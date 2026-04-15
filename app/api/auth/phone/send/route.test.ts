@@ -88,6 +88,15 @@ function makeRequest() {
   })
 }
 
+function makeTx() {
+  return {
+    phoneVerification: {
+      updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+      create: vi.fn().mockResolvedValue({ id: 'pv_new' }),
+    },
+  }
+}
+
 describe('app/api/auth/phone/send/route', () => {
   beforeEach(() => {
     resetMockGroup(mockPrisma.phoneVerification)
@@ -217,7 +226,7 @@ describe('app/api/auth/phone/send/route', () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
-  it('sends Twilio SMS first, then rotates old codes and stores the new code', async () => {
+  it('rotates old codes and stores the new code before attempting Twilio SMS', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
@@ -229,12 +238,7 @@ describe('app/api/auth/phone/send/route', () => {
     mockPrisma.phoneVerification.findFirst.mockResolvedValue(null)
     mockPrisma.phoneVerification.count.mockResolvedValue(0)
 
-    const tx = {
-      phoneVerification: {
-        updateMany: vi.fn().mockResolvedValue({ count: 2 }),
-        create: vi.fn().mockResolvedValue({ id: 'pv_new' }),
-      },
-    }
+    const tx = makeTx()
 
     mockPrisma.$transaction.mockImplementation(
       async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
@@ -258,25 +262,6 @@ describe('app/api/auth/phone/send/route', () => {
       sent: true,
     })
 
-    expect(mockFetch).toHaveBeenCalledTimes(1)
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://api.twilio.com/2010-04-01/Accounts/AC_test_sid/Messages.json',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          Authorization: expect.stringContaining('Basic '),
-          'Content-Type': 'application/x-www-form-urlencoded',
-        }),
-        body: expect.stringContaining('To=%2B15551234567'),
-        cache: 'no-store',
-      }),
-    )
-
-    const fetchArgs = mockFetch.mock.calls[0]?.[1]
-    expect(String(fetchArgs?.body)).toContain('From=%2B15550001111')
-    expect(String(fetchArgs?.body)).toContain('Body=TOVIS%3A+Your+verification+code+is+')
-    expect(String(fetchArgs?.body)).toContain('Expires+in+10+minutes.')
-
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
     expect(tx.phoneVerification.updateMany).toHaveBeenCalledWith({
       where: {
@@ -297,12 +282,33 @@ describe('app/api/auth/phone/send/route', () => {
       },
     })
 
-    expect(mockFetch.mock.invocationCallOrder[0]).toBeLessThan(
-      mockPrisma.$transaction.mock.invocationCallOrder[0],
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.twilio.com/2010-04-01/Accounts/AC_test_sid/Messages.json',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: expect.stringContaining('Basic '),
+          'Content-Type': 'application/x-www-form-urlencoded',
+        }),
+        body: expect.stringContaining('To=%2B15551234567'),
+        cache: 'no-store',
+      }),
+    )
+
+    const fetchArgs = mockFetch.mock.calls[0]?.[1]
+    expect(String(fetchArgs?.body)).toContain('From=%2B15550001111')
+    expect(String(fetchArgs?.body)).toContain(
+      'Body=TOVIS%3A+Your+verification+code+is+',
+    )
+    expect(String(fetchArgs?.body)).toContain('Expires+in+10+minutes.')
+
+    expect(mockPrisma.$transaction.mock.invocationCallOrder[0]).toBeLessThan(
+      mockFetch.mock.invocationCallOrder[0],
     )
   })
 
-  it('returns 500 with SMS_NOT_CONFIGURED when Twilio env is missing', async () => {
+  it('returns 500 with SMS_NOT_CONFIGURED when Twilio env is missing, after storing a fresh code', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
@@ -310,6 +316,12 @@ describe('app/api/auth/phone/send/route', () => {
 
     mockPrisma.phoneVerification.findFirst.mockResolvedValue(null)
     mockPrisma.phoneVerification.count.mockResolvedValue(0)
+
+    const tx = makeTx()
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
 
     delete process.env.TWILIO_ACCOUNT_SID
 
@@ -323,11 +335,13 @@ describe('app/api/auth/phone/send/route', () => {
       code: 'SMS_NOT_CONFIGURED',
     })
 
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
+    expect(tx.phoneVerification.updateMany).toHaveBeenCalledTimes(1)
+    expect(tx.phoneVerification.create).toHaveBeenCalledTimes(1)
     expect(mockFetch).not.toHaveBeenCalled()
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
-  it('returns 502 with SMS_SEND_FAILED when Twilio send fails and does not rotate codes', async () => {
+  it('returns 502 with SMS_SEND_FAILED when Twilio send fails, after storing a fresh code', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
@@ -335,6 +349,12 @@ describe('app/api/auth/phone/send/route', () => {
 
     mockPrisma.phoneVerification.findFirst.mockResolvedValue(null)
     mockPrisma.phoneVerification.count.mockResolvedValue(0)
+
+    const tx = makeTx()
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
 
     mockFetch.mockResolvedValue(
       new Response('', {
@@ -358,6 +378,8 @@ describe('app/api/auth/phone/send/route', () => {
     })
 
     expect(mockFetch).toHaveBeenCalledTimes(1)
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
+    expect(tx.phoneVerification.updateMany).toHaveBeenCalledTimes(1)
+    expect(tx.phoneVerification.create).toHaveBeenCalledTimes(1)
   })
 })

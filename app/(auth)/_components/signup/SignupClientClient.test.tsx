@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
   return {
     router,
     hardNavigate: vi.fn(),
+    getTurnstileToken: vi.fn(),
     setSearchParams(next: Record<string, string | undefined>) {
       const params = new URLSearchParams()
       for (const [key, value] of Object.entries(next)) {
@@ -74,6 +75,10 @@ vi.mock('@/lib/clientNavigation', () => ({
   hardNavigate: mocks.hardNavigate,
 }))
 
+vi.mock('@/lib/turnstileClient', () => ({
+  getTurnstileToken: mocks.getTurnstileToken,
+}))
+
 import SignupClientClient from './SignupClientClient'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -92,15 +97,6 @@ function setFetchSequence(responses: Response[]) {
   return fetchMock
 }
 
-function getTextInputAt(index: number): HTMLInputElement {
-  const inputs = screen.getAllByRole('textbox')
-  const input = inputs[index]
-  if (!(input instanceof HTMLInputElement)) {
-    throw new Error(`Expected textbox at index ${index} to be an input`)
-  }
-  return input
-}
-
 function getPasswordInput(): HTMLInputElement {
   const input = document.querySelector(
     'input[type="password"]',
@@ -108,6 +104,18 @@ function getPasswordInput(): HTMLInputElement {
 
   if (!input) {
     throw new Error('Password input not found')
+  }
+
+  return input
+}
+
+function getConsentCheckbox(): HTMLInputElement {
+  const input = document.querySelector(
+    'input[type="checkbox"]',
+  ) as HTMLInputElement | null
+
+  if (!input) {
+    throw new Error('Consent checkbox not found')
   }
 
   return input
@@ -131,6 +139,8 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     vi.clearAllMocks()
     mocks.router.refresh.mockReset()
     mocks.hardNavigate.mockReset()
+    mocks.getTurnstileToken.mockReset()
+    mocks.getTurnstileToken.mockResolvedValue('ts_client_ok')
     mocks.setSearchParams({})
     vi.unstubAllGlobals()
   })
@@ -179,7 +189,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     )
   })
 
-  it('submits client signup and falls back to query next for verify-phone redirect when register returns no nextUrl', async () => {
+  it('submits client signup, includes tos + turnstile, and falls back to query next with email and sms retry flags', async () => {
     mocks.setSearchParams({
       ti: 'ti_123',
       next: '/claim/tok_1',
@@ -207,6 +217,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       jsonResponse({
         nextUrl: null,
         emailVerificationSent: false,
+        phoneVerificationSent: false,
       }),
     ])
 
@@ -218,6 +229,8 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       target: { value: 'supersecret123' },
     })
 
+    fireEvent.click(getConsentCheckbox())
+
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Client Account' }),
     )
@@ -225,6 +238,8 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(3)
     })
+
+    expect(mocks.getTurnstileToken).toHaveBeenCalledWith('signup_client')
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
@@ -236,41 +251,43 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     )
 
     const registerCall = fetchMock.mock.calls[2]
-const registerBody = JSON.parse(String(registerCall?.[1]?.body ?? '{}'))
+    const registerBody = JSON.parse(String(registerCall?.[1]?.body ?? '{}'))
 
-expect(registerBody).toMatchObject({
-  email: 'tori@example.com',
-  password: 'supersecret123',
-  role: 'CLIENT',
-  firstName: 'Tori',
-  lastName: 'Morales',
-  phone: '+16195551234',
-  tapIntentId: 'ti_123',
-  next: '/claim/tok_1',
-  intent: 'CLAIM_INVITE',
-  inviteToken: 'tok_1',
-  signupLocation: {
-    kind: 'CLIENT_ZIP',
-    postalCode: '92024',
-    city: 'Encinitas',
-    state: 'CA',
-    countryCode: 'US',
-    lat: 33.036,
-    lng: -117.292,
-    timeZoneId: 'America/Los_Angeles',
-  },
-})
+    expect(registerBody).toMatchObject({
+      email: 'tori@example.com',
+      password: 'supersecret123',
+      role: 'CLIENT',
+      firstName: 'Tori',
+      lastName: 'Morales',
+      phone: '+16195551234',
+      tosAccepted: true,
+      turnstileToken: 'ts_client_ok',
+      tapIntentId: 'ti_123',
+      next: '/claim/tok_1',
+      intent: 'CLAIM_INVITE',
+      inviteToken: 'tok_1',
+      signupLocation: {
+        kind: 'CLIENT_ZIP',
+        postalCode: '92024',
+        city: 'Encinitas',
+        state: 'CA',
+        countryCode: 'US',
+        lat: 33.036,
+        lng: -117.292,
+        timeZoneId: 'America/Los_Angeles',
+      },
+    })
 
     expect(mocks.router.refresh).toHaveBeenCalledTimes(1)
 
     await waitFor(() => {
       expect(mocks.hardNavigate).toHaveBeenCalledWith(
-        '/verify-phone?next=%2Fclaim%2Ftok_1&email=retry',
+        '/verify-phone?next=%2Fclaim%2Ftok_1&email=retry&sms=retry',
       )
     })
   })
 
-  it('prefers server nextUrl and omits email retry when email verification was sent', async () => {
+  it('prefers server nextUrl and omits retry flags when both verification sends succeeded', async () => {
     mocks.setSearchParams({
       next: '/claim/tok_1',
       email: 'client@example.com',
@@ -295,6 +312,7 @@ expect(registerBody).toMatchObject({
       jsonResponse({
         nextUrl: '/client/onboarding',
         emailVerificationSent: true,
+        phoneVerificationSent: true,
       }),
     ])
 
@@ -305,6 +323,8 @@ expect(registerBody).toMatchObject({
     fireEvent.change(getPasswordInput(), {
       target: { value: 'supersecret123' },
     })
+
+    fireEvent.click(getConsentCheckbox())
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Client Account' }),
@@ -321,7 +341,7 @@ expect(registerBody).toMatchObject({
     })
   })
 
-  it('shows API error messages from register failures', async () => {
+  it('shows the neutral duplicate-account error from register failures', async () => {
     mocks.setSearchParams({
       name: 'Tori Morales',
       email: 'tori@example.com',
@@ -344,7 +364,7 @@ expect(registerBody).toMatchObject({
       }),
       jsonResponse(
         {
-          error: 'Email already in use.',
+          error: 'An account already exists with those details.',
         },
         400,
       ),
@@ -358,35 +378,91 @@ expect(registerBody).toMatchObject({
       target: { value: 'supersecret123' },
     })
 
+    fireEvent.click(getConsentCheckbox())
+
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Client Account' }),
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Email already in use.')).toBeTruthy()
+      expect(
+        screen.getByText('An account already exists with those details.'),
+      ).toBeTruthy()
     })
 
     expect(mocks.hardNavigate).not.toHaveBeenCalled()
   })
 
-  it('keeps submit disabled until the required client signup fields are filled', () => {
-  render(<SignupClientClient />)
+  it('surfaces turnstile errors and does not call register', async () => {
+    mocks.setSearchParams({
+      name: 'Tori Morales',
+      email: 'tori@example.com',
+      phone: '+16195551234',
+    })
 
-  const submitButton = screen.getByRole('button', {
-    name: 'Create Client Account',
+    const fetchMock = setFetchSequence([
+      jsonResponse({
+        geo: {
+          lat: 32.7157,
+          lng: -117.1611,
+          postalCode: '92101',
+          city: 'San Diego',
+          state: 'CA',
+          countryCode: 'US',
+        },
+      }),
+      jsonResponse({
+        timeZoneId: 'America/Los_Angeles',
+      }),
+    ])
+
+    mocks.getTurnstileToken.mockRejectedValue(
+      new Error('Captcha timed out. Please try again.'),
+    )
+
+    render(<SignupClientClient />)
+
+    await confirmZip('92101')
+
+    fireEvent.change(getPasswordInput(), {
+      target: { value: 'supersecret123' },
+    })
+
+    fireEvent.click(getConsentCheckbox())
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Create Client Account' }),
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Captcha timed out. Please try again.'),
+      ).toBeTruthy()
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(mocks.hardNavigate).not.toHaveBeenCalled()
+    expect(mocks.router.refresh).not.toHaveBeenCalled()
   })
 
-  expect(submitButton.hasAttribute('disabled')).toBe(true)
+  it('keeps submit disabled until the required fields and consent are present', () => {
+    render(<SignupClientClient />)
 
-  fireEvent.click(submitButton)
+    const submitButton = screen.getByRole('button', {
+      name: 'Create Client Account',
+    })
 
-  expect(
-    screen.queryByText('First and last name are required.'),
-  ).toBeNull()
+    expect(submitButton.hasAttribute('disabled')).toBe(true)
 
-  expect(mocks.router.refresh).not.toHaveBeenCalled()
-  expect(mocks.hardNavigate).not.toHaveBeenCalled()
-})
+    fireEvent.click(submitButton)
+
+    expect(
+      screen.queryByText('First and last name are required.'),
+    ).toBeNull()
+
+    expect(mocks.router.refresh).not.toHaveBeenCalled()
+    expect(mocks.hardNavigate).not.toHaveBeenCalled()
+  })
 
   it('lets the user clear a confirmed ZIP and re-enter it', async () => {
     setFetchSequence([

@@ -14,6 +14,10 @@ const mockIsValidIanaTimeZone = vi.hoisted(() => vi.fn())
 const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
 const mockRateLimitIdentity = vi.hoisted(() => vi.fn())
 
+const mockValidatePassword = vi.hoisted(() => vi.fn())
+const mockGetCurrentTosVersion = vi.hoisted(() => vi.fn())
+const mockVerifyTurnstileOrFailOpen = vi.hoisted(() => vi.fn())
+
 const mockTwilioMessagesCreate = vi.hoisted(() => vi.fn())
 const mockTwilio = vi.hoisted(() =>
   vi.fn(() => ({
@@ -71,6 +75,18 @@ vi.mock('twilio', () => ({
   default: mockTwilio,
 }))
 
+vi.mock('@/lib/passwordPolicy', () => ({
+  validatePassword: mockValidatePassword,
+}))
+
+vi.mock('@/lib/legal', () => ({
+  getCurrentTosVersion: mockGetCurrentTosVersion,
+}))
+
+vi.mock('@/lib/auth/turnstile', () => ({
+  verifyTurnstileOrFailOpen: mockVerifyTurnstileOrFailOpen,
+}))
+
 import { POST } from './route'
 
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
@@ -88,6 +104,8 @@ function makeClientSignupBody() {
     lastName: 'Morales',
     phone: '(555) 123-4567',
     tapIntentId: 'tap_1',
+    tosAccepted: true,
+    turnstileToken: 'ts_signup_ok',
     signupLocation: {
       kind: 'CLIENT_ZIP',
       postalCode: '92101',
@@ -121,6 +139,10 @@ describe('app/api/auth/register/route', () => {
     mockHashPassword.mockReset()
     mockCreateVerificationToken.mockReset()
 
+    mockValidatePassword.mockReset()
+    mockGetCurrentTosVersion.mockReset()
+    mockVerifyTurnstileOrFailOpen.mockReset()
+
     mockConsumeTapIntent.mockReset()
 
     mockGetAppUrlFromRequest.mockReset()
@@ -136,6 +158,13 @@ describe('app/api/auth/register/route', () => {
 
     mockRateLimitIdentity.mockResolvedValue('ip:test')
     mockEnforceRateLimit.mockResolvedValue(null)
+
+    mockValidatePassword.mockReturnValue(null)
+    mockGetCurrentTosVersion.mockReturnValue('2026-04')
+    mockVerifyTurnstileOrFailOpen.mockResolvedValue({
+      ok: true,
+      failOpen: false,
+    })
 
     mockHashPassword.mockResolvedValue('hashed_password')
     mockCreateVerificationToken.mockReturnValue('verification_token')
@@ -225,6 +254,13 @@ describe('app/api/auth/register/route', () => {
       manualLicensePendingReview: false,
     })
 
+    expect(mockValidatePassword).toHaveBeenCalledWith('SuperSecret123!')
+    expect(mockGetCurrentTosVersion).toHaveBeenCalledTimes(1)
+    expect(mockVerifyTurnstileOrFailOpen).toHaveBeenCalledWith({
+      request: expect.any(Request),
+      token: 'ts_signup_ok',
+    })
+
     expect(mockHashPassword).toHaveBeenCalledWith('SuperSecret123!')
     expect(mockCreateVerificationToken).toHaveBeenCalledWith({
       userId: 'user_1',
@@ -240,6 +276,8 @@ describe('app/api/auth/register/route', () => {
         emailVerifiedAt: null,
         password: 'hashed_password',
         role: 'CLIENT',
+        tosAcceptedAt: expect.any(Date),
+        tosVersion: '2026-04',
         clientProfile: {
           create: {
             firstName: 'Tori',
@@ -443,6 +481,7 @@ describe('app/api/auth/register/route', () => {
       code: 'APP_URL_MISSING',
     })
 
+    expect(mockVerifyTurnstileOrFailOpen).not.toHaveBeenCalled()
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
     expect(mockIssueAndSendEmailVerification).not.toHaveBeenCalled()
   })

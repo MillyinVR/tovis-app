@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
 const mockRequireUser = vi.hoisted(() => vi.fn())
+const mockCookies = vi.hoisted(() => vi.fn())
+const mockVerifyToken = vi.hoisted(() => vi.fn())
+const mockCreateActiveToken = vi.hoisted(() => vi.fn())
+const mockCreateVerificationToken = vi.hoisted(() => vi.fn())
+
 const mockPrisma = vi.hoisted(() => ({
   phoneVerification: {
     findFirst: vi.fn(),
@@ -11,6 +16,16 @@ const mockPrisma = vi.hoisted(() => ({
 
 vi.mock('@/app/api/_utils/auth/requireUser', () => ({
   requireUser: mockRequireUser,
+}))
+
+vi.mock('next/headers', () => ({
+  cookies: mockCookies,
+}))
+
+vi.mock('@/lib/auth', () => ({
+  verifyToken: mockVerifyToken,
+  createActiveToken: mockCreateActiveToken,
+  createVerificationToken: mockCreateVerificationToken,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -33,19 +48,16 @@ function makeUser(args?: {
 }) {
   const role = args?.role ?? Role.CLIENT
   const phoneVerifiedAt =
-    args?.phoneVerifiedAt === undefined
-      ? null
-      : args.phoneVerifiedAt
+    args?.phoneVerifiedAt === undefined ? null : args.phoneVerifiedAt
   const emailVerifiedAt =
-    args?.emailVerifiedAt === undefined
-      ? null
-      : args.emailVerifiedAt
+    args?.emailVerifiedAt === undefined ? null : args.emailVerifiedAt
 
   return {
     id: 'user_1',
     email: 'user@example.com',
     phone: args?.phone === undefined ? '+15551234567' : args.phone,
     role,
+    authVersion: 1,
     sessionKind: 'VERIFICATION' as const,
     phoneVerifiedAt,
     emailVerifiedAt,
@@ -87,7 +99,19 @@ describe('app/api/auth/phone/verify/route', () => {
   beforeEach(() => {
     resetMockGroup(mockPrisma.phoneVerification)
     mockPrisma.$transaction.mockReset()
+
     mockRequireUser.mockReset()
+    mockCookies.mockReset()
+    mockVerifyToken.mockReset()
+    mockCreateActiveToken.mockReset()
+    mockCreateVerificationToken.mockReset()
+
+    mockCookies.mockResolvedValue({
+      get: vi.fn().mockReturnValue(undefined),
+    })
+    mockVerifyToken.mockReturnValue(null)
+    mockCreateActiveToken.mockReturnValue('active_token')
+    mockCreateVerificationToken.mockReturnValue('verification_token')
   })
 
   it('passes through a failed auth result unchanged', async () => {
@@ -116,7 +140,11 @@ describe('app/api/auth/phone/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('CODE_REQUIRED')
+    expect(body).toEqual({
+      ok: false,
+      error: 'Verification code is required.',
+      code: 'CODE_REQUIRED',
+    })
   })
 
   it('returns 400 when code format is invalid', async () => {
@@ -129,7 +157,11 @@ describe('app/api/auth/phone/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('CODE_INVALID')
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid code format.',
+      code: 'CODE_INVALID',
+    })
   })
 
   it('returns alreadyVerified state when phone is already verified', async () => {
@@ -167,7 +199,11 @@ describe('app/api/auth/phone/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('PHONE_REQUIRED')
+    expect(body).toEqual({
+      ok: false,
+      error: 'Phone number missing.',
+      code: 'PHONE_REQUIRED',
+    })
   })
 
   it('returns 400 when the code is incorrect or expired', async () => {
@@ -181,7 +217,11 @@ describe('app/api/auth/phone/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('CODE_MISMATCH')
+    expect(body).toEqual({
+      ok: false,
+      error: 'Incorrect or expired code.',
+      code: 'CODE_MISMATCH',
+    })
   })
 
   it('marks the phone verified and returns partial verification state when email is still unverified', async () => {
@@ -214,9 +254,11 @@ describe('app/api/auth/phone/verify/route', () => {
       },
     }
 
-    mockPrisma.$transaction.mockImplementation(async (fn: (txArg: typeof tx) => Promise<void>) => {
-      return fn(tx)
-    })
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<void>) => {
+        return fn(tx)
+      },
+    )
 
     const result = await POST(makeRequest({ code: '123456' }))
     const body = await result.json()
@@ -263,6 +305,9 @@ describe('app/api/auth/phone/verify/route', () => {
       where: { userId: 'user_1' },
       data: { phoneVerifiedAt: expect.any(Date) },
     })
+
+    expect(mockCookies).toHaveBeenCalledTimes(1)
+    expect(mockVerifyToken).not.toHaveBeenCalled()
   })
 
   it('returns fully verified state when email is already verified', async () => {
@@ -293,9 +338,11 @@ describe('app/api/auth/phone/verify/route', () => {
       },
     }
 
-    mockPrisma.$transaction.mockImplementation(async (fn: (txArg: typeof tx) => Promise<void>) => {
-      return fn(tx)
-    })
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<void>) => {
+        return fn(tx)
+      },
+    )
 
     const result = await POST(makeRequest({ code: '123456' }))
     const body = await result.json()
@@ -307,6 +354,16 @@ describe('app/api/auth/phone/verify/route', () => {
       isEmailVerified: true,
       isFullyVerified: true,
       requiresEmailVerification: false,
+    })
+
+    expect(tx.phoneVerification.update).toHaveBeenCalledWith({
+      where: { id: 'pv_2' },
+      data: { usedAt: expect.any(Date) },
+    })
+
+    expect(tx.user.update).toHaveBeenCalledWith({
+      where: { id: 'user_1' },
+      data: { phoneVerifiedAt: expect.any(Date) },
     })
   })
 })

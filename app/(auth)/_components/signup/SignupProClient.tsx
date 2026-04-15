@@ -3,11 +3,14 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+
 import AuthShell from '../AuthShell'
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
+import { getTurnstileToken } from '@/lib/turnstileClient'
+import { buildVerifyPhoneUrl } from './buildVerifyPhoneUrl'
 
 function sanitizePhone(v: string) {
   return v.replace(/\s+/g, '')
@@ -29,31 +32,12 @@ function readBooleanField(
   return data?.[key] === true
 }
 
-function buildVerifyPhoneUrl(args: {
-  nextUrl: string | null
-  emailVerificationSent: boolean
-  phoneVerificationSent: boolean
-}): string {
-  const params = new URLSearchParams()
-
-  if (args.nextUrl) {
-    params.set('next', args.nextUrl)
-  }
-
-  if (!args.emailVerificationSent) {
-    params.set('email', 'retry')
-  }
-
-  if (!args.phoneVerificationSent) {
-    params.set('sms', 'retry')
-  }
-
-  const qs = params.toString()
-  return qs ? `/verify-phone?${qs}` : '/verify-phone'
-}
-
 function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <span className="text-xs font-black tracking-wide text-textSecondary">{children}</span>
+  return (
+    <span className="text-xs font-black tracking-wide text-textSecondary">
+      {children}
+    </span>
+  )
 }
 
 function HelpText({ children }: { children: React.ReactNode }) {
@@ -120,7 +104,13 @@ function PrimaryButton({
   )
 }
 
-function SecondaryLinkButton({ href, children }: { href: string; children: React.ReactNode }) {
+function SecondaryLinkButton({
+  href,
+  children,
+}: {
+  href: string
+  children: React.ReactNode
+}) {
   return (
     <Link
       href={href}
@@ -145,8 +135,6 @@ function normalizeHandleInput(raw: string) {
   return raw.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
 }
 
-// MUST match Prisma enum values
-// Keep these in sync with Prisma.
 type ProfessionType =
   | 'COSMETOLOGIST'
   | 'BARBER'
@@ -188,7 +176,10 @@ type ConfirmedLocation = {
   name: string | null
 }
 
-async function fetchAutocomplete(args: { input: string; sessionToken: string }) {
+async function fetchAutocomplete(args: {
+  input: string
+  sessionToken: string
+}) {
   const url = new URL('/api/google/places/autocomplete', window.location.origin)
   url.searchParams.set('input', args.input)
   url.searchParams.set('sessionToken', args.sessionToken)
@@ -197,7 +188,9 @@ async function fetchAutocomplete(args: { input: string; sessionToken: string }) 
   const res = await fetch(url.toString(), { cache: 'no-store' })
   const data = await safeJsonRecord(res)
 
-  if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Location search failed.')
+  if (!res.ok) {
+    throw new Error(readErrorMessage(data) ?? 'Location search failed.')
+  }
 
   const predsRaw = data && Array.isArray(data.predictions) ? data.predictions : []
   const out: GooglePrediction[] = []
@@ -220,7 +213,10 @@ async function fetchAutocomplete(args: { input: string; sessionToken: string }) 
   return out
 }
 
-async function fetchPlaceDetails(args: { placeId: string; sessionToken: string }) {
+async function fetchPlaceDetails(args: {
+  placeId: string
+  sessionToken: string
+}) {
   const url = new URL('/api/google/places/details', window.location.origin)
   url.searchParams.set('placeId', args.placeId)
   url.searchParams.set('sessionToken', args.sessionToken)
@@ -228,20 +224,28 @@ async function fetchPlaceDetails(args: { placeId: string; sessionToken: string }
   const res = await fetch(url.toString(), { cache: 'no-store' })
   const data = await safeJsonRecord(res)
 
-  if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Could not confirm selected location.')
+  if (!res.ok) {
+    throw new Error(
+      readErrorMessage(data) ?? 'Could not confirm selected location.',
+    )
+  }
 
   const place = data && isRecord(data.place) ? data.place : null
 
   return {
     placeId: typeof place?.placeId === 'string' ? place.placeId : args.placeId,
     name: typeof place?.name === 'string' ? place.name : null,
-    formattedAddress: typeof place?.formattedAddress === 'string' ? place.formattedAddress : null,
+    formattedAddress:
+      typeof place?.formattedAddress === 'string'
+        ? place.formattedAddress
+        : null,
     lat: typeof place?.lat === 'number' ? place.lat : null,
     lng: typeof place?.lng === 'number' ? place.lng : null,
     city: typeof place?.city === 'string' ? place.city : null,
     state: typeof place?.state === 'string' ? place.state : null,
     postalCode: typeof place?.postalCode === 'string' ? place.postalCode : null,
-    countryCode: typeof place?.countryCode === 'string' ? place.countryCode : null,
+    countryCode:
+      typeof place?.countryCode === 'string' ? place.countryCode : null,
   }
 }
 
@@ -263,8 +267,12 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
   const state = typeof geo?.state === 'string' ? geo.state : null
   const countryCode = typeof geo?.countryCode === 'string' ? geo.countryCode : null
 
-  if (lat == null || lng == null) throw new Error('ZIP lookup returned no coordinates.')
-  if (!postalCode) throw new Error('ZIP lookup did not resolve a valid postal code.')
+  if (lat == null || lng == null) {
+    throw new Error('ZIP lookup returned no coordinates.')
+  }
+  if (!postalCode) {
+    throw new Error('ZIP lookup did not resolve a valid postal code.')
+  }
 
   return { lat, lng, postalCode, city, state, countryCode }
 }
@@ -277,7 +285,9 @@ async function fetchTimeZoneId(args: { lat: number; lng: number }) {
   const res = await fetch(url.toString(), { cache: 'no-store' })
   const data = await safeJsonRecord(res)
 
-  if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Timezone lookup failed.')
+  if (!res.ok) {
+    throw new Error(readErrorMessage(data) ?? 'Timezone lookup failed.')
+  }
 
   const tz = typeof data?.timeZoneId === 'string' ? data.timeZoneId.trim() : ''
   if (!tz) throw new Error('No timezone returned.')
@@ -296,17 +306,22 @@ export default function SignupProClient() {
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [tosAccepted, setTosAccepted] = useState(false)
 
   const [businessName, setBusinessName] = useState('')
   const [handle, setHandle] = useState('')
-  const [professionType, setProfessionType] = useState<ProfessionType>('COSMETOLOGIST')
+  const [professionType, setProfessionType] =
+    useState<ProfessionType>('COSMETOLOGIST')
   const [proMode, setProMode] = useState<'SALON' | 'MOBILE'>('SALON')
   const [mobileRadiusMiles, setMobileRadiusMiles] = useState('15')
   const [licenseState] = useState<'CA'>('CA')
   const [licenseNumber, setLicenseNumber] = useState('')
 
   const sessionToken = useMemo(
-    () => (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : String(Date.now())),
+    () =>
+      globalThis.crypto?.randomUUID
+        ? globalThis.crypto.randomUUID()
+        : String(Date.now()),
     [],
   )
 
@@ -331,7 +346,9 @@ export default function SignupProClient() {
   }
 
   function locationPlaceholder() {
-    return proMode === 'MOBILE' ? 'Enter your ZIP code (e.g. 92101)' : 'Search your salon / suite address'
+    return proMode === 'MOBILE'
+      ? 'Enter your ZIP code (e.g. 92101)'
+      : 'Search your salon / suite address'
   }
 
   function isLocationConfirmed() {
@@ -363,7 +380,11 @@ export default function SignupProClient() {
       setLocPredictions(preds.slice(0, 6))
     } catch (e: unknown) {
       setLocPredictions([])
-      setError(e instanceof Error ? e.message : 'Location search is unavailable right now.')
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'Location search is unavailable right now.',
+      )
     } finally {
       setLocLoading(false)
     }
@@ -374,8 +395,13 @@ export default function SignupProClient() {
     setLocLoading(true)
 
     try {
-      const details = await fetchPlaceDetails({ placeId: p.placeId, sessionToken })
-      if (details.lat == null || details.lng == null) throw new Error('Selected place is missing coordinates.')
+      const details = await fetchPlaceDetails({
+        placeId: p.placeId,
+        sessionToken,
+      })
+      if (details.lat == null || details.lng == null) {
+        throw new Error('Selected place is missing coordinates.')
+      }
 
       const tz = await fetchTimeZoneId({ lat: details.lat, lng: details.lng })
 
@@ -396,7 +422,9 @@ export default function SignupProClient() {
       setLocQuery(p.description)
     } catch (e: unknown) {
       setConfirmed(null)
-      setError(e instanceof Error ? e.message : 'Could not confirm location.')
+      setError(
+        e instanceof Error ? e.message : 'Could not confirm location.',
+      )
     } finally {
       setLocLoading(false)
     }
@@ -433,7 +461,9 @@ export default function SignupProClient() {
       setLocQuery(geo.postalCode ?? raw)
     } catch (e: unknown) {
       setConfirmed(null)
-      setError(e instanceof Error ? e.message : 'Could not confirm ZIP code.')
+      setError(
+        e instanceof Error ? e.message : 'Could not confirm ZIP code.',
+      )
     } finally {
       setLocLoading(false)
     }
@@ -444,13 +474,28 @@ export default function SignupProClient() {
     if (loading) return
     setError(null)
 
-    if (!firstName.trim() || !lastName.trim()) return setError('First and last name are required.')
-    if (!sanitizePhone(phone).trim()) return setError('Phone number is required.')
-    if (!email.trim()) return setError('Email is required.')
-    if (!password.trim()) return setError('Password is required.')
+    if (!firstName.trim() || !lastName.trim()) {
+      return setError('First and last name are required.')
+    }
+    if (!sanitizePhone(phone).trim()) {
+      return setError('Phone number is required.')
+    }
+    if (!email.trim()) {
+      return setError('Email is required.')
+    }
+    if (!password.trim()) {
+      return setError('Password is required.')
+    }
+    if (!tosAccepted) {
+      return setError('You must accept the Terms and Privacy Policy.')
+    }
 
     if (!isLocationConfirmed() || !confirmed) {
-      return setError(proMode === 'MOBILE' ? 'Please confirm your ZIP code.' : 'Please choose an address from the dropdown.')
+      return setError(
+        proMode === 'MOBILE'
+          ? 'Please confirm your ZIP code.'
+          : 'Please choose an address from the dropdown.',
+      )
     }
 
     if (proMode === 'MOBILE') {
@@ -492,6 +537,8 @@ export default function SignupProClient() {
 
     setLoading(true)
     try {
+      const turnstileToken = await getTurnstileToken('signup_pro')
+
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -503,13 +550,22 @@ export default function SignupProClient() {
           lastName,
           phone: sanitizePhone(phone),
           tapIntentId: ti ?? undefined,
-          businessName: businessName.trim() ? businessName.trim() : undefined,
-          handle: handle.trim() ? normalizeHandleInput(handle.trim()) : undefined,
+          businessName: businessName.trim()
+            ? businessName.trim()
+            : undefined,
+          handle: handle.trim()
+            ? normalizeHandleInput(handle.trim())
+            : undefined,
           professionType,
-          mobileRadiusMiles: proMode === 'MOBILE' ? Number(mobileRadiusMiles) : undefined,
+          mobileRadiusMiles:
+            proMode === 'MOBILE' ? Number(mobileRadiusMiles) : undefined,
           licenseState: needsLicense ? licenseState : undefined,
-          licenseNumber: needsLicense ? licenseNumber.trim().toUpperCase() : undefined,
+          licenseNumber: needsLicense
+            ? licenseNumber.trim().toUpperCase()
+            : undefined,
           signupLocation,
+          tosAccepted: true,
+          turnstileToken,
         }),
       })
 
@@ -541,7 +597,7 @@ export default function SignupProClient() {
       hardNavigate(verifyPhoneUrl)
     } catch (err: unknown) {
       console.error(err)
-      setError('Network error.')
+      setError(err instanceof Error ? err.message : 'Signup failed.')
     } finally {
       setLoading(false)
     }
@@ -552,17 +608,22 @@ export default function SignupProClient() {
 
   const canSubmit =
     !loading &&
-    firstName.trim() &&
-    lastName.trim() &&
-    sanitizePhone(phone).trim() &&
-    email.trim() &&
-    password.trim() &&
+    Boolean(firstName.trim()) &&
+    Boolean(lastName.trim()) &&
+    Boolean(sanitizePhone(phone).trim()) &&
+    Boolean(email.trim()) &&
+    Boolean(password.trim()) &&
     isLocationConfirmed() &&
-    (!needsLicense || licenseNumber.trim()) &&
-    (proMode !== 'MOBILE' || (Number(mobileRadiusMiles) >= 1 && Number(mobileRadiusMiles) <= 200))
+    tosAccepted &&
+    (!needsLicense || Boolean(licenseNumber.trim())) &&
+    (proMode !== 'MOBILE' ||
+      (Number(mobileRadiusMiles) >= 1 && Number(mobileRadiusMiles) <= 200))
 
   return (
-    <AuthShell title="Create Pro Account" subtitle="Run your business from your phone — set up takes minutes.">
+    <AuthShell
+      title="Create Pro Account"
+      subtitle="Run your business from your phone — set up takes minutes."
+    >
       <form onSubmit={handleSubmit} className="grid gap-5">
         <div className="grid gap-2">
           <FieldLabel>Profession</FieldLabel>
@@ -586,7 +647,8 @@ export default function SignupProClient() {
 
           {professionType === 'MAKEUP_ARTIST' ? (
             <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
-              Makeup artists don’t require a CA license check here. (You’ll add alternative verification later: portfolio + ID, etc.)
+              Makeup artists don’t require a CA license check here. (You’ll add
+              alternative verification later: portfolio + ID, etc.)
             </div>
           ) : null}
         </div>
@@ -633,7 +695,9 @@ export default function SignupProClient() {
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>{locationLabel()}</FieldLabel>
             {confirmed?.timeZoneId ? (
-              <span className="text-[11px] font-black text-textSecondary/80">{confirmed.timeZoneId}</span>
+              <span className="text-[11px] font-black text-textSecondary/80">
+                {confirmed.timeZoneId}
+              </span>
             ) : null}
           </div>
 
@@ -659,8 +723,12 @@ export default function SignupProClient() {
                         'hover:bg-bgPrimary/35 focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
                       )}
                     >
-                      <div className="text-sm font-black text-textPrimary">{p.mainText || p.description}</div>
-                      <div className="text-xs text-textSecondary/80">{p.secondaryText}</div>
+                      <div className="text-sm font-black text-textPrimary">
+                        {p.mainText || p.description}
+                      </div>
+                      <div className="text-xs text-textSecondary/80">
+                        {p.secondaryText}
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -672,7 +740,9 @@ export default function SignupProClient() {
             {locLoading ? <HelpText>Confirming…</HelpText> : <span />}
 
             {isLocationConfirmed() ? (
-              <span className="text-xs font-black text-accentPrimary">Confirmed</span>
+              <span className="text-xs font-black text-accentPrimary">
+                Confirmed
+              </span>
             ) : proMode === 'MOBILE' ? (
               <button
                 type="button"
@@ -683,13 +753,16 @@ export default function SignupProClient() {
                   'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
                   'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
                   'focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
-                  (locLoading || !locQuery.trim()) && 'cursor-not-allowed opacity-60',
+                  (locLoading || !locQuery.trim()) &&
+                    'cursor-not-allowed opacity-60',
                 )}
               >
                 Confirm ZIP
               </button>
             ) : (
-              <HelpText>Pick your address from the dropdown to confirm.</HelpText>
+              <HelpText>
+                Pick your address from the dropdown to confirm.
+              </HelpText>
             )}
           </div>
         </div>
@@ -698,7 +771,9 @@ export default function SignupProClient() {
           <label className="grid gap-1.5">
             <div className="flex items-center justify-between gap-3">
               <FieldLabel>Mobile radius (miles)</FieldLabel>
-              <span className="text-xs font-black text-textSecondary/80">Required</span>
+              <span className="text-xs font-black text-textSecondary/80">
+                Required
+              </span>
             </div>
             <Input
               value={mobileRadiusMiles}
@@ -714,8 +789,12 @@ export default function SignupProClient() {
         {needsLicense ? (
           <div className="grid gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 p-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="font-black text-textPrimary">California license</div>
-              <span className="text-xs font-black text-textSecondary/80">Required</span>
+              <div className="font-black text-textPrimary">
+                California license
+              </div>
+              <span className="text-xs font-black text-textSecondary/80">
+                Required
+              </span>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
@@ -742,9 +821,16 @@ export default function SignupProClient() {
             </div>
 
             <div className="rounded-card border border-surfaceGlass/12 bg-bgPrimary/25 px-3 py-2 text-xs text-textSecondary">
-              We’ll try to verify your license automatically. If verification is unavailable, you’ll upload a license photo
-              <span className="font-black text-textPrimary"> after signup</span> for admin approval.
-              <div className="mt-1">You can still set up services + your calendar immediately.</div>
+              We’ll try to verify your license automatically. If verification is
+              unavailable, you’ll upload a license photo
+              <span className="font-black text-textPrimary">
+                {' '}
+                after signup
+              </span>{' '}
+              for admin approval.
+              <div className="mt-1">
+                You can still set up services + your calendar immediately.
+              </div>
             </div>
           </div>
         ) : null}
@@ -754,18 +840,33 @@ export default function SignupProClient() {
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1.5">
             <FieldLabel>First name</FieldLabel>
-            <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} required autoComplete="given-name" />
+            <Input
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              required
+              autoComplete="given-name"
+            />
           </label>
 
           <label className="grid gap-1.5">
             <FieldLabel>Last name</FieldLabel>
-            <Input value={lastName} onChange={(e) => setLastName(e.target.value)} required autoComplete="family-name" />
+            <Input
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              required
+              autoComplete="family-name"
+            />
           </label>
         </div>
 
         <label className="grid gap-1.5">
           <FieldLabel>Business name (optional)</FieldLabel>
-          <Input value={businessName} onChange={(e) => setBusinessName(e.target.value)} placeholder="e.g. Salon De Tovis" autoComplete="organization" />
+          <Input
+            value={businessName}
+            onChange={(e) => setBusinessName(e.target.value)}
+            placeholder="e.g. Salon De Tovis"
+            autoComplete="organization"
+          />
           <HelpText>You can add this later — we won’t block signup.</HelpText>
         </label>
 
@@ -781,27 +882,83 @@ export default function SignupProClient() {
           />
           <HelpText>
             Optional for now. If you enter one, it will be normalized to{' '}
-            <span className="font-black text-textPrimary">{handlePreview || 'your-handle'}</span>
-            {handleIsTrimmed ? <span className="text-toneWarn"> (we’ll trim symbols)</span> : null}
+            <span className="font-black text-textPrimary">
+              {handlePreview || 'your-handle'}
+            </span>
+            {handleIsTrimmed ? (
+              <span className="text-toneWarn"> (we’ll trim symbols)</span>
+            ) : null}
           </HelpText>
         </label>
 
         <label className="grid gap-1.5">
           <div className="flex items-center justify-between gap-3">
             <FieldLabel>Phone</FieldLabel>
-            <span className="text-xs font-black text-textSecondary/80">Required</span>
+            <span className="text-xs font-black text-textSecondary/80">
+              Required
+            </span>
           </div>
-          <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" autoComplete="tel" placeholder="+1 (___) ___-____" required />
+          <Input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            inputMode="tel"
+            autoComplete="tel"
+            placeholder="+1 (___) ___-____"
+            required
+          />
         </label>
 
         <label className="grid gap-1.5">
           <FieldLabel>Email address</FieldLabel>
-          <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required autoComplete="email" inputMode="email" />
+          <Input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            type="email"
+            required
+            autoComplete="email"
+            inputMode="email"
+          />
         </label>
 
         <label className="grid gap-1.5">
           <FieldLabel>Password</FieldLabel>
-          <Input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required autoComplete="new-password" />
+          <Input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            required
+            autoComplete="new-password"
+          />
+        </label>
+
+        <label className="flex items-start gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-3 text-sm text-textSecondary">
+          <input
+            type="checkbox"
+            checked={tosAccepted}
+            onChange={(e) => setTosAccepted(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-surfaceGlass/20"
+            required
+          />
+          <span className="leading-5">
+            I agree to the{' '}
+            <Link
+              className="font-black text-textPrimary hover:text-accentPrimary"
+              href="/terms"
+            >
+              Terms
+            </Link>{' '}
+            and{' '}
+            <Link
+              className="font-black text-textPrimary hover:text-accentPrimary"
+              href="/privacy"
+            >
+              Privacy Policy
+            </Link>
+            .
+            <span className="mt-1 block text-[11px] text-textSecondary/80">
+              Protected by Turnstile.
+            </span>
+          </span>
         </label>
 
         {error ? (

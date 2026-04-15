@@ -1,6 +1,9 @@
 // app/api/auth/register/route.ts
 import { prisma } from '@/lib/prisma'
 import { hashPassword, createVerificationToken } from '@/lib/auth'
+import { validatePassword } from '@/lib/passwordPolicy'
+import { getCurrentTosVersion } from '@/lib/legal'
+import { verifyTurnstileOrFailOpen } from '@/lib/auth/turnstile'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
 import {
   getAppUrlFromRequest,
@@ -93,6 +96,10 @@ type RegisterBody = {
 
   // ✅ optional at signup now
   licenseDocumentUrl?: unknown
+
+  // step 2 hardening
+  tosAccepted?: unknown
+  turnstileToken?: unknown
 }
 
 /* =========================================================
@@ -294,11 +301,37 @@ async function sendPhoneVerificationSms(args: { to: string; code: string }): Pro
   }
 }
 
-function isPrismaUniqueError(err: unknown) {
-  if (!isRecord(err)) return false
+function readPrismaUniqueTargets(err: unknown): string[] {
+  if (!isRecord(err)) return []
+
   const code = typeof err.code === 'string' ? err.code : ''
-  const msg = typeof err.message === 'string' ? err.message : ''
-  return code === 'P2002' || msg.toLowerCase().includes('unique constraint')
+  if (code !== 'P2002') return []
+
+  const meta = isRecord(err.meta) ? err.meta : null
+  const rawTarget = meta?.target
+
+  if (Array.isArray(rawTarget)) {
+    return rawTarget
+      .map((value) => (typeof value === 'string' ? value : ''))
+      .filter(Boolean)
+  }
+
+  if (typeof rawTarget === 'string' && rawTarget.trim()) {
+    return [rawTarget.trim()]
+  }
+
+  return []
+}
+
+function targetsContainEmailOrPhone(targets: string[]): boolean {
+  return targets.some((target) => {
+    const lower = target.toLowerCase()
+    return lower.includes('email') || lower.includes('phone')
+  })
+}
+
+function targetsContainHandle(targets: string[]): boolean {
+  return targets.some((target) => target.toLowerCase().includes('handle'))
 }
 
 function hostToHostname(hostHeader: string | null): string | null {
@@ -551,7 +584,12 @@ export async function POST(request: Request) {
 
     const firstName = pickString(body.firstName)
     const lastName = pickString(body.lastName)
-    const phone = cleanPhone(body.phone)
+
+    const rawPhone = pickString(body.phone)
+    const phone = rawPhone ? cleanPhone(rawPhone) : null
+
+    const tosAccepted = body.tosAccepted === true
+    const turnstileToken = pickString(body.turnstileToken)
 
     const tapIntentId = pickString(body.tapIntentId)
     const signupLocation = isLocationPayload(body.signupLocation) ? body.signupLocation : null
@@ -567,10 +605,29 @@ export async function POST(request: Request) {
     if (!firstName || !lastName) {
       return jsonFail(400, 'First and last name are required.', { code: 'MISSING_NAME' })
     }
-    if (!phone) {
+
+    const passwordError = validatePassword(password)
+    if (passwordError) {
+      return jsonFail(400, passwordError, { code: 'WEAK_PASSWORD' })
+    }
+
+    if (!rawPhone) {
       return jsonFail(400, 'Phone number is required.', { code: 'PHONE_REQUIRED' })
     }
 
+    if (!phone) {
+      return jsonFail(400, 'Enter a valid phone number.', {
+        code: 'INVALID_PHONE_FORMAT',
+      })
+    }
+
+    if (!tosAccepted) {
+      return jsonFail(
+        400,
+        'You must accept the Terms and Privacy Policy.',
+        { code: 'CONSENT_REQUIRED' },
+      )
+    }
     // location enforcement
     if (role === 'PRO') {
       if (!signupLocation || (signupLocation.kind !== 'PRO_SALON' && signupLocation.kind !== 'PRO_MOBILE')) {
@@ -596,6 +653,35 @@ export async function POST(request: Request) {
       return jsonFail(500, 'App URL is not configured.', {
         code: 'APP_URL_MISSING',
       })
+    }
+
+    let tosVersion: string
+    try {
+      tosVersion = getCurrentTosVersion()
+    } catch {
+      return jsonFail(500, 'Terms version is not configured.', {
+        code: 'TOS_VERSION_MISSING',
+      })
+    }
+
+    const captcha = await verifyTurnstileOrFailOpen({
+      request,
+      token: turnstileToken,
+    })
+
+    if (!captcha.ok) {
+      return jsonFail(400, captcha.message, { code: captcha.code })
+    }
+
+    if (captcha.failOpen) {
+      console.warn(
+        JSON.stringify({
+          eventName: captcha.eventName,
+          route: 'auth.register',
+          reason: captcha.reason,
+          role,
+        }),
+      )
     }
 
     // pro profession
@@ -699,13 +785,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // unique email + phone
-    const existing = await prisma.user.findFirst({
-      where: { OR: [{ email }, { phone }] },
-      select: { email: true, phone: true },
-    })
-    if (existing?.email === email) return jsonFail(400, 'Email already in use.', { code: 'EMAIL_IN_USE' })
-    if (existing?.phone === phone) return jsonFail(400, 'Phone number already in use.', { code: 'PHONE_IN_USE' })
+  
 
     // handle uniqueness
     if (role === 'PRO' && normalizedHandle) {
@@ -727,6 +807,8 @@ export async function POST(request: Request) {
           emailVerifiedAt: null,
           password: passwordHash,
           role,
+          tosAcceptedAt: new Date(),
+          tosVersion,
 
           clientProfile:
             role === 'CLIENT'
@@ -920,8 +1002,18 @@ if (signupLocation.kind === 'CLIENT_ZIP') {
 
     return res
   } catch (err: unknown) {
-    if (isPrismaUniqueError(err)) {
-      return jsonFail(400, 'Email or phone already in use.', { code: 'DUPLICATE_ACCOUNT' })
+    const uniqueTargets = readPrismaUniqueTargets(err)
+
+    if (targetsContainHandle(uniqueTargets)) {
+      return jsonFail(400, 'That handle is already taken.', {
+        code: 'HANDLE_IN_USE',
+      })
+    }
+
+    if (targetsContainEmailOrPhone(uniqueTargets)) {
+      return jsonFail(400, 'An account already exists with those details.', {
+        code: 'ACCOUNT_EXISTS',
+      })
     }
 
 

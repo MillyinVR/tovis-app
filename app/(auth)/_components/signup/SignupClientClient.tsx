@@ -8,6 +8,8 @@ import AuthShell from '../AuthShell'
 import { cn } from '@/lib/utils'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
+import { getTurnstileToken } from '@/lib/turnstileClient'
+import { buildVerifyPhoneUrl } from './buildVerifyPhoneUrl'
 
 function normalizeTrimmed(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
@@ -92,24 +94,6 @@ function buildLoginHref(args: {
 
   const qs = params.toString()
   return qs ? `/login?${qs}` : '/login'
-}
-
-function buildVerifyPhoneUrl(args: {
-  nextUrl: string | null
-  emailVerificationSent: boolean
-}): string {
-  const params = new URLSearchParams()
-
-  if (args.nextUrl) {
-    params.set('next', args.nextUrl)
-  }
-
-  if (!args.emailVerificationSent) {
-    params.set('email', 'retry')
-  }
-
-  const qs = params.toString()
-  return qs ? `/verify-phone?${qs}` : '/verify-phone'
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -252,8 +236,7 @@ export default function SignupClientClient() {
 
   const ti = normalizeTrimmed(sp.get('ti'))
   const from = sanitizeNextUrl(sp.get('from'))
-  const nextFromQuery =
-    sanitizeNextUrl(sp.get('next')) ?? from
+  const nextFromQuery = sanitizeNextUrl(sp.get('next')) ?? from
   const intent = normalizeTrimmed(sp.get('intent'))
   const inviteToken = normalizeTrimmed(sp.get('inviteToken'))
   const emailPrefill = normalizeTrimmed(sp.get('email')) ?? ''
@@ -280,14 +263,6 @@ export default function SignupClientClient() {
 
   const isClaimInviteFlow = intent === 'CLAIM_INVITE'
 
-  useMemo(
-    () =>
-      globalThis.crypto?.randomUUID
-        ? globalThis.crypto.randomUUID()
-        : String(Date.now()),
-    [],
-  )
-
   const [firstName, setFirstName] = useState(nameParts.firstName)
   const [lastName, setLastName] = useState(nameParts.lastName)
 
@@ -298,6 +273,7 @@ export default function SignupClientClient() {
   const [phone, setPhone] = useState(phonePrefill)
   const [email, setEmail] = useState(emailPrefill)
   const [password, setPassword] = useState('')
+  const [tosAccepted, setTosAccepted] = useState(false)
 
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -378,9 +354,14 @@ export default function SignupClientClient() {
     if (!password.trim()) {
       return setError('Password is required.')
     }
+    if (!tosAccepted) {
+      return setError('You must accept the Terms and Privacy Policy.')
+    }
 
     setLoading(true)
     try {
+      const turnstileToken = await getTurnstileToken('signup_client')
+
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -391,6 +372,8 @@ export default function SignupClientClient() {
           firstName,
           lastName,
           phone: sanitizePhone(phone),
+          tosAccepted: true,
+          turnstileToken,
           tapIntentId: ti ?? undefined,
           next: nextFromQuery ?? undefined,
           intent: intent ?? undefined,
@@ -423,16 +406,21 @@ export default function SignupClientClient() {
         data,
         'emailVerificationSent',
       )
+      const phoneVerificationSent = readBooleanField(
+        data,
+        'phoneVerificationSent',
+      )
 
       const verifyPhoneUrl = buildVerifyPhoneUrl({
         nextUrl,
         emailVerificationSent,
+        phoneVerificationSent,
       })
 
       hardNavigate(verifyPhoneUrl)
     } catch (err) {
       console.error(err)
-      setError('Network error.')
+      setError(err instanceof Error ? err.message : 'Signup failed.')
     } finally {
       setLoading(false)
     }
@@ -446,7 +434,8 @@ export default function SignupClientClient() {
     sanitizePhone(phone).trim() &&
     email.trim() &&
     password.trim() &&
-    Boolean(confirmed)
+    Boolean(confirmed) &&
+    tosAccepted
 
   return (
     <AuthShell
@@ -588,6 +577,36 @@ export default function SignupClientClient() {
             required
             autoComplete="new-password"
           />
+        </label>
+
+        <label className="flex items-start gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-3 text-sm text-textSecondary">
+          <input
+            type="checkbox"
+            checked={tosAccepted}
+            onChange={(e) => setTosAccepted(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-surfaceGlass/20"
+            required
+          />
+          <span className="leading-5">
+            I agree to the{' '}
+            <Link
+              className="font-black text-textPrimary hover:text-accentPrimary"
+              href="/terms"
+            >
+              Terms
+            </Link>{' '}
+            and{' '}
+            <Link
+              className="font-black text-textPrimary hover:text-accentPrimary"
+              href="/privacy"
+            >
+              Privacy Policy
+            </Link>
+            .
+            <span className="mt-1 block text-[11px] text-textSecondary/80">
+              Protected by Turnstile.
+            </span>
+          </span>
         </label>
 
         {error ? (
