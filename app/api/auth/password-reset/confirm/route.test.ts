@@ -10,6 +10,7 @@ const mockPrisma = vi.hoisted(() => ({
   passwordResetToken: {
     findUnique: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   user: {
     update: vi.fn(),
@@ -88,6 +89,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     mockPrisma.passwordResetToken.findUnique.mockReset()
     mockPrisma.passwordResetToken.update.mockReset()
+    mockPrisma.passwordResetToken.updateMany.mockReset()
     mockPrisma.user.update.mockReset()
     mockPrisma.$transaction.mockReset()
 
@@ -101,9 +103,11 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     mockPrisma.user.update.mockResolvedValue({ id: 'user_1' })
     mockPrisma.passwordResetToken.update.mockResolvedValue({ id: 'prt_1' })
+    mockPrisma.passwordResetToken.updateMany.mockResolvedValue({ count: 1 })
     mockPrisma.$transaction.mockResolvedValue([
       { id: 'user_1' },
       { id: 'prt_1' },
+      { count: 1 },
     ])
   })
 
@@ -195,7 +199,13 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     expect(mockPrisma.passwordResetToken.findUnique).toHaveBeenCalledWith({
       where: { tokenHash: expect.any(String) },
-      select: { id: true, userId: true, expiresAt: true, usedAt: true },
+      select: {
+        id: true,
+        userId: true,
+        attempts: true,
+        expiresAt: true,
+        usedAt: true,
+      },
     })
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -204,6 +214,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
       id: 'prt_1',
       userId: 'user_1',
+      attempts: 0,
       expiresAt: new Date('2099-01-01T00:00:00.000Z'),
       usedAt: new Date('2026-04-08T10:00:00.000Z'),
     })
@@ -228,10 +239,40 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
+  it('keeps a locked token unusable after usedAt has been set', async () => {
+    mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
+      id: 'prt_1',
+      userId: 'user_1',
+      attempts: 5,
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+      usedAt: new Date('2026-04-16T12:00:00.000Z'),
+    })
+
+    const result = await POST(
+      makeRequest({
+        token: 'good_token',
+        password: 'NewPassword123!',
+      }),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'This reset link has already been used.',
+      code: 'TOKEN_USED',
+    })
+
+    expect(mockHashPassword).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
   it('returns 400 when the token is expired', async () => {
     mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
       id: 'prt_1',
       userId: 'user_1',
+      attempts: 0,
       expiresAt: new Date('2000-01-01T00:00:00.000Z'),
       usedAt: null,
     })
@@ -256,10 +297,52 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('updates the password and marks the token used when the token is valid', async () => {
+  it('locks the token on the 5th matched confirm attempt', async () => {
     mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
       id: 'prt_1',
       userId: 'user_1',
+      attempts: 4,
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+      usedAt: null,
+    })
+
+    const result = await POST(
+      makeRequest({
+        token: 'good_token',
+        password: 'NewPassword123!',
+      }),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Too many attempts. Please request a new password reset.',
+      code: 'TOKEN_LOCKED',
+    })
+
+    expect(mockPrisma.passwordResetToken.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'prt_1',
+        usedAt: null,
+        attempts: 4,
+      },
+      data: {
+        attempts: { increment: 1 },
+        usedAt: expect.any(Date),
+      },
+    })
+
+    expect(mockHashPassword).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('updates the password, marks the current token used, and invalidates sibling tokens when the token is valid', async () => {
+    mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
+      id: 'prt_1',
+      userId: 'user_1',
+      attempts: 0,
       expiresAt: new Date('2099-01-01T00:00:00.000Z'),
       usedAt: null,
     })
@@ -274,6 +357,17 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     expect(result.status).toBe(200)
     expect(body).toEqual({ ok: true })
+
+    expect(mockPrisma.passwordResetToken.updateMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: 'prt_1',
+        usedAt: null,
+        attempts: 0,
+      },
+      data: {
+        attempts: { increment: 1 },
+      },
+    })
 
     expect(mockHashPassword).toHaveBeenCalledWith('NewPassword123!')
 
@@ -292,10 +386,18 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       select: { id: true },
     })
 
+    expect(mockPrisma.passwordResetToken.updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        userId: 'user_1',
+        usedAt: null,
+      },
+      data: { usedAt: expect.any(Date) },
+    })
+
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
     const txArg = mockPrisma.$transaction.mock.calls[0]?.[0]
     expect(Array.isArray(txArg)).toBe(true)
-    expect(txArg).toHaveLength(2)
+    expect(txArg).toHaveLength(3)
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 

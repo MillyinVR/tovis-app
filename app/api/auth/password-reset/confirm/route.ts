@@ -15,6 +15,8 @@ import { captureAuthException } from '@/lib/observability/authEvents'
 
 export const dynamic = 'force-dynamic'
 
+const MAX_PASSWORD_RESET_ATTEMPTS = 5
+
 type Body = {
   token?: unknown
   password?: unknown
@@ -57,7 +59,13 @@ export async function POST(req: Request) {
 
     const record = await prisma.passwordResetToken.findUnique({
       where: { tokenHash },
-      select: { id: true, userId: true, expiresAt: true, usedAt: true },
+      select: {
+        id: true,
+        userId: true,
+        attempts: true,
+        expiresAt: true,
+        usedAt: true,
+      },
     })
 
     if (!record) {
@@ -74,10 +82,47 @@ export async function POST(req: Request) {
       })
     }
 
-    if (record.expiresAt.getTime() < Date.now()) {
+    const now = new Date()
+
+    if (record.expiresAt.getTime() < now.getTime()) {
       return jsonFail(400, 'This reset link is invalid or has expired.', {
         code: 'TOKEN_EXPIRED',
       })
+    }
+
+    const nextAttempts = record.attempts + 1
+    const shouldLock = nextAttempts >= MAX_PASSWORD_RESET_ATTEMPTS
+
+    const attemptUpdate = await prisma.passwordResetToken.updateMany({
+      where: {
+        id: record.id,
+        usedAt: null,
+        attempts: record.attempts,
+      },
+      data: shouldLock
+        ? {
+            attempts: { increment: 1 },
+            usedAt: now,
+          }
+        : {
+            attempts: { increment: 1 },
+          },
+    })
+
+    if (attemptUpdate.count === 0) {
+      return jsonFail(400, 'This reset link is invalid or has expired.', {
+        code: 'INVALID_TOKEN',
+      })
+    }
+
+    if (shouldLock) {
+      return jsonFail(
+        400,
+        'Too many attempts. Please request a new password reset.',
+        {
+          code: 'TOKEN_LOCKED',
+        },
+      )
     }
 
     const passwordHash = await hashPassword(password)
@@ -93,8 +138,15 @@ export async function POST(req: Request) {
       }),
       prisma.passwordResetToken.update({
         where: { id: record.id },
-        data: { usedAt: new Date() },
+        data: { usedAt: now },
         select: { id: true },
+      }),
+      prisma.passwordResetToken.updateMany({
+        where: {
+          userId: record.userId,
+          usedAt: null,
+        },
+        data: { usedAt: now },
       }),
     ])
 
