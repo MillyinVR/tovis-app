@@ -10,6 +10,10 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
+import {
+  logAuthEvent,
+  captureAuthException,
+} from '@/lib/observability/authEvents'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -95,8 +99,13 @@ function getRequestHostname(request: Request): string | null {
 }
 
 export async function POST(request: Request) {
+  let verificationIdForLog: string | null = null
+  let userIdForLog: string | null = null
+  let emailForLog: string | null = null
+
   try {
     const { verificationId, token } = await readVerificationBody(request)
+    verificationIdForLog = verificationId
 
     if (!verificationId) {
       return jsonFail(400, 'Verification token is required.', {
@@ -147,6 +156,9 @@ export async function POST(request: Request) {
         code: 'TOKEN_INVALID',
       })
     }
+
+    userIdForLog = record.userId
+    emailForLog = record.email
 
     if (record.usedAt) {
       return jsonFail(400, 'This verification link has already been used.', {
@@ -243,6 +255,20 @@ export async function POST(request: Request) {
     const isEmailVerified = Boolean(result.emailVerifiedAt)
     const isFullyVerified = isPhoneVerified && isEmailVerified
 
+    logAuthEvent({
+      level: 'info',
+      event: 'auth.email.verify.success',
+      route: 'auth.email.verify',
+      userId: result.id,
+      email: result.email,
+      verificationId: record.id,
+      meta: {
+        isPhoneVerified,
+        isEmailVerified,
+        isFullyVerified,
+      },
+    })
+
     const res = jsonOk(
       {
         ok: true,
@@ -285,9 +311,15 @@ export async function POST(request: Request) {
 
     return res
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : 'Internal server error'
-    console.error('[auth/email/verify] error', message)
+    captureAuthException({
+      event: 'auth.email.verify.failed',
+      route: 'auth.email.verify',
+      code: 'INTERNAL',
+      verificationId: verificationIdForLog,
+      userId: userIdForLog,
+      email: emailForLog,
+      error,
+    })
 
     return jsonFail(500, 'Internal server error', {
       code: 'INTERNAL',

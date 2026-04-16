@@ -2,9 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
 const mockGetCurrentUser = vi.hoisted(() => vi.fn())
+const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/currentUser', () => ({
   getCurrentUser: mockGetCurrentUser,
+}))
+
+vi.mock('@/lib/observability/authEvents', () => ({
+  captureAuthException: mockCaptureAuthException,
 }))
 
 import { requireUser } from './requireUser'
@@ -86,6 +91,7 @@ function makeMockUser(args: MockUserArgs = {}) {
 describe('app/api/_utils/auth/requireUser', () => {
   beforeEach(() => {
     mockGetCurrentUser.mockReset()
+    mockCaptureAuthException.mockReset()
   })
 
   it('returns 500 when getCurrentUser throws', async () => {
@@ -96,6 +102,13 @@ describe('app/api/_utils/auth/requireUser', () => {
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('Expected failure result')
     expect(result.res.status).toBe(500)
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.require_user.current_user_failed',
+      route: 'auth.requireUser',
+      code: 'INTERNAL',
+      error: expect.any(Error),
+    })
   })
 
   it('returns 401 when no user is present', async () => {
@@ -106,6 +119,7 @@ describe('app/api/_utils/auth/requireUser', () => {
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('Expected failure result')
     expect(result.res.status).toBe(401)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 403 when the user role is not allowed', async () => {
@@ -120,6 +134,7 @@ describe('app/api/_utils/auth/requireUser', () => {
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('Expected failure result')
     expect(result.res.status).toBe(403)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 403 for a verification-only session by default', async () => {
@@ -135,6 +150,7 @@ describe('app/api/_utils/auth/requireUser', () => {
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('Expected failure result')
     expect(result.res.status).toBe(403)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('allows a verification-only session when explicitly enabled', async () => {
@@ -153,6 +169,7 @@ describe('app/api/_utils/auth/requireUser', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('Expected success result')
     expect(result.user).toEqual(user)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 403 for an active session that is not fully verified', async () => {
@@ -168,6 +185,7 @@ describe('app/api/_utils/auth/requireUser', () => {
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error('Expected failure result')
     expect(result.res.status).toBe(403)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns ok for a fully verified active user', async () => {
@@ -182,5 +200,6 @@ describe('app/api/_utils/auth/requireUser', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) throw new Error('Expected success result')
     expect(result.user).toEqual(user)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 })

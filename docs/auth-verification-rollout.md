@@ -2,6 +2,8 @@
 
 ## Purpose
 
+Operational incident runbook: see `docs/auth-verification-incident-runbook.md`
+
 TOVIS now requires **both phone verification and email verification** before a user is treated as fully active for normal app access.
 
 This document describes the production contract for:

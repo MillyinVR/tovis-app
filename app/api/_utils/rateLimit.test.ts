@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockRateLimitRedis = vi.hoisted(() => vi.fn())
 const mockGetTrustedClientIpFromNextHeaders = vi.hoisted(() => vi.fn())
+const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/rateLimitRedis', () => ({
   rateLimitRedis: mockRateLimitRedis,
@@ -9,6 +10,33 @@ vi.mock('@/lib/rateLimitRedis', () => ({
 
 vi.mock('@/lib/trustedClientIp', () => ({
   getTrustedClientIpFromNextHeaders: mockGetTrustedClientIpFromNextHeaders,
+}))
+
+vi.mock('@/lib/observability/authEvents', () => ({
+  logAuthEvent: mockLogAuthEvent,
+}))
+
+vi.mock('./responses', () => ({
+  jsonFail: (
+    status: number,
+    error: string,
+    extra?: Record<string, unknown>,
+    init?: { headers?: Record<string, string> },
+  ) =>
+    new Response(
+      JSON.stringify({
+        ok: false,
+        error,
+        ...(extra ?? {}),
+      }),
+      {
+        status,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(init?.headers ?? {}),
+        },
+      },
+    ),
 }))
 
 const ORIGINAL_ENV = { ...process.env }
@@ -23,6 +51,7 @@ describe('app/api/_utils/rateLimit', () => {
     process.env = { ...ORIGINAL_ENV }
     mockRateLimitRedis.mockReset()
     mockGetTrustedClientIpFromNextHeaders.mockReset()
+    mockLogAuthEvent.mockReset()
   })
 
   afterEach(() => {
@@ -42,6 +71,7 @@ describe('app/api/_utils/rateLimit', () => {
       id: 'user_123',
     })
     expect(mockGetTrustedClientIpFromNextHeaders).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
   })
 
   it('uses trusted client IP when no user identity is present', async () => {
@@ -56,6 +86,7 @@ describe('app/api/_utils/rateLimit', () => {
       kind: 'ip',
       id: '203.0.113.20',
     })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
   })
 
   it('returns null when neither user nor trusted IP identity is available', async () => {
@@ -66,6 +97,7 @@ describe('app/api/_utils/rateLimit', () => {
     const result = await rateLimitIdentity()
 
     expect(result).toBeNull()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
   })
 
   it('builds a phone identity for shared SMS quotas', async () => {
@@ -75,6 +107,7 @@ describe('app/api/_utils/rateLimit', () => {
       kind: 'phone',
       id: '+15551234567',
     })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
   })
 
   it('returns null when Redis allows the request', async () => {
@@ -101,6 +134,7 @@ describe('app/api/_utils/rateLimit', () => {
       limit: 5,
       windowSeconds: 60 * 60,
     })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
 
     nowSpy.mockRestore()
   })
@@ -141,10 +175,12 @@ describe('app/api/_utils/rateLimit', () => {
       },
     })
 
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+
     nowSpy.mockRestore()
   })
 
-  it('degrades auth-critical buckets to bounded L1 limits when Redis fails and opens the circuit breaker', async () => {
+  it('degrades auth-critical buckets to bounded local limits when Redis fails and logs the circuit-open event', async () => {
     mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
 
     const { enforceRateLimit } = await loadSubject()
@@ -172,6 +208,21 @@ describe('app/api/_utils/rateLimit', () => {
     expect(body.code).toBe('RATE_LIMITED')
 
     expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
+    expect(mockLogAuthEvent).toHaveBeenCalledTimes(1)
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.rate_limit.local_only_degraded',
+      route: 'auth.rateLimit',
+      provider: 'redis',
+      meta: {
+        bucket: 'auth:register',
+        mode: 'auth-critical',
+        keySuffix: null,
+        circuitOpened: true,
+        identityKind: 'ip',
+        identityId: '198.51.100.12',
+      },
+    })
   })
 
   it('uses separate keys for phone-based SMS quota buckets', async () => {
@@ -197,7 +248,43 @@ describe('app/api/_utils/rateLimit', () => {
       limit: 3,
       windowSeconds: 60 * 60,
     })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
 
     nowSpy.mockRestore()
+  })
+
+  it('skips non-auth-critical Redis rate limits when Redis fails and logs a structured warning', async () => {
+    mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
+
+    const { enforceRateLimit } = await loadSubject()
+
+    const result = await enforceRateLimit({
+      bucket: 'looks:like',
+      identity: { kind: 'user', id: 'user_77' },
+    })
+
+    expect(result).toBeNull()
+    expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
+    expect(mockRateLimitRedis).toHaveBeenCalledWith({
+      key: 'rl:looks:like:user:user_77',
+      limit: 60,
+      windowSeconds: 60,
+    })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.rate_limit.redis_skipped',
+      route: 'auth.rateLimit',
+      provider: 'redis',
+      userId: 'user_77',
+      phone: undefined,
+      meta: {
+        bucket: 'looks:like',
+        mode: 'redis-only',
+        keySuffix: null,
+        circuitOpened: false,
+        identityKind: 'user',
+      },
+    })
   })
 })

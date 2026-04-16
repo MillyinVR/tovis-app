@@ -30,6 +30,10 @@ import {
 } from '@prisma/client'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
+import {
+  logAuthEvent,
+  captureAuthException,
+} from '@/lib/observability/authEvents'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,14 +76,12 @@ type SignupLocation =
       timeZoneId: string
     }
 
-
 type SmsSendResult =
   | { ok: true }
   | {
       ok: false
       code: 'SMS_NOT_CONFIGURED' | 'SMS_SEND_FAILED'
     }
-
 
 type RegisterBody = {
   email?: unknown
@@ -157,7 +159,13 @@ function cleanPhone(v: unknown): string | null {
 
   // US-only assumption for now
   if (!cleaned.startsWith('+') && digits.length === 10) return `+1${digits}`
-  if (!cleaned.startsWith('+') && digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+  if (
+    !cleaned.startsWith('+') &&
+    digits.length === 11 &&
+    digits.startsWith('1')
+  ) {
+    return `+${digits}`
+  }
 
   return cleaned
 }
@@ -239,8 +247,9 @@ function parseNumber(v: unknown): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-
-function parseSupabaseRef(input: string): { bucket: string; path: string } | null {
+function parseSupabaseRef(
+  input: string,
+): { bucket: string; path: string } | null {
   const s = input.trim()
   if (!s.startsWith('supabase://')) return null
   const rest = s.slice('supabase://'.length)
@@ -260,13 +269,20 @@ function looksLikeLicenseDocRef(s: string) {
   return false
 }
 
-function validateLicenseDocUrl(input: string): { ok: true; value: string } | { ok: false; error: string } {
+function validateLicenseDocUrl(
+  input: string,
+): { ok: true; value: string } | { ok: false; error: string } {
   const s = input.trim()
-  if (!looksLikeLicenseDocRef(s)) return { ok: false, error: 'Invalid license document reference.' }
+  if (!looksLikeLicenseDocRef(s)) {
+    return { ok: false, error: 'Invalid license document reference.' }
+  }
 
   const ref = parseSupabaseRef(s)
   if (ref && ref.bucket !== BUCKETS.mediaPrivate) {
-    return { ok: false, error: 'Invalid license document (must be private upload).' }
+    return {
+      ok: false,
+      error: 'Invalid license document (must be private upload).',
+    }
   }
 
   return { ok: true, value: s }
@@ -281,14 +297,23 @@ function createManualLicenseDocData(urlOrRef: string) {
   }
 }
 
-async function sendPhoneVerificationSms(args: { to: string; code: string }): Promise<SmsSendResult> {
+async function sendPhoneVerificationSms(args: {
+  to: string
+  code: string
+}): Promise<SmsSendResult> {
   const accountSid = envOrNull('TWILIO_ACCOUNT_SID')
   const authToken = envOrNull('TWILIO_AUTH_TOKEN')
   const from = envOrNull('TWILIO_FROM_NUMBER')
 
   if (!accountSid || !authToken || !from) {
-    // eslint-disable-next-line no-console
-    console.error('[phone-verification] twilio env missing')
+    logAuthEvent({
+      level: 'error',
+      event: 'auth.phone.send.not_configured',
+      route: 'auth.register',
+      provider: 'twilio',
+      code: 'SMS_NOT_CONFIGURED',
+      phone: args.to,
+    })
     return { ok: false, code: 'SMS_NOT_CONFIGURED' }
   }
 
@@ -297,16 +322,27 @@ async function sendPhoneVerificationSms(args: { to: string; code: string }): Pro
     const body = `TOVIS verification code: ${args.code}. Expires in 10 minutes.`
     const msg = await client.messages.create({ to: args.to, from, body })
 
-    // eslint-disable-next-line no-console
-    console.log(
-      '[phone-verification] twilio sent',
-      process.env.NODE_ENV !== 'production' ? { sid: msg.sid, to: args.to, from } : { sid: msg.sid, to: args.to },
-    )
+    logAuthEvent({
+      level: 'info',
+      event: 'auth.phone.send.success',
+      route: 'auth.register',
+      provider: 'twilio',
+      phone: args.to,
+      meta: {
+        sid: msg.sid,
+      },
+    })
 
     return { ok: true }
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[phone-verification] failed to send', err)
+    captureAuthException({
+      event: 'auth.phone.send.failed',
+      route: 'auth.register',
+      provider: 'twilio',
+      code: 'SMS_SEND_FAILED',
+      phone: args.to,
+      error: err,
+    })
     return { ok: false, code: 'SMS_SEND_FAILED' }
   }
 }
@@ -366,8 +402,12 @@ function hostToHostname(hostHeader: string | null): string | null {
 function resolveCookieDomain(hostname: string | null): string | undefined {
   if (!hostname) return undefined
 
-  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) return '.tovis.app'
-  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) return '.tovis.me'
+  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) {
+    return '.tovis.app'
+  }
+  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) {
+    return '.tovis.me'
+  }
 
   // localhost / unknown hosts: host-only cookie (no Domain attribute)
   return undefined
@@ -375,7 +415,10 @@ function resolveCookieDomain(hostname: string | null): string | undefined {
 
 function resolveIsHttps(request: Request): boolean {
   // Prefer proxy headers (Vercel / reverse proxies)
-  const xfProto = request.headers.get('x-forwarded-proto')?.trim().toLowerCase()
+  const xfProto = request.headers
+    .get('x-forwarded-proto')
+    ?.trim()
+    .toLowerCase()
   if (xfProto === 'https') return true
   if (xfProto === 'http') return false
 
@@ -388,7 +431,8 @@ function resolveIsHttps(request: Request): boolean {
 }
 
 function getRequestHostname(request: Request): string | null {
-  const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host')
+  const host =
+    request.headers.get('x-forwarded-host') ?? request.headers.get('host')
   return hostToHostname(host)
 }
 
@@ -457,16 +501,23 @@ async function getCaDcaTypeMap(): Promise<Record<string, string>> {
   const APP_ID = envOrNull('DCA_SEARCH_APP_ID')
   const APP_KEY = envOrNull('DCA_SEARCH_APP_KEY')
   if (!APP_ID || !APP_KEY) {
-    throw new Error('DCA API is not configured (missing DCA_SEARCH_APP_ID / DCA_SEARCH_APP_KEY).')
+    throw new Error(
+      'DCA API is not configured (missing DCA_SEARCH_APP_ID / DCA_SEARCH_APP_KEY).',
+    )
   }
 
-  const url = 'https://iservices.dca.ca.gov/api/search/v1/breezeDetailService/getAllLicenseTypes'
-  const res = await fetch(url, { headers: { APP_ID, APP_KEY }, cache: 'no-store' })
+  const url =
+    'https://iservices.dca.ca.gov/api/search/v1/breezeDetailService/getAllLicenseTypes'
+  const res = await fetch(url, {
+    headers: { APP_ID, APP_KEY },
+    cache: 'no-store',
+  })
   const data: unknown = await res.json().catch(() => ({}))
 
   if (!res.ok) {
     const msg =
-      isRecord(data) && (typeof data.message === 'string' || typeof data.error === 'string')
+      isRecord(data) &&
+      (typeof data.message === 'string' || typeof data.error === 'string')
         ? String(data.message ?? data.error)
         : 'DCA license types lookup failed.'
     throw new Error(msg)
@@ -505,7 +556,9 @@ async function getCaDcaTypeMap(): Promise<Record<string, string>> {
     .map(([k]) => k)
 
   if (missing.length) {
-    throw new Error(`Could not resolve DCA licType codes for: ${missing.join(', ')}.`)
+    throw new Error(
+      `Could not resolve DCA licType codes for: ${missing.join(', ')}.`,
+    )
   }
 
   cachedTypeMap = map
@@ -528,16 +581,22 @@ async function verifyCaBbcLicense(args: {
     const licType = typeMap[args.professionType]
     if (!licType) return { ok: false, error: 'Unsupported CA license type.' }
 
-    const url = new URL('https://iservices.dca.ca.gov/api/search/v1/licenseSearchService/getLicenseNumberSearch')
+    const url = new URL(
+      'https://iservices.dca.ca.gov/api/search/v1/licenseSearchService/getLicenseNumberSearch',
+    )
     url.searchParams.set('licType', licType)
     url.searchParams.set('licNumber', args.licenseNumber)
 
-    const res = await fetch(url.toString(), { headers: { APP_ID, APP_KEY }, cache: 'no-store' })
+    const res = await fetch(url.toString(), {
+      headers: { APP_ID, APP_KEY },
+      cache: 'no-store',
+    })
     const data: unknown = await res.json().catch(() => ({}))
 
     if (!res.ok) {
       const msg =
-        isRecord(data) && (typeof data.message === 'string' || typeof data.error === 'string')
+        isRecord(data) &&
+        (typeof data.message === 'string' || typeof data.error === 'string')
           ? String(data.message ?? data.error)
           : 'License lookup failed.'
       return { ok: false, error: msg }
@@ -549,18 +608,28 @@ async function verifyCaBbcLicense(args: {
     const lic = isRecord(full) ? asArray(full.getLicenseDetails)[0] : null
 
     const statusCode =
-      isRecord(lic) && lic.primaryStatusCode != null ? String(lic.primaryStatusCode) : null
+      isRecord(lic) && lic.primaryStatusCode != null
+        ? String(lic.primaryStatusCode)
+        : null
     const expDate =
       isRecord(lic) && lic.expDate != null ? String(lic.expDate) : null
     const returnedNumber =
-      isRecord(lic) && lic.licNumber != null ? String(lic.licNumber).toUpperCase() : null
+      isRecord(lic) && lic.licNumber != null
+        ? String(lic.licNumber).toUpperCase()
+        : null
 
-    const numberMatches = Boolean(returnedNumber && returnedNumber === args.licenseNumber)
-    const isCurrent = statusCode ? statusCode.toUpperCase().includes('CURRENT') : false
+    const numberMatches = Boolean(
+      returnedNumber && returnedNumber === args.licenseNumber,
+    )
+    const isCurrent = statusCode
+      ? statusCode.toUpperCase().includes('CURRENT')
+      : false
 
     // Prisma wants InputJsonValue for create/update inputs.
     // fetch().json() is JSON-safe; stringify/parse guarantees no Date/functions/undefined.
-    const rawJson: Prisma.InputJsonValue = JSON.parse(JSON.stringify(data ?? {}))
+    const rawJson: Prisma.InputJsonValue = JSON.parse(
+      JSON.stringify(data ?? {}),
+    )
 
     return {
       ok: true,
@@ -581,8 +650,10 @@ async function verifyCaBbcLicense(args: {
 ========================================================= */
 
 export async function POST(request: Request) {
-  try {
+  let emailForLog: string | null = null
+  let phoneForLog: string | null = null
 
+  try {
     const body = (await request.json().catch(() => ({}))) as RegisterBody
 
     const email = normalizeEmail(body.email)
@@ -595,11 +666,16 @@ export async function POST(request: Request) {
     const rawPhone = pickString(body.phone)
     const phone = rawPhone ? cleanPhone(rawPhone) : null
 
+    emailForLog = email
+    phoneForLog = phone
+
     const tosAccepted = body.tosAccepted === true
     const turnstileToken = pickString(body.turnstileToken)
 
     const tapIntentId = pickString(body.tapIntentId)
-    const signupLocation = isLocationPayload(body.signupLocation) ? body.signupLocation : null
+    const signupLocation = isLocationPayload(body.signupLocation)
+      ? body.signupLocation
+      : null
     const nextForVerification = sanitizeInternalPath(pickString(body.next))
     const verificationIntent = sanitizeOptionalText(pickString(body.intent))
     const verificationInviteToken = sanitizeOptionalText(
@@ -607,10 +683,14 @@ export async function POST(request: Request) {
     )
 
     if (!email || !password || !role) {
-      return jsonFail(400, 'Missing required fields.', { code: 'MISSING_FIELDS' })
+      return jsonFail(400, 'Missing required fields.', {
+        code: 'MISSING_FIELDS',
+      })
     }
     if (!firstName || !lastName) {
-      return jsonFail(400, 'First and last name are required.', { code: 'MISSING_NAME' })
+      return jsonFail(400, 'First and last name are required.', {
+        code: 'MISSING_NAME',
+      })
     }
 
     const passwordError = validatePassword(password)
@@ -619,7 +699,9 @@ export async function POST(request: Request) {
     }
 
     if (!rawPhone) {
-      return jsonFail(400, 'Phone number is required.', { code: 'PHONE_REQUIRED' })
+      return jsonFail(400, 'Phone number is required.', {
+        code: 'PHONE_REQUIRED',
+      })
     }
 
     if (!phone) {
@@ -629,40 +711,47 @@ export async function POST(request: Request) {
     }
 
     if (await isRuntimeFlagEnabled('signup_disabled')) {
-  return jsonFail(503, 'Signup is temporarily unavailable.', {
-    code: 'SIGNUP_DISABLED',
-  })
-}
+      return jsonFail(503, 'Signup is temporarily unavailable.', {
+        code: 'SIGNUP_DISABLED',
+      })
+    }
 
-if (await isRuntimeFlagEnabled('sms_disabled')) {
-  return jsonFail(503, 'SMS verification is temporarily unavailable.', {
-    code: 'SMS_DISABLED',
-  })
-}
+    if (await isRuntimeFlagEnabled('sms_disabled')) {
+      return jsonFail(503, 'SMS verification is temporarily unavailable.', {
+        code: 'SMS_DISABLED',
+      })
+    }
 
-const smsCountry = validateSmsDestinationCountry(phone)
-if (!smsCountry.ok) {
-  return jsonFail(400, smsCountry.message, {
-    code: smsCountry.code,
-    countryCode: smsCountry.countryCode,
-  })
-}
+    const smsCountry = validateSmsDestinationCountry(phone)
+    if (!smsCountry.ok) {
+      return jsonFail(400, smsCountry.message, {
+        code: smsCountry.code,
+        countryCode: smsCountry.countryCode,
+      })
+    }
 
     if (!tosAccepted) {
-      return jsonFail(
-        400,
-        'You must accept the Terms and Privacy Policy.',
-        { code: 'CONSENT_REQUIRED' },
-      )
+      return jsonFail(400, 'You must accept the Terms and Privacy Policy.', {
+        code: 'CONSENT_REQUIRED',
+      })
     }
+
     // location enforcement
     if (role === 'PRO') {
-      if (!signupLocation || (signupLocation.kind !== 'PRO_SALON' && signupLocation.kind !== 'PRO_MOBILE')) {
-        return jsonFail(400, 'Please confirm your work location.', { code: 'PRO_LOCATION_REQUIRED' })
+      if (
+        !signupLocation ||
+        (signupLocation.kind !== 'PRO_SALON' &&
+          signupLocation.kind !== 'PRO_MOBILE')
+      ) {
+        return jsonFail(400, 'Please confirm your work location.', {
+          code: 'PRO_LOCATION_REQUIRED',
+        })
       }
     } else {
       if (!signupLocation || signupLocation.kind !== 'CLIENT_ZIP') {
-        return jsonFail(400, 'Please confirm your ZIP code.', { code: 'CLIENT_ZIP_REQUIRED' })
+        return jsonFail(400, 'Please confirm your ZIP code.', {
+          code: 'CLIENT_ZIP_REQUIRED',
+        })
       }
     }
 
@@ -701,41 +790,58 @@ if (!smsCountry.ok) {
     }
 
     if (captcha.failOpen) {
-      console.warn(
-        JSON.stringify({
-          eventName: captcha.eventName,
-          route: 'auth.register',
+      logAuthEvent({
+        level: 'warn',
+        event: 'auth.register.captcha_fail_open',
+        route: 'auth.register',
+        email,
+        phone,
+        meta: {
+          captchaEvent: captcha.eventName,
           reason: captcha.reason,
           role,
-        }),
-      )
+        },
+      })
     }
 
     const identity = await rateLimitIdentity()
 
-const registerBucket = captcha.failOpen
-  ? 'auth:register'
-  : 'auth:register:verified'
+    const registerBucket = captcha.failOpen
+      ? 'auth:register'
+      : 'auth:register:verified'
 
-const registerRateLimitRes = await enforceRateLimit({
-  bucket: registerBucket,
-  identity,
-})
+    const registerRateLimitRes = await enforceRateLimit({
+      bucket: registerBucket,
+      identity,
+    })
 
-if (registerRateLimitRes) return registerRateLimitRes
+    if (registerRateLimitRes) return registerRateLimitRes
 
     // pro profession
     const professionRaw = pickUpper(body.professionType)
     let profession: ProfessionType | null = null
     if (role === 'PRO') {
-      if (!professionRaw) return jsonFail(400, 'Profession is required for pros.', { code: 'PROFESSION_REQUIRED' })
-      if (!isAnyProfessionType(professionRaw)) return jsonFail(400, 'Invalid profession type.', { code: 'PROFESSION_INVALID' })
+      if (!professionRaw) {
+        return jsonFail(400, 'Profession is required for pros.', {
+          code: 'PROFESSION_REQUIRED',
+        })
+      }
+      if (!isAnyProfessionType(professionRaw)) {
+        return jsonFail(400, 'Invalid profession type.', {
+          code: 'PROFESSION_INVALID',
+        })
+      }
       profession = professionRaw
     }
 
     // business name
     const businessNameRaw = pickString(body.businessName)
-    const businessName = role === 'PRO' ? (businessNameRaw?.trim() ? businessNameRaw.trim() : null) : null
+    const businessName =
+      role === 'PRO'
+        ? businessNameRaw?.trim()
+          ? businessNameRaw.trim()
+          : null
+        : null
 
     // handle
     const handleRaw = pickString(body.handle)
@@ -744,15 +850,29 @@ if (registerRateLimitRes) return registerRateLimitRes
     if (role === 'PRO' && handleRaw?.trim()) {
       handleToStore = handleRaw.trim()
       normalizedHandle = normalizeHandleInput(handleToStore)
-      if (!normalizedHandle) return jsonFail(400, 'Handle is invalid.', { code: 'HANDLE_INVALID' })
+      if (!normalizedHandle) {
+        return jsonFail(400, 'Handle is invalid.', { code: 'HANDLE_INVALID' })
+      }
     }
 
     // mobile radius
     let mobileRadiusMiles: number | null = null
     if (role === 'PRO' && signupLocation.kind === 'PRO_MOBILE') {
       const miles = parseNumber(body.mobileRadiusMiles)
-      if (miles == null) return jsonFail(400, 'Mobile radius (miles) is required for mobile pros.', { code: 'MOBILE_RADIUS_REQUIRED' })
-      if (miles < 1 || miles > 200) return jsonFail(400, 'Please enter a mobile radius between 1 and 200 miles.', { code: 'MOBILE_RADIUS_RANGE' })
+      if (miles == null) {
+        return jsonFail(
+          400,
+          'Mobile radius (miles) is required for mobile pros.',
+          { code: 'MOBILE_RADIUS_REQUIRED' },
+        )
+      }
+      if (miles < 1 || miles > 200) {
+        return jsonFail(
+          400,
+          'Please enter a mobile radius between 1 and 200 miles.',
+          { code: 'MOBILE_RADIUS_RANGE' },
+        )
+      }
       mobileRadiusMiles = Math.round(miles)
     }
 
@@ -778,16 +898,27 @@ if (registerRateLimitRes) return registerRateLimitRes
       const licenseNumber = normalizeLicenseNumber(body.licenseNumber)
 
       if (!licenseState || !licenseNumber) {
-        return jsonFail(400, 'CA license state and number are required for this profession.', { code: 'LICENSE_REQUIRED' })
+        return jsonFail(
+          400,
+          'CA license state and number are required for this profession.',
+          { code: 'LICENSE_REQUIRED' },
+        )
       }
       if (licenseState !== 'CA') {
-        return jsonFail(400, 'Only California licenses are supported right now.', { code: 'LICENSE_STATE_UNSUPPORTED' })
+        return jsonFail(
+          400,
+          'Only California licenses are supported right now.',
+          { code: 'LICENSE_STATE_UNSUPPORTED' },
+        )
       }
 
       licenseStateToStore = 'CA'
       licenseNumberToStore = licenseNumber
 
-      const v = await verifyCaBbcLicense({ professionType: profession, licenseNumber })
+      const v = await verifyCaBbcLicense({
+        professionType: profession,
+        licenseNumber,
+      })
 
       if (v.ok && v.verified) {
         verificationStatus = VerificationStatus.APPROVED
@@ -807,7 +938,11 @@ if (registerRateLimitRes) return registerRateLimitRes
         const docUrlRaw = pickString(body.licenseDocumentUrl)
         if (docUrlRaw?.trim()) {
           const checked = validateLicenseDocUrl(docUrlRaw)
-          if (!checked.ok) return jsonFail(400, checked.error, { code: 'LICENSE_DOC_INVALID' })
+          if (!checked.ok) {
+            return jsonFail(400, checked.error, {
+              code: 'LICENSE_DOC_INVALID',
+            })
+          }
           manualLicenseDocUrl = checked.value
           manualLicensePendingReview = true
         } else {
@@ -825,30 +960,32 @@ if (registerRateLimitRes) return registerRateLimitRes
       }
     }
 
-  
-
     // handle uniqueness
     if (role === 'PRO' && normalizedHandle) {
       const handleTaken = await prisma.professionalProfile.findFirst({
         where: { handleNormalized: normalizedHandle },
         select: { id: true },
       })
-      if (handleTaken) return jsonFail(400, 'That handle is already taken.', { code: 'HANDLE_IN_USE' })
+      if (handleTaken) {
+        return jsonFail(400, 'That handle is already taken.', {
+          code: 'HANDLE_IN_USE',
+        })
+      }
     }
 
-      const phoneIdentity = phoneRateLimitIdentity(phone)
+    const phoneIdentity = phoneRateLimitIdentity(phone)
 
-      const smsPhoneHourRes = await enforceRateLimit({
-        bucket: 'auth:sms-phone-hour',
-        identity: phoneIdentity,
-      })
-      if (smsPhoneHourRes) return smsPhoneHourRes
+    const smsPhoneHourRes = await enforceRateLimit({
+      bucket: 'auth:sms-phone-hour',
+      identity: phoneIdentity,
+    })
+    if (smsPhoneHourRes) return smsPhoneHourRes
 
-      const smsPhoneDayRes = await enforceRateLimit({
-        bucket: 'auth:sms-phone-day',
-        identity: phoneIdentity,
-      })
-      if (smsPhoneDayRes) return smsPhoneDayRes
+    const smsPhoneDayRes = await enforceRateLimit({
+      bucket: 'auth:sms-phone-day',
+      identity: phoneIdentity,
+    })
+    if (smsPhoneDayRes) return smsPhoneDayRes
 
     const passwordHash = await hashPassword(password)
 
@@ -906,10 +1043,18 @@ if (registerRateLimitRes) return registerRateLimitRes
                     licenseStatusCode: licenseStatusCodeToStore,
 
                     // ✅ IMPORTANT: omit when undefined (prevents exactOptionalPropertyTypes pain)
-                    ...(licenseRawJsonToStore !== undefined ? { licenseRawJson: licenseRawJsonToStore } : {}),
+                    ...(licenseRawJsonToStore !== undefined
+                      ? { licenseRawJson: licenseRawJsonToStore }
+                      : {}),
 
-                    mobileBasePostalCode: signupLocation.kind === 'PRO_MOBILE' ? signupLocation.postalCode : null,
-                    mobileRadiusMiles: signupLocation.kind === 'PRO_MOBILE' ? mobileRadiusMiles : null,
+                    mobileBasePostalCode:
+                      signupLocation.kind === 'PRO_MOBILE'
+                        ? signupLocation.postalCode
+                        : null,
+                    mobileRadiusMiles:
+                      signupLocation.kind === 'PRO_MOBILE'
+                        ? mobileRadiusMiles
+                        : null,
 
                     locations: {
                       create:
@@ -920,7 +1065,8 @@ if (registerRateLimitRes) return registerRateLimitRes
                               isPrimary: true,
                               isBookable: true,
 
-                              formattedAddress: signupLocation.formattedAddress,
+                              formattedAddress:
+                                signupLocation.formattedAddress,
                               city: signupLocation.city,
                               state: signupLocation.state,
                               postalCode: signupLocation.postalCode,
@@ -953,13 +1099,23 @@ if (registerRateLimitRes) return registerRateLimitRes
                     },
 
                     verificationDocs: manualLicenseDocUrl
-                      ? { create: createManualLicenseDocData(manualLicenseDocUrl) }
+                      ? {
+                          create: createManualLicenseDocData(
+                            manualLicenseDocUrl,
+                          ),
+                        }
                       : undefined,
                   },
                 }
               : undefined,
         },
-          select: { id: true, email: true, role: true, phone: true, authVersion: true },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+          phone: true,
+          authVersion: true,
+        },
       })
 
       await tx.phoneVerification.updateMany({
@@ -997,14 +1153,34 @@ if (registerRateLimitRes) return registerRateLimitRes
           intent: verificationIntent,
           inviteToken: verificationInviteToken,
         })
+
+        logAuthEvent({
+          level: 'info',
+          event: 'auth.email.send.success',
+          route: 'auth.register',
+          provider: 'postmark',
+          userId: user.id,
+          email: verificationEmail,
+        })
+
         emailVerificationSent = true
       } catch (emailErr) {
-        // eslint-disable-next-line no-console
-        console.error('[email-verification] failed to send', emailErr)
+        captureAuthException({
+          event: 'auth.email.send.failed',
+          route: 'auth.register',
+          provider: 'postmark',
+          userId: user.id,
+          email: verificationEmail,
+          error: emailErr,
+        })
       }
     }
 
-    const consumed = await consumeTapIntent({ tapIntentId, userId: user.id }).catch(() => null)
+    const consumed = await consumeTapIntent({
+      tapIntentId,
+      userId: user.id,
+    }).catch(() => null)
+
     const token = createVerificationToken({
       userId: user.id,
       role: user.role,
@@ -1025,34 +1201,37 @@ if (registerRateLimitRes) return registerRateLimitRes
         emailVerificationSent,
 
         // ✅ safe flags for the client UX
-        needsManualLicenseUpload: role === 'PRO' ? needsManualLicenseUpload : false,
-        manualLicensePendingReview: role === 'PRO' ? manualLicensePendingReview : false,
+        needsManualLicenseUpload:
+          role === 'PRO' ? needsManualLicenseUpload : false,
+        manualLicensePendingReview:
+          role === 'PRO' ? manualLicensePendingReview : false,
       },
       201,
     )
-const hostname = getRequestHostname(request)
-const cookieDomain = resolveCookieDomain(hostname)
-const isHttps = resolveIsHttps(request)
 
-res.cookies.set('tovis_token', token, {
-  httpOnly: true,
-  secure: isHttps, // ✅ based on actual protocol, not NODE_ENV
-  sameSite: 'lax',
-  path: '/',
-  maxAge: 60 * 60 * 24 * 7,
-  ...(cookieDomain ? { domain: cookieDomain } : {}),
-})
+    const hostname = getRequestHostname(request)
+    const cookieDomain = resolveCookieDomain(hostname)
+    const isHttps = resolveIsHttps(request)
 
-if (signupLocation.kind === 'CLIENT_ZIP') {
-  res.cookies.set('tovis_client_zip', signupLocation.postalCode, {
-    httpOnly: false,
-    secure: isHttps, // ✅ based on actual protocol, not NODE_ENV
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 60 * 60 * 24 * 90,
-    ...(cookieDomain ? { domain: cookieDomain } : {}),
-  })
-}
+    res.cookies.set('tovis_token', token, {
+      httpOnly: true,
+      secure: isHttps, // ✅ based on actual protocol, not NODE_ENV
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7,
+      ...(cookieDomain ? { domain: cookieDomain } : {}),
+    })
+
+    if (signupLocation.kind === 'CLIENT_ZIP') {
+      res.cookies.set('tovis_client_zip', signupLocation.postalCode, {
+        httpOnly: false,
+        secure: isHttps, // ✅ based on actual protocol, not NODE_ENV
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 24 * 90,
+        ...(cookieDomain ? { domain: cookieDomain } : {}),
+      })
+    }
 
     return res
   } catch (err: unknown) {
@@ -1070,9 +1249,14 @@ if (signupLocation.kind === 'CLIENT_ZIP') {
       })
     }
 
+    captureAuthException({
+      event: 'auth.register.failed',
+      route: 'auth.register',
+      email: emailForLog,
+      phone: phoneForLog,
+      error: err,
+    })
 
-    // eslint-disable-next-line no-console
-    console.error('Register error', err)
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }

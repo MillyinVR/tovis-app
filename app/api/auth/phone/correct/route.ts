@@ -17,6 +17,7 @@ import {
 import { prisma } from '@/lib/prisma'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
+import { captureAuthException } from '@/lib/observability/authEvents'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -26,15 +27,22 @@ type CorrectPhoneBody = {
 }
 
 export async function POST(request: Request) {
+  let userIdForLog: string | null = null
+  let phoneForLog: string | null = null
+
   try {
     const auth = await requireUser({ allowVerificationSession: true })
     if (!auth.ok) return auth.res
+
+    userIdForLog = auth.user.id
+    phoneForLog = auth.user.phone?.trim() ?? null
 
     if (auth.user.phoneVerifiedAt) {
       return jsonOk({ alreadyVerified: true, sent: false }, 200)
     }
 
-    const body = ((await request.json().catch(() => ({}))) ?? {}) as CorrectPhoneBody
+    const body = ((await request.json().catch(() => ({}))) ??
+      {}) as CorrectPhoneBody
     const rawPhone = pickString(body.phone)?.trim() ?? null
 
     if (!rawPhone) {
@@ -58,6 +66,8 @@ export async function POST(request: Request) {
     }
 
     const normalizedPhone = smsCountry.phone
+    phoneForLog = normalizedPhone
+
     const phoneIdentity = phoneRateLimitIdentity(normalizedPhone)
 
     const smsPhoneHourRes = await enforceRateLimit({
@@ -118,18 +128,46 @@ export async function POST(request: Request) {
     const code = readPhoneSendErrorCode(error)
 
     if (code === 'SMS_NOT_CONFIGURED') {
-      console.error('[phone/correct] twilio env missing', error)
+      captureAuthException({
+        event: 'auth.phone.correct.not_configured',
+        route: 'auth.phone.correct',
+        provider: 'twilio',
+        code,
+        userId: userIdForLog,
+        phone: phoneForLog,
+        error,
+      })
       return jsonFail(500, 'SMS provider is not configured.', { code })
     }
 
     if (code === 'SMS_SEND_FAILED') {
-      console.error('[phone/correct] send failed', error)
-      return jsonFail(502, 'Could not send verification code. Please try again.', {
+      captureAuthException({
+        event: 'auth.phone.correct.failed',
+        route: 'auth.phone.correct',
+        provider: 'twilio',
         code,
+        userId: userIdForLog,
+        phone: phoneForLog,
+        error,
       })
+      return jsonFail(
+        502,
+        'Could not send verification code. Please try again.',
+        {
+          code,
+        },
+      )
     }
 
-    console.error('[phone/correct] error', error)
+    captureAuthException({
+      event: 'auth.phone.correct.internal_error',
+      route: 'auth.phone.correct',
+      code: 'INTERNAL',
+      userId: userIdForLog,
+      phone: phoneForLog,
+      error,
+    })
+
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }

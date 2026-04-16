@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockRateLimitIdentity = vi.hoisted(() => vi.fn())
 const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
 const mockHashPassword = vi.hoisted(() => vi.fn())
 const mockValidatePassword = vi.hoisted(() => vi.fn())
+const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   passwordResetToken: {
@@ -28,22 +29,38 @@ vi.mock('@/lib/passwordPolicy', () => ({
   validatePassword: mockValidatePassword,
 }))
 
+vi.mock('@/lib/observability/authEvents', () => ({
+  captureAuthException: mockCaptureAuthException,
+}))
+
 vi.mock('@/app/api/_utils', () => ({
-  jsonOk(payload: unknown, status = 200) {
-    return new Response(JSON.stringify(payload), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    })
+  jsonOk(payload: Record<string, unknown>, status = 200) {
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        ...payload,
+      }),
+      {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
   },
+
   jsonFail(status: number, error: string, extras?: Record<string, unknown>) {
-    return new Response(JSON.stringify({ ok: false, error, ...(extras ?? {}) }), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return new Response(
+      JSON.stringify({ ok: false, error, ...(extras ?? {}) }),
+      {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
   },
+
   pickString(value: unknown) {
     return typeof value === 'string' && value.trim() ? value.trim() : null
   },
+
   enforceRateLimit: mockEnforceRateLimit,
   rateLimitIdentity: mockRateLimitIdentity,
 }))
@@ -67,13 +84,17 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     mockEnforceRateLimit.mockReset()
     mockHashPassword.mockReset()
     mockValidatePassword.mockReset()
+    mockCaptureAuthException.mockReset()
 
     mockPrisma.passwordResetToken.findUnique.mockReset()
     mockPrisma.passwordResetToken.update.mockReset()
     mockPrisma.user.update.mockReset()
     mockPrisma.$transaction.mockReset()
 
-    mockRateLimitIdentity.mockResolvedValue('ip:test')
+    mockRateLimitIdentity.mockResolvedValue({
+      kind: 'ip',
+      id: '203.0.113.10',
+    })
     mockEnforceRateLimit.mockResolvedValue(null)
     mockValidatePassword.mockReturnValue(null)
     mockHashPassword.mockResolvedValue('hashed_password')
@@ -84,6 +105,10 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       { id: 'user_1' },
       { id: 'prt_1' },
     ])
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('passes through the rate-limit response unchanged', async () => {
@@ -100,11 +125,12 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     expect(mockRateLimitIdentity).toHaveBeenCalledTimes(1)
     expect(mockEnforceRateLimit).toHaveBeenCalledWith({
       bucket: 'auth:password-reset-confirm',
-      identity: 'ip:test',
+      identity: { kind: 'ip', id: '203.0.113.10' },
     })
 
     expect(result).toBe(rateLimitRes)
     expect(result.status).toBe(429)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when required fields are missing', async () => {
@@ -124,6 +150,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     })
 
     expect(mockPrisma.passwordResetToken.findUnique).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the password is too weak', async () => {
@@ -145,6 +172,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     })
 
     expect(mockPrisma.passwordResetToken.findUnique).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the token is invalid', async () => {
@@ -169,6 +197,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       where: { tokenHash: expect.any(String) },
       select: { id: true, userId: true, expiresAt: true, usedAt: true },
     })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the token has already been used', async () => {
@@ -196,6 +225,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     expect(mockHashPassword).not.toHaveBeenCalled()
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the token is expired', async () => {
@@ -223,6 +253,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     expect(mockHashPassword).not.toHaveBeenCalled()
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('updates the password and marks the token used when the token is valid', async () => {
@@ -265,9 +296,10 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     const txArg = mockPrisma.$transaction.mock.calls[0]?.[0]
     expect(Array.isArray(txArg)).toBe(true)
     expect(txArg).toHaveLength(2)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns 500 when an unexpected error occurs', async () => {
+  it('returns 500 and captures the exception when an unexpected error occurs', async () => {
     mockPrisma.passwordResetToken.findUnique.mockRejectedValue(
       new Error('database exploded'),
     )
@@ -285,6 +317,14 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       ok: false,
       error: 'Internal server error',
       code: 'INTERNAL',
+    })
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.password_reset.confirm.failed',
+      route: 'auth.passwordReset.confirm',
+      code: 'INTERNAL',
+      userId: null,
+      error: expect.any(Error),
     })
   })
 })

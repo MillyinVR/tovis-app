@@ -22,6 +22,9 @@ const mockVerifyTurnstileOrFailOpen = vi.hoisted(() => vi.fn())
 const mockIsRuntimeFlagEnabled = vi.hoisted(() => vi.fn())
 const mockValidateSmsDestinationCountry = vi.hoisted(() => vi.fn())
 
+const mockLogAuthEvent = vi.hoisted(() => vi.fn())
+const mockCaptureAuthException = vi.hoisted(() => vi.fn())
+
 const mockTwilioMessagesCreate = vi.hoisted(() => vi.fn())
 const mockTwilio = vi.hoisted(() =>
   vi.fn(() => ({
@@ -102,6 +105,11 @@ vi.mock('@/lib/smsCountryPolicy', () => ({
   validateSmsDestinationCountry: mockValidateSmsDestinationCountry,
 }))
 
+vi.mock('@/lib/observability/authEvents', () => ({
+  logAuthEvent: mockLogAuthEvent,
+  captureAuthException: mockCaptureAuthException,
+}))
+
 import { POST } from './route'
 
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
@@ -173,6 +181,9 @@ describe('app/api/auth/register/route', () => {
 
     mockIsRuntimeFlagEnabled.mockReset()
     mockValidateSmsDestinationCountry.mockReset()
+
+    mockLogAuthEvent.mockReset()
+    mockCaptureAuthException.mockReset()
 
     mockTwilio.mockReset()
     mockTwilioMessagesCreate.mockReset()
@@ -254,6 +265,8 @@ describe('app/api/auth/register/route', () => {
     expect(result).toBe(rateLimitRes)
     expect(result.status).toBe(429)
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('uses the base register bucket when Turnstile fails open', async () => {
@@ -290,6 +303,19 @@ describe('app/api/auth/register/route', () => {
     expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
       bucket: 'auth:register',
       identity: { kind: 'ip', id: '198.51.100.10' },
+    })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.register.captcha_fail_open',
+      route: 'auth.register',
+      email: 'client@example.com',
+      phone: '+15551234567',
+      meta: {
+        captchaEvent: 'auth.turnstile.fail_open',
+        reason: 'turnstile_network_or_timeout',
+        role: 'CLIENT',
+      },
     })
   })
 
@@ -530,6 +556,28 @@ describe('app/api/auth/register/route', () => {
     expect(mockTwilio).toHaveBeenCalledWith('AC_test_sid', 'test_auth_token')
     expect(mockTwilioMessagesCreate).toHaveBeenCalledTimes(1)
 
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'info',
+      event: 'auth.phone.send.success',
+      route: 'auth.register',
+      provider: 'twilio',
+      phone: '+15551234567',
+      meta: {
+        sid: 'SM123456789',
+      },
+    })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'info',
+      event: 'auth.email.send.success',
+      route: 'auth.register',
+      provider: 'postmark',
+      userId: 'user_1',
+      email: 'client@example.com',
+    })
+
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=verification_token')
     expect(setCookie).toContain('tovis_client_zip=92101')
@@ -578,6 +626,15 @@ describe('app/api/auth/register/route', () => {
       authVersion: 1,
     })
 
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.email.send.failed',
+      route: 'auth.register',
+      provider: 'postmark',
+      userId: 'user_2',
+      email: 'client@example.com',
+      error: expect.any(Error),
+    })
+
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=verification_token')
   })
@@ -623,6 +680,15 @@ describe('app/api/auth/register/route', () => {
       authVersion: 1,
     })
 
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.phone.send.failed',
+      route: 'auth.register',
+      provider: 'twilio',
+      code: 'SMS_SEND_FAILED',
+      phone: '+15551234567',
+      error: expect.any(Error),
+    })
+
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=verification_token')
   })
@@ -658,6 +724,15 @@ describe('app/api/auth/register/route', () => {
     expect(body.phoneVerificationSent).toBe(false)
     expect(body.phoneVerificationErrorCode).toBe('SMS_NOT_CONFIGURED')
     expect(body.emailVerificationSent).toBe(true)
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'error',
+      event: 'auth.phone.send.not_configured',
+      route: 'auth.register',
+      provider: 'twilio',
+      code: 'SMS_NOT_CONFIGURED',
+      phone: '+15551234567',
+    })
   })
 
   it('returns 500 when the app URL cannot be resolved', async () => {

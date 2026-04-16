@@ -1,7 +1,9 @@
+// lib/auth/passwordReset.ts
 import crypto from 'crypto'
 import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { logAuthEvent } from '@/lib/observability/authEvents'
 
 const POSTMARK_SEND_URL = 'https://api.postmarkapp.com/email'
 
@@ -38,7 +40,9 @@ function envOrNull(name: string): string | null {
   return value ? value : null
 }
 
-export function getPasswordResetAppUrlFromRequest(request: Request): string | null {
+export function getPasswordResetAppUrlFromRequest(
+  request: Request,
+): string | null {
   const envUrl = envOrNull('NEXT_PUBLIC_APP_URL')
   if (envUrl) {
     return envUrl.replace(/\/+$/, '')
@@ -230,6 +234,16 @@ export async function issueAndSendPasswordReset(args: {
     })
     throw error
   }
+
+  logAuthEvent({
+    level: 'info',
+    event: 'auth.password_reset.email_send.success',
+    route: 'auth.passwordReset.request',
+    provider: 'postmark',
+    userId: args.userId,
+    email: args.email,
+    verificationId: issued.id,
+  })
 
   return {
     id: issued.id,

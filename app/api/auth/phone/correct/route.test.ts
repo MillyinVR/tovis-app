@@ -12,6 +12,8 @@ const mockEnforcePhoneVerificationOtpLimits = vi.hoisted(() => vi.fn())
 const mockIssueAndSendPhoneVerificationCode = vi.hoisted(() => vi.fn())
 const mockReadPhoneSendErrorCode = vi.hoisted(() => vi.fn())
 
+const mockCaptureAuthException = vi.hoisted(() => vi.fn())
+
 const mockPrisma = vi.hoisted(() => ({
   user: {
     update: vi.fn(),
@@ -51,6 +53,10 @@ vi.mock('@/app/api/_utils/auth/phoneVerificationSend', () => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: mockPrisma,
+}))
+
+vi.mock('@/lib/observability/authEvents', () => ({
+  captureAuthException: mockCaptureAuthException,
 }))
 
 import { POST } from './route'
@@ -136,6 +142,7 @@ describe('app/api/auth/phone/correct/route', () => {
     mockEnforcePhoneVerificationOtpLimits.mockReset()
     mockIssueAndSendPhoneVerificationCode.mockReset()
     mockReadPhoneSendErrorCode.mockReset()
+    mockCaptureAuthException.mockReset()
     mockPrisma.user.update.mockReset()
 
     mockIsRuntimeFlagEnabled.mockResolvedValue(false)
@@ -183,6 +190,7 @@ describe('app/api/auth/phone/correct/route', () => {
     })
     expect(result).toBe(res)
     expect(result.status).toBe(401)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns alreadyVerified when the phone is already verified', async () => {
@@ -208,6 +216,7 @@ describe('app/api/auth/phone/correct/route', () => {
     expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
     expect(mockPrisma.user.update).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the phone number is missing', async () => {
@@ -230,6 +239,7 @@ describe('app/api/auth/phone/correct/route', () => {
     expect(mockValidateSmsDestinationCountry).not.toHaveBeenCalled()
     expect(mockPrisma.user.update).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 503 when SMS is disabled', async () => {
@@ -257,6 +267,7 @@ describe('app/api/auth/phone/correct/route', () => {
     expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
     expect(mockPrisma.user.update).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the phone format is invalid', async () => {
@@ -289,6 +300,7 @@ describe('app/api/auth/phone/correct/route', () => {
     expect(mockEnforceRateLimit).not.toHaveBeenCalled()
     expect(mockPrisma.user.update).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the SMS destination country is unsupported', async () => {
@@ -321,6 +333,7 @@ describe('app/api/auth/phone/correct/route', () => {
     expect(mockEnforceRateLimit).not.toHaveBeenCalled()
     expect(mockPrisma.user.update).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns the shared per-phone quota response unchanged when SMS quota blocks correction', async () => {
@@ -351,6 +364,7 @@ describe('app/api/auth/phone/correct/route', () => {
     expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
     expect(mockPrisma.user.update).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 429 and Retry-After when resend is rate limited by cooldown', async () => {
@@ -391,6 +405,7 @@ describe('app/api/auth/phone/correct/route', () => {
     expect(mockEnforcePhoneVerificationOtpLimits).toHaveBeenCalledWith('user_1')
     expect(mockPrisma.user.update).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 409 when the corrected phone number is already in use', async () => {
@@ -418,6 +433,7 @@ describe('app/api/auth/phone/correct/route', () => {
       },
     })
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('updates the phone and sends a fresh verification code when allowed', async () => {
@@ -465,6 +481,8 @@ describe('app/api/auth/phone/correct/route', () => {
     ).toBeLessThan(
       mockIssueAndSendPhoneVerificationCode.mock.invocationCallOrder[0],
     )
+
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 500 with SMS_NOT_CONFIGURED when the helper reports missing Twilio config', async () => {
@@ -486,6 +504,16 @@ describe('app/api/auth/phone/correct/route', () => {
       ok: false,
       error: 'SMS provider is not configured.',
       code: 'SMS_NOT_CONFIGURED',
+    })
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.phone.correct.not_configured',
+      route: 'auth.phone.correct',
+      provider: 'twilio',
+      code: 'SMS_NOT_CONFIGURED',
+      userId: 'user_1',
+      phone: '+15557654321',
+      error: expect.any(Error),
     })
   })
 
@@ -509,6 +537,16 @@ describe('app/api/auth/phone/correct/route', () => {
       error: 'Could not send verification code. Please try again.',
       code: 'SMS_SEND_FAILED',
     })
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.phone.correct.failed',
+      route: 'auth.phone.correct',
+      provider: 'twilio',
+      code: 'SMS_SEND_FAILED',
+      userId: 'user_1',
+      phone: '+15557654321',
+      error: expect.any(Error),
+    })
   })
 
   it('returns 500 for unexpected helper failures', async () => {
@@ -530,6 +568,15 @@ describe('app/api/auth/phone/correct/route', () => {
       ok: false,
       error: 'Internal server error',
       code: 'INTERNAL',
+    })
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.phone.correct.internal_error',
+      route: 'auth.phone.correct',
+      code: 'INTERNAL',
+      userId: 'user_1',
+      phone: '+15557654321',
+      error: expect.any(Error),
     })
   })
 })

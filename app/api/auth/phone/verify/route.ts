@@ -11,6 +11,10 @@ import {
   verifyToken,
 } from '@/lib/auth'
 import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
+import {
+  logAuthEvent,
+  captureAuthException,
+} from '@/lib/observability/authEvents'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -71,11 +75,15 @@ function getRequestHostname(request: Request): string | null {
 }
 
 export async function POST(request: Request) {
+  let userIdForLog: string | null = null
+  let phoneForLog: string | null = null
+
   try {
     const auth = await requireUser({ allowVerificationSession: true })
     if (!auth.ok) return auth.res
 
     const userId = auth.user.id
+    userIdForLog = userId
 
     const raw: unknown = await request.json().catch(() => ({}))
     const body = isRecord(raw) ? raw : {}
@@ -107,6 +115,8 @@ export async function POST(request: Request) {
     }
 
     const phone = auth.user.phone?.trim() ?? ''
+    phoneForLog = phone || null
+
     if (!phone) {
       return jsonFail(400, 'Phone number missing.', {
         code: 'PHONE_REQUIRED',
@@ -207,6 +217,18 @@ export async function POST(request: Request) {
     const isEmailVerified = auth.user.isEmailVerified
     const isFullyVerified = isEmailVerified
 
+    logAuthEvent({
+      level: 'info',
+      event: 'auth.phone.verify.success',
+      route: 'auth.phone.verify',
+      userId,
+      phone,
+      meta: {
+        isEmailVerified,
+        isFullyVerified,
+      },
+    })
+
     const res = jsonOk(
       {
         ok: true,
@@ -248,8 +270,14 @@ export async function POST(request: Request) {
 
     return res
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error('[phone/verify] error', message)
+    captureAuthException({
+      event: 'auth.phone.verify.failed',
+      route: 'auth.phone.verify',
+      userId: userIdForLog,
+      phone: phoneForLog,
+      code: 'INTERNAL',
+      error: err,
+    })
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }

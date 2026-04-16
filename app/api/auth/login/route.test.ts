@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
 const mockVerifyPassword = vi.hoisted(() => vi.fn())
@@ -9,6 +9,8 @@ const mockConsumeTapIntent = vi.hoisted(() => vi.fn())
 
 const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
 const mockRateLimitIdentity = vi.hoisted(() => vi.fn())
+
+const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   user: {
@@ -30,13 +32,93 @@ vi.mock('@/lib/tapIntentConsume', () => ({
   consumeTapIntent: mockConsumeTapIntent,
 }))
 
-vi.mock('@/app/api/_utils', async () => {
-  const actual = await vi.importActual<typeof import('@/app/api/_utils')>(
-    '@/app/api/_utils',
-  )
+vi.mock('@/lib/observability/authEvents', () => ({
+  captureAuthException: mockCaptureAuthException,
+}))
+
+vi.mock('@/app/api/_utils', () => {
+  function attachCookies(response: Response) {
+    const res = response as Response & {
+      cookies: {
+        set: (
+          name: string,
+          value: string,
+          options?: {
+            httpOnly?: boolean
+            secure?: boolean
+            sameSite?: 'lax' | 'strict' | 'none'
+            path?: string
+            maxAge?: number
+            domain?: string
+          },
+        ) => void
+      }
+    }
+
+    res.cookies = {
+      set(name, value, options) {
+        const parts = [`${name}=${value}`]
+
+        if (options?.path) parts.push(`Path=${options.path}`)
+        if (options?.domain) parts.push(`Domain=${options.domain}`)
+        if (options?.maxAge != null) parts.push(`Max-Age=${options.maxAge}`)
+        if (options?.httpOnly) parts.push('HttpOnly')
+        if (options?.secure) parts.push('Secure')
+        if (options?.sameSite) parts.push(`SameSite=${options.sameSite}`)
+
+        res.headers.append('set-cookie', parts.join('; '))
+      },
+    }
+
+    return res
+  }
 
   return {
-    ...actual,
+    jsonFail: (
+      status: number,
+      error: string,
+      extra?: Record<string, unknown>,
+      init?: { headers?: Record<string, string> },
+    ) =>
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error,
+          ...(extra ?? {}),
+        }),
+        {
+          status,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(init?.headers ?? {}),
+          },
+        },
+      ),
+
+    jsonOk: (body: Record<string, unknown>, status = 200) =>
+      attachCookies(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            ...body,
+          }),
+          {
+            status,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        ),
+      ),
+
+    pickString: (value: unknown) => (typeof value === 'string' ? value : null),
+
+    normalizeEmail: (value: unknown) => {
+      if (typeof value !== 'string') return null
+      const normalized = value.trim().toLowerCase()
+      return normalized || null
+    },
+
     enforceRateLimit: mockEnforceRateLimit,
     rateLimitIdentity: mockRateLimitIdentity,
   }
@@ -50,7 +132,10 @@ function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
   }
 }
 
-function makeRequest(body: unknown, extras?: { url?: string; headers?: Record<string, string> }) {
+function makeRequest(
+  body: unknown,
+  extras?: { url?: string; headers?: Record<string, string> },
+) {
   return new Request(extras?.url ?? 'http://localhost/api/auth/login', {
     method: 'POST',
     headers: {
@@ -72,20 +157,16 @@ function makeUser(args?: {
 }) {
   const role = args?.role ?? Role.CLIENT
 
-return {
-  id: 'user_1',
-  email: 'user@example.com',
-  password: 'stored_hash',
-  role,
-  authVersion: args?.authVersion ?? 1,
+  return {
+    id: 'user_1',
+    email: 'user@example.com',
+    password: 'stored_hash',
+    role,
+    authVersion: args?.authVersion ?? 1,
     phoneVerifiedAt:
-      args?.phoneVerifiedAt === undefined
-        ? null
-        : args.phoneVerifiedAt,
+      args?.phoneVerifiedAt === undefined ? null : args.phoneVerifiedAt,
     emailVerifiedAt:
-      args?.emailVerifiedAt === undefined
-        ? null
-        : args.emailVerifiedAt,
+      args?.emailVerifiedAt === undefined ? null : args.emailVerifiedAt,
     professionalProfile:
       role === Role.PRO
         ? {
@@ -119,8 +200,12 @@ describe('app/api/auth/login/route', () => {
 
     mockEnforceRateLimit.mockReset()
     mockRateLimitIdentity.mockReset()
+    mockCaptureAuthException.mockReset()
 
-    mockRateLimitIdentity.mockResolvedValue('ip:test')
+    mockRateLimitIdentity.mockResolvedValue({
+      kind: 'ip',
+      id: '198.51.100.10',
+    })
     mockEnforceRateLimit.mockResolvedValue(null)
 
     mockCreateActiveToken.mockReturnValue('active_token')
@@ -129,6 +214,10 @@ describe('app/api/auth/login/route', () => {
     mockConsumeTapIntent.mockResolvedValue({
       nextUrl: '/looks?from=tap',
     })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('passes through the rate-limit response unchanged', async () => {
@@ -145,10 +234,11 @@ describe('app/api/auth/login/route', () => {
     expect(mockRateLimitIdentity).toHaveBeenCalledTimes(1)
     expect(mockEnforceRateLimit).toHaveBeenCalledWith({
       bucket: 'auth:login',
-      identity: 'ip:test',
+      identity: { kind: 'ip', id: '198.51.100.10' },
     })
     expect(result).toBe(rateLimitRes)
     expect(result.status).toBe(429)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when credentials are missing', async () => {
@@ -168,6 +258,7 @@ describe('app/api/auth/login/route', () => {
     })
 
     expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 401 when the user is not found', async () => {
@@ -187,6 +278,7 @@ describe('app/api/auth/login/route', () => {
       error: 'Invalid credentials',
       code: 'INVALID_CREDENTIALS',
     })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 401 when the password does not match', async () => {
@@ -212,6 +304,7 @@ describe('app/api/auth/login/route', () => {
       'WrongPassword',
       'stored_hash',
     )
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 403 when expectedRole does not match the user role', async () => {
@@ -239,6 +332,7 @@ describe('app/api/auth/login/route', () => {
       expectedRole: 'PRO',
       actualRole: 'CLIENT',
     })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 409 when a PRO account is missing its professional profile', async () => {
@@ -264,6 +358,7 @@ describe('app/api/auth/login/route', () => {
       error: 'Professional setup is not complete yet.',
       code: 'PRO_SETUP_REQUIRED',
     })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('issues a verification token when the user is not fully verified', async () => {
@@ -308,6 +403,7 @@ describe('app/api/auth/login/route', () => {
 
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=verification_token')
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('issues an active token when the user is fully verified', async () => {
@@ -361,5 +457,34 @@ describe('app/api/auth/login/route', () => {
 
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=active_token')
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('returns 500 and captures the exception when login throws unexpectedly', async () => {
+    mockPrisma.user.findUnique.mockRejectedValue(new Error('db blew up'))
+
+    const result = await POST(
+      makeRequest({
+        email: 'user@example.com',
+        password: 'Secret123!',
+      }),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(500)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Internal server error',
+      code: 'INTERNAL',
+    })
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.login.failed',
+      route: 'auth.login',
+      code: 'INTERNAL',
+      userId: null,
+      email: 'user@example.com',
+      error: expect.any(Error),
+    })
   })
 })

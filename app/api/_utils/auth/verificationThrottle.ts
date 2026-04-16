@@ -2,6 +2,7 @@
 import { jsonFail } from '@/app/api/_utils'
 import { rateLimitRedis } from '@/lib/rateLimitRedis'
 import { getTrustedClientIpFromRequest } from '@/lib/trustedClientIp'
+import { logAuthEvent } from '@/lib/observability/authEvents'
 
 const VERIFY_LIMIT = 10
 const VERIFY_WINDOW_SECONDS = 10 * 60
@@ -47,7 +48,16 @@ export async function enforceVerificationVerifyThrottle(args: {
       },
     )
   } catch (error) {
-    console.warn('[verification-throttle] skipped (redis error):', error)
+    logAuthEvent({
+      level: 'warn',
+      event: 'auth.verification_throttle.degraded',
+      route: 'auth.verificationThrottle',
+      provider: 'redis',
+      verificationId: args.subjectKey,
+      meta: {
+        scope: args.scope,
+      },
+    })
     return null
   }
 }

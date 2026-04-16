@@ -2,6 +2,7 @@
 import { jsonFail } from './responses'
 import { rateLimitRedis } from '@/lib/rateLimitRedis'
 import { getTrustedClientIpFromNextHeaders } from '@/lib/trustedClientIp'
+import { logAuthEvent } from '@/lib/observability/authEvents'
 
 export type RateLimitBucket =
   | 'holds:create'
@@ -257,6 +258,60 @@ export async function rateLimitIdentity(
   return ip ? { kind: 'ip', id: ip } : null
 }
 
+function buildIdentityEventFields(identity: RateLimitIdentity): {
+  userId?: string
+  phone?: string
+  meta: Record<string, unknown>
+} {
+  if (identity.kind === 'user') {
+    return {
+      userId: identity.id,
+      meta: { identityKind: identity.kind },
+    }
+  }
+
+  if (identity.kind === 'phone') {
+    return {
+      phone: identity.id,
+      meta: { identityKind: identity.kind },
+    }
+  }
+
+  return {
+    meta: {
+      identityKind: identity.kind,
+      identityId: identity.id,
+    },
+  }
+}
+
+function logRateLimitDegraded(args: {
+  event: 'auth.rate_limit.local_only_degraded' | 'auth.rate_limit.redis_skipped'
+  bucket: RateLimitBucket
+  config: LimitConfig
+  identity: RateLimitIdentity
+  keySuffix?: string
+  circuitOpened?: boolean
+}) {
+  const identityFields = buildIdentityEventFields(args.identity)
+
+  logAuthEvent({
+    level: 'warn',
+    event: args.event,
+    route: 'auth.rateLimit',
+    provider: 'redis',
+    userId: identityFields.userId,
+    phone: identityFields.phone,
+    meta: {
+      bucket: args.bucket,
+      mode: args.config.mode,
+      keySuffix: args.keySuffix ?? null,
+      circuitOpened: args.circuitOpened ?? false,
+      ...identityFields.meta,
+    },
+  })
+}
+
 export async function enforceRateLimit(args: {
   bucket: RateLimitBucket
   identity: RateLimitIdentity | null
@@ -303,9 +358,16 @@ export async function enforceRateLimit(args: {
         remaining: result.remaining,
         resetMs: result.resetMs,
       })
-    } catch (e) {
+    } catch {
       openRedisCircuit()
-      console.warn('Rate limit degraded to local-only mode (redis error):', e)
+      logRateLimitDegraded({
+        event: 'auth.rate_limit.local_only_degraded',
+        bucket,
+        config: cfg,
+        identity,
+        keySuffix,
+        circuitOpened: true,
+      })
       return null
     }
   }
@@ -324,8 +386,15 @@ export async function enforceRateLimit(args: {
       remaining: result.remaining,
       resetMs: result.resetMs,
     })
-  } catch (e) {
-    console.warn('Rate limit skipped (redis error):', e)
+  } catch {
+    logRateLimitDegraded({
+      event: 'auth.rate_limit.redis_skipped',
+      bucket,
+      config: cfg,
+      identity,
+      keySuffix,
+      circuitOpened: false,
+    })
     return null
   }
 }

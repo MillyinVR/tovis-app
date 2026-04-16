@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { logAuthEvent } from '@/lib/observability/authEvents'
 
 const POSTMARK_SEND_URL = 'https://api.postmarkapp.com/email'
 
@@ -312,6 +313,16 @@ export async function issueAndSendEmailVerification(args: {
     })
     throw error
   }
+
+  logAuthEvent({
+    level: 'info',
+    event: 'auth.email.send.success',
+    route: 'auth.email.send',
+    provider: 'postmark',
+    userId: args.userId,
+    email: args.email,
+    verificationId: issued.id,
+  })
 
   return {
     id: issued.id,

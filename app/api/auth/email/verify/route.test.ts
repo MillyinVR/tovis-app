@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthVerificationPurpose, Role } from '@prisma/client'
 
 const mockCookies = vi.hoisted(() => vi.fn())
@@ -8,6 +8,8 @@ const mockCreateVerificationToken = vi.hoisted(() => vi.fn())
 const mockEnforceVerificationVerifyThrottle = vi.hoisted(() => vi.fn())
 const mockSha256Hex = vi.hoisted(() => vi.fn())
 const mockTimingSafeEqualHex = vi.hoisted(() => vi.fn())
+const mockLogAuthEvent = vi.hoisted(() => vi.fn())
+const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   emailVerificationToken: {
@@ -44,6 +46,11 @@ vi.mock('@/lib/prisma', () => ({
   prisma: mockPrisma,
 }))
 
+vi.mock('@/lib/observability/authEvents', () => ({
+  logAuthEvent: mockLogAuthEvent,
+  captureAuthException: mockCaptureAuthException,
+}))
+
 import { POST } from './route'
 
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
@@ -78,12 +85,13 @@ function makeRecord(args?: {
   expiresAt?: Date
   phoneVerifiedAt?: Date | null
   emailVerifiedAt?: Date | null
+  email?: string
 }) {
   return {
     id: args?.id ?? 'evt_1',
     userId: args?.userId ?? 'user_1',
     purpose: args?.purpose ?? AuthVerificationPurpose.EMAIL_VERIFY,
-    email: 'user@example.com',
+    email: args?.email ?? 'user@example.com',
     tokenHash: args?.tokenHash ?? 'stored_hash',
     attempts: args?.attempts ?? 0,
     expiresAt: args?.expiresAt ?? new Date('2099-04-08T12:00:00.000Z'),
@@ -113,6 +121,8 @@ describe('app/api/auth/email/verify/route', () => {
     mockEnforceVerificationVerifyThrottle.mockReset()
     mockSha256Hex.mockReset()
     mockTimingSafeEqualHex.mockReset()
+    mockLogAuthEvent.mockReset()
+    mockCaptureAuthException.mockReset()
 
     mockCookies.mockResolvedValue({
       get: vi.fn(() => undefined),
@@ -126,6 +136,10 @@ describe('app/api/auth/email/verify/route', () => {
     mockTimingSafeEqualHex.mockReturnValue(true)
   })
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('returns 400 when verificationId is missing', async () => {
     const result = await POST(
       makeRequest({
@@ -135,8 +149,14 @@ describe('app/api/auth/email/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('TOKEN_REQUIRED')
+    expect(body).toEqual({
+      ok: false,
+      error: 'Verification token is required.',
+      code: 'TOKEN_REQUIRED',
+    })
     expect(mockPrisma.emailVerificationToken.findUnique).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when token is missing', async () => {
@@ -148,8 +168,14 @@ describe('app/api/auth/email/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('TOKEN_REQUIRED')
+    expect(body).toEqual({
+      ok: false,
+      error: 'Verification token is required.',
+      code: 'TOKEN_REQUIRED',
+    })
     expect(mockPrisma.emailVerificationToken.findUnique).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 429 when verify throttling blocks the request', async () => {
@@ -180,6 +206,8 @@ describe('app/api/auth/email/verify/route', () => {
     })
     expect(result).toBe(throttleResponse)
     expect(mockPrisma.emailVerificationToken.findUnique).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the token record is invalid', async () => {
@@ -193,7 +221,11 @@ describe('app/api/auth/email/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('TOKEN_INVALID')
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid verification token.',
+      code: 'TOKEN_INVALID',
+    })
 
     expect(mockPrisma.emailVerificationToken.findUnique).toHaveBeenCalledWith({
       where: { id: 'evt_1' },
@@ -217,19 +249,14 @@ describe('app/api/auth/email/verify/route', () => {
         },
       },
     })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the record purpose is not EMAIL_VERIFY', async () => {
-    mockPrisma.emailVerificationToken.findUnique.mockResolvedValue(
-      makeRecord({
-        purpose: AuthVerificationPurpose.EMAIL_VERIFY,
-      }),
-    )
-
     const nonEmailVerifyRecord = makeRecord({
-      purpose: 'EMAIL_VERIFY' as AuthVerificationPurpose,
+      purpose: 'NOT_EMAIL_VERIFY' as AuthVerificationPurpose,
     })
-    nonEmailVerifyRecord.purpose = 'NOT_EMAIL_VERIFY' as AuthVerificationPurpose
 
     mockPrisma.emailVerificationToken.findUnique.mockResolvedValue(
       nonEmailVerifyRecord,
@@ -243,7 +270,13 @@ describe('app/api/auth/email/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('TOKEN_INVALID')
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid verification token.',
+      code: 'TOKEN_INVALID',
+    })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the token has already been used', async () => {
@@ -261,8 +294,14 @@ describe('app/api/auth/email/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('TOKEN_USED')
+    expect(body).toEqual({
+      ok: false,
+      error: 'This verification link has already been used.',
+      code: 'TOKEN_USED',
+    })
     expect(mockPrisma.emailVerificationToken.update).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 and marks the token used when it is expired', async () => {
@@ -280,12 +319,18 @@ describe('app/api/auth/email/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(400)
-    expect(body.code).toBe('TOKEN_EXPIRED')
+    expect(body).toEqual({
+      ok: false,
+      error: 'This verification link has expired.',
+      code: 'TOKEN_EXPIRED',
+    })
 
     expect(mockPrisma.emailVerificationToken.update).toHaveBeenCalledWith({
       where: { id: 'evt_1' },
       data: { usedAt: expect.any(Date) },
     })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('increments attempts when the token is incorrect and not yet locked', async () => {
@@ -330,6 +375,8 @@ describe('app/api/auth/email/verify/route', () => {
     })
 
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('locks the current token on the fifth wrong attempt', async () => {
@@ -372,6 +419,8 @@ describe('app/api/auth/email/verify/route', () => {
     })
 
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('verifies email and returns partial verification state when phone is still unverified', async () => {
@@ -459,6 +508,21 @@ describe('app/api/auth/email/verify/route', () => {
 
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
     expect(mockCreateVerificationToken).not.toHaveBeenCalled()
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'info',
+      event: 'auth.email.verify.success',
+      route: 'auth.email.verify',
+      userId: 'user_1',
+      email: 'user@example.com',
+      verificationId: 'evt_1',
+      meta: {
+        isPhoneVerified: false,
+        isEmailVerified: true,
+        isFullyVerified: false,
+      },
+    })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('refreshes the cookie to an ACTIVE session when the authenticated user becomes fully verified', async () => {
@@ -537,6 +601,21 @@ describe('app/api/auth/email/verify/route', () => {
 
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=active_token')
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'info',
+      event: 'auth.email.verify.success',
+      route: 'auth.email.verify',
+      userId: 'user_1',
+      email: 'user@example.com',
+      verificationId: 'evt_1',
+      meta: {
+        isPhoneVerified: true,
+        isEmailVerified: true,
+        isFullyVerified: true,
+      },
+    })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('refreshes the cookie to a verification session when the authenticated user is still missing phone verification', async () => {
@@ -611,6 +690,21 @@ describe('app/api/auth/email/verify/route', () => {
 
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=verification_token')
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'info',
+      event: 'auth.email.verify.success',
+      route: 'auth.email.verify',
+      userId: 'user_1',
+      email: 'user@example.com',
+      verificationId: 'evt_1',
+      meta: {
+        isPhoneVerified: false,
+        isEmailVerified: true,
+        isFullyVerified: false,
+      },
+    })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('does not refresh cookies when the verified token belongs to a different user than the authenticated cookie', async () => {
@@ -621,6 +715,7 @@ describe('app/api/auth/email/verify/route', () => {
         phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
         emailVerifiedAt: null,
         attempts: 0,
+        email: 'other@example.com',
       }),
     )
 
@@ -663,10 +758,62 @@ describe('app/api/auth/email/verify/route', () => {
     const body = await result.json()
 
     expect(result.status).toBe(200)
-    expect(body.isFullyVerified).toBe(true)
+    expect(body).toEqual({
+      ok: true,
+      alreadyVerified: false,
+      isPhoneVerified: true,
+      isEmailVerified: true,
+      isFullyVerified: true,
+      requiresPhoneVerification: false,
+    })
 
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
     expect(mockCreateVerificationToken).not.toHaveBeenCalled()
     expect(result.headers.get('set-cookie')).toBeNull()
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'info',
+      event: 'auth.email.verify.success',
+      route: 'auth.email.verify',
+      userId: 'user_2',
+      email: 'other@example.com',
+      verificationId: 'evt_1',
+      meta: {
+        isPhoneVerified: true,
+        isEmailVerified: true,
+        isFullyVerified: true,
+      },
+    })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('returns 500 and captures the exception when an unexpected error occurs', async () => {
+    mockPrisma.emailVerificationToken.findUnique.mockRejectedValue(
+      new Error('database blew up'),
+    )
+
+    const result = await POST(
+      makeRequest({
+        body: { verificationId: 'evt_1', token: 'good_token' },
+      }),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(500)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Internal server error',
+      code: 'INTERNAL',
+    })
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.email.verify.failed',
+      route: 'auth.email.verify',
+      code: 'INTERNAL',
+      verificationId: 'evt_1',
+      userId: null,
+      email: null,
+      error: expect.any(Error),
+    })
   })
 })

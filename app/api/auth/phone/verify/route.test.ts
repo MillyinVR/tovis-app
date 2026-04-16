@@ -9,6 +9,8 @@ const mockCreateVerificationToken = vi.hoisted(() => vi.fn())
 const mockEnforceVerificationVerifyThrottle = vi.hoisted(() => vi.fn())
 const mockSha256Hex = vi.hoisted(() => vi.fn())
 const mockTimingSafeEqualHex = vi.hoisted(() => vi.fn())
+const mockLogAuthEvent = vi.hoisted(() => vi.fn())
+const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   phoneVerification: {
@@ -43,6 +45,11 @@ vi.mock('@/lib/auth/timingSafe', () => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: mockPrisma,
+}))
+
+vi.mock('@/lib/observability/authEvents', () => ({
+  logAuthEvent: mockLogAuthEvent,
+  captureAuthException: mockCaptureAuthException,
 }))
 
 import { POST } from './route'
@@ -124,6 +131,8 @@ describe('app/api/auth/phone/verify/route', () => {
     mockEnforceVerificationVerifyThrottle.mockReset()
     mockSha256Hex.mockReset()
     mockTimingSafeEqualHex.mockReset()
+    mockLogAuthEvent.mockReset()
+    mockCaptureAuthException.mockReset()
 
     mockCookies.mockResolvedValue({
       get: vi.fn().mockReturnValue(undefined),
@@ -150,6 +159,8 @@ describe('app/api/auth/phone/verify/route', () => {
     })
     expect(result).toBe(res)
     expect(result.status).toBe(401)
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when code is missing', async () => {
@@ -167,6 +178,8 @@ describe('app/api/auth/phone/verify/route', () => {
       error: 'Verification code is required.',
       code: 'CODE_REQUIRED',
     })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when code format is invalid', async () => {
@@ -184,6 +197,8 @@ describe('app/api/auth/phone/verify/route', () => {
       error: 'Invalid code format.',
       code: 'CODE_INVALID',
     })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns alreadyVerified state when phone is already verified', async () => {
@@ -208,6 +223,8 @@ describe('app/api/auth/phone/verify/route', () => {
     })
     expect(mockPrisma.phoneVerification.findFirst).not.toHaveBeenCalled()
     expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the user has no phone number', async () => {
@@ -228,6 +245,8 @@ describe('app/api/auth/phone/verify/route', () => {
       code: 'PHONE_REQUIRED',
     })
     expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 429 when verify throttling blocks the request', async () => {
@@ -260,6 +279,8 @@ describe('app/api/auth/phone/verify/route', () => {
     expect(result).toBe(throttleResponse)
     expect(result.status).toBe(429)
     expect(mockPrisma.phoneVerification.findFirst).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when there is no active verification record', async () => {
@@ -297,6 +318,8 @@ describe('app/api/auth/phone/verify/route', () => {
       orderBy: { createdAt: 'desc' },
     })
     expect(mockTimingSafeEqualHex).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('increments attempts when the code is incorrect and not yet locked', async () => {
@@ -341,6 +364,8 @@ describe('app/api/auth/phone/verify/route', () => {
     })
 
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('locks the current code on the fifth wrong attempt', async () => {
@@ -382,6 +407,8 @@ describe('app/api/auth/phone/verify/route', () => {
     })
 
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('marks the phone verified and returns partial verification state when email is still unverified', async () => {
@@ -481,6 +508,19 @@ describe('app/api/auth/phone/verify/route', () => {
     expect(mockPrisma.phoneVerification.updateMany).not.toHaveBeenCalled()
     expect(mockCookies).toHaveBeenCalledTimes(1)
     expect(mockVerifyToken).not.toHaveBeenCalled()
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'info',
+      event: 'auth.phone.verify.success',
+      route: 'auth.phone.verify',
+      userId: 'user_1',
+      phone: '+15551234567',
+      meta: {
+        isEmailVerified: false,
+        isFullyVerified: false,
+      },
+    })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('refreshes the cookie to an ACTIVE session when email is already verified and the auth cookie belongs to the same user', async () => {
@@ -563,5 +603,48 @@ describe('app/api/auth/phone/verify/route', () => {
 
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=active_token')
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'info',
+      event: 'auth.phone.verify.success',
+      route: 'auth.phone.verify',
+      userId: 'user_1',
+      phone: '+15551234567',
+      meta: {
+        isEmailVerified: true,
+        isFullyVerified: true,
+      },
+    })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('returns 500 and captures the exception when an unexpected error occurs', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser(),
+    })
+
+    mockPrisma.phoneVerification.findFirst.mockRejectedValue(
+      new Error('database blew up'),
+    )
+
+    const result = await POST(makeRequest({ code: '123456' }))
+    const body = await result.json()
+
+    expect(result.status).toBe(500)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Internal server error',
+      code: 'INTERNAL',
+    })
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.phone.verify.failed',
+      route: 'auth.phone.verify',
+      userId: 'user_1',
+      phone: '+15551234567',
+      code: 'INTERNAL',
+      error: expect.any(Error),
+    })
   })
 })

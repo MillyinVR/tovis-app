@@ -3,6 +3,7 @@ import { Role } from '@prisma/client'
 
 import { jsonFail } from '@/app/api/_utils'
 import { getCurrentUser } from '@/lib/currentUser'
+import { captureAuthException } from '@/lib/observability/authEvents'
 
 type RequireUserOptions = {
   roles?: readonly Role[]
@@ -37,7 +38,12 @@ export async function requireUser(
   try {
     user = await getCurrentUser()
   } catch (err: unknown) {
-    console.error('requireUser: getCurrentUser failed', err)
+    captureAuthException({
+      event: 'auth.require_user.current_user_failed',
+      route: 'auth.requireUser',
+      code: 'INTERNAL',
+      error: err,
+    })
     return { ok: false, res: jsonFail(500, 'Internal server error') }
   }
 

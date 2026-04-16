@@ -11,6 +11,8 @@ const mockEnforcePhoneVerificationOtpLimits = vi.hoisted(() => vi.fn())
 const mockIssueAndSendPhoneVerificationCode = vi.hoisted(() => vi.fn())
 const mockReadPhoneSendErrorCode = vi.hoisted(() => vi.fn())
 
+const mockCaptureAuthException = vi.hoisted(() => vi.fn())
+
 vi.mock('@/app/api/_utils/auth/requireUser', () => ({
   requireUser: mockRequireUser,
 }))
@@ -40,6 +42,10 @@ vi.mock('@/app/api/_utils/auth/phoneVerificationSend', () => ({
   enforcePhoneVerificationOtpLimits: mockEnforcePhoneVerificationOtpLimits,
   issueAndSendPhoneVerificationCode: mockIssueAndSendPhoneVerificationCode,
   readPhoneSendErrorCode: mockReadPhoneSendErrorCode,
+}))
+
+vi.mock('@/lib/observability/authEvents', () => ({
+  captureAuthException: mockCaptureAuthException,
 }))
 
 import { POST } from './route'
@@ -109,6 +115,7 @@ describe('app/api/auth/phone/send/route', () => {
     mockEnforcePhoneVerificationOtpLimits.mockReset()
     mockIssueAndSendPhoneVerificationCode.mockReset()
     mockReadPhoneSendErrorCode.mockReset()
+    mockCaptureAuthException.mockReset()
 
     mockIsRuntimeFlagEnabled.mockResolvedValue(false)
     mockPhoneRateLimitIdentity.mockReturnValue({
@@ -149,6 +156,7 @@ describe('app/api/auth/phone/send/route', () => {
     })
     expect(result).toBe(res)
     expect(result.status).toBe(401)
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns alreadyVerified when the phone is already verified', async () => {
@@ -173,6 +181,7 @@ describe('app/api/auth/phone/send/route', () => {
     expect(mockValidateSmsDestinationCountry).not.toHaveBeenCalled()
     expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the phone number is missing', async () => {
@@ -196,6 +205,7 @@ describe('app/api/auth/phone/send/route', () => {
     expect(mockIsRuntimeFlagEnabled).not.toHaveBeenCalled()
     expect(mockValidateSmsDestinationCountry).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 503 when SMS is disabled', async () => {
@@ -222,6 +232,7 @@ describe('app/api/auth/phone/send/route', () => {
     expect(mockEnforceRateLimit).not.toHaveBeenCalled()
     expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the SMS destination country is unsupported', async () => {
@@ -256,6 +267,7 @@ describe('app/api/auth/phone/send/route', () => {
     expect(mockEnforceRateLimit).not.toHaveBeenCalled()
     expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns the shared per-phone quota response unchanged when SMS quota blocks resend', async () => {
@@ -285,6 +297,7 @@ describe('app/api/auth/phone/send/route', () => {
     expect(result.status).toBe(429)
     expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 429 and Retry-After when resend is rate limited by cooldown', async () => {
@@ -325,6 +338,7 @@ describe('app/api/auth/phone/send/route', () => {
     })
     expect(mockEnforcePhoneVerificationOtpLimits).toHaveBeenCalledWith('user_1')
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 429 and Retry-After when hourly cap is exceeded', async () => {
@@ -365,6 +379,7 @@ describe('app/api/auth/phone/send/route', () => {
     })
     expect(mockEnforcePhoneVerificationOtpLimits).toHaveBeenCalledWith('user_1')
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('issues and sends a fresh verification code when allowed', async () => {
@@ -408,6 +423,7 @@ describe('app/api/auth/phone/send/route', () => {
       userId: 'user_1',
       phone: '+15551234567',
     })
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 500 with SMS_NOT_CONFIGURED when the helper reports missing Twilio config', async () => {
@@ -429,6 +445,16 @@ describe('app/api/auth/phone/send/route', () => {
       ok: false,
       error: 'SMS provider is not configured.',
       code: 'SMS_NOT_CONFIGURED',
+    })
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.phone.send.not_configured',
+      route: 'auth.phone.send',
+      provider: 'twilio',
+      code: 'SMS_NOT_CONFIGURED',
+      userId: 'user_1',
+      phone: '+15551234567',
+      error: expect.any(Error),
     })
   })
 
@@ -452,6 +478,16 @@ describe('app/api/auth/phone/send/route', () => {
       error: 'Could not send verification code. Please try again.',
       code: 'SMS_SEND_FAILED',
     })
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.phone.send.failed',
+      route: 'auth.phone.send',
+      provider: 'twilio',
+      code: 'SMS_SEND_FAILED',
+      userId: 'user_1',
+      phone: '+15551234567',
+      error: expect.any(Error),
+    })
   })
 
   it('returns 500 for unexpected helper failures', async () => {
@@ -473,6 +509,15 @@ describe('app/api/auth/phone/send/route', () => {
       ok: false,
       error: 'Internal server error',
       code: 'INTERNAL',
+    })
+
+    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+      event: 'auth.phone.send.internal_error',
+      route: 'auth.phone.send',
+      code: 'INTERNAL',
+      userId: 'user_1',
+      phone: '+15551234567',
+      error: expect.any(Error),
     })
   })
 })

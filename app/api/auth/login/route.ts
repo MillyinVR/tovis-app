@@ -1,6 +1,10 @@
 // app/api/auth/login/route.ts
 import { prisma } from '@/lib/prisma'
-import { verifyPassword, createActiveToken, createVerificationToken } from '@/lib/auth'
+import {
+  verifyPassword,
+  createActiveToken,
+  createVerificationToken,
+} from '@/lib/auth'
 import { consumeTapIntent } from '@/lib/tapIntentConsume'
 import {
   jsonFail,
@@ -11,6 +15,7 @@ import {
   rateLimitIdentity,
 } from '@/app/api/_utils'
 import { Role } from '@prisma/client'
+import { captureAuthException } from '@/lib/observability/authEvents'
 
 export const dynamic = 'force-dynamic'
 
@@ -51,8 +56,12 @@ function resolveCookieDomain(hostname: string | null): string | undefined {
   if (!hostname) return undefined
 
   // Share cookie across subdomains of tovis.app or tovis.me
-  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) return '.tovis.app'
-  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) return '.tovis.me'
+  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) {
+    return '.tovis.app'
+  }
+  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) {
+    return '.tovis.me'
+  }
 
   // localhost / other hosts: host-only cookie (no Domain attribute)
   return undefined
@@ -73,9 +82,10 @@ function resolveIsHttps(request: Request): boolean {
 }
 
 export async function POST(request: Request) {
+  let emailForLog: string | null = null
+  let userIdForLog: string | null = null
+
   try {
-
-
     const identity = await rateLimitIdentity()
     const rlRes = await enforceRateLimit({ bucket: 'auth:login', identity })
     if (rlRes) return rlRes
@@ -86,6 +96,8 @@ export async function POST(request: Request) {
     const password = pickString(body.password)
     const tapIntentId = pickString(body.tapIntentId)
     const expectedRole = normalizeExpectedRole(body.expectedRole)
+
+    emailForLog = email
 
     if (!email || !password) {
       return jsonFail(400, 'Missing email or password', {
@@ -109,13 +121,19 @@ export async function POST(request: Request) {
     })
 
     if (!user) {
-      return jsonFail(401, 'Invalid credentials', { code: 'INVALID_CREDENTIALS' })
+      return jsonFail(401, 'Invalid credentials', {
+        code: 'INVALID_CREDENTIALS',
+      })
     }
+
+    userIdForLog = user.id
 
     const isValid = await verifyPassword(password, user.password)
 
     if (!isValid) {
-      return jsonFail(401, 'Invalid credentials', { code: 'INVALID_CREDENTIALS' })
+      return jsonFail(401, 'Invalid credentials', {
+        code: 'INVALID_CREDENTIALS',
+      })
     }
 
     if (expectedRole && user.role !== expectedRole) {
@@ -182,8 +200,16 @@ export async function POST(request: Request) {
     })
 
     return res
-  } catch (error) {
-    console.error('Login error', error)
+  } catch (error: unknown) {
+    captureAuthException({
+      event: 'auth.login.failed',
+      route: 'auth.login',
+      code: 'INTERNAL',
+      userId: userIdForLog,
+      email: emailForLog,
+      error,
+    })
+
     return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
   }
 }
