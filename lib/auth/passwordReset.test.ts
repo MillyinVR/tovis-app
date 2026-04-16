@@ -1,4 +1,5 @@
 // lib/auth/passwordReset.test.ts
+import crypto from 'crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockPrisma = vi.hoisted(() => ({
@@ -21,12 +22,14 @@ vi.mock('@/lib/observability/authEvents', () => ({
 }))
 
 import {
+  buildPasswordResetToken,
   buildPasswordResetUrl,
   createPasswordResetToken,
   getPasswordResetAppUrlFromRequest,
   getPasswordResetRequestIp,
   issueAndSendPasswordReset,
   markPasswordResetTokenUsed,
+  parsePasswordResetToken,
   sendPasswordResetEmail,
 } from './passwordReset'
 
@@ -36,6 +39,10 @@ function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
   for (const fn of Object.values(group)) {
     fn.mockReset()
   }
+}
+
+function sha256(input: string): string {
+  return crypto.createHash('sha256').update(input).digest('hex')
 }
 
 describe('lib/auth/passwordReset', () => {
@@ -67,12 +74,15 @@ describe('lib/auth/passwordReset', () => {
   it('prefers NEXT_PUBLIC_APP_URL when resolving the password reset app URL', () => {
     process.env.NEXT_PUBLIC_APP_URL = 'https://app.tovis.app///'
 
-    const request = new Request('http://localhost/api/auth/password-reset/request', {
-      headers: {
-        host: 'localhost:3000',
-        'x-forwarded-proto': 'http',
+    const request = new Request(
+      'http://localhost/api/auth/password-reset/request',
+      {
+        headers: {
+          host: 'localhost:3000',
+          'x-forwarded-proto': 'http',
+        },
       },
-    })
+    )
 
     expect(getPasswordResetAppUrlFromRequest(request)).toBe(
       'https://app.tovis.app',
@@ -82,45 +92,77 @@ describe('lib/auth/passwordReset', () => {
   it('falls back to forwarded host/proto when NEXT_PUBLIC_APP_URL is missing', () => {
     delete process.env.NEXT_PUBLIC_APP_URL
 
-    const request = new Request('http://localhost/api/auth/password-reset/request', {
-      headers: {
-        host: 'localhost:3000',
-        'x-forwarded-host': 'app.tovis.app',
-        'x-forwarded-proto': 'https',
+    const request = new Request(
+      'http://localhost/api/auth/password-reset/request',
+      {
+        headers: {
+          host: 'localhost:3000',
+          'x-forwarded-host': 'app.tovis.app',
+          'x-forwarded-proto': 'https',
+        },
       },
-    })
+    )
 
     expect(getPasswordResetAppUrlFromRequest(request)).toBe(
       'https://app.tovis.app',
     )
   })
 
+  it('builds the password reset token from token id and secret', () => {
+    const token = buildPasswordResetToken({
+      tokenId: 'prt_1',
+      secret: 'abcdef123456',
+    })
+
+    expect(token).toBe('prt_1.abcdef123456')
+  })
+
+  it('parses a password reset token into token id and secret', () => {
+    expect(parsePasswordResetToken('prt_1.abcdef123456')).toEqual({
+      tokenId: 'prt_1',
+      secret: 'abcdef123456',
+    })
+  })
+
+  it('returns null when the password reset token format is invalid', () => {
+    expect(parsePasswordResetToken(null)).toBeNull()
+    expect(parsePasswordResetToken('')).toBeNull()
+    expect(parsePasswordResetToken('prt_1')).toBeNull()
+    expect(parsePasswordResetToken('.abcdef')).toBeNull()
+    expect(parsePasswordResetToken('prt_1.')).toBeNull()
+  })
+
   it('builds the password reset URL', () => {
     const url = buildPasswordResetUrl({
       appUrl: 'https://app.tovis.app',
-      token: 'reset_token_abc',
+      token: 'prt_1.abcdef123456',
     })
 
-    expect(url).toBe('https://app.tovis.app/reset-password/reset_token_abc')
+    expect(url).toBe('https://app.tovis.app/reset-password/prt_1.abcdef123456')
   })
 
   it('extracts the first forwarded IP for password reset requests', () => {
-    const request = new Request('http://localhost/api/auth/password-reset/request', {
-      headers: {
-        'x-forwarded-for': '198.51.100.20, 10.0.0.2',
+    const request = new Request(
+      'http://localhost/api/auth/password-reset/request',
+      {
+        headers: {
+          'x-forwarded-for': '198.51.100.20, 10.0.0.2',
+        },
       },
-    })
+    )
 
     expect(getPasswordResetRequestIp(request)).toBe('198.51.100.20')
   })
 
   it('returns null when no forwarded IP is present', () => {
-    const request = new Request('http://localhost/api/auth/password-reset/request')
+    const request = new Request(
+      'http://localhost/api/auth/password-reset/request',
+    )
 
     expect(getPasswordResetRequestIp(request)).toBeNull()
   })
 
-  it('creates a fresh password reset token and invalidates prior unused tokens', async () => {
+  it('creates a fresh password reset token, hashes only the secret, and invalidates prior unused tokens', async () => {
     const result = await createPasswordResetToken({
       userId: 'user_1',
       ip: '198.51.100.20',
@@ -135,10 +177,17 @@ describe('lib/auth/passwordReset', () => {
       data: { usedAt: expect.any(Date) },
     })
 
+    const parsed = parsePasswordResetToken(result.token)
+    expect(parsed).not.toBeNull()
+
+    expect(result.id).toBe('prt_1')
+    expect(result.expiresAt).toEqual(new Date('2026-04-20T12:00:00.000Z'))
+    expect(result.token).toMatch(/^prt_1\.[a-f0-9]{64}$/)
+
     expect(mockPrisma.passwordResetToken.create).toHaveBeenCalledWith({
       data: {
         userId: 'user_1',
-        tokenHash: expect.any(String),
+        tokenHash: sha256(parsed!.secret),
         expiresAt: expect.any(Date),
         ip: '198.51.100.20',
         userAgent: 'Vitest Agent',
@@ -148,10 +197,6 @@ describe('lib/auth/passwordReset', () => {
         expiresAt: true,
       },
     })
-
-    expect(result.id).toBe('prt_1')
-    expect(result.expiresAt).toEqual(new Date('2026-04-20T12:00:00.000Z'))
-    expect(result.token).toMatch(/^[a-f0-9]{64}$/)
   })
 
   it('marks a password reset token used', async () => {
@@ -180,7 +225,7 @@ describe('lib/auth/passwordReset', () => {
 
     await sendPasswordResetEmail({
       to: 'user@example.com',
-      resetUrl: 'https://app.tovis.app/reset-password/reset_token_abc',
+      resetUrl: 'https://app.tovis.app/reset-password/prt_1.abcdef123456',
     })
 
     expect(mockFetch).toHaveBeenCalledTimes(1)
@@ -226,7 +271,7 @@ describe('lib/auth/passwordReset', () => {
     await expect(
       sendPasswordResetEmail({
         to: 'user@example.com',
-        resetUrl: 'https://app.tovis.app/reset-password/reset_token_abc',
+        resetUrl: 'https://app.tovis.app/reset-password/prt_1.abcdef123456',
       }),
     ).rejects.toThrow('Sender signature not found.')
   })
@@ -251,7 +296,7 @@ describe('lib/auth/passwordReset', () => {
     await expect(
       sendPasswordResetEmail({
         to: 'user@example.com',
-        resetUrl: 'https://app.tovis.app/reset-password/reset_token_abc',
+        resetUrl: 'https://app.tovis.app/reset-password/prt_1.abcdef123456',
       }),
     ).rejects.toThrow('Inactive recipient.')
   })

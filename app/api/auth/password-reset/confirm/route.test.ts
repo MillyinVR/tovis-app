@@ -5,6 +5,9 @@ const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
 const mockHashPassword = vi.hoisted(() => vi.fn())
 const mockValidatePassword = vi.hoisted(() => vi.fn())
 const mockCaptureAuthException = vi.hoisted(() => vi.fn())
+const mockParsePasswordResetToken = vi.hoisted(() => vi.fn())
+const mockSha256Hex = vi.hoisted(() => vi.fn())
+const mockTimingSafeEqualHex = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   passwordResetToken: {
@@ -32,6 +35,15 @@ vi.mock('@/lib/passwordPolicy', () => ({
 
 vi.mock('@/lib/observability/authEvents', () => ({
   captureAuthException: mockCaptureAuthException,
+}))
+
+vi.mock('@/lib/auth/passwordReset', () => ({
+  parsePasswordResetToken: mockParsePasswordResetToken,
+}))
+
+vi.mock('@/lib/auth/timingSafe', () => ({
+  sha256Hex: mockSha256Hex,
+  timingSafeEqualHex: mockTimingSafeEqualHex,
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -86,6 +98,9 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     mockHashPassword.mockReset()
     mockValidatePassword.mockReset()
     mockCaptureAuthException.mockReset()
+    mockParsePasswordResetToken.mockReset()
+    mockSha256Hex.mockReset()
+    mockTimingSafeEqualHex.mockReset()
 
     mockPrisma.passwordResetToken.findUnique.mockReset()
     mockPrisma.passwordResetToken.update.mockReset()
@@ -100,6 +115,13 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     mockEnforceRateLimit.mockResolvedValue(null)
     mockValidatePassword.mockReturnValue(null)
     mockHashPassword.mockResolvedValue('hashed_password')
+
+    mockParsePasswordResetToken.mockReturnValue({
+      tokenId: 'prt_1',
+      secret: 'secret_abc',
+    })
+    mockSha256Hex.mockReturnValue('submitted_hash')
+    mockTimingSafeEqualHex.mockReturnValue(true)
 
     mockPrisma.user.update.mockResolvedValue({ id: 'user_1' })
     mockPrisma.passwordResetToken.update.mockResolvedValue({ id: 'prt_1' })
@@ -121,7 +143,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     const result = await POST(
       makeRequest({
-        token: 'reset_token',
+        token: 'prt_1.secret_abc',
         password: 'NewPassword123!',
       }),
     )
@@ -153,6 +175,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       code: 'MISSING_FIELDS',
     })
 
+    expect(mockParsePasswordResetToken).not.toHaveBeenCalled()
     expect(mockPrisma.passwordResetToken.findUnique).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -162,7 +185,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     const result = await POST(
       makeRequest({
-        token: 'reset_token',
+        token: 'prt_1.secret_abc',
         password: 'short',
       }),
     )
@@ -175,12 +198,13 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       code: 'WEAK_PASSWORD',
     })
 
+    expect(mockParsePasswordResetToken).not.toHaveBeenCalled()
     expect(mockPrisma.passwordResetToken.findUnique).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when the token is invalid', async () => {
-    mockPrisma.passwordResetToken.findUnique.mockResolvedValue(null)
+  it('returns 400 when the token format is invalid', async () => {
+    mockParsePasswordResetToken.mockReturnValue(null)
 
     const result = await POST(
       makeRequest({
@@ -197,11 +221,35 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       code: 'INVALID_TOKEN',
     })
 
+    expect(mockParsePasswordResetToken).toHaveBeenCalledWith('bad_token')
+    expect(mockPrisma.passwordResetToken.findUnique).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when the token id is not found', async () => {
+    mockPrisma.passwordResetToken.findUnique.mockResolvedValue(null)
+
+    const result = await POST(
+      makeRequest({
+        token: 'prt_1.secret_abc',
+        password: 'NewPassword123!',
+      }),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'This reset link is invalid or has expired.',
+      code: 'INVALID_TOKEN',
+    })
+
     expect(mockPrisma.passwordResetToken.findUnique).toHaveBeenCalledWith({
-      where: { tokenHash: expect.any(String) },
+      where: { id: 'prt_1' },
       select: {
         id: true,
         userId: true,
+        tokenHash: true,
         attempts: true,
         expiresAt: true,
         usedAt: true,
@@ -214,6 +262,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
       id: 'prt_1',
       userId: 'user_1',
+      tokenHash: 'stored_hash',
       attempts: 0,
       expiresAt: new Date('2099-01-01T00:00:00.000Z'),
       usedAt: new Date('2026-04-08T10:00:00.000Z'),
@@ -221,7 +270,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     const result = await POST(
       makeRequest({
-        token: 'used_token',
+        token: 'prt_1.secret_abc',
         password: 'NewPassword123!',
       }),
     )
@@ -234,6 +283,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       code: 'TOKEN_USED',
     })
 
+    expect(mockSha256Hex).not.toHaveBeenCalled()
     expect(mockHashPassword).not.toHaveBeenCalled()
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
@@ -243,6 +293,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
       id: 'prt_1',
       userId: 'user_1',
+      tokenHash: 'stored_hash',
       attempts: 5,
       expiresAt: new Date('2099-01-01T00:00:00.000Z'),
       usedAt: new Date('2026-04-16T12:00:00.000Z'),
@@ -250,7 +301,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     const result = await POST(
       makeRequest({
-        token: 'good_token',
+        token: 'prt_1.secret_abc',
         password: 'NewPassword123!',
       }),
     )
@@ -263,6 +314,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       code: 'TOKEN_USED',
     })
 
+    expect(mockSha256Hex).not.toHaveBeenCalled()
     expect(mockHashPassword).not.toHaveBeenCalled()
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
@@ -272,6 +324,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
       id: 'prt_1',
       userId: 'user_1',
+      tokenHash: 'stored_hash',
       attempts: 0,
       expiresAt: new Date('2000-01-01T00:00:00.000Z'),
       usedAt: null,
@@ -279,7 +332,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     const result = await POST(
       makeRequest({
-        token: 'expired_token',
+        token: 'prt_1.secret_abc',
         password: 'NewPassword123!',
       }),
     )
@@ -292,23 +345,73 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       code: 'TOKEN_EXPIRED',
     })
 
+    expect(mockSha256Hex).not.toHaveBeenCalled()
     expect(mockHashPassword).not.toHaveBeenCalled()
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('locks the token on the 5th matched confirm attempt', async () => {
+  it('returns 400 and increments attempts when the token secret is wrong before lockout', async () => {
     mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
       id: 'prt_1',
       userId: 'user_1',
+      tokenHash: 'stored_hash',
+      attempts: 3,
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+      usedAt: null,
+    })
+    mockTimingSafeEqualHex.mockReturnValue(false)
+
+    const result = await POST(
+      makeRequest({
+        token: 'prt_1.wrong_secret',
+        password: 'NewPassword123!',
+      }),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'This reset link is invalid or has expired.',
+      code: 'INVALID_TOKEN',
+    })
+
+    expect(mockSha256Hex).toHaveBeenCalledWith('secret_abc')
+    expect(mockTimingSafeEqualHex).toHaveBeenCalledWith(
+      'submitted_hash',
+      'stored_hash',
+    )
+    expect(mockPrisma.passwordResetToken.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'prt_1',
+        usedAt: null,
+        attempts: 3,
+      },
+      data: {
+        attempts: { increment: 1 },
+      },
+    })
+
+    expect(mockHashPassword).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('locks the token on the 5th wrong secret attempt', async () => {
+    mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
+      id: 'prt_1',
+      userId: 'user_1',
+      tokenHash: 'stored_hash',
       attempts: 4,
       expiresAt: new Date('2099-01-01T00:00:00.000Z'),
       usedAt: null,
     })
+    mockTimingSafeEqualHex.mockReturnValue(false)
 
     const result = await POST(
       makeRequest({
-        token: 'good_token',
+        token: 'prt_1.wrong_secret',
         password: 'NewPassword123!',
       }),
     )
@@ -342,14 +445,16 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     mockPrisma.passwordResetToken.findUnique.mockResolvedValue({
       id: 'prt_1',
       userId: 'user_1',
+      tokenHash: 'stored_hash',
       attempts: 0,
       expiresAt: new Date('2099-01-01T00:00:00.000Z'),
       usedAt: null,
     })
+    mockTimingSafeEqualHex.mockReturnValue(true)
 
     const result = await POST(
       makeRequest({
-        token: 'good_token',
+        token: 'prt_1.secret_abc',
         password: 'NewPassword123!',
       }),
     )
@@ -358,16 +463,11 @@ describe('app/api/auth/password-reset/confirm/route', () => {
     expect(result.status).toBe(200)
     expect(body).toEqual({ ok: true })
 
-    expect(mockPrisma.passwordResetToken.updateMany).toHaveBeenNthCalledWith(1, {
-      where: {
-        id: 'prt_1',
-        usedAt: null,
-        attempts: 0,
-      },
-      data: {
-        attempts: { increment: 1 },
-      },
-    })
+    expect(mockSha256Hex).toHaveBeenCalledWith('secret_abc')
+    expect(mockTimingSafeEqualHex).toHaveBeenCalledWith(
+      'submitted_hash',
+      'stored_hash',
+    )
 
     expect(mockHashPassword).toHaveBeenCalledWith('NewPassword123!')
 
@@ -386,7 +486,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
       select: { id: true },
     })
 
-    expect(mockPrisma.passwordResetToken.updateMany).toHaveBeenNthCalledWith(2, {
+    expect(mockPrisma.passwordResetToken.updateMany).toHaveBeenCalledWith({
       where: {
         userId: 'user_1',
         usedAt: null,
@@ -408,7 +508,7 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     const result = await POST(
       makeRequest({
-        token: 'good_token',
+        token: 'prt_1.secret_abc',
         password: 'NewPassword123!',
       }),
     )

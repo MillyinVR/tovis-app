@@ -1,7 +1,6 @@
 // app/api/auth/password-reset/confirm/route.ts
 
 import { prisma } from '@/lib/prisma'
-import crypto from 'crypto'
 import { hashPassword } from '@/lib/auth'
 import {
   jsonFail,
@@ -12,6 +11,8 @@ import {
 } from '@/app/api/_utils'
 import { validatePassword } from '@/lib/passwordPolicy'
 import { captureAuthException } from '@/lib/observability/authEvents'
+import { parsePasswordResetToken } from '@/lib/auth/passwordReset'
+import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,10 +21,6 @@ const MAX_PASSWORD_RESET_ATTEMPTS = 5
 type Body = {
   token?: unknown
   password?: unknown
-}
-
-function sha256(input: string) {
-  return crypto.createHash('sha256').update(input).digest('hex')
 }
 
 export async function POST(req: Request) {
@@ -39,10 +36,10 @@ export async function POST(req: Request) {
 
     const body = (await req.json().catch(() => ({}))) as Body
 
-    const token = pickString(body.token)
+    const rawToken = pickString(body.token)
     const password = pickString(body.password)
 
-    if (!token || !password) {
+    if (!rawToken || !password) {
       return jsonFail(400, 'Missing required fields.', {
         code: 'MISSING_FIELDS',
       })
@@ -55,13 +52,19 @@ export async function POST(req: Request) {
       })
     }
 
-    const tokenHash = sha256(token)
+    const parsedToken = parsePasswordResetToken(rawToken)
+    if (!parsedToken) {
+      return jsonFail(400, 'This reset link is invalid or has expired.', {
+        code: 'INVALID_TOKEN',
+      })
+    }
 
     const record = await prisma.passwordResetToken.findUnique({
-      where: { tokenHash },
+      where: { id: parsedToken.tokenId },
       select: {
         id: true,
         userId: true,
+        tokenHash: true,
         attempts: true,
         expiresAt: true,
         usedAt: true,
@@ -90,39 +93,48 @@ export async function POST(req: Request) {
       })
     }
 
-    const nextAttempts = record.attempts + 1
-    const shouldLock = nextAttempts >= MAX_PASSWORD_RESET_ATTEMPTS
+    const submittedTokenHash = sha256Hex(parsedToken.secret)
+    const isMatch = timingSafeEqualHex(submittedTokenHash, record.tokenHash)
 
-    const attemptUpdate = await prisma.passwordResetToken.updateMany({
-      where: {
-        id: record.id,
-        usedAt: null,
-        attempts: record.attempts,
-      },
-      data: shouldLock
-        ? {
-            attempts: { increment: 1 },
-            usedAt: now,
-          }
-        : {
-            attempts: { increment: 1 },
+    if (!isMatch) {
+      const nextAttempts = record.attempts + 1
+      const shouldLock = nextAttempts >= MAX_PASSWORD_RESET_ATTEMPTS
+
+      const attemptUpdate = await prisma.passwordResetToken.updateMany({
+        where: {
+          id: record.id,
+          usedAt: null,
+          attempts: record.attempts,
+        },
+        data: shouldLock
+          ? {
+              attempts: { increment: 1 },
+              usedAt: now,
+            }
+          : {
+              attempts: { increment: 1 },
+            },
+      })
+
+      if (attemptUpdate.count === 0) {
+        return jsonFail(400, 'This reset link is invalid or has expired.', {
+          code: 'INVALID_TOKEN',
+        })
+      }
+
+      if (shouldLock) {
+        return jsonFail(
+          400,
+          'Too many attempts. Please request a new password reset.',
+          {
+            code: 'TOKEN_LOCKED',
           },
-    })
+        )
+      }
 
-    if (attemptUpdate.count === 0) {
       return jsonFail(400, 'This reset link is invalid or has expired.', {
         code: 'INVALID_TOKEN',
       })
-    }
-
-    if (shouldLock) {
-      return jsonFail(
-        400,
-        'Too many attempts. Please request a new password reset.',
-        {
-          code: 'TOKEN_LOCKED',
-        },
-      )
     }
 
     const passwordHash = await hashPassword(password)

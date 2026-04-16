@@ -11,6 +11,11 @@ export const PASSWORD_RESET_EXPIRY_MS = 1000 * 60 * 30 // 30 minutes
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
+type ParsedPasswordResetToken = {
+  tokenId: string
+  secret: string
+}
+
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
 }
@@ -19,7 +24,7 @@ function sha256(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex')
 }
 
-function generateResetToken(): string {
+function generateResetSecret(): string {
   return crypto.randomBytes(32).toString('hex')
 }
 
@@ -57,6 +62,36 @@ export function getPasswordResetAppUrlFromRequest(
   return `${proto}://${host}`.replace(/\/+$/, '')
 }
 
+export function buildPasswordResetToken(args: {
+  tokenId: string
+  secret: string
+}): string {
+  return `${args.tokenId}.${args.secret}`
+}
+
+export function parsePasswordResetToken(
+  token: string | null | undefined,
+): ParsedPasswordResetToken | null {
+  if (!token) return null
+
+  const trimmed = token.trim()
+  if (!trimmed) return null
+
+  const separatorIndex = trimmed.indexOf('.')
+  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
+    return null
+  }
+
+  const tokenId = trimmed.slice(0, separatorIndex).trim()
+  const secret = trimmed.slice(separatorIndex + 1).trim()
+
+  if (!tokenId || !secret) {
+    return null
+  }
+
+  return { tokenId, secret }
+}
+
 export function buildPasswordResetUrl(args: {
   appUrl: string
   token: string
@@ -81,9 +116,9 @@ export async function createPasswordResetToken(args: {
 }) {
   const db = getDb(args.tx)
   const now = new Date()
-  const token = generateResetToken()
-  const tokenHash = sha256(token)
-  const expiresAt = new Date(Date.now() + PASSWORD_RESET_EXPIRY_MS)
+  const secret = generateResetSecret()
+  const tokenHash = sha256(secret)
+  const expiresAt = new Date(now.getTime() + PASSWORD_RESET_EXPIRY_MS)
 
   await db.passwordResetToken.updateMany({
     where: {
@@ -109,7 +144,10 @@ export async function createPasswordResetToken(args: {
 
   return {
     id: created.id,
-    token,
+    token: buildPasswordResetToken({
+      tokenId: created.id,
+      secret,
+    }),
     expiresAt: created.expiresAt,
   }
 }
