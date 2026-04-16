@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
 const mockHashPassword = vi.hoisted(() => vi.fn())
@@ -13,10 +13,14 @@ const mockIsValidIanaTimeZone = vi.hoisted(() => vi.fn())
 
 const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
 const mockRateLimitIdentity = vi.hoisted(() => vi.fn())
+const mockPhoneRateLimitIdentity = vi.hoisted(() => vi.fn())
 
 const mockValidatePassword = vi.hoisted(() => vi.fn())
 const mockGetCurrentTosVersion = vi.hoisted(() => vi.fn())
 const mockVerifyTurnstileOrFailOpen = vi.hoisted(() => vi.fn())
+
+const mockIsRuntimeFlagEnabled = vi.hoisted(() => vi.fn())
+const mockValidateSmsDestinationCountry = vi.hoisted(() => vi.fn())
 
 const mockTwilioMessagesCreate = vi.hoisted(() => vi.fn())
 const mockTwilio = vi.hoisted(() =>
@@ -36,6 +40,8 @@ const mockPrisma = vi.hoisted(() => ({
   },
   $transaction: vi.fn(),
 }))
+
+const ORIGINAL_ENV = { ...process.env }
 
 vi.mock('@/lib/prisma', () => ({
   prisma: mockPrisma,
@@ -68,6 +74,7 @@ vi.mock('@/app/api/_utils', async () => {
     ...actual,
     enforceRateLimit: mockEnforceRateLimit,
     rateLimitIdentity: mockRateLimitIdentity,
+    phoneRateLimitIdentity: mockPhoneRateLimitIdentity,
   }
 })
 
@@ -85,6 +92,14 @@ vi.mock('@/lib/legal', () => ({
 
 vi.mock('@/lib/auth/turnstile', () => ({
   verifyTurnstileOrFailOpen: mockVerifyTurnstileOrFailOpen,
+}))
+
+vi.mock('@/lib/runtimeFlags', () => ({
+  isRuntimeFlagEnabled: mockIsRuntimeFlagEnabled,
+}))
+
+vi.mock('@/lib/smsCountryPolicy', () => ({
+  validateSmsDestinationCountry: mockValidateSmsDestinationCountry,
 }))
 
 import { POST } from './route'
@@ -132,6 +147,8 @@ function makeRequest(body: unknown) {
 
 describe('app/api/auth/register/route', () => {
   beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV }
+
     resetMockGroup(mockPrisma.user)
     resetMockGroup(mockPrisma.professionalProfile)
     mockPrisma.$transaction.mockReset()
@@ -152,12 +169,30 @@ describe('app/api/auth/register/route', () => {
 
     mockEnforceRateLimit.mockReset()
     mockRateLimitIdentity.mockReset()
+    mockPhoneRateLimitIdentity.mockReset()
+
+    mockIsRuntimeFlagEnabled.mockReset()
+    mockValidateSmsDestinationCountry.mockReset()
 
     mockTwilio.mockReset()
     mockTwilioMessagesCreate.mockReset()
 
-    mockRateLimitIdentity.mockResolvedValue('ip:test')
+    mockRateLimitIdentity.mockResolvedValue({
+      kind: 'ip',
+      id: '198.51.100.10',
+    })
+    mockPhoneRateLimitIdentity.mockReturnValue({
+      kind: 'phone',
+      id: '+15551234567',
+    })
     mockEnforceRateLimit.mockResolvedValue(null)
+
+    mockIsRuntimeFlagEnabled.mockImplementation(async () => false)
+    mockValidateSmsDestinationCountry.mockReturnValue({
+      ok: true,
+      phone: '+15551234567',
+      countryCode: 'US',
+    })
 
     mockValidatePassword.mockReturnValue(null)
     mockGetCurrentTosVersion.mockReturnValue('2026-04')
@@ -193,20 +228,154 @@ describe('app/api/auth/register/route', () => {
     process.env.TWILIO_FROM_NUMBER = '+15550001111'
   })
 
-  it('passes through the rate-limit response unchanged', async () => {
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV }
+    vi.restoreAllMocks()
+  })
+
+  it('passes through the verified-register rate-limit response unchanged', async () => {
     const rateLimitRes = new Response(null, { status: 429 })
-    mockEnforceRateLimit.mockResolvedValue(rateLimitRes)
+    mockEnforceRateLimit.mockResolvedValueOnce(rateLimitRes)
 
     const result = await POST(makeRequest(makeClientSignupBody()))
 
+    expect(mockVerifyTurnstileOrFailOpen).toHaveBeenCalledWith({
+      request: expect.any(Request),
+      token: 'ts_signup_ok',
+    })
+
     expect(mockRateLimitIdentity).toHaveBeenCalledTimes(1)
+    expect(mockEnforceRateLimit).toHaveBeenCalledTimes(1)
     expect(mockEnforceRateLimit).toHaveBeenCalledWith({
-      bucket: 'auth:register',
-      identity: 'ip:test',
+      bucket: 'auth:register:verified',
+      identity: { kind: 'ip', id: '198.51.100.10' },
     })
 
     expect(result).toBe(rateLimitRes)
     expect(result.status).toBe(429)
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('uses the base register bucket when Turnstile fails open', async () => {
+    mockVerifyTurnstileOrFailOpen.mockResolvedValue({
+      ok: true,
+      failOpen: true,
+      eventName: 'auth.turnstile.fail_open',
+      reason: 'turnstile_network_or_timeout',
+    })
+
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_failopen',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+      phoneVerification: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        create: vi.fn().mockResolvedValue({ id: 'pv_failopen' }),
+      },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+    expect(result.status).toBe(201)
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'auth:register',
+      identity: { kind: 'ip', id: '198.51.100.10' },
+    })
+  })
+
+  it('returns 503 when signup is disabled', async () => {
+    mockIsRuntimeFlagEnabled.mockImplementation(async (name: string) => {
+      return name === 'signup_disabled'
+    })
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+    const body = await result.json()
+
+    expect(result.status).toBe(503)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Signup is temporarily unavailable.',
+      code: 'SIGNUP_DISABLED',
+    })
+
+    expect(mockVerifyTurnstileOrFailOpen).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('returns 503 when SMS is disabled', async () => {
+    mockIsRuntimeFlagEnabled.mockImplementation(async (name: string) => {
+      return name === 'sms_disabled'
+    })
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+    const body = await result.json()
+
+    expect(result.status).toBe(503)
+    expect(body).toEqual({
+      ok: false,
+      error: 'SMS verification is temporarily unavailable.',
+      code: 'SMS_DISABLED',
+    })
+
+    expect(mockVerifyTurnstileOrFailOpen).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when the SMS destination country is unsupported', async () => {
+    mockValidateSmsDestinationCountry.mockReturnValue({
+      ok: false,
+      code: 'SMS_COUNTRY_UNSUPPORTED',
+      message: 'SMS verification is not available for this country yet.',
+      countryCode: 'GB',
+    })
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+    const body = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'SMS verification is not available for this country yet.',
+      code: 'SMS_COUNTRY_UNSUPPORTED',
+      countryCode: 'GB',
+    })
+
+    expect(mockVerifyTurnstileOrFailOpen).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('returns the shared per-phone quota response unchanged when SMS quota blocks signup', async () => {
+    const quotaRes = new Response(null, { status: 429 })
+
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null) // register bucket
+      .mockResolvedValueOnce(quotaRes) // phone-hour bucket
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+
+    expect(mockPhoneRateLimitIdentity).toHaveBeenCalledWith('+15551234567')
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'auth:register:verified',
+      identity: { kind: 'ip', id: '198.51.100.10' },
+    })
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(2, {
+      bucket: 'auth:sms-phone-hour',
+      identity: { kind: 'phone', id: '+15551234567' },
+    })
+
+    expect(result).toBe(quotaRes)
+    expect(result.status).toBe(429)
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
   it('creates an unverified client account, sends verification artifacts, and issues a verification-only session', async () => {
@@ -243,12 +412,12 @@ describe('app/api/auth/register/route', () => {
       },
       nextUrl: '/looks?from=tap',
       requiresPhoneVerification: true,
+      phoneVerificationSent: true,
+      phoneVerificationErrorCode: null,
       requiresEmailVerification: true,
       isPhoneVerified: false,
       isEmailVerified: false,
       isFullyVerified: false,
-      phoneVerificationSent: true,
-      phoneVerificationErrorCode: null,
       emailVerificationSent: true,
       needsManualLicenseUpload: false,
       manualLicensePendingReview: false,
@@ -256,9 +425,35 @@ describe('app/api/auth/register/route', () => {
 
     expect(mockValidatePassword).toHaveBeenCalledWith('SuperSecret123!')
     expect(mockGetCurrentTosVersion).toHaveBeenCalledTimes(1)
+
+    expect(mockIsRuntimeFlagEnabled).toHaveBeenNthCalledWith(
+      1,
+      'signup_disabled',
+    )
+    expect(mockIsRuntimeFlagEnabled).toHaveBeenNthCalledWith(2, 'sms_disabled')
+    expect(mockValidateSmsDestinationCountry).toHaveBeenCalledWith(
+      '+15551234567',
+    )
+
     expect(mockVerifyTurnstileOrFailOpen).toHaveBeenCalledWith({
       request: expect.any(Request),
       token: 'ts_signup_ok',
+    })
+
+    expect(mockRateLimitIdentity).toHaveBeenCalledTimes(1)
+    expect(mockPhoneRateLimitIdentity).toHaveBeenCalledWith('+15551234567')
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'auth:register:verified',
+      identity: { kind: 'ip', id: '198.51.100.10' },
+    })
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(2, {
+      bucket: 'auth:sms-phone-hour',
+      identity: { kind: 'phone', id: '+15551234567' },
+    })
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(3, {
+      bucket: 'auth:sms-phone-day',
+      identity: { kind: 'phone', id: '+15551234567' },
     })
 
     expect(mockHashPassword).toHaveBeenCalledWith('SuperSecret123!')
@@ -332,10 +527,7 @@ describe('app/api/auth/register/route', () => {
       userId: 'user_1',
     })
 
-    expect(mockTwilio).toHaveBeenCalledWith(
-      'AC_test_sid',
-      'test_auth_token',
-    )
+    expect(mockTwilio).toHaveBeenCalledWith('AC_test_sid', 'test_auth_token')
     expect(mockTwilioMessagesCreate).toHaveBeenCalledTimes(1)
 
     const setCookie = result.headers.get('set-cookie')

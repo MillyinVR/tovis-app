@@ -136,7 +136,20 @@ export default async function AdminHomePage() {
           ) : null}
 
           {perms.canManagePermissions ? (
-            <Card title="Permissions" desc="Scope what admins can do." href="/admin/permissions" cta="Manage permissions" />
+            <>
+              <Card
+                title="Permissions"
+                desc="Scope what admins can do."
+                href="/admin/permissions"
+                cta="Manage permissions"
+              />
+              <Card
+                title="Runtime flags"
+                desc="Temporarily disable signup or verification SMS without a deploy."
+                href="/admin/runtime-flags"
+                cta="Open flags"
+              />
+            </>
           ) : null}
 
           {perms.canViewLogs ? (

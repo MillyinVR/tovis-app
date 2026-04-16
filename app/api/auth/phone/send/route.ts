@@ -4,8 +4,10 @@ import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { safeJson } from '@/lib/http'
-import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { jsonFail, jsonOk, enforceRateLimit, phoneRateLimitIdentity } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
+import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -128,6 +130,34 @@ export async function POST(_request: Request) {
     if (!phone) {
       return jsonFail(400, 'Phone number missing.', { code: 'PHONE_REQUIRED' })
     }
+
+    if (await isRuntimeFlagEnabled('sms_disabled')) {
+      return jsonFail(503, 'SMS verification is temporarily unavailable.', {
+        code: 'SMS_DISABLED',
+      })
+    }
+
+    const smsCountry = validateSmsDestinationCountry(phone)
+    if (!smsCountry.ok) {
+      return jsonFail(400, smsCountry.message, {
+        code: smsCountry.code,
+        countryCode: smsCountry.countryCode,
+      })
+    }
+
+    const phoneIdentity = phoneRateLimitIdentity(phone)
+
+    const smsPhoneHourRes = await enforceRateLimit({
+      bucket: 'auth:sms-phone-hour',
+      identity: phoneIdentity,
+    })
+    if (smsPhoneHourRes) return smsPhoneHourRes
+
+    const smsPhoneDayRes = await enforceRateLimit({
+      bucket: 'auth:sms-phone-day',
+      identity: phoneIdentity,
+    })
+    if (smsPhoneDayRes) return smsPhoneDayRes
 
     const limit = await enforceOtpLimits(userId)
     if (!limit.ok) {

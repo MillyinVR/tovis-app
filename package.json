@@ -40,6 +40,7 @@
     "framer-motion": "^12.29.2",
     "jsonwebtoken": "^9.0.2",
     "leaflet": "^1.9.4",
+    "libphonenumber-js": "^1.12.41",
     "lucide-react": "^0.562.0",
     "next": "^16.1.1",
     "prisma": "^6.19.0",
@@ -79,5 +80,6 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
-  }
+  },
+  "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319"
 }

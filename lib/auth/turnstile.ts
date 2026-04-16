@@ -1,4 +1,6 @@
 // lib/auth/turnstile.ts
+import { getTrustedClientIpFromRequest } from '@/lib/trustedClientIp'
+
 const TURNSTILE_VERIFY_URL =
   'https://challenges.cloudflare.com/turnstile/v0/siteverify'
 
@@ -16,14 +18,6 @@ type VerifyTurnstileResult =
 function envOrNull(name: string): string | null {
   const value = process.env[name]?.trim()
   return value ? value : null
-}
-
-function getRemoteIp(request: Request): string | null {
-  const xff = request.headers.get('x-forwarded-for')
-  if (!xff) return null
-
-  const first = xff.split(',')[0]?.trim()
-  return first || null
 }
 
 type TurnstileVerifyPayload = {
@@ -56,7 +50,7 @@ export async function verifyTurnstileOrFailOpen(args: {
     response: args.token,
   })
 
-  const remoteIp = getRemoteIp(args.request)
+  const remoteIp = getTrustedClientIpFromRequest(args.request)
   if (remoteIp) {
     body.set('remoteip', remoteIp)
   }

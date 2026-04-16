@@ -11,7 +11,15 @@ import {
 } from '@/lib/auth/emailVerification'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { BUCKETS } from '@/lib/storageBuckets'
-import { jsonFail, jsonOk, pickString, normalizeEmail, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
+import {
+  jsonFail,
+  jsonOk,
+  pickString,
+  normalizeEmail,
+  enforceRateLimit,
+  rateLimitIdentity,
+  phoneRateLimitIdentity,
+} from '@/app/api/_utils'
 import crypto from 'crypto'
 import Twilio from 'twilio'
 import {
@@ -20,6 +28,8 @@ import {
   VerificationDocumentType,
   VerificationStatus,
 } from '@prisma/client'
+import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
+import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
 
 export const dynamic = 'force-dynamic'
 
@@ -572,9 +582,6 @@ async function verifyCaBbcLicense(args: {
 
 export async function POST(request: Request) {
   try {
-    const identity = await rateLimitIdentity()
-    const rlRes = await enforceRateLimit({ bucket: 'auth:register', identity })
-    if (rlRes) return rlRes
 
     const body = (await request.json().catch(() => ({}))) as RegisterBody
 
@@ -620,6 +627,26 @@ export async function POST(request: Request) {
         code: 'INVALID_PHONE_FORMAT',
       })
     }
+
+    if (await isRuntimeFlagEnabled('signup_disabled')) {
+  return jsonFail(503, 'Signup is temporarily unavailable.', {
+    code: 'SIGNUP_DISABLED',
+  })
+}
+
+if (await isRuntimeFlagEnabled('sms_disabled')) {
+  return jsonFail(503, 'SMS verification is temporarily unavailable.', {
+    code: 'SMS_DISABLED',
+  })
+}
+
+const smsCountry = validateSmsDestinationCountry(phone)
+if (!smsCountry.ok) {
+  return jsonFail(400, smsCountry.message, {
+    code: smsCountry.code,
+    countryCode: smsCountry.countryCode,
+  })
+}
 
     if (!tosAccepted) {
       return jsonFail(
@@ -683,6 +710,19 @@ export async function POST(request: Request) {
         }),
       )
     }
+
+    const identity = await rateLimitIdentity()
+
+const registerBucket = captcha.failOpen
+  ? 'auth:register'
+  : 'auth:register:verified'
+
+const registerRateLimitRes = await enforceRateLimit({
+  bucket: registerBucket,
+  identity,
+})
+
+if (registerRateLimitRes) return registerRateLimitRes
 
     // pro profession
     const professionRaw = pickUpper(body.professionType)
@@ -795,6 +835,20 @@ export async function POST(request: Request) {
       })
       if (handleTaken) return jsonFail(400, 'That handle is already taken.', { code: 'HANDLE_IN_USE' })
     }
+
+      const phoneIdentity = phoneRateLimitIdentity(phone)
+
+      const smsPhoneHourRes = await enforceRateLimit({
+        bucket: 'auth:sms-phone-hour',
+        identity: phoneIdentity,
+      })
+      if (smsPhoneHourRes) return smsPhoneHourRes
+
+      const smsPhoneDayRes = await enforceRateLimit({
+        bucket: 'auth:sms-phone-day',
+        identity: phoneIdentity,
+      })
+      if (smsPhoneDayRes) return smsPhoneDayRes
 
     const passwordHash = await hashPassword(password)
 
