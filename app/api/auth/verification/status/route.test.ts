@@ -104,6 +104,7 @@ describe('app/api/auth/verification/status/route', () => {
       user: {
         id: 'user_1',
         email: 'user@example.com',
+        phone: '+15551234567',
         role: Role.CLIENT,
       },
       sessionKind: 'VERIFICATION',
@@ -129,7 +130,12 @@ describe('app/api/auth/verification/status/route', () => {
 
     expect(result.status).toBe(200)
     expect(body.nextUrl).toBe('/pro/calendar')
-    expect(body.user.role).toBe(Role.PRO)
+    expect(body.user).toEqual({
+      id: 'user_1',
+      email: 'user@example.com',
+      phone: '+15551234567',
+      role: Role.PRO,
+    })
     expect(body.isFullyVerified).toBe(true)
   })
 
@@ -146,6 +152,11 @@ describe('app/api/auth/verification/status/route', () => {
 
     expect(result.status).toBe(200)
     expect(body.nextUrl).toBe('/admin')
-    expect(body.user.role).toBe(Role.ADMIN)
+    expect(body.user).toEqual({
+      id: 'user_1',
+      email: 'user@example.com',
+      phone: '+15551234567',
+      role: Role.ADMIN,
+    })
   })
 })

@@ -1,7 +1,13 @@
 import React from 'react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockReplace = vi.hoisted(() => vi.fn())
 const mockRefresh = vi.hoisted(() => vi.fn())
@@ -69,6 +75,14 @@ vi.mock('@/lib/http', () => ({
 
 import VerifyPhonePage from './page'
 
+async function flushAsyncWork(rounds = 8) {
+  for (let i = 0; i < rounds; i += 1) {
+    await act(async () => {
+      await Promise.resolve()
+    })
+  }
+}
+
 function makeResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -84,6 +98,7 @@ function makeStatusBody(args?: {
   nextUrl?: string | null
   role?: 'CLIENT' | 'PRO' | 'ADMIN'
   email?: string | null
+  phone?: string | null
 }) {
   const isPhoneVerified = args?.isPhoneVerified ?? false
   const isEmailVerified = args?.isEmailVerified ?? false
@@ -94,6 +109,7 @@ function makeStatusBody(args?: {
     user: {
       id: 'user_1',
       email: args?.email ?? 'user@example.com',
+      phone: args?.phone ?? '+15551234567',
       role: args?.role ?? 'CLIENT',
     },
     sessionKind: args?.sessionKind ?? 'VERIFICATION',
@@ -125,6 +141,12 @@ describe('app/(auth)/verify-phone/page', () => {
     })
 
     vi.stubGlobal('fetch', fetchMock)
+    vi.useRealTimers()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.useRealTimers()
   })
 
   it('loads partial verification state from server truth and shows the email retry banner', async () => {
@@ -144,6 +166,7 @@ describe('app/(auth)/verify-phone/page', () => {
           nextUrl: '/looks',
           role: 'CLIENT',
           email: 'client@example.com',
+          phone: '+15551234567',
         }),
       ),
     )
@@ -152,7 +175,7 @@ describe('app/(auth)/verify-phone/page', () => {
 
     expect(
       await screen.findByText(
-        'We could not send your verification email during signup. Use the resend button below to send it now.',
+        'TOVIS could not send your first verification email. Resend it, then check your inbox and spam.',
       ),
     ).toBeInTheDocument()
 
@@ -162,14 +185,16 @@ describe('app/(auth)/verify-phone/page', () => {
       screen.getByText('Verification email destination:'),
     ).toBeInTheDocument()
     expect(screen.getByText('client@example.com')).toBeInTheDocument()
+    expect(screen.getByText('Texts go to')).toBeInTheDocument()
+    expect(screen.getByText('*** *** 4567')).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: /resend verification email/i }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: /resend code/i }),
+      screen.getByRole('button', { name: /^resend code$/i }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: /verify phone/i }),
+      screen.getByRole('button', { name: /wrong number\?/i }),
     ).toBeInTheDocument()
 
     expect(mockReplace).not.toHaveBeenCalled()
@@ -193,6 +218,7 @@ describe('app/(auth)/verify-phone/page', () => {
           nextUrl: '/looks',
           role: 'CLIENT',
           email: 'client@example.com',
+          phone: '+15551234567',
         }),
       ),
     )
@@ -201,11 +227,16 @@ describe('app/(auth)/verify-phone/page', () => {
 
     expect(
       await screen.findByText(
-        'We could not send your phone verification code during signup. Use the resend button below to send it now.',
+        'TOVIS could not send your first verification text. Resend a code or fix your phone number below.',
       ),
     ).toBeInTheDocument()
 
-    expect(screen.getByRole('button', { name: /resend code/i })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /^resend code$/i }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /wrong number\?/i }),
+    ).toBeInTheDocument()
     expect(mockReplace).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -353,8 +384,8 @@ describe('app/(auth)/verify-phone/page', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('resends verification email and shows success feedback', async () => {
-    const user = userEvent.setup()
+  it('resends verification email, shows success feedback, and starts the cooldown', async () => {
+    vi.useFakeTimers()
 
     fetchMock
       .mockResolvedValueOnce(
@@ -393,18 +424,16 @@ describe('app/(auth)/verify-phone/page', () => {
 
     render(<VerifyPhonePage />)
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-    })
+    await flushAsyncWork()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    await user.click(
+    fireEvent.click(
       screen.getByRole('button', { name: /resend verification email/i }),
     )
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(3)
-    })
+    await flushAsyncWork()
 
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       '/api/auth/email/send',
@@ -421,12 +450,26 @@ describe('app/(auth)/verify-phone/page', () => {
     )
 
     expect(
-      await screen.findByText('Verification email sent. Check your inbox.'),
+      screen.getByText(
+        'TOVIS sent a new verification email. Check your inbox and spam.',
+      ),
     ).toBeInTheDocument()
+
+    expect(
+      screen.getByRole('button', { name: /resend email in 1:00/i }),
+    ).toBeDisabled()
+
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+
+    expect(
+      screen.getByRole('button', { name: /resend email in 0:59/i }),
+    ).toBeDisabled()
   })
 
-  it('resends phone verification code and shows success feedback', async () => {
-    const user = userEvent.setup()
+  it('resends phone verification code, shows success feedback, and starts the cooldown', async () => {
+    vi.useFakeTimers()
 
     fetchMock
       .mockResolvedValueOnce(
@@ -462,16 +505,14 @@ describe('app/(auth)/verify-phone/page', () => {
 
     render(<VerifyPhonePage />)
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(1)
-    })
+    await flushAsyncWork()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    await user.click(screen.getByRole('button', { name: /resend code/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^resend code$/i }))
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(3)
-    })
+    await flushAsyncWork()
 
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       '/api/auth/phone/send',
@@ -484,7 +525,197 @@ describe('app/(auth)/verify-phone/page', () => {
     )
 
     expect(
-      await screen.findByText('New phone verification code sent.'),
+      screen.getByText('We sent a new TOVIS verification code.'),
+    ).toBeInTheDocument()
+
+    expect(
+      screen.getByRole('button', { name: /resend code in 1:00/i }),
+    ).toBeDisabled()
+
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+
+    expect(
+      screen.getByRole('button', { name: /resend code in 0:59/i }),
+    ).toBeDisabled()
+  })
+
+  it('maps phone resend rate limits into cooldown UX instead of raw retry leakage', async () => {
+    vi.useFakeTimers()
+
+    fetchMock
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: false,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: '/looks',
+            role: 'CLIENT',
+            email: 'client@example.com',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse(
+          {
+            ok: false,
+            error: 'Too many requests. Try again shortly.',
+            code: 'RATE_LIMITED',
+            retryAfterSeconds: 60,
+          },
+          429,
+        ),
+      )
+
+    render(<VerifyPhonePage />)
+
+    await flushAsyncWork()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /^resend code$/i }))
+
+    await flushAsyncWork()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    expect(
+      screen.getByText(
+        'You already requested a TOVIS verification code. Wait 1:00 and try again.',
+      ),
+    ).toBeInTheDocument()
+
+    expect(
+      screen.getByRole('button', { name: /resend code in 1:00/i }),
+    ).toBeDisabled()
+  })
+
+  it('opens the wrong-number flow, updates the phone, and shows success feedback', async () => {
+    const user = userEvent.setup()
+
+    fetchMock
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: false,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: '/looks',
+            role: 'CLIENT',
+            email: 'client@example.com',
+            phone: '+15551234567',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse({
+          ok: true,
+          sent: true,
+          phone: '+15557654321',
+          isPhoneVerified: false,
+          isEmailVerified: false,
+          isFullyVerified: false,
+        }),
+      )
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: false,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: '/looks',
+            role: 'CLIENT',
+            email: 'client@example.com',
+            phone: '+15557654321',
+          }),
+        ),
+      )
+
+    render(<VerifyPhonePage />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole('button', { name: /wrong number\?/i }))
+
+    const phoneInput = screen.getByPlaceholderText('+1 555 123 4567')
+    await user.type(phoneInput, '+1 555 765 4321')
+
+    await user.click(
+      screen.getByRole('button', { name: /update number and resend/i }),
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/phone/correct',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ phone: '+1 555 765 4321' }),
+      }),
+    )
+
+    expect(
+      await screen.findByText(
+        'We updated your TOVIS phone number and sent a fresh code.',
+      ),
+    ).toBeInTheDocument()
+
+    expect(screen.getByText('*** *** 4321')).toBeInTheDocument()
+  })
+
+  it('shows server validation errors from the wrong-number flow', async () => {
+    const user = userEvent.setup()
+
+    fetchMock
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: false,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: '/looks',
+            role: 'CLIENT',
+            email: 'client@example.com',
+            phone: '+15551234567',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse(
+          {
+            ok: false,
+            error: 'That phone number is already in use.',
+            code: 'PHONE_IN_USE',
+          },
+          409,
+        ),
+      )
+
+    render(<VerifyPhonePage />)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    await user.click(screen.getByRole('button', { name: /wrong number\?/i }))
+    await user.type(
+      screen.getByPlaceholderText('+1 555 123 4567'),
+      '+1 555 765 4321',
+    )
+    await user.click(
+      screen.getByRole('button', { name: /update number and resend/i }),
+    )
+
+    expect(
+      await screen.findByText('That phone number is already in use.'),
     ).toBeInTheDocument()
   })
 })

@@ -24,6 +24,7 @@ export async function GET() {
     user: {
       id: user.id,
       email: user.email,
+      phone: user.phone,
       role: user.role,
     },
     sessionKind: user.sessionKind,
