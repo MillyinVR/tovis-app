@@ -10,6 +10,7 @@ import { pickString } from '@/lib/pick'
 import { cn } from '@/lib/utils'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { MediaVisibility } from '@prisma/client'
+import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
 
 type PageProps = { params: Promise<{ id: string }> }
 
@@ -29,22 +30,42 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
       isEligibleForLooks: true,
       isFeaturedInPortfolio: true,
 
-      // SSoT fields
       storageBucket: true,
       storagePath: true,
       thumbBucket: true,
       thumbPath: true,
 
-      // legacy fallbacks
       url: true,
       thumbUrl: true,
 
-      services: { select: { serviceId: true, service: { select: { name: true } } } },
+      professional: {
+        select: {
+          verificationStatus: true,
+        },
+      },
+
+      services: {
+        select: {
+          serviceId: true,
+          service: { select: { name: true } },
+        },
+      },
       _count: { select: { likes: true, comments: true } },
     },
   })
 
   if (!media || media.visibility !== MediaVisibility.PUBLIC) notFound()
+
+  const viewer = await getCurrentUser().catch(() => null)
+  const isOwner =
+    viewer?.role === 'PRO' &&
+    viewer?.professionalProfile?.id === media.professionalId
+
+  const isApproved = isPubliclyApprovedProStatus(
+    media.professional?.verificationStatus ?? null,
+  )
+
+  if (!isOwner && !isApproved) notFound()
 
   const { renderUrl } = await renderMediaUrls({
     storageBucket: media.storageBucket,
@@ -56,11 +77,6 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
   })
 
   if (!renderUrl) notFound()
-
-  const viewer = await getCurrentUser().catch(() => null)
-  const isOwner =
-    viewer?.role === 'PRO' &&
-    viewer?.professionalProfile?.id === media.professionalId
 
   const backHref = `/professionals/${media.professionalId}`
   const isVideo = media.mediaType === 'VIDEO'
@@ -128,7 +144,9 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
               </div>
 
               {media.caption ? (
-                <div className="mt-1 text-[14px] font-black leading-snug text-textPrimary">{media.caption}</div>
+                <div className="mt-1 text-[14px] font-black leading-snug text-textPrimary">
+                  {media.caption}
+                </div>
               ) : null}
 
               {tags.length ? (

@@ -1,4 +1,3 @@
-// app/pro/profile/public-profile/ProAccountMenu.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
@@ -9,14 +8,17 @@ type Props = {
   businessName?: string | null
   subtitle?: string | null
 
-  publicUrl: string
-  proServicesHref: string
+  publicUrl?: string | null
   looksHref: string
+  proServicesHref: string
   uploadHref: string
   messagesHref: string
 }
 
-function useOnClickOutside<T extends HTMLElement>(ref: React.RefObject<T | null>, onOutside: () => void) {
+function useOnClickOutside<T extends HTMLElement>(
+  ref: React.RefObject<T | null>,
+  onOutside: () => void,
+) {
   const onOutsideStable = useCallback(onOutside, [onOutside])
 
   useEffect(() => {
@@ -76,7 +78,6 @@ export default function ProAccountMenu(props: Props) {
 
   useEffect(() => {
     if (!open) return
-    // Prevent accidental background scroll when menu open (lux feel)
     const prev = document.documentElement.style.overflow
     document.documentElement.style.overflow = 'hidden'
     return () => {
@@ -86,23 +87,60 @@ export default function ProAccountMenu(props: Props) {
 
   const items = useMemo(
     () => [
-      { label: 'View as client', href: props.publicUrl, emoji: '👀', hint: 'See what clients see' },
-      { label: 'Looks', href: props.looksHref, emoji: '✨', hint: 'Explore & post' },
-      { label: 'Manage services', href: props.proServicesHref, emoji: '🧾', hint: 'Edit pricing & availability' },
-      { label: 'Upload', href: props.uploadHref, emoji: '⬆️', hint: 'Add photos/videos' },
-      { label: 'Messages', href: props.messagesHref, emoji: '💬', hint: 'Inbox' },
+      ...(props.publicUrl
+        ? [
+            {
+              label: 'View as client',
+              href: props.publicUrl,
+              emoji: '👀',
+              hint: 'See what clients see',
+            },
+          ]
+        : []),
+      {
+        label: 'Looks',
+        href: props.looksHref,
+        emoji: '✨',
+        hint: 'Explore & post',
+      },
+      {
+        label: 'Manage services',
+        href: props.proServicesHref,
+        emoji: '🧾',
+        hint: 'Edit pricing & availability',
+      },
+      {
+        label: 'Upload',
+        href: props.uploadHref,
+        emoji: '⬆️',
+        hint: 'Add photos/videos',
+      },
+      {
+        label: 'Messages',
+        href: props.messagesHref,
+        emoji: '💬',
+        hint: 'Inbox',
+      },
     ],
-    [props.publicUrl, props.looksHref, props.proServicesHref, props.uploadHref, props.messagesHref],
+    [
+      props.publicUrl,
+      props.looksHref,
+      props.proServicesHref,
+      props.uploadHref,
+      props.messagesHref,
+    ],
   )
 
   const title = (props.businessName || '').trim()
   const subtitle = (props.subtitle || '').trim()
 
-  // Panel skin (no hex)
-  const panelBase = 'absolute right-0 mt-2 w-[min(360px,90vw)] overflow-hidden rounded-[18px] border border-white/10'
+  const panelBase =
+    'absolute right-0 mt-2 w-[min(360px,90vw)] overflow-hidden rounded-[18px] border border-white/10'
   const panelSkin = 'bg-bgPrimary/70 backdrop-blur'
-  const edgeGlow = 'shadow-[0_0_0_1px_hsl(0_0%_100%_/0.06),0_28px_90px_rgba(0,0,0,0.60)]'
-  const panelMotion = 'origin-top-right transition duration-200 ease-out will-change-transform will-change-opacity'
+  const edgeGlow =
+    'shadow-[0_0_0_1px_hsl(0_0%_100%_/0.06),0_28px_90px_rgba(0,0,0,0.60)]'
+  const panelMotion =
+    'origin-top-right transition duration-200 ease-out will-change-transform will-change-opacity'
 
   return (
     <div ref={wrapRef} className="relative">
@@ -122,17 +160,19 @@ export default function ProAccountMenu(props: Props) {
         aria-label="Account menu"
         title="Account"
       >
-        <span className="text-[18px] leading-none transition group-hover:opacity-90">⋯</span>
+        <span className="text-[18px] leading-none transition group-hover:opacity-90">
+          ⋯
+        </span>
       </button>
 
-      {/* Mounted overlay + panel for smooth animation */}
       {mounted ? (
         <>
-          {/* Soft scrim (luxury feel) */}
           <div
             className={[
               'fixed inset-0 z-[9998] transition',
-              open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0',
+              open
+                ? 'pointer-events-auto opacity-100'
+                : 'pointer-events-none opacity-0',
             ].join(' ')}
             style={{
               background:
@@ -149,25 +189,34 @@ export default function ProAccountMenu(props: Props) {
               panelSkin,
               edgeGlow,
               panelMotion,
-              open ? 'pointer-events-auto opacity-100 scale-[1]' : 'pointer-events-none opacity-0 scale-[0.985]',
+              open
+                ? 'pointer-events-auto opacity-100 scale-[1]'
+                : 'pointer-events-none opacity-0 scale-[0.985]',
             ].join(' ')}
             role="menu"
             aria-label="Account actions"
           >
-            {/* Header */}
             <div className="px-3 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[11px] font-extrabold text-textSecondary">Account</div>
+                  <div className="text-[11px] font-extrabold text-textSecondary">
+                    Account
+                  </div>
 
                   {title ? (
-                    <div className="mt-0.5 truncate text-[14px] font-black text-textPrimary">{title}</div>
+                    <div className="mt-0.5 truncate text-[14px] font-black text-textPrimary">
+                      {title}
+                    </div>
                   ) : (
-                    <div className="mt-0.5 text-[14px] font-black text-textPrimary">Quick actions</div>
+                    <div className="mt-0.5 text-[14px] font-black text-textPrimary">
+                      Quick actions
+                    </div>
                   )}
 
                   {subtitle ? (
-                    <div className="mt-0.5 truncate text-[11px] font-extrabold text-textSecondary">{subtitle}</div>
+                    <div className="mt-0.5 truncate text-[11px] font-extrabold text-textSecondary">
+                      {subtitle}
+                    </div>
                   ) : null}
                 </div>
 
@@ -179,7 +228,6 @@ export default function ProAccountMenu(props: Props) {
 
             <div className="h-px bg-white/10" />
 
-            {/* Items */}
             <div className="grid">
               {items.map((it) => (
                 <Link
@@ -205,14 +253,15 @@ export default function ProAccountMenu(props: Props) {
                     </span>
                   </span>
 
-                  <span className="text-textSecondary opacity-0 transition group-hover:opacity-100">›</span>
+                  <span className="text-textSecondary opacity-0 transition group-hover:opacity-100">
+                    ›
+                  </span>
                 </Link>
               ))}
             </div>
 
             <div className="h-px bg-white/10" />
 
-            {/* Sign out */}
             <div className="p-2">
               <button
                 type="button"
@@ -238,10 +287,14 @@ export default function ProAccountMenu(props: Props) {
 
                   <div className="min-w-0 flex-1">
                     <div className="text-toneDanger">Sign out</div>
-                    <div className="mt-0.5 text-[11px] font-extrabold text-textSecondary">End your session on this device</div>
+                    <div className="mt-0.5 text-[11px] font-extrabold text-textSecondary">
+                      End your session on this device
+                    </div>
                   </div>
 
-                  <span className="text-textSecondary opacity-70 transition group-hover:opacity-100">›</span>
+                  <span className="text-textSecondary opacity-70 transition group-hover:opacity-100">
+                    ›
+                  </span>
                 </div>
               </button>
             </div>

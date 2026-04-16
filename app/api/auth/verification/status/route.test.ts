@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Role } from '@prisma/client'
+import { Role, VerificationStatus } from '@prisma/client'
 
 const mockRequireUser = vi.hoisted(() => vi.fn())
 
@@ -14,6 +14,7 @@ function makeUser(args?: {
   sessionKind?: 'ACTIVE' | 'VERIFICATION'
   phoneVerifiedAt?: Date | null
   emailVerifiedAt?: Date | null
+  professionalVerificationStatus?: VerificationStatus | null
 }) {
   const role = args?.role ?? Role.CLIENT
   const phoneVerifiedAt =
@@ -54,6 +55,8 @@ function makeUser(args?: {
             avatarUrl: null,
             timeZone: 'America/Los_Angeles',
             location: null,
+            verificationStatus:
+              args?.professionalVerificationStatus ?? VerificationStatus.APPROVED,
           }
         : null,
   }
@@ -117,11 +120,12 @@ describe('app/api/auth/verification/status/route', () => {
     })
   })
 
-  it('returns pro default nextUrl', async () => {
+  it('returns approved pro nextUrl', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
         role: Role.PRO,
+        professionalVerificationStatus: VerificationStatus.APPROVED,
       }),
     })
 
@@ -137,6 +141,28 @@ describe('app/api/auth/verification/status/route', () => {
       role: Role.PRO,
     })
     expect(body.isFullyVerified).toBe(true)
+  })
+
+  it('returns pending pro nextUrl to the profile setup surface', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser({
+        role: Role.PRO,
+        professionalVerificationStatus: VerificationStatus.PENDING,
+      }),
+    })
+
+    const result = await GET()
+    const body = await result.json()
+
+    expect(result.status).toBe(200)
+    expect(body.nextUrl).toBe('/pro/profile/public-profile')
+    expect(body.user).toEqual({
+      id: 'user_1',
+      email: 'user@example.com',
+      phone: '+15551234567',
+      role: Role.PRO,
+    })
   })
 
   it('returns admin default nextUrl', async () => {

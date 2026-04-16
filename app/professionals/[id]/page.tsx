@@ -13,6 +13,7 @@ import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { MediaType, MediaVisibility } from '@prisma/client'
 import { pickString } from '@/lib/pick'
+import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
 
 function hasStoragePointers<T extends { storageBucket: unknown; storagePath: unknown }>(
   m: T,
@@ -21,6 +22,7 @@ function hasStoragePointers<T extends { storageBucket: unknown; storagePath: unk
   const p = pickString(m.storagePath)
   return Boolean(b && p)
 }
+
 export const dynamic = 'force-dynamic'
 
 type SearchParams = { [key: string]: string | string[] | undefined }
@@ -34,7 +36,10 @@ function buildLoginHref(fromPath: string) {
   return `/login?from=${encodeURIComponent(fromPath)}`
 }
 
-function pickOfferingImage(off: { customImageUrl?: string | null; service?: { defaultImageUrl?: string | null } }) {
+function pickOfferingImage(off: {
+  customImageUrl?: string | null
+  service?: { defaultImageUrl?: string | null }
+}) {
   const src = (off.customImageUrl || off.service?.defaultImageUrl || '').trim()
   return src || null
 }
@@ -48,8 +53,12 @@ function formatOfferingPricing(off: any) {
   const mobilePrice = off.mobilePriceStartingAt ? moneyToString(off.mobilePriceStartingAt) : null
   const mobileMin = off.mobileDurationMinutes ?? null
 
-  if (off.offersInSalon && salonPrice && salonMin) lines.push(`Salon: $${salonPrice} • ${salonMin} min`)
-  if (off.offersMobile && mobilePrice && mobileMin) lines.push(`Mobile: $${mobilePrice} • ${mobileMin} min`)
+  if (off.offersInSalon && salonPrice && salonMin) {
+    lines.push(`Salon: $${salonPrice} • ${salonMin} min`)
+  }
+  if (off.offersMobile && mobilePrice && mobileMin) {
+    lines.push(`Mobile: $${mobilePrice} • ${mobileMin} min`)
+  }
 
   return lines
 }
@@ -95,8 +104,6 @@ export default async function PublicProfessionalProfilePage({
         },
         orderBy: { createdAt: 'asc' },
       },
-
-      // ✅ Select helpfulCount explicitly + only fields we use
       reviews: {
         orderBy: { createdAt: 'desc' },
         take: 50,
@@ -107,7 +114,6 @@ export default async function PublicProfessionalProfilePage({
           body: true,
           createdAt: true,
           helpfulCount: true,
-
           client: {
             select: {
               firstName: true,
@@ -115,7 +121,6 @@ export default async function PublicProfessionalProfilePage({
               user: { select: { email: true } },
             },
           },
-
           mediaAssets: {
             select: {
               id: true,
@@ -136,11 +141,14 @@ export default async function PublicProfessionalProfilePage({
 
   if (!pro) notFound()
 
-  // Visibility gate: pending/unapproved pros are only viewable by themselves
-  const isOwner = viewer?.role === 'PRO' && viewer?.professionalProfile?.id === pro.id
-  const isApproved = pro.verificationStatus === 'APPROVED'
+  const canViewPublicSurface = canViewerSeeProPublicSurface({
+    viewerRole: viewer?.role ?? null,
+    viewerProfessionalId: viewer?.professionalProfile?.id ?? null,
+    professionalId: pro.id,
+    verificationStatus: pro.verificationStatus,
+  })
 
-  if (!isOwner && !isApproved) {
+  if (!canViewPublicSurface) {
     return (
       <main className="mx-auto max-w-180 px-4 pb-24 pt-10">
         <Link href="/looks" className="text-[12px] font-black text-textPrimary hover:opacity-80">
@@ -148,7 +156,9 @@ export default async function PublicProfessionalProfilePage({
         </Link>
 
         <div className="tovis-glass mt-4 rounded-card border border-white/10 bg-bgSecondary p-4">
-          <div className="text-[16px] font-black text-textPrimary">This profile is pending verification</div>
+          <div className="text-[16px] font-black text-textPrimary">
+            This profile is pending verification
+          </div>
           <div className="mt-2 text-[13px] text-textSecondary">
             We’re verifying the professional’s license and details. Check back soon.
           </div>
@@ -164,7 +174,8 @@ export default async function PublicProfessionalProfilePage({
   })
 
   const reviewCount: number = reviewStats?._count?._all ?? 0
-  const averageRating = typeof reviewStats?._avg?.rating === 'number' ? reviewStats._avg.rating.toFixed(1) : null
+  const averageRating =
+    typeof reviewStats?._avg?.rating === 'number' ? reviewStats._avg.rating.toFixed(1) : null
 
   const favoritesCount = await prisma.professionalFavorite.count({
     where: { professionalId: pro.id },
@@ -179,7 +190,6 @@ export default async function PublicProfessionalProfilePage({
       }))
     : false
 
-  // Client-facing portfolio: PUBLIC + featured only
   const portfolioMedia = await prisma.mediaAsset.findMany({
     where: {
       professionalId: pro.id,
@@ -201,7 +211,6 @@ export default async function PublicProfessionalProfilePage({
     },
   })
 
-  // Build render-safe tiles (filter out any broken legacy rows)
   const portfolioTiles = (
     await Promise.all(
       portfolioMedia.map(async (m) => {
@@ -233,7 +242,6 @@ export default async function PublicProfessionalProfilePage({
   const displayName = pro.businessName || 'Beauty professional'
   const avatar = (pro.avatarUrl as string | null | undefined) || null
 
-  // ✅ Spotlight support: which reviews has this viewer marked helpful?
   const viewerHelpfulSet = new Set<string>()
   if (isClientViewer && pro.reviews.length) {
     const reviewIds = pro.reviews.map((r) => r.id)
@@ -244,7 +252,6 @@ export default async function PublicProfessionalProfilePage({
     for (const row of helpfulRows) viewerHelpfulSet.add(row.reviewId)
   }
 
-  // ReviewsPanel expects mediaAssets[].url as renderable string
   const reviewsForUI = await Promise.all(
     pro.reviews.map(async (rev) => {
       const first = (rev.client?.firstName ?? '').trim()
@@ -290,8 +297,6 @@ export default async function PublicProfessionalProfilePage({
         createdAt: new Date(rev.createdAt).toISOString(),
         clientName,
         mediaAssets,
-
-        // ✅ Spotlight fuel fields
         helpfulCount: rev.helpfulCount ?? 0,
         viewerHelpful: viewerHelpfulSet.has(rev.id),
       }
@@ -303,7 +308,9 @@ export default async function PublicProfessionalProfilePage({
   const loginHref = buildLoginHref(fromPath)
 
   const mustLogin = !viewer
-  const messageHref = mustLogin ? loginHref : messageStartHref({ kind: 'PRO_PROFILE', professionalId: pro.id })
+  const messageHref = mustLogin
+    ? loginHref
+    : messageStartHref({ kind: 'PRO_PROFILE', professionalId: pro.id })
 
   const proTimeZone = displayTimeZoneOrNull(pro.timeZone)
 
@@ -323,7 +330,9 @@ export default async function PublicProfessionalProfilePage({
 
           <div className="flex items-center gap-2">
             <ShareButton url={`/professionals/${pro.id}`} />
-            {isClientViewer ? <FavoriteButton professionalId={pro.id} initialFavorited={isFavoritedByMe} /> : null}
+            {isClientViewer ? (
+              <FavoriteButton professionalId={pro.id} initialFavorited={isFavoritedByMe} />
+            ) : null}
           </div>
         </div>
 
@@ -338,7 +347,8 @@ export default async function PublicProfessionalProfilePage({
           <div className="min-w-0 flex-1">
             <div className="truncate text-[20px] font-black text-textPrimary">{displayName}</div>
             <div className="mt-1 text-[13px] text-textSecondary">
-              {(pro.professionType || 'Beauty professional') + (pro.location ? ` • ${pro.location}` : '')}
+              {(pro.professionType || 'Beauty professional') +
+                (pro.location ? ` • ${pro.location}` : '')}
             </div>
 
             {pro.bio ? <div className="mt-3 text-[13px] text-textSecondary">{pro.bio}</div> : null}
@@ -464,7 +474,9 @@ function TabLink({
       href={href}
       className={[
         'border-b-2 px-3 py-3 text-[13px] font-black transition-colors',
-        active ? 'border-accentPrimary text-textPrimary' : 'border-transparent text-textSecondary hover:text-textPrimary',
+        active
+          ? 'border-accentPrimary text-textPrimary'
+          : 'border-transparent text-textSecondary hover:text-textPrimary',
       ].join(' ')}
     >
       {children}
@@ -474,6 +486,8 @@ function TabLink({
 
 function EmptyBox({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">{children}</div>
+    <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
+      {children}
+    </div>
   )
 }

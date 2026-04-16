@@ -4,6 +4,7 @@ import { jsonFail, jsonOk, pickInt, pickString } from '@/app/api/_utils'
 import { getCurrentUser } from '@/lib/currentUser'
 import { Prisma, MediaVisibility, Role } from '@prisma/client'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,13 +12,22 @@ const SPOTLIGHT_SLUG = 'spotlight'
 const SPOTLIGHT_HELPFUL_THRESHOLD = 25
 const QMODE = 'insensitive' as const
 
-function hasStoragePointers(m: { storageBucket: string | null; storagePath: string | null }) {
+function hasStoragePointers(m: {
+  storageBucket: string | null
+  storagePath: string | null
+}) {
   return Boolean(m.storageBucket && m.storagePath)
 }
 
 function pickPrimaryService(
   services:
-    | Array<{ service: { id: string; name: string; category?: { name: string; slug: string } | null } }>
+    | Array<{
+        service: {
+          id: string
+          name: string
+          category?: { name: string; slug: string } | null
+        }
+      }>
     | null
     | undefined,
 ) {
@@ -38,7 +48,6 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url)
     const limit = Math.min(pickInt(searchParams.get('limit')) ?? 12, 50)
 
-    // category is a SLUG from the UI
     const rawCategorySlug = pickString(searchParams.get('category'))
     const q = pickString(searchParams.get('q'))
 
@@ -51,15 +60,23 @@ export async function GET(req: Request) {
       and.push(
         { reviewId: { not: null } },
         { uploadedByRole: Role.CLIENT },
-        { review: { is: { helpfulCount: { gte: SPOTLIGHT_HELPFUL_THRESHOLD } } } },
+        {
+          review: {
+            is: { helpfulCount: { gte: SPOTLIGHT_HELPFUL_THRESHOLD } },
+          },
+        },
       )
     } else {
-      and.push({ OR: [{ isEligibleForLooks: true }, { isFeaturedInPortfolio: true }] })
+      and.push({
+        OR: [{ isEligibleForLooks: true }, { isFeaturedInPortfolio: true }],
+      })
 
       if (categorySlug) {
         and.push({
           services: {
-            some: { service: { category: { is: { slug: categorySlug } } } },
+            some: {
+              service: { category: { is: { slug: categorySlug } } },
+            },
           },
         })
       }
@@ -77,10 +94,17 @@ export async function GET(req: Request) {
 
     const where: Prisma.MediaAssetWhereInput = {
       visibility: MediaVisibility.PUBLIC,
+      professional: {
+        is: {
+          verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
+        },
+      },
       ...(and.length ? { AND: and } : {}),
     }
 
-    const orderBy: Prisma.MediaAssetOrderByWithRelationInput | Prisma.MediaAssetOrderByWithRelationInput[] = isSpotlight
+    const orderBy:
+      | Prisma.MediaAssetOrderByWithRelationInput
+      | Prisma.MediaAssetOrderByWithRelationInput[] = isSpotlight
       ? [{ review: { helpfulCount: 'desc' } }, { createdAt: 'desc' }]
       : { createdAt: 'desc' }
 
@@ -90,23 +114,18 @@ export async function GET(req: Request) {
       take: limit,
       select: {
         id: true,
-
-        // may be null on older rows
         url: true,
         thumbUrl: true,
         storageBucket: true,
         storagePath: true,
         thumbBucket: true,
         thumbPath: true,
-
         mediaType: true,
         caption: true,
         createdAt: true,
         uploadedByRole: true,
         uploadedByUserId: true,
         reviewId: true,
-
-        // ✅ review metadata for Review Spotlight UI
         review: {
           select: {
             helpfulCount: true,
@@ -114,7 +133,6 @@ export async function GET(req: Request) {
             headline: true,
           },
         },
-
         professional: {
           select: {
             id: true,
@@ -128,7 +146,11 @@ export async function GET(req: Request) {
         services: {
           select: {
             service: {
-              select: { id: true, name: true, category: { select: { name: true, slug: true } } },
+              select: {
+                id: true,
+                name: true,
+                category: { select: { name: true, slug: true } },
+              },
             },
           },
         },
@@ -148,7 +170,6 @@ export async function GET(req: Request) {
     const payload = (
       await Promise.all(
         items.map(async (m) => {
-          // Render-safe URL fallback (especially important for Spotlight review media)
           let renderUrl = (m.url ?? '').trim()
           let renderThumbUrl = (m.thumbUrl ?? '').trim() || null
 
@@ -163,12 +184,15 @@ export async function GET(req: Request) {
             })
 
             renderUrl = (rendered.renderUrl ?? renderUrl ?? '').trim()
-            renderThumbUrl = (rendered.renderThumbUrl ?? renderThumbUrl ?? null)
+            renderThumbUrl = (
+              rendered.renderThumbUrl ??
+              renderThumbUrl ??
+              null
+            )
               ? (rendered.renderThumbUrl ?? renderThumbUrl)
               : null
           }
 
-          // If still no URL, drop it (prevents blank tiles)
           if (!renderUrl) return null
 
           const primaryService = pickPrimaryService(m.services)
@@ -205,8 +229,6 @@ export async function GET(req: Request) {
 
             uploadedByRole: m.uploadedByRole ?? null,
             reviewId: m.reviewId ?? null,
-
-            // ✅ feed fields for “Review Spotlight”
             reviewHelpfulCount: m.review?.helpfulCount ?? null,
             reviewRating: m.review?.rating ?? null,
             reviewHeadline: m.review?.headline ?? null,

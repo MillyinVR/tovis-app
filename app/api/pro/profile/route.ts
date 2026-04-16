@@ -1,7 +1,8 @@
 // app/api/pro/profile/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { Prisma } from '@prisma/client'
+import { Prisma, ProfessionType } from '@prisma/client'
+import { canEditPublicPublishingFields } from '@/lib/proTrustState'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,16 +10,6 @@ function pickNonEmptyStringOrUndefined(v: unknown): string | undefined {
   if (typeof v !== 'string') return undefined
   const t = v.trim()
   return t ? t : undefined
-}
-
-function pickStringOrNullOrUndefined(v: unknown): string | null | undefined {
-  // undefined => don't change
-  // "" => clear to null
-  // "abc" => "abc"
-  if (v === undefined) return undefined
-  if (typeof v !== 'string') return undefined
-  const t = v.trim()
-  return t ? t : null
 }
 
 /**
@@ -66,26 +57,40 @@ function isValidHandleNormalized(h: string) {
   if (!/^[a-z0-9-]+$/.test(h)) return false
   if (!/^[a-z0-9]/.test(h)) return false
   if (!/[a-z0-9]$/.test(h)) return false
-  // NOTE: double hyphens are allowed (keeping your previous behavior)
   return true
 }
 
-function prismaErrorToResponse(e: any) {
-  // Unique constraint
-  if (e?.code === 'P2002') {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isProfessionTypeValue(value: string): value is ProfessionType {
+  return Object.values(ProfessionType).some((candidate) => candidate === value)
+}
+
+function prismaErrorToResponse(e: unknown) {
+  if (
+    typeof e === 'object' &&
+    e !== null &&
+    'code' in e &&
+    e.code === 'P2002'
+  ) {
     return jsonFail(409, 'That handle is taken.')
   }
 
-  // Prisma validation/known request errors
   if (e instanceof Prisma.PrismaClientValidationError) {
-    return jsonFail(400, 'Invalid profile update payload.', { detail: e.message })
+    return jsonFail(400, 'Invalid profile update payload.', {
+      detail: e.message,
+    })
   }
 
   if (e instanceof Prisma.PrismaClientKnownRequestError) {
-    return jsonFail(400, 'Database rejected the update.', { code: e.code, detail: e.message })
+    return jsonFail(400, 'Database rejected the update.', {
+      code: e.code,
+      detail: e.message,
+    })
   }
 
-  // Fallback
   return null
 }
 
@@ -93,34 +98,53 @@ export async function PATCH(req: Request) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
+
     const proProfileId = auth.professionalId
 
-    const body = await req.json().catch(() => ({} as any))
+    const rawBody: unknown = await req.json().catch(() => ({}))
+    const body = isRecord(rawBody) ? rawBody : {}
+
+    const current = await prisma.professionalProfile.findUnique({
+      where: { id: proProfileId },
+      select: {
+        id: true,
+        verificationStatus: true,
+        handle: true,
+        handleNormalized: true,
+      },
+    })
+
+    if (!current) {
+      return jsonFail(404, 'Professional profile not found.')
+    }
 
     const businessName = pickNonEmptyStringOrUndefined(body.businessName)
     const bio = pickNonEmptyStringOrUndefined(body.bio)
     const location = pickNonEmptyStringOrUndefined(body.location)
     const avatarUrl = pickNonEmptyStringOrUndefined(body.avatarUrl)
 
-    // ✅ FIX: do NOT write "" into Prisma for an enum field
-    // If they leave it blank, we simply don't update it.
-    const professionType = pickNonEmptyStringOrUndefined(body.professionType)
+    const professionTypeRaw = pickNonEmptyStringOrUndefined(body.professionType)
+    let professionType: ProfessionType | undefined = undefined
 
-    // Handle (optional)
-    // - send handle: "tori" to set
-    // - send handle: "" to clear (null)
+    if (professionTypeRaw !== undefined) {
+      if (!isProfessionTypeValue(professionTypeRaw)) {
+        return jsonFail(400, 'Invalid profession type.')
+      }
+      professionType = professionTypeRaw
+    }
+
     const handleRaw = typeof body.handle === 'string' ? body.handle : undefined
     const wantsHandleUpdate = handleRaw !== undefined
 
-    let handle: string | null | undefined = undefined
-    let handleNormalized: string | null | undefined = undefined
+    let nextHandle: string | null | undefined = undefined
+    let nextHandleNormalized: string | null | undefined = undefined
 
     if (wantsHandleUpdate) {
       const trimmed = handleRaw.trim()
 
       if (!trimmed) {
-        handle = null
-        handleNormalized = null
+        nextHandle = null
+        nextHandleNormalized = null
       } else {
         const normalized = normalizeHandle(trimmed)
 
@@ -130,13 +154,28 @@ export async function PATCH(req: Request) {
             `Handle must be ${HANDLE_MIN}-${HANDLE_MAX} chars and use only letters, numbers, and hyphens.`,
           )
         }
+
         if (RESERVED_HANDLES.has(normalized)) {
           return jsonFail(400, 'That handle is reserved.')
         }
 
-        handle = normalized
-        handleNormalized = normalized
+        nextHandle = normalized
+        nextHandleNormalized = normalized
       }
+    }
+
+    const handleActuallyChanges =
+      wantsHandleUpdate &&
+      (current.handleNormalized ?? null) !== (nextHandleNormalized ?? null)
+
+    if (
+      handleActuallyChanges &&
+      !canEditPublicPublishingFields(current.verificationStatus)
+    ) {
+      return jsonFail(
+        403,
+        'Your public profile link becomes available after approval.',
+      )
     }
 
     const data: Prisma.ProfessionalProfileUpdateInput = {
@@ -144,8 +183,13 @@ export async function PATCH(req: Request) {
       ...(bio !== undefined ? { bio } : {}),
       ...(location !== undefined ? { location } : {}),
       ...(avatarUrl !== undefined ? { avatarUrl } : {}),
-      ...(professionType !== undefined ? { professionType: professionType as any } : {}),
-      ...(wantsHandleUpdate ? { handle, handleNormalized } : {}),
+      ...(professionType !== undefined ? { professionType } : {}),
+      ...(handleActuallyChanges
+        ? {
+            handle: nextHandle,
+            handleNormalized: nextHandleNormalized,
+          }
+        : {}),
     }
 
     try {
@@ -165,19 +209,19 @@ export async function PATCH(req: Request) {
       })
 
       return jsonOk({ ok: true, profile: updated }, 200)
-    } catch (e: any) {
+    } catch (e: unknown) {
       const res = prismaErrorToResponse(e)
       if (res) return res
+
       console.error('PATCH /api/pro/profile prisma error', e)
       return jsonFail(500, 'Failed to update profile', {
-        code: e?.code ?? null,
-        message: e?.message ?? String(e),
+        message: e instanceof Error ? e.message : String(e),
       })
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('PATCH /api/pro/profile error', e)
     return jsonFail(500, 'Failed to update profile', {
-      message: e?.message ?? String(e),
+      message: e instanceof Error ? e.message : String(e),
     })
   }
 }

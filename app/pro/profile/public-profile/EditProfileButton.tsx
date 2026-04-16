@@ -4,11 +4,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabaseBrowser } from '@/lib/supabaseBrowser'
-import { asTrimmedString, isRecord, type UnknownRecord } from '@/lib/guards'
+import { asTrimmedString, type UnknownRecord } from '@/lib/guards'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 import { withCacheBuster } from '@/lib/url'
 
 type Props = {
+  canEditHandle: boolean
   initial: {
     businessName: string | null
     bio: string | null
@@ -20,7 +21,6 @@ type Props = {
   }
 }
 
-// Client-side preview only (server validates)
 function normalizeHandleClientPreview(raw: string) {
   return raw
     .toLowerCase()
@@ -40,7 +40,7 @@ function readNumber(obj: UnknownRecord, key: string) {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
 
-export default function EditProfileButton({ initial }: Props) {
+export default function EditProfileButton({ canEditHandle, initial }: Props) {
   const router = useRouter()
   const closeBtnRef = useRef<HTMLButtonElement | null>(null)
 
@@ -79,7 +79,6 @@ export default function EditProfileButton({ initial }: Props) {
     }, 140)
   }
 
-  // open -> mount -> animate in
   useEffect(() => {
     if (!open) return
     setMounted(false)
@@ -87,7 +86,6 @@ export default function EditProfileButton({ initial }: Props) {
     return () => window.clearTimeout(t)
   }, [open])
 
-  // preview object URL
   useEffect(() => {
     if (!avatarFile) return
     const url = URL.createObjectURL(avatarFile)
@@ -95,12 +93,10 @@ export default function EditProfileButton({ initial }: Props) {
     return () => URL.revokeObjectURL(url)
   }, [avatarFile])
 
-  // reset broken when source changes
   useEffect(() => {
     setAvatarBroken(false)
   }, [avatarPreview, avatarUrl])
 
-  // lock body scroll when modal open
   useEffect(() => {
     if (!open) return
     const prev = document.body.style.overflow
@@ -110,7 +106,6 @@ export default function EditProfileButton({ initial }: Props) {
     }
   }, [open])
 
-  // Escape closes (unless busy)
   useEffect(() => {
     if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -121,7 +116,6 @@ export default function EditProfileButton({ initial }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, busy])
 
-  // focus close button
   useEffect(() => {
     if (!open) return
     closeBtnRef.current?.focus()
@@ -140,7 +134,13 @@ export default function EditProfileButton({ initial }: Props) {
   }, [avatarPreview, avatarUrl])
 
   const showAvatarImage = Boolean(avatarSrc) && !avatarBroken
-  const statusText = savedFlash ? 'Saved ✓' : uploadingAvatar ? 'Uploading…' : saving ? 'Saving…' : null
+  const statusText = savedFlash
+    ? 'Saved ✓'
+    : uploadingAvatar
+      ? 'Uploading…'
+      : saving
+        ? 'Saving…'
+        : null
 
   async function uploadAvatarIfNeeded(): Promise<string> {
     if (!avatarFile) return (avatarUrl || '').trim()
@@ -162,26 +162,46 @@ export default function EditProfileButton({ initial }: Props) {
       const signedRaw = await safeJson(signedRes)
 
       if (!signedRes.ok) {
-        throw new Error(readErrorMessage(signedRaw) ?? `Failed to init avatar upload (${signedRes.status})`)
+        throw new Error(
+          readErrorMessage(signedRaw) ??
+            `Failed to init avatar upload (${signedRes.status})`,
+        )
       }
 
-      if (!isRecord(signedRaw)) {
-        throw new Error('Upload init returned invalid JSON.')
+      const bucket =
+        signedRaw && typeof signedRaw === 'object'
+          ? readString(signedRaw as UnknownRecord, 'bucket')
+          : null
+      const path =
+        signedRaw && typeof signedRaw === 'object'
+          ? readString(signedRaw as UnknownRecord, 'path')
+          : null
+      const token =
+        signedRaw && typeof signedRaw === 'object'
+          ? readString(signedRaw as UnknownRecord, 'token')
+          : null
+      const publicUrl =
+        signedRaw && typeof signedRaw === 'object'
+          ? readString(signedRaw as UnknownRecord, 'publicUrl')
+          : null
+      const cacheBuster =
+        signedRaw && typeof signedRaw === 'object'
+          ? readNumber(signedRaw as UnknownRecord, 'cacheBuster') ?? Date.now()
+          : Date.now()
+
+      if (!bucket || !path || !token) {
+        throw new Error('Upload init missing bucket/path/token.')
+      }
+      if (!publicUrl) {
+        throw new Error('Avatar upload must be public but no publicUrl was returned.')
       }
 
-      const bucket = readString(signedRaw, 'bucket')
-      const path = readString(signedRaw, 'path')
-      const token = readString(signedRaw, 'token')
-      const publicUrl = readString(signedRaw, 'publicUrl')
-      const cacheBuster = readNumber(signedRaw, 'cacheBuster') ?? Date.now()
-
-      if (!bucket || !path || !token) throw new Error('Upload init missing bucket/path/token.')
-      if (!publicUrl) throw new Error('Avatar upload must be public but no publicUrl was returned.')
-
-      const up = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, avatarFile, {
-        contentType: avatarFile.type,
-        upsert: true, // ✅ stable "current.*" paths
-      })
+      const up = await supabaseBrowser.storage
+        .from(bucket)
+        .uploadToSignedUrl(path, token, avatarFile, {
+          contentType: avatarFile.type,
+          upsert: true,
+        })
 
       if (up.error) throw new Error(up.error.message || 'Avatar upload failed')
 
@@ -207,7 +227,7 @@ export default function EditProfileButton({ initial }: Props) {
           location,
           bio,
           avatarUrl: nextAvatarUrl,
-          handle,
+          ...(canEditHandle ? { handle } : {}),
         }),
       })
 
@@ -259,7 +279,9 @@ export default function EditProfileButton({ initial }: Props) {
             className={[
               'tovis-glass w-full max-w-130 max-h-[85vh] overflow-y-auto rounded-card border border-white/10 bg-bgSecondary p-4',
               'transform-gpu transition-all duration-150 ease-out',
-              mounted && !closing ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.985] opacity-0',
+              mounted && !closing
+                ? 'translate-y-0 scale-100 opacity-100'
+                : 'translate-y-2 scale-[0.985] opacity-0',
             ].join(' ')}
             onMouseDown={(e) => e.stopPropagation()}
           >
@@ -288,9 +310,9 @@ export default function EditProfileButton({ initial }: Props) {
                   <input
                     value={handle}
                     onChange={(e) => setHandle(e.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
+                    className="w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:cursor-not-allowed disabled:opacity-70"
                     placeholder="e.g. tori"
-                    disabled={busy}
+                    disabled={busy || !canEditHandle}
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}
@@ -298,31 +320,45 @@ export default function EditProfileButton({ initial }: Props) {
                   />
 
                   <div className="rounded-xl border border-white/10 bg-bgPrimary/40 px-3 py-2 text-[12px] text-textSecondary">
-                    {vanityPreview ? (
-                      <>
-                        Vanity link: <span className="font-black text-textPrimary">{vanityPreview}</span>
-                        <span className="ml-2">
-                          {initial.isPremium ? (
-                            <span className="font-black text-textPrimary">Active</span>
-                          ) : (
-                            <span className="font-black text-textSecondary">Reserved (Premium required)</span>
-                          )}
-                        </span>
-                      </>
+                    {canEditHandle ? (
+                      vanityPreview ? (
+                        <>
+                          Vanity link:{' '}
+                          <span className="font-black text-textPrimary">
+                            {vanityPreview}
+                          </span>
+                          <span className="ml-2">
+                            {initial.isPremium ? (
+                              <span className="font-black text-textPrimary">Active</span>
+                            ) : (
+                              <span className="font-black text-textSecondary">
+                                Reserved (Premium required)
+                              </span>
+                            )}
+                          </span>
+                        </>
+                      ) : (
+                        <>Pick a handle to preview your vanity link.</>
+                      )
                     ) : (
-                      <>Pick a handle to preview your vanity link.</>
+                      <>
+                        Your public profile link unlocks after approval. You can
+                        finish the rest of your profile now.
+                      </>
                     )}
                   </div>
 
-                  {!initial.isPremium ? (
+                  {canEditHandle && !initial.isPremium ? (
                     <div className="text-[11px] text-textSecondary">
-                      You can reserve a handle now. Your <span className="font-black text-textPrimary">.tovis.me</span>{' '}
+                      You can reserve a handle now. Your{' '}
+                      <span className="font-black text-textPrimary">.tovis.me</span>{' '}
                       link activates after upgrading.
                     </div>
                   ) : null}
 
                   <div className="text-[11px] text-textSecondary">
-                    Allowed: letters, numbers, hyphens. No spaces. Must start/end with a letter or number.
+                    Allowed: letters, numbers, hyphens. No spaces. Must start/end
+                    with a letter or number.
                   </div>
                 </div>
               </Field>
@@ -386,8 +422,8 @@ export default function EditProfileButton({ initial }: Props) {
                   </div>
 
                   <div className="text-[11px] text-textSecondary">
-                    Selecting a file does not upload yet. Upload happens when you click{' '}
-                    <span className="font-black text-textPrimary">Save</span>.
+                    Selecting a file does not upload yet. Upload happens when you
+                    click <span className="font-black text-textPrimary">Save</span>.
                   </div>
 
                   <input
@@ -414,7 +450,11 @@ export default function EditProfileButton({ initial }: Props) {
               {error ? <div className="text-[12px] text-toneDanger">{error}</div> : null}
 
               <div className="mt-1 flex items-center justify-end gap-3">
-                {statusText ? <div className="text-[12px] font-black text-textSecondary">{statusText}</div> : null}
+                {statusText ? (
+                  <div className="text-[12px] font-black text-textSecondary">
+                    {statusText}
+                  </div>
+                ) : null}
 
                 <button
                   type="button"

@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { Prisma, type ProfessionType } from '@prisma/client'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
+import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+
 export const dynamic = 'force-dynamic'
 
 function pickNumber(v: string | null) {
@@ -195,14 +197,16 @@ export async function GET(req: Request) {
 
     const pros = await prisma.professionalProfile.findMany({
       where: {
-        verificationStatus: 'APPROVED',
+        verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
         ...(q
           ? {
               OR: [
                 { businessName: { contains: q, mode: 'insensitive' } },
                 { handle: { contains: q, mode: 'insensitive' } },
                 { location: { contains: q, mode: 'insensitive' } },
-                ...(matchedProfessions.length ? [{ professionType: { in: matchedProfessions } }] : []),
+                ...(matchedProfessions.length
+                  ? [{ professionType: { in: matchedProfessions } }]
+                  : []),
               ],
             }
           : {}),
@@ -216,8 +220,6 @@ export async function GET(req: Request) {
         professionType: true,
         avatarUrl: true,
         location: true,
-
-        // all bookable locations w/ coords
         locations: {
           where: { isBookable: true, lat: { not: null }, lng: { not: null } },
           take: 25,

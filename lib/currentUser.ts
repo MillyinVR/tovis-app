@@ -1,3 +1,5 @@
+// lib/currentUser.ts
+
 import { Prisma } from '@prisma/client'
 import { cookies } from 'next/headers'
 
@@ -32,6 +34,7 @@ export const currentUserSelect = {
       timeZone: true,
       location: true,
       phoneVerifiedAt: true,
+      verificationStatus: true,
     },
   },
 } satisfies Prisma.UserSelect

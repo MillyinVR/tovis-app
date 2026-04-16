@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
+import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
 
 import ReviewsPanel from '../ReviewsPanel'
 import ServicesManagerSection from '../_sections/ServicesManagerSection'
@@ -104,6 +105,7 @@ export default async function ProPublicProfilePage({
     select: {
       id: true,
       handle: true,
+      verificationStatus: true,
       isPremium: true,
       businessName: true,
       bio: true,
@@ -165,6 +167,10 @@ export default async function ProPublicProfilePage({
   })
 
   if (!pro) redirect(ROUTES.proHome)
+
+  const isApproved = isPubliclyApprovedProStatus(pro.verificationStatus)
+  const publicUrl = `/professionals/${pro.id}`
+  const livePublicUrl = isApproved ? publicUrl : null
 
   const [portfolioMedia, favoritesCount, serviceOptions] = await Promise.all([
     prisma.mediaAsset.findMany({
@@ -258,7 +264,6 @@ export default async function ProPublicProfilePage({
     }),
   )
 
-  const publicUrl = `/professionals/${pro.id}`
   const displayName = pro.businessName?.trim() || 'Your business name'
   const subtitle = pro.professionType || 'Beauty professional'
   const location = pro.location?.trim() || null
@@ -341,6 +346,23 @@ export default async function ProPublicProfilePage({
 
   return (
     <main className="mx-auto max-w-5xl pb-6 font-sans">
+      {!isApproved ? (
+        <section className="mb-4 rounded-[18px] border border-white/10 bg-bgSecondary p-4">
+          <div className="text-[16px] font-black text-textPrimary">
+            Your profile is under review
+          </div>
+          <div className="mt-2 text-[13px] text-textSecondary">
+            Your public profile is not live yet. While review is pending, you are
+            not searchable, not publicly bookable, and clients cannot view your
+            public profile yet.
+          </div>
+          <div className="mt-3 text-[13px] text-textSecondary">
+            You can keep setting up your services, portfolio, and payment details
+            here while TOVIS reviews your account.
+          </div>
+        </section>
+      ) : null}
+
       <section className="tovis-glass rounded-[18px] border border-white/10 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <Link
@@ -359,10 +381,10 @@ export default async function ProPublicProfilePage({
               + Upload
             </Link>
 
-            <ShareButton url={publicUrl} />
+            {isApproved ? <ShareButton url={publicUrl} /> : null}
 
             <ProAccountMenu
-              publicUrl={publicUrl}
+              publicUrl={livePublicUrl}
               looksHref={ROUTES.looks}
               proServicesHref={`${ROUTES.proPublicProfile}?tab=services`}
               uploadHref={ROUTES.proMediaNew}
@@ -403,6 +425,7 @@ export default async function ProPublicProfilePage({
 
           <div className="flex items-center gap-3">
             <EditProfileButton
+              canEditHandle={isApproved}
               initial={{
                 businessName: pro.businessName ?? null,
                 bio: pro.bio ?? null,
@@ -446,13 +469,15 @@ export default async function ProPublicProfilePage({
             Messages
           </Link>
 
-          <Link
-            href={publicUrl}
-            className="ml-auto text-[12px] font-black text-textSecondary hover:text-textPrimary"
-            title="Open your public profile as clients see it"
-          >
-            View as client →
-          </Link>
+          {isApproved ? (
+            <Link
+              href={publicUrl}
+              className="ml-auto text-[12px] font-black text-textSecondary hover:text-textPrimary"
+              title="Open your public profile as clients see it"
+            >
+              View as client →
+            </Link>
+          ) : null}
         </div>
       </section>
 
