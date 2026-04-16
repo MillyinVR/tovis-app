@@ -142,6 +142,35 @@ function makeClientSignupBody() {
   }
 }
 
+function makeProSignupBody(overrides?: Record<string, unknown>) {
+  return {
+    email: 'pro@example.com',
+    password: 'SuperSecret123!',
+    role: 'PRO',
+    firstName: 'Tori',
+    lastName: 'Morales',
+    phone: '(555) 123-4567',
+    tosAccepted: true,
+    turnstileToken: 'ts_signup_ok',
+    professionType: 'MAKEUP_ARTIST',
+    handle: 'jane_smith',
+    signupLocation: {
+      kind: 'PRO_SALON',
+      placeId: 'place_1',
+      formattedAddress: '123 Main St, San Diego, CA 92101',
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      lat: 32.7157,
+      lng: -117.1611,
+      timeZoneId: 'America/Los_Angeles',
+      name: 'TOVIS Studio',
+    },
+    ...(overrides ?? {}),
+  }
+}
+
 function makeProSalonSignupBody() {
   return {
     email: 'pro-salon@example.com',
@@ -608,6 +637,82 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
+
+    it.each(['admin', 'Admin', 'tovis'])(
+    'returns 400 HANDLE_RESERVED for reserved pro handle %s',
+    async (handle) => {
+      const result = await POST(makeRequest(makeProSignupBody({ handle })))
+      const body = await result.json()
+
+      expect(result.status).toBe(400)
+      expect(body).toEqual({
+        ok: false,
+        error: 'That handle is reserved.',
+        code: 'HANDLE_RESERVED',
+      })
+
+      expect(mockPrisma.professionalProfile.findFirst).not.toHaveBeenCalled()
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    },
+  )
+
+  it('allows a non-reserved pro handle when otherwise valid', async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'pro_user_1',
+          email: 'pro@example.com',
+          role: Role.PRO,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+      phoneVerification: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        create: vi.fn().mockResolvedValue({ id: 'pv_pro_1' }),
+      },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    const result = await POST(
+      makeRequest(makeProSignupBody({ handle: 'jane_smith' })),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(201)
+    expect(body.ok).toBe(true)
+
+    expect(mockPrisma.professionalProfile.findFirst).toHaveBeenCalledWith({
+      where: { handleNormalized: 'jane_smith' },
+      select: { id: true },
+    })
+
+    expect(tx.user.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        email: 'pro@example.com',
+        phone: '+15551234567',
+        role: 'PRO',
+        professionalProfile: {
+          create: expect.objectContaining({
+            handle: 'jane_smith',
+            handleNormalized: 'jane_smith',
+            professionType: 'MAKEUP_ARTIST',
+          }),
+        },
+      }),
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        phone: true,
+        authVersion: true,
+      },
+    })
+  })
+  
   it('creates an unverified client account, sends verification artifacts, and issues a verification-only session', async () => {
     const tx = {
       user: {

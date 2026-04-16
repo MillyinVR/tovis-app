@@ -331,6 +331,24 @@ describe('app/api/pro/profile/route.ts', () => {
     })
   })
 
+    it('rejects a reserved handle', async () => {
+    const result = await PATCH(
+      makeRequest({
+        handle: 'Admin',
+      }),
+    )
+
+    const body = await readJson<{ ok: false; error: string }>(result)
+
+    expect(result.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'That handle is reserved.',
+    })
+
+    expect(mocks.prisma.professionalProfile.update).not.toHaveBeenCalled()
+  })
+
   it('rejects an invalid profession type', async () => {
     const result = await PATCH(
       makeRequest({

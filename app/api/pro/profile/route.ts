@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { Prisma, ProfessionType } from '@prisma/client'
 import { canEditPublicPublishingFields } from '@/lib/proTrustState'
+import { isHandleReserved } from '@/lib/handles'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,32 +22,6 @@ function pickNonEmptyStringOrUndefined(v: unknown): string | undefined {
 const HANDLE_MIN = 3
 const HANDLE_MAX = 24
 
-const RESERVED_HANDLES = new Set([
-  'admin',
-  'api',
-  'www',
-  'app',
-  'support',
-  'billing',
-  'pricing',
-  'login',
-  'logout',
-  'signup',
-  'pro',
-  'pros',
-  'client',
-  'clients',
-  't',
-  'c',
-  'p',
-  'nfc',
-  'book',
-  'booking',
-  'messages',
-  'looks',
-  'professional',
-  'professionals',
-])
 
 function normalizeHandle(raw: string) {
   return raw.trim().toLowerCase()
@@ -155,7 +130,7 @@ export async function PATCH(req: Request) {
           )
         }
 
-        if (RESERVED_HANDLES.has(normalized)) {
+        if (isHandleReserved(normalized)) {
           return jsonFail(400, 'That handle is reserved.')
         }
 

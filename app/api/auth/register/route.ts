@@ -34,6 +34,7 @@ import {
   logAuthEvent,
   captureAuthException,
 } from '@/lib/observability/authEvents'
+import { isHandleReserved } from '@/lib/handles'
 
 export const dynamic = 'force-dynamic'
 
@@ -852,6 +853,11 @@ export async function POST(request: Request) {
       normalizedHandle = normalizeHandleInput(handleToStore)
       if (!normalizedHandle) {
         return jsonFail(400, 'Handle is invalid.', { code: 'HANDLE_INVALID' })
+      }
+      if (isHandleReserved(normalizedHandle)) {
+        return jsonFail(400, 'That handle is reserved.', {
+          code: 'HANDLE_RESERVED',
+        })
       }
     }
 
