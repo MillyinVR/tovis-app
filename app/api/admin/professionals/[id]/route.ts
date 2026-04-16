@@ -88,13 +88,24 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     })
     if (!exists) return jsonFail(404, 'Professional not found.')
 
-    const updated = await prisma.professionalProfile.update({
-      where: { id: professionalId },
-      data: {
-        ...(status != null ? { verificationStatus: status } : {}),
-        ...(licenseVerified != null ? { licenseVerified } : {}),
-      },
-      select: { id: true, verificationStatus: true, licenseVerified: true },
+    const updated = await prisma.$transaction(async (tx) => {
+      const professional = await tx.professionalProfile.update({
+        where: { id: professionalId },
+        data: {
+          ...(status != null ? { verificationStatus: status } : {}),
+          ...(licenseVerified != null ? { licenseVerified } : {}),
+        },
+        select: { id: true, verificationStatus: true, licenseVerified: true },
+      })
+
+      if (status === VerificationStatus.APPROVED) {
+        await tx.professionalLocation.updateMany({
+          where: { professionalId },
+          data: { isBookable: true },
+        })
+      }
+
+      return professional
     })
 
     // best-effort log (never fail request)

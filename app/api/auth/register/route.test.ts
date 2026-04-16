@@ -142,6 +142,84 @@ function makeClientSignupBody() {
   }
 }
 
+function makeProSalonSignupBody() {
+  return {
+    email: 'pro-salon@example.com',
+    password: 'SuperSecret123!',
+    role: 'PRO',
+    firstName: 'Tori',
+    lastName: 'Morales',
+    phone: '(555) 123-4567',
+    tapIntentId: 'tap_pro_salon',
+    tosAccepted: true,
+    turnstileToken: 'ts_signup_ok',
+    businessName: 'TOVIS Studio',
+    professionType: 'MAKEUP_ARTIST',
+    signupLocation: {
+      kind: 'PRO_SALON',
+      placeId: 'place_123',
+      formattedAddress: '123 Main St, San Diego, CA 92101',
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      lat: 32.7157,
+      lng: -117.1611,
+      timeZoneId: 'America/Los_Angeles',
+      name: 'TOVIS Studio',
+    },
+  }
+}
+
+function makeProMobileSignupBody() {
+  return {
+    email: 'pro-mobile@example.com',
+    password: 'SuperSecret123!',
+    role: 'PRO',
+    firstName: 'Tori',
+    lastName: 'Morales',
+    phone: '(555) 123-4567',
+    tapIntentId: 'tap_pro_mobile',
+    tosAccepted: true,
+    turnstileToken: 'ts_signup_ok',
+    businessName: 'TOVIS Mobile',
+    professionType: 'MAKEUP_ARTIST',
+    mobileRadiusMiles: 25,
+    signupLocation: {
+      kind: 'PRO_MOBILE',
+      postalCode: '92101',
+      city: 'San Diego',
+      state: 'CA',
+      countryCode: 'US',
+      lat: 32.7157,
+      lng: -117.1611,
+      timeZoneId: 'America/Los_Angeles',
+    },
+  }
+}
+
+function makeSuccessfulRegisterTx(args: {
+  userId: string
+  email: string
+  role: Role
+}) {
+  return {
+    user: {
+      create: vi.fn().mockResolvedValue({
+        id: args.userId,
+        email: args.email,
+        role: args.role,
+        phone: '+15551234567',
+        authVersion: 1,
+      }),
+    },
+    phoneVerification: {
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      create: vi.fn().mockResolvedValue({ id: `pv_${args.userId}` }),
+    },
+  }
+}
+
 function makeRequest(body: unknown) {
   return new Request('http://localhost/api/auth/register', {
     method: 'POST',
@@ -243,6 +321,132 @@ describe('app/api/auth/register/route', () => {
     process.env = { ...ORIGINAL_ENV }
     vi.restoreAllMocks()
   })
+
+  it('creates the initial PRO_SALON location as non-bookable', async () => {
+  const tx = makeSuccessfulRegisterTx({
+    userId: 'user_pro_salon',
+    email: 'pro-salon@example.com',
+    role: Role.PRO,
+  })
+
+  mockPrisma.$transaction.mockImplementation(
+    async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+  )
+
+  const result = await POST(makeRequest(makeProSalonSignupBody()))
+
+  expect(result.status).toBe(201)
+
+  expect(tx.user.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      data: expect.objectContaining({
+        email: 'pro-salon@example.com',
+        phone: '+15551234567',
+        role: 'PRO',
+        professionalProfile: {
+          create: expect.objectContaining({
+            firstName: 'Tori',
+            lastName: 'Morales',
+            phone: '+15551234567',
+            timeZone: 'America/Los_Angeles',
+            businessName: 'TOVIS Studio',
+            professionType: 'MAKEUP_ARTIST',
+            verificationStatus: 'PENDING',
+            licenseVerified: false,
+            mobileBasePostalCode: null,
+            mobileRadiusMiles: null,
+            locations: {
+              create: expect.objectContaining({
+                type: 'SALON',
+                name: 'TOVIS Studio',
+                isPrimary: true,
+                isBookable: false,
+                formattedAddress: '123 Main St, San Diego, CA 92101',
+                city: 'San Diego',
+                state: 'CA',
+                postalCode: '92101',
+                countryCode: 'US',
+                placeId: 'place_123',
+                lat: 32.7157,
+                lng: -117.1611,
+                timeZone: 'America/Los_Angeles',
+                workingHours: expect.any(Object),
+              }),
+            },
+          }),
+        },
+      }),
+    }),
+  )
+
+  expect(mockCreateVerificationToken).toHaveBeenCalledWith({
+    userId: 'user_pro_salon',
+    role: Role.PRO,
+    authVersion: 1,
+  })
+})
+
+it('creates the initial PRO_MOBILE location as non-bookable', async () => {
+  const tx = makeSuccessfulRegisterTx({
+    userId: 'user_pro_mobile',
+    email: 'pro-mobile@example.com',
+    role: Role.PRO,
+  })
+
+  mockPrisma.$transaction.mockImplementation(
+    async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+  )
+
+  const result = await POST(makeRequest(makeProMobileSignupBody()))
+
+  expect(result.status).toBe(201)
+
+  expect(tx.user.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      data: expect.objectContaining({
+        email: 'pro-mobile@example.com',
+        phone: '+15551234567',
+        role: 'PRO',
+        professionalProfile: {
+          create: expect.objectContaining({
+            firstName: 'Tori',
+            lastName: 'Morales',
+            phone: '+15551234567',
+            timeZone: 'America/Los_Angeles',
+            businessName: 'TOVIS Mobile',
+            professionType: 'MAKEUP_ARTIST',
+            verificationStatus: 'PENDING',
+            licenseVerified: false,
+            mobileBasePostalCode: '92101',
+            mobileRadiusMiles: 25,
+            locations: {
+              create: expect.objectContaining({
+                type: 'MOBILE_BASE',
+                name: 'Mobile base',
+                isPrimary: true,
+                isBookable: false,
+                city: 'San Diego',
+                state: 'CA',
+                postalCode: '92101',
+                countryCode: 'US',
+                lat: 32.7157,
+                lng: -117.1611,
+                timeZone: 'America/Los_Angeles',
+                workingHours: expect.any(Object),
+              }),
+            },
+          }),
+        },
+      }),
+    }),
+  )
+
+  expect(mockCreateVerificationToken).toHaveBeenCalledWith({
+    userId: 'user_pro_mobile',
+    role: Role.PRO,
+    authVersion: 1,
+  })
+})
 
   it('passes through the verified-register rate-limit response unchanged', async () => {
     const rateLimitRes = new Response(null, { status: 429 })

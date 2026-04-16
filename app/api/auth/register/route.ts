@@ -1063,7 +1063,7 @@ export async function POST(request: Request) {
                               type: 'SALON',
                               name: signupLocation.name ?? null,
                               isPrimary: true,
-                              isBookable: true,
+                              isBookable: false,
 
                               formattedAddress:
                                 signupLocation.formattedAddress,
@@ -1083,7 +1083,7 @@ export async function POST(request: Request) {
                               type: 'MOBILE_BASE',
                               name: 'Mobile base',
                               isPrimary: true,
-                              isBookable: true,
+                              isBookable: false,
 
                               city: signupLocation.city,
                               state: signupLocation.state,
