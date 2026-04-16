@@ -779,6 +779,8 @@ model User {
   tosVersion    String?
 
   authVersion        Int                        @default(1)
+  loginAttempts      Int                        @default(0)
+  lockedUntil        DateTime?
   password           String
   role               Role
   createdAt          DateTime                   @default(now())

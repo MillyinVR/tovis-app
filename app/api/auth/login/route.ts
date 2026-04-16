@@ -1,6 +1,7 @@
 // app/api/auth/login/route.ts
 import { prisma } from '@/lib/prisma'
 import {
+  DUMMY_PASSWORD_HASH,
   verifyPassword,
   createActiveToken,
   createVerificationToken,
@@ -14,7 +15,7 @@ import {
   enforceRateLimit,
   rateLimitIdentity,
 } from '@/app/api/_utils'
-import { Role } from '@prisma/client'
+import { Prisma, Role } from '@prisma/client'
 import { captureAuthException } from '@/lib/observability/authEvents'
 
 export const dynamic = 'force-dynamic'
@@ -24,6 +25,80 @@ type LoginBody = {
   password?: unknown
   tapIntentId?: unknown
   expectedRole?: unknown
+}
+
+const LOGIN_LOCK_THRESHOLD = 10
+const LOGIN_LOCK_WINDOW_MS = 30 * 60 * 1000
+
+function invalidCredentialsResponse() {
+  return jsonFail(401, 'Invalid credentials', {
+    code: 'INVALID_CREDENTIALS',
+  })
+}
+
+function accountLockedResponse(retryAfter: number) {
+  return jsonFail(400, 'Too many login attempts. Try again later.', {
+    code: 'ACCOUNT_LOCKED',
+    retryAfter,
+  })
+}
+
+function getRetryAfterSeconds(lockedUntil: Date, now: Date): number {
+  return Math.max(1, Math.ceil((lockedUntil.getTime() - now.getTime()) / 1000))
+}
+
+async function recordFailedLoginAttempt(userId: string, now: Date) {
+  const lockUntil = new Date(now.getTime() + LOGIN_LOCK_WINDOW_MS)
+
+  const rows = await prisma.$queryRaw<
+    Array<{ loginAttempts: number; lockedUntil: Date | null }>
+  >(Prisma.sql`
+    UPDATE "User"
+    SET
+      "loginAttempts" = CASE
+        WHEN "lockedUntil" IS NOT NULL AND "lockedUntil" > ${now} THEN "loginAttempts"
+        WHEN "lockedUntil" IS NOT NULL AND "lockedUntil" <= ${now} THEN 1
+        ELSE "loginAttempts" + 1
+      END,
+      "lockedUntil" = CASE
+        WHEN "lockedUntil" IS NOT NULL AND "lockedUntil" > ${now} THEN "lockedUntil"
+        WHEN (
+          CASE
+            WHEN "lockedUntil" IS NOT NULL AND "lockedUntil" <= ${now} THEN 1
+            ELSE "loginAttempts" + 1
+          END
+        ) >= ${LOGIN_LOCK_THRESHOLD}
+        THEN ${lockUntil}
+        ELSE NULL
+      END
+    WHERE "id" = ${userId}
+    RETURNING "loginAttempts", "lockedUntil"
+  `)
+
+  const row = rows[0]
+  if (!row) {
+    throw new Error('Failed to record login attempt state')
+  }
+
+  return row
+}
+
+async function clearLoginLockState(userId: string) {
+  return prisma.user.update({
+    where: { id: userId },
+    data: {
+      loginAttempts: 0,
+      lockedUntil: null,
+    },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      authVersion: true,
+      phoneVerifiedAt: true,
+      emailVerifiedAt: true,
+    },
+  })
 }
 
 function normalizeExpectedRole(raw: unknown): Role | null {
@@ -113,6 +188,8 @@ export async function POST(request: Request) {
         password: true,
         role: true,
         authVersion: true,
+        loginAttempts: true,
+        lockedUntil: true,
         phoneVerifiedAt: true,
         emailVerifiedAt: true,
         professionalProfile: { select: { id: true } },
@@ -120,65 +197,92 @@ export async function POST(request: Request) {
       },
     })
 
+    const passwordHash = user?.password ?? DUMMY_PASSWORD_HASH
+    const isValid = await verifyPassword(password, passwordHash)
+
     if (!user) {
-      return jsonFail(401, 'Invalid credentials', {
-        code: 'INVALID_CREDENTIALS',
-      })
+      return invalidCredentialsResponse()
     }
 
     userIdForLog = user.id
 
-    const isValid = await verifyPassword(password, user.password)
+    const now = new Date()
 
-    if (!isValid) {
-      return jsonFail(401, 'Invalid credentials', {
-        code: 'INVALID_CREDENTIALS',
-      })
+    if (user.lockedUntil && user.lockedUntil.getTime() > now.getTime()) {
+      return accountLockedResponse(
+        getRetryAfterSeconds(user.lockedUntil, now),
+      )
     }
 
-    if (expectedRole && user.role !== expectedRole) {
+    if (!isValid) {
+      const failedState = await recordFailedLoginAttempt(user.id, now)
+
+      if (
+        failedState.lockedUntil &&
+        failedState.lockedUntil.getTime() > now.getTime()
+      ) {
+        return accountLockedResponse(
+          getRetryAfterSeconds(failedState.lockedUntil, now),
+        )
+      }
+
+      return invalidCredentialsResponse()
+    }
+
+    // Correct password path starts here.
+    // Clear partial/expired lockout state before downstream business checks
+    // so lockout tracks password failures, not later authorization/setup gates.
+    const clearedUser = await clearLoginLockState(user.id)
+
+    if (expectedRole && clearedUser.role !== expectedRole) {
       return jsonFail(
         403,
         `That account is not a ${expectedRole.toLowerCase()} account.`,
         {
           code: 'ROLE_MISMATCH',
           expectedRole,
-          actualRole: user.role,
+          actualRole: clearedUser.role,
         },
       )
     }
 
-    if (user.role === Role.PRO && !user.professionalProfile?.id) {
+    if (clearedUser.role === Role.PRO && !user.professionalProfile?.id) {
       return jsonFail(409, 'Professional setup is not complete yet.', {
         code: 'PRO_SETUP_REQUIRED',
       })
     }
 
-    const isFullyVerified = Boolean(user.phoneVerifiedAt && user.emailVerifiedAt)
+    const isFullyVerified = Boolean(
+      clearedUser.phoneVerifiedAt && clearedUser.emailVerifiedAt,
+    )
 
     const token = isFullyVerified
       ? createActiveToken({
-          userId: user.id,
-          role: user.role,
-          authVersion: user.authVersion,
+          userId: clearedUser.id,
+          role: clearedUser.role,
+          authVersion: clearedUser.authVersion,
         })
       : createVerificationToken({
-          userId: user.id,
-          role: user.role,
-          authVersion: user.authVersion,
+          userId: clearedUser.id,
+          role: clearedUser.role,
+          authVersion: clearedUser.authVersion,
         })
 
     const consumed = await consumeTapIntent({
       tapIntentId: tapIntentId ?? null,
-      userId: user.id,
+      userId: clearedUser.id,
     })
 
     const res = jsonOk(
       {
-        user: { id: user.id, email: user.email, role: user.role },
+        user: {
+          id: clearedUser.id,
+          email: clearedUser.email,
+          role: clearedUser.role,
+        },
         nextUrl: consumed?.nextUrl ?? null,
-        isPhoneVerified: Boolean(user.phoneVerifiedAt),
-        isEmailVerified: Boolean(user.emailVerifiedAt),
+        isPhoneVerified: Boolean(clearedUser.phoneVerifiedAt),
+        isEmailVerified: Boolean(clearedUser.emailVerifiedAt),
         isFullyVerified,
       },
       200,

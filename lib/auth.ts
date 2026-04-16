@@ -10,6 +10,11 @@ if (!JWT_SECRET) {
 const PASSWORD_SALT_ROUNDS = 10
 const TOKEN_EXPIRES_IN = '7d' as const
 
+// Precomputed bcrypt hash for the fixed string "tovis-login-dummy-password-v1".
+// Used only to normalize login timing when no matching user exists.
+export const DUMMY_PASSWORD_HASH =
+  '$2b$10$F.ZAIlXTg.PToRZemArB7emjC1dfwqWxYrOhbd4P0bFfPiM/m19/O'
+
 export type AuthRole = 'CLIENT' | 'PRO' | 'ADMIN'
 export type AuthSessionKind = 'ACTIVE' | 'VERIFICATION'
 
@@ -79,8 +84,8 @@ export async function verifyPassword(
 
 export function createToken(payload: AuthTokenPayload): string {
   return jwt.sign(payload, JWT_SECRET as string, {
-  expiresIn: TOKEN_EXPIRES_IN,
-})
+    expiresIn: TOKEN_EXPIRES_IN,
+  })
 }
 
 export function createActiveToken(payload: TokenSubject): string {
