@@ -18,6 +18,9 @@ vi.mock('@/lib/booking/timeZoneTruth', () => ({
 
 import { resolveBookingLocationContext } from '@/lib/booking/locationContext'
 
+const PROFESSIONAL_ID = 'pro_1'
+const DEFAULT_TIME_ZONE = 'America/Los_Angeles'
+
 function makeLocation(
   overrides: Partial<BookableLocation> = {},
 ): BookableLocation {
@@ -27,7 +30,7 @@ function makeLocation(
     name: 'Main Salon',
     isPrimary: true,
     isBookable: true,
-    timeZone: 'America/Los_Angeles',
+    timeZone: DEFAULT_TIME_ZONE,
     workingHours: {
       sun: { enabled: false, start: '09:00', end: '17:00' },
       mon: { enabled: true, start: '09:00', end: '17:00' },
@@ -50,6 +53,29 @@ function makeLocation(
   }
 }
 
+function mockValidTimeZoneResolution(
+  timeZone = DEFAULT_TIME_ZONE,
+) {
+  resolveApptTimeZoneMock.mockResolvedValue({
+    ok: true,
+    timeZone,
+  })
+}
+
+function expectLocationLookup(args: {
+  requestedLocationId: string
+  locationType: ServiceLocationType
+  allowFallback: boolean
+}) {
+  expect(pickBookableLocationMock).toHaveBeenCalledWith({
+    tx: undefined,
+    professionalId: PROFESSIONAL_ID,
+    requestedLocationId: args.requestedLocationId,
+    locationType: args.locationType,
+    allowFallback: args.allowFallback,
+  })
+}
+
 describe('resolveBookingLocationContext', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -62,22 +88,16 @@ describe('resolveBookingLocationContext', () => {
         type: ProfessionalLocationType.SALON,
       }),
     )
-
-    resolveApptTimeZoneMock.mockResolvedValue({
-      ok: true,
-      timeZone: 'America/Los_Angeles',
-    })
+    mockValidTimeZoneResolution()
 
     const result = await resolveBookingLocationContext({
-      professionalId: 'pro_1',
+      professionalId: PROFESSIONAL_ID,
       requestedLocationId: 'loc_requested',
       locationType: ServiceLocationType.SALON,
       allowFallback: false,
     })
 
-    expect(pickBookableLocationMock).toHaveBeenCalledWith({
-      tx: undefined,
-      professionalId: 'pro_1',
+    expectLocationLookup({
       requestedLocationId: 'loc_requested',
       locationType: ServiceLocationType.SALON,
       allowFallback: false,
@@ -89,27 +109,25 @@ describe('resolveBookingLocationContext', () => {
     expect(result.context.locationId).toBe('loc_requested')
     expect(result.context.location.id).toBe('loc_requested')
     expect(result.context.locationType).toBe(ServiceLocationType.SALON)
-    expect(result.context.timeZone).toBe('America/Los_Angeles')
+    expect(result.context.timeZone).toBe(DEFAULT_TIME_ZONE)
     expect(result.context.stepMinutes).toBe(15)
     expect(result.context.bufferMinutes).toBe(15)
     expect(result.context.advanceNoticeMinutes).toBe(60)
     expect(result.context.maxDaysAhead).toBe(90)
   })
 
-  it('returns LOCATION_NOT_FOUND when the requested location is invalid and fallback is disabled', async () => {
+  it('returns LOCATION_NOT_FOUND when the requested location is non-bookable and fallback is disabled', async () => {
     pickBookableLocationMock.mockResolvedValue(null)
 
     const result = await resolveBookingLocationContext({
-      professionalId: 'pro_1',
-      requestedLocationId: 'loc_missing',
+      professionalId: PROFESSIONAL_ID,
+      requestedLocationId: 'loc_non_bookable',
       locationType: ServiceLocationType.SALON,
       allowFallback: false,
     })
 
-    expect(pickBookableLocationMock).toHaveBeenCalledWith({
-      tx: undefined,
-      professionalId: 'pro_1',
-      requestedLocationId: 'loc_missing',
+    expectLocationLookup({
+      requestedLocationId: 'loc_non_bookable',
       locationType: ServiceLocationType.SALON,
       allowFallback: false,
     })
@@ -129,22 +147,16 @@ describe('resolveBookingLocationContext', () => {
         isPrimary: true,
       }),
     )
-
-    resolveApptTimeZoneMock.mockResolvedValue({
-      ok: true,
-      timeZone: 'America/Los_Angeles',
-    })
+    mockValidTimeZoneResolution()
 
     const result = await resolveBookingLocationContext({
-      professionalId: 'pro_1',
+      professionalId: PROFESSIONAL_ID,
       requestedLocationId: 'loc_bad',
       locationType: ServiceLocationType.SALON,
       allowFallback: true,
     })
 
-    expect(pickBookableLocationMock).toHaveBeenCalledWith({
-      tx: undefined,
-      professionalId: 'pro_1',
+    expectLocationLookup({
       requestedLocationId: 'loc_bad',
       locationType: ServiceLocationType.SALON,
       allowFallback: false,
@@ -162,21 +174,15 @@ describe('resolveBookingLocationContext', () => {
         id: 'loc_best',
       }),
     )
-
-    resolveApptTimeZoneMock.mockResolvedValue({
-      ok: true,
-      timeZone: 'America/Los_Angeles',
-    })
+    mockValidTimeZoneResolution()
 
     const result = await resolveBookingLocationContext({
-      professionalId: 'pro_1',
+      professionalId: PROFESSIONAL_ID,
       requestedLocationId: 'loc_unknown',
       locationType: ServiceLocationType.SALON,
     })
 
-    expect(pickBookableLocationMock).toHaveBeenCalledWith({
-      tx: undefined,
-      professionalId: 'pro_1',
+    expectLocationLookup({
       requestedLocationId: 'loc_unknown',
       locationType: ServiceLocationType.SALON,
       allowFallback: false,
@@ -190,13 +196,12 @@ describe('resolveBookingLocationContext', () => {
 
   it('returns TIMEZONE_REQUIRED when timezone resolution fails', async () => {
     pickBookableLocationMock.mockResolvedValue(makeLocation())
-
     resolveApptTimeZoneMock.mockResolvedValue({
       ok: false,
     })
 
     const result = await resolveBookingLocationContext({
-      professionalId: 'pro_1',
+      professionalId: PROFESSIONAL_ID,
       requestedLocationId: 'loc_primary',
       locationType: ServiceLocationType.SALON,
       allowFallback: false,
@@ -210,14 +215,10 @@ describe('resolveBookingLocationContext', () => {
 
   it('returns TIMEZONE_REQUIRED when the resolved timezone is invalid', async () => {
     pickBookableLocationMock.mockResolvedValue(makeLocation())
-
-    resolveApptTimeZoneMock.mockResolvedValue({
-      ok: true,
-      timeZone: 'Not/A_Real_Time_Zone',
-    })
+    mockValidTimeZoneResolution('Not/A_Real_Time_Zone')
 
     const result = await resolveBookingLocationContext({
-      professionalId: 'pro_1',
+      professionalId: PROFESSIONAL_ID,
       requestedLocationId: 'loc_primary',
       locationType: ServiceLocationType.SALON,
       allowFallback: false,

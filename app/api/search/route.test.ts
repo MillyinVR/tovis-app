@@ -1,3 +1,5 @@
+// app/api/search/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Prisma, ProfessionType } from '@prisma/client'
 
@@ -63,12 +65,71 @@ vi.mock('@/lib/scheduling/workingHours', () => ({
 
 import { GET } from './route'
 
+const DEFAULT_LOCATION = {
+  id: 'loc_primary',
+  formattedAddress: '123 Main St',
+  city: 'San Diego',
+  state: 'CA',
+  timeZone: 'America/Los_Angeles',
+  placeId: 'place_1',
+  lat: 32.7157,
+  lng: -117.1611,
+  isPrimary: true,
+  workingHours: {
+    mon: { enabled: true, start: '09:00', end: '17:00' },
+  },
+}
+
 function makeRequest(path: string) {
   return new Request(`http://localhost${path}`)
 }
 
-async function readJson<T>(res: Response): Promise<T> {
-  return (await res.json()) as T
+function makeSearchablePro(overrides?: {
+  id?: string
+  businessName?: string
+  handle?: string
+  professionType?: ProfessionType
+  avatarUrl?: string | null
+  location?: string | null
+}) {
+  return {
+    id: overrides?.id ?? 'pro_1',
+    businessName: overrides?.businessName ?? 'TOVIS Studio',
+    handle: overrides?.handle ?? 'tovisstudio',
+    professionType: overrides?.professionType ?? ProfessionType.BARBER,
+    avatarUrl: overrides?.avatarUrl ?? null,
+    location: overrides?.location ?? 'San Diego, CA',
+    locations: [DEFAULT_LOCATION],
+  }
+}
+
+function makeRatingRow(overrides?: {
+  professionalId?: string
+  avg?: number
+  count?: number
+}) {
+  return {
+    professionalId: overrides?.professionalId ?? 'pro_1',
+    _avg: { rating: overrides?.avg ?? 4.8 },
+    _count: { _all: overrides?.count ?? 12 },
+  }
+}
+
+function makeOfferingRow(overrides?: {
+  professionalId?: string
+  offersInSalon?: boolean
+  offersMobile?: boolean
+  salonPriceStartingAt?: Prisma.Decimal | null
+  mobilePriceStartingAt?: Prisma.Decimal | null
+}) {
+  return {
+    professionalId: overrides?.professionalId ?? 'pro_1',
+    offersInSalon: overrides?.offersInSalon ?? true,
+    offersMobile: overrides?.offersMobile ?? false,
+    salonPriceStartingAt:
+      overrides?.salonPriceStartingAt ?? new Prisma.Decimal('85.00'),
+    mobilePriceStartingAt: overrides?.mobilePriceStartingAt ?? null,
+  }
 }
 
 describe('app/api/search/route.ts', () => {
@@ -96,22 +157,10 @@ describe('app/api/search/route.ts', () => {
       },
     ])
 
-    const res = await GET(
-      makeRequest('/api/search?tab=SERVICES&q=silk'),
-    )
+    const res = await GET(makeRequest('/api/search?tab=SERVICES&q=silk'))
+    const body = await res.json()
 
     expect(res.status).toBe(200)
-
-    const body = await readJson<{
-      ok: true
-      pros: unknown[]
-      services: Array<{
-        id: string
-        name: string
-        categoryName: string | null
-      }>
-    }>(res)
-
     expect(body).toEqual({
       ok: true,
       pros: [],
@@ -141,12 +190,8 @@ describe('app/api/search/route.ts', () => {
     expect(mocks.prisma.professionalServiceOffering.findMany).not.toHaveBeenCalled()
   })
 
-  it('queries only publicly approved pros for discovery', async () => {
-    mocks.prisma.professionalProfile.findMany.mockResolvedValue([])
-
-    const res = await GET(
-      makeRequest('/api/search?q=barber'),
-    )
+  it('queries only publicly approved pros and only bookable locations for discovery', async () => {
+    const res = await GET(makeRequest('/api/search?q=barber'))
 
     expect(res.status).toBe(200)
 
@@ -179,86 +224,92 @@ describe('app/api/search/route.ts', () => {
     )
   })
 
-  it('returns mapped pro discovery results for an approved searchable pro', async () => {
-    mocks.prisma.professionalProfile.findMany.mockResolvedValue([
-      {
+  it('returns no discovery results before approval and returns the pro after approval when the location is bookable', async () => {
+    mocks.prisma.professionalProfile.findMany.mockResolvedValueOnce([])
+    mocks.prisma.review.groupBy.mockResolvedValueOnce([])
+    mocks.prisma.professionalServiceOffering.findMany.mockResolvedValueOnce([])
+
+    const beforeRes = await GET(makeRequest('/api/search?q=tovis'))
+    const beforeBody = await beforeRes.json()
+
+    expect(beforeRes.status).toBe(200)
+    expect(beforeBody).toEqual({
+      ok: true,
+      pros: [],
+      services: [],
+    })
+
+    mocks.prisma.professionalProfile.findMany.mockResolvedValueOnce([
+      makeSearchablePro({
         id: 'pro_1',
         businessName: 'TOVIS Studio',
         handle: 'tovisstudio',
-        professionType: ProfessionType.BARBER,
-        avatarUrl: null,
-        location: 'San Diego, CA',
-        locations: [
-          {
-            id: 'loc_primary',
-            formattedAddress: '123 Main St',
-            city: 'San Diego',
-            state: 'CA',
-            timeZone: 'America/Los_Angeles',
-            placeId: 'place_1',
-            lat: 32.7157,
-            lng: -117.1611,
-            isPrimary: true,
-            workingHours: {
-              mon: { enabled: true, start: '09:00', end: '17:00' },
-            },
-          },
-        ],
-      },
+        professionType: ProfessionType.MAKEUP_ARTIST,
+      }),
     ])
-
-    mocks.prisma.review.groupBy.mockResolvedValue([
-      {
+    mocks.prisma.review.groupBy.mockResolvedValueOnce([
+      makeRatingRow({
         professionalId: 'pro_1',
-        _avg: { rating: 4.8 },
-        _count: { _all: 12 },
-      },
+        avg: 4.8,
+        count: 12,
+      }),
     ])
-
-    mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([
-      {
+    mocks.prisma.professionalServiceOffering.findMany.mockResolvedValueOnce([
+      makeOfferingRow({
         professionalId: 'pro_1',
         offersInSalon: true,
         offersMobile: false,
         salonPriceStartingAt: new Prisma.Decimal('85.00'),
         mobilePriceStartingAt: null,
-      },
+      }),
+    ])
+
+    const afterRes = await GET(makeRequest('/api/search?q=tovis'))
+    const afterBody = await afterRes.json()
+
+    expect(afterRes.status).toBe(200)
+    expect(afterBody).toEqual({
+      ok: true,
+      pros: [
+        {
+          id: 'pro_1',
+          businessName: 'TOVIS Studio',
+          handle: 'tovisstudio',
+          professionType: ProfessionType.MAKEUP_ARTIST,
+          avatarUrl: null,
+          locationLabel: 'San Diego, CA',
+          distanceMiles: null,
+          ratingAvg: 4.8,
+          ratingCount: 12,
+          minPrice: 85,
+          supportsMobile: false,
+          closestLocation: DEFAULT_LOCATION,
+          primaryLocation: DEFAULT_LOCATION,
+        },
+      ],
+      services: [],
+    })
+
+    expect(mocks.prisma.professionalProfile.findMany).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns mapped pro discovery results for an approved searchable pro', async () => {
+    mocks.prisma.professionalProfile.findMany.mockResolvedValue([
+      makeSearchablePro(),
+    ])
+
+    mocks.prisma.review.groupBy.mockResolvedValue([
+      makeRatingRow(),
+    ])
+
+    mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([
+      makeOfferingRow(),
     ])
 
     const res = await GET(makeRequest('/api/search'))
+    const body = await res.json()
 
     expect(res.status).toBe(200)
-
-    const body = await readJson<{
-      ok: true
-      pros: Array<{
-        id: string
-        businessName: string | null
-        handle: string | null
-        professionType: ProfessionType | null
-        avatarUrl: string | null
-        locationLabel: string | null
-        distanceMiles: number | null
-        ratingAvg: number | null
-        ratingCount: number
-        minPrice: number | null
-        supportsMobile: boolean
-        closestLocation: {
-          id: string
-          city: string | null
-          state: string | null
-          isPrimary: boolean
-        } | null
-        primaryLocation: {
-          id: string
-          city: string | null
-          state: string | null
-          isPrimary: boolean
-        } | null
-      }>
-      services: unknown[]
-    }>(res)
-
     expect(body).toEqual({
       ok: true,
       pros: [
@@ -274,34 +325,8 @@ describe('app/api/search/route.ts', () => {
           ratingCount: 12,
           minPrice: 85,
           supportsMobile: false,
-          closestLocation: {
-            id: 'loc_primary',
-            formattedAddress: '123 Main St',
-            city: 'San Diego',
-            state: 'CA',
-            timeZone: 'America/Los_Angeles',
-            placeId: 'place_1',
-            lat: 32.7157,
-            lng: -117.1611,
-            isPrimary: true,
-            workingHours: {
-              mon: { enabled: true, start: '09:00', end: '17:00' },
-            },
-          },
-          primaryLocation: {
-            id: 'loc_primary',
-            formattedAddress: '123 Main St',
-            city: 'San Diego',
-            state: 'CA',
-            timeZone: 'America/Los_Angeles',
-            placeId: 'place_1',
-            lat: 32.7157,
-            lng: -117.1611,
-            isPrimary: true,
-            workingHours: {
-              mon: { enabled: true, start: '09:00', end: '17:00' },
-            },
-          },
+          closestLocation: DEFAULT_LOCATION,
+          primaryLocation: DEFAULT_LOCATION,
         },
       ],
       services: [],
@@ -314,7 +339,7 @@ describe('app/api/search/route.ts', () => {
     )
 
     const res = await GET(makeRequest('/api/search?q=barber'))
-    const body = await readJson<{ ok: false; error: string }>(res)
+    const body = await res.json()
 
     expect(res.status).toBe(500)
     expect(body).toEqual({
