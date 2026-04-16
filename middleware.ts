@@ -13,7 +13,6 @@ const ALLOWED_VERIFICATION_API_PATHS = new Set([
   '/api/auth/phone/verify',
   '/api/auth/email/send',
   '/api/auth/email/verify',
-  '/api/auth/email/send/verify', // temporary duplicate shim; delete in Step 8
   '/api/auth/verification/status',
   '/api/auth/logout',
 ])
