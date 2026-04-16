@@ -1,25 +1,24 @@
 // app/api/auth/phone/verify/route.ts
-import crypto from 'crypto'
 import { cookies } from 'next/headers'
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import {
   createActiveToken,
   createVerificationToken,
   verifyToken,
 } from '@/lib/auth'
+import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
+const MAX_VERIFY_ATTEMPTS = 5
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function sha256(input: string) {
-  return crypto.createHash('sha256').update(input).digest('hex')
 }
 
 async function getAuthenticatedUserId(): Promise<string | null> {
@@ -45,8 +44,12 @@ function hostToHostname(hostHeader: string | null): string | null {
 
 function resolveCookieDomain(hostname: string | null): string | undefined {
   if (!hostname) return undefined
-  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) return '.tovis.app'
-  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) return '.tovis.me'
+  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) {
+    return '.tovis.app'
+  }
+  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) {
+    return '.tovis.me'
+  }
   return undefined
 }
 
@@ -62,7 +65,8 @@ function resolveIsHttps(request: Request): boolean {
 }
 
 function getRequestHostname(request: Request): string | null {
-  const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host')
+  const host =
+    request.headers.get('x-forwarded-host') ?? request.headers.get('host')
   return hostToHostname(host)
 }
 
@@ -109,22 +113,70 @@ export async function POST(request: Request) {
       })
     }
 
-    const now = new Date()
-    const codeHash = sha256(codeRaw)
+    const throttleRes = await enforceVerificationVerifyThrottle({
+      request,
+      scope: 'phone-verify',
+      subjectKey: userId,
+    })
+    if (throttleRes) return throttleRes
 
-    const match = await prisma.phoneVerification.findFirst({
+    const now = new Date()
+    const submittedCodeHash = sha256Hex(codeRaw)
+
+    const record = await prisma.phoneVerification.findFirst({
       where: {
         userId,
         phone,
         usedAt: null,
         expiresAt: { gt: now },
-        codeHash,
       },
-      select: { id: true },
+      select: {
+        id: true,
+        codeHash: true,
+        attempts: true,
+      },
       orderBy: { createdAt: 'desc' },
     })
 
-    if (!match) {
+    if (!record) {
+      return jsonFail(400, 'Incorrect or expired code.', {
+        code: 'CODE_MISMATCH',
+      })
+    }
+
+    const isMatch = timingSafeEqualHex(submittedCodeHash, record.codeHash)
+
+    if (!isMatch) {
+      const nextAttempts = record.attempts + 1
+      const shouldLock = nextAttempts >= MAX_VERIFY_ATTEMPTS
+
+      const updateResult = await prisma.phoneVerification.updateMany({
+        where: {
+          id: record.id,
+          usedAt: null,
+          attempts: record.attempts,
+        },
+        data: shouldLock
+          ? {
+              attempts: { increment: 1 },
+              usedAt: now,
+            }
+          : {
+              attempts: { increment: 1 },
+            },
+      })
+
+      if (shouldLock && updateResult.count > 0) {
+        return jsonFail(
+          429,
+          'Too many incorrect verification attempts. Request a new verification code.',
+          {
+            code: 'CODE_LOCKED',
+            resendRequired: true,
+          },
+        )
+      }
+
       return jsonFail(400, 'Incorrect or expired code.', {
         code: 'CODE_MISMATCH',
       })
@@ -132,7 +184,7 @@ export async function POST(request: Request) {
 
     await prisma.$transaction(async (tx) => {
       await tx.phoneVerification.update({
-        where: { id: match.id },
+        where: { id: record.id },
         data: { usedAt: now },
       })
 
@@ -166,8 +218,6 @@ export async function POST(request: Request) {
       200,
     )
 
-    // Upgrade (or refresh) the session cookie so the client can access the app
-    // without needing a separate round-trip.
     const authenticatedUserId = await getAuthenticatedUserId()
     if (authenticatedUserId === userId) {
       const sessionToken = isFullyVerified

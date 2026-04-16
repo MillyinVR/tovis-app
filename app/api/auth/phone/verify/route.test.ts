@@ -6,10 +6,14 @@ const mockCookies = vi.hoisted(() => vi.fn())
 const mockVerifyToken = vi.hoisted(() => vi.fn())
 const mockCreateActiveToken = vi.hoisted(() => vi.fn())
 const mockCreateVerificationToken = vi.hoisted(() => vi.fn())
+const mockEnforceVerificationVerifyThrottle = vi.hoisted(() => vi.fn())
+const mockSha256Hex = vi.hoisted(() => vi.fn())
+const mockTimingSafeEqualHex = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   phoneVerification: {
     findFirst: vi.fn(),
+    updateMany: vi.fn(),
   },
   $transaction: vi.fn(),
 }))
@@ -26,6 +30,15 @@ vi.mock('@/lib/auth', () => ({
   verifyToken: mockVerifyToken,
   createActiveToken: mockCreateActiveToken,
   createVerificationToken: mockCreateVerificationToken,
+}))
+
+vi.mock('@/app/api/_utils/auth/verificationThrottle', () => ({
+  enforceVerificationVerifyThrottle: mockEnforceVerificationVerifyThrottle,
+}))
+
+vi.mock('@/lib/auth/timingSafe', () => ({
+  sha256Hex: mockSha256Hex,
+  timingSafeEqualHex: mockTimingSafeEqualHex,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -87,10 +100,13 @@ function makeUser(args?: {
   }
 }
 
-function makeRequest(body: unknown) {
+function makeRequest(body: unknown, headers?: Record<string, string>) {
   return new Request('http://localhost/api/auth/phone/verify', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(headers ?? {}),
+    },
     body: JSON.stringify(body),
   })
 }
@@ -105,6 +121,9 @@ describe('app/api/auth/phone/verify/route', () => {
     mockVerifyToken.mockReset()
     mockCreateActiveToken.mockReset()
     mockCreateVerificationToken.mockReset()
+    mockEnforceVerificationVerifyThrottle.mockReset()
+    mockSha256Hex.mockReset()
+    mockTimingSafeEqualHex.mockReset()
 
     mockCookies.mockResolvedValue({
       get: vi.fn().mockReturnValue(undefined),
@@ -112,6 +131,9 @@ describe('app/api/auth/phone/verify/route', () => {
     mockVerifyToken.mockReturnValue(null)
     mockCreateActiveToken.mockReturnValue('active_token')
     mockCreateVerificationToken.mockReturnValue('verification_token')
+    mockEnforceVerificationVerifyThrottle.mockResolvedValue(null)
+    mockSha256Hex.mockReturnValue('submitted_hash')
+    mockTimingSafeEqualHex.mockReturnValue(true)
   })
 
   it('passes through a failed auth result unchanged', async () => {
@@ -185,6 +207,7 @@ describe('app/api/auth/phone/verify/route', () => {
       isFullyVerified: false,
     })
     expect(mockPrisma.phoneVerification.findFirst).not.toHaveBeenCalled()
+    expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the user has no phone number', async () => {
@@ -204,9 +227,42 @@ describe('app/api/auth/phone/verify/route', () => {
       error: 'Phone number missing.',
       code: 'PHONE_REQUIRED',
     })
+    expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when the code is incorrect or expired', async () => {
+  it('returns 429 when verify throttling blocks the request', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser(),
+    })
+
+    const throttleResponse = new Response(
+      JSON.stringify({
+        ok: false,
+        error: 'Too many verification attempts. Please wait and try again.',
+        code: 'RATE_LIMITED',
+      }),
+      {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
+
+    mockEnforceVerificationVerifyThrottle.mockResolvedValue(throttleResponse)
+
+    const result = await POST(makeRequest({ code: '123456' }))
+
+    expect(mockEnforceVerificationVerifyThrottle).toHaveBeenCalledWith({
+      request: expect.any(Request),
+      scope: 'phone-verify',
+      subjectKey: 'user_1',
+    })
+    expect(result).toBe(throttleResponse)
+    expect(result.status).toBe(429)
+    expect(mockPrisma.phoneVerification.findFirst).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when there is no active verification record', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
@@ -222,6 +278,110 @@ describe('app/api/auth/phone/verify/route', () => {
       error: 'Incorrect or expired code.',
       code: 'CODE_MISMATCH',
     })
+
+    expect(mockSha256Hex).toHaveBeenCalledWith('123456')
+    expect(mockPrisma.phoneVerification.findFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        userId: 'user_1',
+        phone: '+15551234567',
+        usedAt: null,
+        expiresAt: expect.objectContaining({
+          gt: expect.any(Date),
+        }),
+      }),
+      select: {
+        id: true,
+        codeHash: true,
+        attempts: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    expect(mockTimingSafeEqualHex).not.toHaveBeenCalled()
+  })
+
+  it('increments attempts when the code is incorrect and not yet locked', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser(),
+    })
+
+    mockPrisma.phoneVerification.findFirst.mockResolvedValue({
+      id: 'pv_1',
+      codeHash: 'stored_hash',
+      attempts: 1,
+    })
+    mockTimingSafeEqualHex.mockReturnValue(false)
+    mockPrisma.phoneVerification.updateMany.mockResolvedValue({ count: 1 })
+
+    const result = await POST(makeRequest({ code: '123456' }))
+    const body = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Incorrect or expired code.',
+      code: 'CODE_MISMATCH',
+    })
+
+    expect(mockSha256Hex).toHaveBeenCalledWith('123456')
+    expect(mockTimingSafeEqualHex).toHaveBeenCalledWith(
+      'submitted_hash',
+      'stored_hash',
+    )
+
+    expect(mockPrisma.phoneVerification.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'pv_1',
+        usedAt: null,
+        attempts: 1,
+      },
+      data: {
+        attempts: { increment: 1 },
+      },
+    })
+
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('locks the current code on the fifth wrong attempt', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser(),
+    })
+
+    mockPrisma.phoneVerification.findFirst.mockResolvedValue({
+      id: 'pv_lock',
+      codeHash: 'stored_hash',
+      attempts: 4,
+    })
+    mockTimingSafeEqualHex.mockReturnValue(false)
+    mockPrisma.phoneVerification.updateMany.mockResolvedValue({ count: 1 })
+
+    const result = await POST(makeRequest({ code: '123456' }))
+    const body = await result.json()
+
+    expect(result.status).toBe(429)
+    expect(body).toEqual({
+      ok: false,
+      error:
+        'Too many incorrect verification attempts. Request a new verification code.',
+      code: 'CODE_LOCKED',
+      resendRequired: true,
+    })
+
+    expect(mockPrisma.phoneVerification.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'pv_lock',
+        usedAt: null,
+        attempts: 4,
+      },
+      data: {
+        attempts: { increment: 1 },
+        usedAt: expect.any(Date),
+      },
+    })
+
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
   it('marks the phone verified and returns partial verification state when email is still unverified', async () => {
@@ -237,7 +397,10 @@ describe('app/api/auth/phone/verify/route', () => {
 
     mockPrisma.phoneVerification.findFirst.mockResolvedValue({
       id: 'pv_1',
+      codeHash: 'stored_hash',
+      attempts: 0,
     })
+    mockTimingSafeEqualHex.mockReturnValue(true)
 
     const tx = {
       phoneVerification: {
@@ -272,17 +435,26 @@ describe('app/api/auth/phone/verify/route', () => {
       requiresEmailVerification: true,
     })
 
+    expect(mockEnforceVerificationVerifyThrottle).toHaveBeenCalledWith({
+      request: expect.any(Request),
+      scope: 'phone-verify',
+      subjectKey: 'user_1',
+    })
+
     expect(mockPrisma.phoneVerification.findFirst).toHaveBeenCalledWith({
       where: expect.objectContaining({
         userId: 'user_1',
         phone: '+15551234567',
         usedAt: null,
-        codeHash: expect.any(String),
         expiresAt: expect.objectContaining({
           gt: expect.any(Date),
         }),
       }),
-      select: { id: true },
+      select: {
+        id: true,
+        codeHash: true,
+        attempts: true,
+      },
       orderBy: { createdAt: 'desc' },
     })
 
@@ -306,11 +478,12 @@ describe('app/api/auth/phone/verify/route', () => {
       data: { phoneVerifiedAt: expect.any(Date) },
     })
 
+    expect(mockPrisma.phoneVerification.updateMany).not.toHaveBeenCalled()
     expect(mockCookies).toHaveBeenCalledTimes(1)
     expect(mockVerifyToken).not.toHaveBeenCalled()
   })
 
-  it('returns fully verified state when email is already verified', async () => {
+  it('refreshes the cookie to an ACTIVE session when email is already verified and the auth cookie belongs to the same user', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
@@ -321,6 +494,20 @@ describe('app/api/auth/phone/verify/route', () => {
 
     mockPrisma.phoneVerification.findFirst.mockResolvedValue({
       id: 'pv_2',
+      codeHash: 'stored_hash',
+      attempts: 0,
+    })
+    mockTimingSafeEqualHex.mockReturnValue(true)
+
+    const getCookie = vi.fn(() => ({ value: 'existing_cookie_token' }))
+    mockCookies.mockResolvedValue({
+      get: getCookie,
+    })
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.PRO,
+      sessionKind: 'VERIFICATION',
+      authVersion: 1,
     })
 
     const tx = {
@@ -344,7 +531,16 @@ describe('app/api/auth/phone/verify/route', () => {
       },
     )
 
-    const result = await POST(makeRequest({ code: '123456' }))
+    const result = await POST(
+      makeRequest(
+        { code: '123456' },
+        {
+          host: 'app.tovis.app',
+          'x-forwarded-host': 'app.tovis.app',
+          'x-forwarded-proto': 'https',
+        },
+      ),
+    )
     const body = await result.json()
 
     expect(result.status).toBe(200)
@@ -356,14 +552,16 @@ describe('app/api/auth/phone/verify/route', () => {
       requiresEmailVerification: false,
     })
 
-    expect(tx.phoneVerification.update).toHaveBeenCalledWith({
-      where: { id: 'pv_2' },
-      data: { usedAt: expect.any(Date) },
+    expect(getCookie).toHaveBeenCalledWith('tovis_token')
+    expect(mockVerifyToken).toHaveBeenCalledWith('existing_cookie_token')
+    expect(mockCreateActiveToken).toHaveBeenCalledWith({
+      userId: 'user_1',
+      role: Role.PRO,
+      authVersion: 1,
     })
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
 
-    expect(tx.user.update).toHaveBeenCalledWith({
-      where: { id: 'user_1' },
-      data: { phoneVerifiedAt: expect.any(Date) },
-    })
+    const setCookie = result.headers.get('set-cookie')
+    expect(setCookie).toContain('tovis_token=active_token')
   })
 })

@@ -1,4 +1,3 @@
-import crypto from 'crypto'
 import { cookies } from 'next/headers'
 import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 
@@ -9,33 +8,33 @@ import {
 } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
+import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+const MAX_VERIFY_ATTEMPTS = 5
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function sha256(input: string): string {
-  return crypto.createHash('sha256').update(input).digest('hex')
-}
-
-function readTokenFromUrl(request: Request): string | null {
-  try {
-    const url = new URL(request.url)
-    const token = url.searchParams.get('token')
-    return token && token.trim() ? token.trim() : null
-  } catch {
-    return null
-  }
-}
-
-async function readTokenFromBody(request: Request): Promise<string | null> {
+async function readVerificationBody(request: Request): Promise<{
+  verificationId: string | null
+  token: string | null
+}> {
   const raw: unknown = await request.json().catch(() => ({}))
   const body = isRecord(raw) ? raw : {}
+
+  const verificationId = pickString(body.verificationId)?.trim() ?? null
   const token = pickString(body.token)?.trim() ?? null
-  return token && token.length > 0 ? token : null
+
+  return {
+    verificationId:
+      verificationId && verificationId.length > 0 ? verificationId : null,
+    token: token && token.length > 0 ? token : null,
+  }
 }
 
 async function getAuthenticatedUserId(): Promise<string | null> {
@@ -97,28 +96,38 @@ function getRequestHostname(request: Request): string | null {
 
 export async function POST(request: Request) {
   try {
-    const tokenFromUrl = readTokenFromUrl(request)
-    const tokenFromBody = tokenFromUrl ? null : await readTokenFromBody(request)
-    const rawToken = tokenFromBody ?? tokenFromUrl
+    const { verificationId, token } = await readVerificationBody(request)
 
-    if (!rawToken) {
+    if (!verificationId) {
       return jsonFail(400, 'Verification token is required.', {
         code: 'TOKEN_REQUIRED',
       })
     }
 
-    const tokenHash = sha256(rawToken)
+    if (!token) {
+      return jsonFail(400, 'Verification token is required.', {
+        code: 'TOKEN_REQUIRED',
+      })
+    }
+
+    const throttleRes = await enforceVerificationVerifyThrottle({
+      request,
+      scope: 'email-verify',
+      subjectKey: verificationId,
+    })
+    if (throttleRes) return throttleRes
+
     const now = new Date()
 
-    const record = await prisma.emailVerificationToken.findFirst({
-      where: {
-        purpose: AuthVerificationPurpose.EMAIL_VERIFY,
-        tokenHash,
-      },
+    const record = await prisma.emailVerificationToken.findUnique({
+      where: { id: verificationId },
       select: {
         id: true,
         userId: true,
+        purpose: true,
         email: true,
+        tokenHash: true,
+        attempts: true,
         expiresAt: true,
         usedAt: true,
         user: {
@@ -133,7 +142,7 @@ export async function POST(request: Request) {
       },
     })
 
-    if (!record) {
+    if (!record || record.purpose !== AuthVerificationPurpose.EMAIL_VERIFY) {
       return jsonFail(400, 'Invalid verification token.', {
         code: 'TOKEN_INVALID',
       })
@@ -153,6 +162,45 @@ export async function POST(request: Request) {
 
       return jsonFail(400, 'This verification link has expired.', {
         code: 'TOKEN_EXPIRED',
+      })
+    }
+
+    const submittedTokenHash = sha256Hex(token)
+    const isMatch = timingSafeEqualHex(submittedTokenHash, record.tokenHash)
+
+    if (!isMatch) {
+      const nextAttempts = record.attempts + 1
+      const shouldLock = nextAttempts >= MAX_VERIFY_ATTEMPTS
+
+      const updateResult = await prisma.emailVerificationToken.updateMany({
+        where: {
+          id: record.id,
+          usedAt: null,
+          attempts: record.attempts,
+        },
+        data: shouldLock
+          ? {
+              attempts: { increment: 1 },
+              usedAt: now,
+            }
+          : {
+              attempts: { increment: 1 },
+            },
+      })
+
+      if (shouldLock && updateResult.count > 0) {
+        return jsonFail(
+          429,
+          'Too many incorrect verification attempts. Request a new verification email.',
+          {
+            code: 'TOKEN_LOCKED',
+            resendRequired: true,
+          },
+        )
+      }
+
+      return jsonFail(400, 'Invalid verification token.', {
+        code: 'TOKEN_INVALID',
       })
     }
 

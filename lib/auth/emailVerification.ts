@@ -78,12 +78,15 @@ export function getAppUrlFromRequest(request: Request): string | null {
 
 export function buildVerifyEmailUrl(args: {
   appUrl: string
+  verificationId: string
   token: string
   next?: string | null
   intent?: string | null
   inviteToken?: string | null
 }): string {
   const url = new URL('/verify-email', args.appUrl)
+
+  url.searchParams.set('verificationId', args.verificationId)
   url.searchParams.set('token', args.token)
 
   appendIfPresent(url.searchParams, 'next', sanitizeInternalPath(args.next))
@@ -290,6 +293,7 @@ export async function issueAndSendEmailVerification(args: {
 
   const verifyUrl = buildVerifyEmailUrl({
     appUrl: args.appUrl,
+    verificationId: issued.id,
     token: issued.token,
     next: args.next,
     intent: args.intent,
