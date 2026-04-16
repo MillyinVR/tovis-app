@@ -46,6 +46,13 @@ async function loadSubject() {
   return await import('./rateLimit')
 }
 
+function setNodeEnv(value: 'development' | 'production' | 'test') {
+  process.env = {
+    ...process.env,
+    NODE_ENV: value,
+  }
+}
+
 describe('app/api/_utils/rateLimit', () => {
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV }
@@ -89,7 +96,8 @@ describe('app/api/_utils/rateLimit', () => {
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
   })
 
-  it('returns null when neither user nor trusted IP identity is available', async () => {
+  it('returns null in development when neither user nor trusted IP identity is available', async () => {
+    setNodeEnv('development')
     mockGetTrustedClientIpFromNextHeaders.mockResolvedValue(null)
 
     const { rateLimitIdentity } = await loadSubject()
@@ -98,6 +106,51 @@ describe('app/api/_utils/rateLimit', () => {
 
     expect(result).toBeNull()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
+  })
+
+  it('uses the shared unknown IP fallback bucket in production when trusted client IP resolves to null', async () => {
+    setNodeEnv('production')
+    mockGetTrustedClientIpFromNextHeaders.mockResolvedValue(null)
+    mockRateLimitRedis.mockResolvedValue({
+      success: true,
+      limit: 5,
+      remaining: 4,
+      resetMs: 1_700_000_060_000,
+    })
+
+    const { enforceRateLimit, rateLimitIdentity } = await loadSubject()
+
+    const identity = await rateLimitIdentity()
+
+    expect(identity).toEqual({
+      kind: 'ip',
+      id: 'unknown',
+    })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'error',
+      event: 'rate_limit_identity_null',
+      route: 'auth.rateLimit',
+      message:
+        'Trusted client IP resolved to null in production; using shared fallback bucket.',
+      meta: {
+        fallbackIdentityKind: 'ip',
+        fallbackIdentityId: 'unknown',
+        nodeEnv: 'production',
+      },
+    })
+
+    const result = await enforceRateLimit({
+      bucket: 'auth:register',
+      identity,
+    })
+
+    expect(result).toBeNull()
+    expect(mockRateLimitRedis).toHaveBeenCalledWith({
+      key: 'rl:auth:register:ip:unknown',
+      limit: 5,
+      windowSeconds: 60 * 60,
+    })
   })
 
   it('builds a phone identity for shared SMS quotas', async () => {

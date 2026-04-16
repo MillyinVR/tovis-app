@@ -135,6 +135,26 @@ const localTokenBuckets = new Map<string, LocalBucketState>()
 const REDIS_CIRCUIT_OPEN_MS = 30_000
 let redisCircuitOpenUntilMs = 0
 
+let hasLoggedNullRateLimitIdentity = false
+
+function logNullRateLimitIdentityOnce() {
+  if (hasLoggedNullRateLimitIdentity) return
+  hasLoggedNullRateLimitIdentity = true
+
+  logAuthEvent({
+    level: 'error',
+    event: 'rate_limit_identity_null',
+    route: 'auth.rateLimit',
+    message:
+      'Trusted client IP resolved to null in production; using shared fallback bucket.',
+    meta: {
+      fallbackIdentityKind: 'ip',
+      fallbackIdentityId: 'unknown',
+      nodeEnv: process.env.NODE_ENV ?? null,
+    },
+  })
+}
+
 function isRedisCircuitOpen(nowMs = Date.now()): boolean {
   return nowMs < redisCircuitOpenUntilMs
 }
@@ -255,7 +275,14 @@ export async function rateLimitIdentity(
   if (u) return { kind: 'user', id: u }
 
   const ip = await getTrustedClientIpFromNextHeaders()
-  return ip ? { kind: 'ip', id: ip } : null
+  if (ip) return { kind: 'ip', id: ip }
+
+  if (process.env.NODE_ENV === 'production') {
+    logNullRateLimitIdentityOnce()
+    return { kind: 'ip', id: 'unknown' }
+  }
+
+  return null
 }
 
 function buildIdentityEventFields(identity: RateLimitIdentity): {
