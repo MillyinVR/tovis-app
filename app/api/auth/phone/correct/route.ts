@@ -17,7 +17,10 @@ import {
 import { prisma } from '@/lib/prisma'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
-import { captureAuthException } from '@/lib/observability/authEvents'
+import {
+  captureAuthException,
+  logAuthEvent,
+} from '@/lib/observability/authEvents'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -120,9 +123,25 @@ export async function POST(request: Request) {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
-      return jsonFail(409, 'That phone number is already in use.', {
-        code: 'PHONE_IN_USE',
+      logAuthEvent({
+        level: 'warn',
+        event: 'auth.phone.correct.duplicate',
+        route: 'auth.phone.correct',
+        code: 'PHONE_UPDATE_FAILED',
+        userId: userIdForLog,
+        phone: phoneForLog,
+        meta: {
+          prismaCode: error.code,
+        },
       })
+
+      return jsonFail(
+        400,
+        "We couldn't update to that phone number. Please try a different number.",
+        {
+          code: 'PHONE_UPDATE_FAILED',
+        },
+      )
     }
 
     const code = readPhoneSendErrorCode(error)

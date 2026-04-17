@@ -12,6 +12,7 @@ const mockEnforcePhoneVerificationOtpLimits = vi.hoisted(() => vi.fn())
 const mockIssueAndSendPhoneVerificationCode = vi.hoisted(() => vi.fn())
 const mockReadPhoneSendErrorCode = vi.hoisted(() => vi.fn())
 
+const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
@@ -56,6 +57,7 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/observability/authEvents', () => ({
+  logAuthEvent: mockLogAuthEvent,
   captureAuthException: mockCaptureAuthException,
 }))
 
@@ -142,6 +144,7 @@ describe('app/api/auth/phone/correct/route', () => {
     mockEnforcePhoneVerificationOtpLimits.mockReset()
     mockIssueAndSendPhoneVerificationCode.mockReset()
     mockReadPhoneSendErrorCode.mockReset()
+    mockLogAuthEvent.mockReset()
     mockCaptureAuthException.mockReset()
     mockPrisma.user.update.mockReset()
 
@@ -408,7 +411,7 @@ describe('app/api/auth/phone/correct/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns 409 when the corrected phone number is already in use', async () => {
+  it('returns a generic 400 and logs internally when the corrected phone number hits a duplicate constraint', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
@@ -418,12 +421,16 @@ describe('app/api/auth/phone/correct/route', () => {
     const result = await POST(makeRequest('+15557654321'))
     const body = await result.json()
 
-    expect(result.status).toBe(409)
+    expect(result.status).toBe(400)
     expect(body).toEqual({
       ok: false,
-      error: 'That phone number is already in use.',
-      code: 'PHONE_IN_USE',
+      error:
+        "We couldn't update to that phone number. Please try a different number.",
+      code: 'PHONE_UPDATE_FAILED',
     })
+
+    expect(JSON.stringify(body)).not.toContain('PHONE_IN_USE')
+    expect(JSON.stringify(body)).not.toContain('already in use')
 
     expect(mockPrisma.user.update).toHaveBeenCalledWith({
       where: { id: 'user_1' },
@@ -432,6 +439,19 @@ describe('app/api/auth/phone/correct/route', () => {
         phoneVerifiedAt: null,
       },
     })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.phone.correct.duplicate',
+      route: 'auth.phone.correct',
+      code: 'PHONE_UPDATE_FAILED',
+      userId: 'user_1',
+      phone: '+15557654321',
+      meta: {
+        prismaCode: 'P2002',
+      },
+    })
+
     expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
