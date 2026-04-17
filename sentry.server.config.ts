@@ -7,4 +7,10 @@ Sentry.init({
   enabled: Boolean(dsn),
   environment: process.env.NODE_ENV,
   tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? '0.05'),
+  enableLogs: true,
+  integrations: [
+    Sentry.consoleLoggingIntegration({
+      levels: ['info', 'warn', 'error'],
+    }),
+  ],
 })
