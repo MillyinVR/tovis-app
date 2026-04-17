@@ -112,7 +112,7 @@ const LIMITS: Record<RateLimitBucket, LimitConfig> = {
     mode: 'auth-critical',
   },
   'auth:sms-phone-hour': {
-    limit: 3,
+    limit: 5,
     windowSeconds: 60 * 60,
     prefix: 'rl:auth:sms:phone:hour',
     mode: 'auth-critical',

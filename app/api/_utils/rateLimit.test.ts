@@ -283,8 +283,8 @@ describe('app/api/_utils/rateLimit', () => {
 
     mockRateLimitRedis.mockResolvedValue({
       success: true,
-      limit: 3,
-      remaining: 2,
+      limit: 5,
+      remaining: 4,
       resetMs: 1_700_000_060_000,
     })
 
@@ -298,7 +298,7 @@ describe('app/api/_utils/rateLimit', () => {
     expect(result).toBeNull()
     expect(mockRateLimitRedis).toHaveBeenCalledWith({
       key: 'rl:auth:sms:phone:hour:phone:+15551234567',
-      limit: 3,
+      limit: 5,
       windowSeconds: 60 * 60,
     })
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
@@ -306,6 +306,76 @@ describe('app/api/_utils/rateLimit', () => {
     nowSpy.mockRestore()
   })
 
+    it('allows 5 SMS requests in the hourly bucket and blocks the 6th when Redis is unavailable', async () => {
+    mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
+
+    const { enforceRateLimit, phoneRateLimitIdentity } = await loadSubject()
+    const identity = phoneRateLimitIdentity('+15551234567')
+
+    for (let i = 0; i < 5; i += 1) {
+      const result = await enforceRateLimit({
+        bucket: 'auth:sms-phone-hour',
+        identity,
+      })
+      expect(result).toBeNull()
+    }
+
+    const blocked = await enforceRateLimit({
+      bucket: 'auth:sms-phone-hour',
+      identity,
+    })
+
+    expect(blocked).toBeInstanceOf(Response)
+    expect(blocked?.status).toBe(429)
+
+    const body = await blocked!.json()
+    expect(body).toMatchObject({
+      ok: false,
+      code: 'RATE_LIMITED',
+      details: {
+        limit: 5,
+      },
+    })
+
+    expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
+    expect(mockLogAuthEvent).toHaveBeenCalledTimes(1)
+  })
+
+    it('allows 6 SMS requests in the daily bucket and blocks the 7th when Redis is unavailable', async () => {
+    mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
+
+    const { enforceRateLimit, phoneRateLimitIdentity } = await loadSubject()
+    const identity = phoneRateLimitIdentity('+15551234567')
+
+    for (let i = 0; i < 6; i += 1) {
+      const result = await enforceRateLimit({
+        bucket: 'auth:sms-phone-day',
+        identity,
+      })
+      expect(result).toBeNull()
+    }
+
+    const blocked = await enforceRateLimit({
+      bucket: 'auth:sms-phone-day',
+      identity,
+    })
+
+    expect(blocked).toBeInstanceOf(Response)
+    expect(blocked?.status).toBe(429)
+
+    const body = await blocked!.json()
+    expect(body).toMatchObject({
+      ok: false,
+      code: 'RATE_LIMITED',
+      details: {
+        limit: 6,
+      },
+    })
+
+    expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
+    expect(mockLogAuthEvent).toHaveBeenCalledTimes(1)
+  })
+  
   it('skips non-auth-critical Redis rate limits when Redis fails and logs a structured warning', async () => {
     mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
 
