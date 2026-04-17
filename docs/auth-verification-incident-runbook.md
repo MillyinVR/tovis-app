@@ -277,6 +277,8 @@ After remediation:
 
 ## Turnstile / CAPTCHA degradation
 
+A Sentry alert rule named "Turnstile fail-open — signup CAPTCHA degraded" fires when `auth.register.captcha_fail_open` exceeds 10 events in 5 minutes in production. If you are reading this section, that alert has fired.
+
 Use this section when the alert for `auth.register.captcha_fail_open` fires or when signup abuse risk rises during Turnstile instability.
 
 ## What this signal means
