@@ -1,4 +1,14 @@
 // lib/currentUser.ts
+//
+// AuthVersion invariant:
+// - Every authenticated server route/page must reach current-user auth through
+//   getCurrentUser(), usually via requireUser()/requireClient()/requirePro().
+// - Middleware can validate JWT signature/session kind, but it cannot
+//   DB-verify authVersion in the Edge runtime.
+// - This file is the source of truth for DB-backed authVersion validation.
+//   If a route reads JWT/session state directly and skips this path, session
+//   revocation flows (sign out everywhere, password reset, authVersion bump)
+//   can be bypassed.
 
 import { Prisma } from '@prisma/client'
 import { cookies } from 'next/headers'

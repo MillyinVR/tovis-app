@@ -1,19 +1,16 @@
-import { cookies } from 'next/headers'
+// app/api/auth/email/verify/route.ts
 import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 
-import {
-  createActiveToken,
-  createVerificationToken,
-  verifyToken,
-} from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { createActiveToken, createVerificationToken } from '@/lib/auth'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
+import { getCurrentUser } from '@/lib/currentUser'
 import {
   logAuthEvent,
   captureAuthException,
 } from '@/lib/observability/authEvents'
+import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -39,15 +36,6 @@ async function readVerificationBody(request: Request): Promise<{
       verificationId && verificationId.length > 0 ? verificationId : null,
     token: token && token.length > 0 ? token : null,
   }
-}
-
-async function getAuthenticatedUserId(): Promise<string | null> {
-  const cookieStore = await cookies()
-  const token = cookieStore.get('tovis_token')?.value ?? null
-  if (!token) return null
-
-  const payload = verifyToken(token)
-  return payload?.userId ?? null
 }
 
 function hostToHostname(hostHeader: string | null): string | null {
@@ -95,6 +83,7 @@ function resolveIsHttps(request: Request): boolean {
 function getRequestHostname(request: Request): string | null {
   const host =
     request.headers.get('x-forwarded-host') ?? request.headers.get('host')
+
   return hostToHostname(host)
 }
 
@@ -281,8 +270,8 @@ export async function POST(request: Request) {
       200,
     )
 
-    const authenticatedUserId = await getAuthenticatedUserId()
-    if (authenticatedUserId === result.id) {
+    const currentUser = await getCurrentUser().catch(() => null)
+    if (currentUser?.id === result.id) {
       const sessionToken = isFullyVerified
         ? createActiveToken({
             userId: result.id,

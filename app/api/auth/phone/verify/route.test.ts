@@ -2,8 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
 const mockRequireUser = vi.hoisted(() => vi.fn())
-const mockCookies = vi.hoisted(() => vi.fn())
-const mockVerifyToken = vi.hoisted(() => vi.fn())
 const mockCreateActiveToken = vi.hoisted(() => vi.fn())
 const mockCreateVerificationToken = vi.hoisted(() => vi.fn())
 const mockEnforceVerificationVerifyThrottle = vi.hoisted(() => vi.fn())
@@ -24,12 +22,7 @@ vi.mock('@/app/api/_utils/auth/requireUser', () => ({
   requireUser: mockRequireUser,
 }))
 
-vi.mock('next/headers', () => ({
-  cookies: mockCookies,
-}))
-
 vi.mock('@/lib/auth', () => ({
-  verifyToken: mockVerifyToken,
   createActiveToken: mockCreateActiveToken,
   createVerificationToken: mockCreateVerificationToken,
 }))
@@ -124,8 +117,6 @@ describe('app/api/auth/phone/verify/route', () => {
     mockPrisma.$transaction.mockReset()
 
     mockRequireUser.mockReset()
-    mockCookies.mockReset()
-    mockVerifyToken.mockReset()
     mockCreateActiveToken.mockReset()
     mockCreateVerificationToken.mockReset()
     mockEnforceVerificationVerifyThrottle.mockReset()
@@ -134,10 +125,6 @@ describe('app/api/auth/phone/verify/route', () => {
     mockLogAuthEvent.mockReset()
     mockCaptureAuthException.mockReset()
 
-    mockCookies.mockResolvedValue({
-      get: vi.fn().mockReturnValue(undefined),
-    })
-    mockVerifyToken.mockReturnValue(null)
     mockCreateActiveToken.mockReturnValue('active_token')
     mockCreateVerificationToken.mockReturnValue('verification_token')
     mockEnforceVerificationVerifyThrottle.mockResolvedValue(null)
@@ -223,6 +210,9 @@ describe('app/api/auth/phone/verify/route', () => {
     })
     expect(mockPrisma.phoneVerification.findFirst).not.toHaveBeenCalled()
     expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
+    expect(result.headers.get('set-cookie')).toBeNull()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -245,6 +235,8 @@ describe('app/api/auth/phone/verify/route', () => {
       code: 'PHONE_REQUIRED',
     })
     expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -279,6 +271,8 @@ describe('app/api/auth/phone/verify/route', () => {
     expect(result).toBe(throttleResponse)
     expect(result.status).toBe(429)
     expect(mockPrisma.phoneVerification.findFirst).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -318,6 +312,8 @@ describe('app/api/auth/phone/verify/route', () => {
       orderBy: { createdAt: 'desc' },
     })
     expect(mockTimingSafeEqualHex).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -364,6 +360,8 @@ describe('app/api/auth/phone/verify/route', () => {
     })
 
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -407,6 +405,8 @@ describe('app/api/auth/phone/verify/route', () => {
     })
 
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -506,8 +506,15 @@ describe('app/api/auth/phone/verify/route', () => {
     })
 
     expect(mockPrisma.phoneVerification.updateMany).not.toHaveBeenCalled()
-    expect(mockCookies).toHaveBeenCalledTimes(1)
-    expect(mockVerifyToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).toHaveBeenCalledWith({
+      userId: 'user_1',
+      role: Role.CLIENT,
+      authVersion: 1,
+    })
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+
+    const setCookie = result.headers.get('set-cookie')
+    expect(setCookie).toContain('tovis_token=verification_token')
 
     expect(mockLogAuthEvent).toHaveBeenCalledWith({
       level: 'info',
@@ -523,7 +530,7 @@ describe('app/api/auth/phone/verify/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('refreshes the cookie to an ACTIVE session when email is already verified and the auth cookie belongs to the same user', async () => {
+  it('refreshes the cookie to an ACTIVE session when email is already verified', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
@@ -538,17 +545,6 @@ describe('app/api/auth/phone/verify/route', () => {
       attempts: 0,
     })
     mockTimingSafeEqualHex.mockReturnValue(true)
-
-    const getCookie = vi.fn(() => ({ value: 'existing_cookie_token' }))
-    mockCookies.mockResolvedValue({
-      get: getCookie,
-    })
-    mockVerifyToken.mockReturnValue({
-      userId: 'user_1',
-      role: Role.PRO,
-      sessionKind: 'VERIFICATION',
-      authVersion: 1,
-    })
 
     const tx = {
       phoneVerification: {
@@ -592,8 +588,6 @@ describe('app/api/auth/phone/verify/route', () => {
       requiresEmailVerification: false,
     })
 
-    expect(getCookie).toHaveBeenCalledWith('tovis_token')
-    expect(mockVerifyToken).toHaveBeenCalledWith('existing_cookie_token')
     expect(mockCreateActiveToken).toHaveBeenCalledWith({
       userId: 'user_1',
       role: Role.PRO,

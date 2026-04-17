@@ -281,11 +281,14 @@ describe('app/(auth)/verify-phone/page', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1)
     })
 
-    const backLink = screen.getByRole('link', { name: /back to sign in/i })
-    expect(backLink).toHaveAttribute(
-      'href',
-      '/login?from=%2Fclaim%2Ftok_1&next=%2Fclaim%2Ftok_1&email=client%40example.com&intent=CLAIM_INVITE&inviteToken=tok_1',
-    )
+    await screen.findByText('client@example.com')
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: /back to sign in/i })).toHaveAttribute(
+        'href',
+        '/login?from=%2Fclaim%2Ftok_1&next=%2Fclaim%2Ftok_1&email=client%40example.com&intent=CLAIM_INVITE&inviteToken=tok_1',
+      )
+    })
   })
 
   it('recovers nextUrl once after a short delay when neither query nor status includes it', async () => {

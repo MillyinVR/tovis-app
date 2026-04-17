@@ -1,8 +1,9 @@
+// app/api/auth/email/verify/route.test.ts
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthVerificationPurpose, Role } from '@prisma/client'
 
-const mockCookies = vi.hoisted(() => vi.fn())
-const mockVerifyToken = vi.hoisted(() => vi.fn())
+const mockGetCurrentUser = vi.hoisted(() => vi.fn())
 const mockCreateActiveToken = vi.hoisted(() => vi.fn())
 const mockCreateVerificationToken = vi.hoisted(() => vi.fn())
 const mockEnforceVerificationVerifyThrottle = vi.hoisted(() => vi.fn())
@@ -23,12 +24,11 @@ const mockPrisma = vi.hoisted(() => ({
   $transaction: vi.fn(),
 }))
 
-vi.mock('next/headers', () => ({
-  cookies: mockCookies,
+vi.mock('@/lib/currentUser', () => ({
+  getCurrentUser: mockGetCurrentUser,
 }))
 
 vi.mock('@/lib/auth', () => ({
-  verifyToken: mockVerifyToken,
   createActiveToken: mockCreateActiveToken,
   createVerificationToken: mockCreateVerificationToken,
 }))
@@ -114,8 +114,7 @@ describe('app/api/auth/email/verify/route', () => {
     resetMockGroup(mockPrisma.user)
     mockPrisma.$transaction.mockReset()
 
-    mockCookies.mockReset()
-    mockVerifyToken.mockReset()
+    mockGetCurrentUser.mockReset()
     mockCreateActiveToken.mockReset()
     mockCreateVerificationToken.mockReset()
     mockEnforceVerificationVerifyThrottle.mockReset()
@@ -124,11 +123,7 @@ describe('app/api/auth/email/verify/route', () => {
     mockLogAuthEvent.mockReset()
     mockCaptureAuthException.mockReset()
 
-    mockCookies.mockResolvedValue({
-      get: vi.fn(() => undefined),
-    })
-
-    mockVerifyToken.mockReturnValue(null)
+    mockGetCurrentUser.mockResolvedValue(null)
     mockCreateActiveToken.mockReturnValue('active_token')
     mockCreateVerificationToken.mockReturnValue('verification_token')
     mockEnforceVerificationVerifyThrottle.mockResolvedValue(null)
@@ -508,6 +503,7 @@ describe('app/api/auth/email/verify/route', () => {
 
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
     expect(mockCreateVerificationToken).not.toHaveBeenCalled()
+    expect(result.headers.get('set-cookie')).toBeNull()
 
     expect(mockLogAuthEvent).toHaveBeenCalledWith({
       level: 'info',
@@ -536,16 +532,7 @@ describe('app/api/auth/email/verify/route', () => {
       }),
     )
 
-    const getCookie = vi.fn(() => ({ value: 'existing_cookie_token' }))
-    mockCookies.mockResolvedValue({
-      get: getCookie,
-    })
-    mockVerifyToken.mockReturnValue({
-      userId: 'user_1',
-      role: Role.PRO,
-      sessionKind: 'VERIFICATION',
-      authVersion: 1,
-    })
+    mockGetCurrentUser.mockResolvedValue({ id: 'user_1' })
 
     const tx = {
       emailVerificationToken: {
@@ -590,8 +577,6 @@ describe('app/api/auth/email/verify/route', () => {
       requiresPhoneVerification: false,
     })
 
-    expect(getCookie).toHaveBeenCalledWith('tovis_token')
-    expect(mockVerifyToken).toHaveBeenCalledWith('existing_cookie_token')
     expect(mockCreateActiveToken).toHaveBeenCalledWith({
       userId: 'user_1',
       role: Role.PRO,
@@ -629,16 +614,7 @@ describe('app/api/auth/email/verify/route', () => {
       }),
     )
 
-    const getCookie = vi.fn(() => ({ value: 'existing_cookie_token' }))
-    mockCookies.mockResolvedValue({
-      get: getCookie,
-    })
-    mockVerifyToken.mockReturnValue({
-      userId: 'user_1',
-      role: Role.CLIENT,
-      sessionKind: 'VERIFICATION',
-      authVersion: 1,
-    })
+    mockGetCurrentUser.mockResolvedValue({ id: 'user_1' })
 
     const tx = {
       emailVerificationToken: {
@@ -707,7 +683,7 @@ describe('app/api/auth/email/verify/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('does not refresh cookies when the verified token belongs to a different user than the authenticated cookie', async () => {
+  it('does not refresh cookies when the verified token belongs to a different authenticated user', async () => {
     mockPrisma.emailVerificationToken.findUnique.mockResolvedValue(
       makeRecord({
         userId: 'user_2',
@@ -719,15 +695,7 @@ describe('app/api/auth/email/verify/route', () => {
       }),
     )
 
-    mockCookies.mockResolvedValue({
-      get: vi.fn(() => ({ value: 'existing_cookie_token' })),
-    })
-    mockVerifyToken.mockReturnValue({
-      userId: 'user_1',
-      role: Role.CLIENT,
-      sessionKind: 'VERIFICATION',
-      authVersion: 1,
-    })
+    mockGetCurrentUser.mockResolvedValue({ id: 'user_1' })
 
     const tx = {
       emailVerificationToken: {
