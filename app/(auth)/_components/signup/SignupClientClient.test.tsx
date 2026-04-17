@@ -1,3 +1,5 @@
+// app/(auth)/_components/signup/SignupClientClient.test.tsx
+
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -189,7 +191,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     )
   })
 
-  it('submits client signup, includes tos + turnstile, and falls back to query next with email and sms retry flags', async () => {
+  it('submits client signup, includes tos + turnstile, and treats pending verification sends as optimistic success while falling back to query next', async () => {
     mocks.setSearchParams({
       ti: 'ti_123',
       next: '/claim/tok_1',
@@ -216,8 +218,8 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       }),
       jsonResponse({
         nextUrl: null,
-        emailVerificationSent: false,
-        phoneVerificationSent: false,
+        emailVerificationSent: 'pending',
+        phoneVerificationSent: 'pending',
       }),
     ])
 
@@ -282,12 +284,71 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
 
     await waitFor(() => {
       expect(mocks.hardNavigate).toHaveBeenCalledWith(
+        '/verify-phone?next=%2Fclaim%2Ftok_1',
+      )
+    })
+  })
+
+  it('preserves explicit retry flags when register reports real send failures', async () => {
+    mocks.setSearchParams({
+      ti: 'ti_123',
+      next: '/claim/tok_1',
+      intent: 'CLAIM_INVITE',
+      inviteToken: 'tok_1',
+      name: 'Tori Morales',
+      email: 'tori@example.com',
+      phone: '+16195551234',
+    })
+
+    const fetchMock = setFetchSequence([
+      jsonResponse({
+        geo: {
+          lat: 33.036,
+          lng: -117.292,
+          postalCode: '92024',
+          city: 'Encinitas',
+          state: 'CA',
+          countryCode: 'US',
+        },
+      }),
+      jsonResponse({
+        timeZoneId: 'America/Los_Angeles',
+      }),
+      jsonResponse({
+        nextUrl: null,
+        emailVerificationSent: false,
+        phoneVerificationSent: false,
+      }),
+    ])
+
+    render(<SignupClientClient />)
+
+    await confirmZip('92024')
+
+    fireEvent.change(getPasswordInput(), {
+      target: { value: 'supersecret123' },
+    })
+
+    fireEvent.click(getConsentCheckbox())
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Create Client Account' }),
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
+
+    expect(mocks.router.refresh).toHaveBeenCalledTimes(1)
+
+    await waitFor(() => {
+      expect(mocks.hardNavigate).toHaveBeenCalledWith(
         '/verify-phone?next=%2Fclaim%2Ftok_1&email=retry&sms=retry',
       )
     })
   })
 
-  it('prefers server nextUrl and omits retry flags when both verification sends succeeded', async () => {
+  it('prefers server nextUrl and omits retry flags when verification sends are pending', async () => {
     mocks.setSearchParams({
       next: '/claim/tok_1',
       email: 'client@example.com',
@@ -311,8 +372,8 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       }),
       jsonResponse({
         nextUrl: '/client/onboarding',
-        emailVerificationSent: true,
-        phoneVerificationSent: true,
+        emailVerificationSent: 'pending',
+        phoneVerificationSent: 'pending',
       }),
     ])
 

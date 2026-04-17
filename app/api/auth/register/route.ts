@@ -35,8 +35,10 @@ import {
   captureAuthException,
 } from '@/lib/observability/authEvents'
 import { isHandleReserved } from '@/lib/handles'
+import { waitUntil } from '@vercel/functions'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
 /* =========================================================
    Types
@@ -490,7 +492,11 @@ type CaVerifyResult =
       raw: Prisma.InputJsonValue
       source: 'CA_DCA_BREEZE'
     }
-  | { ok: false; error: string }
+  | {
+      ok: false
+      error: string
+      reason: 'TIMEOUT' | 'UNAVAILABLE' | 'CONFIG' | 'UNKNOWN'
+    }
 
 let cachedTypeMap: Record<string, string> | null = null
 let cachedTypeExp = 0
@@ -512,6 +518,7 @@ async function getCaDcaTypeMap(): Promise<Record<string, string>> {
   const res = await fetch(url, {
     headers: { APP_ID, APP_KEY },
     cache: 'no-store',
+    signal: AbortSignal.timeout(10000),
   })
   const data: unknown = await res.json().catch(() => ({}))
 
@@ -575,12 +582,21 @@ async function verifyCaBbcLicense(args: {
     const APP_ID = envOrNull('DCA_SEARCH_APP_ID')
     const APP_KEY = envOrNull('DCA_SEARCH_APP_KEY')
     if (!APP_ID || !APP_KEY) {
-      return { ok: false, error: 'License verification is not configured.' }
+      return {
+        ok: false,
+        error: 'License verification is not configured.',
+        reason: 'CONFIG',
+      }
     }
-
     const typeMap = await getCaDcaTypeMap()
     const licType = typeMap[args.professionType]
-    if (!licType) return { ok: false, error: 'Unsupported CA license type.' }
+    if (!licType) {
+      return {
+        ok: false,
+        error: 'Unsupported CA license type.',
+        reason: 'UNKNOWN',
+      }
+    }
 
     const url = new URL(
       'https://iservices.dca.ca.gov/api/search/v1/licenseSearchService/getLicenseNumberSearch',
@@ -591,6 +607,7 @@ async function verifyCaBbcLicense(args: {
     const res = await fetch(url.toString(), {
       headers: { APP_ID, APP_KEY },
       cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
     })
     const data: unknown = await res.json().catch(() => ({}))
 
@@ -600,7 +617,11 @@ async function verifyCaBbcLicense(args: {
         (typeof data.message === 'string' || typeof data.error === 'string')
           ? String(data.message ?? data.error)
           : 'License lookup failed.'
-      return { ok: false, error: msg }
+      return {
+        ok: false,
+        error: msg,
+        reason: 'UNAVAILABLE',
+      }
     }
 
     const detailsRoot = isRecord(data) ? asArray(data.licenseDetails) : []
@@ -641,8 +662,23 @@ async function verifyCaBbcLicense(args: {
       source: 'CA_DCA_BREEZE',
     }
   } catch (e: unknown) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      return {
+        ok: false,
+        error: 'DCA verification timed out.',
+        reason: 'TIMEOUT',
+      }
+    }
+
     const msg = e instanceof Error ? e.message : 'Verification error.'
-    return { ok: false, error: msg }
+    return {
+      ok: false,
+      error: msg,
+      reason:
+        msg.includes('not configured') || msg.includes('missing')
+          ? 'CONFIG'
+          : 'UNAVAILABLE',
+    }
   }
 }
 
@@ -898,6 +934,7 @@ export async function POST(request: Request) {
     let manualLicenseDocUrl: string | null = null
     let needsManualLicenseUpload = false
     let manualLicensePendingReview = false
+    let dcaTimedOutAtSignup = false
 
     if (role === 'PRO' && profession && requiresCaBbcLicense(profession)) {
       const licenseState = pickUpper(body.licenseState)
@@ -926,7 +963,7 @@ export async function POST(request: Request) {
         licenseNumber,
       })
 
-      if (v.ok && v.verified) {
+    if (v.ok && v.verified) {
         verificationStatus = VerificationStatus.APPROVED
         licenseVerified = true
         licenseExpiryToStore = parseMaybeDate(v.expDate ?? null)
@@ -939,8 +976,16 @@ export async function POST(request: Request) {
           code: 'LICENSE_NOT_VERIFIED',
           statusCode: v.statusCode ?? null,
         })
+      } else if (v.reason === 'TIMEOUT') {
+        dcaTimedOutAtSignup = true
+        verificationStatus = VerificationStatus.PENDING
+        licenseVerified = false
+        licenseRawJsonToStore = {
+          note: 'DCA timeout at signup',
+          error: 'AbortError',
+        } satisfies Prisma.InputJsonValue
       } else {
-        // ✅ DCA unavailable -> allow signup; require post-signup upload.
+        // keep your current fallback behavior for non-timeout DCA failures
         const docUrlRaw = pickString(body.licenseDocumentUrl)
         if (docUrlRaw?.trim()) {
           const checked = validateLicenseDocUrl(docUrlRaw)
@@ -1141,51 +1186,67 @@ export async function POST(request: Request) {
       return { user, code }
     })
 
-    const smsResult = await sendPhoneVerificationSms({ to: user.phone!, code })
-    const phoneVerificationSent = smsResult.ok
-    const phoneVerificationErrorCode = smsResult.ok ? null : smsResult.code
-
-    let emailVerificationSent = false
+    if (dcaTimedOutAtSignup) {
+      logAuthEvent({
+        level: 'warn',
+        event: 'auth.dca.timeout',
+        route: 'auth.register',
+        userId: user.id,
+      })
+    }
 
     const verificationEmail = normalizeEmail(user.email)
 
-    if (verificationEmail) {
-      try {
-        await issueAndSendEmailVerification({
-          userId: user.id,
-          email: verificationEmail,
-          appUrl,
-          next: nextForVerification,
-          intent: verificationIntent,
-          inviteToken: verificationInviteToken,
-        })
+    waitUntil(
+      (async () => {
+        await sendPhoneVerificationSms({ to: user.phone!, code })
 
-        logAuthEvent({
-          level: 'info',
-          event: 'auth.email.send.success',
-          route: 'auth.register',
-          provider: 'postmark',
-          userId: user.id,
-          email: verificationEmail,
-        })
+        if (verificationEmail) {
+          try {
+            await issueAndSendEmailVerification({
+              userId: user.id,
+              email: verificationEmail,
+              appUrl,
+              next: nextForVerification,
+              intent: verificationIntent,
+              inviteToken: verificationInviteToken,
+            })
 
-        emailVerificationSent = true
-      } catch (emailErr) {
+            logAuthEvent({
+              level: 'info',
+              event: 'auth.email.send.success',
+              route: 'auth.register',
+              provider: 'postmark',
+              userId: user.id,
+              email: verificationEmail,
+            })
+          } catch (emailErr) {
+            captureAuthException({
+              event: 'auth.email.send.failed',
+              route: 'auth.register',
+              provider: 'postmark',
+              userId: user.id,
+              email: verificationEmail,
+              error: emailErr,
+            })
+          }
+        }
+
+        await consumeTapIntent({
+          tapIntentId,
+          userId: user.id,
+        }).catch(() => null)
+      })().catch((backgroundErr) => {
         captureAuthException({
-          event: 'auth.email.send.failed',
+          event: 'auth.register.background_tail.failed',
           route: 'auth.register',
-          provider: 'postmark',
           userId: user.id,
           email: verificationEmail,
-          error: emailErr,
+          phone: user.phone,
+          error: backgroundErr,
         })
-      }
-    }
-
-    const consumed = await consumeTapIntent({
-      tapIntentId,
-      userId: user.id,
-    }).catch(() => null)
+      }),
+    )
 
     const token = createVerificationToken({
       userId: user.id,
@@ -1196,15 +1257,15 @@ export async function POST(request: Request) {
     const res = jsonOk(
       {
         user: { id: user.id, email: user.email, role: user.role },
-        nextUrl: consumed?.nextUrl ?? nextForVerification ?? null,
+        nextUrl: nextForVerification ?? null,
         requiresPhoneVerification: true,
-        phoneVerificationSent,
-        phoneVerificationErrorCode,
+        phoneVerificationSent: 'pending',
+        phoneVerificationErrorCode: null,
         requiresEmailVerification: true,
         isPhoneVerified: false,
         isEmailVerified: false,
         isFullyVerified: false,
-        emailVerificationSent,
+        emailVerificationSent: 'pending',
 
         // ✅ safe flags for the client UX
         needsManualLicenseUpload:

@@ -9,6 +9,8 @@ const mockConsumeTapIntent = vi.hoisted(() => vi.fn())
 const mockGetAppUrlFromRequest = vi.hoisted(() => vi.fn())
 const mockIssueAndSendEmailVerification = vi.hoisted(() => vi.fn())
 
+const mockWaitUntil = vi.hoisted(() => vi.fn())
+
 const mockIsValidIanaTimeZone = vi.hoisted(() => vi.fn())
 
 const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
@@ -33,6 +35,8 @@ const mockTwilio = vi.hoisted(() =>
     },
   })),
 )
+
+const mockFetch = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   user: {
@@ -62,6 +66,10 @@ vi.mock('@/lib/tapIntentConsume', () => ({
 vi.mock('@/lib/auth/emailVerification', () => ({
   getAppUrlFromRequest: mockGetAppUrlFromRequest,
   issueAndSendEmailVerification: mockIssueAndSendEmailVerification,
+}))
+
+vi.mock('@vercel/functions', () => ({
+  waitUntil: mockWaitUntil,
 }))
 
 vi.mock('@/lib/timeZone', () => ({
@@ -116,6 +124,25 @@ function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
   for (const fn of Object.values(group)) {
     fn.mockReset()
   }
+}
+
+let waitUntilTasks: Promise<unknown>[] = []
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+
+  return { promise, resolve, reject }
+}
+
+async function flushWaitUntilTasks() {
+  await Promise.allSettled(waitUntilTasks)
+  await Promise.resolve()
 }
 
 function makeClientSignupBody() {
@@ -260,6 +287,54 @@ function makeRequest(body: unknown) {
   })
 }
 
+function makeCompleteDcaLicenseTypesResponse() {
+  return makeJsonResponse({
+    getAllLicenseTypes: [
+      {
+        licenseTypes: [
+          {
+            licenseLongName: 'COSMETOLOGIST',
+            publicNameDesc: 'COSMETOLOGIST',
+            clientCode: 'COSM',
+          },
+          {
+            licenseLongName: 'BARBER',
+            publicNameDesc: 'BARBER',
+            clientCode: 'BARB',
+          },
+          {
+            licenseLongName: 'ESTHETICIAN',
+            publicNameDesc: 'ESTHETICIAN',
+            clientCode: 'ESTH',
+          },
+          {
+            licenseLongName: 'MANICURIST',
+            publicNameDesc: 'MANICURIST',
+            clientCode: 'MANI',
+          },
+          {
+            licenseLongName: 'HAIRSTYLIST',
+            publicNameDesc: 'HAIRSTYLIST',
+            clientCode: 'HAIR',
+          },
+          {
+            licenseLongName: 'ELECTROLOGIST',
+            publicNameDesc: 'ELECTROLOGIST',
+            clientCode: 'ELEC',
+          },
+        ],
+      },
+    ],
+  })
+}
+
+function makeJsonResponse(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 describe('app/api/auth/register/route', () => {
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV }
@@ -280,6 +355,12 @@ describe('app/api/auth/register/route', () => {
     mockGetAppUrlFromRequest.mockReset()
     mockIssueAndSendEmailVerification.mockReset()
 
+    waitUntilTasks = []
+    mockWaitUntil.mockReset()
+    mockWaitUntil.mockImplementation((task: Promise<unknown>) => {
+      waitUntilTasks.push(Promise.resolve(task))
+    })
+
     mockIsValidIanaTimeZone.mockReset()
 
     mockEnforceRateLimit.mockReset()
@@ -294,6 +375,9 @@ describe('app/api/auth/register/route', () => {
 
     mockTwilio.mockReset()
     mockTwilioMessagesCreate.mockReset()
+
+    mockFetch.mockReset()
+    vi.stubGlobal('fetch', mockFetch)
 
     mockRateLimitIdentity.mockResolvedValue({
       kind: 'ip',
@@ -348,134 +432,135 @@ describe('app/api/auth/register/route', () => {
 
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV }
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
   it('creates the initial PRO_SALON location as non-bookable', async () => {
-  const tx = makeSuccessfulRegisterTx({
-    userId: 'user_pro_salon',
-    email: 'pro-salon@example.com',
-    role: Role.PRO,
-  })
+    const tx = makeSuccessfulRegisterTx({
+      userId: 'user_pro_salon',
+      email: 'pro-salon@example.com',
+      role: Role.PRO,
+    })
 
-  mockPrisma.$transaction.mockImplementation(
-    async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
-  )
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
 
-  const result = await POST(makeRequest(makeProSalonSignupBody()))
+    const result = await POST(makeRequest(makeProSalonSignupBody()))
 
-  expect(result.status).toBe(201)
+    expect(result.status).toBe(201)
 
-  expect(tx.user.create).toHaveBeenCalledWith(
-    expect.objectContaining({
-      data: expect.objectContaining({
-        email: 'pro-salon@example.com',
-        phone: '+15551234567',
-        role: 'PRO',
-        professionalProfile: {
-          create: expect.objectContaining({
-            firstName: 'Tori',
-            lastName: 'Morales',
-            phone: '+15551234567',
-            timeZone: 'America/Los_Angeles',
-            businessName: 'TOVIS Studio',
-            professionType: 'MAKEUP_ARTIST',
-            verificationStatus: 'PENDING',
-            licenseVerified: false,
-            mobileBasePostalCode: null,
-            mobileRadiusMiles: null,
-            locations: {
-              create: expect.objectContaining({
-                type: 'SALON',
-                name: 'TOVIS Studio',
-                isPrimary: true,
-                isBookable: false,
-                formattedAddress: '123 Main St, San Diego, CA 92101',
-                city: 'San Diego',
-                state: 'CA',
-                postalCode: '92101',
-                countryCode: 'US',
-                placeId: 'place_123',
-                lat: 32.7157,
-                lng: -117.1611,
-                timeZone: 'America/Los_Angeles',
-                workingHours: expect.any(Object),
-              }),
-            },
-          }),
-        },
+    expect(tx.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          email: 'pro-salon@example.com',
+          phone: '+15551234567',
+          role: 'PRO',
+          professionalProfile: {
+            create: expect.objectContaining({
+              firstName: 'Tori',
+              lastName: 'Morales',
+              phone: '+15551234567',
+              timeZone: 'America/Los_Angeles',
+              businessName: 'TOVIS Studio',
+              professionType: 'MAKEUP_ARTIST',
+              verificationStatus: 'PENDING',
+              licenseVerified: false,
+              mobileBasePostalCode: null,
+              mobileRadiusMiles: null,
+              locations: {
+                create: expect.objectContaining({
+                  type: 'SALON',
+                  name: 'TOVIS Studio',
+                  isPrimary: true,
+                  isBookable: false,
+                  formattedAddress: '123 Main St, San Diego, CA 92101',
+                  city: 'San Diego',
+                  state: 'CA',
+                  postalCode: '92101',
+                  countryCode: 'US',
+                  placeId: 'place_123',
+                  lat: 32.7157,
+                  lng: -117.1611,
+                  timeZone: 'America/Los_Angeles',
+                  workingHours: expect.any(Object),
+                }),
+              },
+            }),
+          },
+        }),
       }),
-    }),
-  )
+    )
 
-  expect(mockCreateVerificationToken).toHaveBeenCalledWith({
-    userId: 'user_pro_salon',
-    role: Role.PRO,
-    authVersion: 1,
-  })
-})
-
-it('creates the initial PRO_MOBILE location as non-bookable', async () => {
-  const tx = makeSuccessfulRegisterTx({
-    userId: 'user_pro_mobile',
-    email: 'pro-mobile@example.com',
-    role: Role.PRO,
+    expect(mockCreateVerificationToken).toHaveBeenCalledWith({
+      userId: 'user_pro_salon',
+      role: Role.PRO,
+      authVersion: 1,
+    })
   })
 
-  mockPrisma.$transaction.mockImplementation(
-    async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
-  )
+  it('creates the initial PRO_MOBILE location as non-bookable', async () => {
+    const tx = makeSuccessfulRegisterTx({
+      userId: 'user_pro_mobile',
+      email: 'pro-mobile@example.com',
+      role: Role.PRO,
+    })
 
-  const result = await POST(makeRequest(makeProMobileSignupBody()))
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
 
-  expect(result.status).toBe(201)
+    const result = await POST(makeRequest(makeProMobileSignupBody()))
 
-  expect(tx.user.create).toHaveBeenCalledWith(
-    expect.objectContaining({
-      data: expect.objectContaining({
-        email: 'pro-mobile@example.com',
-        phone: '+15551234567',
-        role: 'PRO',
-        professionalProfile: {
-          create: expect.objectContaining({
-            firstName: 'Tori',
-            lastName: 'Morales',
-            phone: '+15551234567',
-            timeZone: 'America/Los_Angeles',
-            businessName: 'TOVIS Mobile',
-            professionType: 'MAKEUP_ARTIST',
-            verificationStatus: 'PENDING',
-            licenseVerified: false,
-            mobileBasePostalCode: '92101',
-            mobileRadiusMiles: 25,
-            locations: {
-              create: expect.objectContaining({
-                type: 'MOBILE_BASE',
-                name: 'Mobile base',
-                isPrimary: true,
-                isBookable: false,
-                city: 'San Diego',
-                state: 'CA',
-                postalCode: '92101',
-                countryCode: 'US',
-                lat: 32.7157,
-                lng: -117.1611,
-                timeZone: 'America/Los_Angeles',
-                workingHours: expect.any(Object),
-              }),
-            },
-          }),
-        },
+    expect(result.status).toBe(201)
+
+    expect(tx.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          email: 'pro-mobile@example.com',
+          phone: '+15551234567',
+          role: 'PRO',
+          professionalProfile: {
+            create: expect.objectContaining({
+              firstName: 'Tori',
+              lastName: 'Morales',
+              phone: '+15551234567',
+              timeZone: 'America/Los_Angeles',
+              businessName: 'TOVIS Mobile',
+              professionType: 'MAKEUP_ARTIST',
+              verificationStatus: 'PENDING',
+              licenseVerified: false,
+              mobileBasePostalCode: '92101',
+              mobileRadiusMiles: 25,
+              locations: {
+                create: expect.objectContaining({
+                  type: 'MOBILE_BASE',
+                  name: 'Mobile base',
+                  isPrimary: true,
+                  isBookable: false,
+                  city: 'San Diego',
+                  state: 'CA',
+                  postalCode: '92101',
+                  countryCode: 'US',
+                  lat: 32.7157,
+                  lng: -117.1611,
+                  timeZone: 'America/Los_Angeles',
+                  workingHours: expect.any(Object),
+                }),
+              },
+            }),
+          },
+        }),
       }),
-    }),
-  )
+    )
 
-  expect(mockCreateVerificationToken).toHaveBeenCalledWith({
-    userId: 'user_pro_mobile',
-    role: Role.PRO,
-    authVersion: 1,
+    expect(mockCreateVerificationToken).toHaveBeenCalledWith({
+      userId: 'user_pro_mobile',
+      role: Role.PRO,
+      authVersion: 1,
+    })
   })
-})
 
   it('passes through the verified-register rate-limit response unchanged', async () => {
     const rateLimitRes = new Response(null, { status: 429 })
@@ -617,8 +702,8 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
     const quotaRes = new Response(null, { status: 429 })
 
     mockEnforceRateLimit
-      .mockResolvedValueOnce(null) // register bucket
-      .mockResolvedValueOnce(quotaRes) // phone-hour bucket
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(quotaRes)
 
     const result = await POST(makeRequest(makeClientSignupBody()))
 
@@ -637,8 +722,7 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
-
-    it.each(['admin', 'Admin', 'tovis'])(
+  it.each(['admin', 'Admin', 'tovis'])(
     'returns 400 HANDLE_RESERVED for reserved pro handle %s',
     async (handle) => {
       const result = await POST(makeRequest(makeProSignupBody({ handle })))
@@ -712,8 +796,8 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
       },
     })
   })
-  
-  it('creates an unverified client account, sends verification artifacts, and issues a verification-only session', async () => {
+
+  it('creates an unverified client account, returns pending verification send states immediately, and finishes the async tail in waitUntil', async () => {
     const tx = {
       user: {
         create: vi.fn().mockResolvedValue({
@@ -734,6 +818,9 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
       async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
     )
 
+    const smsDeferred = createDeferred<{ sid: string }>()
+    mockTwilioMessagesCreate.mockReturnValueOnce(smsDeferred.promise)
+
     const result = await POST(makeRequest(makeClientSignupBody()))
     const body = await result.json()
 
@@ -745,15 +832,15 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
         email: 'client@example.com',
         role: Role.CLIENT,
       },
-      nextUrl: '/looks?from=tap',
+      nextUrl: null,
       requiresPhoneVerification: true,
-      phoneVerificationSent: true,
+      phoneVerificationSent: 'pending',
       phoneVerificationErrorCode: null,
       requiresEmailVerification: true,
       isPhoneVerified: false,
       isEmailVerified: false,
       isFullyVerified: false,
-      emailVerificationSent: true,
+      emailVerificationSent: 'pending',
       needsManualLicenseUpload: false,
       manualLicensePendingReview: false,
     })
@@ -846,6 +933,13 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
       select: { id: true },
     })
 
+    expect(mockWaitUntil).toHaveBeenCalledTimes(1)
+    expect(mockIssueAndSendEmailVerification).not.toHaveBeenCalled()
+    expect(mockConsumeTapIntent).not.toHaveBeenCalled()
+
+    smsDeferred.resolve({ sid: 'SM123456789' })
+    await flushWaitUntilTasks()
+
     expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user_1',
@@ -892,7 +986,7 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
     expect(setCookie).toContain('tovis_client_zip=92101')
   })
 
-  it('still creates the verification flow when email send fails, but reports emailVerificationSent=false', async () => {
+  it('still returns 201 immediately when email send fails in the background tail', async () => {
     const tx = {
       user: {
         create: vi.fn().mockResolvedValue({
@@ -925,15 +1019,17 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
     expect(body.requiresPhoneVerification).toBe(true)
     expect(body.requiresEmailVerification).toBe(true)
     expect(body.isFullyVerified).toBe(false)
-    expect(body.phoneVerificationSent).toBe(true)
+    expect(body.phoneVerificationSent).toBe('pending')
     expect(body.phoneVerificationErrorCode).toBe(null)
-    expect(body.emailVerificationSent).toBe(false)
+    expect(body.emailVerificationSent).toBe('pending')
 
     expect(mockCreateVerificationToken).toHaveBeenCalledWith({
       userId: 'user_2',
       role: Role.CLIENT,
       authVersion: 1,
     })
+
+    await flushWaitUntilTasks()
 
     expect(mockCaptureAuthException).toHaveBeenCalledWith({
       event: 'auth.email.send.failed',
@@ -944,11 +1040,16 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
       error: expect.any(Error),
     })
 
+    expect(mockConsumeTapIntent).toHaveBeenCalledWith({
+      tapIntentId: 'tap_1',
+      userId: 'user_2',
+    })
+
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=verification_token')
   })
 
-  it('still creates the verification flow when sms send fails, but reports phoneVerificationSent=false with an error code', async () => {
+  it('still returns 201 immediately when sms send fails in the background tail', async () => {
     const tx = {
       user: {
         create: vi.fn().mockResolvedValue({
@@ -979,15 +1080,17 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
     expect(body.requiresPhoneVerification).toBe(true)
     expect(body.requiresEmailVerification).toBe(true)
     expect(body.isFullyVerified).toBe(false)
-    expect(body.phoneVerificationSent).toBe(false)
-    expect(body.phoneVerificationErrorCode).toBe('SMS_SEND_FAILED')
-    expect(body.emailVerificationSent).toBe(true)
+    expect(body.phoneVerificationSent).toBe('pending')
+    expect(body.phoneVerificationErrorCode).toBe(null)
+    expect(body.emailVerificationSent).toBe('pending')
 
     expect(mockCreateVerificationToken).toHaveBeenCalledWith({
       userId: 'user_3',
       role: Role.CLIENT,
       authVersion: 1,
     })
+
+    await flushWaitUntilTasks()
 
     expect(mockCaptureAuthException).toHaveBeenCalledWith({
       event: 'auth.phone.send.failed',
@@ -998,11 +1101,24 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
       error: expect.any(Error),
     })
 
+    expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user_3',
+        email: 'client@example.com',
+        appUrl: 'http://localhost:3000',
+      }),
+    )
+
+    expect(mockConsumeTapIntent).toHaveBeenCalledWith({
+      tapIntentId: 'tap_1',
+      userId: 'user_3',
+    })
+
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=verification_token')
   })
 
-  it('still creates the verification flow when twilio env is missing, but reports phoneVerificationSent=false with SMS_NOT_CONFIGURED', async () => {
+  it('still returns 201 immediately when twilio env is missing in the background tail', async () => {
     const tx = {
       user: {
         create: vi.fn().mockResolvedValue({
@@ -1030,9 +1146,11 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
 
     expect(result.status).toBe(201)
     expect(body.ok).toBe(true)
-    expect(body.phoneVerificationSent).toBe(false)
-    expect(body.phoneVerificationErrorCode).toBe('SMS_NOT_CONFIGURED')
-    expect(body.emailVerificationSent).toBe(true)
+    expect(body.phoneVerificationSent).toBe('pending')
+    expect(body.phoneVerificationErrorCode).toBe(null)
+    expect(body.emailVerificationSent).toBe('pending')
+
+    await flushWaitUntilTasks()
 
     expect(mockLogAuthEvent).toHaveBeenCalledWith({
       level: 'error',
@@ -1042,6 +1160,183 @@ it('creates the initial PRO_MOBILE location as non-bookable', async () => {
       code: 'SMS_NOT_CONFIGURED',
       phone: '+15551234567',
     })
+
+    expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user_4',
+        email: 'client@example.com',
+        appUrl: 'http://localhost:3000',
+      }),
+    )
+
+    expect(mockConsumeTapIntent).toHaveBeenCalledWith({
+      tapIntentId: 'tap_1',
+      userId: 'user_4',
+    })
+  })
+
+  it('degrades DCA timeout to PENDING for CA-license signup and still creates the PRO account', async () => {
+    process.env.DCA_SEARCH_APP_ID = 'dca_app_id'
+    process.env.DCA_SEARCH_APP_KEY = 'dca_app_key'
+
+    const tx = makeSuccessfulRegisterTx({
+      userId: 'user_dca_timeout',
+      email: 'pro@example.com',
+      role: Role.PRO,
+    })
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    mockFetch.mockImplementation(async (input: string | URL | Request) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+
+      if (url.includes('getAllLicenseTypes')) {
+        return makeCompleteDcaLicenseTypesResponse()
+      }
+
+      if (url.includes('getLicenseNumberSearch')) {
+        const err = new Error('Aborted')
+        Object.defineProperty(err, 'name', {
+          value: 'AbortError',
+          configurable: true,
+        })
+        throw err
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`)
+    })
+
+    const result = await POST(
+      makeRequest(
+        makeProSignupBody({
+          professionType: 'ESTHETICIAN',
+          licenseState: 'CA',
+          licenseNumber: 'Z123456',
+        }),
+      ),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(201)
+    expect(body.ok).toBe(true)
+    expect(body.requiresPhoneVerification).toBe(true)
+    expect(body.requiresEmailVerification).toBe(true)
+    expect(body.phoneVerificationSent).toBe('pending')
+    expect(body.emailVerificationSent).toBe('pending')
+
+    const createCall = tx.user.create.mock.calls[0]?.[0]
+    expect(createCall).toBeTruthy()
+
+    expect(createCall?.select).toEqual({
+      id: true,
+      email: true,
+      role: true,
+      phone: true,
+      authVersion: true,
+    })
+
+    expect(createCall?.data).toEqual(
+      expect.objectContaining({
+        email: 'pro@example.com',
+        phone: '+15551234567',
+        role: 'PRO',
+        professionalProfile: {
+          create: expect.objectContaining({
+            professionType: 'ESTHETICIAN',
+            licenseState: 'CA',
+            licenseNumber: 'Z123456',
+            verificationStatus: 'PENDING',
+            licenseVerified: false,
+            licenseRawJson: {
+              note: 'DCA timeout at signup',
+              error: 'AbortError',
+            },
+          }),
+        },
+      }),
+    )
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.dca.timeout',
+      route: 'auth.register',
+      userId: 'user_dca_timeout',
+    })
+
+    await flushWaitUntilTasks()
+  })
+
+  it('still blocks signup when the CA license is found but not CURRENT', async () => {
+    process.env.DCA_SEARCH_APP_ID = 'dca_app_id'
+    process.env.DCA_SEARCH_APP_KEY = 'dca_app_key'
+
+    mockFetch.mockImplementation(async (input: string | URL | Request) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url
+
+      if (url.includes('getAllLicenseTypes')) {
+        return makeCompleteDcaLicenseTypesResponse()
+      }
+
+      if (url.includes('getLicenseNumberSearch')) {
+        const licenseDetail = {
+          licNumber: 'Z123456',
+          primaryStatusCode: 'EXPIRED',
+          expDate: '2025-01-01',
+        }
+
+        return makeJsonResponse({
+          licenseDetails: [
+            {
+              licNumber: 'Z123456',
+              primaryStatusCode: 'EXPIRED',
+              expDate: '2025-01-01',
+              getLicenseDetails: [licenseDetail],
+              getFullLicenseDetail: [
+                {
+                  getLicenseDetails: [licenseDetail],
+                },
+              ],
+            },
+          ],
+        })
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`)
+    })
+
+    const result = await POST(
+      makeRequest(
+        makeProSignupBody({
+          professionType: 'ESTHETICIAN',
+          licenseState: 'CA',
+          licenseNumber: 'Z123456',
+        }),
+      ),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(body).toMatchObject({
+      ok: false,
+      error: 'License could not be verified as CURRENT.',
+      code: 'LICENSE_NOT_VERIFIED',
+      statusCode: 'EXPIRED',
+    })
+
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockWaitUntil).not.toHaveBeenCalled()
   })
 
   it('returns 500 when the app URL cannot be resolved', async () => {

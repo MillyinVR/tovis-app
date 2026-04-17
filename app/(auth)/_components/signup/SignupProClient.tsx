@@ -1,3 +1,5 @@
+// app/(auth)/_components/signup/SignupProClient.tsx
+
 'use client'
 
 import Link from 'next/link'
@@ -12,6 +14,8 @@ import { hardNavigate } from '@/lib/clientNavigation'
 import { getTurnstileToken } from '@/lib/turnstileClient'
 import { buildVerifyPhoneUrl } from './buildVerifyPhoneUrl'
 
+type VerificationSendState = boolean | 'pending'
+
 function sanitizePhone(v: string) {
   return v.replace(/\s+/g, '')
 }
@@ -25,11 +29,13 @@ function sanitizeNextUrl(nextUrl: unknown): string | null {
   return s
 }
 
-function readBooleanField(
+function readVerificationSendState(
   data: Record<string, unknown> | null,
   key: string,
-): boolean {
-  return data?.[key] === true
+): VerificationSendState {
+  const value = data?.[key]
+  if (value === 'pending') return 'pending'
+  return value === true
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -192,14 +198,16 @@ async function fetchAutocomplete(args: {
     throw new Error(readErrorMessage(data) ?? 'Location search failed.')
   }
 
-  const predsRaw = data && Array.isArray(data.predictions) ? data.predictions : []
+  const predsRaw =
+    data && Array.isArray(data.predictions) ? data.predictions : []
   const out: GooglePrediction[] = []
 
   for (const p of predsRaw) {
     if (!isRecord(p)) continue
 
     const placeId = typeof p.placeId === 'string' ? p.placeId.trim() : ''
-    const description = typeof p.description === 'string' ? p.description.trim() : ''
+    const description =
+      typeof p.description === 'string' ? p.description.trim() : ''
     if (!placeId || !description) continue
 
     out.push({
@@ -243,7 +251,8 @@ async function fetchPlaceDetails(args: {
     lng: typeof place?.lng === 'number' ? place.lng : null,
     city: typeof place?.city === 'string' ? place.city : null,
     state: typeof place?.state === 'string' ? place.state : null,
-    postalCode: typeof place?.postalCode === 'string' ? place.postalCode : null,
+    postalCode:
+      typeof place?.postalCode === 'string' ? place.postalCode : null,
     countryCode:
       typeof place?.countryCode === 'string' ? place.countryCode : null,
   }
@@ -262,10 +271,12 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
   const geo = data && isRecord(data.geo) ? data.geo : null
   const lat = typeof geo?.lat === 'number' ? geo.lat : null
   const lng = typeof geo?.lng === 'number' ? geo.lng : null
-  const postalCode = typeof geo?.postalCode === 'string' ? geo.postalCode : null
+  const postalCode =
+    typeof geo?.postalCode === 'string' ? geo.postalCode : null
   const city = typeof geo?.city === 'string' ? geo.city : null
   const state = typeof geo?.state === 'string' ? geo.state : null
-  const countryCode = typeof geo?.countryCode === 'string' ? geo.countryCode : null
+  const countryCode =
+    typeof geo?.countryCode === 'string' ? geo.countryCode : null
 
   if (lat == null || lng == null) {
     throw new Error('ZIP lookup returned no coordinates.')
@@ -422,9 +433,7 @@ export default function SignupProClient() {
       setLocQuery(p.description)
     } catch (e: unknown) {
       setConfirmed(null)
-      setError(
-        e instanceof Error ? e.message : 'Could not confirm location.',
-      )
+      setError(e instanceof Error ? e.message : 'Could not confirm location.')
     } finally {
       setLocLoading(false)
     }
@@ -461,9 +470,7 @@ export default function SignupProClient() {
       setLocQuery(geo.postalCode ?? raw)
     } catch (e: unknown) {
       setConfirmed(null)
-      setError(
-        e instanceof Error ? e.message : 'Could not confirm ZIP code.',
-      )
+      setError(e instanceof Error ? e.message : 'Could not confirm ZIP code.')
     } finally {
       setLocLoading(false)
     }
@@ -579,11 +586,11 @@ export default function SignupProClient() {
       router.refresh()
 
       const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
-      const emailVerificationSent = readBooleanField(
+      const emailVerificationSent = readVerificationSendState(
         data,
         'emailVerificationSent',
       )
-      const phoneVerificationSent = readBooleanField(
+      const phoneVerificationSent = readVerificationSendState(
         data,
         'phoneVerificationSent',
       )

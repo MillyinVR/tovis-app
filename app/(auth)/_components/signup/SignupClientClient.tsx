@@ -1,3 +1,4 @@
+// app/(auth)/_components/signup/SignupClientClient.tsx
 'use client'
 
 import Link from 'next/link'
@@ -10,6 +11,25 @@ import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
 import { getTurnstileToken } from '@/lib/turnstileClient'
 import { buildVerifyPhoneUrl } from './buildVerifyPhoneUrl'
+
+type VerificationSendState = boolean | 'pending'
+
+type GeocodeResponse = {
+  geo?: {
+    lat?: number
+    lng?: number
+    postalCode?: string
+    city?: string
+    state?: string
+    countryCode?: string
+  }
+  error?: string
+}
+
+type TimeZoneResponse = {
+  timeZoneId?: string
+  error?: string
+}
 
 function normalizeTrimmed(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
@@ -30,11 +50,13 @@ function sanitizeNextUrl(nextUrl: unknown): string | null {
   return s
 }
 
-function readBooleanField(
+function readVerificationSendState(
   data: Record<string, unknown> | null,
   key: string,
-): boolean {
-  return data?.[key] === true
+): VerificationSendState {
+  const value = data?.[key]
+  if (value === 'pending') return 'pending'
+  return value === true
 }
 
 function splitFullName(fullName: string | null): {
@@ -195,16 +217,21 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
   url.searchParams.set('components', 'country:us')
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await res.json().catch(() => ({} as any))
-  if (!res.ok) throw new Error((data as any)?.error || 'ZIP lookup failed.')
+  const raw = (await res.json().catch(() => null)) as GeocodeResponse | null
+  const geo = raw?.geo
 
-  const g = (data as any)?.geo ?? {}
-  const lat = typeof g?.lat === 'number' ? g.lat : null
-  const lng = typeof g?.lng === 'number' ? g.lng : null
-  const postalCode = typeof g?.postalCode === 'string' ? g.postalCode : null
-  const city = typeof g?.city === 'string' ? g.city : null
-  const state = typeof g?.state === 'string' ? g.state : null
-  const countryCode = typeof g?.countryCode === 'string' ? g.countryCode : null
+  if (!res.ok) {
+    throw new Error(raw?.error || 'ZIP lookup failed.')
+  }
+
+  const lat = typeof geo?.lat === 'number' ? geo.lat : null
+  const lng = typeof geo?.lng === 'number' ? geo.lng : null
+  const postalCode =
+    typeof geo?.postalCode === 'string' ? geo.postalCode : null
+  const city = typeof geo?.city === 'string' ? geo.city : null
+  const state = typeof geo?.state === 'string' ? geo.state : null
+  const countryCode =
+    typeof geo?.countryCode === 'string' ? geo.countryCode : null
 
   if (lat == null || lng == null) {
     throw new Error('ZIP lookup returned no coordinates.')
@@ -222,10 +249,13 @@ async function fetchTimeZoneId(args: { lat: number; lng: number }) {
   url.searchParams.set('lng', String(args.lng))
 
   const res = await fetch(url.toString(), { cache: 'no-store' })
-  const data = await res.json().catch(() => ({} as any))
-  if (!res.ok) throw new Error((data as any)?.error || 'Timezone lookup failed.')
+  const raw = (await res.json().catch(() => null)) as TimeZoneResponse | null
 
-  const tz = String((data as any)?.timeZoneId ?? '')
+  if (!res.ok) {
+    throw new Error(raw?.error || 'Timezone lookup failed.')
+  }
+
+  const tz = typeof raw?.timeZoneId === 'string' ? raw.timeZoneId : ''
   if (!tz) throw new Error('No timezone returned.')
   return tz
 }
@@ -322,9 +352,9 @@ export default function SignupClientClient() {
       setConfirmed(nextConfirmed)
       setZip(geo.postalCode ?? raw)
       return nextConfirmed
-    } catch (e: any) {
+    } catch (e) {
       setConfirmed(null)
-      setError(e?.message || 'Could not confirm ZIP code.')
+      setError(e instanceof Error ? e.message : 'Could not confirm ZIP code.')
       return null
     } finally {
       setZipLoading(false)
@@ -402,11 +432,11 @@ export default function SignupClientClient() {
 
       const responseNextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
       const nextUrl = responseNextUrl ?? nextFromQuery
-      const emailVerificationSent = readBooleanField(
+      const emailVerificationSent = readVerificationSendState(
         data,
         'emailVerificationSent',
       )
-      const phoneVerificationSent = readBooleanField(
+      const phoneVerificationSent = readVerificationSendState(
         data,
         'phoneVerificationSent',
       )
@@ -426,16 +456,17 @@ export default function SignupClientClient() {
     }
   }
 
-  const canSubmit =
+  const canSubmit = Boolean(
     !loading &&
-    firstName.trim() &&
-    lastName.trim() &&
-    isUsZip(zip) &&
-    sanitizePhone(phone).trim() &&
-    email.trim() &&
-    password.trim() &&
-    Boolean(confirmed) &&
-    tosAccepted
+      firstName.trim() &&
+      lastName.trim() &&
+      isUsZip(zip) &&
+      sanitizePhone(phone).trim() &&
+      email.trim() &&
+      password.trim() &&
+      confirmed &&
+      tosAccepted,
+  )
 
   return (
     <AuthShell

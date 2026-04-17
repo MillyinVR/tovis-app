@@ -1,3 +1,4 @@
+// app/(auth)/verify-phone/page.tsx
 'use client'
 
 import Link from 'next/link'
@@ -16,6 +17,7 @@ import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { cn } from '@/lib/utils'
 
 const RESEND_COOLDOWN_SECONDS = 60
+const NEXT_URL_RECOVERY_DELAY_MS = 3000
 
 type VerificationStatus = {
   loaded: boolean
@@ -239,6 +241,7 @@ export default function VerifyPhonePage() {
   )
 
   const [status, setStatus] = useState<VerificationStatus>(EMPTY_STATUS)
+  const [recoveredNextUrl, setRecoveredNextUrl] = useState<string | null>(null)
   const [code, setCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
@@ -254,8 +257,13 @@ export default function VerifyPhonePage() {
   const [correctingPhone, setCorrectingPhone] = useState(false)
 
   const resolvedNextUrl = useMemo(() => {
-    return nextFromQuery ?? status.nextUrl ?? buildDefaultNextUrl(status.role)
-  }, [nextFromQuery, status.nextUrl, status.role])
+    return (
+      nextFromQuery ??
+      recoveredNextUrl ??
+      status.nextUrl ??
+      buildDefaultNextUrl(status.role)
+    )
+  }, [nextFromQuery, recoveredNextUrl, status.nextUrl, status.role])
 
   const loginHref = useMemo(
     () =>
@@ -354,6 +362,42 @@ export default function VerifyPhonePage() {
     }
   }, [router, nextFromQuery])
 
+  useEffect(() => {
+    if (!status.loaded) return
+    if (nextFromQuery) return
+    if (status.nextUrl) return
+    if (recoveredNextUrl) return
+
+    let cancelled = false
+
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await fetch('/api/auth/session/next-url', {
+            method: 'GET',
+            cache: 'no-store',
+            credentials: 'include',
+          })
+
+          const data = await safeJsonRecord(res)
+          if (!res.ok || cancelled) return
+
+          const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
+          if (nextUrl) {
+            setRecoveredNextUrl(nextUrl)
+          }
+        } catch {
+          // best-effort recovery only; do not surface a new error banner here
+        }
+      })()
+    }, NEXT_URL_RECOVERY_DELAY_MS)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [status.loaded, status.nextUrl, nextFromQuery, recoveredNextUrl])
+
   async function resendPhone() {
     if (
       sendingPhone ||
@@ -420,8 +464,7 @@ export default function VerifyPhonePage() {
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          next:
-            nextFromQuery ?? status.nextUrl ?? buildDefaultNextUrl(status.role),
+          next: resolvedNextUrl,
           intent,
           inviteToken,
         }),
@@ -549,6 +592,7 @@ export default function VerifyPhonePage() {
       if (refreshed.isFullyVerified) {
         const dest =
           nextFromQuery ??
+          recoveredNextUrl ??
           refreshed.nextUrl ??
           buildDefaultNextUrl(refreshed.role)
         router.replace(dest)
@@ -744,7 +788,9 @@ export default function VerifyPhonePage() {
               <TinyButton
                 onClick={resendEmail}
                 disabled={
-                  sendingEmail || status.isEmailVerified || emailCooldownSeconds > 0
+                  sendingEmail ||
+                  status.isEmailVerified ||
+                  emailCooldownSeconds > 0
                 }
               >
                 {sendingEmail

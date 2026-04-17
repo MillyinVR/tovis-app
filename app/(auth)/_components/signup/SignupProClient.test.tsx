@@ -1,3 +1,4 @@
+// app/(auth)/_components/signup/SignupProClient.test.tsx
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -193,7 +194,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
     expect(submitButton.hasAttribute('disabled')).toBe(false)
   })
 
-  it('submits with tosAccepted and turnstileToken, then preserves sms/email retry redirect parity', async () => {
+  it('submits with tosAccepted and turnstileToken, then treats pending verification sends as optimistic success', async () => {
     const fetchMock = setFetchSequence([
       jsonResponse({
         geo: {
@@ -210,8 +211,8 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
       }),
       jsonResponse({
         nextUrl: '/pro/calendar',
-        emailVerificationSent: false,
-        phoneVerificationSent: false,
+        emailVerificationSent: 'pending',
+        phoneVerificationSent: 'pending',
       }),
     ])
 
@@ -266,6 +267,51 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
         lng: -117.1611,
         timeZoneId: 'America/Los_Angeles',
       },
+    })
+
+    expect(mocks.router.refresh).toHaveBeenCalledTimes(1)
+
+    await waitFor(() => {
+      expect(mocks.hardNavigate).toHaveBeenCalledWith(
+        '/verify-phone?next=%2Fpro%2Fcalendar',
+      )
+    })
+  })
+
+  it('preserves explicit retry redirect params when register reports real send failures', async () => {
+    const fetchMock = setFetchSequence([
+      jsonResponse({
+        geo: {
+          lat: 32.7157,
+          lng: -117.1611,
+          postalCode: '92101',
+          city: 'San Diego',
+          state: 'CA',
+          countryCode: 'US',
+        },
+      }),
+      jsonResponse({
+        timeZoneId: 'America/Los_Angeles',
+      }),
+      jsonResponse({
+        nextUrl: '/pro/calendar',
+        emailVerificationSent: false,
+        phoneVerificationSent: false,
+      }),
+    ])
+
+    render(<SignupProClient />)
+
+    await confirmMobileZip('92101')
+    fillRequiredFields()
+    fireEvent.click(screen.getByRole('checkbox'))
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Create Pro Account' }),
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3)
     })
 
     expect(mocks.router.refresh).toHaveBeenCalledTimes(1)

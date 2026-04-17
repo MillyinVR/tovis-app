@@ -1,8 +1,10 @@
 // app/(auth)/_components/signup/buildVerifyPhoneUrl.ts
+type VerificationSendState = boolean | 'pending'
+
 export function buildVerifyPhoneUrl(args: {
   nextUrl: string | null
-  emailVerificationSent: boolean
-  phoneVerificationSent: boolean
+  emailVerificationSent: VerificationSendState
+  phoneVerificationSent: VerificationSendState
 }): string {
   const params = new URLSearchParams()
 
@@ -10,11 +12,11 @@ export function buildVerifyPhoneUrl(args: {
     params.set('next', args.nextUrl)
   }
 
-  if (!args.emailVerificationSent) {
+  if (args.emailVerificationSent === false) {
     params.set('email', 'retry')
   }
 
-  if (!args.phoneVerificationSent) {
+  if (args.phoneVerificationSent === false) {
     params.set('sms', 'retry')
   }
 

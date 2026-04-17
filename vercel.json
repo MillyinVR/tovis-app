@@ -7,6 +7,10 @@
     {
       "path": "/api/internal/jobs/client-reminders",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/internal/cron/retry-verification-emails",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
