@@ -192,6 +192,34 @@ describe('app/api/_utils/rateLimit', () => {
     nowSpy.mockRestore()
   })
 
+    it('uses a 20-per-hour limit for verified register traffic', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+
+    mockRateLimitRedis.mockResolvedValue({
+      success: true,
+      limit: 20,
+      remaining: 19,
+      resetMs: 1_700_003_600_000,
+    })
+
+    const { enforceRateLimit } = await loadSubject()
+
+    const result = await enforceRateLimit({
+      bucket: 'auth:register:verified',
+      identity: { kind: 'ip', id: '198.51.100.10' },
+    })
+
+    expect(result).toBeNull()
+    expect(mockRateLimitRedis).toHaveBeenCalledWith({
+      key: 'rl:auth:register:verified:ip:198.51.100.10',
+      limit: 20,
+      windowSeconds: 60 * 60,
+    })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+
+    nowSpy.mockRestore()
+  })
+
   it('returns a 429 response with rate-limit headers when Redis rejects the request', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
 
@@ -278,6 +306,56 @@ describe('app/api/_utils/rateLimit', () => {
     })
   })
 
+    it('allows 20 verified register requests and blocks the 21st when Redis is unavailable', async () => {
+    mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
+
+    const { enforceRateLimit } = await loadSubject()
+
+    const identity = { kind: 'ip', id: '198.51.100.20' } as const
+
+    for (let i = 0; i < 20; i += 1) {
+      const result = await enforceRateLimit({
+        bucket: 'auth:register:verified',
+        identity,
+      })
+      expect(result).toBeNull()
+    }
+
+    const blocked = await enforceRateLimit({
+      bucket: 'auth:register:verified',
+      identity,
+    })
+
+    expect(blocked).toBeInstanceOf(Response)
+    expect(blocked?.status).toBe(429)
+
+    const body = await blocked!.json()
+    expect(body).toMatchObject({
+      ok: false,
+      code: 'RATE_LIMITED',
+      details: {
+        limit: 20,
+      },
+    })
+
+    expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
+    expect(mockLogAuthEvent).toHaveBeenCalledTimes(1)
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.rate_limit.local_only_degraded',
+      route: 'auth.rateLimit',
+      provider: 'redis',
+      meta: {
+        bucket: 'auth:register:verified',
+        mode: 'auth-critical',
+        keySuffix: null,
+        circuitOpened: true,
+        identityKind: 'ip',
+        identityId: '198.51.100.20',
+      },
+    })
+  })
+  
   it('uses separate keys for phone-based SMS quota buckets', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
 

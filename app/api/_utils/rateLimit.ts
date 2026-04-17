@@ -93,8 +93,11 @@ const LIMITS: Record<RateLimitBucket, LimitConfig> = {
     prefix: 'rl:auth:register',
     mode: 'auth-critical',
   },
+  // Higher limit for Turnstile-verified requests to accommodate shared NAT
+  // (offices, universities). Abuse is mitigated by Turnstile challenge +
+  // per-phone SMS quotas.
   'auth:register:verified': {
-    limit: 12,
+    limit: 20,
     windowSeconds: 60 * 60,
     prefix: 'rl:auth:register:verified',
     mode: 'auth-critical',
