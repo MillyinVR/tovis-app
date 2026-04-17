@@ -6,3 +6,23 @@
 - Run `curl -s https://your-domain.com/api/health` and confirm rate limiting is active.
 - Verify the configured trusted IP header name matches the production ingress header actually reaching TOVIS.
 - Repeat a request against a rate-limited auth path from the same client and confirm repeated requests eventually receive `429` instead of bypassing throttling.
+
+## Signup load test results
+
+Record the prelaunch staging signup load-test result here before launch approval.
+
+- Environment tested:
+- Date:
+- Commit:
+- Tool used:
+- Route tested: `POST /api/auth/register`
+- Payload shape tested: repo-confirmed `CLIENT` signup contract
+- Peak target reached:
+- p50:
+- p95:
+- p99:
+- Overall error rate:
+- `429` rate:
+- Were expected `429`s excluded from real-failure calculations?:
+- Runtime dashboard screenshot / link:
+- Notes / follow-up:
