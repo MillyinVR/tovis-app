@@ -275,6 +275,67 @@ After remediation:
 
 ---
 
+## Turnstile / CAPTCHA degradation
+
+Use this section when the alert for `auth.register.captcha_fail_open` fires or when signup abuse risk rises during Turnstile instability.
+
+## What this signal means
+
+- TOVIS register is failing open on Turnstile verification.
+- Signup is still being allowed, but the route logs `auth.register.captcha_fail_open`.
+- Current built-in mitigation is already present:
+  - Turnstile-verified traffic uses `auth:register:verified` (20/hour per IP).
+  - Fail-open traffic drops to `auth:register` (5/hour per IP).
+  - Per-phone SMS quotas still remain active.
+- This is a degradation signal, not proof of abuse by itself.
+
+## How to confirm
+
+1. Check recent structured auth logs for repeated `auth.register.captcha_fail_open`.
+2. Confirm recent events include:
+   - `route = auth.register`
+   - `captchaEvent`
+   - `reason`
+   - `role`
+3. Confirm whether Turnstile is timing out or unavailable.
+4. Check current signup request volume and 429 behavior for `/api/auth/register`.
+5. Check whether abuse indicators are rising at the same time:
+   - unusual signup spikes
+   - repeated phone targets
+   - unusual IP concentration
+   - elevated downstream SMS activity
+
+## Immediate mitigation options
+
+- Keep signup live only if event volume is limited and abuse indicators remain normal.
+- Watch auth register volume and 429 behavior while the alert is active.
+- Remember that TOVIS already falls back to the tighter `auth:register` bucket automatically.
+- There is no repo-confirmed runtime flag for changing `auth:register` limits live. Tightening that bucket requires a code/config change and redeploy.
+- If abuse is detected, or if fail-open volume becomes unsafe before a redeploy is available, enable `signup_disabled`.
+
+## When to consider `signup_disabled`
+
+Enable `signup_disabled` if any of the following are true:
+
+- `auth.register.captcha_fail_open` stays elevated and Turnstile remains unavailable
+- signup abuse indicators are rising
+- current 429 behavior is not containing traffic well enough
+- operators cannot safely distinguish legitimate signup traffic from attack traffic during the outage
+
+## Evidence to capture
+
+Record all of the following before closing:
+
+- first alert time
+- recent `auth.register.captcha_fail_open` samples
+- `captchaEvent` and `reason` values from those samples
+- current signup volume
+- current 429 behavior
+- Turnstile status / timeout evidence
+- whether `signup_disabled` was enabled
+- whether a tighter `auth:register` change/redeploy was requested
+- incident timeline and operator notes
+
 ## Recovery decision tree
 
 ## Case 1: Redis degraded, app still up
