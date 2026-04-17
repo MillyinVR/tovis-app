@@ -47,12 +47,27 @@ function getRetryAfterSeconds(lockedUntil: Date, now: Date): number {
   return Math.max(1, Math.ceil((lockedUntil.getTime() - now.getTime()) / 1000))
 }
 
-async function recordFailedLoginAttempt(userId: string, now: Date) {
+type FailedLoginAttemptState = {
+  loginAttempts: number
+  lockedUntil: Date | string | null
+}
+
+function coerceDate(value: Date | string | null): Date | null {
+  if (value instanceof Date) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+  return null
+}
+
+async function recordFailedLoginAttempt(
+  userId: string,
+  now: Date,
+): Promise<FailedLoginAttemptState> {
   const lockUntil = new Date(now.getTime() + LOGIN_LOCK_WINDOW_MS)
 
-  const rows = await prisma.$queryRaw<
-    Array<{ loginAttempts: number; lockedUntil: Date | null }>
-  >(Prisma.sql`
+  const rows = await prisma.$queryRaw<FailedLoginAttemptState[]>(Prisma.sql`
     UPDATE "User"
     SET
       "loginAttempts" = CASE
@@ -216,13 +231,11 @@ export async function POST(request: Request) {
 
     if (!isValid) {
       const failedState = await recordFailedLoginAttempt(user.id, now)
+      const failedLockedUntil = coerceDate(failedState.lockedUntil)
 
-      if (
-        failedState.lockedUntil &&
-        failedState.lockedUntil.getTime() > now.getTime()
-      ) {
+      if (failedLockedUntil && failedLockedUntil.getTime() > now.getTime()) {
         return accountLockedResponse(
-          getRetryAfterSeconds(failedState.lockedUntil, now),
+          getRetryAfterSeconds(failedLockedUntil, now),
         )
       }
 

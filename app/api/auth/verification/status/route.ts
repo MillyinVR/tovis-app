@@ -12,6 +12,15 @@ export async function GET() {
 
   const user = auth.user
 
+  const nextUrl =
+    user.sessionKind === 'VERIFICATION' && !user.isFullyVerified
+      ? null
+      : getPostVerificationNextUrl({
+          role: user.role,
+          professionalVerificationStatus:
+            user.professionalProfile?.verificationStatus ?? null,
+        })
+
   return jsonOk({
     user: {
       id: user.id,
@@ -25,10 +34,6 @@ export async function GET() {
     isFullyVerified: user.isFullyVerified,
     requiresPhoneVerification: !user.isPhoneVerified,
     requiresEmailVerification: !user.isEmailVerified,
-    nextUrl: getPostVerificationNextUrl({
-      role: user.role,
-      professionalVerificationStatus:
-        user.professionalProfile?.verificationStatus ?? null,
-    }),
+    nextUrl,
   })
 }

@@ -1,3 +1,5 @@
+// app/api/auth/verification/status/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role, VerificationStatus } from '@prisma/client'
 
@@ -56,7 +58,8 @@ function makeUser(args?: {
             timeZone: 'America/Los_Angeles',
             location: null,
             verificationStatus:
-              args?.professionalVerificationStatus ?? VerificationStatus.APPROVED,
+              args?.professionalVerificationStatus ??
+              VerificationStatus.APPROVED,
           }
         : null,
   }
@@ -84,7 +87,7 @@ describe('app/api/auth/verification/status/route', () => {
     expect(result.status).toBe(401)
   })
 
-  it('returns client verification status and default nextUrl', async () => {
+  it('returns null nextUrl during unfinished client verification sessions', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
@@ -116,15 +119,49 @@ describe('app/api/auth/verification/status/route', () => {
       isFullyVerified: false,
       requiresPhoneVerification: false,
       requiresEmailVerification: true,
-      nextUrl: '/looks',
+      nextUrl: null,
     })
   })
 
-  it('returns approved pro nextUrl', async () => {
+  it('returns null nextUrl during unfinished pro verification sessions', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
         role: Role.PRO,
+        sessionKind: 'VERIFICATION',
+        emailVerifiedAt: null,
+        professionalVerificationStatus: VerificationStatus.PENDING,
+      }),
+    })
+
+    const result = await GET()
+    const body = await result.json()
+
+    expect(result.status).toBe(200)
+    expect(body).toEqual({
+      ok: true,
+      user: {
+        id: 'user_1',
+        email: 'user@example.com',
+        phone: '+15551234567',
+        role: Role.PRO,
+      },
+      sessionKind: 'VERIFICATION',
+      isPhoneVerified: true,
+      isEmailVerified: false,
+      isFullyVerified: false,
+      requiresPhoneVerification: false,
+      requiresEmailVerification: true,
+      nextUrl: null,
+    })
+  })
+
+  it('returns approved pro nextUrl once fully verified', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser({
+        role: Role.PRO,
+        sessionKind: 'ACTIVE',
         professionalVerificationStatus: VerificationStatus.APPROVED,
       }),
     })
@@ -143,11 +180,12 @@ describe('app/api/auth/verification/status/route', () => {
     expect(body.isFullyVerified).toBe(true)
   })
 
-  it('returns pending pro nextUrl to the profile setup surface', async () => {
+  it('returns pending pro nextUrl to the profile setup surface once fully verified', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
         role: Role.PRO,
+        sessionKind: 'ACTIVE',
         professionalVerificationStatus: VerificationStatus.PENDING,
       }),
     })
@@ -165,11 +203,12 @@ describe('app/api/auth/verification/status/route', () => {
     })
   })
 
-  it('returns admin default nextUrl', async () => {
+  it('returns admin default nextUrl once fully verified', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
         role: Role.ADMIN,
+        sessionKind: 'ACTIVE',
       }),
     })
 
@@ -183,6 +222,28 @@ describe('app/api/auth/verification/status/route', () => {
       email: 'user@example.com',
       phone: '+15551234567',
       role: Role.ADMIN,
+    })
+  })
+
+  it('returns default client nextUrl once fully verified', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser({
+        role: Role.CLIENT,
+        sessionKind: 'ACTIVE',
+      }),
+    })
+
+    const result = await GET()
+    const body = await result.json()
+
+    expect(result.status).toBe(200)
+    expect(body.nextUrl).toBe('/looks')
+    expect(body.user).toEqual({
+      id: 'user_1',
+      email: 'user@example.com',
+      phone: '+15551234567',
+      role: Role.CLIENT,
     })
   })
 })

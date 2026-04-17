@@ -388,6 +388,48 @@ describe('app/api/auth/login/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
+  it('locks the account when failed login state returns lockedUntil as a string timestamp', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-16T12:00:00.000Z'))
+
+    mockPrisma.user.findUnique.mockResolvedValue(
+      makeUser({
+        loginAttempts: 9,
+      }),
+    )
+    mockVerifyPassword.mockResolvedValue(false)
+    mockPrisma.$queryRaw.mockResolvedValue([
+      {
+        loginAttempts: 10,
+        lockedUntil: '2026-04-16T12:30:00.000Z',
+      },
+    ])
+
+    const result = await POST(
+      makeRequest({
+        email: 'user@example.com',
+        password: 'WrongPassword',
+      }),
+    )
+    const body = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Too many login attempts. Try again later.',
+      code: 'ACCOUNT_LOCKED',
+      retryAfter: 1800,
+    })
+
+    expect(mockVerifyPassword).toHaveBeenCalledWith(
+      'WrongPassword',
+      'stored_hash',
+    )
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.user.update).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
   it('returns ACCOUNT_LOCKED for a locked account even when the password is correct', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-16T12:00:00.000Z'))
