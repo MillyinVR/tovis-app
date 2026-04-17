@@ -81,7 +81,7 @@ type SeedDeps = {
 }
 
 const DEFAULT_PROFESSIONAL_PASSWORD = 'TestPassword123!'
-const FIXED_CLIENT_EMAIL = 'client@test.com'
+const FIXED_CLIENT_EMAIL = 'client@tovis.app'
 const FIXED_CLIENT_PASSWORD = 'password123'
 const DEFAULT_TIME_ZONE = 'America/Los_Angeles'
 const DEFAULT_OFFERING_TITLE = 'E2E Base Offering'

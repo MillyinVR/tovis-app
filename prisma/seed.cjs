@@ -593,13 +593,13 @@ async function main() {
 
   const seedPassword = process.env.SEED_TEST_PASSWORD || 'password123'
 
-  const proEmail = normalizeEmail('pro@test.com')
+  const proEmail = normalizeEmail('pro@tovis.app')
   const proPassword = seedPassword
 
-  const clientEmail = normalizeEmail('client@test.com')
+  const clientEmail = normalizeEmail('client@tovis.app')
   const clientPassword = seedPassword
 
-  const adminEmail = normalizeEmail(process.env.ADMIN_EMAIL || 'admin@test.com')
+  const adminEmail = normalizeEmail(process.env.ADMIN_EMAIL || 'admin@tovis.app')
   const adminPassword = seedPassword
 
   const { user: proUser, professionalProfile } = await upsertProfessionalUser({
@@ -620,7 +620,7 @@ async function main() {
     const unclaimedEmailClient = await upsertUnclaimedClientProfile({
     firstName: 'Email',
     lastName: 'Only',
-    email: 'unclaimed-email@test.com',
+    email: 'unclaimed-email@tovis.app',
     phone: null,
     preferredContactMethod: ContactMethod.EMAIL,
   })

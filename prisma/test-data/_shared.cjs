@@ -62,7 +62,7 @@ function emailFor(letter) {
     throw new Error('letter is required')
   }
 
-  return normalizeEmail(`client${normalizedLetter}@test.com`)
+  return normalizeEmail(`client${normalizedLetter}@tovis.app`)
 }
 
 function buildClientSeed(letter) {

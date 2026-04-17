@@ -19,7 +19,7 @@ const {
 
 const prisma = new PrismaClient()
 
-const TEST_PRO_EMAIL = 'testpro-lastminute@test.com'
+const TEST_PRO_EMAIL = 'testpro-lastminute@tovis.app'
 const TEST_PRO_PASSWORD = 'password123'
 const TEST_HANDLE = 'testprolastminute'
 const TEST_BUSINESS_NAME = 'Test Pro Last Minute Studio'

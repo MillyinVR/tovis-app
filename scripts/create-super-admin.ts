@@ -4,7 +4,7 @@ import { normalizeEmail } from '../app/api/_utils/email'
 
 const prisma = new PrismaClient()
 
-const DEFAULT_ADMIN_EMAIL = 'admin@test.com'
+const DEFAULT_ADMIN_EMAIL = 'admin@tovis.app'
 const DEFAULT_ADMIN_PASSWORD = 'password123'
 
 function requireNormalizedEmail(value: unknown, label = 'email'): string {

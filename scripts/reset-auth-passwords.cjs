@@ -30,15 +30,15 @@ function requireNormalizedEmail(value, label) {
 
 const TARGET_EMAILS = {
   client: requireNormalizedEmail(
-    process.env.AUTH_RESET_CLIENT_EMAIL || 'client@test.com',
+    process.env.AUTH_RESET_CLIENT_EMAIL || 'client@tovis.app',
     'AUTH_RESET_CLIENT_EMAIL',
   ),
   pro: requireNormalizedEmail(
-    process.env.AUTH_RESET_PRO_EMAIL || 'pro@test.com',
+    process.env.AUTH_RESET_PRO_EMAIL || 'pro@tovis.app',
     'AUTH_RESET_PRO_EMAIL',
   ),
   admin: requireNormalizedEmail(
-    process.env.AUTH_RESET_ADMIN_EMAIL || process.env.ADMIN_EMAIL || 'admin@test.com',
+    process.env.AUTH_RESET_ADMIN_EMAIL || process.env.ADMIN_EMAIL || 'admin@tovis.app',
     'AUTH_RESET_ADMIN_EMAIL',
   ),
 }

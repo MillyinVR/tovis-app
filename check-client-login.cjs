@@ -10,7 +10,7 @@ const bcryptjs = require('bcryptjs')
 const prisma = new PrismaClient()
 
 async function main() {
-  const rawEmail = 'clientA@test.com'
+  const rawEmail = 'clientA@tovis.app'
   const normalizedEmail = rawEmail.trim().toLowerCase()
   const password = 'password123'
 

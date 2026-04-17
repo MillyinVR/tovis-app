@@ -24,7 +24,7 @@ setup('authenticate client test account', async ({ page }) => {
   await expect(passwordInput).toBeVisible()
   await expect(submitButton).toBeVisible()
 
-  await emailInput.fill('client@test.com')
+  await emailInput.fill('client@tovis.app')
   await passwordInput.fill('password123')
 
   await submitButton.click()
@@ -37,14 +37,14 @@ setup('authenticate client test account', async ({ page }) => {
       timeout: 15_000,
     }).then(() => {
       throw new Error(
-        'Login was rate-limited for client@test.com. Wait for the throttle window to clear, then rerun the auth setup.',
+        'Login was rate-limited for client@tovis.app. Wait for the throttle window to clear, then rerun the auth setup.',
       )
     }),
     expect(page.getByText(/invalid|incorrect|unauthorized/i)).toBeVisible({
       timeout: 15_000,
     }).then(() => {
       throw new Error(
-        'Login failed for client@test.com. Check that the credentials are correct and that the account is active.',
+        'Login failed for client@tovis.app. Check that the credentials are correct and that the account is active.',
       )
     }),
   ])
