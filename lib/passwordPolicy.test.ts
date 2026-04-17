@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import breachedPasswords from './data/breached-passwords-10k.json'
 import { PASSWORD_MIN_LEN, validatePassword } from './passwordPolicy'
+
+const COMMON_PASSWORD_ERROR =
+  'This password is too common. Choose something less predictable.'
 
 describe('lib/passwordPolicy.ts', () => {
   it('rejects passwords shorter than the minimum length', () => {
@@ -9,17 +13,28 @@ describe('lib/passwordPolicy.ts', () => {
     )
   })
 
-  it('rejects top-common / breached passwords', () => {
-    expect(validatePassword(' password123 ')).toBe(
-      'Please choose a less common password.',
-    )
-    expect(validatePassword('1234567890')).toBe(
-      'Please choose a less common password.',
-    )
+  it('rejects breached/common passwords from the static dataset', () => {
+    expect(validatePassword('password123')).toBe(COMMON_PASSWORD_ERROR)
+    expect(validatePassword('iloveyou123')).toBe(COMMON_PASSWORD_ERROR)
+    expect(validatePassword('qwerty12345')).toBe(COMMON_PASSWORD_ERROR)
+  })
+
+  it('normalizes trim + lowercase before breached-password lookup', () => {
+    expect(validatePassword(' PASSWORD123 ')).toBe(COMMON_PASSWORD_ERROR)
+  })
+
+  it('allows a strong random password', () => {
+    expect(validatePassword('Xk9mP2vLqRnW')).toBeNull()
   })
 
   it('does not require mixed character classes', () => {
-    expect(validatePassword('longpassword')).toBeNull()
-    expect(validatePassword('beautyrules')).toBeNull()
+    expect(validatePassword('fjordcactus')).toBeNull()
+  })
+
+  it('loads the static breached-password dataset in the test runtime', () => {
+    expect(breachedPasswords.length).toBeGreaterThanOrEqual(10_000)
+    expect(breachedPasswords).toContain('password123')
+    expect(breachedPasswords).toContain('iloveyou123')
+    expect(breachedPasswords).toContain('qwerty12345')
   })
 })
