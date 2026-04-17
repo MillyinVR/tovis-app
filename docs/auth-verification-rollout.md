@@ -633,3 +633,7 @@ The production contract is simple:
 - **notifications use the same verified-destination rules as auth**
 
 Anything that weakens one of those rules is a regression.
+
+## Sweep result
+
+AuthVersion enforcement sweep completed against bf6dc98. Repo-confirmed authenticated app surfaces do not perform raw JWT verification or raw tovis_token reads outside auth lifecycle endpoints. DB-backed current-user validation remains centralized in lib/currentUser.ts and flows through requireUser()/requireClient()/requirePro(). Structural regression test now passes and is scoped to catch real session-bypass risks without flagging unauthenticated token-based flows like password reset confirm.
