@@ -12,6 +12,7 @@ import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
 import { NotificationEventKey } from '@prisma/client'
 import ProProfileLink from '@/app/client/components/ProProfileLink'
 
+import { getBrandConfig } from '@/lib/brand'
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'
 import ClientBookingActionsCard from './ClientBookingActionsCard'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
@@ -710,6 +711,7 @@ export default async function ClientBookingPage(props: {
   params: Promise<PageParams> | PageParams
   searchParams?: Promise<PageSearchParams> | PageSearchParams
 }) {
+  const brand = getBrandConfig()
   const resolvedParams = await resolvePageValue<PageParams>(props.params, {
     id: '',
   })
@@ -1212,7 +1214,7 @@ export default async function ClientBookingPage(props: {
             <section id="aftercare" className="mt-4 grid gap-4">
               <SectionCard
                 title={COPY.bookings.aftercare.header}
-                subtitle="Your TOVIS post-appointment summary."
+                subtitle={`Your ${brand.displayName} post-appointment summary.`}
                 right={
                   showUnreadAftercareBadge ? (
                     <TinyMetaPill>{COPY.bookings.badges.new}</TinyMetaPill>

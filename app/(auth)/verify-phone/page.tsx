@@ -15,6 +15,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import AuthShell from '../_components/AuthShell'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { cn } from '@/lib/utils'
+import { useBrand } from '@/lib/brand/BrandProvider'
 
 const RESEND_COOLDOWN_SECONDS = 60
 const NEXT_URL_RECOVERY_DELAY_MS = 3000
@@ -230,6 +231,7 @@ function maskPhone(phone: string | null): string | null {
 export default function VerifyPhonePage() {
   const router = useRouter()
   const sp = useSearchParams()
+  const { brand } = useBrand()
 
   const nextFromQuery = useMemo(() => sanitizeNextUrl(sp.get('next')), [sp])
   const emailRetryRequested = useMemo(() => sp.get('email') === 'retry', [sp])
@@ -427,7 +429,7 @@ export default function VerifyPhonePage() {
         if (retryAfterSeconds != null && retryAfterSeconds > 0) {
           setPhoneCooldownSeconds(retryAfterSeconds)
           setError(
-            `You already requested a TOVIS verification code. Wait ${formatCooldown(
+            `You already requested a ${brand.displayName} verification code. Wait ${formatCooldown(
               retryAfterSeconds,
             )} and try again.`,
           )
@@ -440,7 +442,7 @@ export default function VerifyPhonePage() {
 
       await refreshStatus()
       setPhoneCooldownSeconds(RESEND_COOLDOWN_SECONDS)
-      setInfo('We sent a new TOVIS verification code.')
+      setInfo(`We sent a new ${brand.displayName} verification code.`)
     } catch (e) {
       console.error(e)
       setError('Network error.')
@@ -477,7 +479,7 @@ export default function VerifyPhonePage() {
         if (retryAfterSeconds != null && retryAfterSeconds > 0) {
           setEmailCooldownSeconds(retryAfterSeconds)
           setError(
-            `You already requested a TOVIS verification email. Wait ${formatCooldown(
+            `You already requested a ${brand.displayName} verification email. Wait ${formatCooldown(
               retryAfterSeconds,
             )} and try again.`,
           )
@@ -492,7 +494,7 @@ export default function VerifyPhonePage() {
 
       await refreshStatus()
       setEmailCooldownSeconds(RESEND_COOLDOWN_SECONDS)
-      setInfo('TOVIS sent a new verification email. Check your inbox and spam.')
+      setInfo(`${brand.displayName} sent a new verification email. Check your inbox and spam.`)
     } catch (e) {
       console.error(e)
       setError('Network error.')
@@ -532,7 +534,7 @@ export default function VerifyPhonePage() {
         if (retryAfterSeconds != null && retryAfterSeconds > 0) {
           setPhoneCooldownSeconds(retryAfterSeconds)
           setError(
-            `You already requested a TOVIS verification code. Wait ${formatCooldown(
+            `You already requested a ${brand.displayName} verification code. Wait ${formatCooldown(
               retryAfterSeconds,
             )} and try again.`,
           )
@@ -548,7 +550,7 @@ export default function VerifyPhonePage() {
       setShowPhoneCorrection(false)
       await refreshStatus()
       setPhoneCooldownSeconds(RESEND_COOLDOWN_SECONDS)
-      setInfo('We updated your TOVIS phone number and sent a fresh code.')
+      setInfo(`We updated your ${brand.displayName} phone number and sent a fresh code.`)
     } catch (e) {
       console.error(e)
       setError('Network error.')
@@ -657,14 +659,14 @@ export default function VerifyPhonePage() {
 
         {smsRetryRequested && !status.isPhoneVerified ? (
           <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-bold text-toneWarn">
-            TOVIS could not send your first verification text. Resend a code or
+            {brand.displayName} could not send your first verification text. Resend a code or
             fix your phone number below.
           </div>
         ) : null}
 
         {emailRetryRequested && !status.isEmailVerified ? (
           <div className="rounded-card border border-toneWarn/25 bg-toneWarn/10 px-3 py-2 text-sm font-bold text-toneWarn">
-            TOVIS could not send your first verification email. Resend it, then
+            {brand.displayName} could not send your first verification email. Resend it, then
             check your inbox and spam.
           </div>
         ) : null}

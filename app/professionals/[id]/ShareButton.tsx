@@ -2,12 +2,13 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useBrand } from '@/lib/brand/BrandProvider'
 
 type SharePayload = { url?: string; title?: string; text?: string }
 
 export default function ShareButton({
   url,
-  title = 'TOVIS',
+  title,
   text,
   className = '',
   variant = 'pill',
@@ -28,6 +29,9 @@ export default function ShareButton({
    */
   variant?: 'pill' | 'icon'
 }) {
+  const { brand } = useBrand()
+  const resolvedTitle = title ?? brand.displayName
+
   const [status, setStatus] = useState<string | null>(null)
   const timerRef = useRef<number | null>(null)
 
@@ -70,7 +74,7 @@ export default function ShareButton({
 
       // Best UX (mostly mobile)
       if (typeof nav.share === 'function') {
-        await nav.share({ url: shareUrl, title, text })
+        await nav.share({ url: shareUrl, title: resolvedTitle, text })
         flash('Shared')
         return
       }

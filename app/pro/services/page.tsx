@@ -1,12 +1,14 @@
 // app/pro/services/page.tsx
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
+import { getBrandConfig } from '@/lib/brand'
 import ServicesManagerSection from '@/app/pro/profile/_sections/ServicesManagerSection'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ProServicesPage() {
   const user = await getCurrentUser()
+  const brand = getBrandConfig()
 
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect('/login?from=/pro/services')
@@ -19,7 +21,7 @@ export default async function ProServicesPage() {
         backHref="/pro/dashboard"
         backLabel="← Back to pro dashboard"
         title="My services"
-        subtitle="Pick from the TOVIS service library. Set pricing for Salon and/or Mobile. Service names stay consistent across the platform."
+        subtitle={`Pick from the ${brand.displayName} service library. Set pricing for Salon and/or Mobile. Service names stay consistent across the platform.`}
       />
     </main>
   )

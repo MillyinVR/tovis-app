@@ -1,6 +1,8 @@
+// app/pro/notifications/page.tsx
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
+import { getBrandConfig } from '@/lib/brand'
 import { prisma } from '@/lib/prisma'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import {
@@ -250,6 +252,7 @@ export default async function ProNotificationsPage(props: {
   searchParams?: SearchParams
 }) {
   const user = await getCurrentUser()
+  const brand = getBrandConfig()
 
   if (!user || user.role !== Role.PRO || !user.professionalProfile) {
     redirect('/login?from=/pro/notifications')
@@ -394,7 +397,7 @@ export default async function ProNotificationsPage(props: {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-textSecondary">
-              TOVIS Pro
+              {brand.displayName} Pro
             </div>
 
             <h1 className="mt-1 truncate text-[18px] font-black text-textPrimary">
@@ -470,7 +473,7 @@ export default async function ProNotificationsPage(props: {
 
             <div className="mt-1 text-[12px] text-textSecondary">
               Booking requests, schedule changes, cancellations, and reviews will
-              appear here in your TOVIS inbox.
+              appear here in your {brand.displayName} inbox.
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">

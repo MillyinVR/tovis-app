@@ -7,6 +7,7 @@ import LogoutButton from './components/LogoutButton'
 import LastMinuteOpenings from './components/LastMinuteOpenings'
 import PendingConsultApprovalBanner from './components/PendingConsultApprovalBanner'
 import SavedServicesWithProviders from './components/SavedServicesWithProviders'
+import { getBrandConfig } from '@/lib/brand'
 export const dynamic = 'force-dynamic'
 
 type ViralStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
@@ -29,9 +30,9 @@ function statusLabel(s: ViralStatus) {
 }
 
 function statusTone(s: ViralStatus) {
-  if (s === 'APPROVED') return 'text-emerald-300'
-  if (s === 'REJECTED') return 'text-rose-300'
-  return 'text-yellow-300'
+  if (s === 'APPROVED') return 'text-toneSuccess'
+  if (s === 'REJECTED') return 'text-toneDanger'
+  return 'text-toneWarn'
 }
 
 function pickDisplayName(user: CurrentUser) {
@@ -129,6 +130,7 @@ export default async function ClientHomePage({
 }: {
   searchParams?: Promise<PageSearchParams>
 }) {
+  const brand = getBrandConfig()
   const user = await getCurrentUser().catch(() => null)
   if (!user || user.role !== 'CLIENT' || !user.clientProfile?.id) {
     redirect('/login?from=/client')
@@ -170,7 +172,7 @@ export default async function ClientHomePage({
         select: {
           id: true,
           name: true,
-          description: true, // ✅ add this
+          description: true,
           defaultImageUrl: true,
           category: { select: { name: true, slug: true } },
         },
@@ -213,16 +215,20 @@ export default async function ClientHomePage({
   ])
 
   return (
-    <main className="mx-auto mt-16 w-full max-w-6xl px-4 pb-14 text-textPrimary">
-      <header className="mb-6 flex items-start justify-between gap-3">
+    <main className="mx-auto w-full max-w-6xl px-4 pb-14 text-textPrimary" style={{ paddingTop: 'max(48px, env(safe-area-inset-top, 0px) + 24px)' }}>
+
+      {/* Page header */}
+      <header className="mb-8 flex items-end justify-between gap-4 border-b border-textPrimary/8 pb-6">
         <div>
-          <h1 className="text-2xl font-black tracking-tight">Your hub</h1>
-          <p className="mt-1 text-sm font-semibold text-textSecondary">Welcome, {displayName}.</p>
+          <div className="text-[10px] font-black tracking-[0.22em] text-textSecondary/50">{brand.assets.wordmark.text}</div>
+          <h1 className="mt-1.5 font-display text-3xl font-bold leading-tight">
+            {displayName}
+          </h1>
         </div>
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex items-center gap-2 pb-0.5">
           <Link
             href="/client/settings"
-            className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgSecondary px-3 py-1.5 text-[12px] font-black text-textPrimary transition hover:border-white/20"
+            className="rounded-inner border border-textPrimary/10 bg-bgSecondary px-3 py-1.5 text-[11px] font-bold text-textSecondary transition hover:border-textPrimary/14 hover:text-textPrimary"
           >
             Settings
           </Link>
@@ -230,81 +236,79 @@ export default async function ClientHomePage({
         </div>
       </header>
 
-      <div className="grid gap-4">
+      <div className="grid gap-8">
         <PendingConsultApprovalBanner />
 
-        {/* feedback banner */}
         {ok ? (
-          <section className="rounded-card border border-white/10 bg-bgSecondary p-3 text-sm font-semibold text-emerald-200">
-            {ok === 'viral_submitted' ? 'Viral request submitted. Admin will review it.' : 'Saved.'}
-          </section>
+          <div className="rounded-inner border border-toneSuccess/25 bg-toneSuccess/8 px-4 py-3 text-sm font-semibold text-toneSuccess">
+            {ok === 'viral_submitted' ? 'Viral request submitted — admin will review it.' : 'Saved.'}
+          </div>
         ) : null}
 
         {err ? (
-          <section className="rounded-card border border-white/10 bg-bgSecondary p-3 text-sm font-semibold text-rose-200">
+          <div className="rounded-inner border border-toneDanger/25 bg-toneDanger/8 px-4 py-3 text-sm font-semibold text-toneDanger">
             {err === 'viral_missing_name'
               ? 'Please enter a viral service name.'
               : err === 'viral_bad_url'
                 ? 'That link looks invalid. Please paste a full http/https URL.'
                 : 'Something went wrong.'}
-          </section>
+          </div>
         ) : null}
 
         {/* Saved Pros */}
-        <section className="rounded-card border border-white/10 bg-bgSecondary p-4">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <div className="text-sm font-black">Saved pros</div>
-            <div className="text-xs font-semibold text-textSecondary">
-              {favoritePros.length ? `${favoritePros.length} saved` : 'Save pros to find them fast.'}
-            </div>
+        <section>
+          <div className="tovis-section-label mb-4">
+            Saved pros
+            {favoritePros.length > 0 && (
+              <span className="ml-auto font-semibold tracking-normal normal-case text-textSecondary/50">
+                {favoritePros.length} saved
+              </span>
+            )}
           </div>
 
           {favoritePros.length === 0 ? (
-            <div className="text-sm text-textSecondary">
-              You haven’t saved anyone yet. Browse{' '}
-              <Link className="font-black text-textPrimary underline" href="/looks">
+            <p className="text-sm text-textSecondary">
+              No saved pros yet. Browse{' '}
+              <Link className="font-bold text-textPrimary underline underline-offset-2" href="/looks">
                 Looks
               </Link>{' '}
-              and hit Favorite on pros you like.
-            </div>
+              and favorite the pros you like.
+            </p>
           ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {favoritePros.map((f) => {
                 const p = f.professional
                 const name = (p.businessName ?? p.handle ?? 'Professional').trim()
-                const subtitle = (p.professionType ?? 'Pro') + (p.location ? ` • ${p.location}` : '')
+                const subtitle = (p.professionType ?? 'Pro') + (p.location ? ` · ${p.location}` : '')
 
                 return (
-                  <div key={p.id} className="rounded-card border border-white/10 bg-bgPrimary/20 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <Link
-                        href={`/professionals/${encodeURIComponent(p.id)}`}
-                        className="flex min-w-0 items-center gap-3 hover:opacity-95"
+                  <div key={p.id} className="flex items-center justify-between gap-3 rounded-card border border-textPrimary/8 bg-bgSecondary px-3 py-3">
+                    <Link
+                      href={`/professionals/${encodeURIComponent(p.id)}`}
+                      className="flex min-w-0 items-center gap-3 hover:opacity-90"
+                    >
+                      <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full border border-textPrimary/10 bg-bgPrimary/40">
+                        {p.avatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={p.avatarUrl} alt={name} className="h-full w-full object-cover" />
+                        ) : null}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-bold">{name}</div>
+                        <div className="truncate text-[11px] text-textSecondary">{subtitle}</div>
+                      </div>
+                    </Link>
+
+                    <form action={removeProFavoriteAction}>
+                      <input type="hidden" name="professionalId" value={p.id} />
+                      <button
+                        type="submit"
+                        className="shrink-0 rounded-inner border border-textPrimary/8 px-2.5 py-1.5 text-[11px] font-bold text-textSecondary/70 transition hover:border-textPrimary/14 hover:text-textPrimary"
+                        title="Remove from saved pros"
                       >
-                        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-white/10 bg-bgPrimary/30">
-                          {p.avatarUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={p.avatarUrl} alt={name} className="h-full w-full object-cover" />
-                          ) : null}
-                        </div>
-
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-black">{name}</div>
-                          <div className="truncate text-xs font-semibold text-textSecondary">{subtitle}</div>
-                        </div>
-                      </Link>
-
-                      <form action={removeProFavoriteAction}>
-                        <input type="hidden" name="professionalId" value={p.id} />
-                        <button
-                          type="submit"
-                          className="rounded-full border border-white/10 bg-bgPrimary/25 px-3 py-2 text-xs font-black text-textPrimary hover:bg-white/10"
-                          title="Remove from saved pros"
-                        >
-                          Remove
-                        </button>
-                      </form>
-                    </div>
+                        Remove
+                      </button>
+                    </form>
                   </div>
                 )
               })}
@@ -313,102 +317,101 @@ export default async function ClientHomePage({
         </section>
 
         {/* Saved Services */}
-        <SavedServicesWithProviders
-          services={favoriteServices.map((f) => ({
-            id: f.service.id,
-            name: f.service.name,
-            description: f.service.description ?? null,
-            defaultImageUrl: f.service.defaultImageUrl ?? null,
-            categoryName: f.service.category?.name ?? null,
-            categorySlug: f.service.category?.slug ?? null,
-          }))}
-        />
+        <section>
+          <div className="tovis-section-label mb-4">Saved services</div>
+          <SavedServicesWithProviders
+            services={favoriteServices.map((f) => ({
+              id: f.service.id,
+              name: f.service.name,
+              description: f.service.description ?? null,
+              defaultImageUrl: f.service.defaultImageUrl ?? null,
+              categoryName: f.service.category?.name ?? null,
+              categorySlug: f.service.category?.slug ?? null,
+            }))}
+          />
+        </section>
 
         {/* Viral Requests */}
-        <section className="rounded-card border border-white/10 bg-bgSecondary p-4">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <div className="text-sm font-black">Viral requests</div>
-            <div className="text-xs font-semibold text-textSecondary">Drop the name + link. Admin approves/denies.</div>
-          </div>
+        <section>
+          <div className="tovis-section-label mb-4">Viral requests</div>
 
-          <form action={createViralRequestAction} className="grid gap-2 sm:grid-cols-3">
+          <form action={createViralRequestAction} className="mb-4 grid gap-2 sm:grid-cols-3">
             <input
               name="name"
-              placeholder='Viral name (e.g. "Wolf Cut")'
-              className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
+              placeholder='Service name (e.g. "Wolf Cut")'
+              className="w-full rounded-inner border border-textPrimary/10 bg-bgSecondary px-3 py-2.5 text-sm text-textPrimary outline-none placeholder:text-textSecondary/50 focus:border-accentPrimary/30 focus:ring-1 focus:ring-accentPrimary/20 transition"
             />
             <input
               name="sourceUrl"
-              placeholder="Link (TikTok/IG/YouTube) — optional"
-              className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary sm:col-span-2"
+              placeholder="TikTok / IG / YouTube link — optional"
+              className="w-full rounded-inner border border-textPrimary/10 bg-bgSecondary px-3 py-2.5 text-sm text-textPrimary outline-none placeholder:text-textSecondary/50 focus:border-accentPrimary/30 focus:ring-1 focus:ring-accentPrimary/20 transition sm:col-span-2"
             />
             <div className="sm:col-span-3">
               <button
                 type="submit"
-                className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-sm font-black text-textPrimary hover:bg-white/10"
+                className="rounded-inner border border-textPrimary/10 bg-bgSecondary px-4 py-2 text-sm font-bold text-textPrimary transition hover:border-white/20 hover:bg-white/5"
               >
-                Request viral service
+                Submit request
               </button>
             </div>
           </form>
 
-          {viralRequests.length ? (
-            <div className="mt-4 grid gap-2">
+          {viralRequests.length > 0 ? (
+            <div className="grid gap-2">
               {viralRequests.map((r) => {
                 const s = r.status as ViralStatus
                 return (
-                  <div key={r.id} className="rounded-card border border-white/10 bg-bgPrimary/15 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-black">{r.name}</div>
-                        <div className="mt-0.5 text-xs font-semibold text-textSecondary">
-                          {new Date(r.createdAt).toLocaleDateString()}
-                          {r.sourceUrl ? (
-                            <>
-                              {' • '}
-                              <a className="pointer-events-auto underline" href={r.sourceUrl} target="_blank" rel="noreferrer">
-                                link
-                              </a>
-                            </>
-                          ) : null}
-                        </div>
+                  <div key={r.id} className="flex items-center justify-between gap-3 rounded-inner border border-textPrimary/8 bg-bgSecondary px-4 py-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-bold">{r.name}</div>
+                      <div className="mt-0.5 text-[11px] text-textSecondary">
+                        {new Date(r.createdAt).toLocaleDateString()}
+                        {r.sourceUrl ? (
+                          <>
+                            {' · '}
+                            <a className="underline underline-offset-2" href={r.sourceUrl} target="_blank" rel="noreferrer">
+                              link
+                            </a>
+                          </>
+                        ) : null}
                       </div>
+                    </div>
 
-                      <div className="flex items-center gap-2">
-                        <div className={`shrink-0 text-xs font-black ${statusTone(s)}`}>{statusLabel(s)}</div>
-
-                        <form action={deleteViralRequestAction}>
-                          <input type="hidden" name="requestId" value={r.id} />
-                          <button
-                            type="submit"
-                            className="rounded-full border border-white/10 bg-bgPrimary/25 px-3 py-2 text-xs font-black text-textPrimary hover:bg-white/10"
-                            title="Delete request"
-                          >
-                            Delete
-                          </button>
-                        </form>
-                      </div>
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span className={`text-[11px] font-black ${statusTone(s)}`}>{statusLabel(s)}</span>
+                      <form action={deleteViralRequestAction}>
+                        <input type="hidden" name="requestId" value={r.id} />
+                        <button
+                          type="submit"
+                          className="rounded-inner border border-textPrimary/8 px-2.5 py-1.5 text-[11px] font-bold text-textSecondary/70 transition hover:text-toneDanger/80"
+                          title="Delete request"
+                        >
+                          Delete
+                        </button>
+                      </form>
                     </div>
                   </div>
                 )
               })}
             </div>
           ) : (
-            <div className="mt-3 text-sm text-textSecondary">No viral requests yet.</div>
+            <p className="text-sm text-textSecondary/60">No requests yet.</p>
           )}
         </section>
 
         {/* Your Reviews */}
-        <section className="rounded-card border border-white/10 bg-bgSecondary p-4">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <div className="text-sm font-black">Your reviews</div>
-            <div className="text-xs font-semibold text-textSecondary">
-              {myReviews.length ? `${myReviews.length} recent` : 'Reviews you’ve left will show up here.'}
-            </div>
+        <section>
+          <div className="tovis-section-label mb-4">
+            Your reviews
+            {myReviews.length > 0 && (
+              <span className="ml-auto font-semibold tracking-normal normal-case text-textSecondary/50">
+                {myReviews.length} recent
+              </span>
+            )}
           </div>
 
           {myReviews.length === 0 ? (
-            <div className="text-sm text-textSecondary">No reviews yet.</div>
+            <p className="text-sm text-textSecondary/60">Reviews you leave will appear here.</p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2">
               {myReviews.map((r) => {
@@ -418,18 +421,18 @@ export default async function ClientHomePage({
                   <Link
                     key={r.id}
                     href={`/professionals/${encodeURIComponent(pro.id)}?tab=reviews`}
-                    className="rounded-card border border-white/10 bg-bgPrimary/15 p-3 hover:bg-white/5"
+                    className="flex items-start justify-between gap-3 rounded-card border border-textPrimary/8 bg-bgSecondary px-4 py-3 transition hover:border-white/14"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-black">{proName}</div>
-                        <div className="mt-0.5 text-xs font-semibold text-textSecondary">
-                          {new Date(r.createdAt).toLocaleDateString()}
-                        </div>
-                        {r.headline ? <div className="mt-2 text-xs font-semibold text-textPrimary/90">“{r.headline}”</div> : null}
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-bold">{proName}</div>
+                      <div className="mt-0.5 text-[11px] text-textSecondary">
+                        {new Date(r.createdAt).toLocaleDateString()}
                       </div>
-                      <div className="shrink-0 text-sm font-black text-amber-300">★ {r.rating}</div>
+                      {r.headline ? (
+                        <div className="mt-2 text-[11px] italic text-textSecondary/80">"{r.headline}"</div>
+                      ) : null}
                     </div>
+                    <div className="shrink-0 text-sm font-black text-accentPrimary">★ {r.rating}</div>
                   </Link>
                 )
               })}
@@ -437,12 +440,9 @@ export default async function ClientHomePage({
           )}
         </section>
 
-        {/* Open now */}
-        <section className="rounded-card border border-white/10 bg-bgSecondary p-4">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <div className="text-sm font-black">Open now</div>
-            <div className="text-xs font-semibold text-textSecondary">Same-day openings near you.</div>
-          </div>
+        {/* Open Now */}
+        <section>
+          <div className="tovis-section-label mb-4">Open now</div>
           <LastMinuteOpenings />
         </section>
       </div>

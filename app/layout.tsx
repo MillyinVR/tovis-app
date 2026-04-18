@@ -1,22 +1,33 @@
 // app/layout.tsx
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
-import { Geist, Geist_Mono } from 'next/font/google'
+import { Cormorant_Garamond, DM_Sans } from 'next/font/google'
 
 import './globals.css'
 import '@/lib/brand/brand.css'
 
 import { BrandProvider } from '@/lib/brand/BrandProvider'
 import RoleFooter from '@/app/_components/RoleFooter'
+import { getBrandConfig } from '@/lib/brand'
 
-const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
-const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] })
+const dmSans = DM_Sans({
+  variable: '--font-body',
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '700'],
+})
+
+const cormorant = Cormorant_Garamond({
+  variable: '--font-display-face',
+  subsets: ['latin'],
+  weight: ['300', '400', '600'],
+})
 
 export const dynamic = 'force-dynamic'
 
+const _brand = getBrandConfig()
 export const metadata: Metadata = {
-  title: 'TOVIS',
-  description: 'TOVIS',
+  title: _brand.displayName,
+  description: _brand.tagline ?? _brand.displayName,
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -24,14 +35,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className={`${dmSans.variable} ${cormorant.variable}`}>
         <BrandProvider>
-          {/* Content padding so it never hides under footer */}
           <div style={{ paddingBottom: 'calc(var(--app-footer-space, 0px) + env(safe-area-inset-bottom))' }}>
             {children}
           </div>
 
-          {/* ✅ Always-present portal host + mount */}
           <div
             id="tovis-footer-host"
             style={{
@@ -53,7 +62,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             />
           </div>
 
-          {/* ✅ Footer chooser (renders FooterShell) */}
           <RoleFooter />
         </BrandProvider>
       </body>

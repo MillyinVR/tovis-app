@@ -3,11 +3,12 @@
 
 import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
+import { useBrand } from '@/lib/brand/BrandProvider'
 
 type SummaryResponse = { hasUnread: boolean; count: number }
 
-function titleFromPath(pathname: string | null): string {
-  if (!pathname) return 'TOVIS Pro'
+function titleFromPath(pathname: string | null, brandName: string): string {
+  if (!pathname) return `${brandName} Pro`
   if (pathname === '/pro/dashboard') return 'Professional Dashboard'
   if (pathname.startsWith('/pro/calendar')) return 'Calendar'
   if (pathname.startsWith('/pro/notifications')) return 'Notifications'
@@ -16,12 +17,13 @@ function titleFromPath(pathname: string | null): string {
   if (pathname.startsWith('/pro/profile')) return 'Profile'
   if (pathname.startsWith('/pro/public-profile')) return 'Public Profile'
   if (pathname.startsWith('/pro/media')) return 'Media'
-  return 'TOVIS Pro'
+  return `${brandName} Pro`
 }
 
 export default function ProHeader() {
   const router = useRouter()
   const pathname = usePathname()
+  const { brand } = useBrand()
   const [hasUnread, setHasUnread] = useState(false)
 
   useEffect(() => {
@@ -46,7 +48,7 @@ export default function ProHeader() {
 
   if (!pathname?.startsWith('/pro')) return null
 
-  const title = titleFromPath(pathname)
+  const title = titleFromPath(pathname, brand.displayName)
 
   return (
     <header className="fixed left-0 right-0 top-0 z-50 border-b border-white/10 bg-bgSecondary/98 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.35)]">

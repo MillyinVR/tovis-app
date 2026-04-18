@@ -1,5 +1,5 @@
 // lib/brand/types.ts
-export type BrandId = 'tovis' // later: | 'salon-xyz' | string
+export type BrandId = string // 'tovis' | 'salon-xyz' | 'school-abc' | ...
 
 export type BrandMode = 'dark' | 'light'
 
@@ -41,10 +41,18 @@ export type BrandAssets = {
   }
 }
 
+export type BrandContact = {
+  businessName: string   // "Tovis Technology"
+  supportEmail: string   // "Support@tovis.app"
+  location?: string      // "Encinitas, CA"
+}
+
 export type BrandConfig = {
   id: BrandId
-  displayName: string
+  displayName: string    // "TOVIS" — used anywhere the brand name appears in UI
+  tagline?: string       // "A New Age of Self Care"
   defaultMode: BrandMode
   tokensByMode: Record<BrandMode, BrandTokens>
   assets: BrandAssets
+  contact: BrandContact
 }

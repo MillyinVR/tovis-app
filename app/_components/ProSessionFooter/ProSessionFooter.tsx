@@ -3,6 +3,7 @@
 
 import { usePathname } from 'next/navigation'
 import { useMemo } from 'react'
+import { CalendarDays, Camera, MessageCircle, Sparkles, User } from 'lucide-react'
 import { useProSession } from './useProSession'
 import NavItem from '../navigation/FooterNavItem'
 import BadgeDot from '../ClientSessionFooter/BadgeDot'
@@ -153,10 +154,10 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
         </div>
       ) : null}
 
-      <div className="tovis-glass border-t border-white/10">
+      <div className="tovis-glass border-t border-textPrimary/10">
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
-          <NavItem label="Looks" href={ROUTES.looks} icon="✨" active={isActivePath(path, ROUTES.looks)} />
-          <NavItem label="Calendar" href={ROUTES.calendar} icon="📅" active={isActivePath(path, ROUTES.calendar)} />
+          <NavItem label="Looks" href={ROUTES.looks} icon={<Sparkles size={20} />} active={isActivePath(path, ROUTES.looks)} />
+          <NavItem label="Calendar" href={ROUTES.calendar} icon={<CalendarDays size={20} />} active={isActivePath(path, ROUTES.calendar)} />
 
           <div className="relative -mt-8 flex w-22 justify-center">
             <button
@@ -175,8 +176,8 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
                 centerRingClass,
               ].join(' ')}
             >
-              <span className={['leading-none', showCameraIcon ? 'text-lg' : '', activePulseClass].join(' ')}>
-                {showCameraIcon ? '📷' : label}
+              <span className={['leading-none flex items-center justify-center', activePulseClass].join(' ')}>
+                {showCameraIcon ? <Camera size={22} /> : label}
               </span>
             </button>
           </div>
@@ -184,12 +185,12 @@ export default function ProSessionFooter({ messagesBadge }: { messagesBadge?: st
           <NavItem
             label="Messages"
             href={ROUTES.messages}
-            icon="💬"
+            icon={<MessageCircle size={20} />}
             active={isActivePath(path, ROUTES.messages)}
             rightSlot={badge ? <BadgeDot label={badge} /> : null}
           />
 
-          <NavItem label="Profile" href={ROUTES.profile} icon="👤" active={isActivePath(path, ROUTES.profile)} />
+          <NavItem label="Profile" href={ROUTES.profile} icon={<User size={20} />} active={isActivePath(path, ROUTES.profile)} />
         </div>
       </div>
     </div>

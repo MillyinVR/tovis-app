@@ -1,46 +1,54 @@
 // lib/brand/brands/tovis.ts
 import type { BrandConfig } from '../types'
 
+// DM Sans loaded via next/font into --font-body
 const fontSans =
-  'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"'
+  'var(--font-body), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial'
 
 export const tovisBrand: BrandConfig = {
   id: 'tovis',
   displayName: 'TOVIS',
+  tagline: 'A New Age of Self Care',
   defaultMode: 'dark',
   assets: {
     mark: { src: '/brand/tovis/mark.png', alt: 'TOVIS mark' },
     wordmark: { text: 'TOVIS' },
   },
+  contact: {
+    businessName: 'Tovis Technology',
+    supportEmail: 'Support@tovis.app',
+    location: 'Encinitas, CA',
+  },
   tokensByMode: {
-    dark: {
+    // Light mode is primary — Parchment bg, white cards, Espresso text, Terra accent
+    light: {
       colors: {
-        // richer, slightly cooler base so gold pops
-        bgPrimary: '10 12 16', // deep graphite
-        bgSecondary: '16 19 25', // elevated surface
+        // Parchment — main page background
+        bgPrimary: '247 243 238',
+        // White — card/surface background
+        bgSecondary: '255 255 255',
 
-        // text tuned to feel less “white on black”
-        textPrimary: '236 238 242',
-        textSecondary: '170 176 188',
+        // Espresso — primary text
+        textPrimary: '30 22 18',
+        // Driftwood — secondary/muted text
+        textSecondary: '154 123 92',
 
-        // glass "ink" (used with opacity)
-        surfaceGlass: '255 255 255',
+        // Espresso-tinted glass (dark frosting on light bg)
+        surfaceGlass: '30 22 18',
 
-        // gold that reads “luxury” instead of “mustard”
-        accentPrimary: '212 173 88',
-        accentPrimaryHover: '235 206 138',
+        // Terra — signature accent
+        accentPrimary: '196 103 58',
+        accentPrimaryHover: '208 122 77',
 
-        // rose quartz stays subtle
-        microAccent: '208 168 164',
+        // Driftwood as micro-accent
+        microAccent: '154 123 92',
       },
       effects: {
-        glassBlurPx: 24,
-        glassOpacity: 0.10,
-
-        // slightly warm shadow tint looks expensive
-        shadowColor: '0 0 0',
+        glassBlurPx: 18,
+        glassOpacity: 0.07,
+        shadowColor: '30 22 18',
         radiusAppIconPx: 28,
-        radiusCardPx: 22,
+        radiusCardPx: 14,
       },
       typography: {
         fontSans,
@@ -48,23 +56,35 @@ export const tovisBrand: BrandConfig = {
       },
     },
 
-    light: {
+    // Dark mode — optional, available for toggle
+    dark: {
       colors: {
-        bgPrimary: '246 247 249',
-        bgSecondary: '237 240 244',
-        textPrimary: '12 14 18',
-        textSecondary: '70 76 86',
-        surfaceGlass: '255 255 255',
-        accentPrimary: '212 173 88',
-        accentPrimaryHover: '235 206 138',
-        microAccent: '208 168 164',
+        // Espresso — warm dark brown
+        bgPrimary: '30 22 18',
+        // Bark — elevated surface
+        bgSecondary: '61 46 39',
+
+        // Parchment — warm off-white text
+        textPrimary: '247 243 238',
+        // Driftwood — muted warm secondary text
+        textSecondary: '154 123 92',
+
+        // Parchment-tinted glass
+        surfaceGlass: '247 243 238',
+
+        // Terra accent
+        accentPrimary: '196 103 58',
+        accentPrimaryHover: '208 122 77',
+
+        // Linen micro-accent
+        microAccent: '232 221 212',
       },
       effects: {
         glassBlurPx: 20,
-        glassOpacity: 0.12,
-        shadowColor: '0 0 0',
+        glassOpacity: 0.09,
+        shadowColor: '30 22 18',
         radiusAppIconPx: 28,
-        radiusCardPx: 22,
+        radiusCardPx: 14,
       },
       typography: {
         fontSans,

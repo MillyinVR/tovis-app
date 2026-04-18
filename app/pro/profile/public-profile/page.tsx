@@ -5,6 +5,7 @@ import { MediaVisibility, MediaType } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { getBrandConfig } from '@/lib/brand'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
 import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
@@ -92,6 +93,7 @@ export default async function ProPublicProfilePage({
   searchParams: Promise<SearchParams>
 }) {
   const user = await getCurrentUser()
+  const brand = getBrandConfig()
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect(`/login?from=${encodeURIComponent(ROUTES.proPublicProfile)}`)
   }
@@ -358,7 +360,7 @@ export default async function ProPublicProfilePage({
           </div>
           <div className="mt-3 text-[13px] text-textSecondary">
             You can keep setting up your services, portfolio, and payment details
-            here while TOVIS reviews your account.
+            here while {brand.displayName} reviews your account.
           </div>
         </section>
       ) : null}

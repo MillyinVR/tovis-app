@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
+import { getBrandConfig } from '@/lib/brand'
 
 import OfferingManager from '@/app/pro/services/OfferingManager'
 import ServicesManagerSectionClient from './ServicesManagerSectionClient'
@@ -22,9 +23,14 @@ export default async function ServicesManagerSection({
   backHref,
   backLabel = '← Back',
   title = 'My services',
-  subtitle = `Pick from the TOVIS service library. Set pricing for Salon and/or Mobile. Service names stay consistent across the platform.`,
+  subtitle,
   variant = 'section',
 }: Props) {
+  const brand = getBrandConfig()
+  const resolvedSubtitle =
+    subtitle !== undefined
+      ? subtitle
+      : `Pick from the ${brand.displayName} service library. Set pricing for Salon and/or Mobile. Service names stay consistent across the platform.`
   const user = await getCurrentUser()
 
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
@@ -177,11 +183,11 @@ export default async function ServicesManagerSection({
 
   return (
     <section className={outer}>
-      {(title || backHref || subtitle) && (
+      {(title || backHref || resolvedSubtitle) && (
         <header className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             {title ? <h1 className="text-[22px] font-black text-textPrimary">{title}</h1> : null}
-            {subtitle ? <p className="mt-1 max-w-680px text-[13px] text-textSecondary">{subtitle}</p> : null}
+            {resolvedSubtitle ? <p className="mt-1 max-w-680px text-[13px] text-textSecondary">{resolvedSubtitle}</p> : null}
           </div>
 
           {backHref ? (

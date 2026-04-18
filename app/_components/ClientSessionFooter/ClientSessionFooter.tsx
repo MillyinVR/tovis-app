@@ -3,6 +3,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { CalendarDays, Compass, House, MessageCircle } from 'lucide-react'
 import NavItem from '../navigation/FooterNavItem'
 import BadgeDot from './BadgeDot'
 import { useUnreadBadge } from '@/app/_components/_hooks/useUnreadBadge'
@@ -31,10 +32,10 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
 
   return (
     <div className="w-full pt-8" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      <div className="tovis-glass border-t border-white/10">
+      <div className="tovis-glass border-t border-textPrimary/10">
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
-          <NavItem label="Home" href={ROUTES.home} icon="🏠" active={isActivePath(path, ROUTES.home)} />
-          <NavItem label="Search" href={ROUTES.search} icon="🗺️" active={searchActive} />
+          <NavItem label="Home" href={ROUTES.home} icon={<House size={20} />} active={isActivePath(path, ROUTES.home)} />
+          <NavItem label="Search" href={ROUTES.search} icon={<Compass size={20} />} active={searchActive} />
 
           <div className="relative -mt-8 flex w-22 justify-center">
             <Link
@@ -58,12 +59,12 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
           <NavItem
             label="Messages"
             href={ROUTES.messages}
-            icon="💬"
+            icon={<MessageCircle size={20} />}
             active={isActivePath(path, ROUTES.messages)}
             rightSlot={badge ? <BadgeDot label={badge} /> : null}
           />
 
-          <NavItem label="Bookings" href={ROUTES.bookings} icon="🗓️" active={isActivePath(path, ROUTES.bookings)} />
+          <NavItem label="Bookings" href={ROUTES.bookings} icon={<CalendarDays size={20} />} active={isActivePath(path, ROUTES.bookings)} />
         </div>
       </div>
     </div>

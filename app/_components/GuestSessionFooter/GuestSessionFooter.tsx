@@ -3,6 +3,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { Compass, House, LogIn, UserPlus } from 'lucide-react'
 import NavItem from '../navigation/FooterNavItem'
 
 const ROUTES = {
@@ -30,10 +31,10 @@ export default function GuestSessionFooter() {
   return (
     // pt-8 accounts for the center button being pulled up with -mt-8
     <div className="w-full pt-8" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      <div className="tovis-glass border-t border-white/10">
+      <div className="tovis-glass border-t border-textPrimary/10">
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
-          <NavItem label="Home" href={ROUTES.home} icon="🏠" active={homeActive} />
-          <NavItem label="Search" href={ROUTES.search} icon="🗺️" active={searchActive} />
+          <NavItem label="Home" href={ROUTES.home} icon={<House size={20} />} active={homeActive} />
+          <NavItem label="Search" href={ROUTES.search} icon={<Compass size={20} />} active={searchActive} />
 
           {/* Center CTA: Looks */}
           <div className="relative -mt-8 flex w-22 justify-center">
@@ -55,8 +56,8 @@ export default function GuestSessionFooter() {
             </Link>
           </div>
 
-          <NavItem label="Log in" href={ROUTES.login} icon="🔑" active={loginActive} />
-          <NavItem label="Sign up" href={ROUTES.signup} icon="✨" active={isActivePath(pathname, ROUTES.signup)} />
+          <NavItem label="Log in" href={ROUTES.login} icon={<LogIn size={20} />} active={loginActive} />
+          <NavItem label="Sign up" href={ROUTES.signup} icon={<UserPlus size={20} />} active={isActivePath(pathname, ROUTES.signup)} />
         </div>
       </div>
     </div>

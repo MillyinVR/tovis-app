@@ -12,7 +12,7 @@ export default function NavItem({
 }: {
   label: string
   href: string
-  icon: string
+  icon: React.ReactNode
   active?: boolean
   rightSlot?: React.ReactNode
 }) {
@@ -28,13 +28,16 @@ export default function NavItem({
       ].join(' ')}
     >
       <div className="relative">
-        <span aria-hidden="true" className={['text-[18px]', active ? '' : 'opacity-80'].join(' ')}>
+        <span
+          aria-hidden="true"
+          className={['flex items-center justify-center', active ? '' : 'opacity-70'].join(' ')}
+        >
           {icon}
         </span>
         {rightSlot ? <span className="absolute -right-2 -top-2">{rightSlot}</span> : null}
       </div>
 
-      <span className={active ? '' : 'opacity-80'}>{label}</span>
+      <span className={active ? '' : 'opacity-70'}>{label}</span>
 
       {active ? <span className="-mt-0.5 h-0.5 w-6 rounded-full bg-white/40" /> : <span className="h-0.5 w-6" />}
     </Link>

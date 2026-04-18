@@ -28,9 +28,13 @@ module.exports = {
       borderRadius: {
         appIcon: 'var(--radius-app-icon)',
         card: 'var(--radius-card)',
+        inner: 'var(--radius-inner)',
       },
       backdropBlur: {
         app: 'var(--glass-blur)',
+      },
+      fontFamily: {
+        display: ['var(--font-display)', 'Georgia', 'serif'],
       },
     },
   },

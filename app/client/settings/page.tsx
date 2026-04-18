@@ -3,7 +3,7 @@ import Image from 'next/image'
 import ClientProfileSettings from './ClientProfileSettings'
 import ClientLocationSettings from './ClientLocationSettings'
 import ClientAddressesSettings from './ClientAddressesSettings'
-import { tovisBrand } from '@/lib/brand/brands/tovis'
+import { getBrandConfig } from '@/lib/brand'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,6 +24,7 @@ function SectionIntro(props: {
 }
 
 export default function ClientSettingsPage() {
+  const brand = getBrandConfig()
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
       <section className="brand-glass overflow-hidden p-5 sm:p-6">
@@ -31,8 +32,8 @@ export default function ClientSettingsPage() {
           <div className="flex items-start gap-4">
             <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-[calc(var(--radius-card)-8px)] border border-white/10 bg-bgSecondary/40">
               <Image
-                src={tovisBrand.assets.mark.src}
-                alt={tovisBrand.assets.mark.alt}
+                src={brand.assets.mark.src}
+                alt={brand.assets.mark.alt}
                 fill
                 className="object-cover"
                 sizes="48px"
@@ -43,7 +44,7 @@ export default function ClientSettingsPage() {
             <div className="max-w-3xl">
               <div className="flex flex-wrap items-center gap-2">
                 <div className="text-xl font-black tracking-[var(--ls-caps)] text-textPrimary">
-                  {tovisBrand.assets.wordmark.text}
+                  {brand.assets.wordmark.text}
                 </div>
                 <div className="rounded-full border border-white/10 bg-bgSecondary/35 px-3 py-1 text-[11px] font-black uppercase tracking-[var(--ls-caps)] text-textSecondary">
                   Client settings
@@ -93,7 +94,7 @@ export default function ClientSettingsPage() {
               How this works
             </div>
             <div className="mt-1 text-xs font-semibold leading-5 text-textSecondary">
-              Your discovery location helps TOVIS show nearby pros and salons.
+              Your discovery location helps {brand.displayName} show nearby pros and salons.
               Your saved service addresses are separate, so mobile bookings can
               use a real destination without messing up your search preferences.
             </div>

@@ -12,6 +12,7 @@ import {
   readErrorMessage,
   readStringField,
 } from '@/lib/http'
+import { useBrand } from '@/lib/brand/BrandProvider'
 
 type VerifyEmailResult = {
   alreadyVerified: boolean
@@ -214,6 +215,7 @@ function SecondaryLinkButton({
 
 export default function VerifyEmailPage() {
   const searchParams = useSearchParams()
+  const { brand } = useBrand()
 
   const verificationId = useMemo(
     () => sanitizeVerificationId(searchParams.get('verificationId')),
@@ -355,7 +357,7 @@ export default function VerifyEmailPage() {
       ? 'Your email is verified and your account is fully verified.'
       : 'Your email is verified. Phone verification is still required before full app access.'
     : hasValidParams
-      ? 'Confirm this email verification to continue setting up your TOVIS account.'
+      ? `Confirm this email verification to continue setting up your ${brand.displayName} account.`
       : 'That verification link is missing required information.'
 
   return (

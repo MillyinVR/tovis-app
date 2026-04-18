@@ -2,6 +2,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
+import { HeadphonesIcon, LayoutDashboard, Nfc, Scissors, UserCheck } from 'lucide-react'
 import NavItem from '@/app/_components/navigation/FooterNavItem'
 
 type Props = {
@@ -27,16 +28,16 @@ export default function AdminSessionFooter({ supportBadge }: Props) {
 
   return (
     <div className="w-full" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      <div className="tovis-glass border-t border-white/10">
+      <div className="tovis-glass border-t border-textPrimary/10">
         <div className="mx-auto flex h-18 w-full max-w-[1100px] items-center justify-between px-4">
-          <NavItem label="Dashboard" href={ROUTES.dashboard} icon="⌂" active={isActivePath(pathname, ROUTES.dashboard)} />
-          <NavItem label="Approve" href={ROUTES.approve} icon="✓" active={isActivePath(pathname, ROUTES.approve)} />
-          <NavItem label="Services" href={ROUTES.services} icon="✦" active={isActivePath(pathname, ROUTES.services)} />
-          <NavItem label="NFC" href={ROUTES.nfc} icon="⌁" active={isActivePath(pathname, ROUTES.nfc)} />
+          <NavItem label="Dashboard" href={ROUTES.dashboard} icon={<LayoutDashboard size={20} />} active={isActivePath(pathname, ROUTES.dashboard)} />
+          <NavItem label="Approve" href={ROUTES.approve} icon={<UserCheck size={20} />} active={isActivePath(pathname, ROUTES.approve)} />
+          <NavItem label="Services" href={ROUTES.services} icon={<Scissors size={20} />} active={isActivePath(pathname, ROUTES.services)} />
+          <NavItem label="NFC" href={ROUTES.nfc} icon={<Nfc size={20} />} active={isActivePath(pathname, ROUTES.nfc)} />
           <NavItem
             label="Support"
             href={ROUTES.support}
-            icon="❢"
+            icon={<HeadphonesIcon size={20} />}
             active={isActivePath(pathname, ROUTES.support)}
             rightSlot={
               supportBadge ? (

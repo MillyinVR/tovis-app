@@ -1,31 +1,43 @@
 /* lib/brand/brand.css */
-/* Defaults (in case provider hasn’t mounted yet) */
+/* Pre-hydration defaults — must match dark mode tokens in tovis.ts   */
+/* so there's no flash before BrandProvider mounts.                   */
 :root {
-  --bg-primary: 10 12 16;
-  --bg-secondary: 16 19 25;
-  --text-primary: 236 238 242;
-  --text-secondary: 170 176 188;
-  --surface-glass: 255 255 255;
-  --accent-primary: 212 173 88;
-  --accent-primary-hover: 235 206 138;
-  --micro-accent: 208 168 164;
+  /* Foundation — dark mode primary (Espresso) */
+  --bg-primary: 30 22 18;       /* Espresso — main dark background */
+  --bg-secondary: 61 46 39;     /* Bark — elevated surfaces */
+  --text-primary: 247 243 238;  /* Parchment — warm off-white text */
+  --text-secondary: 154 123 92; /* Driftwood — muted warm secondary */
+  --surface-glass: 247 243 238; /* Parchment-tinted glass on dark bg */
 
-  --tone-danger: 248 113 113;  /* red-400-ish */
-  --tone-warn: 251 191 36;     /* amber-400-ish */
-  --tone-success: 74 222 128;  /* green-400-ish */
-  --tone-info: 96 165 250;     /* blue-400-ish */
+  /* Accent */
+  --accent-primary: 196 103 58;       /* Terra */
+  --accent-primary-hover: 208 122 77;
+  --micro-accent: 232 221 212;        /* Linen — warm highlight */
 
-  --overlay: 0 0 0;            /* used for modal overlays */
-  --glass-blur: 24px;
-  --glass-opacity: 0.10;
-  --shadow-color: 0 0 0;
+  /* Status — brand palette */
+  --tone-danger: 168 75 58;    /* Ember   #A84B3A */
+  --tone-warn: 196 146 58;     /* Ochre   #C4923A */
+  --tone-success: 92 138 107;  /* Fern    #5C8A6B */
+  --tone-info: 59 130 246;     /* blue-500 */
 
+  --overlay: 30 22 18;
+
+  /* Effects */
+  --glass-blur: 20px;
+  --glass-opacity: 0.09;
+  --shadow-color: 30 22 18;
+
+  /* Radii */
   --radius-app-icon: 28px;
-  --radius-card: 22px;
+  --radius-card: 14px;
+  --radius-inner: 8px;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji",
-    "Segoe UI Emoji";
+  /* Typography */
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto,
+    Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-display: var(--font-display-face), "Cormorant Garamond", Georgia,
+    "Times New Roman", serif;
   --ls-caps: 0.08em;
 }
 
@@ -36,11 +48,10 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Keep this as a basic generic utility */
 .brand-glass {
   background: rgb(var(--surface-glass) / var(--glass-opacity));
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid rgb(255 255 255 / 0.10);
+  border: 1px solid rgb(var(--surface-glass) / 0.12);
   border-radius: var(--radius-card);
 }

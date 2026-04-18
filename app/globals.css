@@ -11,7 +11,7 @@ body {
   overflow-x: hidden;
 }
 
-/* Explicit scheme; BrandProvider controls mode */
+/* Dark mode is primary — warm espresso palette */
 html {
   color-scheme: dark;
 }
@@ -23,12 +23,12 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
-  /* Premium depth: ambient gradient + slight vignette */
+  /* Subtle warmth: very gentle terra glow top-left, parchment-to-white gradient.   */
+  /* Opacities kept low (0.05-0.06) so it's atmospheric, not orange.                */
   background-image:
-    radial-gradient(900px 700px at 15% 10%, rgb(var(--accent-primary) / 0.12), transparent 60%),
-    radial-gradient(800px 600px at 85% 20%, rgb(var(--micro-accent) / 0.10), transparent 55%),
-    radial-gradient(1200px 900px at 50% 120%, rgb(255 255 255 / 0.05), transparent 55%),
-    linear-gradient(180deg, rgb(var(--bg-primary)) 0%, rgb(var(--bg-secondary)) 120%);
+    radial-gradient(800px 600px at 10% 0%, rgb(var(--accent-primary) / 0.05), transparent 60%),
+    radial-gradient(600px 500px at 90% 10%, rgb(var(--micro-accent) / 0.06), transparent 55%),
+    linear-gradient(180deg, rgb(var(--bg-primary)) 0%, rgb(var(--bg-secondary)) 100%);
 }
 
 a {
@@ -36,13 +36,13 @@ a {
   text-decoration: none;
 }
 
-/* Better default focus (feels “product”, not “prototype”) */
+/* Focus ring using accent color */
 :focus-visible {
   outline: none;
   box-shadow:
     0 0 0 2px rgb(var(--bg-primary)),
-    0 0 0 4px rgb(var(--accent-primary) / 0.55);
-  border-radius: 12px;
+    0 0 0 4px rgb(var(--accent-primary) / 0.50);
+  border-radius: var(--radius-inner);
 }
 
 /* Respect reduced motion */
@@ -54,8 +54,43 @@ a {
   }
 }
 
-/* ===== Premium Glass ===== */
-/* Glass needs: highlight + border + shadow depth */
+/* ===== Solid page surface ===== */
+/* For page content cards — grounded, not frosted.               */
+/* Borders use text-primary so they adapt to light and dark mode */
+.tovis-surface {
+  position: relative;
+  border-radius: var(--radius-card);
+  background: rgb(var(--bg-secondary) / 1);
+  border: 1px solid rgb(var(--text-primary) / 0.08);
+  box-shadow:
+    0 1px 4px rgb(var(--shadow-color) / 0.10),
+    0 1px 0 rgb(var(--surface-glass) / 0.04) inset;
+}
+
+/* Section label — editorial separator */
+/* text-primary at low opacity so it works on both light and dark */
+.tovis-section-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgb(var(--text-secondary) / 0.70);
+}
+
+.tovis-section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgb(var(--text-primary) / 0.08);
+}
+
+/* ===== Glass — for FLOATING elements only (footer, drawers, modals) ===== */
+/* surface-glass adapts per mode:                                            */
+/*   light mode → espresso (30 22 18) = dark frosted bar at bottom          */
+/*   dark mode  → parchment (247 243 238) = warm frosted glass              */
 
 .tovis-glass {
   position: relative;
@@ -67,35 +102,51 @@ a {
     rgb(var(--surface-glass) / var(--glass-opacity)) 100%
   );
 
-  border: 1px solid rgb(255 255 255 / 0.10);
+  /* Adaptive border — surface-glass tint at low opacity */
+  border: 1px solid rgb(var(--surface-glass) / 0.12);
 
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
 
   box-shadow:
-    0 10px 30px rgb(0 0 0 / 0.35),
-    0 1px 0 rgb(255 255 255 / 0.06) inset;
+    0 8px 24px rgb(var(--shadow-color) / 0.14),
+    0 1px 0 rgb(var(--surface-glass) / 0.06) inset;
 }
-/* ===== Stronger glass for overlays (readable) ===== */
+
+/* Specular highlight — only meaningful on dark glass */
+.tovis-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+
+  background: radial-gradient(
+    600px 180px at 30% 0%,
+    rgb(var(--surface-glass) / 0.10),
+    transparent 60%
+  );
+}
+
+/* ===== Stronger glass for drawers/modals ===== */
 .tovis-glass-strong {
   position: relative;
   border-radius: var(--radius-card);
 
-  /* more opaque surface for legibility */
   background: linear-gradient(
     180deg,
-    rgb(var(--bg-secondary) / 0.92) 0%,
-    rgb(var(--bg-secondary) / 0.84) 100%
+    rgb(var(--bg-secondary) / 0.94) 0%,
+    rgb(var(--bg-secondary) / 0.88) 100%
   );
 
-  border: 1px solid rgb(255 255 255 / 0.12);
+  border: 1px solid rgb(var(--text-primary) / 0.08);
 
-  backdrop-filter: blur(calc(var(--glass-blur) * 1.05));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.05));
+  backdrop-filter: blur(calc(var(--glass-blur) * 1.1));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.1));
 
   box-shadow:
-    0 18px 70px rgb(0 0 0 / 0.60),
-    0 1px 0 rgb(255 255 255 / 0.07) inset;
+    0 20px 60px rgb(var(--shadow-color) / 0.22),
+    0 1px 0 rgb(var(--surface-glass) / 0.06) inset;
 }
 
 .tovis-glass-strong::before {
@@ -107,59 +158,30 @@ a {
 
   background: radial-gradient(
     700px 240px at 28% 0%,
-    rgb(255 255 255 / 0.14),
+    rgb(var(--surface-glass) / 0.08),
     transparent 60%
   );
-
-  opacity: 1;
 }
 
-/* Optional: inner scrim layer for readability on top of glass */
-.tovis-overlay-scrim {
-  background: linear-gradient(
-    180deg,
-    rgb(0 0 0 / 0.20) 0%,
-    rgb(0 0 0 / 0.42) 100%
-  );
-}
-
-
-/* Specular highlight */
-.tovis-glass::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-
-  background: radial-gradient(
-    600px 220px at 30% 0%,
-    rgb(255 255 255 / 0.16),
-    transparent 60%
-  );
-
-  opacity: 0.9;
-}
-
-/* Soft variant */
+/* ===== Soft glass variant ===== */
 .tovis-glass-soft {
   position: relative;
   border-radius: var(--radius-card);
 
   background: linear-gradient(
     180deg,
-    rgb(var(--surface-glass) / calc(var(--glass-opacity) * 0.75 + 0.02)) 0%,
-    rgb(var(--surface-glass) / calc(var(--glass-opacity) * 0.75)) 100%
+    rgb(var(--surface-glass) / calc(var(--glass-opacity) * 0.7 + 0.02)) 0%,
+    rgb(var(--surface-glass) / calc(var(--glass-opacity) * 0.7)) 100%
   );
 
-  border: 1px solid rgb(255 255 255 / 0.08);
+  border: 1px solid rgb(var(--surface-glass) / 0.09);
 
   backdrop-filter: blur(calc(var(--glass-blur) * 0.85));
   -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.85));
 
   box-shadow:
-    0 8px 22px rgb(0 0 0 / 0.28),
-    0 1px 0 rgb(255 255 255 / 0.05) inset;
+    0 6px 20px rgb(var(--shadow-color) / 0.10),
+    0 1px 0 rgb(var(--surface-glass) / 0.04) inset;
 }
 
 .tovis-glass-soft::before {
@@ -170,32 +192,25 @@ a {
   pointer-events: none;
 
   background: radial-gradient(
-    520px 180px at 35% 0%,
-    rgb(255 255 255 / 0.12),
+    500px 180px at 35% 0%,
+    rgb(var(--surface-glass) / 0.08),
     transparent 60%
   );
 }
 
-/* Keep BrandProvider content above the grain */
+/* Overlay scrim */
+.tovis-overlay-scrim {
+  background: linear-gradient(
+    180deg,
+    rgb(var(--shadow-color) / 0.15) 0%,
+    rgb(var(--shadow-color) / 0.35) 100%
+  );
+}
+
+/* Keep BrandProvider content above any pseudo-element overlays */
 [data-brand] {
   position: relative;
   z-index: 1;
-}
-
-/* Optional grain (subtle, expensive) */
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-
-  opacity: 0.08;
-  mix-blend-mode: overlay;
-
-  background-image:
-    repeating-linear-gradient(0deg, rgb(255 255 255 / 0.015) 0, transparent 1px, transparent 2px),
-    repeating-linear-gradient(90deg, rgb(0 0 0 / 0.02) 0, transparent 1px, transparent 3px);
 }
 
 /* Scrollbar hygiene */
@@ -209,7 +224,7 @@ body::after {
   height: 0;
 }
 
-/* ===== Luxe Motion Helpers ===== */
+/* ===== Motion helpers ===== */
 @keyframes overlayFadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -220,36 +235,13 @@ body::after {
   to { opacity: 0; }
 }
 
-/* Optional “expensive air” noise (panel-only) */
-.tovis-noise {
-  position: relative;
-}
-
-.tovis-noise::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  opacity: 0.10;
-  mix-blend-mode: overlay;
-
-  /* subtle, non-hex */
-  background-image:
-    radial-gradient(1px 1px at 20% 30%, rgb(255 255 255 / 0.18) 0, transparent 55%),
-    radial-gradient(1px 1px at 70% 60%, rgb(0 0 0 / 0.16) 0, transparent 55%),
-    radial-gradient(1px 1px at 45% 80%, rgb(255 255 255 / 0.12) 0, transparent 55%);
-  background-size: 220px 220px;
-  background-repeat: repeat;
-}
-
 /* Better mobile scroll behavior inside overlays */
 .overlayScroll {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
 
-/* ===== Skeleton shimmer for loading states ===== */
+/* ===== Skeleton shimmer ===== */
 @keyframes avail-shimmer {
   0%   { background-position: 200% center; }
   100% { background-position: -200% center; }
@@ -258,9 +250,9 @@ body::after {
 .avail-skeleton {
   background: linear-gradient(
     90deg,
-    rgb(255 255 255 / 0.04) 25%,
-    rgb(255 255 255 / 0.13) 50%,
-    rgb(255 255 255 / 0.04) 75%
+    rgb(var(--text-primary) / 0.04) 25%,
+    rgb(var(--text-primary) / 0.10) 50%,
+    rgb(var(--text-primary) / 0.04) 75%
   );
   background-size: 200% 100%;
   animation: avail-shimmer 1.4s ease-in-out infinite;

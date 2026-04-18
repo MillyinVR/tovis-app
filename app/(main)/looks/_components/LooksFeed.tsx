@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useBrand } from '@/lib/brand/BrandProvider'
 import { UI_SIZES } from '../../ui/layoutConstants'
 import AvailabilityDrawer from '../../booking/AvailabilityDrawer'
 import LooksTopBar from './LooksTopBar'
@@ -157,6 +158,7 @@ function buildAvailabilityDrawerContext(
 
 export default function LooksFeed() {
   const router = useRouter()
+  const { brand } = useBrand()
 
   const [items, setItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -657,7 +659,7 @@ export default function LooksFeed() {
       const share = getNavigatorShare()
       if (share) {
         await share({
-          title: 'TOVIS Look',
+          title: `${brand.displayName} Look`,
           text: item.caption ? item.caption.slice(0, 120) : undefined,
           url,
         })

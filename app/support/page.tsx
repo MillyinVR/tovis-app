@@ -1,12 +1,15 @@
 // app/support/page.tsx
 import { getCurrentUser } from '@/lib/currentUser'
 import SupportForm from './supportForm'
-import { TRANSACTIONAL_SMS_SUMMARY } from '@/lib/transactionalSmsPolicy'
+import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
+import { getBrandConfig } from '@/lib/brand'
 
 export const dynamic = 'force-dynamic'
 
 export default async function SupportPage() {
   const user = await getCurrentUser().catch(() => null)
+
+  const brand = getBrandConfig()
 
   const role =
     user?.role === 'PRO'
@@ -18,44 +21,47 @@ export default async function SupportPage() {
           : 'GUEST'
 
   return (
-    <main className="mx-auto grid w-full max-w-2xl gap-6 px-4 py-8 text-textPrimary">
-      <div className="grid gap-2">
-        <h1 className="text-[22px] font-black">Support & Contact</h1>
-        <p className="text-[13px] text-textSecondary">
-          This is the public support/contact page for TOVIS. Use the form below
-          to report an issue, request help, or ask a policy question.
-        </p>
-        <p className="text-[13px] text-textSecondary">
-          {TRANSACTIONAL_SMS_SUMMARY}
-        </p>
-      </div>
+    <main className="min-h-screen w-full text-textPrimary">
+      <PublicTopBar />
 
-      <section className="grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 p-4">
-        <div className="text-sm font-black text-textPrimary">
-          Business details
-        </div>
-        <div className="text-sm text-textSecondary">
-          <div>
-            <span className="font-black text-textPrimary">Business name:</span>{' '}
-            Tovis Technology
+      <div className="mx-auto w-full max-w-2xl px-6 pb-20 sm:px-10">
+
+        <header className="mb-10 mt-2">
+          <div className="tovis-section-label mb-4">Support</div>
+          <h1 className="font-display text-[36px] font-semibold leading-tight tracking-tight">
+            Get in touch
+          </h1>
+          <p className="mt-4 text-[14px] leading-relaxed text-textSecondary">
+            Report an issue, ask about your account, or get help with a booking.
+            We respond to all inquiries.
+          </p>
+        </header>
+
+        {/* Business details — clean list, no card boxing */}
+        <div className="mb-8 grid gap-1.5 border-b border-textPrimary/8 pb-8">
+          <div className="text-[12px] font-black tracking-[0.14em] text-textSecondary/60 uppercase mb-3">
+            Contact details
           </div>
-          <div>
-            <span className="font-black text-textPrimary">Support email:</span>{' '}
+          <div className="text-[14px] text-textSecondary">
+            <span className="font-semibold text-textPrimary">{brand.contact.businessName}</span>
+          </div>
+          {brand.contact.location && (
+            <div className="text-[14px] text-textSecondary">
+              {brand.contact.location}
+            </div>
+          )}
+          <div className="text-[14px] text-textSecondary">
             <a
-              href="mailto:Support@tovis.app"
-              className="font-black text-textPrimary hover:text-accentPrimary"
+              href={`mailto:${brand.contact.supportEmail}`}
+              className="font-semibold text-accentPrimary underline-offset-2 transition hover:underline"
             >
-              Support@tovis.app
+              {brand.contact.supportEmail}
             </a>
           </div>
-          <div>
-            <span className="font-black text-textPrimary">Location:</span>{' '}
-            Encinitas, CA
-          </div>
         </div>
-      </section>
 
-      <SupportForm role={role} />
+        <SupportForm role={role} />
+      </div>
     </main>
   )
 }

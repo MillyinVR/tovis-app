@@ -1,5 +1,6 @@
 // app/(auth)/_components/AuthShell.tsx
 import type { ReactNode } from 'react'
+import { getBrandConfig } from '@/lib/brand'
 
 export default function AuthShell({
   title,
@@ -10,6 +11,8 @@ export default function AuthShell({
   subtitle?: string
   children: ReactNode
 }) {
+  const brand = getBrandConfig()
+
   return (
     <div className="relative min-h-[100svh] w-full overflow-hidden px-4 py-10 text-textPrimary">
       {/* Ambient background (token-only, no hex) */}
@@ -32,11 +35,13 @@ export default function AuthShell({
         {/* Wordmark header */}
         <div className="mb-7 flex items-center justify-center">
           <div className="grid place-items-center gap-1.5 text-center">
-            <div className="text-[22px] font-black tracking-[0.24em] text-textPrimary">TOVIS</div>
+            <div className="text-[22px] font-black tracking-[0.24em] text-textPrimary">{brand.assets.wordmark.text}</div>
 
-            <div className="text-[11px] font-semibold tracking-wide text-textSecondary">
-              A New Age of Self Care
-            </div>
+            {brand.tagline && (
+              <div className="text-[11px] font-semibold tracking-wide text-textSecondary">
+                {brand.tagline}
+              </div>
+            )}
 
             {/* luxury micro-accent */}
             <div className="mt-1 flex items-center justify-center gap-2">
@@ -49,7 +54,7 @@ export default function AuthShell({
 
         <div className="grid gap-4">
           <div className="grid gap-1.5 text-center">
-            <h1 className="text-[22px] font-extrabold tracking-tight">{title}</h1>
+            <h1 className="font-display text-[28px] font-bold tracking-tight">{title}</h1>
             {subtitle ? <p className="text-sm leading-relaxed text-textSecondary">{subtitle}</p> : null}
           </div>
 
