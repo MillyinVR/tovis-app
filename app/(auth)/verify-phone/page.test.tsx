@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mockReplace = vi.hoisted(() => vi.fn())
 const mockRefresh = vi.hoisted(() => vi.fn())
 const mockSearchParamsGet = vi.hoisted(() => vi.fn())
+const mockSetBrandMode = vi.hoisted(() => vi.fn())
 
 const mockRouter = vi.hoisted(() => ({
   replace: mockReplace,
@@ -59,6 +60,18 @@ vi.mock('../_components/AuthShell', () => ({
       {children}
     </div>
   ),
+}))
+
+vi.mock('@/lib/brand/BrandProvider', () => ({
+  useBrand: () => ({
+    brand: {
+      id: 'tovis',
+      displayName: 'TOVIS',
+    },
+    mode: 'dark',
+    setMode: mockSetBrandMode,
+  }),
+  BrandProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
 vi.mock('@/lib/http', () => ({
@@ -139,6 +152,7 @@ describe('app/(auth)/verify-phone/page', () => {
     mockReplace.mockReset()
     mockRefresh.mockReset()
     mockSearchParamsGet.mockReset()
+    mockSetBrandMode.mockReset()
     fetchMock.mockReset()
 
     mockSearchParamsGet.mockImplementation((key: string) => {
@@ -292,10 +306,68 @@ describe('app/(auth)/verify-phone/page', () => {
   })
 
   it('recovers nextUrl once after a short delay when neither query nor status includes it', async () => {
-  vi.useFakeTimers()
+    vi.useFakeTimers()
 
-  fetchMock
-    .mockResolvedValueOnce(
+    fetchMock
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: false,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: null,
+            role: 'CLIENT',
+            email: 'client@example.com',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse({
+          ok: true,
+          nextUrl: '/claim/tok_1',
+        }),
+      )
+
+    render(<VerifyPhonePage />)
+
+    await flushAsyncWork()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Verification incomplete')).toBeInTheDocument()
+
+    await advanceFakeTime(3000)
+    await flushAsyncWork()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/auth/session/next-url',
+      expect.objectContaining({
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'include',
+      }),
+    )
+
+    const backLink = screen.getByRole('link', { name: /back to sign in/i })
+    expect(backLink).toHaveAttribute(
+      'href',
+      '/login?from=%2Fclaim%2Ftok_1&next=%2Fclaim%2Ftok_1&email=client%40example.com',
+    )
+  })
+
+  it('does not poll for nextUrl recovery when query already provides next', async () => {
+    vi.useFakeTimers()
+
+    mockSearchParamsGet.mockImplementation((key: string) => {
+      if (key === 'next') return '/claim/tok_1'
+      if (key === 'email') return null
+      if (key === 'sms') return null
+      if (key === 'intent') return null
+      if (key === 'inviteToken') return null
+      return null
+    })
+
+    fetchMock.mockResolvedValueOnce(
       makeResponse(
         makeStatusBody({
           isPhoneVerified: false,
@@ -307,160 +379,102 @@ describe('app/(auth)/verify-phone/page', () => {
         }),
       ),
     )
-    .mockResolvedValueOnce(
-      makeResponse({
-        ok: true,
-        nextUrl: '/claim/tok_1',
-      }),
+
+    render(<VerifyPhonePage />)
+
+    await flushAsyncWork()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Verification incomplete')).toBeInTheDocument()
+
+    await advanceFakeTime(3000)
+    await flushAsyncWork()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    const backLink = screen.getByRole('link', { name: /back to sign in/i })
+    expect(backLink).toHaveAttribute(
+      'href',
+      '/login?from=%2Fclaim%2Ftok_1&next=%2Fclaim%2Ftok_1&email=client%40example.com',
     )
-
-  render(<VerifyPhonePage />)
-
-  await flushAsyncWork()
-  expect(fetchMock).toHaveBeenCalledTimes(1)
-  expect(screen.getByText('Verification incomplete')).toBeInTheDocument()
-
-  await advanceFakeTime(3000)
-  await flushAsyncWork()
-
-  expect(fetchMock).toHaveBeenCalledTimes(2)
-  expect(fetchMock).toHaveBeenNthCalledWith(
-    2,
-    '/api/auth/session/next-url',
-    expect.objectContaining({
-      method: 'GET',
-      cache: 'no-store',
-      credentials: 'include',
-    }),
-  )
-
-  const backLink = screen.getByRole('link', { name: /back to sign in/i })
-  expect(backLink).toHaveAttribute(
-    'href',
-    '/login?from=%2Fclaim%2Ftok_1&next=%2Fclaim%2Ftok_1&email=client%40example.com',
-  )
-})
-
-it('does not poll for nextUrl recovery when query already provides next', async () => {
-  vi.useFakeTimers()
-
-  mockSearchParamsGet.mockImplementation((key: string) => {
-    if (key === 'next') return '/claim/tok_1'
-    if (key === 'email') return null
-    if (key === 'sms') return null
-    if (key === 'intent') return null
-    if (key === 'inviteToken') return null
-    return null
   })
 
-  fetchMock.mockResolvedValueOnce(
-    makeResponse(
-      makeStatusBody({
-        isPhoneVerified: false,
-        isEmailVerified: false,
-        isFullyVerified: false,
-        nextUrl: null,
-        role: 'CLIENT',
-        email: 'client@example.com',
-      }),
-    ),
-  )
+  it('uses recovered nextUrl when resending verification email after delayed recovery', async () => {
+    vi.useFakeTimers()
 
-  render(<VerifyPhonePage />)
-
-  await flushAsyncWork()
-  expect(fetchMock).toHaveBeenCalledTimes(1)
-  expect(screen.getByText('Verification incomplete')).toBeInTheDocument()
-
-  await advanceFakeTime(3000)
-  await flushAsyncWork()
-
-  expect(fetchMock).toHaveBeenCalledTimes(1)
-
-  const backLink = screen.getByRole('link', { name: /back to sign in/i })
-  expect(backLink).toHaveAttribute(
-    'href',
-    '/login?from=%2Fclaim%2Ftok_1&next=%2Fclaim%2Ftok_1&email=client%40example.com',
-  )
-})
-
-it('uses recovered nextUrl when resending verification email after delayed recovery', async () => {
-  vi.useFakeTimers()
-
-  fetchMock
-    .mockResolvedValueOnce(
-      makeResponse(
-        makeStatusBody({
+    fetchMock
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: true,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: null,
+            role: 'CLIENT',
+            email: 'client@example.com',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse({
+          ok: true,
+          nextUrl: '/claim/tok_1',
+        }),
+      )
+      .mockResolvedValueOnce(
+        makeResponse({
+          ok: true,
+          sent: true,
           isPhoneVerified: true,
           isEmailVerified: false,
           isFullyVerified: false,
-          nextUrl: null,
-          role: 'CLIENT',
-          email: 'client@example.com',
         }),
-      ),
+      )
+      .mockResolvedValueOnce(
+        makeResponse(
+          makeStatusBody({
+            isPhoneVerified: true,
+            isEmailVerified: false,
+            isFullyVerified: false,
+            nextUrl: null,
+            role: 'CLIENT',
+            email: 'client@example.com',
+          }),
+        ),
+      )
+
+    render(<VerifyPhonePage />)
+
+    await flushAsyncWork()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('Your phone is verified.')).toBeInTheDocument()
+
+    await advanceFakeTime(3000)
+    await flushAsyncWork()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /resend verification email/i }),
     )
-    .mockResolvedValueOnce(
-      makeResponse({
-        ok: true,
-        nextUrl: '/claim/tok_1',
-      }),
-    )
-    .mockResolvedValueOnce(
-      makeResponse({
-        ok: true,
-        sent: true,
-        isPhoneVerified: true,
-        isEmailVerified: false,
-        isFullyVerified: false,
-      }),
-    )
-    .mockResolvedValueOnce(
-      makeResponse(
-        makeStatusBody({
-          isPhoneVerified: true,
-          isEmailVerified: false,
-          isFullyVerified: false,
-          nextUrl: null,
-          role: 'CLIENT',
-          email: 'client@example.com',
+
+    await flushAsyncWork()
+
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/auth/email/send',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          next: '/claim/tok_1',
+          intent: null,
+          inviteToken: null,
         }),
-      ),
-    )
-
-  render(<VerifyPhonePage />)
-
-  await flushAsyncWork()
-  expect(fetchMock).toHaveBeenCalledTimes(1)
-  expect(screen.getByText('Your phone is verified.')).toBeInTheDocument()
-
-  await advanceFakeTime(3000)
-  await flushAsyncWork()
-
-  expect(fetchMock).toHaveBeenCalledTimes(2)
-
-  fireEvent.click(
-    screen.getByRole('button', { name: /resend verification email/i }),
-  )
-
-  await flushAsyncWork()
-
-  expect(fetchMock).toHaveBeenCalledTimes(4)
-  expect(fetchMock).toHaveBeenNthCalledWith(
-    3,
-    '/api/auth/email/send',
-    expect.objectContaining({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        next: '/claim/tok_1',
-        intent: null,
-        inviteToken: null,
       }),
-    }),
-  )
-})
+    )
+  })
 
   it('verifies phone, refreshes server truth, and keeps the user in verification flow when email is still pending', async () => {
     const user = userEvent.setup()

@@ -1,8 +1,10 @@
+import React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 const mockUseSearchParams = vi.hoisted(() => vi.fn())
 const mockFetch = vi.hoisted(() => vi.fn())
+const mockSetBrandMode = vi.hoisted(() => vi.fn())
 
 vi.mock('next/navigation', () => ({
   useSearchParams: mockUseSearchParams,
@@ -39,6 +41,18 @@ vi.mock('../_components/AuthShell', () => ({
       {children}
     </div>
   ),
+}))
+
+vi.mock('@/lib/brand/BrandProvider', () => ({
+  useBrand: () => ({
+    brand: {
+      id: 'tovis',
+      displayName: 'TOVIS',
+    },
+    mode: 'dark',
+    setMode: mockSetBrandMode,
+  }),
+  BrandProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
 vi.mock('@/lib/utils', () => ({
@@ -87,6 +101,7 @@ describe('app/(auth)/verify-email/page', () => {
   beforeEach(() => {
     mockUseSearchParams.mockReset()
     mockFetch.mockReset()
+    mockSetBrandMode.mockReset()
     vi.stubGlobal('fetch', mockFetch)
   })
 

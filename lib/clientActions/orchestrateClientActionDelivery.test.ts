@@ -1,6 +1,6 @@
 // lib/clientActions/orchestrateClientActionDelivery.test.ts
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ContactMethod,
   NotificationEventKey,
@@ -45,6 +45,15 @@ function buildInput(
 }
 
 describe('lib/clientActions/orchestrateClientActionDelivery', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-18T10:00:00.000Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('builds a complete orchestration plan for CLIENT_CLAIM_INVITE', () => {
     const input = buildInput({
       actionType: 'CLIENT_CLAIM_INVITE',
