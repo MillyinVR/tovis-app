@@ -10,7 +10,7 @@ import SavedServicesWithProviders from './components/SavedServicesWithProviders'
 import { getBrandConfig } from '@/lib/brand'
 export const dynamic = 'force-dynamic'
 
-type ViralStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
+type ViralStatus = 'REQUESTED' | 'IN_REVIEW' | 'APPROVED' | 'REJECTED'
 type PageSearchParams = { [key: string]: string | string[] | undefined }
 
 type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
@@ -26,12 +26,14 @@ function pickFirst(sp: PageSearchParams | undefined, key: string): string | null
 function statusLabel(s: ViralStatus) {
   if (s === 'APPROVED') return 'Approved'
   if (s === 'REJECTED') return 'Denied'
-  return 'Pending'
+  if (s === 'IN_REVIEW') return 'In review'
+  return 'Requested'
 }
 
 function statusTone(s: ViralStatus) {
   if (s === 'APPROVED') return 'text-toneSuccess'
   if (s === 'REJECTED') return 'text-toneDanger'
+  if (s === 'IN_REVIEW') return 'text-accentPrimary'
   return 'text-toneWarn'
 }
 
@@ -75,7 +77,7 @@ async function createViralRequestAction(formData: FormData) {
       clientId: user.clientProfile!.id,
       name,
       sourceUrl,
-      status: 'PENDING',
+      status: 'REQUESTED',
     },
     select: { id: true },
   })
