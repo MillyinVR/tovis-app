@@ -9,10 +9,10 @@ export const TRANSACTIONAL_SMS_USE_CASES = [
 ] as const
 
 export const TRANSACTIONAL_SMS_CHECKBOX_LABEL =
-  'I agree to receive transactional SMS/text messages from TOVIS for account verification and appointment updates, including appointment confirmations, reminders, reschedules, and cancellations. TOVIS does not send marketing or promotional SMS.'
+  'I agree to receive transactional SMS/text messages from TOVIS for account verification and appointment updates, including appointment confirmations, reminders, reschedules, and cancellations. TOVIS does not send marketing or promotional SMS. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help.'
 
 export const TRANSACTIONAL_SMS_SUMMARY =
-  'TOVIS sends transactional SMS only for account verification and appointment updates. No marketing or promotional SMS.'
+  'TOVIS sends transactional SMS only for account verification and appointment updates. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help. No marketing or promotional SMS.'
 
 export const TRANSACTIONAL_SMS_PAGE_COPY =
-  'TOVIS uses SMS only for transactional messages related to your account and appointments. Messages may include account verification codes, appointment confirmations, appointment reminders, reschedules, and cancellations. TOVIS does not send marketing or promotional SMS.'
+  'TOVIS uses SMS only for transactional messages related to your account and appointments. Messages may include account verification codes, appointment confirmations, appointment reminders, reschedules, and cancellations. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help. TOVIS does not send marketing or promotional SMS.'

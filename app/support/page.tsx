@@ -30,6 +30,31 @@ export default async function SupportPage() {
         </p>
       </div>
 
+      <section className="grid gap-2 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 p-4">
+        <div className="text-sm font-black text-textPrimary">
+          Business details
+        </div>
+        <div className="text-sm text-textSecondary">
+          <div>
+            <span className="font-black text-textPrimary">Business name:</span>{' '}
+            Tovis Technology
+          </div>
+          <div>
+            <span className="font-black text-textPrimary">Support email:</span>{' '}
+            <a
+              href="mailto:Support@tovis.app"
+              className="font-black text-textPrimary hover:text-accentPrimary"
+            >
+              Support@tovis.app
+            </a>
+          </div>
+          <div>
+            <span className="font-black text-textPrimary">Location:</span>{' '}
+            Encinitas, CA
+          </div>
+        </div>
+      </section>
+
       <SupportForm role={role} />
     </main>
   )
