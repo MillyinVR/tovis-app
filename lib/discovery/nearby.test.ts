@@ -11,6 +11,7 @@ vi.mock('@/lib/scheduling/workingHours', () => ({
 }))
 
 import {
+  boundsForRadiusMiles,
   buildDiscoveryLocationLabel,
   haversineMiles,
   inferProfessionTypesFromQuery,
@@ -101,6 +102,26 @@ describe('lib/discovery/nearby.ts', () => {
 
       expect(highLat).toBeGreaterThan(equator)
       expect(highLat).toBeCloseTo(2, 1)
+    })
+  })
+
+  describe('boundsForRadiusMiles', () => {
+    it('returns a bounded latitude and longitude box around the center', () => {
+      const bounds = boundsForRadiusMiles(32.7157, -117.1611, 10)
+
+      expect(bounds.minLat).toBeLessThan(32.7157)
+      expect(bounds.maxLat).toBeGreaterThan(32.7157)
+      expect(bounds.minLng).toBeLessThan(-117.1611)
+      expect(bounds.maxLng).toBeGreaterThan(-117.1611)
+    })
+
+    it('clamps bounds at world limits', () => {
+      const bounds = boundsForRadiusMiles(89.9, 179.9, 500)
+
+      expect(bounds.minLat).toBeGreaterThanOrEqual(-90)
+      expect(bounds.maxLat).toBeLessThanOrEqual(90)
+      expect(bounds.minLng).toBeGreaterThanOrEqual(-180)
+      expect(bounds.maxLng).toBeLessThanOrEqual(180)
     })
   })
 
@@ -227,6 +248,23 @@ describe('lib/discovery/nearby.ts', () => {
           workingHours: {},
         }),
       ).toBe(false)
+    })
+
+    it('uses the provided now value consistently', () => {
+      const now = new Date('2026-04-20T12:30:00.000Z')
+
+      const result = isOpenNowAtLocation({
+        timeZone: 'UTC',
+        workingHours: {},
+        now,
+      })
+
+      expect(result).toBe(true)
+      expect(mocks.getWorkingWindowForDay).toHaveBeenCalledWith(
+        now,
+        {},
+        'UTC',
+      )
     })
   })
 

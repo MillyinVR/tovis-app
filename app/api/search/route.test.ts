@@ -35,13 +35,128 @@ const mocks = vi.hoisted(() => {
     },
   }
 
-  const getWorkingWindowForDay = vi.fn()
+  const inferProfessionTypesFromQuery = vi.fn(
+    (query: string): ProfessionType[] => {
+      const q = query.trim().toLowerCase()
+      const hits: ProfessionType[] = []
+
+      if (q.includes('barber')) hits.push(ProfessionType.BARBER)
+      if (
+        q.includes('cosmo') ||
+        q.includes('hair') ||
+        q.includes('stylist')
+      ) {
+        hits.push(ProfessionType.COSMETOLOGIST)
+      }
+      if (
+        q.includes('esthetic') ||
+        q.includes('facial') ||
+        q.includes('skin')
+      ) {
+        hits.push(ProfessionType.ESTHETICIAN)
+      }
+      if (
+        q.includes('nail') ||
+        q.includes('mani') ||
+        q.includes('pedi')
+      ) {
+        hits.push(ProfessionType.MANICURIST)
+      }
+      if (q.includes('massage')) {
+        hits.push(ProfessionType.MASSAGE_THERAPIST)
+      }
+      if (q.includes('makeup') || q.includes('mua')) {
+        hits.push(ProfessionType.MAKEUP_ARTIST)
+      }
+
+      return Array.from(new Set(hits))
+    },
+  )
+
+  const mapProfessionalLocation = vi.fn((input) => ({
+    id: input.id,
+    formattedAddress: input.formattedAddress ?? null,
+    city: input.city ?? null,
+    state: input.state ?? null,
+    timeZone: input.timeZone ?? null,
+    placeId: input.placeId ?? null,
+    lat:
+      typeof input.lat === 'number'
+        ? input.lat
+        : input.lat == null
+          ? null
+          : Number(input.lat),
+    lng:
+      typeof input.lng === 'number'
+        ? input.lng
+        : input.lng == null
+          ? null
+          : Number(input.lng),
+    isPrimary: Boolean(input.isPrimary),
+    workingHours: input.workingHours,
+  }))
+
+  const pickPrimaryLocation = vi.fn((locations) => {
+    return locations.find((location: { isPrimary: boolean }) => location.isPrimary)
+      ?? locations[0]
+      ?? null
+  })
+
+  const pickClosestLocationWithinRadius = vi.fn(
+    ({
+      locations,
+    }: {
+      origin: { lat: number; lng: number }
+      locations: Array<{
+        lat: number | null
+        lng: number | null
+      }>
+      radiusMiles: number
+    }) => {
+      const first = locations[0] ?? null
+      if (!first) return null
+
+      return {
+        location: first,
+        distanceMiles: 1.2,
+      }
+    },
+  )
+
+  const isOpenNowAtLocation = vi.fn(() => true)
+
+  const buildDiscoveryLocationLabel = vi.fn(
+    ({
+      profileLocation,
+      location,
+    }: {
+      profileLocation: string | null
+      location: { city: string | null; state: string | null } | null
+    }) => {
+      const profile = profileLocation?.trim() ?? ''
+      if (profile) return profile
+
+      const city = location?.city?.trim() ?? ''
+      const state = location?.state?.trim() ?? ''
+
+      if (city && state) return `${city}, ${state}`
+      if (city) return city
+      if (state) return state
+
+      return null
+    },
+  )
 
   return {
     jsonOk,
     jsonFail,
     prisma,
-    getWorkingWindowForDay,
+    inferProfessionTypesFromQuery,
+    mapProfessionalLocation,
+    pickPrimaryLocation,
+    pickClosestLocationWithinRadius,
+    isOpenNowAtLocation,
+    buildDiscoveryLocationLabel,
   }
 })
 
@@ -59,8 +174,13 @@ vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
 }))
 
-vi.mock('@/lib/scheduling/workingHours', () => ({
-  getWorkingWindowForDay: mocks.getWorkingWindowForDay,
+vi.mock('@/lib/discovery/nearby', () => ({
+  inferProfessionTypesFromQuery: mocks.inferProfessionTypesFromQuery,
+  mapProfessionalLocation: mocks.mapProfessionalLocation,
+  pickPrimaryLocation: mocks.pickPrimaryLocation,
+  pickClosestLocationWithinRadius: mocks.pickClosestLocationWithinRadius,
+  isOpenNowAtLocation: mocks.isOpenNowAtLocation,
+  buildDiscoveryLocationLabel: mocks.buildDiscoveryLocationLabel,
 }))
 
 import { GET } from './route'
@@ -80,7 +200,7 @@ const DEFAULT_LOCATION = {
   },
 }
 
-function makeRequest(path: string) {
+function makeRequest(path: string): Request {
   return new Request(`http://localhost${path}`)
 }
 
@@ -136,12 +256,6 @@ describe('app/api/search/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
-    mocks.getWorkingWindowForDay.mockReturnValue({
-      ok: true,
-      startMinutes: 9 * 60,
-      endMinutes: 17 * 60,
-    })
-
     mocks.prisma.service.findMany.mockResolvedValue([])
     mocks.prisma.professionalProfile.findMany.mockResolvedValue([])
     mocks.prisma.review.groupBy.mockResolvedValue([])
@@ -194,6 +308,7 @@ describe('app/api/search/route.ts', () => {
     const res = await GET(makeRequest('/api/search?q=barber'))
 
     expect(res.status).toBe(200)
+    expect(mocks.inferProfessionTypesFromQuery).toHaveBeenCalledWith('barber')
 
     expect(mocks.prisma.professionalProfile.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -297,11 +412,7 @@ describe('app/api/search/route.ts', () => {
     mocks.prisma.professionalProfile.findMany.mockResolvedValue([
       makeSearchablePro(),
     ])
-
-    mocks.prisma.review.groupBy.mockResolvedValue([
-      makeRatingRow(),
-    ])
-
+    mocks.prisma.review.groupBy.mockResolvedValue([makeRatingRow()])
     mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([
       makeOfferingRow(),
     ])

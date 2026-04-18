@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => {
   return {
     looksBoardPreviewSelect: { __mocked: 'looksBoardPreviewSelect' },
     mapLooksBoardPreviewToDto: vi.fn(),
+    recomputeLookPostSaveCount: vi.fn(),
   }
 })
 
@@ -15,6 +16,10 @@ vi.mock('@/lib/looks/selects', () => ({
 
 vi.mock('@/lib/looks/mappers', () => ({
   mapLooksBoardPreviewToDto: mocks.mapLooksBoardPreviewToDto,
+}))
+
+vi.mock('@/lib/looks/counters', () => ({
+  recomputeLookPostSaveCount: mocks.recomputeLookPostSaveCount,
 }))
 
 import {
@@ -44,7 +49,6 @@ function makeDb() {
     boardItem: {
       findUnique: vi.fn(),
       create: vi.fn(),
-      count: vi.fn(),
       deleteMany: vi.fn(),
       findMany: vi.fn(),
     },
@@ -235,7 +239,7 @@ describe('lib/boards/index.ts', () => {
       })
       db.boardItem.findUnique.mockResolvedValue(null)
       db.boardItem.create.mockResolvedValue({ id: 'item_1' })
-      db.boardItem.count.mockResolvedValue(3)
+      mocks.recomputeLookPostSaveCount.mockResolvedValue(3)
 
       const result = await addBoardItem(asTransactionClient(db), {
         boardId: 'board_1',
@@ -260,6 +264,11 @@ describe('lib/boards/index.ts', () => {
         },
         select: { id: true },
       })
+
+      expect(mocks.recomputeLookPostSaveCount).toHaveBeenCalledWith(
+        asTransactionClient(db),
+        'look_1',
+      )
 
       expect(result).toEqual({
         board: {
@@ -288,7 +297,7 @@ describe('lib/boards/index.ts', () => {
         updatedAt: new Date('2026-04-18T10:00:00.000Z'),
       })
       db.boardItem.findUnique.mockResolvedValue({ id: 'item_existing' })
-      db.boardItem.count.mockResolvedValue(2)
+      mocks.recomputeLookPostSaveCount.mockResolvedValue(2)
 
       const result = await addBoardItem(asTransactionClient(db), {
         boardId: 'board_1',
@@ -297,6 +306,11 @@ describe('lib/boards/index.ts', () => {
       })
 
       expect(db.boardItem.create).not.toHaveBeenCalled()
+      expect(mocks.recomputeLookPostSaveCount).toHaveBeenCalledWith(
+        asTransactionClient(db),
+        'look_1',
+      )
+
       expect(result).toEqual({
         board: {
           id: 'board_1',
@@ -326,7 +340,7 @@ describe('lib/boards/index.ts', () => {
         updatedAt: new Date('2026-04-18T10:00:00.000Z'),
       })
       db.boardItem.deleteMany.mockResolvedValue({ count: 1 })
-      db.boardItem.count.mockResolvedValue(1)
+      mocks.recomputeLookPostSaveCount.mockResolvedValue(1)
 
       const result = await removeBoardItem(asTransactionClient(db), {
         boardId: 'board_1',
@@ -340,6 +354,11 @@ describe('lib/boards/index.ts', () => {
           lookPostId: 'look_1',
         },
       })
+
+      expect(mocks.recomputeLookPostSaveCount).toHaveBeenCalledWith(
+        asTransactionClient(db),
+        'look_1',
+      )
 
       expect(result).toEqual({
         board: {

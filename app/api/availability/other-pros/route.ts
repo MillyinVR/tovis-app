@@ -1,11 +1,15 @@
 // app/api/availability/other-pros/route.ts
 import { createHash } from 'node:crypto'
 
-import { Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
+import {
+  Prisma,
+  ProfessionalLocationType,
+  ServiceLocationType,
+} from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { pickString } from '@/app/api/_utils/pick'
-import { decimalToNumber } from '@/lib/booking/snapshots'
+import { loadOtherProsNearbyCached } from '@/lib/availability/data/otherPros'
 import {
   normalizeLocationType,
   pickEffectiveLocationType,
@@ -16,14 +20,10 @@ import {
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { getRedis } from '@/lib/redis'
-import {
-  isValidIanaTimeZone,
-  sanitizeTimeZone,
-} from '@/lib/timeZone'
+import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
-const TTL_OTHER_PROS_SECONDS = 600
 const TTL_PLACEMENT_SECONDS = 600
 
 const LOCATION_SELECT = {
@@ -47,17 +47,6 @@ const LOCATION_SELECT = {
 type AvailabilityLocation = Prisma.ProfessionalLocationGetPayload<{
   select: typeof LOCATION_SELECT
 }>
-
-type OtherProRow = {
-  id: string
-  businessName: string | null
-  avatarUrl: string | null
-  location: string | null
-  offeringId: string
-  timeZone: string
-  locationId: string
-  distanceMiles: number
-}
 
 type OtherProsRequestPayload = {
   professionalId: string
@@ -119,6 +108,7 @@ function normalizeAddress(value: unknown): string | null {
 
 function parseFloatParam(v: string | null): number | null {
   if (!v) return null
+
   const n = Number(v)
   return Number.isFinite(n) ? n : null
 }
@@ -173,11 +163,13 @@ function parseCachedPlacement(raw: unknown): CachedPlacement | null {
     typeof raw.locationId === 'string' && raw.locationId.trim()
       ? raw.locationId.trim()
       : null
+
   const locationType =
     raw.locationType === ServiceLocationType.SALON ||
     raw.locationType === ServiceLocationType.MOBILE
       ? raw.locationType
       : null
+
   const timeZone =
     typeof raw.timeZone === 'string' && raw.timeZone.trim()
       ? sanitizeTimeZone(raw.timeZone, 'UTC')
@@ -189,6 +181,7 @@ function parseCachedPlacement(raw: unknown): CachedPlacement | null {
     typeof raw.lat === 'number' && Number.isFinite(raw.lat)
       ? raw.lat
       : undefined
+
   const lng =
     typeof raw.lng === 'number' && Number.isFinite(raw.lng)
       ? raw.lng
@@ -201,14 +194,6 @@ function parseCachedPlacement(raw: unknown): CachedPlacement | null {
     lat,
     lng,
   }
-}
-
-function allowedProfessionalTypes(
-  locationType: ServiceLocationType,
-): ProfessionalLocationType[] {
-  return locationType === ServiceLocationType.MOBILE
-    ? [ProfessionalLocationType.MOBILE_BASE]
-    : [ProfessionalLocationType.SALON, ProfessionalLocationType.SUITE]
 }
 
 function locationTypeForLocation(
@@ -261,6 +246,8 @@ function mapPlacementError(code: AvailabilityPlacementErrorCode): string {
       return 'This location is missing coordinates required for this booking flow.'
     case 'NO_SCHEDULING_READY_LOCATION':
       return 'No scheduling-ready location found for this service.'
+    default:
+      return 'Unable to validate scheduling for this service.'
   }
 }
 
@@ -276,7 +263,7 @@ function buildOtherProsVersion(args: {
   viewerLng: number | null
   radiusMiles: number
   limit: number
-}) {
+}): string {
   const raw = JSON.stringify({
     v: 1,
     ...args,
@@ -436,7 +423,7 @@ async function resolveAvailabilityPlacement(args: {
     allowedTypes.push(ProfessionalLocationType.MOBILE_BASE)
   }
 
-  if (!allowedTypes.length) {
+  if (allowedTypes.length === 0) {
     return {
       ok: false,
       code: 'MODE_NOT_SUPPORTED',
@@ -458,6 +445,7 @@ async function resolveAvailabilityPlacement(args: {
   const attempts = await Promise.all(
     candidates.map(async (candidate) => {
       const locationType = locationTypeForLocation(candidate)
+
       return validateAvailabilityPlacement({
         professionalId,
         requestedLocationId: candidate.id,
@@ -484,351 +472,6 @@ async function resolveAvailabilityPlacement(args: {
       error: mapPlacementError('NO_SCHEDULING_READY_LOCATION'),
     }
   )
-}
-
-function haversineMiles(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
-  const earthRadiusMiles = 3958.7613
-  const toRad = (degrees: number) => (degrees * Math.PI) / 180
-
-  const dLat = toRad(b.lat - a.lat)
-  const dLng = toRad(b.lng - a.lng)
-  const lat1 = toRad(a.lat)
-  const lat2 = toRad(b.lat)
-
-  const sin1 = Math.sin(dLat / 2)
-  const sin2 = Math.sin(dLng / 2)
-
-  const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2
-  return 2 * earthRadiusMiles * Math.asin(Math.min(1, Math.sqrt(h)))
-}
-
-function boundsForRadiusMiles(
-  centerLat: number,
-  centerLng: number,
-  radiusMiles: number,
-) {
-  const latDelta = radiusMiles / 69
-  const cos = Math.max(0.2, Math.cos((centerLat * Math.PI) / 180))
-  const lngDelta = radiusMiles / (69 * cos)
-
-  return {
-    minLat: clampFloat(centerLat - latDelta, -90, 90),
-    maxLat: clampFloat(centerLat + latDelta, -90, 90),
-    minLng: clampFloat(centerLng - lngDelta, -180, 180),
-    maxLng: clampFloat(centerLng + lngDelta, -180, 180),
-  }
-}
-
-function toDecimal(n: number): Prisma.Decimal {
-  return new Prisma.Decimal(String(n))
-}
-
-async function loadOtherProsNearby(args: {
-  centerLat: number
-  centerLng: number
-  radiusMiles: number
-  serviceId: string
-  locationType: ServiceLocationType
-  excludeProfessionalId: string
-  limit: number
-}): Promise<OtherProRow[]> {
-  const {
-    centerLat,
-    centerLng,
-    radiusMiles,
-    serviceId,
-    locationType,
-    excludeProfessionalId,
-    limit,
-  } = args
-
-  const bounds = boundsForRadiusMiles(centerLat, centerLng, radiusMiles)
-  const allowedTypes = allowedProfessionalTypes(locationType)
-
-  const candidateLocs = await prisma.professionalLocation.findMany({
-    where: {
-      isBookable: true,
-      professionalId: { not: excludeProfessionalId },
-      type: { in: allowedTypes },
-      timeZone: { not: null },
-      workingHours: { not: Prisma.JsonNull },
-      lat: {
-        not: null,
-        gte: toDecimal(bounds.minLat),
-        lte: toDecimal(bounds.maxLat),
-      },
-      lng: {
-        not: null,
-        gte: toDecimal(bounds.minLng),
-        lte: toDecimal(bounds.maxLng),
-      },
-    },
-    select: {
-      id: true,
-      professionalId: true,
-      type: true,
-      timeZone: true,
-      workingHours: true,
-      lat: true,
-      lng: true,
-      city: true,
-      formattedAddress: true,
-      isPrimary: true,
-      createdAt: true,
-    },
-    take: 800,
-  })
-
-  const center = { lat: centerLat, lng: centerLng }
-
-  const bestByPro = new Map<
-    string,
-    {
-      locationId: string
-      timeZone: string
-      distanceMiles: number
-      isPrimary: boolean
-      createdAt: Date
-      city: string | null
-      formattedAddress: string | null
-    }
-  >()
-
-  for (const location of candidateLocs) {
-    const lat = decimalToNumber(location.lat)
-    const lng = decimalToNumber(location.lng)
-    if (lat == null || lng == null) continue
-
-    const tz =
-      typeof location.timeZone === 'string' ? location.timeZone.trim() : ''
-    if (!tz || !isValidIanaTimeZone(tz)) continue
-
-    if (!location.workingHours || !isRecord(location.workingHours)) continue
-
-    if (
-      locationType === ServiceLocationType.SALON &&
-      !normalizeAddress(location.formattedAddress)
-    ) {
-      continue
-    }
-
-    const distanceMiles = haversineMiles(center, { lat, lng })
-    if (distanceMiles > radiusMiles) continue
-
-    const prev = bestByPro.get(location.professionalId)
-    if (!prev) {
-      bestByPro.set(location.professionalId, {
-        locationId: location.id,
-        timeZone: tz,
-        distanceMiles,
-        isPrimary: Boolean(location.isPrimary),
-        createdAt: location.createdAt,
-        city: location.city ?? null,
-        formattedAddress: normalizeAddress(location.formattedAddress),
-      })
-      continue
-    }
-
-    const better =
-      distanceMiles < prev.distanceMiles ||
-      (Math.abs(distanceMiles - prev.distanceMiles) < 1e-9 &&
-        Boolean(location.isPrimary) &&
-        !prev.isPrimary) ||
-      (Math.abs(distanceMiles - prev.distanceMiles) < 1e-9 &&
-        Boolean(location.isPrimary) === prev.isPrimary &&
-        location.createdAt < prev.createdAt)
-
-    if (better) {
-      bestByPro.set(location.professionalId, {
-        locationId: location.id,
-        timeZone: tz,
-        distanceMiles,
-        isPrimary: Boolean(location.isPrimary),
-        createdAt: location.createdAt,
-        city: location.city ?? null,
-        formattedAddress: normalizeAddress(location.formattedAddress),
-      })
-    }
-  }
-
-  const proIds = Array.from(bestByPro.keys())
-  if (!proIds.length) return []
-
-  const offeringRows = await prisma.professionalServiceOffering.findMany({
-    where: {
-      professionalId: { in: proIds },
-      serviceId,
-      isActive: true,
-      ...(locationType === ServiceLocationType.MOBILE
-        ? {
-            offersMobile: true,
-            mobilePriceStartingAt: { not: null },
-            mobileDurationMinutes: { not: null },
-          }
-        : {
-            offersInSalon: true,
-            salonPriceStartingAt: { not: null },
-            salonDurationMinutes: { not: null },
-          }),
-    },
-    select: {
-      id: true,
-      professionalId: true,
-      professional: {
-        select: {
-          id: true,
-          businessName: true,
-          avatarUrl: true,
-          location: true,
-        },
-      },
-    },
-    take: 2000,
-  })
-
-  const offeringByPro = new Map<
-    string,
-    {
-      offeringId: string
-      businessName: string | null
-      avatarUrl: string | null
-      proLocation: string | null
-    }
-  >()
-
-  for (const offering of offeringRows) {
-    offeringByPro.set(offering.professionalId, {
-      offeringId: offering.id,
-      businessName: offering.professional.businessName ?? null,
-      avatarUrl: offering.professional.avatarUrl ?? null,
-      proLocation: offering.professional.location ?? null,
-    })
-  }
-
-  const out: OtherProRow[] = []
-
-  for (const proId of proIds) {
-    const best = bestByPro.get(proId)
-    const offering = offeringByPro.get(proId)
-    if (!best || !offering) continue
-
-    const locationLabel =
-      (offering.proLocation && offering.proLocation.trim()) ||
-      (best.city && best.city.trim()) ||
-      (best.formattedAddress && best.formattedAddress.trim()) ||
-      null
-
-    out.push({
-      id: proId,
-      businessName: offering.businessName,
-      avatarUrl: offering.avatarUrl,
-      location: locationLabel,
-      offeringId: offering.offeringId,
-      timeZone: best.timeZone,
-      locationId: best.locationId,
-      distanceMiles: Math.round(best.distanceMiles * 10) / 10,
-    })
-  }
-
-  out.sort((a, b) => a.distanceMiles - b.distanceMiles)
-  return out.slice(0, Math.max(0, limit))
-}
-
-function parseCachedOtherProsRows(raw: unknown): OtherProRow[] | null {
-  if (!Array.isArray(raw)) return null
-
-  const parsed: OtherProRow[] = []
-
-  for (const row of raw) {
-    if (!isRecord(row)) return null
-
-    const id = pickString(row.id)
-    const offeringId = pickString(row.offeringId)
-    const timeZone = pickString(row.timeZone)
-    const locationId = pickString(row.locationId)
-    const distanceMilesRaw =
-      typeof row.distanceMiles === 'number' ? row.distanceMiles : Number.NaN
-
-    if (
-      !id ||
-      !offeringId ||
-      !timeZone ||
-      !locationId ||
-      !Number.isFinite(distanceMilesRaw)
-    ) {
-      return null
-    }
-
-    parsed.push({
-      id,
-      businessName: pickString(row.businessName) ?? null,
-      avatarUrl: pickString(row.avatarUrl) ?? null,
-      location: pickString(row.location) ?? null,
-      offeringId,
-      timeZone,
-      locationId,
-      distanceMiles: distanceMilesRaw,
-    })
-  }
-
-  return parsed
-}
-
-async function loadOtherProsNearbyCached(args: {
-  centerLat: number
-  centerLng: number
-  radiusMiles: number
-  serviceId: string
-  locationType: ServiceLocationType
-  excludeProfessionalId: string
-  limit: number
-  cacheEnabled: boolean
-}): Promise<OtherProRow[]> {
-  if (!args.cacheEnabled || !redis) {
-    return loadOtherProsNearby({
-      centerLat: args.centerLat,
-      centerLng: args.centerLng,
-      radiusMiles: args.radiusMiles,
-      serviceId: args.serviceId,
-      locationType: args.locationType,
-      excludeProfessionalId: args.excludeProfessionalId,
-      limit: args.limit,
-    })
-  }
-
-  const key = [
-    'avail:otherPros:v3',
-    args.serviceId,
-    args.locationType,
-    args.excludeProfessionalId,
-    String(Math.round(args.centerLat * 1000) / 1000),
-    String(Math.round(args.centerLng * 1000) / 1000),
-    String(Math.round(args.radiusMiles * 10) / 10),
-    String(args.limit),
-  ].join(':')
-
-  const hit = await cacheGetJson<unknown>(key)
-  const parsedHit = parseCachedOtherProsRows(hit)
-  if (parsedHit) {
-    return parsedHit
-  }
-
-  const fresh = await loadOtherProsNearby({
-    centerLat: args.centerLat,
-    centerLng: args.centerLng,
-    radiusMiles: args.radiusMiles,
-    serviceId: args.serviceId,
-    locationType: args.locationType,
-    excludeProfessionalId: args.excludeProfessionalId,
-    limit: args.limit,
-  })
-
-  void cacheSetJson(key, fresh, TTL_OTHER_PROS_SECONDS)
-
-  return fresh
 }
 
 export async function GET(req: Request) {
@@ -866,7 +509,9 @@ export async function GET(req: Request) {
         })
 
     const cachedPlacement = placementCacheKey
-      ? parseCachedPlacement(await cacheGetJson(placementCacheKey))
+      ? parseCachedPlacement(
+          await cacheGetJson<unknown>(placementCacheKey),
+        )
       : null
 
     let effectiveLocationType: ServiceLocationType
@@ -980,7 +625,7 @@ export async function GET(req: Request) {
     if (centerLat == null || centerLng == null) {
       return jsonOk({
         ok: true,
-        mode: 'OTHER_PROS' as const,
+        mode: 'OTHER_PROS',
         availabilityVersion,
         generatedAt,
         request,
@@ -1009,7 +654,7 @@ export async function GET(req: Request) {
 
     return jsonOk({
       ok: true,
-      mode: 'OTHER_PROS' as const,
+      mode: 'OTHER_PROS',
       availabilityVersion,
       generatedAt,
       request,

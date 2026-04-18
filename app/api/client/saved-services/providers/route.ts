@@ -1,7 +1,6 @@
 // app/api/client/saved-services/providers/route.ts
-import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
-import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { createHash } from 'crypto'
+
 import {
   LastMinuteOfferType,
   LastMinuteTier,
@@ -10,8 +9,16 @@ import {
   Prisma,
   VerificationStatus,
 } from '@prisma/client'
+
+import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { decimalToNumber } from '@/lib/booking/snapshots'
+import {
+  boundsForRadiusMiles,
+  haversineMiles,
+} from '@/lib/discovery/nearby'
+import { getCurrentUser } from '@/lib/currentUser'
+import { prisma } from '@/lib/prisma'
 import { getRedis } from '@/lib/redis'
-import { createHash } from 'crypto'
 
 export const dynamic = 'force-dynamic'
 
@@ -161,6 +168,7 @@ function parseIntParam(v: string | null): number | null {
 
 function parseCommaIds(v: string | null): string[] {
   if (!v) return []
+
   return v
     .split(',')
     .map((s) => s.trim())
@@ -174,13 +182,17 @@ function clampFloat(n: number, min: number, max: number): number {
 }
 
 function stableHash(input: unknown): string {
-  return createHash('sha256').update(JSON.stringify(input)).digest('hex').slice(0, 24)
+  return createHash('sha256')
+    .update(JSON.stringify(input))
+    .digest('hex')
+    .slice(0, 24)
 }
 
 const redis = getRedis()
 
 async function cacheGetJson<T>(key: string): Promise<T | null> {
   if (!redis) return null
+
   try {
     const raw = await redis.get<string>(key)
     if (!raw) return null
@@ -190,8 +202,13 @@ async function cacheGetJson<T>(key: string): Promise<T | null> {
   }
 }
 
-async function cacheSetJson(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+async function cacheSetJson(
+  key: string,
+  value: unknown,
+  ttlSeconds: number,
+): Promise<void> {
   if (!redis) return
+
   try {
     await redis.set(key, JSON.stringify(value), { ex: ttlSeconds })
   } catch {
@@ -199,65 +216,32 @@ async function cacheSetJson(key: string, value: unknown, ttlSeconds: number): Pr
   }
 }
 
-function decimalToNumber(v: unknown): number | null {
-  if (typeof v === 'number' && Number.isFinite(v)) return v
-
-  if (v && typeof v === 'object' && typeof (v as { toNumber?: unknown }).toNumber === 'function') {
-    const n = (v as { toNumber: () => number }).toNumber()
-    return Number.isFinite(n) ? n : null
-  }
-
-  if (v && typeof v === 'object' && typeof (v as { toString?: unknown }).toString === 'function') {
-    const n = Number(String((v as { toString: () => string }).toString()))
-    return Number.isFinite(n) ? n : null
-  }
-
-  return null
-}
-
 function toDecimal(n: number): Prisma.Decimal {
   return new Prisma.Decimal(String(n))
 }
 
-function haversineMiles(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const R = 3958.7613
-  const toRad = (d: number) => (d * Math.PI) / 180
-  const dLat = toRad(b.lat - a.lat)
-  const dLng = toRad(b.lng - a.lng)
-  const lat1 = toRad(a.lat)
-  const lat2 = toRad(b.lat)
-
-  const sin1 = Math.sin(dLat / 2)
-  const sin2 = Math.sin(dLng / 2)
-  const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
-}
-
-function boundsForRadiusMiles(centerLat: number, centerLng: number, radiusMiles: number) {
-  const latDelta = radiusMiles / 69
-  const cos = Math.max(0.2, Math.cos((centerLat * Math.PI) / 180))
-  const lngDelta = radiusMiles / (69 * cos)
-
-  const minLat = clampFloat(centerLat - latDelta, -90, 90)
-  const maxLat = clampFloat(centerLat + latDelta, -90, 90)
-  const minLng = clampFloat(centerLng - lngDelta, -180, 180)
-  const maxLng = clampFloat(centerLng + lngDelta, -180, 180)
-
-  return { minLat, maxLat, minLng, maxLng }
-}
-
-function pickPublicTierPlan(row: OpeningRow, now: Date): PublicTierPlanRow | null {
+function pickPublicTierPlan(
+  row: OpeningRow,
+  now: Date,
+): PublicTierPlanRow | null {
   if (row.tierPlans.length === 0) return null
 
   if (row.visibilityMode === LastMinuteVisibilityMode.PUBLIC_AT_DISCOVERY) {
-    return row.tierPlans.find((plan) => plan.tier === LastMinuteTier.DISCOVERY) ?? null
+    return (
+      row.tierPlans.find((plan) => plan.tier === LastMinuteTier.DISCOVERY) ??
+      null
+    )
   }
 
   if (row.visibilityMode === LastMinuteVisibilityMode.PUBLIC_IMMEDIATE) {
-    const started = row.tierPlans.filter((plan) => plan.scheduledFor.getTime() <= now.getTime())
+    const started = row.tierPlans.filter(
+      (plan) => plan.scheduledFor.getTime() <= now.getTime(),
+    )
+
     if (started.length > 0) {
       return started[started.length - 1] ?? null
     }
+
     return row.tierPlans[0] ?? null
   }
 
@@ -265,11 +249,17 @@ function pickPublicTierPlan(row: OpeningRow, now: Date): PublicTierPlanRow | nul
 }
 
 function incentiveLabel(plan: PublicTierPlanRow): string {
-  if (plan.offerType === LastMinuteOfferType.PERCENT_OFF && plan.percentOff != null) {
+  if (
+    plan.offerType === LastMinuteOfferType.PERCENT_OFF &&
+    plan.percentOff != null
+  ) {
     return `${plan.percentOff}% off`
   }
 
-  if (plan.offerType === LastMinuteOfferType.AMOUNT_OFF && plan.amountOff) {
+  if (
+    plan.offerType === LastMinuteOfferType.AMOUNT_OFF &&
+    plan.amountOff
+  ) {
     return `$${plan.amountOff.toString()} off`
   }
 
@@ -284,7 +274,9 @@ function incentiveLabel(plan: PublicTierPlanRow): string {
   return 'No incentive'
 }
 
-function mapPublicIncentive(plan: PublicTierPlanRow | null): SavedServiceProviderEntry['opening']['publicIncentive'] {
+function mapPublicIncentive(
+  plan: PublicTierPlanRow | null,
+): SavedServiceProviderEntry['opening']['publicIncentive'] {
   if (!plan) return null
 
   return {
@@ -306,7 +298,9 @@ export async function GET(req: Request) {
   try {
     const user = await getCurrentUser().catch(() => null)
     if (!user) return jsonFail(401, 'Login required.')
-    if (user.role !== 'CLIENT' || !user.clientProfile?.id) return jsonFail(403, 'Client only.')
+    if (user.role !== 'CLIENT' || !user.clientProfile?.id) {
+      return jsonFail(403, 'Client only.')
+    }
 
     const { searchParams } = new URL(req.url)
 
@@ -345,7 +339,10 @@ export async function GET(req: Request) {
         cancelledAt: null,
         startAt: { gte: now, lte: until },
         publicVisibleFrom: { lte: now },
-        OR: [{ publicVisibleUntil: null }, { publicVisibleUntil: { gt: now } }],
+        OR: [
+          { publicVisibleUntil: null },
+          { publicVisibleUntil: { gt: now } },
+        ],
         services: {
           some: {
             serviceId: { in: serviceIds },
@@ -361,8 +358,16 @@ export async function GET(req: Request) {
         },
         location: {
           isBookable: true,
-          lat: { not: null, gte: toDecimal(bounds.minLat), lte: toDecimal(bounds.maxLat) },
-          lng: { not: null, gte: toDecimal(bounds.minLng), lte: toDecimal(bounds.maxLng) },
+          lat: {
+            not: null,
+            gte: toDecimal(bounds.minLat),
+            lte: toDecimal(bounds.maxLat),
+          },
+          lng: {
+            not: null,
+            gte: toDecimal(bounds.minLng),
+            lte: toDecimal(bounds.maxLng),
+          },
         },
       },
       orderBy: [{ startAt: 'asc' }, { id: 'asc' }],
@@ -379,15 +384,22 @@ export async function GET(req: Request) {
       const locLng = decimalToNumber(row.location.lng)
       if (locLat == null || locLng == null) continue
 
-      const distanceMiles = haversineMiles(center, { lat: locLat, lng: locLng })
+      const distanceMiles = haversineMiles(center, {
+        lat: locLat,
+        lng: locLng,
+      })
       if (distanceMiles > radiusMiles) continue
 
       const publicPlan = pickPublicTierPlan(row, now)
       const publicIncentive = mapPublicIncentive(publicPlan)
       const derivedDiscountPct =
-        publicPlan?.offerType === LastMinuteOfferType.PERCENT_OFF ? publicPlan.percentOff ?? null : null
+        publicPlan?.offerType === LastMinuteOfferType.PERCENT_OFF
+          ? publicPlan.percentOff ?? null
+          : null
 
-      const matchedServices = row.services.filter((serviceRow) => requestedServiceIds.has(serviceRow.serviceId))
+      const matchedServices = row.services.filter((serviceRow) =>
+        requestedServiceIds.has(serviceRow.serviceId),
+      )
 
       for (const serviceRow of matchedServices) {
         const resolvedServiceId = serviceRow.serviceId.trim()
@@ -435,17 +447,23 @@ export async function GET(req: Request) {
       }
     }
 
-    for (const sid of Object.keys(byServiceId)) {
-      byServiceId[sid].sort((a, b) => {
-        const ta = new Date(a.opening.startAt).getTime()
-        const tb = new Date(b.opening.startAt).getTime()
-        if (ta !== tb) return ta - tb
+    for (const serviceId of Object.keys(byServiceId)) {
+      byServiceId[serviceId].sort((a, b) => {
+        const aTime = new Date(a.opening.startAt).getTime()
+        const bTime = new Date(b.opening.startAt).getTime()
+
+        if (aTime !== bTime) return aTime - bTime
         return a.distanceMiles - b.distanceMiles
       })
-      byServiceId[sid] = byServiceId[sid].slice(0, perService)
+
+      byServiceId[serviceId] = byServiceId[serviceId].slice(0, perService)
     }
 
-    const payload: SavedServiceProvidersPayload = { ok: true, byServiceId }
+    const payload: SavedServiceProvidersPayload = {
+      ok: true,
+      byServiceId,
+    }
+
     void cacheSetJson(cacheKey, payload, 30)
 
     return jsonOk(payload)

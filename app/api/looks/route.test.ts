@@ -1,13 +1,6 @@
+// app/api/looks/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  MediaType,
-  MediaVisibility,
-  Prisma,
-  ProfessionType,
-  Role,
-} from '@prisma/client'
-
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { MediaType, ProfessionType, Role } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn((data: unknown, status = 200) => {
@@ -34,14 +27,25 @@ const mocks = vi.hoisted(() => {
   }
 
   const getCurrentUser = vi.fn()
-  const renderMediaUrls = vi.fn()
+  const resolveLooksMediaFeedKind = vi.fn()
+  const buildLooksMediaFeedWhere = vi.fn()
+  const buildLooksMediaFeedOrderBy = vi.fn()
+  const mapLooksFeedMediaToDto = vi.fn()
+
+  const looksFeedMediaSelect = {
+    __testSelect: 'looks-feed-media-select',
+  }
 
   return {
     jsonOk,
     jsonFail,
     prisma,
     getCurrentUser,
-    renderMediaUrls,
+    resolveLooksMediaFeedKind,
+    buildLooksMediaFeedWhere,
+    buildLooksMediaFeedOrderBy,
+    mapLooksFeedMediaToDto,
+    looksFeedMediaSelect,
   }
 })
 
@@ -56,7 +60,7 @@ vi.mock('@/app/api/_utils', () => ({
   pickString: (value: string | null) => {
     if (typeof value !== 'string') return null
     const trimmed = value.trim()
-    return trimmed.length ? trimmed : null
+    return trimmed.length > 0 ? trimmed : null
   },
 }))
 
@@ -68,13 +72,23 @@ vi.mock('@/lib/currentUser', () => ({
   getCurrentUser: mocks.getCurrentUser,
 }))
 
-vi.mock('@/lib/media/renderUrls', () => ({
-  renderMediaUrls: mocks.renderMediaUrls,
+vi.mock('@/lib/looks/feed', () => ({
+  resolveLooksMediaFeedKind: mocks.resolveLooksMediaFeedKind,
+  buildLooksMediaFeedWhere: mocks.buildLooksMediaFeedWhere,
+  buildLooksMediaFeedOrderBy: mocks.buildLooksMediaFeedOrderBy,
+}))
+
+vi.mock('@/lib/looks/selects', () => ({
+  looksFeedMediaSelect: mocks.looksFeedMediaSelect,
+}))
+
+vi.mock('@/lib/looks/mappers', () => ({
+  mapLooksFeedMediaToDto: mocks.mapLooksFeedMediaToDto,
 }))
 
 import { GET } from './route'
 
-function makeRequest(path: string) {
+function makeRequest(path: string): Request {
   return new Request(`http://localhost${path}`)
 }
 
@@ -82,46 +96,40 @@ async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T
 }
 
-function makeApprovedMediaRow() {
+function makeMediaRow(id: string) {
+  return { id }
+}
+
+function makeMappedDto(id: string) {
   return {
-    id: 'media_1',
-    url: 'https://cdn.example.com/full.jpg',
-    thumbUrl: 'https://cdn.example.com/thumb.jpg',
-    storageBucket: null,
-    storagePath: null,
-    thumbBucket: null,
-    thumbPath: null,
+    id,
+    url: `https://cdn.example.com/${id}.jpg`,
+    thumbUrl: `https://cdn.example.com/${id}-thumb.jpg`,
     mediaType: MediaType.IMAGE,
-    caption: 'Fresh cut',
-    createdAt: new Date('2026-04-01T12:00:00.000Z'),
-    uploadedByRole: Role.PRO,
-    uploadedByUserId: 'user_pro_1',
-    reviewId: null,
-    review: null,
+    caption: `${id} caption`,
+    createdAt: '2026-04-01T12:00:00.000Z',
     professional: {
-      id: 'pro_1',
+      id: `pro_${id}`,
       businessName: 'TOVIS Studio',
       handle: 'tovisstudio',
       avatarUrl: null,
       professionType: ProfessionType.BARBER,
       location: 'San Diego, CA',
     },
-    services: [
-      {
-        service: {
-          id: 'svc_1',
-          name: 'Fade',
-          category: {
-            name: 'Hair',
-            slug: 'hair',
-          },
-        },
-      },
-    ],
+    serviceId: 'svc_1',
+    serviceName: 'Fade',
+    category: 'Hair',
+    serviceIds: ['svc_1'],
     _count: {
       likes: 3,
       comments: 1,
     },
+    viewerLiked: false,
+    uploadedByRole: Role.PRO,
+    reviewId: null,
+    reviewHelpfulCount: null,
+    reviewRating: null,
+    reviewHeadline: null,
   }
 }
 
@@ -130,233 +138,160 @@ describe('app/api/looks/route.ts', () => {
     vi.clearAllMocks()
 
     mocks.getCurrentUser.mockResolvedValue(null)
+    mocks.resolveLooksMediaFeedKind.mockReturnValue('ALL')
+    mocks.buildLooksMediaFeedWhere.mockReturnValue({
+      whereToken: 'default-where',
+    })
+    mocks.buildLooksMediaFeedOrderBy.mockReturnValue({
+      createdAt: 'desc',
+    })
     mocks.prisma.mediaAsset.findMany.mockResolvedValue([])
     mocks.prisma.mediaLike.findMany.mockResolvedValue([])
-    mocks.renderMediaUrls.mockResolvedValue({
-      renderUrl: 'https://cdn.example.com/rendered.jpg',
-      renderThumbUrl: 'https://cdn.example.com/rendered-thumb.jpg',
-    })
+    mocks.mapLooksFeedMediaToDto.mockResolvedValue(null)
   })
 
-  it('queries the public looks feed with an approved-pro trust gate', async () => {
+  it('queries the looks feed through shared feed helpers', async () => {
+    const sharedWhere = { whereToken: 'all-feed' }
+    const sharedOrderBy = [{ createdAt: 'desc' }]
+
+    mocks.resolveLooksMediaFeedKind.mockReturnValue('ALL')
+    mocks.buildLooksMediaFeedWhere.mockReturnValue(sharedWhere)
+    mocks.buildLooksMediaFeedOrderBy.mockReturnValue(sharedOrderBy)
+
     const res = await GET(makeRequest('/api/looks'))
 
     expect(res.status).toBe(200)
 
+    expect(mocks.resolveLooksMediaFeedKind).toHaveBeenCalledWith({
+      categorySlug: null,
+    })
+
+    expect(mocks.buildLooksMediaFeedWhere).toHaveBeenCalledWith({
+      kind: 'ALL',
+      categorySlug: null,
+      q: null,
+    })
+
+    expect(mocks.buildLooksMediaFeedOrderBy).toHaveBeenCalledWith({
+      kind: 'ALL',
+    })
+
     expect(mocks.prisma.mediaAsset.findMany).toHaveBeenCalledWith({
-      where: {
-        visibility: MediaVisibility.PUBLIC,
-        professional: {
-          is: {
-            verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
-          },
-        },
-        AND: [
-          {
-            OR: [{ isEligibleForLooks: true }, { isFeaturedInPortfolio: true }],
-          },
-        ],
-      },
-      orderBy: { createdAt: 'desc' },
+      where: sharedWhere,
+      orderBy: sharedOrderBy,
       take: 12,
-      select: {
-        id: true,
-        url: true,
-        thumbUrl: true,
-        storageBucket: true,
-        storagePath: true,
-        thumbBucket: true,
-        thumbPath: true,
-        mediaType: true,
-        caption: true,
-        createdAt: true,
-        uploadedByRole: true,
-        uploadedByUserId: true,
-        reviewId: true,
-        review: {
-          select: {
-            helpfulCount: true,
-            rating: true,
-            headline: true,
-          },
-        },
-        professional: {
-          select: {
-            id: true,
-            businessName: true,
-            handle: true,
-            avatarUrl: true,
-            professionType: true,
-            location: true,
-          },
-        },
-        services: {
-          select: {
-            service: {
-              select: {
-                id: true,
-                name: true,
-                category: { select: { name: true, slug: true } },
-              },
-            },
-          },
-        },
-        _count: { select: { likes: true, comments: true } },
-      },
+      select: mocks.looksFeedMediaSelect,
     })
 
     expect(mocks.prisma.mediaLike.findMany).not.toHaveBeenCalled()
+    expect(mocks.mapLooksFeedMediaToDto).not.toHaveBeenCalled()
   })
 
-  it('returns mapped payload for approved public media', async () => {
-    mocks.prisma.mediaAsset.findMany.mockResolvedValue([makeApprovedMediaRow()])
+  it('hydrates viewer likes and returns mapped payload', async () => {
+    const media1 = makeMediaRow('media_1')
+    const media2 = makeMediaRow('media_2')
+    const dto1 = makeMappedDto('media_1')
+    const dto2 = {
+      ...makeMappedDto('media_2'),
+      viewerLiked: true,
+    }
+
+    mocks.getCurrentUser.mockResolvedValue({ id: 'user_1' })
+    mocks.prisma.mediaAsset.findMany.mockResolvedValue([media1, media2])
+    mocks.prisma.mediaLike.findMany.mockResolvedValue([{ mediaId: 'media_2' }])
+
+    mocks.mapLooksFeedMediaToDto
+      .mockResolvedValueOnce(dto1)
+      .mockResolvedValueOnce(dto2)
 
     const res = await GET(makeRequest('/api/looks?limit=20'))
     const body = await readJson<{
       ok: true
-      items: Array<{
-        id: string
-        url: string
-        thumbUrl: string | null
-        mediaType: MediaType
-        caption: string | null
-        createdAt: string
-        professional: {
-          id: string
-          businessName: string | null
-          handle: string | null
-          avatarUrl: string | null
-          professionType: ProfessionType | null
-          location: string | null
-        } | null
-        serviceId: string | null
-        serviceName: string | null
-        category: string | null
-        serviceIds: string[]
-        _count: {
-          likes: number
-          comments: number
-        }
-        viewerLiked: boolean
-        uploadedByRole: Role | null
-        reviewId: string | null
-        reviewHelpfulCount: number | null
-        reviewRating: number | null
-        reviewHeadline: string | null
-      }>
+      items: Array<typeof dto1>
     }>(res)
-
-    expect(res.status).toBe(200)
-    expect(body).toEqual({
-      ok: true,
-      items: [
-        {
-          id: 'media_1',
-          url: 'https://cdn.example.com/full.jpg',
-          thumbUrl: 'https://cdn.example.com/thumb.jpg',
-          mediaType: MediaType.IMAGE,
-          caption: 'Fresh cut',
-          createdAt: '2026-04-01T12:00:00.000Z',
-          professional: {
-            id: 'pro_1',
-            businessName: 'TOVIS Studio',
-            handle: 'tovisstudio',
-            avatarUrl: null,
-            professionType: ProfessionType.BARBER,
-            location: 'San Diego, CA',
-          },
-          serviceId: 'svc_1',
-          serviceName: 'Fade',
-          category: 'Hair',
-          serviceIds: ['svc_1'],
-          _count: {
-            likes: 3,
-            comments: 1,
-          },
-          viewerLiked: false,
-          uploadedByRole: Role.PRO,
-          reviewId: null,
-          reviewHelpfulCount: null,
-          reviewRating: null,
-          reviewHeadline: null,
-        },
-      ],
-    })
-
-    expect(mocks.renderMediaUrls).not.toHaveBeenCalled()
-    expect(mocks.prisma.mediaLike.findMany).not.toHaveBeenCalled()
-  })
-
-  it('keeps the approved-pro trust gate on spotlight queries', async () => {
-    const res = await GET(makeRequest('/api/looks?category=spotlight'))
 
     expect(res.status).toBe(200)
 
     expect(mocks.prisma.mediaAsset.findMany).toHaveBeenCalledWith({
-      where: {
-        visibility: MediaVisibility.PUBLIC,
-        professional: {
-          is: {
-            verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
-          },
-        },
-        AND: [
-          { reviewId: { not: null } },
-          { uploadedByRole: Role.CLIENT },
-          {
-            review: {
-              is: { helpfulCount: { gte: 25 } },
-            },
-          },
-        ],
-      },
-      orderBy: [{ review: { helpfulCount: 'desc' } }, { createdAt: 'desc' }],
-      take: 12,
-      select: {
-        id: true,
-        url: true,
-        thumbUrl: true,
-        storageBucket: true,
-        storagePath: true,
-        thumbBucket: true,
-        thumbPath: true,
-        mediaType: true,
-        caption: true,
-        createdAt: true,
-        uploadedByRole: true,
-        uploadedByUserId: true,
-        reviewId: true,
-        review: {
-          select: {
-            helpfulCount: true,
-            rating: true,
-            headline: true,
-          },
-        },
-        professional: {
-          select: {
-            id: true,
-            businessName: true,
-            handle: true,
-            avatarUrl: true,
-            professionType: true,
-            location: true,
-          },
-        },
-        services: {
-          select: {
-            service: {
-              select: {
-                id: true,
-                name: true,
-                category: { select: { name: true, slug: true } },
-              },
-            },
-          },
-        },
-        _count: { select: { likes: true, comments: true } },
-      },
+      where: { whereToken: 'default-where' },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: mocks.looksFeedMediaSelect,
     })
+
+    expect(mocks.prisma.mediaLike.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'user_1',
+        mediaId: { in: ['media_1', 'media_2'] },
+      },
+      select: { mediaId: true },
+    })
+
+    expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(1, {
+      item: media1,
+      viewerLiked: false,
+    })
+
+    expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(2, {
+      item: media2,
+      viewerLiked: true,
+    })
+
+    expect(body).toEqual({
+      ok: true,
+      items: [dto1, dto2],
+    })
+  })
+
+  it('passes spotlight and search params through shared feed helpers and filters null mapped items', async () => {
+    const media1 = makeMediaRow('media_1')
+    const media2 = makeMediaRow('media_2')
+    const dto1 = makeMappedDto('media_1')
+
+    mocks.resolveLooksMediaFeedKind.mockReturnValue('SPOTLIGHT')
+    mocks.buildLooksMediaFeedWhere.mockReturnValue({
+      whereToken: 'spotlight-where',
+    })
+    mocks.buildLooksMediaFeedOrderBy.mockReturnValue([
+      { review: { helpfulCount: 'desc' } },
+      { createdAt: 'desc' },
+    ])
+    mocks.prisma.mediaAsset.findMany.mockResolvedValue([media1, media2])
+
+    mocks.mapLooksFeedMediaToDto
+      .mockResolvedValueOnce(dto1)
+      .mockResolvedValueOnce(null)
+
+    const res = await GET(
+      makeRequest('/api/looks?category=spotlight&q=fade&limit=18'),
+    )
+    const body = await readJson<{
+      ok: true
+      items: Array<typeof dto1>
+    }>(res)
+
+    expect(res.status).toBe(200)
+
+    expect(mocks.resolveLooksMediaFeedKind).toHaveBeenCalledWith({
+      categorySlug: 'spotlight',
+    })
+
+    expect(mocks.buildLooksMediaFeedWhere).toHaveBeenCalledWith({
+      kind: 'SPOTLIGHT',
+      categorySlug: 'spotlight',
+      q: 'fade',
+    })
+
+    expect(mocks.buildLooksMediaFeedOrderBy).toHaveBeenCalledWith({
+      kind: 'SPOTLIGHT',
+    })
+
+    expect(body).toEqual({
+      ok: true,
+      items: [dto1],
+    })
+
+    expect(mocks.prisma.mediaLike.findMany).not.toHaveBeenCalled()
   })
 
   it('returns 500 when loading the looks feed fails', async () => {

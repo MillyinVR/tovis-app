@@ -5,8 +5,9 @@ import {
   PrismaClient,
 } from '@prisma/client'
 
-import { looksBoardPreviewSelect } from '@/lib/looks/selects'
 import { mapLooksBoardPreviewToDto } from '@/lib/looks/mappers'
+import { recomputeLookPostSaveCount } from '@/lib/looks/counters'
+import { looksBoardPreviewSelect } from '@/lib/looks/selects'
 import type { LooksBoardPreviewDto } from '@/lib/looks/types'
 
 type BoardsDb = PrismaClient | Prisma.TransactionClient
@@ -44,6 +45,7 @@ function normalizeRequiredId(name: string, value: string): string {
 
 function normalizeOptionalId(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
+
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
 }
@@ -53,9 +55,11 @@ function normalizeBoardName(name: string): string {
   if (!trimmed) {
     throw new Error('Board name is required.')
   }
+
   if (trimmed.length > 120) {
     throw new Error('Board name must be 120 characters or fewer.')
   }
+
   return trimmed
 }
 
@@ -80,6 +84,7 @@ async function withBoardsTx<T>(
   if (canUseRootTransaction(db)) {
     return db.$transaction(fn)
   }
+
   return fn(db)
 }
 
@@ -89,6 +94,7 @@ export function canManageBoard(args: {
 }): boolean {
   const viewerClientId = normalizeOptionalId(args.viewerClientId)
   const ownerClientId = normalizeRequiredId('ownerClientId', args.ownerClientId)
+
   return viewerClientId === ownerClientId
 }
 
@@ -155,6 +161,7 @@ export async function createBoard(
     ) {
       throw new Error('A board with this name already exists.')
     }
+
     throw error
   }
 }
@@ -190,9 +197,7 @@ export async function addBoardItem(
     })
 
     if (existing) {
-      const saveCount = await tx.boardItem.count({
-        where: { lookPostId },
-      })
+      const saveCount = await recomputeLookPostSaveCount(tx, lookPostId)
 
       return {
         board,
@@ -210,9 +215,7 @@ export async function addBoardItem(
       select: { id: true },
     })
 
-    const saveCount = await tx.boardItem.count({
-      where: { lookPostId },
-    })
+    const saveCount = await recomputeLookPostSaveCount(tx, lookPostId)
 
     return {
       board,
@@ -249,9 +252,7 @@ export async function removeBoardItem(
       },
     })
 
-    const saveCount = await tx.boardItem.count({
-      where: { lookPostId },
-    })
+    const saveCount = await recomputeLookPostSaveCount(tx, lookPostId)
 
     return {
       board,

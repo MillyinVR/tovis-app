@@ -1,5 +1,6 @@
 // lib/discovery/nearby.ts
-import { Prisma, type ProfessionType } from '@prisma/client'
+import { Prisma, ProfessionType } from '@prisma/client'
+
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 export type DiscoveryLocationDto = {
@@ -24,6 +25,11 @@ function normalizeQuery(q: string): string {
   return q.trim().toLowerCase()
 }
 
+function clampFloat(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min
+  return Math.min(Math.max(value, min), max)
+}
+
 function toFiniteNumber(value: unknown): number | null {
   if (value == null) return null
 
@@ -43,7 +49,7 @@ function toFiniteNumber(value: unknown): number | null {
   return null
 }
 
-function localNowMinutes(timeZone: string): number | null {
+function localNowMinutes(timeZone: string, now: Date): number | null {
   const tz = timeZone.trim()
   if (!tz) return null
 
@@ -52,13 +58,13 @@ function localNowMinutes(timeZone: string): number | null {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).formatToParts(new Date())
+  }).formatToParts(now)
 
   const hour = parts.find((part) => part.type === 'hour')?.value
   const minute = parts.find((part) => part.type === 'minute')?.value
 
-  const hh = hour ? Number(hour) : NaN
-  const mm = minute ? Number(minute) : NaN
+  const hh = hour ? Number(hour) : Number.NaN
+  const mm = minute ? Number(minute) : Number.NaN
 
   if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null
 
@@ -69,7 +75,7 @@ export function haversineMiles(
   a: { lat: number; lng: number },
   b: { lat: number; lng: number },
 ): number {
-  const R = 3958.7613
+  const earthRadiusMiles = 3958.7613
   const toRad = (degrees: number) => (degrees * Math.PI) / 180
 
   const dLat = toRad(b.lat - a.lat)
@@ -79,12 +85,13 @@ export function haversineMiles(
 
   const sin1 = Math.sin(dLat / 2)
   const sin2 = Math.sin(dLng / 2)
+
   const h =
     sin1 * sin1 +
     Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2
 
   const c = 2 * Math.asin(Math.min(1, Math.sqrt(h)))
-  return R * c
+  return earthRadiusMiles * c
 }
 
 export function milesToLatDelta(miles: number): number {
@@ -96,10 +103,33 @@ export function milesToLngDelta(
   lat: number,
 ): number {
   const denom = Math.cos((lat * Math.PI) / 180)
+
   if (!Number.isFinite(denom) || denom === 0) {
     return miles / 69.0
   }
+
   return miles / (69.0 * denom)
+}
+
+export function boundsForRadiusMiles(
+  centerLat: number,
+  centerLng: number,
+  radiusMiles: number,
+): {
+  minLat: number
+  maxLat: number
+  minLng: number
+  maxLng: number
+} {
+  const latDelta = milesToLatDelta(radiusMiles)
+  const lngDelta = milesToLngDelta(radiusMiles, centerLat)
+
+  return {
+    minLat: clampFloat(centerLat - latDelta, -90, 90),
+    maxLat: clampFloat(centerLat + latDelta, -90, 90),
+    minLng: clampFloat(centerLng - lngDelta, -180, 180),
+    maxLng: clampFloat(centerLng + lngDelta, -180, 180),
+  }
 }
 
 export function inferProfessionTypesFromQuery(
@@ -108,31 +138,40 @@ export function inferProfessionTypesFromQuery(
   const s = normalizeQuery(q)
   const hits: ProfessionType[] = []
 
-  if (s.includes('barber')) hits.push('BARBER')
+  if (s.includes('barber')) {
+    hits.push(ProfessionType.BARBER)
+  }
+
   if (
     s.includes('cosmo') ||
     s.includes('hair') ||
     s.includes('stylist')
   ) {
-    hits.push('COSMETOLOGIST')
+    hits.push(ProfessionType.COSMETOLOGIST)
   }
+
   if (
     s.includes('esthetic') ||
     s.includes('facial') ||
     s.includes('skin')
   ) {
-    hits.push('ESTHETICIAN')
+    hits.push(ProfessionType.ESTHETICIAN)
   }
+
   if (
     s.includes('nail') ||
     s.includes('mani') ||
     s.includes('pedi')
   ) {
-    hits.push('MANICURIST')
+    hits.push(ProfessionType.MANICURIST)
   }
-  if (s.includes('massage')) hits.push('MASSAGE_THERAPIST')
+
+  if (s.includes('massage')) {
+    hits.push(ProfessionType.MASSAGE_THERAPIST)
+  }
+
   if (s.includes('makeup') || s.includes('mua')) {
-    hits.push('MAKEUP_ARTIST')
+    hits.push(ProfessionType.MAKEUP_ARTIST)
   }
 
   return Array.from(new Set(hits))
@@ -167,7 +206,11 @@ export function mapProfessionalLocation(input: {
 export function pickPrimaryLocation(
   locations: readonly DiscoveryLocationDto[],
 ): DiscoveryLocationDto | null {
-  return locations.find((location) => location.isPrimary) ?? locations[0] ?? null
+  return (
+    locations.find((location) => location.isPrimary) ??
+    locations[0] ??
+    null
+  )
 }
 
 export function isOpenNowAtLocation(args: {
@@ -182,7 +225,7 @@ export function isOpenNowAtLocation(args: {
   const window = getWorkingWindowForDay(now, args.workingHours, timeZone)
   if (!window.ok) return false
 
-  const nowMinutes = localNowMinutes(timeZone)
+  const nowMinutes = localNowMinutes(timeZone, now)
   if (nowMinutes == null) return false
 
   return (
@@ -197,9 +240,11 @@ export function pickClosestLocationWithinRadius(args: {
   radiusMiles: number
 }): ClosestDiscoveryLocationMatch | null {
   const { origin, locations, radiusMiles } = args
-
-  const latDelta = milesToLatDelta(radiusMiles)
-  const lngDelta = milesToLngDelta(radiusMiles, origin.lat)
+  const bounds = boundsForRadiusMiles(
+    origin.lat,
+    origin.lng,
+    radiusMiles,
+  )
 
   let best: ClosestDiscoveryLocationMatch | null = null
 
@@ -207,10 +252,10 @@ export function pickClosestLocationWithinRadius(args: {
     if (location.lat == null || location.lng == null) continue
 
     if (
-      location.lat < origin.lat - latDelta ||
-      location.lat > origin.lat + latDelta ||
-      location.lng < origin.lng - lngDelta ||
-      location.lng > origin.lng + lngDelta
+      location.lat < bounds.minLat ||
+      location.lat > bounds.maxLat ||
+      location.lng < bounds.minLng ||
+      location.lng > bounds.maxLng
     ) {
       continue
     }
@@ -257,5 +302,6 @@ export function shouldExcludeSelfProfessional(args: {
 }): boolean {
   const viewerProfessionalId = args.viewerProfessionalId?.trim() ?? ''
   if (!viewerProfessionalId) return false
+
   return args.professionalId === viewerProfessionalId
 }
