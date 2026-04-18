@@ -778,6 +778,12 @@ model User {
   tosAcceptedAt DateTime?
   tosVersion    String?
 
+  transactionalSmsConsentAt        DateTime?
+  transactionalSmsConsentVersion   String?   @db.VarChar(64)
+  transactionalSmsConsentSource    String?   @db.VarChar(64)
+  transactionalSmsConsentIp        String?   @db.VarChar(64)
+  transactionalSmsConsentUserAgent String?
+  
   authVersion        Int                        @default(1)
   loginAttempts      Int                        @default(0)
   lockedUntil        DateTime?

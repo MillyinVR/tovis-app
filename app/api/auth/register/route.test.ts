@@ -155,6 +155,7 @@ function makeClientSignupBody() {
     phone: '(555) 123-4567',
     tapIntentId: 'tap_1',
     tosAccepted: true,
+    transactionalSmsConsent: true,
     turnstileToken: 'ts_signup_ok',
     signupLocation: {
       kind: 'CLIENT_ZIP',
@@ -178,6 +179,7 @@ function makeProSignupBody(overrides?: Record<string, unknown>) {
     lastName: 'Morales',
     phone: '(555) 123-4567',
     tosAccepted: true,
+    transactionalSmsConsent: true,
     turnstileToken: 'ts_signup_ok',
     professionType: 'MAKEUP_ARTIST',
     handle: 'jane_smith',
@@ -208,6 +210,7 @@ function makeProSalonSignupBody() {
     phone: '(555) 123-4567',
     tapIntentId: 'tap_pro_salon',
     tosAccepted: true,
+    transactionalSmsConsent: true,
     turnstileToken: 'ts_signup_ok',
     businessName: 'TOVIS Studio',
     professionType: 'MAKEUP_ARTIST',
@@ -237,6 +240,7 @@ function makeProMobileSignupBody() {
     phone: '(555) 123-4567',
     tapIntentId: 'tap_pro_mobile',
     tosAccepted: true,
+    transactionalSmsConsent: true,
     turnstileToken: 'ts_signup_ok',
     businessName: 'TOVIS Mobile',
     professionType: 'MAKEUP_ARTIST',
@@ -282,6 +286,8 @@ function makeRequest(body: unknown) {
     headers: {
       'Content-Type': 'application/json',
       host: 'localhost:3000',
+      'user-agent': 'vitest',
+      'x-forwarded-for': '198.51.100.10',
     },
     body: JSON.stringify(body),
   })
@@ -457,6 +463,11 @@ describe('app/api/auth/register/route', () => {
           email: 'pro-salon@example.com',
           phone: '+15551234567',
           role: 'PRO',
+          transactionalSmsConsentAt: expect.any(Date),
+          transactionalSmsConsentVersion: '2026-04-17',
+          transactionalSmsConsentSource: 'WEB_SIGNUP_PRO',
+          transactionalSmsConsentIp: '198.51.100.10',
+          transactionalSmsConsentUserAgent: 'vitest',
           professionalProfile: {
             create: expect.objectContaining({
               firstName: 'Tori',
@@ -521,6 +532,11 @@ describe('app/api/auth/register/route', () => {
           email: 'pro-mobile@example.com',
           phone: '+15551234567',
           role: 'PRO',
+          transactionalSmsConsentAt: expect.any(Date),
+          transactionalSmsConsentVersion: '2026-04-17',
+          transactionalSmsConsentSource: 'WEB_SIGNUP_PRO',
+          transactionalSmsConsentIp: '198.51.100.10',
+          transactionalSmsConsentUserAgent: 'vitest',
           professionalProfile: {
             create: expect.objectContaining({
               firstName: 'Tori',
@@ -674,6 +690,23 @@ describe('app/api/auth/register/route', () => {
     expect(mockVerifyTurnstileOrFailOpen).not.toHaveBeenCalled()
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
+  it('returns 400 when transactional SMS consent is missing', async () => {
+    const body = makeClientSignupBody()
+    delete (body as { transactionalSmsConsent?: boolean }).transactionalSmsConsent
+
+    const result = await POST(makeRequest(body))
+    const data = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(data).toEqual({
+      ok: false,
+      error:
+        'You must agree to receive transactional SMS messages for account verification and appointment updates.',
+      code: 'SMS_CONSENT_REQUIRED',
+    })
+
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
 
   it('returns 400 when the SMS destination country is unsupported', async () => {
     mockValidateSmsDestinationCountry.mockReturnValue({
@@ -779,6 +812,11 @@ describe('app/api/auth/register/route', () => {
         email: 'pro@example.com',
         phone: '+15551234567',
         role: 'PRO',
+        transactionalSmsConsentAt: expect.any(Date),
+        transactionalSmsConsentVersion: '2026-04-17',
+        transactionalSmsConsentSource: 'WEB_SIGNUP_PRO',
+        transactionalSmsConsentIp: '198.51.100.10',
+        transactionalSmsConsentUserAgent: 'vitest',
         professionalProfile: {
           create: expect.objectContaining({
             handle: 'jane_smith',
@@ -895,6 +933,11 @@ describe('app/api/auth/register/route', () => {
         role: 'CLIENT',
         tosAcceptedAt: expect.any(Date),
         tosVersion: '2026-04',
+        transactionalSmsConsentAt: expect.any(Date),
+        transactionalSmsConsentVersion: '2026-04-17',
+        transactionalSmsConsentSource: 'WEB_SIGNUP_CLIENT',
+        transactionalSmsConsentIp: '198.51.100.10',
+        transactionalSmsConsentUserAgent: 'vitest',
         clientProfile: {
           create: {
             firstName: 'Tori',
@@ -1247,6 +1290,11 @@ describe('app/api/auth/register/route', () => {
         email: 'pro@example.com',
         phone: '+15551234567',
         role: 'PRO',
+        transactionalSmsConsentAt: expect.any(Date),
+        transactionalSmsConsentVersion: '2026-04-17',
+        transactionalSmsConsentSource: 'WEB_SIGNUP_PRO',
+        transactionalSmsConsentIp: '198.51.100.10',
+        transactionalSmsConsentUserAgent: 'vitest',
         professionalProfile: {
           create: expect.objectContaining({
             professionType: 'ESTHETICIAN',

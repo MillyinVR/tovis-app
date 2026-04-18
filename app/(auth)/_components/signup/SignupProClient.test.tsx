@@ -129,6 +129,27 @@ function getPasswordInput(): HTMLInputElement {
   return input
 }
 
+function getTermsCheckbox(): HTMLInputElement {
+  return screen.getByLabelText(/I agree to the\s+Terms\s+and\s+Privacy Policy/i)
+}
+
+function getTransactionalSmsCheckbox(): HTMLInputElement {
+  return screen.getByLabelText(/transactional SMS\/text messages from TOVIS/i)
+}
+
+function checkTermsConsent() {
+  fireEvent.click(getTermsCheckbox())
+}
+
+function checkTransactionalSmsConsent() {
+  fireEvent.click(getTransactionalSmsCheckbox())
+}
+
+function checkAllRequiredConsents() {
+  checkTransactionalSmsConsent()
+  checkTermsConsent()
+}
+
 function fillRequiredFields() {
   fireEvent.change(screen.getByLabelText(/First name/i), {
     target: { value: 'Tori' },
@@ -162,7 +183,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
     mocks.setSearchParams({})
   })
 
-  it('keeps submit disabled until consent is checked', async () => {
+  it('keeps submit disabled until both transactional SMS consent and terms consent are checked', async () => {
     setFetchSequence([
       jsonResponse({
         geo: {
@@ -187,14 +208,17 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
     const submitButton = screen.getByRole('button', {
       name: 'Create Pro Account',
     })
+
     expect(submitButton.hasAttribute('disabled')).toBe(true)
 
-    fireEvent.click(screen.getByRole('checkbox'))
+    checkTransactionalSmsConsent()
+    expect(submitButton.hasAttribute('disabled')).toBe(true)
 
+    checkTermsConsent()
     expect(submitButton.hasAttribute('disabled')).toBe(false)
   })
 
-  it('submits with tosAccepted and turnstileToken, then treats pending verification sends as optimistic success', async () => {
+  it('submits with separate transactional SMS consent, tosAccepted, and turnstileToken, then treats pending verification sends as optimistic success', async () => {
     const fetchMock = setFetchSequence([
       jsonResponse({
         geo: {
@@ -220,7 +244,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
     await confirmMobileZip('92101')
     fillRequiredFields()
-    fireEvent.click(screen.getByRole('checkbox'))
+    checkAllRequiredConsents()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Pro Account' }),
@@ -251,6 +275,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
       firstName: 'Tori',
       lastName: 'Morales',
       phone: '+16195551234',
+      transactionalSmsConsent: true,
       tosAccepted: true,
       turnstileToken: 'ts_pro_ok',
       professionType: 'COSMETOLOGIST',
@@ -304,7 +329,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
     await confirmMobileZip('92101')
     fillRequiredFields()
-    fireEvent.click(screen.getByRole('checkbox'))
+    checkAllRequiredConsents()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Pro Account' }),
@@ -348,7 +373,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
     await confirmMobileZip('92101')
     fillRequiredFields()
-    fireEvent.click(screen.getByRole('checkbox'))
+    checkAllRequiredConsents()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Pro Account' }),
@@ -392,7 +417,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
     await confirmMobileZip('92101')
     fillRequiredFields()
-    fireEvent.click(screen.getByRole('checkbox'))
+    checkAllRequiredConsents()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Pro Account' }),

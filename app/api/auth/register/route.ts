@@ -36,6 +36,7 @@ import {
 } from '@/lib/observability/authEvents'
 import { isHandleReserved } from '@/lib/handles'
 import { waitUntil } from '@vercel/functions'
+import { TRANSACTIONAL_SMS_POLICY_VERSION } from '@/lib/transactionalSmsPolicy'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -114,6 +115,7 @@ type RegisterBody = {
 
   // step 2 hardening
   tosAccepted?: unknown
+  transactionalSmsConsent?: unknown
   turnstileToken?: unknown
 }
 
@@ -148,6 +150,18 @@ function sanitizeInternalPath(raw: string | null | undefined): string | null {
 
 function sanitizeOptionalText(raw: string | null | undefined): string | null {
   const value = (raw ?? '').trim()
+  return value || null
+}
+
+function getClientIp(request: Request): string | null {
+  const forwarded = request.headers.get('x-forwarded-for')?.trim()
+  if (!forwarded) return null
+  const first = forwarded.split(',')[0]?.trim()
+  return first || null
+}
+
+function getUserAgent(request: Request): string | null {
+  const value = request.headers.get('user-agent')?.trim()
   return value || null
 }
 
@@ -707,6 +721,9 @@ export async function POST(request: Request) {
     phoneForLog = phone
 
     const tosAccepted = body.tosAccepted === true
+    const transactionalSmsConsent = body.transactionalSmsConsent === true
+    const transactionalSmsConsentIp = getClientIp(request)
+    const transactionalSmsConsentUserAgent = getUserAgent(request)
     const turnstileToken = pickString(body.turnstileToken)
 
     const tapIntentId = pickString(body.tapIntentId)
@@ -772,6 +789,13 @@ export async function POST(request: Request) {
         code: 'CONSENT_REQUIRED',
       })
     }
+    if (!transactionalSmsConsent) {
+      return jsonFail(
+        400,
+        'You must agree to receive transactional SMS messages for account verification and appointment updates.',
+        { code: 'SMS_CONSENT_REQUIRED' },
+      )
+    }
 
     // location enforcement
     if (role === 'PRO') {
@@ -816,6 +840,8 @@ export async function POST(request: Request) {
         code: 'TOS_VERSION_MISSING',
       })
     }
+
+    const transactionalSmsConsentVersion = TRANSACTIONAL_SMS_POLICY_VERSION
 
     const captcha = await verifyTurnstileOrFailOpen({
       request,
@@ -1051,7 +1077,13 @@ export async function POST(request: Request) {
           role,
           tosAcceptedAt: new Date(),
           tosVersion,
-
+          transactionalSmsConsentAt: new Date(),
+          transactionalSmsConsentVersion,
+          transactionalSmsConsentSource:
+            role === 'PRO' ? 'WEB_SIGNUP_PRO' : 'WEB_SIGNUP_CLIENT',
+          transactionalSmsConsentIp,
+          transactionalSmsConsentUserAgent,
+          
           clientProfile:
             role === 'CLIENT'
               ? {

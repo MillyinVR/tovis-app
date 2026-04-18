@@ -111,16 +111,25 @@ function getPasswordInput(): HTMLInputElement {
   return input
 }
 
-function getConsentCheckbox(): HTMLInputElement {
-  const input = document.querySelector(
-    'input[type="checkbox"]',
-  ) as HTMLInputElement | null
+function getTermsCheckbox(): HTMLInputElement {
+  return screen.getByLabelText(/I agree to the\s+Terms\s+and\s+Privacy Policy/i)
+}
 
-  if (!input) {
-    throw new Error('Consent checkbox not found')
-  }
+function getTransactionalSmsCheckbox(): HTMLInputElement {
+  return screen.getByLabelText(/transactional SMS\/text messages from TOVIS/i)
+}
 
-  return input
+function checkTermsConsent() {
+  fireEvent.click(getTermsCheckbox())
+}
+
+function checkTransactionalSmsConsent() {
+  fireEvent.click(getTransactionalSmsCheckbox())
+}
+
+function checkAllRequiredConsents() {
+  checkTransactionalSmsConsent()
+  checkTermsConsent()
 }
 
 async function confirmZip(zip = '92024') {
@@ -191,7 +200,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     )
   })
 
-  it('submits client signup, includes tos + turnstile, and treats pending verification sends as optimistic success while falling back to query next', async () => {
+  it('submits client signup with separate transactional SMS consent, tosAccepted, and turnstile, and treats pending verification sends as optimistic success while falling back to query next', async () => {
     mocks.setSearchParams({
       ti: 'ti_123',
       next: '/claim/tok_1',
@@ -231,7 +240,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       target: { value: 'supersecret123' },
     })
 
-    fireEvent.click(getConsentCheckbox())
+    checkAllRequiredConsents()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Client Account' }),
@@ -262,6 +271,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       firstName: 'Tori',
       lastName: 'Morales',
       phone: '+16195551234',
+      transactionalSmsConsent: true,
       tosAccepted: true,
       turnstileToken: 'ts_client_ok',
       tapIntentId: 'ti_123',
@@ -329,7 +339,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       target: { value: 'supersecret123' },
     })
 
-    fireEvent.click(getConsentCheckbox())
+    checkAllRequiredConsents()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Client Account' }),
@@ -385,7 +395,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       target: { value: 'supersecret123' },
     })
 
-    fireEvent.click(getConsentCheckbox())
+    checkAllRequiredConsents()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Client Account' }),
@@ -439,7 +449,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       target: { value: 'supersecret123' },
     })
 
-    fireEvent.click(getConsentCheckbox())
+    checkAllRequiredConsents()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Client Account' }),
@@ -489,7 +499,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       target: { value: 'supersecret123' },
     })
 
-    fireEvent.click(getConsentCheckbox())
+    checkAllRequiredConsents()
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Create Client Account' }),
@@ -506,7 +516,29 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     expect(mocks.router.refresh).not.toHaveBeenCalled()
   })
 
-  it('keeps submit disabled until the required fields and consent are present', () => {
+  it('keeps submit disabled until the required fields, confirmed ZIP, and both consents are present', async () => {
+    mocks.setSearchParams({
+      name: 'Tori Morales',
+      email: 'tori@example.com',
+      phone: '+16195551234',
+    })
+
+    setFetchSequence([
+      jsonResponse({
+        geo: {
+          lat: 32.7157,
+          lng: -117.1611,
+          postalCode: '92101',
+          city: 'San Diego',
+          state: 'CA',
+          countryCode: 'US',
+        },
+      }),
+      jsonResponse({
+        timeZoneId: 'America/Los_Angeles',
+      }),
+    ])
+
     render(<SignupClientClient />)
 
     const submitButton = screen.getByRole('button', {
@@ -515,11 +547,19 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
 
     expect(submitButton.hasAttribute('disabled')).toBe(true)
 
-    fireEvent.click(submitButton)
+    await confirmZip('92101')
 
-    expect(
-      screen.queryByText('First and last name are required.'),
-    ).toBeNull()
+    fireEvent.change(getPasswordInput(), {
+      target: { value: 'supersecret123' },
+    })
+
+    expect(submitButton.hasAttribute('disabled')).toBe(true)
+
+    checkTransactionalSmsConsent()
+    expect(submitButton.hasAttribute('disabled')).toBe(true)
+
+    checkTermsConsent()
+    expect(submitButton.hasAttribute('disabled')).toBe(false)
 
     expect(mocks.router.refresh).not.toHaveBeenCalled()
     expect(mocks.hardNavigate).not.toHaveBeenCalled()

@@ -13,6 +13,7 @@ import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
 import { getTurnstileToken } from '@/lib/turnstileClient'
 import { buildVerifyPhoneUrl } from './buildVerifyPhoneUrl'
+import { TRANSACTIONAL_SMS_CHECKBOX_LABEL } from '@/lib/transactionalSmsPolicy'
 
 type VerificationSendState = boolean | 'pending'
 
@@ -318,6 +319,7 @@ export default function SignupProClient() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [tosAccepted, setTosAccepted] = useState(false)
+  const [transactionalSmsConsent, setTransactionalSmsConsent] = useState(false)
 
   const [businessName, setBusinessName] = useState('')
   const [handle, setHandle] = useState('')
@@ -487,6 +489,11 @@ export default function SignupProClient() {
     if (!sanitizePhone(phone).trim()) {
       return setError('Phone number is required.')
     }
+    if (!transactionalSmsConsent) {
+      return setError(
+        'You must agree to receive transactional SMS messages for account verification and appointment updates.',
+      )
+    }
     if (!email.trim()) {
       return setError('Email is required.')
     }
@@ -571,6 +578,7 @@ export default function SignupProClient() {
             ? licenseNumber.trim().toUpperCase()
             : undefined,
           signupLocation,
+          transactionalSmsConsent,
           tosAccepted: true,
           turnstileToken,
         }),
@@ -621,6 +629,7 @@ export default function SignupProClient() {
     Boolean(email.trim()) &&
     Boolean(password.trim()) &&
     isLocationConfirmed() &&
+    transactionalSmsConsent &&
     tosAccepted &&
     (!needsLicense || Boolean(licenseNumber.trim())) &&
     (proMode !== 'MOBILE' ||
@@ -913,6 +922,17 @@ export default function SignupProClient() {
             placeholder="+1 (___) ___-____"
             required
           />
+        </label>
+
+        <label className="flex items-start gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-3 text-sm text-textSecondary">
+          <input
+            type="checkbox"
+            checked={transactionalSmsConsent}
+            onChange={(e) => setTransactionalSmsConsent(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-surfaceGlass/20"
+            required
+          />
+          <span className="leading-5">{TRANSACTIONAL_SMS_CHECKBOX_LABEL}</span>
         </label>
 
         <label className="grid gap-1.5">
