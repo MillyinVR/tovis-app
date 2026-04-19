@@ -16,11 +16,14 @@ import type {
   LooksBoardPreviewDto,
   LooksBoardPreviewPrimaryMediaDto,
   LooksCommentDto,
+  LooksDetailItemDto,
+  LooksDetailMediaDto,
+  LooksDetailReviewDto,
   LooksFeedItemDto,
+  LooksFeedResponseDto,
   LooksPortfolioTileDto,
   LooksProProfilePreviewDto,
   LooksRenderedMediaDto,
-  LooksFeedResponseDto,
 } from '@/lib/looks/types'
 
 type MediaCommentUserShape = {
@@ -483,6 +486,130 @@ export async function mapLooksDetailMediaToRenderable(
     ...item,
     primaryMediaAsset,
     assets: assets.filter(isNonNull),
+  }
+}
+
+function mapLooksDetailReviewToDto(input: {
+  id: string
+  rating: number
+  headline: string | null
+  helpfulCount: number
+} | null): LooksDetailReviewDto | null {
+  if (!input) return null
+
+  return {
+    id: input.id,
+    rating: input.rating,
+    headline: input.headline ?? null,
+    helpfulCount: input.helpfulCount,
+  }
+}
+
+function mapRenderableLooksDetailMediaToDto(input: {
+  id: string
+  renderUrl: string
+  renderThumbUrl: string | null
+  mediaType: MediaType
+  caption: string | null
+  createdAt: Date
+  review: {
+    id: string
+    rating: number
+    headline: string | null
+    helpfulCount: number
+    body: string | null
+  } | null
+}): LooksDetailMediaDto {
+  return {
+    id: input.id,
+    url: input.renderUrl,
+    thumbUrl: input.renderThumbUrl,
+    mediaType: input.mediaType,
+    caption: input.caption ?? null,
+    createdAt: input.createdAt.toISOString(),
+    review: mapLooksDetailReviewToDto(input.review),
+  }
+}
+
+export function mapLooksDetailToDto(args: {
+  item: LooksRenderableDetailMedia
+  viewerContext: {
+    isAuthenticated: boolean
+    viewerLiked: boolean
+    canComment: boolean
+    canSave: boolean
+    isOwner: boolean
+    canModerate: boolean
+  }
+}): LooksDetailItemDto {
+  const { item, viewerContext } = args
+
+  return {
+    id: item.id,
+    caption: item.caption ?? item.primaryMediaAsset.caption ?? null,
+    status: item.status,
+    visibility: item.visibility,
+    moderationStatus: item.moderationStatus,
+    publishedAt: item.publishedAt?.toISOString() ?? null,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString(),
+
+    professional: mapLooksProProfilePreviewToDto(item.professional),
+
+    service: item.service
+      ? {
+          id: item.service.id,
+          name: item.service.name,
+          category: item.service.category
+            ? {
+                name: item.service.category.name,
+                slug: item.service.category.slug,
+              }
+            : null,
+        }
+      : null,
+
+    primaryMedia: mapRenderableLooksDetailMediaToDto(item.primaryMediaAsset),
+
+    assets: item.assets.map((asset) => ({
+      id: asset.id,
+      sortOrder: asset.sortOrder,
+      mediaAssetId: asset.mediaAssetId,
+      media: mapRenderableLooksDetailMediaToDto(asset.mediaAsset),
+    })),
+
+    _count: {
+      likes: item.likeCount,
+      comments: item.commentCount,
+      saves: item.saveCount,
+      shares: item.shareCount,
+    },
+
+    viewerContext: {
+      isAuthenticated: viewerContext.isAuthenticated,
+      viewerLiked: viewerContext.viewerLiked,
+      canComment: viewerContext.canComment,
+      canSave: viewerContext.canSave,
+      isOwner: viewerContext.isOwner,
+    },
+
+    ...(viewerContext.canModerate
+      ? {
+          admin: {
+            canModerate: true,
+            archivedAt: item.archivedAt?.toISOString() ?? null,
+            removedAt: item.removedAt?.toISOString() ?? null,
+            primaryMediaAssetId: item.primaryMediaAssetId,
+            primaryMedia: {
+              visibility: item.primaryMediaAsset.visibility,
+              isEligibleForLooks: item.primaryMediaAsset.isEligibleForLooks,
+              isFeaturedInPortfolio:
+                item.primaryMediaAsset.isFeaturedInPortfolio,
+              reviewBody: item.primaryMediaAsset.review?.body ?? null,
+            },
+          },
+        }
+      : {}),
   }
 }
 

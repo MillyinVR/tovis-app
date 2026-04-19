@@ -65,6 +65,90 @@ export type LooksFeedResponseDto = {
   viewerContext?: LooksFeedViewerContextDto
 }
 
+export type LooksDetailReviewDto = {
+  id: string
+  rating: number
+  headline: string | null
+  helpfulCount: number
+}
+
+export type LooksDetailMediaDto = {
+  id: string
+  url: string
+  thumbUrl: string | null
+  mediaType: MediaType
+  caption: string | null
+  createdAt: string
+  review: LooksDetailReviewDto | null
+}
+
+export type LooksDetailAssetDto = {
+  id: string
+  sortOrder: number
+  mediaAssetId: string
+  media: LooksDetailMediaDto
+}
+
+export type LooksDetailServiceDto = {
+  id: string
+  name: string
+  category: LooksCategoryDto | null
+}
+
+export type LooksDetailCountsDto = LooksCountsDto & {
+  saves: number
+  shares: number
+}
+
+export type LooksDetailViewerContextDto = {
+  isAuthenticated: boolean
+  viewerLiked: boolean
+  canComment: boolean
+  canSave: boolean
+  isOwner: boolean
+}
+
+export type LooksDetailAdminMediaDto = {
+  visibility: MediaVisibility
+  isEligibleForLooks: boolean
+  isFeaturedInPortfolio: boolean
+  reviewBody: string | null
+}
+
+export type LooksDetailAdminDto = {
+  canModerate: true
+  archivedAt: string | null
+  removedAt: string | null
+  primaryMediaAssetId: string
+  primaryMedia: LooksDetailAdminMediaDto
+}
+
+export type LooksDetailItemDto = {
+  id: string
+  caption: string | null
+  status: LookPostStatus
+  visibility: LookPostVisibility
+  moderationStatus: ModerationStatus
+  publishedAt: string | null
+  createdAt: string
+  updatedAt: string
+
+  professional: LooksProProfilePreviewDto
+  service: LooksDetailServiceDto | null
+
+  primaryMedia: LooksDetailMediaDto
+  assets: LooksDetailAssetDto[]
+
+  _count: LooksDetailCountsDto
+  viewerContext: LooksDetailViewerContextDto
+
+  admin?: LooksDetailAdminDto
+}
+
+export type LooksDetailResponseDto = {
+  item: LooksDetailItemDto
+}
+
 export type LooksCommentUserDto = {
   id: string
   displayName: string

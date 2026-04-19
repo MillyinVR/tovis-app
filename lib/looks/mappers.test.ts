@@ -29,6 +29,7 @@ import {
   mapLooksBoardPreviewToDto,
   mapLooksCommentToDto,
   mapLooksDetailMediaToRenderable,
+  mapLooksDetailToDto,
   mapLooksFeedMediaToDto,
   mapLooksProProfilePreviewToDto,
   mapPortfolioTileToDto,
@@ -652,6 +653,138 @@ describe('lib/looks/mappers.ts', () => {
       expect(result?.professional.verificationStatus).toBe(
         VerificationStatus.APPROVED,
       )
+    })
+  })
+
+  describe('mapLooksDetailToDto', () => {
+    it('maps a renderable detail row into the stable detail DTO', async () => {
+      const renderable = await mapLooksDetailMediaToRenderable(makeDetailRow())
+
+      if (!renderable) {
+        throw new Error('Expected renderable look detail row')
+      }
+
+      const result = mapLooksDetailToDto({
+        item: renderable,
+        viewerContext: {
+          isAuthenticated: true,
+          viewerLiked: true,
+          canComment: true,
+          canSave: true,
+          isOwner: false,
+          canModerate: false,
+        },
+      })
+
+      expect(result).toEqual({
+        id: 'look_1',
+        caption: 'Detailed caption',
+        status: LookPostStatus.PUBLISHED,
+        visibility: LookPostVisibility.PUBLIC,
+        moderationStatus: ModerationStatus.APPROVED,
+        publishedAt: '2026-04-18T12:00:00.000Z',
+        createdAt: '2026-04-18T11:00:00.000Z',
+        updatedAt: '2026-04-18T12:30:00.000Z',
+        professional: {
+          id: 'pro_1',
+          businessName: 'TOVIS Studio',
+          handle: 'tovisstudio',
+          avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
+          professionType: ProfessionType.BARBER,
+          location: 'San Diego, CA',
+          verificationStatus: VerificationStatus.APPROVED,
+          isPremium: true,
+        },
+        service: {
+          id: 'service_1',
+          name: 'Fade',
+          category: {
+            name: 'Hair',
+            slug: 'hair',
+          },
+        },
+        primaryMedia: {
+          id: 'media_1',
+          url: 'https://cdn.example.com/detail.jpg',
+          thumbUrl: 'https://cdn.example.com/detail-thumb.jpg',
+          mediaType: MediaType.IMAGE,
+          caption: 'Primary detail caption',
+          createdAt: '2026-04-18T10:30:00.000Z',
+          review: {
+            id: 'review_1',
+            rating: 5,
+            headline: 'Love it',
+            helpfulCount: 8,
+          },
+        },
+        assets: [
+          {
+            id: 'asset_1',
+            sortOrder: 0,
+            mediaAssetId: 'media_1',
+            media: {
+              id: 'media_1',
+              url: 'https://cdn.example.com/detail.jpg',
+              thumbUrl: 'https://cdn.example.com/detail-thumb.jpg',
+              mediaType: MediaType.IMAGE,
+              caption: 'Primary detail caption',
+              createdAt: '2026-04-18T10:30:00.000Z',
+              review: {
+                id: 'review_1',
+                rating: 5,
+                headline: 'Love it',
+                helpfulCount: 8,
+              },
+            },
+          },
+        ],
+        _count: {
+          likes: 4,
+          comments: 2,
+          saves: 1,
+          shares: 0,
+        },
+        viewerContext: {
+          isAuthenticated: true,
+          viewerLiked: true,
+          canComment: true,
+          canSave: true,
+          isOwner: false,
+        },
+      })
+    })
+
+    it('adds the admin block only when moderation access is allowed', async () => {
+      const renderable = await mapLooksDetailMediaToRenderable(makeDetailRow())
+
+      if (!renderable) {
+        throw new Error('Expected renderable look detail row')
+      }
+
+      const result = mapLooksDetailToDto({
+        item: renderable,
+        viewerContext: {
+          isAuthenticated: true,
+          viewerLiked: false,
+          canComment: false,
+          canSave: false,
+          isOwner: false,
+          canModerate: true,
+        },
+      })
+
+      expect(result.admin).toEqual({
+        canModerate: true,
+        archivedAt: null,
+        removedAt: null,
+        primaryMediaAssetId: 'media_1',
+        primaryMedia: {
+          visibility: MediaVisibility.PUBLIC,
+          isEligibleForLooks: true,
+          isFeaturedInPortfolio: false,
+          reviewBody: 'Looks amazing',
+        },
+      })
     })
   })
 
