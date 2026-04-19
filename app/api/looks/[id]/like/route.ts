@@ -1,5 +1,5 @@
 // app/api/looks/[id]/like/route.ts
-import { Prisma, Role } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireUser } from '@/app/api/_utils'
@@ -8,110 +8,21 @@ import {
   canViewLookPost,
 } from '@/lib/looks/guards'
 import { recomputeLookPostLikeCount } from '@/lib/looks/counters'
+import { loadLookAccess } from '@/lib/looks/access'
 
 export const dynamic = 'force-dynamic'
 
 type Params = { id: string }
 type Ctx = { params: Params | Promise<Params> }
 
-type LookViewer = {
-  id: string
-  role: Role
-  clientProfile: { id: string } | null
-  professionalProfile: { id: string } | null
-} | null
-
-const lookAccessSelect = Prisma.validator<Prisma.LookPostSelect>()({
-  id: true,
-  professionalId: true,
-  status: true,
-  visibility: true,
-  moderationStatus: true,
-  professional: {
-    select: {
-      verificationStatus: true,
-    },
-  },
-})
-
-type LookAccessRow = Prisma.LookPostGetPayload<{
-  select: typeof lookAccessSelect
-}>
-
 async function getParams(ctx: Ctx): Promise<Params> {
   return await Promise.resolve(ctx.params)
-}
-
-function isLookOwner(args: {
-  viewer: LookViewer
-  professionalId: string
-}): boolean {
-  return (
-    args.viewer?.role === Role.PRO &&
-    args.viewer.professionalProfile?.id === args.professionalId
-  )
-}
-
-async function getViewerFollowState(args: {
-  viewer: LookViewer
-  look: LookAccessRow
-  isOwner: boolean
-}): Promise<boolean> {
-  if (args.isOwner) return false
-  if (!args.viewer?.clientProfile?.id) return false
-
-  const follow = await prisma.proFollow.findUnique({
-    where: {
-      clientId_professionalId: {
-        clientId: args.viewer.clientProfile.id,
-        professionalId: args.look.professionalId,
-      },
-    },
-    select: { id: true },
-  })
-
-  return Boolean(follow)
-}
-
-async function loadLookAccess(args: {
-  lookPostId: string
-  viewer: LookViewer
-}): Promise<{
-  look: LookAccessRow
-  isOwner: boolean
-  viewerFollowsProfessional: boolean
-} | null> {
-  const look = await prisma.lookPost.findUnique({
-    where: { id: args.lookPostId },
-    select: lookAccessSelect,
-  })
-
-  if (!look) return null
-
-  const isOwner = isLookOwner({
-    viewer: args.viewer,
-    professionalId: look.professionalId,
-  })
-
-  const viewerFollowsProfessional = await getViewerFollowState({
-    viewer: args.viewer,
-    look,
-    isOwner,
-  })
-
-  return {
-    look,
-    isOwner,
-    viewerFollowsProfessional,
-  }
 }
 
 export async function POST(_req: Request, ctx: Ctx) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
-
-    const viewer: LookViewer = auth.user
 
     const { id: rawId } = await getParams(ctx)
     const lookPostId = pickString(rawId)
@@ -122,9 +33,10 @@ export async function POST(_req: Request, ctx: Ctx) {
       })
     }
 
-    const access = await loadLookAccess({
+    const access = await loadLookAccess(prisma, {
       lookPostId,
-      viewer,
+      viewerClientId: auth.user.clientProfile?.id ?? null,
+      viewerProfessionalId: auth.user.professionalProfile?.id ?? null,
     })
 
     if (!access) {
@@ -135,7 +47,7 @@ export async function POST(_req: Request, ctx: Ctx) {
 
     const canView = canViewLookPost({
       isOwner: access.isOwner,
-      viewerRole: viewer?.role ?? null,
+      viewerRole: auth.user.role ?? null,
       status: access.look.status,
       visibility: access.look.visibility,
       moderationStatus: access.look.moderationStatus,
@@ -152,7 +64,7 @@ export async function POST(_req: Request, ctx: Ctx) {
 
     const canLike = canSaveLookPost({
       isOwner: access.isOwner,
-      viewerRole: viewer?.role ?? null,
+      viewerRole: auth.user.role ?? null,
       status: access.look.status,
       visibility: access.look.visibility,
       moderationStatus: access.look.moderationStatus,
@@ -206,8 +118,6 @@ export async function DELETE(_req: Request, ctx: Ctx) {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
 
-    const viewer: LookViewer = auth.user
-
     const { id: rawId } = await getParams(ctx)
     const lookPostId = pickString(rawId)
 
@@ -217,9 +127,10 @@ export async function DELETE(_req: Request, ctx: Ctx) {
       })
     }
 
-    const access = await loadLookAccess({
+    const access = await loadLookAccess(prisma, {
       lookPostId,
-      viewer,
+      viewerClientId: auth.user.clientProfile?.id ?? null,
+      viewerProfessionalId: auth.user.professionalProfile?.id ?? null,
     })
 
     if (!access) {
@@ -230,7 +141,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
 
     const canView = canViewLookPost({
       isOwner: access.isOwner,
-      viewerRole: viewer?.role ?? null,
+      viewerRole: auth.user.role ?? null,
       status: access.look.status,
       visibility: access.look.visibility,
       moderationStatus: access.look.moderationStatus,
@@ -245,7 +156,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
       })
     }
 
-    await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       await tx.lookLike.deleteMany({
         where: {
           lookPostId,
@@ -253,21 +164,15 @@ export async function DELETE(_req: Request, ctx: Ctx) {
         },
       })
 
-      await recomputeLookPostLikeCount(tx, lookPostId)
-    })
+      const likeCount = await recomputeLookPostLikeCount(tx, lookPostId)
 
-    const likeCount = await prisma.lookPost.findUnique({
-      where: { id: lookPostId },
-      select: { likeCount: true },
-    })
-
-    return jsonOk(
-      {
+      return {
         liked: false,
-        likeCount: likeCount?.likeCount ?? 0,
-      },
-      200,
-    )
+        likeCount,
+      }
+    })
+
+    return jsonOk(result, 200)
   } catch (e) {
     console.error('DELETE /api/looks/[id]/like error', e)
     return jsonFail(500, 'Couldn’t update your like. Try again.', {

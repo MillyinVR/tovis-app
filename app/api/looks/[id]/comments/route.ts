@@ -14,40 +14,13 @@ import {
 } from '@/lib/looks/guards'
 import { recomputeLookPostCommentCount } from '@/lib/looks/counters'
 import { mapLooksCommentToDto } from '@/lib/looks/mappers'
-import {
-  ModerationStatus,
-  Prisma,
-  Role,
-} from '@prisma/client'
+import { loadLookAccess } from '@/lib/looks/access'
+import { ModerationStatus, Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 type Params = { id: string }
 type Ctx = { params: Params | Promise<Params> }
-
-type LookViewer = {
-  id: string
-  role: Role
-  clientProfile: { id: string } | null
-  professionalProfile: { id: string } | null
-} | null
-
-const lookAccessSelect = Prisma.validator<Prisma.LookPostSelect>()({
-  id: true,
-  professionalId: true,
-  status: true,
-  visibility: true,
-  moderationStatus: true,
-  professional: {
-    select: {
-      verificationStatus: true,
-    },
-  },
-})
-
-type LookAccessRow = Prisma.LookPostGetPayload<{
-  select: typeof lookAccessSelect
-}>
 
 const lookCommentSelect = Prisma.validator<Prisma.LookCommentSelect>()({
   id: true,
@@ -81,70 +54,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function isLookOwner(args: {
-  viewer: LookViewer
-  professionalId: string
-}): boolean {
-  return (
-    args.viewer?.role === Role.PRO &&
-    args.viewer.professionalProfile?.id === args.professionalId
-  )
-}
-
-async function getViewerFollowState(args: {
-  viewer: LookViewer
-  look: LookAccessRow
-  isOwner: boolean
-}): Promise<boolean> {
-  if (args.isOwner) return false
-  if (!args.viewer?.clientProfile?.id) return false
-
-  const follow = await prisma.proFollow.findUnique({
-    where: {
-      clientId_professionalId: {
-        clientId: args.viewer.clientProfile.id,
-        professionalId: args.look.professionalId,
-      },
-    },
-    select: { id: true },
-  })
-
-  return Boolean(follow)
-}
-
-async function loadLookAccess(args: {
-  lookPostId: string
-  viewer: LookViewer
-}): Promise<{
-  look: LookAccessRow
-  isOwner: boolean
-  viewerFollowsProfessional: boolean
-} | null> {
-  const look = await prisma.lookPost.findUnique({
-    where: { id: args.lookPostId },
-    select: lookAccessSelect,
-  })
-
-  if (!look) return null
-
-  const isOwner = isLookOwner({
-    viewer: args.viewer,
-    professionalId: look.professionalId,
-  })
-
-  const viewerFollowsProfessional = await getViewerFollowState({
-    viewer: args.viewer,
-    look,
-    isOwner,
-  })
-
-  return {
-    look,
-    isOwner,
-    viewerFollowsProfessional,
-  }
-}
-
 function readCommentText(raw: unknown): string {
   if (!isRecord(raw)) return ''
 
@@ -165,9 +74,10 @@ export async function GET(req: Request, ctx: Ctx) {
 
     const viewer = await getCurrentUser().catch(() => null)
 
-    const access = await loadLookAccess({
+    const access = await loadLookAccess(prisma, {
       lookPostId,
-      viewer,
+      viewerClientId: viewer?.clientProfile?.id ?? null,
+      viewerProfessionalId: viewer?.professionalProfile?.id ?? null,
     })
 
     if (!access) {
@@ -203,10 +113,7 @@ export async function GET(req: Request, ctx: Ctx) {
           lookPostId,
           moderationStatus: ModerationStatus.APPROVED,
         },
-        orderBy: [
-          { createdAt: 'desc' },
-          { id: 'desc' },
-        ],
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
         select: lookCommentSelect,
       }),
@@ -238,8 +145,6 @@ export async function POST(req: Request, ctx: Ctx) {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
 
-    const viewer: LookViewer = auth.user
-
     const { id: rawId } = await getParams(ctx)
     const lookPostId = pickString(rawId)
 
@@ -249,9 +154,10 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    const access = await loadLookAccess({
+    const access = await loadLookAccess(prisma, {
       lookPostId,
-      viewer,
+      viewerClientId: auth.user.clientProfile?.id ?? null,
+      viewerProfessionalId: auth.user.professionalProfile?.id ?? null,
     })
 
     if (!access) {
@@ -262,7 +168,7 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const canView = canViewLookPost({
       isOwner: access.isOwner,
-      viewerRole: viewer?.role ?? null,
+      viewerRole: auth.user.role ?? null,
       status: access.look.status,
       visibility: access.look.visibility,
       moderationStatus: access.look.moderationStatus,
@@ -279,7 +185,7 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const canComment = canCommentOnLookPost({
       isOwner: access.isOwner,
-      viewerRole: viewer?.role ?? null,
+      viewerRole: auth.user.role ?? null,
       status: access.look.status,
       visibility: access.look.visibility,
       moderationStatus: access.look.moderationStatus,

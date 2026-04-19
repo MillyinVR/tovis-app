@@ -239,6 +239,34 @@ export function resolveLooksFeedKind(args: {
   return 'ALL'
 }
 
+function isStandardLooksFeedCursor(
+  cursor:
+    | StandardLooksFeedCursor
+    | SpotlightLooksFeedCursor
+    | null
+    | undefined,
+): cursor is StandardLooksFeedCursor {
+  return (
+    Boolean(cursor) &&
+    cursor?.publishedAt instanceof Date &&
+    typeof cursor.id === 'string'
+  )
+}
+
+function isSpotlightLooksFeedCursor(
+  cursor:
+    | StandardLooksFeedCursor
+    | SpotlightLooksFeedCursor
+    | null
+    | undefined,
+): cursor is SpotlightLooksFeedCursor {
+  return (
+    isStandardLooksFeedCursor(cursor) &&
+    typeof (cursor as { spotlightScore?: unknown }).spotlightScore ===
+      'number'
+  )
+}
+
 export function buildLooksFeedCursorWhere(args: {
   kind: 'ALL' | 'FOLLOWING'
   cursor?: StandardLooksFeedCursor | null
@@ -258,45 +286,49 @@ export function buildLooksFeedCursorWhere(args: {
   if (!cursor) return undefined
 
   if (args.kind === 'SPOTLIGHT') {
-    const spotlightCursor = cursor as SpotlightLooksFeedCursor
+    if (!isSpotlightLooksFeedCursor(cursor)) {
+      return undefined
+    }
 
     return {
       OR: [
         {
           spotlightScore: {
-            lt: spotlightCursor.spotlightScore,
+            lt: cursor.spotlightScore,
           },
         },
         {
-          spotlightScore: spotlightCursor.spotlightScore,
+          spotlightScore: cursor.spotlightScore,
           publishedAt: {
-            lt: spotlightCursor.publishedAt,
+            lt: cursor.publishedAt,
           },
         },
         {
-          spotlightScore: spotlightCursor.spotlightScore,
-          publishedAt: spotlightCursor.publishedAt,
+          spotlightScore: cursor.spotlightScore,
+          publishedAt: cursor.publishedAt,
           id: {
-            lt: spotlightCursor.id,
+            lt: cursor.id,
           },
         },
       ],
     }
   }
 
-  const standardCursor = cursor as StandardLooksFeedCursor
+  if (!isStandardLooksFeedCursor(cursor)) {
+    return undefined
+  }
 
   return {
     OR: [
       {
         publishedAt: {
-          lt: standardCursor.publishedAt,
+          lt: cursor.publishedAt,
         },
       },
       {
-        publishedAt: standardCursor.publishedAt,
+        publishedAt: cursor.publishedAt,
         id: {
-          lt: standardCursor.id,
+          lt: cursor.id,
         },
       },
     ],
