@@ -1,6 +1,6 @@
 // lib/looks/counters.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Prisma } from '@prisma/client'
+import { ModerationStatus, Prisma } from '@prisma/client'
 
 import {
   recomputeLookPostCommentCount,
@@ -26,6 +26,11 @@ function makeDb() {
   }
 }
 
+/**
+ * Narrow local test-only cast:
+ * the production helper accepts Prisma.TransactionClient | PrismaClient,
+ * but the test only needs the few mocked members it actually calls.
+ */
 function asTransactionClient(
   value: ReturnType<typeof makeDb>,
 ): Prisma.TransactionClient {
@@ -63,7 +68,7 @@ describe('lib/looks/counters.ts', () => {
   })
 
   describe('recomputeLookPostCommentCount', () => {
-    it('recomputes commentCount from LookComment rows and persists it on the look post', async () => {
+    it('recomputes commentCount from approved LookComment rows and persists it on the look post', async () => {
       const db = makeDb()
       db.lookComment.count.mockResolvedValue(4)
       db.lookPost.update.mockResolvedValue({ id: 'look_1' })
@@ -74,7 +79,10 @@ describe('lib/looks/counters.ts', () => {
       )
 
       expect(db.lookComment.count).toHaveBeenCalledWith({
-        where: { lookPostId: 'look_1' },
+        where: {
+          lookPostId: 'look_1',
+          moderationStatus: ModerationStatus.APPROVED,
+        },
       })
 
       expect(db.lookPost.update).toHaveBeenCalledWith({
@@ -128,9 +136,14 @@ describe('lib/looks/counters.ts', () => {
       expect(db.lookLike.count).toHaveBeenCalledWith({
         where: { lookPostId: 'look_1' },
       })
+
       expect(db.lookComment.count).toHaveBeenCalledWith({
-        where: { lookPostId: 'look_1' },
+        where: {
+          lookPostId: 'look_1',
+          moderationStatus: ModerationStatus.APPROVED,
+        },
       })
+
       expect(db.boardItem.count).toHaveBeenCalledWith({
         where: { lookPostId: 'look_1' },
       })

@@ -8,8 +8,8 @@ import {
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import type {
   LooksBoardPreviewRow,
-  LooksDetailMediaRow,
-  LooksFeedMediaRow,
+  LooksDetailRow,
+  LooksFeedRow,
   LooksProProfilePreviewRow,
 } from '@/lib/looks/selects'
 import type {
@@ -42,13 +42,54 @@ type MediaCommentRowShape = {
   user: MediaCommentUserShape
 }
 
-export type LooksRenderableDetailMedia = LooksDetailMediaRow & {
+type StoredMediaShape = {
+  id: string
+  url: string | null
+  thumbUrl: string | null
+  storageBucket: string | null
+  storagePath: string | null
+  thumbBucket: string | null
+  thumbPath: string | null
+  mediaType: MediaType
+  caption: string | null
+  createdAt: Date
+}
+
+type FeedPrimaryMediaShape = StoredMediaShape & {
+  uploadedByRole?: Role | null
+  reviewId?: string | null
+  review?: {
+    helpfulCount: number
+    rating: number
+    headline: string | null
+  } | null
+}
+
+type RenderableStoredMedia<T extends StoredMediaShape> = T & {
   renderUrl: string
   renderThumbUrl: string | null
 }
 
+type LooksDetailAssetRow = LooksDetailRow['assets'][number]
+
+export type LooksRenderableDetailMedia = Omit<
+  LooksDetailRow,
+  'primaryMediaAsset' | 'assets'
+> & {
+  primaryMediaAsset: RenderableStoredMedia<LooksDetailRow['primaryMediaAsset']>
+  assets: Array<
+    Omit<LooksDetailAssetRow, 'mediaAsset'> & {
+      mediaAsset: RenderableStoredMedia<LooksDetailAssetRow['mediaAsset']>
+    }
+  >
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isNonNull<T>(value: T | null): value is T {
+  return value !== null
 }
 
 function pickString(value: unknown): string | null {
@@ -96,34 +137,7 @@ function hasStoragePointers(input: {
   return Boolean(input.storageBucket && input.storagePath)
 }
 
-function pickPrimaryService(
-  services:
-    | Array<{
-        serviceId?: string
-        service: {
-          id: string
-          name: string
-          category: {
-            name: string
-            slug: string
-          } | null
-        } | null
-      }>
-    | null
-    | undefined,
-) {
-  const first = services?.find((serviceTag) => serviceTag.service)?.service
-  if (!first) return null
-
-  return {
-    id: first.id,
-    name: first.name,
-    category: first.category?.name ?? null,
-    categorySlug: first.category?.slug ?? null,
-  }
-}
-
-function pickServiceIds(
+function pickLegacyServiceIds(
   services:
     | Array<{
         serviceId?: string
@@ -148,6 +162,51 @@ function pickServiceIds(
       ids.add(nestedId)
     }
   }
+
+  return [...ids]
+}
+
+function pickLookPostServiceSummary(
+  service:
+    | {
+        id: string
+        name: string
+        category: {
+          name: string
+          slug: string
+        } | null
+      }
+    | null
+    | undefined,
+  explicitServiceId: string | null | undefined,
+) {
+  const id = service?.id ?? pickString(explicitServiceId)
+  if (!id) return null
+
+  return {
+    id,
+    name: service?.name ?? null,
+    category: service?.category?.name ?? null,
+    categorySlug: service?.category?.slug ?? null,
+  }
+}
+
+function pickLookPostServiceIds(args: {
+  serviceId: string | null | undefined
+  service:
+    | {
+        id: string
+      }
+    | null
+    | undefined
+}): string[] {
+  const ids = new Set<string>()
+
+  const explicitId = pickString(args.serviceId)
+  if (explicitId) ids.add(explicitId)
+
+  const nestedId = pickString(args.service?.id)
+  if (nestedId) ids.add(nestedId)
 
   return [...ids]
 }
@@ -206,12 +265,9 @@ async function renderAssetUrls(input: {
   }
 }
 
-export async function mapLooksFeedMediaToDto(args: {
-  item: LooksFeedMediaRow
-  viewerLiked: boolean
-}): Promise<LooksFeedItemDto | null> {
-  const { item, viewerLiked } = args
-
+async function mapStoredMediaToRenderable<T extends StoredMediaShape>(
+  item: T,
+): Promise<RenderableStoredMedia<T> | null> {
   const rendered = await renderAssetUrls({
     storageBucket: item.storageBucket,
     storagePath: item.storagePath,
@@ -223,16 +279,66 @@ export async function mapLooksFeedMediaToDto(args: {
 
   if (!rendered.url) return null
 
-  const primaryService = pickPrimaryService(item.services)
-  const serviceIds = pickServiceIds(item.services)
+  return {
+    ...item,
+    renderUrl: rendered.url,
+    renderThumbUrl: rendered.thumbUrl,
+  }
+}
+
+async function mapStoredMediaToPreviewDto(
+  item: StoredMediaShape,
+): Promise<LooksBoardPreviewPrimaryMediaDto | null> {
+  const rendered = await renderAssetUrls({
+    storageBucket: item.storageBucket,
+    storagePath: item.storagePath,
+    thumbBucket: item.thumbBucket,
+    thumbPath: item.thumbPath,
+    url: item.url,
+    thumbUrl: item.thumbUrl,
+  })
+
+  if (!rendered.url) return null
 
   return {
     id: item.id,
     url: rendered.url,
     thumbUrl: rendered.thumbUrl,
     mediaType: item.mediaType,
-    caption: item.caption ?? null,
-    createdAt: item.createdAt.toISOString(),
+  }
+}
+
+export async function mapLooksFeedMediaToDto(args: {
+  item: LooksFeedRow
+  viewerLiked: boolean
+}): Promise<LooksFeedItemDto | null> {
+  const { item, viewerLiked } = args
+  const primaryMedia: FeedPrimaryMediaShape = item.primaryMediaAsset
+
+  const rendered = await renderAssetUrls({
+    storageBucket: primaryMedia.storageBucket,
+    storagePath: primaryMedia.storagePath,
+    thumbBucket: primaryMedia.thumbBucket,
+    thumbPath: primaryMedia.thumbPath,
+    url: primaryMedia.url,
+    thumbUrl: primaryMedia.thumbUrl,
+  })
+
+  if (!rendered.url) return null
+
+  const primaryService = pickLookPostServiceSummary(item.service, item.serviceId)
+  const serviceIds = pickLookPostServiceIds({
+    serviceId: item.serviceId,
+    service: item.service,
+  })
+
+  return {
+    id: item.id,
+    url: rendered.url,
+    thumbUrl: rendered.thumbUrl,
+    mediaType: primaryMedia.mediaType,
+    caption: item.caption ?? primaryMedia.caption ?? null,
+    createdAt: (item.publishedAt ?? item.createdAt).toISOString(),
 
     professional: item.professional
       ? {
@@ -246,8 +352,8 @@ export async function mapLooksFeedMediaToDto(args: {
       : null,
 
     _count: {
-      likes: item._count.likes,
-      comments: item._count.comments,
+      likes: item.likeCount,
+      comments: item.commentCount,
     },
     viewerLiked,
 
@@ -256,11 +362,11 @@ export async function mapLooksFeedMediaToDto(args: {
     category: primaryService?.category ?? null,
     serviceIds,
 
-    uploadedByRole: item.uploadedByRole ?? null,
-    reviewId: item.reviewId ?? null,
-    reviewHelpfulCount: item.review?.helpfulCount ?? null,
-    reviewRating: item.review?.rating ?? null,
-    reviewHeadline: item.review?.headline ?? null,
+    uploadedByRole: primaryMedia.uploadedByRole ?? null,
+    reviewId: primaryMedia.reviewId ?? null,
+    reviewHelpfulCount: primaryMedia.review?.helpfulCount ?? null,
+    reviewRating: primaryMedia.review?.rating ?? null,
+    reviewHeadline: primaryMedia.review?.headline ?? null,
   }
 }
 
@@ -345,30 +451,37 @@ export async function mapPortfolioTileToDto(input: {
     isEligibleForLooks: input.isEligibleForLooks,
     isFeaturedInPortfolio: input.isFeaturedInPortfolio,
     src,
-    serviceIds: pickServiceIds(input.services),
+    serviceIds: pickLegacyServiceIds(input.services),
     isVideo: input.mediaType === MediaType.VIDEO,
     mediaType: input.mediaType,
   }
 }
 
 export async function mapLooksDetailMediaToRenderable(
-  item: LooksDetailMediaRow,
+  item: LooksDetailRow,
 ): Promise<LooksRenderableDetailMedia | null> {
-  const rendered = await renderAssetUrls({
-    storageBucket: item.storageBucket,
-    storagePath: item.storagePath,
-    thumbBucket: item.thumbBucket,
-    thumbPath: item.thumbPath,
-    url: item.url,
-    thumbUrl: item.thumbUrl,
-  })
+  const primaryMediaAsset = await mapStoredMediaToRenderable(
+    item.primaryMediaAsset,
+  )
 
-  if (!rendered.url) return null
+  if (!primaryMediaAsset) return null
+
+  const assets = await Promise.all(
+    item.assets.map(async (asset) => {
+      const mediaAsset = await mapStoredMediaToRenderable(asset.mediaAsset)
+      if (!mediaAsset) return null
+
+      return {
+        ...asset,
+        mediaAsset,
+      }
+    }),
+  )
 
   return {
     ...item,
-    renderUrl: rendered.url,
-    renderThumbUrl: rendered.thumbUrl,
+    primaryMediaAsset,
+    assets: assets.filter(isNonNull),
   }
 }
 
@@ -378,6 +491,7 @@ export async function mapLooksBoardPreviewToDto(
   const items = await Promise.all(
     board.items.map(async (item) => {
       const lookPost = item.lookPost
+
       if (!lookPost) {
         return {
           id: item.id,
@@ -387,29 +501,9 @@ export async function mapLooksBoardPreviewToDto(
         }
       }
 
-      const primaryAsset = lookPost.primaryMediaAsset
-      let primaryMedia: LooksBoardPreviewPrimaryMediaDto | null = null
-
-
-      if (primaryAsset) {
-        const rendered = await renderAssetUrls({
-          storageBucket: primaryAsset.storageBucket,
-          storagePath: primaryAsset.storagePath,
-          thumbBucket: primaryAsset.thumbBucket,
-          thumbPath: primaryAsset.thumbPath,
-          url: primaryAsset.url,
-          thumbUrl: primaryAsset.thumbUrl,
-        })
-
-        if (rendered.url) {
-          primaryMedia = {
-            id: primaryAsset.id,
-            url: rendered.url,
-            thumbUrl: rendered.thumbUrl,
-            mediaType: primaryAsset.mediaType,
-          }
-        }
-      }
+      const primaryMedia = await mapStoredMediaToPreviewDto(
+        lookPost.primaryMediaAsset,
+      )
 
       return {
         id: item.id,

@@ -7,82 +7,214 @@ import {
   pickString,
   requireUser,
 } from '@/app/api/_utils'
-import { isPublicLooksEligibleMedia } from '@/lib/looks/guards'
+import { getCurrentUser } from '@/lib/currentUser'
+import {
+  canCommentOnLookPost,
+  canViewLookPost,
+} from '@/lib/looks/guards'
+import { recomputeLookPostCommentCount } from '@/lib/looks/counters'
 import { mapLooksCommentToDto } from '@/lib/looks/mappers'
+import {
+  ModerationStatus,
+  Prisma,
+  Role,
+} from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 type Params = { id: string }
 type Ctx = { params: Params | Promise<Params> }
 
+type LookViewer = {
+  id: string
+  role: Role
+  clientProfile: { id: string } | null
+  professionalProfile: { id: string } | null
+} | null
+
+const lookAccessSelect = Prisma.validator<Prisma.LookPostSelect>()({
+  id: true,
+  professionalId: true,
+  status: true,
+  visibility: true,
+  moderationStatus: true,
+  professional: {
+    select: {
+      verificationStatus: true,
+    },
+  },
+})
+
+type LookAccessRow = Prisma.LookPostGetPayload<{
+  select: typeof lookAccessSelect
+}>
+
+const lookCommentSelect = Prisma.validator<Prisma.LookCommentSelect>()({
+  id: true,
+  body: true,
+  createdAt: true,
+  user: {
+    select: {
+      id: true,
+      clientProfile: {
+        select: {
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+        },
+      },
+      professionalProfile: {
+        select: {
+          businessName: true,
+          avatarUrl: true,
+        },
+      },
+    },
+  },
+})
+
 async function getParams(ctx: Ctx): Promise<Params> {
   return await Promise.resolve(ctx.params)
 }
 
-async function requirePublicEligibleLook(id: string) {
-  const media = await prisma.mediaAsset.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      visibility: true,
-      isEligibleForLooks: true,
-      isFeaturedInPortfolio: true,
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isLookOwner(args: {
+  viewer: LookViewer
+  professionalId: string
+}): boolean {
+  return (
+    args.viewer?.role === Role.PRO &&
+    args.viewer.professionalProfile?.id === args.professionalId
+  )
+}
+
+async function getViewerFollowState(args: {
+  viewer: LookViewer
+  look: LookAccessRow
+  isOwner: boolean
+}): Promise<boolean> {
+  if (args.isOwner) return false
+  if (!args.viewer?.clientProfile?.id) return false
+
+  const follow = await prisma.proFollow.findUnique({
+    where: {
+      clientId_professionalId: {
+        clientId: args.viewer.clientProfile.id,
+        professionalId: args.look.professionalId,
+      },
     },
+    select: { id: true },
   })
 
-  if (!media) return null
-  return isPublicLooksEligibleMedia(media) ? media : null
+  return Boolean(follow)
+}
+
+async function loadLookAccess(args: {
+  lookPostId: string
+  viewer: LookViewer
+}): Promise<{
+  look: LookAccessRow
+  isOwner: boolean
+  viewerFollowsProfessional: boolean
+} | null> {
+  const look = await prisma.lookPost.findUnique({
+    where: { id: args.lookPostId },
+    select: lookAccessSelect,
+  })
+
+  if (!look) return null
+
+  const isOwner = isLookOwner({
+    viewer: args.viewer,
+    professionalId: look.professionalId,
+  })
+
+  const viewerFollowsProfessional = await getViewerFollowState({
+    viewer: args.viewer,
+    look,
+    isOwner,
+  })
+
+  return {
+    look,
+    isOwner,
+    viewerFollowsProfessional,
+  }
+}
+
+function readCommentText(raw: unknown): string {
+  if (!isRecord(raw)) return ''
+
+  const body = raw.body
+  return typeof body === 'string' ? body.trim() : ''
 }
 
 export async function GET(req: Request, ctx: Ctx) {
   try {
     const { id: rawId } = await getParams(ctx)
-    const id = pickString(rawId)
+    const lookPostId = pickString(rawId)
 
-    if (!id) {
-      return jsonFail(400, 'Missing media id.', {
-        code: 'MISSING_MEDIA_ID',
+    if (!lookPostId) {
+      return jsonFail(400, 'Missing look id.', {
+        code: 'MISSING_LOOK_ID',
       })
     }
 
-    const media = await requirePublicEligibleLook(id)
-    if (!media) {
+    const viewer = await getCurrentUser().catch(() => null)
+
+    const access = await loadLookAccess({
+      lookPostId,
+      viewer,
+    })
+
+    if (!access) {
       return jsonFail(404, 'Not found.', {
-        code: 'NOT_FOUND',
+        code: 'LOOK_NOT_FOUND',
+      })
+    }
+
+    const canView = canViewLookPost({
+      isOwner: access.isOwner,
+      viewerRole: viewer?.role ?? null,
+      status: access.look.status,
+      visibility: access.look.visibility,
+      moderationStatus: access.look.moderationStatus,
+      proVerificationStatus:
+        access.look.professional.verificationStatus,
+      viewerFollowsProfessional: access.viewerFollowsProfessional,
+    })
+
+    if (!canView) {
+      return jsonFail(404, 'Not found.', {
+        code: 'LOOK_NOT_FOUND',
       })
     }
 
     const { searchParams } = new URL(req.url)
-    const limit = Math.min(pickInt(searchParams.get('limit')) ?? 30, 100)
+    const requestedLimit = pickInt(searchParams.get('limit')) ?? 30
+    const limit = Math.max(1, Math.min(requestedLimit, 100))
 
     const [rows, commentsCount] = await prisma.$transaction([
-      prisma.mediaComment.findMany({
-        where: { mediaId: id },
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-        include: {
-          user: {
-            select: {
-              id: true,
-              clientProfile: {
-                select: {
-                  firstName: true,
-                  lastName: true,
-                  avatarUrl: true,
-                },
-              },
-              professionalProfile: {
-                select: {
-                  businessName: true,
-                  avatarUrl: true,
-                },
-              },
-            },
-          },
+      prisma.lookComment.findMany({
+        where: {
+          lookPostId,
+          moderationStatus: ModerationStatus.APPROVED,
         },
+        orderBy: [
+          { createdAt: 'desc' },
+          { id: 'desc' },
+        ],
+        take: limit,
+        select: lookCommentSelect,
       }),
-      prisma.mediaComment.count({
-        where: { mediaId: id },
+      prisma.lookComment.count({
+        where: {
+          lookPostId,
+          moderationStatus: ModerationStatus.APPROVED,
+        },
       }),
     ])
 
@@ -106,26 +238,64 @@ export async function POST(req: Request, ctx: Ctx) {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
 
-    const user = auth.user
+    const viewer: LookViewer = auth.user
 
     const { id: rawId } = await getParams(ctx)
-    const id = pickString(rawId)
+    const lookPostId = pickString(rawId)
 
-    if (!id) {
-      return jsonFail(400, 'Missing media id.', {
-        code: 'MISSING_MEDIA_ID',
+    if (!lookPostId) {
+      return jsonFail(400, 'Missing look id.', {
+        code: 'MISSING_LOOK_ID',
       })
     }
 
-    const media = await requirePublicEligibleLook(id)
-    if (!media) {
+    const access = await loadLookAccess({
+      lookPostId,
+      viewer,
+    })
+
+    if (!access) {
       return jsonFail(404, 'Not found.', {
-        code: 'NOT_FOUND',
+        code: 'LOOK_NOT_FOUND',
       })
     }
 
-    const body = (await req.json().catch(() => ({}))) as { body?: unknown }
-    const text = typeof body.body === 'string' ? body.body.trim() : ''
+    const canView = canViewLookPost({
+      isOwner: access.isOwner,
+      viewerRole: viewer?.role ?? null,
+      status: access.look.status,
+      visibility: access.look.visibility,
+      moderationStatus: access.look.moderationStatus,
+      proVerificationStatus:
+        access.look.professional.verificationStatus,
+      viewerFollowsProfessional: access.viewerFollowsProfessional,
+    })
+
+    if (!canView) {
+      return jsonFail(404, 'Not found.', {
+        code: 'LOOK_NOT_FOUND',
+      })
+    }
+
+    const canComment = canCommentOnLookPost({
+      isOwner: access.isOwner,
+      viewerRole: viewer?.role ?? null,
+      status: access.look.status,
+      visibility: access.look.visibility,
+      moderationStatus: access.look.moderationStatus,
+      proVerificationStatus:
+        access.look.professional.verificationStatus,
+      viewerFollowsProfessional: access.viewerFollowsProfessional,
+    })
+
+    if (!canComment) {
+      return jsonFail(403, 'You can’t comment on this look.', {
+        code: 'COMMENTS_FORBIDDEN',
+      })
+    }
+
+    const rawBody: unknown = await req.json().catch(() => null)
+    const text = readCommentText(rawBody)
 
     if (!text) {
       return jsonFail(400, 'Comment cannot be empty.', {
@@ -139,42 +309,31 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    const created = await prisma.mediaComment.create({
-      data: {
-        mediaId: id,
-        userId: user.id,
-        body: text,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            clientProfile: {
-              select: {
-                firstName: true,
-                lastName: true,
-                avatarUrl: true,
-              },
-            },
-            professionalProfile: {
-              select: {
-                businessName: true,
-                avatarUrl: true,
-              },
-            },
-          },
+    const result = await prisma.$transaction(async (tx) => {
+      const comment = await tx.lookComment.create({
+        data: {
+          lookPostId,
+          userId: auth.user.id,
+          body: text,
         },
-      },
-    })
+        select: lookCommentSelect,
+      })
 
-    const commentsCount = await prisma.mediaComment.count({
-      where: { mediaId: id },
+      const commentsCount = await recomputeLookPostCommentCount(
+        tx,
+        lookPostId,
+      )
+
+      return {
+        comment,
+        commentsCount,
+      }
     })
 
     return jsonOk(
       {
-        comment: mapLooksCommentToDto(created),
-        commentsCount,
+        comment: mapLooksCommentToDto(result.comment),
+        commentsCount: result.commentsCount,
       },
       201,
     )

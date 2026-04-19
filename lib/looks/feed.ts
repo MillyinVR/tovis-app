@@ -1,19 +1,37 @@
 // lib/looks/feed.ts
-import { Prisma, MediaVisibility, Role } from '@prisma/client'
+import {
+  LookPostStatus,
+  LookPostVisibility,
+  ModerationStatus,
+  Prisma,
+} from '@prisma/client'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 
 export const LOOKS_SPOTLIGHT_SLUG = 'spotlight'
-export const LOOKS_SPOTLIGHT_HELPFUL_THRESHOLD = 25
 
 const QMODE: Prisma.QueryMode = 'insensitive'
 
-export type LooksMediaFeedKind = 'ALL' | 'SPOTLIGHT' | 'FOLLOWING'
+export type LooksFeedKind = 'ALL' | 'SPOTLIGHT' | 'FOLLOWING'
+export type LooksMediaFeedKind = LooksFeedKind
 
-export type BuildLooksMediaFeedWhereArgs = {
-  kind: LooksMediaFeedKind
+export type BuildLooksFeedWhereArgs = {
+  kind: LooksFeedKind
   categorySlug?: string | null
   q?: string | null
   followingProfessionalIds?: readonly string[] | null
+}
+
+export type BuildLooksMediaFeedWhereArgs = BuildLooksFeedWhereArgs
+
+export type StandardLooksFeedCursor = {
+  publishedAt: Date
+  id: string
+}
+
+export type SpotlightLooksFeedCursor = {
+  spotlightScore: number
+  publishedAt: Date
+  id: string
 }
 
 function pickNonEmptyString(value: string | null | undefined): string | null {
@@ -36,52 +54,36 @@ function pickDistinctIds(
   )
 }
 
-function buildSpotlightFeedFilters(): Prisma.MediaAssetWhereInput[] {
-  return [
-    { reviewId: { not: null } },
-    { uploadedByRole: Role.CLIENT },
-    {
-      review: {
-        is: {
-          helpfulCount: { gte: LOOKS_SPOTLIGHT_HELPFUL_THRESHOLD },
-        },
+function buildLooksVisibilityFilter(
+  kind: LooksFeedKind,
+): Prisma.LookPostWhereInput {
+  if (kind === 'FOLLOWING') {
+    return {
+      visibility: {
+        in: [
+          LookPostVisibility.PUBLIC,
+          LookPostVisibility.FOLLOWERS_ONLY,
+        ],
       },
-    },
-  ]
-}
-
-function buildDefaultLooksFeedFilters(args: {
-  categorySlug: string | null
-}): Prisma.MediaAssetWhereInput[] {
-  const filters: Prisma.MediaAssetWhereInput[] = [
-    {
-      OR: [
-        { isEligibleForLooks: true },
-        { isFeaturedInPortfolio: true },
-      ],
-    },
-  ]
-
-  if (args.categorySlug) {
-    filters.push({
-      services: {
-        some: {
-          service: {
-            category: {
-              is: { slug: args.categorySlug },
-            },
-          },
-        },
-      },
-    })
+    }
   }
 
-  return filters
+  return {
+    visibility: LookPostVisibility.PUBLIC,
+  }
 }
 
 function buildFollowingFeedFilter(
   followingProfessionalIds: readonly string[],
-): Prisma.MediaAssetWhereInput {
+): Prisma.LookPostWhereInput {
+  if (followingProfessionalIds.length === 0) {
+    return {
+      professionalId: {
+        in: [],
+      },
+    }
+  }
+
   return {
     professionalId: {
       in: [...followingProfessionalIds],
@@ -89,7 +91,25 @@ function buildFollowingFeedFilter(
   }
 }
 
-function buildLooksSearchFilter(q: string): Prisma.MediaAssetWhereInput {
+function buildCategoryFilter(
+  categorySlug: string | null,
+): Prisma.LookPostWhereInput | null {
+  if (!categorySlug) return null
+
+  return {
+    service: {
+      is: {
+        category: {
+          is: {
+            slug: categorySlug,
+          },
+        },
+      },
+    },
+  }
+}
+
+function buildLooksSearchFilter(q: string): Prisma.LookPostWhereInput {
   return {
     OR: [
       {
@@ -100,17 +120,45 @@ function buildLooksSearchFilter(q: string): Prisma.MediaAssetWhereInput {
       },
       {
         professional: {
-          businessName: {
-            contains: q,
-            mode: QMODE,
+          is: {
+            businessName: {
+              contains: q,
+              mode: QMODE,
+            },
           },
         },
       },
       {
         professional: {
-          handle: {
-            contains: q,
-            mode: QMODE,
+          is: {
+            handle: {
+              contains: q,
+              mode: QMODE,
+            },
+          },
+        },
+      },
+      {
+        service: {
+          is: {
+            name: {
+              contains: q,
+              mode: QMODE,
+            },
+          },
+        },
+      },
+      {
+        service: {
+          is: {
+            category: {
+              is: {
+                name: {
+                  contains: q,
+                  mode: QMODE,
+                },
+              },
+            },
           },
         },
       },
@@ -118,38 +166,26 @@ function buildLooksSearchFilter(q: string): Prisma.MediaAssetWhereInput {
   }
 }
 
-export function buildLooksMediaFeedWhere(
-  args: BuildLooksMediaFeedWhereArgs,
-): Prisma.MediaAssetWhereInput {
-  const kind = args.kind
+export function buildLooksFeedWhere(
+  args: BuildLooksFeedWhereArgs,
+): Prisma.LookPostWhereInput {
   const categorySlug = pickNonEmptyString(args.categorySlug)
   const q = pickNonEmptyString(args.q)
   const followingProfessionalIds = pickDistinctIds(
     args.followingProfessionalIds,
   )
 
-  const and: Prisma.MediaAssetWhereInput[] = []
+  const and: Prisma.LookPostWhereInput[] = [
+    buildLooksVisibilityFilter(args.kind),
+  ]
 
-  if (kind === 'SPOTLIGHT') {
-    and.push(...buildSpotlightFeedFilters())
-  } else {
-    and.push(
-      ...buildDefaultLooksFeedFilters({
-        categorySlug,
-      }),
-    )
+  const categoryFilter = buildCategoryFilter(categorySlug)
+  if (categoryFilter) {
+    and.push(categoryFilter)
+  }
 
-    if (kind === 'FOLLOWING') {
-      if (followingProfessionalIds.length === 0) {
-        and.push({
-          professionalId: {
-            in: [],
-          },
-        })
-      } else {
-        and.push(buildFollowingFeedFilter(followingProfessionalIds))
-      }
-    }
+  if (args.kind === 'FOLLOWING') {
+    and.push(buildFollowingFeedFilter(followingProfessionalIds))
   }
 
   if (q) {
@@ -157,7 +193,11 @@ export function buildLooksMediaFeedWhere(
   }
 
   return {
-    visibility: MediaVisibility.PUBLIC,
+    status: LookPostStatus.PUBLISHED,
+    moderationStatus: ModerationStatus.APPROVED,
+    publishedAt: {
+      not: null,
+    },
     professional: {
       is: {
         verificationStatus: {
@@ -169,32 +209,104 @@ export function buildLooksMediaFeedWhere(
   }
 }
 
-export function buildLooksMediaFeedOrderBy(args: {
-  kind: LooksMediaFeedKind
+export function buildLooksFeedOrderBy(args: {
+  kind: LooksFeedKind
 }):
-  | Prisma.MediaAssetOrderByWithRelationInput
-  | Prisma.MediaAssetOrderByWithRelationInput[] {
+  | Prisma.LookPostOrderByWithRelationInput
+  | Prisma.LookPostOrderByWithRelationInput[] {
   if (args.kind === 'SPOTLIGHT') {
     return [
-      { review: { helpfulCount: 'desc' } },
-      { createdAt: 'desc' },
+      { spotlightScore: 'desc' },
+      { publishedAt: 'desc' },
       { id: 'desc' },
     ]
   }
 
   return [
-    { createdAt: 'desc' },
+    { publishedAt: 'desc' },
     { id: 'desc' },
   ]
 }
 
-export function resolveLooksMediaFeedKind(args: {
+export function resolveLooksFeedKind(args: {
   categorySlug?: string | null
   following?: boolean | null
-}): LooksMediaFeedKind {
+}): LooksFeedKind {
   const categorySlug = pickNonEmptyString(args.categorySlug)
 
   if (args.following) return 'FOLLOWING'
   if (categorySlug === LOOKS_SPOTLIGHT_SLUG) return 'SPOTLIGHT'
   return 'ALL'
 }
+
+export function buildLooksFeedCursorWhere(args: {
+  kind: 'ALL' | 'FOLLOWING'
+  cursor?: StandardLooksFeedCursor | null
+}): Prisma.LookPostWhereInput | undefined
+export function buildLooksFeedCursorWhere(args: {
+  kind: 'SPOTLIGHT'
+  cursor?: SpotlightLooksFeedCursor | null
+}): Prisma.LookPostWhereInput | undefined
+export function buildLooksFeedCursorWhere(args: {
+  kind: LooksFeedKind
+  cursor?:
+    | StandardLooksFeedCursor
+    | SpotlightLooksFeedCursor
+    | null
+}): Prisma.LookPostWhereInput | undefined {
+  const cursor = args.cursor
+  if (!cursor) return undefined
+
+  if (args.kind === 'SPOTLIGHT') {
+    const spotlightCursor = cursor as SpotlightLooksFeedCursor
+
+    return {
+      OR: [
+        {
+          spotlightScore: {
+            lt: spotlightCursor.spotlightScore,
+          },
+        },
+        {
+          spotlightScore: spotlightCursor.spotlightScore,
+          publishedAt: {
+            lt: spotlightCursor.publishedAt,
+          },
+        },
+        {
+          spotlightScore: spotlightCursor.spotlightScore,
+          publishedAt: spotlightCursor.publishedAt,
+          id: {
+            lt: spotlightCursor.id,
+          },
+        },
+      ],
+    }
+  }
+
+  const standardCursor = cursor as StandardLooksFeedCursor
+
+  return {
+    OR: [
+      {
+        publishedAt: {
+          lt: standardCursor.publishedAt,
+        },
+      },
+      {
+        publishedAt: standardCursor.publishedAt,
+        id: {
+          lt: standardCursor.id,
+        },
+      },
+    ],
+  }
+}
+
+/**
+ * Backward-compatible aliases for existing imports during route migration.
+ * Remove these once all call sites stop using the media-rooted names.
+ */
+export const buildLooksMediaFeedWhere = buildLooksFeedWhere
+export const buildLooksMediaFeedOrderBy = buildLooksFeedOrderBy
+export const resolveLooksMediaFeedKind = resolveLooksFeedKind

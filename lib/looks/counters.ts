@@ -1,12 +1,27 @@
 // lib/looks/counters.ts
-import { PrismaClient, type Prisma } from '@prisma/client'
+import {
+  ModerationStatus,
+  PrismaClient,
+  type Prisma,
+} from '@prisma/client'
 
 type LooksCounterDb = Prisma.TransactionClient | PrismaClient
 
-async function persistLookPostCounter(
+type PersistedLookPostCounterPatch = Pick<
+  Prisma.LookPostUpdateInput,
+  'likeCount' | 'commentCount' | 'saveCount'
+>
+
+type LookPostCounterSnapshot = {
+  likeCount: number
+  commentCount: number
+  saveCount: number
+}
+
+async function persistLookPostCounters(
   db: LooksCounterDb,
   lookPostId: string,
-  data: Prisma.LookPostUpdateInput,
+  data: PersistedLookPostCounterPatch,
 ): Promise<void> {
   await db.lookPost.update({
     where: { id: lookPostId },
@@ -15,15 +30,43 @@ async function persistLookPostCounter(
   })
 }
 
+async function countLookLikes(
+  db: LooksCounterDb,
+  lookPostId: string,
+): Promise<number> {
+  return db.lookLike.count({
+    where: { lookPostId },
+  })
+}
+
+async function countApprovedLookComments(
+  db: LooksCounterDb,
+  lookPostId: string,
+): Promise<number> {
+  return db.lookComment.count({
+    where: {
+      lookPostId,
+      moderationStatus: ModerationStatus.APPROVED,
+    },
+  })
+}
+
+async function countLookSaves(
+  db: LooksCounterDb,
+  lookPostId: string,
+): Promise<number> {
+  return db.boardItem.count({
+    where: { lookPostId },
+  })
+}
+
 export async function recomputeLookPostLikeCount(
   db: LooksCounterDb,
   lookPostId: string,
 ): Promise<number> {
-  const likeCount = await db.lookLike.count({
-    where: { lookPostId },
-  })
+  const likeCount = await countLookLikes(db, lookPostId)
 
-  await persistLookPostCounter(db, lookPostId, {
+  await persistLookPostCounters(db, lookPostId, {
     likeCount,
   })
 
@@ -34,11 +77,9 @@ export async function recomputeLookPostCommentCount(
   db: LooksCounterDb,
   lookPostId: string,
 ): Promise<number> {
-  const commentCount = await db.lookComment.count({
-    where: { lookPostId },
-  })
+  const commentCount = await countApprovedLookComments(db, lookPostId)
 
-  await persistLookPostCounter(db, lookPostId, {
+  await persistLookPostCounters(db, lookPostId, {
     commentCount,
   })
 
@@ -49,11 +90,9 @@ export async function recomputeLookPostSaveCount(
   db: LooksCounterDb,
   lookPostId: string,
 ): Promise<number> {
-  const saveCount = await db.boardItem.count({
-    where: { lookPostId },
-  })
+  const saveCount = await countLookSaves(db, lookPostId)
 
-  await persistLookPostCounter(db, lookPostId, {
+  await persistLookPostCounters(db, lookPostId, {
     saveCount,
   })
 
@@ -63,18 +102,14 @@ export async function recomputeLookPostSaveCount(
 export async function recomputeLookPostCounters(
   db: LooksCounterDb,
   lookPostId: string,
-): Promise<{
-  likeCount: number
-  commentCount: number
-  saveCount: number
-}> {
+): Promise<LookPostCounterSnapshot> {
   const [likeCount, commentCount, saveCount] = await Promise.all([
-    db.lookLike.count({ where: { lookPostId } }),
-    db.lookComment.count({ where: { lookPostId } }),
-    db.boardItem.count({ where: { lookPostId } }),
+    countLookLikes(db, lookPostId),
+    countApprovedLookComments(db, lookPostId),
+    countLookSaves(db, lookPostId),
   ])
 
-  await persistLookPostCounter(db, lookPostId, {
+  await persistLookPostCounters(db, lookPostId, {
     likeCount,
     commentCount,
     saveCount,

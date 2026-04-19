@@ -22,8 +22,8 @@ vi.mock('@/lib/media/renderUrls', () => ({
 
 import type {
   LooksBoardPreviewRow,
-  LooksDetailMediaRow,
-  LooksFeedMediaRow,
+  LooksDetailRow,
+  LooksFeedRow,
   LooksProProfilePreviewRow,
 } from '@/lib/looks/selects'
 import {
@@ -39,76 +39,38 @@ import {
 } from './mappers'
 
 function makeFeedRow(
-  overrides?: Partial<LooksFeedMediaRow>,
-): LooksFeedMediaRow {
+  overrides?: Partial<LooksFeedRow>,
+): LooksFeedRow {
   return {
-    id: 'media_1',
-    url: 'https://cdn.example.com/media.jpg',
-    thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
-    storageBucket: 'media-public',
-    storagePath: 'looks/media_1.jpg',
-    thumbBucket: 'media-public',
-    thumbPath: 'looks/media_1-thumb.jpg',
-    mediaType: MediaType.IMAGE,
-    caption: 'Fresh cut',
-    createdAt: new Date('2026-04-18T12:00:00.000Z'),
-    uploadedByRole: Role.CLIENT,
-    uploadedByUserId: 'user_1',
-    reviewId: 'review_1',
-    review: {
-      id: 'review_1',
-      helpfulCount: 42,
-      rating: 5,
-      headline: 'Love it',
-    },
-    professional: {
-      id: 'pro_1',
-      businessName: 'TOVIS Studio',
-      handle: 'tovisstudio',
-      avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
-      professionType: ProfessionType.BARBER,
-      location: 'San Diego, CA',
-    },
-    services: [
-      {
-        id: 'tag_1',
-        serviceId: 'service_1',
-        service: {
-          id: 'service_1',
-          name: 'Fade',
-          category: {
-            name: 'Hair',
-            slug: 'hair',
-          },
-        },
-      },
-    ],
-    _count: {
-      likes: 9,
-      comments: 3,
-    },
-    ...overrides,
-  }
-}
-
-function makeDetailRow(
-  overrides?: Partial<LooksDetailMediaRow>,
-): LooksDetailMediaRow {
-  return {
-    id: 'media_1',
+    id: 'look_1',
     professionalId: 'pro_1',
-    url: 'https://cdn.example.com/detail.jpg',
-    thumbUrl: 'https://cdn.example.com/detail-thumb.jpg',
-    storageBucket: 'media-public',
-    storagePath: 'looks/detail.jpg',
-    thumbBucket: 'media-public',
-    thumbPath: 'looks/detail-thumb.jpg',
-    mediaType: MediaType.IMAGE,
-    caption: 'Detailed caption',
+    serviceId: 'service_1',
+    caption: 'Fresh cut',
+    priceStartingAt: null,
+    status: LookPostStatus.PUBLISHED,
+    visibility: LookPostVisibility.PUBLIC,
+    moderationStatus: ModerationStatus.APPROVED,
+    publishedAt: new Date('2026-04-18T13:00:00.000Z'),
     createdAt: new Date('2026-04-18T12:00:00.000Z'),
-    visibility: MediaVisibility.PUBLIC,
-    isEligibleForLooks: true,
-    isFeaturedInPortfolio: false,
+    updatedAt: new Date('2026-04-18T13:30:00.000Z'),
+    likeCount: 9,
+    commentCount: 3,
+    saveCount: 2,
+    shareCount: 1,
+    spotlightScore: 42,
+    rankScore: 99,
+    primaryMediaAsset: {
+      id: 'media_1',
+      url: 'https://cdn.example.com/media.jpg',
+      thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
+      storageBucket: 'media-public',
+      storagePath: 'looks/media_1.jpg',
+      thumbBucket: 'media-public',
+      thumbPath: 'looks/media_1-thumb.jpg',
+      mediaType: MediaType.IMAGE,
+      caption: 'Primary caption',
+      createdAt: new Date('2026-04-18T11:30:00.000Z'),
+    },
     professional: {
       id: 'pro_1',
       businessName: 'TOVIS Studio',
@@ -117,33 +79,117 @@ function makeDetailRow(
       professionType: ProfessionType.BARBER,
       location: 'San Diego, CA',
       verificationStatus: VerificationStatus.APPROVED,
+      isPremium: true,
     },
-    services: [
+    service: {
+      id: 'service_1',
+      name: 'Fade',
+      category: {
+        name: 'Hair',
+        slug: 'hair',
+      },
+    },
+    ...overrides,
+  }
+}
+
+function makeDetailRow(
+  overrides?: Partial<LooksDetailRow>,
+): LooksDetailRow {
+  return {
+    id: 'look_1',
+    professionalId: 'pro_1',
+    serviceId: 'service_1',
+    primaryMediaAssetId: 'media_1',
+    caption: 'Detailed caption',
+    priceStartingAt: null,
+    status: LookPostStatus.PUBLISHED,
+    visibility: LookPostVisibility.PUBLIC,
+    moderationStatus: ModerationStatus.APPROVED,
+    publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+    archivedAt: null,
+    removedAt: null,
+    createdAt: new Date('2026-04-18T11:00:00.000Z'),
+    updatedAt: new Date('2026-04-18T12:30:00.000Z'),
+    likeCount: 4,
+    commentCount: 2,
+    saveCount: 1,
+    shareCount: 0,
+    spotlightScore: 18,
+    rankScore: 27,
+    professional: {
+      id: 'pro_1',
+      businessName: 'TOVIS Studio',
+      handle: 'tovisstudio',
+      avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
+      professionType: ProfessionType.BARBER,
+      location: 'San Diego, CA',
+      verificationStatus: VerificationStatus.APPROVED,
+      isPremium: true,
+    },
+    service: {
+      id: 'service_1',
+      name: 'Fade',
+      category: {
+        name: 'Hair',
+        slug: 'hair',
+      },
+    },
+    primaryMediaAsset: {
+      id: 'media_1',
+      url: 'https://cdn.example.com/detail.jpg',
+      thumbUrl: 'https://cdn.example.com/detail-thumb.jpg',
+      storageBucket: 'media-public',
+      storagePath: 'looks/detail.jpg',
+      thumbBucket: 'media-public',
+      thumbPath: 'looks/detail-thumb.jpg',
+      mediaType: MediaType.IMAGE,
+      caption: 'Primary detail caption',
+      createdAt: new Date('2026-04-18T10:30:00.000Z'),
+      visibility: MediaVisibility.PUBLIC,
+      isEligibleForLooks: true,
+      isFeaturedInPortfolio: false,
+      reviewId: 'review_1',
+      review: {
+        id: 'review_1',
+        rating: 5,
+        headline: 'Love it',
+        body: 'Looks amazing',
+        createdAt: new Date('2026-04-17T12:00:00.000Z'),
+        helpfulCount: 8,
+      },
+    },
+    assets: [
       {
-        id: 'tag_1',
-        serviceId: 'service_1',
-        service: {
-          id: 'service_1',
-          name: 'Fade',
-          category: {
-            name: 'Hair',
-            slug: 'hair',
+        id: 'asset_1',
+        sortOrder: 0,
+        mediaAssetId: 'media_1',
+        mediaAsset: {
+          id: 'media_1',
+          url: 'https://cdn.example.com/detail.jpg',
+          thumbUrl: 'https://cdn.example.com/detail-thumb.jpg',
+          storageBucket: 'media-public',
+          storagePath: 'looks/detail.jpg',
+          thumbBucket: 'media-public',
+          thumbPath: 'looks/detail-thumb.jpg',
+          mediaType: MediaType.IMAGE,
+          caption: 'Primary detail caption',
+          createdAt: new Date('2026-04-18T10:30:00.000Z'),
+          visibility: MediaVisibility.PUBLIC,
+          isEligibleForLooks: true,
+          isFeaturedInPortfolio: false,
+          reviewId: 'review_1',
+          review: {
+            id: 'review_1',
+            rating: 5,
+            headline: 'Love it',
+            body: 'Looks amazing',
+            createdAt: new Date('2026-04-17T12:00:00.000Z'),
+            helpfulCount: 8,
           },
         },
       },
     ],
-    review: {
-      id: 'review_1',
-      rating: 5,
-      headline: 'Love it',
-      body: 'Looks amazing',
-      createdAt: new Date('2026-04-17T12:00:00.000Z'),
-      helpfulCount: 8,
-    },
-    _count: {
-      likes: 4,
-      comments: 2,
-    },
     ...overrides,
   }
 }
@@ -182,6 +228,8 @@ function makeBoardPreviewRow(
             thumbBucket: 'media-public',
             thumbPath: 'looks/look-thumb.jpg',
             mediaType: MediaType.IMAGE,
+            caption: 'Look preview',
+            createdAt: new Date('2026-04-18T08:30:00.000Z'),
           },
         },
       },
@@ -216,7 +264,7 @@ describe('lib/looks/mappers.ts', () => {
   })
 
   describe('mapLooksFeedMediaToDto', () => {
-    it('maps a feed row into the stable feed DTO', async () => {
+    it('maps a look-post feed row into the stable feed DTO', async () => {
       const row = makeFeedRow()
 
       const result = await mapLooksFeedMediaToDto({
@@ -225,12 +273,12 @@ describe('lib/looks/mappers.ts', () => {
       })
 
       expect(result).toEqual({
-        id: 'media_1',
+        id: 'look_1',
         url: 'https://cdn.example.com/media.jpg',
         thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
         mediaType: MediaType.IMAGE,
         caption: 'Fresh cut',
-        createdAt: '2026-04-18T12:00:00.000Z',
+        createdAt: '2026-04-18T13:00:00.000Z',
         professional: {
           id: 'pro_1',
           businessName: 'TOVIS Studio',
@@ -248,11 +296,11 @@ describe('lib/looks/mappers.ts', () => {
         serviceName: 'Fade',
         category: 'Hair',
         serviceIds: ['service_1'],
-        uploadedByRole: Role.CLIENT,
-        reviewId: 'review_1',
-        reviewHelpfulCount: 42,
-        reviewRating: 5,
-        reviewHeadline: 'Love it',
+        uploadedByRole: null,
+        reviewId: null,
+        reviewHelpfulCount: null,
+        reviewRating: null,
+        reviewHeadline: null,
       })
 
       expect(mocks.renderMediaUrls).not.toHaveBeenCalled()
@@ -260,8 +308,18 @@ describe('lib/looks/mappers.ts', () => {
 
     it('uses rendered URLs when direct URLs are missing', async () => {
       const row = makeFeedRow({
-        url: null,
-        thumbUrl: null,
+        primaryMediaAsset: {
+          id: 'media_1',
+          url: null,
+          thumbUrl: null,
+          storageBucket: 'media-public',
+          storagePath: 'looks/media_1.jpg',
+          thumbBucket: 'media-public',
+          thumbPath: 'looks/media_1-thumb.jpg',
+          mediaType: MediaType.IMAGE,
+          caption: 'Primary caption',
+          createdAt: new Date('2026-04-18T11:30:00.000Z'),
+        },
       })
 
       const result = await mapLooksFeedMediaToDto({
@@ -286,8 +344,18 @@ describe('lib/looks/mappers.ts', () => {
 
     it('returns null when no renderable URL can be produced', async () => {
       const row = makeFeedRow({
-        url: null,
-        thumbUrl: null,
+        primaryMediaAsset: {
+          id: 'media_1',
+          url: null,
+          thumbUrl: null,
+          storageBucket: 'media-public',
+          storagePath: 'looks/media_1.jpg',
+          thumbBucket: 'media-public',
+          thumbPath: 'looks/media_1-thumb.jpg',
+          mediaType: MediaType.IMAGE,
+          caption: 'Primary caption',
+          createdAt: new Date('2026-04-18T11:30:00.000Z'),
+        },
       })
 
       mocks.renderMediaUrls.mockResolvedValueOnce({
@@ -449,20 +517,76 @@ describe('lib/looks/mappers.ts', () => {
   })
 
   describe('mapLooksDetailMediaToRenderable', () => {
-    it('returns the detail row with renderUrl fields attached', async () => {
+    it('returns the detail row with rendered media attached', async () => {
       const row = makeDetailRow({
-        url: null,
-        thumbUrl: null,
+        primaryMediaAsset: {
+          id: 'media_1',
+          url: null,
+          thumbUrl: null,
+          storageBucket: 'media-public',
+          storagePath: 'looks/detail.jpg',
+          thumbBucket: 'media-public',
+          thumbPath: 'looks/detail-thumb.jpg',
+          mediaType: MediaType.IMAGE,
+          caption: 'Primary detail caption',
+          createdAt: new Date('2026-04-18T10:30:00.000Z'),
+          visibility: MediaVisibility.PUBLIC,
+          isEligibleForLooks: true,
+          isFeaturedInPortfolio: false,
+          reviewId: 'review_1',
+          review: {
+            id: 'review_1',
+            rating: 5,
+            headline: 'Love it',
+            body: 'Looks amazing',
+            createdAt: new Date('2026-04-17T12:00:00.000Z'),
+            helpfulCount: 8,
+          },
+        },
+        assets: [
+          {
+            id: 'asset_1',
+            sortOrder: 0,
+            mediaAssetId: 'media_1',
+            mediaAsset: {
+              id: 'media_1',
+              url: null,
+              thumbUrl: null,
+              storageBucket: 'media-public',
+              storagePath: 'looks/detail.jpg',
+              thumbBucket: 'media-public',
+              thumbPath: 'looks/detail-thumb.jpg',
+              mediaType: MediaType.IMAGE,
+              caption: 'Primary detail caption',
+              createdAt: new Date('2026-04-18T10:30:00.000Z'),
+              visibility: MediaVisibility.PUBLIC,
+              isEligibleForLooks: true,
+              isFeaturedInPortfolio: false,
+              reviewId: 'review_1',
+              review: {
+                id: 'review_1',
+                rating: 5,
+                headline: 'Love it',
+                body: 'Looks amazing',
+                createdAt: new Date('2026-04-17T12:00:00.000Z'),
+                helpfulCount: 8,
+              },
+            },
+          },
+        ],
       })
 
       const result = await mapLooksDetailMediaToRenderable(row)
 
       expect(result).not.toBeNull()
-      expect(result?.renderUrl).toBe(
+      expect(result?.primaryMediaAsset.renderUrl).toBe(
         'https://rendered.example.com/media.jpg',
       )
-      expect(result?.renderThumbUrl).toBe(
+      expect(result?.primaryMediaAsset.renderThumbUrl).toBe(
         'https://rendered.example.com/media-thumb.jpg',
+      )
+      expect(result?.assets[0]?.mediaAsset.renderUrl).toBe(
+        'https://rendered.example.com/media.jpg',
       )
       expect(result?.professional.verificationStatus).toBe(
         VerificationStatus.APPROVED,
@@ -533,12 +657,12 @@ describe('lib/looks/mappers.ts', () => {
       const result = parseLooksFeedResponse({
         items: [
           {
-            id: 'media_1',
+            id: 'look_1',
             url: 'https://cdn.example.com/media.jpg',
             thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
             mediaType: MediaType.IMAGE,
             caption: 'Fresh cut',
-            createdAt: '2026-04-18T12:00:00.000Z',
+            createdAt: '2026-04-18T13:00:00.000Z',
             professional: {
               id: 'pro_1',
               businessName: 'TOVIS Studio',
@@ -556,23 +680,23 @@ describe('lib/looks/mappers.ts', () => {
             serviceName: 'Fade',
             category: 'Hair',
             serviceIds: ['service_1'],
-            uploadedByRole: Role.CLIENT,
-            reviewId: 'review_1',
-            reviewHelpfulCount: 42,
-            reviewRating: 5,
-            reviewHeadline: 'Love it',
+            uploadedByRole: null,
+            reviewId: null,
+            reviewHelpfulCount: null,
+            reviewRating: null,
+            reviewHeadline: null,
           },
         ],
       })
 
       expect(result).toEqual([
         {
-          id: 'media_1',
+          id: 'look_1',
           url: 'https://cdn.example.com/media.jpg',
           thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
           mediaType: MediaType.IMAGE,
           caption: 'Fresh cut',
-          createdAt: '2026-04-18T12:00:00.000Z',
+          createdAt: '2026-04-18T13:00:00.000Z',
           professional: {
             id: 'pro_1',
             businessName: 'TOVIS Studio',
@@ -590,11 +714,11 @@ describe('lib/looks/mappers.ts', () => {
           serviceName: 'Fade',
           category: 'Hair',
           serviceIds: ['service_1'],
-          uploadedByRole: Role.CLIENT,
-          reviewId: 'review_1',
-          reviewHelpfulCount: 42,
-          reviewRating: 5,
-          reviewHeadline: 'Love it',
+          uploadedByRole: null,
+          reviewId: null,
+          reviewHelpfulCount: null,
+          reviewRating: null,
+          reviewHeadline: null,
         },
       ])
     })
@@ -628,7 +752,7 @@ describe('lib/looks/mappers.ts', () => {
       const result = parseLooksFeedResponse({
         items: [
           {
-            id: 'media_1',
+            id: 'look_1',
             url: 'https://cdn.example.com/media.jpg',
             thumbUrl: null,
             mediaType: MediaType.IMAGE,
@@ -662,7 +786,7 @@ describe('lib/looks/mappers.ts', () => {
 
       expect(result).toEqual([
         {
-          id: 'media_1',
+          id: 'look_1',
           url: 'https://cdn.example.com/media.jpg',
           thumbUrl: null,
           mediaType: MediaType.IMAGE,

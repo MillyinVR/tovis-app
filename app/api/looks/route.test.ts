@@ -18,22 +18,25 @@ const mocks = vi.hoisted(() => {
   })
 
   const prisma = {
-    mediaAsset: {
+    lookPost: {
       findMany: vi.fn(),
     },
-    mediaLike: {
+    lookLike: {
+      findMany: vi.fn(),
+    },
+    proFollow: {
       findMany: vi.fn(),
     },
   }
 
   const getCurrentUser = vi.fn()
-  const resolveLooksMediaFeedKind = vi.fn()
-  const buildLooksMediaFeedWhere = vi.fn()
-  const buildLooksMediaFeedOrderBy = vi.fn()
+  const resolveLooksFeedKind = vi.fn()
+  const buildLooksFeedWhere = vi.fn()
+  const buildLooksFeedOrderBy = vi.fn()
   const mapLooksFeedMediaToDto = vi.fn()
 
-  const looksFeedMediaSelect = {
-    __testSelect: 'looks-feed-media-select',
+  const looksFeedSelect = {
+    __testSelect: 'looks-feed-select',
   }
 
   return {
@@ -41,11 +44,11 @@ const mocks = vi.hoisted(() => {
     jsonFail,
     prisma,
     getCurrentUser,
-    resolveLooksMediaFeedKind,
-    buildLooksMediaFeedWhere,
-    buildLooksMediaFeedOrderBy,
+    resolveLooksFeedKind,
+    buildLooksFeedWhere,
+    buildLooksFeedOrderBy,
     mapLooksFeedMediaToDto,
-    looksFeedMediaSelect,
+    looksFeedSelect,
   }
 })
 
@@ -73,13 +76,13 @@ vi.mock('@/lib/currentUser', () => ({
 }))
 
 vi.mock('@/lib/looks/feed', () => ({
-  resolveLooksMediaFeedKind: mocks.resolveLooksMediaFeedKind,
-  buildLooksMediaFeedWhere: mocks.buildLooksMediaFeedWhere,
-  buildLooksMediaFeedOrderBy: mocks.buildLooksMediaFeedOrderBy,
+  resolveLooksFeedKind: mocks.resolveLooksFeedKind,
+  buildLooksFeedWhere: mocks.buildLooksFeedWhere,
+  buildLooksFeedOrderBy: mocks.buildLooksFeedOrderBy,
 }))
 
 vi.mock('@/lib/looks/selects', () => ({
-  looksFeedMediaSelect: mocks.looksFeedMediaSelect,
+  looksFeedSelect: mocks.looksFeedSelect,
 }))
 
 vi.mock('@/lib/looks/mappers', () => ({
@@ -96,7 +99,7 @@ async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T
 }
 
-function makeMediaRow(id: string) {
+function makeLookRow(id: string) {
   return { id }
 }
 
@@ -125,7 +128,7 @@ function makeMappedDto(id: string) {
       comments: 1,
     },
     viewerLiked: false,
-    uploadedByRole: Role.PRO,
+    uploadedByRole: null,
     reviewId: null,
     reviewHelpfulCount: null,
     reviewRating: null,
@@ -138,67 +141,76 @@ describe('app/api/looks/route.ts', () => {
     vi.clearAllMocks()
 
     mocks.getCurrentUser.mockResolvedValue(null)
-    mocks.resolveLooksMediaFeedKind.mockReturnValue('ALL')
-    mocks.buildLooksMediaFeedWhere.mockReturnValue({
+    mocks.resolveLooksFeedKind.mockReturnValue('ALL')
+    mocks.buildLooksFeedWhere.mockReturnValue({
       whereToken: 'default-where',
     })
-    mocks.buildLooksMediaFeedOrderBy.mockReturnValue({
-      createdAt: 'desc',
+    mocks.buildLooksFeedOrderBy.mockReturnValue({
+      publishedAt: 'desc',
     })
-    mocks.prisma.mediaAsset.findMany.mockResolvedValue([])
-    mocks.prisma.mediaLike.findMany.mockResolvedValue([])
+    mocks.prisma.lookPost.findMany.mockResolvedValue([])
+    mocks.prisma.lookLike.findMany.mockResolvedValue([])
+    mocks.prisma.proFollow.findMany.mockResolvedValue([])
     mocks.mapLooksFeedMediaToDto.mockResolvedValue(null)
   })
 
-  it('queries the looks feed through shared feed helpers', async () => {
+  it('queries the looks feed through shared look-post feed helpers', async () => {
     const sharedWhere = { whereToken: 'all-feed' }
-    const sharedOrderBy = [{ createdAt: 'desc' }]
+    const sharedOrderBy = [{ publishedAt: 'desc' }]
 
-    mocks.resolveLooksMediaFeedKind.mockReturnValue('ALL')
-    mocks.buildLooksMediaFeedWhere.mockReturnValue(sharedWhere)
-    mocks.buildLooksMediaFeedOrderBy.mockReturnValue(sharedOrderBy)
+    mocks.resolveLooksFeedKind.mockReturnValue('ALL')
+    mocks.buildLooksFeedWhere.mockReturnValue(sharedWhere)
+    mocks.buildLooksFeedOrderBy.mockReturnValue(sharedOrderBy)
 
     const res = await GET(makeRequest('/api/looks'))
 
     expect(res.status).toBe(200)
 
-    expect(mocks.resolveLooksMediaFeedKind).toHaveBeenCalledWith({
+    expect(mocks.resolveLooksFeedKind).toHaveBeenCalledWith({
       categorySlug: null,
+      following: false,
     })
 
-    expect(mocks.buildLooksMediaFeedWhere).toHaveBeenCalledWith({
+    expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
       kind: 'ALL',
       categorySlug: null,
       q: null,
+      followingProfessionalIds: [],
     })
 
-    expect(mocks.buildLooksMediaFeedOrderBy).toHaveBeenCalledWith({
+    expect(mocks.buildLooksFeedOrderBy).toHaveBeenCalledWith({
       kind: 'ALL',
     })
 
-    expect(mocks.prisma.mediaAsset.findMany).toHaveBeenCalledWith({
+    expect(mocks.prisma.lookPost.findMany).toHaveBeenCalledWith({
       where: sharedWhere,
       orderBy: sharedOrderBy,
       take: 12,
-      select: mocks.looksFeedMediaSelect,
+      select: mocks.looksFeedSelect,
     })
 
-    expect(mocks.prisma.mediaLike.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.proFollow.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.lookLike.findMany).not.toHaveBeenCalled()
     expect(mocks.mapLooksFeedMediaToDto).not.toHaveBeenCalled()
   })
 
   it('hydrates viewer likes and returns mapped payload', async () => {
-    const media1 = makeMediaRow('media_1')
-    const media2 = makeMediaRow('media_2')
-    const dto1 = makeMappedDto('media_1')
+    const look1 = makeLookRow('look_1')
+    const look2 = makeLookRow('look_2')
+    const dto1 = makeMappedDto('look_1')
     const dto2 = {
-      ...makeMappedDto('media_2'),
+      ...makeMappedDto('look_2'),
       viewerLiked: true,
     }
 
-    mocks.getCurrentUser.mockResolvedValue({ id: 'user_1' })
-    mocks.prisma.mediaAsset.findMany.mockResolvedValue([media1, media2])
-    mocks.prisma.mediaLike.findMany.mockResolvedValue([{ mediaId: 'media_2' }])
+    mocks.getCurrentUser.mockResolvedValue({
+      id: 'user_1',
+      clientProfile: { id: 'client_1' },
+    })
+    mocks.prisma.lookPost.findMany.mockResolvedValue([look1, look2])
+    mocks.prisma.lookLike.findMany.mockResolvedValue([
+      { lookPostId: 'look_2' },
+    ])
 
     mocks.mapLooksFeedMediaToDto
       .mockResolvedValueOnce(dto1)
@@ -212,28 +224,28 @@ describe('app/api/looks/route.ts', () => {
 
     expect(res.status).toBe(200)
 
-    expect(mocks.prisma.mediaAsset.findMany).toHaveBeenCalledWith({
+    expect(mocks.prisma.lookPost.findMany).toHaveBeenCalledWith({
       where: { whereToken: 'default-where' },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { publishedAt: 'desc' },
       take: 20,
-      select: mocks.looksFeedMediaSelect,
+      select: mocks.looksFeedSelect,
     })
 
-    expect(mocks.prisma.mediaLike.findMany).toHaveBeenCalledWith({
+    expect(mocks.prisma.lookLike.findMany).toHaveBeenCalledWith({
       where: {
         userId: 'user_1',
-        mediaId: { in: ['media_1', 'media_2'] },
+        lookPostId: { in: ['look_1', 'look_2'] },
       },
-      select: { mediaId: true },
+      select: { lookPostId: true },
     })
 
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(1, {
-      item: media1,
+      item: look1,
       viewerLiked: false,
     })
 
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(2, {
-      item: media2,
+      item: look2,
       viewerLiked: true,
     })
 
@@ -243,20 +255,58 @@ describe('app/api/looks/route.ts', () => {
     })
   })
 
-  it('passes spotlight and search params through shared feed helpers and filters null mapped items', async () => {
-    const media1 = makeMediaRow('media_1')
-    const media2 = makeMediaRow('media_2')
-    const dto1 = makeMappedDto('media_1')
+  it('loads followed pros for the following feed and passes them into shared feed helpers', async () => {
+    mocks.getCurrentUser.mockResolvedValue({
+      id: 'user_1',
+      clientProfile: { id: 'client_1' },
+    })
+    mocks.resolveLooksFeedKind.mockReturnValue('FOLLOWING')
+    mocks.prisma.proFollow.findMany.mockResolvedValue([
+      { professionalId: 'pro_1' },
+      { professionalId: 'pro_2' },
+    ])
 
-    mocks.resolveLooksMediaFeedKind.mockReturnValue('SPOTLIGHT')
-    mocks.buildLooksMediaFeedWhere.mockReturnValue({
+    const res = await GET(makeRequest('/api/looks?following=true'))
+
+    expect(res.status).toBe(200)
+
+    expect(mocks.resolveLooksFeedKind).toHaveBeenCalledWith({
+      categorySlug: null,
+      following: true,
+    })
+
+    expect(mocks.prisma.proFollow.findMany).toHaveBeenCalledWith({
+      where: {
+        clientId: 'client_1',
+      },
+      select: {
+        professionalId: true,
+      },
+    })
+
+    expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
+      kind: 'FOLLOWING',
+      categorySlug: null,
+      q: null,
+      followingProfessionalIds: ['pro_1', 'pro_2'],
+    })
+  })
+
+  it('passes spotlight and search params through shared feed helpers and filters null mapped items', async () => {
+    const look1 = makeLookRow('look_1')
+    const look2 = makeLookRow('look_2')
+    const dto1 = makeMappedDto('look_1')
+
+    mocks.resolveLooksFeedKind.mockReturnValue('SPOTLIGHT')
+    mocks.buildLooksFeedWhere.mockReturnValue({
       whereToken: 'spotlight-where',
     })
-    mocks.buildLooksMediaFeedOrderBy.mockReturnValue([
-      { review: { helpfulCount: 'desc' } },
-      { createdAt: 'desc' },
+    mocks.buildLooksFeedOrderBy.mockReturnValue([
+      { spotlightScore: 'desc' },
+      { publishedAt: 'desc' },
+      { id: 'desc' },
     ])
-    mocks.prisma.mediaAsset.findMany.mockResolvedValue([media1, media2])
+    mocks.prisma.lookPost.findMany.mockResolvedValue([look1, look2])
 
     mocks.mapLooksFeedMediaToDto
       .mockResolvedValueOnce(dto1)
@@ -272,17 +322,19 @@ describe('app/api/looks/route.ts', () => {
 
     expect(res.status).toBe(200)
 
-    expect(mocks.resolveLooksMediaFeedKind).toHaveBeenCalledWith({
+    expect(mocks.resolveLooksFeedKind).toHaveBeenCalledWith({
       categorySlug: 'spotlight',
+      following: false,
     })
 
-    expect(mocks.buildLooksMediaFeedWhere).toHaveBeenCalledWith({
+    expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
       kind: 'SPOTLIGHT',
       categorySlug: 'spotlight',
       q: 'fade',
+      followingProfessionalIds: [],
     })
 
-    expect(mocks.buildLooksMediaFeedOrderBy).toHaveBeenCalledWith({
+    expect(mocks.buildLooksFeedOrderBy).toHaveBeenCalledWith({
       kind: 'SPOTLIGHT',
     })
 
@@ -291,12 +343,13 @@ describe('app/api/looks/route.ts', () => {
       items: [dto1],
     })
 
-    expect(mocks.prisma.mediaLike.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.proFollow.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.lookLike.findMany).not.toHaveBeenCalled()
   })
 
   it('returns 500 when loading the looks feed fails', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    mocks.prisma.mediaAsset.findMany.mockRejectedValue(new Error('db blew up'))
+    mocks.prisma.lookPost.findMany.mockRejectedValue(new Error('db blew up'))
 
     const res = await GET(makeRequest('/api/looks'))
     const body = await readJson<{ ok: false; error: string }>(res)

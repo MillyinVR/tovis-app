@@ -1,7 +1,43 @@
 // lib/looks/selects.ts
 import { Prisma } from '@prisma/client'
 
-export const looksFeedMediaSelect =
+const looksServiceCategorySelect =
+  Prisma.validator<Prisma.ServiceCategorySelect>()({
+    name: true,
+    slug: true,
+  })
+
+export const looksServicePreviewSelect =
+  Prisma.validator<Prisma.ServiceSelect>()({
+    id: true,
+    name: true,
+    category: {
+      select: looksServiceCategorySelect,
+    },
+  })
+
+export type LooksServicePreviewRow = Prisma.ServiceGetPayload<{
+  select: typeof looksServicePreviewSelect
+}>
+
+export const looksProProfilePreviewSelect =
+  Prisma.validator<Prisma.ProfessionalProfileSelect>()({
+    id: true,
+    businessName: true,
+    handle: true,
+    avatarUrl: true,
+    professionType: true,
+    location: true,
+    verificationStatus: true,
+    isPremium: true,
+  })
+
+export type LooksProProfilePreviewRow =
+  Prisma.ProfessionalProfileGetPayload<{
+    select: typeof looksProProfilePreviewSelect
+  }>
+
+const looksMediaPreviewSelect =
   Prisma.validator<Prisma.MediaAssetSelect>()({
     id: true,
     url: true,
@@ -13,73 +49,17 @@ export const looksFeedMediaSelect =
     mediaType: true,
     caption: true,
     createdAt: true,
-    uploadedByRole: true,
-    uploadedByUserId: true,
-    reviewId: true,
-
-    review: {
-      select: {
-        id: true,
-        helpfulCount: true,
-        rating: true,
-        headline: true,
-      },
-    },
-
-    professional: {
-      select: {
-        id: true,
-        businessName: true,
-        handle: true,
-        avatarUrl: true,
-        professionType: true,
-        location: true,
-      },
-    },
-
-    services: {
-      select: {
-        id: true,
-        serviceId: true,
-        service: {
-          select: {
-            id: true,
-            name: true,
-            category: {
-              select: {
-                name: true,
-                slug: true,
-              },
-            },
-          },
-        },
-      },
-    },
-
-    _count: {
-      select: {
-        likes: true,
-        comments: true,
-      },
-    },
   })
 
-export type LooksFeedMediaRow = Prisma.MediaAssetGetPayload<{
-  select: typeof looksFeedMediaSelect
-}>
-
-export const looksDetailMediaSelect =
+const looksDetailMediaAssetSelect =
   Prisma.validator<Prisma.MediaAssetSelect>()({
     id: true,
-    professionalId: true,
-
     url: true,
     thumbUrl: true,
     storageBucket: true,
     storagePath: true,
     thumbBucket: true,
     thumbPath: true,
-
     mediaType: true,
     caption: true,
     createdAt: true,
@@ -87,37 +67,7 @@ export const looksDetailMediaSelect =
     visibility: true,
     isEligibleForLooks: true,
     isFeaturedInPortfolio: true,
-
-    professional: {
-      select: {
-        id: true,
-        businessName: true,
-        handle: true,
-        avatarUrl: true,
-        professionType: true,
-        location: true,
-        verificationStatus: true,
-      },
-    },
-
-    services: {
-      select: {
-        id: true,
-        serviceId: true,
-        service: {
-          select: {
-            id: true,
-            name: true,
-            category: {
-              select: {
-                name: true,
-                slug: true,
-              },
-            },
-          },
-        },
-      },
-    },
+    reviewId: true,
 
     review: {
       select: {
@@ -129,17 +79,108 @@ export const looksDetailMediaSelect =
         helpfulCount: true,
       },
     },
+  })
 
-    _count: {
+export const looksFeedSelect =
+  Prisma.validator<Prisma.LookPostSelect>()({
+    id: true,
+    professionalId: true,
+    serviceId: true,
+
+    caption: true,
+    priceStartingAt: true,
+
+    status: true,
+    visibility: true,
+    moderationStatus: true,
+
+    publishedAt: true,
+    createdAt: true,
+    updatedAt: true,
+
+    likeCount: true,
+    commentCount: true,
+    saveCount: true,
+    shareCount: true,
+
+    spotlightScore: true,
+    rankScore: true,
+
+    primaryMediaAsset: {
+      select: looksMediaPreviewSelect,
+    },
+
+    professional: {
+      select: looksProProfilePreviewSelect,
+    },
+
+    service: {
+      select: looksServicePreviewSelect,
+    },
+  })
+
+export type LooksFeedRow = Prisma.LookPostGetPayload<{
+  select: typeof looksFeedSelect
+}>
+
+export const looksDetailSelect =
+  Prisma.validator<Prisma.LookPostSelect>()({
+    id: true,
+    professionalId: true,
+    serviceId: true,
+    primaryMediaAssetId: true,
+
+    caption: true,
+    priceStartingAt: true,
+
+    status: true,
+    visibility: true,
+    moderationStatus: true,
+
+    publishedAt: true,
+    archivedAt: true,
+    removedAt: true,
+
+    createdAt: true,
+    updatedAt: true,
+
+    likeCount: true,
+    commentCount: true,
+    saveCount: true,
+    shareCount: true,
+
+    spotlightScore: true,
+    rankScore: true,
+
+    professional: {
+      select: looksProProfilePreviewSelect,
+    },
+
+    service: {
+      select: looksServicePreviewSelect,
+    },
+
+    primaryMediaAsset: {
+      select: looksDetailMediaAssetSelect,
+    },
+
+    assets: {
+      orderBy: {
+        sortOrder: 'asc',
+      },
       select: {
-        likes: true,
-        comments: true,
+        id: true,
+        sortOrder: true,
+        mediaAssetId: true,
+        mediaAsset: {
+          select: looksDetailMediaAssetSelect,
+        },
       },
     },
   })
 
-export type LooksDetailMediaRow = Prisma.MediaAssetGetPayload<{
-  select: typeof looksDetailMediaSelect
+export type LooksDetailRow = Prisma.LookPostGetPayload<{
+  select: typeof looksDetailSelect
 }>
 
 export const looksBoardPreviewSelect =
@@ -175,16 +216,7 @@ export const looksBoardPreviewSelect =
             moderationStatus: true,
             publishedAt: true,
             primaryMediaAsset: {
-              select: {
-                id: true,
-                url: true,
-                thumbUrl: true,
-                storageBucket: true,
-                storagePath: true,
-                thumbBucket: true,
-                thumbPath: true,
-                mediaType: true,
-              },
+              select: looksMediaPreviewSelect,
             },
           },
         },
@@ -195,20 +227,3 @@ export const looksBoardPreviewSelect =
 export type LooksBoardPreviewRow = Prisma.BoardGetPayload<{
   select: typeof looksBoardPreviewSelect
 }>
-
-export const looksProProfilePreviewSelect =
-  Prisma.validator<Prisma.ProfessionalProfileSelect>()({
-    id: true,
-    businessName: true,
-    handle: true,
-    avatarUrl: true,
-    professionType: true,
-    location: true,
-    verificationStatus: true,
-    isPremium: true,
-  })
-
-export type LooksProProfilePreviewRow =
-  Prisma.ProfessionalProfileGetPayload<{
-    select: typeof looksProProfilePreviewSelect
-  }>
