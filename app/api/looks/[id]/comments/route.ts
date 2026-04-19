@@ -15,7 +15,14 @@ import {
 import { recomputeLookPostCommentCount } from '@/lib/looks/counters'
 import { mapLooksCommentToDto } from '@/lib/looks/mappers'
 import { loadLookAccess } from '@/lib/looks/access'
-import { ModerationStatus, Prisma } from '@prisma/client'
+import {
+  ModerationStatus,
+  Prisma,
+} from '@prisma/client'
+import type {
+  LooksCommentCreateResponseDto,
+  LooksCommentsListResponseDto,
+} from '@/lib/looks/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -125,13 +132,13 @@ export async function GET(req: Request, ctx: Ctx) {
       }),
     ])
 
-    return jsonOk(
-      {
-        comments: rows.map(mapLooksCommentToDto),
-        commentsCount,
-      },
-      200,
-    )
+    const body: LooksCommentsListResponseDto = {
+      lookPostId,
+      comments: rows.map(mapLooksCommentToDto),
+      commentsCount,
+    }
+
+    return jsonOk(body, 200)
   } catch (e) {
     console.error('GET /api/looks/[id]/comments error', e)
     return jsonFail(500, 'Couldn’t load comments. Try again.', {
@@ -236,13 +243,13 @@ export async function POST(req: Request, ctx: Ctx) {
       }
     })
 
-    return jsonOk(
-      {
-        comment: mapLooksCommentToDto(result.comment),
-        commentsCount: result.commentsCount,
-      },
-      201,
-    )
+    const body: LooksCommentCreateResponseDto = {
+      lookPostId,
+      comment: mapLooksCommentToDto(result.comment),
+      commentsCount: result.commentsCount,
+    }
+
+    return jsonOk(body, 201)
   } catch (e) {
     console.error('POST /api/looks/[id]/comments error', e)
     return jsonFail(500, 'Couldn’t post that. Try again.', {

@@ -162,6 +162,24 @@ export type LooksCommentDto = {
   user: LooksCommentUserDto
 }
 
+export type LooksLikeResponseDto = {
+  lookPostId: string
+  liked: boolean
+  likeCount: number
+}
+
+export type LooksCommentsListResponseDto = {
+  lookPostId: string
+  comments: LooksCommentDto[]
+  commentsCount: number
+}
+
+export type LooksCommentCreateResponseDto = {
+  lookPostId: string
+  comment: LooksCommentDto
+  commentsCount: number
+}
+
 export type LooksRenderedMediaDto = {
   id: string
   url: string

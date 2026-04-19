@@ -9,6 +9,7 @@ import {
 } from '@/lib/looks/guards'
 import { recomputeLookPostLikeCount } from '@/lib/looks/counters'
 import { loadLookAccess } from '@/lib/looks/access'
+import type { LooksLikeResponseDto } from '@/lib/looks/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -79,30 +80,33 @@ export async function POST(_req: Request, ctx: Ctx) {
       })
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      try {
-        await tx.lookLike.create({
-          data: {
-            lookPostId,
-            userId: auth.user.id,
-          },
-        })
-      } catch (error) {
-        if (
-          !(error instanceof Prisma.PrismaClientKnownRequestError) ||
-          error.code !== 'P2002'
-        ) {
-          throw error
+    const result = await prisma.$transaction(
+      async (tx): Promise<LooksLikeResponseDto> => {
+        try {
+          await tx.lookLike.create({
+            data: {
+              lookPostId,
+              userId: auth.user.id,
+            },
+          })
+        } catch (error) {
+          if (
+            !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+            error.code !== 'P2002'
+          ) {
+            throw error
+          }
         }
-      }
 
-      const likeCount = await recomputeLookPostLikeCount(tx, lookPostId)
+        const likeCount = await recomputeLookPostLikeCount(tx, lookPostId)
 
-      return {
-        liked: true,
-        likeCount,
-      }
-    })
+        return {
+          lookPostId,
+          liked: true,
+          likeCount,
+        }
+      },
+    )
 
     return jsonOk(result, 200)
   } catch (e) {
@@ -156,21 +160,24 @@ export async function DELETE(_req: Request, ctx: Ctx) {
       })
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      await tx.lookLike.deleteMany({
-        where: {
+    const result = await prisma.$transaction(
+      async (tx): Promise<LooksLikeResponseDto> => {
+        await tx.lookLike.deleteMany({
+          where: {
+            lookPostId,
+            userId: auth.user.id,
+          },
+        })
+
+        const likeCount = await recomputeLookPostLikeCount(tx, lookPostId)
+
+        return {
           lookPostId,
-          userId: auth.user.id,
-        },
-      })
-
-      const likeCount = await recomputeLookPostLikeCount(tx, lookPostId)
-
-      return {
-        liked: false,
-        likeCount,
-      }
-    })
+          liked: false,
+          likeCount,
+        }
+      },
+    )
 
     return jsonOk(result, 200)
   } catch (e) {
