@@ -20,6 +20,7 @@ export type NotificationTemplateKey =
   | 'appointment_reminder'
   | 'aftercare_ready'
   | 'last_minute_opening_available'
+  | 'viral_request_approved'
   | 'payment_collected'
   | 'payment_action_required'
 
@@ -85,6 +86,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.APPOINTMENT_REMINDER,
   NotificationEventKey.AFTERCARE_READY,
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
+  NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
 ]
@@ -293,6 +295,18 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  [NotificationEventKey.VIRAL_REQUEST_APPROVED]: {
+    key: NotificationEventKey.VIRAL_REQUEST_APPROVED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'viral_request_approved',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.PAYMENT_COLLECTED]: {
     key: NotificationEventKey.PAYMENT_COLLECTED,
     defaultPriority: NotificationPriority.NORMAL,
@@ -337,6 +351,7 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.CONSULTATION_REJECTED,
   NotificationEventKey.REVIEW_RECEIVED,
   NotificationEventKey.APPOINTMENT_REMINDER,
+  NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
 ]

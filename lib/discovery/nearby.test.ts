@@ -13,16 +13,21 @@ vi.mock('@/lib/scheduling/workingHours', () => ({
 import {
   boundsForRadiusMiles,
   buildDiscoveryLocationLabel,
+  buildDiscoveryOfferSummaryMap,
   haversineMiles,
   inferProfessionTypesFromQuery,
   isOpenNowAtLocation,
   mapProfessionalLocation,
+  matchesDiscoveryOfferingFilters,
+  matchesRequestedDiscoveryCategory,
   milesToLatDelta,
   milesToLngDelta,
   pickClosestLocationWithinRadius,
   pickPrimaryLocation,
   shouldExcludeSelfProfessional,
+  summarizeDiscoveryOfferingsForProfessional,
   type DiscoveryLocationDto,
+  type DiscoveryOfferingInput,
 } from './nearby'
 
 function pickDefined<T>(value: T | undefined, fallback: T): T {
@@ -45,6 +50,28 @@ function makeLocation(
     workingHours: pickDefined(overrides.workingHours, {
       mon: { enabled: true, start: '09:00', end: '17:00' },
     }),
+  }
+}
+
+function makeOffering(
+  overrides: Partial<DiscoveryOfferingInput> = {},
+): DiscoveryOfferingInput {
+  return {
+    professionalId: pickDefined(overrides.professionalId, 'pro_1'),
+    offersInSalon: pickDefined(overrides.offersInSalon, true),
+    offersMobile: pickDefined(overrides.offersMobile, false),
+    salonPriceStartingAt: pickDefined(
+      overrides.salonPriceStartingAt,
+      new Prisma.Decimal('95.00'),
+    ),
+    mobilePriceStartingAt: pickDefined(
+      overrides.mobilePriceStartingAt,
+      null,
+    ),
+    categoryId:
+      overrides && 'categoryId' in overrides
+        ? overrides.categoryId ?? null
+        : 'cat_1',
   }
 }
 
@@ -175,6 +202,186 @@ describe('lib/discovery/nearby.ts', () => {
         isPrimary: true,
         workingHours: { mon: { enabled: true, start: '09:00', end: '17:00' } },
       })
+    })
+  })
+
+  describe('summarizeDiscoveryOfferingsForProfessional', () => {
+    it('builds a per-professional offer summary with mins and distinct categories', () => {
+      const result = summarizeDiscoveryOfferingsForProfessional({
+        professionalId: 'pro_1',
+        offerings: [
+          makeOffering({
+            professionalId: 'pro_1',
+            offersInSalon: true,
+            offersMobile: false,
+            salonPriceStartingAt: new Prisma.Decimal('95.00'),
+            categoryId: 'cat_1',
+          }),
+          makeOffering({
+            professionalId: 'pro_1',
+            offersInSalon: false,
+            offersMobile: true,
+            mobilePriceStartingAt: new Prisma.Decimal('140.00'),
+            categoryId: 'cat_1',
+          }),
+          makeOffering({
+            professionalId: 'pro_1',
+            offersInSalon: true,
+            offersMobile: false,
+            salonPriceStartingAt: new Prisma.Decimal('80.00'),
+            categoryId: 'cat_2',
+          }),
+          makeOffering({
+            professionalId: 'pro_2',
+            offersInSalon: true,
+            salonPriceStartingAt: new Prisma.Decimal('50.00'),
+            categoryId: 'cat_9',
+          }),
+        ],
+      })
+
+      expect(result).toEqual({
+        professionalId: 'pro_1',
+        supportsSalon: true,
+        supportsMobile: true,
+        minSalon: 80,
+        minMobile: 140,
+        minAny: 80,
+        categoryIds: ['cat_1', 'cat_2'],
+      })
+    })
+
+    it('throws when professionalId is blank', () => {
+      expect(() =>
+        summarizeDiscoveryOfferingsForProfessional({
+          professionalId: '   ',
+          offerings: [],
+        }),
+      ).toThrow('professionalId is required.')
+    })
+  })
+
+  describe('buildDiscoveryOfferSummaryMap', () => {
+    it('groups offerings by professional and builds summaries for each one', () => {
+      const result = buildDiscoveryOfferSummaryMap([
+        makeOffering({
+          professionalId: 'pro_1',
+          salonPriceStartingAt: new Prisma.Decimal('100.00'),
+          categoryId: 'cat_1',
+        }),
+        makeOffering({
+          professionalId: 'pro_1',
+          offersInSalon: false,
+          offersMobile: true,
+          mobilePriceStartingAt: new Prisma.Decimal('150.00'),
+          categoryId: 'cat_2',
+        }),
+        makeOffering({
+          professionalId: 'pro_2',
+          salonPriceStartingAt: new Prisma.Decimal('75.00'),
+          categoryId: 'cat_3',
+        }),
+      ])
+
+      expect(result.get('pro_1')).toEqual({
+        professionalId: 'pro_1',
+        supportsSalon: true,
+        supportsMobile: true,
+        minSalon: 100,
+        minMobile: 150,
+        minAny: 100,
+        categoryIds: ['cat_1', 'cat_2'],
+      })
+
+      expect(result.get('pro_2')).toEqual({
+        professionalId: 'pro_2',
+        supportsSalon: true,
+        supportsMobile: false,
+        minSalon: 75,
+        minMobile: null,
+        minAny: 75,
+        categoryIds: ['cat_3'],
+      })
+    })
+
+    it('ignores offerings with blank professional ids', () => {
+      const result = buildDiscoveryOfferSummaryMap([
+        makeOffering({
+          professionalId: '   ',
+        }),
+      ])
+
+      expect(result.size).toBe(0)
+    })
+  })
+
+  describe('matchesRequestedDiscoveryCategory', () => {
+    it('returns true when no category filter is requested', () => {
+      expect(
+        matchesRequestedDiscoveryCategory({
+          requestedCategoryId: null,
+          offeringCategoryIds: ['cat_1'],
+        }),
+      ).toBe(true)
+    })
+
+    it('returns true when the requested category is present', () => {
+      expect(
+        matchesRequestedDiscoveryCategory({
+          requestedCategoryId: 'cat_2',
+          offeringCategoryIds: ['cat_1', 'cat_2'],
+        }),
+      ).toBe(true)
+    })
+
+    it('returns false when the requested category is absent', () => {
+      expect(
+        matchesRequestedDiscoveryCategory({
+          requestedCategoryId: 'cat_3',
+          offeringCategoryIds: ['cat_1', 'cat_2'],
+        }),
+      ).toBe(false)
+    })
+  })
+
+  describe('matchesDiscoveryOfferingFilters', () => {
+    it('returns false when mobileOnly is requested and the pro has no mobile offering', () => {
+      expect(
+        matchesDiscoveryOfferingFilters({
+          offerSummary: {
+            supportsMobile: false,
+            categoryIds: ['cat_1'],
+          },
+          mobileOnly: true,
+          requestedCategoryId: null,
+        }),
+      ).toBe(false)
+    })
+
+    it('returns false when the requested category is not offered', () => {
+      expect(
+        matchesDiscoveryOfferingFilters({
+          offerSummary: {
+            supportsMobile: true,
+            categoryIds: ['cat_1'],
+          },
+          mobileOnly: false,
+          requestedCategoryId: 'cat_2',
+        }),
+      ).toBe(false)
+    })
+
+    it('returns true when the offer summary satisfies both mobile and category filters', () => {
+      expect(
+        matchesDiscoveryOfferingFilters({
+          offerSummary: {
+            supportsMobile: true,
+            categoryIds: ['cat_1', 'cat_2'],
+          },
+          mobileOnly: true,
+          requestedCategoryId: 'cat_2',
+        }),
+      ).toBe(true)
     })
   })
 

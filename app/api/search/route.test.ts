@@ -97,9 +97,11 @@ const mocks = vi.hoisted(() => {
   }))
 
   const pickPrimaryLocation = vi.fn((locations) => {
-    return locations.find((location: { isPrimary: boolean }) => location.isPrimary)
-      ?? locations[0]
-      ?? null
+    return (
+      locations.find((location: { isPrimary: boolean }) => location.isPrimary) ??
+      locations[0] ??
+      null
+    )
   })
 
   const pickClosestLocationWithinRadius = vi.fn(
@@ -147,6 +149,120 @@ const mocks = vi.hoisted(() => {
     },
   )
 
+  function decToNum(value: unknown): number | null {
+    if (value == null) return null
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null
+    if (typeof value === 'string') {
+      const n = Number(value)
+      return Number.isFinite(n) ? n : null
+    }
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'toString' in value &&
+      typeof value.toString === 'function'
+    ) {
+      const n = Number(value.toString())
+      return Number.isFinite(n) ? n : null
+    }
+    return null
+  }
+
+  const buildDiscoveryOfferSummaryMap = vi.fn((offerings) => {
+    const byPro = new Map<
+      string,
+      {
+        professionalId: string
+        supportsSalon: boolean
+        supportsMobile: boolean
+        minSalon: number | null
+        minMobile: number | null
+        minAny: number | null
+        categoryIds: string[]
+      }
+    >()
+
+    for (const offering of offerings as Array<{
+      professionalId: string
+      offersInSalon: boolean
+      offersMobile: boolean
+      salonPriceStartingAt: unknown
+      mobilePriceStartingAt: unknown
+      categoryId: string | null
+    }>) {
+      const current = byPro.get(offering.professionalId) ?? {
+        professionalId: offering.professionalId,
+        supportsSalon: false,
+        supportsMobile: false,
+        minSalon: null,
+        minMobile: null,
+        minAny: null,
+        categoryIds: [],
+      }
+
+      const salonPrice = decToNum(offering.salonPriceStartingAt)
+      const mobilePrice = decToNum(offering.mobilePriceStartingAt)
+
+      if (offering.offersInSalon) {
+        current.supportsSalon = true
+        current.minSalon =
+          current.minSalon == null || (salonPrice != null && salonPrice < current.minSalon)
+            ? salonPrice
+            : current.minSalon
+      }
+
+      if (offering.offersMobile) {
+        current.supportsMobile = true
+        current.minMobile =
+          current.minMobile == null || (mobilePrice != null && mobilePrice < current.minMobile)
+            ? mobilePrice
+            : current.minMobile
+      }
+
+      if (
+        typeof offering.categoryId === 'string' &&
+        offering.categoryId.trim() &&
+        !current.categoryIds.includes(offering.categoryId)
+      ) {
+        current.categoryIds.push(offering.categoryId)
+      }
+
+      const prices = [current.minSalon, current.minMobile].filter(
+        (value): value is number => value != null,
+      )
+      current.minAny = prices.length > 0 ? Math.min(...prices) : null
+
+      byPro.set(offering.professionalId, current)
+    }
+
+    return byPro
+  })
+
+  const matchesDiscoveryOfferingFilters = vi.fn(
+    ({
+      offerSummary,
+      mobileOnly,
+      requestedCategoryId,
+    }: {
+      offerSummary: {
+        supportsMobile: boolean
+        categoryIds: string[]
+      }
+      mobileOnly?: boolean | null
+      requestedCategoryId?: string | null
+    }) => {
+      if (mobileOnly && !offerSummary.supportsMobile) {
+        return false
+      }
+
+      if (requestedCategoryId) {
+        return offerSummary.categoryIds.includes(requestedCategoryId)
+      }
+
+      return true
+    },
+  )
+
   return {
     jsonOk,
     jsonFail,
@@ -157,6 +273,8 @@ const mocks = vi.hoisted(() => {
     pickClosestLocationWithinRadius,
     isOpenNowAtLocation,
     buildDiscoveryLocationLabel,
+    buildDiscoveryOfferSummaryMap,
+    matchesDiscoveryOfferingFilters,
   }
 })
 
@@ -175,12 +293,14 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/discovery/nearby', () => ({
-  inferProfessionTypesFromQuery: mocks.inferProfessionTypesFromQuery,
-  mapProfessionalLocation: mocks.mapProfessionalLocation,
-  pickPrimaryLocation: mocks.pickPrimaryLocation,
-  pickClosestLocationWithinRadius: mocks.pickClosestLocationWithinRadius,
-  isOpenNowAtLocation: mocks.isOpenNowAtLocation,
   buildDiscoveryLocationLabel: mocks.buildDiscoveryLocationLabel,
+  buildDiscoveryOfferSummaryMap: mocks.buildDiscoveryOfferSummaryMap,
+  inferProfessionTypesFromQuery: mocks.inferProfessionTypesFromQuery,
+  isOpenNowAtLocation: mocks.isOpenNowAtLocation,
+  mapProfessionalLocation: mocks.mapProfessionalLocation,
+  matchesDiscoveryOfferingFilters: mocks.matchesDiscoveryOfferingFilters,
+  pickClosestLocationWithinRadius: mocks.pickClosestLocationWithinRadius,
+  pickPrimaryLocation: mocks.pickPrimaryLocation,
 }))
 
 import { GET } from './route'
@@ -241,6 +361,7 @@ function makeOfferingRow(overrides?: {
   offersMobile?: boolean
   salonPriceStartingAt?: Prisma.Decimal | null
   mobilePriceStartingAt?: Prisma.Decimal | null
+  categoryId?: string | null
 }) {
   return {
     professionalId: overrides?.professionalId ?? 'pro_1',
@@ -249,6 +370,9 @@ function makeOfferingRow(overrides?: {
     salonPriceStartingAt:
       overrides?.salonPriceStartingAt ?? new Prisma.Decimal('85.00'),
     mobilePriceStartingAt: overrides?.mobilePriceStartingAt ?? null,
+    service: {
+      categoryId: overrides?.categoryId ?? 'cat_hair',
+    },
   }
 }
 
@@ -267,11 +391,17 @@ describe('app/api/search/route.ts', () => {
       {
         id: 'svc_1',
         name: 'Silk Press',
-        category: { name: 'Hair' },
+        category: {
+          id: 'cat_hair',
+          name: 'Hair',
+          slug: 'hair',
+        },
       },
     ])
 
-    const res = await GET(makeRequest('/api/search?tab=SERVICES&q=silk'))
+    const res = await GET(
+      makeRequest('/api/search?tab=SERVICES&q=silk&categoryId=cat_hair'),
+    )
     const body = await res.json()
 
     expect(res.status).toBe(200)
@@ -282,13 +412,17 @@ describe('app/api/search/route.ts', () => {
         {
           id: 'svc_1',
           name: 'Silk Press',
+          categoryId: 'cat_hair',
           categoryName: 'Hair',
+          categorySlug: 'hair',
         },
       ],
     })
 
     expect(mocks.prisma.service.findMany).toHaveBeenCalledWith({
       where: {
+        isActive: true,
+        categoryId: 'cat_hair',
         OR: [
           { name: { contains: 'silk', mode: 'insensitive' } },
           { category: { name: { contains: 'silk', mode: 'insensitive' } } },
@@ -296,7 +430,17 @@ describe('app/api/search/route.ts', () => {
       },
       take: 40,
       orderBy: { name: 'asc' },
-      select: { id: true, name: true, category: { select: { name: true } } },
+      select: {
+        id: true,
+        name: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+      },
     })
 
     expect(mocks.prisma.professionalProfile.findMany).not.toHaveBeenCalled()
@@ -376,6 +520,7 @@ describe('app/api/search/route.ts', () => {
         offersMobile: false,
         salonPriceStartingAt: new Prisma.Decimal('85.00'),
         mobilePriceStartingAt: null,
+        categoryId: 'cat_makeup',
       }),
     ])
 
@@ -440,6 +585,68 @@ describe('app/api/search/route.ts', () => {
           primaryLocation: DEFAULT_LOCATION,
         },
       ],
+      services: [],
+    })
+
+    expect(mocks.buildDiscoveryOfferSummaryMap).toHaveBeenCalledWith([
+      {
+        professionalId: 'pro_1',
+        offersInSalon: true,
+        offersMobile: false,
+        salonPriceStartingAt: new Prisma.Decimal('85.00'),
+        mobilePriceStartingAt: null,
+        categoryId: 'cat_hair',
+      },
+    ])
+
+    expect(mocks.matchesDiscoveryOfferingFilters).toHaveBeenCalledWith({
+      offerSummary: {
+        professionalId: 'pro_1',
+        supportsSalon: true,
+        supportsMobile: false,
+        minSalon: 85,
+        minMobile: null,
+        minAny: 85,
+        categoryIds: ['cat_hair'],
+      },
+      mobileOnly: false,
+      requestedCategoryId: null,
+    })
+  })
+
+  it('filters discovery pros through the shared offering/category filter helper', async () => {
+    mocks.prisma.professionalProfile.findMany.mockResolvedValue([
+      makeSearchablePro({ id: 'pro_1', businessName: 'Hair One' }),
+      makeSearchablePro({ id: 'pro_2', businessName: 'Hair Two', handle: 'hairtwo' }),
+    ])
+
+    mocks.prisma.review.groupBy.mockResolvedValue([
+      makeRatingRow({ professionalId: 'pro_1', avg: 4.7, count: 9 }),
+      makeRatingRow({ professionalId: 'pro_2', avg: 4.6, count: 8 }),
+    ])
+
+    mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([
+      makeOfferingRow({
+        professionalId: 'pro_1',
+        categoryId: 'cat_hair',
+      }),
+      makeOfferingRow({
+        professionalId: 'pro_2',
+        categoryId: 'cat_makeup',
+      }),
+    ])
+
+    const res = await GET(
+      makeRequest('/api/search?categoryId=cat_hair&mobile=true'),
+    )
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(mocks.matchesDiscoveryOfferingFilters).toHaveBeenCalledTimes(2)
+
+    expect(body).toEqual({
+      ok: true,
+      pros: [],
       services: [],
     })
   })

@@ -253,6 +253,15 @@ function isStandardLooksFeedCursor(
   )
 }
 
+function hasSpotlightScore(
+  cursor: StandardLooksFeedCursor | SpotlightLooksFeedCursor,
+): cursor is SpotlightLooksFeedCursor {
+  return (
+    'spotlightScore' in cursor &&
+    typeof cursor.spotlightScore === 'number'
+  )
+}
+
 function isSpotlightLooksFeedCursor(
   cursor:
     | StandardLooksFeedCursor
@@ -260,11 +269,7 @@ function isSpotlightLooksFeedCursor(
     | null
     | undefined,
 ): cursor is SpotlightLooksFeedCursor {
-  return (
-    isStandardLooksFeedCursor(cursor) &&
-    typeof (cursor as { spotlightScore?: unknown }).spotlightScore ===
-      'number'
-  )
+  return isStandardLooksFeedCursor(cursor) && hasSpotlightScore(cursor)
 }
 
 export function buildLooksFeedCursorWhere(args: {

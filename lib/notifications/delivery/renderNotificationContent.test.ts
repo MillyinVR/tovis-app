@@ -91,6 +91,42 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     )
   })
 
+  it('renders viral request approved email content with the viral CTA label', () => {
+    const result = renderNotificationContent({
+      channel: NotificationChannel.EMAIL,
+      templateKey: 'viral_request_approved',
+      dispatch: makeDispatch({
+        eventKey: NotificationEventKey.VIRAL_REQUEST_APPROVED,
+        title: ' New viral request in your category ',
+        body: ' "Wolf Cut" was approved and matches your services. ',
+        href: ' /admin/viral-requests/request_1 ',
+      }),
+    })
+
+    expect(result.channel).toBe(NotificationChannel.EMAIL)
+
+    if (result.channel !== NotificationChannel.EMAIL) {
+      throw new Error('expected EMAIL content')
+    }
+
+    expect(result.templateKey).toBe('viral_request_approved')
+    expect(result.subject).toBe('TOVIS: New viral request in your category')
+    expect(result.text).toContain('New viral request in your category')
+    expect(result.text).toContain('"Wolf Cut" was approved and matches your services.')
+    expect(result.text).toContain(
+      'View request: /admin/viral-requests/request_1',
+    )
+    expect(result.html).toContain(
+      '<h1>New viral request in your category</h1>',
+    )
+    expect(result.html).toContain(
+      '<p>&quot;Wolf Cut&quot; was approved and matches your services.</p>',
+    )
+    expect(result.html).toContain(
+      '<a href="/admin/viral-requests/request_1">View request</a>',
+    )
+  })
+
   it('drops unsafe external href values from rendered content', () => {
     const inAppResult = renderNotificationContent({
       channel: NotificationChannel.IN_APP,

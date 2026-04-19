@@ -1,12 +1,12 @@
 // app/api/search/route.ts
-import { Prisma } from '@prisma/client'
-
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import {
   buildDiscoveryLocationLabel,
+  buildDiscoveryOfferSummaryMap,
   inferProfessionTypesFromQuery,
   isOpenNowAtLocation,
   mapProfessionalLocation,
+  matchesDiscoveryOfferingFilters,
   pickClosestLocationWithinRadius,
   pickPrimaryLocation,
   type DiscoveryLocationDto,
@@ -44,23 +44,21 @@ function clampInt(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.trunc(n)))
 }
 
-function decToNum(value: unknown): number | null {
-  if (value == null) return null
+function normalizeOptionalId(value: string | null): string | null {
+  const trimmed = (value ?? '').trim()
+  return trimmed.length > 0 ? trimmed : null
+}
 
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null
+function emptyOfferSummary(professionalId: string) {
+  return {
+    professionalId,
+    supportsSalon: false,
+    supportsMobile: false,
+    minSalon: null,
+    minMobile: null,
+    minAny: null,
+    categoryIds: [],
   }
-
-  if (typeof value === 'string') {
-    const n = Number(value)
-    return Number.isFinite(n) ? n : null
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toNumber()
-  }
-
-  return null
 }
 
 export async function GET(req: Request) {
@@ -75,6 +73,9 @@ export async function GET(req: Request) {
 
     const lat = pickNumber(searchParams.get('lat'))
     const lng = pickNumber(searchParams.get('lng'))
+    const requestedCategoryId = normalizeOptionalId(
+      pickString(searchParams.get('categoryId')),
+    )
 
     const radiusMiles = (() => {
       const r = pickNumber(searchParams.get('radiusMiles')) ?? 15
@@ -89,25 +90,35 @@ export async function GET(req: Request) {
 
     if (tab === 'SERVICES') {
       const services = await prisma.service.findMany({
-        where: q
-          ? {
-              OR: [
-                { name: { contains: q, mode: 'insensitive' } },
-                {
-                  category: {
-                    name: { contains: q, mode: 'insensitive' },
+        where: {
+          isActive: true,
+          ...(requestedCategoryId
+            ? { categoryId: requestedCategoryId }
+            : {}),
+          ...(q
+            ? {
+                OR: [
+                  { name: { contains: q, mode: 'insensitive' } },
+                  {
+                    category: {
+                      name: { contains: q, mode: 'insensitive' },
+                    },
                   },
-                },
-              ],
-            }
-          : undefined,
+                ],
+              }
+            : {}),
+        },
         take: 40,
         orderBy: { name: 'asc' },
         select: {
           id: true,
           name: true,
           category: {
-            select: { name: true },
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
           },
         },
       })
@@ -118,14 +129,15 @@ export async function GET(req: Request) {
         services: services.map((service) => ({
           id: service.id,
           name: service.name,
+          categoryId: service.category?.id ?? null,
           categoryName: service.category?.name ?? null,
+          categorySlug: service.category?.slug ?? null,
         })),
       })
     }
 
-    const geoEnabled = lat != null && lng != null
     const origin =
-      geoEnabled && lat != null && lng != null ? { lat, lng } : null
+      lat != null && lng != null ? { lat, lng } : null
 
     const matchedProfessions = q
       ? inferProfessionTypesFromQuery(q)
@@ -207,6 +219,9 @@ export async function GET(req: Request) {
         where: {
           professionalId: { in: proIds },
           isActive: true,
+          service: {
+            isActive: true,
+          },
         },
         select: {
           professionalId: true,
@@ -214,58 +229,24 @@ export async function GET(req: Request) {
           offersMobile: true,
           salonPriceStartingAt: true,
           mobilePriceStartingAt: true,
+          service: {
+            select: {
+              categoryId: true,
+            },
+          },
         },
       })
 
-    const offerByPro = new Map<
-      string,
-      {
-        supportsSalon: boolean
-        supportsMobile: boolean
-        minSalon: number | null
-        minMobile: number | null
-        minAny: number | null
-      }
-    >()
-
-    for (const offering of offeringRows) {
-      const current = offerByPro.get(offering.professionalId) ?? {
-        supportsSalon: false,
-        supportsMobile: false,
-        minSalon: null,
-        minMobile: null,
-        minAny: null,
-      }
-
-      const salonPrice = decToNum(offering.salonPriceStartingAt)
-      const mobilePrice = decToNum(offering.mobilePriceStartingAt)
-
-      if (offering.offersInSalon) current.supportsSalon = true
-      if (offering.offersMobile) current.supportsMobile = true
-
-      if (offering.offersInSalon && salonPrice != null) {
-        current.minSalon =
-          current.minSalon == null
-            ? salonPrice
-            : Math.min(current.minSalon, salonPrice)
-      }
-
-      if (offering.offersMobile && mobilePrice != null) {
-        current.minMobile =
-          current.minMobile == null
-            ? mobilePrice
-            : Math.min(current.minMobile, mobilePrice)
-      }
-
-      const candidates = [current.minSalon, current.minMobile].filter(
-        (value): value is number => typeof value === 'number',
-      )
-
-      current.minAny =
-        candidates.length > 0 ? Math.min(...candidates) : null
-
-      offerByPro.set(offering.professionalId, current)
-    }
+    const offerByPro = buildDiscoveryOfferSummaryMap(
+      offeringRows.map((offering) => ({
+        professionalId: offering.professionalId,
+        offersInSalon: offering.offersInSalon,
+        offersMobile: offering.offersMobile,
+        salonPriceStartingAt: offering.salonPriceStartingAt,
+        mobilePriceStartingAt: offering.mobilePriceStartingAt,
+        categoryId: offering.service.categoryId,
+      })),
+    )
 
     const mapLocation = (
       location: (typeof pros)[number]['locations'][number],
@@ -283,7 +264,7 @@ export async function GET(req: Request) {
         workingHours: location.workingHours,
       })
 
-        const base = pros.map((pro) => {
+    const base = pros.map((pro) => {
       const locs = (pro.locations ?? [])
         .map(mapLocation)
         .filter(
@@ -299,13 +280,8 @@ export async function GET(req: Request) {
         count: 0,
       }
 
-      const offers = offerByPro.get(pro.id) ?? {
-        supportsSalon: false,
-        supportsMobile: false,
-        minSalon: null,
-        minMobile: null,
-        minAny: null,
-      }
+      const offers =
+        offerByPro.get(pro.id) ?? emptyOfferSummary(pro.id)
 
       return {
         pro,
@@ -349,14 +325,16 @@ export async function GET(req: Request) {
           dist: null,
           closest: entry.fallback,
         }))
-        
+
     let filtered = results
 
-    if (mobileOnly) {
-      filtered = filtered.filter(
-        (entry) => entry.offers.supportsMobile,
-      )
-    }
+    filtered = filtered.filter((entry) =>
+      matchesDiscoveryOfferingFilters({
+        offerSummary: entry.offers,
+        mobileOnly,
+        requestedCategoryId,
+      }),
+    )
 
     if (maxPrice != null) {
       filtered = filtered.filter((entry) => {

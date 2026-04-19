@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "NotificationEventKey" ADD VALUE 'VIRAL_REQUEST_APPROVED';

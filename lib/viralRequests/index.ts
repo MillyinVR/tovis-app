@@ -3,11 +3,23 @@ import {
   ModerationStatus,
   Prisma,
   PrismaClient,
+  ProfessionType,
+  VerificationStatus,
   ViralServiceRequestStatus,
+  NotificationEventKey,
+  NotificationRecipientKind,
 } from '@prisma/client'
+import { enqueueDispatch } from '@/lib/notifications/dispatch/enqueueDispatch'
+import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { canTransitionViralRequestStatus } from '@/lib/viralRequests/status'
 
 type ViralRequestsDb = PrismaClient | Prisma.TransactionClient
+
+function pickDispatchTx(
+  db: ViralRequestsDb,
+): Prisma.TransactionClient | undefined {
+  return '$transaction' in db ? undefined : db
+}
 
 export const viralRequestListSelect =
   Prisma.validator<Prisma.ViralServiceRequestSelect>()({
@@ -40,6 +52,27 @@ export const viralRequestListSelect =
 export type ViralRequestListRow = Prisma.ViralServiceRequestGetPayload<{
   select: typeof viralRequestListSelect
 }>
+
+export type ViralRequestMatchedProfessional = {
+  id: string
+  businessName: string | null
+  handle: string | null
+  avatarUrl: string | null
+  professionType: ProfessionType | null
+  location: string | null
+  verificationStatus: VerificationStatus
+  isPremium: boolean
+  matchingServices: Array<{
+    id: string
+    name: string
+  }>
+}
+
+export type EnqueueViralRequestApprovalNotificationsResult = {
+  enqueued: true
+  matchedProfessionalIds: string[]
+  dispatchSourceKeys: string[]
+}
 
 function normalizeRequiredId(name: string, value: string): string {
   const trimmed = value.trim()
@@ -141,6 +174,72 @@ function normalizeSkip(value: number | null | undefined): number {
   return Math.max(Math.trunc(value), 0)
 }
 
+function normalizeUploadFileName(fileName: string): string {
+  const trimmed = fileName.trim()
+  if (!trimmed) {
+    throw new Error('fileName is required.')
+  }
+
+  const withoutDirectories = trimmed
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter(Boolean)
+    .at(-1)
+
+  const candidate = withoutDirectories ?? trimmed
+  const lastDot = candidate.lastIndexOf('.')
+
+  const rawBase =
+    lastDot > 0 ? candidate.slice(0, lastDot) : candidate
+  const rawExt =
+    lastDot > 0 ? candidate.slice(lastDot + 1) : ''
+
+  const safeBase = rawBase
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+
+  const safeExt = rawExt
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 16)
+
+  const normalizedBase = safeBase || 'upload'
+
+  return safeExt ? `${normalizedBase}.${safeExt}` : normalizedBase
+}
+
+function dedupeMatchingServices(
+  offerings: Array<{
+    service: {
+      id: string
+      name: string
+    }
+  }>,
+): Array<{
+  id: string
+  name: string
+}> {
+  const seen = new Set<string>()
+  const services: Array<{
+    id: string
+    name: string
+  }> = []
+
+  for (const offering of offerings) {
+    if (seen.has(offering.service.id)) continue
+    seen.add(offering.service.id)
+
+    services.push({
+      id: offering.service.id,
+      name: offering.service.name,
+    })
+  }
+
+  return services
+}
+
 async function getViralRequestByIdOrThrow(
   db: ViralRequestsDb,
   requestId: string,
@@ -199,6 +298,8 @@ export async function createClientViralRequest(
   const requestedCategoryId = normalizeOptionalId(args.requestedCategoryId)
   const links = normalizeUrlList(args.links, 'links')
   const mediaUrls = normalizeUrlList(args.mediaUrls, 'mediaUrls')
+  const linksJson = toOptionalJsonArray(links)
+  const mediaUrlsJson = toOptionalJsonArray(mediaUrls)
 
   const created = await db.viralServiceRequest.create({
     data: {
@@ -208,12 +309,8 @@ export async function createClientViralRequest(
       sourceUrl,
       requestedCategoryId,
       status: ViralServiceRequestStatus.REQUESTED,
-      ...(toOptionalJsonArray(links) !== undefined
-        ? { linksJson: toOptionalJsonArray(links) }
-        : {}),
-      ...(toOptionalJsonArray(mediaUrls) !== undefined
-        ? { mediaUrlsJson: toOptionalJsonArray(mediaUrls) }
-        : {}),
+      ...(linksJson !== undefined ? { linksJson } : {}),
+      ...(mediaUrlsJson !== undefined ? { mediaUrlsJson } : {}),
     },
     select: { id: true },
   })
@@ -331,4 +428,177 @@ export async function updateViralRequestStatus(
   })
 
   return getViralRequestByIdOrThrow(db, updated.id)
+}
+
+export async function findMatchingProsByRequestedCategory(
+  db: ViralRequestsDb,
+  args: {
+    requestedCategoryId: string
+    take?: number
+    skip?: number
+  },
+): Promise<ViralRequestMatchedProfessional[]> {
+  const requestedCategoryId = normalizeRequiredId(
+    'requestedCategoryId',
+    args.requestedCategoryId,
+  )
+
+  const rows = await db.professionalProfile.findMany({
+    where: {
+      verificationStatus: {
+        in: [...PUBLICLY_APPROVED_PRO_STATUSES],
+      },
+      offerings: {
+        some: {
+          isActive: true,
+          service: {
+            isActive: true,
+            categoryId: requestedCategoryId,
+          },
+        },
+      },
+    },
+    orderBy: [{ isPremium: 'desc' }, { id: 'asc' }],
+    take: normalizeTake(args.take),
+    skip: normalizeSkip(args.skip),
+    select: {
+      id: true,
+      businessName: true,
+      handle: true,
+      avatarUrl: true,
+      professionType: true,
+      location: true,
+      verificationStatus: true,
+      isPremium: true,
+      offerings: {
+        where: {
+          isActive: true,
+          service: {
+            isActive: true,
+            categoryId: requestedCategoryId,
+          },
+        },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+        take: 5,
+        select: {
+          service: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  return rows.map((row) => ({
+    id: row.id,
+    businessName: row.businessName ?? null,
+    handle: row.handle ?? null,
+    avatarUrl: row.avatarUrl ?? null,
+    professionType: row.professionType ?? null,
+    location: row.location ?? null,
+    verificationStatus: row.verificationStatus,
+    isPremium: row.isPremium,
+    matchingServices: dedupeMatchingServices(row.offerings),
+  }))
+}
+
+export async function findMatchingProsForViralRequest(
+  db: ViralRequestsDb,
+  args: {
+    requestId: string
+    take?: number
+    skip?: number
+  },
+): Promise<ViralRequestMatchedProfessional[]> {
+  const requestId = normalizeRequiredId('requestId', args.requestId)
+  const request = await getViralRequestByIdOrThrow(db, requestId)
+
+  if (!request.requestedCategoryId) {
+    return []
+  }
+
+  return findMatchingProsByRequestedCategory(db, {
+    requestedCategoryId: request.requestedCategoryId,
+    take: args.take,
+    skip: args.skip,
+  })
+}
+
+export function buildViralRequestUploadTargetPath(args: {
+  requestId: string
+  fileName: string
+}): string {
+  const requestId = normalizeRequiredId('requestId', args.requestId)
+  const fileName = normalizeUploadFileName(args.fileName)
+
+  return `viral-requests/${requestId}/uploads/${fileName}`
+}
+
+/**
+ * Enqueues pro-facing dispatches for approved viral requests that have a
+ * requested category and matching approved professionals.
+ *
+ * Idempotency:
+ * - dispatch sourceKey is stable per request/professional pair
+ * - repeated calls do not create duplicate dispatch rows
+ *
+ * Important:
+ * - this helper only enqueues dispatches
+ * - it does not create a separate product inbox Notification row
+ */
+export async function enqueueViralRequestApprovalNotifications(
+  db: ViralRequestsDb,
+  args: {
+    requestId: string
+    take?: number
+    skip?: number
+  },
+): Promise<EnqueueViralRequestApprovalNotificationsResult> {
+  const requestId = normalizeRequiredId('requestId', args.requestId)
+  const request = await getViralRequestByIdOrThrow(db, requestId)
+
+  if (request.status !== ViralServiceRequestStatus.APPROVED) {
+    throw new Error(
+      'Viral request must be APPROVED before approval notifications can be enqueued.',
+    )
+  }
+
+  const matches = await findMatchingProsForViralRequest(db, {
+    requestId,
+    take: args.take,
+    skip: args.skip,
+  })
+
+  const href = `/admin/viral-requests/${encodeURIComponent(requestId)}`
+
+  const dispatchSourceKeys: string[] = []
+
+  for (const match of matches) {
+    const result = await enqueueDispatch({
+      key: NotificationEventKey.VIRAL_REQUEST_APPROVED,
+      sourceKey: `viral-request:${requestId}:professional:${match.id}:approved`,
+      recipient: {
+        kind: NotificationRecipientKind.PRO,
+        professionalId: match.id,
+        inAppTargetId: match.id,
+      },
+      title: 'New viral request in your category',
+      body: request.name
+        ? `"${request.name}" was approved and matches your services.`
+        : 'A newly approved viral request matches your services.',
+      href,
+      tx: pickDispatchTx(db),
+    })
+
+    dispatchSourceKeys.push(result.dispatch.sourceKey)
+  }
+
+  return {
+    enqueued: true,
+    matchedProfessionalIds: matches.map((match) => match.id),
+    dispatchSourceKeys,
+  }
 }

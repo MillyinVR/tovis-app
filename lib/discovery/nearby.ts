@@ -21,8 +21,34 @@ export type ClosestDiscoveryLocationMatch = {
   distanceMiles: number
 }
 
+export type DiscoveryOfferingInput = {
+  professionalId: string
+  offersInSalon: boolean
+  offersMobile: boolean
+  salonPriceStartingAt: Prisma.Decimal | number | string | null
+  mobilePriceStartingAt: Prisma.Decimal | number | string | null
+  categoryId: string | null
+}
+
+export type DiscoveryOfferSummaryDto = {
+  professionalId: string
+  supportsSalon: boolean
+  supportsMobile: boolean
+  minSalon: number | null
+  minMobile: number | null
+  minAny: number | null
+  categoryIds: string[]
+}
+
 function normalizeQuery(q: string): string {
   return q.trim().toLowerCase()
+}
+
+function normalizeOptionalId(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 function clampFloat(value: number, min: number, max: number): number {
@@ -47,6 +73,18 @@ function toFiniteNumber(value: unknown): number | null {
   }
 
   return null
+}
+
+function pushDistinctId(target: string[], value: string | null): void {
+  if (!value) return
+  if (target.includes(value)) return
+  target.push(value)
+}
+
+function pickMin(current: number | null, candidate: number | null): number | null {
+  if (candidate == null) return current
+  if (current == null) return candidate
+  return Math.min(current, candidate)
 }
 
 function localNowMinutes(timeZone: string, now: Date): number | null {
@@ -201,6 +239,116 @@ export function mapProfessionalLocation(input: {
     isPrimary: Boolean(input.isPrimary),
     workingHours: input.workingHours,
   }
+}
+
+export function summarizeDiscoveryOfferingsForProfessional(args: {
+  professionalId: string
+  offerings: readonly DiscoveryOfferingInput[]
+}): DiscoveryOfferSummaryDto {
+  const professionalId = normalizeOptionalId(args.professionalId)
+  if (!professionalId) {
+    throw new Error('professionalId is required.')
+  }
+
+  const summary: DiscoveryOfferSummaryDto = {
+    professionalId,
+    supportsSalon: false,
+    supportsMobile: false,
+    minSalon: null,
+    minMobile: null,
+    minAny: null,
+    categoryIds: [],
+  }
+
+  for (const offering of args.offerings) {
+    if (offering.professionalId !== professionalId) continue
+
+    const salonPrice = toFiniteNumber(offering.salonPriceStartingAt)
+    const mobilePrice = toFiniteNumber(offering.mobilePriceStartingAt)
+    const categoryId = normalizeOptionalId(offering.categoryId)
+
+    if (offering.offersInSalon) {
+      summary.supportsSalon = true
+      summary.minSalon = pickMin(summary.minSalon, salonPrice)
+    }
+
+    if (offering.offersMobile) {
+      summary.supportsMobile = true
+      summary.minMobile = pickMin(summary.minMobile, mobilePrice)
+    }
+
+    pushDistinctId(summary.categoryIds, categoryId)
+  }
+
+  const candidates = [summary.minSalon, summary.minMobile].filter(
+    (value): value is number => value != null,
+  )
+
+  summary.minAny =
+    candidates.length > 0 ? Math.min(...candidates) : null
+
+  return summary
+}
+
+export function buildDiscoveryOfferSummaryMap(
+  offerings: readonly DiscoveryOfferingInput[],
+): Map<string, DiscoveryOfferSummaryDto> {
+  const grouped = new Map<string, DiscoveryOfferingInput[]>()
+
+  for (const offering of offerings) {
+    const professionalId = normalizeOptionalId(offering.professionalId)
+    if (!professionalId) continue
+
+    const current = grouped.get(professionalId) ?? []
+    current.push(offering)
+    grouped.set(professionalId, current)
+  }
+
+  const result = new Map<string, DiscoveryOfferSummaryDto>()
+
+  for (const [professionalId, professionalOfferings] of grouped) {
+    result.set(
+      professionalId,
+      summarizeDiscoveryOfferingsForProfessional({
+        professionalId,
+        offerings: professionalOfferings,
+      }),
+    )
+  }
+
+  return result
+}
+
+export function matchesRequestedDiscoveryCategory(args: {
+  requestedCategoryId: string | null | undefined
+  offeringCategoryIds: readonly string[] | null | undefined
+}): boolean {
+  const requestedCategoryId = normalizeOptionalId(args.requestedCategoryId)
+  if (!requestedCategoryId) return true
+
+  const categoryIds = (args.offeringCategoryIds ?? [])
+    .map((id) => normalizeOptionalId(id))
+    .filter((id): id is string => id !== null)
+
+  return categoryIds.includes(requestedCategoryId)
+}
+
+export function matchesDiscoveryOfferingFilters(args: {
+  offerSummary: Pick<
+    DiscoveryOfferSummaryDto,
+    'supportsMobile' | 'categoryIds'
+  >
+  mobileOnly?: boolean | null
+  requestedCategoryId?: string | null
+}): boolean {
+  if (args.mobileOnly && !args.offerSummary.supportsMobile) {
+    return false
+  }
+
+  return matchesRequestedDiscoveryCategory({
+    requestedCategoryId: args.requestedCategoryId,
+    offeringCategoryIds: args.offerSummary.categoryIds,
+  })
 }
 
 export function pickPrimaryLocation(
