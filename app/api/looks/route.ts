@@ -3,12 +3,17 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickInt, pickString } from '@/app/api/_utils'
 import { getCurrentUser } from '@/lib/currentUser'
 import {
+  buildLooksFeedCursorWhere,
   buildLooksFeedOrderBy,
   buildLooksFeedWhere,
+  decodeLooksFeedCursor,
+  encodeLooksFeedCursor,
+  parseLooksFeedSort,
   resolveLooksFeedKind,
 } from '@/lib/looks/feed'
 import { looksFeedSelect } from '@/lib/looks/selects'
 import { mapLooksFeedMediaToDto } from '@/lib/looks/mappers'
+import type { LooksFeedResponseDto } from '@/lib/looks/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,10 +59,30 @@ export async function GET(req: Request) {
     const q = pickString(searchParams.get('q'))
     const following = parseBooleanParam(searchParams.get('following'))
 
+    const rawFilter = pickString(searchParams.get('filter'))
     const kind = resolveLooksFeedKind({
+      filter: rawFilter,
       categorySlug: rawCategorySlug,
       following,
     })
+
+    if (!kind) {
+      return jsonFail(400, 'Invalid looks filter.')
+    }
+
+    const rawSort = searchParams.get('sort')
+    const sort = parseLooksFeedSort(rawSort)
+
+    if (rawSort && !sort) {
+      return jsonFail(400, 'Invalid looks sort.')
+    }
+
+    const rawCursor = pickString(searchParams.get('cursor'))
+    const cursor = decodeLooksFeedCursor(rawCursor)
+
+    if (rawCursor && !cursor) {
+      return jsonFail(400, 'Invalid looks cursor.')
+    }
 
     const followingProfessionalIds =
       kind === 'FOLLOWING'
@@ -73,14 +98,29 @@ export async function GET(req: Request) {
       followingProfessionalIds,
     })
 
-    const orderBy = buildLooksFeedOrderBy({ kind })
+    const cursorWhere = buildLooksFeedCursorWhere({
+  kind,
+  sort,
+  cursor,
+})
 
-    const items = await prisma.lookPost.findMany({
-      where,
+    const pageWhere = cursorWhere
+      ? {
+          AND: [where, cursorWhere],
+        }
+      : where
+
+    const orderBy = buildLooksFeedOrderBy({ kind, sort })
+
+    const rows = await prisma.lookPost.findMany({
+      where: pageWhere,
       orderBy,
-      take: limit,
+      take: limit + 1,
       select: looksFeedSelect,
     })
+
+    const hasMore = rows.length > limit
+    const items = hasMore ? rows.slice(0, limit) : rows
 
     let likedSet = new Set<string>()
 
@@ -113,10 +153,29 @@ export async function GET(req: Request) {
       (item): item is NonNullable<typeof item> => item !== null,
     )
 
-    return jsonOk({
+    const nextCursor =
+      hasMore && items.length > 0
+        ? encodeLooksFeedCursor({
+            kind,
+            sort,
+            row: items[items.length - 1],
+          })
+        : null
+
+    const body: LooksFeedResponseDto & { ok: true } = {
       ok: true,
       items: payload,
-    })
+      nextCursor,
+      ...(user
+        ? {
+            viewerContext: {
+              isAuthenticated: true,
+            },
+          }
+        : {}),
+    }
+
+    return jsonOk(body)
   } catch (e) {
     console.error('GET /api/looks error', e)
     return jsonFail(500, 'Failed to load looks.')

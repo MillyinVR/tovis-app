@@ -11,6 +11,9 @@ import {
   buildLooksFeedCursorWhere,
   buildLooksFeedOrderBy,
   buildLooksFeedWhere,
+  decodeLooksFeedCursor,
+  encodeLooksFeedCursor,
+  parseLooksFeedSort,
   resolveLooksFeedKind,
 } from './feed'
 
@@ -19,13 +22,14 @@ describe('lib/looks/feed.ts', () => {
     it('resolves FOLLOWING ahead of spotlight/category handling', () => {
       expect(
         resolveLooksFeedKind({
+          filter: 'all',
           categorySlug: LOOKS_SPOTLIGHT_SLUG,
           following: true,
         }),
       ).toBe('FOLLOWING')
     })
 
-    it('resolves SPOTLIGHT for the spotlight slug', () => {
+    it('resolves SPOTLIGHT for the spotlight slug when no explicit filter is set', () => {
       expect(
         resolveLooksFeedKind({
           categorySlug: LOOKS_SPOTLIGHT_SLUG,
@@ -35,6 +39,31 @@ describe('lib/looks/feed.ts', () => {
 
     it('resolves ALL by default', () => {
       expect(resolveLooksFeedKind({})).toBe('ALL')
+    })
+
+    it('resolves explicit filter values', () => {
+      expect(resolveLooksFeedKind({ filter: 'all' })).toBe('ALL')
+      expect(resolveLooksFeedKind({ filter: 'following' })).toBe('FOLLOWING')
+      expect(resolveLooksFeedKind({ filter: 'spotlight' })).toBe('SPOTLIGHT')
+    })
+
+    it('returns null for an invalid filter', () => {
+      expect(resolveLooksFeedKind({ filter: 'banana' })).toBeNull()
+    })
+  })
+
+  describe('parseLooksFeedSort', () => {
+    it('parses supported sort values', () => {
+      expect(parseLooksFeedSort(null)).toBeNull()
+      expect(parseLooksFeedSort(undefined)).toBeNull()
+      expect(parseLooksFeedSort('recent')).toBe('RECENT')
+      expect(parseLooksFeedSort('ranked')).toBe('RANKED')
+      expect(parseLooksFeedSort('  ranked  ')).toBe('RANKED')
+    })
+
+    it('returns null for unsupported sort values', () => {
+      expect(parseLooksFeedSort('spotlight')).toBeNull()
+      expect(parseLooksFeedSort('chaos')).toBeNull()
     })
   })
 
@@ -211,22 +240,52 @@ describe('lib/looks/feed.ts', () => {
   })
 
   describe('buildLooksFeedOrderBy', () => {
-    it('uses spotlight ordering only for spotlight feeds', () => {
+    it('uses spotlight ordering for spotlight feeds by default', () => {
       expect(
         buildLooksFeedOrderBy({
           kind: 'SPOTLIGHT',
+          sort: null,
         }),
       ).toEqual([
         { spotlightScore: 'desc' },
         { publishedAt: 'desc' },
         { id: 'desc' },
       ])
+    })
 
+    it('uses recent ordering for the all feed by default', () => {
       expect(
         buildLooksFeedOrderBy({
           kind: 'ALL',
+          sort: null,
         }),
       ).toEqual([
+        { publishedAt: 'desc' },
+        { id: 'desc' },
+      ])
+    })
+
+    it('uses ranked ordering when sort=RANKED', () => {
+      expect(
+        buildLooksFeedOrderBy({
+          kind: 'ALL',
+          sort: 'RANKED',
+        }),
+      ).toEqual([
+        { rankScore: 'desc' },
+        { publishedAt: 'desc' },
+        { id: 'desc' },
+      ])
+    })
+
+    it('keeps spotlight ordering when spotlight feed explicitly asks for RECENT', () => {
+      expect(
+        buildLooksFeedOrderBy({
+          kind: 'SPOTLIGHT',
+          sort: 'RECENT',
+        }),
+      ).toEqual([
+        { spotlightScore: 'desc' },
         { publishedAt: 'desc' },
         { id: 'desc' },
       ])
@@ -238,12 +297,13 @@ describe('lib/looks/feed.ts', () => {
       expect(
         buildLooksFeedCursorWhere({
           kind: 'ALL',
+          sort: null,
           cursor: null,
         }),
       ).toBeUndefined()
     })
 
-    it('builds standard seek pagination for ALL/FOLLOWING feeds', () => {
+    it('builds standard seek pagination for recent ALL/FOLLOWING feeds', () => {
       const cursor = {
         publishedAt: new Date('2026-04-18T12:00:00.000Z'),
         id: 'look_123',
@@ -252,6 +312,7 @@ describe('lib/looks/feed.ts', () => {
       expect(
         buildLooksFeedCursorWhere({
           kind: 'ALL',
+          sort: null,
           cursor,
         }),
       ).toEqual({
@@ -273,6 +334,7 @@ describe('lib/looks/feed.ts', () => {
       expect(
         buildLooksFeedCursorWhere({
           kind: 'FOLLOWING',
+          sort: 'RECENT',
           cursor,
         }),
       ).toEqual({
@@ -302,6 +364,7 @@ describe('lib/looks/feed.ts', () => {
       expect(
         buildLooksFeedCursorWhere({
           kind: 'SPOTLIGHT',
+          sort: null,
           cursor,
         }),
       ).toEqual({
@@ -326,6 +389,150 @@ describe('lib/looks/feed.ts', () => {
           },
         ],
       })
+    })
+
+    it('builds ranked seek pagination using rankScore, publishedAt, and id', () => {
+      const cursor = {
+        rankScore: 47,
+        publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+        id: 'look_ranked_1',
+      } as const
+
+      expect(
+        buildLooksFeedCursorWhere({
+          kind: 'ALL',
+          sort: 'RANKED',
+          cursor,
+        }),
+      ).toEqual({
+        OR: [
+          {
+            rankScore: {
+              lt: 47,
+            },
+          },
+          {
+            rankScore: 47,
+            publishedAt: {
+              lt: cursor.publishedAt,
+            },
+          },
+          {
+            rankScore: 47,
+            publishedAt: cursor.publishedAt,
+            id: {
+              lt: 'look_ranked_1',
+            },
+          },
+        ],
+      })
+    })
+
+    it('returns undefined when the cursor shape does not match the active order mode', () => {
+      expect(
+        buildLooksFeedCursorWhere({
+          kind: 'SPOTLIGHT',
+          sort: null,
+          cursor: {
+            publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+            id: 'look_123',
+          },
+        }),
+      ).toBeUndefined()
+
+      expect(
+        buildLooksFeedCursorWhere({
+          kind: 'ALL',
+          sort: 'RANKED',
+          cursor: {
+            publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+            id: 'look_123',
+          },
+        }),
+      ).toBeUndefined()
+    })
+  })
+
+  describe('looks feed cursor encoding', () => {
+    it('round-trips a recent cursor', () => {
+      const token = encodeLooksFeedCursor({
+        kind: 'ALL',
+        sort: null,
+        row: {
+          id: 'look_recent_1',
+          publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+          spotlightScore: 0,
+          rankScore: 12,
+        },
+      })
+
+      expect(token).toEqual(expect.any(String))
+      expect(decodeLooksFeedCursor(token)).toEqual({
+        id: 'look_recent_1',
+        publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+      })
+    })
+
+    it('round-trips a spotlight cursor', () => {
+      const token = encodeLooksFeedCursor({
+        kind: 'SPOTLIGHT',
+        sort: null,
+        row: {
+          id: 'look_spotlight_1',
+          publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+          spotlightScore: 91.25,
+          rankScore: 33,
+        },
+      })
+
+      expect(token).toEqual(expect.any(String))
+      expect(decodeLooksFeedCursor(token)).toEqual({
+        id: 'look_spotlight_1',
+        publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+        spotlightScore: 91.25,
+      })
+    })
+
+    it('round-trips a ranked cursor', () => {
+      const token = encodeLooksFeedCursor({
+        kind: 'ALL',
+        sort: 'RANKED',
+        row: {
+          id: 'look_ranked_1',
+          publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+          spotlightScore: 8,
+          rankScore: 54.5,
+        },
+      })
+
+      expect(token).toEqual(expect.any(String))
+      expect(decodeLooksFeedCursor(token)).toEqual({
+        id: 'look_ranked_1',
+        publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+        rankScore: 54.5,
+      })
+    })
+
+    it('returns null for malformed cursor tokens', () => {
+      expect(decodeLooksFeedCursor(null)).toBeNull()
+      expect(decodeLooksFeedCursor(undefined)).toBeNull()
+      expect(decodeLooksFeedCursor('')).toBeNull()
+      expect(decodeLooksFeedCursor('this-is-not-valid-base64url')).toBeNull()
+    })
+
+    it('returns null when encoding a row without publishedAt', () => {
+      const token = encodeLooksFeedCursor({
+        kind: 'ALL',
+        sort: null,
+        row: {
+          id: 'look_missing_date',
+          publishedAt: null,
+          spotlightScore: 0,
+          rankScore: 0,
+        },
+      })
+
+      expect(token).toBeNull()
     })
   })
 })

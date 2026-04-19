@@ -12,6 +12,10 @@ export const LOOKS_SPOTLIGHT_SLUG = 'spotlight'
 const QMODE: Prisma.QueryMode = 'insensitive'
 
 export type LooksFeedKind = 'ALL' | 'SPOTLIGHT' | 'FOLLOWING'
+export type LooksFeedSort = 'RECENT' | 'RANKED'
+
+type LooksFeedOrderMode = 'RECENT' | 'RANKED' | 'SPOTLIGHT'
+
 export type LooksMediaFeedKind = LooksFeedKind
 
 export type BuildLooksFeedWhereArgs = {
@@ -33,6 +37,17 @@ export type SpotlightLooksFeedCursor = {
   publishedAt: Date
   id: string
 }
+
+export type RankedLooksFeedCursor = {
+  rankScore: number
+  publishedAt: Date
+  id: string
+}
+
+export type LooksFeedCursor =
+  | StandardLooksFeedCursor
+  | SpotlightLooksFeedCursor
+  | RankedLooksFeedCursor
 
 function pickNonEmptyString(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
@@ -209,14 +224,34 @@ export function buildLooksFeedWhere(
   }
 }
 
+export function resolveLooksFeedOrderMode(args: {
+  kind: LooksFeedKind
+  sort?: LooksFeedSort | null
+}): LooksFeedOrderMode {
+  if (args.sort === 'RANKED') return 'RANKED'
+  if (args.kind === 'SPOTLIGHT') return 'SPOTLIGHT'
+  return 'RECENT'
+}
+
 export function buildLooksFeedOrderBy(args: {
   kind: LooksFeedKind
+  sort?: LooksFeedSort | null
 }):
   | Prisma.LookPostOrderByWithRelationInput
   | Prisma.LookPostOrderByWithRelationInput[] {
-  if (args.kind === 'SPOTLIGHT') {
+  const mode = resolveLooksFeedOrderMode(args)
+
+  if (mode === 'SPOTLIGHT') {
     return [
       { spotlightScore: 'desc' },
+      { publishedAt: 'desc' },
+      { id: 'desc' },
+    ]
+  }
+
+  if (mode === 'RANKED') {
+    return [
+      { rankScore: 'desc' },
       { publishedAt: 'desc' },
       { id: 'desc' },
     ]
@@ -229,14 +264,25 @@ export function buildLooksFeedOrderBy(args: {
 }
 
 export function resolveLooksFeedKind(args: {
+  filter?: string | null
   categorySlug?: string | null
   following?: boolean | null
-}): LooksFeedKind {
+}): LooksFeedKind | null {
+  const filter = pickNonEmptyString(args.filter)?.toLowerCase() ?? null
   const categorySlug = pickNonEmptyString(args.categorySlug)
 
   if (args.following) return 'FOLLOWING'
-  if (categorySlug === LOOKS_SPOTLIGHT_SLUG) return 'SPOTLIGHT'
-  return 'ALL'
+
+  if (!filter) {
+    if (categorySlug === LOOKS_SPOTLIGHT_SLUG) return 'SPOTLIGHT'
+    return 'ALL'
+  }
+
+  if (filter === 'all') return 'ALL'
+  if (filter === 'following') return 'FOLLOWING'
+  if (filter === 'spotlight') return 'SPOTLIGHT'
+
+  return null
 }
 
 function isStandardLooksFeedCursor(
@@ -272,28 +318,41 @@ function isSpotlightLooksFeedCursor(
   return isStandardLooksFeedCursor(cursor) && hasSpotlightScore(cursor)
 }
 
-export function buildLooksFeedCursorWhere(args: {
-  kind: 'ALL' | 'FOLLOWING'
-  cursor?: StandardLooksFeedCursor | null
-}): Prisma.LookPostWhereInput | undefined
-export function buildLooksFeedCursorWhere(args: {
-  kind: 'SPOTLIGHT'
-  cursor?: SpotlightLooksFeedCursor | null
-}): Prisma.LookPostWhereInput | undefined
-export function buildLooksFeedCursorWhere(args: {
-  kind: LooksFeedKind
-  cursor?:
+function hasRankScore(
+  cursor:
     | StandardLooksFeedCursor
     | SpotlightLooksFeedCursor
+    | RankedLooksFeedCursor,
+): cursor is RankedLooksFeedCursor {
+  return 'rankScore' in cursor && typeof cursor.rankScore === 'number'
+}
+
+function isRankedLooksFeedCursor(
+  cursor:
+    | StandardLooksFeedCursor
+    | SpotlightLooksFeedCursor
+    | RankedLooksFeedCursor
     | null
+    | undefined,
+): cursor is RankedLooksFeedCursor {
+  return isStandardLooksFeedCursor(cursor) && hasRankScore(cursor)
+}
+
+export function buildLooksFeedCursorWhere(args: {
+  kind: LooksFeedKind
+  sort?: LooksFeedSort | null
+  cursor?: LooksFeedCursor | null
 }): Prisma.LookPostWhereInput | undefined {
   const cursor = args.cursor
   if (!cursor) return undefined
 
-  if (args.kind === 'SPOTLIGHT') {
-    if (!isSpotlightLooksFeedCursor(cursor)) {
-      return undefined
-    }
+  const mode = resolveLooksFeedOrderMode({
+    kind: args.kind,
+    sort: args.sort ?? null,
+  })
+
+  if (mode === 'SPOTLIGHT') {
+    if (!isSpotlightLooksFeedCursor(cursor)) return undefined
 
     return {
       OR: [
@@ -319,9 +378,34 @@ export function buildLooksFeedCursorWhere(args: {
     }
   }
 
-  if (!isStandardLooksFeedCursor(cursor)) {
-    return undefined
+  if (mode === 'RANKED') {
+    if (!isRankedLooksFeedCursor(cursor)) return undefined
+
+    return {
+      OR: [
+        {
+          rankScore: {
+            lt: cursor.rankScore,
+          },
+        },
+        {
+          rankScore: cursor.rankScore,
+          publishedAt: {
+            lt: cursor.publishedAt,
+          },
+        },
+        {
+          rankScore: cursor.rankScore,
+          publishedAt: cursor.publishedAt,
+          id: {
+            lt: cursor.id,
+          },
+        },
+      ],
+    }
   }
+
+  if (!isStandardLooksFeedCursor(cursor)) return undefined
 
   return {
     OR: [
@@ -338,6 +422,99 @@ export function buildLooksFeedCursorWhere(args: {
       },
     ],
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function parseLooksFeedSort(
+  value: string | null | undefined,
+): LooksFeedSort | null {
+  const raw = pickNonEmptyString(value)
+  if (!raw) return null
+
+  const normalized = raw.toLowerCase()
+  if (normalized === 'recent') return 'RECENT'
+  if (normalized === 'ranked') return 'RANKED'
+
+  return null
+}
+
+export function decodeLooksFeedCursor(
+  raw: string | null | undefined,
+): LooksFeedCursor | null {
+  const token = pickNonEmptyString(raw)
+  if (!token) return null
+
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(token, 'base64url').toString('utf8'),
+    ) as unknown
+
+    if (!isRecord(decoded)) return null
+    if (typeof decoded.id !== 'string' || !decoded.id.trim()) return null
+    if (typeof decoded.publishedAt !== 'string') return null
+
+    const publishedAt = new Date(decoded.publishedAt)
+    if (Number.isNaN(publishedAt.getTime())) return null
+
+    if (typeof decoded.spotlightScore === 'number') {
+      return {
+        id: decoded.id,
+        publishedAt,
+        spotlightScore: decoded.spotlightScore,
+      }
+    }
+
+    if (typeof decoded.rankScore === 'number') {
+      return {
+        id: decoded.id,
+        publishedAt,
+        rankScore: decoded.rankScore,
+      }
+    }
+
+    return {
+      id: decoded.id,
+      publishedAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function encodeLooksFeedCursor(args: {
+  kind: LooksFeedKind
+  sort?: LooksFeedSort | null
+  row: {
+    id: string
+    publishedAt: Date | null
+    spotlightScore: number
+    rankScore: number
+  }
+}): string | null {
+  if (!(args.row.publishedAt instanceof Date)) return null
+
+  const mode = resolveLooksFeedOrderMode({
+    kind: args.kind,
+    sort: args.sort ?? null,
+  })
+
+  const payload: Record<string, unknown> = {
+    id: args.row.id,
+    publishedAt: args.row.publishedAt.toISOString(),
+  }
+
+  if (mode === 'SPOTLIGHT') {
+    payload.spotlightScore = args.row.spotlightScore
+  } else if (mode === 'RANKED') {
+    payload.rankScore = args.row.rankScore
+  }
+
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString(
+    'base64url',
+  )
 }
 
 /**

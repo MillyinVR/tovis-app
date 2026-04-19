@@ -8,7 +8,6 @@ import {
   MediaVisibility,
   ModerationStatus,
   ProfessionType,
-  Role,
   VerificationStatus,
 } from '@prisma/client'
 
@@ -35,12 +34,11 @@ import {
   mapPortfolioTileToDto,
   mapReviewMediaAssetToDto,
   parseLooksCommentsResponse,
+  parseLooksFeedEnvelope,
   parseLooksFeedResponse,
 } from './mappers'
 
-function makeFeedRow(
-  overrides?: Partial<LooksFeedRow>,
-): LooksFeedRow {
+function makeFeedRow(overrides?: Partial<LooksFeedRow>): LooksFeedRow {
   return {
     id: 'look_1',
     professionalId: 'pro_1',
@@ -93,9 +91,7 @@ function makeFeedRow(
   }
 }
 
-function makeDetailRow(
-  overrides?: Partial<LooksDetailRow>,
-): LooksDetailRow {
+function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
   return {
     id: 'look_1',
     professionalId: 'pro_1',
@@ -250,6 +246,71 @@ function makeProProfilePreviewRow(
     location: 'San Diego, CA',
     verificationStatus: VerificationStatus.APPROVED,
     isPremium: true,
+    ...overrides,
+  }
+}
+
+function makeFeedDto(
+  overrides?: Partial<{
+    id: string
+    url: string
+    thumbUrl: string | null
+    mediaType: MediaType
+    caption: string | null
+    createdAt: string
+    professional: {
+      id: string
+      businessName: string | null
+      handle: string | null
+      professionType: ProfessionType | null
+      avatarUrl: string | null
+      location: string | null
+    } | null
+    _count: {
+      likes: number
+      comments: number
+    }
+    viewerLiked: boolean
+    serviceId: string | null
+    serviceName: string | null
+    category: string | null
+    serviceIds: string[]
+    uploadedByRole: string | null
+    reviewId: string | null
+    reviewHelpfulCount: number | null
+    reviewRating: number | null
+    reviewHeadline: string | null
+  }>,
+) {
+  return {
+    id: 'look_1',
+    url: 'https://cdn.example.com/media.jpg',
+    thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
+    mediaType: MediaType.IMAGE,
+    caption: 'Fresh cut',
+    createdAt: '2026-04-18T13:00:00.000Z',
+    professional: {
+      id: 'pro_1',
+      businessName: 'TOVIS Studio',
+      handle: 'tovisstudio',
+      professionType: ProfessionType.BARBER,
+      avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
+      location: 'San Diego, CA',
+    },
+    _count: {
+      likes: 9,
+      comments: 3,
+    },
+    viewerLiked: true,
+    serviceId: 'service_1',
+    serviceName: 'Fade',
+    category: 'Hair',
+    serviceIds: ['service_1'],
+    uploadedByRole: null,
+    reviewId: null,
+    reviewHelpfulCount: null,
+    reviewRating: null,
+    reviewHeadline: null,
     ...overrides,
   }
 }
@@ -655,72 +716,10 @@ describe('lib/looks/mappers.ts', () => {
   describe('parseLooksFeedResponse', () => {
     it('parses valid feed payload rows into typed DTOs', () => {
       const result = parseLooksFeedResponse({
-        items: [
-          {
-            id: 'look_1',
-            url: 'https://cdn.example.com/media.jpg',
-            thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
-            mediaType: MediaType.IMAGE,
-            caption: 'Fresh cut',
-            createdAt: '2026-04-18T13:00:00.000Z',
-            professional: {
-              id: 'pro_1',
-              businessName: 'TOVIS Studio',
-              handle: 'tovisstudio',
-              professionType: ProfessionType.BARBER,
-              avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
-              location: 'San Diego, CA',
-            },
-            _count: {
-              likes: 9,
-              comments: 3,
-            },
-            viewerLiked: true,
-            serviceId: 'service_1',
-            serviceName: 'Fade',
-            category: 'Hair',
-            serviceIds: ['service_1'],
-            uploadedByRole: null,
-            reviewId: null,
-            reviewHelpfulCount: null,
-            reviewRating: null,
-            reviewHeadline: null,
-          },
-        ],
+        items: [makeFeedDto()],
       })
 
-      expect(result).toEqual([
-        {
-          id: 'look_1',
-          url: 'https://cdn.example.com/media.jpg',
-          thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
-          mediaType: MediaType.IMAGE,
-          caption: 'Fresh cut',
-          createdAt: '2026-04-18T13:00:00.000Z',
-          professional: {
-            id: 'pro_1',
-            businessName: 'TOVIS Studio',
-            handle: 'tovisstudio',
-            professionType: ProfessionType.BARBER,
-            avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
-            location: 'San Diego, CA',
-          },
-          _count: {
-            likes: 9,
-            comments: 3,
-          },
-          viewerLiked: true,
-          serviceId: 'service_1',
-          serviceName: 'Fade',
-          category: 'Hair',
-          serviceIds: ['service_1'],
-          uploadedByRole: null,
-          reviewId: null,
-          reviewHelpfulCount: null,
-          reviewRating: null,
-          reviewHeadline: null,
-        },
-      ])
+      expect(result).toEqual([makeFeedDto()])
     })
 
     it('skips invalid feed payload rows', () => {
@@ -751,18 +750,14 @@ describe('lib/looks/mappers.ts', () => {
     it('nulls invalid role and professionType values instead of trusting junk', () => {
       const result = parseLooksFeedResponse({
         items: [
-          {
-            id: 'look_1',
-            url: 'https://cdn.example.com/media.jpg',
+          makeFeedDto({
             thumbUrl: null,
-            mediaType: MediaType.IMAGE,
             caption: null,
-            createdAt: '2026-04-18T12:00:00.000Z',
             professional: {
               id: 'pro_1',
               businessName: 'TOVIS Studio',
               handle: 'tovisstudio',
-              professionType: 'SPACE_WIZARD',
+              professionType: 'SPACE_WIZARD' as never,
               avatarUrl: null,
               location: null,
             },
@@ -776,11 +771,7 @@ describe('lib/looks/mappers.ts', () => {
             category: null,
             serviceIds: [],
             uploadedByRole: 'CHAOS_GREMLIN',
-            reviewId: null,
-            reviewHelpfulCount: null,
-            reviewRating: null,
-            reviewHeadline: null,
-          },
+          }),
         ],
       })
 
@@ -791,7 +782,7 @@ describe('lib/looks/mappers.ts', () => {
           thumbUrl: null,
           mediaType: MediaType.IMAGE,
           caption: null,
-          createdAt: '2026-04-18T12:00:00.000Z',
+          createdAt: '2026-04-18T13:00:00.000Z',
           professional: {
             id: 'pro_1',
             businessName: 'TOVIS Studio',
@@ -816,6 +807,74 @@ describe('lib/looks/mappers.ts', () => {
           reviewHeadline: null,
         },
       ])
+    })
+  })
+
+  describe('parseLooksFeedEnvelope', () => {
+    it('parses the full feed envelope with nextCursor and viewerContext', () => {
+      const result = parseLooksFeedEnvelope({
+        items: [makeFeedDto()],
+        nextCursor: 'cursor_123',
+        viewerContext: {
+          isAuthenticated: true,
+        },
+      })
+
+      expect(result).toEqual({
+        items: [makeFeedDto()],
+        nextCursor: 'cursor_123',
+        viewerContext: {
+          isAuthenticated: true,
+        },
+      })
+    })
+
+    it('defaults nextCursor to null when it is missing or invalid', () => {
+      expect(
+        parseLooksFeedEnvelope({
+          items: [makeFeedDto()],
+        }),
+      ).toEqual({
+        items: [makeFeedDto()],
+        nextCursor: null,
+      })
+
+      expect(
+        parseLooksFeedEnvelope({
+          items: [makeFeedDto()],
+          nextCursor: 123,
+        }),
+      ).toEqual({
+        items: [makeFeedDto()],
+        nextCursor: null,
+      })
+    })
+
+    it('omits malformed viewerContext instead of trusting junk', () => {
+      const result = parseLooksFeedEnvelope({
+        items: [makeFeedDto()],
+        nextCursor: 'cursor_123',
+        viewerContext: {
+          isAuthenticated: 'yes absolutely',
+        },
+      })
+
+      expect(result).toEqual({
+        items: [makeFeedDto()],
+        nextCursor: 'cursor_123',
+      })
+    })
+
+    it('returns an empty safe envelope for malformed payloads', () => {
+      expect(parseLooksFeedEnvelope(null)).toEqual({
+        items: [],
+        nextCursor: null,
+      })
+
+      expect(parseLooksFeedEnvelope('not an object')).toEqual({
+        items: [],
+        nextCursor: null,
+      })
     })
   })
 

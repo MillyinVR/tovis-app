@@ -1,6 +1,6 @@
 // app/api/looks/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { MediaType, ProfessionType, Role } from '@prisma/client'
+import { MediaType, ProfessionType } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn((data: unknown, status = 200) => {
@@ -32,7 +32,11 @@ const mocks = vi.hoisted(() => {
   const getCurrentUser = vi.fn()
   const resolveLooksFeedKind = vi.fn()
   const buildLooksFeedWhere = vi.fn()
+  const buildLooksFeedCursorWhere = vi.fn()
   const buildLooksFeedOrderBy = vi.fn()
+  const parseLooksFeedSort = vi.fn()
+  const decodeLooksFeedCursor = vi.fn()
+  const encodeLooksFeedCursor = vi.fn()
   const mapLooksFeedMediaToDto = vi.fn()
 
   const looksFeedSelect = {
@@ -46,7 +50,11 @@ const mocks = vi.hoisted(() => {
     getCurrentUser,
     resolveLooksFeedKind,
     buildLooksFeedWhere,
+    buildLooksFeedCursorWhere,
     buildLooksFeedOrderBy,
+    parseLooksFeedSort,
+    decodeLooksFeedCursor,
+    encodeLooksFeedCursor,
     mapLooksFeedMediaToDto,
     looksFeedSelect,
   }
@@ -78,7 +86,11 @@ vi.mock('@/lib/currentUser', () => ({
 vi.mock('@/lib/looks/feed', () => ({
   resolveLooksFeedKind: mocks.resolveLooksFeedKind,
   buildLooksFeedWhere: mocks.buildLooksFeedWhere,
+  buildLooksFeedCursorWhere: mocks.buildLooksFeedCursorWhere,
   buildLooksFeedOrderBy: mocks.buildLooksFeedOrderBy,
+  parseLooksFeedSort: mocks.parseLooksFeedSort,
+  decodeLooksFeedCursor: mocks.decodeLooksFeedCursor,
+  encodeLooksFeedCursor: mocks.encodeLooksFeedCursor,
 }))
 
 vi.mock('@/lib/looks/selects', () => ({
@@ -95,22 +107,40 @@ function makeRequest(path: string): Request {
   return new Request(`http://localhost${path}`)
 }
 
-async function readJson<T>(res: Response): Promise<T> {
-  return (await res.json()) as T
+async function readJson(res: Response): Promise<unknown> {
+  return res.json()
 }
 
-function makeLookRow(id: string) {
-  return { id }
+function makeLookRow(
+  id: string,
+  overrides?: Partial<{
+    publishedAt: Date
+    spotlightScore: number
+    rankScore: number
+  }>,
+) {
+  return {
+    id,
+    publishedAt: new Date('2026-04-18T12:00:00.000Z'),
+    spotlightScore: 0,
+    rankScore: 0,
+    ...overrides,
+  }
 }
 
-function makeMappedDto(id: string) {
+function makeMappedDto(
+  id: string,
+  overrides?: Partial<{
+    viewerLiked: boolean
+  }>,
+) {
   return {
     id,
     url: `https://cdn.example.com/${id}.jpg`,
     thumbUrl: `https://cdn.example.com/${id}-thumb.jpg`,
     mediaType: MediaType.IMAGE,
     caption: `${id} caption`,
-    createdAt: '2026-04-01T12:00:00.000Z',
+    createdAt: '2026-04-18T12:00:00.000Z',
     professional: {
       id: `pro_${id}`,
       businessName: 'TOVIS Studio',
@@ -133,6 +163,7 @@ function makeMappedDto(id: string) {
     reviewHelpfulCount: null,
     reviewRating: null,
     reviewHeadline: null,
+    ...overrides,
   }
 }
 
@@ -145,31 +176,42 @@ describe('app/api/looks/route.ts', () => {
     mocks.buildLooksFeedWhere.mockReturnValue({
       whereToken: 'default-where',
     })
-    mocks.buildLooksFeedOrderBy.mockReturnValue({
-      publishedAt: 'desc',
-    })
+    mocks.buildLooksFeedCursorWhere.mockReturnValue(undefined)
+    mocks.buildLooksFeedOrderBy.mockReturnValue([
+      { publishedAt: 'desc' },
+      { id: 'desc' },
+    ])
+    mocks.parseLooksFeedSort.mockReturnValue(null)
+    mocks.decodeLooksFeedCursor.mockReturnValue(null)
+    mocks.encodeLooksFeedCursor.mockReturnValue('next_cursor_1')
+
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
     mocks.prisma.proFollow.findMany.mockResolvedValue([])
+
     mocks.mapLooksFeedMediaToDto.mockResolvedValue(null)
   })
 
-  it('queries the looks feed through shared look-post feed helpers', async () => {
+  it('queries the default feed through shared look-post helpers and returns the new envelope', async () => {
     const sharedWhere = { whereToken: 'all-feed' }
-    const sharedOrderBy = [{ publishedAt: 'desc' }]
+    const sharedOrderBy = [{ publishedAt: 'desc' }, { id: 'desc' }]
 
-    mocks.resolveLooksFeedKind.mockReturnValue('ALL')
     mocks.buildLooksFeedWhere.mockReturnValue(sharedWhere)
     mocks.buildLooksFeedOrderBy.mockReturnValue(sharedOrderBy)
 
     const res = await GET(makeRequest('/api/looks'))
+    const body = await readJson(res)
 
     expect(res.status).toBe(200)
 
     expect(mocks.resolveLooksFeedKind).toHaveBeenCalledWith({
+      filter: null,
       categorySlug: null,
       following: false,
     })
+
+    expect(mocks.parseLooksFeedSort).toHaveBeenCalledWith(null)
+    expect(mocks.decodeLooksFeedCursor).toHaveBeenCalledWith(null)
 
     expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
       kind: 'ALL',
@@ -178,56 +220,65 @@ describe('app/api/looks/route.ts', () => {
       followingProfessionalIds: [],
     })
 
+    expect(mocks.buildLooksFeedCursorWhere).toHaveBeenCalledWith({
+      kind: 'ALL',
+      sort: null,
+      cursor: null,
+    })
+
     expect(mocks.buildLooksFeedOrderBy).toHaveBeenCalledWith({
       kind: 'ALL',
+      sort: null,
     })
 
     expect(mocks.prisma.lookPost.findMany).toHaveBeenCalledWith({
       where: sharedWhere,
       orderBy: sharedOrderBy,
-      take: 12,
+      take: 13,
       select: mocks.looksFeedSelect,
+    })
+
+    expect(body).toEqual({
+      ok: true,
+      items: [],
+      nextCursor: null,
     })
 
     expect(mocks.prisma.proFollow.findMany).not.toHaveBeenCalled()
     expect(mocks.prisma.lookLike.findMany).not.toHaveBeenCalled()
     expect(mocks.mapLooksFeedMediaToDto).not.toHaveBeenCalled()
+    expect(mocks.encodeLooksFeedCursor).not.toHaveBeenCalled()
   })
 
-  it('hydrates viewer likes and returns mapped payload', async () => {
+  it('hydrates viewer likes, returns viewerContext, and emits nextCursor when another page exists', async () => {
     const look1 = makeLookRow('look_1')
     const look2 = makeLookRow('look_2')
+    const look3 = makeLookRow('look_3')
+
     const dto1 = makeMappedDto('look_1')
-    const dto2 = {
-      ...makeMappedDto('look_2'),
-      viewerLiked: true,
-    }
+    const dto2 = makeMappedDto('look_2', { viewerLiked: true })
 
     mocks.getCurrentUser.mockResolvedValue({
       id: 'user_1',
       clientProfile: { id: 'client_1' },
     })
-    mocks.prisma.lookPost.findMany.mockResolvedValue([look1, look2])
-    mocks.prisma.lookLike.findMany.mockResolvedValue([
-      { lookPostId: 'look_2' },
-    ])
+
+    mocks.prisma.lookPost.findMany.mockResolvedValue([look1, look2, look3])
+    mocks.prisma.lookLike.findMany.mockResolvedValue([{ lookPostId: 'look_2' }])
 
     mocks.mapLooksFeedMediaToDto
       .mockResolvedValueOnce(dto1)
       .mockResolvedValueOnce(dto2)
 
-    const res = await GET(makeRequest('/api/looks?limit=20'))
-    const body = await readJson<{
-      ok: true
-      items: Array<typeof dto1>
-    }>(res)
+    const res = await GET(makeRequest('/api/looks?limit=2'))
+    const body = await readJson(res)
 
     expect(res.status).toBe(200)
 
     expect(mocks.prisma.lookPost.findMany).toHaveBeenCalledWith({
       where: { whereToken: 'default-where' },
-      orderBy: { publishedAt: 'desc' },
-      take: 20,
+      orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
+      take: 3,
       select: mocks.looksFeedSelect,
     })
 
@@ -239,6 +290,8 @@ describe('app/api/looks/route.ts', () => {
       select: { lookPostId: true },
     })
 
+    expect(mocks.mapLooksFeedMediaToDto).toHaveBeenCalledTimes(2)
+
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(1, {
       item: look1,
       viewerLiked: false,
@@ -249,30 +302,42 @@ describe('app/api/looks/route.ts', () => {
       viewerLiked: true,
     })
 
+    expect(mocks.encodeLooksFeedCursor).toHaveBeenCalledWith({
+      kind: 'ALL',
+      sort: null,
+      row: look2,
+    })
+
     expect(body).toEqual({
       ok: true,
       items: [dto1, dto2],
+      nextCursor: 'next_cursor_1',
+      viewerContext: {
+        isAuthenticated: true,
+      },
     })
   })
 
-  it('loads followed pros for the following feed and passes them into shared feed helpers', async () => {
+  it('loads followed pros for filter=following and passes them into shared feed helpers', async () => {
     mocks.getCurrentUser.mockResolvedValue({
       id: 'user_1',
       clientProfile: { id: 'client_1' },
     })
+
     mocks.resolveLooksFeedKind.mockReturnValue('FOLLOWING')
     mocks.prisma.proFollow.findMany.mockResolvedValue([
       { professionalId: 'pro_1' },
       { professionalId: 'pro_2' },
     ])
 
-    const res = await GET(makeRequest('/api/looks?following=true'))
+    const res = await GET(makeRequest('/api/looks?filter=following'))
 
     expect(res.status).toBe(200)
 
     expect(mocks.resolveLooksFeedKind).toHaveBeenCalledWith({
+      filter: 'following',
       categorySlug: null,
-      following: true,
+      following: false,
     })
 
     expect(mocks.prisma.proFollow.findMany).toHaveBeenCalledWith({
@@ -290,11 +355,36 @@ describe('app/api/looks/route.ts', () => {
       q: null,
       followingProfessionalIds: ['pro_1', 'pro_2'],
     })
+
+    expect(mocks.buildLooksFeedCursorWhere).toHaveBeenCalledWith({
+      kind: 'FOLLOWING',
+      sort: null,
+      cursor: null,
+    })
   })
 
-  it('passes spotlight and search params through shared feed helpers and filters null mapped items', async () => {
-    const look1 = makeLookRow('look_1')
-    const look2 = makeLookRow('look_2')
+  it('still supports the legacy following=true alias', async () => {
+    mocks.getCurrentUser.mockResolvedValue({
+      id: 'user_1',
+      clientProfile: { id: 'client_1' },
+    })
+
+    mocks.resolveLooksFeedKind.mockReturnValue('FOLLOWING')
+
+    const res = await GET(makeRequest('/api/looks?following=true'))
+
+    expect(res.status).toBe(200)
+
+    expect(mocks.resolveLooksFeedKind).toHaveBeenCalledWith({
+      filter: null,
+      categorySlug: null,
+      following: true,
+    })
+  })
+
+  it('passes spotlight alias + search params through shared helpers and filters null mapped items', async () => {
+    const look1 = makeLookRow('look_1', { spotlightScore: 91.5 })
+    const look2 = makeLookRow('look_2', { spotlightScore: 88.2 })
     const dto1 = makeMappedDto('look_1')
 
     mocks.resolveLooksFeedKind.mockReturnValue('SPOTLIGHT')
@@ -315,14 +405,12 @@ describe('app/api/looks/route.ts', () => {
     const res = await GET(
       makeRequest('/api/looks?category=spotlight&q=fade&limit=18'),
     )
-    const body = await readJson<{
-      ok: true
-      items: Array<typeof dto1>
-    }>(res)
+    const body = await readJson(res)
 
     expect(res.status).toBe(200)
 
     expect(mocks.resolveLooksFeedKind).toHaveBeenCalledWith({
+      filter: null,
       categorySlug: 'spotlight',
       following: false,
     })
@@ -336,15 +424,144 @@ describe('app/api/looks/route.ts', () => {
 
     expect(mocks.buildLooksFeedOrderBy).toHaveBeenCalledWith({
       kind: 'SPOTLIGHT',
+      sort: null,
     })
 
     expect(body).toEqual({
       ok: true,
       items: [dto1],
+      nextCursor: null,
     })
 
     expect(mocks.prisma.proFollow.findMany).not.toHaveBeenCalled()
     expect(mocks.prisma.lookLike.findMany).not.toHaveBeenCalled()
+  })
+
+  it('supports ranked sort and cursor seek through shared feed helpers', async () => {
+    const sharedWhere = { whereToken: 'ranked-where' }
+    const cursorWhere = { cursorToken: 'ranked-cursor-where' }
+    const rankedOrderBy = [
+      { rankScore: 'desc' },
+      { publishedAt: 'desc' },
+      { id: 'desc' },
+    ]
+
+    const decodedCursor = {
+      rankScore: 42,
+      publishedAt: new Date('2026-04-18T10:00:00.000Z'),
+      id: 'look_ranked_1',
+    }
+
+    mocks.parseLooksFeedSort.mockReturnValue('RANKED')
+    mocks.decodeLooksFeedCursor.mockReturnValue(decodedCursor)
+    mocks.buildLooksFeedWhere.mockReturnValue(sharedWhere)
+    mocks.buildLooksFeedCursorWhere.mockReturnValue(cursorWhere)
+    mocks.buildLooksFeedOrderBy.mockReturnValue(rankedOrderBy)
+
+    const res = await GET(
+      makeRequest(
+        '/api/looks?sort=ranked&cursor=cursor_123&category=nails&q=fade',
+      ),
+    )
+    const body = await readJson(res)
+
+    expect(res.status).toBe(200)
+
+    expect(mocks.resolveLooksFeedKind).toHaveBeenCalledWith({
+      filter: null,
+      categorySlug: 'nails',
+      following: false,
+    })
+
+    expect(mocks.parseLooksFeedSort).toHaveBeenCalledWith('ranked')
+    expect(mocks.decodeLooksFeedCursor).toHaveBeenCalledWith('cursor_123')
+
+    expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
+      kind: 'ALL',
+      categorySlug: 'nails',
+      q: 'fade',
+      followingProfessionalIds: [],
+    })
+
+    expect(mocks.buildLooksFeedCursorWhere).toHaveBeenCalledWith({
+      kind: 'ALL',
+      sort: 'RANKED',
+      cursor: decodedCursor,
+    })
+
+    expect(mocks.buildLooksFeedOrderBy).toHaveBeenCalledWith({
+      kind: 'ALL',
+      sort: 'RANKED',
+    })
+
+    expect(mocks.prisma.lookPost.findMany).toHaveBeenCalledWith({
+      where: {
+        AND: [sharedWhere, cursorWhere],
+      },
+      orderBy: rankedOrderBy,
+      take: 13,
+      select: mocks.looksFeedSelect,
+    })
+
+    expect(body).toEqual({
+      ok: true,
+      items: [],
+      nextCursor: null,
+    })
+  })
+
+  it('returns 400 for an invalid filter', async () => {
+    mocks.resolveLooksFeedKind.mockReturnValue(null)
+
+    const res = await GET(makeRequest('/api/looks?filter=banana'))
+    const body = await readJson(res)
+
+    expect(res.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid looks filter.',
+    })
+
+    expect(mocks.buildLooksFeedWhere).not.toHaveBeenCalled()
+    expect(mocks.buildLooksFeedCursorWhere).not.toHaveBeenCalled()
+    expect(mocks.buildLooksFeedOrderBy).not.toHaveBeenCalled()
+    expect(mocks.prisma.lookPost.findMany).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 for an invalid sort', async () => {
+    mocks.parseLooksFeedSort.mockReturnValue(null)
+
+    const res = await GET(makeRequest('/api/looks?sort=chaos'))
+    const body = await readJson(res)
+
+    expect(res.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid looks sort.',
+    })
+
+    expect(mocks.buildLooksFeedWhere).not.toHaveBeenCalled()
+    expect(mocks.buildLooksFeedCursorWhere).not.toHaveBeenCalled()
+    expect(mocks.buildLooksFeedOrderBy).not.toHaveBeenCalled()
+    expect(mocks.prisma.lookPost.findMany).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 for an invalid cursor', async () => {
+    mocks.decodeLooksFeedCursor.mockReturnValue(null)
+
+    const res = await GET(makeRequest('/api/looks?cursor=bad_cursor'))
+    const body = await readJson(res)
+
+    expect(res.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid looks cursor.',
+    })
+
+    expect(mocks.buildLooksFeedWhere).not.toHaveBeenCalled()
+    expect(mocks.buildLooksFeedCursorWhere).not.toHaveBeenCalled()
+    expect(mocks.buildLooksFeedOrderBy).not.toHaveBeenCalled()
+    expect(mocks.prisma.lookPost.findMany).not.toHaveBeenCalled()
   })
 
   it('returns 500 when loading the looks feed fails', async () => {
@@ -352,7 +569,7 @@ describe('app/api/looks/route.ts', () => {
     mocks.prisma.lookPost.findMany.mockRejectedValue(new Error('db blew up'))
 
     const res = await GET(makeRequest('/api/looks'))
-    const body = await readJson<{ ok: false; error: string }>(res)
+    const body = await readJson(res)
 
     expect(res.status).toBe(500)
     expect(body).toEqual({

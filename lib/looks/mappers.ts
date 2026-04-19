@@ -20,6 +20,7 @@ import type {
   LooksPortfolioTileDto,
   LooksProProfilePreviewDto,
   LooksRenderedMediaDto,
+  LooksFeedResponseDto,
 } from '@/lib/looks/types'
 
 type MediaCommentUserShape = {
@@ -546,6 +547,37 @@ export function mapLooksProProfilePreviewToDto(
     location: profile.location ?? null,
     verificationStatus: profile.verificationStatus,
     isPremium: profile.isPremium,
+  }
+}
+
+export function parseLooksFeedEnvelope(
+  raw: unknown,
+): LooksFeedResponseDto {
+  const items = parseLooksFeedResponse(raw)
+
+  if (!isRecord(raw)) {
+    return {
+      items,
+      nextCursor: null,
+    }
+  }
+
+  const viewerContextRaw = isRecord(raw.viewerContext)
+    ? raw.viewerContext
+    : null
+
+  const viewerContext =
+    viewerContextRaw &&
+    typeof viewerContextRaw.isAuthenticated === 'boolean'
+      ? {
+          isAuthenticated: viewerContextRaw.isAuthenticated,
+        }
+      : undefined
+
+  return {
+    items,
+    nextCursor: pickString(raw.nextCursor),
+    ...(viewerContext ? { viewerContext } : {}),
   }
 }
 

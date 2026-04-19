@@ -55,6 +55,16 @@ export type LooksFeedItemDto = {
   reviewHeadline: string | null
 }
 
+export type LooksFeedViewerContextDto = {
+  isAuthenticated: boolean
+}
+
+export type LooksFeedResponseDto = {
+  items: LooksFeedItemDto[]
+  nextCursor: string | null
+  viewerContext?: LooksFeedViewerContextDto
+}
+
 export type LooksCommentUserDto = {
   id: string
   displayName: string
