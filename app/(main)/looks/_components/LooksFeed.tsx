@@ -11,9 +11,12 @@ import LookSlide from './LookSlide'
 import CommentsDrawer from './CommentsDrawer'
 import RightActionRail from './RightActionRail'
 import { safeJson } from '@/lib/http'
+import {
+  parseLooksCommentsResponse,
+  parseLooksFeedEnvelope,
+} from '@/lib/looks/mappers'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
 import type { FeedItem, UiCategory, UiComment } from './lookTypes'
-
 import {
   loadViewerLocation,
   subscribeViewerLocation,
@@ -87,23 +90,12 @@ function parseCategories(raw: unknown): UiCategory[] {
   return withSpotlight([ALL_TAB, ...Array.from(map.values())])
 }
 
-/**
- * NOTE:
- * /api/looks is internal and already matches FeedItem.
- * This is a local, justified boundary assertion.
- */
 function parseFeedItems(raw: unknown): FeedItem[] {
-  if (!isRecord(raw)) return []
-  const items = raw.items
-  if (!Array.isArray(items)) return []
-  return items as unknown as FeedItem[]
+  return parseLooksFeedEnvelope(raw).items
 }
 
 function parseComments(raw: unknown): UiComment[] {
-  if (!isRecord(raw)) return []
-  const comments = raw.comments
-  if (!Array.isArray(comments)) return []
-  return comments as unknown as UiComment[]
+  return parseLooksCommentsResponse(raw)
 }
 
 function hashStringToIndex(id: string, mod: number) {
@@ -147,8 +139,11 @@ function buildAvailabilityDrawerContext(
 ): AvailabilityDrawerContext | null {
   if (!item.professional?.id) return null
 
+  // Feed items are canonically keyed by lookPostId now.
+  // AvailabilityDrawer still carries a legacy `mediaId` field downstream,
+  // so do not pass the post id through that slot.
   return {
-    mediaId: item.id,
+    mediaId: null,
     professionalId: item.professional.id,
     serviceId: item.serviceId ?? null,
     source: 'DISCOVERY',
@@ -201,6 +196,7 @@ export default function LooksFeed() {
   const [activeIndex, setActiveIndex] = useState(0)
 
   const [viewerLoc, setViewerLoc] = useState<ViewerLocation | null>(null)
+
   useEffect(() => {
     setViewerLoc(loadViewerLocation())
     return subscribeViewerLocation(setViewerLoc)
@@ -233,6 +229,7 @@ export default function LooksFeed() {
         headers: { Accept: 'application/json' },
       })
       const raw = await safeJson(res)
+
       if (!res.ok) {
         throw new Error(
           isRecord(raw)
@@ -288,17 +285,23 @@ export default function LooksFeed() {
       setRefreshing(false)
     }
 
-    if (!hasLoadedOnceRef.current && !cachedFresh) setLoading(true)
+    if (!hasLoadedOnceRef.current && !cachedFresh) {
+      setLoading(true)
+    }
 
     setFeedError(null)
 
     try {
       const qs = new URLSearchParams()
       qs.set('limit', String(FEED_LIMIT))
+
       if (activeCategorySlug && activeCategorySlug !== ALL_TAB.slug) {
         qs.set('category', activeCategorySlug)
       }
-      if (query.trim()) qs.set('q', query.trim())
+
+      if (query.trim()) {
+        qs.set('q', query.trim())
+      }
 
       const res = await fetch(`/api/looks?${qs.toString()}`, {
         cache: 'no-store',
@@ -331,7 +334,9 @@ export default function LooksFeed() {
 
       setFeedError(e instanceof Error ? e.message : 'Failed to load looks')
     } finally {
-      if (updatingTimerRef.current) window.clearTimeout(updatingTimerRef.current)
+      if (updatingTimerRef.current) {
+        window.clearTimeout(updatingTimerRef.current)
+      }
       setLoading(false)
       setRefreshing(false)
     }
@@ -354,20 +359,26 @@ export default function LooksFeed() {
   useEffect(() => {
     const el = feedScrollRef.current
     if (!el) return
+
     const slides = Array.from(
       el.querySelectorAll('[data-look-slide="1"]'),
     ) as HTMLElement[]
+
     if (!slides.length) return
 
     const io = new IntersectionObserver(
       (entries) => {
         let best: { idx: number; ratio: number } | null = null
+
         for (const ent of entries) {
           const idx = Number((ent.target as HTMLElement).dataset.index || '0')
           const ratio = ent.intersectionRatio || 0
           if (!best || ratio > best.ratio) best = { idx, ratio }
         }
-        if (best && best.ratio >= 0.6) setActiveIndex(best.idx)
+
+        if (best && best.ratio >= 0.6) {
+          setActiveIndex(best.idx)
+        }
       },
       { root: el, threshold: [0.35, 0.6, 0.8, 1] },
     )
@@ -377,22 +388,23 @@ export default function LooksFeed() {
   }, [items.length])
 
   const toggleLike = useCallback(
-    async (mediaId: string) => {
-      if (likeInFlight.current[mediaId]) return
-      likeInFlight.current[mediaId] = true
+    async (lookPostId: string) => {
+      if (likeInFlight.current[lookPostId]) return
+      likeInFlight.current[lookPostId] = true
 
       let beforeLiked = false
       let beforeCount = 0
 
       setItems((prev) => {
-        const cur = prev.find((x) => x.id === mediaId)
+        const cur = prev.find((x) => x.id === lookPostId)
         beforeLiked = !!cur?.viewerLiked
         beforeCount = cur?._count.likes ?? 0
 
         return prev.map((m) => {
-          if (m.id !== mediaId) return m
+          if (m.id !== lookPostId) return m
           const nextLiked = !m.viewerLiked
           const nextCount = Math.max(0, m._count.likes + (nextLiked ? 1 : -1))
+
           return {
             ...m,
             viewerLiked: nextLiked,
@@ -402,7 +414,7 @@ export default function LooksFeed() {
       })
 
       try {
-        const res = await fetch(`/api/looks/${mediaId}/like`, {
+        const res = await fetch(`/api/looks/${lookPostId}/like`, {
           method: beforeLiked ? 'DELETE' : 'POST',
         })
         const raw = await safeJson(res)
@@ -410,7 +422,7 @@ export default function LooksFeed() {
         if (isGuestBlocked(res.status)) {
           setItems((prev) =>
             prev.map((m) =>
-              m.id === mediaId
+              m.id === lookPostId
                 ? {
                     ...m,
                     viewerLiked: beforeLiked,
@@ -426,7 +438,7 @@ export default function LooksFeed() {
         if (!res.ok) {
           setItems((prev) =>
             prev.map((m) =>
-              m.id === mediaId
+              m.id === lookPostId
                 ? {
                     ...m,
                     viewerLiked: beforeLiked,
@@ -442,6 +454,7 @@ export default function LooksFeed() {
           isRecord(raw) && typeof raw.liked === 'boolean'
             ? raw.liked
             : !beforeLiked
+
         const serverCount =
           isRecord(raw) && typeof raw.likeCount === 'number'
             ? raw.likeCount
@@ -453,7 +466,7 @@ export default function LooksFeed() {
 
         setItems((prev) =>
           prev.map((m) =>
-            m.id === mediaId
+            m.id === lookPostId
               ? {
                   ...m,
                   viewerLiked: serverLiked,
@@ -469,45 +482,45 @@ export default function LooksFeed() {
           ),
         )
       } finally {
-        likeInFlight.current[mediaId] = false
+        likeInFlight.current[lookPostId] = false
       }
     },
     [redirectToLogin],
   )
 
   const likeOnly = useCallback(
-    (mediaId: string) => {
-      const item = items.find((x) => x.id === mediaId)
+    (lookPostId: string) => {
+      const item = items.find((x) => x.id === lookPostId)
       if (!item || item.viewerLiked) return
-      toggleLike(mediaId)
+      void toggleLike(lookPostId)
     },
     [items, toggleLike],
   )
 
   const handleDoubleClickLikeOnly = useCallback(
-    (mediaId: string) => likeOnly(mediaId),
+    (lookPostId: string) => likeOnly(lookPostId),
     [likeOnly],
   )
 
   const handleTouchEndLikeOnly = useCallback(
-    (mediaId: string) => {
+    (lookPostId: string) => {
       const now = Date.now()
-      const last = lastTapRef.current[mediaId] ?? 0
-      lastTapRef.current[mediaId] = now
-      if (now - last < 280) likeOnly(mediaId)
+      const last = lastTapRef.current[lookPostId] ?? 0
+      lastTapRef.current[lookPostId] = now
+      if (now - last < 280) likeOnly(lookPostId)
     },
     [likeOnly],
   )
 
-  async function openCommentsDrawer(mediaId: string) {
-    setOpenCommentsFor(mediaId)
+  async function openCommentsDrawer(lookPostId: string) {
+    setOpenCommentsFor(lookPostId)
     setComments([])
     setCommentText('')
     setCommentError(null)
     setCommentsLoading(true)
 
     try {
-      const res = await fetch(`/api/looks/${mediaId}/comments`, {
+      const res = await fetch(`/api/looks/${lookPostId}/comments`, {
         cache: 'no-store',
         headers: { Accept: 'application/json' },
       })
@@ -526,9 +539,12 @@ export default function LooksFeed() {
             : 'Failed to load comments',
         )
       }
+
       setComments(parseComments(raw))
     } catch (e: unknown) {
-      setCommentError(e instanceof Error ? e.message : 'Failed to load comments')
+      setCommentError(
+        e instanceof Error ? e.message : 'Failed to load comments',
+      )
     } finally {
       setCommentsLoading(false)
     }
@@ -536,13 +552,14 @@ export default function LooksFeed() {
 
   async function postComment() {
     if (!openCommentsFor || posting) return
+
     const body = commentText.trim()
     if (!body) return
 
     setPosting(true)
     setCommentError(null)
 
-    const mediaId = openCommentsFor
+    const lookPostId = openCommentsFor
     const tempId = `temp_${Date.now()}`
 
     const optimistic: UiComment = {
@@ -556,7 +573,7 @@ export default function LooksFeed() {
     setCommentText('')
     setItems((prev) =>
       prev.map((m) =>
-        m.id === mediaId
+        m.id === lookPostId
           ? {
               ...m,
               _count: { ...m._count, comments: m._count.comments + 1 },
@@ -566,9 +583,12 @@ export default function LooksFeed() {
     )
 
     try {
-      const res = await fetch(`/api/looks/${mediaId}/comments`, {
+      const res = await fetch(`/api/looks/${lookPostId}/comments`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
         body: JSON.stringify({ body }),
       })
 
@@ -578,7 +598,7 @@ export default function LooksFeed() {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
         setItems((prev) =>
           prev.map((m) =>
-            m.id === mediaId
+            m.id === lookPostId
               ? {
                   ...m,
                   _count: {
@@ -597,7 +617,7 @@ export default function LooksFeed() {
         setComments((prev) => prev.filter((c) => c.id !== tempId))
         setItems((prev) =>
           prev.map((m) =>
-            m.id === mediaId
+            m.id === lookPostId
               ? {
                   ...m,
                   _count: {
@@ -608,17 +628,18 @@ export default function LooksFeed() {
               : m,
           ),
         )
+
         const msg = isRecord(raw) ? pickString(raw.error) : null
         setCommentError(msg ?? 'Failed to post comment')
         return
       }
 
-      await openCommentsDrawer(mediaId)
+      await openCommentsDrawer(lookPostId)
     } catch (e: unknown) {
       setComments((prev) => prev.filter((c) => c.id !== tempId))
       setItems((prev) =>
         prev.map((m) =>
-          m.id === mediaId
+          m.id === lookPostId
             ? {
                 ...m,
                 _count: {
@@ -651,31 +672,36 @@ export default function LooksFeed() {
     [viewerLoc],
   )
 
-  const shareLook = useCallback(async (item: FeedItem) => {
-    if (typeof window === 'undefined') return
-    const url = `${window.location.origin}/looks?m=${encodeURIComponent(item.id)}`
+  const shareLook = useCallback(
+    async (item: FeedItem) => {
+      if (typeof window === 'undefined') return
 
-    try {
-      const share = getNavigatorShare()
-      if (share) {
-        await share({
-          title: `${brand.displayName} Look`,
-          text: item.caption ? item.caption.slice(0, 120) : undefined,
-          url,
-        })
-        return
+      const lookPostId = item.id
+      const url = `${window.location.origin}/looks?m=${encodeURIComponent(lookPostId)}`
+
+      try {
+        const share = getNavigatorShare()
+        if (share) {
+          await share({
+            title: `${brand.displayName} Look`,
+            text: item.caption ? item.caption.slice(0, 120) : undefined,
+            url,
+          })
+          return
+        }
+
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(url)
+          return
+        }
+
+        window.prompt('Copy this link:', url)
+      } catch {
+        // ignore
       }
-
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(url)
-        return
-      }
-
-      window.prompt('Copy this link:', url)
-    } catch {
-      // ignore
-    }
-  }, [])
+    },
+    [brand.displayName],
+  )
 
   const FEED_VIEWPORT_HEIGHT = `calc(100dvh - ${FOOTER_HEIGHT}px)`
 
@@ -741,9 +767,9 @@ export default function LooksFeed() {
                     commentCount={m._count.comments}
                     bottom={RIGHT_RAIL_BOTTOM}
                     onOpenAvailability={() => openAvailabilityFor(m)}
-                    onToggleLike={() => toggleLike(m.id)}
-                    onOpenComments={() => openCommentsDrawer(m.id)}
-                    onShare={() => shareLook(m)}
+                    onToggleLike={() => void toggleLike(m.id)}
+                    onOpenComments={() => void openCommentsDrawer(m.id)}
+                    onShare={() => void shareLook(m)}
                   />
                 )
 
@@ -759,8 +785,8 @@ export default function LooksFeed() {
                     rightRail={rightRail}
                     onDoubleClickLike={() => handleDoubleClickLikeOnly(m.id)}
                     onTouchEndLike={() => handleTouchEndLikeOnly(m.id)}
-                    onToggleLike={() => toggleLike(m.id)}
-                    onOpenComments={() => openCommentsDrawer(m.id)}
+                    onToggleLike={() => void toggleLike(m.id)}
+                    onOpenComments={() => void openCommentsDrawer(m.id)}
                     onOpenAvailability={() => openAvailabilityFor(m)}
                   />
                 )
