@@ -2,7 +2,14 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { MediaType, MediaVisibility, VerificationStatus } from '@prisma/client'
+import {
+  LookPostStatus,
+  LookPostVisibility,
+  MediaType,
+  MediaVisibility,
+  ModerationStatus,
+  VerificationStatus,
+} from '@prisma/client'
 
 const mockRedirect = vi.hoisted(() =>
   vi.fn((url: string) => {
@@ -12,6 +19,8 @@ const mockRedirect = vi.hoisted(() =>
 
 const mockGetCurrentUser = vi.hoisted(() => vi.fn())
 const mockRenderMediaUrls = vi.hoisted(() => vi.fn())
+const mockCountFollowers = vi.hoisted(() => vi.fn())
+const mockMapPortfolioTileToDto = vi.hoisted(() => vi.fn())
 
 const mocks = vi.hoisted(() => ({
   prisma: {
@@ -22,6 +31,9 @@ const mocks = vi.hoisted(() => ({
       findMany: vi.fn(),
     },
     professionalFavorite: {
+      count: vi.fn(),
+    },
+    lookPost: {
       count: vi.fn(),
     },
     service: {
@@ -59,6 +71,14 @@ vi.mock('@/lib/currentUser', () => ({
 
 vi.mock('@/lib/media/renderUrls', () => ({
   renderMediaUrls: mockRenderMediaUrls,
+}))
+
+vi.mock('@/lib/follows', () => ({
+  countFollowers: mockCountFollowers,
+}))
+
+vi.mock('@/lib/looks/mappers', () => ({
+  mapPortfolioTileToDto: mockMapPortfolioTileToDto,
 }))
 
 vi.mock('../ReviewsPanel', () => ({
@@ -188,9 +208,7 @@ function makeUser() {
   }
 }
 
-function makePro(args?: {
-  verificationStatus?: VerificationStatus
-}) {
+function makePro(args?: { verificationStatus?: VerificationStatus }) {
   return {
     id: 'pro_1',
     handle: 'tovisstudio',
@@ -226,9 +244,12 @@ function makePortfolioMedia() {
   ]
 }
 
-async function renderPage(args?: {
-  searchParams?: TestSearchParams
-}) {
+function expectStatValue(label: string, value: string) {
+  const labelNode = screen.getByText(label)
+  expect(labelNode.parentElement).toHaveTextContent(value)
+}
+
+async function renderPage(args?: { searchParams?: TestSearchParams }) {
   const ui = await ProPublicProfilePage({
     searchParams: Promise.resolve(args?.searchParams ?? {}),
   })
@@ -248,6 +269,9 @@ describe('app/pro/profile/public-profile/page', () => {
 
     mocks.prisma.mediaAsset.findMany.mockResolvedValue(makePortfolioMedia())
     mocks.prisma.professionalFavorite.count.mockResolvedValue(7)
+    mocks.prisma.lookPost.count.mockResolvedValue(3)
+    mockCountFollowers.mockResolvedValue(11)
+
     mocks.prisma.service.findMany.mockResolvedValue([
       { id: 'svc_1', name: 'Fade' },
     ])
@@ -256,6 +280,30 @@ describe('app/pro/profile/public-profile/page', () => {
       renderUrl: 'https://cdn.example.com/media_1.jpg',
       renderThumbUrl: 'https://cdn.example.com/media_1-thumb.jpg',
     })
+
+    mockMapPortfolioTileToDto.mockImplementation(
+      async (asset: {
+        id: string
+        caption: string | null
+        visibility: MediaVisibility
+        isEligibleForLooks: boolean
+        isFeaturedInPortfolio: boolean
+        mediaType: MediaType
+        services?: Array<{ serviceId?: string }>
+      }) => ({
+        id: asset.id,
+        caption: asset.caption ?? null,
+        visibility: asset.visibility,
+        isEligibleForLooks: asset.isEligibleForLooks,
+        isFeaturedInPortfolio: asset.isFeaturedInPortfolio,
+        src: 'https://cdn.example.com/media_1-thumb.jpg',
+        serviceIds: (asset.services ?? [])
+          .map((service) => service.serviceId ?? '')
+          .filter((id): id is string => Boolean(id)),
+        isVideo: asset.mediaType === MediaType.VIDEO,
+        mediaType: asset.mediaType,
+      }),
+    )
   })
 
   it('shows pending-review setup mode for non-approved pros', async () => {
@@ -275,9 +323,7 @@ describe('app/pro/profile/public-profile/page', () => {
       ),
     ).toBeInTheDocument()
 
-    expect(
-      screen.queryByTestId('share-button'),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByTestId('share-button')).not.toBeInTheDocument()
 
     expect(
       screen.queryByRole('link', { name: /view as client/i }),
@@ -297,9 +343,10 @@ describe('app/pro/profile/public-profile/page', () => {
       screen.getByRole('link', { name: /add services/i }),
     ).toHaveAttribute('href', '/pro/profile/public-profile?tab=services&add=1')
 
-    expect(
-      screen.getByRole('link', { name: /messages/i }),
-    ).toHaveAttribute('href', '/messages')
+    expect(screen.getByRole('link', { name: /messages/i })).toHaveAttribute(
+      'href',
+      '/messages',
+    )
   })
 
   it('shows live/public affordances for approved pros', async () => {
@@ -318,10 +365,9 @@ describe('app/pro/profile/public-profile/page', () => {
       '/professionals/pro_1',
     )
 
-    expect(screen.getByRole('link', { name: /view as client/i })).toHaveAttribute(
-      'href',
-      '/professionals/pro_1',
-    )
+    expect(
+      screen.getByRole('link', { name: /view as client/i }),
+    ).toHaveAttribute('href', '/professionals/pro_1')
 
     expect(screen.getByTestId('pro-account-menu')).toHaveAttribute(
       'data-public-url',
@@ -332,6 +378,49 @@ describe('app/pro/profile/public-profile/page', () => {
       'data-can-edit-handle',
       'true',
     )
+  })
+
+  it('separates portfolio assets from canonical published looks and followers', async () => {
+    await renderPage()
+
+    expect(mocks.prisma.lookPost.count).toHaveBeenCalledWith({
+      where: {
+        professionalId: 'pro_1',
+        status: LookPostStatus.PUBLISHED,
+        moderationStatus: ModerationStatus.APPROVED,
+        visibility: LookPostVisibility.PUBLIC,
+        publishedAt: { not: null },
+      },
+    })
+
+    expect(mockCountFollowers).toHaveBeenCalledWith(mocks.prisma, 'pro_1')
+
+    expect(screen.getByText('Portfolio assets')).toBeInTheDocument()
+
+    expect(
+      screen.getByText(
+        /Published Looks are counted from canonical look posts, not from media flags on this grid\./i,
+      ),
+    ).toBeInTheDocument()
+
+    expect(screen.getByText('LOOKS ELIGIBLE')).toBeInTheDocument()
+    expect(screen.queryByText(/^LOOKS$/)).not.toBeInTheDocument()
+
+    expectStatValue('Published Looks', '3')
+    expectStatValue('Followers', '11')
+
+    expect(
+      screen.queryByRole('button', { name: /follow/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps the empty state scoped to portfolio assets', async () => {
+    mocks.prisma.mediaAsset.findMany.mockResolvedValue([])
+    mockMapPortfolioTileToDto.mockReset()
+
+    await renderPage()
+
+    expect(screen.getByText('No portfolio assets yet.')).toBeInTheDocument()
   })
 
   it('renders the services tab', async () => {

@@ -1,8 +1,12 @@
 // app/pro/profile/public-profile/page.tsx
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { MediaVisibility, MediaType } from '@prisma/client'
-
+import {
+  LookPostStatus,
+  LookPostVisibility,
+  MediaVisibility,
+  ModerationStatus,
+} from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { getBrandConfig } from '@/lib/brand'
@@ -18,7 +22,8 @@ import type { PaymentCollectionTiming } from './EditPaymentSettingsButton'
 import ShareButton from './ShareButton'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import ProAccountMenu from './ProAccountMenu'
-
+import { countFollowers } from '@/lib/follows'
+import { mapPortfolioTileToDto } from '@/lib/looks/mappers'
 export const dynamic = 'force-dynamic'
 
 type SearchParams = { [key: string]: string | string[] | undefined }
@@ -57,9 +62,6 @@ function formatClientName(input: {
   return full || 'Client'
 }
 
-function pickNonEmptyString(v: unknown): string {
-  return typeof v === 'string' ? v.trim() : ''
-}
 
 function hasStoragePointers(m: {
   storageBucket: unknown
@@ -174,7 +176,13 @@ export default async function ProPublicProfilePage({
   const publicUrl = `/professionals/${pro.id}`
   const livePublicUrl = isApproved ? publicUrl : null
 
-  const [portfolioMedia, favoritesCount, serviceOptions] = await Promise.all([
+  const [
+    portfolioAssets,
+    favoritesCount,
+    publishedLooksCount,
+    followersCount,
+    serviceOptions,
+  ] = await Promise.all([
     prisma.mediaAsset.findMany({
       where: {
         professionalId: pro.id,
@@ -201,6 +209,16 @@ export default async function ProPublicProfilePage({
     prisma.professionalFavorite.count({
       where: { professionalId: pro.id },
     }),
+    prisma.lookPost.count({
+      where: {
+        professionalId: pro.id,
+        status: LookPostStatus.PUBLISHED,
+        moderationStatus: ModerationStatus.APPROVED,
+        visibility: LookPostVisibility.PUBLIC,
+        publishedAt: { not: null },
+      },
+    }),
+    countFollowers(prisma, pro.id),
     prisma.service.findMany({
       where: { isActive: true },
       orderBy: { name: 'asc' },
@@ -270,35 +288,9 @@ export default async function ProPublicProfilePage({
   const subtitle = pro.professionType || 'Beauty professional'
   const location = pro.location?.trim() || null
 
-  const portfolioTiles = (
+  const portfolioAssetTiles = (
     await Promise.all(
-      portfolioMedia.map(async (m) => {
-        if (!hasStoragePointers(m)) return null
-
-        const { renderUrl, renderThumbUrl } = await renderMediaUrls({
-          storageBucket: m.storageBucket,
-          storagePath: m.storagePath,
-          thumbBucket: m.thumbBucket,
-          thumbPath: m.thumbPath,
-          url: m.url,
-          thumbUrl: m.thumbUrl,
-        })
-
-        const src = (renderThumbUrl ?? renderUrl ?? '').trim()
-        if (!src) return null
-
-        const serviceIds = (m.services ?? [])
-          .map((s) => pickNonEmptyString(s.serviceId))
-          .filter((id): id is string => id.length > 0)
-
-        return {
-          ...m,
-          src,
-          serviceIds,
-          isVideo: m.mediaType === MediaType.VIDEO,
-          isPrivate: m.visibility === MediaVisibility.PRO_CLIENT,
-        }
-      }),
+      portfolioAssets.map((asset) => mapPortfolioTileToDto(asset)),
     )
   ).filter((x): x is NonNullable<typeof x> => Boolean(x))
 
@@ -445,13 +437,15 @@ export default async function ProPublicProfilePage({
           </div>
         </div>
 
-        <div className="mt-5 grid grid-cols-3 gap-3">
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-5">
           <Stat
             label="Rating"
             value={reviewCount ? averageRating || '–' : '–'}
           />
           <Stat label="Reviews" value={String(reviewCount)} />
           <Stat label="Favorites" value={String(favoritesCount)} />
+          <Stat label="Published Looks" value={String(publishedLooksCount)} />
+          <Stat label="Followers" value={String(followersCount)} />
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
@@ -503,6 +497,24 @@ export default async function ProPublicProfilePage({
 
       {tab === 'portfolio' ? (
         <section className="pt-4">
+                    <div className="mb-3">
+            <div className="text-[14px] font-black text-textPrimary">
+              Portfolio assets
+            </div>
+            <div className="mt-1 text-[12px] text-textSecondary">
+              This grid is your featured media library. Published Looks are
+              counted from canonical look posts, not from media flags on this
+              grid.
+            </div>
+          </div>
+
+          {portfolioAssetTiles.some((asset) => asset.isEligibleForLooks) ? (
+            <div className="mb-3 text-[12px] text-textSecondary">
+              “LOOKS ELIGIBLE” is a temporary media-level bridge. It is not the
+              canonical published-look record.
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-3 gap-2 sm:gap-3">
             <Link
               href={ROUTES.proMediaNew}
@@ -519,7 +531,7 @@ export default async function ProPublicProfilePage({
               </div>
             </Link>
 
-            {portfolioTiles.map((m) => (
+            {portfolioAssetTiles.map((m) => (
               <div
                 key={m.id}
                 className="group relative aspect-square overflow-hidden rounded-[18px] border border-white/10 bg-bgSecondary"
@@ -535,14 +547,14 @@ export default async function ProPublicProfilePage({
                 </Link>
 
                 <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap gap-1.5">
-                  {m.isPrivate ? (
+                  {m.visibility === MediaVisibility.PRO_CLIENT ? (
                     <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
                       ONLY YOU
                     </span>
                   ) : null}
                   {m.isEligibleForLooks ? (
                     <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] font-black text-white">
-                      LOOKS
+                      LOOKS ELIGIBLE
                     </span>
                   ) : null}
                   {m.isFeaturedInPortfolio ? (
@@ -575,9 +587,9 @@ export default async function ProPublicProfilePage({
             ))}
           </div>
 
-          {portfolioTiles.length === 0 ? (
+          {portfolioAssetTiles.length === 0 ? (
             <div className="mt-3 text-[12px] text-textSecondary">
-              No posts yet. Go ahead—feed the algorithm.
+              No portfolio assets yet.
             </div>
           ) : null}
         </section>
