@@ -31,6 +31,13 @@ import {
   getViewerLookSaveState,
   removeBoardItem,
   requireBoardOwner,
+  buildLooksBoardItemMutationResponse,
+  buildLooksSaveStateResponse,
+  deleteBoard,
+  getBoardDetail,
+  getBoardErrorMeta,
+  parseBoardVisibility,
+  updateBoard,
 } from './index'
 
 function asTransactionClient(
@@ -45,6 +52,8 @@ function makeDb() {
       findUnique: vi.fn(),
       create: vi.fn(),
       findMany: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
     },
     boardItem: {
       findUnique: vi.fn(),

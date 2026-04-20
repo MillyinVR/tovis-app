@@ -235,6 +235,58 @@ export type LooksBoardPreviewDto = {
   items: LooksBoardPreviewItemDto[]
 }
 
+export type LooksSavedBoardStateDto = {
+  id: string
+  name: string
+  visibility: BoardVisibility
+}
+
+export type LooksSaveStateResponseDto = {
+  lookPostId: string
+  isSaved: boolean
+  saveCount: number
+  boardIds: string[]
+  boards: LooksSavedBoardStateDto[]
+}
+
+export type LooksBoardDetailLookPostDto = LooksBoardPreviewLookPostDto
+
+export type LooksBoardDetailItemDto = LooksBoardPreviewItemDto
+
+export type LooksBoardDetailDto = {
+  id: string
+  clientId: string
+  name: string
+  visibility: BoardVisibility
+  createdAt: string
+  updatedAt: string
+  itemCount: number
+  items: LooksBoardDetailItemDto[]
+}
+
+export type LooksBoardsListResponseDto = {
+  boards: LooksBoardPreviewDto[]
+}
+
+export type LooksBoardDetailResponseDto = {
+  board: LooksBoardDetailDto
+}
+
+export type LooksBoardItemMutationResponseDto = {
+  boardId: string
+  lookPostId: string
+  inBoard: boolean
+  isSaved: boolean
+  saveCount: number
+  boardIds: string[]
+  boards: LooksSavedBoardStateDto[]
+}
+
+export type LooksBoardDeleteResponseDto = {
+  deleted: true
+  id: string
+}
+
 export type LooksProProfilePreviewDto = {
   id: string
   businessName: string | null

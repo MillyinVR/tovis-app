@@ -1,5 +1,11 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { VerificationStatus } from '@prisma/client'
+// lib/looks/access.test.ts
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  LookPostStatus,
+  LookPostVisibility,
+  ModerationStatus,
+  VerificationStatus,
+} from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
   getViewerFollowState: vi.fn(),
@@ -47,9 +53,10 @@ describe('lib/looks/access.ts', () => {
     db.lookPost.findUnique.mockResolvedValue({
       id: 'look_1',
       professionalId: 'pro_1',
-      status: 'PUBLISHED',
-      visibility: 'PUBLIC',
-      moderationStatus: 'APPROVED',
+      status: LookPostStatus.PUBLISHED,
+      visibility: LookPostVisibility.PUBLIC,
+      moderationStatus: ModerationStatus.APPROVED,
+      saveCount: 3,
       professional: {
         id: 'pro_1',
         verificationStatus: VerificationStatus.APPROVED,
@@ -66,9 +73,10 @@ describe('lib/looks/access.ts', () => {
       look: {
         id: 'look_1',
         professionalId: 'pro_1',
-        status: 'PUBLISHED',
-        visibility: 'PUBLIC',
-        moderationStatus: 'APPROVED',
+        status: LookPostStatus.PUBLISHED,
+        visibility: LookPostVisibility.PUBLIC,
+        moderationStatus: ModerationStatus.APPROVED,
+        saveCount: 3,
         professional: {
           id: 'pro_1',
           verificationStatus: VerificationStatus.APPROVED,
@@ -85,9 +93,10 @@ describe('lib/looks/access.ts', () => {
     db.lookPost.findUnique.mockResolvedValue({
       id: 'look_1',
       professionalId: 'pro_2',
-      status: 'PUBLISHED',
-      visibility: 'FOLLOWERS_ONLY',
-      moderationStatus: 'APPROVED',
+      status: LookPostStatus.PUBLISHED,
+      visibility: LookPostVisibility.FOLLOWERS_ONLY,
+      moderationStatus: ModerationStatus.APPROVED,
+      saveCount: 7,
       professional: {
         id: 'pro_2',
         verificationStatus: VerificationStatus.APPROVED,
@@ -106,7 +115,21 @@ describe('lib/looks/access.ts', () => {
       professionalId: 'pro_2',
     })
 
-    expect(result?.isOwner).toBe(false)
-    expect(result?.viewerFollowsProfessional).toBe(true)
+    expect(result).toEqual({
+      look: {
+        id: 'look_1',
+        professionalId: 'pro_2',
+        status: LookPostStatus.PUBLISHED,
+        visibility: LookPostVisibility.FOLLOWERS_ONLY,
+        moderationStatus: ModerationStatus.APPROVED,
+        saveCount: 7,
+        professional: {
+          id: 'pro_2',
+          verificationStatus: VerificationStatus.APPROVED,
+        },
+      },
+      isOwner: false,
+      viewerFollowsProfessional: true,
+    })
   })
 })

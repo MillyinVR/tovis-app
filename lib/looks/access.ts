@@ -11,6 +11,7 @@ export const lookAccessSelect =
     status: true,
     visibility: true,
     moderationStatus: true,
+    saveCount: true,
     professional: {
       select: {
         id: true,

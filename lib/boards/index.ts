@@ -5,10 +5,21 @@ import {
   PrismaClient,
 } from '@prisma/client'
 
-import { mapLooksBoardPreviewToDto } from '@/lib/looks/mappers'
+import {
+  mapLooksBoardDetailToDto,
+  mapLooksBoardPreviewToDto,
+} from '@/lib/looks/mappers'
 import { recomputeLookPostSaveCount } from '@/lib/looks/counters'
-import { looksBoardPreviewSelect } from '@/lib/looks/selects'
-import type { LooksBoardPreviewDto } from '@/lib/looks/types'
+import {
+  looksBoardDetailSelect,
+  looksBoardPreviewSelect,
+} from '@/lib/looks/selects'
+import type {
+  LooksBoardDetailDto,
+  LooksBoardItemMutationResponseDto,
+  LooksBoardPreviewDto,
+  LooksSaveStateResponseDto,
+} from '@/lib/looks/types'
 
 type BoardsDb = PrismaClient | Prisma.TransactionClient
 
@@ -33,6 +44,109 @@ export type ViewerLookSaveState = {
     name: string
     visibility: BoardVisibility
   }>
+}
+
+export type BoardErrorMeta = {
+  status: 400 | 403 | 404 | 409
+  message: string
+  code:
+    | 'INVALID_BOARD_NAME'
+    | 'INVALID_BOARD_VISIBILITY'
+    | 'BOARD_NOT_FOUND'
+    | 'BOARD_FORBIDDEN'
+    | 'BOARD_NAME_CONFLICT'
+}
+
+export function parseBoardVisibility(
+  value: string | null | undefined,
+): BoardVisibility | null {
+  const trimmed = normalizeOptionalId(value)
+  if (!trimmed) return null
+
+  const upper = trimmed.toUpperCase()
+
+  if (upper === BoardVisibility.PRIVATE) return BoardVisibility.PRIVATE
+  if (upper === BoardVisibility.SHARED) return BoardVisibility.SHARED
+
+  return null
+}
+
+export function getBoardErrorMeta(error: unknown): BoardErrorMeta | null {
+  const message = error instanceof Error ? error.message : ''
+
+  switch (message) {
+    case 'Board name is required.':
+    case 'Board name must be 120 characters or fewer.':
+      return {
+        status: 400,
+        message,
+        code: 'INVALID_BOARD_NAME',
+      }
+    case 'Board not found.':
+      return {
+        status: 404,
+        message,
+        code: 'BOARD_NOT_FOUND',
+      }
+    case 'Not allowed to manage this board.':
+      return {
+        status: 403,
+        message,
+        code: 'BOARD_FORBIDDEN',
+      }
+    case 'A board with this name already exists.':
+      return {
+        status: 409,
+        message,
+        code: 'BOARD_NAME_CONFLICT',
+      }
+    default:
+      return null
+  }
+}
+
+export function buildLooksSaveStateResponse(args: {
+  lookPostId: string
+  saveCount: number
+  state: ViewerLookSaveState
+}): LooksSaveStateResponseDto {
+  const lookPostId = normalizeRequiredId('lookPostId', args.lookPostId)
+
+  return {
+    lookPostId,
+    isSaved: args.state.isSaved,
+    saveCount: Math.max(Math.trunc(args.saveCount), 0),
+    boardIds: [...args.state.boardIds],
+    boards: args.state.boards.map((board) => ({
+      id: board.id,
+      name: board.name,
+      visibility: board.visibility,
+    })),
+  }
+}
+
+export function buildLooksBoardItemMutationResponse(args: {
+  boardId: string
+  lookPostId: string
+  inBoard: boolean
+  saveCount: number
+  state: ViewerLookSaveState
+}): LooksBoardItemMutationResponseDto {
+  const save = buildLooksSaveStateResponse({
+    lookPostId: args.lookPostId,
+    saveCount: args.saveCount,
+    state: args.state,
+  })
+
+  return {
+    boardId: normalizeRequiredId('boardId', args.boardId),
+    lookPostId: save.lookPostId,
+    inBoard: args.inBoard,
+    isSaved: save.isSaved,
+    saveCount: save.saveCount,
+    boardIds: save.boardIds,
+    boards: save.boards,
+  }
 }
 
 function normalizeRequiredId(name: string, value: string): string {
@@ -164,6 +278,91 @@ export async function createBoard(
 
     throw error
   }
+}
+
+export async function getBoardDetail(
+  db: BoardsDb,
+  args: {
+    boardId: string
+    clientId: string
+  },
+): Promise<LooksBoardDetailDto> {
+  const boardId = normalizeRequiredId('boardId', args.boardId)
+  const clientId = normalizeRequiredId('clientId', args.clientId)
+
+  await requireBoardOwner(db, { boardId, clientId })
+
+  const row = await db.board.findUnique({
+    where: { id: boardId },
+    select: looksBoardDetailSelect,
+  })
+
+  if (!row) {
+    throw new Error('Board not found.')
+  }
+
+  return mapLooksBoardDetailToDto(row)
+}
+
+export async function updateBoard(
+  db: BoardsDb,
+  args: {
+    boardId: string
+    clientId: string
+    name?: string
+    visibility?: BoardVisibility
+  },
+): Promise<BoardOwnerRow> {
+  const boardId = normalizeRequiredId('boardId', args.boardId)
+  const clientId = normalizeRequiredId('clientId', args.clientId)
+
+  const current = await requireBoardOwner(db, { boardId, clientId })
+
+  const data: Prisma.BoardUpdateInput = {}
+
+  if (args.name !== undefined) {
+    data.name = normalizeBoardName(args.name)
+  }
+
+  if (args.visibility !== undefined) {
+    data.visibility = args.visibility
+  }
+
+  if (Object.keys(data).length === 0) {
+    return current
+  }
+
+  try {
+    return await db.board.update({
+      where: { id: current.id },
+      data,
+      select: boardOwnerSelect,
+    })
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw new Error('A board with this name already exists.')
+    }
+
+    throw error
+  }
+}
+
+export async function deleteBoard(
+  db: BoardsDb,
+  args: {
+    boardId: string
+    clientId: string
+  },
+): Promise<{ id: string }> {
+  const board = await requireBoardOwner(db, args)
+
+  return db.board.delete({
+    where: { id: board.id },
+    select: { id: true },
+  })
 }
 
 export async function addBoardItem(

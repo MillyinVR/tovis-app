@@ -227,3 +227,45 @@ export const looksBoardPreviewSelect =
 export type LooksBoardPreviewRow = Prisma.BoardGetPayload<{
   select: typeof looksBoardPreviewSelect
 }>
+
+export const looksBoardDetailSelect =
+  Prisma.validator<Prisma.BoardSelect>()({
+    id: true,
+    clientId: true,
+    name: true,
+    visibility: true,
+    createdAt: true,
+    updatedAt: true,
+
+    _count: {
+      select: {
+        items: true,
+      },
+    },
+
+    items: {
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        createdAt: true,
+        lookPostId: true,
+        lookPost: {
+          select: {
+            id: true,
+            caption: true,
+            status: true,
+            visibility: true,
+            moderationStatus: true,
+            publishedAt: true,
+            primaryMediaAsset: {
+              select: looksMediaPreviewSelect,
+            },
+          },
+        },
+      },
+    },
+  })
+
+export type LooksBoardDetailRow = Prisma.BoardGetPayload<{
+  select: typeof looksBoardDetailSelect
+}>

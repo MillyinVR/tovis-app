@@ -20,12 +20,14 @@ vi.mock('@/lib/media/renderUrls', () => ({
 }))
 
 import type {
+  LooksBoardDetailRow,
   LooksBoardPreviewRow,
   LooksDetailRow,
   LooksFeedRow,
   LooksProProfilePreviewRow,
 } from '@/lib/looks/selects'
 import {
+  mapLooksBoardDetailToDto,
   mapLooksBoardPreviewToDto,
   mapLooksCommentToDto,
   mapLooksDetailMediaToRenderable,
@@ -205,6 +207,75 @@ function makeBoardPreviewRow(
       items: 1,
     },
     items: [
+      {
+        id: 'item_1',
+        createdAt: new Date('2026-04-18T11:30:00.000Z'),
+        lookPostId: 'look_1',
+        lookPost: {
+          id: 'look_1',
+          caption: 'Wolf cut inspo',
+          status: LookPostStatus.PUBLISHED,
+          visibility: LookPostVisibility.PUBLIC,
+          moderationStatus: ModerationStatus.APPROVED,
+          publishedAt: new Date('2026-04-18T09:00:00.000Z'),
+          primaryMediaAsset: {
+            id: 'media_1',
+            url: 'https://cdn.example.com/look.jpg',
+            thumbUrl: 'https://cdn.example.com/look-thumb.jpg',
+            storageBucket: 'media-public',
+            storagePath: 'looks/look.jpg',
+            thumbBucket: 'media-public',
+            thumbPath: 'looks/look-thumb.jpg',
+            mediaType: MediaType.IMAGE,
+            caption: 'Look preview',
+            createdAt: new Date('2026-04-18T08:30:00.000Z'),
+          },
+        },
+      },
+    ],
+    ...overrides,
+  }
+}
+
+function makeBoardDetailRow(
+  overrides?: Partial<LooksBoardDetailRow>,
+): LooksBoardDetailRow {
+  return {
+    id: 'board_1',
+    clientId: 'client_1',
+    name: 'Hair ideas',
+    visibility: BoardVisibility.PRIVATE,
+    createdAt: new Date('2026-04-18T10:00:00.000Z'),
+    updatedAt: new Date('2026-04-18T11:00:00.000Z'),
+    _count: {
+      items: 2,
+    },
+    items: [
+      {
+        id: 'item_2',
+        createdAt: new Date('2026-04-18T12:00:00.000Z'),
+        lookPostId: 'look_2',
+        lookPost: {
+          id: 'look_2',
+          caption: 'Bob cut inspo',
+          status: LookPostStatus.PUBLISHED,
+          visibility: LookPostVisibility.PUBLIC,
+          moderationStatus: ModerationStatus.APPROVED,
+          publishedAt: new Date('2026-04-18T10:00:00.000Z'),
+          primaryMediaAsset: {
+            id: 'media_2',
+            url: 'https://cdn.example.com/look-2.jpg',
+            thumbUrl: 'https://cdn.example.com/look-2-thumb.jpg',
+            storageBucket: 'media-public',
+            storagePath: 'looks/look-2.jpg',
+            thumbBucket: 'media-public',
+            thumbPath: 'looks/look-2-thumb.jpg',
+            mediaType: MediaType.IMAGE,
+            caption: 'Second look preview',
+            createdAt: new Date('2026-04-18T09:30:00.000Z'),
+          },
+        },
+      },
       {
         id: 'item_1',
         createdAt: new Date('2026-04-18T11:30:00.000Z'),
@@ -803,6 +874,64 @@ describe('lib/looks/mappers.ts', () => {
         updatedAt: '2026-04-18T11:00:00.000Z',
         itemCount: 1,
         items: [
+          {
+            id: 'item_1',
+            createdAt: '2026-04-18T11:30:00.000Z',
+            lookPostId: 'look_1',
+            lookPost: {
+              id: 'look_1',
+              caption: 'Wolf cut inspo',
+              status: LookPostStatus.PUBLISHED,
+              visibility: LookPostVisibility.PUBLIC,
+              moderationStatus: ModerationStatus.APPROVED,
+              publishedAt: '2026-04-18T09:00:00.000Z',
+              primaryMedia: {
+                id: 'media_1',
+                url: 'https://cdn.example.com/look.jpg',
+                thumbUrl: 'https://cdn.example.com/look-thumb.jpg',
+                mediaType: MediaType.IMAGE,
+              },
+            },
+          },
+        ],
+      })
+    })
+  })
+
+  describe('mapLooksBoardDetailToDto', () => {
+    it('maps a board detail row into the stable detail DTO', async () => {
+      const row = makeBoardDetailRow()
+
+      const result = await mapLooksBoardDetailToDto(row)
+
+      expect(result).toEqual({
+        id: 'board_1',
+        clientId: 'client_1',
+        name: 'Hair ideas',
+        visibility: BoardVisibility.PRIVATE,
+        createdAt: '2026-04-18T10:00:00.000Z',
+        updatedAt: '2026-04-18T11:00:00.000Z',
+        itemCount: 2,
+        items: [
+          {
+            id: 'item_2',
+            createdAt: '2026-04-18T12:00:00.000Z',
+            lookPostId: 'look_2',
+            lookPost: {
+              id: 'look_2',
+              caption: 'Bob cut inspo',
+              status: LookPostStatus.PUBLISHED,
+              visibility: LookPostVisibility.PUBLIC,
+              moderationStatus: ModerationStatus.APPROVED,
+              publishedAt: '2026-04-18T10:00:00.000Z',
+              primaryMedia: {
+                id: 'media_2',
+                url: 'https://cdn.example.com/look-2.jpg',
+                thumbUrl: 'https://cdn.example.com/look-2-thumb.jpg',
+                mediaType: MediaType.IMAGE,
+              },
+            },
+          },
           {
             id: 'item_1',
             createdAt: '2026-04-18T11:30:00.000Z',

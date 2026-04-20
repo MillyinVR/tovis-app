@@ -7,12 +7,14 @@ import {
 } from '@prisma/client'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import type {
+  LooksBoardDetailRow,
   LooksBoardPreviewRow,
   LooksDetailRow,
   LooksFeedRow,
   LooksProProfilePreviewRow,
 } from '@/lib/looks/selects'
 import type {
+  LooksBoardDetailDto,
   LooksBoardPreviewDto,
   LooksBoardPreviewPrimaryMediaDto,
   LooksCommentDto,
@@ -616,6 +618,55 @@ export function mapLooksDetailToDto(args: {
 export async function mapLooksBoardPreviewToDto(
   board: LooksBoardPreviewRow,
 ): Promise<LooksBoardPreviewDto> {
+  const items = await Promise.all(
+    board.items.map(async (item) => {
+      const lookPost = item.lookPost
+
+      if (!lookPost) {
+        return {
+          id: item.id,
+          createdAt: item.createdAt.toISOString(),
+          lookPostId: item.lookPostId,
+          lookPost: null,
+        }
+      }
+
+      const primaryMedia = await mapStoredMediaToPreviewDto(
+        lookPost.primaryMediaAsset,
+      )
+
+      return {
+        id: item.id,
+        createdAt: item.createdAt.toISOString(),
+        lookPostId: item.lookPostId,
+        lookPost: {
+          id: lookPost.id,
+          caption: lookPost.caption ?? null,
+          status: lookPost.status,
+          visibility: lookPost.visibility,
+          moderationStatus: lookPost.moderationStatus,
+          publishedAt: lookPost.publishedAt?.toISOString() ?? null,
+          primaryMedia,
+        },
+      }
+    }),
+  )
+
+  return {
+    id: board.id,
+    clientId: board.clientId,
+    name: board.name,
+    visibility: board.visibility,
+    createdAt: board.createdAt.toISOString(),
+    updatedAt: board.updatedAt.toISOString(),
+    itemCount: board._count.items,
+    items,
+  }
+}
+
+export async function mapLooksBoardDetailToDto(
+  board: LooksBoardDetailRow,
+): Promise<LooksBoardDetailDto> {
   const items = await Promise.all(
     board.items.map(async (item) => {
       const lookPost = item.lookPost
