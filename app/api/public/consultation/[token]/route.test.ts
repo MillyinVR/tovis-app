@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientActionTokenKind,
   ConsultationApprovalStatus,
@@ -139,6 +139,9 @@ function makePublicConsultationToken(overrides?: {
 
 describe('GET /api/public/consultation/[token]', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-20T12:00:00.000Z'))
+
     vi.clearAllMocks()
 
     mocks.jsonOk.mockImplementation(
@@ -163,6 +166,10 @@ describe('GET /api/public/consultation/[token]', () => {
     mocks.hashClientActionToken.mockImplementation(
       (rawToken: string) => `hashed:${rawToken}`,
     )
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('returns 404 when token is missing', async () => {

@@ -1,3 +1,5 @@
+// app/api/public/consultation/[token]/route.ts 
+
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
 import { hashClientActionToken } from '@/lib/consultation/clientActionTokens'
