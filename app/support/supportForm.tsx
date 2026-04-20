@@ -65,7 +65,7 @@ export default function SupportForm({ role }: Props) {
       </button>
 
       <p className="text-[11px] text-textSecondary">
-        Please don’t include passwords, verification codes, or secret keys. (Yes, I have to say it.)
+        Please don’t include passwords, verification codes, or secret keys. We’ll get back to you as soon as we can, but response times may vary based on the volume of requests.)
       </p>
     </form>
   )
