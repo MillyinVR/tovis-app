@@ -431,6 +431,23 @@ enum BoardVisibility {
   SHARED
 }
 
+enum LooksSocialJobType {
+  RECOMPUTE_LOOK_COUNTS
+  RECOMPUTE_LOOK_SPOTLIGHT_SCORE
+  RECOMPUTE_LOOK_RANK_SCORE
+  FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS
+  INDEX_LOOK_POST_DOCUMENT
+  MODERATION_SCAN_LOOK_POST
+  MODERATION_SCAN_COMMENT
+}
+
+enum LooksSocialJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 // =======================
 // CORE MODELS
 // =======================
@@ -2279,6 +2296,26 @@ model LookComment {
   @@index([lookPostId, createdAt])
   @@index([userId, createdAt])
   @@index([moderationStatus, createdAt])
+}
+
+model LooksSocialJob {
+  id           String               @id @default(cuid())
+  type         LooksSocialJobType
+  dedupeKey    String               @unique
+  payload      Json
+  status       LooksSocialJobStatus @default(PENDING)
+  runAt        DateTime             @default(now())
+  claimedAt    DateTime?
+  processedAt  DateTime?
+  failedAt     DateTime?
+  attemptCount Int                  @default(0)
+  maxAttempts  Int                  @default(5)
+  lastError    String?
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([status, runAt, createdAt, id])
+  @@index([type, status, runAt])
 }
 
 model ProFollow {
