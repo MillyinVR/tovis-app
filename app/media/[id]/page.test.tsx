@@ -221,7 +221,17 @@ describe('app/media/[id]/page', () => {
     })
   })
 
-  it('allows non-owners to view approved public media', async () => {
+  it('treats [id] as a raw media asset id', async () => {
+    await renderPage({ id: 'media_asset_42' })
+
+    expect(mocks.prisma.mediaAsset.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'media_asset_42' },
+      }),
+    )
+  })
+
+    it('renders approved public media as a raw media detail view for non-owners', async () => {
     await renderPage()
 
     expect(screen.getByTestId('media-fullscreen-viewer')).toHaveAttribute(
@@ -232,16 +242,26 @@ describe('app/media/[id]/page', () => {
       'data-media-type',
       'IMAGE',
     )
-    expect(screen.getByRole('link', { name: /back to profile/i })).toHaveAttribute(
-      'href',
-      '/professionals/pro_1',
-    )
-    expect(screen.getByText('3 likes • 1 comments')).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: /back to profile/i }),
+    ).toHaveAttribute('href', '/professionals/pro_1')
+
+    expect(screen.getByText('Image asset')).toBeInTheDocument()
     expect(screen.getByText('Fresh cut')).toBeInTheDocument()
+    expect(screen.getByText('Services')).toBeInTheDocument()
     expect(screen.getByText('Fade')).toBeInTheDocument()
     expect(screen.getByText('Beard Trim')).toBeInTheDocument()
 
-    expect(screen.queryByTestId('owner-media-menu')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('3 likes • 1 comments'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Owner media view'),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('owner-media-menu'),
+    ).not.toBeInTheDocument()
+
     expect(mocks.prisma.service.findMany).not.toHaveBeenCalled()
   })
 
@@ -279,6 +299,14 @@ describe('app/media/[id]/page', () => {
       'data-service-ids',
       'svc_1,svc_2',
     )
+
+    expect(screen.getByText('Owner media view')).toBeInTheDocument()
+    expect(screen.getByText('Public media')).toBeInTheDocument()
+    expect(screen.getByText('Looks enabled')).toBeInTheDocument()
+    expect(screen.getByText('Portfolio featured')).toBeInTheDocument()
+    expect(
+      screen.queryByText('3 likes • 1 comments'),
+    ).not.toBeInTheDocument()
 
     expect(mocks.prisma.service.findMany).toHaveBeenCalledWith({
       where: { isActive: true },

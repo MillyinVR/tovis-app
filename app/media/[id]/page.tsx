@@ -1,59 +1,88 @@
 // app/media/[id]/page.tsx
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import {
+  MediaType,
+  MediaVisibility,
+  type Prisma,
+} from '@prisma/client'
+
 import MediaFullscreenViewer from '@/app/_components/media/MediaFullscreenViewer'
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
-import { pickString } from '@/lib/pick'
-import { cn } from '@/lib/utils'
+import { getCurrentUser } from '@/lib/currentUser'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
-import { MediaVisibility } from '@prisma/client'
+import { pickString } from '@/lib/pick'
+import { prisma } from '@/lib/prisma'
 import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
+import { cn } from '@/lib/utils'
 
-type PageProps = { params: Promise<{ id: string }> }
+type PageProps = {
+  params: Promise<{ id: string }>
+}
 
-export default async function PublicMediaDetailPage({ params }: PageProps) {
+const mediaPageSelect = {
+  id: true,
+  caption: true,
+  mediaType: true,
+  visibility: true,
+  professionalId: true,
+  isEligibleForLooks: true,
+  isFeaturedInPortfolio: true,
+  storageBucket: true,
+  storagePath: true,
+  thumbBucket: true,
+  thumbPath: true,
+  url: true,
+  thumbUrl: true,
+  professional: {
+    select: {
+      verificationStatus: true,
+    },
+  },
+  services: {
+    select: {
+      serviceId: true,
+      service: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.MediaAssetSelect
+
+type MediaPageRecord = Prisma.MediaAssetGetPayload<{
+  select: typeof mediaPageSelect
+}>
+
+async function getMediaPageRecord(id: string): Promise<MediaPageRecord | null> {
+  return prisma.mediaAsset.findUnique({
+    where: { id },
+    select: mediaPageSelect,
+  })
+}
+
+function MetaBadge({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      className={cn(
+        'rounded-full border border-white/10 bg-bgPrimary/20',
+        'px-3 py-1 text-[11px] font-extrabold text-textPrimary',
+        'backdrop-blur-xl',
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
+export default async function MediaDetailPage({ params }: PageProps) {
   const { id: rawId } = await params
   const id = pickString(rawId)
   if (!id) notFound()
 
-  const media = await prisma.mediaAsset.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      caption: true,
-      mediaType: true,
-      visibility: true,
-      professionalId: true,
-      isEligibleForLooks: true,
-      isFeaturedInPortfolio: true,
-
-      storageBucket: true,
-      storagePath: true,
-      thumbBucket: true,
-      thumbPath: true,
-
-      url: true,
-      thumbUrl: true,
-
-      professional: {
-        select: {
-          verificationStatus: true,
-        },
-      },
-
-      services: {
-        select: {
-          serviceId: true,
-          service: { select: { name: true } },
-        },
-      },
-      _count: { select: { likes: true, comments: true } },
-    },
-  })
-
+  const media = await getMediaPageRecord(id)
   if (!media || media.visibility !== MediaVisibility.PUBLIC) notFound()
 
   const viewer = await getCurrentUser().catch(() => null)
@@ -62,7 +91,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
     viewer?.professionalProfile?.id === media.professionalId
 
   const isApproved = isPubliclyApprovedProStatus(
-    media.professional?.verificationStatus ?? null,
+    media.professional.verificationStatus,
   )
 
   if (!isOwner && !isApproved) notFound()
@@ -79,8 +108,10 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
   if (!renderUrl) notFound()
 
   const backHref = `/professionals/${media.professionalId}`
-  const isVideo = media.mediaType === 'VIDEO'
-  const tags = (media.services || []).map((t) => t.service?.name || '').filter(Boolean)
+  const isVideo = media.mediaType === MediaType.VIDEO
+  const tagNames = media.services
+    .map((tag) => tag.service.name.trim())
+    .filter((name) => name.length > 0)
 
   const serviceOptions = isOwner
     ? await prisma.service.findMany({
@@ -97,7 +128,7 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
     <MediaFullscreenViewer
       src={renderUrl}
       mediaType={isVideo ? 'VIDEO' : 'IMAGE'}
-      alt={media.caption || 'Media'}
+      alt={media.caption || 'Media asset'}
       fit="contain"
       showGradients
       footerOffsetPx={footerOffsetPx}
@@ -122,16 +153,16 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
             initial={{
               caption: media.caption ?? null,
               visibility: media.visibility,
-              isEligibleForLooks: Boolean(media.isEligibleForLooks),
-              isFeaturedInPortfolio: Boolean(media.isFeaturedInPortfolio),
-              serviceIds: (media.services || []).map((s) => s.serviceId).filter(Boolean),
+              isEligibleForLooks: media.isEligibleForLooks,
+              isFeaturedInPortfolio: media.isFeaturedInPortfolio,
+              serviceIds: media.services.map((tag) => tag.serviceId),
             }}
           />
         ) : null
       }
       bottom={
         <div className="pointer-events-none">
-          <div className="pointer-events-auto w-full max-w-[520px]">
+          <div className="pointer-events-auto w-full max-w-[560px]">
             <div
               className={cn(
                 'rounded-[18px] border border-white/10 bg-bgPrimary/25 backdrop-blur-xl',
@@ -139,30 +170,48 @@ export default async function PublicMediaDetailPage({ params }: PageProps) {
                 'shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
               )}
             >
-              <div className="text-[12px] font-extrabold text-textSecondary">
-                {media._count.likes} likes • {media._count.comments} comments
+              <div className="flex flex-wrap gap-2">
+                <MetaBadge>{isVideo ? 'Video asset' : 'Image asset'}</MetaBadge>
+
+                {isOwner ? (
+                  <>
+                    <MetaBadge>Owner media view</MetaBadge>
+                    <MetaBadge>
+                      {media.visibility === MediaVisibility.PUBLIC
+                        ? 'Public media'
+                        : 'Client + you'}
+                    </MetaBadge>
+                    <MetaBadge>
+                      {media.isEligibleForLooks
+                        ? 'Looks enabled'
+                        : 'Looks off'}
+                    </MetaBadge>
+                    <MetaBadge>
+                      {media.isFeaturedInPortfolio
+                        ? 'Portfolio featured'
+                        : 'Portfolio off'}
+                    </MetaBadge>
+                  </>
+                ) : null}
               </div>
 
               {media.caption ? (
-                <div className="mt-1 text-[14px] font-black leading-snug text-textPrimary">
+                <div className="mt-2 text-[14px] font-black leading-snug text-textPrimary">
                   {media.caption}
                 </div>
               ) : null}
 
-              {tags.length ? (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {tags.slice(0, 6).map((name, idx) => (
-                    <span
-                      key={`${name}_${idx}`}
-                      className={cn(
-                        'rounded-full border border-white/10 bg-bgPrimary/20',
-                        'px-3 py-1 text-[12px] font-extrabold text-textPrimary',
-                        'backdrop-blur-xl',
-                      )}
-                    >
-                      {name}
-                    </span>
-                  ))}
+              {tagNames.length > 0 ? (
+                <div className="mt-3">
+                  <div className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-textSecondary">
+                    Services
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {tagNames.slice(0, 6).map((name) => (
+                      <MetaBadge key={name}>{name}</MetaBadge>
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </div>
