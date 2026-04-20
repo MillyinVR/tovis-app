@@ -1,25 +1,20 @@
 // lib/viralRequests/index.ts
 import {
   ModerationStatus,
+  NotificationEventKey,
+  NotificationRecipientKind,
   Prisma,
   PrismaClient,
   ProfessionType,
   VerificationStatus,
   ViralServiceRequestStatus,
-  NotificationEventKey,
-  NotificationRecipientKind,
 } from '@prisma/client'
+
 import { enqueueDispatch } from '@/lib/notifications/dispatch/enqueueDispatch'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { canTransitionViralRequestStatus } from '@/lib/viralRequests/status'
 
-type ViralRequestsDb = PrismaClient | Prisma.TransactionClient
-
-function pickDispatchTx(
-  db: ViralRequestsDb,
-): Prisma.TransactionClient | undefined {
-  return '$transaction' in db ? undefined : db
-}
+export type ViralRequestsDb = PrismaClient | Prisma.TransactionClient
 
 export const viralRequestListSelect =
   Prisma.validator<Prisma.ViralServiceRequestSelect>()({
@@ -53,6 +48,11 @@ export type ViralRequestListRow = Prisma.ViralServiceRequestGetPayload<{
   select: typeof viralRequestListSelect
 }>
 
+export type ViralRequestMatchedProfessionalService = {
+  id: string
+  name: string
+}
+
 export type ViralRequestMatchedProfessional = {
   id: string
   businessName: string | null
@@ -62,16 +62,67 @@ export type ViralRequestMatchedProfessional = {
   location: string | null
   verificationStatus: VerificationStatus
   isPremium: boolean
-  matchingServices: Array<{
-    id: string
-    name: string
-  }>
+  matchingServices: ViralRequestMatchedProfessionalService[]
 }
 
 export type EnqueueViralRequestApprovalNotificationsResult = {
   enqueued: true
   matchedProfessionalIds: string[]
   dispatchSourceKeys: string[]
+}
+
+export type ViralRequestListOptions = {
+  take?: number
+  skip?: number
+}
+
+export type CreateClientViralRequestArgs = {
+  clientId: string
+  name: string
+  description?: string | null
+  sourceUrl?: string | null
+  requestedCategoryId?: string | null
+  links?: readonly string[] | null
+  mediaUrls?: readonly string[] | null
+}
+
+export type DeleteClientViralRequestArgs = {
+  clientId: string
+  requestId: string
+}
+
+export type UpdateViralRequestStatusArgs = {
+  requestId: string
+  nextStatus: ViralServiceRequestStatus
+  reviewerUserId?: string | null
+  adminNotes?: string | null
+  moderationStatus?: ModerationStatus
+}
+
+export type FindMatchingProsByRequestedCategoryArgs = {
+  requestedCategoryId: string
+  take?: number
+  skip?: number
+}
+
+export type FindMatchingProsForViralRequestArgs = {
+  requestId: string
+  take?: number
+  skip?: number
+}
+
+export type BuildViralRequestUploadTargetPathArgs = {
+  requestId: string
+  fileName: string
+}
+
+const DEFAULT_TAKE = 20
+const MAX_TAKE = 100
+
+function pickDispatchTx(
+  db: ViralRequestsDb,
+): Prisma.TransactionClient | undefined {
+  return '$transaction' in db ? undefined : db
 }
 
 function normalizeRequiredId(name: string, value: string): string {
@@ -84,18 +135,22 @@ function normalizeRequiredId(name: string, value: string): string {
 
 function normalizeOptionalId(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
+
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
 }
 
-function normalizeRequiredName(name: string): string {
-  const trimmed = name.trim()
+function normalizeRequiredName(value: string): string {
+  const trimmed = value.trim()
+
   if (!trimmed) {
     throw new Error('Viral request name is required.')
   }
+
   if (trimmed.length > 160) {
     throw new Error('Viral request name must be 160 characters or fewer.')
   }
+
   return trimmed
 }
 
@@ -104,6 +159,7 @@ function normalizeOptionalText(
   options?: { maxLength?: number },
 ): string | null {
   if (typeof value !== 'string') return null
+
   const trimmed = value.trim()
   if (!trimmed) return null
 
@@ -111,9 +167,7 @@ function normalizeOptionalText(
     typeof options?.maxLength === 'number' &&
     trimmed.length > options.maxLength
   ) {
-    throw new Error(
-      `Text must be ${options.maxLength} characters or fewer.`,
-    )
+    throw new Error(`Text must be ${options.maxLength} characters or fewer.`)
   }
 
   return trimmed
@@ -158,19 +212,25 @@ function normalizeUrlList(
 }
 
 function toOptionalJsonArray(
-  values: string[] | null,
+  values: readonly string[] | null,
 ): Prisma.InputJsonValue | undefined {
   if (!values) return undefined
-  return values
+  return [...values]
 }
 
 function normalizeTake(value: number | null | undefined): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 20
-  return Math.min(Math.max(Math.trunc(value), 1), 100)
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_TAKE
+  }
+
+  return Math.min(Math.max(Math.trunc(value), 1), MAX_TAKE)
 }
 
 function normalizeSkip(value: number | null | undefined): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 0
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0
+  }
+
   return Math.max(Math.trunc(value), 0)
 }
 
@@ -189,10 +249,8 @@ function normalizeUploadFileName(fileName: string): string {
   const candidate = withoutDirectories ?? trimmed
   const lastDot = candidate.lastIndexOf('.')
 
-  const rawBase =
-    lastDot > 0 ? candidate.slice(0, lastDot) : candidate
-  const rawExt =
-    lastDot > 0 ? candidate.slice(lastDot + 1) : ''
+  const rawBase = lastDot > 0 ? candidate.slice(0, lastDot) : candidate
+  const rawExt = lastDot > 0 ? candidate.slice(lastDot + 1) : ''
 
   const safeBase = rawBase
     .toLowerCase()
@@ -217,22 +275,17 @@ function dedupeMatchingServices(
       name: string
     }
   }>,
-): Array<{
-  id: string
-  name: string
-}> {
+): ViralRequestMatchedProfessionalService[] {
   const seen = new Set<string>()
-  const services: Array<{
-    id: string
-    name: string
-  }> = []
+  const services: ViralRequestMatchedProfessionalService[] = []
 
   for (const offering of offerings) {
-    if (seen.has(offering.service.id)) continue
-    seen.add(offering.service.id)
+    const serviceId = offering.service.id
+    if (seen.has(serviceId)) continue
 
+    seen.add(serviceId)
     services.push({
-      id: offering.service.id,
+      id: serviceId,
       name: offering.service.name,
     })
   }
@@ -240,12 +293,14 @@ function dedupeMatchingServices(
   return services
 }
 
-async function getViralRequestByIdOrThrow(
+export async function getViralRequestByIdOrThrow(
   db: ViralRequestsDb,
   requestId: string,
 ): Promise<ViralRequestListRow> {
+  const normalizedRequestId = normalizeRequiredId('requestId', requestId)
+
   const row = await db.viralServiceRequest.findUnique({
-    where: { id: requestId },
+    where: { id: normalizedRequestId },
     select: viralRequestListSelect,
   })
 
@@ -259,10 +314,7 @@ async function getViralRequestByIdOrThrow(
 export async function listClientViralRequests(
   db: ViralRequestsDb,
   clientId: string,
-  options?: {
-    take?: number
-    skip?: number
-  },
+  options?: ViralRequestListOptions,
 ): Promise<ViralRequestListRow[]> {
   const normalizedClientId = normalizeRequiredId('clientId', clientId)
 
@@ -279,15 +331,7 @@ export async function listClientViralRequests(
 
 export async function createClientViralRequest(
   db: ViralRequestsDb,
-  args: {
-    clientId: string
-    name: string
-    description?: string | null
-    sourceUrl?: string | null
-    requestedCategoryId?: string | null
-    links?: readonly string[] | null
-    mediaUrls?: readonly string[] | null
-  },
+  args: CreateClientViralRequestArgs,
 ): Promise<ViralRequestListRow> {
   const clientId = normalizeRequiredId('clientId', args.clientId)
   const name = normalizeRequiredName(args.name)
@@ -320,10 +364,7 @@ export async function createClientViralRequest(
 
 export async function deleteClientViralRequest(
   db: ViralRequestsDb,
-  args: {
-    clientId: string
-    requestId: string
-  },
+  args: DeleteClientViralRequestArgs,
 ): Promise<{
   deleted: boolean
 }> {
@@ -344,13 +385,7 @@ export async function deleteClientViralRequest(
 
 export async function updateViralRequestStatus(
   db: ViralRequestsDb,
-  args: {
-    requestId: string
-    nextStatus: ViralServiceRequestStatus
-    reviewerUserId?: string | null
-    adminNotes?: string | null
-    moderationStatus?: ModerationStatus
-  },
+  args: UpdateViralRequestStatusArgs,
 ): Promise<ViralRequestListRow> {
   const requestId = normalizeRequiredId('requestId', args.requestId)
   const reviewerUserId = normalizeOptionalId(args.reviewerUserId)
@@ -432,11 +467,7 @@ export async function updateViralRequestStatus(
 
 export async function findMatchingProsByRequestedCategory(
   db: ViralRequestsDb,
-  args: {
-    requestedCategoryId: string
-    take?: number
-    skip?: number
-  },
+  args: FindMatchingProsByRequestedCategoryArgs,
 ): Promise<ViralRequestMatchedProfessional[]> {
   const requestedCategoryId = normalizeRequiredId(
     'requestedCategoryId',
@@ -507,14 +538,9 @@ export async function findMatchingProsByRequestedCategory(
 
 export async function findMatchingProsForViralRequest(
   db: ViralRequestsDb,
-  args: {
-    requestId: string
-    take?: number
-    skip?: number
-  },
+  args: FindMatchingProsForViralRequestArgs,
 ): Promise<ViralRequestMatchedProfessional[]> {
-  const requestId = normalizeRequiredId('requestId', args.requestId)
-  const request = await getViralRequestByIdOrThrow(db, requestId)
+  const request = await getViralRequestByIdOrThrow(db, args.requestId)
 
   if (!request.requestedCategoryId) {
     return []
@@ -527,10 +553,9 @@ export async function findMatchingProsForViralRequest(
   })
 }
 
-export function buildViralRequestUploadTargetPath(args: {
-  requestId: string
-  fileName: string
-}): string {
+export function buildViralRequestUploadTargetPath(
+  args: BuildViralRequestUploadTargetPathArgs,
+): string {
   const requestId = normalizeRequiredId('requestId', args.requestId)
   const fileName = normalizeUploadFileName(args.fileName)
 
@@ -551,14 +576,9 @@ export function buildViralRequestUploadTargetPath(args: {
  */
 export async function enqueueViralRequestApprovalNotifications(
   db: ViralRequestsDb,
-  args: {
-    requestId: string
-    take?: number
-    skip?: number
-  },
+  args: FindMatchingProsForViralRequestArgs,
 ): Promise<EnqueueViralRequestApprovalNotificationsResult> {
-  const requestId = normalizeRequiredId('requestId', args.requestId)
-  const request = await getViralRequestByIdOrThrow(db, requestId)
+  const request = await getViralRequestByIdOrThrow(db, args.requestId)
 
   if (request.status !== ViralServiceRequestStatus.APPROVED) {
     throw new Error(
@@ -567,19 +587,18 @@ export async function enqueueViralRequestApprovalNotifications(
   }
 
   const matches = await findMatchingProsForViralRequest(db, {
-    requestId,
+    requestId: request.id,
     take: args.take,
     skip: args.skip,
   })
 
-  const href = `/admin/viral-requests/${encodeURIComponent(requestId)}`
-
+  const href = `/admin/viral-requests/${encodeURIComponent(request.id)}`
   const dispatchSourceKeys: string[] = []
 
   for (const match of matches) {
     const result = await enqueueDispatch({
       key: NotificationEventKey.VIRAL_REQUEST_APPROVED,
-      sourceKey: `viral-request:${requestId}:professional:${match.id}:approved`,
+      sourceKey: `viral-request:${request.id}:professional:${match.id}:approved`,
       recipient: {
         kind: NotificationRecipientKind.PRO,
         professionalId: match.id,
