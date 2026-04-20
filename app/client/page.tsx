@@ -6,24 +6,14 @@ import { Role } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { getBrandConfig } from '@/lib/brand'
-import {
-  createClientViralRequest,
-  deleteClientViralRequest,
-  listClientViralRequests,
-} from '@/lib/viralRequests'
-import {
-  getViralRequestStatusLabel,
-  getViralRequestStatusTone,
-} from '@/lib/viralRequests/status'
 
+import ClientViralRequestsPanel from './components/ClientViralRequestsPanel'
 import LogoutButton from './components/LogoutButton'
 import LastMinuteOpenings from './components/LastMinuteOpenings'
 import PendingConsultApprovalBanner from './components/PendingConsultApprovalBanner'
 import SavedServicesWithProviders from './components/SavedServicesWithProviders'
 
 export const dynamic = 'force-dynamic'
-
-type PageSearchParams = { [key: string]: string | string[] | undefined }
 
 type MaybeCurrentUser = Awaited<ReturnType<typeof getCurrentUser>>
 type CurrentUser = NonNullable<MaybeCurrentUser>
@@ -34,23 +24,7 @@ type ClientPageUser = CurrentUser & {
 }
 
 function isClientPageUser(user: MaybeCurrentUser): user is ClientPageUser {
-  return Boolean(
-    user &&
-      user.role === Role.CLIENT &&
-      user.clientProfile?.id,
-  )
-}
-
-function pickFirst(
-  sp: PageSearchParams | undefined,
-  key: string,
-): string | null {
-  const raw = sp?.[key]
-  const value = Array.isArray(raw) ? raw[0] : raw
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
+  return Boolean(user && user.role === Role.CLIENT && user.clientProfile?.id)
 }
 
 function pickDisplayName(user: ClientPageUser): string {
@@ -67,55 +41,6 @@ async function requireClientOrRedirect(): Promise<ClientPageUser> {
   }
 
   return user
-}
-
-async function createViralRequestAction(formData: FormData) {
-  'use server'
-
-  const user = await requireClientOrRedirect()
-
-  const name = String(formData.get('name') ?? '').trim()
-  const sourceUrlRaw = String(formData.get('sourceUrl') ?? '').trim()
-
-  if (!name) {
-    redirect('/client?err=viral_missing_name')
-  }
-
-  let sourceUrl: string | null = null
-  if (sourceUrlRaw) {
-    try {
-      const parsed = new URL(sourceUrlRaw)
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        throw new Error('bad protocol')
-      }
-      sourceUrl = parsed.toString()
-    } catch {
-      redirect('/client?err=viral_bad_url')
-    }
-  }
-
-  try {
-    await createClientViralRequest(prisma, {
-      clientId: user.clientProfile.id,
-      name,
-      sourceUrl,
-    })
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message.toLowerCase() : ''
-
-    if (message.includes('url')) {
-      redirect('/client?err=viral_bad_url')
-    }
-
-    if (message.includes('name')) {
-      redirect('/client?err=viral_missing_name')
-    }
-
-    redirect('/client?err=viral_create_failed')
-  }
-
-  redirect('/client?ok=viral_submitted')
 }
 
 async function removeProFavoriteAction(formData: FormData) {
@@ -138,127 +63,75 @@ async function removeProFavoriteAction(formData: FormData) {
   redirect('/client')
 }
 
-async function removeServiceFavoriteAction(formData: FormData) {
-  'use server'
-
-  const user = await requireClientOrRedirect()
-
-  const serviceId = String(formData.get('serviceId') ?? '').trim()
-  if (!serviceId) {
-    redirect('/client')
-  }
-
-  await prisma.serviceFavorite.deleteMany({
-    where: {
-      serviceId,
-      userId: user.id,
-    },
-  })
-
-  redirect('/client')
-}
-
-async function deleteViralRequestAction(formData: FormData) {
-  'use server'
-
-  const user = await requireClientOrRedirect()
-
-  const requestId = String(formData.get('requestId') ?? '').trim()
-  if (!requestId) {
-    redirect('/client')
-  }
-
-  await deleteClientViralRequest(prisma, {
-    clientId: user.clientProfile.id,
-    requestId,
-  })
-
-  redirect('/client')
-}
-
-export default async function ClientHomePage({
-  searchParams,
-}: {
-  searchParams?: Promise<PageSearchParams>
-}) {
+export default async function ClientHomePage() {
   const brand = getBrandConfig()
   const user = await requireClientOrRedirect()
-
-  const resolvedSearchParams = searchParams ? await searchParams : undefined
-  const ok = pickFirst(resolvedSearchParams, 'ok')
-  const err = pickFirst(resolvedSearchParams, 'err')
 
   const userId = user.id
   const clientId = user.clientProfile.id
   const displayName = pickDisplayName(user)
 
-  const [favoritePros, favoriteServices, viralRequests, myReviews] =
-    await Promise.all([
-      prisma.professionalFavorite.findMany({
-        where: { userId },
-        orderBy: { createdAt: 'desc' },
-        take: 24,
-        select: {
-          professional: {
-            select: {
-              id: true,
-              businessName: true,
-              handle: true,
-              avatarUrl: true,
-              professionType: true,
-              location: true,
-            },
+  const [favoritePros, favoriteServices, myReviews] = await Promise.all([
+    prisma.professionalFavorite.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 24,
+      select: {
+        professional: {
+          select: {
+            id: true,
+            businessName: true,
+            handle: true,
+            avatarUrl: true,
+            professionType: true,
+            location: true,
           },
         },
-      }),
+      },
+    }),
 
-      prisma.serviceFavorite.findMany({
-        where: { userId },
-        orderBy: { createdAt: 'desc' },
-        take: 24,
-        select: {
-          service: {
-            select: {
-              id: true,
-              name: true,
-              description: true,
-              defaultImageUrl: true,
-              category: {
-                select: {
-                  name: true,
-                  slug: true,
-                },
+    prisma.serviceFavorite.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: 24,
+      select: {
+        service: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            defaultImageUrl: true,
+            category: {
+              select: {
+                name: true,
+                slug: true,
               },
             },
           },
         },
-      }),
+      },
+    }),
 
-      listClientViralRequests(prisma, clientId, {
-        take: 20,
-        skip: 0,
-      }),
-
-      prisma.review.findMany({
-        where: { clientId },
-        orderBy: { createdAt: 'desc' },
-        take: 12,
-        select: {
-          id: true,
-          rating: true,
-          headline: true,
-          createdAt: true,
-          professional: {
-            select: {
-              id: true,
-              businessName: true,
-              handle: true,
-              avatarUrl: true,
-            },
+    prisma.review.findMany({
+      where: { clientId },
+      orderBy: { createdAt: 'desc' },
+      take: 12,
+      select: {
+        id: true,
+        rating: true,
+        headline: true,
+        createdAt: true,
+        professional: {
+          select: {
+            id: true,
+            businessName: true,
+            handle: true,
+            avatarUrl: true,
           },
         },
-      }),
-    ])
+      },
+    }),
+  ])
 
   return (
     <main
@@ -290,24 +163,6 @@ export default async function ClientHomePage({
 
       <div className="grid gap-8">
         <PendingConsultApprovalBanner />
-
-        {ok ? (
-          <div className="rounded-inner border border-toneSuccess/25 bg-toneSuccess/8 px-4 py-3 text-sm font-semibold text-toneSuccess">
-            {ok === 'viral_submitted'
-              ? 'Viral request submitted — admin will review it.'
-              : 'Saved.'}
-          </div>
-        ) : null}
-
-        {err ? (
-          <div className="rounded-inner border border-toneDanger/25 bg-toneDanger/8 px-4 py-3 text-sm font-semibold text-toneDanger">
-            {err === 'viral_missing_name'
-              ? 'Please enter a viral service name.'
-              : err === 'viral_bad_url'
-                ? 'That link looks invalid. Please paste a full http/https URL.'
-                : 'Something went wrong.'}
-          </div>
-        ) : null}
 
         <section>
           <div className="tovis-section-label mb-4">
@@ -408,88 +263,7 @@ export default async function ClientHomePage({
 
         <section>
           <div className="tovis-section-label mb-4">Viral requests</div>
-
-          <form
-            action={createViralRequestAction}
-            className="mb-4 grid gap-2 sm:grid-cols-3"
-          >
-            <input
-              name="name"
-              placeholder='Service name (e.g. "Wolf Cut")'
-              className="w-full rounded-inner border border-textPrimary/10 bg-bgSecondary px-3 py-2.5 text-sm text-textPrimary outline-none placeholder:text-textSecondary/50 focus:border-accentPrimary/30 focus:ring-1 focus:ring-accentPrimary/20 transition"
-            />
-            <input
-              name="sourceUrl"
-              placeholder="TikTok / IG / YouTube link — optional"
-              className="w-full rounded-inner border border-textPrimary/10 bg-bgSecondary px-3 py-2.5 text-sm text-textPrimary outline-none placeholder:text-textSecondary/50 focus:border-accentPrimary/30 focus:ring-1 focus:ring-accentPrimary/20 transition sm:col-span-2"
-            />
-            <div className="sm:col-span-3">
-              <button
-                type="submit"
-                className="rounded-inner border border-textPrimary/10 bg-bgSecondary px-4 py-2 text-sm font-bold text-textPrimary transition hover:border-white/20 hover:bg-white/5"
-              >
-                Submit request
-              </button>
-            </div>
-          </form>
-
-          {viralRequests.length > 0 ? (
-            <div className="grid gap-2">
-              {viralRequests.map((request) => (
-                <div
-                  key={request.id}
-                  className="flex items-center justify-between gap-3 rounded-inner border border-textPrimary/8 bg-bgSecondary px-4 py-3"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-bold">
-                      {request.name}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-textSecondary">
-                      {new Date(request.createdAt).toLocaleDateString()}
-                      {request.sourceUrl ? (
-                        <>
-                          {' · '}
-                          <a
-                            className="underline underline-offset-2"
-                            href={request.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            link
-                          </a>
-                        </>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-3">
-                    <span
-                      className={`text-[11px] font-black ${getViralRequestStatusTone(request.status)}`}
-                    >
-                      {getViralRequestStatusLabel(request.status)}
-                    </span>
-
-                    <form action={deleteViralRequestAction}>
-                      <input
-                        type="hidden"
-                        name="requestId"
-                        value={request.id}
-                      />
-                      <button
-                        type="submit"
-                        className="rounded-inner border border-textPrimary/8 px-2.5 py-1.5 text-[11px] font-bold text-textSecondary/70 transition hover:text-toneDanger/80"
-                        title="Delete request"
-                      >
-                        Delete
-                      </button>
-                    </form>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-textSecondary/60">No requests yet.</p>
-          )}
+          <ClientViralRequestsPanel />
         </section>
 
         <section>
