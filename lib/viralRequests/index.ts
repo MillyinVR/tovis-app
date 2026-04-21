@@ -8,7 +8,7 @@ import {
   ViralServiceRequestStatus,
 } from '@prisma/client'
 
-import { createViralRequestApprovedProNotification } from '@/lib/notifications/viralRequestApproved'
+import { notifyMatchedProsAboutApprovedViralRequest } from '@/lib/notifications/social'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { canTransitionViralRequestStatus } from '@/lib/viralRequests/status'
 
@@ -595,24 +595,21 @@ export async function enqueueViralRequestApprovalNotifications(
     skip: args.skip,
   })
 
-  const notificationIds: string[] = []
-
-  for (const match of matches) {
-    const result = await createViralRequestApprovedProNotification({
-      professionalId: match.id,
+  const notificationResult =
+    await notifyMatchedProsAboutApprovedViralRequest({
       viralRequestId: request.id,
       requestName: request.name,
       requestedCategoryId: request.requestedCategoryId,
-      matchedServiceIds: match.matchingServices.map((service) => service.id),
+      recipients: matches.map((match) => ({
+        professionalId: match.id,
+        matchedServiceIds: match.matchingServices.map((service) => service.id),
+      })),
       tx: pickDispatchTx(db),
     })
 
-    notificationIds.push(result.id)
-  }
-
   return {
     enqueued: true,
-    matchedProfessionalIds: matches.map((match) => match.id),
-    notificationIds,
+    matchedProfessionalIds: notificationResult.matchedProfessionalIds,
+    notificationIds: notificationResult.notificationIds,
   }
 }

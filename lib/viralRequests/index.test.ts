@@ -9,12 +9,12 @@ import {
 } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
-  createViralRequestApprovedProNotification: vi.fn(),
+  notifyMatchedProsAboutApprovedViralRequest: vi.fn(),
 }))
 
-vi.mock('@/lib/notifications/viralRequestApproved', () => ({
-  createViralRequestApprovedProNotification:
-    mocks.createViralRequestApprovedProNotification,
+vi.mock('@/lib/notifications/social', () => ({
+  notifyMatchedProsAboutApprovedViralRequest:
+    mocks.notifyMatchedProsAboutApprovedViralRequest,
 }))
 
 import {
@@ -470,7 +470,7 @@ describe('lib/viralRequests/index.ts', () => {
       )
 
       expect(
-        mocks.createViralRequestApprovedProNotification,
+        mocks.notifyMatchedProsAboutApprovedViralRequest,
       ).not.toHaveBeenCalled()
     })
 
@@ -528,9 +528,10 @@ describe('lib/viralRequests/index.ts', () => {
         },
       ])
 
-      mocks.createViralRequestApprovedProNotification
-        .mockResolvedValueOnce({ id: 'notif_1' })
-        .mockResolvedValueOnce({ id: 'notif_2' })
+      mocks.notifyMatchedProsAboutApprovedViralRequest.mockResolvedValue({
+        matchedProfessionalIds: ['pro_1', 'pro_2'],
+        notificationIds: ['notif_1', 'notif_2'],
+      })
 
       const result =
         await enqueueViralRequestApprovalNotifications(tx, {
@@ -538,28 +539,25 @@ describe('lib/viralRequests/index.ts', () => {
         })
 
       expect(
-        mocks.createViralRequestApprovedProNotification,
-      ).toHaveBeenCalledTimes(2)
+        mocks.notifyMatchedProsAboutApprovedViralRequest,
+      ).toHaveBeenCalledTimes(1)
 
       expect(
-        mocks.createViralRequestApprovedProNotification,
-      ).toHaveBeenNthCalledWith(1, {
-        professionalId: 'pro_1',
+        mocks.notifyMatchedProsAboutApprovedViralRequest,
+      ).toHaveBeenCalledWith({
         viralRequestId: 'request_1',
         requestName: 'Wolf Cut',
         requestedCategoryId: 'cat_1',
-        matchedServiceIds: ['service_1'],
-        tx,
-      })
-
-      expect(
-        mocks.createViralRequestApprovedProNotification,
-      ).toHaveBeenNthCalledWith(2, {
-        professionalId: 'pro_2',
-        viralRequestId: 'request_1',
-        requestName: 'Wolf Cut',
-        requestedCategoryId: 'cat_1',
-        matchedServiceIds: ['service_2'],
+        recipients: [
+          {
+            professionalId: 'pro_1',
+            matchedServiceIds: ['service_1'],
+          },
+          {
+            professionalId: 'pro_2',
+            matchedServiceIds: ['service_2'],
+          },
+        ],
         tx,
       })
 
