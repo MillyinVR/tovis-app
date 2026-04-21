@@ -20,6 +20,7 @@ import type {
   LooksBoardPreviewDto,
   LooksSaveStateResponseDto,
 } from '@/lib/looks/types'
+import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
 
 type BoardsDb = PrismaClient | Prisma.TransactionClient
 
@@ -397,6 +398,7 @@ export async function addBoardItem(
 
     if (existing) {
       const saveCount = await recomputeLookPostSaveCount(tx, lookPostId)
+      await enqueueRecomputeLookCounts(tx, { lookPostId })
 
       return {
         board,
@@ -415,6 +417,7 @@ export async function addBoardItem(
     })
 
     const saveCount = await recomputeLookPostSaveCount(tx, lookPostId)
+    await enqueueRecomputeLookCounts(tx, { lookPostId })
 
     return {
       board,
@@ -452,6 +455,7 @@ export async function removeBoardItem(
     })
 
     const saveCount = await recomputeLookPostSaveCount(tx, lookPostId)
+    await enqueueRecomputeLookCounts(tx, { lookPostId })
 
     return {
       board,

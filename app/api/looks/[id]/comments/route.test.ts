@@ -8,6 +8,16 @@ import {
   VerificationStatus,
 } from '@prisma/client'
 
+type CommentsTxMock = {
+  lookComment: {
+    create: ReturnType<typeof vi.fn>
+  }
+}
+
+type CommentsTransactionCallback = (
+  tx: CommentsTxMock,
+) => Promise<unknown> | unknown
+
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn((data: unknown, status = 200) => {
     return new Response(JSON.stringify(data), {
@@ -41,31 +51,31 @@ const mocks = vi.hoisted(() => {
     },
   )
 
-type CommentsTxMock = {
-  lookComment: {
-    create: ReturnType<typeof vi.fn>
+  const tx: CommentsTxMock = {
+    lookComment: {
+      create: vi.fn(),
+    },
   }
-}
 
-type CommentsTransactionCallback = (
-  tx: CommentsTxMock,
-) => Promise<unknown> | unknown
+  const prisma = {
+    $transaction: vi.fn(
+      async (
+        arg:
+          | CommentsTransactionCallback
+          | [Promise<unknown>, Promise<unknown>],
+      ) => {
+        if (typeof arg === 'function') {
+          return await arg(tx)
+        }
 
-const tx: CommentsTxMock = {
-  lookComment: {
-    create: vi.fn(),
-  },
-}
-
-const prisma = {
-  $transaction: vi.fn(async (callback: CommentsTransactionCallback) => {
-    return await callback(tx)
-  }),
-  lookComment: {
-    findMany: vi.fn(),
-    count: vi.fn(),
-  },
-}
+        return await Promise.all(arg)
+      },
+    ),
+    lookComment: {
+      findMany: vi.fn(),
+      count: vi.fn(),
+    },
+  }
 
   const requireUser = vi.fn()
   const getCurrentUser = vi.fn()
@@ -73,6 +83,7 @@ const prisma = {
   const canViewLookPost = vi.fn()
   const canCommentOnLookPost = vi.fn()
   const recomputeLookPostCommentCount = vi.fn()
+  const enqueueRecomputeLookCounts = vi.fn()
   const mapLooksCommentToDto = vi.fn()
 
   return {
@@ -86,6 +97,7 @@ const prisma = {
     canViewLookPost,
     canCommentOnLookPost,
     recomputeLookPostCommentCount,
+    enqueueRecomputeLookCounts,
     mapLooksCommentToDto,
   }
 })
@@ -125,6 +137,10 @@ vi.mock('@/lib/looks/guards', () => ({
 
 vi.mock('@/lib/looks/counters', () => ({
   recomputeLookPostCommentCount: mocks.recomputeLookPostCommentCount,
+}))
+
+vi.mock('@/lib/jobs/looksSocial/enqueue', () => ({
+  enqueueRecomputeLookCounts: mocks.enqueueRecomputeLookCounts,
 }))
 
 vi.mock('@/lib/looks/mappers', () => ({
@@ -242,10 +258,19 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
     mocks.canCommentOnLookPost.mockReturnValue(true)
     mocks.tx.lookComment.create.mockResolvedValue(makeCommentRow())
     mocks.recomputeLookPostCommentCount.mockResolvedValue(1)
+    mocks.enqueueRecomputeLookCounts.mockResolvedValue({
+      id: 'job_1',
+      type: 'RECOMPUTE_LOOK_COUNTS',
+      dedupeKey: 'look:look_1:recompute-counts',
+      status: 'PENDING',
+      runAt: new Date('2026-04-20T12:00:00.000Z'),
+      attemptCount: 0,
+      maxAttempts: 5,
+    })
     mocks.prisma.lookComment.findMany.mockResolvedValue([])
     mocks.prisma.lookComment.count.mockResolvedValue(0)
-    mocks.mapLooksCommentToDto.mockImplementation((row: { id: string; body: string }) =>
-      makeCommentDto(row.id, row.body),
+    mocks.mapLooksCommentToDto.mockImplementation(
+      (row: { id: string; body: string }) => makeCommentDto(row.id, row.body),
     )
   })
 
@@ -257,7 +282,6 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
 
     mocks.prisma.lookComment.findMany.mockResolvedValue([row1, row2])
     mocks.prisma.lookComment.count.mockResolvedValue(2)
-    mocks.prisma.$transaction.mockResolvedValueOnce([[row1, row2], 2])
     mocks.mapLooksCommentToDto
       .mockReturnValueOnce(dto1)
       .mockReturnValueOnce(dto2)
@@ -304,7 +328,7 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
     })
   })
 
-  it('POST creates a comment by canonical lookPostId and returns the canonical id in the contract', async () => {
+  it('POST creates a comment by canonical lookPostId, recomputes immediately, enqueues reconciliation, and returns the canonical id in the contract', async () => {
     const created = makeCommentRow('comment_9', 'Sharp work')
     const mapped = makeCommentDto('comment_9', 'Sharp work')
 
@@ -358,6 +382,10 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
       'look_1',
     )
 
+    expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(mocks.tx, {
+      lookPostId: 'look_1',
+    })
+
     expect(body).toEqual({
       lookPostId: 'look_1',
       comment: mapped,
@@ -386,6 +414,8 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
     })
 
     expect(mocks.tx.lookComment.create).not.toHaveBeenCalled()
+    expect(mocks.recomputeLookPostCommentCount).not.toHaveBeenCalled()
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the comment body is empty', async () => {
@@ -407,6 +437,8 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
     })
 
     expect(mocks.tx.lookComment.create).not.toHaveBeenCalled()
+    expect(mocks.recomputeLookPostCommentCount).not.toHaveBeenCalled()
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the comment body is too long', async () => {
@@ -428,6 +460,8 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
     })
 
     expect(mocks.tx.lookComment.create).not.toHaveBeenCalled()
+    expect(mocks.recomputeLookPostCommentCount).not.toHaveBeenCalled()
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
   })
 
   it('returns 404 when the canonical lookPostId cannot be resolved', async () => {
@@ -447,6 +481,7 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
     })
 
     expect(mocks.prisma.lookComment.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.lookComment.count).not.toHaveBeenCalled()
   })
 
   it('returns 404 when the viewer cannot view the look', async () => {
@@ -466,6 +501,7 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
     })
 
     expect(mocks.prisma.lookComment.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.lookComment.count).not.toHaveBeenCalled()
   })
 
   it('does not treat legacy media ids as fallback identifiers', async () => {
@@ -491,5 +527,102 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
     })
 
     expect(mocks.prisma.lookComment.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.lookComment.count).not.toHaveBeenCalled()
+  })
+
+  it('returns the auth response immediately when requireUser fails', async () => {
+    const authResponse = new Response(
+      JSON.stringify({
+        ok: false,
+        error: 'Unauthorized',
+      }),
+      {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      },
+    )
+
+    mocks.requireUser.mockResolvedValue({
+      ok: false as const,
+      res: authResponse,
+    })
+
+    const res = await POST(
+      new Request('http://localhost/api/looks/look_1/comments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'Sharp work' }),
+      }),
+      makeCtx('look_1'),
+    )
+    const body = await readJson(res)
+
+    expect(res.status).toBe(401)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Unauthorized',
+    })
+
+    expect(mocks.loadLookAccess).not.toHaveBeenCalled()
+    expect(mocks.tx.lookComment.create).not.toHaveBeenCalled()
+    expect(mocks.recomputeLookPostCommentCount).not.toHaveBeenCalled()
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
+  })
+
+  it('returns 500 when recompute fails', async () => {
+    mocks.recomputeLookPostCommentCount.mockRejectedValue(
+      new Error('recompute exploded'),
+    )
+
+    const res = await POST(
+      new Request('http://localhost/api/looks/look_1/comments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'Sharp work' }),
+      }),
+      makeCtx('look_1'),
+    )
+    const body = await readJson(res)
+
+    expect(res.status).toBe(500)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Couldn’t post that. Try again.',
+      code: 'INTERNAL',
+    })
+
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
+  })
+
+  it('returns 500 when enqueue fails after the immediate recompute', async () => {
+    mocks.recomputeLookPostCommentCount.mockResolvedValue(4)
+    mocks.enqueueRecomputeLookCounts.mockRejectedValue(
+      new Error('enqueue exploded'),
+    )
+
+    const res = await POST(
+      new Request('http://localhost/api/looks/look_1/comments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ body: 'Sharp work' }),
+      }),
+      makeCtx('look_1'),
+    )
+    const body = await readJson(res)
+
+    expect(res.status).toBe(500)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Couldn’t post that. Try again.',
+      code: 'INTERNAL',
+    })
+
+    expect(mocks.recomputeLookPostCommentCount).toHaveBeenCalledWith(
+      mocks.tx,
+      'look_1',
+    )
+    expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(mocks.tx, {
+      lookPostId: 'look_1',
+    })
   })
 })

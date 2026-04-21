@@ -23,6 +23,7 @@ import type {
   LooksCommentCreateResponseDto,
   LooksCommentsListResponseDto,
 } from '@/lib/looks/types'
+import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
 
 export const dynamic = 'force-dynamic'
 
@@ -236,6 +237,7 @@ export async function POST(req: Request, ctx: Ctx) {
         tx,
         lookPostId,
       )
+      await enqueueRecomputeLookCounts(tx, { lookPostId })
 
       return {
         comment,

@@ -10,6 +10,7 @@ import {
 import { recomputeLookPostLikeCount } from '@/lib/looks/counters'
 import { loadLookAccess } from '@/lib/looks/access'
 import type { LooksLikeResponseDto } from '@/lib/looks/types'
+import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
 
 export const dynamic = 'force-dynamic'
 
@@ -98,13 +99,14 @@ export async function POST(_req: Request, ctx: Ctx) {
           }
         }
 
-        const likeCount = await recomputeLookPostLikeCount(tx, lookPostId)
+    const likeCount = await recomputeLookPostLikeCount(tx, lookPostId)
+    await enqueueRecomputeLookCounts(tx, { lookPostId })
 
-        return {
-          lookPostId,
-          liked: true,
-          likeCount,
-        }
+    return {
+      lookPostId,
+      liked: true,
+      likeCount,
+    }
       },
     )
 
@@ -170,6 +172,7 @@ export async function DELETE(_req: Request, ctx: Ctx) {
         })
 
         const likeCount = await recomputeLookPostLikeCount(tx, lookPostId)
+        await enqueueRecomputeLookCounts(tx, { lookPostId })
 
         return {
           lookPostId,
