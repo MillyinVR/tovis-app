@@ -5,13 +5,29 @@ import type {
 } from '@/lib/viralRequests'
 
 function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
+  if (!Array.isArray(value)) {
+    return []
+  }
 
   return value.filter((entry): entry is string => typeof entry === 'string')
 }
 
+function copyStringArray(values: readonly string[]): string[] {
+  return [...values]
+}
+
 function toIso(value: Date | null): string | null {
   return value ? value.toISOString() : null
+}
+
+function requireNonEmptyString(name: string, value: string): string {
+  const trimmed = value.trim()
+
+  if (!trimmed) {
+    throw new Error(`${name} is required.`)
+  }
+
+  return trimmed
 }
 
 export type ViralRequestDto = {
@@ -70,18 +86,44 @@ export function toViralRequestDto(row: ViralRequestListRow): ViralRequestDto {
   }
 }
 
-export type ViralRequestApprovalNotificationsDto = {
+export type InlineViralRequestApprovalNotificationsDto = {
   enqueued: true
   matchedProfessionalIds: string[]
   notificationIds: string[]
+  deliveryMode: 'INLINE'
 }
+
+export type QueuedViralRequestApprovalNotificationsDto = {
+  enqueued: true
+  matchedProfessionalIds: string[]
+  notificationIds: string[]
+  jobId: string
+  deliveryMode: 'JOB_QUEUED'
+}
+
+export type ViralRequestApprovalNotificationsDto =
+  | InlineViralRequestApprovalNotificationsDto
+  | QueuedViralRequestApprovalNotificationsDto
 
 export function toViralRequestApprovalNotificationsDto(
   result: EnqueueViralRequestApprovalNotificationsResult,
-): ViralRequestApprovalNotificationsDto {
+): InlineViralRequestApprovalNotificationsDto {
   return {
-    enqueued: result.enqueued,
-    matchedProfessionalIds: [...result.matchedProfessionalIds],
-    notificationIds: [...result.notificationIds],
+    enqueued: true,
+    matchedProfessionalIds: copyStringArray(result.matchedProfessionalIds),
+    notificationIds: copyStringArray(result.notificationIds),
+    deliveryMode: 'INLINE',
+  }
+}
+
+export function toQueuedViralRequestApprovalNotificationsDto(args: {
+  jobId: string
+}): QueuedViralRequestApprovalNotificationsDto {
+  return {
+    enqueued: true,
+    matchedProfessionalIds: [],
+    notificationIds: [],
+    jobId: requireNonEmptyString('jobId', args.jobId),
+    deliveryMode: 'JOB_QUEUED',
   }
 }

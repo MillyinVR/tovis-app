@@ -5,6 +5,7 @@ import {
   PrismaClient,
   ProfessionType,
   VerificationStatus,
+  ViralRequestApprovalFanOutStatus,
   ViralServiceRequestStatus,
 } from '@prisma/client'
 
@@ -47,6 +48,30 @@ export const viralRequestListSelect =
 export type ViralRequestListRow = Prisma.ViralServiceRequestGetPayload<{
   select: typeof viralRequestListSelect
 }>
+
+export const viralRequestApprovalFanOutSelect =
+  Prisma.validator<Prisma.ViralRequestApprovalFanOutSelect>()({
+    id: true,
+    viralServiceRequestId: true,
+    professionalId: true,
+    status: true,
+    matchedAt: true,
+    queuedAt: true,
+    sentAt: true,
+    skippedAt: true,
+    failedAt: true,
+    skipReason: true,
+    lastError: true,
+    notificationId: true,
+    notificationDispatchId: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+
+export type ViralRequestApprovalFanOutRow =
+  Prisma.ViralRequestApprovalFanOutGetPayload<{
+    select: typeof viralRequestApprovalFanOutSelect
+  }>
 
 export type ViralRequestMatchedProfessionalService = {
   id: string
@@ -111,6 +136,51 @@ export type FindMatchingProsForViralRequestArgs = {
   skip?: number
 }
 
+export type CreateViralRequestApprovalFanOutRowsArgs = {
+  requestId: string
+  take?: number
+  skip?: number
+}
+
+export type CreateViralRequestApprovalFanOutRowsResult = {
+  requestId: string
+  matchedProfessionalIds: string[]
+  fanOutRows: ViralRequestApprovalFanOutRow[]
+}
+
+export type ListViralRequestApprovalFanOutRowsArgs = {
+  requestId: string
+  statuses?: readonly ViralRequestApprovalFanOutStatus[]
+  take?: number
+  skip?: number
+}
+
+export type MarkViralRequestApprovalFanOutRowsQueuedArgs = {
+  fanOutRowIds: readonly string[]
+}
+
+export type MarkViralRequestApprovalFanOutRowsQueuedResult = {
+  updatedCount: number
+}
+
+export type MarkViralRequestApprovalFanOutRowsSkippedArgs = {
+  fanOutRowIds: readonly string[]
+  reason: string
+}
+
+export type MarkViralRequestApprovalFanOutRowsSkippedResult = {
+  updatedCount: number
+}
+
+export type MarkViralRequestApprovalFanOutRowsFailedArgs = {
+  fanOutRowIds: readonly string[]
+  message: string
+}
+
+export type MarkViralRequestApprovalFanOutRowsFailedResult = {
+  updatedCount: number
+}
+
 export type BuildViralRequestUploadTargetPathArgs = {
   requestId: string
   fileName: string
@@ -127,10 +197,21 @@ function pickDispatchTx(
 
 function normalizeRequiredId(name: string, value: string): string {
   const trimmed = value.trim()
+
   if (!trimmed) {
     throw new Error(`${name} is required.`)
   }
+
   return trimmed
+}
+
+function normalizeRequiredIdList(
+  name: string,
+  values: readonly string[],
+): string[] {
+  return Array.from(
+    new Set(values.map((value) => normalizeRequiredId(name, value))),
+  )
 }
 
 function normalizeOptionalId(value: string | null | undefined): string | null {
@@ -214,7 +295,10 @@ function normalizeUrlList(
 function toOptionalJsonArray(
   values: readonly string[] | null,
 ): Prisma.InputJsonValue | undefined {
-  if (!values) return undefined
+  if (!values) {
+    return undefined
+  }
+
   return [...values]
 }
 
@@ -236,6 +320,7 @@ function normalizeSkip(value: number | null | undefined): number {
 
 function normalizeUploadFileName(fileName: string): string {
   const trimmed = fileName.trim()
+
   if (!trimmed) {
     throw new Error('fileName is required.')
   }
@@ -281,7 +366,10 @@ function dedupeMatchingServices(
 
   for (const offering of offerings) {
     const serviceId = offering.service.id
-    if (seen.has(serviceId)) continue
+
+    if (seen.has(serviceId)) {
+      continue
+    }
 
     seen.add(serviceId)
     services.push({
@@ -291,6 +379,48 @@ function dedupeMatchingServices(
   }
 
   return services
+}
+
+function sortFanOutRowsByMatchedProfessionalIds(
+  rows: ViralRequestApprovalFanOutRow[],
+  matchedProfessionalIds: readonly string[],
+): ViralRequestApprovalFanOutRow[] {
+  const rowsByProfessionalId = new Map(
+    rows.map((row) => [row.professionalId, row] as const),
+  )
+
+  return matchedProfessionalIds
+    .map((professionalId) => rowsByProfessionalId.get(professionalId) ?? null)
+    .filter(
+      (row): row is ViralRequestApprovalFanOutRow => row !== null,
+    )
+}
+
+async function getApprovedViralRequestMatchContext(
+  db: ViralRequestsDb,
+  args: FindMatchingProsForViralRequestArgs,
+): Promise<{
+  request: ViralRequestListRow
+  matches: ViralRequestMatchedProfessional[]
+}> {
+  const request = await getViralRequestByIdOrThrow(db, args.requestId)
+
+  if (request.status !== ViralServiceRequestStatus.APPROVED) {
+    throw new Error(
+      'Viral request must be APPROVED before approval fan-out can run.',
+    )
+  }
+
+  const matches = await findMatchingProsForViralRequest(db, {
+    requestId: request.id,
+    take: args.take,
+    skip: args.skip,
+  })
+
+  return {
+    request,
+    matches,
+  }
 }
 
 export async function getViralRequestByIdOrThrow(
@@ -553,6 +683,190 @@ export async function findMatchingProsForViralRequest(
   })
 }
 
+export async function createViralRequestApprovalFanOutRows(
+  db: ViralRequestsDb,
+  args: CreateViralRequestApprovalFanOutRowsArgs,
+): Promise<CreateViralRequestApprovalFanOutRowsResult> {
+  const { request, matches } = await getApprovedViralRequestMatchContext(db, {
+    requestId: args.requestId,
+    take: args.take,
+    skip: args.skip,
+  })
+
+  const matchedProfessionalIds = matches.map((match) => match.id)
+
+  if (matchedProfessionalIds.length === 0) {
+    return {
+      requestId: request.id,
+      matchedProfessionalIds: [],
+      fanOutRows: [],
+    }
+  }
+
+  await db.viralRequestApprovalFanOut.createMany({
+    data: matchedProfessionalIds.map((professionalId) => ({
+      viralServiceRequestId: request.id,
+      professionalId,
+      status: ViralRequestApprovalFanOutStatus.PLANNED,
+    })),
+    skipDuplicates: true,
+  })
+
+  const rows = await db.viralRequestApprovalFanOut.findMany({
+    where: {
+      viralServiceRequestId: request.id,
+      professionalId: {
+        in: matchedProfessionalIds,
+      },
+    },
+    select: viralRequestApprovalFanOutSelect,
+  })
+
+  return {
+    requestId: request.id,
+    matchedProfessionalIds,
+    fanOutRows: sortFanOutRowsByMatchedProfessionalIds(
+      rows,
+      matchedProfessionalIds,
+    ),
+  }
+}
+
+export async function listViralRequestApprovalFanOutRows(
+  db: ViralRequestsDb,
+  args: ListViralRequestApprovalFanOutRowsArgs,
+): Promise<ViralRequestApprovalFanOutRow[]> {
+  const requestId = normalizeRequiredId('requestId', args.requestId)
+
+  return db.viralRequestApprovalFanOut.findMany({
+    where: {
+      viralServiceRequestId: requestId,
+      ...(args.statuses && args.statuses.length > 0
+        ? {
+            status: {
+              in: [...args.statuses],
+            },
+          }
+        : {}),
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: normalizeTake(args.take),
+    skip: normalizeSkip(args.skip),
+    select: viralRequestApprovalFanOutSelect,
+  })
+}
+
+export async function markViralRequestApprovalFanOutRowsQueued(
+  db: ViralRequestsDb,
+  args: MarkViralRequestApprovalFanOutRowsQueuedArgs,
+): Promise<MarkViralRequestApprovalFanOutRowsQueuedResult> {
+  const fanOutRowIds = normalizeRequiredIdList('fanOutRowId', args.fanOutRowIds)
+
+  if (fanOutRowIds.length === 0) {
+    return { updatedCount: 0 }
+  }
+
+  const now = new Date()
+
+  const updated = await db.viralRequestApprovalFanOut.updateMany({
+    where: {
+      id: {
+        in: fanOutRowIds,
+      },
+    },
+    data: {
+      status: ViralRequestApprovalFanOutStatus.NOTIFICATION_ENQUEUED,
+      queuedAt: now,
+      failedAt: null,
+      skippedAt: null,
+      lastError: null,
+      skipReason: null,
+    },
+  })
+
+  return {
+    updatedCount: updated.count,
+  }
+}
+
+export async function markViralRequestApprovalFanOutRowsSkipped(
+  db: ViralRequestsDb,
+  args: MarkViralRequestApprovalFanOutRowsSkippedArgs,
+): Promise<MarkViralRequestApprovalFanOutRowsSkippedResult> {
+  const fanOutRowIds = normalizeRequiredIdList('fanOutRowId', args.fanOutRowIds)
+
+  if (fanOutRowIds.length === 0) {
+    return { updatedCount: 0 }
+  }
+
+  const reason = normalizeOptionalText(args.reason, {
+    maxLength: 2000,
+  })
+
+  if (!reason) {
+    throw new Error('reason is required.')
+  }
+
+  const now = new Date()
+
+  const updated = await db.viralRequestApprovalFanOut.updateMany({
+    where: {
+      id: {
+        in: fanOutRowIds,
+      },
+    },
+    data: {
+      status: ViralRequestApprovalFanOutStatus.SKIPPED,
+      skippedAt: now,
+      failedAt: null,
+      lastError: null,
+      skipReason: reason,
+    },
+  })
+
+  return {
+    updatedCount: updated.count,
+  }
+}
+
+export async function markViralRequestApprovalFanOutRowsFailed(
+  db: ViralRequestsDb,
+  args: MarkViralRequestApprovalFanOutRowsFailedArgs,
+): Promise<MarkViralRequestApprovalFanOutRowsFailedResult> {
+  const fanOutRowIds = normalizeRequiredIdList('fanOutRowId', args.fanOutRowIds)
+
+  if (fanOutRowIds.length === 0) {
+    return { updatedCount: 0 }
+  }
+
+  const message = normalizeOptionalText(args.message, {
+    maxLength: 2000,
+  })
+
+  if (!message) {
+    throw new Error('message is required.')
+  }
+
+  const now = new Date()
+
+  const updated = await db.viralRequestApprovalFanOut.updateMany({
+    where: {
+      id: {
+        in: fanOutRowIds,
+      },
+    },
+    data: {
+      status: ViralRequestApprovalFanOutStatus.FAILED,
+      failedAt: now,
+      lastError: message,
+    },
+  })
+
+  return {
+    updatedCount: updated.count,
+  }
+}
+
 export function buildViralRequestUploadTargetPath(
   args: BuildViralRequestUploadTargetPathArgs,
 ): string {
@@ -563,6 +877,8 @@ export function buildViralRequestUploadTargetPath(
 }
 
 /**
+ * Worker/orchestrator-only downstream helper.
+ *
  * Creates pro inbox Notification rows for approved viral requests and lets the
  * existing notification foundation enqueue downstream dispatch for newly
  * created rows.
@@ -576,21 +892,14 @@ export function buildViralRequestUploadTargetPath(
  * - this helper does not write NotificationDispatch rows directly
  * - durable inbox creation + downstream dispatch stay inside the existing
  *   notification foundation
+ * - do not call this from moderation routes or request handlers
  */
 export async function enqueueViralRequestApprovalNotifications(
   db: ViralRequestsDb,
   args: FindMatchingProsForViralRequestArgs,
 ): Promise<EnqueueViralRequestApprovalNotificationsResult> {
-  const request = await getViralRequestByIdOrThrow(db, args.requestId)
-
-  if (request.status !== ViralServiceRequestStatus.APPROVED) {
-    throw new Error(
-      'Viral request must be APPROVED before approval notifications can be enqueued.',
-    )
-  }
-
-  const matches = await findMatchingProsForViralRequest(db, {
-    requestId: request.id,
+  const { request, matches } = await getApprovedViralRequestMatchContext(db, {
+    requestId: args.requestId,
     take: args.take,
     skip: args.skip,
   })

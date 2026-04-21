@@ -258,6 +258,13 @@ enum ViralServiceRequestStatus {
   REJECTED
 }
 
+enum ViralRequestApprovalFanOutStatus {
+  PLANNED
+  NOTIFICATION_ENQUEUED
+  SKIPPED
+  FAILED
+}
+
 enum ClientAddressKind {
   SEARCH_AREA
   SERVICE_ADDRESS
@@ -497,7 +504,8 @@ model Notification {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  dispatches NotificationDispatch[] @relation("ProNotificationDispatches")
+  dispatches                  NotificationDispatch[]       @relation("ProNotificationDispatches")
+  viralRequestApprovalFanOuts ViralRequestApprovalFanOut[]
 
   @@unique([professionalId, dedupeKey])
   // main inbox query
@@ -556,7 +564,8 @@ model NotificationDispatch {
   notification       Notification?       @relation("ProNotificationDispatches", fields: [notificationId], references: [id], onDelete: SetNull)
   clientNotification ClientNotification? @relation("ClientInboxNotificationDispatches", fields: [clientNotificationId], references: [id], onDelete: SetNull)
 
-  deliveries NotificationDelivery[]
+  deliveries                  NotificationDelivery[]
+  viralRequestApprovalFanOuts ViralRequestApprovalFanOut[]
 
   @@index([recipientKind, scheduledFor, createdAt])
   @@index([professionalId, createdAt])
@@ -1106,10 +1115,11 @@ model ProfessionalProfile {
 
   holds BookingHold[] @relation("ProHolds") // name optional but makes it clear
 
-  clientNotes       ClientProfessionalNote[]
-  recordedAllergies ClientAllergy[] // for recordedBy relation
-  reviews           Review[]
-  reminders         Reminder[]
+  clientNotes                 ClientProfessionalNote[]
+  recordedAllergies           ClientAllergy[] // for recordedBy relation
+  reviews                     Review[]
+  reminders                   Reminder[]
+  viralRequestApprovalFanOuts ViralRequestApprovalFanOut[]
 
   @@index([handleNormalized])
 }
@@ -2403,6 +2413,41 @@ model LooksSocialJob {
   @@index([type, status, runAt])
 }
 
+model ViralRequestApprovalFanOut {
+  id String @id @default(cuid())
+
+  viralServiceRequestId String
+  professionalId        String
+
+  status ViralRequestApprovalFanOutStatus @default(PLANNED)
+
+  matchedAt DateTime  @default(now())
+  queuedAt  DateTime?
+  sentAt    DateTime?
+  skippedAt DateTime?
+  failedAt  DateTime?
+
+  skipReason String?
+  lastError  String?
+
+  notificationId         String?
+  notificationDispatchId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  viralServiceRequest  ViralServiceRequest   @relation(fields: [viralServiceRequestId], references: [id], onDelete: Cascade)
+  professional         ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  notification         Notification?         @relation(fields: [notificationId], references: [id], onDelete: SetNull)
+  notificationDispatch NotificationDispatch? @relation(fields: [notificationDispatchId], references: [id], onDelete: SetNull)
+
+  @@unique([viralServiceRequestId, professionalId])
+  @@index([viralServiceRequestId, status, createdAt])
+  @@index([professionalId, status, createdAt])
+  @@index([notificationId])
+  @@index([notificationDispatchId])
+}
+
 model ProFollow {
   id             String   @id @default(cuid())
   clientId       String
@@ -2894,9 +2939,10 @@ model ViralServiceRequest {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client         ClientProfile               @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  reviewedByUser User?                       @relation("ViralServiceRequestReviewedByUser", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
-  reports        ViralServiceRequestReport[]
+  client          ClientProfile                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  reviewedByUser  User?                        @relation("ViralServiceRequestReviewedByUser", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  reports         ViralServiceRequestReport[]
+  approvalFanOuts ViralRequestApprovalFanOut[]
 
   @@index([clientId, createdAt])
   @@index([status, createdAt])

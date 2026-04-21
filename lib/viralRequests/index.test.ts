@@ -5,6 +5,7 @@ import {
   Prisma,
   ProfessionType,
   VerificationStatus,
+  ViralRequestApprovalFanOutStatus,
   ViralServiceRequestStatus,
 } from '@prisma/client'
 
@@ -20,10 +21,15 @@ vi.mock('@/lib/notifications/social', () => ({
 import {
   buildViralRequestUploadTargetPath,
   createClientViralRequest,
+  createViralRequestApprovalFanOutRows,
   deleteClientViralRequest,
   enqueueViralRequestApprovalNotifications,
   findMatchingProsByRequestedCategory,
   findMatchingProsForViralRequest,
+  listViralRequestApprovalFanOutRows,
+  markViralRequestApprovalFanOutRowsFailed,
+  markViralRequestApprovalFanOutRowsQueued,
+  markViralRequestApprovalFanOutRowsSkipped,
   updateViralRequestStatus,
 } from './index'
 
@@ -39,13 +45,18 @@ function makeDb() {
     professionalProfile: {
       findMany: vi.fn(),
     },
+    viralRequestApprovalFanOut: {
+      createMany: vi.fn(),
+      findMany: vi.fn(),
+      updateMany: vi.fn(),
+    },
   }
 }
 
 /**
  * Narrow local test-only cast:
  * production helpers accept Prisma.TransactionClient | PrismaClient,
- * but these unit tests only mock the members exercised by viralRequests/index.ts.
+ * but these unit tests mock only the members exercised by lib/viralRequests/index.ts.
  */
 function asTransactionClient(
   value: ReturnType<typeof makeDb>,
@@ -117,6 +128,44 @@ function makeViralRequestRow(
             name: 'Hair',
             slug: 'hair',
           },
+  }
+}
+
+function makeFanOutRow(
+  overrides?: Partial<{
+    id: string
+    viralServiceRequestId: string
+    professionalId: string
+    status: ViralRequestApprovalFanOutStatus
+    matchedAt: Date
+    queuedAt: Date | null
+    sentAt: Date | null
+    skippedAt: Date | null
+    failedAt: Date | null
+    skipReason: string | null
+    lastError: string | null
+    notificationId: string | null
+    notificationDispatchId: string | null
+    createdAt: Date
+    updatedAt: Date
+  }>,
+) {
+  return {
+    id: overrides?.id ?? 'fanout_1',
+    viralServiceRequestId: overrides?.viralServiceRequestId ?? 'request_1',
+    professionalId: overrides?.professionalId ?? 'pro_1',
+    status: overrides?.status ?? ViralRequestApprovalFanOutStatus.PLANNED,
+    matchedAt: overrides?.matchedAt ?? new Date('2026-04-19T00:00:00.000Z'),
+    queuedAt: overrides?.queuedAt ?? null,
+    sentAt: overrides?.sentAt ?? null,
+    skippedAt: overrides?.skippedAt ?? null,
+    failedAt: overrides?.failedAt ?? null,
+    skipReason: overrides?.skipReason ?? null,
+    lastError: overrides?.lastError ?? null,
+    notificationId: overrides?.notificationId ?? null,
+    notificationDispatchId: overrides?.notificationDispatchId ?? null,
+    createdAt: overrides?.createdAt ?? new Date('2026-04-19T00:00:00.000Z'),
+    updatedAt: overrides?.updatedAt ?? new Date('2026-04-19T00:00:00.000Z'),
   }
 }
 
@@ -347,7 +396,7 @@ describe('lib/viralRequests/index.ts', () => {
       expect(db.professionalProfile.findMany).toHaveBeenCalledWith({
         where: {
           verificationStatus: {
-            in: [VerificationStatus.APPROVED],
+            in: expect.arrayContaining([VerificationStatus.APPROVED]),
           },
           offerings: {
             some: {
@@ -439,6 +488,352 @@ describe('lib/viralRequests/index.ts', () => {
     })
   })
 
+  describe('createViralRequestApprovalFanOutRows', () => {
+    it('creates durable per-pro fan-out rows and returns them in matched-pro order', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralServiceRequest.findUnique.mockResolvedValue(
+        makeViralRequestRow({
+          id: 'request_1',
+          status: ViralServiceRequestStatus.APPROVED,
+          requestedCategoryId: 'cat_1',
+        }),
+      )
+
+      db.professionalProfile.findMany.mockResolvedValue([
+        {
+          id: 'pro_1',
+          businessName: 'Studio One',
+          handle: 'studio-one',
+          avatarUrl: null,
+          professionType: ProfessionType.HAIRSTYLIST,
+          location: 'San Diego, CA',
+          verificationStatus: VerificationStatus.APPROVED,
+          isPremium: true,
+          offerings: [
+            {
+              service: {
+                id: 'service_1',
+                name: 'Wolf Cut',
+              },
+            },
+          ],
+        },
+        {
+          id: 'pro_2',
+          businessName: 'Studio Two',
+          handle: 'studio-two',
+          avatarUrl: null,
+          professionType: ProfessionType.HAIRSTYLIST,
+          location: 'Los Angeles, CA',
+          verificationStatus: VerificationStatus.APPROVED,
+          isPremium: false,
+          offerings: [
+            {
+              service: {
+                id: 'service_2',
+                name: 'Shag Cut',
+              },
+            },
+          ],
+        },
+      ])
+
+      db.viralRequestApprovalFanOut.createMany.mockResolvedValue({
+        count: 2,
+      })
+
+      db.viralRequestApprovalFanOut.findMany.mockResolvedValue([
+        makeFanOutRow({
+          id: 'fanout_2',
+          professionalId: 'pro_2',
+        }),
+        makeFanOutRow({
+          id: 'fanout_1',
+          professionalId: 'pro_1',
+        }),
+      ])
+
+      const result = await createViralRequestApprovalFanOutRows(tx, {
+        requestId: 'request_1',
+      })
+
+      expect(db.viralRequestApprovalFanOut.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            viralServiceRequestId: 'request_1',
+            professionalId: 'pro_1',
+            status: ViralRequestApprovalFanOutStatus.PLANNED,
+          },
+          {
+            viralServiceRequestId: 'request_1',
+            professionalId: 'pro_2',
+            status: ViralRequestApprovalFanOutStatus.PLANNED,
+          },
+        ],
+        skipDuplicates: true,
+      })
+
+      expect(db.viralRequestApprovalFanOut.findMany).toHaveBeenCalledWith({
+        where: {
+          viralServiceRequestId: 'request_1',
+          professionalId: {
+            in: ['pro_1', 'pro_2'],
+          },
+        },
+        select: {
+          id: true,
+          viralServiceRequestId: true,
+          professionalId: true,
+          status: true,
+          matchedAt: true,
+          queuedAt: true,
+          sentAt: true,
+          skippedAt: true,
+          failedAt: true,
+          skipReason: true,
+          lastError: true,
+          notificationId: true,
+          notificationDispatchId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      })
+
+      expect(result).toEqual({
+        requestId: 'request_1',
+        matchedProfessionalIds: ['pro_1', 'pro_2'],
+        fanOutRows: [
+          makeFanOutRow({
+            id: 'fanout_1',
+            professionalId: 'pro_1',
+          }),
+          makeFanOutRow({
+            id: 'fanout_2',
+            professionalId: 'pro_2',
+          }),
+        ],
+      })
+    })
+
+    it('returns an empty result when no pros match the approved request', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralServiceRequest.findUnique.mockResolvedValue(
+        makeViralRequestRow({
+          id: 'request_1',
+          status: ViralServiceRequestStatus.APPROVED,
+          requestedCategoryId: 'cat_1',
+        }),
+      )
+
+      db.professionalProfile.findMany.mockResolvedValue([])
+
+      const result = await createViralRequestApprovalFanOutRows(tx, {
+        requestId: 'request_1',
+      })
+
+      expect(db.viralRequestApprovalFanOut.createMany).not.toHaveBeenCalled()
+      expect(db.viralRequestApprovalFanOut.findMany).not.toHaveBeenCalled()
+
+      expect(result).toEqual({
+        requestId: 'request_1',
+        matchedProfessionalIds: [],
+        fanOutRows: [],
+      })
+    })
+  })
+
+  describe('listViralRequestApprovalFanOutRows', () => {
+    it('lists fan-out rows with optional status filtering', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralRequestApprovalFanOut.findMany.mockResolvedValue([
+        makeFanOutRow({
+          id: 'fanout_1',
+          status: ViralRequestApprovalFanOutStatus.PLANNED,
+        }),
+      ])
+
+      const result = await listViralRequestApprovalFanOutRows(tx, {
+        requestId: 'request_1',
+        statuses: [ViralRequestApprovalFanOutStatus.PLANNED],
+        take: 10,
+        skip: 0,
+      })
+
+      expect(db.viralRequestApprovalFanOut.findMany).toHaveBeenCalledWith({
+        where: {
+          viralServiceRequestId: 'request_1',
+          status: {
+            in: [ViralRequestApprovalFanOutStatus.PLANNED],
+          },
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: 10,
+        skip: 0,
+        select: {
+          id: true,
+          viralServiceRequestId: true,
+          professionalId: true,
+          status: true,
+          matchedAt: true,
+          queuedAt: true,
+          sentAt: true,
+          skippedAt: true,
+          failedAt: true,
+          skipReason: true,
+          lastError: true,
+          notificationId: true,
+          notificationDispatchId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      })
+
+      expect(result).toEqual([
+        makeFanOutRow({
+          id: 'fanout_1',
+          status: ViralRequestApprovalFanOutStatus.PLANNED,
+        }),
+      ])
+    })
+  })
+
+  describe('markViralRequestApprovalFanOutRowsQueued', () => {
+    it('marks fan-out rows as notification enqueued', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralRequestApprovalFanOut.updateMany.mockResolvedValue({
+        count: 2,
+      })
+
+      const result = await markViralRequestApprovalFanOutRowsQueued(tx, {
+        fanOutRowIds: ['fanout_1', 'fanout_2'],
+      })
+
+      expect(db.viralRequestApprovalFanOut.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: {
+            in: ['fanout_1', 'fanout_2'],
+          },
+        },
+        data: {
+          status: ViralRequestApprovalFanOutStatus.NOTIFICATION_ENQUEUED,
+          queuedAt: expect.any(Date),
+          failedAt: null,
+          skippedAt: null,
+          lastError: null,
+          skipReason: null,
+        },
+      })
+
+      expect(result).toEqual({
+        updatedCount: 2,
+      })
+    })
+  })
+
+  describe('markViralRequestApprovalFanOutRowsSkipped', () => {
+    it('marks fan-out rows as skipped with a normalized reason', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralRequestApprovalFanOut.updateMany.mockResolvedValue({
+        count: 1,
+      })
+
+      const result = await markViralRequestApprovalFanOutRowsSkipped(tx, {
+        fanOutRowIds: ['fanout_1'],
+        reason: '  no supported delivery channel  ',
+      })
+
+      expect(db.viralRequestApprovalFanOut.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: {
+            in: ['fanout_1'],
+          },
+        },
+        data: {
+          status: ViralRequestApprovalFanOutStatus.SKIPPED,
+          skippedAt: expect.any(Date),
+          failedAt: null,
+          lastError: null,
+          skipReason: 'no supported delivery channel',
+        },
+      })
+
+      expect(result).toEqual({
+        updatedCount: 1,
+      })
+    })
+
+    it('throws when the skip reason is empty', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      await expect(
+        markViralRequestApprovalFanOutRowsSkipped(tx, {
+          fanOutRowIds: ['fanout_1'],
+          reason: '   ',
+        }),
+      ).rejects.toThrow('reason is required.')
+
+      expect(db.viralRequestApprovalFanOut.updateMany).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('markViralRequestApprovalFanOutRowsFailed', () => {
+    it('marks fan-out rows as failed with the supplied message', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      db.viralRequestApprovalFanOut.updateMany.mockResolvedValue({
+        count: 1,
+      })
+
+      const result = await markViralRequestApprovalFanOutRowsFailed(tx, {
+        fanOutRowIds: ['fanout_1'],
+        message: '  downstream notification enqueue failed  ',
+      })
+
+      expect(db.viralRequestApprovalFanOut.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: {
+            in: ['fanout_1'],
+          },
+        },
+        data: {
+          status: ViralRequestApprovalFanOutStatus.FAILED,
+          failedAt: expect.any(Date),
+          lastError: 'downstream notification enqueue failed',
+        },
+      })
+
+      expect(result).toEqual({
+        updatedCount: 1,
+      })
+    })
+
+    it('throws when the failure message is empty', async () => {
+      const db = makeDb()
+      const tx = asTransactionClient(db)
+
+      await expect(
+        markViralRequestApprovalFanOutRowsFailed(tx, {
+          fanOutRowIds: ['fanout_1'],
+          message: '   ',
+        }),
+      ).rejects.toThrow('message is required.')
+
+      expect(db.viralRequestApprovalFanOut.updateMany).not.toHaveBeenCalled()
+    })
+  })
+
   describe('buildViralRequestUploadTargetPath', () => {
     it('builds a deterministic sanitized upload path', () => {
       expect(
@@ -466,7 +861,7 @@ describe('lib/viralRequests/index.ts', () => {
           requestId: 'request_1',
         }),
       ).rejects.toThrow(
-        'Viral request must be APPROVED before approval notifications can be enqueued.',
+        'Viral request must be APPROVED before approval fan-out can run.',
       )
 
       expect(
@@ -478,16 +873,14 @@ describe('lib/viralRequests/index.ts', () => {
       const db = makeDb()
       const tx = asTransactionClient(db)
 
-      const approvedRequest = makeViralRequestRow({
-        id: 'request_1',
-        name: 'Wolf Cut',
-        status: ViralServiceRequestStatus.APPROVED,
-        requestedCategoryId: 'cat_1',
-      })
-
-      db.viralServiceRequest.findUnique
-        .mockResolvedValueOnce(approvedRequest)
-        .mockResolvedValueOnce(approvedRequest)
+      db.viralServiceRequest.findUnique.mockResolvedValue(
+        makeViralRequestRow({
+          id: 'request_1',
+          name: 'Wolf Cut',
+          status: ViralServiceRequestStatus.APPROVED,
+          requestedCategoryId: 'cat_1',
+        }),
+      )
 
       db.professionalProfile.findMany.mockResolvedValue([
         {

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn(
     (data?: Record<string, unknown>, init?: number | ResponseInit) => {
       const status = typeof init === 'number' ? init : init?.status
+
       return Response.json(
         { ok: true, ...(data ?? {}) },
         { status: status ?? 200 },
@@ -51,6 +52,9 @@ const mocks = vi.hoisted(() => {
     viralServiceRequest: {
       findUnique: viralServiceRequestFindUnique,
     },
+    adminActionLog: {
+      create: adminActionLogCreate,
+    },
   }
 
   const prisma = {
@@ -79,12 +83,14 @@ const mocks = vi.hoisted(() => {
   const recomputeLookPostCommentCount = vi.fn()
   const recomputeLookPostScores = vi.fn()
   const enqueueRecomputeLookCounts = vi.fn()
+  const enqueueFanOutViralRequestApprovalNotifications = vi.fn()
 
   const updateViralRequestStatus = vi.fn()
   const enqueueViralRequestApprovalNotifications = vi.fn()
 
   const toViralRequestDto = vi.fn()
   const toViralRequestApprovalNotificationsDto = vi.fn()
+  const toQueuedViralRequestApprovalNotificationsDto = vi.fn()
 
   return {
     jsonOk,
@@ -96,10 +102,12 @@ const mocks = vi.hoisted(() => {
     recomputeLookPostCommentCount,
     recomputeLookPostScores,
     enqueueRecomputeLookCounts,
+    enqueueFanOutViralRequestApprovalNotifications,
     updateViralRequestStatus,
     enqueueViralRequestApprovalNotifications,
     toViralRequestDto,
     toViralRequestApprovalNotificationsDto,
+    toQueuedViralRequestApprovalNotificationsDto,
   }
 })
 
@@ -127,6 +135,8 @@ vi.mock('@/lib/looks/counters', () => ({
 
 vi.mock('@/lib/jobs/looksSocial/enqueue', () => ({
   enqueueRecomputeLookCounts: mocks.enqueueRecomputeLookCounts,
+  enqueueFanOutViralRequestApprovalNotifications:
+    mocks.enqueueFanOutViralRequestApprovalNotifications,
 }))
 
 vi.mock('@/lib/viralRequests', () => ({
@@ -139,6 +149,8 @@ vi.mock('@/lib/viralRequests/contracts', () => ({
   toViralRequestDto: mocks.toViralRequestDto,
   toViralRequestApprovalNotificationsDto:
     mocks.toViralRequestApprovalNotificationsDto,
+  toQueuedViralRequestApprovalNotificationsDto:
+    mocks.toQueuedViralRequestApprovalNotificationsDto,
 }))
 
 import {
@@ -265,6 +277,106 @@ function makeViralPermissionRow(
   }
 }
 
+function makeApprovedViralRequestDto(
+  overrides?: Partial<Record<string, unknown>>,
+) {
+  return {
+    id: 'request_1',
+    status: ViralServiceRequestStatus.APPROVED,
+    moderationStatus: ModerationStatus.APPROVED,
+    reportCount: 0,
+    removedAt: null,
+    reviewedAt: '2026-04-20T00:00:00.000Z',
+    reviewedByUserId: 'admin_1',
+    approvedAt: '2026-04-20T00:00:00.000Z',
+    rejectedAt: null,
+    adminNotes: null,
+    name: 'Chrome aura nails',
+    description: null,
+    sourceUrl: null,
+    links: [],
+    mediaUrls: [],
+    requestedCategoryId: 'cat_1',
+    requestedCategory: null,
+    createdAt: '2026-04-20T00:00:00.000Z',
+    updatedAt: '2026-04-20T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function makeInReviewViralRequestDto(
+  overrides?: Partial<Record<string, unknown>>,
+) {
+  return {
+    id: 'request_1',
+    status: ViralServiceRequestStatus.IN_REVIEW,
+    moderationStatus: ModerationStatus.PENDING_REVIEW,
+    reportCount: 0,
+    removedAt: null,
+    reviewedAt: '2026-04-20T00:00:00.000Z',
+    reviewedByUserId: 'admin_1',
+    approvedAt: null,
+    rejectedAt: null,
+    adminNotes: 'Needs another pass',
+    name: 'Chrome aura nails',
+    description: null,
+    sourceUrl: null,
+    links: [],
+    mediaUrls: [],
+    requestedCategoryId: 'cat_1',
+    requestedCategory: null,
+    createdAt: '2026-04-20T00:00:00.000Z',
+    updatedAt: '2026-04-20T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function makeRejectedViralRequestDto(
+  overrides?: Partial<Record<string, unknown>>,
+) {
+  return {
+    id: 'request_1',
+    status: ViralServiceRequestStatus.REJECTED,
+    moderationStatus: ModerationStatus.REJECTED,
+    reportCount: 0,
+    removedAt: null,
+    reviewedAt: '2026-04-20T00:00:00.000Z',
+    reviewedByUserId: 'admin_1',
+    approvedAt: null,
+    rejectedAt: '2026-04-20T00:00:00.000Z',
+    adminNotes: 'No fit',
+    name: 'Chrome aura nails',
+    description: null,
+    sourceUrl: null,
+    links: [],
+    mediaUrls: [],
+    requestedCategoryId: 'cat_1',
+    requestedCategory: null,
+    createdAt: '2026-04-20T00:00:00.000Z',
+    updatedAt: '2026-04-20T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function makeQueuedApprovalNotificationsDto(
+  overrides?: Partial<{
+    enqueued: true
+    matchedProfessionalIds: string[]
+    notificationIds: string[]
+    jobId: string
+    deliveryMode: 'JOB_QUEUED'
+  }>,
+) {
+  return {
+    enqueued: true as const,
+    matchedProfessionalIds: [],
+    notificationIds: [],
+    jobId: 'job_viral_1',
+    deliveryMode: 'JOB_QUEUED' as const,
+    ...overrides,
+  }
+}
+
 describe('lib/adminModeration/service.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -277,40 +389,24 @@ describe('lib/adminModeration/service.ts', () => {
       spotlightScore: 10,
       rankScore: 20,
     })
+
     mocks.enqueueRecomputeLookCounts.mockResolvedValue({
       id: 'job_1',
       type: 'RECOMPUTE_LOOK_COUNTS',
     })
 
+    mocks.enqueueFanOutViralRequestApprovalNotifications.mockResolvedValue({
+      id: 'job_viral_1',
+      type: 'FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS',
+    })
+
     mocks.prisma.adminActionLog.create.mockResolvedValue({ id: 'log_1' })
 
-    mocks.toViralRequestDto.mockReturnValue({
-      id: 'request_1',
-      status: ViralServiceRequestStatus.APPROVED,
-      moderationStatus: ModerationStatus.APPROVED,
-      reportCount: 0,
-      removedAt: null,
-      reviewedAt: '2026-04-20T00:00:00.000Z',
-      reviewedByUserId: 'admin_1',
-      approvedAt: '2026-04-20T00:00:00.000Z',
-      rejectedAt: null,
-      adminNotes: null,
-      name: 'Chrome aura nails',
-      description: null,
-      sourceUrl: null,
-      links: [],
-      mediaUrls: [],
-      requestedCategoryId: 'cat_1',
-      requestedCategory: null,
-      createdAt: '2026-04-20T00:00:00.000Z',
-      updatedAt: '2026-04-20T00:00:00.000Z',
-    })
+    mocks.toViralRequestDto.mockReturnValue(makeApprovedViralRequestDto())
 
-    mocks.toViralRequestApprovalNotificationsDto.mockReturnValue({
-      enqueued: true,
-      matchedProfessionalIds: ['pro_1'],
-      dispatchSourceKeys: ['dispatch_1'],
-    })
+    mocks.toQueuedViralRequestApprovalNotificationsDto.mockReturnValue(
+      makeQueuedApprovalNotificationsDto(),
+    )
   })
 
   it('passes through failed admin auth responses unchanged', async () => {
@@ -673,27 +769,11 @@ describe('lib/adminModeration/service.ts', () => {
       id: 'request_1',
     })
 
-    mocks.toViralRequestDto.mockReturnValue({
-      id: 'request_1',
-      status: ViralServiceRequestStatus.IN_REVIEW,
-      moderationStatus: ModerationStatus.PENDING_REVIEW,
-      reportCount: 0,
-      removedAt: null,
-      reviewedAt: '2026-04-20T00:00:00.000Z',
-      reviewedByUserId: 'admin_1',
-      approvedAt: null,
-      rejectedAt: null,
-      adminNotes: 'Needs another pass',
-      name: 'Chrome aura nails',
-      description: null,
-      sourceUrl: null,
-      links: [],
-      mediaUrls: [],
-      requestedCategoryId: 'cat_1',
-      requestedCategory: null,
-      createdAt: '2026-04-20T00:00:00.000Z',
-      updatedAt: '2026-04-20T00:00:00.000Z',
-    })
+    mocks.toViralRequestDto.mockReturnValue(
+      makeInReviewViralRequestDto({
+        adminNotes: 'Needs another pass',
+      }),
+    )
 
     const res = await handleAdminModerationRoute(
       makeJsonRequest({
@@ -717,6 +797,10 @@ describe('lib/adminModeration/service.ts', () => {
         moderationStatus: ModerationStatus.PENDING_REVIEW,
       },
     )
+
+    expect(
+      mocks.enqueueFanOutViralRequestApprovalNotifications,
+    ).not.toHaveBeenCalled()
 
     expect(
       mocks.enqueueViralRequestApprovalNotifications,
@@ -756,7 +840,7 @@ describe('lib/adminModeration/service.ts', () => {
     })
   })
 
-  it('approves a viral request and returns notifications in the shared moderation contract', async () => {
+  it('approves a viral request, enqueues a durable fan-out job, and returns the queued notifications contract', async () => {
     mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue(
       makeViralPermissionRow(),
     )
@@ -765,11 +849,7 @@ describe('lib/adminModeration/service.ts', () => {
       id: 'request_1',
     })
 
-    mocks.enqueueViralRequestApprovalNotifications.mockResolvedValue({
-      enqueued: true,
-      matchedProfessionalIds: ['pro_1'],
-      dispatchSourceKeys: ['dispatch_1'],
-    })
+    mocks.toViralRequestDto.mockReturnValue(makeApprovedViralRequestDto())
 
     const res = await handleAdminModerationRoute(
       makeJsonRequest({
@@ -795,9 +875,22 @@ describe('lib/adminModeration/service.ts', () => {
     )
 
     expect(
-      mocks.enqueueViralRequestApprovalNotifications,
+      mocks.enqueueFanOutViralRequestApprovalNotifications,
     ).toHaveBeenCalledWith(mocks.tx, {
       requestId: 'request_1',
+    })
+
+    expect(
+      mocks.enqueueViralRequestApprovalNotifications,
+    ).not.toHaveBeenCalled()
+
+    expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
+      data: {
+        adminUserId: 'admin_1',
+        action: 'VIRAL_REQUEST_APPROVED',
+        note: 'requestId=request_1 note=Looks good',
+        categoryId: 'cat_1',
+      },
     })
 
     expect(res.status).toBe(200)
@@ -832,14 +925,16 @@ describe('lib/adminModeration/service.ts', () => {
         },
         notifications: {
           enqueued: true,
-          matchedProfessionalIds: ['pro_1'],
-          dispatchSourceKeys: ['dispatch_1'],
+          matchedProfessionalIds: [],
+          notificationIds: [],
+          jobId: 'job_viral_1',
+          deliveryMode: 'JOB_QUEUED',
         },
       },
     })
   })
 
-  it('keeps the legacy approve route response shape for viral requests', async () => {
+  it('keeps the legacy approve route response shape for viral requests while using queued orchestration', async () => {
     mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue(
       makeViralPermissionRow(),
     )
@@ -848,11 +943,7 @@ describe('lib/adminModeration/service.ts', () => {
       id: 'request_1',
     })
 
-    mocks.enqueueViralRequestApprovalNotifications.mockResolvedValue({
-      enqueued: true,
-      matchedProfessionalIds: ['pro_1'],
-      dispatchSourceKeys: ['dispatch_1'],
-    })
+    mocks.toViralRequestDto.mockReturnValue(makeApprovedViralRequestDto())
 
     const res = await handleLegacyViralModerationRoute(
       makeJsonRequest({
@@ -864,6 +955,16 @@ describe('lib/adminModeration/service.ts', () => {
       },
     )
     const body = await readJson(res)
+
+    expect(
+      mocks.enqueueFanOutViralRequestApprovalNotifications,
+    ).toHaveBeenCalledWith(mocks.tx, {
+      requestId: 'request_1',
+    })
+
+    expect(
+      mocks.enqueueViralRequestApprovalNotifications,
+    ).not.toHaveBeenCalled()
 
     expect(res.status).toBe(200)
     expect(body).toEqual({
@@ -891,8 +992,10 @@ describe('lib/adminModeration/service.ts', () => {
       },
       notifications: {
         enqueued: true,
-        matchedProfessionalIds: ['pro_1'],
-        dispatchSourceKeys: ['dispatch_1'],
+        matchedProfessionalIds: [],
+        notificationIds: [],
+        jobId: 'job_viral_1',
+        deliveryMode: 'JOB_QUEUED',
       },
     })
   })
@@ -906,27 +1009,11 @@ describe('lib/adminModeration/service.ts', () => {
       id: 'request_1',
     })
 
-    mocks.toViralRequestDto.mockReturnValue({
-      id: 'request_1',
-      status: ViralServiceRequestStatus.REJECTED,
-      moderationStatus: ModerationStatus.REJECTED,
-      reportCount: 0,
-      removedAt: null,
-      reviewedAt: '2026-04-20T00:00:00.000Z',
-      reviewedByUserId: 'admin_1',
-      approvedAt: null,
-      rejectedAt: '2026-04-20T00:00:00.000Z',
-      adminNotes: 'No fit',
-      name: 'Chrome aura nails',
-      description: null,
-      sourceUrl: null,
-      links: [],
-      mediaUrls: [],
-      requestedCategoryId: 'cat_1',
-      requestedCategory: null,
-      createdAt: '2026-04-20T00:00:00.000Z',
-      updatedAt: '2026-04-20T00:00:00.000Z',
-    })
+    mocks.toViralRequestDto.mockReturnValue(
+      makeRejectedViralRequestDto({
+        adminNotes: 'No fit',
+      }),
+    )
 
     const res = await handleLegacyViralModerationRoute(
       makeJsonRequest({
@@ -938,6 +1025,10 @@ describe('lib/adminModeration/service.ts', () => {
       },
     )
     const body = await readJson(res)
+
+    expect(
+      mocks.enqueueFanOutViralRequestApprovalNotifications,
+    ).not.toHaveBeenCalled()
 
     expect(
       mocks.enqueueViralRequestApprovalNotifications,

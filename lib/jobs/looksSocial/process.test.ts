@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
     recomputeLookPostCounters: vi.fn(),
     recomputeLookPostSpotlightScore: vi.fn(),
     recomputeLookPostRankScore: vi.fn(),
-    enqueueViralRequestApprovalNotifications: vi.fn(),
+    runViralRequestApprovalOrchestration: vi.fn(),
   }
 })
 
@@ -30,9 +30,9 @@ vi.mock('@/lib/looks/counters', () => ({
   recomputeLookPostRankScore: mocks.recomputeLookPostRankScore,
 }))
 
-vi.mock('@/lib/viralRequests', () => ({
-  enqueueViralRequestApprovalNotifications:
-    mocks.enqueueViralRequestApprovalNotifications,
+vi.mock('@/lib/viralRequests/approvalOrchestrator', () => ({
+  runViralRequestApprovalOrchestration:
+    mocks.runViralRequestApprovalOrchestration,
 }))
 
 import { processLooksSocialJobs } from './process'
@@ -250,7 +250,7 @@ describe('lib/jobs/looksSocial/process', () => {
     })
   })
 
-  it('processes viral fan-out jobs and marks them completed', async () => {
+  it('processes viral fan-out jobs through the shared approval orchestrator and marks them completed', async () => {
     const now = new Date('2026-04-20T16:00:00.000Z')
     const job = makeDueJob({
       id: 'job_viral_1',
@@ -263,20 +263,23 @@ describe('lib/jobs/looksSocial/process', () => {
 
     mocks.prisma.looksSocialJob.findMany.mockResolvedValue([job])
     mocks.prisma.looksSocialJob.updateMany.mockResolvedValue({ count: 1 })
-    mocks.enqueueViralRequestApprovalNotifications.mockResolvedValue({
-      enqueued: true,
+    mocks.runViralRequestApprovalOrchestration.mockResolvedValue({
+      requestId: 'request_7',
       matchedProfessionalIds: ['pro_1', 'pro_2'],
-      dispatchSourceKeys: [
-        'viral-request:request_7:professional:pro_1:approved',
-        'viral-request:request_7:professional:pro_2:approved',
-      ],
+      notificationIds: ['notif_1', 'notif_2'],
+      smsDeferred: true,
+      fanOutRowsCreated: true,
+      blocked: {
+        durableFanOutRows: false,
+        smsForEvent: true,
+      },
     })
     mocks.prisma.looksSocialJob.update.mockResolvedValue({ id: job.id })
 
     const result = await processLooksSocialJobs({ now })
 
     expect(
-      mocks.enqueueViralRequestApprovalNotifications,
+      mocks.runViralRequestApprovalOrchestration,
     ).toHaveBeenCalledWith(mocks.prisma, {
       requestId: 'request_7',
     })
@@ -320,7 +323,7 @@ describe('lib/jobs/looksSocial/process', () => {
 
     expect(mocks.recomputeLookPostCounters).not.toHaveBeenCalled()
     expect(
-      mocks.enqueueViralRequestApprovalNotifications,
+      mocks.runViralRequestApprovalOrchestration,
     ).not.toHaveBeenCalled()
 
     expect(mocks.prisma.looksSocialJob.update).toHaveBeenCalledWith({

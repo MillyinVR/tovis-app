@@ -5,13 +5,13 @@ import {
   Prisma,
 } from '@prisma/client'
 
-import { prisma } from '@/lib/prisma'
 import {
   recomputeLookPostCounters,
   recomputeLookPostRankScore,
   recomputeLookPostSpotlightScore,
 } from '@/lib/looks/counters'
-import { enqueueViralRequestApprovalNotifications } from '@/lib/viralRequests'
+import { prisma } from '@/lib/prisma'
+import { runViralRequestApprovalOrchestration } from '@/lib/viralRequests/approvalOrchestrator'
 
 const DEFAULT_BATCH_SIZE = 100
 const MAX_BATCH_SIZE = 250
@@ -147,7 +147,7 @@ async function runLooksSocialJob(
       return
 
     case LooksSocialJobType.FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS:
-      await enqueueViralRequestApprovalNotifications(prisma, {
+      await runViralRequestApprovalOrchestration(prisma, {
         requestId: readRequiredString(job.payload, 'requestId'),
       })
       return

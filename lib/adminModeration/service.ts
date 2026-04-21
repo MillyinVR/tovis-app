@@ -29,18 +29,18 @@ import {
   type LookPostModerationAction,
   type ViralRequestModerationAction,
 } from '@/lib/adminModeration/contracts'
-import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
+import {
+  enqueueFanOutViralRequestApprovalNotifications,
+  enqueueRecomputeLookCounts,
+} from '@/lib/jobs/looksSocial/enqueue'
 import {
   recomputeLookPostCommentCount,
   recomputeLookPostScores,
 } from '@/lib/looks/counters'
 import { prisma } from '@/lib/prisma'
+import { updateViralRequestStatus } from '@/lib/viralRequests'
 import {
-  enqueueViralRequestApprovalNotifications,
-  updateViralRequestStatus,
-} from '@/lib/viralRequests'
-import {
-  toViralRequestApprovalNotificationsDto,
+  toQueuedViralRequestApprovalNotificationsDto,
   toViralRequestDto,
 } from '@/lib/viralRequests/contracts'
 
@@ -178,7 +178,9 @@ function normalizeTargetId(
 ): string {
   const trimmed = value.trim()
 
-  if (trimmed) return trimmed
+  if (trimmed) {
+    return trimmed
+  }
 
   switch (kind) {
     case 'LOOK_POST':
@@ -672,6 +674,7 @@ async function executeLookCommentModeration(
     db,
     updated.lookPostId,
   )
+
   await enqueueRecomputeLookCounts(db, {
     lookPostId: updated.lookPostId,
   })
@@ -732,11 +735,14 @@ async function executeViralRequestModeration(
   const scope = buildViralRequestPermissionScope(existing)
 
   if (request.action === 'approve') {
-    const notifications = await enqueueViralRequestApprovalNotifications(db, {
+    const fanOutJob = await enqueueFanOutViralRequestApprovalNotifications(db, {
       requestId: request.targetId,
     })
+
     const notificationsDto =
-      toViralRequestApprovalNotificationsDto(notifications)
+      toQueuedViralRequestApprovalNotificationsDto({
+        jobId: fanOutJob.id,
+      })
 
     return {
       response: toViralRequestModerationResultDto({
@@ -801,16 +807,6 @@ export async function executeAdminModeration(
   }
 }
 
-async function writeAdminActionLog(
-  logData: Prisma.AdminActionLogUncheckedCreateInput,
-): Promise<void> {
-  await prisma.adminActionLog
-    .create({
-      data: logData,
-    })
-    .catch(() => null)
-}
-
 async function runModerationRequest(
   adminUserId: string,
   request: ParsedAdminModerationRequest,
@@ -831,10 +827,14 @@ async function runModerationRequest(
   }
 
   const executed = await prisma.$transaction(async (tx) => {
-    return executeAdminModeration(tx, adminUserId, request)
-  })
+    const result = await executeAdminModeration(tx, adminUserId, request)
 
-  await writeAdminActionLog(executed.logData)
+    await tx.adminActionLog.create({
+      data: result.logData,
+    })
+
+    return result
+  })
 
   return executed
 }
@@ -896,6 +896,7 @@ export async function handleAdminModerationRoute(
           : parseViralRequestModerationBody(targetId, body)
 
     const executed = await runModerationRequest(auth.user.id, parsed)
+
     if (executed instanceof Response) {
       return executed
     }
@@ -924,6 +925,7 @@ export async function handleLegacyViralModerationRoute(
     )
 
     const body = await readJsonBody(req)
+
     if (body === null) {
       return jsonFail(415, 'Content-Type must be application/json.')
     }
@@ -938,6 +940,7 @@ export async function handleLegacyViralModerationRoute(
     }
 
     const executed = await runModerationRequest(auth.user.id, parsed)
+
     if (executed instanceof Response) {
       return executed
     }
