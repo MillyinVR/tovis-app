@@ -1,12 +1,15 @@
-import { Prisma, PrismaClient, ViralServiceRequestStatus } from '@prisma/client'
+import { Prisma, PrismaClient } from '@prisma/client'
 
 import {
+  createViralRequestApprovalFanOutRows,
   enqueueViralRequestApprovalNotifications,
-  findMatchingProsForViralRequest,
-  getViralRequestByIdOrThrow,
+  markViralRequestApprovalFanOutRowsFailed,
+  markViralRequestApprovalFanOutRowsQueued,
 } from '@/lib/viralRequests'
 
-export type ViralApprovalOrchestratorDb = PrismaClient | Prisma.TransactionClient
+export type ViralApprovalOrchestratorDb =
+  | PrismaClient
+  | Prisma.TransactionClient
 
 export type RunViralRequestApprovalOrchestrationArgs = {
   requestId: string
@@ -15,11 +18,12 @@ export type RunViralRequestApprovalOrchestrationArgs = {
 export type RunViralRequestApprovalOrchestrationResult = {
   requestId: string
   matchedProfessionalIds: string[]
+  fanOutRowIds: string[]
   notificationIds: string[]
   smsDeferred: true
-  fanOutRowsCreated: false
+  fanOutRowsCreated: boolean
   blocked: {
-    durableFanOutRows: true
+    durableFanOutRows: false
     smsForEvent: true
   }
 }
@@ -34,37 +38,78 @@ function normalizeRequiredId(name: string, value: string): string {
   return trimmed
 }
 
+function normalizeErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return 'Unknown viral approval orchestration error.'
+  }
+
+  const message = error.message.trim()
+
+  return message.length > 0
+    ? message
+    : 'Unknown viral approval orchestration error.'
+}
+
 export async function runViralRequestApprovalOrchestration(
   db: ViralApprovalOrchestratorDb,
   args: RunViralRequestApprovalOrchestrationArgs,
 ): Promise<RunViralRequestApprovalOrchestrationResult> {
   const requestId = normalizeRequiredId('requestId', args.requestId)
-  const request = await getViralRequestByIdOrThrow(db, requestId)
 
-  if (request.status !== ViralServiceRequestStatus.APPROVED) {
-    throw new Error(
-      'Viral request must be APPROVED before approval orchestration can run.',
-    )
+  const fanOut = await createViralRequestApprovalFanOutRows(db, {
+    requestId,
+  })
+
+  const fanOutRowIds = fanOut.fanOutRows.map((row) => row.id)
+
+  if (fanOutRowIds.length === 0) {
+    return {
+      requestId: fanOut.requestId,
+      matchedProfessionalIds: fanOut.matchedProfessionalIds,
+      fanOutRowIds: [],
+      notificationIds: [],
+      smsDeferred: true,
+      fanOutRowsCreated: false,
+      blocked: {
+        durableFanOutRows: false,
+        smsForEvent: true,
+      },
+    }
   }
 
-  const matches = await findMatchingProsForViralRequest(db, {
-    requestId: request.id,
-  })
+  try {
+    const notifications = await enqueueViralRequestApprovalNotifications(db, {
+      requestId: fanOut.requestId,
+    })
 
-  const notifications = await enqueueViralRequestApprovalNotifications(db, {
-    requestId: request.id,
-  })
+    await markViralRequestApprovalFanOutRowsQueued(db, {
+      fanOutRowIds,
+    })
 
-  return {
-    requestId: request.id,
-    matchedProfessionalIds:
-      matches.map((match) => match.id),
-    notificationIds: notifications.notificationIds,
-    smsDeferred: true,
-    fanOutRowsCreated: false,
-    blocked: {
-      durableFanOutRows: true,
-      smsForEvent: true,
-    },
+    return {
+      requestId: fanOut.requestId,
+      matchedProfessionalIds: fanOut.matchedProfessionalIds,
+      fanOutRowIds,
+      notificationIds: notifications.notificationIds,
+      smsDeferred: true,
+      fanOutRowsCreated: true,
+      blocked: {
+        durableFanOutRows: false,
+        smsForEvent: true,
+      },
+    }
+  } catch (error) {
+    const message = normalizeErrorMessage(error)
+
+    try {
+      await markViralRequestApprovalFanOutRowsFailed(db, {
+        fanOutRowIds,
+        message,
+      })
+    } catch {
+      // Preserve the original orchestration failure.
+    }
+
+    throw error
   }
 }
