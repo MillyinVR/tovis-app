@@ -1,431 +1,54 @@
 // app/api/search/route.ts
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { SearchRequestError } from '@/lib/search/contracts'
 import {
-  buildDiscoveryLocationLabel,
-  buildDiscoveryOfferSummaryMap,
-  inferProfessionTypesFromQuery,
-  isOpenNowAtLocation,
-  mapProfessionalLocation,
-  matchesDiscoveryOfferingFilters,
-  pickClosestLocationWithinRadius,
-  pickPrimaryLocation,
-  type DiscoveryLocationDto,
-} from '@/lib/discovery/nearby'
-import { prisma } from '@/lib/prisma'
-import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+  parseSearchProsParams,
+  searchPros,
+} from '@/lib/search/pros'
+import {
+  parseSearchServicesParams,
+  searchServices,
+} from '@/lib/search/services'
 
 export const dynamic = 'force-dynamic'
 
-function pickNumber(value: string | null): number | null {
-  if (!value) return null
-
-  const n = Number(value)
-  return Number.isFinite(n) ? n : null
-}
-
-function parseBool(value: string | null): boolean {
-  const s = (value ?? '').trim().toLowerCase()
-  return s === '1' || s === 'true' || s === 'yes' || s === 'on'
-}
-
-type Sort = 'DISTANCE' | 'RATING' | 'PRICE' | 'NAME'
-
-function normalizeSort(value: string | null): Sort {
-  const s = (value ?? '').trim().toUpperCase()
-
-  if (s === 'RATING') return 'RATING'
-  if (s === 'PRICE') return 'PRICE'
-  if (s === 'NAME') return 'NAME'
-
-  return 'DISTANCE'
-}
-
-function clampInt(n: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, Math.trunc(n)))
-}
-
-function normalizeOptionalId(value: string | null): string | null {
-  const trimmed = (value ?? '').trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function emptyOfferSummary(professionalId: string) {
-  return {
-    professionalId,
-    supportsSalon: false,
-    supportsMobile: false,
-    minSalon: null,
-    minMobile: null,
-    minAny: null,
-    categoryIds: [],
-  }
+function parseTab(value: string | null): 'PROS' | 'SERVICES' {
+  return (pickString(value) ?? '').trim().toUpperCase() === 'SERVICES'
+    ? 'SERVICES'
+    : 'PROS'
 }
 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
-
-    const q = (pickString(searchParams.get('q')) ?? '').trim()
-    const tabRaw = (
-      pickString(searchParams.get('tab')) ?? 'PROS'
-    ).toUpperCase()
-    const tab = tabRaw === 'SERVICES' ? 'SERVICES' : 'PROS'
-
-    const lat = pickNumber(searchParams.get('lat'))
-    const lng = pickNumber(searchParams.get('lng'))
-    const requestedCategoryId = normalizeOptionalId(
-      pickString(searchParams.get('categoryId')),
-    )
-
-    const radiusMiles = (() => {
-      const r = pickNumber(searchParams.get('radiusMiles')) ?? 15
-      return clampInt(r, 1, 100)
-    })()
-
-    const mobileOnly = parseBool(searchParams.get('mobile'))
-    const openNowOnly = parseBool(searchParams.get('openNow'))
-    const minRating = pickNumber(searchParams.get('minRating'))
-    const maxPrice = pickNumber(searchParams.get('maxPrice'))
-    const sort = normalizeSort(searchParams.get('sort'))
+    const tab = parseTab(searchParams.get('tab'))
 
     if (tab === 'SERVICES') {
-      const services = await prisma.service.findMany({
-        where: {
-          isActive: true,
-          ...(requestedCategoryId
-            ? { categoryId: requestedCategoryId }
-            : {}),
-          ...(q
-            ? {
-                OR: [
-                  { name: { contains: q, mode: 'insensitive' } },
-                  {
-                    category: {
-                      name: { contains: q, mode: 'insensitive' },
-                    },
-                  },
-                ],
-              }
-            : {}),
-        },
-        take: 40,
-        orderBy: { name: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          category: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-            },
-          },
-        },
-      })
+      const result = await searchServices(
+        parseSearchServicesParams(searchParams),
+      )
 
       return jsonOk({
         ok: true,
         pros: [],
-        services: services.map((service) => ({
-          id: service.id,
-          name: service.name,
-          categoryId: service.category?.id ?? null,
-          categoryName: service.category?.name ?? null,
-          categorySlug: service.category?.slug ?? null,
-        })),
+        services: result.items,
       })
     }
 
-    const origin =
-      lat != null && lng != null ? { lat, lng } : null
-
-    const matchedProfessions = q
-      ? inferProfessionTypesFromQuery(q)
-      : []
-
-    const pros = await prisma.professionalProfile.findMany({
-      where: {
-        verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
-        ...(q
-          ? {
-              OR: [
-                { businessName: { contains: q, mode: 'insensitive' } },
-                { handle: { contains: q, mode: 'insensitive' } },
-                { location: { contains: q, mode: 'insensitive' } },
-                ...(matchedProfessions.length > 0
-                  ? [{ professionType: { in: matchedProfessions } }]
-                  : []),
-              ],
-            }
-          : {}),
-      },
-      take: 200,
-      orderBy: [{ businessName: 'asc' }, { handleNormalized: 'asc' }],
-      select: {
-        id: true,
-        businessName: true,
-        handle: true,
-        professionType: true,
-        avatarUrl: true,
-        location: true,
-        locations: {
-          where: {
-            isBookable: true,
-            lat: { not: null },
-            lng: { not: null },
-          },
-          take: 25,
-          select: {
-            id: true,
-            formattedAddress: true,
-            city: true,
-            state: true,
-            timeZone: true,
-            placeId: true,
-            lat: true,
-            lng: true,
-            isPrimary: true,
-            workingHours: true,
-          },
-          orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-        },
-      },
-    })
-
-    const proIds = pros.map((pro) => pro.id)
-
-    const ratingRows = await prisma.review.groupBy({
-      by: ['professionalId'],
-      where: { professionalId: { in: proIds } },
-      _avg: { rating: true },
-      _count: { _all: true },
-    })
-
-    const ratingByPro = new Map<
-      string,
-      { avg: number | null; count: number }
-    >()
-
-    for (const row of ratingRows) {
-      ratingByPro.set(row.professionalId, {
-        avg:
-          typeof row._avg.rating === 'number' ? row._avg.rating : null,
-        count: row._count._all ?? 0,
-      })
-    }
-
-    const offeringRows =
-      await prisma.professionalServiceOffering.findMany({
-        where: {
-          professionalId: { in: proIds },
-          isActive: true,
-          service: {
-            isActive: true,
-          },
-        },
-        select: {
-          professionalId: true,
-          offersInSalon: true,
-          offersMobile: true,
-          salonPriceStartingAt: true,
-          mobilePriceStartingAt: true,
-          service: {
-            select: {
-              categoryId: true,
-            },
-          },
-        },
-      })
-
-    const offerByPro = buildDiscoveryOfferSummaryMap(
-      offeringRows.map((offering) => ({
-        professionalId: offering.professionalId,
-        offersInSalon: offering.offersInSalon,
-        offersMobile: offering.offersMobile,
-        salonPriceStartingAt: offering.salonPriceStartingAt,
-        mobilePriceStartingAt: offering.mobilePriceStartingAt,
-        categoryId: offering.service.categoryId,
-      })),
+    const result = await searchPros(
+      parseSearchProsParams(searchParams),
     )
-
-    const mapLocation = (
-      location: (typeof pros)[number]['locations'][number],
-    ): DiscoveryLocationDto =>
-      mapProfessionalLocation({
-        id: location.id,
-        formattedAddress: location.formattedAddress ?? null,
-        city: location.city ?? null,
-        state: location.state ?? null,
-        timeZone: location.timeZone ?? null,
-        placeId: location.placeId ?? null,
-        lat: location.lat,
-        lng: location.lng,
-        isPrimary: Boolean(location.isPrimary),
-        workingHours: location.workingHours,
-      })
-
-    const base = pros.map((pro) => {
-      const locs = (pro.locations ?? [])
-        .map(mapLocation)
-        .filter(
-          (location) =>
-            location.lat != null && location.lng != null,
-        )
-
-      const primary = pickPrimaryLocation(locs)
-      const fallback = primary ?? locs[0] ?? null
-
-      const rating = ratingByPro.get(pro.id) ?? {
-        avg: null,
-        count: 0,
-      }
-
-      const offers =
-        offerByPro.get(pro.id) ?? emptyOfferSummary(pro.id)
-
-      return {
-        pro,
-        locs,
-        primary,
-        fallback,
-        rating,
-        offers,
-      }
-    })
-
-    type SearchBaseEntry = (typeof base)[number]
-
-    type SearchResultEntry = SearchBaseEntry & {
-      dist: number | null
-      closest: DiscoveryLocationDto | null
-    }
-
-    const results: SearchResultEntry[] = origin
-      ? base
-          .map<SearchResultEntry | null>((entry) => {
-            const best = pickClosestLocationWithinRadius({
-              origin,
-              locations: entry.locs,
-              radiusMiles,
-            })
-
-            if (!best) return null
-
-            return {
-              ...entry,
-              dist: best.distanceMiles,
-              closest: best.location,
-            }
-          })
-          .filter(
-            (entry): entry is SearchResultEntry => entry !== null,
-          )
-      : base.map<SearchResultEntry>((entry) => ({
-          ...entry,
-          dist: null,
-          closest: entry.fallback,
-        }))
-
-    let filtered = results
-
-    filtered = filtered.filter((entry) =>
-      matchesDiscoveryOfferingFilters({
-        offerSummary: entry.offers,
-        mobileOnly,
-        requestedCategoryId,
-      }),
-    )
-
-    if (maxPrice != null) {
-      filtered = filtered.filter((entry) => {
-        const price = mobileOnly
-          ? entry.offers.minMobile
-          : entry.offers.minAny
-
-        return price != null && price <= maxPrice
-      })
-    }
-
-    if (minRating != null) {
-      filtered = filtered.filter(
-        (entry) =>
-          entry.rating.avg != null && entry.rating.avg >= minRating,
-      )
-    }
-
-    if (openNowOnly) {
-      filtered = filtered.filter((entry) => {
-        const loc = entry.closest
-        if (!loc) return false
-
-        return isOpenNowAtLocation({
-          timeZone: loc.timeZone,
-          workingHours: loc.workingHours,
-        })
-      })
-    }
-
-    filtered = filtered.sort((a, b) => {
-      if (sort === 'NAME') {
-        const aName = (a.pro.businessName ?? '').toLowerCase()
-        const bName = (b.pro.businessName ?? '').toLowerCase()
-        return aName.localeCompare(bName)
-      }
-
-      if (sort === 'RATING') {
-        const aRating = a.rating.avg ?? -1
-        const bRating = b.rating.avg ?? -1
-
-        if (bRating !== aRating) return bRating - aRating
-        return (b.rating.count ?? 0) - (a.rating.count ?? 0)
-      }
-
-      if (sort === 'PRICE') {
-        const aPrice = mobileOnly
-          ? a.offers.minMobile ?? Number.POSITIVE_INFINITY
-          : a.offers.minAny ?? Number.POSITIVE_INFINITY
-
-        const bPrice = mobileOnly
-          ? b.offers.minMobile ?? Number.POSITIVE_INFINITY
-          : b.offers.minAny ?? Number.POSITIVE_INFINITY
-
-        return aPrice - bPrice
-      }
-
-      const aDistance = a.dist ?? Number.POSITIVE_INFINITY
-      const bDistance = b.dist ?? Number.POSITIVE_INFINITY
-      return aDistance - bDistance
-    })
 
     return jsonOk({
       ok: true,
-      pros: filtered.slice(0, 50).map((entry) => {
-        const loc = entry.closest
-
-        return {
-          id: entry.pro.id,
-          businessName: entry.pro.businessName ?? null,
-          handle: entry.pro.handle ?? null,
-          professionType: entry.pro.professionType ?? null,
-          avatarUrl: entry.pro.avatarUrl ?? null,
-          locationLabel: buildDiscoveryLocationLabel({
-            profileLocation: entry.pro.location ?? null,
-            location: loc ?? entry.primary ?? null,
-          }),
-          distanceMiles: entry.dist,
-          ratingAvg: entry.rating.avg,
-          ratingCount: entry.rating.count,
-          minPrice: mobileOnly
-            ? entry.offers.minMobile
-            : entry.offers.minAny,
-          supportsMobile: entry.offers.supportsMobile,
-          closestLocation: loc ?? null,
-          primaryLocation: entry.primary ?? null,
-        }
-      }),
+      pros: result.items,
       services: [],
     })
   } catch (e) {
+    if (e instanceof SearchRequestError) {
+      return jsonFail(e.status, e.message)
+    }
+
     console.error('GET /api/search error', e)
     return jsonFail(500, 'Failed to search.')
   }
