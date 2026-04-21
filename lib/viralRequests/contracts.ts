@@ -28,6 +28,8 @@ export type ViralRequestDto = {
   } | null
   status: ViralRequestListRow['status']
   moderationStatus: ViralRequestListRow['moderationStatus']
+  reportCount: number
+  removedAt: string | null
   reviewedAt: string | null
   reviewedByUserId: string | null
   approvedAt: string | null
@@ -55,6 +57,8 @@ export function toViralRequestDto(row: ViralRequestListRow): ViralRequestDto {
       : null,
     status: row.status,
     moderationStatus: row.moderationStatus,
+    reportCount: row.reportCount,
+    removedAt: toIso(row.removedAt),
     reviewedAt: toIso(row.reviewedAt),
     reviewedByUserId: row.reviewedByUserId ?? null,
     approvedAt: toIso(row.approvedAt),

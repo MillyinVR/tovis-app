@@ -40,6 +40,20 @@ function readTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
+function readNonNegativeInteger(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null
+  }
+
+  const normalized = Math.trunc(value)
+
+  if (normalized < 0 || normalized !== value) {
+    return null
+  }
+
+  return normalized
+}
+
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
 
@@ -86,6 +100,7 @@ function parseViralRequestDto(value: unknown): ViralRequestDto | null {
   const name = readTrimmedString(value.name)
   const status = value.status
   const moderationStatus = value.moderationStatus
+  const reportCount = readNonNegativeInteger(value.reportCount)
   const createdAt = readTrimmedString(value.createdAt)
   const updatedAt = readTrimmedString(value.updatedAt)
 
@@ -94,6 +109,7 @@ function parseViralRequestDto(value: unknown): ViralRequestDto | null {
     !name ||
     !isViralRequestStatus(status) ||
     !isModerationStatus(moderationStatus) ||
+    reportCount === null ||
     !createdAt ||
     !updatedAt
   ) {
@@ -111,6 +127,8 @@ function parseViralRequestDto(value: unknown): ViralRequestDto | null {
     requestedCategory: parseRequestedCategory(value.requestedCategory),
     status,
     moderationStatus,
+    reportCount,
+    removedAt: readTrimmedString(value.removedAt),
     reviewedAt: readTrimmedString(value.reviewedAt),
     reviewedByUserId: readTrimmedString(value.reviewedByUserId),
     approvedAt: readTrimmedString(value.approvedAt),

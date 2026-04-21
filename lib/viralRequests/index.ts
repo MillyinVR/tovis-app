@@ -28,6 +28,8 @@ export const viralRequestListSelect =
     requestedCategoryId: true,
     status: true,
     moderationStatus: true,
+    reportCount: true,
+    removedAt: true,
     reviewedAt: true,
     reviewedByUserId: true,
     approvedAt: true,

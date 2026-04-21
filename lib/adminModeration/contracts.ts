@@ -48,10 +48,12 @@ export type AdminModerationAction =
 
 export type LookPostModerationRequestDto = {
   action: LookPostModerationAction
+  adminNotes?: string
 }
 
 export type LookCommentModerationRequestDto = {
   action: LookCommentModerationAction
+  adminNotes?: string
 }
 
 export type ViralRequestModerationRequestDto = {
@@ -91,12 +93,21 @@ export type LookPostModerationStateDto = {
   moderationStatus: ModerationStatus
   archivedAt: string | null
   removedAt: string | null
+  reviewedAt: string | null
+  reviewedByUserId: string | null
+  adminNotes: string | null
+  reportCount: number
 }
 
 export type LookCommentModerationStateDto = {
   id: string
   lookPostId: string
   moderationStatus: ModerationStatus
+  removedAt: string | null
+  reviewedAt: string | null
+  reviewedByUserId: string | null
+  adminNotes: string | null
+  reportCount: number
   commentsCount: number
 }
 
@@ -183,6 +194,10 @@ export function toLookPostModerationResultDto(args: {
   moderationStatus: ModerationStatus
   archivedAt: Date | null
   removedAt: Date | null
+  reviewedAt: Date | null
+  reviewedByUserId: string | null
+  adminNotes: string | null
+  reportCount: number
 }): LookPostModerationResultDto {
   return {
     target: {
@@ -196,6 +211,10 @@ export function toLookPostModerationResultDto(args: {
       moderationStatus: args.moderationStatus,
       archivedAt: toIso(args.archivedAt),
       removedAt: toIso(args.removedAt),
+      reviewedAt: toIso(args.reviewedAt),
+      reviewedByUserId: args.reviewedByUserId,
+      adminNotes: args.adminNotes,
+      reportCount: args.reportCount,
     },
   }
 }
@@ -205,6 +224,11 @@ export function toLookCommentModerationResultDto(args: {
   lookPostId: string
   action: LookCommentModerationAction
   moderationStatus: ModerationStatus
+  removedAt: Date | null
+  reviewedAt: Date | null
+  reviewedByUserId: string | null
+  adminNotes: string | null
+  reportCount: number
   commentsCount: number
 }): LookCommentModerationResultDto {
   return {
@@ -218,6 +242,11 @@ export function toLookCommentModerationResultDto(args: {
       id: args.id,
       lookPostId: args.lookPostId,
       moderationStatus: args.moderationStatus,
+      removedAt: toIso(args.removedAt),
+      reviewedAt: toIso(args.reviewedAt),
+      reviewedByUserId: args.reviewedByUserId,
+      adminNotes: args.adminNotes,
+      reportCount: args.reportCount,
       commentsCount: args.commentsCount,
     },
   }

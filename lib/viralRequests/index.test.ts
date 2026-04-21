@@ -66,6 +66,8 @@ function makeViralRequestRow(
     requestedCategoryId: string | null
     status: ViralServiceRequestStatus
     moderationStatus: ModerationStatus
+    reportCount: number
+    removedAt: Date | null
     reviewedAt: Date | null
     reviewedByUserId: string | null
     approvedAt: Date | null
@@ -91,12 +93,14 @@ function makeViralRequestRow(
     linksJson: overrides?.linksJson ?? null,
     mediaUrlsJson: overrides?.mediaUrlsJson ?? null,
     requestedCategoryId:
-        overrides && 'requestedCategoryId' in overrides
-            ? overrides.requestedCategoryId ?? null
-            : 'cat_1',
+      overrides && 'requestedCategoryId' in overrides
+        ? overrides.requestedCategoryId ?? null
+        : 'cat_1',
     status: overrides?.status ?? ViralServiceRequestStatus.REQUESTED,
     moderationStatus:
       overrides?.moderationStatus ?? ModerationStatus.APPROVED,
+    reportCount: overrides?.reportCount ?? 0,
+    removedAt: overrides?.removedAt ?? null,
     reviewedAt: overrides?.reviewedAt ?? null,
     reviewedByUserId: overrides?.reviewedByUserId ?? null,
     approvedAt: overrides?.approvedAt ?? null,
@@ -265,6 +269,8 @@ describe('lib/viralRequests/index.ts', () => {
       expect(result.status).toBe(ViralServiceRequestStatus.APPROVED)
       expect(result.reviewedByUserId).toBe('admin_1')
       expect(result.adminNotes).toBe('Looks viable.')
+      expect(result.reportCount).toBe(0)
+      expect(result.removedAt).toBeNull()
     })
 
     it('throws on an invalid status transition', async () => {
@@ -415,23 +421,23 @@ describe('lib/viralRequests/index.ts', () => {
 
   describe('findMatchingProsForViralRequest', () => {
     it('returns an empty list when the viral request has no requested category', async () => {
-        const db = makeDb()
-        const tx = asTransactionClient(db)
+      const db = makeDb()
+      const tx = asTransactionClient(db)
 
-        db.viralServiceRequest.findUnique.mockResolvedValue(
-            makeViralRequestRow({
-            requestedCategoryId: null,
-            requestedCategory: null,
-            }),
-        )
+      db.viralServiceRequest.findUnique.mockResolvedValue(
+        makeViralRequestRow({
+          requestedCategoryId: null,
+          requestedCategory: null,
+        }),
+      )
 
-        const result = await findMatchingProsForViralRequest(tx, {
-            requestId: 'request_1',
-        })
+      const result = await findMatchingProsForViralRequest(tx, {
+        requestId: 'request_1',
+      })
 
-        expect(result).toEqual([])
-        expect(db.professionalProfile.findMany).not.toHaveBeenCalled()
-        })
+      expect(result).toEqual([])
+      expect(db.professionalProfile.findMany).not.toHaveBeenCalled()
+    })
   })
 
   describe('buildViralRequestUploadTargetPath', () => {

@@ -187,6 +187,10 @@ function makeLookPostRow(
     moderationStatus: ModerationStatus
     archivedAt: Date | null
     removedAt: Date | null
+    reviewedAt: Date | null
+    reviewedByUserId: string | null
+    adminNotes: string | null
+    reportCount: number
     professionalId: string
     serviceId: string | null
     service: { categoryId: string | null } | null
@@ -198,6 +202,10 @@ function makeLookPostRow(
     moderationStatus: ModerationStatus.PENDING_REVIEW,
     archivedAt: null,
     removedAt: null,
+    reviewedAt: null,
+    reviewedByUserId: null,
+    adminNotes: null,
+    reportCount: 0,
     professionalId: 'pro_1',
     serviceId: 'service_1',
     service: { categoryId: 'cat_1' },
@@ -210,6 +218,11 @@ function makeLookCommentRow(
     id: string
     lookPostId: string
     moderationStatus: ModerationStatus
+    removedAt: Date | null
+    reviewedAt: Date | null
+    reviewedByUserId: string | null
+    adminNotes: string | null
+    reportCount: number
     lookPost: {
       id: string
       professionalId: string
@@ -222,6 +235,11 @@ function makeLookCommentRow(
     id: 'comment_1',
     lookPostId: 'look_9',
     moderationStatus: ModerationStatus.APPROVED,
+    removedAt: null,
+    reviewedAt: null,
+    reviewedByUserId: null,
+    adminNotes: null,
+    reportCount: 0,
     lookPost: {
       id: 'look_9',
       professionalId: 'pro_9',
@@ -270,6 +288,8 @@ describe('lib/adminModeration/service.ts', () => {
       id: 'request_1',
       status: ViralServiceRequestStatus.APPROVED,
       moderationStatus: ModerationStatus.APPROVED,
+      reportCount: 0,
+      removedAt: null,
       reviewedAt: '2026-04-20T00:00:00.000Z',
       reviewedByUserId: 'admin_1',
       approvedAt: '2026-04-20T00:00:00.000Z',
@@ -376,11 +396,18 @@ describe('lib/adminModeration/service.ts', () => {
     mocks.prisma.lookPost.update.mockResolvedValue(
       makeLookPostRow({
         moderationStatus: ModerationStatus.APPROVED,
+        reviewedAt: new Date('2026-04-20T00:00:00.000Z'),
+        reviewedByUserId: 'admin_1',
+        adminNotes: 'Approved by admin',
+        reportCount: 0,
       }),
     )
 
     const res = await handleAdminModerationRoute(
-      makeJsonRequest({ action: 'approve' }),
+      makeJsonRequest({
+        action: 'approve',
+        adminNotes: 'Approved by admin',
+      }),
       {
         kind: 'LOOK_POST',
         targetId: 'look_1',
@@ -392,11 +419,18 @@ describe('lib/adminModeration/service.ts', () => {
       where: { id: 'look_1' },
       data: {
         moderationStatus: ModerationStatus.APPROVED,
+        reviewedAt: expect.any(Date),
+        reviewedByUserId: 'admin_1',
+        adminNotes: 'Approved by admin',
       },
       select: expect.objectContaining({
         id: true,
         status: true,
         moderationStatus: true,
+        reviewedAt: true,
+        reviewedByUserId: true,
+        adminNotes: true,
+        reportCount: true,
       }),
     })
 
@@ -409,7 +443,7 @@ describe('lib/adminModeration/service.ts', () => {
       data: {
         adminUserId: 'admin_1',
         action: 'LOOK_POST_APPROVED',
-        note: 'lookPostId=look_1',
+        note: 'lookPostId=look_1 note=Approved by admin',
         professionalId: 'pro_1',
         serviceId: 'service_1',
         categoryId: 'cat_1',
@@ -430,6 +464,10 @@ describe('lib/adminModeration/service.ts', () => {
         moderationStatus: ModerationStatus.APPROVED,
         archivedAt: null,
         removedAt: null,
+        reviewedAt: '2026-04-20T00:00:00.000Z',
+        reviewedByUserId: 'admin_1',
+        adminNotes: 'Approved by admin',
+        reportCount: 0,
       },
     })
   })
@@ -443,12 +481,20 @@ describe('lib/adminModeration/service.ts', () => {
       id: 'comment_1',
       lookPostId: 'look_9',
       moderationStatus: ModerationStatus.REMOVED,
+      removedAt: new Date('2026-04-20T00:00:00.000Z'),
+      reviewedAt: new Date('2026-04-20T00:00:00.000Z'),
+      reviewedByUserId: 'admin_1',
+      adminNotes: 'Removed by admin',
+      reportCount: 0,
     })
 
     mocks.recomputeLookPostCommentCount.mockResolvedValue(7)
 
     const res = await handleAdminModerationRoute(
-      makeJsonRequest({ action: 'remove' }),
+      makeJsonRequest({
+        action: 'remove',
+        adminNotes: 'Removed by admin',
+      }),
       {
         kind: 'LOOK_COMMENT',
         targetId: 'comment_1',
@@ -460,11 +506,20 @@ describe('lib/adminModeration/service.ts', () => {
       where: { id: 'comment_1' },
       data: {
         moderationStatus: ModerationStatus.REMOVED,
+        reviewedAt: expect.any(Date),
+        reviewedByUserId: 'admin_1',
+        adminNotes: 'Removed by admin',
+        removedAt: expect.any(Date),
       },
       select: {
         id: true,
         lookPostId: true,
         moderationStatus: true,
+        removedAt: true,
+        reviewedAt: true,
+        reviewedByUserId: true,
+        adminNotes: true,
+        reportCount: true,
       },
     })
 
@@ -484,7 +539,8 @@ describe('lib/adminModeration/service.ts', () => {
       data: {
         adminUserId: 'admin_1',
         action: 'LOOK_COMMENT_REMOVED',
-        note: 'lookCommentId=comment_1 lookPostId=look_9',
+        note:
+          'lookCommentId=comment_1 lookPostId=look_9 note=Removed by admin',
         professionalId: 'pro_9',
         serviceId: 'service_9',
         categoryId: 'cat_9',
@@ -504,6 +560,11 @@ describe('lib/adminModeration/service.ts', () => {
         id: 'comment_1',
         lookPostId: 'look_9',
         moderationStatus: ModerationStatus.REMOVED,
+        removedAt: '2026-04-20T00:00:00.000Z',
+        reviewedAt: '2026-04-20T00:00:00.000Z',
+        reviewedByUserId: 'admin_1',
+        adminNotes: 'Removed by admin',
+        reportCount: 0,
         commentsCount: 7,
       },
     })
@@ -556,6 +617,32 @@ describe('lib/adminModeration/service.ts', () => {
     expect(mocks.prisma.adminActionLog.create).not.toHaveBeenCalled()
   })
 
+  it('returns 409 when approve is requested for an already removed look comment', async () => {
+    mocks.prisma.lookComment.findUnique.mockResolvedValue(
+      makeLookCommentRow({
+        moderationStatus: ModerationStatus.REMOVED,
+      }),
+    )
+
+    const res = await handleAdminModerationRoute(
+      makeJsonRequest({ action: 'approve' }),
+      {
+        kind: 'LOOK_COMMENT',
+        targetId: 'comment_1',
+      },
+    )
+    const body = await readJson(res)
+
+    expect(res.status).toBe(409)
+    expect(body).toEqual({
+      ok: false,
+      error:
+        'Invalid look comment moderation transition: moderationStatus=REMOVED action=approve.',
+    })
+
+    expect(mocks.prisma.lookComment.update).not.toHaveBeenCalled()
+  })
+
   it('returns 404 when the moderation target does not exist', async () => {
     mocks.prisma.lookPost.findUnique.mockResolvedValue(null)
 
@@ -590,6 +677,8 @@ describe('lib/adminModeration/service.ts', () => {
       id: 'request_1',
       status: ViralServiceRequestStatus.IN_REVIEW,
       moderationStatus: ModerationStatus.PENDING_REVIEW,
+      reportCount: 0,
+      removedAt: null,
       reviewedAt: '2026-04-20T00:00:00.000Z',
       reviewedByUserId: 'admin_1',
       approvedAt: null,
@@ -646,6 +735,8 @@ describe('lib/adminModeration/service.ts', () => {
           id: 'request_1',
           status: ViralServiceRequestStatus.IN_REVIEW,
           moderationStatus: ModerationStatus.PENDING_REVIEW,
+          reportCount: 0,
+          removedAt: null,
           reviewedAt: '2026-04-20T00:00:00.000Z',
           reviewedByUserId: 'admin_1',
           approvedAt: null,
@@ -722,6 +813,8 @@ describe('lib/adminModeration/service.ts', () => {
           id: 'request_1',
           status: ViralServiceRequestStatus.APPROVED,
           moderationStatus: ModerationStatus.APPROVED,
+          reportCount: 0,
+          removedAt: null,
           reviewedAt: '2026-04-20T00:00:00.000Z',
           reviewedByUserId: 'admin_1',
           approvedAt: '2026-04-20T00:00:00.000Z',
@@ -779,6 +872,8 @@ describe('lib/adminModeration/service.ts', () => {
         id: 'request_1',
         status: ViralServiceRequestStatus.APPROVED,
         moderationStatus: ModerationStatus.APPROVED,
+        reportCount: 0,
+        removedAt: null,
         reviewedAt: '2026-04-20T00:00:00.000Z',
         reviewedByUserId: 'admin_1',
         approvedAt: '2026-04-20T00:00:00.000Z',
@@ -815,6 +910,8 @@ describe('lib/adminModeration/service.ts', () => {
       id: 'request_1',
       status: ViralServiceRequestStatus.REJECTED,
       moderationStatus: ModerationStatus.REJECTED,
+      reportCount: 0,
+      removedAt: null,
       reviewedAt: '2026-04-20T00:00:00.000Z',
       reviewedByUserId: 'admin_1',
       approvedAt: null,
@@ -853,6 +950,8 @@ describe('lib/adminModeration/service.ts', () => {
         id: 'request_1',
         status: ViralServiceRequestStatus.REJECTED,
         moderationStatus: ModerationStatus.REJECTED,
+        reportCount: 0,
+        removedAt: null,
         reviewedAt: '2026-04-20T00:00:00.000Z',
         reviewedByUserId: 'admin_1',
         approvedAt: null,

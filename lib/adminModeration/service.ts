@@ -57,12 +57,14 @@ type ParsedLookPostModerationRequest = {
   kind: 'LOOK_POST'
   targetId: string
   action: LookPostModerationAction
+  adminNotes?: string
 }
 
 type ParsedLookCommentModerationRequest = {
   kind: 'LOOK_COMMENT'
   targetId: string
   action: LookCommentModerationAction
+  adminNotes?: string
 }
 
 type ParsedViralRequestModerationRequest = {
@@ -89,6 +91,10 @@ const lookPostPermissionSelect =
     id: true,
     status: true,
     moderationStatus: true,
+    reviewedAt: true,
+    reviewedByUserId: true,
+    adminNotes: true,
+    reportCount: true,
     archivedAt: true,
     removedAt: true,
     professionalId: true,
@@ -109,6 +115,11 @@ const lookCommentPermissionSelect =
     id: true,
     lookPostId: true,
     moderationStatus: true,
+    removedAt: true,
+    reviewedAt: true,
+    reviewedByUserId: true,
+    adminNotes: true,
+    reportCount: true,
     lookPost: {
       select: {
         id: true,
@@ -291,23 +302,17 @@ function parseLookPostModerationBody(
   body: JsonRecord,
 ): ParsedLookPostModerationRequest {
   const action = body.action
-  const adminNotes = trimString(body.adminNotes)
+  const adminNotes = trimString(body.adminNotes) ?? undefined
 
   if (!isLookPostModerationAction(action)) {
     throw new AdminModerationRouteError(400, 'Invalid look moderation action.')
-  }
-
-  if (adminNotes) {
-    throw new AdminModerationRouteError(
-      400,
-      'adminNotes are not supported for look moderation.',
-    )
   }
 
   return {
     kind: 'LOOK_POST',
     targetId,
     action,
+    ...(adminNotes ? { adminNotes } : {}),
   }
 }
 
@@ -316,7 +321,7 @@ function parseLookCommentModerationBody(
   body: JsonRecord,
 ): ParsedLookCommentModerationRequest {
   const action = body.action
-  const adminNotes = trimString(body.adminNotes)
+  const adminNotes = trimString(body.adminNotes) ?? undefined
 
   if (!isLookCommentModerationAction(action)) {
     throw new AdminModerationRouteError(
@@ -325,17 +330,11 @@ function parseLookCommentModerationBody(
     )
   }
 
-  if (adminNotes) {
-    throw new AdminModerationRouteError(
-      400,
-      'adminNotes are not supported for look comment moderation.',
-    )
-  }
-
   return {
     kind: 'LOOK_COMMENT',
     targetId,
     action,
+    ...(adminNotes ? { adminNotes } : {}),
   }
 }
 
@@ -377,9 +376,7 @@ function buildAdminActionLogData(args: {
   }
 }
 
-function buildLookPostLogAction(
-  action: LookPostModerationAction,
-): string {
+function buildLookPostLogAction(action: LookPostModerationAction): string {
   switch (action) {
     case 'approve':
       return 'LOOK_POST_APPROVED'
@@ -456,7 +453,8 @@ function assertLookCommentActionAllowed(
 ): void {
   if (
     action === 'approve' &&
-    row.moderationStatus === ModerationStatus.APPROVED
+    (row.moderationStatus === ModerationStatus.APPROVED ||
+      row.moderationStatus === ModerationStatus.REMOVED)
   ) {
     throw new AdminModerationRouteError(
       409,
@@ -466,7 +464,8 @@ function assertLookCommentActionAllowed(
 
   if (
     action === 'reject' &&
-    row.moderationStatus === ModerationStatus.REJECTED
+    (row.moderationStatus === ModerationStatus.REJECTED ||
+      row.moderationStatus === ModerationStatus.REMOVED)
   ) {
     throw new AdminModerationRouteError(
       409,
@@ -555,19 +554,34 @@ async function executeLookPostModeration(
 
   const now = new Date()
 
-  const data: Prisma.LookPostUpdateInput =
+  const data: Prisma.LookPostUncheckedUpdateInput =
     request.action === 'approve'
       ? {
           moderationStatus: ModerationStatus.APPROVED,
+          reviewedAt: now,
+          reviewedByUserId: adminUserId,
+          ...(request.adminNotes !== undefined
+            ? { adminNotes: request.adminNotes }
+            : {}),
         }
       : request.action === 'reject'
         ? {
             moderationStatus: ModerationStatus.REJECTED,
+            reviewedAt: now,
+            reviewedByUserId: adminUserId,
+            ...(request.adminNotes !== undefined
+              ? { adminNotes: request.adminNotes }
+              : {}),
           }
         : {
             status: LookPostStatus.REMOVED,
             moderationStatus: ModerationStatus.REMOVED,
             removedAt: now,
+            reviewedAt: now,
+            reviewedByUserId: adminUserId,
+            ...(request.adminNotes !== undefined
+              ? { adminNotes: request.adminNotes }
+              : {}),
           }
 
   const updated = await db.lookPost.update({
@@ -586,6 +600,10 @@ async function executeLookPostModeration(
     moderationStatus: updated.moderationStatus,
     archivedAt: updated.archivedAt,
     removedAt: updated.removedAt,
+    reviewedAt: updated.reviewedAt,
+    reviewedByUserId: updated.reviewedByUserId,
+    adminNotes: updated.adminNotes,
+    reportCount: updated.reportCount,
   })
 
   return {
@@ -593,7 +611,10 @@ async function executeLookPostModeration(
     logData: buildAdminActionLogData({
       adminUserId,
       action: buildLookPostLogAction(request.action),
-      note: `lookPostId=${updated.id}`,
+      note:
+        request.adminNotes !== undefined
+          ? `lookPostId=${updated.id} note=${request.adminNotes}`
+          : `lookPostId=${updated.id}`,
       scope,
     }),
   }
@@ -622,15 +643,28 @@ async function executeLookCommentModeration(
         ? ModerationStatus.REJECTED
         : ModerationStatus.REMOVED
 
+  const now = new Date()
+
   const updated = await db.lookComment.update({
     where: { id: request.targetId },
     data: {
       moderationStatus,
+      reviewedAt: now,
+      reviewedByUserId: adminUserId,
+      ...(request.adminNotes !== undefined
+        ? { adminNotes: request.adminNotes }
+        : {}),
+      ...(request.action === 'remove' ? { removedAt: now } : {}),
     },
     select: {
       id: true,
       lookPostId: true,
       moderationStatus: true,
+      removedAt: true,
+      reviewedAt: true,
+      reviewedByUserId: true,
+      adminNotes: true,
+      reportCount: true,
     },
   })
 
@@ -648,6 +682,11 @@ async function executeLookCommentModeration(
     lookPostId: updated.lookPostId,
     action: request.action,
     moderationStatus: updated.moderationStatus,
+    removedAt: updated.removedAt,
+    reviewedAt: updated.reviewedAt,
+    reviewedByUserId: updated.reviewedByUserId,
+    adminNotes: updated.adminNotes,
+    reportCount: updated.reportCount,
     commentsCount,
   })
 
@@ -656,7 +695,10 @@ async function executeLookCommentModeration(
     logData: buildAdminActionLogData({
       adminUserId,
       action: buildLookCommentLogAction(request.action),
-      note: `lookCommentId=${updated.id} lookPostId=${updated.lookPostId}`,
+      note:
+        request.adminNotes !== undefined
+          ? `lookCommentId=${updated.id} lookPostId=${updated.lookPostId} note=${request.adminNotes}`
+          : `lookCommentId=${updated.id} lookPostId=${updated.lookPostId}`,
       scope,
     }),
   }
@@ -728,10 +770,9 @@ async function executeViralRequestModeration(
     response,
     ...(request.action === 'reject'
       ? {
-          legacyViralRejectResponse:
-            toLegacyViralRequestRejectResponseDto({
-              request: requestDto,
-            }),
+          legacyViralRejectResponse: toLegacyViralRequestRejectResponseDto({
+            request: requestDto,
+          }),
         }
       : {}),
     logData: buildAdminActionLogData({
@@ -903,9 +944,7 @@ export async function handleLegacyViralModerationRoute(
 
     if (args.forcedAction === 'approve') {
       if (!executed.legacyViralApproveResponse) {
-        throw new Error(
-          'Missing legacy viral approve response payload.',
-        )
+        throw new Error('Missing legacy viral approve response payload.')
       }
 
       return jsonOk(executed.legacyViralApproveResponse)
