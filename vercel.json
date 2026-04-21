@@ -11,6 +11,10 @@
     {
       "path": "/api/internal/cron/retry-verification-emails",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/internal/jobs/looks-social/process",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
