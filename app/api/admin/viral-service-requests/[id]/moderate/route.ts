@@ -1,7 +1,7 @@
-// app/api/admin/viral-service-requests/[id]/reject/route.ts
+// app/api/admin/viral-service-requests/[id]/moderate/route.ts
 import { NextRequest } from 'next/server'
 
-import { handleLegacyViralModerationRoute } from '@/lib/adminModeration/service'
+import { handleAdminModerationRoute } from '@/lib/adminModeration/service'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,8 +15,8 @@ async function getParams(ctx: Ctx): Promise<Params> {
 export async function POST(req: NextRequest, ctx: Ctx) {
   const { id } = await getParams(ctx)
 
-  return handleLegacyViralModerationRoute(req, {
+  return handleAdminModerationRoute(req, {
+    kind: 'VIRAL_SERVICE_REQUEST',
     targetId: id,
-    forcedAction: 'reject',
   })
 }
