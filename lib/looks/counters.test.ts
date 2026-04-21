@@ -197,6 +197,19 @@ describe('lib/looks/counters.ts', () => {
 
       expect(newer).toBeGreaterThan(older)
     })
+
+    it('returns a stable rounded score', () => {
+      const result = computeLookPostSpotlightScore(
+        makeScoreEligibleLookRow({
+          likeCount: 11,
+          commentCount: 6,
+          saveCount: 3,
+          shareCount: 2,
+        }),
+      )
+
+      expect(result).toBe(37.5667)
+    })
   })
 
   describe('computeLookPostRankScore', () => {
@@ -214,7 +227,7 @@ describe('lib/looks/counters.ts', () => {
       expect(result).toBe(0)
     })
 
-    it('computes rank score from persisted engagement counts', () => {
+    it('computes rank score from recency plus persisted engagement counts', () => {
       const result = computeLookPostRankScore(
         makeScoreEligibleLookRow({
           likeCount: 11,
@@ -224,7 +237,53 @@ describe('lib/looks/counters.ts', () => {
         }),
       )
 
-      expect(result).toBe(47)
+      expect(result).toBe(30.625)
+    })
+
+    it('weights saves above likes', () => {
+      const saveHeavy = computeLookPostRankScore(
+        makeScoreEligibleLookRow({
+          likeCount: 1,
+          commentCount: 1,
+          saveCount: 4,
+          shareCount: 0,
+        }),
+      )
+
+      const likeHeavy = computeLookPostRankScore(
+        makeScoreEligibleLookRow({
+          likeCount: 4,
+          commentCount: 1,
+          saveCount: 1,
+          shareCount: 99,
+        }),
+      )
+
+      expect(saveHeavy).toBeGreaterThan(likeHeavy)
+    })
+
+    it('decays as the look gets older', () => {
+      const newer = computeLookPostRankScore(
+        makeScoreEligibleLookRow({
+          publishedAt: new Date('2026-04-19T00:00:00.000Z'),
+          likeCount: 11,
+          commentCount: 6,
+          saveCount: 3,
+          shareCount: 2,
+        }),
+      )
+
+      const older = computeLookPostRankScore(
+        makeScoreEligibleLookRow({
+          publishedAt: new Date('2026-03-20T00:00:00.000Z'),
+          likeCount: 11,
+          commentCount: 6,
+          saveCount: 3,
+          shareCount: 999,
+        }),
+      )
+
+      expect(newer).toBeGreaterThan(older)
     })
   })
 
@@ -270,7 +329,7 @@ describe('lib/looks/counters.ts', () => {
         data: {
           likeCount: 7,
           spotlightScore: 69.02,
-          rankScore: 63,
+          rankScore: 44.625,
         },
         select: { id: true },
       })
@@ -310,7 +369,7 @@ describe('lib/looks/counters.ts', () => {
         data: {
           commentCount: 4,
           spotlightScore: 69.02,
-          rankScore: 63,
+          rankScore: 44.625,
         },
         select: { id: true },
       })
@@ -347,7 +406,7 @@ describe('lib/looks/counters.ts', () => {
         data: {
           saveCount: 9,
           spotlightScore: 69.02,
-          rankScore: 63,
+          rankScore: 44.625,
         },
         select: { id: true },
       })
@@ -438,12 +497,43 @@ describe('lib/looks/counters.ts', () => {
       expect(db.lookPost.update).toHaveBeenCalledWith({
         where: { id: 'look_1' },
         data: {
-          rankScore: 47,
+          rankScore: 30.625,
         },
         select: { id: true },
       })
 
-      expect(result).toBe(47)
+      expect(result).toBe(30.625)
+    })
+
+    it('uses an explicit now option for deterministic rank recomputes', async () => {
+      const db = makeDb()
+      db.lookPost.findUnique.mockResolvedValue(
+        makeScoreEligibleLookRow({
+          likeCount: 11,
+          commentCount: 6,
+          saveCount: 3,
+          shareCount: 2,
+        }),
+      )
+      db.lookPost.update.mockResolvedValue({ id: 'look_1' })
+
+      const result = await recomputeLookPostRankScore(
+        asTransactionClient(db),
+        'look_1',
+        {
+          now: new Date('2026-04-21T00:00:00.000Z'),
+        },
+      )
+
+      expect(db.lookPost.update).toHaveBeenCalledWith({
+        where: { id: 'look_1' },
+        data: {
+          rankScore: 27.2222,
+        },
+        select: { id: true },
+      })
+
+      expect(result).toBe(27.2222)
     })
   })
 
@@ -469,14 +559,14 @@ describe('lib/looks/counters.ts', () => {
         where: { id: 'look_1' },
         data: {
           spotlightScore: 37.5667,
-          rankScore: 47,
+          rankScore: 30.625,
         },
         select: { id: true },
       })
 
       expect(result).toEqual({
         spotlightScore: 37.5667,
-        rankScore: 47,
+        rankScore: 30.625,
       })
     })
   })
@@ -524,7 +614,7 @@ describe('lib/looks/counters.ts', () => {
           commentCount: 6,
           saveCount: 3,
           spotlightScore: 37.5667,
-          rankScore: 47,
+          rankScore: 30.625,
         },
         select: { id: true },
       })
@@ -534,7 +624,7 @@ describe('lib/looks/counters.ts', () => {
         commentCount: 6,
         saveCount: 3,
         spotlightScore: 37.5667,
-        rankScore: 47,
+        rankScore: 30.625,
       })
     })
   })

@@ -230,6 +230,7 @@ describe('lib/jobs/looksSocial/process', () => {
     expect(mocks.recomputeLookPostRankScore).toHaveBeenCalledWith(
       mocks.prisma,
       'look_53',
+      { now },
     )
 
     expect(result).toEqual({

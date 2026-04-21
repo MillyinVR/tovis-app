@@ -6,6 +6,10 @@ import {
   PrismaClient,
 } from '@prisma/client'
 import {
+  computeLookPostRankScore as computeCentralLookPostRankScore,
+  type LookPostRankScoreOptions,
+} from '@/lib/looks/ranking'
+import {
   computeLookPostSpotlightScore as computeCentralLookPostSpotlightScore,
   type LookPostSpotlightScoreOptions,
 } from '@/lib/looks/spotlight'
@@ -50,38 +54,17 @@ type LookPostScoreRow = Prisma.LookPostGetPayload<{
   select: typeof lookPostScoreSelect
 }>
 
-export type LookPostScoreComputeOptions = LookPostSpotlightScoreOptions
-
-const LOOK_POST_RANK_WEIGHTS = {
-  like: 1,
-  comment: 2,
-  save: 4,
-  share: 6,
-} as const
+export type LookPostScoreComputeOptions =
+  LookPostRankScoreOptions & LookPostSpotlightScoreOptions
 
 function normalizeRequiredId(name: string, value: string): string {
   const trimmed = value.trim()
+
   if (!trimmed) {
     throw new Error(`${name} is required.`)
   }
+
   return trimmed
-}
-
-function normalizeCount(value: number): number {
-  if (!Number.isFinite(value)) return 0
-  return Math.max(Math.trunc(value), 0)
-}
-
-function isScoreEligibleLook(row: {
-  status: LookPostStatus
-  moderationStatus: ModerationStatus
-  publishedAt: Date | null
-}): boolean {
-  return (
-    row.status === LookPostStatus.PUBLISHED &&
-    row.moderationStatus === ModerationStatus.APPROVED &&
-    row.publishedAt !== null
-  )
 }
 
 async function persistLookPostMetrics(
@@ -179,19 +162,18 @@ export function computeLookPostRankScore(
     | 'saveCount'
     | 'shareCount'
   >,
+  options?: LookPostScoreComputeOptions,
 ): number {
-  if (!isScoreEligibleLook(row)) return 0
-
-  const likeCount = normalizeCount(row.likeCount)
-  const commentCount = normalizeCount(row.commentCount)
-  const saveCount = normalizeCount(row.saveCount)
-  const shareCount = normalizeCount(row.shareCount)
-
-  return (
-    likeCount * LOOK_POST_RANK_WEIGHTS.like +
-    commentCount * LOOK_POST_RANK_WEIGHTS.comment +
-    saveCount * LOOK_POST_RANK_WEIGHTS.save +
-    shareCount * LOOK_POST_RANK_WEIGHTS.share
+  return computeCentralLookPostRankScore(
+    {
+      status: row.status,
+      moderationStatus: row.moderationStatus,
+      publishedAt: row.publishedAt,
+      likeCount: row.likeCount,
+      commentCount: row.commentCount,
+      saveCount: row.saveCount,
+    },
+    options,
   )
 }
 
@@ -210,7 +192,7 @@ function buildLookPostScoreSnapshot(
 ): LookPostScoreSnapshot {
   return {
     spotlightScore: computeLookPostSpotlightScore(row, options),
-    rankScore: computeLookPostRankScore(row),
+    rankScore: computeLookPostRankScore(row, options),
   }
 }
 
@@ -234,11 +216,12 @@ export async function recomputeLookPostSpotlightScore(
 export async function recomputeLookPostRankScore(
   db: LooksCounterDb,
   lookPostId: string,
+  options?: LookPostScoreComputeOptions,
 ): Promise<number> {
   const normalizedLookPostId = normalizeRequiredId('lookPostId', lookPostId)
   const row = await readLookPostScoreRow(db, normalizedLookPostId)
 
-  const rankScore = computeLookPostRankScore(row)
+  const rankScore = computeLookPostRankScore(row, options)
 
   await persistLookPostMetrics(db, normalizedLookPostId, {
     rankScore,

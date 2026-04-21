@@ -142,6 +142,7 @@ async function runLooksSocialJob(
       await recomputeLookPostRankScore(
         prisma,
         readRequiredString(job.payload, 'lookPostId'),
+        { now },
       )
       return
 
