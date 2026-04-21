@@ -6,6 +6,10 @@ import {
 } from '@prisma/client'
 
 import {
+  makeEmptyLooksSocialJobPerTypeCounts,
+  type LooksSocialJobPerTypeCounts,
+} from '@/lib/jobs/looksSocial/contracts'
+import {
   recomputeLookPostCounters,
   recomputeLookPostRankScore,
   recomputeLookPostSpotlightScore,
@@ -61,6 +65,7 @@ export type ProcessLooksSocialJobsResult = {
   completedCount: number
   retryScheduledCount: number
   failedCount: number
+  perTypeCounts: LooksSocialJobPerTypeCounts
   outcomes: ProcessLooksSocialJobOutcome[]
 }
 
@@ -262,15 +267,51 @@ async function markJobFailure(args: {
   }
 }
 
+function recordScannedJob(
+  perTypeCounts: LooksSocialJobPerTypeCounts,
+  job: DueLooksSocialJob,
+): void {
+  perTypeCounts[job.type].scannedCount += 1
+}
+
+function recordOutcome(
+  perTypeCounts: LooksSocialJobPerTypeCounts,
+  outcome: ProcessLooksSocialJobOutcome,
+): void {
+  const counts = perTypeCounts[outcome.type]
+
+  counts.processedCount += 1
+
+  switch (outcome.result) {
+    case 'COMPLETED':
+      counts.completedCount += 1
+      return
+    case 'RETRY_SCHEDULED':
+      counts.retryScheduledCount += 1
+      return
+    case 'FAILED_FINAL':
+      counts.failedCount += 1
+      return
+  }
+}
+
 function buildSummary(args: {
-  scannedCount: number
+  dueJobs: DueLooksSocialJob[]
   outcomes: ProcessLooksSocialJobOutcome[]
 }): ProcessLooksSocialJobsResult {
+  const perTypeCounts = makeEmptyLooksSocialJobPerTypeCounts()
+
+  for (const job of args.dueJobs) {
+    recordScannedJob(perTypeCounts, job)
+  }
+
   let completedCount = 0
   let retryScheduledCount = 0
   let failedCount = 0
 
   for (const outcome of args.outcomes) {
+    recordOutcome(perTypeCounts, outcome)
+
     switch (outcome.result) {
       case 'COMPLETED':
         completedCount += 1
@@ -285,11 +326,12 @@ function buildSummary(args: {
   }
 
   return {
-    scannedCount: args.scannedCount,
+    scannedCount: args.dueJobs.length,
     processedCount: args.outcomes.length,
     completedCount,
     retryScheduledCount,
     failedCount,
+    perTypeCounts,
     outcomes: args.outcomes,
   }
 }
@@ -343,7 +385,7 @@ export async function processLooksSocialJobs(args?: {
   }
 
   return buildSummary({
-    scannedCount: dueJobs.length,
+    dueJobs,
     outcomes,
   })
 }

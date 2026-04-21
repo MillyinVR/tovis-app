@@ -1,11 +1,18 @@
 // app/api/internal/jobs/looks-social/process/route.ts
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { processLooksSocialJobs } from '@/lib/jobs/looksSocial/process'
+import {
+  processLooksSocialJobs,
+  type ProcessLooksSocialJobsResult,
+} from '@/lib/jobs/looksSocial/process'
+import { logLooksSocialJobBatchEvent } from '@/lib/observability/looksSocialJobEvents'
 
 export const dynamic = 'force-dynamic'
 
 const DEFAULT_TAKE = 100
 const MAX_TAKE = 250
+const ROUTE = 'internal.jobs.looks_social.process'
+
+type JobMethod = 'GET' | 'POST'
 
 function readTake(req: Request): number {
   const url = new URL(req.url)
@@ -38,7 +45,24 @@ function isAuthorizedJobRequest(req: Request): boolean {
   return false
 }
 
-async function runJob(req: Request) {
+function createBatchId(): string {
+  return crypto.randomUUID()
+}
+
+function resolveFinishedLogLevel(
+  result: ProcessLooksSocialJobsResult,
+): 'info' | 'warn' {
+  if (result.retryScheduledCount > 0) return 'warn'
+  if (result.failedCount > 0) return 'warn'
+  if (result.processedCount !== result.scannedCount) return 'warn'
+  return 'info'
+}
+
+async function runJob(
+  req: Request,
+  method: JobMethod,
+  batchId: string,
+) {
   const secret = getJobSecret()
   if (!secret) {
     return jsonFail(
@@ -52,38 +76,95 @@ async function runJob(req: Request) {
   }
 
   const take = readTake(req)
+  const startedAtMs = Date.now()
+
+  logLooksSocialJobBatchEvent({
+    level: 'info',
+    event: 'looks_social.jobs.batch.started',
+    route: ROUTE,
+    batchId,
+    method,
+    take,
+  })
+
   const now = new Date()
+  const processedAt = now.toISOString()
 
   const result = await processLooksSocialJobs({
     now,
     batchSize: take,
   })
 
+  logLooksSocialJobBatchEvent({
+    level: resolveFinishedLogLevel(result),
+    event: 'looks_social.jobs.batch.finished',
+    route: ROUTE,
+    batchId,
+    method,
+    take,
+    processedAt,
+    durationMs: Date.now() - startedAtMs,
+    scannedCount: result.scannedCount,
+    processedCount: result.processedCount,
+    completedCount: result.completedCount,
+    retryScheduledCount: result.retryScheduledCount,
+    failedCount: result.failedCount,
+    perTypeCounts: result.perTypeCounts,
+  })
+
   return jsonOk({
     ...result,
     take,
-    processedAt: now.toISOString(),
+    processedAt,
   })
 }
 
 export async function GET(req: Request) {
+  const batchId = createBatchId()
+
   try {
-    return await runJob(req)
+    return await runJob(req, 'GET', batchId)
   } catch (error: unknown) {
-    console.error('GET /api/internal/jobs/looks-social/process error', error)
     const message =
       error instanceof Error ? error.message : 'Internal server error'
+
+    logLooksSocialJobBatchEvent({
+      level: 'error',
+      event: 'looks_social.jobs.batch.exception',
+      route: ROUTE,
+      batchId,
+      method: 'GET',
+      message,
+      meta: {
+        errorName: error instanceof Error ? error.name : 'NonErrorThrown',
+      },
+    })
+
     return jsonFail(500, message)
   }
 }
 
 export async function POST(req: Request) {
+  const batchId = createBatchId()
+
   try {
-    return await runJob(req)
+    return await runJob(req, 'POST', batchId)
   } catch (error: unknown) {
-    console.error('POST /api/internal/jobs/looks-social/process error', error)
     const message =
       error instanceof Error ? error.message : 'Internal server error'
+
+    logLooksSocialJobBatchEvent({
+      level: 'error',
+      event: 'looks_social.jobs.batch.exception',
+      route: ROUTE,
+      batchId,
+      method: 'POST',
+      message,
+      meta: {
+        errorName: error instanceof Error ? error.name : 'NonErrorThrown',
+      },
+    })
+
     return jsonFail(500, message)
   }
 }

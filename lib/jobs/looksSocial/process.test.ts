@@ -4,6 +4,12 @@ import {
   LooksSocialJobType,
 } from '@prisma/client'
 
+import {
+  makeEmptyLooksSocialJobPerTypeCounts,
+  type LooksSocialJobBatchCounts,
+  type LooksSocialJobPerTypeCounts,
+} from '@/lib/jobs/looksSocial/contracts'
+
 const mocks = vi.hoisted(() => {
   return {
     prisma: {
@@ -48,21 +54,60 @@ type DueJob = {
   createdAt: Date
 }
 
+type PerTypeCountPatch = {
+  type: LooksSocialJobType
+  scannedCount?: number
+  processedCount?: number
+  completedCount?: number
+  retryScheduledCount?: number
+  failedCount?: number
+}
+
 function makeDueJob(overrides?: Partial<DueJob>): DueJob {
   return {
     id: overrides?.id ?? 'job_1',
-    type:
-      overrides?.type ?? LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
+    type: overrides?.type ?? LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
     payload: overrides?.payload ?? { lookPostId: 'look_1' },
-    dedupeKey:
-      overrides?.dedupeKey ?? 'look:look_1:recompute-counts',
-    runAt:
-      overrides?.runAt ?? new Date('2026-04-20T12:00:00.000Z'),
+    dedupeKey: overrides?.dedupeKey ?? 'look:look_1:recompute-counts',
+    runAt: overrides?.runAt ?? new Date('2026-04-20T12:00:00.000Z'),
     attemptCount: overrides?.attemptCount ?? 0,
     maxAttempts: overrides?.maxAttempts ?? 5,
     createdAt:
       overrides?.createdAt ?? new Date('2026-04-20T11:00:00.000Z'),
   }
+}
+
+function applyBatchCountPatch(
+  target: LooksSocialJobBatchCounts,
+  patch: Omit<PerTypeCountPatch, 'type'>,
+): void {
+  if (patch.scannedCount !== undefined) {
+    target.scannedCount = patch.scannedCount
+  }
+  if (patch.processedCount !== undefined) {
+    target.processedCount = patch.processedCount
+  }
+  if (patch.completedCount !== undefined) {
+    target.completedCount = patch.completedCount
+  }
+  if (patch.retryScheduledCount !== undefined) {
+    target.retryScheduledCount = patch.retryScheduledCount
+  }
+  if (patch.failedCount !== undefined) {
+    target.failedCount = patch.failedCount
+  }
+}
+
+function makePerTypeCounts(
+  ...patches: PerTypeCountPatch[]
+): LooksSocialJobPerTypeCounts {
+  const counts = makeEmptyLooksSocialJobPerTypeCounts()
+
+  for (const patch of patches) {
+    applyBatchCountPatch(counts[patch.type], patch)
+  }
+
+  return counts
 }
 
 describe('lib/jobs/looksSocial/process', () => {
@@ -161,6 +206,12 @@ describe('lib/jobs/looksSocial/process', () => {
       completedCount: 1,
       retryScheduledCount: 0,
       failedCount: 0,
+      perTypeCounts: makePerTypeCounts({
+        type: LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
+        scannedCount: 1,
+        processedCount: 1,
+        completedCount: 1,
+      }),
       outcomes: [
         {
           jobId: 'job_counts_1',
@@ -200,6 +251,12 @@ describe('lib/jobs/looksSocial/process', () => {
       completedCount: 1,
       retryScheduledCount: 0,
       failedCount: 0,
+      perTypeCounts: makePerTypeCounts({
+        type: LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE,
+        scannedCount: 1,
+        processedCount: 1,
+        completedCount: 1,
+      }),
       outcomes: [
         {
           jobId: 'job_spotlight_1',
@@ -239,6 +296,12 @@ describe('lib/jobs/looksSocial/process', () => {
       completedCount: 1,
       retryScheduledCount: 0,
       failedCount: 0,
+      perTypeCounts: makePerTypeCounts({
+        type: LooksSocialJobType.RECOMPUTE_LOOK_RANK_SCORE,
+        scannedCount: 1,
+        processedCount: 1,
+        completedCount: 1,
+      }),
       outcomes: [
         {
           jobId: 'job_rank_1',
@@ -290,6 +353,13 @@ describe('lib/jobs/looksSocial/process', () => {
       completedCount: 1,
       retryScheduledCount: 0,
       failedCount: 0,
+      perTypeCounts: makePerTypeCounts({
+        type:
+          LooksSocialJobType.FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS,
+        scannedCount: 1,
+        processedCount: 1,
+        completedCount: 1,
+      }),
       outcomes: [
         {
           jobId: 'job_viral_1',
@@ -344,6 +414,12 @@ describe('lib/jobs/looksSocial/process', () => {
       completedCount: 0,
       retryScheduledCount: 1,
       failedCount: 0,
+      perTypeCounts: makePerTypeCounts({
+        type: LooksSocialJobType.MODERATION_SCAN_COMMENT,
+        scannedCount: 1,
+        processedCount: 1,
+        retryScheduledCount: 1,
+      }),
       outcomes: [
         {
           jobId: 'job_mod_comment_1',
@@ -393,6 +469,12 @@ describe('lib/jobs/looksSocial/process', () => {
       completedCount: 0,
       retryScheduledCount: 0,
       failedCount: 1,
+      perTypeCounts: makePerTypeCounts({
+        type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+        scannedCount: 1,
+        processedCount: 1,
+        failedCount: 1,
+      }),
       outcomes: [
         {
           jobId: 'job_index_1',
@@ -431,6 +513,12 @@ describe('lib/jobs/looksSocial/process', () => {
       completedCount: 0,
       retryScheduledCount: 0,
       failedCount: 1,
+      perTypeCounts: makePerTypeCounts({
+        type: LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
+        scannedCount: 1,
+        processedCount: 1,
+        failedCount: 1,
+      }),
       outcomes: [
         {
           jobId: 'job_bad_payload_1',
@@ -443,7 +531,7 @@ describe('lib/jobs/looksSocial/process', () => {
     })
   })
 
-  it('skips jobs it cannot claim', async () => {
+  it('skips jobs it cannot claim and still reports scanned per-type counts', async () => {
     const now = new Date('2026-04-20T19:00:00.000Z')
     const job = makeDueJob({
       id: 'job_counts_2',
@@ -466,7 +554,130 @@ describe('lib/jobs/looksSocial/process', () => {
       completedCount: 0,
       retryScheduledCount: 0,
       failedCount: 0,
+      perTypeCounts: makePerTypeCounts({
+        type: LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
+        scannedCount: 1,
+      }),
       outcomes: [],
+    })
+  })
+
+  it('builds per-type counts across a mixed batch including unclaimed, completed, retry, and failed jobs', async () => {
+    const now = new Date('2026-04-20T19:15:00.000Z')
+    const retryAt = new Date('2026-04-20T19:20:00.000Z')
+
+    const completedJob = makeDueJob({
+      id: 'job_counts_completed',
+      type: LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
+      payload: { lookPostId: 'look_100' },
+      dedupeKey: 'look:look_100:recompute-counts',
+    })
+
+    const retryJob = makeDueJob({
+      id: 'job_comment_retry',
+      type: LooksSocialJobType.MODERATION_SCAN_COMMENT,
+      payload: { commentId: 'comment_10' },
+      dedupeKey: 'look-comment:comment_10:moderation-scan',
+      attemptCount: 0,
+      maxAttempts: 2,
+    })
+
+    const failedJob = makeDueJob({
+      id: 'job_index_failed',
+      type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+      payload: { lookPostId: 'look_300' },
+      dedupeKey: 'look:look_300:index-document',
+      attemptCount: 0,
+      maxAttempts: 1,
+    })
+
+    const unclaimedJob = makeDueJob({
+      id: 'job_spotlight_unclaimed',
+      type: LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE,
+      payload: { lookPostId: 'look_200' },
+      dedupeKey: 'look:look_200:recompute-spotlight-score',
+    })
+
+    mocks.prisma.looksSocialJob.findMany.mockResolvedValue([
+      completedJob,
+      retryJob,
+      failedJob,
+      unclaimedJob,
+    ])
+
+    mocks.prisma.looksSocialJob.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 })
+
+    mocks.recomputeLookPostCounters.mockResolvedValue({
+      likeCount: 7,
+      commentCount: 2,
+      saveCount: 1,
+      spotlightScore: 21,
+      rankScore: 15,
+    })
+
+    mocks.prisma.looksSocialJob.update.mockResolvedValue({ id: 'updated' })
+
+    const result = await processLooksSocialJobs({ now })
+
+    expect(result).toEqual({
+      scannedCount: 4,
+      processedCount: 3,
+      completedCount: 1,
+      retryScheduledCount: 1,
+      failedCount: 1,
+      perTypeCounts: makePerTypeCounts(
+        {
+          type: LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
+          scannedCount: 1,
+          processedCount: 1,
+          completedCount: 1,
+        },
+        {
+          type: LooksSocialJobType.MODERATION_SCAN_COMMENT,
+          scannedCount: 1,
+          processedCount: 1,
+          retryScheduledCount: 1,
+        },
+        {
+          type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+          scannedCount: 1,
+          processedCount: 1,
+          failedCount: 1,
+        },
+        {
+          type: LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE,
+          scannedCount: 1,
+        },
+      ),
+      outcomes: [
+        {
+          jobId: 'job_counts_completed',
+          type: LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
+          dedupeKey: 'look:look_100:recompute-counts',
+          result: 'COMPLETED',
+        },
+        {
+          jobId: 'job_comment_retry',
+          type: LooksSocialJobType.MODERATION_SCAN_COMMENT,
+          dedupeKey: 'look-comment:comment_10:moderation-scan',
+          result: 'RETRY_SCHEDULED',
+          retryAt,
+          message:
+            'moderationScanComment is deferred until the comment moderation implementation exists.',
+        },
+        {
+          jobId: 'job_index_failed',
+          type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+          dedupeKey: 'look:look_300:index-document',
+          result: 'FAILED_FINAL',
+          message:
+            'indexLookPostDocument is deferred until the search indexing implementation exists.',
+        },
+      ],
     })
   })
 
@@ -508,6 +719,7 @@ describe('lib/jobs/looksSocial/process', () => {
       completedCount: 0,
       retryScheduledCount: 0,
       failedCount: 0,
+      perTypeCounts: makeEmptyLooksSocialJobPerTypeCounts(),
       outcomes: [],
     })
   })

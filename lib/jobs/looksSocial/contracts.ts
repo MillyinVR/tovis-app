@@ -57,3 +57,45 @@ export type LooksSocialJobRequest<
   runAt?: Date
   maxAttempts?: number
 }
+
+export type LooksSocialJobBatchCounts = {
+  scannedCount: number
+  processedCount: number
+  completedCount: number
+  retryScheduledCount: number
+  failedCount: number
+}
+
+export type LooksSocialJobPerTypeCounts = Record<
+  LooksSocialJobType,
+  LooksSocialJobBatchCounts
+>
+
+export function makeEmptyLooksSocialJobBatchCounts(): LooksSocialJobBatchCounts {
+  return {
+    scannedCount: 0,
+    processedCount: 0,
+    completedCount: 0,
+    retryScheduledCount: 0,
+    failedCount: 0,
+  }
+}
+
+export function makeEmptyLooksSocialJobPerTypeCounts(): LooksSocialJobPerTypeCounts {
+  return {
+    [LooksSocialJobType.RECOMPUTE_LOOK_COUNTS]:
+      makeEmptyLooksSocialJobBatchCounts(),
+    [LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE]:
+      makeEmptyLooksSocialJobBatchCounts(),
+    [LooksSocialJobType.RECOMPUTE_LOOK_RANK_SCORE]:
+      makeEmptyLooksSocialJobBatchCounts(),
+    [LooksSocialJobType.FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS]:
+      makeEmptyLooksSocialJobBatchCounts(),
+    [LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT]:
+      makeEmptyLooksSocialJobBatchCounts(),
+    [LooksSocialJobType.MODERATION_SCAN_LOOK_POST]:
+      makeEmptyLooksSocialJobBatchCounts(),
+    [LooksSocialJobType.MODERATION_SCAN_COMMENT]:
+      makeEmptyLooksSocialJobBatchCounts(),
+  }
+}
