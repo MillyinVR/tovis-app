@@ -14,6 +14,7 @@ import {
 } from '@/lib/availability/data/cache'
 import { decimalToNumber } from '@/lib/booking/snapshots'
 import {
+  buildDiscoveryLocationLabel,
   boundsForRadiusMiles,
   haversineMiles,
 } from '@/lib/discovery/nearby'
@@ -147,6 +148,7 @@ export async function loadOtherProsNearby(
       lat: true,
       lng: true,
       city: true,
+      state: true,
       formattedAddress: true,
       isPrimary: true,
       createdAt: true,
@@ -165,6 +167,7 @@ export async function loadOtherProsNearby(
       isPrimary: boolean
       createdAt: Date
       city: string | null
+      state: string | null
       formattedAddress: string | null
     }
   >()
@@ -199,6 +202,7 @@ export async function loadOtherProsNearby(
         isPrimary: Boolean(location.isPrimary),
         createdAt: location.createdAt,
         city: location.city ?? null,
+        state: location.state ?? null,
         formattedAddress: normalizeAddress(location.formattedAddress),
       })
       continue
@@ -221,6 +225,7 @@ export async function loadOtherProsNearby(
         isPrimary: Boolean(location.isPrimary),
         createdAt: location.createdAt,
         city: location.city ?? null,
+        state: location.state ?? null,
         formattedAddress: normalizeAddress(location.formattedAddress),
       })
     }
@@ -254,7 +259,6 @@ export async function loadOtherProsNearby(
           id: true,
           businessName: true,
           avatarUrl: true,
-          location: true,
         },
       },
     },
@@ -267,7 +271,6 @@ export async function loadOtherProsNearby(
       offeringId: string
       businessName: string | null
       avatarUrl: string | null
-      proLocation: string | null
     }
   >()
 
@@ -276,7 +279,6 @@ export async function loadOtherProsNearby(
       offeringId: offering.id,
       businessName: offering.professional.businessName ?? null,
       avatarUrl: offering.professional.avatarUrl ?? null,
-      proLocation: offering.professional.location ?? null,
     })
   }
 
@@ -287,12 +289,13 @@ export async function loadOtherProsNearby(
     const offering = offeringByPro.get(professionalId)
     if (!bestLocation || !offering) continue
 
-    const locationLabel =
-      (offering.proLocation && offering.proLocation.trim()) ||
-      (bestLocation.city && bestLocation.city.trim()) ||
-      (bestLocation.formattedAddress &&
-        bestLocation.formattedAddress.trim()) ||
-      null
+    const locationLabel = buildDiscoveryLocationLabel({
+      location: {
+        formattedAddress: bestLocation.formattedAddress,
+        city: bestLocation.city,
+        state: bestLocation.state,
+      },
+    })
 
     results.push({
       id: professionalId,

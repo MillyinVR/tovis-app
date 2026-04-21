@@ -546,28 +546,33 @@ describe('lib/discovery/nearby.ts', () => {
   })
 
   describe('buildDiscoveryLocationLabel', () => {
-    it('prefers the profile location string when present', () => {
+    it('builds a city/state label from canonical location data', () => {
       expect(
         buildDiscoveryLocationLabel({
-          profileLocation: 'San Diego, CA',
-          location: { city: 'Los Angeles', state: 'CA' },
-        }),
-      ).toBe('San Diego, CA')
-    })
-
-    it('falls back to city and state from the selected location', () => {
-      expect(
-        buildDiscoveryLocationLabel({
-          profileLocation: null,
-          location: { city: 'Los Angeles', state: 'CA' },
+          location: {
+            formattedAddress: '123 Main St',
+            city: 'Los Angeles',
+            state: 'CA',
+          },
         }),
       ).toBe('Los Angeles, CA')
+    })
+
+    it('falls back to formattedAddress when city/state are unavailable', () => {
+      expect(
+        buildDiscoveryLocationLabel({
+          location: {
+            formattedAddress: '123 Main St',
+            city: null,
+            state: null,
+          },
+        }),
+      ).toBe('123 Main St')
     })
 
     it('returns null when no location label data is available', () => {
       expect(
         buildDiscoveryLocationLabel({
-          profileLocation: null,
           location: null,
         }),
       ).toBeNull()

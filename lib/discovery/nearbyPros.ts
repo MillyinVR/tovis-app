@@ -33,7 +33,6 @@ const LOCATION_SELECT = {
       handle: true,
       professionType: true,
       avatarUrl: true,
-      location: true,
     },
   },
 } satisfies Prisma.ProfessionalLocationSelect
@@ -268,7 +267,6 @@ export async function loadNearbyPros(
       professionType: entry.pro.professionType ?? null,
       avatarUrl: entry.pro.avatarUrl ?? null,
       locationLabel: buildDiscoveryLocationLabel({
-        profileLocation: entry.pro.location ?? null,
         location: entry.location,
       }),
       distanceMiles: roundDistanceMiles(entry.distanceMiles),

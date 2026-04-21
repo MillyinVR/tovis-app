@@ -111,21 +111,24 @@ const mocks = vi.hoisted(() => {
 
   const buildDiscoveryLocationLabel = vi.fn(
     ({
-      profileLocation,
       location,
     }: {
-      profileLocation: string | null
-      location: { city: string | null; state: string | null } | null
+      location:
+        | {
+            formattedAddress: string | null
+            city: string | null
+            state: string | null
+          }
+        | null
     }) => {
-      const profile = profileLocation?.trim() ?? ''
-      if (profile) return profile
-
       const city = location?.city?.trim() ?? ''
       const state = location?.state?.trim() ?? ''
+      const formattedAddress = location?.formattedAddress?.trim() ?? ''
 
       if (city && state) return `${city}, ${state}`
       if (city) return city
       if (state) return state
+      if (formattedAddress) return formattedAddress
 
       return null
     },
@@ -314,7 +317,9 @@ function makeSearchablePro(overrides?: {
     handle: overrides?.handle ?? 'tovisstudio',
     professionType: overrides?.professionType ?? ProfessionType.BARBER,
     avatarUrl: overrides?.avatarUrl ?? null,
-    location: overrides?.location ?? 'San Diego, CA',
+    ...(overrides?.location !== undefined
+      ? { location: overrides.location }
+      : {}),
     locations: overrides?.locations ?? [DEFAULT_LOCATION],
   }
 }
@@ -429,7 +434,7 @@ describe('lib/search/pros.ts', () => {
   })
 
   describe('searchPros', () => {
-    it('queries only publicly approved pros and only bookable locations', async () => {
+    it('queries only publicly approved pros and only canonical bookable locations', async () => {
       await searchPros({
         q: 'barber',
         lat: null,
@@ -455,7 +460,24 @@ describe('lib/search/pros.ts', () => {
           OR: [
             { businessName: { contains: 'barber', mode: 'insensitive' } },
             { handle: { contains: 'barber', mode: 'insensitive' } },
-            { location: { contains: 'barber', mode: 'insensitive' } },
+            {
+              locations: {
+                some: {
+                  isBookable: true,
+                  OR: [
+                    { name: { contains: 'barber', mode: 'insensitive' } },
+                    { city: { contains: 'barber', mode: 'insensitive' } },
+                    { state: { contains: 'barber', mode: 'insensitive' } },
+                    {
+                      formattedAddress: {
+                        contains: 'barber',
+                        mode: 'insensitive',
+                      },
+                    },
+                  ],
+                },
+              },
+            },
             { professionType: { in: [ProfessionType.BARBER] } },
           ],
         },
@@ -467,7 +489,6 @@ describe('lib/search/pros.ts', () => {
           handle: true,
           professionType: true,
           avatarUrl: true,
-          location: true,
           locations: {
             where: {
               isBookable: true,
@@ -493,7 +514,9 @@ describe('lib/search/pros.ts', () => {
       })
 
       expect(mocks.prisma.review.groupBy).not.toHaveBeenCalled()
-      expect(mocks.prisma.professionalServiceOffering.findMany).not.toHaveBeenCalled()
+      expect(
+        mocks.prisma.professionalServiceOffering.findMany,
+      ).not.toHaveBeenCalled()
     })
 
     it('returns the stable DTO shape with canonical pro ids and strips workingHours from location previews', async () => {
@@ -503,6 +526,7 @@ describe('lib/search/pros.ts', () => {
           businessName: 'TOVIS Studio',
           handle: 'tovisstudio',
           professionType: ProfessionType.MAKEUP_ARTIST,
+          location: 'Legacy Profile Label',
         }),
       ])
 
@@ -583,6 +607,18 @@ describe('lib/search/pros.ts', () => {
       expect(result.items[0]?.id).toBe('pro_1')
       expect(result.items[0]?.closestLocation).not.toHaveProperty('workingHours')
       expect(result.items[0]?.primaryLocation).not.toHaveProperty('workingHours')
+
+      expect(mocks.buildDiscoveryLocationLabel).toHaveBeenCalledWith({
+        location: expect.objectContaining({
+          formattedAddress: '123 Main St',
+          city: 'San Diego',
+          state: 'CA',
+        }),
+      })
+
+      expect(
+        mocks.buildDiscoveryLocationLabel.mock.calls[0]?.[0],
+      ).not.toHaveProperty('profileLocation')
     })
 
     it('filters pros through the shared discovery offering/category helper', async () => {

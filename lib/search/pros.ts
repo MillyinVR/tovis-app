@@ -177,9 +177,36 @@ export async function searchPros(
                 },
               },
               {
-                location: {
-                  contains: params.q,
-                  mode: 'insensitive',
+                locations: {
+                  some: {
+                    isBookable: true,
+                    OR: [
+                      {
+                        name: {
+                          contains: params.q,
+                          mode: 'insensitive',
+                        },
+                      },
+                      {
+                        city: {
+                          contains: params.q,
+                          mode: 'insensitive',
+                        },
+                      },
+                      {
+                        state: {
+                          contains: params.q,
+                          mode: 'insensitive',
+                        },
+                      },
+                      {
+                        formattedAddress: {
+                          contains: params.q,
+                          mode: 'insensitive',
+                        },
+                      },
+                    ],
+                  },
                 },
               },
               ...(matchedProfessions.length > 0
@@ -200,7 +227,6 @@ export async function searchPros(
       handle: true,
       professionType: true,
       avatarUrl: true,
-      location: true,
       locations: {
         where: {
           isBookable: true,
@@ -392,7 +418,7 @@ export async function searchPros(
         entry.rating.avg >= minRating,
     )
   }
-  
+
   if (params.openNowOnly) {
     filtered = filtered.filter((entry) => {
       const location = entry.closest
@@ -454,7 +480,6 @@ export async function searchPros(
       professionType: entry.pro.professionType ?? null,
       avatarUrl: entry.pro.avatarUrl ?? null,
       locationLabel: buildDiscoveryLocationLabel({
-        profileLocation: entry.pro.location ?? null,
         location: location ?? entry.primary ?? null,
       }),
       distanceMiles: entry.dist,

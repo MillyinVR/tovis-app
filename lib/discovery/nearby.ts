@@ -428,18 +428,20 @@ export function pickClosestLocationWithinRadius(args: {
 }
 
 export function buildDiscoveryLocationLabel(args: {
-  profileLocation: string | null
-  location: Pick<DiscoveryLocationDto, 'city' | 'state'> | null
+  location: Pick<
+    DiscoveryLocationDto,
+    'formattedAddress' | 'city' | 'state'
+  > | null
 }): string | null {
-  const profileLocation = args.profileLocation?.trim() ?? ''
-  if (profileLocation) return profileLocation
-
   const city = args.location?.city?.trim() ?? ''
   const state = args.location?.state?.trim() ?? ''
+  const formattedAddress =
+    args.location?.formattedAddress?.trim() ?? ''
 
   if (city && state) return `${city}, ${state}`
   if (city) return city
   if (state) return state
+  if (formattedAddress) return formattedAddress
 
   return null
 }
