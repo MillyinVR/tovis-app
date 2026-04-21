@@ -27,7 +27,8 @@
     "test:load:signup": "tsx tests/load/signup-load-test.ts",
     "check:booking-boundary": "node tools/check-booking-write-boundary.mjs",
     "seed:booking-overrides": "tsx prisma/seeds/bookingOverridePermissions.ts",
-    "lookup:booking-override-ids": "tsx prisma/seeds/lookupBookingOverrideIds.ts"
+    "lookup:booking-override-ids": "tsx prisma/seeds/lookupBookingOverrideIds.ts",
+    "jobs:looks-social:run-local": "node scripts/run-looks-social-jobs.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",

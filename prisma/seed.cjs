@@ -15,12 +15,42 @@ const {
   VerificationStatus,
   ClientClaimStatus,
   ContactMethod,
+  LookPostStatus,
+  LookPostVisibility,
+  ModerationStatus,
+  LooksSocialJobStatus,
+  LooksSocialJobType,
 } = require('@prisma/client')
 const bcrypt = require('bcrypt')
 
 const prisma = new PrismaClient()
 
 const DEFAULT_TIME_ZONE = 'America/Los_Angeles'
+
+const VERIFIED_PHONE_AT = new Date('2026-04-08T10:00:00.000Z')
+const VERIFIED_EMAIL_AT = new Date('2026-04-08T10:05:00.000Z')
+const LICENSE_VERIFIED_AT = new Date('2026-04-08T10:10:00.000Z')
+const LOOK_PUBLISHED_AT = new Date('2026-04-18T12:00:00.000Z')
+
+function requireSeedPhone(label, value) {
+  const normalized = normalizeOptionalPhone(value)
+
+  if (!normalized) {
+    throw new Error(`${label} is required`)
+  }
+
+  return normalized
+}
+
+function getFullyVerifiedUserFields(label, phone) {
+  const normalizedPhone = requireSeedPhone(label, phone)
+
+  return {
+    phone: normalizedPhone,
+    phoneVerifiedAt: VERIFIED_PHONE_AT,
+    emailVerifiedAt: VERIFIED_EMAIL_AT,
+  }
+}
 
 function normalizeEmail(value) {
   if (typeof value !== 'string') {
@@ -143,9 +173,14 @@ async function ensurePermission(serviceId, professionType, stateCode = null) {
   })
 }
 
-async function upsertAdmin({ email, password }) {
+async function upsertAdmin({
+  email,
+  password,
+  phone = '+15555550102',
+}) {
   const normalizedEmail = normalizeEmail(email)
   const adminHash = await bcrypt.hash(password, 10)
+  const verifiedAuth = getFullyVerifiedUserFields('Seed admin phone', phone)
 
   const adminUser = await prisma.user.upsert({
     where: { email: normalizedEmail },
@@ -153,13 +188,22 @@ async function upsertAdmin({ email, password }) {
       email: normalizedEmail,
       role: Role.ADMIN,
       password: adminHash,
+      ...verifiedAuth,
     },
     create: {
       email: normalizedEmail,
       password: adminHash,
       role: Role.ADMIN,
+      ...verifiedAuth,
     },
-    select: { id: true, email: true, role: true },
+    select: {
+      id: true,
+      email: true,
+      phone: true,
+      role: true,
+      phoneVerifiedAt: true,
+      emailVerifiedAt: true,
+    },
   })
 
   const existingPerm = await prisma.adminPermission.findFirst({
@@ -185,7 +229,13 @@ async function upsertAdmin({ email, password }) {
     })
   }
 
-  console.log('ADMIN login:', { email: adminUser.email, password })
+  console.log('ADMIN login:', {
+    email: adminUser.email,
+    password,
+    phone: adminUser.phone,
+    phoneVerifiedAt: adminUser.phoneVerifiedAt,
+    emailVerifiedAt: adminUser.emailVerifiedAt,
+  })
   console.log('ADMIN user id:', adminUser.id)
 
   return adminUser
@@ -197,15 +247,8 @@ async function upsertClientUser({
   phone = '+15555550100',
 }) {
   const normalizedEmail = normalizeEmail(email)
-  const normalizedPhone = normalizeOptionalPhone(phone)
   const passwordHash = await bcrypt.hash(password, 10)
-
-  if (!normalizedPhone) {
-    throw new Error('Seed client phone is required for a fully verified client')
-  }
-
-  const phoneVerifiedAt = new Date('2026-04-08T10:00:00.000Z')
-  const emailVerifiedAt = new Date('2026-04-08T10:05:00.000Z')
+  const verifiedAuth = getFullyVerifiedUserFields('Seed client phone', phone)
 
   const user = await prisma.user.upsert({
     where: { email: normalizedEmail },
@@ -213,17 +256,13 @@ async function upsertClientUser({
       email: normalizedEmail,
       password: passwordHash,
       role: Role.CLIENT,
-      phone: normalizedPhone,
-      phoneVerifiedAt,
-      emailVerifiedAt,
+      ...verifiedAuth,
     },
     create: {
       email: normalizedEmail,
       password: passwordHash,
       role: Role.CLIENT,
-      phone: normalizedPhone,
-      phoneVerifiedAt,
-      emailVerifiedAt,
+      ...verifiedAuth,
     },
     select: {
       id: true,
@@ -240,16 +279,22 @@ async function upsertClientUser({
     update: {
       firstName: 'Test',
       lastName: 'Client',
-      phone: normalizedPhone,
-      phoneVerifiedAt,
+      email: normalizedEmail,
+      phone: verifiedAuth.phone,
+      phoneVerifiedAt: VERIFIED_PHONE_AT,
+      claimStatus: ClientClaimStatus.CLAIMED,
+      claimedAt: VERIFIED_EMAIL_AT,
       avatarUrl: null,
     },
     create: {
       userId: user.id,
       firstName: 'Test',
       lastName: 'Client',
-      phone: normalizedPhone,
-      phoneVerifiedAt,
+      email: normalizedEmail,
+      phone: verifiedAuth.phone,
+      phoneVerifiedAt: VERIFIED_PHONE_AT,
+      claimStatus: ClientClaimStatus.CLAIMED,
+      claimedAt: VERIFIED_EMAIL_AT,
       avatarUrl: null,
     },
   })
@@ -367,9 +412,14 @@ async function upsertUnclaimedClientProfile({
   })
 }
 
-async function upsertProfessionalUser({ email, password }) {
+async function upsertProfessionalUser({
+  email,
+  password,
+  phone = '+15555550103',
+}) {
   const normalizedEmail = normalizeEmail(email)
   const passwordHash = await bcrypt.hash(password, 10)
+  const verifiedAuth = getFullyVerifiedUserFields('Seed pro phone', phone)
 
   const user = await prisma.user.upsert({
     where: { email: normalizedEmail },
@@ -377,13 +427,22 @@ async function upsertProfessionalUser({ email, password }) {
       email: normalizedEmail,
       password: passwordHash,
       role: Role.PRO,
+      ...verifiedAuth,
     },
     create: {
       email: normalizedEmail,
       password: passwordHash,
       role: Role.PRO,
+      ...verifiedAuth,
     },
-    select: { id: true, email: true, role: true },
+    select: {
+      id: true,
+      email: true,
+      phone: true,
+      role: true,
+      phoneVerifiedAt: true,
+      emailVerifiedAt: true,
+    },
   })
 
   const professionalProfile = await prisma.professionalProfile.upsert({
@@ -391,6 +450,8 @@ async function upsertProfessionalUser({ email, password }) {
     update: {
       firstName: 'Test',
       lastName: 'Professional',
+      phone: verifiedAuth.phone,
+      phoneVerifiedAt: VERIFIED_PHONE_AT,
       businessName: 'TOVIS Test Pro',
       handle: 'tovis-test-pro',
       handleNormalized: 'tovis-test-pro',
@@ -400,6 +461,7 @@ async function upsertProfessionalUser({ email, password }) {
       licenseState: 'CA',
       licenseVerified: true,
       verificationStatus: VerificationStatus.APPROVED,
+      licenseVerifiedAt: LICENSE_VERIFIED_AT,
       licenseVerifiedSource: 'SEED',
       licenseStatusCode: 'CURRENT',
     },
@@ -407,6 +469,8 @@ async function upsertProfessionalUser({ email, password }) {
       userId: user.id,
       firstName: 'Test',
       lastName: 'Professional',
+      phone: verifiedAuth.phone,
+      phoneVerifiedAt: VERIFIED_PHONE_AT,
       businessName: 'TOVIS Test Pro',
       handle: 'tovis-test-pro',
       handleNormalized: 'tovis-test-pro',
@@ -416,6 +480,7 @@ async function upsertProfessionalUser({ email, password }) {
       licenseState: 'CA',
       licenseVerified: true,
       verificationStatus: VerificationStatus.APPROVED,
+      licenseVerifiedAt: LICENSE_VERIFIED_AT,
       licenseVerifiedSource: 'SEED',
       licenseStatusCode: 'CURRENT',
     },
@@ -586,6 +651,140 @@ async function tagLook(mediaId, serviceId) {
   return prisma.mediaServiceTag.create({
     data: { mediaId, serviceId },
   })
+}
+
+async function ensureLookPostAsset({
+  lookPostId,
+  mediaAssetId,
+  sortOrder,
+}) {
+  const existing = await prisma.lookPostAsset.findFirst({
+    where: { lookPostId, mediaAssetId },
+    select: { id: true },
+  })
+
+  if (existing) {
+    return prisma.lookPostAsset.update({
+      where: { id: existing.id },
+      data: { sortOrder },
+    })
+  }
+
+  return prisma.lookPostAsset.create({
+    data: {
+      lookPostId,
+      mediaAssetId,
+      sortOrder,
+    },
+  })
+}
+
+async function ensurePublishedLookPost({
+  professionalId,
+  primaryMediaAssetId,
+  serviceId = null,
+  caption = null,
+  priceStartingAt = null,
+  publishedAt = LOOK_PUBLISHED_AT,
+}) {
+  const baseData = {
+    professionalId,
+    primaryMediaAssetId,
+    serviceId,
+    caption,
+    priceStartingAt:
+      priceStartingAt == null ? null : money(priceStartingAt),
+    status: LookPostStatus.PUBLISHED,
+    visibility: LookPostVisibility.PUBLIC,
+    moderationStatus: ModerationStatus.APPROVED,
+    publishedAt,
+    archivedAt: null,
+    removedAt: null,
+  }
+
+  const lookPost = await prisma.lookPost.upsert({
+    where: { primaryMediaAssetId },
+    update: baseData,
+    create: baseData,
+    select: {
+      id: true,
+      primaryMediaAssetId: true,
+      serviceId: true,
+      status: true,
+      visibility: true,
+      moderationStatus: true,
+      publishedAt: true,
+    },
+  })
+
+  await ensureLookPostAsset({
+    lookPostId: lookPost.id,
+    mediaAssetId: primaryMediaAssetId,
+    sortOrder: 0,
+  })
+
+  return lookPost
+}
+
+async function enqueueLooksSocialJob({
+  type,
+  dedupeKey,
+  payload,
+  runAt = new Date(),
+  maxAttempts = 5,
+}) {
+  return prisma.looksSocialJob.upsert({
+    where: { dedupeKey },
+    update: {
+      type,
+      payload,
+      status: LooksSocialJobStatus.PENDING,
+      runAt,
+      claimedAt: null,
+      processedAt: null,
+      failedAt: null,
+      attemptCount: 0,
+      maxAttempts,
+      lastError: null,
+    },
+    create: {
+      type,
+      dedupeKey,
+      payload,
+      status: LooksSocialJobStatus.PENDING,
+      runAt,
+      maxAttempts,
+    },
+    select: {
+      id: true,
+      type: true,
+      dedupeKey: true,
+      status: true,
+      runAt: true,
+      attemptCount: true,
+      maxAttempts: true,
+    },
+  })
+}
+
+async function enqueueSeedLookScoringJobs(lookPostId) {
+  await Promise.all([
+    enqueueLooksSocialJob({
+      type: LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
+      dedupeKey: `look:${lookPostId}:recompute-counts`,
+      payload: { lookPostId },
+    }),
+    enqueueLooksSocialJob({
+      type: LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE,
+      dedupeKey: `look:${lookPostId}:recompute-spotlight-score`,
+      payload: { lookPostId },
+    }),
+    enqueueLooksSocialJob({
+      type: LooksSocialJobType.RECOMPUTE_LOOK_RANK_SCORE,
+      dedupeKey: `look:${lookPostId}:recompute-rank-score`,
+      payload: { lookPostId },
+    }),
+  ])
 }
 
 async function main() {
@@ -871,12 +1070,45 @@ async function main() {
     storagePath: makeStoragePath('look-3.jpg'),
   })
 
-  await tagLook(look1.id, balayage.id)
-  await tagLook(look1.id, rootTouchUp.id)
-  await tagLook(look2.id, gelX.id)
-  await tagLook(look3.id, softGlam.id)
+await tagLook(look1.id, balayage.id)
+await tagLook(look1.id, rootTouchUp.id)
+await tagLook(look2.id, gelX.id)
+await tagLook(look3.id, softGlam.id)
 
-  console.log('✅ Seeded looks feed media:', [look1.id, look2.id, look3.id])
+const lookPost1 = await ensurePublishedLookPost({
+  professionalId: professionalProfile.id,
+  primaryMediaAssetId: look1.id,
+  serviceId: balayage.id,
+  caption: look1.caption,
+})
+
+const lookPost2 = await ensurePublishedLookPost({
+  professionalId: professionalProfile.id,
+  primaryMediaAssetId: look2.id,
+  serviceId: gelX.id,
+  caption: look2.caption,
+})
+
+const lookPost3 = await ensurePublishedLookPost({
+  professionalId: professionalProfile.id,
+  primaryMediaAssetId: look3.id,
+  serviceId: softGlam.id,
+  caption: look3.caption,
+})
+
+await Promise.all([
+  enqueueSeedLookScoringJobs(lookPost1.id),
+  enqueueSeedLookScoringJobs(lookPost2.id),
+  enqueueSeedLookScoringJobs(lookPost3.id),
+])
+
+console.log('✅ Seeded looks feed media:', [look1.id, look2.id, look3.id])
+console.log('✅ Seeded canonical LookPosts:', [
+  lookPost1.id,
+  lookPost2.id,
+  lookPost3.id,
+])
+console.log('✅ Enqueued due LooksSocial jobs for seeded LookPosts')
 }
 
 main()
