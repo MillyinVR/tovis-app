@@ -12,6 +12,7 @@ import {
   toLookPublicationAsyncEffectsDto,
   toProLookPublicationResultDto,
   type CreateProLookRequestDto,
+  type LookPublicationAsyncEffectsDto,
   type ProLookMutationAction,
   type ProLookPublicationResultDto,
   type ProLookStateAction,
@@ -21,6 +22,7 @@ import { recomputeLookPostScores } from '@/lib/looks/counters'
 import {
   enqueueLookPostMutationPolicy,
   type EnqueueLookPostMutationPolicyArgs,
+  type EnqueueLookPostMutationPolicyResult,
 } from '@/lib/jobs/looksSocial/mutationEnqueuePolicy'
 
 export type LookPublicationDb = PrismaClient | Prisma.TransactionClient
@@ -52,12 +54,6 @@ const mediaAssetPublicationSelect =
         serviceId: true,
       },
       orderBy: [{ serviceId: 'asc' }],
-    },
-    lookPostPrimaryFor: {
-      select: {
-        id: true,
-      },
-      take: 1,
     },
   })
 
@@ -119,10 +115,21 @@ type ProLookPublicationRow = Prisma.LookPostGetPayload<{
   select: typeof proLookPublicationSelect
 }>
 
-type PublicationMutationPlan = {
-  action: ProLookMutationAction
-  data: Prisma.LookPostUncheckedCreateInput | Prisma.LookPostUncheckedUpdateInput
+type CreatePublicationMutationPlan = {
+  kind: 'create'
+  action: Extract<ProLookMutationAction, 'create_draft' | 'publish'>
+  data: Prisma.LookPostUncheckedCreateInput
 }
+
+type UpdatePublicationMutationPlan = {
+  kind: 'update'
+  action: Exclude<ProLookMutationAction, 'create_draft'>
+  data: Prisma.LookPostUncheckedUpdateInput
+}
+
+type PublicationMutationPlan =
+  | CreatePublicationMutationPlan
+  | UpdatePublicationMutationPlan
 
 function normalizeRequiredId(name: string, value: string): string {
   const trimmed = value.trim()
@@ -371,6 +378,13 @@ function didSearchableFieldsChange(args: {
   )
 }
 
+function didRankingRelevantFieldsChange(args: {
+  previous: Pick<ProLookPublicationRow, 'serviceId'>
+  next: Pick<ProLookPublicationRow, 'serviceId'>
+}): boolean {
+  return (args.previous.serviceId ?? null) !== (args.next.serviceId ?? null)
+}
+
 function shouldModerationScanLook(args: {
   previous: Pick<
     ProLookPublicationRow,
@@ -458,6 +472,11 @@ function buildMutationPolicyArgs(args: {
     next: args.next,
   })
 
+  const rankingRelevantFieldsChanged = didRankingRelevantFieldsChange({
+    previous,
+    next: args.next,
+  })
+
   const visibilityChanged = previous.visibility !== args.next.visibility
 
   const searchableDocumentChanged =
@@ -469,11 +488,15 @@ function buildMutationPolicyArgs(args: {
     action: args.action,
   })
 
+  const rankingRelevantChanged =
+    feedEligibilityChanged || rankingRelevantFieldsChanged
+
   if (
     !feedEligibilityChanged &&
     !searchableDocumentChanged &&
     !visibilityChanged &&
-    !contentRequiresModerationScan
+    !contentRequiresModerationScan &&
+    !rankingRelevantChanged
   ) {
     return null
   }
@@ -482,7 +505,7 @@ function buildMutationPolicyArgs(args: {
     lookPostId: args.lookPostId,
     mutation: visibilityChanged ? 'VISIBILITY_CHANGE' : 'EDIT',
     feedEligibilityChanged,
-    rankingRelevantChanged: feedEligibilityChanged,
+    rankingRelevantChanged,
     searchableDocumentChanged,
     contentRequiresModerationScan,
   }
@@ -492,7 +515,7 @@ function buildLookPostCreatePlan(args: {
   professionalId: string
   media: MediaAssetPublicationRow
   request: CreateProLookRequestDto
-}): PublicationMutationPlan {
+}): CreatePublicationMutationPlan {
   const publish = args.request.publish === true
   const caption =
     normalizeOptionalCaption(args.request.caption) ??
@@ -517,6 +540,7 @@ function buildLookPostCreatePlan(args: {
   }
 
   return {
+    kind: 'create',
     action: publish ? 'publish' : 'create_draft',
     data: {
       professionalId: normalizeRequiredId(
@@ -540,7 +564,7 @@ function buildLookPostUpdatePlanFromCreateRequest(args: {
   media: MediaAssetPublicationRow
   existing: ProLookPublicationRow
   request: CreateProLookRequestDto
-}): PublicationMutationPlan {
+}): UpdatePublicationMutationPlan {
   assertLookPostIsMutable(args.existing)
 
   const publish = args.request.publish === true
@@ -571,6 +595,7 @@ function buildLookPostUpdatePlanFromCreateRequest(args: {
     publish && args.existing.status !== LookPostStatus.PUBLISHED
 
   return {
+    kind: 'update',
     action: shouldPublish ? 'publish' : 'update',
     data: {
       caption,
@@ -591,7 +616,7 @@ function buildLookPostUpdatePlanFromCreateRequest(args: {
 function buildLookPostUpdatePlan(args: {
   existing: ProLookPublicationRow
   request: UpdateProLookRequestDto
-}): PublicationMutationPlan {
+}): UpdatePublicationMutationPlan {
   assertLookPostIsMutable(args.existing)
 
   const caption =
@@ -632,6 +657,7 @@ function buildLookPostUpdatePlan(args: {
     assertMediaAssetCanBackLooks(args.existing.primaryMediaAsset)
 
     return {
+      kind: 'update',
       action: 'publish',
       data: {
         caption,
@@ -647,6 +673,7 @@ function buildLookPostUpdatePlan(args: {
 
   if (stateAction === 'archive') {
     return {
+      kind: 'update',
       action: 'archive',
       data: {
         caption,
@@ -661,6 +688,7 @@ function buildLookPostUpdatePlan(args: {
 
   if (stateAction === 'unpublish') {
     return {
+      kind: 'update',
       action: 'unpublish',
       data: {
         caption,
@@ -675,6 +703,7 @@ function buildLookPostUpdatePlan(args: {
   }
 
   return {
+    kind: 'update',
     action: 'update',
     data: {
       caption,
@@ -683,6 +712,20 @@ function buildLookPostUpdatePlan(args: {
       visibility,
     },
   }
+}
+
+function toPublicationAsyncEffects(
+  result?: EnqueueLookPostMutationPolicyResult,
+): LookPublicationAsyncEffectsDto {
+  if (!result) {
+    return toLookPublicationAsyncEffectsDto()
+  }
+
+  return toLookPublicationAsyncEffectsDto({
+    plannedJobs: result.plannedJobs,
+    enqueuedJobs: result.enqueuedJobs,
+    gatedJobs: result.gatedJobs,
+  })
 }
 
 /**
@@ -707,28 +750,37 @@ export async function createOrUpdateProLookFromMediaAsset(
       select: proLookPublicationSelect,
     })
 
-    const plan = existing
-      ? buildLookPostUpdatePlanFromCreateRequest({
-          media,
-          existing,
-          request: args.request,
-        })
-      : buildLookPostCreatePlan({
-          professionalId: args.professionalId,
-          media,
-          request: args.request,
-        })
+    let plan: PublicationMutationPlan
+    let saved: ProLookPublicationRow
 
-    const saved = existing
-      ? await tx.lookPost.update({
-          where: { id: existing.id },
-          data: plan.data as Prisma.LookPostUncheckedUpdateInput,
-          select: proLookPublicationSelect,
-        })
-      : await tx.lookPost.create({
-          data: plan.data as Prisma.LookPostUncheckedCreateInput,
-          select: proLookPublicationSelect,
-        })
+    if (existing) {
+      const updatePlan = buildLookPostUpdatePlanFromCreateRequest({
+        media,
+        existing,
+        request: args.request,
+      })
+
+      plan = updatePlan
+
+      saved = await tx.lookPost.update({
+        where: { id: existing.id },
+        data: updatePlan.data,
+        select: proLookPublicationSelect,
+      })
+    } else {
+      const createPlan = buildLookPostCreatePlan({
+        professionalId: args.professionalId,
+        media,
+        request: args.request,
+      })
+
+      plan = createPlan
+
+      saved = await tx.lookPost.create({
+        data: createPlan.data,
+        select: proLookPublicationSelect,
+      })
+    }
 
     await recomputeLookPostScores(tx, saved.id)
 
@@ -748,24 +800,14 @@ export async function createOrUpdateProLookFromMediaAsset(
       next: refreshed,
     })
 
-    const asyncEffects = policyArgs
+    const enqueueResult = policyArgs
       ? await enqueueLookPostMutationPolicy(tx, policyArgs)
-      : {
-          lookPostId: refreshed.id,
-          mutation: 'EDIT' as const,
-          plannedJobs: [],
-          enqueuedJobs: [],
-          gatedJobs: [],
-        }
+      : undefined
 
     return toProLookPublicationResultDto({
       action: plan.action,
       lookPost: refreshed,
-      asyncEffects: toLookPublicationAsyncEffectsDto({
-        plannedJobs: asyncEffects.plannedJobs,
-        enqueuedJobs: asyncEffects.enqueuedJobs,
-        gatedJobs: asyncEffects.gatedJobs,
-      }),
+      asyncEffects: toPublicationAsyncEffects(enqueueResult),
     })
   })
 }
@@ -791,7 +833,7 @@ export async function updateProLookPublication(
 
     const updated = await tx.lookPost.update({
       where: { id: existing.id },
-      data: plan.data as Prisma.LookPostUncheckedUpdateInput,
+      data: plan.data,
       select: proLookPublicationSelect,
     })
 
@@ -813,24 +855,14 @@ export async function updateProLookPublication(
       next: refreshed,
     })
 
-    const asyncEffects = policyArgs
+    const enqueueResult = policyArgs
       ? await enqueueLookPostMutationPolicy(tx, policyArgs)
-      : {
-          lookPostId: refreshed.id,
-          mutation: 'EDIT' as const,
-          plannedJobs: [],
-          enqueuedJobs: [],
-          gatedJobs: [],
-        }
+      : undefined
 
     return toProLookPublicationResultDto({
       action: plan.action,
       lookPost: refreshed,
-      asyncEffects: toLookPublicationAsyncEffectsDto({
-        plannedJobs: asyncEffects.plannedJobs,
-        enqueuedJobs: asyncEffects.enqueuedJobs,
-        gatedJobs: asyncEffects.gatedJobs,
-      }),
+      asyncEffects: toPublicationAsyncEffects(enqueueResult),
     })
   })
 }
