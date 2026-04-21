@@ -823,6 +823,9 @@ model User {
   lookLikes    LookLike[]
   lookComments LookComment[]
 
+  lookPostReports    LookPostReport[]
+  lookCommentReports LookCommentReport[]
+
   tosAcceptedAt DateTime?
   tosVersion    String?
 
@@ -2242,6 +2245,7 @@ model LookPost {
   assets     LookPostAsset[]
   likes      LookLike[]
   comments   LookComment[]
+  reports    LookPostReport[]
   boardItems BoardItem[]
 
   @@index([professionalId, publishedAt])
@@ -2293,9 +2297,41 @@ model LookComment {
   lookPost LookPost @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
   user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  reports  LookCommentReport[]
+
   @@index([lookPostId, createdAt])
   @@index([userId, createdAt])
   @@index([moderationStatus, createdAt])
+}
+
+model LookPostReport {
+  id         String   @id @default(cuid())
+  lookPostId String
+  userId     String
+  createdAt  DateTime @default(now())
+
+  lookPost LookPost @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([lookPostId, userId])
+  @@index([lookPostId, createdAt])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+model LookCommentReport {
+  id            String   @id @default(cuid())
+  lookCommentId String
+  userId        String
+  createdAt     DateTime @default(now())
+
+  lookComment LookComment @relation(fields: [lookCommentId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([lookCommentId, userId])
+  @@index([lookCommentId, createdAt])
+  @@index([userId, createdAt])
+  @@index([createdAt])
 }
 
 model LooksSocialJob {

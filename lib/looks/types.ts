@@ -180,6 +180,19 @@ export type LooksCommentCreateResponseDto = {
   commentsCount: number
 }
 
+export type LooksReportStatusDto = 'accepted' | 'already_reported'
+
+export type LooksLookReportResponseDto = {
+  lookPostId: string
+  status: LooksReportStatusDto
+}
+
+export type LooksCommentReportResponseDto = {
+  lookPostId: string
+  commentId: string
+  status: LooksReportStatusDto
+}
+
 export type LooksRenderedMediaDto = {
   id: string
   url: string
