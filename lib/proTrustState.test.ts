@@ -1,12 +1,17 @@
 // lib/proTrustState.test.ts
 
 import { describe, expect, it } from 'vitest'
-import { Role, VerificationStatus } from '@prisma/client'
+import {
+  MediaVisibility,
+  Role,
+  VerificationStatus,
+} from '@prisma/client'
 
 import {
   PUBLICLY_APPROVED_PRO_STATUSES,
   canEditPublicPublishingFields,
   canViewerSeeProPublicSurface,
+  canViewerSeePublicMediaSurface,
   getPostVerificationNextUrl,
   isPubliclyApprovedProStatus,
 } from './proTrustState'
@@ -109,6 +114,58 @@ describe('lib/proTrustState', () => {
           viewerProfessionalId: professionalId,
           professionalId,
           verificationStatus: VerificationStatus.PENDING,
+        }),
+      ).toBe(false)
+    })
+  })
+
+  describe('canViewerSeePublicMediaSurface', () => {
+    const professionalId = 'pro_123'
+
+    it('allows approved public media for non-owners', () => {
+      expect(
+        canViewerSeePublicMediaSurface({
+          viewerRole: Role.CLIENT,
+          viewerProfessionalId: null,
+          professionalId,
+          verificationStatus: VerificationStatus.APPROVED,
+          visibility: MediaVisibility.PUBLIC,
+        }),
+      ).toBe(true)
+    })
+
+    it('blocks non-owners from public media when the pro is not approved', () => {
+      expect(
+        canViewerSeePublicMediaSurface({
+          viewerRole: Role.CLIENT,
+          viewerProfessionalId: null,
+          professionalId,
+          verificationStatus: VerificationStatus.PENDING,
+          visibility: MediaVisibility.PUBLIC,
+        }),
+      ).toBe(false)
+    })
+
+    it('allows the owner to preview public media before approval', () => {
+      expect(
+        canViewerSeePublicMediaSurface({
+          viewerRole: Role.PRO,
+          viewerProfessionalId: professionalId,
+          professionalId,
+          verificationStatus: VerificationStatus.PENDING,
+          visibility: MediaVisibility.PUBLIC,
+        }),
+      ).toBe(true)
+    })
+
+    it('blocks non-public media even when the pro is approved', () => {
+      expect(
+        canViewerSeePublicMediaSurface({
+          viewerRole: Role.CLIENT,
+          viewerProfessionalId: null,
+          professionalId,
+          verificationStatus: VerificationStatus.APPROVED,
+          visibility: MediaVisibility.PRO_CLIENT,
         }),
       ).toBe(false)
     })

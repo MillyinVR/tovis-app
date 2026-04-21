@@ -1,5 +1,9 @@
 // lib/proTrustState.ts
-import { Role, VerificationStatus } from '@prisma/client'
+import {
+  MediaVisibility,
+  Role,
+  VerificationStatus,
+} from '@prisma/client'
 
 export const PUBLICLY_APPROVED_PRO_STATUSES = [
   VerificationStatus.APPROVED,
@@ -29,6 +33,23 @@ export function canViewerSeeProPublicSurface(args: {
     args.viewerProfessionalId === args.professionalId
 
   return isOwner || isPubliclyApprovedProStatus(args.verificationStatus)
+}
+
+export function canViewerSeePublicMediaSurface(args: {
+  viewerRole?: Role | null
+  viewerProfessionalId?: string | null
+  professionalId: string
+  verificationStatus: VerificationStatus | null | undefined
+  visibility: MediaVisibility
+}): boolean {
+  if (args.visibility !== MediaVisibility.PUBLIC) return false
+
+  return canViewerSeeProPublicSurface({
+    viewerRole: args.viewerRole,
+    viewerProfessionalId: args.viewerProfessionalId,
+    professionalId: args.professionalId,
+    verificationStatus: args.verificationStatus,
+  })
 }
 
 export function getPostVerificationNextUrl(args: {

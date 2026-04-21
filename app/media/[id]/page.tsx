@@ -14,7 +14,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
-import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
+import { canViewerSeePublicMediaSurface } from '@/lib/proTrustState'
 import { cn } from '@/lib/utils'
 
 type PageProps = {
@@ -90,11 +90,15 @@ export default async function MediaDetailPage({ params }: PageProps) {
     viewer?.role === 'PRO' &&
     viewer?.professionalProfile?.id === media.professionalId
 
-  const isApproved = isPubliclyApprovedProStatus(
-    media.professional.verificationStatus,
-  )
+  const canViewPublicMediaSurface = canViewerSeePublicMediaSurface({
+    viewerRole: viewer?.role ?? null,
+    viewerProfessionalId: viewer?.professionalProfile?.id ?? null,
+    professionalId: media.professionalId,
+    verificationStatus: media.professional.verificationStatus,
+    visibility: media.visibility,
+  })
 
-  if (!isOwner && !isApproved) notFound()
+  if (!canViewPublicMediaSurface) notFound()
 
   const { renderUrl } = await renderMediaUrls({
     storageBucket: media.storageBucket,

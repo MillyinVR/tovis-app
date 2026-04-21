@@ -6,6 +6,8 @@ import {
   ModerationStatus,
 } from '@prisma/client'
 
+import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+
 import {
   LOOKS_SPOTLIGHT_SLUG,
   buildLooksFeedCursorWhere,
@@ -80,7 +82,7 @@ describe('lib/looks/feed.ts', () => {
         professional: {
           is: {
             verificationStatus: {
-              in: expect.any(Array),
+              in: [...PUBLICLY_APPROVED_PRO_STATUSES],
             },
           },
         },
@@ -100,6 +102,22 @@ describe('lib/looks/feed.ts', () => {
           },
         ]),
       )
+    })
+
+    it('uses the canonical publicly approved pro statuses in the shared feed gate', () => {
+      const where = buildLooksFeedWhere({
+        kind: 'ALL',
+      })
+
+      expect(where).toMatchObject({
+        professional: {
+          is: {
+            verificationStatus: {
+              in: [...PUBLICLY_APPROVED_PRO_STATUSES],
+            },
+          },
+        },
+      })
     })
 
     it('treats category=spotlight as an alias, not a real service category filter', () => {
