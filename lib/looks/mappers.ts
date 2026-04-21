@@ -10,6 +10,10 @@ import {
   VerificationStatus,
 } from '@prisma/client'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import {
+  resolveLookPrimaryService,
+  toLookPrimaryServiceSummary,
+} from '@/lib/looks/serviceOwnership'
 import type {
   LooksBoardDetailRow,
   LooksBoardPreviewRow,
@@ -150,7 +154,7 @@ function hasStoragePointers(input: {
   return Boolean(input.storageBucket && input.storagePath)
 }
 
-function pickLegacyServiceIds(
+function pickMediaServiceTagIds(
   services:
     | Array<{
         serviceId?: string
@@ -179,50 +183,6 @@ function pickLegacyServiceIds(
   return [...ids]
 }
 
-function pickLookPostServiceSummary(
-  service:
-    | {
-        id: string
-        name: string
-        category: {
-          name: string
-          slug: string
-        } | null
-      }
-    | null
-    | undefined,
-  explicitServiceId: string | null | undefined,
-) {
-  const id = service?.id ?? pickString(explicitServiceId)
-  if (!id) return null
-
-  return {
-    id,
-    name: service?.name ?? null,
-    category: service?.category?.name ?? null,
-    categorySlug: service?.category?.slug ?? null,
-  }
-}
-
-function pickLookPostServiceIds(args: {
-  serviceId: string | null | undefined
-  service:
-    | {
-        id: string
-      }
-    | null
-    | undefined
-}): string[] {
-  const ids = new Set<string>()
-
-  const explicitId = pickString(args.serviceId)
-  if (explicitId) ids.add(explicitId)
-
-  const nestedId = pickString(args.service?.id)
-  if (nestedId) ids.add(nestedId)
-
-  return [...ids]
-}
 
 function normalizeCommentUser(user: MediaCommentUserShape): {
   id: string
@@ -339,11 +299,11 @@ export async function mapLooksFeedMediaToDto(args: {
 
   if (!rendered.url) return null
 
-  const primaryService = pickLookPostServiceSummary(item.service, item.serviceId)
-  const serviceIds = pickLookPostServiceIds({
+  const resolvedPrimaryService = resolveLookPrimaryService({
     serviceId: item.serviceId,
     service: item.service,
   })
+  const primaryService = toLookPrimaryServiceSummary(resolvedPrimaryService)
 
   return {
     id: item.id,
@@ -372,8 +332,8 @@ export async function mapLooksFeedMediaToDto(args: {
 
     serviceId: primaryService?.id ?? null,
     serviceName: primaryService?.name ?? null,
-    category: primaryService?.category ?? null,
-    serviceIds,
+    category: primaryService?.categoryName ?? null,
+    serviceIds: resolvedPrimaryService.serviceIds,
 
     uploadedByRole: primaryMedia.uploadedByRole ?? null,
     reviewId: primaryMedia.reviewId ?? null,
@@ -464,7 +424,7 @@ export async function mapPortfolioTileToDto(input: {
     isEligibleForLooks: input.isEligibleForLooks,
     isFeaturedInPortfolio: input.isFeaturedInPortfolio,
     src,
-    serviceIds: pickLegacyServiceIds(input.services),
+    serviceIds: pickMediaServiceTagIds(input.services),
     isVideo: input.mediaType === MediaType.VIDEO,
     mediaType: input.mediaType,
   }
@@ -553,6 +513,12 @@ export function mapLooksDetailToDto(args: {
 }): LooksDetailItemDto {
   const { item, viewerContext } = args
 
+  const resolvedPrimaryService = resolveLookPrimaryService({
+    serviceId: item.serviceId,
+    service: item.service,
+  })
+  const primaryService = resolvedPrimaryService.primaryService
+
   return {
     id: item.id,
     caption: item.caption ?? item.primaryMediaAsset.caption ?? null,
@@ -565,14 +531,14 @@ export function mapLooksDetailToDto(args: {
 
     professional: mapLooksProProfilePreviewToDto(item.professional),
 
-    service: item.service
+    service: primaryService
       ? {
-          id: item.service.id,
-          name: item.service.name,
-          category: item.service.category
+          id: primaryService.id,
+          name: primaryService.name,
+          category: primaryService.category
             ? {
-                name: item.service.category.name,
-                slug: item.service.category.slug,
+                name: primaryService.category.name,
+                slug: primaryService.category.slug,
               }
             : null,
         }

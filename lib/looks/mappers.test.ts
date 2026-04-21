@@ -397,6 +397,49 @@ describe('lib/looks/mappers.ts', () => {
   })
 
   describe('mapLooksFeedMediaToDto', () => {
+        it('keeps explicit serviceId even when the joined service relation is null', async () => {
+      const row = makeFeedRow({
+        serviceId: 'service_1',
+        service: null,
+      })
+
+      const result = await mapLooksFeedMediaToDto({
+        item: row,
+        viewerLiked: false,
+      })
+
+      expect(result).toEqual({
+        id: 'look_1',
+        url: 'https://cdn.example.com/media.jpg',
+        thumbUrl: 'https://cdn.example.com/media-thumb.jpg',
+        mediaType: MediaType.IMAGE,
+        caption: 'Fresh cut',
+        createdAt: '2026-04-18T13:00:00.000Z',
+        professional: {
+          id: 'pro_1',
+          businessName: 'TOVIS Studio',
+          handle: 'tovisstudio',
+          professionType: ProfessionType.BARBER,
+          avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
+          location: 'San Diego, CA',
+        },
+        _count: {
+          likes: 9,
+          comments: 3,
+        },
+        viewerLiked: false,
+        serviceId: 'service_1',
+        serviceName: null,
+        category: null,
+        serviceIds: ['service_1'],
+        uploadedByRole: null,
+        reviewId: null,
+        reviewHelpfulCount: null,
+        reviewRating: null,
+        reviewHeadline: null,
+      })
+    })
+    
     it('maps a look-post feed row into the stable feed DTO', async () => {
       const row = makeFeedRow()
 
