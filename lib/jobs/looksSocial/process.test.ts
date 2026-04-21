@@ -140,6 +140,7 @@ describe('lib/jobs/looksSocial/process', () => {
     expect(mocks.recomputeLookPostCounters).toHaveBeenCalledWith(
       mocks.prisma,
       'look_42',
+      { now },
     )
 
     expect(mocks.prisma.looksSocialJob.update).toHaveBeenCalledWith({
@@ -190,6 +191,7 @@ describe('lib/jobs/looksSocial/process', () => {
     expect(mocks.recomputeLookPostSpotlightScore).toHaveBeenCalledWith(
       mocks.prisma,
       'look_52',
+      { now },
     )
 
     expect(result).toEqual({

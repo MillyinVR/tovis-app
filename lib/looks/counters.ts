@@ -5,6 +5,10 @@ import {
   Prisma,
   PrismaClient,
 } from '@prisma/client'
+import {
+  computeLookPostSpotlightScore as computeCentralLookPostSpotlightScore,
+  type LookPostSpotlightScoreOptions,
+} from '@/lib/looks/spotlight'
 
 type LooksCounterDb = Prisma.TransactionClient | PrismaClient
 
@@ -46,12 +50,7 @@ type LookPostScoreRow = Prisma.LookPostGetPayload<{
   select: typeof lookPostScoreSelect
 }>
 
-const LOOK_POST_SPOTLIGHT_WEIGHTS = {
-  like: 1,
-  comment: 3,
-  save: 5,
-  share: 8,
-} as const
+export type LookPostScoreComputeOptions = LookPostSpotlightScoreOptions
 
 const LOOK_POST_RANK_WEIGHTS = {
   like: 1,
@@ -154,19 +153,18 @@ export function computeLookPostSpotlightScore(
     | 'saveCount'
     | 'shareCount'
   >,
+  options?: LookPostScoreComputeOptions,
 ): number {
-  if (!isScoreEligibleLook(row)) return 0
-
-  const likeCount = normalizeCount(row.likeCount)
-  const commentCount = normalizeCount(row.commentCount)
-  const saveCount = normalizeCount(row.saveCount)
-  const shareCount = normalizeCount(row.shareCount)
-
-  return (
-    likeCount * LOOK_POST_SPOTLIGHT_WEIGHTS.like +
-    commentCount * LOOK_POST_SPOTLIGHT_WEIGHTS.comment +
-    saveCount * LOOK_POST_SPOTLIGHT_WEIGHTS.save +
-    shareCount * LOOK_POST_SPOTLIGHT_WEIGHTS.share
+  return computeCentralLookPostSpotlightScore(
+    {
+      status: row.status,
+      moderationStatus: row.moderationStatus,
+      publishedAt: row.publishedAt,
+      likeCount: row.likeCount,
+      commentCount: row.commentCount,
+      saveCount: row.saveCount,
+    },
+    options,
   )
 }
 
@@ -208,9 +206,10 @@ function buildLookPostScoreSnapshot(
     | 'saveCount'
     | 'shareCount'
   >,
+  options?: LookPostScoreComputeOptions,
 ): LookPostScoreSnapshot {
   return {
-    spotlightScore: computeLookPostSpotlightScore(row),
+    spotlightScore: computeLookPostSpotlightScore(row, options),
     rankScore: computeLookPostRankScore(row),
   }
 }
@@ -218,11 +217,12 @@ function buildLookPostScoreSnapshot(
 export async function recomputeLookPostSpotlightScore(
   db: LooksCounterDb,
   lookPostId: string,
+  options?: LookPostScoreComputeOptions,
 ): Promise<number> {
   const normalizedLookPostId = normalizeRequiredId('lookPostId', lookPostId)
   const row = await readLookPostScoreRow(db, normalizedLookPostId)
 
-  const spotlightScore = computeLookPostSpotlightScore(row)
+  const spotlightScore = computeLookPostSpotlightScore(row, options)
 
   await persistLookPostMetrics(db, normalizedLookPostId, {
     spotlightScore,
@@ -250,10 +250,11 @@ export async function recomputeLookPostRankScore(
 export async function recomputeLookPostScores(
   db: LooksCounterDb,
   lookPostId: string,
+  options?: LookPostScoreComputeOptions,
 ): Promise<LookPostScoreSnapshot> {
   const normalizedLookPostId = normalizeRequiredId('lookPostId', lookPostId)
   const row = await readLookPostScoreRow(db, normalizedLookPostId)
-  const scores = buildLookPostScoreSnapshot(row)
+  const scores = buildLookPostScoreSnapshot(row, options)
 
   await persistLookPostMetrics(db, normalizedLookPostId, scores)
 
@@ -263,6 +264,7 @@ export async function recomputeLookPostScores(
 export async function recomputeLookPostLikeCount(
   db: LooksCounterDb,
   lookPostId: string,
+  options?: LookPostScoreComputeOptions,
 ): Promise<number> {
   const normalizedLookPostId = normalizeRequiredId('lookPostId', lookPostId)
 
@@ -271,10 +273,13 @@ export async function recomputeLookPostLikeCount(
     readLookPostScoreRow(db, normalizedLookPostId),
   ])
 
-  const scores = buildLookPostScoreSnapshot({
-    ...row,
-    likeCount,
-  })
+  const scores = buildLookPostScoreSnapshot(
+    {
+      ...row,
+      likeCount,
+    },
+    options,
+  )
 
   await persistLookPostMetrics(db, normalizedLookPostId, {
     likeCount,
@@ -287,6 +292,7 @@ export async function recomputeLookPostLikeCount(
 export async function recomputeLookPostCommentCount(
   db: LooksCounterDb,
   lookPostId: string,
+  options?: LookPostScoreComputeOptions,
 ): Promise<number> {
   const normalizedLookPostId = normalizeRequiredId('lookPostId', lookPostId)
 
@@ -295,10 +301,13 @@ export async function recomputeLookPostCommentCount(
     readLookPostScoreRow(db, normalizedLookPostId),
   ])
 
-  const scores = buildLookPostScoreSnapshot({
-    ...row,
-    commentCount,
-  })
+  const scores = buildLookPostScoreSnapshot(
+    {
+      ...row,
+      commentCount,
+    },
+    options,
+  )
 
   await persistLookPostMetrics(db, normalizedLookPostId, {
     commentCount,
@@ -311,6 +320,7 @@ export async function recomputeLookPostCommentCount(
 export async function recomputeLookPostSaveCount(
   db: LooksCounterDb,
   lookPostId: string,
+  options?: LookPostScoreComputeOptions,
 ): Promise<number> {
   const normalizedLookPostId = normalizeRequiredId('lookPostId', lookPostId)
 
@@ -319,10 +329,13 @@ export async function recomputeLookPostSaveCount(
     readLookPostScoreRow(db, normalizedLookPostId),
   ])
 
-  const scores = buildLookPostScoreSnapshot({
-    ...row,
-    saveCount,
-  })
+  const scores = buildLookPostScoreSnapshot(
+    {
+      ...row,
+      saveCount,
+    },
+    options,
+  )
 
   await persistLookPostMetrics(db, normalizedLookPostId, {
     saveCount,
@@ -335,6 +348,7 @@ export async function recomputeLookPostSaveCount(
 export async function recomputeLookPostCounters(
   db: LooksCounterDb,
   lookPostId: string,
+  options?: LookPostScoreComputeOptions,
 ): Promise<LookPostCounterSnapshot> {
   const normalizedLookPostId = normalizeRequiredId('lookPostId', lookPostId)
 
@@ -345,12 +359,15 @@ export async function recomputeLookPostCounters(
     readLookPostScoreRow(db, normalizedLookPostId),
   ])
 
-  const scores = buildLookPostScoreSnapshot({
-    ...row,
-    likeCount,
-    commentCount,
-    saveCount,
-  })
+  const scores = buildLookPostScoreSnapshot(
+    {
+      ...row,
+      likeCount,
+      commentCount,
+      saveCount,
+    },
+    options,
+  )
 
   await persistLookPostMetrics(db, normalizedLookPostId, {
     likeCount,

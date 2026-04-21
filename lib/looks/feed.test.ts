@@ -88,9 +88,79 @@ describe('lib/looks/feed.ts', () => {
 
       const andFilters = Array.isArray(where.AND) ? where.AND : []
 
-      expect(andFilters).toContainEqual({
-        visibility: LookPostVisibility.PUBLIC,
+      expect(andFilters).toEqual(
+        expect.arrayContaining([
+          {
+            visibility: LookPostVisibility.PUBLIC,
+          },
+          {
+            spotlightScore: {
+              gt: 0,
+            },
+          },
+        ]),
+      )
+    })
+
+    it('treats category=spotlight as an alias, not a real service category filter', () => {
+      const where = buildLooksFeedWhere({
+        kind: 'SPOTLIGHT',
+        categorySlug: LOOKS_SPOTLIGHT_SLUG,
       })
+
+      expect(where).toMatchObject({
+        status: LookPostStatus.PUBLISHED,
+        moderationStatus: ModerationStatus.APPROVED,
+        publishedAt: { not: null },
+      })
+
+      const andFilters = Array.isArray(where.AND) ? where.AND : []
+
+      expect(andFilters).toEqual(
+        expect.arrayContaining([
+          {
+            visibility: LookPostVisibility.PUBLIC,
+          },
+          {
+            spotlightScore: {
+              gt: 0,
+            },
+          },
+        ]),
+      )
+
+      expect(JSON.stringify(where)).not.toContain('"slug":"spotlight"')
+    })
+
+    it('still applies a real category filter inside spotlight when the slug is not the alias', () => {
+      const where = buildLooksFeedWhere({
+        kind: 'SPOTLIGHT',
+        categorySlug: 'nails',
+      })
+
+      const andFilters = Array.isArray(where.AND) ? where.AND : []
+
+      expect(andFilters).toEqual(
+        expect.arrayContaining([
+          {
+            visibility: LookPostVisibility.PUBLIC,
+          },
+          {
+            spotlightScore: {
+              gt: 0,
+            },
+          },
+          {
+            service: {
+              is: {
+                category: {
+                  is: { slug: 'nails' },
+                },
+              },
+            },
+          },
+        ]),
+      )
     })
 
     it('builds category and text-search filters for the all feed', () => {

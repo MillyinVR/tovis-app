@@ -6,6 +6,7 @@ import {
   Prisma,
 } from '@prisma/client'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { buildLookPostSpotlightEligibilityWhere } from '@/lib/looks/spotlight'
 
 export const LOOKS_SPOTLIGHT_SLUG = 'spotlight'
 
@@ -51,6 +52,7 @@ export type LooksFeedCursor =
 
 function pickNonEmptyString(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
+
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
 }
@@ -185,6 +187,10 @@ export function buildLooksFeedWhere(
   args: BuildLooksFeedWhereArgs,
 ): Prisma.LookPostWhereInput {
   const categorySlug = pickNonEmptyString(args.categorySlug)
+  const resolvedCategorySlug =
+    args.kind === 'SPOTLIGHT' && categorySlug === LOOKS_SPOTLIGHT_SLUG
+      ? null
+      : categorySlug
   const q = pickNonEmptyString(args.q)
   const followingProfessionalIds = pickDistinctIds(
     args.followingProfessionalIds,
@@ -194,13 +200,17 @@ export function buildLooksFeedWhere(
     buildLooksVisibilityFilter(args.kind),
   ]
 
-  const categoryFilter = buildCategoryFilter(categorySlug)
+  const categoryFilter = buildCategoryFilter(resolvedCategorySlug)
   if (categoryFilter) {
     and.push(categoryFilter)
   }
 
   if (args.kind === 'FOLLOWING') {
     and.push(buildFollowingFeedFilter(followingProfessionalIds))
+  }
+
+  if (args.kind === 'SPOTLIGHT') {
+    and.push(buildLookPostSpotlightEligibilityWhere())
   }
 
   if (q) {

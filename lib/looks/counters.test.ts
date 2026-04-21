@@ -1,5 +1,5 @@
 // lib/looks/counters.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   LookPostStatus,
   ModerationStatus,
@@ -75,6 +75,12 @@ function asTransactionClient(
 describe('lib/looks/counters.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-20T00:00:00.000Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   describe('computeLookPostSpotlightScore', () => {
@@ -120,17 +126,76 @@ describe('lib/looks/counters.ts', () => {
       expect(result).toBe(0)
     })
 
-    it('weights saves/comments/shares above likes', () => {
+    it('returns 0 below the minimum interaction threshold', () => {
       const result = computeLookPostSpotlightScore(
         makeScoreEligibleLookRow({
-          likeCount: 11,
-          commentCount: 6,
-          saveCount: 3,
-          shareCount: 2,
+          likeCount: 2,
+          commentCount: 1,
+          saveCount: 1,
+          shareCount: 0,
         }),
       )
 
-      expect(result).toBe(60)
+      expect(result).toBe(0)
+    })
+
+    it('returns 0 when the look has no saves', () => {
+      const result = computeLookPostSpotlightScore(
+        makeScoreEligibleLookRow({
+          likeCount: 4,
+          commentCount: 1,
+          saveCount: 0,
+          shareCount: 0,
+        }),
+      )
+
+      expect(result).toBe(0)
+    })
+
+    it('rewards a more save-heavy interaction mix at the same sample size', () => {
+      const saveHeavy = computeLookPostSpotlightScore(
+        makeScoreEligibleLookRow({
+          likeCount: 1,
+          commentCount: 1,
+          saveCount: 4,
+          shareCount: 0,
+        }),
+      )
+
+      const likeHeavy = computeLookPostSpotlightScore(
+        makeScoreEligibleLookRow({
+          likeCount: 4,
+          commentCount: 1,
+          saveCount: 1,
+          shareCount: 0,
+        }),
+      )
+
+      expect(saveHeavy).toBeGreaterThan(likeHeavy)
+    })
+
+    it('decays as the look gets older', () => {
+      const newer = computeLookPostSpotlightScore(
+        makeScoreEligibleLookRow({
+          publishedAt: new Date('2026-04-19T00:00:00.000Z'),
+          likeCount: 4,
+          commentCount: 2,
+          saveCount: 2,
+          shareCount: 0,
+        }),
+      )
+
+      const older = computeLookPostSpotlightScore(
+        makeScoreEligibleLookRow({
+          publishedAt: new Date('2026-03-20T00:00:00.000Z'),
+          likeCount: 4,
+          commentCount: 2,
+          saveCount: 2,
+          shareCount: 0,
+        }),
+      )
+
+      expect(newer).toBeGreaterThan(older)
     })
   })
 
@@ -204,7 +269,7 @@ describe('lib/looks/counters.ts', () => {
         where: { id: 'look_1' },
         data: {
           likeCount: 7,
-          spotlightScore: 80,
+          spotlightScore: 69.02,
           rankScore: 63,
         },
         select: { id: true },
@@ -244,7 +309,7 @@ describe('lib/looks/counters.ts', () => {
         where: { id: 'look_1' },
         data: {
           commentCount: 4,
-          spotlightScore: 80,
+          spotlightScore: 69.02,
           rankScore: 63,
         },
         select: { id: true },
@@ -281,7 +346,7 @@ describe('lib/looks/counters.ts', () => {
         where: { id: 'look_1' },
         data: {
           saveCount: 9,
-          spotlightScore: 80,
+          spotlightScore: 69.02,
           rankScore: 63,
         },
         select: { id: true },
@@ -312,12 +377,43 @@ describe('lib/looks/counters.ts', () => {
       expect(db.lookPost.update).toHaveBeenCalledWith({
         where: { id: 'look_1' },
         data: {
-          spotlightScore: 60,
+          spotlightScore: 37.5667,
         },
         select: { id: true },
       })
 
-      expect(result).toBe(60)
+      expect(result).toBe(37.5667)
+    })
+
+    it('uses an explicit now option for deterministic spotlight recomputes', async () => {
+      const db = makeDb()
+      db.lookPost.findUnique.mockResolvedValue(
+        makeScoreEligibleLookRow({
+          likeCount: 11,
+          commentCount: 6,
+          saveCount: 3,
+          shareCount: 2,
+        }),
+      )
+      db.lookPost.update.mockResolvedValue({ id: 'look_1' })
+
+      const result = await recomputeLookPostSpotlightScore(
+        asTransactionClient(db),
+        'look_1',
+        {
+          now: new Date('2026-04-21T00:00:00.000Z'),
+        },
+      )
+
+      expect(db.lookPost.update).toHaveBeenCalledWith({
+        where: { id: 'look_1' },
+        data: {
+          spotlightScore: 35.2188,
+        },
+        select: { id: true },
+      })
+
+      expect(result).toBe(35.2188)
     })
   })
 
@@ -372,14 +468,14 @@ describe('lib/looks/counters.ts', () => {
       expect(db.lookPost.update).toHaveBeenCalledWith({
         where: { id: 'look_1' },
         data: {
-          spotlightScore: 60,
+          spotlightScore: 37.5667,
           rankScore: 47,
         },
         select: { id: true },
       })
 
       expect(result).toEqual({
-        spotlightScore: 60,
+        spotlightScore: 37.5667,
         rankScore: 47,
       })
     })
@@ -427,7 +523,7 @@ describe('lib/looks/counters.ts', () => {
           likeCount: 11,
           commentCount: 6,
           saveCount: 3,
-          spotlightScore: 60,
+          spotlightScore: 37.5667,
           rankScore: 47,
         },
         select: { id: true },
@@ -437,7 +533,7 @@ describe('lib/looks/counters.ts', () => {
         likeCount: 11,
         commentCount: 6,
         saveCount: 3,
-        spotlightScore: 60,
+        spotlightScore: 37.5667,
         rankScore: 47,
       })
     })

@@ -117,12 +117,16 @@ function readRequiredString(
   return trimmed
 }
 
-async function runLooksSocialJob(job: DueLooksSocialJob): Promise<void> {
+async function runLooksSocialJob(
+  job: DueLooksSocialJob,
+  now: Date,
+): Promise<void> {
   switch (job.type) {
     case LooksSocialJobType.RECOMPUTE_LOOK_COUNTS:
       await recomputeLookPostCounters(
         prisma,
         readRequiredString(job.payload, 'lookPostId'),
+        { now },
       )
       return
 
@@ -130,6 +134,7 @@ async function runLooksSocialJob(job: DueLooksSocialJob): Promise<void> {
       await recomputeLookPostSpotlightScore(
         prisma,
         readRequiredString(job.payload, 'lookPostId'),
+        { now },
       )
       return
 
@@ -163,7 +168,10 @@ async function runLooksSocialJob(job: DueLooksSocialJob): Promise<void> {
   }
 }
 
-async function claimDueJob(job: DueLooksSocialJob, now: Date): Promise<boolean> {
+async function claimDueJob(
+  job: DueLooksSocialJob,
+  now: Date,
+): Promise<boolean> {
   const claimed = await prisma.looksSocialJob.updateMany({
     where: {
       id: job.id,
@@ -184,7 +192,10 @@ async function claimDueJob(job: DueLooksSocialJob, now: Date): Promise<boolean> 
   return claimed.count === 1
 }
 
-async function markJobCompleted(job: DueLooksSocialJob, now: Date): Promise<void> {
+async function markJobCompleted(
+  job: DueLooksSocialJob,
+  now: Date,
+): Promise<void> {
   await prisma.looksSocialJob.update({
     where: { id: job.id },
     data: {
@@ -310,7 +321,7 @@ export async function processLooksSocialJobs(args?: {
     }
 
     try {
-      await runLooksSocialJob(job)
+      await runLooksSocialJob(job, now)
       await markJobCompleted(job, now)
 
       outcomes.push({
