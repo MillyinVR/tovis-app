@@ -139,15 +139,6 @@ export type AdminModerationResultDto =
   | LookCommentModerationResultDto
   | ViralRequestModerationResultDto
 
-export type LegacyViralRequestApproveResponseDto = {
-  request: ViralRequestDto
-  notifications: ViralRequestApprovalNotificationsDto
-}
-
-export type LegacyViralRequestRejectResponseDto = {
-  request: ViralRequestDto
-}
-
 function toIso(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
 }
@@ -156,7 +147,7 @@ function isOneOf<T extends string>(
   value: unknown,
   options: readonly T[],
 ): value is T {
-  return typeof value === 'string' && options.some((option) => option === value)
+  return typeof value === 'string' && options.includes(value as T)
 }
 
 export function isLookPostModerationAction(
@@ -272,23 +263,5 @@ export function toViralRequestModerationResultDto(args: {
           }
         : {}),
     },
-  }
-}
-
-export function toLegacyViralRequestApproveResponseDto(args: {
-  request: ViralRequestDto
-  notifications: ViralRequestApprovalNotificationsDto
-}): LegacyViralRequestApproveResponseDto {
-  return {
-    request: args.request,
-    notifications: args.notifications,
-  }
-}
-
-export function toLegacyViralRequestRejectResponseDto(args: {
-  request: ViralRequestDto
-}): LegacyViralRequestRejectResponseDto {
-  return {
-    request: args.request,
   }
 }

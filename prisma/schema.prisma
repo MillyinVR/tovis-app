@@ -2198,6 +2198,11 @@ model MediaAsset {
   storagePath   String
   thumbBucket   String?
   thumbPath     String?
+
+  @@index([professionalId, createdAt])
+  @@index([professionalId, isEligibleForLooks, createdAt])
+  @@index([professionalId, isFeaturedInPortfolio, createdAt])
+  @@index([uploadedByUserId, createdAt])
 }
 
 model MediaServiceTag {
@@ -2286,6 +2291,8 @@ model LookPost {
   @@index([spotlightScore, publishedAt])
   @@index([moderationStatus, reportCount, createdAt])
   @@index([reviewedByUserId, reviewedAt])
+  @@index([professionalId, status, updatedAt])
+  @@index([professionalId, visibility, updatedAt])
 }
 
 model LookPostAsset {

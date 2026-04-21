@@ -16,15 +16,11 @@ import {
   isLookCommentModerationAction,
   isLookPostModerationAction,
   isViralRequestModerationAction,
-  toLegacyViralRequestApproveResponseDto,
-  toLegacyViralRequestRejectResponseDto,
   toLookCommentModerationResultDto,
   toLookPostModerationResultDto,
   toViralRequestModerationResultDto,
   type AdminModerationResultDto,
   type AdminModerationTargetKind,
-  type LegacyViralRequestApproveResponseDto,
-  type LegacyViralRequestRejectResponseDto,
   type LookCommentModerationAction,
   type LookPostModerationAction,
   type ViralRequestModerationAction,
@@ -33,6 +29,7 @@ import {
   enqueueFanOutViralRequestApprovalNotifications,
   enqueueRecomputeLookCounts,
 } from '@/lib/jobs/looksSocial/enqueue'
+import { enqueueLookPostMutationPolicy } from '@/lib/jobs/looksSocial/mutationEnqueuePolicy'
 import {
   recomputeLookPostCommentCount,
   recomputeLookPostScores,
@@ -82,8 +79,6 @@ type ParsedAdminModerationRequest =
 type ExecuteAdminModerationResult = {
   response: AdminModerationResultDto
   logData: Prisma.AdminActionLogUncheckedCreateInput
-  legacyViralApproveResponse?: LegacyViralRequestApproveResponseDto
-  legacyViralRejectResponse?: LegacyViralRequestRejectResponseDto
 }
 
 const lookPostPermissionSelect =
@@ -538,6 +533,19 @@ function getNextViralModerationStatus(
   }
 }
 
+function buildLookPostModerationMutation(
+  action: LookPostModerationAction,
+): 'MODERATION_APPROVE' | 'MODERATION_REJECT' | 'MODERATION_REMOVE' {
+  switch (action) {
+    case 'approve':
+      return 'MODERATION_APPROVE'
+    case 'reject':
+      return 'MODERATION_REJECT'
+    case 'remove':
+      return 'MODERATION_REMOVE'
+  }
+}
+
 async function executeLookPostModeration(
   db: AdminModerationDb,
   adminUserId: string,
@@ -593,6 +601,13 @@ async function executeLookPostModeration(
   })
 
   await recomputeLookPostScores(db, request.targetId)
+
+  await enqueueLookPostMutationPolicy(db, {
+    lookPostId: request.targetId,
+    mutation: buildLookPostModerationMutation(request.action),
+    feedEligibilityChanged: true,
+    searchableDocumentChanged: true,
+  })
 
   const scope = buildLookPostPermissionScope(updated)
   const response = toLookPostModerationResultDto({
@@ -751,10 +766,6 @@ async function executeViralRequestModeration(
         request: requestDto,
         notifications: notificationsDto,
       }),
-      legacyViralApproveResponse: toLegacyViralRequestApproveResponseDto({
-        request: requestDto,
-        notifications: notificationsDto,
-      }),
       logData: buildAdminActionLogData({
         adminUserId,
         action: buildViralRequestLogAction(request.action),
@@ -774,13 +785,6 @@ async function executeViralRequestModeration(
 
   return {
     response,
-    ...(request.action === 'reject'
-      ? {
-          legacyViralRejectResponse: toLegacyViralRequestRejectResponseDto({
-            request: requestDto,
-          }),
-        }
-      : {}),
     logData: buildAdminActionLogData({
       adminUserId,
       action: buildViralRequestLogAction(request.action),
@@ -904,62 +908,6 @@ export async function handleAdminModerationRoute(
     return jsonOk(executed.response)
   } catch (error: unknown) {
     console.error('admin moderation route error', error)
-    return toErrorResponse(error)
-  }
-}
-
-export async function handleLegacyViralModerationRoute(
-  req: Request,
-  args: {
-    targetId: string
-    forcedAction: 'approve' | 'reject'
-  },
-): Promise<Response> {
-  try {
-    const auth = await requireUser({ roles: [Role.ADMIN] })
-    if (!auth.ok) return auth.res
-
-    const targetId = normalizeTargetId(
-      'VIRAL_SERVICE_REQUEST',
-      args.targetId,
-    )
-
-    const body = await readJsonBody(req)
-
-    if (body === null) {
-      return jsonFail(415, 'Content-Type must be application/json.')
-    }
-
-    const adminNotes = trimString(body.adminNotes) ?? undefined
-
-    const parsed: ParsedViralRequestModerationRequest = {
-      kind: 'VIRAL_SERVICE_REQUEST',
-      targetId,
-      action: args.forcedAction,
-      ...(adminNotes ? { adminNotes } : {}),
-    }
-
-    const executed = await runModerationRequest(auth.user.id, parsed)
-
-    if (executed instanceof Response) {
-      return executed
-    }
-
-    if (args.forcedAction === 'approve') {
-      if (!executed.legacyViralApproveResponse) {
-        throw new Error('Missing legacy viral approve response payload.')
-      }
-
-      return jsonOk(executed.legacyViralApproveResponse)
-    }
-
-    if (!executed.legacyViralRejectResponse) {
-      throw new Error('Missing legacy viral reject response payload.')
-    }
-
-    return jsonOk(executed.legacyViralRejectResponse)
-  } catch (error: unknown) {
-    console.error('legacy admin viral moderation route error', error)
     return toErrorResponse(error)
   }
 }

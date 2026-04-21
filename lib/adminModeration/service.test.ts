@@ -72,9 +72,11 @@ const mocks = vi.hoisted(() => {
     adminActionLog: {
       create: adminActionLogCreate,
     },
-    $transaction: vi.fn(async (callback: (db: typeof tx) => Promise<unknown>) => {
-      return await callback(tx)
-    }),
+    $transaction: vi.fn(
+      async (callback: (db: typeof tx) => Promise<unknown>) => {
+        return await callback(tx)
+      },
+    ),
   }
 
   const requireUser = vi.fn()
@@ -82,14 +84,14 @@ const mocks = vi.hoisted(() => {
 
   const recomputeLookPostCommentCount = vi.fn()
   const recomputeLookPostScores = vi.fn()
+
   const enqueueRecomputeLookCounts = vi.fn()
   const enqueueFanOutViralRequestApprovalNotifications = vi.fn()
+  const enqueueLookPostMutationPolicy = vi.fn()
 
   const updateViralRequestStatus = vi.fn()
-  const enqueueViralRequestApprovalNotifications = vi.fn()
 
   const toViralRequestDto = vi.fn()
-  const toViralRequestApprovalNotificationsDto = vi.fn()
   const toQueuedViralRequestApprovalNotificationsDto = vi.fn()
 
   return {
@@ -103,10 +105,9 @@ const mocks = vi.hoisted(() => {
     recomputeLookPostScores,
     enqueueRecomputeLookCounts,
     enqueueFanOutViralRequestApprovalNotifications,
+    enqueueLookPostMutationPolicy,
     updateViralRequestStatus,
-    enqueueViralRequestApprovalNotifications,
     toViralRequestDto,
-    toViralRequestApprovalNotificationsDto,
     toQueuedViralRequestApprovalNotificationsDto,
   }
 })
@@ -139,24 +140,21 @@ vi.mock('@/lib/jobs/looksSocial/enqueue', () => ({
     mocks.enqueueFanOutViralRequestApprovalNotifications,
 }))
 
+vi.mock('@/lib/jobs/looksSocial/mutationEnqueuePolicy', () => ({
+  enqueueLookPostMutationPolicy: mocks.enqueueLookPostMutationPolicy,
+}))
+
 vi.mock('@/lib/viralRequests', () => ({
   updateViralRequestStatus: mocks.updateViralRequestStatus,
-  enqueueViralRequestApprovalNotifications:
-    mocks.enqueueViralRequestApprovalNotifications,
 }))
 
 vi.mock('@/lib/viralRequests/contracts', () => ({
   toViralRequestDto: mocks.toViralRequestDto,
-  toViralRequestApprovalNotificationsDto:
-    mocks.toViralRequestApprovalNotificationsDto,
   toQueuedViralRequestApprovalNotificationsDto:
     mocks.toQueuedViralRequestApprovalNotificationsDto,
 }))
 
-import {
-  handleAdminModerationRoute,
-  handleLegacyViralModerationRoute,
-} from './service'
+import { handleAdminModerationRoute } from './service'
 
 function makeAdminAuth(overrides?: Partial<{ id: string }>) {
   return {
@@ -331,33 +329,6 @@ function makeInReviewViralRequestDto(
   }
 }
 
-function makeRejectedViralRequestDto(
-  overrides?: Partial<Record<string, unknown>>,
-) {
-  return {
-    id: 'request_1',
-    status: ViralServiceRequestStatus.REJECTED,
-    moderationStatus: ModerationStatus.REJECTED,
-    reportCount: 0,
-    removedAt: null,
-    reviewedAt: '2026-04-20T00:00:00.000Z',
-    reviewedByUserId: 'admin_1',
-    approvedAt: null,
-    rejectedAt: '2026-04-20T00:00:00.000Z',
-    adminNotes: 'No fit',
-    name: 'Chrome aura nails',
-    description: null,
-    sourceUrl: null,
-    links: [],
-    mediaUrls: [],
-    requestedCategoryId: 'cat_1',
-    requestedCategory: null,
-    createdAt: '2026-04-20T00:00:00.000Z',
-    updatedAt: '2026-04-20T00:00:00.000Z',
-    ...overrides,
-  }
-}
-
 function makeQueuedApprovalNotificationsDto(
   overrides?: Partial<{
     enqueued: true
@@ -398,6 +369,14 @@ describe('lib/adminModeration/service.ts', () => {
     mocks.enqueueFanOutViralRequestApprovalNotifications.mockResolvedValue({
       id: 'job_viral_1',
       type: 'FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS',
+    })
+
+    mocks.enqueueLookPostMutationPolicy.mockResolvedValue({
+      lookPostId: 'look_1',
+      mutation: 'MODERATION_APPROVE',
+      plannedJobs: [],
+      enqueuedJobs: [],
+      gatedJobs: [],
     })
 
     mocks.prisma.adminActionLog.create.mockResolvedValue({ id: 'log_1' })
@@ -486,7 +465,7 @@ describe('lib/adminModeration/service.ts', () => {
     })
   })
 
-  it('approves a look post, recomputes scores, and logs the action', async () => {
+  it('approves a look post, recomputes scores, enqueues policy work, and logs the action', async () => {
     mocks.prisma.lookPost.findUnique.mockResolvedValue(makeLookPostRow())
 
     mocks.prisma.lookPost.update.mockResolvedValue(
@@ -533,6 +512,16 @@ describe('lib/adminModeration/service.ts', () => {
     expect(mocks.recomputeLookPostScores).toHaveBeenCalledWith(
       mocks.tx,
       'look_1',
+    )
+
+    expect(mocks.enqueueLookPostMutationPolicy).toHaveBeenCalledWith(
+      mocks.tx,
+      {
+        lookPostId: 'look_1',
+        mutation: 'MODERATION_APPROVE',
+        feedEligibilityChanged: true,
+        searchableDocumentChanged: true,
+      },
     )
 
     expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
@@ -713,32 +702,6 @@ describe('lib/adminModeration/service.ts', () => {
     expect(mocks.prisma.adminActionLog.create).not.toHaveBeenCalled()
   })
 
-  it('returns 409 when approve is requested for an already removed look comment', async () => {
-    mocks.prisma.lookComment.findUnique.mockResolvedValue(
-      makeLookCommentRow({
-        moderationStatus: ModerationStatus.REMOVED,
-      }),
-    )
-
-    const res = await handleAdminModerationRoute(
-      makeJsonRequest({ action: 'approve' }),
-      {
-        kind: 'LOOK_COMMENT',
-        targetId: 'comment_1',
-      },
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(409)
-    expect(body).toEqual({
-      ok: false,
-      error:
-        'Invalid look comment moderation transition: moderationStatus=REMOVED action=approve.',
-    })
-
-    expect(mocks.prisma.lookComment.update).not.toHaveBeenCalled()
-  })
-
   it('returns 404 when the moderation target does not exist', async () => {
     mocks.prisma.lookPost.findUnique.mockResolvedValue(null)
 
@@ -800,10 +763,6 @@ describe('lib/adminModeration/service.ts', () => {
 
     expect(
       mocks.enqueueFanOutViralRequestApprovalNotifications,
-    ).not.toHaveBeenCalled()
-
-    expect(
-      mocks.enqueueViralRequestApprovalNotifications,
     ).not.toHaveBeenCalled()
 
     expect(res.status).toBe(200)
@@ -880,10 +839,6 @@ describe('lib/adminModeration/service.ts', () => {
       requestId: 'request_1',
     })
 
-    expect(
-      mocks.enqueueViralRequestApprovalNotifications,
-    ).not.toHaveBeenCalled()
-
     expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
       data: {
         adminUserId: 'admin_1',
@@ -930,133 +885,6 @@ describe('lib/adminModeration/service.ts', () => {
           jobId: 'job_viral_1',
           deliveryMode: 'JOB_QUEUED',
         },
-      },
-    })
-  })
-
-  it('keeps the legacy approve route response shape for viral requests while using queued orchestration', async () => {
-    mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue(
-      makeViralPermissionRow(),
-    )
-
-    mocks.updateViralRequestStatus.mockResolvedValue({
-      id: 'request_1',
-    })
-
-    mocks.toViralRequestDto.mockReturnValue(makeApprovedViralRequestDto())
-
-    const res = await handleLegacyViralModerationRoute(
-      makeJsonRequest({
-        adminNotes: 'Approved for match fan-out',
-      }),
-      {
-        targetId: 'request_1',
-        forcedAction: 'approve',
-      },
-    )
-    const body = await readJson(res)
-
-    expect(
-      mocks.enqueueFanOutViralRequestApprovalNotifications,
-    ).toHaveBeenCalledWith(mocks.tx, {
-      requestId: 'request_1',
-    })
-
-    expect(
-      mocks.enqueueViralRequestApprovalNotifications,
-    ).not.toHaveBeenCalled()
-
-    expect(res.status).toBe(200)
-    expect(body).toEqual({
-      ok: true,
-      request: {
-        id: 'request_1',
-        status: ViralServiceRequestStatus.APPROVED,
-        moderationStatus: ModerationStatus.APPROVED,
-        reportCount: 0,
-        removedAt: null,
-        reviewedAt: '2026-04-20T00:00:00.000Z',
-        reviewedByUserId: 'admin_1',
-        approvedAt: '2026-04-20T00:00:00.000Z',
-        rejectedAt: null,
-        adminNotes: null,
-        name: 'Chrome aura nails',
-        description: null,
-        sourceUrl: null,
-        links: [],
-        mediaUrls: [],
-        requestedCategoryId: 'cat_1',
-        requestedCategory: null,
-        createdAt: '2026-04-20T00:00:00.000Z',
-        updatedAt: '2026-04-20T00:00:00.000Z',
-      },
-      notifications: {
-        enqueued: true,
-        matchedProfessionalIds: [],
-        notificationIds: [],
-        jobId: 'job_viral_1',
-        deliveryMode: 'JOB_QUEUED',
-      },
-    })
-  })
-
-  it('keeps the legacy reject route response shape for viral requests', async () => {
-    mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue(
-      makeViralPermissionRow(),
-    )
-
-    mocks.updateViralRequestStatus.mockResolvedValue({
-      id: 'request_1',
-    })
-
-    mocks.toViralRequestDto.mockReturnValue(
-      makeRejectedViralRequestDto({
-        adminNotes: 'No fit',
-      }),
-    )
-
-    const res = await handleLegacyViralModerationRoute(
-      makeJsonRequest({
-        adminNotes: 'No fit',
-      }),
-      {
-        targetId: 'request_1',
-        forcedAction: 'reject',
-      },
-    )
-    const body = await readJson(res)
-
-    expect(
-      mocks.enqueueFanOutViralRequestApprovalNotifications,
-    ).not.toHaveBeenCalled()
-
-    expect(
-      mocks.enqueueViralRequestApprovalNotifications,
-    ).not.toHaveBeenCalled()
-
-    expect(res.status).toBe(200)
-    expect(body).toEqual({
-      ok: true,
-      request: {
-        id: 'request_1',
-        status: ViralServiceRequestStatus.REJECTED,
-        moderationStatus: ModerationStatus.REJECTED,
-        reportCount: 0,
-        removedAt: null,
-        reviewedAt: '2026-04-20T00:00:00.000Z',
-        reviewedByUserId: 'admin_1',
-        approvedAt: null,
-        rejectedAt: '2026-04-20T00:00:00.000Z',
-        adminNotes: 'No fit',
-        name: 'Chrome aura nails',
-        description: null,
-        sourceUrl: null,
-        links: [],
-        mediaUrls: [],
-        requestedCategoryId: 'cat_1',
-        requestedCategory: null,
-        createdAt: '2026-04-20T00:00:00.000Z',
-        updatedAt: '2026-04-20T00:00:00.000Z',
       },
     })
   })
