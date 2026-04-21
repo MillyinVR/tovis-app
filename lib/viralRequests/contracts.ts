@@ -6,6 +6,7 @@ import type {
 
 function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
+
   return value.filter((entry): entry is string => typeof entry === 'string')
 }
 
@@ -72,7 +73,7 @@ export function toViralRequestDto(row: ViralRequestListRow): ViralRequestDto {
 export type ViralRequestApprovalNotificationsDto = {
   enqueued: true
   matchedProfessionalIds: string[]
-  dispatchSourceKeys: string[]
+  notificationIds: string[]
 }
 
 export function toViralRequestApprovalNotificationsDto(
@@ -81,6 +82,6 @@ export function toViralRequestApprovalNotificationsDto(
   return {
     enqueued: result.enqueued,
     matchedProfessionalIds: [...result.matchedProfessionalIds],
-    dispatchSourceKeys: [...result.dispatchSourceKeys],
+    notificationIds: [...result.notificationIds],
   }
 }

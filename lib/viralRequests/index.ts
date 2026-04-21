@@ -1,8 +1,6 @@
 // lib/viralRequests/index.ts
 import {
   ModerationStatus,
-  NotificationEventKey,
-  NotificationRecipientKind,
   Prisma,
   PrismaClient,
   ProfessionType,
@@ -10,7 +8,7 @@ import {
   ViralServiceRequestStatus,
 } from '@prisma/client'
 
-import { enqueueDispatch } from '@/lib/notifications/dispatch/enqueueDispatch'
+import { createViralRequestApprovedProNotification } from '@/lib/notifications/viralRequestApproved'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { canTransitionViralRequestStatus } from '@/lib/viralRequests/status'
 
@@ -70,7 +68,7 @@ export type ViralRequestMatchedProfessional = {
 export type EnqueueViralRequestApprovalNotificationsResult = {
   enqueued: true
   matchedProfessionalIds: string[]
-  dispatchSourceKeys: string[]
+  notificationIds: string[]
 }
 
 export type ViralRequestListOptions = {
@@ -565,16 +563,19 @@ export function buildViralRequestUploadTargetPath(
 }
 
 /**
- * Enqueues pro-facing dispatches for approved viral requests that have a
- * requested category and matching approved professionals.
+ * Creates pro inbox Notification rows for approved viral requests and lets the
+ * existing notification foundation enqueue downstream dispatch for newly
+ * created rows.
  *
  * Idempotency:
- * - dispatch sourceKey is stable per request/professional pair
- * - repeated calls do not create duplicate dispatch rows
+ * - notification identity is stable per (professionalId, dedupeKey)
+ * - repeated calls update the same inbox row and do not enqueue a second
+ *   delivery cycle
  *
  * Important:
- * - this helper only enqueues dispatches
- * - it does not create a separate product inbox Notification row
+ * - this helper does not write NotificationDispatch rows directly
+ * - durable inbox creation + downstream dispatch stay inside the existing
+ *   notification foundation
  */
 export async function enqueueViralRequestApprovalNotifications(
   db: ViralRequestsDb,
@@ -594,32 +595,24 @@ export async function enqueueViralRequestApprovalNotifications(
     skip: args.skip,
   })
 
-  const href = `/admin/viral-requests/${encodeURIComponent(request.id)}`
-  const dispatchSourceKeys: string[] = []
+  const notificationIds: string[] = []
 
   for (const match of matches) {
-    const result = await enqueueDispatch({
-      key: NotificationEventKey.VIRAL_REQUEST_APPROVED,
-      sourceKey: `viral-request:${request.id}:professional:${match.id}:approved`,
-      recipient: {
-        kind: NotificationRecipientKind.PRO,
-        professionalId: match.id,
-        inAppTargetId: match.id,
-      },
-      title: 'New viral request in your category',
-      body: request.name
-        ? `"${request.name}" was approved and matches your services.`
-        : 'A newly approved viral request matches your services.',
-      href,
+    const result = await createViralRequestApprovedProNotification({
+      professionalId: match.id,
+      viralRequestId: request.id,
+      requestName: request.name,
+      requestedCategoryId: request.requestedCategoryId,
+      matchedServiceIds: match.matchingServices.map((service) => service.id),
       tx: pickDispatchTx(db),
     })
 
-    dispatchSourceKeys.push(result.dispatch.sourceKey)
+    notificationIds.push(result.id)
   }
 
   return {
     enqueued: true,
     matchedProfessionalIds: matches.map((match) => match.id),
-    dispatchSourceKeys,
+    notificationIds,
   }
 }

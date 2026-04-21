@@ -2,8 +2,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ModerationStatus,
-  NotificationEventKey,
-  NotificationRecipientKind,
   Prisma,
   ProfessionType,
   VerificationStatus,
@@ -11,11 +9,12 @@ import {
 } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
-  enqueueDispatch: vi.fn(),
+  createViralRequestApprovedProNotification: vi.fn(),
 }))
 
-vi.mock('@/lib/notifications/dispatch/enqueueDispatch', () => ({
-  enqueueDispatch: mocks.enqueueDispatch,
+vi.mock('@/lib/notifications/viralRequestApproved', () => ({
+  createViralRequestApprovedProNotification:
+    mocks.createViralRequestApprovedProNotification,
 }))
 
 import {
@@ -447,9 +446,7 @@ describe('lib/viralRequests/index.ts', () => {
           requestId: 'request_1',
           fileName: ' ..\\Wolf Cut Inspo.PNG ',
         }),
-      ).toBe(
-        'viral-requests/request_1/uploads/wolf-cut-inspo.png',
-      )
+      ).toBe('viral-requests/request_1/uploads/wolf-cut-inspo.png')
     })
   })
 
@@ -472,10 +469,12 @@ describe('lib/viralRequests/index.ts', () => {
         'Viral request must be APPROVED before approval notifications can be enqueued.',
       )
 
-      expect(mocks.enqueueDispatch).not.toHaveBeenCalled()
+      expect(
+        mocks.createViralRequestApprovedProNotification,
+      ).not.toHaveBeenCalled()
     })
 
-    it('enqueues one pro dispatch per matching professional with stable source keys', async () => {
+    it('creates one canonical pro notification per matching professional', async () => {
       const db = makeDb()
       const tx = asTransactionClient(db)
 
@@ -529,64 +528,45 @@ describe('lib/viralRequests/index.ts', () => {
         },
       ])
 
-      mocks.enqueueDispatch
-        .mockResolvedValueOnce({
-          dispatch: {
-            sourceKey:
-              'viral-request:request_1:professional:pro_1:approved',
-          },
-        })
-        .mockResolvedValueOnce({
-          dispatch: {
-            sourceKey:
-              'viral-request:request_1:professional:pro_2:approved',
-          },
-        })
+      mocks.createViralRequestApprovedProNotification
+        .mockResolvedValueOnce({ id: 'notif_1' })
+        .mockResolvedValueOnce({ id: 'notif_2' })
 
       const result =
         await enqueueViralRequestApprovalNotifications(tx, {
           requestId: 'request_1',
         })
 
-      expect(mocks.enqueueDispatch).toHaveBeenCalledTimes(2)
+      expect(
+        mocks.createViralRequestApprovedProNotification,
+      ).toHaveBeenCalledTimes(2)
 
-      expect(mocks.enqueueDispatch).toHaveBeenNthCalledWith(1, {
-        key: NotificationEventKey.VIRAL_REQUEST_APPROVED,
-        sourceKey:
-          'viral-request:request_1:professional:pro_1:approved',
-        recipient: {
-          kind: NotificationRecipientKind.PRO,
-          professionalId: 'pro_1',
-          inAppTargetId: 'pro_1',
-        },
-        title: 'New viral request in your category',
-        body: '"Wolf Cut" was approved and matches your services.',
-        href: '/admin/viral-requests/request_1',
+      expect(
+        mocks.createViralRequestApprovedProNotification,
+      ).toHaveBeenNthCalledWith(1, {
+        professionalId: 'pro_1',
+        viralRequestId: 'request_1',
+        requestName: 'Wolf Cut',
+        requestedCategoryId: 'cat_1',
+        matchedServiceIds: ['service_1'],
         tx,
       })
 
-      expect(mocks.enqueueDispatch).toHaveBeenNthCalledWith(2, {
-        key: NotificationEventKey.VIRAL_REQUEST_APPROVED,
-        sourceKey:
-          'viral-request:request_1:professional:pro_2:approved',
-        recipient: {
-          kind: NotificationRecipientKind.PRO,
-          professionalId: 'pro_2',
-          inAppTargetId: 'pro_2',
-        },
-        title: 'New viral request in your category',
-        body: '"Wolf Cut" was approved and matches your services.',
-        href: '/admin/viral-requests/request_1',
+      expect(
+        mocks.createViralRequestApprovedProNotification,
+      ).toHaveBeenNthCalledWith(2, {
+        professionalId: 'pro_2',
+        viralRequestId: 'request_1',
+        requestName: 'Wolf Cut',
+        requestedCategoryId: 'cat_1',
+        matchedServiceIds: ['service_2'],
         tx,
       })
 
       expect(result).toEqual({
         enqueued: true,
         matchedProfessionalIds: ['pro_1', 'pro_2'],
-        dispatchSourceKeys: [
-          'viral-request:request_1:professional:pro_1:approved',
-          'viral-request:request_1:professional:pro_2:approved',
-        ],
+        notificationIds: ['notif_1', 'notif_2'],
       })
     })
   })
