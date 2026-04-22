@@ -33,7 +33,9 @@ const mocks = vi.hoisted(() => {
       details?: Record<string, unknown> | null,
     ) => {
       const safeDetails =
-        typeof details === 'object' && details !== null && !Array.isArray(details)
+        typeof details === 'object' &&
+        details !== null &&
+        !Array.isArray(details)
           ? details
           : {}
 
@@ -123,13 +125,17 @@ type Params = { id: string }
 type Ctx = { params: Params | Promise<Params> }
 
 function makeCtx(id: string): Ctx {
-  return {
-    params: { id },
-  }
+  return { params: { id } }
+}
+
+function makeRequest(method: 'POST' | 'DELETE'): Request {
+  return new Request('http://localhost/api/looks/look_1/like', {
+    method,
+  })
 }
 
 async function readJson(res: Response): Promise<unknown> {
-  return res.json()
+  return await res.json()
 }
 
 function makeAuth(
@@ -187,6 +193,49 @@ function makeAccess(
   }
 }
 
+function makeQueuedJob() {
+  return {
+    id: 'job_1',
+    type: 'RECOMPUTE_LOOK_COUNTS',
+    dedupeKey: 'look:look_1:recompute-counts',
+    status: 'PENDING',
+    runAt: new Date('2026-04-20T12:00:00.000Z'),
+    attemptCount: 0,
+    maxAttempts: 5,
+  }
+}
+
+function expectNoWriteOrEnqueueWork(): void {
+  expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+  expect(mocks.tx.lookLike.create).not.toHaveBeenCalled()
+  expect(mocks.tx.lookLike.deleteMany).not.toHaveBeenCalled()
+  expect(mocks.recomputeLookPostLikeCount).not.toHaveBeenCalled()
+  expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
+}
+
+function expectLoadAccessCalledWithDefaultViewer(lookPostId: string): void {
+  expect(mocks.loadLookAccess).toHaveBeenCalledWith(mocks.prisma, {
+    lookPostId,
+    viewerClientId: 'client_1',
+    viewerProfessionalId: null,
+  })
+}
+
+function expectSynchronousAndAsyncLikeReconciliation(
+  lookPostId: string,
+): void {
+  expect(mocks.recomputeLookPostLikeCount).toHaveBeenCalledTimes(1)
+  expect(mocks.recomputeLookPostLikeCount).toHaveBeenCalledWith(
+    mocks.tx,
+    lookPostId,
+  )
+
+  expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledTimes(1)
+  expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(mocks.tx, {
+    lookPostId,
+  })
+}
+
 describe('app/api/looks/[id]/like/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -198,354 +247,280 @@ describe('app/api/looks/[id]/like/route.ts', () => {
     mocks.tx.lookLike.create.mockResolvedValue({ id: 'like_1' })
     mocks.tx.lookLike.deleteMany.mockResolvedValue({ count: 1 })
     mocks.recomputeLookPostLikeCount.mockResolvedValue(7)
-    mocks.enqueueRecomputeLookCounts.mockResolvedValue({
-      id: 'job_1',
-      type: 'RECOMPUTE_LOOK_COUNTS',
-      dedupeKey: 'look:look_1:recompute-counts',
-      status: 'PENDING',
-      runAt: new Date('2026-04-20T12:00:00.000Z'),
-      attemptCount: 0,
-      maxAttempts: 5,
-    })
+    mocks.enqueueRecomputeLookCounts.mockResolvedValue(makeQueuedJob())
   })
 
-  it('POST likes by canonical lookPostId, recomputes immediately, enqueues reconciliation, and returns the canonical id in the contract', async () => {
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/like', {
-        method: 'POST',
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
+  describe('POST', () => {
+    it('creates the like, recomputes like count immediately, enqueues count reconciliation, and returns the canonical lookPostId contract', async () => {
+      const res = await POST(makeRequest('POST'), makeCtx('look_1'))
+      const body = await readJson(res)
 
-    expect(res.status).toBe(200)
+      expect(res.status).toBe(200)
 
-    expect(mocks.loadLookAccess).toHaveBeenCalledWith(mocks.prisma, {
-      lookPostId: 'look_1',
-      viewerClientId: 'client_1',
-      viewerProfessionalId: null,
-    })
+      expectLoadAccessCalledWithDefaultViewer('look_1')
 
-    expect(mocks.canViewLookPost).toHaveBeenCalledWith({
-      isOwner: false,
-      viewerRole: Role.CLIENT,
-      status: LookPostStatus.PUBLISHED,
-      visibility: LookPostVisibility.PUBLIC,
-      moderationStatus: ModerationStatus.APPROVED,
-      proVerificationStatus: VerificationStatus.APPROVED,
-      viewerFollowsProfessional: false,
-    })
+      expect(mocks.canViewLookPost).toHaveBeenCalledWith({
+        isOwner: false,
+        viewerRole: Role.CLIENT,
+        status: LookPostStatus.PUBLISHED,
+        visibility: LookPostVisibility.PUBLIC,
+        moderationStatus: ModerationStatus.APPROVED,
+        proVerificationStatus: VerificationStatus.APPROVED,
+        viewerFollowsProfessional: false,
+      })
 
-    expect(mocks.canSaveLookPost).toHaveBeenCalledWith({
-      isOwner: false,
-      viewerRole: Role.CLIENT,
-      status: LookPostStatus.PUBLISHED,
-      visibility: LookPostVisibility.PUBLIC,
-      moderationStatus: ModerationStatus.APPROVED,
-      proVerificationStatus: VerificationStatus.APPROVED,
-      viewerFollowsProfessional: false,
-    })
+      expect(mocks.canSaveLookPost).toHaveBeenCalledWith({
+        isOwner: false,
+        viewerRole: Role.CLIENT,
+        status: LookPostStatus.PUBLISHED,
+        visibility: LookPostVisibility.PUBLIC,
+        moderationStatus: ModerationStatus.APPROVED,
+        proVerificationStatus: VerificationStatus.APPROVED,
+        viewerFollowsProfessional: false,
+      })
 
-    expect(mocks.tx.lookLike.create).toHaveBeenCalledWith({
-      data: {
+      expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(1)
+
+      expect(mocks.tx.lookLike.create).toHaveBeenCalledWith({
+        data: {
+          lookPostId: 'look_1',
+          userId: 'user_1',
+        },
+      })
+
+      expectSynchronousAndAsyncLikeReconciliation('look_1')
+
+      expect(body).toEqual({
         lookPostId: 'look_1',
-        userId: 'user_1',
-      },
+        liked: true,
+        likeCount: 7,
+      })
     })
 
-    expect(mocks.recomputeLookPostLikeCount).toHaveBeenCalledWith(
-      mocks.tx,
-      'look_1',
-    )
+    it('swallows duplicate like writes, then still recomputes and enqueues reconciliation for the canonical lookPostId', async () => {
+      mocks.tx.lookLike.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('duplicate like', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      )
 
-    expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(mocks.tx, {
-      lookPostId: 'look_1',
-    })
+      const res = await POST(makeRequest('POST'), makeCtx('look_1'))
+      const body = await readJson(res)
 
-    expect(body).toEqual({
-      lookPostId: 'look_1',
-      liked: true,
-      likeCount: 7,
-    })
-  })
+      expect(res.status).toBe(200)
 
-  it('POST swallows duplicate like writes, still recomputes, and still enqueues reconciliation', async () => {
-  mocks.tx.lookLike.create.mockRejectedValue(
-    new Prisma.PrismaClientKnownRequestError('duplicate like', {
-      code: 'P2002',
-      clientVersion: 'test',
-    }),
-  )
+      expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(1)
 
-  const res = await POST(
-    new Request('http://localhost/api/looks/look_1/like', {
-      method: 'POST',
-    }),
-    makeCtx('look_1'),
-  )
-  const body = await readJson(res)
+      expect(mocks.tx.lookLike.create).toHaveBeenCalledWith({
+        data: {
+          lookPostId: 'look_1',
+          userId: 'user_1',
+        },
+      })
 
-  expect(res.status).toBe(200)
+      expectSynchronousAndAsyncLikeReconciliation('look_1')
 
-  expect(mocks.recomputeLookPostLikeCount).toHaveBeenCalledWith(
-    mocks.tx,
-    'look_1',
-  )
-
-  expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(mocks.tx, {
-    lookPostId: 'look_1',
-  })
-
-  expect(body).toEqual({
-    lookPostId: 'look_1',
-    liked: true,
-    likeCount: 7,
-  })
-})
-
-  it('DELETE unlikes by canonical lookPostId, recomputes immediately, enqueues reconciliation, and returns the canonical id in the contract', async () => {
-    mocks.recomputeLookPostLikeCount.mockResolvedValue(3)
-
-    const res = await DELETE(
-      new Request('http://localhost/api/looks/look_1/like', {
-        method: 'DELETE',
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(200)
-
-    expect(mocks.tx.lookLike.deleteMany).toHaveBeenCalledWith({
-      where: {
+      expect(body).toEqual({
         lookPostId: 'look_1',
-        userId: 'user_1',
-      },
+        liked: true,
+        likeCount: 7,
+      })
     })
 
-    expect(mocks.recomputeLookPostLikeCount).toHaveBeenCalledWith(
-      mocks.tx,
-      'look_1',
-    )
+    it('returns the auth response immediately and does not attempt any write, recompute, or enqueue work', async () => {
+      const authResponse = new Response(
+        JSON.stringify({
+          ok: false,
+          error: 'Unauthorized',
+        }),
+        {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        },
+      )
 
-    expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(mocks.tx, {
-      lookPostId: 'look_1',
-    })
+      mocks.requireUser.mockResolvedValue({
+        ok: false as const,
+        res: authResponse,
+      })
 
-    expect(body).toEqual({
-      lookPostId: 'look_1',
-      liked: false,
-      likeCount: 3,
-    })
-  })
+      const res = await POST(makeRequest('POST'), makeCtx('look_1'))
+      const body = await readJson(res)
 
-  it('returns 400 when the route param is blank', async () => {
-    const res = await POST(
-      new Request('http://localhost/api/looks/%20%20/like', {
-        method: 'POST',
-      }),
-      makeCtx('   '),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(400)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Missing look id.',
-      code: 'MISSING_LOOK_ID',
-    })
-
-    expect(mocks.loadLookAccess).not.toHaveBeenCalled()
-    expect(mocks.tx.lookLike.create).not.toHaveBeenCalled()
-    expect(mocks.recomputeLookPostLikeCount).not.toHaveBeenCalled()
-    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
-  })
-
-  it('returns 404 when the canonical lookPostId cannot be resolved', async () => {
-    mocks.loadLookAccess.mockResolvedValue(null)
-
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_missing/like', {
-        method: 'POST',
-      }),
-      makeCtx('look_missing'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(404)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Not found.',
-      code: 'LOOK_NOT_FOUND',
-    })
-
-    expect(mocks.tx.lookLike.create).not.toHaveBeenCalled()
-    expect(mocks.recomputeLookPostLikeCount).not.toHaveBeenCalled()
-    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
-  })
-
-  it('returns 404 when the viewer cannot view the look', async () => {
-    mocks.canViewLookPost.mockReturnValue(false)
-
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/like', {
-        method: 'POST',
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(404)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Not found.',
-      code: 'LOOK_NOT_FOUND',
-    })
-
-    expect(mocks.canSaveLookPost).not.toHaveBeenCalled()
-    expect(mocks.tx.lookLike.create).not.toHaveBeenCalled()
-    expect(mocks.recomputeLookPostLikeCount).not.toHaveBeenCalled()
-    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
-  })
-
-  it('returns 403 when the shared interaction policy forbids likes', async () => {
-    mocks.canSaveLookPost.mockReturnValue(false)
-
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/like', {
-        method: 'POST',
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(403)
-    expect(body).toEqual({
-      ok: false,
-      error: 'You can’t like this look.',
-      code: 'LIKE_FORBIDDEN',
-    })
-
-    expect(mocks.tx.lookLike.create).not.toHaveBeenCalled()
-    expect(mocks.recomputeLookPostLikeCount).not.toHaveBeenCalled()
-    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
-  })
-
-  it('does not treat legacy media ids as fallback identifiers', async () => {
-    mocks.loadLookAccess.mockResolvedValue(null)
-
-    const res = await POST(
-      new Request('http://localhost/api/looks/media_legacy_1/like', {
-        method: 'POST',
-      }),
-      makeCtx('media_legacy_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(404)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Not found.',
-      code: 'LOOK_NOT_FOUND',
-    })
-
-    expect(mocks.loadLookAccess).toHaveBeenCalledWith(mocks.prisma, {
-      lookPostId: 'media_legacy_1',
-      viewerClientId: 'client_1',
-      viewerProfessionalId: null,
-    })
-
-    expect(mocks.tx.lookLike.create).not.toHaveBeenCalled()
-    expect(mocks.recomputeLookPostLikeCount).not.toHaveBeenCalled()
-    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
-  })
-
-  it('returns the auth response immediately when requireUser fails', async () => {
-    const authResponse = new Response(
-      JSON.stringify({
+      expect(res.status).toBe(401)
+      expect(body).toEqual({
         ok: false,
         error: 'Unauthorized',
-      }),
-      {
-        status: 401,
-        headers: { 'content-type': 'application/json' },
-      },
-    )
+      })
 
-    mocks.requireUser.mockResolvedValue({
-      ok: false as const,
-      res: authResponse,
+      expect(mocks.loadLookAccess).not.toHaveBeenCalled()
+      expectNoWriteOrEnqueueWork()
     })
 
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/like', {
-        method: 'POST',
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
+    it('returns 400 for a blank look id and does not attempt any write, recompute, or enqueue work', async () => {
+      const res = await POST(makeRequest('POST'), makeCtx('   '))
+      const body = await readJson(res)
 
-    expect(res.status).toBe(401)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Unauthorized',
+      expect(res.status).toBe(400)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Missing look id.',
+        code: 'MISSING_LOOK_ID',
+      })
+
+      expect(mocks.loadLookAccess).not.toHaveBeenCalled()
+      expectNoWriteOrEnqueueWork()
     })
 
-    expect(mocks.loadLookAccess).not.toHaveBeenCalled()
-    expect(mocks.tx.lookLike.create).not.toHaveBeenCalled()
-    expect(mocks.recomputeLookPostLikeCount).not.toHaveBeenCalled()
-    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
+    it('returns 404 when look access cannot be resolved and does not attempt any write, recompute, or enqueue work', async () => {
+      mocks.loadLookAccess.mockResolvedValue(null)
+
+      const res = await POST(makeRequest('POST'), makeCtx('look_missing'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(404)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Not found.',
+        code: 'LOOK_NOT_FOUND',
+      })
+
+      expectLoadAccessCalledWithDefaultViewer('look_missing')
+      expectNoWriteOrEnqueueWork()
+    })
+
+    it('returns 404 when the viewer cannot view the look and does not attempt any write, recompute, or enqueue work', async () => {
+      mocks.canViewLookPost.mockReturnValue(false)
+
+      const res = await POST(makeRequest('POST'), makeCtx('look_1'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(404)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Not found.',
+        code: 'LOOK_NOT_FOUND',
+      })
+
+      expect(mocks.canSaveLookPost).not.toHaveBeenCalled()
+      expectNoWriteOrEnqueueWork()
+    })
+
+    it('returns 403 when the shared interaction policy forbids likes and does not attempt any write, recompute, or enqueue work', async () => {
+      mocks.canSaveLookPost.mockReturnValue(false)
+
+      const res = await POST(makeRequest('POST'), makeCtx('look_1'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(403)
+      expect(body).toEqual({
+        ok: false,
+        error: 'You can’t like this look.',
+        code: 'LIKE_FORBIDDEN',
+      })
+
+      expectNoWriteOrEnqueueWork()
+    })
+
+    it('returns 500 when synchronous like-count recompute fails and does not enqueue reconciliation afterward', async () => {
+      mocks.recomputeLookPostLikeCount.mockRejectedValue(
+        new Error('recompute exploded'),
+      )
+
+      const res = await POST(makeRequest('POST'), makeCtx('look_1'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(500)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Couldn’t update your like. Try again.',
+        code: 'INTERNAL',
+      })
+
+      expect(mocks.tx.lookLike.create).toHaveBeenCalledWith({
+        data: {
+          lookPostId: 'look_1',
+          userId: 'user_1',
+        },
+      })
+
+      expect(mocks.recomputeLookPostLikeCount).toHaveBeenCalledWith(
+        mocks.tx,
+        'look_1',
+      )
+      expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
+    })
+
+    it('returns 500 when enqueue fails after immediate recompute, proving the route does not silently skip async reconciliation', async () => {
+      mocks.enqueueRecomputeLookCounts.mockRejectedValue(
+        new Error('enqueue exploded'),
+      )
+
+      const res = await POST(makeRequest('POST'), makeCtx('look_1'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(500)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Couldn’t update your like. Try again.',
+        code: 'INTERNAL',
+      })
+
+      expectSynchronousAndAsyncLikeReconciliation('look_1')
+    })
   })
 
-  it('returns 500 when recompute fails', async () => {
-    mocks.recomputeLookPostLikeCount.mockRejectedValue(
-      new Error('recompute exploded'),
-    )
+  describe('DELETE', () => {
+    it('deletes the like, recomputes like count immediately, enqueues count reconciliation, and returns the canonical lookPostId contract', async () => {
+      mocks.recomputeLookPostLikeCount.mockResolvedValue(3)
 
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/like', {
-        method: 'POST',
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
+      const res = await DELETE(makeRequest('DELETE'), makeCtx('look_1'))
+      const body = await readJson(res)
 
-    expect(res.status).toBe(500)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Couldn’t update your like. Try again.',
-      code: 'INTERNAL',
+      expect(res.status).toBe(200)
+      expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(1)
+
+      expect(mocks.tx.lookLike.deleteMany).toHaveBeenCalledWith({
+        where: {
+          lookPostId: 'look_1',
+          userId: 'user_1',
+        },
+      })
+
+      expectSynchronousAndAsyncLikeReconciliation('look_1')
+
+      expect(body).toEqual({
+        lookPostId: 'look_1',
+        liked: false,
+        likeCount: 3,
+      })
     })
 
-    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
-  })
+    it('returns 500 when enqueue fails after delete-side recompute, proving unlike does not silently skip async reconciliation', async () => {
+      mocks.recomputeLookPostLikeCount.mockResolvedValue(3)
+      mocks.enqueueRecomputeLookCounts.mockRejectedValue(
+        new Error('enqueue exploded'),
+      )
 
-  it('returns 500 when enqueue fails after the immediate recompute', async () => {
-    mocks.enqueueRecomputeLookCounts.mockRejectedValue(
-      new Error('enqueue exploded'),
-    )
+      const res = await DELETE(makeRequest('DELETE'), makeCtx('look_1'))
+      const body = await readJson(res)
 
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/like', {
-        method: 'POST',
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
+      expect(res.status).toBe(500)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Couldn’t update your like. Try again.',
+        code: 'INTERNAL',
+      })
 
-    expect(res.status).toBe(500)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Couldn’t update your like. Try again.',
-      code: 'INTERNAL',
-    })
+      expect(mocks.tx.lookLike.deleteMany).toHaveBeenCalledWith({
+        where: {
+          lookPostId: 'look_1',
+          userId: 'user_1',
+        },
+      })
 
-    expect(mocks.recomputeLookPostLikeCount).toHaveBeenCalledWith(
-      mocks.tx,
-      'look_1',
-    )
-    expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(mocks.tx, {
-      lookPostId: 'look_1',
+      expectSynchronousAndAsyncLikeReconciliation('look_1')
     })
   })
 })

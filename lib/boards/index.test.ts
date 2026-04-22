@@ -1,6 +1,6 @@
 // lib/boards/index.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BoardVisibility, Prisma } from '@prisma/client'
+import { BoardVisibility, Prisma, PrismaClient } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
   return {
@@ -49,8 +49,35 @@ import {
   updateBoard,
 } from './index'
 
-function makeDb() {
-  return {
+type BoardOwnerRow = {
+  id: string
+  clientId: string
+  name: string
+  visibility: BoardVisibility
+  createdAt: Date
+  updatedAt: Date
+}
+
+type MockDb = {
+  $transaction: ReturnType<typeof vi.fn>
+  board: {
+    findUnique: ReturnType<typeof vi.fn>
+    create: ReturnType<typeof vi.fn>
+    findMany: ReturnType<typeof vi.fn>
+    update: ReturnType<typeof vi.fn>
+    delete: ReturnType<typeof vi.fn>
+  }
+  boardItem: {
+    findUnique: ReturnType<typeof vi.fn>
+    create: ReturnType<typeof vi.fn>
+    deleteMany: ReturnType<typeof vi.fn>
+    findMany: ReturnType<typeof vi.fn>
+  }
+}
+
+function makeDb(): MockDb {
+  const db: MockDb = {
+    $transaction: vi.fn(),
     board: {
       findUnique: vi.fn(),
       create: vi.fn(),
@@ -65,17 +92,67 @@ function makeDb() {
       findMany: vi.fn(),
     },
   }
+
+  db.$transaction.mockImplementation(
+    async (
+      callback: (tx: Prisma.TransactionClient) => Promise<unknown> | unknown,
+    ) => {
+      return await callback(db as unknown as Prisma.TransactionClient)
+    },
+  )
+
+  return db
 }
 
-/**
- * Narrow local test-only cast:
- * production helpers accept Prisma.TransactionClient | PrismaClient,
- * but these unit tests only mock the members exercised by lib/boards/index.ts.
- */
-function asTransactionClient(
-  value: ReturnType<typeof makeDb>,
-): Prisma.TransactionClient {
-  return value as unknown as Prisma.TransactionClient
+function asRootDb(db: MockDb): PrismaClient {
+  return db as unknown as PrismaClient
+}
+
+function asTx(db: MockDb): Prisma.TransactionClient {
+  return db as unknown as Prisma.TransactionClient
+}
+
+function makeOwnedBoard(
+  overrides?: Partial<BoardOwnerRow>,
+): BoardOwnerRow {
+  return {
+    id: 'board_1',
+    clientId: 'client_1',
+    name: 'Hair ideas',
+    visibility: BoardVisibility.PRIVATE,
+    createdAt: new Date('2026-04-18T10:00:00.000Z'),
+    updatedAt: new Date('2026-04-18T10:00:00.000Z'),
+    ...overrides,
+  }
+}
+
+function makeQueuedJob() {
+  return {
+    id: 'job_1',
+    type: 'RECOMPUTE_LOOK_COUNTS',
+    dedupeKey: 'look:look_1:recompute-counts',
+    status: 'PENDING',
+    runAt: new Date('2026-04-20T12:00:00.000Z'),
+    attemptCount: 0,
+    maxAttempts: 5,
+  }
+}
+
+function expectSaveRecomputeAndEnqueue(
+  db: MockDb,
+  lookPostId: string,
+  times = 1,
+): void {
+  expect(mocks.recomputeLookPostSaveCount).toHaveBeenCalledTimes(times)
+  expect(mocks.recomputeLookPostSaveCount).toHaveBeenCalledWith(
+    asTx(db),
+    lookPostId,
+  )
+
+  expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledTimes(times)
+  expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(asTx(db), {
+    lookPostId,
+  })
 }
 
 describe('lib/boards/index.ts', () => {
@@ -83,15 +160,7 @@ describe('lib/boards/index.ts', () => {
     vi.clearAllMocks()
 
     mocks.recomputeLookPostSaveCount.mockResolvedValue(0)
-    mocks.enqueueRecomputeLookCounts.mockResolvedValue({
-      id: 'job_1',
-      type: 'RECOMPUTE_LOOK_COUNTS',
-      dedupeKey: 'look:look_1:recompute-counts',
-      status: 'PENDING',
-      runAt: new Date('2026-04-20T12:00:00.000Z'),
-      attemptCount: 0,
-      maxAttempts: 5,
-    })
+    mocks.enqueueRecomputeLookCounts.mockResolvedValue(makeQueuedJob())
   })
 
   describe('ownership helpers', () => {
@@ -126,29 +195,18 @@ describe('lib/boards/index.ts', () => {
   describe('requireBoardOwner', () => {
     it('returns the board for the owning client', async () => {
       const db = makeDb()
-
-      db.board.findUnique.mockResolvedValue({
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Hair ideas',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
+      const board = makeOwnedBoard({
         updatedAt: new Date('2026-04-18T11:00:00.000Z'),
       })
 
+      db.board.findUnique.mockResolvedValue(board)
+
       await expect(
-        requireBoardOwner(asTransactionClient(db), {
+        requireBoardOwner(asTx(db), {
           boardId: 'board_1',
           clientId: 'client_1',
         }),
-      ).resolves.toEqual({
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Hair ideas',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
-        updatedAt: new Date('2026-04-18T11:00:00.000Z'),
-      })
+      ).resolves.toEqual(board)
 
       expect(db.board.findUnique).toHaveBeenCalledWith({
         where: { id: 'board_1' },
@@ -168,7 +226,7 @@ describe('lib/boards/index.ts', () => {
       db.board.findUnique.mockResolvedValue(null)
 
       await expect(
-        requireBoardOwner(asTransactionClient(db), {
+        requireBoardOwner(asTx(db), {
           boardId: 'board_missing',
           clientId: 'client_1',
         }),
@@ -178,17 +236,12 @@ describe('lib/boards/index.ts', () => {
     it('throws when the board belongs to a different client', async () => {
       const db = makeDb()
 
-      db.board.findUnique.mockResolvedValue({
-        id: 'board_1',
-        clientId: 'client_2',
-        name: 'Not yours',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
-        updatedAt: new Date('2026-04-18T11:00:00.000Z'),
-      })
+      db.board.findUnique.mockResolvedValue(
+        makeOwnedBoard({ clientId: 'client_2', name: 'Not yours' }),
+      )
 
       await expect(
-        requireBoardOwner(asTransactionClient(db), {
+        requireBoardOwner(asTx(db), {
           boardId: 'board_1',
           clientId: 'client_1',
         }),
@@ -199,17 +252,11 @@ describe('lib/boards/index.ts', () => {
   describe('createBoard', () => {
     it('creates a board with normalized name and default PRIVATE visibility', async () => {
       const db = makeDb()
+      const board = makeOwnedBoard()
 
-      db.board.create.mockResolvedValue({
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Hair ideas',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
-        updatedAt: new Date('2026-04-18T10:00:00.000Z'),
-      })
+      db.board.create.mockResolvedValue(board)
 
-      const result = await createBoard(asTransactionClient(db), {
+      const result = await createBoard(asTx(db), {
         clientId: 'client_1',
         name: '  Hair ideas  ',
       })
@@ -230,14 +277,7 @@ describe('lib/boards/index.ts', () => {
         },
       })
 
-      expect(result).toEqual({
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Hair ideas',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
-        updatedAt: new Date('2026-04-18T10:00:00.000Z'),
-      })
+      expect(result).toEqual(board)
     })
 
     it('translates duplicate board names into a stable error', async () => {
@@ -251,7 +291,7 @@ describe('lib/boards/index.ts', () => {
       )
 
       await expect(
-        createBoard(asTransactionClient(db), {
+        createBoard(asTx(db), {
           clientId: 'client_1',
           name: 'Hair ideas',
         }),
@@ -262,26 +302,19 @@ describe('lib/boards/index.ts', () => {
   describe('updateBoard', () => {
     it('updates name and visibility for an owned board', async () => {
       const db = makeDb()
-
-      db.board.findUnique.mockResolvedValue({
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Hair ideas',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
+      const current = makeOwnedBoard({
         updatedAt: new Date('2026-04-18T11:00:00.000Z'),
       })
-
-      db.board.update.mockResolvedValue({
-        id: 'board_1',
-        clientId: 'client_1',
+      const updated = makeOwnedBoard({
         name: 'Nails later',
         visibility: BoardVisibility.SHARED,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
         updatedAt: new Date('2026-04-19T11:00:00.000Z'),
       })
 
-      const result = await updateBoard(asTransactionClient(db), {
+      db.board.findUnique.mockResolvedValue(current)
+      db.board.update.mockResolvedValue(updated)
+
+      const result = await updateBoard(asTx(db), {
         boardId: 'board_1',
         clientId: 'client_1',
         name: '  Nails later  ',
@@ -304,31 +337,18 @@ describe('lib/boards/index.ts', () => {
         },
       })
 
-      expect(result).toEqual({
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Nails later',
-        visibility: BoardVisibility.SHARED,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
-        updatedAt: new Date('2026-04-19T11:00:00.000Z'),
-      })
+      expect(result).toEqual(updated)
     })
 
     it('returns the current board when no update fields are provided', async () => {
       const db = makeDb()
-
-      const current = {
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Hair ideas',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
+      const current = makeOwnedBoard({
         updatedAt: new Date('2026-04-18T11:00:00.000Z'),
-      }
+      })
 
       db.board.findUnique.mockResolvedValue(current)
 
-      const result = await updateBoard(asTransactionClient(db), {
+      const result = await updateBoard(asTx(db), {
         boardId: 'board_1',
         clientId: 'client_1',
       })
@@ -342,18 +362,10 @@ describe('lib/boards/index.ts', () => {
     it('deletes an owned board', async () => {
       const db = makeDb()
 
-      db.board.findUnique.mockResolvedValue({
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Hair ideas',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
-        updatedAt: new Date('2026-04-18T11:00:00.000Z'),
-      })
-
+      db.board.findUnique.mockResolvedValue(makeOwnedBoard())
       db.board.delete.mockResolvedValue({ id: 'board_1' })
 
-      const result = await deleteBoard(asTransactionClient(db), {
+      const result = await deleteBoard(asTx(db), {
         boardId: 'board_1',
         clientId: 'client_1',
       })
@@ -368,28 +380,21 @@ describe('lib/boards/index.ts', () => {
   })
 
   describe('addBoardItem', () => {
-    it('creates a board item when the look is not already saved to that board, recomputes save count, and enqueues count reconciliation', async () => {
+    it('uses the root db transaction path, creates the item, recomputes save count, and enqueues reconciliation at the real save write point', async () => {
       const db = makeDb()
 
-      db.board.findUnique.mockResolvedValue({
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Hair ideas',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
-        updatedAt: new Date('2026-04-18T10:00:00.000Z'),
-      })
+      db.board.findUnique.mockResolvedValue(makeOwnedBoard())
       db.boardItem.findUnique.mockResolvedValue(null)
       db.boardItem.create.mockResolvedValue({ id: 'item_1' })
       mocks.recomputeLookPostSaveCount.mockResolvedValue(3)
 
-      const tx = asTransactionClient(db)
-
-      const result = await addBoardItem(tx, {
+      const result = await addBoardItem(asRootDb(db), {
         boardId: 'board_1',
         clientId: 'client_1',
         lookPostId: 'look_1',
       })
+
+      expect(db.$transaction).toHaveBeenCalledTimes(1)
 
       expect(db.boardItem.findUnique).toHaveBeenCalledWith({
         where: {
@@ -409,101 +414,86 @@ describe('lib/boards/index.ts', () => {
         select: { id: true },
       })
 
-      expect(mocks.recomputeLookPostSaveCount).toHaveBeenCalledWith(
-        tx,
-        'look_1',
-      )
-
-      expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(tx, {
-        lookPostId: 'look_1',
-      })
+      expectSaveRecomputeAndEnqueue(db, 'look_1')
 
       expect(result).toEqual({
-        board: {
-          id: 'board_1',
-          clientId: 'client_1',
-          name: 'Hair ideas',
-          visibility: BoardVisibility.PRIVATE,
-          createdAt: new Date('2026-04-18T10:00:00.000Z'),
-          updatedAt: new Date('2026-04-18T10:00:00.000Z'),
-        },
+        board: makeOwnedBoard(),
         itemId: 'item_1',
         added: true,
         saveCount: 3,
       })
     })
 
-    it('does not create a duplicate board item when the look is already saved, but still recomputes and enqueues reconciliation', async () => {
+    it('does not create a duplicate item when already present, but still recomputes save count and enqueues reconciliation', async () => {
       const db = makeDb()
 
-      db.board.findUnique.mockResolvedValue({
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Hair ideas',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
-        updatedAt: new Date('2026-04-18T10:00:00.000Z'),
-      })
+      db.board.findUnique.mockResolvedValue(makeOwnedBoard())
       db.boardItem.findUnique.mockResolvedValue({ id: 'item_existing' })
       mocks.recomputeLookPostSaveCount.mockResolvedValue(2)
 
-      const tx = asTransactionClient(db)
-
-      const result = await addBoardItem(tx, {
+      const result = await addBoardItem(asRootDb(db), {
         boardId: 'board_1',
         clientId: 'client_1',
         lookPostId: 'look_1',
       })
 
+      expect(db.$transaction).toHaveBeenCalledTimes(1)
       expect(db.boardItem.create).not.toHaveBeenCalled()
 
-      expect(mocks.recomputeLookPostSaveCount).toHaveBeenCalledWith(
-        tx,
-        'look_1',
-      )
-
-      expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(tx, {
-        lookPostId: 'look_1',
-      })
+      expectSaveRecomputeAndEnqueue(db, 'look_1')
 
       expect(result).toEqual({
-        board: {
-          id: 'board_1',
-          clientId: 'client_1',
-          name: 'Hair ideas',
-          visibility: BoardVisibility.PRIVATE,
-          createdAt: new Date('2026-04-18T10:00:00.000Z'),
-          updatedAt: new Date('2026-04-18T10:00:00.000Z'),
-        },
+        board: makeOwnedBoard(),
         itemId: 'item_existing',
         added: false,
         saveCount: 2,
       })
     })
+
+    it('surfaces enqueue failure after recompute so the save path cannot silently skip async reconciliation', async () => {
+      const db = makeDb()
+
+      db.board.findUnique.mockResolvedValue(makeOwnedBoard())
+      db.boardItem.findUnique.mockResolvedValue(null)
+      db.boardItem.create.mockResolvedValue({ id: 'item_1' })
+      mocks.recomputeLookPostSaveCount.mockResolvedValue(3)
+      mocks.enqueueRecomputeLookCounts.mockRejectedValue(
+        new Error('enqueue exploded'),
+      )
+
+      await expect(
+        addBoardItem(asRootDb(db), {
+          boardId: 'board_1',
+          clientId: 'client_1',
+          lookPostId: 'look_1',
+        }),
+      ).rejects.toThrow('enqueue exploded')
+
+      expect(mocks.recomputeLookPostSaveCount).toHaveBeenCalledWith(
+        asTx(db),
+        'look_1',
+      )
+      expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(asTx(db), {
+        lookPostId: 'look_1',
+      })
+    })
   })
 
   describe('removeBoardItem', () => {
-    it('removes the board item, recomputes save count, and enqueues count reconciliation', async () => {
+    it('uses the root db transaction path, deletes matching board items, recomputes save count, and enqueues reconciliation at the real unsave write point', async () => {
       const db = makeDb()
 
-      db.board.findUnique.mockResolvedValue({
-        id: 'board_1',
-        clientId: 'client_1',
-        name: 'Hair ideas',
-        visibility: BoardVisibility.PRIVATE,
-        createdAt: new Date('2026-04-18T10:00:00.000Z'),
-        updatedAt: new Date('2026-04-18T10:00:00.000Z'),
-      })
+      db.board.findUnique.mockResolvedValue(makeOwnedBoard())
       db.boardItem.deleteMany.mockResolvedValue({ count: 1 })
       mocks.recomputeLookPostSaveCount.mockResolvedValue(1)
 
-      const tx = asTransactionClient(db)
-
-      const result = await removeBoardItem(tx, {
+      const result = await removeBoardItem(asRootDb(db), {
         boardId: 'board_1',
         clientId: 'client_1',
         lookPostId: 'look_1',
       })
+
+      expect(db.$transaction).toHaveBeenCalledTimes(1)
 
       expect(db.boardItem.deleteMany).toHaveBeenCalledWith({
         where: {
@@ -512,26 +502,70 @@ describe('lib/boards/index.ts', () => {
         },
       })
 
-      expect(mocks.recomputeLookPostSaveCount).toHaveBeenCalledWith(
-        tx,
-        'look_1',
-      )
+      expectSaveRecomputeAndEnqueue(db, 'look_1')
 
-      expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(tx, {
+      expect(result).toEqual({
+        board: makeOwnedBoard(),
+        removed: true,
+        saveCount: 1,
+      })
+    })
+
+    it('still recomputes save count and enqueues reconciliation when deleteMany removes zero rows, preventing silent drift on idempotent unsave paths', async () => {
+      const db = makeDb()
+
+      db.board.findUnique.mockResolvedValue(makeOwnedBoard())
+      db.boardItem.deleteMany.mockResolvedValue({ count: 0 })
+      mocks.recomputeLookPostSaveCount.mockResolvedValue(4)
+
+      const result = await removeBoardItem(asRootDb(db), {
+        boardId: 'board_1',
+        clientId: 'client_1',
         lookPostId: 'look_1',
       })
 
-      expect(result).toEqual({
-        board: {
-          id: 'board_1',
-          clientId: 'client_1',
-          name: 'Hair ideas',
-          visibility: BoardVisibility.PRIVATE,
-          createdAt: new Date('2026-04-18T10:00:00.000Z'),
-          updatedAt: new Date('2026-04-18T10:00:00.000Z'),
+      expect(db.$transaction).toHaveBeenCalledTimes(1)
+
+      expect(db.boardItem.deleteMany).toHaveBeenCalledWith({
+        where: {
+          boardId: 'board_1',
+          lookPostId: 'look_1',
         },
-        removed: true,
-        saveCount: 1,
+      })
+
+      expectSaveRecomputeAndEnqueue(db, 'look_1')
+
+      expect(result).toEqual({
+        board: makeOwnedBoard(),
+        removed: false,
+        saveCount: 4,
+      })
+    })
+
+    it('surfaces enqueue failure after recompute so the unsave path cannot silently skip async reconciliation', async () => {
+      const db = makeDb()
+
+      db.board.findUnique.mockResolvedValue(makeOwnedBoard())
+      db.boardItem.deleteMany.mockResolvedValue({ count: 1 })
+      mocks.recomputeLookPostSaveCount.mockResolvedValue(1)
+      mocks.enqueueRecomputeLookCounts.mockRejectedValue(
+        new Error('enqueue exploded'),
+      )
+
+      await expect(
+        removeBoardItem(asRootDb(db), {
+          boardId: 'board_1',
+          clientId: 'client_1',
+          lookPostId: 'look_1',
+        }),
+      ).rejects.toThrow('enqueue exploded')
+
+      expect(mocks.recomputeLookPostSaveCount).toHaveBeenCalledWith(
+        asTx(db),
+        'look_1',
+      )
+      expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(asTx(db), {
+        lookPostId: 'look_1',
       })
     })
   })
@@ -566,7 +600,7 @@ describe('lib/boards/index.ts', () => {
         items: [],
       })
 
-      const result = await getBoardSummaries(asTransactionClient(db), {
+      const result = await getBoardSummaries(asTx(db), {
         clientId: 'client_1',
         viewerClientId: 'client_1',
       })
@@ -604,7 +638,7 @@ describe('lib/boards/index.ts', () => {
       const db = makeDb()
 
       await expect(
-        getBoardSummaries(asTransactionClient(db), {
+        getBoardSummaries(asTx(db), {
           clientId: 'client_1',
           viewerClientId: 'client_2',
         }),
@@ -619,14 +653,11 @@ describe('lib/boards/index.ts', () => {
       const db = makeDb()
 
       db.board.findUnique
-        .mockResolvedValueOnce({
-          id: 'board_1',
-          clientId: 'client_1',
-          name: 'Hair ideas',
-          visibility: BoardVisibility.PRIVATE,
-          createdAt: new Date('2026-04-18T10:00:00.000Z'),
-          updatedAt: new Date('2026-04-18T11:00:00.000Z'),
-        })
+        .mockResolvedValueOnce(
+          makeOwnedBoard({
+            updatedAt: new Date('2026-04-18T11:00:00.000Z'),
+          }),
+        )
         .mockResolvedValueOnce({
           id: 'board_1',
           clientId: 'client_1',
@@ -649,7 +680,7 @@ describe('lib/boards/index.ts', () => {
         items: [],
       })
 
-      const result = await getBoardDetail(asTransactionClient(db), {
+      const result = await getBoardDetail(asTx(db), {
         boardId: 'board_1',
         clientId: 'client_1',
       })
@@ -677,7 +708,7 @@ describe('lib/boards/index.ts', () => {
     it('returns unsaved when there is no viewer client id', async () => {
       const db = makeDb()
 
-      const result = await getViewerLookSaveState(asTransactionClient(db), {
+      const result = await getViewerLookSaveState(asTx(db), {
         viewerClientId: null,
         lookPostId: 'look_1',
       })
@@ -720,7 +751,7 @@ describe('lib/boards/index.ts', () => {
         },
       ])
 
-      const result = await getViewerLookSaveState(asTransactionClient(db), {
+      const result = await getViewerLookSaveState(asTx(db), {
         viewerClientId: 'client_1',
         lookPostId: 'look_1',
       })

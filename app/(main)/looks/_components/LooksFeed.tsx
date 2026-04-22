@@ -24,7 +24,7 @@ import {
   type ViewerLocation,
 } from '@/lib/viewerLocation'
 
-const ALL_TAB: UiCategory = { name: 'The Looks', slug: 'all' }
+const ALL_TAB: UiCategory = { name: 'Look', slug: 'all' }
 const SPOTLIGHT_TAB: UiCategory = { name: 'Spotlight', slug: 'spotlight' }
 
 const FEED_LIMIT = 24

@@ -20,26 +20,34 @@ export default function NavItem({
     <Link
       href={href}
       aria-current={active ? 'page' : undefined}
-      className={[
-        'flex w-18 flex-col items-center justify-center gap-1',
-        'text-[11px] font-extrabold',
-        active ? 'text-textPrimary' : 'text-textSecondary',
-        'no-underline',
-      ].join(' ')}
+      className="no-underline"
+      style={{
+        display: 'grid',
+        gap: 2,
+        justifyItems: 'center',
+        color: active ? 'rgba(244,239,231,1)' : 'rgba(122,117,105,1)',
+        textShadow: '0 2px 12px rgba(0,0,0,0.8)',
+        position: 'relative',
+      }}
     >
       <div className="relative">
-        <span
-          aria-hidden="true"
-          className={['flex items-center justify-center', active ? '' : 'opacity-70'].join(' ')}
-        >
+        <span aria-hidden="true" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           {icon}
         </span>
         {rightSlot ? <span className="absolute -right-2 -top-2">{rightSlot}</span> : null}
       </div>
 
-      <span className={active ? '' : 'opacity-70'}>{label}</span>
-
-      {active ? <span className="-mt-0.5 h-0.5 w-6 rounded-full bg-white/40" /> : <span className="h-0.5 w-6" />}
+      <span
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9,
+          fontWeight: 800,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+        }}
+      >
+        {label}
+      </span>
     </Link>
   )
 }

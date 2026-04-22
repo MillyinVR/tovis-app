@@ -29,32 +29,36 @@ export default function GuestSessionFooter() {
   const loginActive = isActivePath(pathname, ROUTES.login) || isActivePath(pathname, ROUTES.signup)
 
   return (
-    // pt-8 accounts for the center button being pulled up with -mt-8
-    <div className="w-full pt-8" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      <div className="tovis-glass border-t border-textPrimary/10">
-        <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-between px-4">
+    <div
+      className="w-full"
+      style={{
+        paddingBottom: 'env(safe-area-inset-bottom)',
+        background: 'linear-gradient(transparent, rgba(10,9,7,0.85) 40%)',
+      }}
+    >
+      <div>
+        <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-around px-4">
           <NavItem label="Home" href={ROUTES.home} icon={<House size={20} />} active={homeActive} />
           <NavItem label="Search" href={ROUTES.search} icon={<Compass size={20} />} active={searchActive} />
 
           {/* Center CTA: Looks */}
-          <div className="relative -mt-8 flex w-22 justify-center">
-            <Link
-              href={ROUTES.looks}
-              className={[
-                'tovis-glass',
-                'grid h-16 w-16 place-items-center rounded-full border border-white/15',
-                'text-[11px] font-black text-textPrimary',
-                'hover:border-white/25 active:scale-[0.98]',
-                'ring-2 ring-white/10',
-                looksActive ? 'border-white/25 ring-white/20' : '',
-                'no-underline',
-              ].join(' ')}
-              title="Looks"
-              aria-label="Looks"
-            >
-              <span className="leading-none">Looks</span>
-            </Link>
-          </div>
+          <Link
+            href={ROUTES.looks}
+            className="grid place-items-center rounded-full hover:opacity-90 active:scale-[0.98] no-underline"
+            style={{
+              width: 52,
+              height: 52,
+              backgroundColor: 'var(--terra, #E05A28)',
+              color: '#ffffff',
+              boxShadow: '0 8px 24px rgba(224,90,40,0.45)',
+            }}
+            title="Looks"
+            aria-label="Looks"
+          >
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              Looks
+            </span>
+          </Link>
 
           <NavItem label="Log in" href={ROUTES.login} icon={<LogIn size={20} />} active={loginActive} />
           <NavItem label="Sign up" href={ROUTES.signup} icon={<UserPlus size={20} />} active={isActivePath(pathname, ROUTES.signup)} />

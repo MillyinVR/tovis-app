@@ -4,8 +4,12 @@
 import { useMemo, useState } from 'react'
 import { Search, X } from 'lucide-react'
 
-const TAB_LOOKS = 'The Looks'
+const TAB_LOOKS = 'Look'
 const TAB_SPOTLIGHT = 'Spotlight'
+
+const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
+const PAPER = 'rgba(244,239,231,1)'
+const PAPER_DIM = 'rgba(244,239,231,0.65)'
 
 export default function LooksTopBar(props: {
   categories: string[]
@@ -23,7 +27,6 @@ export default function LooksTopBar(props: {
       .filter(Boolean)
       .filter((c) => c.toLowerCase() !== 'for you')
 
-    // Dedup case-insensitively, preserve first occurrence
     const seen = new Set<string>()
     const unique: string[] = []
     for (const c of cleaned) {
@@ -33,15 +36,15 @@ export default function LooksTopBar(props: {
       unique.push(c)
     }
 
-    // Remove any existing “The Looks” / “Spotlight” from the backend list (case-insensitive),
-    // then re-insert in the exact order we want.
     const rest = unique.filter((c) => {
       const key = c.toLowerCase()
       return key !== TAB_LOOKS.toLowerCase() && key !== TAB_SPOTLIGHT.toLowerCase()
     })
 
-    return [TAB_LOOKS, TAB_SPOTLIGHT, ...rest]
+    return [TAB_SPOTLIGHT, ...rest]
   }, [categories])
+
+  const looksActive = activeCategory === TAB_LOOKS
 
   return (
     <div
@@ -51,41 +54,62 @@ export default function LooksTopBar(props: {
         pointerEvents: 'none',
       }}
     >
-      <div className="mx-auto w-full max-w-140 px-3" style={{ pointerEvents: 'auto' }}>
-        {/* Row: scrollable tabs + pinned search */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr auto',
-            alignItems: 'center',
-            gap: 10,
-          }}
-        >
-          {/* Scrollable tabs shell */}
-          <div
-            className="looksNoScrollbar"
-            style={{
-              position: 'relative',
-              overflow: 'hidden',
-              borderRadius: 14,
-              background: 'rgba(0,0,0,0.28)',
-              border: '1px solid rgba(255,255,255,0.10)',
-              backdropFilter: 'blur(14px)',
-              WebkitBackdropFilter: 'blur(14px)',
-              boxShadow: '0 10px 26px rgba(0,0,0,0.45)',
-            }}
-          >
-            {/* Actual scrolling area */}
+      <div className="mx-auto w-full max-w-140 px-4" style={{ pointerEvents: 'auto' }}>
+        {/* Main row */}
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 14 }}>
+          {/* Left: "Looks" title (= the all tab) + scrollable secondary tabs */}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, overflow: 'hidden', flex: 1 }}>
+            {/* "Looks" serif word IS the all-feed tab */}
+            <button
+              type="button"
+              onClick={() => onSelectCategory(TAB_LOOKS)}
+              style={{
+                appearance: 'none',
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                margin: 0,
+                cursor: 'pointer',
+                fontFamily: 'var(--font-display-face, "Fraunces"), Georgia, serif',
+                fontStyle: 'italic',
+                fontWeight: 600,
+                fontSize: 20,
+                color: looksActive ? PAPER : PAPER_DIM,
+                textShadow: TEXT_SHADOW,
+                flexShrink: 0,
+                lineHeight: 1.2,
+                position: 'relative',
+              }}
+            >
+              Looks
+              <span
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  bottom: -6,
+                  height: 2,
+                  borderRadius: 999,
+                  background: PAPER,
+                  boxShadow: '0 0 10px rgba(244,239,231,0.4)',
+                  opacity: looksActive ? 1 : 0,
+                  transition: 'opacity 160ms ease',
+                }}
+              />
+            </button>
+
+            {/* Scrollable tab strip — Spotlight + admin categories */}
             <div
               className="looksNoScrollbar"
               style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 16,
                 overflowX: 'auto',
                 overflowY: 'hidden',
                 whiteSpace: 'nowrap',
-                display: 'flex',
-                alignItems: 'center',
-                columnGap: 16,
-                padding: '8px 10px',
+                paddingBottom: 8,
               }}
             >
               {tabs.map((c) => {
@@ -99,14 +123,18 @@ export default function LooksTopBar(props: {
                       appearance: 'none',
                       background: 'transparent',
                       border: 'none',
-                      padding: '0 2px',
+                      padding: '0 1px',
                       margin: 0,
                       cursor: 'pointer',
-                      color: active ? 'rgba(255,255,255,0.98)' : 'rgba(255,255,255,0.62)',
-                      fontSize: 13,
-                      fontWeight: active ? 800 : 600,
-                      letterSpacing: 0.2,
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10,
+                      fontWeight: 500,
+                      letterSpacing: '0.14em',
+                      textTransform: 'uppercase',
+                      color: active ? PAPER : PAPER_DIM,
+                      textShadow: TEXT_SHADOW,
                       position: 'relative',
+                      flexShrink: 0,
                       lineHeight: 1.2,
                     }}
                   >
@@ -117,12 +145,12 @@ export default function LooksTopBar(props: {
                         position: 'absolute',
                         left: 0,
                         right: 0,
-                        bottom: -7,
+                        bottom: -6,
                         height: 2,
                         borderRadius: 999,
+                        background: PAPER,
+                        boxShadow: '0 0 10px rgba(244,239,231,0.4)',
                         opacity: active ? 1 : 0,
-                        background: 'rgba(255,255,255,0.95)',
-                        boxShadow: '0 0 14px rgba(255,255,255,0.35)',
                         transition: 'opacity 160ms ease',
                       }}
                     />
@@ -130,65 +158,47 @@ export default function LooksTopBar(props: {
                 )
               })}
             </div>
-
-            {/* Right-edge fade so scroll feels premium */}
-            <div
-              aria-hidden
-              style={{
-                pointerEvents: 'none',
-                position: 'absolute',
-                top: 0,
-                right: 0,
-                width: 22,
-                height: '100%',
-                background: 'linear-gradient(to left, rgba(0,0,0,0.32), rgba(0,0,0,0))',
-              }}
-            />
           </div>
 
-          {/* Pinned Search button */}
+          {/* Right: search button */}
           <button
             type="button"
             onClick={() => setSearchOpen((v) => !v)}
             aria-label={searchOpen ? 'Close search' : 'Open search'}
-            title={searchOpen ? 'Close search' : 'Search'}
             style={{
-              width: 38,
-              height: 38,
+              width: 32,
+              height: 32,
               display: 'grid',
               placeItems: 'center',
-              borderRadius: 999,
-              background: 'rgba(0,0,0,0.28)',
-              border: '1px solid rgba(255,255,255,0.10)',
-              backdropFilter: 'blur(14px)',
-              WebkitBackdropFilter: 'blur(14px)',
-              boxShadow: '0 10px 26px rgba(0,0,0,0.45)',
+              color: PAPER,
+              textShadow: TEXT_SHADOW,
+              background: 'transparent',
+              border: 'none',
               cursor: 'pointer',
-              color: 'rgba(255,255,255,0.95)',
+              flexShrink: 0,
             }}
           >
-            {searchOpen ? <X size={18} /> : <Search size={18} />}
+            {searchOpen ? <X size={18} /> : <Search size={20} />}
           </button>
         </div>
 
-        {/* Search field (below) */}
-        {searchOpen ? (
+        {/* Search field */}
+        {searchOpen && (
           <div
             style={{
               marginTop: 10,
               padding: '10px 12px',
-              borderRadius: 16,
-              background: 'rgba(0,0,0,0.32)',
-              border: '1px solid rgba(255,255,255,0.10)',
+              borderRadius: 14,
+              background: 'rgba(10,9,7,0.80)',
+              border: '1px solid rgba(244,239,231,0.14)',
               backdropFilter: 'blur(16px)',
               WebkitBackdropFilter: 'blur(16px)',
-              boxShadow: '0 10px 26px rgba(0,0,0,0.45)',
               display: 'flex',
               alignItems: 'center',
               gap: 10,
             }}
           >
-            <Search size={16} style={{ color: 'rgba(255,255,255,0.72)' }} />
+            <Search size={16} style={{ color: PAPER_DIM, flexShrink: 0 }} />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -199,32 +209,33 @@ export default function LooksTopBar(props: {
                 background: 'transparent',
                 border: 'none',
                 outline: 'none',
-                color: 'white',
+                color: PAPER,
+                fontFamily: 'var(--font-sans)',
                 fontSize: 13,
               }}
             />
-            {query ? (
+            {query && (
               <button
                 type="button"
                 onClick={() => setQuery('')}
                 aria-label="Clear search"
                 style={{
-                  width: 28,
-                  height: 28,
+                  width: 26,
+                  height: 26,
                   display: 'grid',
                   placeItems: 'center',
                   borderRadius: 999,
-                  background: 'rgba(255,255,255,0.10)',
-                  border: '1px solid rgba(255,255,255,0.10)',
+                  background: 'rgba(244,239,231,0.10)',
+                  border: '1px solid rgba(244,239,231,0.12)',
                   cursor: 'pointer',
-                  color: 'white',
+                  color: PAPER,
                 }}
               >
-                <X size={16} />
+                <X size={14} />
               </button>
-            ) : null}
+            )}
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   )

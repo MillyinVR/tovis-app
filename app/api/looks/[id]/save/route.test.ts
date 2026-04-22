@@ -23,7 +23,9 @@ const mocks = vi.hoisted(() => {
       details?: Record<string, unknown> | null,
     ) => {
       const safeDetails =
-        typeof details === 'object' && details !== null && !Array.isArray(details)
+        typeof details === 'object' &&
+        details !== null &&
+        !Array.isArray(details)
           ? details
           : {}
 
@@ -175,8 +177,18 @@ function makeCtx(id: string): Ctx {
   }
 }
 
+function makeRequest(
+  method: 'GET' | 'POST' | 'DELETE',
+  body?: unknown,
+): Request {
+  return new Request('http://localhost/api/looks/look_1/save', {
+    method,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  })
+}
+
 async function readJson(res: Response): Promise<unknown> {
-  return res.json()
+  return await res.json()
 }
 
 function makeAuth(
@@ -262,6 +274,60 @@ function makeSaveState(
   }
 }
 
+function makeBoardMutationResult(added: boolean, saveCount: number) {
+  return {
+    board: { id: 'board_1' },
+    itemId: added ? 'item_1' : 'item_existing',
+    added,
+    saveCount,
+  }
+}
+
+function makeRemoveMutationResult(saveCount: number) {
+  return {
+    board: { id: 'board_1' },
+    removed: true,
+    saveCount,
+  }
+}
+
+function expectDefaultLoadLookAccess(lookPostId: string): void {
+  expect(mocks.loadLookAccess).toHaveBeenCalledWith(mocks.prisma, {
+    lookPostId,
+    viewerClientId: 'client_1',
+    viewerProfessionalId: null,
+  })
+}
+
+function expectDefaultGuardInputs(): void {
+  expect(mocks.canViewLookPost).toHaveBeenCalledWith({
+    isOwner: false,
+    viewerRole: Role.CLIENT,
+    status: LookPostStatus.PUBLISHED,
+    visibility: LookPostVisibility.PUBLIC,
+    moderationStatus: ModerationStatus.APPROVED,
+    proVerificationStatus: VerificationStatus.APPROVED,
+    viewerFollowsProfessional: false,
+  })
+
+  expect(mocks.canSaveLookPost).toHaveBeenCalledWith({
+    isOwner: false,
+    viewerRole: Role.CLIENT,
+    status: LookPostStatus.PUBLISHED,
+    visibility: LookPostVisibility.PUBLIC,
+    moderationStatus: ModerationStatus.APPROVED,
+    proVerificationStatus: VerificationStatus.APPROVED,
+    viewerFollowsProfessional: false,
+  })
+}
+
+function expectNoSaveStateReadsOrWrites(): void {
+  expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
+  expect(mocks.addBoardItem).not.toHaveBeenCalled()
+  expect(mocks.removeBoardItem).not.toHaveBeenCalled()
+  expect(mocks.prisma.lookPost.findUnique).not.toHaveBeenCalled()
+}
+
 describe('app/api/looks/[id]/save/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -271,447 +337,492 @@ describe('app/api/looks/[id]/save/route.ts', () => {
     mocks.canViewLookPost.mockReturnValue(true)
     mocks.canSaveLookPost.mockReturnValue(true)
     mocks.getViewerLookSaveState.mockResolvedValue(makeSaveState())
-    mocks.addBoardItem.mockResolvedValue({
-      board: {
-        id: 'board_1',
-      },
-      itemId: 'item_1',
-      added: true,
-      saveCount: 5,
-    })
-    mocks.removeBoardItem.mockResolvedValue({
-      board: {
-        id: 'board_1',
-      },
-      removed: true,
-      saveCount: 3,
-    })
+    mocks.addBoardItem.mockResolvedValue(makeBoardMutationResult(true, 5))
+    mocks.removeBoardItem.mockResolvedValue(makeRemoveMutationResult(3))
     mocks.getBoardErrorMeta.mockReturnValue(null)
     mocks.prisma.lookPost.findUnique.mockResolvedValue({ id: 'look_1' })
   })
 
-  it('GET returns viewer save state by canonical lookPostId', async () => {
-    const res = await GET(
-      new Request('http://localhost/api/looks/look_1/save'),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
+  describe('GET', () => {
+    it('loads viewer save state by canonical lookPostId and returns the route-level response contract', async () => {
+      const res = await GET(makeRequest('GET'), makeCtx('look_1'))
+      const body = await readJson(res)
 
-    expect(res.status).toBe(200)
+      expect(res.status).toBe(200)
 
-    expect(mocks.loadLookAccess).toHaveBeenCalledWith(mocks.prisma, {
-      lookPostId: 'look_1',
-      viewerClientId: 'client_1',
-      viewerProfessionalId: null,
+      expectDefaultLoadLookAccess('look_1')
+      expectDefaultGuardInputs()
+
+      expect(mocks.getViewerLookSaveState).toHaveBeenCalledWith(mocks.prisma, {
+        viewerClientId: 'client_1',
+        lookPostId: 'look_1',
+      })
+
+      expect(mocks.buildLooksSaveStateResponse).toHaveBeenCalledWith({
+        lookPostId: 'look_1',
+        saveCount: 4,
+        state: makeSaveState(),
+      })
+
+      expect(body).toEqual({
+        lookPostId: 'look_1',
+        isSaved: true,
+        saveCount: 4,
+        boardIds: ['board_1'],
+        boards: [
+          {
+            id: 'board_1',
+            name: 'Hair ideas',
+            visibility: 'PRIVATE',
+          },
+        ],
+      })
     })
 
-    expect(mocks.canViewLookPost).toHaveBeenCalledWith({
-      isOwner: false,
-      viewerRole: Role.CLIENT,
-      status: LookPostStatus.PUBLISHED,
-      visibility: LookPostVisibility.PUBLIC,
-      moderationStatus: ModerationStatus.APPROVED,
-      proVerificationStatus: VerificationStatus.APPROVED,
-      viewerFollowsProfessional: false,
-    })
-
-    expect(mocks.canSaveLookPost).toHaveBeenCalledWith({
-      isOwner: false,
-      viewerRole: Role.CLIENT,
-      status: LookPostStatus.PUBLISHED,
-      visibility: LookPostVisibility.PUBLIC,
-      moderationStatus: ModerationStatus.APPROVED,
-      proVerificationStatus: VerificationStatus.APPROVED,
-      viewerFollowsProfessional: false,
-    })
-
-    expect(mocks.getViewerLookSaveState).toHaveBeenCalledWith(mocks.prisma, {
-      viewerClientId: 'client_1',
-      lookPostId: 'look_1',
-    })
-
-    expect(mocks.buildLooksSaveStateResponse).toHaveBeenCalledWith({
-      lookPostId: 'look_1',
-      saveCount: 4,
-      state: makeSaveState(),
-    })
-
-    expect(body).toEqual({
-      lookPostId: 'look_1',
-      isSaved: true,
-      saveCount: 4,
-      boardIds: ['board_1'],
-      boards: [
+    it('returns the auth response immediately and does not perform access or save-state work', async () => {
+      const authResponse = new Response(
+        JSON.stringify({
+          ok: false,
+          error: 'Unauthorized',
+        }),
         {
-          id: 'board_1',
-          name: 'Hair ideas',
-          visibility: 'PRIVATE',
+          status: 401,
+          headers: { 'content-type': 'application/json' },
         },
-      ],
+      )
+
+      mocks.requireClient.mockResolvedValue({
+        ok: false as const,
+        res: authResponse,
+      })
+
+      const res = await GET(makeRequest('GET'), makeCtx('look_1'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(401)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Unauthorized',
+      })
+
+      expect(mocks.loadLookAccess).not.toHaveBeenCalled()
+      expectNoSaveStateReadsOrWrites()
+    })
+
+    it('returns 400 for a blank look id and does not perform access or save-state work', async () => {
+      const res = await GET(makeRequest('GET'), makeCtx('   '))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(400)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Missing look id.',
+        code: 'MISSING_LOOK_ID',
+      })
+
+      expect(mocks.loadLookAccess).not.toHaveBeenCalled()
+      expectNoSaveStateReadsOrWrites()
+    })
+
+    it('returns 404 when canonical look access cannot be resolved', async () => {
+      mocks.loadLookAccess.mockResolvedValueOnce(null)
+
+      const res = await GET(makeRequest('GET'), makeCtx('look_missing'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(404)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Not found.',
+        code: 'LOOK_NOT_FOUND',
+      })
+
+      expectDefaultLoadLookAccess('look_missing')
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
+    })
+
+    it('returns 404 when the viewer cannot view the look and does not read save state', async () => {
+      mocks.canViewLookPost.mockReturnValueOnce(false)
+
+      const res = await GET(makeRequest('GET'), makeCtx('look_1'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(404)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Not found.',
+        code: 'LOOK_NOT_FOUND',
+      })
+
+      expect(mocks.canSaveLookPost).not.toHaveBeenCalled()
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
+    })
+
+    it('returns 500 on unexpected save-state read failures', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      mocks.getViewerLookSaveState.mockRejectedValueOnce(new Error('db blew up'))
+
+      const res = await GET(makeRequest('GET'), makeCtx('look_1'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(500)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Couldn’t load save state. Try again.',
+        code: 'INTERNAL',
+      })
+
+      consoleError.mockRestore()
     })
   })
 
-  it('POST adds the canonical lookPostId to an explicit board and returns stable mutation state', async () => {
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/save', {
-        method: 'POST',
-        body: JSON.stringify({ boardId: 'board_1' }),
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
+  describe('POST', () => {
+    it('delegates save writes to addBoardItem using the canonical lookPostId and returns route-level mutation state', async () => {
+      const res = await POST(
+        makeRequest('POST', { boardId: 'board_1' }),
+        makeCtx('look_1'),
+      )
+      const body = await readJson(res)
 
-    expect(res.status).toBe(201)
+      expect(res.status).toBe(201)
 
-    expect(mocks.loadLookAccess).toHaveBeenCalledWith(mocks.prisma, {
-      lookPostId: 'look_1',
-      viewerClientId: 'client_1',
-      viewerProfessionalId: null,
+      expectDefaultLoadLookAccess('look_1')
+      expectDefaultGuardInputs()
+
+      expect(mocks.addBoardItem).toHaveBeenCalledWith(mocks.prisma, {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        lookPostId: 'look_1',
+      })
+
+      expect(mocks.getViewerLookSaveState).toHaveBeenCalledWith(mocks.prisma, {
+        viewerClientId: 'client_1',
+        lookPostId: 'look_1',
+      })
+
+      expect(mocks.buildLooksBoardItemMutationResponse).toHaveBeenCalledWith({
+        boardId: 'board_1',
+        lookPostId: 'look_1',
+        inBoard: true,
+        saveCount: 5,
+        state: makeSaveState(),
+      })
+
+      expect(body).toEqual({
+        boardId: 'board_1',
+        lookPostId: 'look_1',
+        inBoard: true,
+        isSaved: true,
+        saveCount: 5,
+        boardIds: ['board_1'],
+        boards: [
+          {
+            id: 'board_1',
+            name: 'Hair ideas',
+            visibility: 'PRIVATE',
+          },
+        ],
+      })
     })
 
-    expect(mocks.addBoardItem).toHaveBeenCalledWith(mocks.prisma, {
-      boardId: 'board_1',
-      clientId: 'client_1',
-      lookPostId: 'look_1',
+    it('returns 200 when addBoardItem reports the item was already present, keeping route behavior delegation-only', async () => {
+      mocks.addBoardItem.mockResolvedValueOnce(makeBoardMutationResult(false, 5))
+
+      const res = await POST(
+        makeRequest('POST', { boardId: 'board_1' }),
+        makeCtx('look_1'),
+      )
+      const body = await readJson(res)
+
+      expect(res.status).toBe(200)
+
+      expect(mocks.addBoardItem).toHaveBeenCalledWith(mocks.prisma, {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        lookPostId: 'look_1',
+      })
+
+      expect(body).toEqual({
+        boardId: 'board_1',
+        lookPostId: 'look_1',
+        inBoard: true,
+        isSaved: true,
+        saveCount: 5,
+        boardIds: ['board_1'],
+        boards: [
+          {
+            id: 'board_1',
+            name: 'Hair ideas',
+            visibility: 'PRIVATE',
+          },
+        ],
+      })
     })
 
-    expect(mocks.getViewerLookSaveState).toHaveBeenCalledWith(mocks.prisma, {
-      viewerClientId: 'client_1',
-      lookPostId: 'look_1',
-    })
-
-    expect(mocks.buildLooksBoardItemMutationResponse).toHaveBeenCalledWith({
-      boardId: 'board_1',
-      lookPostId: 'look_1',
-      inBoard: true,
-      saveCount: 5,
-      state: makeSaveState(),
-    })
-
-    expect(body).toEqual({
-      boardId: 'board_1',
-      lookPostId: 'look_1',
-      inBoard: true,
-      isSaved: true,
-      saveCount: 5,
-      boardIds: ['board_1'],
-      boards: [
+    it('returns the auth response immediately and does not perform access, helper, or save-state work', async () => {
+      const authResponse = new Response(
+        JSON.stringify({
+          ok: false,
+          error: 'Unauthorized',
+        }),
         {
-          id: 'board_1',
-          name: 'Hair ideas',
-          visibility: 'PRIVATE',
+          status: 401,
+          headers: { 'content-type': 'application/json' },
         },
-      ],
+      )
+
+      mocks.requireClient.mockResolvedValue({
+        ok: false as const,
+        res: authResponse,
+      })
+
+      const res = await POST(
+        makeRequest('POST', { boardId: 'board_1' }),
+        makeCtx('look_1'),
+      )
+      const body = await readJson(res)
+
+      expect(res.status).toBe(401)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Unauthorized',
+      })
+
+      expect(mocks.loadLookAccess).not.toHaveBeenCalled()
+      expect(mocks.addBoardItem).not.toHaveBeenCalled()
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 when boardId is missing and does not call the write helper', async () => {
+      const res = await POST(makeRequest('POST', {}), makeCtx('look_1'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(400)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Missing board id.',
+        code: 'MISSING_BOARD_ID',
+      })
+
+      expect(mocks.loadLookAccess).not.toHaveBeenCalled()
+      expect(mocks.addBoardItem).not.toHaveBeenCalled()
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
+    })
+
+    it('returns 404 when canonical look access cannot be resolved and does not call the write helper', async () => {
+      mocks.loadLookAccess.mockResolvedValueOnce(null)
+
+      const res = await POST(
+        makeRequest('POST', { boardId: 'board_1' }),
+        makeCtx('look_missing'),
+      )
+      const body = await readJson(res)
+
+      expect(res.status).toBe(404)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Not found.',
+        code: 'LOOK_NOT_FOUND',
+      })
+
+      expect(mocks.addBoardItem).not.toHaveBeenCalled()
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
+    })
+
+    it('returns 403 when the shared save policy forbids saves and does not call the write helper', async () => {
+      mocks.canSaveLookPost.mockReturnValueOnce(false)
+
+      const res = await POST(
+        makeRequest('POST', { boardId: 'board_1' }),
+        makeCtx('look_1'),
+      )
+      const body = await readJson(res)
+
+      expect(res.status).toBe(403)
+      expect(body).toEqual({
+        ok: false,
+        error: 'You can’t save this look.',
+        code: 'SAVE_FORBIDDEN',
+      })
+
+      expect(mocks.addBoardItem).not.toHaveBeenCalled()
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
+    })
+
+    it('maps board-helper errors into route responses without inventing route-owned save logic', async () => {
+      mocks.addBoardItem.mockRejectedValueOnce(new Error('forbidden'))
+      mocks.getBoardErrorMeta.mockReturnValueOnce({
+        status: 403,
+        message: 'Not allowed to manage this board.',
+        code: 'BOARD_FORBIDDEN',
+      })
+
+      const res = await POST(
+        makeRequest('POST', { boardId: 'board_1' }),
+        makeCtx('look_1'),
+      )
+      const body = await readJson(res)
+
+      expect(res.status).toBe(403)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Not allowed to manage this board.',
+        code: 'BOARD_FORBIDDEN',
+      })
+
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
     })
   })
 
-  it('POST returns 200 when the item was already in the board', async () => {
-    mocks.addBoardItem.mockResolvedValueOnce({
-      board: {
-        id: 'board_1',
-      },
-      itemId: 'item_existing',
-      added: false,
-      saveCount: 5,
-    })
+  describe('DELETE', () => {
+    it('delegates unsave writes to removeBoardItem using the canonical lookPostId and returns route-level mutation state', async () => {
+      mocks.getViewerLookSaveState.mockResolvedValueOnce(
+        makeSaveState({
+          isSaved: false,
+          boardIds: [],
+          boards: [],
+        }),
+      )
 
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/save', {
-        method: 'POST',
-        body: JSON.stringify({ boardId: 'board_1' }),
-      }),
-      makeCtx('look_1'),
-    )
+      const res = await DELETE(
+        makeRequest('DELETE', { boardId: 'board_1' }),
+        makeCtx('look_1'),
+      )
+      const body = await readJson(res)
 
-    expect(res.status).toBe(200)
-  })
+      expect(res.status).toBe(200)
 
-  it('DELETE removes the canonical lookPostId from an explicit board and returns stable mutation state', async () => {
-    mocks.getViewerLookSaveState.mockResolvedValueOnce(
-      makeSaveState({
+      expect(mocks.prisma.lookPost.findUnique).toHaveBeenCalledWith({
+        where: { id: 'look_1' },
+        select: { id: true },
+      })
+
+      expect(mocks.removeBoardItem).toHaveBeenCalledWith(mocks.prisma, {
+        boardId: 'board_1',
+        clientId: 'client_1',
+        lookPostId: 'look_1',
+      })
+
+      expect(mocks.getViewerLookSaveState).toHaveBeenCalledWith(mocks.prisma, {
+        viewerClientId: 'client_1',
+        lookPostId: 'look_1',
+      })
+
+      expect(mocks.buildLooksBoardItemMutationResponse).toHaveBeenCalledWith({
+        boardId: 'board_1',
+        lookPostId: 'look_1',
+        inBoard: false,
+        saveCount: 3,
+        state: {
+          isSaved: false,
+          boardIds: [],
+          boards: [],
+        },
+      })
+
+      expect(body).toEqual({
+        boardId: 'board_1',
+        lookPostId: 'look_1',
+        inBoard: false,
         isSaved: false,
+        saveCount: 3,
         boardIds: [],
         boards: [],
-      }),
-    )
-
-    const res = await DELETE(
-      new Request('http://localhost/api/looks/look_1/save', {
-        method: 'DELETE',
-        body: JSON.stringify({ boardId: 'board_1' }),
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(200)
-
-    expect(mocks.prisma.lookPost.findUnique).toHaveBeenCalledWith({
-      where: { id: 'look_1' },
-      select: { id: true },
+      })
     })
 
-    expect(mocks.removeBoardItem).toHaveBeenCalledWith(mocks.prisma, {
-      boardId: 'board_1',
-      clientId: 'client_1',
-      lookPostId: 'look_1',
+    it('returns the auth response immediately and does not perform existence checks or helper work', async () => {
+      const authResponse = new Response(
+        JSON.stringify({
+          ok: false,
+          error: 'Unauthorized',
+        }),
+        {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        },
+      )
+
+      mocks.requireClient.mockResolvedValue({
+        ok: false as const,
+        res: authResponse,
+      })
+
+      const res = await DELETE(
+        makeRequest('DELETE', { boardId: 'board_1' }),
+        makeCtx('look_1'),
+      )
+      const body = await readJson(res)
+
+      expect(res.status).toBe(401)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Unauthorized',
+      })
+
+      expect(mocks.prisma.lookPost.findUnique).not.toHaveBeenCalled()
+      expect(mocks.removeBoardItem).not.toHaveBeenCalled()
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
     })
 
-    expect(mocks.buildLooksBoardItemMutationResponse).toHaveBeenCalledWith({
-      boardId: 'board_1',
-      lookPostId: 'look_1',
-      inBoard: false,
-      saveCount: 3,
-      state: {
-        isSaved: false,
-        boardIds: [],
-        boards: [],
-      },
+    it('returns 400 when boardId is missing and does not call the delete helper', async () => {
+      const res = await DELETE(makeRequest('DELETE', {}), makeCtx('look_1'))
+      const body = await readJson(res)
+
+      expect(res.status).toBe(400)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Missing board id.',
+        code: 'MISSING_BOARD_ID',
+      })
+
+      expect(mocks.prisma.lookPost.findUnique).not.toHaveBeenCalled()
+      expect(mocks.removeBoardItem).not.toHaveBeenCalled()
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
     })
 
-    expect(body).toEqual({
-      boardId: 'board_1',
-      lookPostId: 'look_1',
-      inBoard: false,
-      isSaved: false,
-      saveCount: 3,
-      boardIds: [],
-      boards: [],
-    })
-  })
+    it('returns 404 when the canonical lookPostId does not exist and does not call the delete helper', async () => {
+      mocks.prisma.lookPost.findUnique.mockResolvedValueOnce(null)
 
-  it('returns 400 when the route param is blank', async () => {
-    const res = await GET(
-      new Request('http://localhost/api/looks/%20%20/save'),
-      makeCtx('   '),
-    )
-    const body = await readJson(res)
+      const res = await DELETE(
+        makeRequest('DELETE', { boardId: 'board_1' }),
+        makeCtx('look_missing'),
+      )
+      const body = await readJson(res)
 
-    expect(res.status).toBe(400)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Missing look id.',
-      code: 'MISSING_LOOK_ID',
+      expect(res.status).toBe(404)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Not found.',
+        code: 'LOOK_NOT_FOUND',
+      })
+
+      expect(mocks.removeBoardItem).not.toHaveBeenCalled()
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
     })
 
-    expect(mocks.loadLookAccess).not.toHaveBeenCalled()
-    expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
-  })
+    it('maps board-helper errors into route responses without moving save-side effects into the route', async () => {
+      mocks.removeBoardItem.mockRejectedValueOnce(new Error('forbidden'))
+      mocks.getBoardErrorMeta.mockReturnValueOnce({
+        status: 403,
+        message: 'Not allowed to manage this board.',
+        code: 'BOARD_FORBIDDEN',
+      })
 
-  it('POST returns 400 when boardId is missing', async () => {
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/save', {
-        method: 'POST',
-        body: JSON.stringify({}),
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
+      const res = await DELETE(
+        makeRequest('DELETE', { boardId: 'board_1' }),
+        makeCtx('look_1'),
+      )
+      const body = await readJson(res)
 
-    expect(res.status).toBe(400)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Missing board id.',
-      code: 'MISSING_BOARD_ID',
+      expect(res.status).toBe(403)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Not allowed to manage this board.',
+        code: 'BOARD_FORBIDDEN',
+      })
+
+      expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
     })
-
-    expect(mocks.loadLookAccess).not.toHaveBeenCalled()
-    expect(mocks.addBoardItem).not.toHaveBeenCalled()
-  })
-
-  it('DELETE returns 400 when boardId is missing', async () => {
-    const res = await DELETE(
-      new Request('http://localhost/api/looks/look_1/save', {
-        method: 'DELETE',
-        body: JSON.stringify({}),
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(400)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Missing board id.',
-      code: 'MISSING_BOARD_ID',
-    })
-
-    expect(mocks.prisma.lookPost.findUnique).not.toHaveBeenCalled()
-    expect(mocks.removeBoardItem).not.toHaveBeenCalled()
-  })
-
-  it('GET returns 404 when the canonical lookPostId cannot be resolved', async () => {
-    mocks.loadLookAccess.mockResolvedValueOnce(null)
-
-    const res = await GET(
-      new Request('http://localhost/api/looks/look_missing/save'),
-      makeCtx('look_missing'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(404)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Not found.',
-      code: 'LOOK_NOT_FOUND',
-    })
-
-    expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
-  })
-
-  it('POST returns 404 when the canonical lookPostId cannot be resolved', async () => {
-    mocks.loadLookAccess.mockResolvedValueOnce(null)
-
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_missing/save', {
-        method: 'POST',
-        body: JSON.stringify({ boardId: 'board_1' }),
-      }),
-      makeCtx('look_missing'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(404)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Not found.',
-      code: 'LOOK_NOT_FOUND',
-    })
-
-    expect(mocks.addBoardItem).not.toHaveBeenCalled()
-  })
-
-  it('GET returns 404 when the viewer cannot view the look', async () => {
-    mocks.canViewLookPost.mockReturnValueOnce(false)
-
-    const res = await GET(
-      new Request('http://localhost/api/looks/look_1/save'),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(404)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Not found.',
-      code: 'LOOK_NOT_FOUND',
-    })
-
-    expect(mocks.canSaveLookPost).not.toHaveBeenCalled()
-    expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
-  })
-
-  it('POST returns 403 when the shared save policy forbids saves', async () => {
-    mocks.canSaveLookPost.mockReturnValueOnce(false)
-
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/save', {
-        method: 'POST',
-        body: JSON.stringify({ boardId: 'board_1' }),
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(403)
-    expect(body).toEqual({
-      ok: false,
-      error: 'You can’t save this look.',
-      code: 'SAVE_FORBIDDEN',
-    })
-
-    expect(mocks.addBoardItem).not.toHaveBeenCalled()
-  })
-
-  it('DELETE returns 404 when the canonical lookPostId does not exist', async () => {
-    mocks.prisma.lookPost.findUnique.mockResolvedValueOnce(null)
-
-    const res = await DELETE(
-      new Request('http://localhost/api/looks/look_missing/save', {
-        method: 'DELETE',
-        body: JSON.stringify({ boardId: 'board_1' }),
-      }),
-      makeCtx('look_missing'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(404)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Not found.',
-      code: 'LOOK_NOT_FOUND',
-    })
-
-    expect(mocks.removeBoardItem).not.toHaveBeenCalled()
-  })
-
-  it('does not treat legacy media ids as fallback identifiers', async () => {
-    mocks.loadLookAccess.mockResolvedValueOnce(null)
-
-    const res = await GET(
-      new Request('http://localhost/api/looks/media_legacy_1/save'),
-      makeCtx('media_legacy_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(404)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Not found.',
-      code: 'LOOK_NOT_FOUND',
-    })
-
-    expect(mocks.loadLookAccess).toHaveBeenCalledWith(mocks.prisma, {
-      lookPostId: 'media_legacy_1',
-      viewerClientId: 'client_1',
-      viewerProfessionalId: null,
-    })
-
-    expect(mocks.getViewerLookSaveState).not.toHaveBeenCalled()
-  })
-
-  it('maps shared board errors into route responses', async () => {
-    mocks.addBoardItem.mockRejectedValueOnce(new Error('forbidden'))
-    mocks.getBoardErrorMeta.mockReturnValueOnce({
-      status: 403,
-      message: 'Not allowed to manage this board.',
-      code: 'BOARD_FORBIDDEN',
-    })
-
-    const res = await POST(
-      new Request('http://localhost/api/looks/look_1/save', {
-        method: 'POST',
-        body: JSON.stringify({ boardId: 'board_1' }),
-      }),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(403)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Not allowed to manage this board.',
-      code: 'BOARD_FORBIDDEN',
-    })
-  })
-
-  it('returns 500 on unexpected GET errors', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    mocks.getViewerLookSaveState.mockRejectedValueOnce(new Error('db blew up'))
-
-    const res = await GET(
-      new Request('http://localhost/api/looks/look_1/save'),
-      makeCtx('look_1'),
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(500)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Couldn’t load save state. Try again.',
-      code: 'INTERNAL',
-    })
-
-    consoleError.mockRestore()
   })
 })

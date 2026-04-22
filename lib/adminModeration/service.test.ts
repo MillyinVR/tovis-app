@@ -1,5 +1,5 @@
 // lib/adminModeration/service.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AdminPermissionRole,
   LookPostStatus,
@@ -7,6 +7,9 @@ import {
   Role,
   ViralServiceRequestStatus,
 } from '@prisma/client'
+
+const FIXED_DATE_ISO = '2026-04-20T00:00:00.000Z'
+const FIXED_DATE = new Date(FIXED_DATE_ISO)
 
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn(
@@ -176,16 +179,6 @@ function makeJsonRequest(body: unknown): Request {
   })
 }
 
-function makeTextRequest(body = 'x'): Request {
-  return new Request('http://localhost/test', {
-    method: 'POST',
-    headers: {
-      'content-type': 'text/plain',
-    },
-    body,
-  })
-}
-
 async function readJson(res: Response): Promise<unknown> {
   return await res.json()
 }
@@ -275,82 +268,11 @@ function makeViralPermissionRow(
   }
 }
 
-function makeApprovedViralRequestDto(
-  overrides?: Partial<Record<string, unknown>>,
-) {
-  return {
-    id: 'request_1',
-    status: ViralServiceRequestStatus.APPROVED,
-    moderationStatus: ModerationStatus.APPROVED,
-    reportCount: 0,
-    removedAt: null,
-    reviewedAt: '2026-04-20T00:00:00.000Z',
-    reviewedByUserId: 'admin_1',
-    approvedAt: '2026-04-20T00:00:00.000Z',
-    rejectedAt: null,
-    adminNotes: null,
-    name: 'Chrome aura nails',
-    description: null,
-    sourceUrl: null,
-    links: [],
-    mediaUrls: [],
-    requestedCategoryId: 'cat_1',
-    requestedCategory: null,
-    createdAt: '2026-04-20T00:00:00.000Z',
-    updatedAt: '2026-04-20T00:00:00.000Z',
-    ...overrides,
-  }
-}
-
-function makeInReviewViralRequestDto(
-  overrides?: Partial<Record<string, unknown>>,
-) {
-  return {
-    id: 'request_1',
-    status: ViralServiceRequestStatus.IN_REVIEW,
-    moderationStatus: ModerationStatus.PENDING_REVIEW,
-    reportCount: 0,
-    removedAt: null,
-    reviewedAt: '2026-04-20T00:00:00.000Z',
-    reviewedByUserId: 'admin_1',
-    approvedAt: null,
-    rejectedAt: null,
-    adminNotes: 'Needs another pass',
-    name: 'Chrome aura nails',
-    description: null,
-    sourceUrl: null,
-    links: [],
-    mediaUrls: [],
-    requestedCategoryId: 'cat_1',
-    requestedCategory: null,
-    createdAt: '2026-04-20T00:00:00.000Z',
-    updatedAt: '2026-04-20T00:00:00.000Z',
-    ...overrides,
-  }
-}
-
-function makeQueuedApprovalNotificationsDto(
-  overrides?: Partial<{
-    enqueued: true
-    matchedProfessionalIds: string[]
-    notificationIds: string[]
-    jobId: string
-    deliveryMode: 'JOB_QUEUED'
-  }>,
-) {
-  return {
-    enqueued: true as const,
-    matchedProfessionalIds: [],
-    notificationIds: [],
-    jobId: 'job_viral_1',
-    deliveryMode: 'JOB_QUEUED' as const,
-    ...overrides,
-  }
-}
-
 describe('lib/adminModeration/service.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useFakeTimers()
+    vi.setSystemTime(FIXED_DATE)
 
     mocks.requireUser.mockResolvedValue(makeAdminAuth())
     mocks.requireAdminPermission.mockResolvedValue({ ok: true })
@@ -362,13 +284,8 @@ describe('lib/adminModeration/service.ts', () => {
     })
 
     mocks.enqueueRecomputeLookCounts.mockResolvedValue({
-      id: 'job_1',
+      id: 'job_counts_1',
       type: 'RECOMPUTE_LOOK_COUNTS',
-    })
-
-    mocks.enqueueFanOutViralRequestApprovalNotifications.mockResolvedValue({
-      id: 'job_viral_1',
-      type: 'FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS',
     })
 
     mocks.enqueueLookPostMutationPolicy.mockResolvedValue({
@@ -379,16 +296,29 @@ describe('lib/adminModeration/service.ts', () => {
       gatedJobs: [],
     })
 
+    mocks.enqueueFanOutViralRequestApprovalNotifications.mockResolvedValue({
+      id: 'job_viral_1',
+      type: 'FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS',
+    })
+
     mocks.prisma.adminActionLog.create.mockResolvedValue({ id: 'log_1' })
 
-    mocks.toViralRequestDto.mockReturnValue(makeApprovedViralRequestDto())
-
-    mocks.toQueuedViralRequestApprovalNotificationsDto.mockReturnValue(
-      makeQueuedApprovalNotificationsDto(),
-    )
+    mocks.updateViralRequestStatus.mockResolvedValue({ id: 'request_1' })
+    mocks.toViralRequestDto.mockReturnValue({ id: 'request_1' })
+    mocks.toQueuedViralRequestApprovalNotificationsDto.mockReturnValue({
+      enqueued: true,
+      matchedProfessionalIds: [],
+      notificationIds: [],
+      jobId: 'job_viral_1',
+      deliveryMode: 'JOB_QUEUED',
+    })
   })
 
-  it('passes through failed admin auth responses unchanged', async () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('passes through failed admin auth responses unchanged and does not touch moderation targets', async () => {
     const authRes = Response.json(
       { ok: false, error: 'Unauthorized' },
       { status: 401 },
@@ -412,15 +342,16 @@ describe('lib/adminModeration/service.ts', () => {
     })
     expect(res).toBe(authRes)
     expect(mocks.prisma.lookPost.findUnique).not.toHaveBeenCalled()
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 
-  it('passes through admin permission failures unchanged', async () => {
+  it('passes through admin permission failures unchanged and does not execute moderation writes or enqueue work', async () => {
+    mocks.prisma.lookPost.findUnique.mockResolvedValue(makeLookPostRow())
+
     const permRes = Response.json(
       { ok: false, error: 'Forbidden' },
       { status: 403 },
     )
-
-    mocks.prisma.lookPost.findUnique.mockResolvedValue(makeLookPostRow())
 
     mocks.requireAdminPermission.mockResolvedValue({
       ok: false as const,
@@ -447,36 +378,81 @@ describe('lib/adminModeration/service.ts', () => {
         categoryId: 'cat_1',
       },
     })
+
     expect(res).toBe(permRes)
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.enqueueLookPostMutationPolicy).not.toHaveBeenCalled()
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
   })
 
-  it('returns 415 when content type is not application/json', async () => {
-    const res = await handleAdminModerationRoute(makeTextRequest(), {
-      kind: 'LOOK_POST',
-      targetId: 'look_1',
-    })
+  it('returns 400 for an invalid look comment moderation action and does not execute writes or enqueue work', async () => {
+    const res = await handleAdminModerationRoute(
+      makeJsonRequest({ action: 'mark_in_review' }),
+      {
+        kind: 'LOOK_COMMENT',
+        targetId: 'comment_1',
+      },
+    )
     const body = await readJson(res)
 
-    expect(res.status).toBe(415)
+    expect(res.status).toBe(400)
     expect(body).toEqual({
       ok: false,
-      error: 'Content-Type must be application/json.',
+      error: 'Invalid look comment moderation action.',
     })
+
+    expect(mocks.prisma.lookComment.findUnique).not.toHaveBeenCalled()
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
+    expect(mocks.enqueueLookPostMutationPolicy).not.toHaveBeenCalled()
   })
 
-  it('approves a look post, recomputes scores, enqueues policy work, and logs the action', async () => {
+  it('approves a look post, recomputes scores, delegates feed/search async work to the look-post mutation policy, and logs the action', async () => {
     mocks.prisma.lookPost.findUnique.mockResolvedValue(makeLookPostRow())
 
     mocks.prisma.lookPost.update.mockResolvedValue(
       makeLookPostRow({
         moderationStatus: ModerationStatus.APPROVED,
-        reviewedAt: new Date('2026-04-20T00:00:00.000Z'),
+        reviewedAt: FIXED_DATE,
         reviewedByUserId: 'admin_1',
         adminNotes: 'Approved by admin',
         reportCount: 0,
       }),
     )
+
+    mocks.enqueueLookPostMutationPolicy.mockResolvedValue({
+      lookPostId: 'look_1',
+      mutation: 'MODERATION_APPROVE',
+      plannedJobs: [
+        { type: 'RECOMPUTE_LOOK_SPOTLIGHT_SCORE', processorSupport: 'SUPPORTED' },
+        { type: 'RECOMPUTE_LOOK_RANK_SCORE', processorSupport: 'SUPPORTED' },
+        { type: 'INDEX_LOOK_POST_DOCUMENT', processorSupport: 'SUPPORTED' },
+      ],
+      enqueuedJobs: [
+        {
+          type: 'RECOMPUTE_LOOK_SPOTLIGHT_SCORE',
+          disposition: 'ENQUEUED',
+          processorSupport: 'SUPPORTED',
+          jobId: 'job_spotlight_1',
+          dedupeKey: 'looks:spotlight:look_1',
+        },
+        {
+          type: 'RECOMPUTE_LOOK_RANK_SCORE',
+          disposition: 'ENQUEUED',
+          processorSupport: 'SUPPORTED',
+          jobId: 'job_rank_1',
+          dedupeKey: 'looks:rank:look_1',
+        },
+        {
+          type: 'INDEX_LOOK_POST_DOCUMENT',
+          disposition: 'ENQUEUED',
+          processorSupport: 'SUPPORTED',
+          jobId: 'job_index_1',
+          dedupeKey: 'looks:index:look_1',
+        },
+      ],
+      gatedJobs: [],
+    })
 
     const res = await handleAdminModerationRoute(
       makeJsonRequest({
@@ -494,7 +470,7 @@ describe('lib/adminModeration/service.ts', () => {
       where: { id: 'look_1' },
       data: {
         moderationStatus: ModerationStatus.APPROVED,
-        reviewedAt: expect.any(Date),
+        reviewedAt: FIXED_DATE,
         reviewedByUserId: 'admin_1',
         adminNotes: 'Approved by admin',
       },
@@ -524,6 +500,8 @@ describe('lib/adminModeration/service.ts', () => {
       },
     )
 
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
+
     expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
       data: {
         adminUserId: 'admin_1',
@@ -549,7 +527,7 @@ describe('lib/adminModeration/service.ts', () => {
         moderationStatus: ModerationStatus.APPROVED,
         archivedAt: null,
         removedAt: null,
-        reviewedAt: '2026-04-20T00:00:00.000Z',
+        reviewedAt: FIXED_DATE_ISO,
         reviewedByUserId: 'admin_1',
         adminNotes: 'Approved by admin',
         reportCount: 0,
@@ -557,7 +535,127 @@ describe('lib/adminModeration/service.ts', () => {
     })
   })
 
-  it('removes a look comment, recomputes approved comment count, enqueues reconciliation, and logs the action', async () => {
+  it('removes a look post, recomputes scores, delegates feed/search removal work to the look-post mutation policy, and logs the action', async () => {
+    mocks.prisma.lookPost.findUnique.mockResolvedValue(makeLookPostRow())
+
+    mocks.prisma.lookPost.update.mockResolvedValue(
+      makeLookPostRow({
+        status: LookPostStatus.REMOVED,
+        moderationStatus: ModerationStatus.REMOVED,
+        removedAt: FIXED_DATE,
+        reviewedAt: FIXED_DATE,
+        reviewedByUserId: 'admin_1',
+        adminNotes: 'Removed by admin',
+      }),
+    )
+
+    mocks.enqueueLookPostMutationPolicy.mockResolvedValue({
+      lookPostId: 'look_1',
+      mutation: 'MODERATION_REMOVE',
+      plannedJobs: [
+        { type: 'RECOMPUTE_LOOK_SPOTLIGHT_SCORE', processorSupport: 'SUPPORTED' },
+        { type: 'RECOMPUTE_LOOK_RANK_SCORE', processorSupport: 'SUPPORTED' },
+        { type: 'INDEX_LOOK_POST_DOCUMENT', processorSupport: 'SUPPORTED' },
+      ],
+      enqueuedJobs: [
+        {
+          type: 'RECOMPUTE_LOOK_SPOTLIGHT_SCORE',
+          disposition: 'ENQUEUED',
+          processorSupport: 'SUPPORTED',
+          jobId: 'job_spotlight_1',
+          dedupeKey: 'looks:spotlight:look_1',
+        },
+        {
+          type: 'RECOMPUTE_LOOK_RANK_SCORE',
+          disposition: 'ENQUEUED',
+          processorSupport: 'SUPPORTED',
+          jobId: 'job_rank_1',
+          dedupeKey: 'looks:rank:look_1',
+        },
+        {
+          type: 'INDEX_LOOK_POST_DOCUMENT',
+          disposition: 'ENQUEUED',
+          processorSupport: 'SUPPORTED',
+          jobId: 'job_index_1',
+          dedupeKey: 'looks:index:look_1',
+        },
+      ],
+      gatedJobs: [],
+    })
+
+    const res = await handleAdminModerationRoute(
+      makeJsonRequest({
+        action: 'remove',
+        adminNotes: 'Removed by admin',
+      }),
+      {
+        kind: 'LOOK_POST',
+        targetId: 'look_1',
+      },
+    )
+    const body = await readJson(res)
+
+    expect(mocks.prisma.lookPost.update).toHaveBeenCalledWith({
+      where: { id: 'look_1' },
+      data: {
+        status: LookPostStatus.REMOVED,
+        moderationStatus: ModerationStatus.REMOVED,
+        removedAt: FIXED_DATE,
+        reviewedAt: FIXED_DATE,
+        reviewedByUserId: 'admin_1',
+        adminNotes: 'Removed by admin',
+      },
+      select: expect.objectContaining({
+        id: true,
+        status: true,
+        moderationStatus: true,
+        reviewedAt: true,
+        reviewedByUserId: true,
+        adminNotes: true,
+        reportCount: true,
+      }),
+    })
+
+    expect(mocks.recomputeLookPostScores).toHaveBeenCalledWith(
+      mocks.tx,
+      'look_1',
+    )
+
+    expect(mocks.enqueueLookPostMutationPolicy).toHaveBeenCalledWith(
+      mocks.tx,
+      {
+        lookPostId: 'look_1',
+        mutation: 'MODERATION_REMOVE',
+        feedEligibilityChanged: true,
+        searchableDocumentChanged: true,
+      },
+    )
+
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
+
+    expect(res.status).toBe(200)
+    expect(body).toEqual({
+      ok: true,
+      target: {
+        kind: 'LOOK_POST',
+        id: 'look_1',
+      },
+      action: 'remove',
+      result: {
+        id: 'look_1',
+        status: LookPostStatus.REMOVED,
+        moderationStatus: ModerationStatus.REMOVED,
+        archivedAt: null,
+        removedAt: FIXED_DATE_ISO,
+        reviewedAt: FIXED_DATE_ISO,
+        reviewedByUserId: 'admin_1',
+        adminNotes: 'Removed by admin',
+        reportCount: 0,
+      },
+    })
+  })
+
+  it('removes a look comment, recomputes approved comment count, enqueues count reconciliation, does not delegate to look-post mutation policy, and logs the action', async () => {
     mocks.prisma.lookComment.findUnique.mockResolvedValue(
       makeLookCommentRow(),
     )
@@ -566,8 +664,8 @@ describe('lib/adminModeration/service.ts', () => {
       id: 'comment_1',
       lookPostId: 'look_9',
       moderationStatus: ModerationStatus.REMOVED,
-      removedAt: new Date('2026-04-20T00:00:00.000Z'),
-      reviewedAt: new Date('2026-04-20T00:00:00.000Z'),
+      removedAt: FIXED_DATE,
+      reviewedAt: FIXED_DATE,
       reviewedByUserId: 'admin_1',
       adminNotes: 'Removed by admin',
       reportCount: 0,
@@ -591,10 +689,10 @@ describe('lib/adminModeration/service.ts', () => {
       where: { id: 'comment_1' },
       data: {
         moderationStatus: ModerationStatus.REMOVED,
-        reviewedAt: expect.any(Date),
+        reviewedAt: FIXED_DATE,
         reviewedByUserId: 'admin_1',
         adminNotes: 'Removed by admin',
-        removedAt: expect.any(Date),
+        removedAt: FIXED_DATE,
       },
       select: {
         id: true,
@@ -619,6 +717,11 @@ describe('lib/adminModeration/service.ts', () => {
         lookPostId: 'look_9',
       },
     )
+
+    expect(mocks.enqueueLookPostMutationPolicy).not.toHaveBeenCalled()
+    expect(
+      mocks.enqueueFanOutViralRequestApprovalNotifications,
+    ).not.toHaveBeenCalled()
 
     expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
       data: {
@@ -645,34 +748,14 @@ describe('lib/adminModeration/service.ts', () => {
         id: 'comment_1',
         lookPostId: 'look_9',
         moderationStatus: ModerationStatus.REMOVED,
-        removedAt: '2026-04-20T00:00:00.000Z',
-        reviewedAt: '2026-04-20T00:00:00.000Z',
+        removedAt: FIXED_DATE_ISO,
+        reviewedAt: FIXED_DATE_ISO,
         reviewedByUserId: 'admin_1',
         adminNotes: 'Removed by admin',
         reportCount: 0,
         commentsCount: 7,
       },
     })
-  })
-
-  it('returns 400 for an invalid look comment moderation action', async () => {
-    const res = await handleAdminModerationRoute(
-      makeJsonRequest({ action: 'mark_in_review' }),
-      {
-        kind: 'LOOK_COMMENT',
-        targetId: 'comment_1',
-      },
-    )
-    const body = await readJson(res)
-
-    expect(res.status).toBe(400)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Invalid look comment moderation action.',
-    })
-
-    expect(mocks.prisma.lookComment.findUnique).not.toHaveBeenCalled()
-    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 
   it('returns 409 when a look comment is already removed and remove is requested again', async () => {
@@ -699,6 +782,7 @@ describe('lib/adminModeration/service.ts', () => {
     })
 
     expect(mocks.prisma.lookComment.update).not.toHaveBeenCalled()
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
     expect(mocks.prisma.adminActionLog.create).not.toHaveBeenCalled()
   })
 
@@ -719,173 +803,28 @@ describe('lib/adminModeration/service.ts', () => {
       ok: false,
       error: 'Look post not found.',
     })
+
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.enqueueLookPostMutationPolicy).not.toHaveBeenCalled()
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
   })
 
-  it('marks a viral request in review and records the reviewer + note', async () => {
-    mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue(
-      makeViralPermissionRow({
-        status: ViralServiceRequestStatus.REQUESTED,
-      }),
-    )
-
-    mocks.updateViralRequestStatus.mockResolvedValue({
-      id: 'request_1',
-    })
-
-    mocks.toViralRequestDto.mockReturnValue(
-      makeInReviewViralRequestDto({
-        adminNotes: 'Needs another pass',
-      }),
-    )
-
-    const res = await handleAdminModerationRoute(
-      makeJsonRequest({
-        action: 'mark_in_review',
-        adminNotes: 'Needs another pass',
-      }),
-      {
-        kind: 'VIRAL_SERVICE_REQUEST',
-        targetId: 'request_1',
-      },
-    )
-    const body = await readJson(res)
-
-    expect(mocks.updateViralRequestStatus).toHaveBeenCalledWith(
-      mocks.tx,
-      {
-        requestId: 'request_1',
-        nextStatus: ViralServiceRequestStatus.IN_REVIEW,
-        reviewerUserId: 'admin_1',
-        adminNotes: 'Needs another pass',
-        moderationStatus: ModerationStatus.PENDING_REVIEW,
-      },
-    )
-
-    expect(
-      mocks.enqueueFanOutViralRequestApprovalNotifications,
-    ).not.toHaveBeenCalled()
-
-    expect(res.status).toBe(200)
-    expect(body).toEqual({
-      ok: true,
-      target: {
-        kind: 'VIRAL_SERVICE_REQUEST',
-        id: 'request_1',
-      },
-      action: 'mark_in_review',
-      result: {
-        request: {
-          id: 'request_1',
-          status: ViralServiceRequestStatus.IN_REVIEW,
-          moderationStatus: ModerationStatus.PENDING_REVIEW,
-          reportCount: 0,
-          removedAt: null,
-          reviewedAt: '2026-04-20T00:00:00.000Z',
-          reviewedByUserId: 'admin_1',
-          approvedAt: null,
-          rejectedAt: null,
-          adminNotes: 'Needs another pass',
-          name: 'Chrome aura nails',
-          description: null,
-          sourceUrl: null,
-          links: [],
-          mediaUrls: [],
-          requestedCategoryId: 'cat_1',
-          requestedCategory: null,
-          createdAt: '2026-04-20T00:00:00.000Z',
-          updatedAt: '2026-04-20T00:00:00.000Z',
-        },
-      },
-    })
-  })
-
-  it('approves a viral request, enqueues a durable fan-out job, and returns the queued notifications contract', async () => {
+  it('does not pull unrelated viral-request enqueue paths into the looks moderation audit surface', async () => {
     mocks.prisma.viralServiceRequest.findUnique.mockResolvedValue(
       makeViralPermissionRow(),
     )
 
-    mocks.updateViralRequestStatus.mockResolvedValue({
-      id: 'request_1',
-    })
-
-    mocks.toViralRequestDto.mockReturnValue(makeApprovedViralRequestDto())
-
     const res = await handleAdminModerationRoute(
-      makeJsonRequest({
-        action: 'approve',
-        adminNotes: 'Looks good',
-      }),
+      makeJsonRequest({ action: 'approve' }),
       {
-        kind: 'VIRAL_SERVICE_REQUEST',
-        targetId: 'request_1',
-      },
-    )
-    const body = await readJson(res)
-
-    expect(mocks.updateViralRequestStatus).toHaveBeenCalledWith(
-      mocks.tx,
-      {
-        requestId: 'request_1',
-        nextStatus: ViralServiceRequestStatus.APPROVED,
-        reviewerUserId: 'admin_1',
-        adminNotes: 'Looks good',
-        moderationStatus: ModerationStatus.APPROVED,
+        kind: 'LOOK_POST',
+        targetId: 'look_missing',
       },
     )
 
+    expect(res.status).toBe(404)
     expect(
       mocks.enqueueFanOutViralRequestApprovalNotifications,
-    ).toHaveBeenCalledWith(mocks.tx, {
-      requestId: 'request_1',
-    })
-
-    expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
-      data: {
-        adminUserId: 'admin_1',
-        action: 'VIRAL_REQUEST_APPROVED',
-        note: 'requestId=request_1 note=Looks good',
-        categoryId: 'cat_1',
-      },
-    })
-
-    expect(res.status).toBe(200)
-    expect(body).toEqual({
-      ok: true,
-      target: {
-        kind: 'VIRAL_SERVICE_REQUEST',
-        id: 'request_1',
-      },
-      action: 'approve',
-      result: {
-        request: {
-          id: 'request_1',
-          status: ViralServiceRequestStatus.APPROVED,
-          moderationStatus: ModerationStatus.APPROVED,
-          reportCount: 0,
-          removedAt: null,
-          reviewedAt: '2026-04-20T00:00:00.000Z',
-          reviewedByUserId: 'admin_1',
-          approvedAt: '2026-04-20T00:00:00.000Z',
-          rejectedAt: null,
-          adminNotes: null,
-          name: 'Chrome aura nails',
-          description: null,
-          sourceUrl: null,
-          links: [],
-          mediaUrls: [],
-          requestedCategoryId: 'cat_1',
-          requestedCategory: null,
-          createdAt: '2026-04-20T00:00:00.000Z',
-          updatedAt: '2026-04-20T00:00:00.000Z',
-        },
-        notifications: {
-          enqueued: true,
-          matchedProfessionalIds: [],
-          notificationIds: [],
-          jobId: 'job_viral_1',
-          deliveryMode: 'JOB_QUEUED',
-        },
-      },
-    })
+    ).not.toHaveBeenCalled()
   })
 })
