@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { safeJson } from '@/lib/http'
-import { parseLooksCommentsResponse } from '@/lib/looks/mappers'
+import { parseLooksCommentsResponse } from '@/lib/looks/parsers'
 import type {
   LooksCommentDto,
   LooksDetailItemDto,
