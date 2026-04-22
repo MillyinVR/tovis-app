@@ -1,4 +1,5 @@
 // lib/looks/mappers.ts
+import 'server-only'
 import {
   LookPostStatus,
   LookPostVisibility,

@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => {
         update: vi.fn(),
       },
     },
+    processIndexLookPostDocument: vi.fn(),
     recomputeLookPostCounters: vi.fn(),
     recomputeLookPostSpotlightScore: vi.fn(),
     recomputeLookPostRankScore: vi.fn(),
@@ -28,6 +29,10 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
+}))
+
+vi.mock('@/lib/jobs/looksSocial/indexLookPostDocument', () => ({
+  processIndexLookPostDocument: mocks.processIndexLookPostDocument,
 }))
 
 vi.mock('@/lib/looks/counters', () => ({
@@ -373,6 +378,73 @@ describe('lib/jobs/looksSocial/process', () => {
     })
   })
 
+  it('processes index look post document jobs and marks them completed', async () => {
+    const now = new Date('2026-04-20T18:00:00.000Z')
+    const job = makeDueJob({
+      id: 'job_index_1',
+      type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+      payload: { lookPostId: 'look_99' },
+      dedupeKey: 'look:look_99:index-document',
+      attemptCount: 0,
+      maxAttempts: 1,
+    })
+
+    mocks.prisma.looksSocialJob.findMany.mockResolvedValue([job])
+    mocks.prisma.looksSocialJob.updateMany.mockResolvedValue({ count: 1 })
+    mocks.processIndexLookPostDocument.mockResolvedValue({
+      action: 'UPSERT',
+      lookPostId: 'look_99',
+      reason: 'LOOK_POST_SEARCHABLE',
+      document: {
+        id: 'look_99',
+      },
+    })
+    mocks.prisma.looksSocialJob.update.mockResolvedValue({ id: job.id })
+
+    const result = await processLooksSocialJobs({ now })
+
+    expect(mocks.processIndexLookPostDocument).toHaveBeenCalledWith(
+      mocks.prisma,
+      {
+        lookPostId: 'look_99',
+      },
+    )
+
+    expect(mocks.prisma.looksSocialJob.update).toHaveBeenCalledWith({
+      where: { id: job.id },
+      data: {
+        status: LooksSocialJobStatus.COMPLETED,
+        claimedAt: null,
+        processedAt: now,
+        failedAt: null,
+        lastError: null,
+      },
+      select: { id: true },
+    })
+
+    expect(result).toEqual({
+      scannedCount: 1,
+      processedCount: 1,
+      completedCount: 1,
+      retryScheduledCount: 0,
+      failedCount: 0,
+      perTypeCounts: makePerTypeCounts({
+        type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+        scannedCount: 1,
+        processedCount: 1,
+        completedCount: 1,
+      }),
+      outcomes: [
+        {
+          jobId: 'job_index_1',
+          type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+          dedupeKey: 'look:look_99:index-document',
+          result: 'COMPLETED',
+        },
+      ],
+    })
+  })
+
   it('requeues deferred moderation scan comment jobs when attempts remain', async () => {
     const now = new Date('2026-04-20T17:00:00.000Z')
     const retryAt = new Date('2026-04-20T17:05:00.000Z')
@@ -395,6 +467,7 @@ describe('lib/jobs/looksSocial/process', () => {
     expect(
       mocks.runViralRequestApprovalOrchestration,
     ).not.toHaveBeenCalled()
+    expect(mocks.processIndexLookPostDocument).not.toHaveBeenCalled()
 
     expect(mocks.prisma.looksSocialJob.update).toHaveBeenCalledWith({
       where: { id: job.id },
@@ -434,60 +507,6 @@ describe('lib/jobs/looksSocial/process', () => {
     })
   })
 
-  it('marks deferred index jobs failed when max attempts are exhausted', async () => {
-    const now = new Date('2026-04-20T18:00:00.000Z')
-    const job = makeDueJob({
-      id: 'job_index_1',
-      type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
-      payload: { lookPostId: 'look_99' },
-      dedupeKey: 'look:look_99:index-document',
-      attemptCount: 0,
-      maxAttempts: 1,
-    })
-
-    mocks.prisma.looksSocialJob.findMany.mockResolvedValue([job])
-    mocks.prisma.looksSocialJob.updateMany.mockResolvedValue({ count: 1 })
-    mocks.prisma.looksSocialJob.update.mockResolvedValue({ id: job.id })
-
-    const result = await processLooksSocialJobs({ now })
-
-    expect(mocks.prisma.looksSocialJob.update).toHaveBeenCalledWith({
-      where: { id: job.id },
-      data: {
-        status: LooksSocialJobStatus.FAILED,
-        claimedAt: null,
-        failedAt: now,
-        lastError:
-          'indexLookPostDocument is deferred until the search indexing implementation exists.',
-      },
-      select: { id: true },
-    })
-
-    expect(result).toEqual({
-      scannedCount: 1,
-      processedCount: 1,
-      completedCount: 0,
-      retryScheduledCount: 0,
-      failedCount: 1,
-      perTypeCounts: makePerTypeCounts({
-        type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
-        scannedCount: 1,
-        processedCount: 1,
-        failedCount: 1,
-      }),
-      outcomes: [
-        {
-          jobId: 'job_index_1',
-          type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
-          dedupeKey: 'look:look_99:index-document',
-          result: 'FAILED_FINAL',
-          message:
-            'indexLookPostDocument is deferred until the search indexing implementation exists.',
-        },
-      ],
-    })
-  })
-
   it('fails finally when a job payload field is missing and max attempts are exhausted', async () => {
     const now = new Date('2026-04-20T18:30:00.000Z')
     const job = makeDueJob({
@@ -506,6 +525,7 @@ describe('lib/jobs/looksSocial/process', () => {
     const result = await processLooksSocialJobs({ now })
 
     expect(mocks.recomputeLookPostCounters).not.toHaveBeenCalled()
+    expect(mocks.processIndexLookPostDocument).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       scannedCount: 1,
@@ -547,6 +567,7 @@ describe('lib/jobs/looksSocial/process', () => {
 
     expect(mocks.recomputeLookPostCounters).not.toHaveBeenCalled()
     expect(mocks.prisma.looksSocialJob.update).not.toHaveBeenCalled()
+    expect(mocks.processIndexLookPostDocument).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       scannedCount: 1,
@@ -582,11 +603,20 @@ describe('lib/jobs/looksSocial/process', () => {
       maxAttempts: 2,
     })
 
-    const failedJob = makeDueJob({
-      id: 'job_index_failed',
+    const indexedJob = makeDueJob({
+      id: 'job_index_completed',
       type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
       payload: { lookPostId: 'look_300' },
       dedupeKey: 'look:look_300:index-document',
+      attemptCount: 0,
+      maxAttempts: 1,
+    })
+
+    const failedJob = makeDueJob({
+      id: 'job_moderation_failed',
+      type: LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
+      payload: { lookPostId: 'look_400' },
+      dedupeKey: 'look:look_400:moderation-scan',
       attemptCount: 0,
       maxAttempts: 1,
     })
@@ -601,11 +631,13 @@ describe('lib/jobs/looksSocial/process', () => {
     mocks.prisma.looksSocialJob.findMany.mockResolvedValue([
       completedJob,
       retryJob,
+      indexedJob,
       failedJob,
       unclaimedJob,
     ])
 
     mocks.prisma.looksSocialJob.updateMany
+      .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 1 })
@@ -619,14 +651,21 @@ describe('lib/jobs/looksSocial/process', () => {
       rankScore: 15,
     })
 
+    mocks.processIndexLookPostDocument.mockResolvedValue({
+      action: 'DELETE',
+      lookPostId: 'look_300',
+      reason: 'LOOK_POST_NOT_SEARCHABLE',
+      document: null,
+    })
+
     mocks.prisma.looksSocialJob.update.mockResolvedValue({ id: 'updated' })
 
     const result = await processLooksSocialJobs({ now })
 
     expect(result).toEqual({
-      scannedCount: 4,
-      processedCount: 3,
-      completedCount: 1,
+      scannedCount: 5,
+      processedCount: 4,
+      completedCount: 2,
       retryScheduledCount: 1,
       failedCount: 1,
       perTypeCounts: makePerTypeCounts(
@@ -644,6 +683,12 @@ describe('lib/jobs/looksSocial/process', () => {
         },
         {
           type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+          scannedCount: 1,
+          processedCount: 1,
+          completedCount: 1,
+        },
+        {
+          type: LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
           scannedCount: 1,
           processedCount: 1,
           failedCount: 1,
@@ -670,12 +715,18 @@ describe('lib/jobs/looksSocial/process', () => {
             'moderationScanComment is deferred until the comment moderation implementation exists.',
         },
         {
-          jobId: 'job_index_failed',
+          jobId: 'job_index_completed',
           type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
           dedupeKey: 'look:look_300:index-document',
+          result: 'COMPLETED',
+        },
+        {
+          jobId: 'job_moderation_failed',
+          type: LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
+          dedupeKey: 'look:look_400:moderation-scan',
           result: 'FAILED_FINAL',
           message:
-            'indexLookPostDocument is deferred until the search indexing implementation exists.',
+            'moderationScanLookPost is deferred until the look moderation implementation exists.',
         },
       ],
     })

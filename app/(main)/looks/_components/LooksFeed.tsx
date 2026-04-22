@@ -14,7 +14,7 @@ import { safeJson } from '@/lib/http'
 import {
   parseLooksCommentsResponse,
   parseLooksFeedEnvelope,
-} from '@/lib/looks/mappers'
+} from '@/lib/looks/parsers'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
 import type { FeedItem, UiCategory, UiComment } from './lookTypes'
 import {

@@ -9,6 +9,7 @@ import {
   makeEmptyLooksSocialJobPerTypeCounts,
   type LooksSocialJobPerTypeCounts,
 } from '@/lib/jobs/looksSocial/contracts'
+import { processIndexLookPostDocument } from '@/lib/jobs/looksSocial/indexLookPostDocument'
 import {
   recomputeLookPostCounters,
   recomputeLookPostRankScore,
@@ -158,9 +159,10 @@ async function runLooksSocialJob(
       return
 
     case LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT:
-      throw new Error(
-        'indexLookPostDocument is deferred until the search indexing implementation exists.',
-      )
+      await processIndexLookPostDocument(prisma, {
+        lookPostId: readRequiredString(job.payload, 'lookPostId'),
+      })
+      return
 
     case LooksSocialJobType.MODERATION_SCAN_LOOK_POST:
       throw new Error(
