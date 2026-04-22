@@ -19,7 +19,7 @@ vi.mock('next/navigation', () => ({
   notFound: mocks.notFound,
 }))
 
-vi.mock('@/lib/looks/mappers', () => ({
+vi.mock('@/lib/looks/parsers', () => ({
   parseLooksDetailResponse: mocks.parseLooksDetailResponse,
 }))
 

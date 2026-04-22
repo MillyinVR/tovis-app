@@ -2,7 +2,7 @@
 import { headers } from 'next/headers'
 import { notFound } from 'next/navigation'
 
-import { parseLooksDetailResponse } from '@/lib/looks/mappers'
+import { parseLooksDetailResponse } from '@/lib/looks/parsers'
 import LookDetailClient from './LookDetailClient'
 
 export const dynamic = 'force-dynamic'

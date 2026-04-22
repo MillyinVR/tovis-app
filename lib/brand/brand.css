@@ -1,44 +1,71 @@
 /* lib/brand/brand.css */
-/* Pre-hydration defaults — must match dark mode tokens in tovis.ts   */
-/* so there's no flash before BrandProvider mounts.                   */
+/* Pre-hydration defaults — must match dark mode tokens in brands/tovis.ts  */
+/* so there's no flash before BrandProvider mounts.                         */
 :root {
-  /* Foundation — dark mode primary (Espresso) */
-  --bg-primary: 30 22 18;       /* Espresso — main dark background */
-  --bg-secondary: 61 46 39;     /* Bark — elevated surfaces */
-  --text-primary: 247 243 238;  /* Parchment — warm off-white text */
-  --text-secondary: 154 123 92; /* Driftwood — muted warm secondary */
-  --surface-glass: 247 243 238; /* Parchment-tinted glass on dark bg */
+  /* ── Background layers ─────────────────────────────────────────── */
+  --bg-primary:   10 9 7;       /* Ink        #0A0907 */
+  --bg-secondary: 20 17 14;     /* Ink-2      #14110E */
+  --bg-surface:   30 26 21;     /* Ink-3      #1E1A15 */
 
-  /* Accent */
-  --accent-primary: 196 103 58;       /* Terra */
-  --accent-primary-hover: 208 122 77;
-  --micro-accent: 232 221 212;        /* Linen — warm highlight */
+  /* ── Text layers ────────────────────────────────────────────────── */
+  --text-primary:   244 239 231; /* Paper      #F4EFE7 */
+  --text-secondary: 205 198 187; /* Paper-dim  #CDC6BB */
+  --text-muted:     122 117 105; /* Paper-mute #7A7569 */
 
-  /* Status — brand palette */
-  --tone-danger: 168 75 58;    /* Ember   #A84B3A */
-  --tone-warn: 196 146 58;     /* Ochre   #C4923A */
-  --tone-success: 92 138 107;  /* Fern    #5C8A6B */
-  --tone-info: 59 130 246;     /* blue-500 */
+  /* ── Glass surface ──────────────────────────────────────────────── */
+  --surface-glass: 244 239 231;  /* Paper-tinted glass on dark bg */
 
-  --overlay: 30 22 18;
+  /* ── Accent ─────────────────────────────────────────────────────── */
+  --accent-primary:       224 90 40;  /* Terra      #E05A28 */
+  --accent-primary-hover: 255 106 54; /* Terra-glow #FF6A36 */
+  --micro-accent:         232 221 212; /* Linen      #E8DDD4 */
 
-  /* Effects */
-  --glass-blur: 20px;
+  /* ── Brand palette ──────────────────────────────────────────────── */
+  --color-acid:  212 255 58;  /* Acid  #D4FF3A */
+  --color-fern:  98 168 122;  /* Fern  #62A87A */
+  --color-ember: 255 61 78;   /* Ember #FF3D4E */
+
+  /* ── Prototype aliases — kept in sync with semantic tokens above ── */
+  --ink:        10 9 7;
+  --ink-2:      20 17 14;
+  --ink-3:      30 26 21;
+  --paper:      244 239 231;
+  --paper-dim:  205 198 187;
+  --paper-mute: 122 117 105;
+  --terra:      224 90 40;
+  --terra-glow: 255 106 54;
+  --acid:       212 255 58;
+  --fern:       98 168 122;
+  --ember:      255 61 78;
+
+  /* ── Computed borders (paper at fixed opacity) ──────────────────── */
+  --line:        rgba(244, 239, 231, 0.08);
+  --line-strong: rgba(244, 239, 231, 0.16);
+
+  /* ── Status tones (not yet white-labelable, match brand palette) ── */
+  --tone-danger:  255 61 78;   /* ember  #FF3D4E */
+  --tone-warn:    196 146 58;  /* Ochre  #C4923A */
+  --tone-success: 98 168 122;  /* fern   #62A87A */
+  --tone-info:    59 130 246;  /* blue-500       */
+
+  /* ── Effects ────────────────────────────────────────────────────── */
+  --glass-blur:    20px;
   --glass-opacity: 0.09;
-  --shadow-color: 30 22 18;
+  --shadow-color:  10 9 7;
 
-  /* Radii */
+  /* ── Radii ──────────────────────────────────────────────────────── */
   --radius-app-icon: 28px;
-  --radius-card: 14px;
-  --radius-inner: 8px;
+  --radius-card:     14px;
+  --radius-inner:    8px;
 
-  /* Typography */
-  --font-sans: var(--font-body), ui-sans-serif, system-ui, -apple-system,
-    BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto,
-    Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-  --font-display: var(--font-display-face), "Cormorant Garamond", Georgia,
-    "Times New Roman", serif;
+  /* ── Typography ─────────────────────────────────────────────────── */
+  --font-sans:    var(--font-body), "Inter Tight", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: var(--font-display-face), "Fraunces", Georgia, "Times New Roman", serif;
+  --font-mono:    var(--font-mono-face), "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
   --ls-caps: 0.08em;
+
+  /* ── Misc ────────────────────────────────────────────────────────── */
+  --overlay: 10 9 7;
 }
 
 html,

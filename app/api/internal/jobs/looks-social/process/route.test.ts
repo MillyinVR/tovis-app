@@ -69,20 +69,24 @@ describe('app/api/internal/jobs/looks-social/process/route', () => {
     vi.restoreAllMocks()
   })
 
-  it('GET returns 401 when no job secret is configured', async () => {
+  it('GET returns 500 when no job secret is configured', async () => {
     const req = new Request(
       'https://tovis.app/api/internal/jobs/looks-social/process',
     )
 
     const result = await GET(req)
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(401, 'Unauthorized')
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      500,
+      'Missing INTERNAL_JOB_SECRET or CRON_SECRET configuration.',
+    )
     expect(mocks.processLooksSocialJobs).not.toHaveBeenCalled()
     expect(mocks.logLooksSocialJobBatchEvent).not.toHaveBeenCalled()
+
     expect(result).toEqual({
       ok: false,
-      status: 401,
-      message: 'Unauthorized',
+      status: 500,
+      message: 'Missing INTERNAL_JOB_SECRET or CRON_SECRET configuration.',
     })
   })
 
@@ -101,6 +105,7 @@ describe('app/api/internal/jobs/looks-social/process/route', () => {
     expect(mocks.jsonFail).toHaveBeenCalledWith(401, 'Unauthorized')
     expect(mocks.processLooksSocialJobs).not.toHaveBeenCalled()
     expect(mocks.logLooksSocialJobBatchEvent).not.toHaveBeenCalled()
+
     expect(result).toEqual({
       ok: false,
       status: 401,

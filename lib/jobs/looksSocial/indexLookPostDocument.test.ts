@@ -67,8 +67,12 @@ function makeLookPostRow(
   return {
     id: overrides?.id ?? 'look_1',
     professionalId: overrides?.professionalId ?? 'pro_1',
-    serviceId: overrides?.serviceId ?? 'svc_1',
-    caption: overrides?.caption ?? '  Soft glam   bob   ',
+    serviceId:
+      overrides && 'serviceId' in overrides ? overrides.serviceId! : 'svc_1',
+    caption:
+      overrides && 'caption' in overrides
+        ? overrides.caption!
+        : '  Soft glam   bob   ',
 
     status: overrides?.status ?? LookPostStatus.PUBLISHED,
     visibility: overrides?.visibility ?? LookPostVisibility.PUBLIC,
@@ -76,9 +80,13 @@ function makeLookPostRow(
       overrides?.moderationStatus ?? ModerationStatus.APPROVED,
 
     publishedAt:
-      overrides?.publishedAt ?? new Date('2026-04-21T12:00:00.000Z'),
-    archivedAt: overrides?.archivedAt ?? null,
-    removedAt: overrides?.removedAt ?? null,
+      overrides && 'publishedAt' in overrides
+        ? overrides.publishedAt!
+        : new Date('2026-04-21T12:00:00.000Z'),
+    archivedAt:
+      overrides && 'archivedAt' in overrides ? overrides.archivedAt! : null,
+    removedAt:
+      overrides && 'removedAt' in overrides ? overrides.removedAt! : null,
 
     likeCount: overrides?.likeCount ?? 12,
     commentCount: overrides?.commentCount ?? 3,
@@ -100,15 +108,18 @@ function makeLookPostRow(
       verificationStatus: VerificationStatus.APPROVED,
     },
 
-    service: overrides?.service ?? {
-      id: 'svc_1',
-      name: '  Bob Cut  ',
-      category: {
-        id: 'cat_1',
-        name: '  Hair  ',
-        slug: '  hair  ',
-      },
-    },
+    service:
+      overrides && 'service' in overrides
+        ? overrides.service!
+        : {
+            id: 'svc_1',
+            name: '  Bob Cut  ',
+            category: {
+              id: 'cat_1',
+              name: '  Hair  ',
+              slug: '  hair  ',
+            },
+          },
   }
 }
 

@@ -1,7 +1,6 @@
 // lib/follows/index.ts
 import { Prisma, PrismaClient } from '@prisma/client'
-
-import { mapLooksProProfilePreviewToDto } from '@/lib/looks/mappers'
+import { mapLooksProProfilePreviewToDto } from '@/lib/looks/profilePreview'
 import {
   looksProProfilePreviewSelect,
   type LooksProProfilePreviewRow,

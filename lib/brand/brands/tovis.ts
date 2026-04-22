@@ -1,9 +1,13 @@
 // lib/brand/brands/tovis.ts
 import type { BrandConfig } from '../types'
 
-// DM Sans loaded via next/font into --font-body
+// Inter Tight loaded via next/font into --font-body
 const fontSans =
-  'var(--font-body), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial'
+  'var(--font-body), "Inter Tight", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+
+// JetBrains Mono loaded via next/font into --font-mono-face
+const fontMono =
+  'var(--font-mono-face), "JetBrains Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace'
 
 export const tovisBrand: BrandConfig = {
   id: 'tovis',
@@ -20,28 +24,51 @@ export const tovisBrand: BrandConfig = {
     location: 'Encinitas, CA',
   },
   tokensByMode: {
-    // Light mode is primary — Parchment bg, white cards, Espresso text, Terra accent
+    dark: {
+      colors: {
+        bgPrimary:          '10 9 7',       // Ink        #0A0907
+        bgSecondary:        '20 17 14',     // Ink-2      #14110E
+        bgSurface:          '30 26 21',     // Ink-3      #1E1A15
+        textPrimary:        '244 239 231',  // Paper      #F4EFE7
+        textSecondary:      '205 198 187',  // Paper-dim  #CDC6BB
+        textMuted:          '122 117 105',  // Paper-mute #7A7569
+        surfaceGlass:       '244 239 231',  // Paper-tinted glass on dark
+        accentPrimary:      '224 90 40',    // Terra      #E05A28
+        accentPrimaryHover: '255 106 54',   // Terra-glow #FF6A36
+        microAccent:        '232 221 212',  // Linen      #E8DDD4
+        colorAcid:          '212 255 58',   // Acid       #D4FF3A
+        colorFern:          '98 168 122',   // Fern       #62A87A
+        colorEmber:         '255 61 78',    // Ember      #FF3D4E
+      },
+      effects: {
+        glassBlurPx: 20,
+        glassOpacity: 0.09,
+        shadowColor: '10 9 7',
+        radiusAppIconPx: 28,
+        radiusCardPx: 14,
+      },
+      typography: {
+        fontSans,
+        fontMono,
+        letterSpacingCaps: '0.08em',
+      },
+    },
+
     light: {
       colors: {
-        // Parchment — main page background
-        bgPrimary: '247 243 238',
-        // White — card/surface background
-        bgSecondary: '255 255 255',
-
-        // Espresso — primary text
-        textPrimary: '30 22 18',
-        // Driftwood — secondary/muted text
-        textSecondary: '154 123 92',
-
-        // Espresso-tinted glass (dark frosting on light bg)
-        surfaceGlass: '30 22 18',
-
-        // Terra — signature accent
-        accentPrimary: '196 103 58',
-        accentPrimaryHover: '208 122 77',
-
-        // Driftwood as micro-accent
-        microAccent: '154 123 92',
+        bgPrimary:          '244 239 231',  // Paper      #F4EFE7
+        bgSecondary:        '255 255 255',  // White
+        bgSurface:          '250 247 244',  // Warm white
+        textPrimary:        '10 9 7',       // Ink        #0A0907
+        textSecondary:      '122 117 105',  // Paper-mute #7A7569
+        textMuted:          '154 148 140',  // Very muted
+        surfaceGlass:       '10 9 7',       // Ink-tinted glass on light bg
+        accentPrimary:      '224 90 40',    // Terra      #E05A28 (same both modes)
+        accentPrimaryHover: '255 106 54',   // Terra-glow #FF6A36
+        microAccent:        '154 123 92',   // Driftwood  #9A7B5C
+        colorAcid:          '180 200 0',    // Acid — darkened for legibility on light
+        colorFern:          '68 130 90',    // Fern — darkened for light
+        colorEmber:         '210 40 55',    // Ember — darkened for light
       },
       effects: {
         glassBlurPx: 18,
@@ -52,42 +79,7 @@ export const tovisBrand: BrandConfig = {
       },
       typography: {
         fontSans,
-        letterSpacingCaps: '0.08em',
-      },
-    },
-
-    // Dark mode — optional, available for toggle
-    dark: {
-      colors: {
-        // Espresso — warm dark brown
-        bgPrimary: '30 22 18',
-        // Bark — elevated surface
-        bgSecondary: '61 46 39',
-
-        // Parchment — warm off-white text
-        textPrimary: '247 243 238',
-        // Driftwood — muted warm secondary text
-        textSecondary: '154 123 92',
-
-        // Parchment-tinted glass
-        surfaceGlass: '247 243 238',
-
-        // Terra accent
-        accentPrimary: '196 103 58',
-        accentPrimaryHover: '208 122 77',
-
-        // Linen micro-accent
-        microAccent: '232 221 212',
-      },
-      effects: {
-        glassBlurPx: 20,
-        glassOpacity: 0.09,
-        shadowColor: '30 22 18',
-        radiusAppIconPx: 28,
-        radiusCardPx: 14,
-      },
-      typography: {
-        fontSans,
+        fontMono,
         letterSpacingCaps: '0.08em',
       },
     },

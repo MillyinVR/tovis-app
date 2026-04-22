@@ -1,7 +1,7 @@
 // app/layout.tsx
 import type { Metadata } from 'next'
 import { cookies } from 'next/headers'
-import { Cormorant_Garamond, DM_Sans } from 'next/font/google'
+import { Inter_Tight, Fraunces, JetBrains_Mono } from 'next/font/google'
 
 import './globals.css'
 import '@/lib/brand/brand.css'
@@ -10,16 +10,23 @@ import { BrandProvider } from '@/lib/brand/BrandProvider'
 import RoleFooter from '@/app/_components/RoleFooter'
 import { getBrandConfig } from '@/lib/brand'
 
-const dmSans = DM_Sans({
+const interTight = Inter_Tight({
   variable: '--font-body',
   subsets: ['latin'],
-  weight: ['300', '400', '500', '700'],
+  weight: ['400', '500', '600', '700', '800'],
 })
 
-const cormorant = Cormorant_Garamond({
+const fraunces = Fraunces({
   variable: '--font-display-face',
   subsets: ['latin'],
-  weight: ['300', '400', '600'],
+  weight: ['300', '400', '600', '700'],
+  style: ['normal', 'italic'],
+})
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: '--font-mono-face',
+  subsets: ['latin'],
+  weight: ['400', '500'],
 })
 
 export const dynamic = 'force-dynamic'
@@ -35,7 +42,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${dmSans.variable} ${cormorant.variable}`}>
+      <body className={`${interTight.variable} ${fraunces.variable} ${jetbrainsMono.variable}`}>
         <BrandProvider>
           <div style={{ paddingBottom: 'calc(var(--app-footer-space, 0px) + env(safe-area-inset-bottom))' }}>
             {children}
