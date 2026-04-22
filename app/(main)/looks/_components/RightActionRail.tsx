@@ -1,9 +1,14 @@
 // app/(main)/looks/_components/RightActionRail.tsx
 'use client'
 
-import type { ReactNode } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
-import { CalendarDays, Heart, MessageCircle, Share2 } from 'lucide-react'
+import { Bookmark, Heart, MessageCircle, Share2, CalendarDays } from 'lucide-react'
+
+const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
+const PAPER = 'rgba(244,239,231,1)'
+const EMBER = '#FF3D4E'
+const ACID = '#D4FF3A'
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
@@ -16,24 +21,16 @@ function formatCount(n: number) {
   return String(v)
 }
 
+function initialLetter(name: string | null) {
+  const s = (name || '').trim()
+  return (s ? s.slice(0, 1) : 'P').toUpperCase()
+}
+
 type ProMini = {
   id: string
   businessName: string | null
   avatarUrl?: string | null
 } | null
-
-type IconVariant = 'default' | 'book'
-
-type IconButtonProps = {
-  icon: ReactNode
-  count?: number
-  label?: string
-  onClick: () => void
-  ariaLabel: string
-  hideZero?: boolean
-  variant?: IconVariant
-  testId?: string
-}
 
 type RightActionRailProps = {
   pro: ProMini
@@ -48,37 +45,22 @@ type RightActionRailProps = {
   onShare: () => void
 }
 
-const GAP = 18
-const AVATAR_SIZE = 56
-const ICON_SIZE = 24
-
-function initialLetter(name: string | null) {
-  const s = (name || '').trim()
-  return (s ? s.slice(0, 1) : 'P').toUpperCase()
-}
-
-function IconButton({
-  icon,
+function RailButton({
+  children,
   count,
   label,
   onClick,
   ariaLabel,
-  hideZero = false,
-  variant = 'default',
   testId,
-}: IconButtonProps) {
-  const showCount = typeof count === 'number' && (!hideZero || count > 0)
-  const formatted = showCount && typeof count === 'number' ? formatCount(count) : null
-  const footerText = label ?? formatted
-
-  const isBook = variant === 'book'
-
-  const baseIconFilter =
-    'brightness(1.75) drop-shadow(0 0 10px rgba(255,255,255,0.9)) drop-shadow(0 10px 22px rgba(0,0,0,0.95))'
-
-  const iconFilter = isBook
-    ? `${baseIconFilter} drop-shadow(0 0 14px rgb(var(--accent-primary) / 0.55)) drop-shadow(0 0 34px rgb(var(--accent-primary) / 0.22))`
-    : baseIconFilter
+}: {
+  children: React.ReactNode
+  count?: number | null
+  label?: string
+  onClick: () => void
+  ariaLabel: string
+  testId?: string
+}) {
+  const footerText = label ?? (typeof count === 'number' && count > 0 ? formatCount(count) : null)
 
   return (
     <button
@@ -87,51 +69,33 @@ function IconButton({
       onClick={onClick}
       aria-label={ariaLabel}
       title={ariaLabel}
-      className={[
-        'm-0 grid cursor-pointer appearance-none justify-items-center gap-1 border-0 bg-transparent p-0 text-center',
-        'transition-transform active:scale-95 md:hover:scale-[1.03]',
-      ].join(' ')}
+      style={{
+        display: 'grid',
+        justifyItems: 'center',
+        gap: 2,
+        background: 'transparent',
+        border: 'none',
+        padding: 0,
+        margin: 0,
+        cursor: 'pointer',
+      }}
+      className="active:scale-95 transition-transform"
     >
-      <div
-        className="relative grid place-items-center"
-        style={{ transform: 'translateZ(0)' }}
-      >
-        {isBook ? (
-          <div
-            aria-hidden="true"
-            className="absolute"
-            style={{
-              inset: -20,
-              borderRadius: 9999,
-              background:
-                'radial-gradient(circle at 50% 45%, rgb(var(--accent-primary) / 0.78) 0%, rgb(var(--accent-primary) / 0.22) 36%, rgb(var(--accent-primary) / 0) 72%), radial-gradient(circle, rgb(var(--accent-primary) / 0) 54%, rgb(var(--accent-primary) / 0.65) 60%, rgb(var(--accent-primary) / 0) 76%)',
-              filter: 'blur(10px)',
-              opacity: 0.9,
-              pointerEvents: 'none',
-            }}
-          />
-        ) : null}
-
-        <div
-          className="grid place-items-center"
-          style={{
-            filter: iconFilter,
-            transform: 'translateZ(0)',
-          }}
-        >
-          {icon}
-        </div>
-      </div>
-
+      <div style={{ textShadow: TEXT_SHADOW }}>{children}</div>
       {footerText ? (
         <div
-          className="w-full text-center text-[12px] font-extrabold tracking-wide text-white/95"
-          style={{ textShadow: '0 2px 10px rgba(0,0,0,0.9)' }}
+          style={{
+            fontSize: 11,
+            fontWeight: 800,
+            color: PAPER,
+            textShadow: TEXT_SHADOW,
+            lineHeight: 1,
+          }}
         >
           {footerText}
         </div>
       ) : (
-        <div className="h-[14px]" />
+        <div style={{ height: 14 }} />
       )}
     </button>
   )
@@ -142,35 +106,38 @@ export default function RightActionRail({
   viewerLiked,
   likeCount,
   commentCount,
-  right = 12,
-  bottom = 150,
+  right = 10,
+  bottom = 130,
   onOpenAvailability,
   onToggleLike,
   onOpenComments,
   onShare,
 }: RightActionRailProps) {
+  // Save is local-only state for now (UI matches prototype)
+  const [saved, setSaved] = useState(false)
+
   return (
     <div
       className="absolute z-[80] select-none"
-      style={{ right, bottom, display: 'grid', gap: GAP, justifyItems: 'center' }}
+      style={{ right, bottom, display: 'grid', gap: 18, justifyItems: 'center' }}
     >
+      {/* Pro avatar */}
       {pro?.id ? (
         <Link
           href={`/professionals/${encodeURIComponent(pro.id)}`}
           aria-label="View professional profile"
-          className="grid justify-items-center no-underline"
+          style={{ display: 'grid', justifyItems: 'center', textDecoration: 'none' }}
+          className="active:scale-95 transition-transform"
         >
-          <div className="relative transition-transform active:scale-95 md:hover:scale-[1.03]">
+          <div style={{ position: 'relative' }}>
             <div
-              className="overflow-hidden rounded-full bg-white/10"
               style={{
-                width: AVATAR_SIZE,
-                height: AVATAR_SIZE,
-                border: '2px solid rgba(255,255,255,0.35)',
-                boxShadow:
-                  '0 10px 30px rgba(0,0,0,0.65), 0 0 18px rgba(255,255,255,0.18)',
-                backdropFilter: 'blur(18px)',
-                WebkitBackdropFilter: 'blur(18px)',
+                width: 48,
+                height: 48,
+                borderRadius: '50%',
+                border: '2px solid rgba(244,239,231,0.4)',
+                overflow: 'hidden',
+                background: 'rgba(244,239,231,0.08)',
               }}
             >
               {pro.avatarUrl ? (
@@ -178,28 +145,46 @@ export default function RightActionRail({
                 <img
                   src={pro.avatarUrl}
                   alt={pro.businessName || 'Professional'}
-                  className="h-full w-full object-cover"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
                   loading="lazy"
                   decoding="async"
                 />
               ) : (
-                <div className="grid h-full w-full place-items-center text-[18px] font-black text-white">
+                <div
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    display: 'grid',
+                    placeItems: 'center',
+                    fontSize: 18,
+                    fontWeight: 900,
+                    color: PAPER,
+                  }}
+                >
                   {initialLetter(pro.businessName)}
                 </div>
               )}
             </div>
 
+            {/* Follow "+" badge */}
             <div
               aria-hidden="true"
-              className="absolute left-1/2 grid place-items-center rounded-full font-black"
               style={{
-                width: 22,
-                height: 22,
-                bottom: -7,
+                position: 'absolute',
+                bottom: -6,
+                left: '50%',
                 transform: 'translateX(-50%)',
-                background: 'rgb(var(--accent-primary) / 1)',
-                color: 'rgb(var(--bg-primary) / 1)',
-                boxShadow: '0 8px 18px rgba(0,0,0,0.6)',
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                background: '#E05A28',
+                color: '#fff',
+                display: 'grid',
+                placeItems: 'center',
+                fontWeight: 900,
+                fontSize: 14,
+                lineHeight: 1,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
               }}
             >
               +
@@ -208,62 +193,99 @@ export default function RightActionRail({
         </Link>
       ) : (
         <div
-          className="rounded-full bg-white/10"
           style={{
-            width: AVATAR_SIZE,
-            height: AVATAR_SIZE,
-            border: '2px solid rgba(255,255,255,0.25)',
-            boxShadow: '0 10px 30px rgba(0,0,0,0.65)',
-            backdropFilter: 'blur(18px)',
-            WebkitBackdropFilter: 'blur(18px)',
+            width: 48,
+            height: 48,
+            borderRadius: '50%',
+            border: '2px solid rgba(244,239,231,0.25)',
+            background: 'rgba(244,239,231,0.06)',
           }}
         />
       )}
 
-      <IconButton
-        testId="open-availability-button"
-        ariaLabel="Book"
-        label="Book"
-        variant="book"
-        onClick={onOpenAvailability}
-        icon={<CalendarDays size={ICON_SIZE} className="text-white" />}
-      />
+      {/* Book button — solid terra circle with pulsing glow */}
+      <div style={{ display: 'grid', justifyItems: 'center', gap: 0 }}>
+        <button
+          type="button"
+          data-testid="open-availability-button"
+          onClick={onOpenAvailability}
+          aria-label="Book"
+          className="book-glow active:scale-95 transition-transform"
+          style={{
+            width: 52,
+            height: 52,
+            borderRadius: '50%',
+            background: '#E05A28',
+            color: '#fff',
+            display: 'grid',
+            placeItems: 'center',
+            border: 'none',
+            cursor: 'pointer',
+            padding: 0,
+            boxShadow: '0 8px 24px rgba(224,90,40,0.55), 0 2px 6px rgba(0,0,0,0.6)',
+          }}
+        >
+          <CalendarDays size={22} aria-hidden="true" />
+        </button>
+        <div
+          style={{
+            fontSize: 11,
+            fontWeight: 800,
+            color: PAPER,
+            textShadow: TEXT_SHADOW,
+            marginTop: -2,
+            fontFamily: 'var(--font-mono)',
+            letterSpacing: '0.06em',
+          }}
+        >
+          BOOK
+        </div>
+      </div>
 
-      <IconButton
+      {/* Like */}
+      <RailButton
         ariaLabel={viewerLiked ? 'Unlike' : 'Like'}
         onClick={onToggleLike}
         count={likeCount}
-        hideZero
-        icon={
-          <Heart
-            size={ICON_SIZE}
-            className={
-              viewerLiked
-                ? 'fill-[rgb(var(--micro-accent))] text-[rgb(var(--micro-accent))]'
-                : 'text-white'
-            }
-            style={{
-              filter: viewerLiked
-                ? 'brightness(1.9) drop-shadow(0 0 14px rgba(255,90,120,0.95)) drop-shadow(0 10px 22px rgba(0,0,0,0.95))'
-                : undefined,
-            }}
-          />
-        }
-      />
+      >
+        <Heart
+          size={26}
+          style={{
+            color: viewerLiked ? EMBER : PAPER,
+            fill: viewerLiked ? EMBER : 'none',
+            transition: 'color 0.15s ease, fill 0.15s ease',
+          }}
+        />
+      </RailButton>
 
-      <IconButton
+      {/* Comments */}
+      <RailButton
         ariaLabel="Open comments"
         onClick={onOpenComments}
         count={commentCount}
-        hideZero
-        icon={<MessageCircle size={ICON_SIZE} className="text-white" />}
-      />
+      >
+        <MessageCircle size={26} style={{ color: PAPER }} />
+      </RailButton>
 
-      <IconButton
-        ariaLabel="Share"
-        onClick={onShare}
-        icon={<Share2 size={ICON_SIZE} className="text-white" />}
-      />
+      {/* Save */}
+      <RailButton
+        ariaLabel={saved ? 'Unsave' : 'Save'}
+        onClick={() => setSaved((s) => !s)}
+      >
+        <Bookmark
+          size={26}
+          style={{
+            color: saved ? ACID : PAPER,
+            fill: saved ? ACID : 'none',
+            transition: 'color 0.15s ease, fill 0.15s ease',
+          }}
+        />
+      </RailButton>
+
+      {/* Share */}
+      <RailButton ariaLabel="Share" onClick={onShare}>
+        <Share2 size={24} style={{ color: PAPER }} />
+      </RailButton>
     </div>
   )
 }

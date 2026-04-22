@@ -19,12 +19,12 @@ export const CLIENT_TABS: ClientNavTab[] = [
   { id: 'me',       label: 'Me',       href: '/client/bookings', icon: User },
 ]
 
-/** Center elevated button: terra when active, paper when inactive (matching prototype). */
+/** Center button: terra when active (home page), paper when elsewhere. */
 export const CENTER_BUTTON = {
-  bgActive:       'var(--terra, #E05A28)',
-  bgInactive:     'var(--paper, #F4EFE7)',
+  bgActive:       '#E05A28',
+  bgInactive:     '#F4EFE7',
   colorActive:    '#ffffff',
-  colorInactive:  'var(--ink, #0A0907)',
+  colorInactive:  '#0A0907',
   shadowActive:   '0 10px 30px rgba(224,90,40,0.55)',
   shadowInactive: '0 10px 30px rgba(244,239,231,0.15)',
 } as const

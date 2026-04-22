@@ -33,7 +33,10 @@ export default function GuestSessionFooter() {
       className="w-full"
       style={{
         paddingBottom: 'env(safe-area-inset-bottom)',
-        background: 'linear-gradient(transparent, rgba(10,9,7,0.85) 40%)',
+        background: 'rgba(10,9,7,0.92)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        borderTop: '1px solid rgba(244,239,231,0.08)',
       }}
     >
       <div>
@@ -46,9 +49,11 @@ export default function GuestSessionFooter() {
             href={ROUTES.looks}
             className="grid place-items-center rounded-full hover:opacity-90 active:scale-[0.98] no-underline"
             style={{
-              width: 52,
-              height: 52,
-              backgroundColor: 'var(--terra, #E05A28)',
+              width: 68,
+              height: 68,
+              position: 'relative',
+              top: -14,
+              backgroundColor: '#E05A28',
               color: '#ffffff',
               boxShadow: '0 8px 24px rgba(224,90,40,0.45)',
             }}
