@@ -59,6 +59,11 @@ const ALLOWLIST = new Set<string>([
   'app/api/auth/logout/route.ts',
 ])
 
+type Offender = {
+  relPath: string
+  reasons: string[]
+}
+
 function normalizeRel(relPath: string): string {
   return relPath.split(path.sep).join('/')
 }
@@ -99,37 +104,147 @@ function hasAnyMarker(source: string, markers: readonly string[]): boolean {
   return markers.some((marker) => source.includes(marker))
 }
 
+function getMatchedMarkers(
+  source: string,
+  markers: readonly string[],
+): string[] {
+  return markers.filter((marker) => source.includes(marker))
+}
+
+function formatMarkerList(markers: readonly string[]): string {
+  return markers.join(', ')
+}
+
+function failWithOffenders(
+  title: string,
+  offenders: readonly Offender[],
+): never {
+  const maxShown = 50
+  const shown = offenders.slice(0, maxShown)
+
+  const body = shown
+    .map(
+      (offender) =>
+        `- ${offender.relPath}\n  ${offender.reasons.join('\n  ')}`,
+    )
+    .join('\n')
+
+  const remaining =
+    offenders.length > maxShown
+      ? `\n...and ${offenders.length - maxShown} more offender(s).`
+      : ''
+
+  throw new Error(`${title}\n\n${body}${remaining}`)
+}
+
+function collectAuthValidationOffenders(): Offender[] {
+  return getScannableFiles().flatMap((relPath) => {
+    if (ALLOWLIST.has(relPath)) {
+      return []
+    }
+
+    const source = readFile(relPath)
+    const directSessionMarkers = getMatchedMarkers(source, DIRECT_SESSION_MARKERS)
+    const authImportMarkers = getMatchedMarkers(source, AUTH_IMPORT_MARKERS)
+    const safeDbBackedMarkers = getMatchedMarkers(source, SAFE_DB_BACKED_MARKERS)
+
+    const touchesSession = directSessionMarkers.length > 0
+    const importsAuth = authImportMarkers.length > 0
+
+    if (!touchesSession && !importsAuth) {
+      return []
+    }
+
+    if (safeDbBackedMarkers.length > 0) {
+      return []
+    }
+
+    const reasons: string[] = []
+
+    if (directSessionMarkers.length > 0) {
+      reasons.push(
+        `direct session markers without DB-backed validation: ${formatMarkerList(
+          directSessionMarkers,
+        )}`,
+      )
+    }
+
+    if (authImportMarkers.length > 0) {
+      reasons.push(
+        `auth/session imports without DB-backed validation: ${formatMarkerList(
+          authImportMarkers,
+        )}`,
+      )
+    }
+
+    reasons.push(
+      `missing one of required DB-backed markers: ${formatMarkerList(
+        SAFE_DB_BACKED_MARKERS,
+      )}`,
+    )
+
+    return [{ relPath, reasons }]
+  })
+}
+
+function collectRawTokenBypassOffenders(): Offender[] {
+  return getScannableFiles().flatMap((relPath) => {
+    if (ALLOWLIST.has(relPath)) {
+      return []
+    }
+
+    const source = readFile(relPath)
+    const directSessionMarkers = getMatchedMarkers(source, DIRECT_SESSION_MARKERS)
+    const safeDbBackedMarkers = getMatchedMarkers(source, SAFE_DB_BACKED_MARKERS)
+
+    if (directSessionMarkers.length === 0) {
+      return []
+    }
+
+    if (safeDbBackedMarkers.length > 0) {
+      return []
+    }
+
+    return [
+      {
+        relPath,
+        reasons: [
+          `raw token/JWT/session access without DB-backed validation: ${formatMarkerList(
+            directSessionMarkers,
+          )}`,
+          `missing one of required DB-backed markers: ${formatMarkerList(
+            SAFE_DB_BACKED_MARKERS,
+          )}`,
+        ],
+      },
+    ]
+  })
+}
+
 describe('authVersion enforcement structure', () => {
   it('requires DB-backed current-user validation for app surfaces that touch auth/session code', () => {
-    const offenders = getScannableFiles().filter((relPath) => {
-      if (ALLOWLIST.has(relPath)) return false
+    const offenders = collectAuthValidationOffenders()
 
-      const source = readFile(relPath)
-      const touchesSession = hasAnyMarker(source, DIRECT_SESSION_MARKERS)
-      const importsAuth = hasAnyMarker(source, AUTH_IMPORT_MARKERS)
+    if (offenders.length > 0) {
+      failWithOffenders(
+        'Found app surfaces that touch auth/session code without DB-backed current-user validation.',
+        offenders,
+      )
+    }
 
-      if (!touchesSession && !importsAuth) {
-        return false
-      }
-
-      return !hasAnyMarker(source, SAFE_DB_BACKED_MARKERS)
-    })
-
-    expect(offenders).toEqual([])
+    expect(offenders).toHaveLength(0)
   })
 
   it('forbids raw token/JWT bypasses in authenticated app surfaces', () => {
-    const offenders = getScannableFiles().filter((relPath) => {
-      if (ALLOWLIST.has(relPath)) return false
+    const offenders = collectRawTokenBypassOffenders()
 
-      const source = readFile(relPath)
-
-      return (
-        hasAnyMarker(source, DIRECT_SESSION_MARKERS) &&
-        !hasAnyMarker(source, SAFE_DB_BACKED_MARKERS)
+    if (offenders.length > 0) {
+      failWithOffenders(
+        'Found authenticated app surfaces using raw token/JWT/session access without DB-backed validation.',
+        offenders,
       )
-    })
+    }
 
-    expect(offenders).toEqual([])
+    expect(offenders).toHaveLength(0)
   })
 })

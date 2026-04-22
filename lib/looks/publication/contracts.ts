@@ -21,10 +21,17 @@ export const PRO_LOOK_STATE_ACTIONS = [
   'unpublish',
 ] as const
 
+export const LOOK_PUBLICATION_GATED_JOB_REASONS = [
+  'MODERATION_SCAN_LOOK_POST_DEFERRED',
+] as const
+
 export type ProLookMutationAction =
   (typeof PRO_LOOK_MUTATION_ACTIONS)[number]
 
 export type ProLookStateAction = (typeof PRO_LOOK_STATE_ACTIONS)[number]
+
+export type LookPublicationGatedJobReason =
+  (typeof LOOK_PUBLICATION_GATED_JOB_REASONS)[number]
 
 export type CreateProLookRequestDto = {
   mediaAssetId: string
@@ -96,10 +103,6 @@ export type LookPublicationEnqueuedJobDto = {
   dedupeKey: string
 }
 
-export type LookPublicationGatedJobReason =
-  | 'INDEX_LOOK_POST_DOCUMENT_DEFERRED'
-  | 'MODERATION_SCAN_LOOK_POST_DEFERRED'
-
 export type LookPublicationGatedJobDto = {
   type: LooksSocialJobType
   disposition: 'GATED'
@@ -119,6 +122,45 @@ export type ProLookPublicationResultDto = {
   action: ProLookMutationAction
   result: ProLookPublicationStateDto
   asyncEffects: LookPublicationAsyncEffectsDto
+}
+
+type ProLookPublicationRowLike = {
+  id: string
+  professionalId: string
+  primaryMediaAssetId: string
+  serviceId: string | null
+  caption: string | null
+  priceStartingAt: Prisma.Decimal | string | number | null
+
+  status: LookPostStatus
+  visibility: LookPostVisibility
+  moderationStatus: ModerationStatus
+
+  publishedAt: Date | null
+  archivedAt: Date | null
+  removedAt: Date | null
+
+  reviewedAt: Date | null
+  reviewedByUserId: string | null
+  adminNotes: string | null
+  reportCount: number
+
+  likeCount: number
+  commentCount: number
+  saveCount: number
+  shareCount: number
+
+  spotlightScore: number
+  rankScore: number
+
+  createdAt: Date
+  updatedAt: Date
+}
+
+type LookPublicationAsyncEffectsInput = {
+  plannedJobs?: readonly LookPublicationPlannedJobDto[]
+  enqueuedJobs?: readonly LookPublicationEnqueuedJobDto[]
+  gatedJobs?: readonly LookPublicationGatedJobDto[]
 }
 
 function toIso(value: Date | null | undefined): string | null {
@@ -161,6 +203,39 @@ function toNullableDecimalString(
   return value.toString()
 }
 
+function clonePlannedJob(
+  job: LookPublicationPlannedJobDto,
+): LookPublicationPlannedJobDto {
+  return {
+    type: job.type,
+    processorSupport: job.processorSupport,
+  }
+}
+
+function cloneEnqueuedJob(
+  job: LookPublicationEnqueuedJobDto,
+): LookPublicationEnqueuedJobDto {
+  return {
+    type: job.type,
+    disposition: job.disposition,
+    processorSupport: job.processorSupport,
+    jobId: job.jobId,
+    dedupeKey: job.dedupeKey,
+  }
+}
+
+function cloneGatedJob(
+  job: LookPublicationGatedJobDto,
+): LookPublicationGatedJobDto {
+  return {
+    type: job.type,
+    disposition: job.disposition,
+    processorSupport: job.processorSupport,
+    reason: job.reason,
+    message: job.message,
+  }
+}
+
 export function isProLookMutationAction(
   value: unknown,
 ): value is ProLookMutationAction {
@@ -183,57 +258,26 @@ export function isLookPostVisibility(
   )
 }
 
-export function toLookPublicationAsyncEffectsDto(args?: {
-  plannedJobs?: readonly LookPublicationPlannedJobDto[]
-  enqueuedJobs?: readonly LookPublicationEnqueuedJobDto[]
-  gatedJobs?: readonly LookPublicationGatedJobDto[]
-}): LookPublicationAsyncEffectsDto {
+export function isLookPublicationGatedJobReason(
+  value: unknown,
+): value is LookPublicationGatedJobReason {
+  return isOneOf(value, LOOK_PUBLICATION_GATED_JOB_REASONS)
+}
+
+export function toLookPublicationAsyncEffectsDto(
+  args?: LookPublicationAsyncEffectsInput,
+): LookPublicationAsyncEffectsDto {
   return {
-    plannedJobs: [...(args?.plannedJobs ?? [])],
-    enqueuedJobs: [...(args?.enqueuedJobs ?? [])],
-    gatedJobs: [...(args?.gatedJobs ?? [])],
+    plannedJobs: (args?.plannedJobs ?? []).map(clonePlannedJob),
+    enqueuedJobs: (args?.enqueuedJobs ?? []).map(cloneEnqueuedJob),
+    gatedJobs: (args?.gatedJobs ?? []).map(cloneGatedJob),
   }
 }
 
 export function toProLookPublicationResultDto(args: {
   action: ProLookMutationAction
-  lookPost: {
-    id: string
-    professionalId: string
-    primaryMediaAssetId: string
-    serviceId: string | null
-    caption: string | null
-    priceStartingAt: Prisma.Decimal | string | number | null
-
-    status: LookPostStatus
-    visibility: LookPostVisibility
-    moderationStatus: ModerationStatus
-
-    publishedAt: Date | null
-    archivedAt: Date | null
-    removedAt: Date | null
-
-    reviewedAt: Date | null
-    reviewedByUserId: string | null
-    adminNotes: string | null
-    reportCount: number
-
-    likeCount: number
-    commentCount: number
-    saveCount: number
-    shareCount: number
-
-    spotlightScore: number
-    rankScore: number
-
-    createdAt: Date
-    updatedAt: Date
-  }
-  asyncEffects?: {
-    plannedJobs?: readonly LookPublicationPlannedJobDto[]
-    enqueuedJobs?: readonly LookPublicationEnqueuedJobDto[]
-    gatedJobs?: readonly LookPublicationGatedJobDto[]
-  }
+  lookPost: ProLookPublicationRowLike
+  asyncEffects?: LookPublicationAsyncEffectsInput
 }): ProLookPublicationResultDto {
   const lookPostId = requireNonEmptyString('lookPost.id', args.lookPost.id)
   const professionalId = requireNonEmptyString(

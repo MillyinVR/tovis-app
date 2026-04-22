@@ -26,7 +26,6 @@ export type LookPostMutationKind =
 export type DeferredLooksSocialJobMode = 'GATE' | 'ENQUEUE'
 
 export type DeferredLookPostJobReason =
-  | 'INDEX_LOOK_POST_DOCUMENT_DEFERRED'
   | 'MODERATION_SCAN_LOOK_POST_DEFERRED'
 
 export type EnqueueLookPostMutationPolicyArgs = {
@@ -69,8 +68,8 @@ export type EnqueueLookPostMutationPolicyArgs = {
   contentRequiresModerationScan?: boolean
 
   /**
-   * Default is GATE because the current worker explicitly defers
-   * INDEX_LOOK_POST_DOCUMENT and MODERATION_SCAN_LOOK_POST.
+   * Default is GATE because the current worker still explicitly defers
+   * MODERATION_SCAN_LOOK_POST.
    * Set to ENQUEUE only if you intentionally want to queue deferred work.
    */
   deferredMode?: DeferredLooksSocialJobMode
@@ -109,10 +108,10 @@ const SUPPORTED_LOOK_POST_JOB_TYPES = new Set<LooksSocialJobType>([
   LooksSocialJobType.RECOMPUTE_LOOK_COUNTS,
   LooksSocialJobType.RECOMPUTE_LOOK_SPOTLIGHT_SCORE,
   LooksSocialJobType.RECOMPUTE_LOOK_RANK_SCORE,
+  LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
 ])
 
 const DEFERRED_LOOK_POST_JOB_TYPES = new Set<LooksSocialJobType>([
-  LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
   LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
 ])
 
@@ -124,8 +123,6 @@ const DEFERRED_LOOK_POST_JOB_MESSAGES: Record<
   DeferredLookPostJobReason,
   string
 > = {
-  INDEX_LOOK_POST_DOCUMENT_DEFERRED:
-    'indexLookPostDocument is deferred until the search indexing implementation exists.',
   MODERATION_SCAN_LOOK_POST_DEFERRED:
     'moderationScanLookPost is deferred until the look moderation implementation exists.',
 }
@@ -148,12 +145,24 @@ function isDeferredLookPostJobType(type: LooksSocialJobType): boolean {
   return DEFERRED_LOOK_POST_JOB_TYPES.has(type)
 }
 
+function getProcessorSupportForJobType(
+  type: LooksSocialJobType,
+): 'SUPPORTED' | 'DEFERRED' {
+  if (isDeferredLookPostJobType(type)) {
+    return 'DEFERRED'
+  }
+
+  if (isSupportedLookPostJobType(type)) {
+    return 'SUPPORTED'
+  }
+
+  throw new Error(`Unknown look-post job type: ${type}.`)
+}
+
 function getDeferredReasonForJobType(
   type: LooksSocialJobType,
 ): DeferredLookPostJobReason {
   switch (type) {
-    case LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT:
-      return 'INDEX_LOOK_POST_DOCUMENT_DEFERRED'
     case LooksSocialJobType.MODERATION_SCAN_LOOK_POST:
       return 'MODERATION_SCAN_LOOK_POST_DEFERRED'
     default:
@@ -206,9 +215,7 @@ export function planLookPostMutationJobs(
 
   return buildPlannedLookPostMutationJobTypes(args).map((type) => ({
     type,
-    processorSupport: isDeferredLookPostJobType(type)
-      ? 'DEFERRED'
-      : 'SUPPORTED',
+    processorSupport: getProcessorSupportForJobType(type),
   }))
 }
 
@@ -260,7 +267,7 @@ async function enqueuePlannedLookPostJob(
       return {
         type,
         disposition: 'ENQUEUED',
-        processorSupport: 'DEFERRED',
+        processorSupport: 'SUPPORTED',
         jobId: job.id,
         dedupeKey: job.dedupeKey,
       }
@@ -347,9 +354,7 @@ export async function enqueueLookPostMutationPolicy(
     mutation: args.mutation,
     plannedJobs: plannedJobTypes.map((type) => ({
       type,
-      processorSupport: isDeferredLookPostJobType(type)
-        ? 'DEFERRED'
-        : 'SUPPORTED',
+      processorSupport: getProcessorSupportForJobType(type),
     })),
     enqueuedJobs,
     gatedJobs,

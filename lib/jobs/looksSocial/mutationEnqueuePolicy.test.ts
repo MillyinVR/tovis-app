@@ -1,6 +1,13 @@
 // lib/jobs/looksSocial/mutationEnqueuePolicy.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { LooksSocialJobType } from '@prisma/client'
+import {
+  afterAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest'
+import { LooksSocialJobType, PrismaClient } from '@prisma/client'
 
 const mocks = vi.hoisted(() => {
   const enqueueRecomputeLookCounts = vi.fn()
@@ -34,9 +41,10 @@ import {
 
 type JobDb = Parameters<typeof enqueueLookPostMutationPolicy>[0]
 
+const testDb = new PrismaClient()
+
 function makeDb(): JobDb {
-  // This helper only forwards the db object to mocked enqueue helpers.
-  return {} as JobDb
+  return testDb
 }
 
 function makeQueuedJob(id: string, dedupeKey: string) {
@@ -67,6 +75,10 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
     )
   })
 
+  afterAll(async () => {
+    await testDb.$disconnect()
+  })
+
   it('plans supported and deferred jobs for a publish-like mutation', () => {
     const planned = planLookPostMutationJobs({
       lookPostId: 'look_1',
@@ -92,7 +104,7 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
       },
       {
         type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
-        processorSupport: 'DEFERRED',
+        processorSupport: 'SUPPORTED',
       },
       {
         type: LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
@@ -101,7 +113,7 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
     ])
   })
 
-  it('enqueues supported jobs and gates deferred jobs by default', async () => {
+  it('enqueues supported jobs and gates only deferred moderation scanning by default', async () => {
     const db = makeDb()
 
     const result = await enqueueLookPostMutationPolicy(db, {
@@ -113,20 +125,34 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
       contentRequiresModerationScan: true,
     })
 
-    expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledWith(db, {
+    expect(mocks.enqueueRecomputeLookCounts).toHaveBeenCalledTimes(1)
+    expect(mocks.enqueueRecomputeLookCounts.mock.calls[0]?.[0]).toBe(db)
+    expect(mocks.enqueueRecomputeLookCounts.mock.calls[0]?.[1]).toEqual({
       lookPostId: 'look_1',
     })
-    expect(mocks.enqueueRecomputeLookSpotlightScore).toHaveBeenCalledWith(
+
+    expect(mocks.enqueueRecomputeLookSpotlightScore).toHaveBeenCalledTimes(1)
+    expect(mocks.enqueueRecomputeLookSpotlightScore.mock.calls[0]?.[0]).toBe(
       db,
+    )
+    expect(mocks.enqueueRecomputeLookSpotlightScore.mock.calls[0]?.[1]).toEqual(
       {
         lookPostId: 'look_1',
       },
     )
-    expect(mocks.enqueueRecomputeLookRankScore).toHaveBeenCalledWith(db, {
+
+    expect(mocks.enqueueRecomputeLookRankScore).toHaveBeenCalledTimes(1)
+    expect(mocks.enqueueRecomputeLookRankScore.mock.calls[0]?.[0]).toBe(db)
+    expect(mocks.enqueueRecomputeLookRankScore.mock.calls[0]?.[1]).toEqual({
       lookPostId: 'look_1',
     })
 
-    expect(mocks.enqueueIndexLookPostDocument).not.toHaveBeenCalled()
+    expect(mocks.enqueueIndexLookPostDocument).toHaveBeenCalledTimes(1)
+    expect(mocks.enqueueIndexLookPostDocument.mock.calls[0]?.[0]).toBe(db)
+    expect(mocks.enqueueIndexLookPostDocument.mock.calls[0]?.[1]).toEqual({
+      lookPostId: 'look_1',
+    })
+
     expect(mocks.enqueueModerationScanLookPost).not.toHaveBeenCalled()
 
     expect(result).toEqual({
@@ -147,7 +173,7 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
         },
         {
           type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
-          processorSupport: 'DEFERRED',
+          processorSupport: 'SUPPORTED',
         },
         {
           type: LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
@@ -176,16 +202,15 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
           jobId: 'job_rank_1',
           dedupeKey: 'looks:rank:look_1',
         },
-      ],
-      gatedJobs: [
         {
           type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
-          disposition: 'GATED',
-          processorSupport: 'DEFERRED',
-          reason: 'INDEX_LOOK_POST_DOCUMENT_DEFERRED',
-          message:
-            'indexLookPostDocument is deferred until the search indexing implementation exists.',
+          disposition: 'ENQUEUED',
+          processorSupport: 'SUPPORTED',
+          jobId: 'job_index_1',
+          dedupeKey: 'looks:index:look_1',
         },
+      ],
+      gatedJobs: [
         {
           type: LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
           disposition: 'GATED',
@@ -198,7 +223,7 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
     })
   })
 
-  it('enqueues deferred jobs when deferredMode is ENQUEUE', async () => {
+  it('always enqueues supported indexing and only conditionally enqueues deferred moderation scanning', async () => {
     const db = makeDb()
 
     const result = await enqueueLookPostMutationPolicy(db, {
@@ -209,10 +234,15 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
       deferredMode: 'ENQUEUE',
     })
 
-    expect(mocks.enqueueIndexLookPostDocument).toHaveBeenCalledWith(db, {
+    expect(mocks.enqueueIndexLookPostDocument).toHaveBeenCalledTimes(1)
+    expect(mocks.enqueueIndexLookPostDocument.mock.calls[0]?.[0]).toBe(db)
+    expect(mocks.enqueueIndexLookPostDocument.mock.calls[0]?.[1]).toEqual({
       lookPostId: 'look_1',
     })
-    expect(mocks.enqueueModerationScanLookPost).toHaveBeenCalledWith(db, {
+
+    expect(mocks.enqueueModerationScanLookPost).toHaveBeenCalledTimes(1)
+    expect(mocks.enqueueModerationScanLookPost.mock.calls[0]?.[0]).toBe(db)
+    expect(mocks.enqueueModerationScanLookPost.mock.calls[0]?.[1]).toEqual({
       lookPostId: 'look_1',
     })
 
@@ -222,7 +252,7 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
       plannedJobs: [
         {
           type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
-          processorSupport: 'DEFERRED',
+          processorSupport: 'SUPPORTED',
         },
         {
           type: LooksSocialJobType.MODERATION_SCAN_LOOK_POST,
@@ -233,7 +263,7 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
         {
           type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
           disposition: 'ENQUEUED',
-          processorSupport: 'DEFERRED',
+          processorSupport: 'SUPPORTED',
           jobId: 'job_index_1',
           dedupeKey: 'looks:index:look_1',
         },
@@ -266,6 +296,48 @@ describe('lib/jobs/looksSocial/mutationEnqueuePolicy.ts', () => {
         processorSupport: 'SUPPORTED',
       },
     ])
+  })
+
+  it('enqueues indexing for searchable-document-only changes', async () => {
+    const db = makeDb()
+
+    const result = await enqueueLookPostMutationPolicy(db, {
+      lookPostId: 'look_1',
+      mutation: 'EDIT',
+      searchableDocumentChanged: true,
+    })
+
+    expect(mocks.enqueueIndexLookPostDocument).toHaveBeenCalledTimes(1)
+    expect(mocks.enqueueIndexLookPostDocument.mock.calls[0]?.[0]).toBe(db)
+    expect(mocks.enqueueIndexLookPostDocument.mock.calls[0]?.[1]).toEqual({
+      lookPostId: 'look_1',
+    })
+
+    expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
+    expect(mocks.enqueueRecomputeLookSpotlightScore).not.toHaveBeenCalled()
+    expect(mocks.enqueueRecomputeLookRankScore).not.toHaveBeenCalled()
+    expect(mocks.enqueueModerationScanLookPost).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      lookPostId: 'look_1',
+      mutation: 'EDIT',
+      plannedJobs: [
+        {
+          type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+          processorSupport: 'SUPPORTED',
+        },
+      ],
+      enqueuedJobs: [
+        {
+          type: LooksSocialJobType.INDEX_LOOK_POST_DOCUMENT,
+          disposition: 'ENQUEUED',
+          processorSupport: 'SUPPORTED',
+          jobId: 'job_index_1',
+          dedupeKey: 'looks:index:look_1',
+        },
+      ],
+      gatedJobs: [],
+    })
   })
 
   it('returns no jobs when no async side effects are requested', async () => {
