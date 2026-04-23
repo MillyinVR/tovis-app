@@ -56,9 +56,7 @@ function isProfessionType(value: unknown): value is ProfessionType {
   )
 }
 
-export function parseLooksFeedEnvelope(
-  raw: unknown,
-): LooksFeedResponseDto {
+export function parseLooksFeedEnvelope(raw: unknown): LooksFeedResponseDto {
   const items = parseLooksFeedResponse(raw)
 
   if (!isRecord(raw)) {
@@ -68,9 +66,7 @@ export function parseLooksFeedEnvelope(
     }
   }
 
-  const viewerContextRaw = isRecord(raw.viewerContext)
-    ? raw.viewerContext
-    : null
+  const viewerContextRaw = isRecord(raw.viewerContext) ? raw.viewerContext : null
 
   const viewerContext =
     viewerContextRaw &&
@@ -104,6 +100,7 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
     const thumbUrl = pickString(item.thumbUrl)
     const caption = pickString(item.caption)
     const viewerLiked = pickBoolean(item.viewerLiked)
+    const viewerSaved = pickBoolean(item.viewerSaved)
 
     const mediaType =
       item.mediaType === MediaType.IMAGE || item.mediaType === MediaType.VIDEO
@@ -119,6 +116,7 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
       !url ||
       !createdAt ||
       viewerLiked === null ||
+      viewerSaved === null ||
       mediaType === null ||
       likeCount === null ||
       commentCount === null
@@ -168,6 +166,7 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
         comments: commentCount,
       },
       viewerLiked,
+      viewerSaved,
 
       serviceId: pickString(item.serviceId),
       serviceName: pickString(item.serviceName),
@@ -270,9 +269,7 @@ function isMediaVisibility(value: unknown): value is MediaVisibility {
   )
 }
 
-function parseLooksDetailReview(
-  raw: unknown,
-): LooksDetailReviewDto | null {
+function parseLooksDetailReview(raw: unknown): LooksDetailReviewDto | null {
   if (!isRecord(raw)) return null
 
   const id = pickString(raw.id)
@@ -292,9 +289,7 @@ function parseLooksDetailReview(
   }
 }
 
-function parseLooksDetailMedia(
-  raw: unknown,
-): LooksDetailMediaDto | null {
+function parseLooksDetailMedia(raw: unknown): LooksDetailMediaDto | null {
   if (!isRecord(raw)) return null
 
   const id = pickString(raw.id)
@@ -324,9 +319,7 @@ function parseLooksDetailMedia(
   }
 }
 
-function parseLooksDetailService(
-  raw: unknown,
-): LooksDetailServiceDto | null {
+function parseLooksDetailService(raw: unknown): LooksDetailServiceDto | null {
   if (!isRecord(raw)) return null
 
   const id = pickString(raw.id)
@@ -354,9 +347,7 @@ function parseLooksDetailService(
   }
 }
 
-function parseLooksDetailAdmin(
-  raw: unknown,
-): LooksDetailAdminDto | null {
+function parseLooksDetailAdmin(raw: unknown): LooksDetailAdminDto | null {
   if (!isRecord(raw)) return null
   if (raw.canModerate !== true) return null
 
@@ -400,9 +391,7 @@ function parseLooksDetailAdmin(
   }
 }
 
-function parseLooksDetailAsset(
-  raw: unknown,
-): LooksDetailAssetDto | null {
+function parseLooksDetailAsset(raw: unknown): LooksDetailAssetDto | null {
   if (!isRecord(raw)) return null
 
   const id = pickString(raw.id)
@@ -422,9 +411,7 @@ function parseLooksDetailAsset(
   }
 }
 
-export function parseLooksDetailResponse(
-  raw: unknown,
-): LooksDetailItemDto | null {
+export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | null {
   if (!isRecord(raw)) return null
 
   const itemRaw = isRecord(raw.item) ? raw.item : null

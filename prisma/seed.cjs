@@ -1047,28 +1047,28 @@ async function main() {
   console.log('UNCLAIMED phone client:', unclaimedPhoneClient) 
 
   const look1 = await upsertMediaAsset({
-    professionalId: professionalProfile.id,
-    mediaType: MediaType.IMAGE,
-    url: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1080&q=80',
-    caption: 'Lived-in balayage with soft money piece ✨',
-    storagePath: makeStoragePath('look-1.jpg'),
-  })
+  professionalId: professionalProfile.id,
+  mediaType: MediaType.IMAGE,
+  url: '/seed/look-1.png',
+  caption: 'Lived-in balayage with soft money piece ✨',
+  storagePath: makeStoragePath('look-1.png'),
+})
 
-  const look2 = await upsertMediaAsset({
-    professionalId: professionalProfile.id,
-    mediaType: MediaType.IMAGE,
-    url: 'https://images.unsplash.com/photo-1526045478516-99145907023c?auto=format&fit=crop&w=1080&q=80',
-    caption: 'Gel X set with a clean glossy finish 💅',
-    storagePath: makeStoragePath('look-2.jpg'),
-  })
+const look2 = await upsertMediaAsset({
+  professionalId: professionalProfile.id,
+  mediaType: MediaType.IMAGE,
+  url: '/seed/look-2.png',
+  caption: 'Gel X set with a clean glossy finish 💅',
+  storagePath: makeStoragePath('look-2.png'),
+})
 
-  const look3 = await upsertMediaAsset({
-    professionalId: professionalProfile.id,
-    mediaType: MediaType.IMAGE,
-    url: 'https://images.unsplash.com/photo-1520975958225-8d92b49a60c1?auto=format&fit=crop&w=1080&q=80',
-    caption: 'Soft glam, camera-ready, no flashback allowed.',
-    storagePath: makeStoragePath('look-3.jpg'),
-  })
+const look3 = await upsertMediaAsset({
+  professionalId: professionalProfile.id,
+  mediaType: MediaType.IMAGE,
+  url: '/seed/look-3.png',
+  caption: 'Soft glam, camera-ready, no flashback allowed.',
+  storagePath: makeStoragePath('look-3.png'),
+})
 
 await tagLook(look1.id, balayage.id)
 await tagLook(look1.id, rootTouchUp.id)

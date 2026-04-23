@@ -747,25 +747,27 @@ export default function LooksFeed() {
                 const isActive = idx === activeIndex
 
                 const rightRail = (
-                  <RightActionRail
-                    pro={
-                      item.professional
-                        ? {
-                            id: item.professional.id,
-                            businessName: item.professional.businessName,
-                            avatarUrl: item.professional.avatarUrl ?? null,
-                          }
-                        : null
-                    }
-                    viewerLiked={item.viewerLiked}
-                    likeCount={item._count.likes}
-                    commentCount={item._count.comments}
-                    bottom={RIGHT_RAIL_BOTTOM}
-                    onOpenAvailability={() => openAvailabilityFor(item)}
-                    onToggleLike={() => void toggleLike(item.id)}
-                    onOpenComments={() => void openCommentsDrawer(item.id)}
-                    onShare={() => void shareLook(item)}
-                  />
+              <RightActionRail
+                lookPostId={item.id}
+                lookTitle={item.caption ?? null}
+                pro={
+                  item.professional
+                    ? {
+                        id: item.professional.id,
+                        businessName: item.professional.businessName,
+                        avatarUrl: item.professional.avatarUrl ?? null,
+                      }
+                    : null
+                }
+                viewerLiked={item.viewerLiked}
+                likeCount={item._count.likes}
+                commentCount={item._count.comments}
+                bottom={RIGHT_RAIL_BOTTOM}
+                onOpenAvailability={() => openAvailabilityFor(item)}
+                onToggleLike={() => void toggleLike(item.id)}
+                onOpenComments={() => void openCommentsDrawer(item.id)}
+                onShare={() => void shareLook(item)}
+              />
                 )
 
                 return (

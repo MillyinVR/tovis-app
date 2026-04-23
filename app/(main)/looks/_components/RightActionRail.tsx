@@ -1,11 +1,21 @@
 // app/(main)/looks/_components/RightActionRail.tsx
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Bookmark, Heart, MessageCircle, Upload, CalendarDays } from 'lucide-react'
+import {
+  Bookmark,
+  Heart,
+  MessageCircle,
+  Upload,
+  CalendarDays,
+} from 'lucide-react'
 
-const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
+import SaveToBoardModal from './SaveToBoardModal'
+import type { LooksSaveStateResponseDto } from '@/lib/looks/types'
+
+const TEXT_SHADOW =
+  '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
 const PAPER = 'rgba(244,239,231,1)'
 const EMBER = '#FF3D4E'
 const ACID = '#D4FF3A'
@@ -33,6 +43,9 @@ type ProMini = {
 } | null
 
 type RightActionRailProps = {
+  lookPostId: string
+  lookTitle?: string | null
+  viewerSaved?: boolean
   pro: ProMini
   viewerLiked: boolean
   likeCount: number
@@ -43,6 +56,7 @@ type RightActionRailProps = {
   onToggleLike: () => void
   onOpenComments: () => void
   onShare: () => void
+  onSaveStateChange?: (state: LooksSaveStateResponseDto) => void
 }
 
 function RailButton({
@@ -60,7 +74,9 @@ function RailButton({
   ariaLabel: string
   testId?: string
 }) {
-  const footerText = label ?? (typeof count === 'number' && count > 0 ? formatCount(count) : null)
+  const footerText =
+    label ??
+    (typeof count === 'number' && count > 0 ? formatCount(count) : null)
 
   return (
     <button
@@ -102,6 +118,9 @@ function RailButton({
 }
 
 export default function RightActionRail({
+  lookPostId,
+  lookTitle = null,
+  viewerSaved = false,
   pro,
   viewerLiked,
   likeCount,
@@ -112,180 +131,208 @@ export default function RightActionRail({
   onToggleLike,
   onOpenComments,
   onShare,
+  onSaveStateChange,
 }: RightActionRailProps) {
-  // Save is local-only state for now (UI matches prototype)
-  const [saved, setSaved] = useState(false)
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
+  const [saved, setSaved] = useState(viewerSaved)
+
+  useEffect(() => {
+    setSaved(viewerSaved)
+  }, [viewerSaved])
+
+  function handleSaveStateChange(state: LooksSaveStateResponseDto) {
+    setSaved(state.isSaved)
+    onSaveStateChange?.(state)
+  }
 
   return (
-    <div
-      className="absolute z-[80] select-none"
-      style={{ right, bottom, display: 'grid', gap: 18, justifyItems: 'center' }}
-    >
-      {/* Pro avatar */}
-      {pro?.id ? (
-        <Link
-          href={`/professionals/${encodeURIComponent(pro.id)}`}
-          aria-label="View professional profile"
-          style={{ display: 'grid', justifyItems: 'center', textDecoration: 'none' }}
-          className="active:scale-95 transition-transform"
-        >
-          <div style={{ position: 'relative' }}>
-            <div
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: '50%',
-                border: '2px solid rgba(244,239,231,0.4)',
-                overflow: 'hidden',
-                background: 'rgba(244,239,231,0.08)',
-              }}
-            >
-              {pro.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={pro.avatarUrl}
-                  alt={pro.businessName || 'Professional'}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                  loading="lazy"
-                  decoding="async"
-                />
-              ) : (
-                <div
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    display: 'grid',
-                    placeItems: 'center',
-                    fontSize: 18,
-                    fontWeight: 900,
-                    color: PAPER,
-                  }}
-                >
-                  {initialLetter(pro.businessName)}
-                </div>
-              )}
-            </div>
+    <>
+      <div
+        className="absolute z-[80] select-none"
+        style={{
+          right,
+          bottom,
+          display: 'grid',
+          gap: 18,
+          justifyItems: 'center',
+        }}
+      >
+        {pro?.id ? (
+          <Link
+            href={`/professionals/${encodeURIComponent(pro.id)}`}
+            aria-label="View professional profile"
+            style={{
+              display: 'grid',
+              justifyItems: 'center',
+              textDecoration: 'none',
+            }}
+            className="active:scale-95 transition-transform"
+          >
+            <div style={{ position: 'relative' }}>
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: '50%',
+                  border: '2px solid rgba(244,239,231,0.4)',
+                  overflow: 'hidden',
+                  background: 'rgba(244,239,231,0.08)',
+                }}
+              >
+                {pro.avatarUrl ? (
+                  <img
+                    src={pro.avatarUrl}
+                    alt={pro.businessName || 'Professional'}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      display: 'block',
+                    }}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'grid',
+                      placeItems: 'center',
+                      fontSize: 18,
+                      fontWeight: 900,
+                      color: PAPER,
+                    }}
+                  >
+                    {initialLetter(pro.businessName)}
+                  </div>
+                )}
+              </div>
 
-            {/* Follow "+" badge */}
-            <div
-              aria-hidden="true"
-              style={{
-                position: 'absolute',
-                bottom: -6,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                width: 20,
-                height: 20,
-                borderRadius: '50%',
-                background: '#E05A28',
-                color: '#fff',
-                display: 'grid',
-                placeItems: 'center',
-                fontWeight: 900,
-                fontSize: 14,
-                lineHeight: 1,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
-              }}
-            >
-              +
+              <div
+                aria-hidden="true"
+                style={{
+                  position: 'absolute',
+                  bottom: -6,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  background: '#E05A28',
+                  color: '#fff',
+                  display: 'grid',
+                  placeItems: 'center',
+                  fontWeight: 900,
+                  fontSize: 14,
+                  lineHeight: 1,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
+                }}
+              >
+                +
+              </div>
             </div>
+          </Link>
+        ) : (
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: '50%',
+              border: '2px solid rgba(244,239,231,0.25)',
+              background: 'rgba(244,239,231,0.06)',
+            }}
+          />
+        )}
+
+        <div style={{ display: 'grid', justifyItems: 'center', gap: 0 }}>
+          <button
+            type="button"
+            data-testid="open-availability-button"
+            onClick={onOpenAvailability}
+            aria-label="Book"
+            className="book-glow active:scale-95 transition-transform"
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: '50%',
+              background: '#E05A28',
+              color: '#fff',
+              display: 'grid',
+              placeItems: 'center',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 0,
+              boxShadow:
+                '0 8px 24px rgba(224,90,40,0.55), 0 2px 6px rgba(0,0,0,0.6)',
+            }}
+          >
+            <CalendarDays size={30} aria-hidden="true" />
+          </button>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 800,
+              color: PAPER,
+              textShadow: TEXT_SHADOW,
+              marginTop: -2,
+              fontFamily: 'var(--font-mono)',
+              letterSpacing: '0.06em',
+            }}
+          >
+            BOOK
           </div>
-        </Link>
-      ) : (
-        <div
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: '50%',
-            border: '2px solid rgba(244,239,231,0.25)',
-            background: 'rgba(244,239,231,0.06)',
-          }}
-        />
-      )}
-
-      {/* Book button — solid terra circle with pulsing glow */}
-      <div style={{ display: 'grid', justifyItems: 'center', gap: 0 }}>
-        <button
-          type="button"
-          data-testid="open-availability-button"
-          onClick={onOpenAvailability}
-          aria-label="Book"
-          className="book-glow active:scale-95 transition-transform"
-          style={{
-            width: 52,
-            height: 52,
-            borderRadius: '50%',
-            background: '#E05A28',
-            color: '#fff',
-            display: 'grid',
-            placeItems: 'center',
-            border: 'none',
-            cursor: 'pointer',
-            padding: 0,
-            boxShadow: '0 8px 24px rgba(224,90,40,0.55), 0 2px 6px rgba(0,0,0,0.6)',
-          }}
-        >
-          <CalendarDays size={30} aria-hidden="true" />
-        </button>
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 800,
-            color: PAPER,
-            textShadow: TEXT_SHADOW,
-            marginTop: -2,
-            fontFamily: 'var(--font-mono)',
-            letterSpacing: '0.06em',
-          }}
-        >
-          BOOK
         </div>
+
+        <RailButton
+          ariaLabel={viewerLiked ? 'Unlike' : 'Like'}
+          onClick={onToggleLike}
+          count={likeCount}
+        >
+          <Heart
+            size={30}
+            style={{
+              color: viewerLiked ? EMBER : PAPER,
+              fill: viewerLiked ? EMBER : 'none',
+              transition: 'color 0.15s ease, fill 0.15s ease',
+            }}
+          />
+        </RailButton>
+
+        <RailButton
+          ariaLabel="Open comments"
+          onClick={onOpenComments}
+          count={commentCount}
+        >
+          <MessageCircle size={30} style={{ color: PAPER }} />
+        </RailButton>
+
+        <RailButton
+          ariaLabel={saved ? 'Manage saved boards' : 'Save to board'}
+          onClick={() => setIsSaveModalOpen(true)}
+        >
+          <Bookmark
+            size={30}
+            style={{
+              color: saved ? ACID : PAPER,
+              fill: saved ? ACID : 'none',
+              transition: 'color 0.15s ease, fill 0.15s ease',
+            }}
+          />
+        </RailButton>
+
+        <RailButton ariaLabel="Share" onClick={onShare}>
+          <Upload size={28} style={{ color: PAPER }} />
+        </RailButton>
       </div>
 
-      {/* Like */}
-      <RailButton
-        ariaLabel={viewerLiked ? 'Unlike' : 'Like'}
-        onClick={onToggleLike}
-        count={likeCount}
-      >
-        <Heart
-          size={30}
-          style={{
-            color: viewerLiked ? EMBER : PAPER,
-            fill: viewerLiked ? EMBER : 'none',
-            transition: 'color 0.15s ease, fill 0.15s ease',
-          }}
-        />
-      </RailButton>
-
-      {/* Comments */}
-      <RailButton
-        ariaLabel="Open comments"
-        onClick={onOpenComments}
-        count={commentCount}
-      >
-        <MessageCircle size={30} style={{ color: PAPER }} />
-      </RailButton>
-
-      {/* Save */}
-      <RailButton
-        ariaLabel={saved ? 'Unsave' : 'Save'}
-        onClick={() => setSaved((s) => !s)}
-      >
-        <Bookmark
-          size={30}
-          style={{
-            color: saved ? ACID : PAPER,
-            fill: saved ? ACID : 'none',
-            transition: 'color 0.15s ease, fill 0.15s ease',
-          }}
-        />
-      </RailButton>
-
-      {/* Share */}
-      <RailButton ariaLabel="Share" onClick={onShare}>
-        <Upload size={28} style={{ color: PAPER }} />
-      </RailButton>
-    </div>
+      <SaveToBoardModal
+        isOpen={isSaveModalOpen}
+        lookPostId={lookPostId}
+        title={lookTitle}
+        onClose={() => setIsSaveModalOpen(false)}
+        onSaveStateChange={handleSaveStateChange}
+      />
+    </>
   )
 }

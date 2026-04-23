@@ -24,6 +24,9 @@ const mocks = vi.hoisted(() => {
     lookLike: {
       findMany: vi.fn(),
     },
+    boardItem: {
+      findMany: vi.fn(),
+    },
     proFollow: {
       findMany: vi.fn(),
     },
@@ -132,6 +135,7 @@ function makeMappedDto(
   id: string,
   overrides?: Partial<{
     viewerLiked: boolean
+    viewerSaved: boolean
   }>,
 ) {
   return {
@@ -158,6 +162,7 @@ function makeMappedDto(
       comments: 1,
     },
     viewerLiked: false,
+    viewerSaved: false,
     uploadedByRole: null,
     reviewId: null,
     reviewHelpfulCount: null,
@@ -187,6 +192,7 @@ describe('app/api/looks/route.ts', () => {
 
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
+    mocks.prisma.boardItem.findMany.mockResolvedValue([])
     mocks.prisma.proFollow.findMany.mockResolvedValue([])
 
     mocks.mapLooksFeedMediaToDto.mockResolvedValue(null)
@@ -246,17 +252,21 @@ describe('app/api/looks/route.ts', () => {
 
     expect(mocks.prisma.proFollow.findMany).not.toHaveBeenCalled()
     expect(mocks.prisma.lookLike.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.boardItem.findMany).not.toHaveBeenCalled()
     expect(mocks.mapLooksFeedMediaToDto).not.toHaveBeenCalled()
     expect(mocks.encodeLooksFeedCursor).not.toHaveBeenCalled()
   })
 
-  it('hydrates viewer likes, returns viewerContext, and emits nextCursor when another page exists', async () => {
+  it('hydrates viewer likes and saves, returns viewerContext, and emits nextCursor when another page exists', async () => {
     const look1 = makeLookRow('look_1')
     const look2 = makeLookRow('look_2')
     const look3 = makeLookRow('look_3')
 
-    const dto1 = makeMappedDto('look_1')
-    const dto2 = makeMappedDto('look_2', { viewerLiked: true })
+    const dto1 = makeMappedDto('look_1', { viewerSaved: true })
+    const dto2 = makeMappedDto('look_2', {
+      viewerLiked: true,
+      viewerSaved: false,
+    })
 
     mocks.getCurrentUser.mockResolvedValue({
       id: 'user_1',
@@ -265,6 +275,7 @@ describe('app/api/looks/route.ts', () => {
 
     mocks.prisma.lookPost.findMany.mockResolvedValue([look1, look2, look3])
     mocks.prisma.lookLike.findMany.mockResolvedValue([{ lookPostId: 'look_2' }])
+    mocks.prisma.boardItem.findMany.mockResolvedValue([{ lookPostId: 'look_1' }])
 
     mocks.mapLooksFeedMediaToDto
       .mockResolvedValueOnce(dto1)
@@ -290,16 +301,28 @@ describe('app/api/looks/route.ts', () => {
       select: { lookPostId: true },
     })
 
+    expect(mocks.prisma.boardItem.findMany).toHaveBeenCalledWith({
+      where: {
+        lookPostId: { in: ['look_1', 'look_2'] },
+        board: {
+          clientId: 'client_1',
+        },
+      },
+      select: { lookPostId: true },
+    })
+
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenCalledTimes(2)
 
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(1, {
       item: look1,
       viewerLiked: false,
+      viewerSaved: true,
     })
 
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(2, {
       item: look2,
       viewerLiked: true,
+      viewerSaved: false,
     })
 
     expect(mocks.encodeLooksFeedCursor).toHaveBeenCalledWith({
@@ -435,6 +458,7 @@ describe('app/api/looks/route.ts', () => {
 
     expect(mocks.prisma.proFollow.findMany).not.toHaveBeenCalled()
     expect(mocks.prisma.lookLike.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.boardItem.findMany).not.toHaveBeenCalled()
   })
 
   it('supports ranked sort and cursor seek through shared feed helpers', async () => {

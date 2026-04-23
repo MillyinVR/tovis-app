@@ -14,18 +14,17 @@ import type {
   LooksBoardPreviewRow,
   LooksDetailRow,
   LooksFeedRow,
-  LooksProProfilePreviewRow,
 } from '@/lib/looks/selects'
 import type {
   LooksBoardDetailDto,
   LooksBoardPreviewDto,
   LooksBoardPreviewPrimaryMediaDto,
   LooksCommentDto,
+  LooksDetailAssetDto,
   LooksDetailItemDto,
   LooksDetailReviewDto,
   LooksFeedItemDto,
   LooksPortfolioTileDto,
-  LooksProProfilePreviewDto,
   LooksRenderedMediaDto,
 } from '@/lib/looks/types'
 import { mapLooksProProfilePreviewToDto } from '@/lib/looks/profilePreview'
@@ -241,8 +240,9 @@ async function mapStoredMediaToPreviewDto(
 export async function mapLooksFeedMediaToDto(args: {
   item: LooksFeedRow
   viewerLiked: boolean
+  viewerSaved: boolean
 }): Promise<LooksFeedItemDto | null> {
-  const { item, viewerLiked } = args
+  const { item, viewerLiked, viewerSaved } = args
   const primaryMedia: FeedPrimaryMediaShape = item.primaryMediaAsset
 
   const rendered = await renderAssetUrls({
@@ -286,6 +286,7 @@ export async function mapLooksFeedMediaToDto(args: {
       comments: item.commentCount,
     },
     viewerLiked,
+    viewerSaved,
 
     serviceId: primaryService?.id ?? null,
     serviceName: primaryService?.name ?? null,
@@ -503,7 +504,7 @@ export function mapLooksDetailToDto(args: {
 
     primaryMedia: mapRenderableLooksDetailMediaToDto(item.primaryMediaAsset),
 
-    assets: item.assets.map((asset) => ({
+    assets: item.assets.map((asset): LooksDetailAssetDto => ({
       id: asset.id,
       sortOrder: asset.sortOrder,
       mediaAssetId: asset.mediaAssetId,

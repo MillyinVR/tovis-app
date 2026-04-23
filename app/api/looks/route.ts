@@ -99,10 +99,10 @@ export async function GET(req: Request) {
     })
 
     const cursorWhere = buildLooksFeedCursorWhere({
-  kind,
-  sort,
-  cursor,
-})
+      kind,
+      sort,
+      cursor,
+    })
 
     const pageWhere = cursorWhere
       ? {
@@ -123,21 +123,40 @@ export async function GET(req: Request) {
     const items = hasMore ? rows.slice(0, limit) : rows
 
     let likedSet = new Set<string>()
+    let savedSet = new Set<string>()
 
     if (user && items.length > 0) {
-      const likes = await prisma.lookLike.findMany({
-        where: {
-          userId: user.id,
-          lookPostId: {
-            in: items.map((item) => item.id),
+      const [likes, savedItems] = await Promise.all([
+        prisma.lookLike.findMany({
+          where: {
+            userId: user.id,
+            lookPostId: {
+              in: items.map((item) => item.id),
+            },
           },
-        },
-        select: {
-          lookPostId: true,
-        },
-      })
+          select: {
+            lookPostId: true,
+          },
+        }),
+        user.clientProfile?.id
+          ? prisma.boardItem.findMany({
+              where: {
+                lookPostId: {
+                  in: items.map((item) => item.id),
+                },
+                board: {
+                  clientId: user.clientProfile.id,
+                },
+              },
+              select: {
+                lookPostId: true,
+              },
+            })
+          : Promise.resolve([] as Array<{ lookPostId: string }>),
+      ])
 
       likedSet = new Set(likes.map((like) => like.lookPostId))
+      savedSet = new Set(savedItems.map((item) => item.lookPostId))
     }
 
     const mapped = await Promise.all(
@@ -145,6 +164,7 @@ export async function GET(req: Request) {
         mapLooksFeedMediaToDto({
           item,
           viewerLiked: user ? likedSet.has(item.id) : false,
+          viewerSaved: user?.clientProfile?.id ? savedSet.has(item.id) : false,
         }),
       ),
     )

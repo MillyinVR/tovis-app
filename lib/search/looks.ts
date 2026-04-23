@@ -1,4 +1,3 @@
-// lib/search/looks.ts
 import { getCurrentUser } from '@/lib/currentUser'
 import {
   buildLooksFeedCursorWhere,
@@ -45,14 +44,10 @@ export async function searchLooks(
     max: 50,
   })
 
-  const rawCategorySlug = pickNonEmptyString(
-    searchParams.get('category'),
-  )
+  const rawCategorySlug = pickNonEmptyString(searchParams.get('category'))
   const q = pickNonEmptyString(searchParams.get('q'))
   const rawFilter = pickNonEmptyString(searchParams.get('filter'))
-  const following = parseBooleanParam(
-    searchParams.get('following'),
-  )
+  const following = parseBooleanParam(searchParams.get('following'))
 
   if (following || rawFilter?.toLowerCase() === 'following') {
     throw new SearchRequestError(
@@ -118,21 +113,40 @@ export async function searchLooks(
   const page = hasMore ? rows.slice(0, limit) : rows
 
   let likedSet = new Set<string>()
+  let savedSet = new Set<string>()
 
   if (user && page.length > 0) {
-    const likes = await prisma.lookLike.findMany({
-      where: {
-        userId: user.id,
-        lookPostId: {
-          in: page.map((item) => item.id),
+    const [likes, savedItems] = await Promise.all([
+      prisma.lookLike.findMany({
+        where: {
+          userId: user.id,
+          lookPostId: {
+            in: page.map((item) => item.id),
+          },
         },
-      },
-      select: {
-        lookPostId: true,
-      },
-    })
+        select: {
+          lookPostId: true,
+        },
+      }),
+      user.clientProfile?.id
+        ? prisma.boardItem.findMany({
+            where: {
+              lookPostId: {
+                in: page.map((item) => item.id),
+              },
+              board: {
+                clientId: user.clientProfile.id,
+              },
+            },
+            select: {
+              lookPostId: true,
+            },
+          })
+        : Promise.resolve([] as Array<{ lookPostId: string }>),
+    ])
 
     likedSet = new Set(likes.map((like) => like.lookPostId))
+    savedSet = new Set(savedItems.map((item) => item.lookPostId))
   }
 
   const mapped = await Promise.all(
@@ -140,6 +154,7 @@ export async function searchLooks(
       mapLooksFeedMediaToDto({
         item,
         viewerLiked: user ? likedSet.has(item.id) : false,
+        viewerSaved: user?.clientProfile?.id ? savedSet.has(item.id) : false,
       }),
     ),
   )
