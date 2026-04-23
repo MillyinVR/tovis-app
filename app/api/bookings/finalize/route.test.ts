@@ -319,31 +319,102 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.requireClient).not.toHaveBeenCalled()
   })
 
-  it('returns MISSING_MEDIA_ID when source is discovery without mediaId', async () => {
-    const descriptor = getBookingErrorDescriptor('MISSING_MEDIA_ID')
+it('returns MISSING_MEDIA_ID when source is discovery without lookPostId or mediaId', async () => {
+  const descriptor = getBookingErrorDescriptor('MISSING_MEDIA_ID')
 
-    const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-        source: 'DISCOVERY',
-      }),
-    )
+  const result = await POST(
+    makeRequest({
+      offeringId: 'offering_1',
+      holdId: 'hold_1',
+      locationType: 'SALON',
+      source: 'DISCOVERY',
+    }),
+  )
 
-    expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
-    })
-
-    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
-    expect(mocks.requireClient).not.toHaveBeenCalled()
+  expect(result.status).toBe(descriptor.httpStatus)
+  await expect(result.json()).resolves.toEqual({
+    ok: false,
+    error: 'Discovery bookings require a look post id or media id.',
+    code: descriptor.code,
+    retryable: descriptor.retryable,
+    uiAction: descriptor.uiAction,
+    message: 'Discovery bookings require a lookPostId or mediaId.',
   })
+
+  expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+  expect(mocks.requireClient).not.toHaveBeenCalled()
+})
+
+it('allows discovery finalize when lookPostId is provided without mediaId', async () => {
+  const result = await POST(
+    makeRequest({
+      offeringId: 'offering_1',
+      holdId: 'hold_1',
+      locationType: 'SALON',
+      source: 'DISCOVERY',
+      lookPostId: 'look_123',
+    }),
+  )
+
+  expect(result.status).toBe(201)
+
+  expect(mocks.requireClient).toHaveBeenCalledTimes(1)
+
+  expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
+    clientId: 'client_1',
+    holdId: 'hold_1',
+    openingId: null,
+    addOnIds: [],
+    locationType: ServiceLocationType.SALON,
+    source: BookingSource.DISCOVERY,
+    initialStatus: BookingStatus.PENDING,
+    rebookOfBookingId: null,
+    offering: {
+      id: 'offering_1',
+      professionalId: 'pro_123',
+      serviceId: 'service_1',
+      offersInSalon: true,
+      offersMobile: true,
+      salonPriceStartingAt: new Prisma.Decimal('100'),
+      salonDurationMinutes: 60,
+      mobilePriceStartingAt: new Prisma.Decimal('120'),
+      mobileDurationMinutes: 75,
+      professionalTimeZone: 'America/Los_Angeles',
+    },
+    fallbackTimeZone: 'UTC',
+  })
+
+  expect(mocks.createProNotification).toHaveBeenCalledWith({
+    professionalId: 'pro_123',
+    eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
+    title: 'New booking request',
+    body: '',
+    href: '/pro/bookings/booking_1',
+    actorUserId: 'user_1',
+    bookingId: 'booking_1',
+    dedupeKey: 'PRO_NOTIF:BOOKING_REQUEST_CREATED:booking_1',
+    data: {
+      bookingId: 'booking_1',
+      bookingStatus: BookingStatus.PENDING,
+      source: BookingSource.DISCOVERY,
+      locationType: ServiceLocationType.SALON,
+    },
+  })
+
+  await expect(result.json()).resolves.toEqual({
+    ok: true,
+    booking: {
+      id: 'booking_1',
+      status: BookingStatus.PENDING,
+      scheduledFor: HOLD_START.toISOString(),
+      professionalId: 'pro_123',
+    },
+    meta: {
+      mutated: true,
+      noOp: false,
+    },
+  })
+})
 
   it('returns OFFERING_NOT_FOUND when offering is missing', async () => {
     const descriptor = getBookingErrorDescriptor('OFFERING_NOT_FOUND')

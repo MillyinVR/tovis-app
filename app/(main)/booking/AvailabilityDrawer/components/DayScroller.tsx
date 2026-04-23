@@ -24,39 +24,53 @@ type DayButtonProps = {
   onSelectDay: (ymd: string) => void
 }
 
-const DayButton = memo(function DayButton({
-  day,
-  active,
-  onSelectDay,
-}: DayButtonProps) {
+const DayButton = memo(function DayButton({ day, active, onSelectDay }: DayButtonProps) {
   return (
     <button
       type="button"
       onClick={() => onSelectDay(day.ymd)}
-      className={[
-        'min-w-21.5 rounded-2xl border px-3 py-3 text-left transition',
-        active
-          ? 'border-accentPrimary/40 bg-accentPrimary text-bgPrimary'
-          : 'border-white/10 bg-bgPrimary/35 text-textPrimary hover:border-white/20 hover:bg-white/10',
-      ].join(' ')}
       aria-pressed={active}
+      style={{
+        flexShrink: 0,
+        minWidth: 54,
+        padding: '10px 12px',
+        borderRadius: 14,
+        border: active ? 'none' : '1px solid rgba(244,239,231,0.12)',
+        background: active ? '#E05A28' : 'rgba(244,239,231,0.06)',
+        cursor: 'pointer',
+        textAlign: 'center',
+        transition: 'background 0.15s ease',
+      }}
     >
-      <div className="text-[11px] font-black uppercase tracking-wide opacity-90">
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 900,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+          color: active ? 'rgba(255,255,255,0.9)' : 'rgba(244,239,231,0.55)',
+          fontFamily: 'var(--font-mono)',
+          lineHeight: 1,
+        }}
+      >
         {day.labelTop}
       </div>
-      <div className="mt-1 text-[16px] font-black leading-none">
+      <div
+        style={{
+          marginTop: 4,
+          fontSize: 18,
+          fontWeight: 900,
+          lineHeight: 1,
+          color: active ? '#fff' : 'rgba(244,239,231,0.95)',
+        }}
+      >
         {day.labelBottom}
       </div>
     </button>
   )
 })
 
-export default function DayScroller({
-  days,
-  selectedYMD,
-  onSelect,
-  onNearEnd,
-}: DayScrollerProps) {
+export default function DayScroller({ days, selectedYMD, onSelect, onNearEnd }: DayScrollerProps) {
   const nearEndTriggeredRef = useRef(false)
   const onSelectRef = useRef(onSelect)
   const onNearEndRef = useRef(onNearEnd)
@@ -91,22 +105,25 @@ export default function DayScroller({
   }, [])
 
   return (
-    <section className="tovis-glass-soft mb-3 rounded-card border border-white/10 bg-bgSecondary p-4">
-      <div className="text-[13px] font-black text-textPrimary">Choose a day</div>
-
-      <div
-        className="looksNoScrollbar mt-3 flex gap-2 overflow-x-auto pb-1"
-        onScroll={handleScroll}
-      >
-        {days.map((day) => (
-          <DayButton
-            key={day.ymd}
-            day={day}
-            active={day.ymd === selectedYMD}
-            onSelectDay={handleSelectDay}
-          />
-        ))}
-      </div>
-    </section>
+    <div
+      className="looksNoScrollbar"
+      style={{
+        display: 'flex',
+        gap: 8,
+        overflowX: 'auto',
+        paddingBottom: 4,
+        marginBottom: 16,
+      }}
+      onScroll={handleScroll}
+    >
+      {days.map((day) => (
+        <DayButton
+          key={day.ymd}
+          day={day}
+          active={day.ymd === selectedYMD}
+          onSelectDay={handleSelectDay}
+        />
+      ))}
+    </div>
   )
 }

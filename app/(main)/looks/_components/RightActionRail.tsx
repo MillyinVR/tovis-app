@@ -3,7 +3,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Bookmark, Heart, MessageCircle, Share2, CalendarDays } from 'lucide-react'
+import { Bookmark, Heart, MessageCircle, Upload, CalendarDays } from 'lucide-react'
 
 const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
 const PAPER = 'rgba(244,239,231,1)'
@@ -225,7 +225,7 @@ export default function RightActionRail({
             boxShadow: '0 8px 24px rgba(224,90,40,0.55), 0 2px 6px rgba(0,0,0,0.6)',
           }}
         >
-          <CalendarDays size={22} aria-hidden="true" />
+          <CalendarDays size={30} aria-hidden="true" />
         </button>
         <div
           style={{
@@ -249,7 +249,7 @@ export default function RightActionRail({
         count={likeCount}
       >
         <Heart
-          size={26}
+          size={30}
           style={{
             color: viewerLiked ? EMBER : PAPER,
             fill: viewerLiked ? EMBER : 'none',
@@ -264,7 +264,7 @@ export default function RightActionRail({
         onClick={onOpenComments}
         count={commentCount}
       >
-        <MessageCircle size={26} style={{ color: PAPER }} />
+        <MessageCircle size={30} style={{ color: PAPER }} />
       </RailButton>
 
       {/* Save */}
@@ -273,7 +273,7 @@ export default function RightActionRail({
         onClick={() => setSaved((s) => !s)}
       >
         <Bookmark
-          size={26}
+          size={30}
           style={{
             color: saved ? ACID : PAPER,
             fill: saved ? ACID : 'none',
@@ -284,7 +284,7 @@ export default function RightActionRail({
 
       {/* Share */}
       <RailButton ariaLabel="Share" onClick={onShare}>
-        <Share2 size={24} style={{ color: PAPER }} />
+        <Upload size={28} style={{ color: PAPER }} />
       </RailButton>
     </div>
   )

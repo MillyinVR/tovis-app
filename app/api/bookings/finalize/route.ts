@@ -24,6 +24,8 @@ import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercar
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
+const FALLBACK_TIME_ZONE: 'UTC' = 'UTC'
+
 const FINALIZE_OFFERING_SELECT = {
   id: true,
   isActive: true,
@@ -64,10 +66,24 @@ type ParsedFinalizeBody = {
   offeringId: string | null
   holdId: string | null
   mediaId: string | null
+  lookPostId: string | null
   openingId: string | null
   aftercareToken: string | null
   requestedRebookOfBookingId: string | null
   locationType: ServiceLocationType | null
+  addOnIds: string[]
+  source: BookingSource
+}
+
+type ValidatedFinalizeBody = {
+  offeringId: string
+  holdId: string
+  mediaId: string | null
+  lookPostId: string | null
+  openingId: string | null
+  aftercareToken: string | null
+  requestedRebookOfBookingId: string | null
+  locationType: ServiceLocationType
   addOnIds: string[]
   source: BookingSource
 }
@@ -89,6 +105,13 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
+function discoveryContextMissingFail(): Response {
+  return bookingJsonFail('MISSING_MEDIA_ID', {
+    userMessage: 'Discovery bookings require a look post id or media id.',
+    message: 'Discovery bookings require a lookPostId or mediaId.',
+  })
+}
+
 function pickStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
 
@@ -102,9 +125,17 @@ function hasDuplicates(values: string[]): boolean {
   return new Set(values).size !== values.length
 }
 
+function hasDiscoveryReference(args: {
+  mediaId: string | null
+  lookPostId: string | null
+}): boolean {
+  return Boolean(args.mediaId || args.lookPostId)
+}
+
 function normalizeSourceFromRequest(args: {
   sourceRaw: unknown
   mediaId: string | null
+  lookPostId: string | null
   aftercareToken: string | null
 }): BookingSource {
   if (args.aftercareToken) {
@@ -121,7 +152,7 @@ function normalizeSourceFromRequest(args: {
   if (raw === 'PROFILE') return BookingSource.REQUESTED
   if (raw === 'UNKNOWN') return BookingSource.REQUESTED
 
-  if (args.mediaId) return BookingSource.DISCOVERY
+  if (hasDiscoveryReference(args)) return BookingSource.DISCOVERY
   return BookingSource.REQUESTED
 }
 
@@ -131,6 +162,7 @@ function parseFinalizeBody(rawBody: unknown): ParsedFinalizeBody {
   const offeringId = pickString(body.offeringId)
   const holdId = pickString(body.holdId)
   const mediaId = pickString(body.mediaId)
+  const lookPostId = pickString(body.lookPostId)
   const openingId = pickString(body.openingId)
   const aftercareToken = pickString(body.aftercareToken)
   const requestedRebookOfBookingId = pickString(body.rebookOfBookingId)
@@ -140,6 +172,7 @@ function parseFinalizeBody(rawBody: unknown): ParsedFinalizeBody {
   const source = normalizeSourceFromRequest({
     sourceRaw: body.source,
     mediaId,
+    lookPostId,
     aftercareToken,
   })
 
@@ -147,6 +180,7 @@ function parseFinalizeBody(rawBody: unknown): ParsedFinalizeBody {
     offeringId,
     holdId,
     mediaId,
+    lookPostId,
     openingId,
     aftercareToken,
     requestedRebookOfBookingId,
@@ -156,32 +190,54 @@ function parseFinalizeBody(rawBody: unknown): ParsedFinalizeBody {
   }
 }
 
-function validateParsedFinalizeBody(body: ParsedFinalizeBody): Response | null {
+function validateParsedFinalizeBody(
+  body: ParsedFinalizeBody,
+): { ok: true; body: ValidatedFinalizeBody } | { ok: false; response: Response } {
   if (hasDuplicates(body.addOnIds)) {
-    return bookingJsonFail('ADDONS_INVALID')
+    return { ok: false, response: bookingJsonFail('ADDONS_INVALID') }
   }
 
   if (!body.locationType) {
-    return bookingJsonFail('LOCATION_TYPE_REQUIRED')
+    return { ok: false, response: bookingJsonFail('LOCATION_TYPE_REQUIRED') }
   }
 
   if (!body.offeringId) {
-    return bookingJsonFail('OFFERING_ID_REQUIRED')
+    return { ok: false, response: bookingJsonFail('OFFERING_ID_REQUIRED') }
   }
 
   if (!body.holdId) {
-    return bookingJsonFail('HOLD_ID_REQUIRED')
+    return { ok: false, response: bookingJsonFail('HOLD_ID_REQUIRED') }
   }
 
-  if (body.source === BookingSource.DISCOVERY && !body.mediaId) {
-    return bookingJsonFail('MISSING_MEDIA_ID')
+  if (
+    body.source === BookingSource.DISCOVERY &&
+    !hasDiscoveryReference({
+      mediaId: body.mediaId,
+      lookPostId: body.lookPostId,
+    })
+  ) {
+    return { ok: false, response: discoveryContextMissingFail() }
   }
 
   if (body.source === BookingSource.AFTERCARE && !body.aftercareToken) {
-    return bookingJsonFail('AFTERCARE_TOKEN_MISSING')
+    return { ok: false, response: bookingJsonFail('AFTERCARE_TOKEN_MISSING') }
   }
 
-  return null
+  return {
+    ok: true,
+    body: {
+      offeringId: body.offeringId,
+      holdId: body.holdId,
+      mediaId: body.mediaId,
+      lookPostId: body.lookPostId,
+      openingId: body.openingId,
+      aftercareToken: body.aftercareToken,
+      requestedRebookOfBookingId: body.requestedRebookOfBookingId,
+      locationType: body.locationType,
+      addOnIds: body.addOnIds,
+      source: body.source,
+    },
+  }
 }
 
 function toFinalizeOffering(
@@ -221,7 +277,7 @@ function getFinalizeProNotificationMeta(status: BookingStatus): {
 async function createFinalizeProNotification(args: {
   professionalId: string
   bookingId: string
-  actorUserId?: string | null
+  actorUserId: string | null
   bookingStatus: BookingStatus
   source: BookingSource
   locationType: ServiceLocationType
@@ -234,7 +290,7 @@ async function createFinalizeProNotification(args: {
     title: meta.title,
     body: '',
     href: `/pro/bookings/${args.bookingId}`,
-    actorUserId: args.actorUserId ?? null,
+    actorUserId: args.actorUserId,
     bookingId: args.bookingId,
     dedupeKey: `PRO_NOTIF:${meta.eventKey}:${args.bookingId}`,
     data: {
@@ -268,8 +324,13 @@ async function resolveFinalizeOwnershipContext(args: {
   offering: FinalizeOfferingRecord
 }): Promise<FinalizeOwnershipContext | Response> {
   if (args.source === BookingSource.AFTERCARE) {
+    const aftercareToken = args.aftercareToken
+    if (!aftercareToken) {
+      return bookingJsonFail('AFTERCARE_TOKEN_MISSING')
+    }
+
     const resolved = await resolveAftercareAccessByToken({
-      rawToken: args.aftercareToken!,
+      rawToken: aftercareToken,
     })
 
     const original = resolved.booking
@@ -312,14 +373,15 @@ async function resolveFinalizeOwnershipContext(args: {
 export async function POST(request: Request) {
   try {
     const rawBody: unknown = await request.json().catch(() => ({}))
-    const body = parseFinalizeBody(rawBody)
+    const parsedBody = parseFinalizeBody(rawBody)
 
-    const validationError = validateParsedFinalizeBody(body)
-    if (validationError) {
-      return validationError
+    const validated = validateParsedFinalizeBody(parsedBody)
+    if (!validated.ok) {
+      return validated.response
     }
+    const body = validated.body
 
-    const offeringOrFail = await getOfferingOrFail(body.offeringId!)
+    const offeringOrFail = await getOfferingOrFail(body.offeringId)
     if (offeringOrFail instanceof Response) {
       return offeringOrFail
     }
@@ -340,15 +402,15 @@ export async function POST(request: Request) {
 
     const result = await finalizeBookingFromHold({
       clientId: ownershipOrFail.clientId,
-      holdId: body.holdId!,
+      holdId: body.holdId,
       openingId: body.openingId,
       addOnIds: body.addOnIds,
-      locationType: body.locationType!,
+      locationType: body.locationType,
       source: body.source,
       initialStatus,
       rebookOfBookingId: ownershipOrFail.rebookOfBookingId,
       offering: toFinalizeOffering(offering),
-      fallbackTimeZone: 'UTC',
+      fallbackTimeZone: FALLBACK_TIME_ZONE,
     })
 
     try {
@@ -358,7 +420,7 @@ export async function POST(request: Request) {
         actorUserId: ownershipOrFail.actorUserId,
         bookingStatus: result.booking.status,
         source: body.source,
-        locationType: body.locationType!,
+        locationType: body.locationType,
       })
     } catch (notificationError: unknown) {
       console.error(

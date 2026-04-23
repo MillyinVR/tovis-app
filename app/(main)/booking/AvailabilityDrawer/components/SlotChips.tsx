@@ -1,7 +1,7 @@
 // app/(main)/booking/AvailabilityDrawer/components/SlotChips.tsx
 'use client'
 
-import { memo, useCallback, useMemo, useRef } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 
 import type { ProCard, SelectedHold } from '../types'
 import {
@@ -23,17 +23,11 @@ type SlotChipsProps = {
   onPick: (proId: string, offeringId: string | null, slotISO: string) => void
 }
 
-type PeriodOption = {
-  key: Period
-  label: string
-}
-
 type PeriodButtonProps = {
-  nextPeriod: Period
-  label: string
+  period: Period
   active: boolean
   disabled: boolean
-  onSelectPeriod: (period: Period) => void
+  onSelect: (period: Period) => void
 }
 
 type SlotButtonProps = {
@@ -43,14 +37,35 @@ type SlotButtonProps = {
   appointmentTz: string
   isSelected: boolean
   disabled: boolean
-  onPickSlot: (proId: string, offeringId: string | null, slotISO: string) => void
+  onPick: (proId: string, offeringId: string | null, slotISO: string) => void
 }
 
-const PERIOD_OPTIONS: PeriodOption[] = [
-  { key: 'MORNING', label: 'Morning' },
-  { key: 'AFTERNOON', label: 'Afternoon' },
-  { key: 'EVENING', label: 'Evening' },
-]
+const PERIOD_META: Record<
+  Period,
+  {
+    label: string
+    emptyCopy: string
+    testId: string
+  }
+> = {
+  MORNING: {
+    label: 'Morning',
+    emptyCopy: 'No morning times for this day.',
+    testId: 'availability-period-morning',
+  },
+  AFTERNOON: {
+    label: 'Afternoon',
+    emptyCopy: 'No afternoon times for this day.',
+    testId: 'availability-period-afternoon',
+  },
+  EVENING: {
+    label: 'Evening',
+    emptyCopy: 'No evening times for this day.',
+    testId: 'availability-period-evening',
+  },
+}
+
+const PERIOD_ORDER: Period[] = ['MORNING', 'AFTERNOON', 'EVENING']
 
 function periodOfHour(hour: number): Period {
   if (hour < 12) return 'MORNING'
@@ -63,51 +78,46 @@ function slotChipTestId(slotISO: string): string {
 }
 
 function buildEmptyCopy(period: Period, hasAnySlots: boolean): string {
-  if (!hasAnySlots) {
-    return 'No available times for this day.'
-  }
+  if (!hasAnySlots) return 'No available times for this day.'
+  return PERIOD_META[period].emptyCopy
+}
 
-  if (period === 'MORNING') {
-    return 'No morning times for this day.'
-  }
-
-  if (period === 'AFTERNOON') {
-    return 'No afternoon times for this day.'
-  }
-
-  return 'No evening times for this day.'
+function dedupeSlots(slotsForDay: string[]): string[] {
+  if (slotsForDay.length <= 1) return slotsForDay
+  return Array.from(new Set(slotsForDay))
 }
 
 const PeriodButton = memo(function PeriodButton({
-  nextPeriod,
-  label,
+  period,
   active,
   disabled,
-  onSelectPeriod,
+  onSelect,
 }: PeriodButtonProps) {
+  const meta = PERIOD_META[period]
+
   return (
     <button
-      data-testid={`availability-period-${nextPeriod.toLowerCase()}`}
+      data-testid={meta.testId}
       type="button"
       aria-pressed={active}
       onClick={() => {
         if (disabled || active) return
-        onSelectPeriod(nextPeriod)
+        onSelect(period)
       }}
       disabled={disabled}
+      title={disabled ? 'No times in this period' : ''}
       className={[
-        'h-10 rounded-full border text-[12px] font-black transition',
-        'border-white/10',
+        'rounded-full border px-0 py-[7px] text-[10px] font-black uppercase tracking-[0.1em] transition',
+        'font-mono',
         active
-          ? 'bg-accentPrimary text-bgPrimary'
-          : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
+          ? 'border-accentPrimary/40 bg-accentPrimary text-bgPrimary'
+          : 'border-white/10 bg-bgPrimary/35 text-textSecondary hover:bg-white/10',
         disabled
           ? 'cursor-not-allowed opacity-40 hover:bg-bgPrimary/35'
           : 'cursor-pointer',
       ].join(' ')}
-      title={disabled ? 'No times in this period' : ''}
     >
-      {label}
+      {meta.label}
     </button>
   )
 })
@@ -119,7 +129,7 @@ const SlotButton = memo(function SlotButton({
   appointmentTz,
   isSelected,
   disabled,
-  onPickSlot,
+  onPick,
 }: SlotButtonProps) {
   const title = useMemo(
     () => formatSlotFullLabel(slotISO, appointmentTz),
@@ -137,22 +147,25 @@ const SlotButton = memo(function SlotButton({
       type="button"
       onClick={() => {
         if (disabled) return
+
         if (typeof navigator !== 'undefined') {
           navigator.vibrate?.(10)
         }
-        onPickSlot(proId, offeringId, slotISO)
+
+        onPick(proId, offeringId, slotISO)
       }}
       disabled={disabled}
-      className={[
-        'h-10 rounded-full border px-3 text-[13px] font-black transition',
-        'border-white/10',
-        isSelected
-          ? 'bg-accentPrimary text-bgPrimary'
-          : 'bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
-        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-      ].join(' ')}
       title={title}
       aria-label={title}
+      className={[
+        'h-[38px] rounded-full border px-[14px] text-[13px] font-black transition',
+        isSelected
+          ? 'border-accentPrimary bg-accentPrimary text-bgPrimary'
+          : 'border-white/10 bg-bgPrimary/35 text-textPrimary hover:bg-white/10',
+        disabled
+          ? 'cursor-not-allowed opacity-50'
+          : 'cursor-pointer',
+      ].join(' ')}
     >
       {label}
     </button>
@@ -169,19 +182,7 @@ function SlotChips({
   slotsForDay,
   onPick,
 }: SlotChipsProps) {
-  const onSelectPeriodRef = useRef(onSelectPeriod)
-  const onPickRef = useRef(onPick)
-
-  onSelectPeriodRef.current = onSelectPeriod
-  onPickRef.current = onPick
-
-  const allSlots = useMemo(() => {
-    if (!Array.isArray(slotsForDay)) return []
-    if (slotsForDay.length <= 1) return slotsForDay
-
-    // Keep ordering stable while avoiding accidental duplicate chips.
-    return Array.from(new Set(slotsForDay))
-  }, [slotsForDay])
+  const allSlots = useMemo(() => dedupeSlots(slotsForDay), [slotsForDay])
 
   const slotsByPeriod = useMemo<Record<Period, string[]>>(() => {
     const grouped: Record<Period, string[]> = {
@@ -199,7 +200,7 @@ function SlotChips({
     return grouped
   }, [allSlots, appointmentTz])
 
-  const periodDisabled = useMemo(
+  const periodDisabled = useMemo<Record<Period, boolean>>(
     () => ({
       MORNING: slotsByPeriod.MORNING.length === 0,
       AFTERNOON: slotsByPeriod.AFTERNOON.length === 0,
@@ -208,62 +209,41 @@ function SlotChips({
     [slotsByPeriod],
   )
 
+  const handleSelectPeriod = useCallback(
+    (nextPeriod: Period) => {
+      onSelectPeriod(nextPeriod)
+    },
+    [onSelectPeriod],
+  )
+
+  const handlePickSlot = useCallback(
+    (proId: string, nextOfferingId: string | null, slotISO: string) => {
+      onPick(proId, nextOfferingId, slotISO)
+    },
+    [onPick],
+  )
+
   const hasAnySlots = allSlots.length > 0
   const visibleSlots = slotsByPeriod[period]
   const offeringId = pro.offeringId ?? null
   const disableSlotSelection = !offeringId || holding
   const emptyCopy = buildEmptyCopy(period, hasAnySlots)
 
-  const handleSelectPeriod = useCallback((nextPeriod: Period) => {
-    onSelectPeriodRef.current(nextPeriod)
-  }, [])
-
-  const handlePickSlot = useCallback(
-    (proId: string, nextOfferingId: string | null, slotISO: string) => {
-      onPickRef.current(proId, nextOfferingId, slotISO)
-    },
-    [],
-  )
-
   return (
-    <div
-      data-testid="availability-slot-list"
-      className="tovis-glass-soft mb-3 rounded-card p-4"
-    >
-      <div className="flex items-end justify-between">
-        <div>
-          <div className="text-[13px] font-black text-textPrimary">
-            Available times
-          </div>
-          <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-            Pick a time. We’ll hold it.
-          </div>
-        </div>
-
-        {holding ? (
-          <div className="text-[12px] font-semibold text-textSecondary">
-            Holding…
-          </div>
-        ) : null}
-      </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        {PERIOD_OPTIONS.map(({ key, label }) => (
+    <div data-testid="availability-slot-list" className="mb-4">
+      <div className="grid grid-cols-3 gap-[6px]">
+        {PERIOD_ORDER.map((nextPeriod) => (
           <PeriodButton
-            key={key}
-            nextPeriod={key}
-            label={label}
-            active={period === key}
-            disabled={periodDisabled[key]}
-            onSelectPeriod={handleSelectPeriod}
+            key={nextPeriod}
+            period={nextPeriod}
+            active={period === nextPeriod}
+            disabled={periodDisabled[nextPeriod]}
+            onSelect={handleSelectPeriod}
           />
         ))}
       </div>
 
-      <div
-        className="mt-3 flex flex-wrap gap-2"
-        aria-live="polite"
-      >
+      <div className="mt-3 flex flex-wrap gap-2" aria-live="polite">
         {visibleSlots.length > 0 ? (
           visibleSlots.map((slotISO) => {
             const isSelected =
@@ -278,7 +258,7 @@ function SlotChips({
                 appointmentTz={appointmentTz}
                 isSelected={isSelected}
                 disabled={disableSlotSelection}
-                onPickSlot={handlePickSlot}
+                onPick={handlePickSlot}
               />
             )
           })
@@ -288,6 +268,12 @@ function SlotChips({
           </div>
         )}
       </div>
+
+      {holding ? (
+        <div className="mt-[10px] text-[12px] font-semibold text-textSecondary">
+          Holding your time…
+        </div>
+      ) : null}
     </div>
   )
 }

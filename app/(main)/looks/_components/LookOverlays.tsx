@@ -4,6 +4,14 @@ import Link from 'next/link'
 import type { CSSProperties } from 'react'
 import type { FeedItem } from './lookTypes'
 
+const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
+const PAPER = 'rgba(244,239,231,1)'
+
+type ClampStyle = CSSProperties & {
+  WebkitLineClamp?: number
+  WebkitBoxOrient?: 'vertical' | 'horizontal'
+}
+
 type Props = {
   item: FeedItem
   rightRailBottom: number
@@ -11,118 +19,163 @@ type Props = {
   futureSelf: string
 }
 
-type ClampStyle = CSSProperties & {
-  WebkitLineClamp?: number
-  WebkitBoxOrient?: 'vertical' | 'horizontal'
-}
-
 function pickTrimmed(v: unknown): string | null {
   const s = typeof v === 'string' ? v.trim() : ''
   return s ? s : null
-}
-
-function formatHelpful(n: number) {
-  return `${n} ${n === 1 ? 'helpful' : 'helpfuls'}`
 }
 
 function formatRating(r: number) {
   return Number.isInteger(r) ? r.toFixed(0) : r.toFixed(1)
 }
 
-export default function LookOverlays(props: Props) {
-  const { item: m, rightRailBottom, futureSelf } = props
+function formatHelpful(n: number) {
+  return `${n} ${n === 1 ? 'helpful' : 'helpfuls'}`
+}
 
+export default function LookOverlays({ item: m, rightRailBottom }: Props) {
   const pro = m.professional ?? null
 
-  const handle = (pro?.handle ?? '').trim()
   const businessName = (pro?.businessName ?? '').trim()
+  const handle = (pro?.handle ?? '').trim()
+  const displayName = businessName || (handle ? `@${handle}` : null)
 
-  const displayHandle = handle ? `@${handle}` : businessName ? businessName : null
   const serviceLabel = pickTrimmed(m.serviceName)
   const caption = pickTrimmed(m.caption)
 
-  // Spotlight / review metadata
   const isReviewSpotlight = Boolean(m.reviewId)
   const reviewHeadline = pickTrimmed(m.reviewHeadline)
   const reviewHelpfulCount = typeof m.reviewHelpfulCount === 'number' ? m.reviewHelpfulCount : null
   const reviewRating = typeof m.reviewRating === 'number' ? m.reviewRating : null
 
-  // Caption behavior:
-  // - Spotlight: prefer review headline, fallback to caption
-  // - Normal: use caption
+  // Spotlight uses review headline as the caption quote
   const captionText = isReviewSpotlight ? (reviewHeadline ?? caption) : caption
-
-  // Bottom line behavior:
-  // - Spotlight: show rating/helpful meta instead of futureSelf
-  // - Normal: keep futureSelf
-  const metaParts: string[] = []
-  if (reviewRating !== null) metaParts.push(`★ ${formatRating(reviewRating)}`)
-  if (reviewHelpfulCount !== null) metaParts.push(formatHelpful(reviewHelpfulCount))
-  const spotlightMeta = metaParts.join(' • ')
-  const footerLine = isReviewSpotlight ? spotlightMeta : futureSelf
-
-  const hasAnyText = Boolean(displayHandle || serviceLabel || captionText || footerLine)
-  if (!hasAnyText) return null
 
   const profileHref = pro?.id ? `/professionals/${encodeURIComponent(pro.id)}` : null
 
-  const glowTextShadow =
-    '0 2px 6px rgba(0,0,0,0.85), 0 0 10px rgb(var(--micro-accent) / 0.28), 0 0 20px rgb(var(--micro-accent) / 0.14)'
+  const hasAnyContent = Boolean(displayName || captionText || serviceLabel)
+  if (!hasAnyContent) return null
 
-  const captionClampStyle: ClampStyle = {
-    fontSize: 13,
-    fontWeight: 650,
-    lineHeight: 1.25,
+  const captionStyle: ClampStyle = {
+    fontFamily: 'var(--font-display-face, "Fraunces"), Georgia, serif',
+    fontStyle: 'italic',
+    fontSize: 18,
+    lineHeight: 1.3,
+    color: PAPER,
+    marginBottom: 10,
     display: '-webkit-box',
     WebkitLineClamp: 2,
     WebkitBoxOrient: 'vertical',
     overflow: 'hidden',
-    opacity: 0.95,
   }
+
+  // Spotlight rating line shown below service pill
+  const metaParts: string[] = []
+  if (reviewRating !== null) metaParts.push(`★ ${formatRating(reviewRating)}`)
+  if (reviewHelpfulCount !== null) metaParts.push(formatHelpful(reviewHelpfulCount))
+  const spotlightMeta = metaParts.join(' • ')
 
   return (
     <div
-      className="absolute z-2 pointer-events-none"
+      className="absolute pointer-events-none"
       style={{
-        left: 12,
+        left: 16,
         right: 92,
         bottom: rightRailBottom,
-        textShadow: '0 2px 6px rgba(0,0,0,0.88), 0 10px 28px rgba(0,0,0,0.65)',
+        zIndex: 25,
+        textShadow: TEXT_SHADOW,
       }}
     >
-      {displayHandle || serviceLabel ? (
-        <div className="flex items-center gap-2.5 leading-tight">
-          {displayHandle ? (
-            profileHref ? (
-              <Link
-                href={profileHref}
-                aria-label={`View profile: ${displayHandle}`}
-                className="pointer-events-auto select-none text-white no-underline"
-              >
-                <span className="text-[14px] font-black hover:opacity-95" style={{ textShadow: glowTextShadow }}>
-                  {displayHandle}
-                </span>
-              </Link>
-            ) : (
-              <span className="text-[14px] font-black text-white" style={{ textShadow: glowTextShadow }}>
-                {displayHandle}
+      {/* Row 1: Pro name + FOLLOW pill */}
+      {displayName ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          {profileHref ? (
+            <Link
+              href={profileHref}
+              aria-label={`View profile: ${displayName}`}
+              className="pointer-events-auto no-underline"
+            >
+              <span style={{ fontSize: 15, fontWeight: 700, color: PAPER }}>
+                {displayName}
               </span>
-            )
+            </Link>
+          ) : (
+            <span style={{ fontSize: 15, fontWeight: 700, color: PAPER }}>
+              {displayName}
+            </span>
+          )}
+
+          <div
+            className="pointer-events-auto"
+            style={{
+              padding: '2px 8px',
+              border: '1px solid rgba(244,239,231,0.35)',
+              borderRadius: 999,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              color: PAPER,
+              cursor: 'pointer',
+              fontFamily: 'var(--font-mono)',
+              flexShrink: 0,
+            }}
+          >
+            FOLLOW
+          </div>
+        </div>
+      ) : null}
+
+      {/* Row 2: Italic serif caption with quotes */}
+      {captionText ? (
+        <div style={captionStyle}>
+          &ldquo;{captionText}&rdquo;
+        </div>
+      ) : null}
+
+      {/* Row 3: Pills */}
+      {(serviceLabel || spotlightMeta) ? (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {serviceLabel ? (
+            <div
+              style={{
+                padding: '4px 10px',
+                background: 'rgba(20,17,14,0.65)',
+                border: '1px solid rgba(244,239,231,0.18)',
+                borderRadius: 999,
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase' as const,
+                color: 'rgba(244,239,231,0.9)',
+              }}
+            >
+              {serviceLabel}
+            </div>
           ) : null}
 
-          {displayHandle && serviceLabel ? <span className="text-white opacity-60">•</span> : null}
-
-          {serviceLabel ? <span className="text-[12.5px] font-semibold text-white/90">{serviceLabel}</span> : null}
+          {isReviewSpotlight && spotlightMeta ? (
+            <div
+              style={{
+                padding: '4px 10px',
+                background: 'rgba(20,17,14,0.65)',
+                border: '1px solid rgba(244,239,231,0.18)',
+                borderRadius: 999,
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: '0.08em',
+                color: 'rgba(244,239,231,0.75)',
+              }}
+            >
+              {spotlightMeta}
+            </div>
+          ) : null}
         </div>
       ) : null}
-
-      {captionText ? (
-        <div className="mt-1 text-white" style={captionClampStyle}>
-          {isReviewSpotlight && reviewHeadline ? `“${captionText}”` : captionText}
-        </div>
-      ) : null}
-
-      {footerLine ? <div className="mt-0.5 text-[12px] font-semibold text-white/80">{footerLine}</div> : null}
     </div>
   )
 }

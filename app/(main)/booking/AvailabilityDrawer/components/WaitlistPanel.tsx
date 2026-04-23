@@ -1,4 +1,4 @@
-// app/(main)/booking/AvailabilityDrawer/components/WaitlistPanel.tsx
+﻿// app/(main)/booking/AvailabilityDrawer/components/WaitlistPanel.tsx
 'use client'
 
 import * as React from 'react'
@@ -316,7 +316,7 @@ export default function WaitlistPanel({
 
     if (!serviceId) {
       setOk(false)
-      setMsg('This look is missing a service link, so a waitlist request can’t be created yet.')
+      setMsg("This look is missing a service link, so a waitlist request can't be created yet.")
       return
     }
 
@@ -373,7 +373,7 @@ export default function WaitlistPanel({
       if (!parsed) throw new Error('Waitlist failed (unexpected response).')
 
       setOk(true)
-      setMsg('You’re on the waitlist. We’ll notify you if something opens up.')
+      setMsg("You're on the waitlist. We'll notify you if something opens up.")
       resetFieldsButKeepPrefs()
       setOpen(false)
     } catch (e: unknown) {
@@ -394,18 +394,16 @@ export default function WaitlistPanel({
           : 'Any time'
 
   return (
-    <div className="tovis-glass-soft mb-3 rounded-card p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-[13px] font-black text-textPrimary">Waitlist</div>
-          <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-            {noPrimarySlots ? 'Get notified when something opens.' : 'Can’t make these times? We’ll ping you.'}
-          </div>
-        </div>
-      </div>
-
+    <div style={{ marginBottom: 16 }}>
       {msg ? (
-        <div className={['mt-3 text-[13px] font-semibold', ok ? 'text-toneSuccess' : 'text-toneDanger'].join(' ')}>
+        <div
+          style={{
+            marginBottom: 10,
+            fontSize: 13,
+            fontWeight: 600,
+            color: ok ? '#4caf50' : '#FF3D4E',
+          }}
+        >
           {msg}
         </div>
       ) : null}
@@ -414,12 +412,35 @@ export default function WaitlistPanel({
         <button
           type="button"
           onClick={openForm}
-          className="mt-3 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 text-[13px] font-black text-textPrimary hover:bg-white/10"
+          style={{
+            width: '100%',
+            height: 44,
+            borderRadius: 999,
+            border: '1px solid rgba(244,239,231,0.1)',
+            background: 'rgba(244,239,231,0.05)',
+            fontSize: 13,
+            fontWeight: 700,
+            color: 'rgba(244,239,231,0.55)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 7,
+          }}
         >
-          Join waitlist
+          <span style={{ fontSize: 10, color: '#E05A28', lineHeight: 1 }}>✦</span>
+          Nothing works? Join the waitlist
         </button>
       ) : (
-        <div className="mt-3 grid gap-3">
+        <div
+          style={{
+            borderRadius: 16,
+            border: '1px solid rgba(244,239,231,0.12)',
+            background: 'rgba(244,239,231,0.05)',
+            padding: 16,
+          }}
+        >
+        <div className="grid gap-3">
           <div className="grid gap-2">
             <div className="text-[12px] font-black text-textPrimary">Quick picks</div>
             <div className="grid grid-cols-3 gap-2">
@@ -520,7 +541,7 @@ export default function WaitlistPanel({
               className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none placeholder:text-textSecondary/70 disabled:opacity-70"
             />
             <div className="mt-1 text-[11px] font-semibold text-textSecondary">
-              We’ll remember your waitlist preference on this device.
+              We'll remember your waitlist preference on this device.
             </div>
           </label>
 
@@ -548,6 +569,7 @@ export default function WaitlistPanel({
               Cancel
             </button>
           </div>
+        </div>
         </div>
       )}
     </div>

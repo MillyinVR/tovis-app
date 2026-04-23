@@ -7,7 +7,19 @@ export type BookingSource = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
 
 export type DrawerContext = {
   professionalId: string
+
+  /**
+   * Legacy discovery/media linkage used by older flows.
+   * Do not use this to carry the canonical look feed post id.
+   */
   mediaId?: string | null
+
+  /**
+   * Canonical discovery identifier for Looks-based booking entry points.
+   * Use this for feed/detail flows that open booking from a look post.
+   */
+  lookPostId?: string | null
+
   serviceId?: string | null
   offeringId?: string | null
   source?: BookingSource

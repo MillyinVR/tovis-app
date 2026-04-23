@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { useBrand } from '@/lib/brand/BrandProvider'
+import { asTrimmedString, isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
 import { parseLooksCommentsResponse } from '@/lib/looks/parsers'
 import type {
@@ -24,31 +25,46 @@ import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/A
 import CommentsDrawer from '../_components/CommentsDrawer'
 import RightActionRail from '../_components/RightActionRail'
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function pickString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length > 0
-    ? value.trim()
-    : null
-}
-
 function currentLooksDetailPath(lookPostId: string): string {
   return `/looks/${encodeURIComponent(lookPostId)}`
 }
 
 function readErrorMessage(raw: unknown, fallback: string): string {
-  if (isRecord(raw)) {
-    const error = pickString(raw.error)
-    if (error) return error
-  }
-
-  return fallback
+  if (!isRecord(raw)) return fallback
+  return asTrimmedString(raw.error) ?? fallback
 }
 
 function isGuestBlocked(status: number): boolean {
   return status === 401
+}
+
+function getNavigatorShare() {
+  if (typeof navigator === 'undefined') return null
+
+  const value: unknown = navigator
+  if (!isRecord(value)) return null
+
+  const share = value.share
+  return typeof share === 'function'
+    ? (share as (data: ShareData) => Promise<void>)
+    : null
+}
+
+function buildAvailabilityDrawerContext(args: {
+  item: LooksDetailItemDto
+  viewerLoc: ViewerLocation | null
+}): AvailabilityDrawerContext | null {
+  const professionalId = args.item.professional?.id
+  if (!professionalId) return null
+
+  return {
+    professionalId,
+    lookPostId: args.item.id,
+    mediaId: null,
+    serviceId: args.item.service?.id ?? null,
+    source: 'DISCOVERY',
+    ...viewerLocationToDrawerContextFields(args.viewerLoc),
+  }
 }
 
 export default function LookDetailClient({
@@ -70,7 +86,9 @@ export default function LookDetailClient({
 
   const [viewerLoc, setViewerLoc] = useState<ViewerLocation | null>(null)
   const [availabilityOpen, setAvailabilityOpen] = useState(false)
-  const [drawerCtx, setDrawerCtx] = useState<AvailabilityDrawerContext | null>(null)
+  const [drawerCtx, setDrawerCtx] = useState<AvailabilityDrawerContext | null>(
+    null,
+  )
 
   useEffect(() => {
     setViewerLoc(loadViewerLocation())
@@ -94,29 +112,30 @@ export default function LookDetailClient({
   }, [])
 
   const openAvailability = useCallback(() => {
-    if (!item.professional?.id) return
-
-    setDrawerCtx({
-      mediaId: null,
-      professionalId: item.professional.id,
-      serviceId: item.service?.id ?? null,
-      source: 'DISCOVERY',
-      ...viewerLocationToDrawerContextFields(viewerLoc),
+    const context = buildAvailabilityDrawerContext({
+      item,
+      viewerLoc,
     })
+    if (!context) return
+
+    setDrawerCtx(context)
     setAvailabilityOpen(true)
-  }, [item.professional?.id, item.service?.id, viewerLoc])
+  }, [item, viewerLoc])
 
   const loadComments = useCallback(async () => {
     setCommentsLoading(true)
     setCommentError(null)
 
     try {
-      const res = await fetch(`/api/looks/${encodeURIComponent(item.id)}/comments`, {
-        cache: 'no-store',
-        headers: {
-          Accept: 'application/json',
+      const res = await fetch(
+        `/api/looks/${encodeURIComponent(item.id)}/comments`,
+        {
+          cache: 'no-store',
+          headers: {
+            Accept: 'application/json',
+          },
         },
-      })
+      )
 
       const raw = await safeJson(res)
 
@@ -131,7 +150,7 @@ export default function LookDetailClient({
       }
 
       setComments(parseLooksCommentsResponse(raw))
-    } catch (error) {
+    } catch (error: unknown) {
       setCommentError(
         error instanceof Error ? error.message : 'Failed to load comments',
       )
@@ -164,9 +183,12 @@ export default function LookDetailClient({
     }))
 
     try {
-      const res = await fetch(`/api/looks/${encodeURIComponent(lookPostId)}/like`, {
-        method: beforeLiked ? 'DELETE' : 'POST',
-      })
+      const res = await fetch(
+        `/api/looks/${encodeURIComponent(lookPostId)}/like`,
+        {
+          method: beforeLiked ? 'DELETE' : 'POST',
+        },
+      )
 
       const raw = await safeJson(res)
 
@@ -270,14 +292,17 @@ export default function LookDetailClient({
     }))
 
     try {
-      const res = await fetch(`/api/looks/${encodeURIComponent(item.id)}/comments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
+      const res = await fetch(
+        `/api/looks/${encodeURIComponent(item.id)}/comments`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ body }),
         },
-        body: JSON.stringify({ body }),
-      })
+      )
 
       const raw = await safeJson(res)
 
@@ -308,7 +333,7 @@ export default function LookDetailClient({
       }
 
       await loadComments()
-    } catch (error) {
+    } catch (error: unknown) {
       setComments((prev) => prev.filter((comment) => comment.id !== tempId))
       setItem((prev) => ({
         ...prev,
@@ -331,12 +356,10 @@ export default function LookDetailClient({
     const url = `${window.location.origin}${currentLooksDetailPath(item.id)}`
 
     try {
-      const nav = navigator as Navigator & {
-        share?: (data: ShareData) => Promise<void>
-      }
+      const share = getNavigatorShare()
 
-      if (typeof nav.share === 'function') {
-        await nav.share({
+      if (share) {
+        await share({
           title: `${brand.displayName} Look`,
           text: item.caption ?? undefined,
           url,
@@ -361,10 +384,7 @@ export default function LookDetailClient({
     : null
 
   const secondaryAssets = useMemo(
-    () =>
-      item.assets.filter(
-        (asset) => asset.media.id !== item.primaryMedia.id,
-      ),
+    () => item.assets.filter((asset) => asset.media.id !== item.primaryMedia.id),
     [item.assets, item.primaryMedia.id],
   )
 
@@ -531,32 +551,32 @@ export default function LookDetailClient({
                   Admin detail
                 </div>
                 <div className="text-[12px] text-textSecondary">
-                  Primary media asset:{" "}
+                  Primary media asset:{' '}
                   <span className="font-black text-textPrimary">
                     {item.admin.primaryMediaAssetId}
                   </span>
                 </div>
                 <div className="text-[12px] text-textSecondary">
-                  Media visibility:{" "}
+                  Media visibility:{' '}
                   <span className="font-black text-textPrimary">
                     {item.admin.primaryMedia.visibility}
                   </span>
                 </div>
                 <div className="text-[12px] text-textSecondary">
-                  Eligible for Looks:{" "}
+                  Eligible for Looks:{' '}
                   <span className="font-black text-textPrimary">
                     {item.admin.primaryMedia.isEligibleForLooks ? 'Yes' : 'No'}
                   </span>
                 </div>
                 <div className="text-[12px] text-textSecondary">
-                  Featured in portfolio:{" "}
+                  Featured in portfolio:{' '}
                   <span className="font-black text-textPrimary">
                     {item.admin.primaryMedia.isFeaturedInPortfolio ? 'Yes' : 'No'}
                   </span>
                 </div>
                 {item.admin.primaryMedia.reviewBody ? (
                   <div className="text-[12px] text-textSecondary">
-                    Review body:{" "}
+                    Review body:{' '}
                     <span className="text-textPrimary">
                       {item.admin.primaryMedia.reviewBody}
                     </span>

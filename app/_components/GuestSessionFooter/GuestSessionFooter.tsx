@@ -33,16 +33,13 @@ export default function GuestSessionFooter() {
       className="w-full"
       style={{
         paddingBottom: 'env(safe-area-inset-bottom)',
-        background: 'rgba(10,9,7,0.92)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        borderTop: '1px solid rgba(244,239,231,0.08)',
+        background: '#0A0907',
       }}
     >
       <div>
         <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-around px-4">
-          <NavItem label="Home" href={ROUTES.home} icon={<House size={20} />} active={homeActive} />
-          <NavItem label="Search" href={ROUTES.search} icon={<Compass size={20} />} active={searchActive} />
+          <NavItem label="Home" href={ROUTES.home} icon={<House size={28} />} active={homeActive} />
+          <NavItem label="Search" href={ROUTES.search} icon={<Compass size={28} />} active={searchActive} />
 
           {/* Center CTA: Looks */}
           <Link
@@ -65,8 +62,8 @@ export default function GuestSessionFooter() {
             </span>
           </Link>
 
-          <NavItem label="Log in" href={ROUTES.login} icon={<LogIn size={20} />} active={loginActive} />
-          <NavItem label="Sign up" href={ROUTES.signup} icon={<UserPlus size={20} />} active={isActivePath(pathname, ROUTES.signup)} />
+          <NavItem label="Log in" href={ROUTES.login} icon={<LogIn size={28} />} active={loginActive} />
+          <NavItem label="Sign up" href={ROUTES.signup} icon={<UserPlus size={28} />} active={isActivePath(pathname, ROUTES.signup)} />
         </div>
       </div>
     </div>

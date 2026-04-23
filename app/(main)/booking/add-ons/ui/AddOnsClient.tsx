@@ -1,3 +1,4 @@
+// app/(main)/booking/add-ons/ui/AddOnsClient.tsx
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
@@ -26,6 +27,7 @@ type Props = {
   locationType: ServiceLocationType
   source: BookingSource
   mediaId: string | null
+  lookPostId: string | null
   addOns: AddOnDTO[]
   initialError?: string | null
   initialSelectedIds?: string[]
@@ -148,6 +150,7 @@ export default function AddOnsClient({
   locationType,
   source,
   mediaId,
+  lookPostId,
   addOns,
   initialError,
   initialSelectedIds,
@@ -359,6 +362,7 @@ export default function AddOnsClient({
           locationType,
           source,
           mediaId,
+          lookPostId,
           addOnIds: selectedIds,
         }),
       })
@@ -375,6 +379,10 @@ export default function AddOnsClient({
 
         if (mediaId) {
           fromQuery.set('mediaId', mediaId)
+        }
+
+        if (lookPostId) {
+          fromQuery.set('lookPostId', lookPostId)
         }
 
         if (selectedIds.length > 0) {
@@ -439,6 +447,7 @@ export default function AddOnsClient({
           locationType,
           bookingSource: source,
           mediaId,
+          lookPostId,
           addOnCount: addOns.length,
           readyTarget: 'booking-add-ons-continue-button',
         },
@@ -448,7 +457,7 @@ export default function AddOnsClient({
     return () => {
       window.cancelAnimationFrame(rafId)
     }
-  }, [holdId, offeringId, locationType, source, mediaId, addOns.length])
+  }, [holdId, offeringId, locationType, source, mediaId, lookPostId, addOns.length])
 
   return (
     <main className="mx-auto max-w-180 px-4 pb-28 pt-10 text-textPrimary">

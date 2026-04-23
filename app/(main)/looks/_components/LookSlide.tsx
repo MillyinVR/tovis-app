@@ -67,6 +67,21 @@ export default function LookSlide(props: {
           <div className="relative h-full w-full overflow-hidden md:rounded-[18px]">
             <LookMedia item={item} isActive={isActive} />
 
+            {/* Bottom fade — matches footer bg so media dissolves into the nav bar */}
+            <div
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: 260,
+                background: 'linear-gradient(to top, rgba(10,9,7,0.92) 0%, rgba(10,9,7,0.4) 45%, transparent 100%)',
+                pointerEvents: 'none',
+                zIndex: 5,
+              }}
+            />
+
             {/* Review Spotlight badge */}
             {isReviewSpotlight ? (
               <div className="pointer-events-none absolute left-3 right-3 z-30" style={{ top: spotlightTop }}>

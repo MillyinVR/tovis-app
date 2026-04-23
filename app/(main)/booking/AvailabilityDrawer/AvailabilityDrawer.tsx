@@ -1,4 +1,4 @@
-// app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx
+﻿// app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx
 'use client'
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -13,7 +13,8 @@ import type {
   ServiceLocationType,
 } from './types'
 
-import { STICKY_CTA_H } from './constants'
+import { asTrimmedString, getRecordProp, isRecord } from '@/lib/guards'
+
 import AppointmentTypeToggle from './components/AppointmentTypeToggle'
 import ClientAddressCreateModal from './components/ClientAddressCreateModal'
 import DayScroller from './components/DayScroller'
@@ -21,8 +22,6 @@ import DebugPanel from './components/DebugPanel'
 import DrawerShell from './components/DrawerShell'
 import MobileAddressSelector from './components/MobileAddressSelector'
 import OtherPros from './components/OtherPros'
-import ProCard from './components/ProCard'
-import ServiceContextCard from './components/ServiceContextCard'
 import SlotChips from './components/SlotChips'
 import StickyCTA from './components/StickyCTA'
 import WaitlistPanel from './components/WaitlistPanel'
@@ -45,11 +44,10 @@ import { safeJson } from './utils/safeJson'
 import { dateTimeLocalToUtcIso } from '@/lib/bookingDateTimeClient'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 
-const FALLBACK_TZ = 'UTC' as const
+const FALLBACK_TZ: 'UTC' = 'UTC'
 const MOBILE_ADDRESS_REQUIRED_MESSAGE =
   'Select a saved service address before viewing mobile availability.'
 
-const AVAILABILITY_REFRESH_BUTTON_TEST_ID = 'availability-refresh-button'
 const AVAILABILITY_BACKGROUND_STATUS_TEST_ID =
   'availability-background-status'
 const AVAILABILITY_HOLD_CONTINUE_BUTTON_TEST_ID =
@@ -59,7 +57,7 @@ type Period = 'MORNING' | 'AFTERNOON' | 'EVENING'
 
 const EMPTY_DAYS: Array<{ date: string; slotCount: number }> = []
 
-const _dtfCache = new Map<string, Intl.DateTimeFormat>()
+const dtfCache = new Map<string, Intl.DateTimeFormat>()
 
 function buildDaySwitchMetricKey(dayYMD: string) {
   return `day-switch:${dayYMD}`
@@ -76,7 +74,7 @@ function buildContinueMetricKey(holdId: string) {
   return `continue:${holdId}`
 }
 
-const _DTF_KEY_PROPS: Array<keyof Intl.DateTimeFormatOptions> = [
+const DTF_KEY_PROPS: Array<keyof Intl.DateTimeFormatOptions> = [
   'timeZone',
   'weekday',
   'month',
@@ -87,23 +85,28 @@ const _DTF_KEY_PROPS: Array<keyof Intl.DateTimeFormatOptions> = [
   'hour12',
 ]
 
-function _getDtf(
+function getDtf(
   locale: string | undefined,
   options: Intl.DateTimeFormatOptions,
 ): Intl.DateTimeFormat {
   const parts: string[] = [locale ?? '']
-  for (const prop of _DTF_KEY_PROPS) {
+  for (const prop of DTF_KEY_PROPS) {
     parts.push(String(options[prop] ?? ''))
   }
   const key = parts.join('|')
 
-  let fmt = _dtfCache.get(key)
+  let fmt = dtfCache.get(key)
   if (!fmt) {
     fmt = new Intl.DateTimeFormat(locale, options)
-    _dtfCache.set(key, fmt)
+    dtfCache.set(key, fmt)
   }
 
   return fmt
+}
+
+type DiscoveryContextIds = {
+  mediaId: string | null
+  lookPostId: string | null
 }
 
 type ConfirmHoldSelection = {
@@ -113,6 +116,7 @@ type ConfirmHoldSelection = {
   slotISO: string
   bookingSource: BookingSource
   mediaId: string | null
+  lookPostId: string | null
 }
 
 type BookingErrorUiAction =
@@ -180,8 +184,37 @@ function trackAvailabilityEvent(
   window.__tovisAvailabilityTrack?.(eventName, payload)
 }
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
+function getDiscoveryContextIds(context: DrawerContext): DiscoveryContextIds {
+  return {
+    mediaId: asTrimmedString(context.mediaId),
+    lookPostId: asTrimmedString(context.lookPostId),
+  }
+}
+
+function resolveBookingSource(context: DrawerContext): BookingSource {
+  if (context.source) return context.source
+
+  const discoveryIds = getDiscoveryContextIds(context)
+  if (discoveryIds.lookPostId || discoveryIds.mediaId) return 'DISCOVERY'
+
+  return 'REQUESTED'
+}
+
+function parseBookingUiAction(value: unknown): BookingErrorUiAction | null {
+  if (
+    value === 'REFRESH_AVAILABILITY' ||
+    value === 'PICK_NEW_SLOT' ||
+    value === 'ADD_SERVICE_ADDRESS' ||
+    value === 'FIX_LOCATION_CONFIG' ||
+    value === 'FIX_OFFERING_CONFIG' ||
+    value === 'FIX_WORKING_HOURS' ||
+    value === 'CONTACT_SUPPORT' ||
+    value === 'NONE'
+  ) {
+    return value
+  }
+
+  return null
 }
 
 function parseBookingApiError(
@@ -190,38 +223,15 @@ function parseBookingApiError(
 ): ParsedBookingApiError | null {
   if (!isRecord(raw)) return null
 
-  const topLevelError =
-    typeof raw.error === 'string' && raw.error.trim() ? raw.error.trim() : null
-
-  const code =
-    typeof raw.code === 'string' && raw.code.trim() ? raw.code.trim() : null
-
-  const retryable = typeof raw.retryable === 'boolean' ? raw.retryable : null
-
-  const uiAction =
-    raw.uiAction === 'REFRESH_AVAILABILITY' ||
-    raw.uiAction === 'PICK_NEW_SLOT' ||
-    raw.uiAction === 'ADD_SERVICE_ADDRESS' ||
-    raw.uiAction === 'FIX_LOCATION_CONFIG' ||
-    raw.uiAction === 'FIX_OFFERING_CONFIG' ||
-    raw.uiAction === 'FIX_WORKING_HOURS' ||
-    raw.uiAction === 'CONTACT_SUPPORT' ||
-    raw.uiAction === 'NONE'
-      ? raw.uiAction
-      : null
-
-  const developerMessage =
-    typeof raw.message === 'string' && raw.message.trim()
-      ? raw.message.trim()
-      : null
+  const retryableRaw = getRecordProp(raw, 'retryable')
 
   return {
     status,
-    code,
-    message: topLevelError,
-    retryable,
-    uiAction,
-    developerMessage,
+    code: asTrimmedString(getRecordProp(raw, 'code')),
+    message: asTrimmedString(getRecordProp(raw, 'error')),
+    retryable: typeof retryableRaw === 'boolean' ? retryableRaw : null,
+    uiAction: parseBookingUiAction(getRecordProp(raw, 'uiAction')),
+    developerMessage: asTrimmedString(getRecordProp(raw, 'message')),
   }
 }
 
@@ -289,9 +299,9 @@ function shouldRefreshAvailabilityAfterBookingError(
   }
 }
 
-function periodOfHour(h: number): Period {
-  if (h < 12) return 'MORNING'
-  if (h < 17) return 'AFTERNOON'
+function periodOfHour(hour: number): Period {
+  if (hour < 12) return 'MORNING'
+  if (hour < 17) return 'AFTERNOON'
   return 'EVENING'
 }
 
@@ -309,7 +319,7 @@ function fmtInTz(isoUtc: string, timeZone: string) {
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
 
-  return _getDtf(undefined, {
+  return getDtf(undefined, {
     timeZone: tz,
     weekday: 'short',
     month: 'short',
@@ -324,7 +334,7 @@ function fmtSelectedLine(isoUtc: string, timeZone: string) {
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return isoUtc
 
-  return _getDtf(undefined, {
+  return getDtf(undefined, {
     timeZone: tz,
     weekday: 'long',
     month: 'long',
@@ -340,7 +350,7 @@ function hourInTz(isoUtc: string, timeZone: string): number | null {
   const d = new Date(isoUtc)
   if (Number.isNaN(d.getTime())) return null
 
-  const parts = _getDtf('en-US', {
+  const parts = getDtf('en-US', {
     timeZone: tz,
     hour: '2-digit',
     hour12: false,
@@ -355,7 +365,7 @@ function ymdInTz(timeZone: string): string | null {
   const tz = sanitizeTimeZone(timeZone, FALLBACK_TZ)
   const d = new Date()
 
-  const parts = _getDtf('en-CA', {
+  const parts = getDtf('en-CA', {
     timeZone: tz,
     year: 'numeric',
     month: '2-digit',
@@ -367,12 +377,6 @@ function ymdInTz(timeZone: string): string | null {
   const day = parts.find((p) => p.type === 'day')?.value
   if (!y || !m || !day) return null
   return `${y}-${m}-${day}`
-}
-
-function resolveBookingSource(context: DrawerContext): BookingSource {
-  if (context.source) return context.source
-  if (context.mediaId) return 'DISCOVERY'
-  return 'REQUESTED'
 }
 
 type AvailabilityBootstrapOk = Extract<AvailabilityBootstrapResponse, { ok: true }>
@@ -391,17 +395,17 @@ function resolveAppointmentTimeZone(args: {
   summaryTimeZone?: unknown
   primaryProTimeZone?: unknown
 }) {
-  const s =
+  const summaryTz =
     typeof args.summaryTimeZone === 'string'
       ? args.summaryTimeZone.trim()
       : ''
-  if (s && isValidIanaTimeZone(s)) return s
+  if (summaryTz && isValidIanaTimeZone(summaryTz)) return summaryTz
 
-  const p =
+  const primaryTz =
     typeof args.primaryProTimeZone === 'string'
       ? args.primaryProTimeZone.trim()
       : ''
-  if (p && isValidIanaTimeZone(p)) return p
+  if (primaryTz && isValidIanaTimeZone(primaryTz)) return primaryTz
 
   return FALLBACK_TZ
 }
@@ -410,26 +414,28 @@ function buildDayScrollerModel(
   days: Array<{ date: string; slotCount: number }>,
   appointmentTz: string,
 ) {
-  return days.map((d) => {
-    let anchor = new Date(`${d.date}T12:00:00.000Z`)
+  return days.map((day) => {
+    let anchor = new Date(`${day.date}T12:00:00.000Z`)
 
     try {
-      anchor = new Date(dateTimeLocalToUtcIso(`${d.date}T12:00:00`, appointmentTz))
+      anchor = new Date(
+        dateTimeLocalToUtcIso(`${day.date}T12:00:00`, appointmentTz),
+      )
     } catch {
       // display-only fallback
     }
 
-    const top = _getDtf(undefined, {
+    const top = getDtf(undefined, {
       timeZone: appointmentTz,
       weekday: 'short',
     }).format(anchor)
 
-    const bottom = _getDtf(undefined, {
+    const bottom = getDtf(undefined, {
       timeZone: appointmentTz,
       day: '2-digit',
     }).format(anchor)
 
-    return { ymd: d.date, labelTop: top, labelBottom: bottom }
+    return { ymd: day.date, labelTop: top, labelBottom: bottom }
   })
 }
 
@@ -441,33 +447,98 @@ function fallbackAllowedMode(args: {
   return 'SALON'
 }
 
-const AvailabilityDrawerSkeleton = React.memo(function AvailabilityDrawerSkeleton() {
-  return (
-    <div className="tovis-glass-soft rounded-card p-4">
-      <div className="mb-4 flex items-center gap-3">
-        <div className="avail-skeleton h-12 w-12 rounded-full" />
-        <div className="flex-1 space-y-2">
-          <div className="avail-skeleton h-3 w-1/2 rounded-full" />
-          <div className="avail-skeleton h-3 w-1/3 rounded-full" />
+const AvailabilityDrawerSkeleton = React.memo(
+  function AvailabilityDrawerSkeleton() {
+    return (
+      <div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            marginBottom: 20,
+          }}
+        >
+          <div
+            className="avail-skeleton"
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: '50%',
+              flexShrink: 0,
+            }}
+          />
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div
+              className="avail-skeleton"
+              style={{ height: 12, width: '45%', borderRadius: 999 }}
+            />
+            <div
+              className="avail-skeleton"
+              style={{ height: 10, width: '30%', borderRadius: 999 }}
+            />
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            marginBottom: 16,
+            overflow: 'hidden',
+          }}
+        >
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="avail-skeleton"
+              style={{
+                height: 62,
+                width: 66,
+                flexShrink: 0,
+                borderRadius: 999,
+              }}
+            />
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr 1fr',
+            gap: 6,
+            marginBottom: 12,
+          }}
+        >
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="avail-skeleton"
+              style={{ height: 36, borderRadius: 999 }}
+            />
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <div
+              key={i}
+              className="avail-skeleton"
+              style={{ height: 38, width: 64, borderRadius: 999 }}
+            />
+          ))}
         </div>
       </div>
-      <div className="avail-skeleton mb-3 h-10 rounded-2xl" />
-      <div className="mb-3 flex gap-2">
-        {[0, 1, 2, 3, 4].map((i) => (
-          <div
-            key={i}
-            className="avail-skeleton h-[62px] w-[86px] flex-shrink-0 rounded-2xl"
-          />
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {[0, 1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="avail-skeleton h-10 w-16 rounded-full" />
-        ))}
-      </div>
-    </div>
-  )
-})
+    )
+  },
+)
 
 function InlineRetryCard(props: {
   message: string
@@ -476,16 +547,17 @@ function InlineRetryCard(props: {
   return (
     <div
       data-testid="availability-error"
-      className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4"
+      className="mb-[14px] rounded-[14px] border border-white/10 bg-bgPrimary/35 p-3.5"
     >
-      <div className="mb-3 text-sm font-semibold text-toneDanger">
+      <div className="mb-2.5 text-[13px] font-semibold text-red-400">
         {props.message}
       </div>
+
       <button
         type="button"
         data-testid="availability-retry-button"
         onClick={props.onRetry}
-        className="inline-flex h-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] font-black text-textPrimary transition hover:bg-white/10"
+        className="h-[34px] rounded-full border border-white/10 bg-bgPrimary/35 px-[14px] text-[12px] font-extrabold text-textPrimary transition hover:bg-white/10"
       >
         Retry
       </button>
@@ -547,6 +619,11 @@ export default function AvailabilityDrawer(props: {
     })
   }, [open, selected?.holdId])
 
+  const discoveryIds = useMemo(
+    () => getDiscoveryContextIds(context),
+    [context.mediaId, context.lookPostId],
+  )
+
   const requestedMobileAddressGate = locationType === 'MOBILE'
 
   const {
@@ -587,6 +664,7 @@ export default function AvailabilityDrawer(props: {
   const others = summary?.otherPros ?? []
   const days = summary?.availableDays ?? EMPTY_DAYS
   const offering: AvailabilityOffering = summary?.offering ?? FALLBACK_OFFERING
+
   const previousResetContextKeyRef = useRef<string | null>(null)
   const forcedMobileOnlyGate =
     !summary && availabilityError === MOBILE_ADDRESS_REQUIRED_MESSAGE
@@ -614,14 +692,16 @@ export default function AvailabilityDrawer(props: {
 
   const resetContextKey = useMemo(() => {
     return [
-      context.mediaId ?? '',
+      discoveryIds.lookPostId ?? '',
+      discoveryIds.mediaId ?? '',
       context.professionalId ?? '',
       context.serviceId ?? '',
       context.offeringId ?? '',
       context.source ?? '',
     ].join('|')
   }, [
-    context.mediaId,
+    discoveryIds.lookPostId,
+    discoveryIds.mediaId,
     context.professionalId,
     context.serviceId,
     context.offeringId,
@@ -635,7 +715,9 @@ export default function AvailabilityDrawer(props: {
 
   const activeLocationType: ServiceLocationType = mobileAddressGateRequested
     ? 'MOBILE'
-    : locationType ?? summary?.request.locationType ?? fallbackAllowedMode(allowed)
+    : locationType ??
+      summary?.request.locationType ??
+      fallbackAllowedMode(allowed)
 
   const { label: holdLabel, urgent: holdUrgent, expired: holdExpired } =
     useHoldTimer(holdUntil)
@@ -651,20 +733,44 @@ export default function AvailabilityDrawer(props: {
   const showLocalHint = viewerTz !== appointmentTz
   const effectiveServiceId =
     summary?.request.serviceId ?? context.serviceId ?? null
-  const bookingSource = resolveBookingSource(context)
+  const bookingSource = useMemo(() => resolveBookingSource(context), [context])
 
   const canWaitlist = Boolean(
     summary?.waitlistSupported && context.professionalId && effectiveServiceId,
   )
 
-  const viewProServicesHref = primary
-    ? `/professionals/${encodeURIComponent(primary.id)}?tab=services`
-    : '/looks'
+  const proHeaderMeta = useMemo(() => {
+    if (!summary) return null
 
-  const statusLine = useMemo(() => {
-    if (!effectiveServiceId) return 'No service linked yet.'
-    return 'Matched to this service'
-  }, [effectiveServiceId])
+    const parts: string[] = []
+
+    if (summary.serviceName?.trim()) {
+      parts.push(summary.serviceName.trim())
+    }
+
+    const rawPrice =
+      activeLocationType === 'MOBILE'
+        ? offering.mobilePriceStartingAt
+        : offering.salonPriceStartingAt
+
+    if (rawPrice) {
+      const n = Number(rawPrice)
+      if (Number.isFinite(n) && n > 0) {
+        parts.push(`$${n.toFixed(0)}`)
+      }
+    }
+
+    const duration =
+      activeLocationType === 'MOBILE'
+        ? offering.mobileDurationMinutes
+        : offering.salonDurationMinutes
+
+    if (typeof duration === 'number' && duration > 0) {
+      parts.push(`${duration}min`)
+    }
+
+    return parts.length ? parts.join(' · ') : null
+  }, [summary, offering, activeLocationType])
 
   const resolvedOfferingId = useMemo(() => {
     if (summary?.offering?.id) return summary.offering.id
@@ -677,8 +783,8 @@ export default function AvailabilityDrawer(props: {
     if (!summary) return map
 
     map[summary.primaryPro.id] = summary.request.locationId
-    for (const p of summary.otherPros) {
-      map[p.id] = p.locationId
+    for (const pro of summary.otherPros) {
+      map[pro.id] = pro.locationId
     }
 
     return map
@@ -757,10 +863,10 @@ export default function AvailabilityDrawer(props: {
 
   const retryDaySlots = useCallback(() => {
     setError(null)
-    setSlotRetryKey((k) => k + 1)
+    setSlotRetryKey((key) => key + 1)
   }, [setError])
 
-    const refreshAfterAvailabilityConflict = useCallback(() => {
+  const refreshAfterAvailabilityConflict = useCallback(() => {
     setSelected(null)
     setHoldUntil(null)
     setOtherProsRequested(false)
@@ -774,7 +880,7 @@ export default function AvailabilityDrawer(props: {
     }
 
     clearAlternates()
-    setSlotRetryKey((k) => k + 1)
+    setSlotRetryKey((key) => key + 1)
     refresh()
   }, [
     selectedDayYMD,
@@ -784,15 +890,6 @@ export default function AvailabilityDrawer(props: {
     clearAlternates,
     refresh,
   ])
-
-  const handleManualRefresh = useCallback(() => {
-    setHoldError(null)
-    refresh()
-
-    if (otherProsRequested) {
-      refreshAlternates()
-    }
-  }, [refresh, otherProsRequested, refreshAlternates])
 
   const resetForLocationModeChange = useCallback(
     async (next: ServiceLocationType) => {
@@ -1010,7 +1107,7 @@ export default function AvailabilityDrawer(props: {
     if (!hasMoreDays) return
     if (loadingPrimarySlots) return
 
-    const selectedIndex = days.findIndex((d) => d.date === selectedDayYMD)
+    const selectedIndex = days.findIndex((day) => day.date === selectedDayYMD)
     if (
       shouldPrefetchForSelectedIndex({
         selectedIndex,
@@ -1112,7 +1209,7 @@ export default function AvailabilityDrawer(props: {
       (() => {
         const todayInAppointmentTz = ymdInTz(appointmentTz)
         const todayExists = todayInAppointmentTz
-          ? days.some((d) => d.date === todayInAppointmentTz)
+          ? days.some((day) => day.date === todayInAppointmentTz)
           : false
         const firstAvailable = days[0]?.date ?? null
 
@@ -1128,24 +1225,19 @@ export default function AvailabilityDrawer(props: {
       if (!current) return preferredDay
 
       if (days.length > 0) {
-        const currentStillExists = days.some((d) => d.date === current)
+        const currentStillExists = days.some((day) => day.date === current)
         return currentStillExists ? current : preferredDay
       }
 
       return current
     })
-  }, [
-    open,
-    summary?.selectedDay?.date,
-    appointmentTz,
-    days,
-  ])
+  }, [open, summary?.selectedDay?.date, appointmentTz, days])
 
   useEffect(() => {
     if (!open) return
 
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
       void hardResetUi({ deleteHold: true })
       onClose()
     }
@@ -1185,15 +1277,15 @@ export default function AvailabilityDrawer(props: {
     }
 
     for (const iso of primarySlots) {
-      const h = hourInTz(iso, appointmentTz)
-      if (h == null) continue
-      counts[periodOfHour(h)] += 1
+      const hour = hourInTz(iso, appointmentTz)
+      if (hour == null) continue
+      counts[periodOfHour(hour)] += 1
     }
 
     if (counts[period] > 0) return
 
     const preferred: Period[] = ['AFTERNOON', 'MORNING', 'EVENING']
-    const next = preferred.find((p) => counts[p] > 0)
+    const next = preferred.find((candidate) => counts[candidate] > 0)
     if (next && next !== period) {
       setPeriod(next)
     }
@@ -1288,20 +1380,16 @@ export default function AvailabilityDrawer(props: {
     days.length,
   ])
 
-  function scrollToOtherPros() {
-    requestOtherPros({ scroll: true })
-  }
-
   async function onPickSlot(
     proId: string,
     offeringId: string | null,
     slotISO: string,
   ) {
-    const effOfferingId = offeringId || resolvedOfferingId
-    if (!effOfferingId || holding) return
+    const effectiveOfferingId = offeringId || resolvedOfferingId
+    if (!effectiveOfferingId || holding) return
 
     const holdMetricKey = buildHoldRequestMetricKey({
-      offeringId: effOfferingId,
+      offeringId: effectiveOfferingId,
       slotISO,
     })
 
@@ -1331,7 +1419,7 @@ export default function AvailabilityDrawer(props: {
       meta: {
         professionalId: proId,
         serviceId: effectiveServiceId,
-        offeringId: effOfferingId,
+        offeringId: effectiveOfferingId,
         selectedDayYMD,
         slotISO,
         locationType: activeLocationType,
@@ -1342,7 +1430,7 @@ export default function AvailabilityDrawer(props: {
     trackAvailabilityEvent('availability_hold_requested', {
       professionalId: proId,
       serviceId: effectiveServiceId,
-      offeringId: effOfferingId,
+      offeringId: effectiveOfferingId,
       selectedDayYMD,
       slotISO,
       locationType: activeLocationType,
@@ -1359,7 +1447,7 @@ export default function AvailabilityDrawer(props: {
           Accept: 'application/json',
         },
         body: JSON.stringify({
-          offeringId: effOfferingId,
+          offeringId: effectiveOfferingId,
           scheduledFor: slotISO,
           locationType: activeLocationType,
           ...(locationId ? { locationId } : {}),
@@ -1374,7 +1462,7 @@ export default function AvailabilityDrawer(props: {
         meta: {
           professionalId: proId,
           serviceId: effectiveServiceId,
-          offeringId: effOfferingId,
+          offeringId: effectiveOfferingId,
           selectedDayYMD,
           slotISO,
           locationType: activeLocationType,
@@ -1414,7 +1502,7 @@ export default function AvailabilityDrawer(props: {
 
       setSelected({
         proId,
-        offeringId: effOfferingId,
+        offeringId: effectiveOfferingId,
         slotISO: parsed.scheduledForISO,
         proTimeZone: appointmentTz,
         holdId: parsed.holdId,
@@ -1428,7 +1516,7 @@ export default function AvailabilityDrawer(props: {
       trackAvailabilityEvent('availability_hold_succeeded', {
         professionalId: proId,
         serviceId: effectiveServiceId,
-        offeringId: effOfferingId,
+        offeringId: effectiveOfferingId,
         selectedDayYMD,
         slotISO: parsed.scheduledForISO,
         locationType: parsed.locationType ?? activeLocationType,
@@ -1438,7 +1526,7 @@ export default function AvailabilityDrawer(props: {
       if (otherProsRequested) {
         refreshAlternates()
       }
-    } catch (e: unknown) {
+    } catch (error: unknown) {
       if (!holdMetricFinished) {
         endAvailabilityMetric({
           metric: 'hold_request_latency_ms',
@@ -1446,7 +1534,7 @@ export default function AvailabilityDrawer(props: {
           meta: {
             professionalId: proId,
             serviceId: effectiveServiceId,
-            offeringId: effOfferingId,
+            offeringId: effectiveOfferingId,
             selectedDayYMD,
             slotISO,
             locationType: activeLocationType,
@@ -1458,8 +1546,8 @@ export default function AvailabilityDrawer(props: {
       }
 
       setHoldError(
-        e instanceof Error
-          ? e.message
+        error instanceof Error
+          ? error.message
           : 'Failed to hold that time. Try another slot.',
       )
     } finally {
@@ -1476,7 +1564,8 @@ export default function AvailabilityDrawer(props: {
       locationType: activeLocationType,
       slotISO: selected.slotISO,
       bookingSource,
-      mediaId: context.mediaId ?? null,
+      mediaId: discoveryIds.mediaId,
+      lookPostId: discoveryIds.lookPostId,
     }
 
     trackAvailabilityEvent('availability_continue_clicked', {
@@ -1493,9 +1582,11 @@ export default function AvailabilityDrawer(props: {
       try {
         await onConfirmHold(payload)
         onClose()
-      } catch (e) {
+      } catch (error) {
         setError(
-          e instanceof Error ? e.message : 'Could not continue with that time.',
+          error instanceof Error
+            ? error.message
+            : 'Could not continue with that time.',
         )
       }
       return
@@ -1524,6 +1615,10 @@ export default function AvailabilityDrawer(props: {
       locationType: payload.locationType,
       source: payload.bookingSource,
     })
+
+    if (payload.lookPostId) {
+      qs.set('lookPostId', payload.lookPostId)
+    }
 
     if (payload.mediaId) {
       qs.set('mediaId', payload.mediaId)
@@ -1554,47 +1649,25 @@ export default function AvailabilityDrawer(props: {
           onClose()
         }}
         header={
-          <>
-            <div className="flex items-center justify-center pt-3">
-              <div className="h-1.5 w-10 rounded-full bg-white/20" />
-            </div>
+          <div className="flex items-center justify-between px-4 pb-[10px] pt-3">
+            <button
+              type="button"
+              data-testid="availability-close-button"
+              onClick={() => {
+                void hardResetUi({ deleteHold: true })
+                onClose()
+              }}
+              aria-label="Close"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 text-[14px] text-textSecondary transition hover:bg-white/10"
+            >
+              ✕
+            </button>
 
-            <div className="sticky top-0 z-10 px-4 pb-3 pt-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-black text-textPrimary">
-                    Availability
-                  </div>
-                  <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
-                    Pick a time. We hold it for you.
-                    {holdLabel ? (
-                      <span
-                        className={[
-                          'ml-2 font-black',
-                          holdUrgent ? 'text-toneDanger' : 'text-textPrimary',
-                        ].join(' ')}
-                      >
-                        {holdLabel}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  data-testid="availability-close-button"
-                  onClick={() => {
-                    void hardResetUi({ deleteHold: true })
-                    onClose()
-                  }}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/40 text-textPrimary hover:bg-white/10"
-                  aria-label="Close"
-                >
-                  ✕
-                </button>
-              </div>
+            <div className="flex items-center gap-[5px]">
+              <div className="h-2 w-6 rounded-full bg-accentPrimary opacity-70" />
+              <div className="h-2 w-2 rounded-full bg-white/15" />
             </div>
-          </>
+          </div>
         }
         footer={
           <StickyCTA
@@ -1607,22 +1680,100 @@ export default function AvailabilityDrawer(props: {
         }
       >
         <div
-          className="looksNoScrollbar overflow-y-auto px-4 pb-4"
-          style={{ paddingBottom: STICKY_CTA_H + 14 }}
+          className="looksNoScrollbar overflow-y-auto px-5"
+          style={{ paddingBottom: 16 }}
         >
+          {summary && primary ? (
+            <div className="mb-[14px] flex items-center gap-3">
+              <a
+                href={`/professionals/${encodeURIComponent(primary.id)}`}
+                className="shrink-0 no-underline"
+              >
+                <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-full border border-white/10 bg-bgPrimary/40">
+                  {primary.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={primary.avatarUrl}
+                      alt={primary.businessName || ''}
+                      className="block h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-[18px] font-black text-textSecondary">
+                      {(primary.businessName || 'P').slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+              </a>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-[6px] truncate text-[16px] font-black text-textPrimary">
+                  <span className="truncate">
+                    {primary.businessName?.trim() || 'Professional'}
+                  </span>
+
+                  {primary.isCreator ? (
+                    <span className="text-[12px] leading-none text-accentPrimary">
+                      ●
+                    </span>
+                  ) : null}
+                </div>
+
+                {proHeaderMeta ? (
+                  <div className="mt-[3px] truncate text-[12px] font-semibold text-textSecondary">
+                    {proHeaderMeta}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          <div
+            className="text-[30px] font-bold leading-[1.1] text-textPrimary"
+            style={{
+              fontFamily: 'var(--font-display-face, "Fraunces"), Georgia, serif',
+              fontStyle: 'italic',
+              marginBottom: holdLabel ? 6 : 18,
+            }}
+          >
+            When works?
+          </div>
+
+          {holdLabel ? (
+            <div className="mb-4 text-[12px] font-semibold text-textSecondary">
+              Hold expires{' '}
+              <span
+                className={
+                  holdUrgent ? 'font-black text-red-400' : 'font-black text-textPrimary'
+                }
+              >
+                {holdLabel}
+              </span>
+            </div>
+          ) : null}
+
+          {summary && primary && !showMobileAddressSelector ? (
+            <AppointmentTypeToggle
+              value={activeLocationType}
+              disabled={holding}
+              allowed={allowed}
+              offering={offering}
+              onChange={(nextType) => {
+                void resetForLocationModeChange(nextType)
+              }}
+            />
+          ) : null}
+
           {showMobileAddressSelector ? (
             <>
-              <div className="relative z-30">
-                <AppointmentTypeToggle
-                  value={activeLocationType}
-                  disabled={holding}
-                  allowed={allowed}
-                  offering={offering}
-                  onChange={(nextType) => {
-                    void resetForLocationModeChange(nextType)
-                  }}
-                />
-              </div>
+              <AppointmentTypeToggle
+                value={activeLocationType}
+                disabled={holding}
+                allowed={allowed}
+                offering={offering}
+                onChange={(nextType) => {
+                  void resetForLocationModeChange(nextType)
+                }}
+              />
 
               <MobileAddressSelector
                 value={selectedClientAddressId}
@@ -1635,7 +1786,7 @@ export default function AvailabilityDrawer(props: {
               />
 
               {waitingForMobileAddress ? (
-                <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
+                <div className="py-3 text-[13px] font-semibold text-textSecondary">
                   Choose a service address to see mobile times.
                 </div>
               ) : null}
@@ -1652,68 +1803,25 @@ export default function AvailabilityDrawer(props: {
               }}
             />
           ) : shouldShowEmpty ? (
-            <div className="tovis-glass-soft rounded-card p-4 text-sm font-semibold text-textSecondary">
+            <div className="py-4 text-[13px] font-semibold text-textSecondary">
               No availability found.
             </div>
           ) : null}
 
+          <div
+            data-testid={AVAILABILITY_BACKGROUND_STATUS_TEST_ID}
+            aria-live="polite"
+            className="pointer-events-none absolute h-px w-px overflow-hidden opacity-0"
+          >
+            {backgroundRefreshing
+              ? 'Updating availability…'
+              : daySlotsRefreshingInline
+                ? 'Verifying times…'
+                : ''}
+          </div>
+
           {summary && primary ? (
             <>
-              <ProCard
-                pro={primary}
-                appointmentTz={appointmentTz}
-                viewerTz={viewerTz}
-                statusLine={statusLine}
-                showFallbackActions={false}
-                viewProServicesHref={viewProServicesHref}
-                onScrollToOtherPros={scrollToOtherPros}
-              />
-
-              <ServiceContextCard
-                serviceName={summary.serviceName ?? null}
-                categoryName={summary.serviceCategoryName ?? null}
-                offering={offering}
-                locationType={activeLocationType}
-              />
-
-              {!showMobileAddressSelector ? (
-                <div className="relative z-30">
-                  <AppointmentTypeToggle
-                    value={activeLocationType}
-                    disabled={holding}
-                    allowed={allowed}
-                    offering={offering}
-                    onChange={(nextType) => {
-                      void resetForLocationModeChange(nextType)
-                    }}
-                  />
-                </div>
-              ) : null}
-
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div
-                  data-testid={AVAILABILITY_BACKGROUND_STATUS_TEST_ID}
-                  aria-live="polite"
-                  className="text-xs font-semibold text-textSecondary"
-                >
-                  {backgroundRefreshing
-                    ? 'Updating availability in the background…'
-                    : daySlotsRefreshingInline
-                      ? 'Verifying times for the selected day…'
-                      : 'Times update automatically.'}
-                </div>
-
-                <button
-                  type="button"
-                  data-testid={AVAILABILITY_REFRESH_BUTTON_TEST_ID}
-                  onClick={handleManualRefresh}
-                  disabled={holding || backgroundRefreshing || summaryDaysLoading}
-                  className="inline-flex h-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] font-black text-textPrimary transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Refresh times
-                </button>
-              </div>
-
               {dayScrollerDays.length ? (
                 <DayScroller
                   days={dayScrollerDays}
@@ -1752,16 +1860,21 @@ export default function AvailabilityDrawer(props: {
               ) : null}
 
               {loadingMore ? (
-                <div className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4">
-                  <div className="mb-3 text-xs font-semibold text-textSecondary">
+                <div className="mb-3 overflow-hidden">
+                  <div className="mb-2 text-[11px] font-semibold text-textSecondary">
                     Loading more days…
                   </div>
-                  <div className="avail-skeleton mb-3 h-3 w-24 rounded-full" />
-                  <div className="flex gap-2 overflow-hidden">
+                  <div style={{ display: 'flex', gap: 8 }}>
                     {[0, 1, 2, 3].map((i) => (
                       <div
                         key={i}
-                        className="avail-skeleton h-[62px] w-[86px] flex-shrink-0 rounded-2xl"
+                        className="avail-skeleton"
+                        style={{
+                          height: 62,
+                          width: 66,
+                          flexShrink: 0,
+                          borderRadius: 999,
+                        }}
                       />
                     ))}
                   </div>
@@ -1776,21 +1889,29 @@ export default function AvailabilityDrawer(props: {
               ) : null}
 
               {daySlotsLoading ? (
-                <div className="tovis-glass-soft mb-3 rounded-card p-4">
-                  <div className="mb-3 text-xs font-semibold text-textSecondary">
-                    Loading times…
-                  </div>
-                  <div className="avail-skeleton mb-4 h-3 w-28 rounded-full" />
-                  <div className="mb-3 grid grid-cols-3 gap-2">
+                <div style={{ marginBottom: 16 }}>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr 1fr',
+                      gap: 6,
+                      marginBottom: 10,
+                    }}
+                  >
                     {[0, 1, 2].map((i) => (
-                      <div key={i} className="avail-skeleton h-10 rounded-full" />
+                      <div
+                        key={i}
+                        className="avail-skeleton"
+                        style={{ height: 36, borderRadius: 999 }}
+                      />
                     ))}
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                     {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
                       <div
                         key={i}
-                        className="avail-skeleton h-10 w-[62px] rounded-full"
+                        className="avail-skeleton"
+                        style={{ height: 38, width: 62, borderRadius: 999 }}
                       />
                     ))}
                   </div>
@@ -1816,12 +1937,12 @@ export default function AvailabilityDrawer(props: {
               {holding ? (
                 <div
                   ref={holdStatusRef}
-                  className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4"
+                  className="mb-[14px] rounded-[14px] border border-white/10 bg-bgPrimary/35 p-[12px_14px]"
                 >
-                  <div className="text-sm font-black text-textPrimary">
-                    Holding your time...
+                  <div className="text-[13px] font-black text-textPrimary">
+                    Holding your time…
                   </div>
-                  <div className="mt-1 text-[13px] font-semibold text-textSecondary">
+                  <div className="mt-[3px] text-[12px] font-semibold text-textSecondary">
                     Please wait while we reserve this slot.
                   </div>
                 </div>
@@ -1829,27 +1950,24 @@ export default function AvailabilityDrawer(props: {
                 <div
                   ref={holdStatusRef}
                   data-testid="availability-hold-banner"
-                  className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-4"
+                  className="mb-[14px] rounded-[14px] border border-accentPrimary/35 bg-accentPrimary/10 p-[14px]"
                 >
-                  <div className="text-sm font-black text-textPrimary">
-                    Your time is held
-                  </div>
-
-                  <div className="mt-1 text-[13px] font-semibold text-textSecondary">
-                    Time held:{' '}
+                  <div className="text-[13px] font-black text-textPrimary">
+                    Time held ·{' '}
                     <span className="font-black text-textPrimary">
                       {selectedLine}
                     </span>
                   </div>
 
                   {holdLabel ? (
-                    <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                    <div className="mt-1 text-[12px] font-semibold text-textSecondary">
                       Continue before{' '}
                       <span
-                        className={[
-                          'font-black',
-                          holdUrgent ? 'text-toneDanger' : 'text-textPrimary',
-                        ].join(' ')}
+                        className={
+                          holdUrgent
+                            ? 'font-black text-red-400'
+                            : 'font-black text-textPrimary'
+                        }
                       >
                         {holdLabel}
                       </span>
@@ -1862,7 +1980,8 @@ export default function AvailabilityDrawer(props: {
                     onClick={() => {
                       void onContinue()
                     }}
-                    className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-full border border-white/10 bg-accentPrimary px-4 text-[14px] font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
+                    className="mt-3 flex h-[46px] w-full items-center justify-center rounded-full bg-accentPrimary text-[14px] font-black tracking-[0.03em] text-bgPrimary transition hover:bg-accentPrimaryHover"
+                    style={{ fontFamily: 'var(--font-mono)' }}
                   >
                     {continueLabel}
                   </button>
@@ -1870,56 +1989,53 @@ export default function AvailabilityDrawer(props: {
               ) : null}
 
               {hasOtherPros && !otherProsRequested ? (
-                <div className="mb-3">
+                <div className="mb-4">
                   <button
                     type="button"
-                    onClick={() => {
-                      requestOtherPros()
-                    }}
+                    onClick={() => requestOtherPros()}
                     disabled={holding || loadingAlternates || !selectedDayYMD}
-                    className="inline-flex h-10 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] font-black text-textPrimary transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                    className={[
+                      'bg-transparent p-0 text-[13px] font-bold underline underline-offset-[3px] transition',
+                      holding || loadingAlternates || !selectedDayYMD
+                        ? 'cursor-not-allowed text-textSecondary opacity-40'
+                        : 'cursor-pointer text-textSecondary decoration-white/20 hover:text-textPrimary',
+                    ].join(' ')}
                   >
-                    Show other pros near you
+                    See other pros nearby
                   </button>
                 </div>
               ) : null}
 
               {loadingAlternates ? (
-                <div className="mb-3 text-xs font-semibold text-textSecondary">
-                  Loading more pros…
+                <div className="mb-3 text-[12px] font-semibold text-textSecondary">
+                  Loading nearby pros…
                 </div>
               ) : null}
 
               {otherProsInlineError ? (
-                <div className="tovis-glass-soft mb-3 rounded-card border border-white/10 p-3">
-                  <div className="text-[12px] font-semibold text-toneDanger">
+                <div className="mb-[14px] rounded-[12px] border border-white/10 bg-bgPrimary/35 p-[10px_12px]">
+                  <div className="text-[12px] font-semibold text-red-400">
                     {otherProsInlineError}
                   </div>
-
                   <button
                     type="button"
-                    onClick={() => {
-                      refreshAlternates()
-                    }}
-                    className="mt-3 inline-flex h-9 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[12px] font-black text-textPrimary transition hover:bg-white/10"
+                    onClick={() => refreshAlternates()}
+                    className="mt-2 h-8 rounded-full border border-white/10 bg-bgPrimary/35 px-3 text-[12px] font-extrabold text-textPrimary transition hover:bg-white/10"
                   >
-                    Retry other pros
+                    Retry
                   </button>
                 </div>
               ) : null}
 
               {showLocalHint && selected?.slotISO ? (
-                <div className="tovis-glass-soft mb-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">
-                  You’re booking{' '}
+                <div className="mb-[14px] text-[12px] font-semibold text-textSecondary">
+                  Booking in{' '}
                   <span className="font-black text-textPrimary">
                     {appointmentTz}
-                  </span>{' '}
-                  time.
-                  <span className="ml-2">
-                    Your local time:{' '}
-                    <span className="font-black text-textPrimary">
-                      {fmtInTz(selected.slotISO, viewerTz)}
-                    </span>
+                  </span>
+                  {' · '}Your time:{' '}
+                  <span className="font-black text-textPrimary">
+                    {fmtInTz(selected.slotISO, viewerTz)}
                   </span>
                 </div>
               ) : null}

@@ -174,6 +174,7 @@ export default async function BookingAddOnsPage({
   const locationType = normalizeLocationType(cleanString(pickOne(sp.locationType) ?? null))
   const source = normalizeSource(cleanString(pickOne(sp.source) ?? null))
   const mediaId = cleanString(pickOne(sp.mediaId) ?? null)
+  const lookPostId = cleanString(pickOne(sp.lookPostId) ?? null)
 
   const urlAddOnIdsRaw = cleanString(pickOne(sp.addOnIds) ?? null)
   const urlAddOnIds = parseCommaIds(urlAddOnIdsRaw, 50)
@@ -210,6 +211,7 @@ export default async function BookingAddOnsPage({
       locationType={locationType}
       source={source}
       mediaId={mediaId}
+      lookPostId={lookPostId}
       addOns={addOns}
       initialError={initialError}
       initialSelectedIds={initialSelectedIds}

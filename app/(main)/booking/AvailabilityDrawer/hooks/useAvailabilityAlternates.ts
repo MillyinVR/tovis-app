@@ -1,4 +1,4 @@
-// app/(main)/booking/AvailabilityDrawer/hooks/useAvailabilityAlternates.ts
+﻿// app/(main)/booking/AvailabilityDrawer/hooks/useAvailabilityAlternates.ts
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -12,6 +12,12 @@ import type {
 
 import { parseAvailabilityAlternatesResponse } from '../contract'
 import { safeJson } from '../utils/safeJson'
+import {
+  asNumber,
+  asTrimmedString,
+  getRecordProp,
+  isRecord,
+} from '@/lib/guards'
 
 type BootstrapOk = Extract<AvailabilityBootstrapResponse, { ok: true }>
 type AlternatesOk = Extract<AvailabilityAlternatesResponse, { ok: true }>
@@ -20,7 +26,7 @@ type LoadAlternatesOptions = {
   forceRefresh?: boolean
 }
 
-function buildAlternatesRequestKey(args: {
+type FetchArgs = {
   professionalId: string
   serviceId: string
   offeringId: string | null
@@ -31,7 +37,10 @@ function buildAlternatesRequestKey(args: {
   viewerLat: number | null
   viewerLng: number | null
   viewerRadiusMiles: number | null
-}): string {
+  viewerPlaceId: string | null
+}
+
+function buildAlternatesRequestKey(args: FetchArgs): string {
   return [
     args.professionalId,
     args.serviceId,
@@ -43,13 +52,23 @@ function buildAlternatesRequestKey(args: {
     args.viewerLat ?? 'none',
     args.viewerLng ?? 'none',
     args.viewerRadiusMiles ?? 'none',
+    args.viewerPlaceId ?? 'none',
   ].join('|')
 }
 
 function pickApiError(raw: unknown): string | null {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
-  const error = (raw as { error?: unknown }).error
-  return typeof error === 'string' && error.trim() ? error.trim() : null
+  if (!isRecord(raw)) return null
+  return asTrimmedString(getRecordProp(raw, 'error'))
+}
+
+function buildOtherSlots(parsed: AlternatesOk): Record<string, string[]> {
+  const nextOtherSlots: Record<string, string[]> = {}
+
+  for (const row of parsed.alternates) {
+    nextOtherSlots[row.pro.id] = row.slots.slice()
+  }
+
+  return nextOtherSlots
 }
 
 export function useAvailabilityAlternates(args: {
@@ -85,67 +104,55 @@ export function useAvailabilityAlternates(args: {
   const previousRetryKeyRef = useRef(retryKey)
   const activeRequestKeyRef = useRef<string | null>(null)
 
-  const fallbackProfessionalId = String(context.professionalId ?? '').trim()
-  const fallbackServiceId = String(context.serviceId ?? '').trim()
+  const fallbackProfessionalId = asTrimmedString(context.professionalId)
+  const fallbackServiceId = asTrimmedString(context.serviceId)
 
   const primaryProfessionalId =
-    summary?.primaryPro.id ?? (fallbackProfessionalId || null)
+    summary?.primaryPro.id ?? fallbackProfessionalId ?? null
 
   const effectiveServiceId =
-    summary?.request.serviceId ?? (fallbackServiceId || null)
+    summary?.request.serviceId ?? fallbackServiceId ?? null
+
   const effectiveOfferingId =
     summary?.request.offeringId ?? summary?.offering.id ?? context.offeringId ?? null
 
   const effectiveLocationId = summary?.request.locationId ?? null
 
-  const viewerLat =
-    typeof context.viewerLat === 'number' && Number.isFinite(context.viewerLat)
-      ? context.viewerLat
-      : null
-  const viewerLng =
-    typeof context.viewerLng === 'number' && Number.isFinite(context.viewerLng)
-      ? context.viewerLng
-      : null
-  const viewerRadiusMiles =
-    typeof context.viewerRadiusMiles === 'number' &&
-    Number.isFinite(context.viewerRadiusMiles)
-      ? context.viewerRadiusMiles
-      : null
+  const viewerLat = asNumber(context.viewerLat)
+  const viewerLng = asNumber(context.viewerLng)
+  const viewerRadiusMiles = asNumber(context.viewerRadiusMiles)
+  const viewerPlaceId = asTrimmedString(context.viewerPlaceId)
 
-  const canFetch =
-    open &&
-    requested &&
-    Boolean(summary) &&
-    Boolean(primaryProfessionalId) &&
-    Boolean(effectiveServiceId) &&
-    Boolean(selectedDayYMD) &&
-    Boolean(effectiveLocationId) &&
-    (activeLocationType !== 'MOBILE' || Boolean(selectedClientAddressId))
-
-  const requestKey = useMemo(() => {
-    if (
-      !primaryProfessionalId ||
-      !effectiveServiceId ||
-      !selectedDayYMD ||
-      !effectiveLocationId
-    ) {
+  const fetchArgs = useMemo<FetchArgs | null>(() => {
+    if (!open || !requested || !summary) return null
+    if (!primaryProfessionalId || !effectiveServiceId || !selectedDayYMD || !effectiveLocationId) {
       return null
     }
 
-    return buildAlternatesRequestKey({
+    const clientAddressId =
+      activeLocationType === 'MOBILE' ? selectedClientAddressId : null
+
+    if (activeLocationType === 'MOBILE' && !clientAddressId) {
+      return null
+    }
+
+    return {
       professionalId: primaryProfessionalId,
       serviceId: effectiveServiceId,
       offeringId: effectiveOfferingId,
       selectedDayYMD,
       locationType: activeLocationType,
       locationId: effectiveLocationId,
-      clientAddressId:
-        activeLocationType === 'MOBILE' ? selectedClientAddressId : null,
+      clientAddressId,
       viewerLat,
       viewerLng,
       viewerRadiusMiles,
-    })
+      viewerPlaceId,
+    }
   }, [
+    open,
+    requested,
+    summary,
     primaryProfessionalId,
     effectiveServiceId,
     effectiveOfferingId,
@@ -156,34 +163,31 @@ export function useAvailabilityAlternates(args: {
     viewerLat,
     viewerLng,
     viewerRadiusMiles,
+    viewerPlaceId,
   ])
 
-  const clearAlternates = useCallback(() => {
-    requestSeqRef.current += 1
-    abortControllerRef.current?.abort()
-    abortControllerRef.current = null
-    activeRequestKeyRef.current = null
+  const requestKey = useMemo(() => {
+    return fetchArgs ? buildAlternatesRequestKey(fetchArgs) : null
+  }, [fetchArgs])
 
+  const resetAlternatesState = useCallback(() => {
     setData(null)
     setOtherSlots({})
     setLoadingAlternates(false)
     setAlternatesError(null)
   }, [])
 
+  const clearAlternates = useCallback(() => {
+    requestSeqRef.current += 1
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    activeRequestKeyRef.current = null
+    resetAlternatesState()
+  }, [resetAlternatesState])
+
   const loadAlternates = useCallback(
     async (options?: LoadAlternatesOptions) => {
-      if (!canFetch) {
-        clearAlternates()
-        return
-      }
-
-      if (
-        !requestKey ||
-        !primaryProfessionalId ||
-        !effectiveServiceId ||
-        !selectedDayYMD ||
-        !effectiveLocationId
-      ) {
+      if (!fetchArgs || !requestKey) {
         clearAlternates()
         return
       }
@@ -195,7 +199,7 @@ export function useAvailabilityAlternates(args: {
       abortControllerRef.current = controller
       activeRequestKeyRef.current = requestKey
 
-      const forceRefresh = Boolean(options?.forceRefresh)
+      const forceRefresh = options?.forceRefresh === true
 
       setLoadingAlternates(true)
       setAlternatesError(null)
@@ -204,31 +208,31 @@ export function useAvailabilityAlternates(args: {
 
       try {
         const qs = new URLSearchParams({
-          professionalId: primaryProfessionalId,
-          serviceId: effectiveServiceId,
-          date: selectedDayYMD,
-          locationType: activeLocationType,
-          locationId: effectiveLocationId,
+          professionalId: fetchArgs.professionalId,
+          serviceId: fetchArgs.serviceId,
+          date: fetchArgs.selectedDayYMD,
+          locationType: fetchArgs.locationType,
+          locationId: fetchArgs.locationId,
         })
 
-        if (effectiveOfferingId) {
-          qs.set('offeringId', effectiveOfferingId)
+        if (fetchArgs.offeringId) {
+          qs.set('offeringId', fetchArgs.offeringId)
         }
 
-        if (activeLocationType === 'MOBILE' && selectedClientAddressId) {
-          qs.set('clientAddressId', selectedClientAddressId)
+        if (fetchArgs.locationType === 'MOBILE' && fetchArgs.clientAddressId) {
+          qs.set('clientAddressId', fetchArgs.clientAddressId)
         }
 
-        if (viewerLat != null && viewerLng != null) {
-          qs.set('viewerLat', String(viewerLat))
-          qs.set('viewerLng', String(viewerLng))
+        if (fetchArgs.viewerLat != null && fetchArgs.viewerLng != null) {
+          qs.set('viewerLat', String(fetchArgs.viewerLat))
+          qs.set('viewerLng', String(fetchArgs.viewerLng))
 
-          if (viewerRadiusMiles != null) {
-            qs.set('radiusMiles', String(viewerRadiusMiles))
+          if (fetchArgs.viewerRadiusMiles != null) {
+            qs.set('radiusMiles', String(fetchArgs.viewerRadiusMiles))
           }
 
-          if (context.viewerPlaceId) {
-            qs.set('viewerPlaceId', context.viewerPlaceId)
+          if (fetchArgs.viewerPlaceId) {
+            qs.set('viewerPlaceId', fetchArgs.viewerPlaceId)
           }
         }
 
@@ -253,50 +257,32 @@ export function useAvailabilityAlternates(args: {
         if (activeRequestKeyRef.current !== requestKey) return
 
         if (res.status === 401) {
-          setAlternatesError('Unauthorized.')
-          setOtherSlots({})
           setData(null)
+          setOtherSlots({})
+          setAlternatesError('Unauthorized.')
           return
         }
 
         if (!res.ok) {
-          setAlternatesError(
-            pickApiError(raw) ?? `Couldn’t load alternate pros (${res.status}).`,
-          )
-          setOtherSlots({})
           setData(null)
+          setOtherSlots({})
+          setAlternatesError(
+            pickApiError(raw) ?? `Couldn't load alternate pros (${res.status}).`,
+          )
           return
         }
 
         const parsed = parseAvailabilityAlternatesResponse(raw)
-        if (!parsed) {
+
+        if (!parsed || !parsed.ok || parsed.mode !== 'ALTERNATES') {
+          setData(null)
+          setOtherSlots({})
           setAlternatesError('Alternates endpoint returned unexpected response.')
-          setOtherSlots({})
-          setData(null)
           return
-        }
-
-        if (!parsed.ok) {
-          setAlternatesError(parsed.error)
-          setOtherSlots({})
-          setData(null)
-          return
-        }
-
-        if (parsed.mode !== 'ALTERNATES') {
-          setAlternatesError('Alternates endpoint returned unexpected response.')
-          setOtherSlots({})
-          setData(null)
-          return
-        }
-
-        const nextOtherSlots: Record<string, string[]> = {}
-        for (const row of parsed.alternates) {
-          nextOtherSlots[row.pro.id] = row.slots.slice()
         }
 
         setData(parsed)
-        setOtherSlots(nextOtherSlots)
+        setOtherSlots(buildOtherSlots(parsed))
         setAlternatesError(null)
       } catch (error: unknown) {
         if (controller.signal.aborted) return
@@ -306,9 +292,7 @@ export function useAvailabilityAlternates(args: {
         setData(null)
         setOtherSlots({})
         setAlternatesError(
-          error instanceof Error
-            ? error.message
-            : 'Couldn’t load alternate pros.',
+          error instanceof Error ? error.message : "Couldn't load alternate pros.",
         )
       } finally {
         if (
@@ -320,23 +304,7 @@ export function useAvailabilityAlternates(args: {
         }
       }
     },
-    [
-      canFetch,
-      requestKey,
-      primaryProfessionalId,
-      effectiveServiceId,
-      selectedDayYMD,
-      activeLocationType,
-      effectiveLocationId,
-      effectiveOfferingId,
-      selectedClientAddressId,
-      viewerLat,
-      viewerLng,
-      viewerRadiusMiles,
-      context.viewerPlaceId,
-      debug,
-      clearAlternates,
-    ],
+    [fetchArgs, requestKey, debug, clearAlternates],
   )
 
   useEffect(() => {
@@ -346,7 +314,7 @@ export function useAvailabilityAlternates(args: {
   }, [])
 
   useEffect(() => {
-    if (!canFetch || !requestKey) {
+    if (!fetchArgs || !requestKey) {
       clearAlternates()
       previousRetryKeyRef.current = retryKey
       return
@@ -356,7 +324,7 @@ export function useAvailabilityAlternates(args: {
     previousRetryKeyRef.current = retryKey
 
     void loadAlternates({ forceRefresh })
-  }, [canFetch, requestKey, retryKey, loadAlternates, clearAlternates])
+  }, [fetchArgs, requestKey, retryKey, loadAlternates, clearAlternates])
 
   const refreshAlternates = useCallback(() => {
     void loadAlternates({ forceRefresh: true })

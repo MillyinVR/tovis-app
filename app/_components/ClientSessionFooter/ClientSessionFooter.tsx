@@ -23,10 +23,7 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
       className="w-full"
       style={{
         paddingBottom: 'env(safe-area-inset-bottom)',
-        background: 'rgba(10,9,7,0.92)',
-        backdropFilter: 'blur(16px)',
-        WebkitBackdropFilter: 'blur(16px)',
-        borderTop: '1px solid rgba(244,239,231,0.08)',
+        background: '#0A0907',
       }}
     >
       <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-around px-4">
@@ -52,7 +49,7 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
                 title={tab.label}
                 aria-label={tab.label}
               >
-                <Icon size={24} aria-hidden="true" />
+                <Icon size={30} aria-hidden="true" />
               </Link>
             )
           }
@@ -62,7 +59,7 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
               key={tab.id}
               label={tab.label}
               href={tab.href}
-              icon={<Icon size={20} />}
+              icon={<Icon size={28} />}
               active={active}
               rightSlot={tab.hasBadge && badge ? <BadgeDot label={badge} /> : null}
             />
