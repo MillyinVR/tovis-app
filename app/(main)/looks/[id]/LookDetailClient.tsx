@@ -421,6 +421,8 @@ export default function LookDetailClient({
           </div>
 
           <RightActionRail
+            lookPostId={item.id}
+            lookTitle={item.caption ?? null}
             pro={{
               id: item.professional.id,
               businessName: item.professional.businessName,
@@ -435,6 +437,15 @@ export default function LookDetailClient({
             onToggleLike={() => void toggleLike()}
             onOpenComments={() => void openComments()}
             onShare={() => void shareLook()}
+            onSaveStateChange={(state) => {
+              setItem((prev) => ({
+                ...prev,
+                _count: {
+                  ...prev._count,
+                  saves: state.saveCount,
+                },
+              }))
+            }}
           />
 
           <div className="grid gap-3 p-4">
