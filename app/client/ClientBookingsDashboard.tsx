@@ -661,7 +661,60 @@ function ConsultationApprovalBanner(props: {
   )
 }
 
-export default function ClientBookingsDashboard() {
+function formatUpcomingDate(scheduledFor: string, timeZone: string | null): string {
+  const d = new Date(scheduledFor)
+  if (isNaN(d.getTime())) return ''
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: timeZone || 'UTC',
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    }).format(d).toUpperCase()
+  } catch {
+    return new Intl.DateTimeFormat(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    }).format(d).toUpperCase()
+  }
+}
+
+function formatUpcomingTime(scheduledFor: string, timeZone: string | null): string {
+  const d = new Date(scheduledFor)
+  if (isNaN(d.getTime())) return ''
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: timeZone || 'UTC',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d).toLowerCase()
+  } catch {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d).toLowerCase()
+  }
+}
+
+function parsePrice(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const n = parseFloat(raw)
+  if (isNaN(n)) return null
+  return `$${Math.round(n)}`
+}
+
+export default function ClientBookingsDashboard({
+  displayName,
+  handle,
+  avatarUrl,
+  memberSince,
+}: {
+  displayName: string
+  handle: string
+  avatarUrl?: string | null
+  memberSince?: string | null
+}) {
   const [buckets, setBuckets] = useState<ApiBuckets>(EMPTY)
   const [tab, setTab] = useState<TabKey>('upcoming')
   const [loading, setLoading] = useState(true)
@@ -676,6 +729,8 @@ export default function ClientBookingsDashboard() {
   const [notificationSummary, setNotificationSummary] =
     useState<NotificationSummary>(EMPTY_NOTIFICATION_SUMMARY)
   const [didPickDefaultTab, setDidPickDefaultTab] = useState(false)
+  const [meTab, setMeTab] = useState<'boards' | 'following' | 'history'>('history')
+  const router = useRouter()
 
   const reload = useCallback(async () => {
     try {
@@ -892,7 +947,7 @@ useEffect(() => {
   if (errorMessage) {
     return (
       <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4 text-textPrimary">
-        <div className="text-[14px] font-black">Couldn’t load your bookings</div>
+        <div className="text-[14px] font-black">Couldn't load your bookings</div>
         <div className="mt-1 text-[13px] text-textSecondary">{errorMessage}</div>
 
         <button
@@ -910,160 +965,198 @@ useEffect(() => {
   }
 
   return (
-    <section className="flex h-full flex-col gap-4">
-      {notificationSummary.hasAnyUnreadUpdates ? (
-  <div className="mx-auto w-full max-w-xl">
-    <button
-      type="button"
-      onClick={() => {
-        if (notificationSummary.pendingUnreadCount > 0) {
-          setTab('pending')
-        } else if (notificationSummary.aftercareUnreadCount > 0) {
-          setTab('aftercare')
-        } else if (notificationSummary.upcomingUnreadCount > 0) {
-          setTab('upcoming')
-        }
-      }}
-      className={cn(
-        'flex w-full items-center justify-between rounded-card border border-white/10 bg-bgSecondary px-4 py-3',
-        'text-left shadow-[0_10px_30px_rgba(0,0,0,0.35)] hover:border-white/20',
-      )}
-    >
-      <div>
-        <div className="text-[12px] font-black text-textPrimary">
-          New updates
-        </div>
-        <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
-          {notificationSummary.pendingUnreadCount +
-            notificationSummary.aftercareUnreadCount +
-            notificationSummary.upcomingUnreadCount}{' '}
-          unread update
-          {notificationSummary.pendingUnreadCount +
-            notificationSummary.aftercareUnreadCount +
-            notificationSummary.upcomingUnreadCount ===
-          1
-            ? ''
-            : 's'}
-        </div>
-      </div>
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="looksNoScrollbar flex-1 overflow-y-auto">
 
-      <div className="text-[12px] font-black text-textPrimary">View →</div>
-    </button>
-  </div>
-) : null}
-
-    <TopTabs
-      tab={tab}
-      setTab={setTab}
-      counts={counts}
-      upcomingUnreadCount={notificationSummary.upcomingUnreadCount}
-      aftercareUnreadCount={notificationSummary.aftercareUnreadCount}
-      pendingUnreadCount={notificationSummary.pendingUnreadCount}
-    />
-
-      <SearchBar
-        value={search}
-        onChange={setSearch}
-        onClear={() => setSearch('')}
-      />
-
-      <ConsultationApprovalBanner
-        approvals={approvalBookings}
-        searchActive={Boolean(query)}
-      />
-
-      <section className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
-        <div className="mb-2 flex items-baseline justify-between gap-3">
-          <div className="text-sm font-black">Last-minute</div>
-          <div className="text-xs font-semibold text-textSecondary">
-            Next 48 hours · if you’re feeling reckless ✨
+        {/* ── Profile header ── */}
+        <div className="px-5 pb-5 pt-12">
+          <div className="mb-5 flex items-center justify-between">
+            <span className="font-mono text-[11px] uppercase tracking-widest text-textMuted">
+              @{handle}
+            </span>
+            <button
+              type="button"
+              aria-label="Share profile"
+              className="text-textMuted"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+              </svg>
+            </button>
           </div>
-        </div>
-        <LastMinuteOpenings />
-      </section>
 
-      <div className="looksNoScrollbar min-h-0 flex-1 overflow-y-auto pb-6">
-        {searchedResults ? (
-          <div className="grid gap-3">
-            <div className="px-0.5 text-[12px] font-semibold text-textSecondary/85">
-              {searchedResults.bookings.length + searchedResults.waitlist.length > 0
-                ? `Results: ${searchedResults.bookings.length + searchedResults.waitlist.length}`
-                : 'No results'}
+          <div className="flex items-center gap-4">
+            <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-full border border-white/10 bg-bgSecondary">
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={displayName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-bgSurface to-bgSecondary">
+                  <span className="font-display italic text-[28px] font-semibold leading-none text-accentPrimary">
+                    {displayName.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+              )}
             </div>
 
-            {searchedResults.bookings.map((booking) => {
-              const meta = getBookingCardMeta({
-                booking,
-                activeTab: null,
-                recentlyApprovedIds,
-              })
-
-              return (
-                <BookingHeroCard
-                  key={booking.id}
-                  booking={booking}
-                  badge={meta.badge}
-                  badgeKey={meta.badgeKey}
-                  href={meta.href}
-                />
-              )
-            })}
-
-            {searchedResults.waitlist.map((waitlist) => (
-              <WaitlistHeroCard key={waitlist.id} waitlist={waitlist} />
-            ))}
-
-            {searchedResults.bookings.length === 0 &&
-            searchedResults.waitlist.length === 0 ? (
-              <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
-                Try searching a service name, your pro, or “pending”.
+            <div className="min-w-0">
+              <div className="font-display italic text-[26px] font-semibold leading-tight tracking-tight text-textPrimary">
+                {displayName}
               </div>
-            ) : null}
-          </div>
-        ) : tab === 'waitlist' ? (
-          <div className="grid gap-3">
-            {buckets.waitlist.length > 0 ? (
-              buckets.waitlist.map((waitlist) => (
-                <WaitlistHeroCard key={waitlist.id} waitlist={waitlist} />
-              ))
-            ) : (
-              <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
-                No waitlist entries right now.
+              {memberSince ? (
+                <div className="mt-1 text-[12px] text-textSecondary">
+                  Joined {memberSince}
+                </div>
+              ) : null}
+              <div className="mt-3 flex gap-[18px]">
+                {[
+                  { label: 'BOARDS', value: '0' },
+                  { label: 'SAVED',  value: '0' },
+                  { label: 'BOOKED', value: String(buckets.past.length) },
+                ].map(({ label, value }) => (
+                  <div key={label} className="text-center">
+                    <div className="text-[16px] font-bold text-textPrimary">{value}</div>
+                    <div className="mt-0.5 font-mono text-[9px] uppercase tracking-widest text-textMuted">
+                      {label}
+                    </div>
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
           </div>
-        ) : (
-          <div className="grid gap-3">
-            {tabBookings.length > 0 ? (
-              tabBookings.map((booking) => {
-                const meta = getBookingCardMeta({
-                  booking,
-                  activeTab: tab,
-                  recentlyApprovedIds,
-                })
+        </div>
 
-                return (
-                 <BookingHeroCard
-                    key={booking.id}
-                    booking={booking}
-                    badge={meta.badge}
-                    badgeKey={meta.badgeKey}
-                    href={meta.href}
-                  />
+        {/* ── Upcoming mini-card ── */}
+        {(() => {
+          const next = buckets.upcoming[0]
+          if (!next) return null
+          return (
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  `/client/bookings/${encodeURIComponent(next.id)}?step=overview`,
                 )
-              })
-            ) : (
-              <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[13px] text-textSecondary">
-                {tab === 'upcoming'
-                  ? 'No upcoming bookings yet. Go scroll Looks like a responsible adult.'
-                  : tab === 'pending'
-                    ? 'No pending requests right now.'
-                    : 'Nothing here yet.'}
+              }
+              className="mx-5 mb-5 w-[calc(100%-2.5rem)] rounded-card border border-accentPrimary/25 bg-accentPrimary/5 p-3.5 text-left"
+            >
+              <div className="mb-2 font-mono text-[9px] uppercase tracking-widest text-accentPrimaryHover">
+                ◆ UPCOMING · {formatUpcomingDate(next.scheduledFor, next.timeZone)}
               </div>
-            )}
-          </div>
-        )}
+              <div className="flex items-center gap-3">
+                <HeroThumb
+                  title={bookingTitle(next)}
+                  subtitle={next.professional?.businessName ?? null}
+                />
+                <div className="min-w-0">
+                  <div className="truncate text-[14px] font-bold text-textPrimary">
+                    {bookingTitle(next)}
+                  </div>
+                  <div className="mt-0.5 truncate text-[12px] text-textSecondary">
+                    {[
+                      next.professional?.businessName,
+                      formatUpcomingTime(next.scheduledFor, next.timeZone),
+                      parsePrice(next.subtotalSnapshot ?? next.checkout?.totalAmount),
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </div>
+                </div>
+              </div>
+            </button>
+          )
+        })()}
+
+        {/* ── Tabs ── */}
+        <div className="flex gap-6 border-b border-white/10 px-5">
+          {(['boards', 'following', 'history'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setMeTab(t)}
+              className={cn(
+                '-mb-px pb-3 pt-1 text-[13px] font-bold capitalize transition',
+                meTab === t
+                  ? 'border-b-2 border-[rgb(var(--accent-primary))] text-textPrimary'
+                  : 'border-b-2 border-transparent text-textMuted hover:text-textSecondary',
+              )}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Tab content ── */}
+        <div className="px-5 pb-24 pt-4">
+
+          {meTab === 'boards' && (
+            <div>
+              <button
+                type="button"
+                className="mb-3 flex w-full items-center gap-2 rounded-card border border-dashed border-white/[0.16] p-3.5 text-[13px] text-textMuted"
+              >
+                <span className="text-[18px] leading-none">+</span>
+                Create new board
+              </button>
+              <div className="rounded-card border border-white/10 bg-bgSecondary px-4 py-8 text-center text-[13px] text-textMuted">
+                Save looks to boards from the feed
+              </div>
+            </div>
+          )}
+
+          {meTab === 'following' && (
+            <div className="rounded-card border border-white/10 bg-bgSecondary px-4 py-8 text-center text-[13px] text-textMuted">
+              Pros you follow will appear here.{' '}
+              <span className="font-semibold text-textSecondary">
+                Discover them on the Looks feed.
+              </span>
+            </div>
+          )}
+
+          {meTab === 'history' && (
+            buckets.past.length === 0 && buckets.prebooked.length === 0 ? (
+              <div className="rounded-card border border-white/10 bg-bgSecondary px-4 py-8 text-center text-[13px] text-textMuted">
+                No history yet — your completed bookings will appear here.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-0.5">
+                {[
+                  ...buckets.past.map((b) => ({ booking: b, label: 'BOOKED' as const })),
+                  ...buckets.prebooked.map((b) => ({ booking: b, label: 'UPCOMING' as const })),
+                ].map(({ booking, label }) => {
+                  const title = bookingTitle(booking)
+                  const href = `/client/bookings/${encodeURIComponent(booking.id)}?step=${label === 'UPCOMING' ? 'overview' : 'aftercare'}`
+                  return (
+                    <button
+                      key={booking.id}
+                      type="button"
+                      onClick={() => router.push(href)}
+                      className="relative overflow-hidden bg-bgSecondary"
+                      style={{ aspectRatio: '3 / 4' }}
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-br from-bgSurface to-bgPrimary" />
+                      <div className="absolute inset-0 grid place-items-center">
+                        <span className="font-display italic text-[36px] font-semibold text-textMuted/30">
+                          {title.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-bgPrimary/90 to-transparent" />
+                      <div className="absolute bottom-1.5 left-1.5 font-mono text-[9px] font-bold uppercase tracking-widest text-textPrimary">
+                        {label}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          )}
+
+        </div>
       </div>
-    </section>
+    </div>
   )
 }

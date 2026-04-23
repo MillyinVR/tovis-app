@@ -2,6 +2,24 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
 
+@theme {
+  --radius-app-icon: 28px;
+  --radius-card:     14px;
+  --radius-inner:    8px;
+}
+
+@utility rounded-card {
+  border-radius: var(--radius-card);
+}
+
+@utility rounded-inner {
+  border-radius: var(--radius-inner);
+}
+
+@utility rounded-appIcon {
+  border-radius: var(--radius-app-icon);
+}
+
 
 /* App-wide hygiene */
 html,

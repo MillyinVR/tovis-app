@@ -22,6 +22,7 @@ export const currentUserSelect = {
   phone: true,
   role: true,
   authVersion: true,
+  createdAt: true,
   phoneVerifiedAt: true,
   emailVerifiedAt: true,
 
