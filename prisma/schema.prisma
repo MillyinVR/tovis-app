@@ -74,6 +74,7 @@ enum MessageThreadContextType {
   SERVICE
   OFFERING
   PRO_PROFILE
+  WAITLIST
 }
 
 enum VerificationStatus {
@@ -2525,6 +2526,8 @@ model WaitlistEntry {
   service      Service             @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   media        MediaAsset?         @relation(fields: [mediaId], references: [id], onDelete: SetNull)
 
+  messageThread MessageThread? @relation("WaitlistThread")
+
   @@index([professionalId, status, createdAt])
   @@index([clientId, status, createdAt])
   @@index([serviceId, status, createdAt])
@@ -2538,13 +2541,16 @@ model MessageThread {
 
   // ✅ context-scoped
   contextType MessageThreadContextType
-  contextId   String // bookingId OR serviceId OR offeringId OR professionalId
+  contextId   String // bookingId OR serviceId OR offeringId OR professionalId OR waitlistEntryId
 
-  // Optional pointers for convenience (nice for joins, not required)
-  bookingId  String?  @unique
-  booking    Booking? @relation("BookingThreads", fields: [bookingId], references: [id], onDelete: SetNull)
-  serviceId  String?
-  offeringId String?
+  // Optional pointers for convenience.
+  // These make joins explicit while contextType/contextId remains the canonical uniqueness guard.
+  bookingId       String?        @unique
+  booking         Booking?       @relation("BookingThreads", fields: [bookingId], references: [id], onDelete: SetNull)
+  serviceId       String?
+  offeringId      String?
+  waitlistEntryId String?        @unique
+  waitlistEntry   WaitlistEntry? @relation("WaitlistThread", fields: [waitlistEntryId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2567,7 +2573,10 @@ model MessageThread {
   @@unique([clientId, professionalId, contextType, contextId])
   @@index([professionalId, updatedAt])
   @@index([clientId, updatedAt])
+  @@index([professionalId, contextType, lastMessageAt])
+  @@index([clientId, contextType, lastMessageAt])
   @@index([contextType, contextId])
+  @@index([waitlistEntryId])
 }
 
 model MessageThreadParticipant {

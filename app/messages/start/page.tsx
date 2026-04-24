@@ -1,96 +1,217 @@
 // app/messages/start/page.tsx
-import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
+import { redirect } from 'next/navigation'
+import { MessageThreadContextType } from '@prisma/client'
 import { getCurrentUser } from '@/lib/currentUser'
 import { getServerOrigin } from '@/lib/serverOrigin'
 
 export const dynamic = 'force-dynamic'
 
 type SearchParamsShape = Record<string, string | string[] | undefined>
+
 type PageProps = {
   searchParams?: SearchParamsShape | Promise<SearchParamsShape>
 }
 
-function pickOne(v: string | string[] | undefined) {
-  if (!v) return ''
-  return Array.isArray(v) ? v[0] ?? '' : v
+type ResolvedContext = {
+  contextType: MessageThreadContextType
+  contextId: string
+}
+
+type ResolvePayload = {
+  contextType: MessageThreadContextType
+  contextId: string
+  createIfMissing: true
+  professionalId?: string
+  clientId?: string
+}
+
+type ResolveThreadResponse = {
+  ok: true
+  thread: {
+    id: string
+  }
+}
+
+type JsonRecord = Record<string, unknown>
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function pickOne(value: string | string[] | undefined): string {
+  if (!value) return ''
+  return Array.isArray(value) ? value[0] ?? '' : value
+}
+
+function normalizeContextType(value: string): MessageThreadContextType | null {
+  const normalized = value.trim().toUpperCase()
+
+  if (normalized === MessageThreadContextType.BOOKING) {
+    return MessageThreadContextType.BOOKING
+  }
+
+  if (normalized === MessageThreadContextType.SERVICE) {
+    return MessageThreadContextType.SERVICE
+  }
+
+  if (normalized === MessageThreadContextType.OFFERING) {
+    return MessageThreadContextType.OFFERING
+  }
+
+  if (normalized === MessageThreadContextType.PRO_PROFILE) {
+    return MessageThreadContextType.PRO_PROFILE
+  }
+
+  if (normalized === MessageThreadContextType.WAITLIST) {
+    return MessageThreadContextType.WAITLIST
+  }
+
+  return null
+}
+
+function resolveContextFromSearchParams(sp: SearchParamsShape): ResolvedContext | null {
+  const directContextType = normalizeContextType(pickOne(sp.contextType))
+  const directContextId = pickOne(sp.contextId)
+
+  if (directContextType && directContextId) {
+    return {
+      contextType: directContextType,
+      contextId: directContextId,
+    }
+  }
+
+  const kind = pickOne(sp.kind).trim().toUpperCase()
+
+  const bookingId = pickOne(sp.bookingId)
+  const serviceId = pickOne(sp.serviceId)
+  const offeringId = pickOne(sp.offeringId)
+  const professionalId = pickOne(sp.professionalId)
+  const waitlistEntryId = pickOne(sp.waitlistEntryId) || pickOne(sp.waitlistId)
+
+  if (kind === MessageThreadContextType.BOOKING && bookingId) {
+    return {
+      contextType: MessageThreadContextType.BOOKING,
+      contextId: bookingId,
+    }
+  }
+
+  if (kind === MessageThreadContextType.SERVICE && serviceId) {
+    return {
+      contextType: MessageThreadContextType.SERVICE,
+      contextId: serviceId,
+    }
+  }
+
+  if (kind === MessageThreadContextType.OFFERING && offeringId) {
+    return {
+      contextType: MessageThreadContextType.OFFERING,
+      contextId: offeringId,
+    }
+  }
+
+  if (kind === MessageThreadContextType.WAITLIST && waitlistEntryId) {
+    return {
+      contextType: MessageThreadContextType.WAITLIST,
+      contextId: waitlistEntryId,
+    }
+  }
+
+  if (kind === 'PRO' && professionalId) {
+    return {
+      contextType: MessageThreadContextType.PRO_PROFILE,
+      contextId: professionalId,
+    }
+  }
+
+  if (waitlistEntryId) {
+    return {
+      contextType: MessageThreadContextType.WAITLIST,
+      contextId: waitlistEntryId,
+    }
+  }
+
+  return null
+}
+
+function isResolveThreadResponse(value: unknown): value is ResolveThreadResponse {
+  if (!isRecord(value)) return false
+  if (value.ok !== true) return false
+  if (!isRecord(value.thread)) return false
+
+  return typeof value.thread.id === 'string' && value.thread.id.length > 0
+}
+
+async function readResolveResponse(res: Response): Promise<unknown> {
+  return await res.json().catch(() => null)
 }
 
 export default async function MessagesStartPage(props: PageProps) {
   const user = await getCurrentUser().catch(() => null)
-  if (!user) redirect('/login?from=/messages/start')
+
+  if (!user) {
+    redirect('/login?from=/messages/start')
+  }
 
   const sp = await Promise.resolve(props.searchParams ?? {})
+  const resolvedContext = resolveContextFromSearchParams(sp)
 
-  // New style
-  let contextType = pickOne(sp.contextType)
-  let contextId = pickOne(sp.contextId)
-
-  // Legacy fallback
-  const kind = pickOne(sp.kind)
-  const bookingId = pickOne(sp.bookingId)
-  const offeringId = pickOne(sp.offeringId)
-  const serviceId = pickOne(sp.serviceId)
-
-  if (!contextType || !contextId) {
-    if (kind === 'BOOKING' && bookingId) {
-      contextType = 'BOOKING'
-      contextId = bookingId
-    } else if (kind === 'OFFERING' && offeringId) {
-      contextType = 'OFFERING'
-      contextId = offeringId
-    } else if (kind === 'SERVICE' && serviceId) {
-      contextType = 'SERVICE'
-      contextId = serviceId
-    } else if (kind === 'PRO' && pickOne(sp.professionalId)) {
-      contextType = 'PRO_PROFILE'
-      contextId = pickOne(sp.professionalId)
-    }
+  if (!resolvedContext) {
+    console.warn('[messages/start] missing context')
+    redirect('/messages')
   }
 
   const professionalId = pickOne(sp.professionalId)
   const clientId = pickOne(sp.clientId)
 
-  if (!contextType || !contextId) {
-    console.log('[messages/start] missing context', { contextType, contextId, sp })
-    redirect('/messages')
-  }
-
   const origin = await getServerOrigin()
+
   if (!origin) {
-    console.log('[messages/start] missing origin')
+    console.warn('[messages/start] missing origin')
     redirect('/messages')
   }
 
-  const h = await headers()
-  const cookie = h.get('cookie') ?? ''
+  const requestHeaders = await headers()
+  const cookie = requestHeaders.get('cookie') ?? ''
 
-  // ✅ Quick confirmation #1: do we actually have cookies here?
-  console.log('[messages/start] cookie present?', { hasCookie: Boolean(cookie), cookieLen: cookie.length })
-
-  const payload = {
-    contextType,
-    contextId,
-    professionalId: professionalId || undefined,
-    clientId: clientId || undefined,
+  const payload: ResolvePayload = {
+    contextType: resolvedContext.contextType,
+    contextId: resolvedContext.contextId,
+    createIfMissing: true,
+    ...(professionalId ? { professionalId } : {}),
+    ...(clientId ? { clientId } : {}),
   }
-
-  console.log('[messages/start] resolve payload', { origin, payload })
 
   const res = await fetch(`${origin}/api/messages/resolve`, {
     method: 'POST',
     cache: 'no-store',
     headers: {
       'content-type': 'application/json',
-      cookie, // ✅ THIS is the fix
+      cookie,
     },
     body: JSON.stringify(payload),
+  }).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Unknown fetch error'
+
+    console.error('[messages/start] resolve request failed', {
+      error: message,
+    })
+
+    return null
   })
 
-  const data = await res.json().catch(() => null)
+  if (!res) {
+    redirect('/messages')
+  }
 
-  if (!res.ok || data?.ok !== true || !data?.thread?.id) {
-    console.log('[messages/start] resolve failed', { status: res.status, ok: res.ok, data })
+  const data = await readResolveResponse(res)
+
+  if (!res.ok || !isResolveThreadResponse(data)) {
+    console.warn('[messages/start] resolve failed', {
+      status: res.status,
+      ok: res.ok,
+    })
+
     redirect('/messages')
   }
 
