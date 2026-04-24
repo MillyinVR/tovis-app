@@ -8,6 +8,14 @@ import { directionsHrefFromLocation, mapsHrefFromLocation } from '@/lib/maps'
 import type { Bounds, Pin } from './_components/MapView'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
+import { isArray, isRecord } from '@/lib/guards'
+import DiscoverCategoryRail from './_components/DiscoverCategoryRail'
+import DiscoverGridView from './_components/DiscoverGridView'
+import DiscoverViewToggle from './_components/DiscoverViewToggle'
+import { fetchDiscoverCategories } from './_lib/discoverCategoryApi'
+import type { DiscoverViewMode } from './_lib/discoverViewTypes'
+import type { DiscoverCategoryOption } from '@/lib/discovery/categoryTypes'
+
 type ApiPro = {
   id: string
   businessName: string | null
@@ -29,10 +37,10 @@ type ApiPro = {
 
 type Coords = { lat: number; lng: number }
 
-type ApiResponse = {
-  ok: boolean
-  pros?: unknown[]
-  error?: unknown
+type SearchArgs = {
+  query: string
+  origin: Coords | null
+  categoryId: string | null
 }
 
 type PlacesPrediction = {
@@ -44,51 +52,70 @@ type PlacesPrediction = {
   distanceMeters: number | null
 }
 
-const MapView = dynamic(() => import('./_components/MapView'), { ssr: false })
+type ResolvedPlace = {
+  coords: Coords
+  label: string
+  viewport: Bounds | null
+}
 
+type SortMode = 'DISTANCE' | 'NAME'
+
+const MapView = dynamic(() => import('./_components/MapView'), { ssr: false })
 
 const APP_BOTTOM_INSET = 'max(var(--app-footer-space, 0px), env(safe-area-inset-bottom))'
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string'
 }
 
-function isNullableString(x: unknown): x is string | null {
-  return x === null || typeof x === 'string'
+function isNullableNumber(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isFinite(value))
 }
 
-function isNullableNumber(x: unknown): x is number | null {
-  return x === null || (typeof x === 'number' && Number.isFinite(x))
-}
+function isBounds(value: unknown): value is Bounds {
+  if (!isRecord(value)) return false
 
-function isPrimaryLocation(x: unknown): x is ApiPro['primaryLocation'] {
-  if (x === null) return true
-  if (!isRecord(x)) return false
   return (
-    typeof x.id === 'string' &&
-    isNullableString(x.formattedAddress) &&
-    isNullableString(x.city) &&
-    isNullableString(x.state) &&
-    isNullableString(x.timeZone) &&
-    isNullableNumber(x.lat) &&
-    isNullableNumber(x.lng) &&
-    isNullableString(x.placeId)
+    typeof value.north === 'number' &&
+    typeof value.south === 'number' &&
+    typeof value.east === 'number' &&
+    typeof value.west === 'number'
   )
 }
 
-function isApiPro(x: unknown): x is ApiPro {
-  if (!isRecord(x)) return false
+function isPrimaryLocation(value: unknown): value is ApiPro['primaryLocation'] {
+  if (value === null) return true
+  if (!isRecord(value)) return false
+
   return (
-    typeof x.id === 'string' &&
-    isNullableString(x.businessName) &&
-    isNullableString(x.professionType) &&
-    isNullableString(x.avatarUrl) &&
-    isNullableString(x.locationLabel) &&
-    isNullableNumber(x.distanceMiles) &&
-    isPrimaryLocation(x.primaryLocation)
+    typeof value.id === 'string' &&
+    isNullableString(value.formattedAddress) &&
+    isNullableString(value.city) &&
+    isNullableString(value.state) &&
+    isNullableString(value.timeZone) &&
+    isNullableNumber(value.lat) &&
+    isNullableNumber(value.lng) &&
+    isNullableString(value.placeId)
   )
 }
 
+function isApiPro(value: unknown): value is ApiPro {
+  if (!isRecord(value)) return false
+
+  return (
+    typeof value.id === 'string' &&
+    isNullableString(value.businessName) &&
+    isNullableString(value.professionType) &&
+    isNullableString(value.avatarUrl) &&
+    isNullableString(value.locationLabel) &&
+    isNullableNumber(value.distanceMiles) &&
+    isPrimaryLocation(value.primaryLocation)
+  )
+}
+
+function isSortMode(value: string): value is SortMode {
+  return value === 'DISTANCE' || value === 'NAME'
+}
 
 function nearlyEqual(a: number, b: number, eps = 1e-5) {
   return Math.abs(a - b) < eps
@@ -100,65 +127,71 @@ function coordsEqual(a: Coords | null, b: Coords, eps = 1e-5) {
 }
 
 function haversineMiles(a: Coords, b: Coords) {
-  const R = 3958.7613
-  const toRad = (d: number) => (d * Math.PI) / 180
+  const radiusMiles = 3958.7613
+  const toRad = (degrees: number) => (degrees * Math.PI) / 180
+
   const dLat = toRad(b.lat - a.lat)
   const dLng = toRad(b.lng - a.lng)
   const lat1 = toRad(a.lat)
   const lat2 = toRad(b.lat)
-  const sin1 = Math.sin(dLat / 2)
-  const sin2 = Math.sin(dLng / 2)
-  const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2
+
+  const sinLat = Math.sin(dLat / 2)
+  const sinLng = Math.sin(dLng / 2)
+
+  const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng
   const c = 2 * Math.asin(Math.min(1, Math.sqrt(h)))
-  return R * c
+
+  return radiusMiles * c
 }
 
 function isUsZip(input: string) {
   return /^\d{5}(?:-\d{4})?$/.test(input.trim())
 }
 
-function zoomForRadiusMiles(mi: number) {
-  if (mi <= 5) return 12
-  if (mi <= 10) return 11
-  if (mi <= 15) return 11
-  if (mi <= 25) return 10
+function zoomForRadiusMiles(radiusMiles: number) {
+  if (radiusMiles <= 5) return 12
+  if (radiusMiles <= 10) return 11
+  if (radiusMiles <= 15) return 11
+  if (radiusMiles <= 25) return 10
   return 9
 }
 
 function newSessionToken() {
-  const c = globalThis.crypto
-  if (c && typeof c.randomUUID === 'function') return c.randomUUID()
+  const crypto = globalThis.crypto
+  if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+
   return `sess_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`
 }
 
 function splitQueryAndLocation(raw: string): { query: string; location: string | null } {
-  const s = raw.trim()
-  if (!s) return { query: '', location: null }
+  const trimmed = raw.trim()
+  if (!trimmed) return { query: '', location: null }
 
-  if (s.startsWith('@')) {
-    const loc = s.slice(1).trim()
-    return { query: '', location: loc || null }
+  if (trimmed.startsWith('@')) {
+    const location = trimmed.slice(1).trim()
+    return { query: '', location: location || null }
   }
 
-  const zipMatch = s.match(/\b\d{5}(?:-\d{4})?\b/)
+  const zipMatch = trimmed.match(/\b\d{5}(?:-\d{4})?\b/)
   if (zipMatch) {
     const zip = zipMatch[0]
-    const query = s.replace(zip, '').replace(/\s{2,}/g, ' ').trim()
+    const query = trimmed.replace(zip, '').replace(/\s{2,}/g, ' ').trim()
     return { query, location: zip }
   }
 
-  const m = s.match(/\b(?:near|in|at)\b\s+(.+)$/i)
-  if (m && m[1]) {
-    const location = m[1].trim()
-    const query = s.slice(0, m.index).trim()
+  const locationMatch = trimmed.match(/\b(?:near|in|at)\b\s+(.+)$/i)
+  if (locationMatch && locationMatch[1]) {
+    const location = locationMatch[1].trim()
+    const matchIndex = typeof locationMatch.index === 'number' ? locationMatch.index : 0
+    const query = trimmed.slice(0, matchIndex).trim()
     return { query, location: location || null }
   }
 
-  return { query: s, location: null }
+  return { query: trimmed, location: null }
 }
 
-function tokenize(s: string) {
-  return s.trim().split(/\s+/).filter(Boolean)
+function tokenize(value: string) {
+  return value.trim().split(/\s+/).filter(Boolean)
 }
 
 const SERVICE_LEAD_WORDS = new Set([
@@ -191,93 +224,115 @@ const SERVICE_LEAD_WORDS = new Set([
 ])
 
 function looksServiceLed(raw: string) {
-  const t = tokenize(raw)
-  if (!t.length) return false
-  return SERVICE_LEAD_WORDS.has(t[0].toLowerCase())
+  const tokens = tokenize(raw)
+  if (!tokens.length) return false
+
+  return SERVICE_LEAD_WORDS.has(tokens[0].toLowerCase())
 }
 
 function deriveAutocompleteTarget(raw: string): { serviceText: string; locationText: string } | null {
-  const s = raw.trim()
-  if (!s) return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
 
-  const { query, location } = splitQueryAndLocation(s)
-  if (location) return { serviceText: query.trim(), locationText: location.trim() }
+  const { query, location } = splitQueryAndLocation(trimmed)
+  if (location) {
+    return {
+      serviceText: query.trim(),
+      locationText: location.trim(),
+    }
+  }
 
-  const tokens = tokenize(s)
+  const tokens = tokenize(trimmed)
   if (!tokens.length) return null
 
-  if (!looksServiceLed(s)) {
-    return { serviceText: '', locationText: s }
+  if (!looksServiceLed(trimmed)) {
+    return {
+      serviceText: '',
+      locationText: trimmed,
+    }
   }
 
   if (tokens.length === 1) return null
-  const k = Math.min(4, tokens.length - 1)
-  const locationText = tokens.slice(tokens.length - k).join(' ')
-  const serviceText = tokens.slice(0, tokens.length - k).join(' ').trim()
+
+  const locationWordCount = Math.min(4, tokens.length - 1)
+  const locationText = tokens.slice(tokens.length - locationWordCount).join(' ')
+  const serviceText = tokens.slice(0, tokens.length - locationWordCount).join(' ').trim()
+
   return { serviceText, locationText }
 }
 
-function normalizePrediction(x: unknown): PlacesPrediction | null {
-  if (!isRecord(x)) return null
-  const placeId = typeof x.placeId === 'string' ? x.placeId : ''
-  const description = typeof x.description === 'string' ? x.description : ''
+function normalizePrediction(value: unknown): PlacesPrediction | null {
+  if (!isRecord(value)) return null
+
+  const placeId = typeof value.placeId === 'string' ? value.placeId : ''
+  const description = typeof value.description === 'string' ? value.description : ''
+
   if (!placeId || !description) return null
 
-  const mainText = typeof x.mainText === 'string' ? x.mainText : description
-  const secondaryText = typeof x.secondaryText === 'string' ? x.secondaryText : ''
-  const types = Array.isArray(x.types) ? x.types.filter((t) => typeof t === 'string') : []
-  const distanceMeters = typeof x.distanceMeters === 'number' ? x.distanceMeters : null
+  const mainText = typeof value.mainText === 'string' ? value.mainText : description
+  const secondaryText = typeof value.secondaryText === 'string' ? value.secondaryText : ''
+  const types = isArray(value.types) ? value.types.filter((type): type is string => typeof type === 'string') : []
+  const distanceMeters = typeof value.distanceMeters === 'number' ? value.distanceMeters : null
 
-  return { placeId, description, mainText, secondaryText, types, distanceMeters }
+  return {
+    placeId,
+    description,
+    mainText,
+    secondaryText,
+    types,
+    distanceMeters,
+  }
 }
-
-type ResolvedPlace = { coords: Coords; label: string; viewport: Bounds | null }
 
 function parseResolvedPlace(raw: unknown): ResolvedPlace | null {
   if (!isRecord(raw)) return null
+
   const place = raw.place
   if (!isRecord(place)) return null
 
   const lat = typeof place.lat === 'number' ? place.lat : null
   const lng = typeof place.lng === 'number' ? place.lng : null
+
   if (lat == null || lng == null) return null
 
-  const viewport =
-    isRecord(place.viewport) &&
-    typeof place.viewport.north === 'number' &&
-    typeof place.viewport.south === 'number' &&
-    typeof place.viewport.east === 'number' &&
-    typeof place.viewport.west === 'number'
-      ? (place.viewport as Bounds)
-      : null
-
+  const viewport = isBounds(place.viewport) ? place.viewport : null
   const name = typeof place.name === 'string' ? place.name : ''
   const formattedAddress = typeof place.formattedAddress === 'string' ? place.formattedAddress : ''
   const label = formattedAddress || name || 'Selected place'
 
-  return { coords: { lat, lng }, label, viewport }
+  return {
+    coords: { lat, lng },
+    label,
+    viewport,
+  }
 }
 
-type SortMode = 'DISTANCE' | 'NAME'
 function sortPros(list: ApiPro[], mode: SortMode): ApiPro[] {
-  const out = [...list]
+  const sorted = [...list]
+
   if (mode === 'NAME') {
-    out.sort((a, b) => (a.businessName || '').localeCompare(b.businessName || ''))
-    return out
+    sorted.sort((a, b) => (a.businessName || '').localeCompare(b.businessName || ''))
+    return sorted
   }
-  // DISTANCE
-  out.sort((a, b) => {
-    const ad = typeof a.distanceMiles === 'number' ? a.distanceMiles : Number.POSITIVE_INFINITY
-    const bd = typeof b.distanceMiles === 'number' ? b.distanceMiles : Number.POSITIVE_INFINITY
-    return ad - bd
+
+  sorted.sort((a, b) => {
+    const aDistance = typeof a.distanceMiles === 'number' ? a.distanceMiles : Number.POSITIVE_INFINITY
+    const bDistance = typeof b.distanceMiles === 'number' ? b.distanceMiles : Number.POSITIVE_INFINITY
+
+    return aDistance - bDistance
   })
-  return out
+
+  return sorted
 }
 
 export default function SearchMapClient() {
   const [q, setQ] = useState('')
   const [radiusMiles, setRadiusMiles] = useState(15)
   const [sortMode, setSortMode] = useState<SortMode>('DISTANCE')
+
+  const [categories, setCategories] = useState<DiscoverCategoryOption[]>([])
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<DiscoverViewMode>('MAP')
 
   const [me, setMe] = useState<Coords | null>(null)
   const [geoDenied, setGeoDenied] = useState(false)
@@ -292,7 +347,7 @@ export default function SearchMapClient() {
   const [pros, setPros] = useState<ApiPro[]>([])
 
   const [activeProId, setActiveProId] = useState<string | null>(null)
-  const activePro = useMemo(() => pros.find((p) => p.id === activeProId) ?? null, [pros, activeProId])
+  const activePro = useMemo(() => pros.find((pro) => pro.id === activeProId) ?? null, [pros, activeProId])
 
   const listRef = useRef<HTMLDivElement | null>(null)
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -302,9 +357,9 @@ export default function SearchMapClient() {
 
   const reqIdRef = useRef(0)
   const inFlightRef = useRef<AbortController | null>(null)
-  const lastSearchRef = useRef<{ query: string; origin: Coords | null }>({ query: '', origin: null })
+  const lastSearchRef = useRef<SearchArgs>({ query: '', origin: null, categoryId: null })
+  const radiusMilesRef = useRef(radiusMiles)
 
-  // Autocomplete state
   const inputRef = useRef<HTMLInputElement | null>(null)
   const acRootRef = useRef<HTMLDivElement | null>(null)
   const [placeSessionToken, setPlaceSessionToken] = useState(() => newSessionToken())
@@ -314,32 +369,120 @@ export default function SearchMapClient() {
   const [acIndex, setAcIndex] = useState(-1)
   const acAbortRef = useRef<AbortController | null>(null)
 
-  // 🚫 Critical: suppress autocomplete after selection until user edits again.
   const [acEnabled, setAcEnabled] = useState(true)
+
+  useEffect(() => {
+    radiusMilesRef.current = radiusMiles
+  }, [radiusMiles])
 
   const displayPros = useMemo(() => sortPros(pros, sortMode), [pros, sortMode])
 
   const pins: Pin[] = useMemo(() => {
-    const out: Pin[] = []
-    for (const p of pros) {
-      const lat = p.primaryLocation?.lat ?? null
-      const lng = p.primaryLocation?.lng ?? null
+    const nextPins: Pin[] = []
+
+    for (const pro of pros) {
+      const lat = pro.primaryLocation?.lat ?? null
+      const lng = pro.primaryLocation?.lng ?? null
+
       if (lat == null || lng == null) continue
-      out.push({
-        id: p.id,
+
+      nextPins.push({
+        id: pro.id,
         lat,
         lng,
-        label: p.businessName || 'Beauty professional',
-        sublabel: p.locationLabel || p.professionType || '',
-        active: p.id === activeProId,
+        label: pro.businessName || 'Beauty professional',
+        sublabel: pro.locationLabel || pro.professionType || '',
+        active: pro.id === activeProId,
       })
     }
-    return out
+
+    return nextPins
   }, [pros, activeProId])
+
+  const runSearch = useCallback(async (args: SearchArgs) => {
+    const myReqId = ++reqIdRef.current
+
+    inFlightRef.current?.abort()
+
+    const controller = new AbortController()
+    inFlightRef.current = controller
+
+    setLoading(true)
+    setErr(null)
+
+    try {
+      const qs = new URLSearchParams()
+
+      qs.set('tab', 'PROS')
+      qs.set('radiusMiles', String(radiusMilesRef.current))
+
+      if (args.query) qs.set('q', args.query)
+      if (args.categoryId) qs.set('categoryId', args.categoryId)
+
+      if (args.origin) {
+        qs.set('lat', String(args.origin.lat))
+        qs.set('lng', String(args.origin.lng))
+      }
+
+      const res = await fetch(`/api/search?${qs.toString()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      })
+
+      const body = await safeJson(res)
+
+      if (reqIdRef.current !== myReqId) return
+
+      if (!res.ok || !isRecord(body) || body.ok !== true) {
+        const message = isRecord(body) && typeof body.error === 'string' ? body.error : 'Search failed.'
+        throw new Error(message)
+      }
+
+      const rawPros = isArray(body.pros) ? body.pros : []
+      const nextPros = rawPros.filter(isApiPro)
+
+      setPros(nextPros)
+
+      const firstPinnedPro = nextPros.find((pro) => pro.primaryLocation?.lat != null && pro.primaryLocation?.lng != null)
+      setActiveProId((prev) => (prev && nextPros.some((pro) => pro.id === prev) ? prev : firstPinnedPro?.id ?? null))
+    } catch (error: unknown) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+
+      const message = error instanceof Error ? error.message : 'Search failed.'
+
+      setErr(message)
+      setPros([])
+      setActiveProId(null)
+    } finally {
+      if (reqIdRef.current === myReqId) setLoading(false)
+      if (inFlightRef.current === controller) inFlightRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+
+    async function loadCategories() {
+      try {
+        const nextCategories = await fetchDiscoverCategories(controller.signal)
+        setCategories(nextCategories)
+      } catch (error: unknown) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+
+        console.error('Failed to load discover categories', error)
+        setCategories([])
+      }
+    }
+
+    void loadCategories()
+
+    return () => controller.abort()
+  }, [])
 
   useEffect(() => {
     return () => {
       if (focusTimerRef.current) window.clearTimeout(focusTimerRef.current)
+
       inFlightRef.current?.abort()
       acAbortRef.current?.abort()
     }
@@ -349,21 +492,25 @@ export default function SearchMapClient() {
     setMapCenter((prev) => (coordsEqual(prev, center) ? prev : center))
   }, [])
 
-  // Close autocomplete on outside click
   useEffect(() => {
     if (!acOpen) return
-    const onDown = (e: PointerEvent) => {
+
+    const onDown = (event: PointerEvent) => {
       const root = acRootRef.current
+
       if (!root) return
-      if (root.contains(e.target as Node)) return
+      if (!(event.target instanceof Node)) return
+      if (root.contains(event.target)) return
+
       setAcOpen(false)
     }
+
     window.addEventListener('pointerdown', onDown)
     return () => window.removeEventListener('pointerdown', onDown)
   }, [acOpen])
 
-  // Geolocation (initial origin)
   const didInitialSearchRef = useRef(false)
+
   useEffect(() => {
     if (!navigator.geolocation) {
       setGeoDenied(true)
@@ -373,18 +520,29 @@ export default function SearchMapClient() {
     }
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const c = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        setMe(c)
+      (position) => {
+        const coords = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        }
+
+        setMe(coords)
         setGeoDenied(false)
 
         if (!didInitialSearchRef.current) {
           didInitialSearchRef.current = true
-          setOrigin(c)
+          setOrigin(coords)
           setOriginLabel('Near you')
           setFitBounds(null)
-          lastSearchRef.current = { query: '', origin: c }
-          void runSearch({ query: '', origin: c })
+
+          const nextSearch: SearchArgs = {
+            query: '',
+            origin: coords,
+            categoryId: null,
+          }
+
+          lastSearchRef.current = nextSearch
+          void runSearch(nextSearch)
         }
       },
       () => {
@@ -392,65 +550,21 @@ export default function SearchMapClient() {
         setMe(null)
         setLoading(false)
       },
-      { enableHighAccuracy: true, timeout: 8000 },
+      {
+        enableHighAccuracy: true,
+        timeout: 8000,
+      },
     )
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [runSearch])
 
-  const runSearch = useCallback(
-    async (args: { query: string; origin: Coords | null }) => {
-      const myReqId = ++reqIdRef.current
+  const didRadiusEffectRunRef = useRef(false)
 
-      inFlightRef.current?.abort()
-      const controller = new AbortController()
-      inFlightRef.current = controller
-
-      setLoading(true)
-      setErr(null)
-
-      try {
-        const qs = new URLSearchParams()
-        qs.set('tab', 'PROS')
-        if (args.query) qs.set('q', args.query)
-        qs.set('radiusMiles', String(radiusMiles))
-
-        if (args.origin) {
-          qs.set('lat', String(args.origin.lat))
-          qs.set('lng', String(args.origin.lng))
-        }
-
-        const res = await fetch(`/api/search?${qs.toString()}`, { cache: 'no-store', signal: controller.signal })
-        const body = await safeJson(res)
-
-        if (reqIdRef.current !== myReqId) return
-
-        if (!res.ok || !isRecord(body) || body.ok !== true) {
-          const msg = isRecord(body) && typeof body.error === 'string' ? body.error : 'Search failed.'
-          throw new Error(msg)
-        }
-
-        const rawPros = Array.isArray(body.pros) ? body.pros : []
-        const list = rawPros.filter(isApiPro)
-
-        setPros(list)
-        const first = list.find((p) => p.primaryLocation?.lat != null && p.primaryLocation?.lng != null)
-        setActiveProId((prev) => (prev && list.some((p) => p.id === prev) ? prev : first?.id ?? null))
-      } catch (e: unknown) {
-        if (e instanceof DOMException && e.name === 'AbortError') return
-        const msg = e instanceof Error ? e.message : 'Search failed.'
-        setErr(msg)
-        setPros([])
-        setActiveProId(null)
-      } finally {
-        if (reqIdRef.current === myReqId) setLoading(false)
-        if (inFlightRef.current === controller) inFlightRef.current = null
-      }
-    },
-    [radiusMiles],
-  )
-
-  // Radius change reruns last search
   useEffect(() => {
+    if (!didRadiusEffectRunRef.current) {
+      didRadiusEffectRunRef.current = true
+      return
+    }
+
     void runSearch(lastSearchRef.current)
   }, [radiusMiles, runSearch])
 
@@ -458,52 +572,69 @@ export default function SearchMapClient() {
     setOrigin(resolved.coords)
     setOriginLabel(resolved.label)
     setFitBounds(resolved.viewport)
-
     setFocus({ lat: resolved.coords.lat, lng: resolved.coords.lng, zoom })
+
     if (focusTimerRef.current) window.clearTimeout(focusTimerRef.current)
     focusTimerRef.current = window.setTimeout(() => setFocus(null), 300)
   }, [])
 
   const resolvePlaceFromText = useCallback(
     async (locationText: string): Promise<ResolvedPlace | null> => {
-      const loc = locationText.trim()
-      if (!loc) return null
+      const location = locationText.trim()
+      if (!location) return null
 
       const sessionToken = newSessionToken()
-      const kind = isUsZip(loc) ? 'AREA' : 'ANY'
-
+      const kind = isUsZip(location) ? 'AREA' : 'ANY'
       const bias = mapCenter ?? origin ?? me
-      const qsA = new URLSearchParams({
-        input: loc,
+
+      const autocompleteParams = new URLSearchParams({
+        input: location,
         sessionToken,
         kind,
         components: 'country:us',
       })
+
       if (bias) {
-        qsA.set('lat', String(bias.lat))
-        qsA.set('lng', String(bias.lng))
-        qsA.set('radiusMeters', '50000')
+        autocompleteParams.set('lat', String(bias.lat))
+        autocompleteParams.set('lng', String(bias.lng))
+        autocompleteParams.set('radiusMeters', '50000')
       }
 
-      const resA = await fetch(`/api/google/places/autocomplete?${qsA.toString()}`, { cache: 'no-store' })
-      const aRaw = await safeJson(resA)
-      if (!resA.ok || !isRecord(aRaw) || !Array.isArray(aRaw.predictions)) return null
+      const autocompleteRes = await fetch(`/api/google/places/autocomplete?${autocompleteParams.toString()}`, {
+        cache: 'no-store',
+      })
 
-      const preds = aRaw.predictions.map(normalizePrediction).filter((p): p is PlacesPrediction => Boolean(p))
-      if (!preds.length) return null
+      const autocompleteBody = await safeJson(autocompleteRes)
 
-      const chosen = preds[0]
-      const qsD = new URLSearchParams({ placeId: chosen.placeId, sessionToken })
-      const resD = await fetch(`/api/google/places/details?${qsD.toString()}`, { cache: 'no-store' })
-      const dRaw = await safeJson(resD)
-      if (!resD.ok || !isRecord(dRaw)) return null
+      if (!autocompleteRes.ok || !isRecord(autocompleteBody) || !isArray(autocompleteBody.predictions)) {
+        return null
+      }
 
-      return parseResolvedPlace(dRaw)
+      const predictions = autocompleteBody.predictions
+        .map(normalizePrediction)
+        .filter((prediction): prediction is PlacesPrediction => Boolean(prediction))
+
+      if (!predictions.length) return null
+
+      const chosen = predictions[0]
+      const detailsParams = new URLSearchParams({
+        placeId: chosen.placeId,
+        sessionToken,
+      })
+
+      const detailsRes = await fetch(`/api/google/places/details?${detailsParams.toString()}`, {
+        cache: 'no-store',
+      })
+
+      const detailsBody = await safeJson(detailsRes)
+
+      if (!detailsRes.ok || !isRecord(detailsBody)) return null
+
+      return parseResolvedPlace(detailsBody)
     },
     [mapCenter, origin, me],
   )
 
-  // Autocomplete fetch (debounced)
   const acTarget = useMemo(() => deriveAutocompleteTarget(q), [q])
 
   useEffect(() => {
@@ -518,6 +649,7 @@ export default function SearchMapClient() {
     }
 
     const target = acTarget?.locationText?.trim() ?? ''
+
     if (!target || target.length < 2) {
       setAcPreds([])
       setAcOpen(false)
@@ -529,8 +661,10 @@ export default function SearchMapClient() {
     }
 
     setAcLoading(true)
+
     const timer = window.setTimeout(async () => {
       acAbortRef.current?.abort()
+
       const controller = new AbortController()
       acAbortRef.current = controller
 
@@ -538,36 +672,43 @@ export default function SearchMapClient() {
         const kind = isUsZip(target) ? 'AREA' : 'ANY'
         const bias = mapCenter ?? origin ?? me
 
-        const qs = new URLSearchParams({
+        const params = new URLSearchParams({
           input: target,
           kind,
           sessionToken: placeSessionToken,
           components: 'country:us',
         })
+
         if (bias) {
-          qs.set('lat', String(bias.lat))
-          qs.set('lng', String(bias.lng))
-          qs.set('radiusMeters', '50000')
+          params.set('lat', String(bias.lat))
+          params.set('lng', String(bias.lng))
+          params.set('radiusMeters', '50000')
         }
 
-        const res = await fetch(`/api/google/places/autocomplete?${qs.toString()}`, {
+        const res = await fetch(`/api/google/places/autocomplete?${params.toString()}`, {
           cache: 'no-store',
           signal: controller.signal,
         })
-        const raw = await safeJson(res)
-        if (!res.ok || !isRecord(raw) || !Array.isArray(raw.predictions)) {
+
+        const body = await safeJson(res)
+
+        if (!res.ok || !isRecord(body) || !isArray(body.predictions)) {
           setAcPreds([])
           setAcOpen(false)
           setAcIndex(-1)
           return
         }
 
-        const preds = raw.predictions.map(normalizePrediction).filter((p): p is PlacesPrediction => Boolean(p))
-        setAcPreds(preds)
-        setAcOpen(preds.length > 0)
-        setAcIndex(preds.length > 0 ? 0 : -1)
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'AbortError') return
+        const predictions = body.predictions
+          .map(normalizePrediction)
+          .filter((prediction): prediction is PlacesPrediction => Boolean(prediction))
+
+        setAcPreds(predictions)
+        setAcOpen(predictions.length > 0)
+        setAcIndex(predictions.length > 0 ? 0 : -1)
+      } catch (error: unknown) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+
         setAcPreds([])
         setAcOpen(false)
         setAcIndex(-1)
@@ -580,52 +721,67 @@ export default function SearchMapClient() {
   }, [acEnabled, acTarget?.locationText, mapCenter, origin, me, placeSessionToken])
 
   const commitSelection = useCallback(
-    async (p: PlacesPrediction) => {
-      // Always close dropdown immediately (UX)
+    async (prediction: PlacesPrediction) => {
       setAcOpen(false)
       setAcPreds([])
       setAcIndex(-1)
 
       const sessionToken = placeSessionToken
-      const qsD = new URLSearchParams({ placeId: p.placeId, sessionToken })
-      const resD = await fetch(`/api/google/places/details?${qsD.toString()}`, { cache: 'no-store' })
-      const dRaw = await safeJson(resD)
-      if (!resD.ok || !isRecord(dRaw)) return
+      const detailsParams = new URLSearchParams({
+        placeId: prediction.placeId,
+        sessionToken,
+      })
 
-      const resolved = parseResolvedPlace(dRaw)
+      const detailsRes = await fetch(`/api/google/places/details?${detailsParams.toString()}`, {
+        cache: 'no-store',
+      })
+
+      const detailsBody = await safeJson(detailsRes)
+
+      if (!detailsRes.ok || !isRecord(detailsBody)) return
+
+      const resolved = parseResolvedPlace(detailsBody)
       if (!resolved) return
 
-      // Autofill: keep service text, commit “near <place>” so hitting Enter later still parses.
       const serviceText = acTarget?.serviceText?.trim() ?? splitQueryAndLocation(q).query.trim()
-      const nextInput = serviceText ? `${serviceText} near ${p.description}` : p.description
-      setQ(nextInput)
+      const nextInput = serviceText ? `${serviceText} near ${prediction.description}` : prediction.description
 
-      // Suppress autocomplete until user edits again
+      setQ(nextInput)
       setAcEnabled(false)
 
-      // Apply origin + run search
-      applyOrigin(resolved, resolved.viewport ? undefined : zoomForRadiusMiles(radiusMiles))
-      lastSearchRef.current = { query: serviceText, origin: resolved.coords }
-      void runSearch({ query: serviceText, origin: resolved.coords })
+      applyOrigin(resolved, resolved.viewport ? undefined : zoomForRadiusMiles(radiusMilesRef.current))
 
-      // New token for next place interaction (billing grouping)
+      const nextSearch: SearchArgs = {
+        query: serviceText,
+        origin: resolved.coords,
+        categoryId: activeCategoryId,
+      }
+
+      lastSearchRef.current = nextSearch
+      void runSearch(nextSearch)
+
       setPlaceSessionToken(newSessionToken())
 
-      // Keep focus in input (feels “native”)
       window.setTimeout(() => inputRef.current?.focus(), 0)
     },
-    [placeSessionToken, acTarget, q, applyOrigin, radiusMiles, runSearch],
+    [placeSessionToken, acTarget, q, applyOrigin, activeCategoryId, runSearch],
   )
 
   const inferAndSearch = useCallback(async () => {
-    // close dropdown no matter what — this fixes your screenshot scenario
     setAcOpen(false)
 
     const raw = q.trim()
+
     if (!raw) {
-      const o = lastSearchRef.current.origin ?? origin ?? mapCenter ?? me
-      lastSearchRef.current = { query: '', origin: o ?? null }
-      void runSearch({ query: '', origin: o ?? null })
+      const fallbackOrigin = lastSearchRef.current.origin ?? origin ?? mapCenter ?? me
+      const nextSearch: SearchArgs = {
+        query: '',
+        origin: fallbackOrigin ?? null,
+        categoryId: activeCategoryId,
+      }
+
+      lastSearchRef.current = nextSearch
+      void runSearch(nextSearch)
       return
     }
 
@@ -633,129 +789,193 @@ export default function SearchMapClient() {
 
     if (location) {
       const resolved = await resolvePlaceFromText(location)
+
       if (resolved) {
-        applyOrigin(resolved, resolved.viewport ? undefined : zoomForRadiusMiles(radiusMiles))
-        lastSearchRef.current = { query: query.trim(), origin: resolved.coords }
-        void runSearch({ query: query.trim(), origin: resolved.coords })
+        applyOrigin(resolved, resolved.viewport ? undefined : zoomForRadiusMiles(radiusMilesRef.current))
+
+        const nextSearch: SearchArgs = {
+          query: query.trim(),
+          origin: resolved.coords,
+          categoryId: activeCategoryId,
+        }
+
+        lastSearchRef.current = nextSearch
+        void runSearch(nextSearch)
         return
       }
     }
 
-    // Ambiguous: try whole string as location if it doesn't look service-led
     if (!looksServiceLed(raw)) {
       const resolved = await resolvePlaceFromText(raw)
+
       if (resolved) {
-        applyOrigin(resolved, resolved.viewport ? undefined : zoomForRadiusMiles(radiusMiles))
-        lastSearchRef.current = { query: '', origin: resolved.coords }
-        void runSearch({ query: '', origin: resolved.coords })
+        applyOrigin(resolved, resolved.viewport ? undefined : zoomForRadiusMiles(radiusMilesRef.current))
+
+        const nextSearch: SearchArgs = {
+          query: '',
+          origin: resolved.coords,
+          categoryId: activeCategoryId,
+        }
+
+        lastSearchRef.current = nextSearch
+        void runSearch(nextSearch)
         return
       }
     }
 
-    // Tail split for service-led (“lashes encinitas”)
     const tokens = tokenize(raw)
+
     if (tokens.length >= 2) {
-      const maxK = Math.min(4, tokens.length - 1)
-      for (let k = maxK; k >= 1; k--) {
-        const locText = tokens.slice(tokens.length - k).join(' ')
-        const serviceText = tokens.slice(0, tokens.length - k).join(' ').trim()
-        const resolved = await resolvePlaceFromText(locText)
+      const maxLocationWords = Math.min(4, tokens.length - 1)
+
+      for (let locationWordCount = maxLocationWords; locationWordCount >= 1; locationWordCount -= 1) {
+        const locationText = tokens.slice(tokens.length - locationWordCount).join(' ')
+        const serviceText = tokens.slice(0, tokens.length - locationWordCount).join(' ').trim()
+        const resolved = await resolvePlaceFromText(locationText)
+
         if (resolved) {
-          applyOrigin(resolved, resolved.viewport ? undefined : zoomForRadiusMiles(radiusMiles))
-          lastSearchRef.current = { query: serviceText, origin: resolved.coords }
-          void runSearch({ query: serviceText, origin: resolved.coords })
+          applyOrigin(resolved, resolved.viewport ? undefined : zoomForRadiusMiles(radiusMilesRef.current))
+
+          const nextSearch: SearchArgs = {
+            query: serviceText,
+            origin: resolved.coords,
+            categoryId: activeCategoryId,
+          }
+
+          lastSearchRef.current = nextSearch
+          void runSearch(nextSearch)
           return
         }
       }
     }
 
-    // fallback: text search around current origin
-    const o = lastSearchRef.current.origin ?? origin ?? mapCenter ?? me
-    lastSearchRef.current = { query: raw, origin: o ?? null }
-    void runSearch({ query: raw, origin: o ?? null })
-  }, [q, origin, mapCenter, me, radiusMiles, applyOrigin, runSearch, resolvePlaceFromText])
+    const fallbackOrigin = lastSearchRef.current.origin ?? origin ?? mapCenter ?? me
+    const nextSearch: SearchArgs = {
+      query: raw,
+      origin: fallbackOrigin ?? null,
+      categoryId: activeCategoryId,
+    }
+
+    lastSearchRef.current = nextSearch
+    void runSearch(nextSearch)
+  }, [q, origin, mapCenter, me, applyOrigin, activeCategoryId, runSearch, resolvePlaceFromText])
+
+  const handleSelectCategory = useCallback(
+    (category: DiscoverCategoryOption) => {
+      const nextCategoryId = category.kind === 'ALL' ? null : category.id
+
+      setActiveCategoryId(nextCategoryId)
+
+      const nextSearch: SearchArgs = {
+        ...lastSearchRef.current,
+        categoryId: nextCategoryId,
+      }
+
+      lastSearchRef.current = nextSearch
+      void runSearch(nextSearch)
+    },
+    [runSearch],
+  )
 
   const headerHint = useMemo(() => {
-    if (loading) return 'Finding pros…'
+    if (loading) return 'Finding pros...'
     if (err) return 'Search failed'
     if (!pros.length) return 'No results'
+
     return `${pros.length} pro${pros.length === 1 ? '' : 's'}`
   }, [loading, err, pros.length])
 
   const showSearchArea = useMemo(() => {
+    if (viewMode !== 'MAP') return false
     if (!mapCenter || !origin) return false
+
     return haversineMiles(mapCenter, origin) >= 0.35
-  }, [mapCenter, origin])
+  }, [viewMode, mapCenter, origin])
 
   const activeNavHref = useMemo(() => {
     if (!activePro) return null
-    const loc = activePro.primaryLocation
+
+    const location = activePro.primaryLocation
+
     return directionsHrefFromLocation({
-      lat: loc?.lat ?? null,
-      lng: loc?.lng ?? null,
-      placeId: loc?.placeId ?? null,
-      formattedAddress: loc?.formattedAddress ?? null,
+      lat: location?.lat ?? null,
+      lng: location?.lng ?? null,
+      placeId: location?.placeId ?? null,
+      formattedAddress: location?.formattedAddress ?? null,
       name: activePro.businessName ?? null,
     })
   }, [activePro])
 
   const activeOpenHref = useMemo(() => {
     if (!activePro) return null
-    const loc = activePro.primaryLocation
+
+    const location = activePro.primaryLocation
+
     return mapsHrefFromLocation({
-      lat: loc?.lat ?? null,
-      lng: loc?.lng ?? null,
-      placeId: loc?.placeId ?? null,
-      formattedAddress: loc?.formattedAddress ?? null,
+      lat: location?.lat ?? null,
+      lng: location?.lng ?? null,
+      placeId: location?.placeId ?? null,
+      formattedAddress: location?.formattedAddress ?? null,
       name: activePro.businessName ?? null,
     })
   }, [activePro])
 
   const handleSelectPin = useCallback((id: string) => {
     setActiveProId(id)
-    const el = itemRefs.current[id]
-    if (el && listRef.current) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+
+    const element = itemRefs.current[id]
+    if (element && listRef.current) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
   }, [])
 
-  const handleSelectList = useCallback((p: ApiPro) => {
-    setActiveProId(p.id)
-    const lat = p.primaryLocation?.lat ?? null
-    const lng = p.primaryLocation?.lng ?? null
+  const handleSelectList = useCallback((pro: ApiPro) => {
+    setActiveProId(pro.id)
+
+    const lat = pro.primaryLocation?.lat ?? null
+    const lng = pro.primaryLocation?.lng ?? null
+
     if (lat != null && lng != null) {
       setFocus({ lat, lng })
+
       if (focusTimerRef.current) window.clearTimeout(focusTimerRef.current)
       focusTimerRef.current = window.setTimeout(() => setFocus(null), 250)
     }
   }, [])
 
-  const quickChip = useCallback(
-    (service: string) => {
-      const base = originLabel ? `${service} near ${originLabel}` : service
-      setQ(service)
-      // keep existing origin; run search immediately
-      const o = lastSearchRef.current.origin ?? origin ?? mapCenter ?? me
-      lastSearchRef.current = { query: service, origin: o ?? null }
-      void runSearch({ query: service, origin: o ?? null })
+  const handleSelectGridPro = useCallback(
+    (pro: { id: string }) => {
+      const selectedPro = displayPros.find((item) => item.id === pro.id)
+      if (!selectedPro) return
+
+      handleSelectList(selectedPro)
     },
-    [originLabel, origin, mapCenter, me, runSearch],
+    [displayPros, handleSelectList],
   )
 
   return (
     <main className="mx-auto max-w-240 px-0 pb-0 pt-0">
-      <div className="relative w-full overflow-hidden bg-bgPrimary" style={{ height: `calc(100dvh - ${APP_BOTTOM_INSET})` }}>
-        <div className="absolute inset-0 z-0">
-          <MapView
-            me={me}
-            origin={origin}
-            fitBounds={fitBounds}
-            radiusMiles={radiusMiles}
-            pins={pins}
-            focus={focus}
-            onSelectPin={handleSelectPin}
-            onViewportChange={(center) => handleViewportChange(center)}
-            enableClustering
-          />
-        </div>
+      <div
+        className="relative w-full overflow-hidden bg-bgPrimary"
+        style={{ height: `calc(100dvh - ${APP_BOTTOM_INSET})` }}
+      >
+        {viewMode === 'MAP' ? (
+          <div className="absolute inset-0 z-0">
+            <MapView
+              me={me}
+              origin={origin}
+              fitBounds={fitBounds}
+              radiusMiles={radiusMiles}
+              pins={pins}
+              focus={focus}
+              onSelectPin={handleSelectPin}
+              onViewportChange={(center) => handleViewportChange(center)}
+              enableClustering
+            />
+          </div>
+        ) : (
+          <div className="absolute inset-0 z-0 bg-bgPrimary" />
+        )}
 
         <div
           className={cn(
@@ -764,68 +984,75 @@ export default function SearchMapClient() {
           )}
         />
 
-        {/* Top bar */}
         <div className="absolute left-0 right-0 top-0 z-20 px-3 pt-3">
           <div
+            ref={acRootRef}
             className={cn(
               'tovis-glass-strong rounded-card border border-white/12 bg-bgSecondary/80 p-3 backdrop-blur-xl',
               'shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
             )}
-            ref={acRootRef}
           >
             <div className="flex items-start gap-3">
               <div className="min-w-0 flex-1">
-                <div className="text-[12px] font-black text-textPrimary/85 tracking-wide">Search</div>
+                <div className="text-[12px] font-black tracking-wide text-textPrimary/85">Search</div>
 
                 <div
                   className={cn(
                     'mt-1 flex items-center gap-2 rounded-2xl px-3 py-2',
-                    'bg-bgPrimary/20',
-                    'backdrop-blur-xl',
-                    'border border-white/12',
+                    'border border-white/12 bg-bgPrimary/20 backdrop-blur-xl',
                     'shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]',
+                    'transition-colors transition-shadow duration-200',
                     'focus-within:border-white/20',
                     'focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.18),_0_0_0_3px_rgba(var(--accent-primary),0.25)]',
-                    'transition-shadow transition-colors duration-200',
                   )}
                 >
                   <input
                     ref={inputRef}
                     value={q}
-                    onChange={(e) => {
-                      setQ(e.target.value)
-                      setAcEnabled(true) // user edited => re-enable autocomplete
+                    onChange={(event) => {
+                      setQ(event.target.value)
+                      setAcEnabled(true)
                       setAcOpen(true)
                     }}
                     onFocus={() => {
                       if (acEnabled && acPreds.length) setAcOpen(true)
                     }}
                     onBlur={() => {
-                      // delay so click selection works reliably
                       window.setTimeout(() => setAcOpen(false), 120)
                     }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'ArrowDown') {
-                        e.preventDefault()
-                        setAcIndex((i) => Math.min(acPreds.length - 1, Math.max(0, i + 1)))
-                      } else if (e.key === 'ArrowUp') {
-                        e.preventDefault()
-                        setAcIndex((i) => Math.max(0, i - 1))
-                      } else if (e.key === 'Escape') {
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowDown') {
+                        event.preventDefault()
+                        setAcIndex((index) => Math.min(acPreds.length - 1, Math.max(0, index + 1)))
+                        return
+                      }
+
+                      if (event.key === 'ArrowUp') {
+                        event.preventDefault()
+                        setAcIndex((index) => Math.max(0, index - 1))
+                        return
+                      }
+
+                      if (event.key === 'Escape') {
                         setAcOpen(false)
-                      } else if (e.key === 'Enter') {
-                        e.preventDefault()
+                        return
+                      }
+
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+
                         if (acOpen && acPreds.length > 0 && acIndex >= 0 && acIndex < acPreds.length) {
                           void commitSelection(acPreds[acIndex])
-                        } else {
-                          void inferAndSearch()
+                          return
                         }
+
+                        void inferAndSearch()
                       }
                     }}
-                    placeholder="ZIP, city, neighborhood, landmark, or “lashes 92024”"
+                    placeholder={'ZIP, city, neighborhood, landmark, or "lashes 92024"'}
                     className={cn(
                       'w-full bg-transparent text-[14px] font-semibold text-textPrimary',
-                      'placeholder:text-textPrimary/60 outline-none',
+                      'outline-none placeholder:text-textPrimary/60',
                     )}
                   />
 
@@ -842,18 +1069,15 @@ export default function SearchMapClient() {
                       className="rounded-full px-2 py-1 text-[12px] font-black text-textPrimary/70 hover:bg-white/10"
                       aria-label="Clear search"
                     >
-                      ✕
+                      x
                     </button>
                   ) : null}
 
                   {acLoading ? (
                     <span className="select-none text-[12px] font-black text-textPrimary/70" aria-hidden>
-                      …
+                      ...
                     </span>
-                  ) : (
-                    <span className="select-none text-[13px] text-textPrimary/75" aria-hidden>
-                    </span>
-                  )}
+                  ) : null}
                 </div>
 
                 <div className="mt-2 flex items-center justify-between gap-2">
@@ -862,30 +1086,33 @@ export default function SearchMapClient() {
                   </div>
 
                   {geoDenied ? (
-                    <div className="text-[12px] font-semibold text-microAccent">Location off — place searches still work.</div>
+                    <div className="text-[12px] font-semibold text-microAccent">
+                      Location off - place searches still work.
+                    </div>
                   ) : null}
                 </div>
 
-                {/* Autocomplete dropdown */}
                 {acOpen && acPreds.length > 0 ? (
                   <div className="mt-2 overflow-hidden rounded-2xl border border-white/12 bg-bgPrimary/45 backdrop-blur-xl">
-                    {acPreds.slice(0, 8).map((p, idx) => (
+                    {acPreds.slice(0, 8).map((prediction, index) => (
                       <button
-                        key={p.placeId}
+                        key={prediction.placeId}
                         type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          void commitSelection(p)
+                        onMouseDown={(event) => {
+                          event.preventDefault()
+                          void commitSelection(prediction)
                         }}
-                        onMouseEnter={() => setAcIndex(idx)}
+                        onMouseEnter={() => setAcIndex(index)}
                         className={cn(
                           'flex w-full flex-col gap-0.5 px-3 py-2 text-left transition',
-                          idx === acIndex ? 'bg-white/10' : 'bg-transparent hover:bg-white/10',
+                          index === acIndex ? 'bg-white/10' : 'bg-transparent hover:bg-white/10',
                           'border-b border-white/10 last:border-b-0',
                         )}
                       >
-                        <div className="text-[13px] font-black text-textPrimary">{p.mainText}</div>
-                        <div className="text-[12px] font-semibold text-textSecondary">{p.secondaryText || p.description}</div>
+                        <div className="text-[13px] font-black text-textPrimary">{prediction.mainText}</div>
+                        <div className="text-[12px] font-semibold text-textSecondary">
+                          {prediction.secondaryText || prediction.description}
+                        </div>
                       </button>
                     ))}
                   </div>
@@ -898,7 +1125,7 @@ export default function SearchMapClient() {
                 <div className="flex items-center gap-2">
                   <select
                     value={radiusMiles}
-                    onChange={(e) => setRadiusMiles(Number(e.target.value))}
+                    onChange={(event) => setRadiusMiles(Number(event.target.value))}
                     className={cn(
                       'rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2',
                       'text-[12px] font-black text-textPrimary outline-none',
@@ -924,7 +1151,11 @@ export default function SearchMapClient() {
                 <div className="flex items-center gap-2">
                   <select
                     value={sortMode}
-                    onChange={(e) => setSortMode(e.target.value as SortMode)}
+                    onChange={(event) => {
+                      if (isSortMode(event.target.value)) {
+                        setSortMode(event.target.value)
+                      }
+                    }}
                     className={cn(
                       'rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2',
                       'text-[12px] font-black text-textPrimary outline-none',
@@ -939,11 +1170,18 @@ export default function SearchMapClient() {
                     <button
                       type="button"
                       onClick={() => {
+                        const nextSearch: SearchArgs = {
+                          query: lastSearchRef.current.query,
+                          origin: me,
+                          categoryId: activeCategoryId,
+                        }
+
                         setOrigin(me)
                         setOriginLabel('Near you')
                         setFitBounds(null)
-                        lastSearchRef.current = { query: lastSearchRef.current.query, origin: me }
-                        void runSearch({ query: lastSearchRef.current.query, origin: me })
+
+                        lastSearchRef.current = nextSearch
+                        void runSearch(nextSearch)
                       }}
                       className="rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
                     >
@@ -954,19 +1192,21 @@ export default function SearchMapClient() {
               </div>
             </div>
 
-            {/* Quick chips (final 10% UX) */}
-            {!q && !loading ? (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {['Lashes', 'Haircut', 'Nails', 'Brows', 'Facial'].map((x) => (
-                  <button
-                    key={x}
-                    type="button"
-                    onClick={() => quickChip(x.toLowerCase())}
-                    className="rounded-full border border-white/12 bg-bgPrimary/20 px-3 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
-                  >
-                    {x}
-                  </button>
-                ))}
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <DiscoverViewToggle value={viewMode} onChange={setViewMode} />
+
+              <div className="shrink-0 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-textSecondary">
+                Trending
+              </div>
+            </div>
+
+            {categories.length > 0 ? (
+              <div className="mt-3">
+                <DiscoverCategoryRail
+                  categories={categories}
+                  activeCategoryId={activeCategoryId}
+                  onSelectCategory={handleSelectCategory}
+                />
               </div>
             ) : null}
 
@@ -976,21 +1216,26 @@ export default function SearchMapClient() {
                   type="button"
                   onClick={() => {
                     if (!mapCenter) return
+
+                    const nextSearch: SearchArgs = {
+                      query: lastSearchRef.current.query,
+                      origin: mapCenter,
+                      categoryId: activeCategoryId,
+                    }
+
                     setOrigin(mapCenter)
                     setOriginLabel('Map center')
                     setFitBounds(null)
 
-                    const query = lastSearchRef.current.query
-                    lastSearchRef.current = { query, origin: mapCenter }
-                    void runSearch({ query, origin: mapCenter })
+                    lastSearchRef.current = nextSearch
+                    void runSearch(nextSearch)
                   }}
                   className={cn(
                     'rounded-full px-4 py-2 text-[12px] font-black',
-                    'border border-white/15',
-                    'bg-bgPrimary/25 backdrop-blur-xl',
+                    'border border-white/15 bg-bgPrimary/25 backdrop-blur-xl',
                     'text-textPrimary',
                     'shadow-[0_14px_40px_rgba(0,0,0,0.55)]',
-                    'hover:bg-white/10 transition',
+                    'transition hover:bg-white/10',
                   )}
                 >
                   Search this area
@@ -1000,116 +1245,143 @@ export default function SearchMapClient() {
           </div>
         </div>
 
-        {/* Bottom sheet */}
-        <div className="absolute left-0 right-0 z-20 px-3" style={{ bottom: APP_BOTTOM_INSET, paddingBottom: 12 }}>
-          <div className="tovis-glass-strong rounded-card border border-white/10 bg-bgSecondary p-3">
+        {viewMode === 'GRID' ? (
+          <div
+            className="absolute left-0 right-0 z-10 overflow-y-auto px-3 pb-4 pt-3"
+            style={{
+              top: 178,
+              bottom: APP_BOTTOM_INSET,
+            }}
+          >
             {err ? (
-              <div className="text-[13px] font-semibold text-microAccent">{err}</div>
+              <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4 text-[13px] font-semibold text-microAccent">
+                {err}
+              </div>
             ) : loading ? (
-              <div className="text-[13px] font-semibold text-textSecondary">Loading…</div>
-            ) : !displayPros.length ? (
-              <div className="text-[13px] font-semibold text-textSecondary">
-                No pros found in this radius. Try increasing the distance or searching a different area.
+              <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4 text-[13px] font-semibold text-textSecondary">
+                Loading...
               </div>
             ) : (
-              <>
-                {activePro ? (
-                  <div className="mb-3 rounded-card border border-white/10 bg-bgPrimary/25 p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-[14px] font-black text-textPrimary">
-                          {activePro.businessName || 'Beauty professional'}
-                        </div>
-                        <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                          {(activePro.professionType || 'Professional') +
-                            (activePro.locationLabel ? ` • ${activePro.locationLabel}` : '')}
-                        </div>
-                        {typeof activePro.distanceMiles === 'number' ? (
-                          <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                            {activePro.distanceMiles.toFixed(1)} miles away
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <Link
-                          href={`/professionals/${encodeURIComponent(activePro.id)}`}
-                          className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
-                        >
-                          View
-                        </Link>
-
-                        {activeOpenHref ? (
-                          <a
-                            href={activeOpenHref}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
-                          >
-                            Open
-                          </a>
-                        ) : null}
-
-                        {activeNavHref ? (
-                          <a
-                            href={activeNavHref}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
-                          >
-                            Navigate
-                          </a>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div ref={listRef} className="max-h-[34dvh] overflow-y-auto pr-1 overlayScroll">
-                  <div className="grid gap-2">
-                    {displayPros.slice(0, 30).map((p) => {
-                      const active = p.id === activeProId
-                      const hasPin = p.primaryLocation?.lat != null && p.primaryLocation?.lng != null
-
-                      return (
-                        <button
-                          key={p.id}
-                          ref={(el) => {
-                            itemRefs.current[p.id] = el
-                          }}
-                          type="button"
-                          onClick={() => handleSelectList(p)}
-                          className={cn(
-                            'w-full rounded-card border border-white/10 p-3 text-left transition',
-                            active ? 'bg-white/10' : 'bg-bgPrimary/25 hover:bg-white/10',
-                          )}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="truncate text-[13px] font-black text-textPrimary">
-                                {p.businessName || 'Beauty professional'}
-                              </div>
-                              <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                                {(p.professionType || 'Professional') + (p.locationLabel ? ` • ${p.locationLabel}` : '')}
-                                {!hasPin ? <span className="ml-2 text-microAccent">• no pin</span> : null}
-                              </div>
-                            </div>
-
-                            {typeof p.distanceMiles === 'number' ? (
-                              <div className="shrink-0 text-[12px] font-black text-textSecondary">
-                                {p.distanceMiles.toFixed(1)} mi
-                              </div>
-                            ) : null}
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              </>
+              <DiscoverGridView pros={displayPros} activeProId={activeProId} onSelectPro={handleSelectGridPro} />
             )}
           </div>
-        </div>
+        ) : null}
+
+        {viewMode === 'MAP' ? (
+          <div className="absolute left-0 right-0 z-20 px-3" style={{ bottom: APP_BOTTOM_INSET, paddingBottom: 12 }}>
+            <div className="tovis-glass-strong rounded-card border border-white/10 bg-bgSecondary p-3">
+              {err ? (
+                <div className="text-[13px] font-semibold text-microAccent">{err}</div>
+              ) : loading ? (
+                <div className="text-[13px] font-semibold text-textSecondary">Loading...</div>
+              ) : !displayPros.length ? (
+                <div className="text-[13px] font-semibold text-textSecondary">
+                  No pros found in this radius. Try increasing the distance or searching a different area.
+                </div>
+              ) : (
+                <>
+                  {activePro ? (
+                    <div className="mb-3 rounded-card border border-white/10 bg-bgPrimary/25 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-[14px] font-black text-textPrimary">
+                            {activePro.businessName || 'Beauty professional'}
+                          </div>
+
+                          <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                            {(activePro.professionType || 'Professional') +
+                              (activePro.locationLabel ? ` - ${activePro.locationLabel}` : '')}
+                          </div>
+
+                          {typeof activePro.distanceMiles === 'number' ? (
+                            <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                              {activePro.distanceMiles.toFixed(1)} miles away
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/professionals/${encodeURIComponent(activePro.id)}`}
+                            className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
+                          >
+                            View
+                          </Link>
+
+                          {activeOpenHref ? (
+                            <a
+                              href={activeOpenHref}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-white/10"
+                            >
+                              Open
+                            </a>
+                          ) : null}
+
+                          {activeNavHref ? (
+                            <a
+                              href={activeNavHref}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
+                            >
+                              Navigate
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div ref={listRef} className="overlayScroll max-h-[34dvh] overflow-y-auto pr-1">
+                    <div className="grid gap-2">
+                      {displayPros.slice(0, 30).map((pro) => {
+                        const active = pro.id === activeProId
+                        const hasPin = pro.primaryLocation?.lat != null && pro.primaryLocation?.lng != null
+
+                        return (
+                          <button
+                            key={pro.id}
+                            ref={(element) => {
+                              itemRefs.current[pro.id] = element
+                            }}
+                            type="button"
+                            onClick={() => handleSelectList(pro)}
+                            className={cn(
+                              'w-full rounded-card border border-white/10 p-3 text-left transition',
+                              active ? 'bg-white/10' : 'bg-bgPrimary/25 hover:bg-white/10',
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-[13px] font-black text-textPrimary">
+                                  {pro.businessName || 'Beauty professional'}
+                                </div>
+
+                                <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                                  {(pro.professionType || 'Professional') +
+                                    (pro.locationLabel ? ` - ${pro.locationLabel}` : '')}
+                                  {!hasPin ? <span className="ml-2 text-microAccent">- no pin</span> : null}
+                                </div>
+                              </div>
+
+                              {typeof pro.distanceMiles === 'number' ? (
+                                <div className="shrink-0 text-[12px] font-black text-textSecondary">
+                                  {pro.distanceMiles.toFixed(1)} mi
+                                </div>
+                              ) : null}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        ) : null}
       </div>
     </main>
   )
