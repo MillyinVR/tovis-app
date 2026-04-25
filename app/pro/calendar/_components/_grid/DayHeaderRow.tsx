@@ -2,8 +2,11 @@
 'use client'
 
 import { useMemo } from 'react'
+import type { CSSProperties } from 'react'
 
 import { ymdInTimeZone } from '../../_utils/date'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type DayHeaderRowProps = {
   visibleDays: Date[]
@@ -15,10 +18,19 @@ type DayHeaderRowProps = {
 type DayHeaderParts = {
   weekday: string
   dayNumber: string
-  month: string
 }
 
+type DayHeader = {
+  dayYmd: string
+  isToday: boolean
+  parts: DayHeaderParts
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const MIDDAY_MS = 12 * 60 * 60 * 1000
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function anchoredVisibleDay(date: Date) {
   return new Date(date.getTime() + MIDDAY_MS)
@@ -32,17 +44,91 @@ function buildDayHeaderParts(args: {
   date: Date
   weekdayFormatter: Intl.DateTimeFormat
   dayFormatter: Intl.DateTimeFormat
-  monthFormatter: Intl.DateTimeFormat
 }): DayHeaderParts {
-  const { date, weekdayFormatter, dayFormatter, monthFormatter } = args
+  const { date, weekdayFormatter, dayFormatter } = args
   const safeDate = anchoredVisibleDay(date)
 
   return {
     weekday: weekdayFormatter.format(safeDate),
     dayNumber: dayFormatter.format(safeDate),
-    month: monthFormatter.format(safeDate),
   }
 }
+
+function dayHeaderClassName(args: {
+  isToday: boolean
+  dayIdx: number
+}) {
+  const { isToday, dayIdx } = args
+
+  return [
+    'relative flex h-[48px] min-w-0 flex-col items-center justify-center',
+    'border-l px-1 text-center',
+    'transition-colors',
+    isToday
+      ? 'border-terra/45'
+      : dayIdx % 2 === 1
+        ? 'border-[var(--line)]'
+        : 'border-[var(--line)]',
+  ].join(' ')
+}
+
+function dayHeaderStyle(args: {
+  isToday: boolean
+  dayIdx: number
+}): CSSProperties {
+  const { isToday, dayIdx } = args
+
+  if (isToday) {
+    return {
+      backgroundColor: 'rgb(var(--terra) / 0.22)',
+      boxShadow:
+        'inset 0 0 0 1px rgb(var(--terra) / 0.35), inset 0 -2px 0 rgb(var(--terra) / 0.95)',
+    }
+  }
+
+  if (dayIdx % 2 === 1) {
+    return {
+      backgroundColor: 'rgb(var(--paper) / 0.025)',
+    }
+  }
+
+  return {
+    backgroundColor: 'transparent',
+  }
+}
+
+function weekdayClassName() {
+  return [
+    'relative z-10 font-mono text-[9px] font-medium uppercase leading-none',
+    'tracking-[0.08em]',
+  ].join(' ')
+}
+
+function weekdayStyle(isToday: boolean): CSSProperties {
+  return {
+    color: isToday
+      ? 'rgb(var(--terra-glow))'
+      : 'rgb(var(--paper-mute))',
+  }
+}
+
+function dayNumberClassName() {
+  return [
+    'relative z-10 mt-1 font-display text-base font-semibold leading-none',
+    'tracking-[-0.03em]',
+  ].join(' ')
+}
+
+function dayNumberStyle(isToday: boolean): CSSProperties {
+  return {
+    color: isToday
+      ? 'rgb(var(--terra-glow))'
+      : 'rgb(var(--paper))',
+    textShadow: isToday ? '0 0 14px rgb(var(--terra-glow) / 0.35)' : undefined,
+  }
+}
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export function DayHeaderRow(props: DayHeaderRowProps) {
   const { visibleDays, timeZone, todayYmd, gridCols } = props
@@ -57,15 +143,11 @@ export function DayHeaderRow(props: DayHeaderRowProps) {
         timeZone,
         day: 'numeric',
       }),
-      month: new Intl.DateTimeFormat(undefined, {
-        timeZone,
-        month: 'short',
-      }),
     }),
     [timeZone],
   )
 
-  const dayHeaders = useMemo(
+  const dayHeaders: DayHeader[] = useMemo(
     () =>
       visibleDays.map((date) => {
         const dayYmd = visibleDayKey(date, timeZone)
@@ -77,7 +159,6 @@ export function DayHeaderRow(props: DayHeaderRowProps) {
             date,
             weekdayFormatter: formatters.weekday,
             dayFormatter: formatters.day,
-            monthFormatter: formatters.month,
           }),
         }
       }),
@@ -86,80 +167,61 @@ export function DayHeaderRow(props: DayHeaderRowProps) {
 
   return (
     <div
-      className={[
-        'grid border-b border-[var(--line-strong)]',
-        'bg-[var(--ink)]/92 backdrop-blur-xl',
-      ].join(' ')}
+      className="grid border-b border-[var(--line-strong)] bg-ink/95 backdrop-blur-xl"
       style={{ gridTemplateColumns: gridCols }}
       data-calendar-day-header-row="1"
     >
       <div
-        className={[
-          'relative h-20 border-r border-[var(--line-strong)]',
-          'bg-[var(--ink)]/80',
-        ].join(' ')}
+        className="relative h-[48px] border-r border-[var(--line-strong)] bg-ink"
         aria-hidden="true"
-      >
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[var(--paper)]/[0.05] to-transparent" />
-      </div>
+      />
 
-      {dayHeaders.map((header) => (
+      {dayHeaders.map((header, dayIdx) => (
         <div
           key={header.dayYmd}
-          className={[
-            'relative flex h-20 min-w-0 flex-col items-center justify-center',
-            'border-l border-[var(--line)] px-2 text-center',
-            header.isToday
-              ? 'bg-[var(--terra)]/[0.10]'
-              : 'bg-[var(--paper)]/[0.015]',
-          ].join(' ')}
+          className={dayHeaderClassName({
+            isToday: header.isToday,
+            dayIdx,
+          })}
+          style={dayHeaderStyle({
+            isToday: header.isToday,
+            dayIdx,
+          })}
           data-calendar-day-header={header.dayYmd}
           data-calendar-today={header.isToday ? '1' : '0'}
+          aria-current={header.isToday ? 'date' : undefined}
         >
-          <div
-            className="pointer-events-none absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[var(--paper)]/[0.06] to-transparent"
-            aria-hidden="true"
-          />
-
           {header.isToday ? (
             <>
-              <div
-                className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[var(--terra)]"
+              <span
+                className="pointer-events-none absolute inset-y-0 left-0 w-px bg-terra/60"
                 aria-hidden="true"
               />
-              <div
-                className="pointer-events-none absolute inset-y-0 left-0 w-px bg-[var(--terra)]/60"
+
+              <span
+                className="pointer-events-none absolute inset-y-0 right-0 w-px bg-terra/35"
                 aria-hidden="true"
               />
-              <div
-                className="pointer-events-none absolute inset-y-0 right-0 w-px bg-[var(--terra)]/35"
+
+              <span
+                className="pointer-events-none absolute inset-x-0 top-0 h-full bg-gradient-to-b from-paper/[0.08] to-transparent"
                 aria-hidden="true"
               />
             </>
           ) : null}
 
           <p
-            className={[
-              'font-mono text-[9px] font-black uppercase tracking-[0.14em]',
-              header.isToday
-                ? 'text-[var(--terra-glow)]'
-                : 'text-[var(--paper-mute)]',
-            ].join(' ')}
+            className={weekdayClassName()}
+            style={weekdayStyle(header.isToday)}
           >
             {header.parts.weekday}
           </p>
 
           <p
-            className={[
-              'mt-1 font-display text-[30px] font-semibold italic leading-none tracking-[-0.06em]',
-              header.isToday ? 'text-terra' : 'text-[var(--paper)]',
-            ].join(' ')}
+            className={dayNumberClassName()}
+            style={dayNumberStyle(header.isToday)}
           >
             {header.parts.dayNumber}
-          </p>
-
-          <p className="mt-1 font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
-            {header.parts.month}
           </p>
         </div>
       ))}

@@ -2,9 +2,12 @@
 'use client'
 
 import { useMemo } from 'react'
+import type { CSSProperties } from 'react'
 
 import { PX_PER_MINUTE } from '../../_utils/calendarMath'
 import { clamp } from '../../_utils/date'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type TimeGutterProps = {
   totalMinutes: number
@@ -17,10 +20,14 @@ type HourMark = {
   label: string
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const MINUTES_PER_HOUR = 60
 const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR
 const MIN_RENDER_MINUTES = MINUTES_PER_HOUR
 const LABEL_TOP_OFFSET_PX = 2
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function normalizeTotalMinutes(totalMinutes: number) {
   if (!Number.isFinite(totalMinutes)) return MINUTES_PER_DAY
@@ -33,12 +40,12 @@ function normalizeTotalMinutes(totalMinutes: number) {
 }
 
 /**
- * Returns a compact 12-hour label with no AM/PM suffix (e.g. 0→"12", 13→"1").
- * Matches the prototype's minimal gutter — the surrounding context (working-hour
- * shading, scroll position) makes AM/PM redundant on a dense week grid.
+ * Compact 12-hour label with no AM/PM suffix.
+ * Example: 0 → "12", 13 → "1".
  */
 function formatHourLabel(hour24: number) {
   const hour = hour24 % 12
+
   return String(hour === 0 ? 12 : hour)
 }
 
@@ -51,6 +58,28 @@ function buildHourMarks(totalMinutes: number): HourMark[] {
     label: formatHourLabel(hour),
   }))
 }
+
+function gutterStyle(): CSSProperties {
+  return {
+    backgroundColor: 'rgb(var(--ink) / 0.96)',
+    color: 'rgb(var(--paper-mute))',
+  }
+}
+
+function gutterRuleStyle(): CSSProperties {
+  return {
+    backgroundColor: 'rgb(var(--paper) / 0.06)',
+  }
+}
+
+function labelStyle(): CSSProperties {
+  return {
+    top: LABEL_TOP_OFFSET_PX,
+    color: 'rgb(var(--paper-mute) / 0.82)',
+  }
+}
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export function TimeGutter(props: TimeGutterProps) {
   const { totalMinutes, timeZone } = props
@@ -67,20 +96,14 @@ export function TimeGutter(props: TimeGutterProps) {
 
   return (
     <div
-      className={[
-        'relative border-r border-[var(--line-strong)] bg-[var(--ink)]/80',
-        'font-mono text-[var(--paper-mute)]',
-      ].join(' ')}
+      className="relative border-r border-[var(--line)] font-mono"
+      style={gutterStyle()}
       aria-label={`Calendar time gutter, ${timeZone}`}
       data-calendar-time-gutter="1"
     >
       <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-12 bg-gradient-to-b from-[var(--paper)]/[0.05] to-transparent"
-        aria-hidden="true"
-      />
-
-      <div
-        className="pointer-events-none absolute inset-y-0 right-0 w-px bg-[var(--paper)]/[0.08]"
+        className="pointer-events-none absolute inset-y-0 right-0 w-px"
+        style={gutterRuleStyle()}
         aria-hidden="true"
       />
 
@@ -96,6 +119,8 @@ export function TimeGutter(props: TimeGutterProps) {
   )
 }
 
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
 function TimeGutterHour(props: { mark: HourMark }) {
   const { mark } = props
 
@@ -106,11 +131,11 @@ function TimeGutterHour(props: { mark: HourMark }) {
     >
       <div
         className={[
-          'absolute left-0 right-0 px-1 text-center',
-          'text-[10px] font-black uppercase tracking-[0.08em]',
-          'text-[var(--paper-mute)] md:text-[11px]',
+          'absolute right-1.5 whitespace-nowrap text-right',
+          'font-mono text-[8px] font-medium leading-none tracking-[0.04em]',
+          'md:right-3 md:text-[10px]',
         ].join(' ')}
-        style={{ top: LABEL_TOP_OFFSET_PX }}
+        style={labelStyle()}
       >
         {mark.label}
       </div>

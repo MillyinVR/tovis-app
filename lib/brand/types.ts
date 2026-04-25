@@ -1,4 +1,5 @@
 // lib/brand/types.ts
+
 export type BrandId = string // 'tovis' | 'salon-xyz' | 'school-abc' | ...
 
 export type BrandMode = 'dark' | 'light'
@@ -7,40 +8,44 @@ export type RgbTriplet = `${number} ${number} ${number}`
 
 export type BrandTokens = {
   colors: {
-    // ── Background layers (dark → light) ──────────────────────────
-    bgPrimary: RgbTriplet   // darkest page bg         → --bg-primary  / --ink
-    bgSecondary: RgbTriplet // elevated surface         → --bg-secondary / --ink-2
-    bgSurface: RgbTriplet   // card / inner surface     → --bg-surface   / --ink-3
+    // ── Background layers ─────────────────────────────────────────
+    bgPrimary: RgbTriplet // darkest page bg → --bg-primary / --ink
+    bgSecondary: RgbTriplet // elevated surface → --bg-secondary / --ink-2
+    bgSurface: RgbTriplet // card / inner surface → --bg-surface / --ink-3
 
-    // ── Text layers (most → least prominent) ──────────────────────
-    textPrimary: RgbTriplet   // primary readable text  → --text-primary  / --paper
-    textSecondary: RgbTriplet // dimmed text             → --text-secondary / --paper-dim
-    textMuted: RgbTriplet     // very muted / placeholder→ --text-muted    / --paper-mute
+    // ── Text layers ───────────────────────────────────────────────
+    textPrimary: RgbTriplet // primary readable text → --text-primary / --paper
+    textSecondary: RgbTriplet // dimmed text → --text-secondary / --paper-dim
+    textMuted: RgbTriplet // very muted / placeholder → --text-muted / --paper-mute
 
-    // ── Glass surface ──────────────────────────────────────────────
+    // ── Glass surface ─────────────────────────────────────────────
     surfaceGlass: RgbTriplet // used with opacity in CSS → --surface-glass
 
-    // ── Accent ────────────────────────────────────────────────────
-    accentPrimary: RgbTriplet      // brand signature    → --accent-primary / --terra
-    accentPrimaryHover: RgbTriplet // hover/glow state   → --accent-primary-hover / --terra-glow
-    microAccent: RgbTriplet        // warm highlight      → --micro-accent
+    // ── Accent ───────────────────────────────────────────────────
+    accentPrimary: RgbTriplet // brand signature → --accent-primary / --terra
+    accentPrimaryHover: RgbTriplet // hover/glow state → --accent-primary-hover / --terra-glow
+    microAccent: RgbTriplet // warm highlight → --micro-accent
 
-    // ── Brand palette ─────────────────────────────────────────────
-    colorAcid: RgbTriplet   // yellow-green CTAs / approvals → --color-acid / --acid
-    colorFern: RgbTriplet   // nature green / success        → --color-fern / --fern
-    colorEmber: RgbTriplet  // alert red / danger            → --color-ember / --ember
+    // ── Brand palette ────────────────────────────────────────────
+    colorAcid: RgbTriplet // yellow-green CTAs / approvals → --color-acid / --acid
+    colorFern: RgbTriplet // success / completed → --color-fern / --fern
+    colorEmber: RgbTriplet // danger / cancelled / error → --color-ember / --ember
+    colorAmber: RgbTriplet // pending / review / warm attention → --color-amber / --amber / --tone-pending
   }
+
   effects: {
-    glassBlurPx: number    // 16–24 recommended
-    glassOpacity: number   // 0.06–0.12 recommended
+    glassBlurPx: number // 16–24 recommended
+    glassOpacity: number // 0.06–0.12 recommended
     shadowColor: RgbTriplet
     radiusAppIconPx: number
     radiusCardPx: number
   }
+
   typography: {
-    fontSans: string  // UI / body text
-    fontMono: string  // data, labels, caps
-    letterSpacingCaps: string
+    fontSans: string // UI / body text → --font-sans
+    fontDisplay: string // editorial headlines → --font-display
+    fontMono: string // data, labels, caps → --font-mono
+    letterSpacingCaps: string // caps labels → --ls-caps
   }
 }
 
@@ -50,21 +55,22 @@ export type BrandAssets = {
     src: string
     alt: string
   }
+
   wordmark: {
     text: string // until you have an SVG wordmark
   }
 }
 
 export type BrandContact = {
-  businessName: string   // "Tovis Technology"
-  supportEmail: string   // "Support@tovis.app"
-  location?: string      // "Encinitas, CA"
+  businessName: string // "Tovis Technology"
+  supportEmail: string // "Support@tovis.app"
+  location?: string // "Encinitas, CA"
 }
 
 export type BrandConfig = {
   id: BrandId
-  displayName: string    // "TOVIS" — used anywhere the brand name appears in UI
-  tagline?: string       // "A New Age of Self Care"
+  displayName: string // "TOVIS" — used anywhere the brand name appears in UI
+  tagline?: string // "A New Age of Self Care"
   defaultMode: BrandMode
   tokensByMode: Record<BrandMode, BrandTokens>
   assets: BrandAssets

@@ -9,6 +9,8 @@ import { ymdInTimeZone, WEEKDAY_KEYS_DISPLAY } from '../_utils/date'
 import { isBlockedEvent } from '../_utils/calendarMath'
 import { eventChipClassName, statusLabel } from '../_utils/statusStyles'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type MonthGridProps = {
   visibleDays: Date[]
   currentDate: Date
@@ -32,8 +34,12 @@ type EventRange = {
   endYmd: string
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const MIDDAY_MS = 12 * 60 * 60 * 1000
 const MAX_VISIBLE_EVENTS_PER_DAY = 3
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function anchoredVisibleDay(day: Date) {
   return new Date(day.getTime() + MIDDAY_MS)
@@ -47,7 +53,14 @@ function isValidDate(date: Date) {
   return Number.isFinite(date.getTime())
 }
 
-function buildEventRange(event: CalendarEvent, timeZone: string): EventRange | null {
+function isEventRange(value: EventRange | null): value is EventRange {
+  return value !== null
+}
+
+function buildEventRange(
+  event: CalendarEvent,
+  timeZone: string,
+): EventRange | null {
   const startsAt = new Date(event.startsAt)
   const endsAt = new Date(event.endsAt)
 
@@ -76,7 +89,7 @@ function buildEventsByVisibleDay(args: {
 
   const eventRanges = events
     .map((event) => buildEventRange(event, timeZone))
-    .filter((range) => range !== null)
+    .filter(isEventRange)
 
   for (const range of eventRanges) {
     for (const dayKey of visibleDayKeys) {
@@ -101,6 +114,45 @@ function eventChipLabel(event: CalendarEvent) {
 function weekdayLabel(dayKey: string) {
   return dayKey.slice(0, 3).toUpperCase()
 }
+
+function dayCellClassName(args: {
+  isLastColumn: boolean
+  isInCurrentMonth: boolean
+  isToday: boolean
+}) {
+  const { isLastColumn, isInCurrentMonth, isToday } = args
+
+  return [
+    'group min-h-[6.75rem] border-b p-1.5 text-left transition',
+    'sm:min-h-[8.5rem] sm:p-2.5',
+    'border-[var(--line)]',
+    isLastColumn ? '' : 'border-r',
+    isInCurrentMonth
+      ? 'bg-paper/[0.018] hover:bg-paper/[0.04]'
+      : 'bg-black/20 text-paperMute hover:bg-black/10',
+    isToday ? 'bg-terra/[0.08]' : '',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40 focus-visible:ring-inset',
+  ].join(' ')
+}
+
+function dayNumberClassName(args: {
+  isInCurrentMonth: boolean
+  isToday: boolean
+}) {
+  const { isInCurrentMonth, isToday } = args
+
+  return [
+    'font-display text-[22px] font-semibold leading-none tracking-[-0.04em]',
+    'sm:text-2xl',
+    isToday
+      ? 'text-terra'
+      : isInCurrentMonth
+        ? 'text-paper'
+        : 'text-paperMute',
+  ].join(' ')
+}
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export function MonthGrid(props: MonthGridProps) {
   const { visibleDays, currentDate, events, timeZone, onPickDay } = props
@@ -150,15 +202,15 @@ export function MonthGrid(props: MonthGridProps) {
       visibleDays.map((day, index) => {
         const dayYmd = visibleDayKeys[index]
         const dayEvents = eventsByVisibleDay.get(dayYmd) ?? []
+        const anchoredDay = anchoredVisibleDay(day)
 
         return {
           day,
           dayYmd,
-          dayNumber: formatters.dayNumber.format(anchoredVisibleDay(day)),
+          dayNumber: formatters.dayNumber.format(anchoredDay),
           isToday: dayYmd === todayYmd,
           isInCurrentMonth:
-            formatters.monthYear.format(anchoredVisibleDay(day)) ===
-            currentMonthKey,
+            formatters.monthYear.format(anchoredDay) === currentMonthKey,
           events: dayEvents,
         }
       }),
@@ -176,17 +228,17 @@ export function MonthGrid(props: MonthGridProps) {
     <section
       className={[
         'overflow-hidden rounded-[18px] border border-[var(--line-strong)]',
-        'bg-[var(--ink)] shadow-[0_28px_70px_rgb(0_0_0/0.38)]',
+        'bg-ink shadow-[0_28px_70px_rgb(0_0_0_/_0.38)]',
       ].join(' ')}
       data-calendar-month-grid="1"
     >
-      <div className="grid grid-cols-7 border-b border-[var(--line-strong)] bg-[var(--paper)]/[0.03]">
+      <div className="grid grid-cols-7 border-b border-[var(--line-strong)] bg-paper/[0.03]">
         {WEEKDAY_KEYS_DISPLAY.map((dayKey) => (
           <div
             key={dayKey}
             className={[
-              'px-2 py-3 text-center font-mono text-[9px] font-black uppercase tracking-[0.14em]',
-              'text-[var(--paper-mute)] sm:px-3 sm:text-[10px]',
+              'px-1.5 py-2 text-center font-mono text-[8px] font-bold uppercase tracking-[0.12em]',
+              'text-paperMute sm:px-3 sm:py-3 sm:text-[10px]',
             ].join(' ')}
           >
             {weekdayLabel(dayKey)}
@@ -197,7 +249,10 @@ export function MonthGrid(props: MonthGridProps) {
       <div className="grid grid-cols-7">
         {dayCells.map((cell, index) => {
           const visibleEvents = cell.events.slice(0, MAX_VISIBLE_EVENTS_PER_DAY)
-          const extraCount = Math.max(0, cell.events.length - visibleEvents.length)
+          const extraCount = Math.max(
+            0,
+            cell.events.length - visibleEvents.length,
+          )
           const isLastColumn = (index + 1) % 7 === 0
 
           return (
@@ -205,33 +260,26 @@ export function MonthGrid(props: MonthGridProps) {
               key={cell.dayYmd}
               type="button"
               onClick={() => onPickDay(cell.day)}
-              className={[
-                'group min-h-[8.5rem] border-b p-2 text-left transition sm:min-h-[9.5rem] sm:p-3',
-                'border-[var(--line)]',
-                isLastColumn ? '' : 'border-r',
-                cell.isInCurrentMonth
-                  ? 'bg-[var(--paper)]/[0.018] hover:bg-[var(--paper)]/[0.04]'
-                  : 'bg-black/20 text-[var(--paper-mute)] hover:bg-black/10',
-                cell.isToday ? 'bg-[var(--terra)]/[0.08]' : '',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40 focus-visible:ring-inset',
-              ].join(' ')}
+              className={dayCellClassName({
+                isLastColumn,
+                isInCurrentMonth: cell.isInCurrentMonth,
+                isToday: cell.isToday,
+              })}
               aria-label={`Open ${cell.dayYmd}`}
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start justify-between gap-1.5">
                 <div>
                   <p
-                    className={[
-                      'font-display text-2xl font-semibold italic leading-none tracking-[-0.05em]',
-                      cell.isInCurrentMonth
-                        ? 'text-[var(--paper)]'
-                        : 'text-[var(--paper-mute)]',
-                    ].join(' ')}
+                    className={dayNumberClassName({
+                      isInCurrentMonth: cell.isInCurrentMonth,
+                      isToday: cell.isToday,
+                    })}
                   >
                     {cell.dayNumber}
                   </p>
 
                   {cell.isToday ? (
-                    <p className="mt-1 font-mono text-[8px] font-black uppercase tracking-[0.14em] text-[var(--terra-glow)]">
+                    <p className="mt-1 font-mono text-[7px] font-black uppercase tracking-[0.12em] text-terraGlow sm:text-[8px]">
                       Today
                     </p>
                   ) : null}
@@ -240,9 +288,9 @@ export function MonthGrid(props: MonthGridProps) {
                 {cell.events.length > 0 ? (
                   <span
                     className={[
-                      'rounded-full border border-[var(--line)] px-2 py-0.5',
-                      'font-mono text-[9px] font-black uppercase tracking-[0.08em]',
-                      'text-[var(--paper-mute)]',
+                      'rounded-full border border-[var(--line)] px-1.5 py-0.5',
+                      'font-mono text-[8px] font-black uppercase tracking-[0.06em]',
+                      'text-paperMute',
                     ].join(' ')}
                   >
                     {cell.events.length}
@@ -250,30 +298,32 @@ export function MonthGrid(props: MonthGridProps) {
                 ) : null}
               </div>
 
-              <div className="mt-3 grid gap-1.5">
+              <div className="mt-2 grid gap-1 sm:mt-3 sm:gap-1.5">
                 {visibleEvents.map((event) => {
                   const isBlocked = isBlockedEvent(event)
+                  const label = eventChipLabel(event)
 
                   return (
                     <div
                       key={event.id}
                       className={[
-                        'truncate rounded-full border px-2.5 py-1',
-                        'text-[10px] font-semibold shadow-sm ring-1 backdrop-blur-md sm:text-xs',
+                        'truncate rounded-full border px-1.5 py-0.5',
+                        'text-[8px] font-semibold ring-1 backdrop-blur-md',
+                        'sm:px-2.5 sm:py-1 sm:text-xs',
                         eventChipClassName({
                           status: event.status,
                           isBlocked,
                         }),
                       ].join(' ')}
-                      title={eventChipLabel(event)}
+                      title={label}
                     >
-                      {eventChipLabel(event)}
+                      {label}
                     </div>
                   )
                 })}
 
                 {extraCount > 0 ? (
-                  <div className="font-mono text-[10px] font-black uppercase tracking-[0.08em] text-[var(--paper-mute)]">
+                  <div className="font-mono text-[8px] font-black uppercase tracking-[0.08em] text-paperMute sm:text-[10px]">
                     +{extraCount} more
                   </div>
                 ) : null}

@@ -48,36 +48,26 @@ const VIEW_OPTIONS: ReadonlyArray<ViewOption> = [
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function todayDayNumber() {
-  return new Date().getDate()
-}
-
 function viewTabClassName(active: boolean) {
   const base = [
-    'rounded-full px-3.5 py-1.5 text-center',
-    'font-mono text-[10px] font-black uppercase tracking-[0.10em]',
-    'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+    'rounded-full px-3.5 py-1.5',
+    'text-[11px] font-extrabold uppercase tracking-[0.06em]',
+    'transition',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
   ].join(' ')
 
   if (active) {
-    return [
-      base,
-      'bg-[var(--paper)] text-[var(--ink)] shadow-[0_4px_12px_rgb(0_0_0/0.22)]',
-    ].join(' ')
+    return [base, 'bg-paper text-ink'].join(' ')
   }
 
-  return [
-    base,
-    'text-[var(--paper-mute)] hover:bg-[var(--paper)]/[0.06] hover:text-[var(--paper)]',
-  ].join(' ')
+  return [base, 'bg-transparent text-paperMute hover:text-paper'].join(' ')
 }
 
 function iconButtonClassName() {
   return [
-    'inline-flex h-9 w-9 shrink-0 items-center justify-center',
-    'rounded-xl border border-[var(--line-strong)]',
-    'text-[var(--paper)]',
-    'transition hover:bg-[var(--paper)]/[0.06]',
+    'inline-flex h-[30px] w-[30px] shrink-0 items-center justify-center',
+    'rounded-lg border border-[var(--line-strong)] bg-transparent',
+    'text-paper transition hover:bg-paper/[0.06]',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
   ].join(' ')
 }
@@ -158,29 +148,20 @@ function IconChevronRight(props: IconProps) {
 
 // ─── Exported components ──────────────────────────────────────────────────────
 
-/**
- * Inline control bar: view-mode tabs + prev/today/next navigation + optional
- * block-time CTA. Designed to sit directly in the calendar card header row —
- * no wrapping shell of its own.
- *
- * On narrow viewports the flex container wraps naturally; no JS breakpoint
- * logic needed.
- */
 export function CalendarHeaderControls(props: CalendarHeaderControlsProps) {
   const { view, setView, headerLabel, onToday, onBack, onNext, onBlockTime } =
     props
 
   return (
     <div
-      className="flex flex-wrap items-center gap-2"
+      className="flex w-full items-center justify-between gap-2 md:w-auto md:flex-wrap md:justify-end"
       role="group"
       aria-label="Calendar navigation"
     >
-      {/* View tabs pill */}
       <div
         className={[
-          'flex gap-0.5 rounded-full border border-[var(--line)]',
-          'bg-[var(--paper)]/[0.04] p-0.5',
+          'flex shrink-0 gap-0.5 rounded-full border border-[var(--line)]',
+          'bg-paper/[0.05] p-[3px]',
         ].join(' ')}
         role="tablist"
         aria-label="Calendar view"
@@ -196,14 +177,7 @@ export function CalendarHeaderControls(props: CalendarHeaderControlsProps) {
         ))}
       </div>
 
-      {/* Visual divider */}
-      <div
-        className="h-5 w-px bg-[var(--line-strong)]"
-        aria-hidden="true"
-      />
-
-      {/* Prev / Today·N / Next */}
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1.5">
         <IconButton label="Previous calendar range" onClick={onBack}>
           <IconChevronLeft className="h-4 w-4" />
         </IconButton>
@@ -212,39 +186,38 @@ export function CalendarHeaderControls(props: CalendarHeaderControlsProps) {
           type="button"
           onClick={onToday}
           className={[
-            'h-9 rounded-xl border border-[var(--line-strong)] bg-transparent',
-            'px-3 font-mono text-[11px] font-black uppercase tracking-[0.06em] text-[var(--paper)]',
-            'transition hover:bg-[var(--paper)]/[0.06]',
+            'h-[30px] rounded-lg border border-[var(--line-strong)] bg-transparent px-2.5',
+            'font-mono text-[11px] font-extrabold uppercase tracking-[0.05em] text-paper',
+            'transition hover:bg-paper/[0.06]',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
           ].join(' ')}
           aria-label="Go to today"
           title={headerLabel}
         >
-          Today · {todayDayNumber()}
+          Today
         </button>
 
         <IconButton label="Next calendar range" onClick={onNext}>
           <IconChevronRight className="h-4 w-4" />
         </IconButton>
-      </div>
 
-      {/* Block time CTA — desktop only; mobile FAB handles this action */}
-      {onBlockTime !== undefined ? (
-        <button
-          type="button"
-          onClick={onBlockTime}
-          className={[
-            'hidden md:inline-flex',
-            'relative h-9 items-center rounded-xl px-4',
-            'bg-terra font-mono text-[11px] font-black uppercase tracking-[0.04em] text-[var(--paper)]',
-            'shadow-[0_8px_22px_rgb(var(--terra)/0.40)]',
-            'transition hover:brightness-110',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-          ].join(' ')}
-        >
-          + Block time
-        </button>
-      ) : null}
+        {onBlockTime !== undefined ? (
+          <button
+            type="button"
+            onClick={onBlockTime}
+            className={[
+              'hidden md:inline-flex',
+              'h-[30px] items-center rounded-lg px-3',
+              'bg-terra font-mono text-[11px] font-extrabold uppercase tracking-[0.05em] text-paper',
+              'shadow-[0_8px_22px_rgb(var(--terra)_/_0.40)]',
+              'transition hover:brightness-110',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+            ].join(' ')}
+          >
+            + Block time
+          </button>
+        ) : null}
+      </div>
     </div>
   )
 }

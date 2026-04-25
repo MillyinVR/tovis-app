@@ -46,7 +46,7 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type StatTone = 'paper' | 'terra' | 'warn' | 'acid' | 'fern' | 'muted'
+type StatTone = 'paper' | 'terra' | 'pending' | 'acid' | 'fern' | 'muted'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -120,6 +120,7 @@ function visibleDaysForView(args: {
     anchoredCurrentDate,
     timeZone,
   )
+
   const firstGridDayNoon = startOfWeekAnchorNoonInTimeZone(
     monthStartNoon,
     timeZone,
@@ -153,43 +154,39 @@ function formatMinutesAsHours(minutes: number) {
 function toneTextClass(tone: StatTone) {
   switch (tone) {
     case 'terra':
-      return 'text-[var(--terra-glow)]'
-    case 'warn':
-      return 'text-toneWarn'
+      return 'text-terraGlow'
+    case 'pending':
+      return 'text-amber'
     case 'acid':
-      return 'text-[var(--acid)]'
+      return 'text-acid'
     case 'fern':
-      return 'text-[var(--fern)]'
+      return 'text-fern'
     case 'muted':
-      return 'text-[var(--paper-mute)]'
+      return 'text-paperMute'
     case 'paper':
     default:
-      return 'text-[var(--paper)]'
+      return 'text-paper'
   }
 }
 
 function toneDotClass(tone: StatTone) {
   switch (tone) {
     case 'terra':
-      return 'bg-terra shadow-[0_0_14px_rgb(var(--terra-glow)/0.65)]'
-    case 'warn':
-      return 'bg-toneWarn shadow-[0_0_14px_rgb(var(--tone-warn)/0.65)]'
+      return 'bg-terra shadow-[0_0_14px_rgb(var(--terra-glow)_/_0.65)]'
+    case 'pending':
+      return 'bg-amber shadow-[0_0_10px_rgb(var(--amber)_/_0.75)]'
     case 'acid':
-      return 'bg-acid shadow-[0_0_14px_rgb(var(--acid)/0.45)]'
+      return 'bg-acid shadow-[0_0_14px_rgb(var(--acid)_/_0.45)]'
     case 'fern':
-      return 'bg-fern shadow-[0_0_14px_rgb(var(--fern)/0.65)]'
+      return 'bg-fern shadow-[0_0_14px_rgb(var(--fern)_/_0.65)]'
     case 'muted':
-      return 'bg-[var(--paper-mute)]'
+      return 'bg-paperMute'
     case 'paper':
     default:
-      return 'bg-[var(--paper)]'
+      return 'bg-paper'
   }
 }
 
-/**
- * Returns today's weekday name in the given IANA timezone, formatted as a
- * short all-caps label (e.g. "Thursday"). Memoised by the caller.
- */
 function todayWeekdayLabel(timeZone: string) {
   return new Intl.DateTimeFormat(undefined, {
     timeZone,
@@ -204,6 +201,32 @@ function bookingActionId(event: CalendarEvent | undefined) {
 
 function firstPendingBooking(events: CalendarEvent[]) {
   return events.find((event) => event.kind === 'BOOKING')
+}
+
+function mobileSubtitleFor(args: {
+  date: Date
+  timeZone: string
+  activeLocationLabel: string | null
+}) {
+  const { date, timeZone, activeLocationLabel } = args
+
+  const format = (options: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat(undefined, { timeZone, ...options })
+      .format(date)
+      .toUpperCase()
+
+  const parts = [
+    format({ weekday: 'short' }),
+    format({ month: 'short', day: 'numeric' }),
+  ]
+
+  const locationName = activeLocationLabel?.split(' — ')[0]?.trim()
+
+  if (locationName) {
+    parts.push(locationName.toUpperCase())
+  }
+
+  return parts.join(' · ')
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -261,29 +284,15 @@ export default function ProCalendarPage() {
     [calendarTimeZone],
   )
 
-  /**
-   * One-line mobile subtitle: "THU · APR 24 · ATLAS SALON"
-   * Shows today's weekday + date + active location name (first segment only,
-   * before any " — address" part). Omits location when none is active.
-   */
-  const mobileSubtitle = useMemo(() => {
-    const now = new Date()
-    const fmt = (opts: Intl.DateTimeFormatOptions) =>
-      new Intl.DateTimeFormat(undefined, { timeZone: calendarTimeZone, ...opts })
-        .format(now)
-        .toUpperCase()
-
-    const parts: string[] = [
-      fmt({ weekday: 'short' }),
-      fmt({ month: 'short', day: 'numeric' }),
-    ]
-
-    // Use the location name only (strip off " — full address" if present)
-    const locationName = cal.activeLocationLabel?.split(' — ')[0]?.trim()
-    if (locationName) parts.push(locationName.toUpperCase())
-
-    return parts.join(' · ')
-  }, [calendarTimeZone, cal.activeLocationLabel])
+  const mobileSubtitle = useMemo(
+    () =>
+      mobileSubtitleFor({
+        date: anchoredCurrentDate,
+        timeZone: calendarTimeZone,
+        activeLocationLabel: cal.activeLocationLabel,
+      }),
+    [anchoredCurrentDate, calendarTimeZone, cal.activeLocationLabel],
+  )
 
   const showInitialLoading = cal.loading && cal.events.length === 0
   const showReloadLoading = cal.loading && cal.events.length > 0
@@ -296,61 +305,28 @@ export default function ProCalendarPage() {
   const topPendingBookingId = bookingActionId(topPendingRequest)
 
   return (
-    <main className="min-h-screen bg-[var(--ink)] px-0 pb-28 pt-0 font-sans text-[var(--paper)] md:px-8 md:pb-14 md:pt-10">
+    <main className="min-h-screen bg-ink px-0 pb-28 pt-0 font-sans text-paper md:px-8 md:pb-14 md:pt-10">
       <div className="mx-auto max-w-[1600px]">
         <PageHero />
 
-        {/* ── Main calendar card ── */}
-        <section className="overflow-hidden bg-[var(--ink)] md:rounded-[18px] md:border md:border-[var(--line-strong)] md:shadow-[0_40px_80px_rgb(0_0_0/0.40)]">
+        <section className="overflow-hidden bg-ink md:rounded-[18px] md:border md:border-[var(--line-strong)] md:shadow-[0_40px_80px_rgb(0_0_0_/_0.40)]">
+          <div className="md:hidden">
+            <MobileCalendarHeader
+              title={titleForView(view)}
+              subtitle={mobileSubtitle}
+            />
 
-          {/* Card header */}
-          <div className="border-b border-[var(--line-strong)] px-4 py-5 md:px-7">
-
-            {/* ── Mobile layout: title → subtitle → stats → controls ── */}
-            <div className="md:hidden">
-              <h2 className="font-display text-[36px] font-semibold italic leading-none tracking-[-0.04em] text-[var(--paper)]">
-                {titleForView(view)}
-              </h2>
-
-              <p className="mt-2 truncate font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
-                {mobileSubtitle}
-              </p>
-
-              <div className="mt-4">
-                <CalendarStatsPanel
-                  stats={cal.stats}
-                  management={cal.management}
-                  blockedMinutesToday={cal.blockedMinutesToday}
-                  onOpenManagement={cal.openManagement}
-                  compact
-                />
-              </div>
-
-              <div className="mt-3">
-                <CalendarHeaderControls
-                  view={view}
-                  setView={setView}
-                  headerLabel={headerLabel}
-                  onToday={goToToday}
-                  onBack={goBack}
-                  onNext={goNext}
-                  onBlockTime={cal.openCreateBlockNow}
-                />
-              </div>
+            <div className="px-5 pb-3">
+              <CalendarStatsPanel
+                stats={cal.stats}
+                management={cal.management}
+                blockedMinutesToday={cal.blockedMinutesToday}
+                onOpenManagement={cal.openManagement}
+                compact
+              />
             </div>
 
-            {/* ── Desktop layout: eyebrow + title left, controls right ── */}
-            <div className="hidden flex-wrap items-end justify-between gap-4 md:flex">
-              <div>
-                <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--terra-glow)]">
-                  ◆ Pro · {headerLabel}
-                </p>
-
-                <h2 className="mt-2 font-display text-[42px] font-semibold italic leading-none tracking-[-0.04em] text-[var(--paper)]">
-                  {titleForView(view)}
-                </h2>
-              </div>
-
+            <div className="px-5 pb-3">
               <CalendarHeaderControls
                 view={view}
                 setView={setView}
@@ -363,12 +339,31 @@ export default function ProCalendarPage() {
             </div>
           </div>
 
-          {/* ── Two-column layout: sidebar + grid ── */}
-          <div className="grid lg:grid-cols-[240px_minmax(0,1fr)]">
+          <div className="hidden border-b border-[var(--line-strong)] px-7 py-5 md:flex md:flex-wrap md:items-end md:justify-between md:gap-4">
+            <div>
+              <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-terraGlow">
+                ◆ Pro · {headerLabel}
+              </p>
 
-            {/* ── Sidebar — desktop only ── */}
+              <h2 className="mt-2 font-display text-[42px] font-semibold italic leading-none tracking-[-0.04em] text-paper">
+                {titleForView(view)}
+              </h2>
+            </div>
+
+            <CalendarHeaderControls
+              view={view}
+              setView={setView}
+              headerLabel={headerLabel}
+              onToday={goToToday}
+              onBack={goBack}
+              onNext={goNext}
+              onBlockTime={cal.openCreateBlockNow}
+            />
+          </div>
+
+          <div className="grid lg:grid-cols-[240px_minmax(0,1fr)]">
             <aside className="hidden border-r border-[var(--line-strong)] p-5 lg:block">
-              <p className="mb-4 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--paper-mute)]">
+              <p className="mb-4 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-paperMute">
                 {sidebarTodayLabel} · Today
               </p>
 
@@ -398,7 +393,6 @@ export default function ProCalendarPage() {
                 onToggle={() => void cal.toggleAutoAccept(!cal.autoAccept)}
               />
 
-              {/* Edit hours — sidebar link, away from the primary flow */}
               <div className="mt-4">
                 <ActionButton
                   onClick={() => cal.setShowHoursForm((current) => !current)}
@@ -409,9 +403,7 @@ export default function ProCalendarPage() {
               </div>
             </aside>
 
-            {/* ── Main grid area ── */}
             <section className="min-w-0">
-              {/* Mobile-only: slim location selector — only when pro has >1 location */}
               <MobileLocationBar
                 locationsLoaded={cal.locationsLoaded}
                 scopedLocations={cal.scopedLocations}
@@ -420,7 +412,6 @@ export default function ProCalendarPage() {
                 onChangeLocation={cal.setActiveLocationId}
               />
 
-              {/* Working hours editor — toggled from sidebar */}
               {cal.showHoursForm ? (
                 <section className="border-b border-[var(--line-strong)] p-4 md:p-5">
                   <WorkingHoursTabs
@@ -433,18 +424,16 @@ export default function ProCalendarPage() {
                 </section>
               ) : null}
 
-              <div className="p-3 md:p-5">
-                {showInitialLoading ? (
-                  <StateBanner>Loading calendar…</StateBanner>
-                ) : null}
+              <div className="p-0 md:p-5">
+                <div className="px-4 pt-3 md:px-0 md:pt-0">
+                  {showInitialLoading ? (
+                    <StateBanner>Loading calendar…</StateBanner>
+                  ) : null}
 
-                {showReloadLoading ? (
-                  <StateBanner>Loading…</StateBanner>
-                ) : null}
+                  {showReloadLoading ? <StateBanner>Loading…</StateBanner> : null}
 
-                {cal.error ? (
-                  <StateBanner danger>{cal.error}</StateBanner>
-                ) : null}
+                  {cal.error ? <StateBanner danger>{cal.error}</StateBanner> : null}
+                </div>
 
                 {(view === 'day' || view === 'week') && !showInitialLoading ? (
                   <DayWeekGrid
@@ -467,26 +456,26 @@ export default function ProCalendarPage() {
                 ) : null}
 
                 {view === 'month' && !showInitialLoading ? (
-                  <MonthGrid
-                    visibleDays={visibleDays}
-                    currentDate={currentDate}
-                    events={cal.events}
-                    timeZone={calendarTimeZone}
-                    onPickDay={(date) => {
-                      setCurrentDate(
-                        anchorNoonInTimeZone(date, calendarTimeZone),
-                      )
-                      setView('day')
-                    }}
-                  />
+                  <div className="p-3 md:p-0">
+                    <MonthGrid
+                      visibleDays={visibleDays}
+                      currentDate={currentDate}
+                      events={cal.events}
+                      timeZone={calendarTimeZone}
+                      onPickDay={(date) => {
+                        setCurrentDate(
+                          anchorNoonInTimeZone(date, calendarTimeZone),
+                        )
+                        setView('day')
+                      }}
+                    />
+                  </div>
                 ) : null}
               </div>
             </section>
           </div>
         </section>
       </div>
-
-      {/* ── Mobile floating UI ── */}
 
       <PendingRequestBar
         event={topPendingRequest}
@@ -508,24 +497,6 @@ export default function ProCalendarPage() {
           }
         }}
       />
-
-      {/* Mobile FAB — block time. Hidden on desktop where the header CTA handles it. */}
-      <button
-        type="button"
-        onClick={cal.openCreateBlockNow}
-        className={[
-          'fixed bottom-6 right-5 z-30 grid h-14 w-14 place-items-center rounded-full',
-          'bg-terra text-3xl font-light leading-none text-[var(--paper)]',
-          'shadow-[0_10px_30px_rgb(var(--terra)/0.60)] transition hover:scale-[1.03]',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/50',
-          'lg:hidden',
-        ].join(' ')}
-        aria-label="Block time"
-      >
-        +
-      </button>
-
-      {/* ── Modals ── */}
 
       <BlockTimeModal
         open={cal.blockCreateOpen}
@@ -626,11 +597,11 @@ function PageHero() {
   return (
     <header className="mb-8 hidden flex-col gap-4 md:flex md:flex-row md:items-end md:justify-between">
       <div>
-        <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--terra-glow)]">
+        <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-terraGlow">
           ◆ Pro mode
         </p>
 
-        <h1 className="mt-2 font-display text-4xl font-semibold italic leading-none tracking-[-0.04em] text-[var(--paper)] md:text-5xl">
+        <h1 className="mt-2 font-display text-4xl font-semibold italic leading-none tracking-[-0.04em] text-paper md:text-5xl">
           tovis<span className="text-terra">.</span> / pro
         </h1>
       </div>
@@ -639,12 +610,50 @@ function PageHero() {
         href="/pro"
         className={[
           'font-mono text-xs font-black uppercase tracking-[0.10em]',
-          'text-[var(--paper-mute)] transition hover:text-[var(--paper)]',
+          'text-paperMute transition hover:text-paper',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
         ].join(' ')}
       >
         ← Pro dashboard
       </a>
+    </header>
+  )
+}
+
+function MobileCalendarHeader(props: {
+  title: string
+  subtitle: string
+}) {
+  const { title, subtitle } = props
+
+  return (
+    <header className="bg-ink px-5 pb-3 pt-[58px]">
+      <div className="mb-3.5 flex items-center justify-between gap-4">
+        <a
+          href="/"
+          className={[
+            'inline-flex items-center gap-1.5',
+            'font-sans text-xs font-bold uppercase tracking-[0.08em]',
+            'text-paperMute transition hover:text-paper',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+          ].join(' ')}
+        >
+          <span aria-hidden="true">‹</span>
+          CLIENT
+        </a>
+
+        <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-terraGlow">
+          ◆ PRO MODE
+        </p>
+      </div>
+
+      <h1 className="font-display text-[34px] font-semibold italic leading-none tracking-[-0.03em] text-paper">
+        {title}
+      </h1>
+
+      <p className="mt-1.5 truncate font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-paperMute">
+        {subtitle}
+      </p>
     </header>
   )
 }
@@ -686,7 +695,7 @@ function CalendarStatsPanel(props: {
         label="Pending"
         value={pendingCount}
         sublabel="review"
-        tone="warn"
+        tone="pending"
         pulse={pendingCount > 0}
         compact={compact}
         onClick={() => onOpenManagement('pendingRequests')}
@@ -695,7 +704,7 @@ function CalendarStatsPanel(props: {
       <StatTile
         label="Waitlist"
         value={waitlistCount}
-        sublabel="today"
+        sublabel="people"
         tone="acid"
         compact={compact}
         onClick={() => onOpenManagement('waitlistToday')}
@@ -737,17 +746,17 @@ function StatTile(props: {
       type="button"
       onClick={onClick}
       className={[
-        'relative rounded-xl border border-[var(--line)] bg-[var(--paper)]/[0.02] text-left',
-        'transition hover:border-[var(--line-strong)] hover:bg-[var(--paper)]/[0.04]',
+        'relative rounded-xl border border-[var(--line)] bg-paper/[0.02] text-left',
+        'transition hover:border-[var(--line-strong)] hover:bg-paper/[0.04]',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
         compact ? 'px-2 py-2' : 'px-3.5 py-3',
       ].join(' ')}
     >
       <span
         className={[
-          'block font-mono font-semibold uppercase text-[var(--paper-mute)]',
+          'block font-mono font-semibold uppercase text-paperMute',
           compact
-            ? 'text-[8px] tracking-[0.10em]'
+            ? 'text-[9px] tracking-[0.10em]'
             : 'text-[10px] tracking-[0.14em]',
         ].join(' ')}
       >
@@ -758,7 +767,7 @@ function StatTile(props: {
         className={[
           'mt-1 block font-display font-semibold leading-none',
           toneTextClass(tone),
-          compact ? 'text-xl' : 'text-[28px]',
+          compact ? 'text-[22px]' : 'text-[28px]',
         ].join(' ')}
       >
         {value}
@@ -766,8 +775,8 @@ function StatTile(props: {
 
       <span
         className={[
-          'mt-1 block text-[var(--paper-mute)]',
-          compact ? 'text-[9px]' : 'text-xs',
+          'mt-1 block text-paperMute',
+          compact ? 'text-[9.5px]' : 'text-xs',
         ].join(' ')}
       >
         {sublabel}
@@ -789,13 +798,13 @@ function StatTile(props: {
 function StatusLegend() {
   return (
     <div className="mt-6 border-t border-[var(--line)] pt-5">
-      <p className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--paper-mute)]">
+      <p className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-paperMute">
         Status key
       </p>
 
       <div className="grid gap-2">
         <LegendRow tone="terra" label="Accepted" />
-        <LegendRow tone="warn" label="Pending request" />
+        <LegendRow tone="pending" label="Pending request" />
         <LegendRow tone="fern" label="Completed" />
         <LegendRow tone="acid" label="Waitlist hold" />
         <LegendRow tone="muted" label="Blocked / break" dashed />
@@ -817,13 +826,13 @@ function LegendRow(props: {
         className={[
           'h-1 w-5 rounded-full',
           dashed
-            ? 'border border-dashed border-[var(--paper-mute)] bg-transparent'
+            ? 'border border-dashed border-paperMute bg-transparent'
             : toneDotClass(tone),
         ].join(' ')}
         aria-hidden="true"
       />
 
-      <span className="text-xs text-[var(--paper-dim)]">{label}</span>
+      <span className="text-xs text-paperDim">{label}</span>
     </div>
   )
 }
@@ -836,12 +845,12 @@ function AutoAcceptCard(props: {
   const { enabled, saving, onToggle } = props
 
   return (
-    <div className="mt-6 rounded-xl border border-[var(--line-strong)] bg-terra/[0.05] p-3.5">
-      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--terra-glow)]">
+    <div className="mt-6 rounded-xl border border-[var(--line-strong)] bg-terra/5 p-3.5">
+      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-terraGlow">
         ◆ Auto-accept
       </p>
 
-      <p className="mt-2 text-xs leading-5 text-[var(--paper-dim)]">
+      <p className="mt-2 text-xs leading-5 text-paperDim">
         New bookings that fit your hours skip the request step.
       </p>
 
@@ -849,7 +858,7 @@ function AutoAcceptCard(props: {
         <span
           className={[
             'font-mono text-[11px] font-black uppercase tracking-[0.08em]',
-            enabled ? 'text-fern' : 'text-[var(--paper-mute)]',
+            enabled ? 'text-fern' : 'text-paperMute',
           ].join(' ')}
         >
           {saving ? 'Saving…' : enabled ? 'On' : 'Off'}
@@ -861,7 +870,7 @@ function AutoAcceptCard(props: {
           disabled={saving}
           className={[
             'relative h-6 w-11 rounded-full border border-[var(--line-strong)] transition',
-            enabled ? 'bg-fern' : 'bg-[var(--paper)]/[0.08]',
+            enabled ? 'bg-fern' : 'bg-paper/10',
             saving ? 'cursor-wait opacity-70' : '',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
           ].join(' ')}
@@ -870,7 +879,7 @@ function AutoAcceptCard(props: {
         >
           <span
             className={[
-              'absolute top-0.5 h-5 w-5 rounded-full bg-[var(--paper)] transition-[left]',
+              'absolute top-0.5 h-5 w-5 rounded-full bg-paper transition-[left]',
               enabled ? 'left-[21px]' : 'left-0.5',
             ].join(' ')}
           />
@@ -912,17 +921,46 @@ function PendingRequestBar(props: {
 
   return (
     <div className="fixed bottom-24 left-4 right-4 z-20 lg:hidden">
-      <div className="rounded-2xl border border-[var(--line-strong)] bg-[var(--ink-2)] p-3 shadow-[0_12px_40px_rgb(0_0_0/0.50)]">
-        <div className="flex items-center gap-3">
+      <div
+        className={[
+          'relative overflow-hidden rounded-2xl border p-3',
+          'shadow-[0_16px_46px_rgb(0_0_0_/_0.62)] backdrop-blur-xl',
+        ].join(' ')}
+        style={{
+          background:
+            'linear-gradient(135deg, rgb(var(--amber) / 0.22), rgb(var(--ink-2) / 0.94) 46%, rgb(var(--terra) / 0.12))',
+          borderColor: 'rgb(var(--amber) / 0.30)',
+          boxShadow:
+            '0 0 0 1px rgb(var(--amber) / 0.10), 0 16px 46px rgb(0 0 0 / 0.62)',
+        }}
+      >
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-px"
+          style={{ backgroundColor: 'rgb(var(--amber) / 0.55)' }}
+          aria-hidden="true"
+        />
+
+        <div
+          className="pointer-events-none absolute -bottom-12 right-10 h-24 w-24 rounded-full blur-3xl"
+          style={{ backgroundColor: 'rgb(var(--terra) / 0.22)' }}
+          aria-hidden="true"
+        />
+
+        <div className="relative flex items-center gap-3">
           <button
             type="button"
             onClick={onOpenAll}
             className={[
-              'grid h-9 w-9 shrink-0 place-items-center rounded-xl',
-              'border border-toneWarn/30 bg-toneWarn/10',
-              'font-mono text-sm font-black text-toneWarn',
+              'grid h-11 w-11 shrink-0 place-items-center rounded-xl',
+              'border font-display text-xl font-semibold leading-none',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
             ].join(' ')}
+            style={{
+              backgroundColor: 'rgb(var(--amber) / 0.20)',
+              borderColor: 'rgb(var(--amber) / 0.42)',
+              color: 'rgb(var(--amber))',
+              boxShadow: 'inset 0 0 0 1px rgb(var(--amber) / 0.10)',
+            }}
             aria-label="Open all pending requests"
           >
             {pendingCount}
@@ -933,16 +971,21 @@ function PendingRequestBar(props: {
             onClick={onOpenAll}
             className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40"
           >
-            <p className="font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-toneWarn">
+            <p
+              className={[
+                'font-mono text-[9px] font-black uppercase tracking-[0.16em]',
+              ].join(' ')}
+              style={{ color: 'rgb(var(--amber))' }}
+            >
               ◆ Pending request
             </p>
 
-            <p className="mt-1 truncate text-sm font-bold text-[var(--paper)]">
+            <p className="mt-1 truncate text-sm font-black text-[var(--paper)]">
               {clientName} — {title}
             </p>
 
             {moreCount > 0 ? (
-              <p className="mt-0.5 text-xs text-[var(--paper-mute)]">
+              <p className="mt-0.5 text-xs font-semibold text-[var(--paper-mute)]">
                 +{moreCount} more waiting
               </p>
             ) : null}
@@ -950,46 +993,67 @@ function PendingRequestBar(props: {
 
           <button
             type="button"
-            onClick={onApprove}
+            onClick={(event) => {
+              event.stopPropagation()
+              onApprove()
+            }}
             disabled={busy}
             className={[
-              'rounded-lg bg-fern px-3 py-2 text-xs font-black text-[var(--paper)]',
+              'grid h-10 w-10 shrink-0 place-items-center rounded-xl',
+              'text-sm font-black',
               'disabled:cursor-wait disabled:opacity-60',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
             ].join(' ')}
+            style={{
+              backgroundColor: 'rgb(var(--fern))',
+              border: '1px solid rgb(var(--fern) / 0.65)',
+              color: 'rgb(var(--paper))',
+              boxShadow:
+                '0 0 0 1px rgb(var(--fern) / 0.22), 0 8px 20px rgb(var(--fern) / 0.34)',
+            }}
             aria-label="Approve pending booking"
+            title="Approve pending booking"
           >
             ✓
           </button>
 
           <button
             type="button"
-            onClick={onDeny}
+            onClick={(event) => {
+              event.stopPropagation()
+              onDeny()
+            }}
             disabled={busy}
             className={[
-              'rounded-lg border border-[var(--line-strong)] bg-[var(--paper)]/[0.06]',
-              'px-3 py-2 text-xs font-black text-[var(--paper)]',
+              'grid h-10 w-10 shrink-0 place-items-center rounded-xl',
+              'text-sm font-black',
               'disabled:cursor-wait disabled:opacity-60',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
             ].join(' ')}
+            style={{
+              backgroundColor: 'rgb(var(--ember) / 0.92)',
+              border: '1px solid rgb(var(--ember) / 0.70)',
+              color: 'rgb(var(--paper))',
+              boxShadow:
+                '0 0 0 1px rgb(var(--ember) / 0.22), 0 8px 20px rgb(var(--ember) / 0.30)',
+            }}
             aria-label="Deny pending booking"
+            title="Deny pending booking"
           >
             ×
           </button>
         </div>
 
         {error ? (
-          <p className="mt-2 text-xs font-semibold text-toneDanger">{error}</p>
+          <p className="relative mt-2 text-xs font-semibold text-toneDanger">
+            {error}
+          </p>
         ) : null}
       </div>
     </div>
   )
 }
 
-/**
- * Small ghost button used for secondary page actions (e.g. "Edit hours").
- * Kept generic so it can be reused elsewhere without re-naming.
- */
 function ActionButton(props: {
   children: ReactNode
   onClick: () => void
@@ -1005,8 +1069,8 @@ function ActionButton(props: {
         'rounded-xl px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
         'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
         active
-          ? 'border border-[var(--line-strong)] bg-[var(--paper)] text-[var(--ink)]'
-          : 'border border-[var(--line-strong)] bg-transparent text-[var(--paper)] hover:bg-[var(--paper)]/[0.05]',
+          ? 'border border-[var(--line-strong)] bg-paper text-ink'
+          : 'border border-[var(--line-strong)] bg-transparent text-paper hover:bg-paper/5',
       ].join(' ')}
     >
       {children}
@@ -1014,11 +1078,6 @@ function ActionButton(props: {
   )
 }
 
-/**
- * One-line location selector strip — mobile only, hidden on desktop.
- * Only renders when the pro has more than one location to choose from;
- * a single-location pro sees nothing (the context is implicit).
- */
 function MobileLocationBar(props: {
   locationsLoaded: boolean
   scopedLocations: Array<{
@@ -1043,7 +1102,7 @@ function MobileLocationBar(props: {
 
   const displayLabel =
     activeLocationLabel?.trim() ||
-    scopedLocations.find((l) => l.id === activeLocationId)?.name?.trim() ||
+    scopedLocations.find((location) => location.id === activeLocationId)?.name?.trim() ||
     'Select location'
 
   return (
@@ -1051,7 +1110,7 @@ function MobileLocationBar(props: {
       className="flex items-center gap-2 border-b border-[var(--line-strong)] px-4 py-2.5 lg:hidden"
       data-mobile-location-bar="1"
     >
-      <span className="font-mono text-[9px] font-black uppercase tracking-[0.14em] text-[var(--paper-mute)]">
+      <span className="font-mono text-[9px] font-black uppercase tracking-[0.14em] text-paperMute">
         Loc
       </span>
 
@@ -1060,17 +1119,17 @@ function MobileLocationBar(props: {
         onChange={(event) => onChangeLocation(event.target.value || null)}
         aria-label="Select calendar location"
         className={[
-          'min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-[var(--ink-2)]',
+          'min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-ink2',
           'px-2.5 py-1.5 font-mono text-[10px] font-black uppercase tracking-[0.06em]',
-          'text-[var(--paper)] outline-none',
+          'text-paper outline-none',
           'focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
         ].join(' ')}
       >
-        {!activeLocationId && (
-          <option value="">{displayLabel}</option>
-        )}
+        {!activeLocationId ? <option value="">{displayLabel}</option> : null}
+
         {scopedLocations.map((location) => {
           const name = location.name?.trim() || location.type || 'Location'
+
           return (
             <option key={location.id} value={location.id}>
               {name}
@@ -1091,7 +1150,7 @@ function StateBanner(props: { children: ReactNode; danger?: boolean }) {
         'mb-3 rounded-2xl border px-4 py-3 text-sm font-semibold',
         danger
           ? 'border-toneDanger/25 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-[var(--paper)]/[0.03] text-[var(--paper-dim)]',
+          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
       ].join(' ')}
     >
       {children}

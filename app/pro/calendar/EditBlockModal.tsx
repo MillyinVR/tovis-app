@@ -22,6 +22,8 @@ import {
   snapMinutes,
 } from './_utils/calendarMath'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type EditBlockModalProps = {
   open: boolean
   blockId: string | null
@@ -50,8 +52,14 @@ type PatchBlockPayload = {
   note: string | null
 }
 
+type ButtonTone = 'primary' | 'danger' | 'ghost'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const DEFAULT_DURATION_MINUTES = 60
 const MAX_NOTE_LENGTH = 160
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -63,7 +71,11 @@ function optionalString(value: unknown) {
 
 function requiredString(value: unknown, errorMessage: string) {
   const stringValue = optionalString(value)
-  if (!stringValue) throw new Error(errorMessage)
+
+  if (!stringValue) {
+    throw new Error(errorMessage)
+  }
+
   return stringValue
 }
 
@@ -140,10 +152,16 @@ function buildPatchPayload(args: {
   stepMinutes: number
 }): PatchBlockPayload {
   const parsedDate = parseDateInput(args.date)
-  if (!parsedDate) throw new Error('Pick a valid date.')
+
+  if (!parsedDate) {
+    throw new Error('Pick a valid date.')
+  }
 
   const parsedTime = parseHHMM(args.startTime)
-  if (!parsedTime) throw new Error('Pick a valid start time.')
+
+  if (!parsedTime) {
+    throw new Error('Pick a valid start time.')
+  }
 
   const durationMinutes = parseDurationInput(
     args.durationInput,
@@ -187,7 +205,7 @@ function readResponseError(data: unknown, fallback: string) {
   return readErrorMessage(data) ?? fallback
 }
 
-function buttonClassName(tone: 'primary' | 'danger' | 'ghost' = 'ghost') {
+function buttonClassName(tone: ButtonTone = 'ghost') {
   const base = [
     'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
     'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
@@ -197,7 +215,7 @@ function buttonClassName(tone: 'primary' | 'danger' | 'ghost' = 'ghost') {
   if (tone === 'primary') {
     return [
       base,
-      'border border-accentPrimary/30 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
     ].join(' ')
   }
 
@@ -210,15 +228,15 @@ function buttonClassName(tone: 'primary' | 'danger' | 'ghost' = 'ghost') {
 
   return [
     base,
-    'border border-[var(--line)] bg-transparent text-[var(--paper-mute)] hover:bg-[var(--paper)]/[0.05] hover:text-[var(--paper)]',
+    'border border-[var(--line)] bg-transparent text-paperMute',
+    'hover:bg-paper/5 hover:text-paper',
   ].join(' ')
 }
 
 function fieldClassName() {
   return [
-    'w-full rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2',
-    'text-sm font-semibold text-[var(--paper)]',
-    'placeholder:text-[var(--paper-mute)]',
+    'w-full rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2',
+    'text-sm font-semibold text-paper placeholder:text-paperMute',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
     'disabled:cursor-not-allowed disabled:opacity-60',
   ].join(' ')
@@ -254,6 +272,8 @@ function closeOnEscape(args: {
 
   return () => window.removeEventListener('keydown', onKeyDown)
 }
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export default function EditBlockModal(props: EditBlockModalProps) {
   const {
@@ -297,10 +317,10 @@ export default function EditBlockModal(props: EditBlockModalProps) {
     () =>
       closeOnEscape({
         open,
-        busy: saving || deleting,
+        busy,
         onClose,
       }),
-    [open, saving, deleting, onClose],
+    [open, busy, onClose],
   )
 
   useEffect(() => {
@@ -475,31 +495,31 @@ export default function EditBlockModal(props: EditBlockModalProps) {
         onMouseDown={(event) => event.stopPropagation()}
         className={[
           'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-[24px]',
-          'border border-[var(--line-strong)] bg-[var(--ink)]',
-          'shadow-[0_28px_90px_rgb(0_0_0/0.62)]',
+          'border border-[var(--line-strong)] bg-ink',
+          'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
           'sm:max-w-[34rem] sm:rounded-[24px]',
         ].join(' ')}
         role="dialog"
         aria-modal="true"
         aria-labelledby="edit-block-modal-title"
       >
-        <header className="border-b border-[var(--line-strong)] bg-[var(--ink)]/92 px-4 py-4 backdrop-blur-xl sm:px-5">
-          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[var(--paper)]/20 sm:hidden" />
+        <header className="border-b border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-paper/20 sm:hidden" />
 
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[var(--terra-glow)]">
+              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
                 ◆ Calendar block
               </p>
 
               <h2
                 id="edit-block-modal-title"
-                className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-[var(--paper)]"
+                className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper"
               >
                 Edit blocked time.
               </h2>
 
-              <p className="mt-1 text-sm leading-6 text-[var(--paper-dim)]">
+              <p className="mt-1 text-sm leading-6 text-paperDim">
                 Adjust or remove the unavailable window from your calendar.
               </p>
             </div>
@@ -524,7 +544,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
 
           {canEdit ? (
             <div className="grid gap-4">
-              <section className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4">
+              <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
                 <SectionHeading
                   title="Block details"
                   description="Edit the unavailable window using the calendar timezone and step size."
@@ -537,7 +557,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4">
+              <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
                 <SectionHeading
                   title="Time"
                   description="Change when the block starts and how long it lasts."
@@ -600,7 +620,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
                     />
                   </Field>
 
-                  <p className="mt-1 text-right font-mono text-[9px] font-black uppercase tracking-[0.08em] text-[var(--paper-mute)]">
+                  <p className="mt-1 text-right font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paperMute">
                     {note.length}/{MAX_NOTE_LENGTH}
                   </p>
                 </div>
@@ -609,7 +629,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
           ) : null}
         </div>
 
-        <footer className="border-t border-[var(--line-strong)] bg-[var(--ink)]/92 px-4 py-4 backdrop-blur-xl sm:px-5">
+        <footer className="border-t border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <button
               type="button"
@@ -645,6 +665,8 @@ export default function EditBlockModal(props: EditBlockModalProps) {
   )
 }
 
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
 function SectionHeading(props: {
   title: string
   description: string
@@ -653,11 +675,11 @@ function SectionHeading(props: {
 
   return (
     <div>
-      <h3 className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-[var(--paper)]">
+      <h3 className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-paper">
         {title}
       </h3>
 
-      <p className="mt-1 text-sm leading-6 text-[var(--paper-dim)]">
+      <p className="mt-1 text-sm leading-6 text-paperDim">
         {description}
       </p>
     </div>
@@ -672,7 +694,7 @@ function Field(props: {
 
   return (
     <label className="block">
-      <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+      <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
         {label}
       </span>
 
@@ -688,12 +710,12 @@ function InfoRow(props: {
   const { label, children } = props
 
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2">
-      <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+    <div className="rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2">
+      <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
         {label}
       </p>
 
-      <p className="mt-1 text-sm font-semibold text-[var(--paper)]">
+      <p className="mt-1 text-sm font-semibold text-paper">
         {children}
       </p>
     </div>
@@ -712,7 +734,7 @@ function StateCard(props: {
         'mb-3 rounded-2xl border px-3 py-3 text-sm font-semibold',
         danger
           ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-[var(--paper)]/[0.03] text-[var(--paper-dim)]',
+          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
       ].join(' ')}
     >
       {children}

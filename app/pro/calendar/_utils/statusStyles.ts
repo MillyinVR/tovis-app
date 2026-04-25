@@ -14,6 +14,10 @@
  * - No casts.
  * - No duplicated status branching in components.
  * - Components should ask this file for labels/classes instead of rebuilding them.
+ *
+ * Important:
+ * - EventCard owns the actual card fill color with CSS variable inline styles.
+ * - This file owns labels, chips, badges, borders, rings, and accent stripes.
  */
 
 export type CalendarEventLike = {
@@ -37,10 +41,6 @@ export type ChipClasses = {
 }
 
 export type CardClasses = {
-  /**
-   * No background here on purpose.
-   * Event cards own their readable base surface.
-   */
   border: string
   ring?: string
   accentBg: string
@@ -58,13 +58,18 @@ export type CalendarStatusMeta = StatusPresentation & {
   label: string
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const BLOCKED_STATUS = 'BLOCKED'
 
+const ACCEPTED_STATUSES = new Set(['ACCEPTED', 'CONFIRMED'])
 const PENDING_STATUSES = new Set(['PENDING', 'RESCHEDULE_REQUESTED'])
+const COMPLETED_STATUSES = new Set(['COMPLETED'])
 const DANGER_STATUSES = new Set(['CANCELLED', 'DECLINED', 'NO_SHOW'])
 
 const STATUS_LABELS: Record<string, string> = {
   ACCEPTED: 'Accepted',
+  CONFIRMED: 'Accepted',
   PENDING: 'Pending',
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled',
@@ -78,102 +83,101 @@ const STATUS_PRESENTATION: Record<StatusTone, StatusPresentation> = {
   accepted: {
     tone: 'accepted',
     chip: {
-      bg: 'bg-accentPrimary/[0.10]',
-      border: 'border-white/[0.12]',
+      bg: 'bg-terra/10',
+      border: 'border-terra/25',
       text: 'text-textPrimary',
-      ring: 'ring-accentPrimary/[0.12]',
+      ring: 'ring-1 ring-inset ring-terra/15',
     },
     card: {
-      border: 'border-white/[0.12]',
-      ring: 'ring-accentPrimary/[0.14]',
-      accentBg: 'bg-accentPrimary/[0.70]',
+      border: 'border-terra/45',
+      ring: 'ring-1 ring-inset ring-terra/30',
+      accentBg: 'bg-terra',
     },
-    badge:
-      'border-accentPrimary/[0.20] bg-accentPrimary/[0.10] text-textPrimary',
+    badge: 'border-terra/25 bg-terra/10 text-textPrimary',
   },
 
   pending: {
     tone: 'pending',
     chip: {
-      bg: 'bg-toneWarn/[0.07]',
-      border: 'border-toneWarn/[0.18]',
+      bg: 'bg-tonePending/10',
+      border: 'border-tonePending/25',
       text: 'text-textPrimary',
-      ring: 'ring-toneWarn/[0.10]',
+      ring: 'ring-1 ring-inset ring-tonePending/15',
     },
     card: {
-      border: 'border-toneWarn/[0.18]',
-      ring: 'ring-toneWarn/[0.12]',
-      accentBg: 'bg-toneWarn/[0.70]',
+      border: 'border-tonePending/50',
+      ring: 'ring-1 ring-inset ring-tonePending/35',
+      accentBg: 'bg-tonePending',
     },
-    badge: 'border-toneWarn/[0.25] bg-toneWarn/[0.10] text-toneWarn',
+    badge: 'border-tonePending/30 bg-tonePending/12 text-tonePending',
   },
 
   completed: {
     tone: 'completed',
     chip: {
-      bg: 'bg-toneSuccess/[0.06]',
-      border: 'border-toneSuccess/[0.16]',
+      bg: 'bg-toneSuccess/10',
+      border: 'border-toneSuccess/25',
       text: 'text-textPrimary',
-      ring: 'ring-toneSuccess/[0.08]',
+      ring: 'ring-1 ring-inset ring-toneSuccess/15',
     },
     card: {
-      border: 'border-toneSuccess/[0.16]',
-      ring: 'ring-toneSuccess/[0.10]',
-      accentBg: 'bg-toneSuccess/[0.70]',
+      border: 'border-toneSuccess/45',
+      ring: 'ring-1 ring-inset ring-toneSuccess/30',
+      accentBg: 'bg-toneSuccess',
     },
-    badge:
-      'border-toneSuccess/[0.20] bg-toneSuccess/[0.10] text-toneSuccess',
+    badge: 'border-toneSuccess/25 bg-toneSuccess/10 text-toneSuccess',
   },
 
   danger: {
     tone: 'danger',
     chip: {
-      bg: 'bg-toneDanger/[0.07]',
-      border: 'border-toneDanger/[0.18]',
+      bg: 'bg-toneDanger/10',
+      border: 'border-toneDanger/25',
       text: 'text-textPrimary',
-      ring: 'ring-toneDanger/[0.10]',
+      ring: 'ring-1 ring-inset ring-toneDanger/15',
     },
     card: {
-      border: 'border-toneDanger/[0.18]',
-      ring: 'ring-toneDanger/[0.12]',
-      accentBg: 'bg-toneDanger/[0.70]',
+      border: 'border-toneDanger/45',
+      ring: 'ring-1 ring-inset ring-toneDanger/30',
+      accentBg: 'bg-toneDanger',
     },
-    badge: 'border-toneDanger/[0.25] bg-toneDanger/[0.10] text-toneDanger',
+    badge: 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger',
   },
 
   blocked: {
     tone: 'blocked',
     chip: {
-      bg: 'bg-surfaceGlass/[0.06]',
-      border: 'border-white/[0.10]',
+      bg: 'bg-paper/8',
+      border: 'border-paper/15',
       text: 'text-textPrimary',
-      ring: 'ring-white/[0.08]',
+      ring: 'ring-1 ring-inset ring-paper/10',
     },
     card: {
-      border: 'border-white/[0.12]',
-      ring: 'ring-white/[0.10]',
-      accentBg: 'bg-white/[0.20]',
+      border: 'border-paper/20',
+      ring: 'ring-1 ring-inset ring-paper/12',
+      accentBg: 'bg-paper/30',
     },
-    badge: 'border-white/[0.10] bg-white/[0.10] text-textSecondary',
+    badge: 'border-paper/15 bg-paper/10 text-textSecondary',
   },
 
   scheduled: {
     tone: 'scheduled',
     chip: {
-      bg: 'bg-accentPrimary/[0.10]',
-      border: 'border-white/[0.12]',
+      bg: 'bg-terra/10',
+      border: 'border-terra/25',
       text: 'text-textPrimary',
-      ring: 'ring-accentPrimary/[0.12]',
+      ring: 'ring-1 ring-inset ring-terra/15',
     },
     card: {
-      border: 'border-white/[0.12]',
-      ring: 'ring-accentPrimary/[0.14]',
-      accentBg: 'bg-accentPrimary/[0.70]',
+      border: 'border-terra/45',
+      ring: 'ring-1 ring-inset ring-terra/30',
+      accentBg: 'bg-terra',
     },
-    badge:
-      'border-accentPrimary/[0.20] bg-accentPrimary/[0.10] text-textPrimary',
+    badge: 'border-terra/25 bg-terra/10 text-textPrimary',
   },
 }
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function normalizeStatus(status?: string | null) {
   return typeof status === 'string' ? status.trim().toUpperCase() : ''
@@ -208,24 +212,26 @@ function statusToneForEvent(event: CalendarEventLike): StatusTone {
     return 'danger'
   }
 
-  if (normalizedStatus === 'COMPLETED') {
+  if (COMPLETED_STATUSES.has(normalizedStatus)) {
     return 'completed'
   }
 
-  if (normalizedStatus === 'ACCEPTED') {
+  if (ACCEPTED_STATUSES.has(normalizedStatus)) {
     return 'accepted'
   }
 
   return 'scheduled'
 }
 
+function isPresentClassName(value: string | undefined): value is string {
+  return typeof value === 'string' && value.length > 0
+}
+
 function joinClasses(parts: ReadonlyArray<string | undefined>) {
   return parts.filter(isPresentClassName).join(' ')
 }
 
-function isPresentClassName(value: string | undefined): value is string {
-  return typeof value === 'string' && value.length > 0
-}
+// ─── Public helpers ───────────────────────────────────────────────────────────
 
 export function calendarStatusMeta(event: CalendarEventLike): CalendarStatusMeta {
   const normalizedStatus = normalizeStatus(event.status)
@@ -255,8 +261,8 @@ export function eventChipClasses(event: CalendarEventLike): ChipClasses {
 }
 
 /**
- * Calendar event block styling.
- * Background is intentionally excluded so cards can own readable surfaces.
+ * Calendar event block chrome.
+ * The card fill itself is handled by EventCard with inline CSS token colors.
  */
 export function eventCardClasses(event: CalendarEventLike): CardClasses {
   return calendarStatusMeta(event).card

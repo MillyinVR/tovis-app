@@ -19,6 +19,8 @@ import {
   snapMinutes,
 } from './_utils/calendarMath'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 export type BlockRow = {
   id: string
   startsAt: string
@@ -51,8 +53,15 @@ type CreatedBlockPayload = {
   locationId: string | null
 }
 
+type ButtonTone = 'primary' | 'ghost'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const DEFAULT_BLOCK_DURATION_MINUTES = 60
 const MAX_NOTE_LENGTH = 160
+const MAX_BLOCK_DURATION_MINUTES = 720
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function pad2(value: number) {
   return String(value).padStart(2, '0')
@@ -65,6 +74,7 @@ function dateInputFromParts(parts: DateParts) {
 function timeInputFromMinutes(minutes: number) {
   const hour = Math.floor(minutes / 60)
   const minute = minutes % 60
+
   return `${pad2(hour)}:${pad2(minute)}`
 }
 
@@ -93,12 +103,17 @@ function optionalString(value: unknown) {
 
 function requiredString(value: unknown, errorMessage: string) {
   const stringValue = optionalString(value)
-  if (!stringValue) throw new Error(errorMessage)
+
+  if (!stringValue) {
+    throw new Error(errorMessage)
+  }
+
   return stringValue
 }
 
 function errorFromResponse(data: unknown, fallback: string) {
   if (!isRecord(data)) return fallback
+
   return optionalString(data.error) ?? optionalString(data.message) ?? fallback
 }
 
@@ -135,12 +150,19 @@ function buildPayload(args: {
   locationId: string | null
 }): CreatedBlockPayload {
   const parsedDate = parseDateInput(args.date)
-  if (!parsedDate) throw new Error('Pick a valid date.')
+
+  if (!parsedDate) {
+    throw new Error('Pick a valid date.')
+  }
 
   const parsedTime = parseHHMM(args.time)
-  if (!parsedTime) throw new Error('Pick a valid start time.')
+
+  if (!parsedTime) {
+    throw new Error('Pick a valid start time.')
+  }
 
   const rawDuration = Number(args.durationInput)
+
   if (!Number.isFinite(rawDuration) || rawDuration <= 0) {
     throw new Error('Pick a valid duration.')
   }
@@ -148,7 +170,7 @@ function buildPayload(args: {
   const durationMinutes = roundDurationMinutes(rawDuration, args.stepMinutes)
 
   if (!args.blockAllLocations && !args.locationId) {
-    throw new Error('Select a location first, or choose “Block all locations”.')
+    throw new Error('Select a location first, or choose "Block all locations".')
   }
 
   const startsAt = zonedTimeToUtc({
@@ -181,7 +203,7 @@ function buildPayload(args: {
   }
 }
 
-function buttonClassName(tone: 'primary' | 'ghost' = 'ghost') {
+function buttonClassName(tone: ButtonTone = 'ghost') {
   const base = [
     'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
     'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
@@ -191,28 +213,32 @@ function buttonClassName(tone: 'primary' | 'ghost' = 'ghost') {
   if (tone === 'primary') {
     return [
       base,
-      'border border-accentPrimary/30 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
     ].join(' ')
   }
 
   return [
     base,
-    'border border-[var(--line)] bg-transparent text-[var(--paper-mute)] hover:bg-[var(--paper)]/[0.05] hover:text-[var(--paper)]',
+    'border border-[var(--line)] bg-transparent text-paperMute',
+    'hover:bg-paper/5 hover:text-paper',
   ].join(' ')
 }
 
 function fieldClassName() {
   return [
-    'w-full rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2',
-    'text-sm font-semibold text-[var(--paper)]',
-    'placeholder:text-[var(--paper-mute)]',
+    'w-full rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2',
+    'text-sm font-semibold text-paper placeholder:text-paperMute',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
     'disabled:cursor-not-allowed disabled:opacity-60',
   ].join(' ')
 }
 
 function checkboxClassName() {
-  return 'h-4 w-4 rounded border-[var(--line)] bg-[var(--ink-2)]'
+  return [
+    'h-4 w-4 rounded border-[var(--line)] bg-ink2',
+    'accent-accentPrimary',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+  ].join(' ')
 }
 
 function lockBodyScroll(open: boolean) {
@@ -245,6 +271,8 @@ function closeOnEscape(args: {
 
   return () => window.removeEventListener('keydown', onKeyDown)
 }
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export default function BlockTimeModal(props: BlockTimeModalProps) {
   const {
@@ -319,6 +347,7 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
 
   function close() {
     if (saving) return
+
     setError(null)
     onClose()
   }
@@ -380,31 +409,31 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
         onMouseDown={(event) => event.stopPropagation()}
         className={[
           'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-[24px]',
-          'border border-[var(--line-strong)] bg-[var(--ink)]',
-          'shadow-[0_28px_90px_rgb(0_0_0/0.62)]',
+          'border border-[var(--line-strong)] bg-ink',
+          'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
           'sm:max-w-[34rem] sm:rounded-[24px]',
         ].join(' ')}
         role="dialog"
         aria-modal="true"
         aria-labelledby="block-time-modal-title"
       >
-        <header className="border-b border-[var(--line-strong)] bg-[var(--ink)]/92 px-4 py-4 backdrop-blur-xl sm:px-5">
-          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[var(--paper)]/20 sm:hidden" />
+        <header className="border-b border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-paper/20 sm:hidden" />
 
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[var(--terra-glow)]">
+              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
                 ◆ Calendar block
               </p>
 
               <h2
                 id="block-time-modal-title"
-                className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-[var(--paper)]"
+                className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper"
               >
                 Block personal time.
               </h2>
 
-              <p className="mt-1 text-sm leading-6 text-[var(--paper-dim)]">
+              <p className="mt-1 text-sm leading-6 text-paperDim">
                 Protect breaks, admin time, travel, or a full-on human reset.
                 Revolutionary concept.
               </p>
@@ -424,7 +453,7 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
           {error ? <StateCard danger>{error}</StateCard> : null}
 
-          <section className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4">
+          <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
             <SectionHeading
               title="Scope"
               description="Choose whether this block applies to the selected location or every location."
@@ -442,7 +471,7 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
               </InfoRow>
 
               {locationId ? (
-                <label className="flex items-center gap-2 rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2 text-sm font-semibold text-[var(--paper-dim)]">
+                <label className="flex items-center gap-2 rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2 text-sm font-semibold text-paperDim">
                   <input
                     type="checkbox"
                     checked={blockAllLocations}
@@ -463,7 +492,7 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
             </div>
           </section>
 
-          <section className="mt-4 rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4">
+          <section className="mt-4 rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
             <SectionHeading
               title="Time"
               description="Pick the start and duration for the unavailable window."
@@ -498,7 +527,7 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
                   type="number"
                   step={step}
                   min={step}
-                  max={720}
+                  max={MAX_BLOCK_DURATION_MINUTES}
                   value={durationInput}
                   onChange={(event) => setDurationInput(event.target.value)}
                   disabled={saving}
@@ -522,14 +551,14 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
                 />
               </Field>
 
-              <p className="mt-1 text-right font-mono text-[9px] font-black uppercase tracking-[0.08em] text-[var(--paper-mute)]">
+              <p className="mt-1 text-right font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paperMute">
                 {note.length}/{MAX_NOTE_LENGTH}
               </p>
             </div>
           </section>
         </div>
 
-        <footer className="border-t border-[var(--line-strong)] bg-[var(--ink)]/92 px-4 py-4 backdrop-blur-xl sm:px-5">
+        <footer className="border-t border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button
               type="button"
@@ -554,6 +583,8 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
   )
 }
 
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
 function SectionHeading(props: {
   title: string
   description: string
@@ -562,11 +593,11 @@ function SectionHeading(props: {
 
   return (
     <div>
-      <h3 className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-[var(--paper)]">
+      <h3 className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-paper">
         {title}
       </h3>
 
-      <p className="mt-1 text-sm leading-6 text-[var(--paper-dim)]">
+      <p className="mt-1 text-sm leading-6 text-paperDim">
         {description}
       </p>
     </div>
@@ -581,7 +612,7 @@ function Field(props: {
 
   return (
     <label className="block">
-      <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+      <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
         {label}
       </span>
 
@@ -597,12 +628,12 @@ function InfoRow(props: {
   const { label, children } = props
 
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2">
-      <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+    <div className="rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2">
+      <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
         {label}
       </p>
 
-      <p className="mt-1 text-sm font-semibold text-[var(--paper)]">
+      <p className="mt-1 text-sm font-semibold text-paper">
         {children}
       </p>
     </div>
@@ -621,7 +652,7 @@ function StateCard(props: {
         'mb-3 rounded-2xl border px-3 py-3 text-sm font-semibold',
         danger
           ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-[var(--paper)]/[0.03] text-[var(--paper-dim)]',
+          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
       ].join(' ')}
     >
       {children}

@@ -10,10 +10,12 @@ import WorkingHoursForm, {
 } from './WorkingHoursForm'
 
 import {
-  safeJson,
-  readErrorMessage,
   errorMessageFromUnknown,
+  readErrorMessage,
+  safeJson,
 } from '@/lib/http'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type WorkingHoursTabsProps = {
   canSalon: boolean
@@ -43,6 +45,8 @@ type StateCardProps = {
 
 type WeekdayKey = keyof ApiWorkingHours
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const LOCATION_TABS: ReadonlyArray<LocationTab> = [
   {
     value: 'SALON',
@@ -67,6 +71,8 @@ const WEEKDAY_KEYS: ReadonlyArray<WeekdayKey> = [
   'sat',
   'sun',
 ]
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -118,6 +124,7 @@ function availableTabsForCapabilities(args: {
   const tabs = LOCATION_TABS.filter((tab) => {
     if (tab.value === 'SALON') return args.canSalon
     if (tab.value === 'MOBILE') return args.canMobile
+
     return false
   })
 
@@ -125,10 +132,7 @@ function availableTabsForCapabilities(args: {
 }
 
 function tabForLocationType(locationType: LocationType) {
-  return (
-    LOCATION_TABS.find((tab) => tab.value === locationType) ??
-    LOCATION_TABS[0]
-  )
+  return LOCATION_TABS.find((tab) => tab.value === locationType) ?? LOCATION_TABS[0]
 }
 
 function firstAvailableType(tabs: ReadonlyArray<LocationTab>) {
@@ -144,6 +148,7 @@ function isAvailableLocationType(
 
 function endpointForLocationType(locationType: LocationType) {
   const params = new URLSearchParams({ locationType })
+
   return `/api/pro/working-hours?${params.toString()}`
 }
 
@@ -181,22 +186,27 @@ async function loadWorkingHours(args: {
 
 function tabToneClassName(tone: LocationTab['tone'], active: boolean) {
   if (!active) {
-    return 'border-[var(--line)] bg-transparent text-[var(--paper-mute)] hover:bg-[var(--paper)]/[0.05] hover:text-[var(--paper)]'
+    return [
+      'border-[var(--line)] bg-transparent text-paperMute',
+      'hover:bg-paper/5 hover:text-paper',
+    ].join(' ')
   }
 
   if (tone === 'mobile') {
-    return 'border-[var(--acid)]/35 bg-[var(--acid)]/10 text-[var(--paper)]'
+    return 'border-acid/35 bg-acid/10 text-paper'
   }
 
-  return 'border-[var(--terra)]/45 bg-[var(--terra)]/10 text-[var(--paper)]'
+  return 'border-terra/45 bg-terra/10 text-paper'
 }
 
 function formShellClassName() {
   return [
-    'rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4',
-    'shadow-[0_16px_40px_rgb(0_0_0/0.20)]',
+    'rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4',
+    'shadow-[0_16px_40px_rgb(0_0_0_/_0.20)]',
   ].join(' ')
 }
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
   const {
@@ -221,6 +231,7 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
   )
 
   const active = activeEditorType ?? localActive
+
   const safeActive = isAvailableLocationType(active, availableTabs)
     ? active
     : firstAvailableType(availableTabs)
@@ -269,6 +280,7 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
         const shouldLoadSalon = availableTabs.some(
           (tab) => tab.value === 'SALON',
         )
+
         const shouldLoadMobile = availableTabs.some(
           (tab) => tab.value === 'MOBILE',
         )
@@ -315,18 +327,18 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
       className="grid gap-4"
       data-calendar-working-hours-tabs="1"
     >
-      <div className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4">
+      <div className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0">
-            <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[var(--terra-glow)]">
+            <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
               ◆ Availability editor
             </p>
 
-            <h2 className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-[var(--paper)]">
+            <h2 className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper">
               {activeTab.label}
             </h2>
 
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--paper-dim)]">
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-paperDim">
               {activeTab.description}
             </p>
           </div>
@@ -347,7 +359,7 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
               ))}
             </div>
           ) : (
-            <span className="rounded-full border border-[var(--line)] bg-[var(--paper)]/[0.04] px-3 py-2 font-mono text-[10px] font-black uppercase tracking-[0.08em] text-[var(--paper-mute)]">
+            <span className="rounded-full border border-[var(--line)] bg-paper/[0.04] px-3 py-2 font-mono text-[10px] font-black uppercase tracking-[0.08em] text-paperMute">
               {activeTab.value === 'SALON' ? 'Salon' : 'Mobile'}
             </span>
           )}
@@ -379,6 +391,8 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
   )
 }
 
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
 function TabButton(props: TabButtonProps) {
   const { tab, active, onClick } = props
 
@@ -409,7 +423,7 @@ function StateCard(props: StateCardProps) {
         'rounded-2xl border px-3 py-3 text-sm font-semibold',
         danger
           ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-[var(--paper)]/[0.03] text-[var(--paper-dim)]',
+          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
       ].join(' ')}
     >
       {children}

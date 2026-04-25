@@ -24,6 +24,7 @@
   --color-acid:  212 255 58;  /* Acid  #D4FF3A */
   --color-fern:  98 168 122;  /* Fern  #62A87A */
   --color-ember: 255 61 78;   /* Ember #FF3D4E */
+  --color-amber: 240 168 48;  /* Amber #F0A830 */
 
   /* ── Prototype aliases — kept in sync with semantic tokens above ── */
   --ink:        10 9 7;
@@ -37,6 +38,7 @@
   --acid:       212 255 58;
   --fern:       98 168 122;
   --ember:      255 61 78;
+  --amber:      240 168 48;
 
   /* ── Computed borders (paper at fixed opacity) ──────────────────── */
   --line:        rgba(244, 239, 231, 0.08);
@@ -45,8 +47,9 @@
   /* ── Status tones (not yet white-labelable, match brand palette) ── */
   --tone-danger:  255 61 78;   /* ember  #FF3D4E */
   --tone-warn:    196 146 58;  /* Ochre  #C4923A */
+  --tone-pending: 240 168 48;  /* Amber  #F0A830 */
   --tone-success: 98 168 122;  /* fern   #62A87A */
-  --tone-info:    59 130 246;  /* blue-500       */
+  --tone-info:    59 130 246;  /* blue-500 */
 
   /* ── Effects ────────────────────────────────────────────────────── */
   --glass-blur:    20px;

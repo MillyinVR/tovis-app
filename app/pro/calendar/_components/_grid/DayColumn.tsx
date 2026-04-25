@@ -2,7 +2,7 @@
 'use client'
 
 import { useMemo, useRef } from 'react'
-import type { DragEvent, MutableRefObject } from 'react'
+import type { CSSProperties, DragEvent, MutableRefObject } from 'react'
 
 import type { CalendarEvent, EntityType, WorkingHoursJson } from '../../_types'
 
@@ -22,8 +22,10 @@ import {
   snapMinutes,
 } from '../../_utils/calendarMath'
 
-import { useDayEvents } from './useDayEvents'
 import { EventCard } from './EventCard'
+import { useDayEvents } from './useDayEvents'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type LocationType = 'SALON' | 'MOBILE'
 
@@ -51,6 +53,11 @@ type EventLayout = {
   compact: boolean
   micro: boolean
   timeLabel: string
+}
+
+type EventLayoutItem = {
+  event: CalendarEvent
+  layout: EventLayout
 }
 
 type DayColumnProps = {
@@ -85,49 +92,34 @@ type DayColumnProps = {
 
 type GridMark = {
   minute: number
-  emphasis: 'hour' | 'half' | 'quarter'
 }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const MIDDAY_MS = 12 * 60 * 60 * 1000
 const TOTAL_MINUTES = 24 * 60
-const GRID_INTERVAL_MINUTES = 15
+const GRID_INTERVAL_MINUTES = 60
 const MICRO_EVENT_HEIGHT_PX = 28
 const COMPACT_EVENT_HEIGHT_PX = 52
 
 const GRID_MARKS: GridMark[] = Array.from(
   { length: TOTAL_MINUTES / GRID_INTERVAL_MINUTES },
-  (_, index) => {
-    const minute = index * GRID_INTERVAL_MINUTES
-
-    if (minute % 60 === 0) {
-      return { minute, emphasis: 'hour' }
-    }
-
-    if (minute % 30 === 0) {
-      return { minute, emphasis: 'half' }
-    }
-
-    return { minute, emphasis: 'quarter' }
-  },
+  (_, index) => ({
+    minute: index * GRID_INTERVAL_MINUTES,
+  }),
 )
 
 const WORKING_OVERLAY_CLASSES: Record<LocationType, string> = {
-  SALON: [
-    'bg-[var(--terra)]/10',
-    'border-[var(--terra)]/35',
-    'shadow-[inset_0_1px_0_rgb(255_255_255/0.05)]',
-  ].join(' '),
-  MOBILE: [
-    'bg-[var(--acid)]/10',
-    'border-[var(--acid)]/25',
-    'shadow-[inset_0_1px_0_rgb(255_255_255/0.05)]',
-  ].join(' '),
+  SALON: 'border-terra/20 bg-terra/[0.025]',
+  MOBILE: 'border-acid/20 bg-acid/[0.025]',
 }
 
 const ACTIVE_WORKING_OVERLAY_CLASSES: Record<LocationType, string> = {
-  SALON: 'border-[var(--terra)]/65 bg-[var(--terra)]/14',
-  MOBILE: 'border-[var(--acid)]/45 bg-[var(--acid)]/14',
+  SALON: 'border-terra/35 bg-terra/[0.04]',
+  MOBILE: 'border-acid/30 bg-acid/[0.04]',
 }
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function stableYmdForVisibleDay(day: Date, timeZone: string) {
   return ymdInTimeZone(new Date(day.getTime() + MIDDAY_MS), timeZone)
@@ -171,7 +163,7 @@ function normalizeWindow(window: TimeWindow): TimeWindow | null {
 function mergeWindows(windows: TimeWindow[]) {
   const normalized = windows
     .map(normalizeWindow)
-    .filter((window) => window !== null)
+    .filter((window): window is TimeWindow => window !== null)
     .sort((first, second) => first.startMinutes - second.startMinutes)
 
   if (normalized.length === 0) return []
@@ -249,12 +241,6 @@ function buildOutsideHoursSegments(workingWindows: TimeWindow[]) {
   return segments
 }
 
-function gridMarkClass(emphasis: GridMark['emphasis']) {
-  if (emphasis === 'hour') return 'border-t border-[var(--paper)]/[0.12]'
-  if (emphasis === 'half') return 'border-t border-[var(--paper)]/[0.07]'
-  return 'border-t border-[var(--paper)]/[0.045]'
-}
-
 function getEventDurationMinutes(event: CalendarEvent, stepMinutes: number) {
   const rawDuration =
     typeof event.durationMinutes === 'number' &&
@@ -268,6 +254,7 @@ function getEventDurationMinutes(event: CalendarEvent, stepMinutes: number) {
 
 function eventApiId(event: CalendarEvent) {
   if (isBlockedEvent(event)) return extractBlockId(event)
+
   return event.id
 }
 
@@ -312,6 +299,7 @@ function buildEventLayout(args: {
 
   const startMinutes = snapMinutes(startMinutesRaw, stepMinutes)
   const minEndMinutes = startMinutes + stepMinutes
+
   const naturalEndMinutes =
     endMinutesRaw <= startMinutesRaw
       ? startMinutesRaw + durationMinutes
@@ -338,6 +326,89 @@ function buildEventLayout(args: {
     timeLabel: timeFormatter.format(eventStart),
   }
 }
+
+function columnClassName(args: {
+  dayIdx: number
+  isToday: boolean
+}) {
+  const { dayIdx, isToday } = args
+
+  return [
+    'relative min-w-0',
+    'border-l',
+    dayIdx === 0 ? 'border-l-0' : '',
+    isToday ? 'border-terra/45' : 'border-[var(--line)]',
+  ].join(' ')
+}
+
+function columnStyle(args: {
+  dayIdx: number
+  isToday: boolean
+}): CSSProperties {
+  const { dayIdx, isToday } = args
+
+  if (isToday) {
+    return {
+      backgroundColor: 'rgb(var(--terra) / 0.14)',
+      boxShadow:
+        'inset 1px 0 0 rgb(var(--terra) / 0.45), inset -1px 0 0 rgb(var(--terra) / 0.26)',
+    }
+  }
+
+  if (dayIdx % 2 === 1) {
+    return {
+      backgroundColor: 'rgb(var(--paper) / 0.026)',
+    }
+  }
+
+  return {
+    backgroundColor: 'transparent',
+  }
+}
+
+function gridMarkStyle(isToday: boolean): CSSProperties {
+  return {
+    borderColor: isToday
+      ? 'rgb(var(--terra) / 0.16)'
+      : 'rgb(var(--paper) / 0.04)',
+  }
+}
+
+function sideRuleStyle(args: {
+  side: 'left' | 'right'
+  isToday: boolean
+}): CSSProperties {
+  const { side, isToday } = args
+
+  if (!isToday) {
+    return {
+      backgroundColor: 'rgb(var(--paper) / 0.055)',
+    }
+  }
+
+  return {
+    backgroundColor:
+      side === 'left'
+        ? 'rgb(var(--terra) / 0.60)'
+        : 'rgb(var(--terra) / 0.32)',
+  }
+}
+
+function todayOverlayStyle(): CSSProperties {
+  return {
+    background:
+      'linear-gradient(180deg, rgb(var(--terra) / 0.12) 0%, rgb(var(--terra) / 0.06) 42%, rgb(var(--terra) / 0.10) 100%)',
+  }
+}
+
+function renderPositionStyle(startMinutes: number, endMinutes: number) {
+  return {
+    top: startMinutes * PX_PER_MINUTE,
+    height: (endMinutes - startMinutes) * PX_PER_MINUTE,
+  }
+}
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export function DayColumn(props: DayColumnProps) {
   const {
@@ -434,7 +505,7 @@ export function DayColumn(props: DayColumnProps) {
             timeFormatter,
           }),
         }))
-        .filter((item) => item.layout !== null),
+        .filter((item): item is EventLayoutItem => item.layout !== null),
     [dayEvents, dayYmd, timeFormatter, timeZone, stepMinutes],
   )
 
@@ -448,10 +519,9 @@ export function DayColumn(props: DayColumnProps) {
       data-cal-col="1"
       data-calendar-day={dayYmd}
       data-calendar-days-visible={visibleDaysCount}
-      className={[
-        'relative min-w-0',
-        dayIdx === 0 ? 'border-l-0' : 'border-l border-[var(--line)]',
-      ].join(' ')}
+      data-calendar-today={isToday ? '1' : '0'}
+      className={columnClassName({ dayIdx, isToday })}
+      style={columnStyle({ dayIdx, isToday })}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault()
@@ -476,37 +546,34 @@ export function DayColumn(props: DayColumnProps) {
         style={{ height: TOTAL_MINUTES * PX_PER_MINUTE }}
       >
         <div
-          className="pointer-events-none absolute inset-y-0 right-0 w-px bg-[var(--paper)]/[0.08]"
-          aria-hidden="true"
-        />
-
-        <div
-          className={[
-            'pointer-events-none absolute inset-0',
-            dayIdx % 2 === 1
-              ? 'bg-[var(--paper)]/[0.018]'
-              : 'bg-transparent',
-          ].join(' ')}
+          className="pointer-events-none absolute inset-y-0 right-0 w-px"
+          style={sideRuleStyle({ side: 'right', isToday })}
           aria-hidden="true"
         />
 
         {isToday ? (
-          <div
-            className="pointer-events-none absolute inset-0 bg-[var(--terra)]/[0.055]"
-            aria-hidden="true"
-          />
+          <>
+            <div
+              className="pointer-events-none absolute inset-y-0 left-0 w-px"
+              style={sideRuleStyle({ side: 'left', isToday })}
+              aria-hidden="true"
+            />
+
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={todayOverlayStyle()}
+              aria-hidden="true"
+            />
+          </>
         ) : null}
 
         {GRID_MARKS.map((mark) => (
           <div
             key={mark.minute}
-            className={gridMarkClass(mark.emphasis)}
+            className="pointer-events-none absolute left-0 right-0 border-t"
             style={{
-              position: 'absolute',
               top: mark.minute * PX_PER_MINUTE,
-              left: 0,
-              right: 0,
-              pointerEvents: 'none',
+              ...gridMarkStyle(isToday),
             }}
             aria-hidden="true"
           />
@@ -515,15 +582,8 @@ export function DayColumn(props: DayColumnProps) {
         {schedule.outsideHoursSegments.map((segment) => (
           <div
             key={segment.key}
-            className={[
-              'pointer-events-none absolute left-0 right-0',
-              'bg-black/45 backdrop-blur-[1px]',
-            ].join(' ')}
-            style={{
-              top: segment.startMinutes * PX_PER_MINUTE,
-              height:
-                (segment.endMinutes - segment.startMinutes) * PX_PER_MINUTE,
-            }}
+            className="pointer-events-none absolute left-0 right-0 hidden bg-black/[0.12] md:block"
+            style={renderPositionStyle(segment.startMinutes, segment.endMinutes)}
             aria-hidden="true"
           />
         ))}
@@ -531,12 +591,11 @@ export function DayColumn(props: DayColumnProps) {
         {schedule.overlays.map((overlay) => (
           <div
             key={overlay.locationType}
-            className="pointer-events-none absolute left-0 right-0 px-1"
-            style={{
-              top: overlay.startMinutes * PX_PER_MINUTE,
-              height:
-                (overlay.endMinutes - overlay.startMinutes) * PX_PER_MINUTE,
-            }}
+            className="pointer-events-none absolute left-1 right-1 hidden md:block"
+            style={renderPositionStyle(
+              overlay.startMinutes,
+              overlay.endMinutes,
+            )}
             aria-hidden="true"
           >
             <div
@@ -548,39 +607,31 @@ export function DayColumn(props: DayColumnProps) {
                   : '',
               ].join(' ')}
             />
-
-            <div className="absolute inset-x-1 top-0 h-10 rounded-t-xl bg-gradient-to-b from-white/[0.06] to-transparent" />
           </div>
         ))}
 
-        {eventLayouts.map((item) => {
-          const { event, layout } = item
-
-          if (!layout) return null
-
-          return (
-            <EventCard
-              key={event.id}
-              ev={event}
-              entityType={layout.entityType}
-              apiId={layout.apiId}
-              topPx={layout.topPx}
-              heightPx={layout.heightPx}
-              timeLabel={layout.timeLabel}
-              compact={layout.compact}
-              micro={layout.micro}
-              day={day}
-              startMinutes={layout.startMinutes}
-              originalDuration={layout.durationMinutes}
-              getColumnTop={getColumnTop}
-              suppressClickRef={suppressClickRef}
-              onClickEvent={onClickEvent}
-              onDragStart={onDragStart}
-              onDropOnDayColumn={onDropOnDayColumn}
-              onBeginResize={onBeginResize}
-            />
-          )
-        })}
+        {eventLayouts.map(({ event, layout }) => (
+          <EventCard
+            key={event.id}
+            ev={event}
+            entityType={layout.entityType}
+            apiId={layout.apiId}
+            topPx={layout.topPx}
+            heightPx={layout.heightPx}
+            timeLabel={layout.timeLabel}
+            compact={layout.compact}
+            micro={layout.micro}
+            day={day}
+            startMinutes={layout.startMinutes}
+            originalDuration={layout.durationMinutes}
+            getColumnTop={getColumnTop}
+            suppressClickRef={suppressClickRef}
+            onClickEvent={onClickEvent}
+            onDragStart={onDragStart}
+            onDropOnDayColumn={onDropOnDayColumn}
+            onBeginResize={onBeginResize}
+          />
+        ))}
       </div>
     </div>
   )

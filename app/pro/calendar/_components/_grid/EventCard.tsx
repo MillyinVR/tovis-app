@@ -14,6 +14,7 @@ import {
   calendarStatusMeta,
   eventAccentBgClassName,
   eventCardClasses,
+  type StatusTone,
 } from '../../_utils/statusStyles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -68,12 +69,8 @@ const FALLBACK_CLIENT_LABEL = 'Client'
 const FALLBACK_BOOKING_LABEL = 'Appointment'
 const FALLBACK_BLOCK_LABEL = 'Personal time'
 
-/**
- * Diagonal stripe pattern for blocked/break slots.
- * Uses CSS custom properties so it white-labels cleanly.
- */
 const BLOCKED_BG =
-  'repeating-linear-gradient(45deg, rgb(var(--paper) / 0.04) 0 6px, transparent 6px 14px)'
+  'repeating-linear-gradient(45deg, rgb(var(--paper) / 0.05) 0 5px, transparent 5px 12px)'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
@@ -94,6 +91,7 @@ function serviceItemCountLabel(event: CalendarEvent) {
   if (event.kind === 'BLOCK') return null
 
   const serviceCount = event.details.serviceItems.length
+
   if (serviceCount <= 1) return null
 
   return `${serviceCount} services`
@@ -106,11 +104,6 @@ function buildEventCardCopy(args: {
   const { event, statusLabel } = args
 
   if (event.kind === 'BLOCK') {
-    // Only use `event.note` — the user-entered label (e.g. "Lunch", "Hold").
-    // `event.title` is a system/API field that defaults to "Blocked", giving us
-    // nothing useful and causing micro cards to show a single "B". The diagonal
-    // stripe + accent bar already communicate that this is blocked time; the note
-    // is the only copy that adds actual information.
     const note = normalizeText(event.note)
 
     return {
@@ -143,16 +136,72 @@ function cardTitle(event: CalendarEvent) {
 
 function cardAriaLabel(args: { copy: EventCardCopy; timeLabel: string }) {
   const { copy, timeLabel } = args
-  return `${copy.primary}, ${copy.secondary}, ${copy.status}, ${timeLabel}`
+
+  return [copy.primary, copy.secondary, copy.status, timeLabel]
+    .filter((part) => part.trim().length > 0)
+    .join(', ')
 }
 
-/**
- * Dark gradient surface for booking cards; empty string for blocked (uses
- * inline style instead — gradients can't be expressed as Tailwind utilities).
- */
-function cardSurfaceClass(isBlocked: boolean): string {
-  if (isBlocked) return ''
-  return 'bg-gradient-to-br from-bgSecondary/95 to-bgSurface/95'
+function cardSurfaceOverlayClass(isBlocked: boolean) {
+  return [
+    'before:pointer-events-none before:absolute before:inset-0',
+    isBlocked
+      ? 'before:bg-gradient-to-br before:from-paper/[0.06] before:to-transparent'
+      : 'before:bg-gradient-to-br before:from-paper/[0.12] before:via-transparent before:to-black/[0.10]',
+  ].join(' ')
+}
+
+function statusBackgroundColor(tone: StatusTone) {
+  switch (tone) {
+    case 'accepted':
+    case 'scheduled':
+      return 'rgb(var(--terra) / 0.36)'
+    case 'pending':
+      return 'rgb(var(--amber) / 0.38)'
+    case 'completed':
+      return 'rgb(var(--fern) / 0.32)'
+    case 'danger':
+      return 'rgb(var(--ember) / 0.32)'
+    case 'blocked':
+      return 'rgb(var(--paper) / 0.08)'
+    default:
+      return 'rgb(var(--terra) / 0.36)'
+  }
+}
+
+function statusBoxShadow(tone: StatusTone) {
+  switch (tone) {
+    case 'accepted':
+    case 'scheduled':
+      return '0 0 0 1px rgb(var(--terra) / 0.28), 0 8px 18px rgb(0 0 0 / 0.42)'
+    case 'pending':
+      return '0 0 0 1px rgb(var(--amber) / 0.32), 0 8px 18px rgb(0 0 0 / 0.42)'
+    case 'completed':
+      return '0 0 0 1px rgb(var(--fern) / 0.28), 0 8px 18px rgb(0 0 0 / 0.42)'
+    case 'danger':
+      return '0 0 0 1px rgb(var(--ember) / 0.28), 0 8px 18px rgb(0 0 0 / 0.42)'
+    case 'blocked':
+      return '0 0 0 1px rgb(var(--paper) / 0.14), 0 8px 18px rgb(0 0 0 / 0.36)'
+    default:
+      return '0 0 0 1px rgb(var(--terra) / 0.28), 0 8px 18px rgb(0 0 0 / 0.42)'
+  }
+}
+
+function eventCardPositionStyle(args: {
+  topPx: number
+  heightPx: number
+  statusTone: StatusTone
+  isBlocked: boolean
+}): CSSProperties {
+  const { topPx, heightPx, statusTone, isBlocked } = args
+
+  return {
+    top: topPx,
+    height: heightPx,
+    backgroundColor: statusBackgroundColor(statusTone),
+    backgroundImage: isBlocked ? BLOCKED_BG : undefined,
+    boxShadow: statusBoxShadow(statusTone),
+  }
 }
 
 function openOnKeyboard(args: {
@@ -172,20 +221,77 @@ function openOnKeyboard(args: {
   onClickEvent(eventId)
 }
 
+function innerPaddingClassName(args: {
+  compact: boolean
+  micro: boolean
+}) {
+  const { compact, micro } = args
+
+  if (micro) return 'py-1 pl-2.5 pr-1.5'
+  if (compact) return 'py-1.5 pl-2.5 pr-2'
+
+  return 'py-2 pl-3 pr-2'
+}
+
+function rootClassName(args: {
+  isBlocked: boolean
+  border: string
+  ring?: string
+}) {
+  const { isBlocked, border, ring } = args
+
+  return [
+    'absolute left-0.5 right-0.5 z-20 overflow-hidden rounded-[7px] border',
+    'md:left-1 md:right-1 md:rounded-xl',
+    'text-left text-paper',
+    'transition-transform duration-150 md:hover:scale-[1.01] active:scale-[0.995]',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+    cardSurfaceOverlayClass(isBlocked),
+    border,
+    ring ?? '',
+  ].join(' ')
+}
+
+function primaryTextClassName(args: {
+  compact: boolean
+  micro: boolean
+  isBlocked: boolean
+}) {
+  const { compact, micro, isBlocked } = args
+
+  return [
+    'min-w-0 flex-1 truncate leading-none drop-shadow-[0_1px_1px_rgb(0_0_0_/_0.45)]',
+    isBlocked
+      ? 'font-mono uppercase tracking-[0.08em]'
+      : 'font-display italic tracking-[-0.025em]',
+    micro ? 'text-[9px]' : compact ? 'text-[10px]' : 'text-[11px]',
+    isBlocked ? 'font-bold text-paperDim' : 'font-semibold text-paper',
+  ].join(' ')
+}
+
+function secondaryTextClassName(compact: boolean) {
+  return [
+    'mt-0.5 truncate font-sans leading-tight text-paperDim',
+    compact ? 'text-[8px]' : 'text-[9px]',
+  ].join(' ')
+}
+
+function timeTextClassName(compact: boolean) {
+  return [
+    'mt-auto truncate font-mono uppercase tracking-[0.04em] text-paperMute',
+    compact ? 'pt-0.5 text-[7px]' : 'pt-1 text-[8px]',
+  ].join(' ')
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-/**
- * Inline pill shown on PENDING / RESCHEDULE_REQUESTED cards next to the
- * client name. Uses toneWarn from the design-token layer — not a hardcoded color.
- */
 function PendingBadge() {
   return (
     <span
       className={[
-        'inline-flex shrink-0 items-center',
-        'rounded-sm border border-toneWarn/30 bg-toneWarn/10',
-        'px-1.5 py-px',
-        'font-mono text-[8px] font-black uppercase tracking-[0.08em] text-toneWarn',
+        'hidden shrink-0 items-center rounded-sm border border-tonePending/35 bg-tonePending/15',
+        'px-1 py-px font-mono text-[7px] font-black uppercase tracking-[0.08em] text-tonePending',
+        'md:inline-flex',
       ].join(' ')}
     >
       Request
@@ -193,15 +299,12 @@ function PendingBadge() {
   )
 }
 
-/**
- * Small checkmark shown on COMPLETED cards next to the client name.
- */
 function CompletedCheck() {
   return (
-    <span className="shrink-0 text-toneSuccess" aria-hidden="true">
+    <span className="hidden shrink-0 text-fern md:inline-flex" aria-hidden="true">
       <svg
-        width="11"
-        height="11"
+        width="10"
+        height="10"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -215,7 +318,7 @@ function CompletedCheck() {
   )
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export function EventCard(props: EventCardProps) {
   const {
@@ -242,24 +345,18 @@ export function EventCard(props: EventCardProps) {
   const statusMeta = calendarStatusMeta({ status: ev.status, isBlocked })
   const card = eventCardClasses({ status: ev.status, isBlocked })
   const accent = eventAccentBgClassName({ status: ev.status, isBlocked })
-
   const copy = buildEventCardCopy({ event: ev, statusLabel: statusMeta.label })
 
   const isPending = statusMeta.tone === 'pending'
   const isCompleted = statusMeta.tone === 'completed'
   const canDragOrResize = apiId !== null
 
-  const innerPadding = micro
-    ? 'py-1 pl-3.5 pr-2'
-    : compact
-      ? 'py-2 pl-3.5 pr-2.5'
-      : 'py-2.5 pl-4 pr-3'
-
   return (
     <div
       data-cal-event="1"
       data-calendar-event-kind={ev.kind}
       data-calendar-event-status={statusMeta.normalizedStatus || 'SCHEDULED'}
+      data-calendar-event-tone={statusMeta.tone}
       role="button"
       tabIndex={0}
       aria-label={cardAriaLabel({ copy, timeLabel })}
@@ -296,118 +393,84 @@ export function EventCard(props: EventCardProps) {
           onClickEvent,
         })
       }}
-      className={[
-        'absolute left-1 right-1 z-20 overflow-hidden rounded-2xl border',
-        'text-left text-[var(--paper)]',
-        'shadow-[0_6px_16px_rgb(0_0_0/0.45)]',
-        'transition-transform duration-150 md:hover:scale-[1.01] active:scale-[0.995]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-        cardSurfaceClass(isBlocked),
-        card.border,
-        card.ring ?? '',
-      ].join(' ')}
-      style={{
-        top: topPx,
-        height: heightPx,
-        background: isBlocked ? BLOCKED_BG : undefined,
-      }}
+      className={rootClassName({
+        isBlocked,
+        border: card.border,
+        ring: card.ring,
+      })}
+      style={eventCardPositionStyle({
+        topPx,
+        heightPx,
+        statusTone: statusMeta.tone,
+        isBlocked,
+      })}
       title={cardTitle(ev)}
     >
-      {/* Left accent bar — color driven by statusStyles, single source of truth */}
       <div
-        className={['absolute inset-y-0 left-0 w-1.5', accent].join(' ')}
+        className={['absolute inset-y-0 left-0 w-0.5 md:w-1', accent].join(' ')}
         aria-hidden="true"
       />
 
-      {/* Dashed border overlay for blocked slots */}
       {isBlocked ? (
         <div
-          className="pointer-events-none absolute inset-0 rounded-2xl border border-dashed border-white/10"
+          className="pointer-events-none absolute inset-0 rounded-[7px] border border-dashed border-paper/10 md:rounded-xl"
           aria-hidden="true"
         />
       ) : null}
 
-      {/* ── Card content ── */}
       <div
         className={[
-          'relative flex h-full flex-col',
-          innerPadding,
+          'relative flex h-full min-w-0 flex-col',
+          innerPaddingClassName({ compact, micro }),
         ].join(' ')}
       >
         {micro ? (
-          // ── Micro layout: single cramped row ──────────────────────────
-          // copy.primary for BLOCK events is now the note/title ("Lunch", "Personal
-          // time" etc.) so no secondary fallback needed here.
-          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-1">
             <span
-              className="min-w-0 flex-1 truncate font-sans text-[11px] font-bold leading-none text-[var(--paper)]"
+              className={primaryTextClassName({
+                compact,
+                micro,
+                isBlocked,
+              })}
             >
               {isBlocked ? copy.primary.toUpperCase() : copy.primary}
             </span>
-
-            <span className="shrink-0 font-mono text-[8px] text-[var(--paper-mute)]">
-              {timeLabel}
-            </span>
           </div>
         ) : (
-          // ── Standard layout: name → service → time ────────────────────
           <>
-            {/* Row 1: client name + inline status markers */}
-            <div className="flex min-w-0 items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1">
               <span
-                className="min-w-0 flex-1 truncate font-sans font-bold leading-none text-[var(--paper)]"
+                className={primaryTextClassName({
+                  compact,
+                  micro,
+                  isBlocked,
+                })}
                 style={textClampStyle({ lines: 1 })}
-                // font-size scales with compact to keep density consistent
               >
-                <span
-                  className={compact ? 'text-[12px]' : 'text-[13px]'}
-                >
-                  {isBlocked ? copy.primary.toUpperCase() : copy.primary}
-                </span>
+                {isBlocked ? copy.primary.toUpperCase() : copy.primary}
               </span>
 
               {isPending ? <PendingBadge /> : null}
               {isCompleted ? <CompletedCheck /> : null}
             </div>
 
-            {/* Row 2: service name (booking only) — serif italic */}
             {!isBlocked ? (
               <p
-                className={[
-                  'mt-1 font-display italic leading-snug text-[var(--paper-dim)]',
-                  compact ? 'text-[10px]' : 'text-[11px]',
-                ].join(' ')}
+                className={secondaryTextClassName(compact)}
                 style={textClampStyle({ lines: compact ? 1 : 2 })}
               >
                 {copy.secondary}
               </p>
-            ) : (
-              // Blocked: show "Break" sub-label when present (empty for unnamed blocks)
-              copy.secondary ? (
-                <p
-                  className={[
-                    'mt-0.5 truncate text-[var(--paper-mute)]',
-                    compact ? 'text-[9px]' : 'text-[10px]',
-                  ].join(' ')}
-                >
-                  {copy.secondary}
-                </p>
-              ) : null
-            )}
+            ) : copy.secondary ? (
+              <p className="mt-0.5 truncate font-mono text-[7px] uppercase tracking-[0.06em] text-paperMute">
+                {copy.secondary}
+              </p>
+            ) : null}
 
-            {/* Row 3: time — pushed to bottom, mono */}
-            <p
-              className={[
-                'mt-auto truncate font-mono text-[var(--paper-mute)] tracking-[0.04em]',
-                compact ? 'pt-1 text-[8px]' : 'pt-1.5 text-[9px]',
-              ].join(' ')}
-            >
-              {timeLabel}
-            </p>
+            <p className={timeTextClassName(compact)}>{timeLabel}</p>
           </>
         )}
 
-        {/* Resize handle — always last so it's above content in the stacking context */}
         <button
           type="button"
           onMouseDown={(mouseEvent) => {
@@ -430,6 +493,7 @@ export function EventCard(props: EventCardProps) {
             'absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize',
             'bg-white/0 transition hover:bg-white/10',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+            canDragOrResize ? '' : 'cursor-default',
           ].join(' ')}
           aria-label={`Resize ${copy.primary}`}
           disabled={!canDragOrResize}

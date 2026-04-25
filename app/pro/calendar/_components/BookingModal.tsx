@@ -14,6 +14,8 @@ import {
   eventBadgeClassName,
 } from '../_utils/statusStyles'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type BookingModalProps = {
   open: boolean
   loading: boolean
@@ -54,8 +56,12 @@ type BookingLocationMeta = {
 
 type ButtonTone = 'primary' | 'default' | 'danger' | 'ghost'
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const DEFAULT_DURATION_MINUTES = 60
 const TIME_INPUT_STEP_SECONDS = 15 * 60
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function normalizeText(value: string | null | undefined) {
   return typeof value === 'string' ? value.trim() : ''
@@ -109,7 +115,9 @@ function messageHrefForBooking(bookingId: string) {
   )}`
 }
 
-function locationModeLabel(locationType: BookingDetails['locationType']) {
+function locationModeLabel(
+  locationType: BookingDetails['locationType'] | null | undefined,
+) {
   return locationType === 'MOBILE' ? 'Mobile' : 'In-salon'
 }
 
@@ -169,7 +177,7 @@ function buttonClassName(tone: ButtonTone = 'default') {
   if (tone === 'primary') {
     return [
       base,
-      'border border-accentPrimary/30 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
     ].join(' ')
   }
 
@@ -183,27 +191,32 @@ function buttonClassName(tone: ButtonTone = 'default') {
   if (tone === 'ghost') {
     return [
       base,
-      'border border-[var(--line)] bg-transparent text-[var(--paper-mute)] hover:bg-[var(--paper)]/[0.05] hover:text-[var(--paper)]',
+      'border border-[var(--line)] bg-transparent text-paperMute',
+      'hover:bg-paper/5 hover:text-paper',
     ].join(' ')
   }
 
   return [
     base,
-    'border border-[var(--line)] bg-[var(--paper)]/[0.04] text-[var(--paper)] hover:bg-[var(--paper)]/[0.07]',
+    'border border-[var(--line)] bg-paper/[0.04] text-paper hover:bg-paper/[0.07]',
   ].join(' ')
 }
 
 function fieldClassName() {
   return [
-    'w-full rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2',
-    'text-sm font-semibold text-[var(--paper)]',
+    'w-full rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2',
+    'text-sm font-semibold text-paper',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
     'disabled:cursor-not-allowed disabled:opacity-60',
   ].join(' ')
 }
 
 function checkboxClassName() {
-  return 'h-4 w-4 rounded border-[var(--line)] bg-[var(--ink-2)]'
+  return [
+    'h-4 w-4 rounded border-[var(--line)] bg-ink2',
+    'accent-accentPrimary',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+  ].join(' ')
 }
 
 function lockBodyScroll(open: boolean) {
@@ -236,6 +249,8 @@ function closeOnEscape(args: {
 
   return () => window.removeEventListener('keydown', onKeyDown)
 }
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export function BookingModal(props: BookingModalProps) {
   const {
@@ -312,8 +327,12 @@ export function BookingModal(props: BookingModalProps) {
   const isPending = isPendingBooking(booking)
   const noServicesSelected = selectedDraftServiceIds.length === 0
   const saveBlockedByOutsideHours = editOutside && !allowOutsideHours
+
   const canSave =
-    Boolean(booking) && !saving && !noServicesSelected && !saveBlockedByOutsideHours
+    Boolean(booking) &&
+    !saving &&
+    !noServicesSelected &&
+    !saveBlockedByOutsideHours
 
   const statusMeta = booking
     ? calendarStatusMeta({
@@ -323,6 +342,7 @@ export function BookingModal(props: BookingModalProps) {
     : null
 
   useEffect(() => lockBodyScroll(open), [open])
+
   useEffect(
     () =>
       closeOnEscape({
@@ -368,8 +388,8 @@ export function BookingModal(props: BookingModalProps) {
       <div
         className={[
           'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-[24px]',
-          'border border-[var(--line-strong)] bg-[var(--ink)]',
-          'shadow-[0_28px_90px_rgb(0_0_0/0.62)]',
+          'border border-[var(--line-strong)] bg-ink',
+          'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
           'sm:max-w-[52rem] sm:rounded-[24px]',
         ].join(' ')}
         onMouseDown={(event) => event.stopPropagation()}
@@ -377,25 +397,25 @@ export function BookingModal(props: BookingModalProps) {
         aria-modal="true"
         aria-labelledby="booking-modal-title"
       >
-        <header className="border-b border-[var(--line-strong)] bg-[var(--ink)]/92 px-4 py-4 backdrop-blur-xl sm:px-5">
-          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[var(--paper)]/20 sm:hidden" />
+        <header className="border-b border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-paper/20 sm:hidden" />
 
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[var(--terra-glow)]">
+              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
                 ◆ Appointment
               </p>
 
               <h2
                 id="booking-modal-title"
-                className="mt-1 truncate font-display text-3xl font-semibold italic tracking-[-0.05em] text-[var(--paper)]"
+                className="mt-1 truncate font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper"
               >
                 {booking ? bookingLabel : 'Appointment details'}
               </h2>
 
               {booking && statusMeta ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-[var(--line)] bg-[var(--paper)]/[0.04] px-2.5 py-1 font-mono text-[10px] font-black uppercase tracking-[0.08em] text-[var(--paper)]">
+                  <span className="rounded-full border border-[var(--line)] bg-paper/[0.04] px-2.5 py-1 font-mono text-[10px] font-black uppercase tracking-[0.08em] text-paper">
                     {modeLabel}
                   </span>
 
@@ -427,13 +447,9 @@ export function BookingModal(props: BookingModalProps) {
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
-          {loading ? (
-            <StateCard>Loading booking…</StateCard>
-          ) : null}
+          {loading ? <StateCard>Loading booking…</StateCard> : null}
 
-          {error ? (
-            <StateCard danger>{error}</StateCard>
-          ) : null}
+          {error ? <StateCard danger>{error}</StateCard> : null}
 
           {!loading && !booking ? (
             <StateCard>Booking details are not available.</StateCard>
@@ -452,13 +468,14 @@ export function BookingModal(props: BookingModalProps) {
               />
 
               {isPending ? (
-                <section className="rounded-2xl border border-toneWarn/25 bg-toneWarn/10 p-4">
+                <section className="rounded-2xl border border-tonePending/25 bg-tonePending/10 p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="font-mono text-[10px] font-black uppercase tracking-[0.14em] text-toneWarn">
+                      <p className="font-mono text-[10px] font-black uppercase tracking-[0.14em] text-tonePending">
                         Pending request
                       </p>
-                      <p className="mt-1 text-sm leading-6 text-[var(--paper-dim)]">
+
+                      <p className="mt-1 text-sm leading-6 text-paperDim">
                         Approve this booking or deny it from here.
                       </p>
                     </div>
@@ -486,7 +503,7 @@ export function BookingModal(props: BookingModalProps) {
                 </section>
               ) : null}
 
-              <section className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4">
+              <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
                 <SectionHeading
                   title="Edit appointment"
                   description="Change the appointment time, services, and client notification settings."
@@ -541,16 +558,17 @@ export function BookingModal(props: BookingModalProps) {
                 />
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-                  <div className="rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2">
-                    <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+                  <div className="rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2">
+                    <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
                       Total duration
                     </p>
-                    <p className="mt-1 text-sm font-black text-[var(--paper)]">
+
+                    <p className="mt-1 text-sm font-black text-paper">
                       {totalDuration} minutes
                     </p>
                   </div>
 
-                  <label className="flex items-center gap-2 text-sm font-semibold text-[var(--paper-dim)]">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-paperDim">
                     <input
                       type="checkbox"
                       checked={notifyClient}
@@ -580,7 +598,7 @@ export function BookingModal(props: BookingModalProps) {
           ) : null}
         </div>
 
-        <footer className="border-t border-[var(--line-strong)] bg-[var(--ink)]/92 px-4 py-4 backdrop-blur-xl sm:px-5">
+        <footer className="border-t border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             {booking ? (
               <a
@@ -622,6 +640,8 @@ export function BookingModal(props: BookingModalProps) {
   )
 }
 
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
 function BookingSummary(props: {
   booking: BookingDetails
   bookingLabel: string
@@ -644,7 +664,7 @@ function BookingSummary(props: {
   const subtotal = formatMoneySnapshot(booking.subtotalSnapshot)
 
   return (
-    <section className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4">
+    <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
       <SectionHeading
         title={bookingLabel}
         description="Client, timing, location, and payment snapshot."
@@ -665,12 +685,12 @@ function BookingSummary(props: {
         <SummaryRow label="Mode">{modeLabel}</SummaryRow>
 
         {booking.locationType === 'MOBILE' ? (
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--ink-2)] p-3">
-            <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+          <div className="rounded-xl border border-[var(--line)] bg-ink2 p-3">
+            <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
               Mobile destination
             </p>
 
-            <p className="mt-1 text-sm font-semibold text-[var(--paper)]">
+            <p className="mt-1 text-sm font-semibold text-paper">
               {locationMeta.address ||
                 'Address will appear here when booking location snapshots are returned.'}
             </p>
@@ -680,10 +700,7 @@ function BookingSummary(props: {
                 href={mapsUrl}
                 target="_blank"
                 rel="noreferrer"
-                className={[
-                  'mt-3 inline-flex',
-                  buttonClassName('default'),
-                ].join(' ')}
+                className={['mt-3 inline-flex', buttonClassName()].join(' ')}
               >
                 Open in Maps
               </a>
@@ -705,12 +722,12 @@ function SectionHeading(props: {
 
   return (
     <div>
-      <h3 className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-[var(--paper)]">
+      <h3 className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-paper">
         {title}
       </h3>
 
       {description ? (
-        <p className="mt-1 text-sm leading-6 text-[var(--paper-dim)]">
+        <p className="mt-1 text-sm leading-6 text-paperDim">
           {description}
         </p>
       ) : null}
@@ -725,12 +742,12 @@ function SummaryRow(props: {
   const { label, children } = props
 
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2 text-sm font-semibold text-[var(--paper-dim)]">
-      <span className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+    <div className="rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2 text-sm font-semibold text-paperDim">
+      <span className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
         {label}
       </span>
 
-      <div className="mt-1 text-[var(--paper)]">{children}</div>
+      <div className="mt-1 text-paper">{children}</div>
     </div>
   )
 }
@@ -743,7 +760,7 @@ function Field(props: {
 
   return (
     <label className="block">
-      <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+      <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
         {label}
       </span>
 
@@ -765,12 +782,12 @@ function OutsideHoursNotice(props: {
         Outside working hours
       </p>
 
-      <p className="mt-1 text-sm leading-6 text-[var(--paper-dim)]">
+      <p className="mt-1 text-sm leading-6 text-paperDim">
         This change falls outside your configured hours. You can still schedule
         it with a pro override.
       </p>
 
-      <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-[var(--paper-dim)]">
+      <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-paperDim">
         <input
           type="checkbox"
           checked={allowOutsideHours}
@@ -804,32 +821,34 @@ function ServicePicker(props: {
   return (
     <div className="mt-4">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+        <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
           Select services
         </p>
 
-        <span className="font-mono text-[9px] font-black uppercase tracking-[0.08em] text-[var(--paper-mute)]">
+        <span className="font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paperMute">
           {selectedDraftServiceIds.length} selected
         </span>
       </div>
 
       {services.length > 0 ? (
-        <div className="rounded-2xl border border-[var(--line)] bg-[var(--ink-2)] p-3">
+        <div className="rounded-2xl border border-[var(--line)] bg-ink2 p-3">
           <div className="grid gap-2">
             {services.map((service) => {
               const checked = selectedServiceIds.has(service.id)
+
               const duration =
                 typeof service.durationMinutes === 'number' &&
                 Number.isFinite(service.durationMinutes) &&
                 service.durationMinutes > 0
                   ? service.durationMinutes
                   : null
+
               const price = formatMoneySnapshot(service.priceStartingAt)
 
               return (
                 <label
                   key={service.id}
-                  className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--paper)]/[0.025] px-3 py-2"
+                  className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-paper/[0.025] px-3 py-2"
                 >
                   <input
                     type="checkbox"
@@ -842,12 +861,14 @@ function ServicePicker(props: {
                   />
 
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-black text-[var(--paper)]">
+                    <span className="block truncate text-sm font-black text-paper">
                       {service.name}
                     </span>
 
-                    <span className="block text-xs font-semibold text-[var(--paper-mute)]">
-                      {duration !== null ? `${duration} min` : 'Duration not set'}
+                    <span className="block text-xs font-semibold text-paperMute">
+                      {duration !== null
+                        ? `${duration} min`
+                        : 'Duration not set'}
                       {price ? ` · ${price}` : ''}
                     </span>
                   </span>
@@ -872,36 +893,36 @@ function CurrentServiceItems(props: {
   return (
     <div className="mt-4">
       <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+        <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
           Current service items
         </p>
 
         {hasChanges ? (
-          <span className="rounded-full border border-[var(--line)] bg-[var(--paper)]/[0.04] px-2 py-1 font-mono text-[9px] font-black uppercase tracking-[0.08em] text-[var(--paper)]">
+          <span className="rounded-full border border-[var(--line)] bg-paper/[0.04] px-2 py-1 font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paper">
             Unsaved changes
           </span>
         ) : null}
       </div>
 
       {items.length > 0 ? (
-        <div className="rounded-2xl border border-[var(--line)] bg-[var(--ink-2)] p-3">
+        <div className="rounded-2xl border border-[var(--line)] bg-ink2 p-3">
           <div className="grid gap-2">
             {items.map((item) => (
               <div
                 key={item.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-[var(--line)] bg-[var(--paper)]/[0.025] px-3 py-2"
+                className="flex items-center justify-between gap-3 rounded-xl border border-[var(--line)] bg-paper/[0.025] px-3 py-2"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-black text-[var(--paper)]">
+                  <p className="truncate text-sm font-black text-paper">
                     {item.serviceName}
                   </p>
 
-                  <p className="text-xs font-semibold text-[var(--paper-mute)]">
+                  <p className="text-xs font-semibold text-paperMute">
                     {item.itemType === 'BASE' ? 'Base service' : 'Add-on'}
                   </p>
                 </div>
 
-                <div className="shrink-0 text-right text-xs font-semibold text-[var(--paper-mute)]">
+                <div className="shrink-0 text-right text-xs font-semibold text-paperMute">
                   <p>{item.durationMinutesSnapshot} min</p>
                   <p>{formatMoneySnapshot(item.priceSnapshot)}</p>
                 </div>
@@ -928,7 +949,7 @@ function StateCard(props: {
         'rounded-2xl border px-3 py-3 text-sm font-semibold',
         danger
           ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-[var(--paper)]/[0.03] text-[var(--paper-dim)]',
+          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
       ].join(' ')}
     >
       {children}

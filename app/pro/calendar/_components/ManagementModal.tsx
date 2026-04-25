@@ -13,6 +13,8 @@ import {
   eventChipClassName,
 } from '../_utils/statusStyles'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type ManagementModalProps = {
   open: boolean
   activeKey: ManagementKey
@@ -46,6 +48,8 @@ type EventRowCopy = {
   timeLabel: string
   statusLabel: string
 }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const MANAGEMENT_TABS: ReadonlyArray<ManagementTab> = [
   {
@@ -84,10 +88,10 @@ const MANAGEMENT_TABS: ReadonlyArray<ManagementTab> = [
 
 const PENDING_STATUS_PRIORITY = 'PENDING'
 
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+
 function tabForKey(key: ManagementKey) {
-  return (
-    MANAGEMENT_TABS.find((tab) => tab.key === key) ?? MANAGEMENT_TABS[0]
-  )
+  return MANAGEMENT_TABS.find((tab) => tab.key === key) ?? MANAGEMENT_TABS[0]
 }
 
 function managementListForKey(management: ManagementLists, key: ManagementKey) {
@@ -100,11 +104,13 @@ function bookingIdFor(event: CalendarEvent) {
 
 function canMessageEvent(key: ManagementKey, event: CalendarEvent) {
   if (isBlockedEvent(event)) return false
+
   return key === 'pendingRequests' || key === 'todaysBookings'
 }
 
 function canModerateEvent(key: ManagementKey, event: CalendarEvent) {
   if (isBlockedEvent(event)) return false
+
   return key === 'pendingRequests'
 }
 
@@ -132,6 +138,7 @@ function initialsFromName(name: string) {
 
 function eventDisplayTimeZone(event: CalendarEvent, viewportTimeZone: string) {
   if (event.kind === 'BOOKING') return event.timeZone
+
   return viewportTimeZone
 }
 
@@ -157,6 +164,7 @@ function formatStartsAt(startsAt: string, timeZone: string) {
 
 function startMs(event: CalendarEvent) {
   const ms = new Date(event.startsAt).getTime()
+
   return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER
 }
 
@@ -267,7 +275,7 @@ function buttonClassName(options?: {
   if (tone === 'primary') {
     return [
       base,
-      'border border-accentPrimary/30 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
     ].join(' ')
   }
 
@@ -281,15 +289,42 @@ function buttonClassName(options?: {
   if (tone === 'ghost') {
     return [
       base,
-      'border border-[var(--line)] bg-transparent text-[var(--paper-mute)] hover:bg-[var(--paper)]/[0.05] hover:text-[var(--paper)]',
+      'border border-[var(--line)] bg-transparent text-paperMute',
+      'hover:bg-paper/5 hover:text-paper',
     ].join(' ')
   }
 
   return [
     base,
-    'border border-[var(--line)] bg-[var(--paper)]/[0.04] text-[var(--paper)] hover:bg-[var(--paper)]/[0.07]',
+    'border border-[var(--line)] bg-paper/[0.04] text-paper hover:bg-paper/[0.07]',
   ].join(' ')
 }
+
+function tabButtonClassName(active: boolean) {
+  return [
+    'shrink-0 rounded-full border px-3 py-2',
+    'font-mono text-[10px] font-black uppercase tracking-[0.08em]',
+    'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+    active
+      ? 'border-paper bg-paper text-ink'
+      : 'border-[var(--line)] bg-transparent text-paperMute hover:bg-paper/5 hover:text-paper',
+  ].join(' ')
+}
+
+function eventArticleClassName(args: {
+  status: string
+  isBlocked: boolean
+}) {
+  const { status, isBlocked } = args
+
+  return [
+    'rounded-2xl border p-4 transition',
+    'bg-paper/[0.03] hover:bg-paper/[0.05]',
+    eventChipClassName({ status, isBlocked }),
+  ].join(' ')
+}
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export function ManagementModal(props: ManagementModalProps) {
   const {
@@ -313,7 +348,11 @@ export function ManagementModal(props: ManagementModalProps) {
   const activeTab = tabForKey(activeKey)
 
   const sortedList = useMemo(
-    () => sortManagementEvents(activeKey, managementListForKey(management, activeKey)),
+    () =>
+      sortManagementEvents(
+        activeKey,
+        managementListForKey(management, activeKey),
+      ),
     [activeKey, management],
   )
 
@@ -328,7 +367,7 @@ export function ManagementModal(props: ManagementModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-1100 flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-6"
+      className="fixed inset-0 z-[1100] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-6"
       onMouseDown={onClose}
       role="dialog"
       aria-modal="true"
@@ -337,26 +376,26 @@ export function ManagementModal(props: ManagementModalProps) {
       <div
         className={[
           'w-full overflow-hidden rounded-t-[24px] border border-[var(--line-strong)]',
-          'bg-[var(--ink)] shadow-[0_28px_80px_rgb(0_0_0/0.60)]',
+          'bg-ink shadow-[0_28px_80px_rgb(0_0_0_/_0.60)]',
           'sm:max-w-[56rem] sm:rounded-[24px]',
         ].join(' ')}
         onMouseDown={stopDialogMouseDown}
       >
-        <div className="sticky top-0 z-10 border-b border-[var(--line-strong)] bg-[var(--ink)]/92 backdrop-blur-xl">
+        <div className="sticky top-0 z-10 border-b border-[var(--line-strong)] bg-ink/95 backdrop-blur-xl">
           <div className="flex items-start justify-between gap-3 p-4 sm:p-5">
             <div className="min-w-0">
-              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[var(--terra-glow)]">
+              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
                 ◆ Calendar management
               </p>
 
               <h2
                 id="calendar-management-title"
-                className="mt-1 truncate font-display text-3xl font-semibold italic tracking-[-0.05em] text-[var(--paper)]"
+                className="mt-1 truncate font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper"
               >
                 {activeTab.title}
               </h2>
 
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--paper-dim)]">
+              <p className="mt-1 max-w-2xl text-sm leading-6 text-paperDim">
                 {activeTab.description}
               </p>
 
@@ -391,17 +430,11 @@ export function ManagementModal(props: ManagementModalProps) {
                     key={tab.key}
                     type="button"
                     onClick={() => onSetKey(tab.key)}
-                    className={[
-                      'shrink-0 rounded-full border px-3 py-2 font-mono text-[10px] font-black uppercase tracking-[0.08em]',
-                      'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-                      active
-                        ? 'border-[var(--paper)] bg-[var(--paper)] text-[var(--ink)]'
-                        : 'border-[var(--line)] bg-transparent text-[var(--paper-mute)] hover:bg-[var(--paper)]/[0.05] hover:text-[var(--paper)]',
-                    ].join(' ')}
+                    className={tabButtonClassName(active)}
                     aria-pressed={active}
                   >
                     {tab.shortTitle}{' '}
-                    <span className={active ? 'text-[var(--ink)]/60' : 'text-[var(--paper-mute)]'}>
+                    <span className={active ? 'text-ink/60' : 'text-paperMute'}>
                       ({count})
                     </span>
                   </button>
@@ -454,28 +487,28 @@ export function ManagementModal(props: ManagementModalProps) {
                   actionBusyId && bookingId && actionBusyId === bookingId,
                 )
 
-                const showMessage = canMessageEvent(activeKey, event) && bookingId
+                const messageBookingId =
+                  canMessageEvent(activeKey, event) && bookingId
+                    ? bookingId
+                    : null
+
                 const showModeration = canModerateEvent(activeKey, event)
 
                 return (
                   <article
                     key={event.id}
-                    className={[
-                      'rounded-2xl border p-4 transition',
-                      'bg-[var(--paper)]/[0.03] hover:bg-[var(--paper)]/[0.05]',
-                      eventChipClassName({
-                        status: event.status,
-                        isBlocked: isBlock,
-                      }),
-                    ].join(' ')}
+                    className={eventArticleClassName({
+                      status: event.status,
+                      isBlocked: isBlock,
+                    })}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-start gap-3">
                         <div
                           className={[
                             'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
-                            'border border-[var(--line)] bg-[var(--ink)]',
-                            'font-mono text-xs font-black text-[var(--paper)]',
+                            'border border-[var(--line)] bg-ink',
+                            'font-mono text-xs font-black text-paper',
                           ].join(' ')}
                           aria-hidden="true"
                         >
@@ -484,13 +517,14 @@ export function ManagementModal(props: ManagementModalProps) {
 
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="truncate font-display text-lg font-semibold italic tracking-[-0.04em] text-[var(--paper)]">
+                            <h3 className="truncate font-display text-lg font-semibold italic tracking-[-0.04em] text-paper">
                               {rowCopy.title}
                             </h3>
 
                             <span
                               className={[
-                                'rounded-full border px-2 py-0.5 font-mono text-[9px] font-black uppercase tracking-[0.08em]',
+                                'rounded-full border px-2 py-0.5',
+                                'font-mono text-[9px] font-black uppercase tracking-[0.08em]',
                                 eventBadgeClassName({
                                   status: event.status,
                                   isBlocked: isBlock,
@@ -501,13 +535,13 @@ export function ManagementModal(props: ManagementModalProps) {
                             </span>
                           </div>
 
-                          <p className="mt-1 truncate text-sm font-semibold text-[var(--paper-dim)]">
+                          <p className="mt-1 truncate text-sm font-semibold text-paperDim">
                             {rowCopy.subtitle}
                           </p>
                         </div>
                       </div>
 
-                      <p className="hidden shrink-0 text-right font-mono text-[10px] font-black uppercase tracking-[0.08em] text-[var(--paper-mute)] sm:block">
+                      <p className="hidden shrink-0 text-right font-mono text-[10px] font-black uppercase tracking-[0.08em] text-paperMute sm:block">
                         {rowCopy.timeLabel}
                       </p>
                     </div>
@@ -527,9 +561,9 @@ export function ManagementModal(props: ManagementModalProps) {
                             : 'Open'}
                         </button>
 
-                        {showMessage ? (
+                        {messageBookingId ? (
                           <a
-                            href={messageHrefForBooking(bookingId)}
+                            href={messageHrefForBooking(messageBookingId)}
                             className={buttonClassName({ tone: 'ghost' })}
                           >
                             Message
@@ -599,8 +633,8 @@ export function ManagementModal(props: ManagementModalProps) {
           )}
         </div>
 
-        <div className="border-t border-[var(--line-strong)] bg-[var(--ink)]/90 px-4 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.10em] text-[var(--paper-mute)] backdrop-blur-xl sm:px-5">
-          Press <span className="text-[var(--paper)]">Esc</span> to close.
+        <div className="border-t border-[var(--line-strong)] bg-ink/90 px-4 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.10em] text-paperMute backdrop-blur-xl sm:px-5">
+          Press <span className="text-paper">Esc</span> to close.
         </div>
       </div>
     </div>
@@ -611,12 +645,12 @@ function EmptyManagementState(props: { tab: ManagementTab }) {
   const { tab } = props
 
   return (
-    <div className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-5">
-      <p className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-[var(--paper)]">
+    <div className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-5">
+      <p className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-paper">
         {tab.emptyTitle}
       </p>
 
-      <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--paper-dim)]">
+      <p className="mt-2 max-w-xl text-sm leading-6 text-paperDim">
         {tab.emptyBody}
       </p>
     </div>

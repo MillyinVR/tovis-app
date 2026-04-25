@@ -6,14 +6,17 @@ import type { FormEvent, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 
 import {
-  safeJson,
-  readErrorMessage,
   errorMessageFromUnknown,
+  readErrorMessage,
+  safeJson,
 } from '@/lib/http'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type Period = 'AM' | 'PM'
 type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
 export type LocationType = 'SALON' | 'MOBILE'
 
 type DayConfig = {
@@ -55,6 +58,15 @@ type SelectProps = {
   children: ReactNode
 }
 
+type StateCardProps = {
+  children: ReactNode
+  danger?: boolean
+}
+
+type InlineStateTone = 'success' | 'danger'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const DAYS: ReadonlyArray<DayDefinition> = [
   { key: 'mon', label: 'Mon', fullLabel: 'Monday' },
   { key: 'tue', label: 'Tue', fullLabel: 'Tuesday' },
@@ -82,6 +94,8 @@ const HOUR_OPTIONS: ReadonlyArray<number> = [
 const MINUTE_OPTIONS: ReadonlyArray<number> = [0, 15, 30, 45]
 const PERIOD_OPTIONS: ReadonlyArray<Period> = ['AM', 'PM']
 
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
@@ -92,11 +106,13 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 async function safeJsonObject(response: Response): Promise<Record<string, unknown>> {
   const data: unknown = await safeJson(response)
+
   return isObject(data) ? data : {}
 }
 
 function normalizeHHMM(value: unknown) {
   const parsed = parseHHMM(value)
+
   if (!parsed) return null
 
   return `${String(parsed.hh).padStart(2, '0')}:${String(parsed.mm).padStart(
@@ -317,11 +333,13 @@ function validateState(state: WorkingHoursState) {
 
 function parseHourSelection(value: string, fallback: number) {
   const parsed = Number(value)
+
   return Number.isFinite(parsed) ? clamp(Math.trunc(parsed), 1, 12) : fallback
 }
 
 function parseMinuteSelection(value: string) {
   const parsed = Number(value)
+
   return Number.isFinite(parsed) ? clamp(Math.trunc(parsed), 0, 59) : 0
 }
 
@@ -360,15 +378,18 @@ function redirectToLogin(
 
 function workingHoursEndpoint(locationType: LocationType) {
   const params = new URLSearchParams({ locationType })
+
   return `/api/pro/working-hours?${params.toString()}`
 }
 
 function errorFromResponse(response: Response, data: unknown) {
   const message = readErrorMessage(data)
+
   if (message) return message
 
   if (isObject(data)) {
     const rawMessage = data.message
+
     if (typeof rawMessage === 'string' && rawMessage.trim()) {
       return rawMessage.trim()
     }
@@ -386,10 +407,10 @@ function locationTypeLabel(locationType: LocationType) {
 
 function locationHintClassName(locationType: LocationType) {
   if (locationType === 'MOBILE') {
-    return 'border-[var(--acid)]/25 bg-[var(--acid)]/10'
+    return 'border-acid/25 bg-acid/10'
   }
 
-  return 'border-[var(--terra)]/35 bg-[var(--terra)]/10'
+  return 'border-terra/35 bg-terra/10'
 }
 
 function buttonClassName() {
@@ -405,15 +426,25 @@ function buttonClassName() {
 
 function selectClassName(disabled: boolean) {
   return [
-    'h-10 rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-2',
+    'h-10 rounded-xl border border-[var(--line)] bg-ink2 px-2',
     'font-mono text-[11px] font-black uppercase tracking-[0.04em]',
-    'text-[var(--paper)] shadow-sm',
+    'text-paper shadow-sm',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
     disabled
       ? 'cursor-not-allowed opacity-50'
-      : 'hover:border-[var(--line-strong)] hover:bg-[var(--paper)]/[0.05]',
+      : 'hover:border-[var(--line-strong)] hover:bg-paper/[0.05]',
   ].join(' ')
 }
+
+function rowClassName(disabled: boolean) {
+  return [
+    'rounded-2xl border border-[var(--line)] bg-paper/[0.025] p-3',
+    'grid gap-3 md:grid-cols-[120px_1fr_1fr] md:items-center',
+    disabled ? 'opacity-65' : 'opacity-100',
+  ].join(' ')
+}
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export default function WorkingHoursForm(props: WorkingHoursFormProps) {
   const {
@@ -508,6 +539,7 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
     setError(null)
 
     const validationError = validateState(state)
+
     if (validationError) {
       setError(validationError)
       return
@@ -553,23 +585,23 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="text-[var(--paper)]"
+      className="text-paper"
       data-calendar-working-hours-form="1"
     >
       <div
         className={[
           'mb-4 rounded-2xl border px-3 py-3',
-          'text-sm font-semibold text-[var(--paper-dim)]',
+          'text-sm font-semibold text-paperDim',
           locationHintClassName(locationType),
         ].join(' ')}
       >
-        <p className="font-mono text-[10px] font-black uppercase tracking-[0.14em] text-[var(--paper-mute)]">
+        <p className="font-mono text-[10px] font-black uppercase tracking-[0.14em] text-paperMute">
           Base schedule
         </p>
 
         <p className="mt-1">
           Editing availability for{' '}
-          <span className="font-black text-[var(--paper)]">
+          <span className="font-black text-paper">
             {locationTypeLabel(locationType)}
           </span>
           . Bookings and blocks still override these hours.
@@ -577,7 +609,7 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
       </div>
 
       <div className="grid gap-2">
-        <div className="hidden grid-cols-[120px_1fr_1fr] items-center gap-3 px-1 font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)] md:grid">
+        <div className="hidden grid-cols-[120px_1fr_1fr] items-center gap-3 px-1 font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute md:grid">
           <div>Day</div>
           <div>Start</div>
           <div>End</div>
@@ -639,6 +671,8 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
   )
 }
 
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
 function DayRow(props: {
   day: DayDefinition
   config: DayConfig
@@ -665,14 +699,8 @@ function DayRow(props: {
   } = props
 
   return (
-    <div
-      className={[
-        'rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.025] p-3',
-        'grid gap-3 md:grid-cols-[120px_1fr_1fr] md:items-center',
-        disabled ? 'opacity-65' : 'opacity-100',
-      ].join(' ')}
-    >
-      <label className="flex items-center gap-2 font-mono text-[11px] font-black uppercase tracking-[0.08em] text-[var(--paper)]">
+    <div className={rowClassName(disabled)}>
+      <label className="flex items-center gap-2 font-mono text-[11px] font-black uppercase tracking-[0.08em] text-paper">
         <input
           type="checkbox"
           checked={config.enabled}
@@ -682,9 +710,7 @@ function DayRow(props: {
 
         <span>{day.label}</span>
 
-        {disabled ? (
-          <span className="text-[var(--paper-mute)]">Off</span>
-        ) : null}
+        {disabled ? <span className="text-paperMute">Off</span> : null}
       </label>
 
       <TimeControlGroup
@@ -735,7 +761,7 @@ function TimeControlGroup(props: {
 
   return (
     <div className="grid grid-cols-3 gap-2">
-      <div className="col-span-3 font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)] md:hidden">
+      <div className="col-span-3 font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute md:hidden">
         {label}
       </div>
 
@@ -793,10 +819,7 @@ function Select(props: SelectProps) {
   )
 }
 
-function StateCard(props: {
-  children: ReactNode
-  danger?: boolean
-}) {
+function StateCard(props: StateCardProps) {
   const { children, danger = false } = props
 
   return (
@@ -805,7 +828,7 @@ function StateCard(props: {
         'rounded-2xl border px-3 py-3 text-sm font-semibold',
         danger
           ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-[var(--paper)]/[0.03] text-[var(--paper-dim)]',
+          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
       ].join(' ')}
     >
       {children}
@@ -815,7 +838,7 @@ function StateCard(props: {
 
 function InlineState(props: {
   children: ReactNode
-  tone: 'success' | 'danger'
+  tone: InlineStateTone
 }) {
   const { children, tone } = props
 

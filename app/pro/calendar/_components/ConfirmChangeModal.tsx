@@ -6,6 +6,8 @@ import type { ReactNode } from 'react'
 
 import type { PendingChange } from '../_types'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type ConfirmChangeModalProps = {
   open: boolean
   change: PendingChange | null
@@ -25,7 +27,13 @@ type ChangeSummary = {
   confirmLabel: string
 }
 
+type ButtonTone = 'primary' | 'ghost'
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const MAX_OVERRIDE_REASON_LENGTH = 280
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function formatLocalDateTime(iso: string) {
   const date = new Date(iso)
@@ -75,7 +83,7 @@ function buildChangeSummary(args: {
   }
 }
 
-function buttonClassName(tone: 'primary' | 'ghost' = 'ghost') {
+function buttonClassName(tone: ButtonTone = 'ghost') {
   const base = [
     'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
     'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
@@ -85,20 +93,21 @@ function buttonClassName(tone: 'primary' | 'ghost' = 'ghost') {
   if (tone === 'primary') {
     return [
       base,
-      'border border-accentPrimary/30 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
     ].join(' ')
   }
 
   return [
     base,
-    'border border-[var(--line)] bg-transparent text-[var(--paper-mute)] hover:bg-[var(--paper)]/[0.05] hover:text-[var(--paper)]',
+    'border border-[var(--line)] bg-transparent text-paperMute',
+    'hover:bg-paper/5 hover:text-paper',
   ].join(' ')
 }
 
 function textareaClassName() {
   return [
-    'w-full resize-none rounded-2xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2',
-    'text-sm font-semibold text-[var(--paper)] placeholder:text-[var(--paper-mute)]',
+    'w-full resize-none rounded-2xl border border-[var(--line)] bg-ink2 px-3 py-2',
+    'text-sm font-semibold text-paper placeholder:text-paperMute',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
     'disabled:cursor-not-allowed disabled:opacity-60',
   ].join(' ')
@@ -134,6 +143,8 @@ function closeOnEscape(args: {
 
   return () => window.removeEventListener('keydown', onKeyDown)
 }
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
   const {
@@ -189,30 +200,31 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
       <div
         className={[
           'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-[24px]',
-          'border border-[var(--line-strong)] bg-[var(--ink)]',
-          'shadow-[0_28px_90px_rgb(0_0_0/0.62)]',
+          'border border-[var(--line-strong)] bg-ink',
+          'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
           'sm:max-w-[34rem] sm:rounded-[24px]',
         ].join(' ')}
         onMouseDown={(event) => event.stopPropagation()}
       >
-        <header className="border-b border-[var(--line-strong)] bg-[var(--ink)]/92 px-4 py-4 backdrop-blur-xl sm:px-5">
-          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[var(--paper)]/20 sm:hidden" />
+        <header className="border-b border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-paper/20 sm:hidden" />
 
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[var(--terra-glow)]">
+              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
                 ◆ Confirm calendar change
               </p>
 
               <h2
                 id="confirm-change-title"
-                className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-[var(--paper)]"
+                className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper"
               >
                 Confirm {summary.actionLabel}.
               </h2>
 
-              <p className="mt-1 text-sm leading-6 text-[var(--paper-dim)]">
-                You’re about to {summary.actionLabel} this {summary.nounLabel}.
+              <p className="mt-1 text-sm leading-6 text-paperDim">
+                You&apos;re about to {summary.actionLabel} this{' '}
+                {summary.nounLabel}.
               </p>
             </div>
 
@@ -228,7 +240,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
-          <section className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4">
+          <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
             <InfoRow label={summary.primaryLabel}>
               {summary.primaryValue}
             </InfoRow>
@@ -240,7 +252,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
                 Outside working hours
               </p>
 
-              <p className="mt-2 text-sm leading-6 text-[var(--paper-dim)]">
+              <p className="mt-2 text-sm leading-6 text-paperDim">
                 Clients cannot normally book this time. You can still place the
                 appointment here, but the override needs a reason.
               </p>
@@ -250,7 +262,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
           {needsOverrideReason ? (
             <section className="mt-4">
               <label htmlFor="calendar-override-reason">
-                <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+                <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
                   Reason for override
                 </span>
 
@@ -268,7 +280,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
                 />
               </label>
 
-              <div className="mt-1 flex items-center justify-between gap-3 font-mono text-[9px] font-black uppercase tracking-[0.08em] text-[var(--paper-mute)]">
+              <div className="mt-1 flex items-center justify-between gap-3 font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paperMute">
                 <span>Required</span>
                 <span>
                   {overrideReason.length}/{MAX_OVERRIDE_REASON_LENGTH}
@@ -278,7 +290,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
           ) : null}
         </div>
 
-        <footer className="border-t border-[var(--line-strong)] bg-[var(--ink)]/92 px-4 py-4 backdrop-blur-xl sm:px-5">
+        <footer className="border-t border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button
               type="button"
@@ -309,6 +321,8 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
   )
 }
 
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
 function InfoRow(props: {
   label: string
   children: ReactNode
@@ -316,12 +330,12 @@ function InfoRow(props: {
   const { label, children } = props
 
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2">
-      <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+    <div className="rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2">
+      <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
         {label}
       </p>
 
-      <p className="mt-1 text-sm font-semibold text-[var(--paper)]">
+      <p className="mt-1 text-sm font-semibold text-paper">
         {children}
       </p>
     </div>

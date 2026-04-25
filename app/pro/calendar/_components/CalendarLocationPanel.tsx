@@ -1,6 +1,8 @@
 // app/pro/calendar/_components/CalendarLocationPanel.tsx
 'use client'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type CalendarLocation = {
   id: string
   type?: string | null
@@ -17,11 +19,15 @@ type CalendarLocationPanelProps = {
   onChangeLocation: (locationId: string | null) => void
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const LOCATION_TYPE_LABELS: Record<string, string> = {
   MOBILE_BASE: 'Mobile base',
   SUITE: 'Suite',
   SALON: 'Salon',
 }
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function normalizeText(value: string | null | undefined) {
   return typeof value === 'string' ? value.trim() : ''
@@ -29,6 +35,7 @@ function normalizeText(value: string | null | undefined) {
 
 function locationTypeLabel(type: string | null | undefined) {
   const normalizedType = normalizeText(type).toUpperCase()
+
   return LOCATION_TYPE_LABELS[normalizedType] ?? 'Location'
 }
 
@@ -46,6 +53,7 @@ function selectedLocationLabel(args: {
   locations: CalendarLocation[]
 }) {
   const explicitLabel = normalizeText(args.activeLocationLabel)
+
   if (explicitLabel) return explicitLabel
 
   const selectedLocation = args.locations.find(
@@ -57,14 +65,16 @@ function selectedLocationLabel(args: {
 
 function selectClassName() {
   return [
-    'w-full rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2',
+    'w-full rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2',
     'font-mono text-[11px] font-black uppercase tracking-[0.06em]',
-    'text-[var(--paper)] outline-none',
+    'text-paper outline-none',
     'focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
     'disabled:cursor-not-allowed disabled:opacity-60',
     'md:w-auto md:min-w-[16rem]',
   ].join(' ')
 }
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export function CalendarLocationPanel(props: CalendarLocationPanelProps) {
   const {
@@ -79,6 +89,7 @@ export function CalendarLocationPanel(props: CalendarLocationPanelProps) {
   if (!locationsLoaded) return null
 
   const hasLocations = scopedLocations.length > 0
+
   const selectedLabel = selectedLocationLabel({
     activeLocationLabel,
     activeLocationId,
@@ -87,20 +98,20 @@ export function CalendarLocationPanel(props: CalendarLocationPanelProps) {
 
   return (
     <section
-      className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4"
+      className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4"
       data-calendar-location-panel="1"
     >
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
-          <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[var(--terra-glow)]">
+          <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
             ◆ Calendar location
           </p>
 
-          <h2 className="mt-1 font-display text-2xl font-semibold italic tracking-[-0.04em] text-[var(--paper)]">
+          <h2 className="mt-1 font-display text-2xl font-semibold italic tracking-[-0.04em] text-paper">
             {selectedLabel || 'Select location.'}
           </h2>
 
-          <p className="mt-2 text-sm leading-6 text-[var(--paper-dim)]">
+          <p className="mt-2 text-sm leading-6 text-paperDim">
             Booking creation and blocked-time actions use this selected location.
           </p>
         </div>
@@ -108,7 +119,7 @@ export function CalendarLocationPanel(props: CalendarLocationPanelProps) {
         {hasLocations ? (
           <div className="grid gap-2 md:justify-items-end">
             <label className="grid gap-1">
-              <span className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+              <span className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
                 Location
               </span>
 
@@ -132,11 +143,8 @@ export function CalendarLocationPanel(props: CalendarLocationPanelProps) {
               </select>
             </label>
 
-            <p className="font-mono text-[9px] font-black uppercase tracking-[0.10em] text-[var(--paper-mute)]">
-              TZ:{' '}
-              <span className="text-[var(--paper)]">
-                {calendarTimeZone}
-              </span>
+            <p className="font-mono text-[9px] font-black uppercase tracking-[0.10em] text-paperMute">
+              TZ: <span className="text-paper">{calendarTimeZone}</span>
             </p>
           </div>
         ) : (
