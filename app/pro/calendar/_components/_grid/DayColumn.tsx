@@ -2,75 +2,58 @@
 'use client'
 
 import { useMemo, useRef } from 'react'
-import type React from 'react'
-import type { DragEvent } from 'react'
+import type { DragEvent, MutableRefObject } from 'react'
+
 import type { CalendarEvent, EntityType, WorkingHoursJson } from '../../_types'
-import { minutesSinceMidnightInTimeZone, ymdInTimeZone } from '../../_utils/date'
+
+import {
+  clamp,
+  minutesSinceMidnightInTimeZone,
+  ymdInTimeZone,
+} from '../../_utils/date'
+
 import {
   PX_PER_MINUTE,
   computeDurationMinutesFromIso,
   extractBlockId,
+  getWorkingWindowForDay,
   isBlockedEvent,
-  snapMinutes,
   roundDurationMinutes,
+  snapMinutes,
 } from '../../_utils/calendarMath'
+
 import { useDayEvents } from './useDayEvents'
 import { EventCard } from './EventCard'
-import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 type LocationType = 'SALON' | 'MOBILE'
-type Window = { startMinutes: number; endMinutes: number }
 
-const MIDDAY_MS = 12 * 60 * 60 * 1000
-const TOTAL_MINUTES = 24 * 60
-
-function stableYmdForVisibleDay(d: Date, timeZone: string) {
-  return ymdInTimeZone(new Date(d.getTime() + MIDDAY_MS), timeZone)
+type TimeWindow = {
+  startMinutes: number
+  endMinutes: number
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n))
+type WorkingOverlay = TimeWindow & {
+  locationType: LocationType
+  active: boolean
 }
 
-function getWorkingWindowForDateInTimeZone(
-  day: Date,
-  workingHours: WorkingHoursJson,
-  timeZone: string,
-): Window | null {
-  const result = getWorkingWindowForDay(new Date(day.getTime() + MIDDAY_MS), workingHours, timeZone)
-  if (!result.ok) return null
-
-  return {
-    startMinutes: result.startMinutes,
-    endMinutes: result.endMinutes,
-  }
+type OutsideHoursSegment = TimeWindow & {
+  key: string
 }
 
-function mergeWindows(windows: Window[]): Window[] {
-  const list = windows
-    .map((w) => ({
-      startMinutes: clamp(w.startMinutes, 0, TOTAL_MINUTES),
-      endMinutes: clamp(w.endMinutes, 0, TOTAL_MINUTES),
-    }))
-    .filter((w) => w.endMinutes > w.startMinutes)
-    .sort((a, b) => a.startMinutes - b.startMinutes)
-
-  if (!list.length) return []
-
-  const out: Window[] = [{ ...list[0] }]
-  for (let i = 1; i < list.length; i++) {
-    const prev = out[out.length - 1]
-    const cur = list[i]
-    if (cur.startMinutes <= prev.endMinutes) {
-      prev.endMinutes = Math.max(prev.endMinutes, cur.endMinutes)
-    } else {
-      out.push({ ...cur })
-    }
-  }
-  return out
+type EventLayout = {
+  apiId: string | null
+  entityType: EntityType
+  startMinutes: number
+  durationMinutes: number
+  topPx: number
+  heightPx: number
+  compact: boolean
+  micro: boolean
+  timeLabel: string
 }
 
-export function DayColumn(props: {
+type DayColumnProps = {
   day: Date
   dayIdx: number
   visibleDaysCount: number
@@ -84,10 +67,10 @@ export function DayColumn(props: {
   stepMinutes: number
 
   isBusy: boolean
-  suppressClickRef: React.MutableRefObject<boolean>
+  suppressClickRef: MutableRefObject<boolean>
   onClickEvent: (id: string) => void
   onCreateForClick: (day: Date, clientY: number, columnTop: number) => void
-  onDragStart: (ev: CalendarEvent, e: DragEvent<HTMLDivElement>) => void
+  onDragStart: (event: CalendarEvent, dragEvent: DragEvent<HTMLDivElement>) => void
   onDropOnDayColumn: (day: Date, clientY: number, columnTop: number) => void
   onBeginResize: (args: {
     entityType: EntityType
@@ -98,10 +81,269 @@ export function DayColumn(props: {
     originalDuration: number
     columnTop: number
   }) => void
-}) {
+}
+
+type GridMark = {
+  minute: number
+  emphasis: 'hour' | 'half' | 'quarter'
+}
+
+const MIDDAY_MS = 12 * 60 * 60 * 1000
+const TOTAL_MINUTES = 24 * 60
+const GRID_INTERVAL_MINUTES = 15
+const MICRO_EVENT_HEIGHT_PX = 28
+const COMPACT_EVENT_HEIGHT_PX = 52
+
+const GRID_MARKS: GridMark[] = Array.from(
+  { length: TOTAL_MINUTES / GRID_INTERVAL_MINUTES },
+  (_, index) => {
+    const minute = index * GRID_INTERVAL_MINUTES
+
+    if (minute % 60 === 0) {
+      return { minute, emphasis: 'hour' }
+    }
+
+    if (minute % 30 === 0) {
+      return { minute, emphasis: 'half' }
+    }
+
+    return { minute, emphasis: 'quarter' }
+  },
+)
+
+const WORKING_OVERLAY_CLASSES: Record<LocationType, string> = {
+  SALON: [
+    'bg-[var(--terra)]/10',
+    'border-[var(--terra)]/35',
+    'shadow-[inset_0_1px_0_rgb(255_255_255/0.05)]',
+  ].join(' '),
+  MOBILE: [
+    'bg-[var(--acid)]/10',
+    'border-[var(--acid)]/25',
+    'shadow-[inset_0_1px_0_rgb(255_255_255/0.05)]',
+  ].join(' '),
+}
+
+const ACTIVE_WORKING_OVERLAY_CLASSES: Record<LocationType, string> = {
+  SALON: 'border-[var(--terra)]/65 bg-[var(--terra)]/14',
+  MOBILE: 'border-[var(--acid)]/45 bg-[var(--acid)]/14',
+}
+
+function stableYmdForVisibleDay(day: Date, timeZone: string) {
+  return ymdInTimeZone(new Date(day.getTime() + MIDDAY_MS), timeZone)
+}
+
+function anchoredDayForWorkingHours(day: Date) {
+  return new Date(day.getTime() + MIDDAY_MS)
+}
+
+function getWorkingWindowForDate(args: {
+  day: Date
+  workingHours: WorkingHoursJson
+  timeZone: string
+}): TimeWindow | null {
+  const result = getWorkingWindowForDay(
+    anchoredDayForWorkingHours(args.day),
+    args.workingHours,
+    args.timeZone,
+  )
+
+  if (!result) return null
+
+  return {
+    startMinutes: result.startMinutes,
+    endMinutes: result.endMinutes,
+  }
+}
+
+function normalizeWindow(window: TimeWindow): TimeWindow | null {
+  const startMinutes = clamp(window.startMinutes, 0, TOTAL_MINUTES)
+  const endMinutes = clamp(window.endMinutes, 0, TOTAL_MINUTES)
+
+  if (endMinutes <= startMinutes) return null
+
+  return {
+    startMinutes,
+    endMinutes,
+  }
+}
+
+function mergeWindows(windows: TimeWindow[]) {
+  const normalized = windows
+    .map(normalizeWindow)
+    .filter((window) => window !== null)
+    .sort((first, second) => first.startMinutes - second.startMinutes)
+
+  if (normalized.length === 0) return []
+
+  const merged: TimeWindow[] = [
+    {
+      startMinutes: normalized[0].startMinutes,
+      endMinutes: normalized[0].endMinutes,
+    },
+  ]
+
+  for (let index = 1; index < normalized.length; index += 1) {
+    const current = normalized[index]
+    const previous = merged[merged.length - 1]
+
+    if (current.startMinutes <= previous.endMinutes) {
+      previous.endMinutes = Math.max(previous.endMinutes, current.endMinutes)
+      continue
+    }
+
+    merged.push({
+      startMinutes: current.startMinutes,
+      endMinutes: current.endMinutes,
+    })
+  }
+
+  return merged
+}
+
+function buildOutsideHoursSegments(workingWindows: TimeWindow[]) {
+  if (workingWindows.length === 0) {
+    return [
+      {
+        key: 'closed-all-day',
+        startMinutes: 0,
+        endMinutes: TOTAL_MINUTES,
+      },
+    ]
+  }
+
+  const segments: OutsideHoursSegment[] = []
+  const firstWindow = workingWindows[0]
+
+  if (firstWindow.startMinutes > 0) {
+    segments.push({
+      key: 'closed-before-open',
+      startMinutes: 0,
+      endMinutes: firstWindow.startMinutes,
+    })
+  }
+
+  for (let index = 0; index < workingWindows.length - 1; index += 1) {
+    const current = workingWindows[index]
+    const next = workingWindows[index + 1]
+
+    if (next.startMinutes > current.endMinutes) {
+      segments.push({
+        key: `closed-gap-${index}`,
+        startMinutes: current.endMinutes,
+        endMinutes: next.startMinutes,
+      })
+    }
+  }
+
+  const lastWindow = workingWindows[workingWindows.length - 1]
+
+  if (lastWindow.endMinutes < TOTAL_MINUTES) {
+    segments.push({
+      key: 'closed-after-close',
+      startMinutes: lastWindow.endMinutes,
+      endMinutes: TOTAL_MINUTES,
+    })
+  }
+
+  return segments
+}
+
+function gridMarkClass(emphasis: GridMark['emphasis']) {
+  if (emphasis === 'hour') return 'border-t border-[var(--paper)]/[0.12]'
+  if (emphasis === 'half') return 'border-t border-[var(--paper)]/[0.07]'
+  return 'border-t border-[var(--paper)]/[0.045]'
+}
+
+function getEventDurationMinutes(event: CalendarEvent, stepMinutes: number) {
+  const rawDuration =
+    typeof event.durationMinutes === 'number' &&
+    Number.isFinite(event.durationMinutes) &&
+    event.durationMinutes > 0
+      ? event.durationMinutes
+      : computeDurationMinutesFromIso(event.startsAt, event.endsAt)
+
+  return roundDurationMinutes(rawDuration, stepMinutes)
+}
+
+function eventApiId(event: CalendarEvent) {
+  if (isBlockedEvent(event)) return extractBlockId(event)
+  return event.id
+}
+
+function eventEntityType(event: CalendarEvent): EntityType {
+  return isBlockedEvent(event) ? 'block' : 'booking'
+}
+
+function isValidDate(date: Date) {
+  return Number.isFinite(date.getTime())
+}
+
+function buildEventLayout(args: {
+  event: CalendarEvent
+  dayYmd: string
+  timeZone: string
+  stepMinutes: number
+  timeFormatter: Intl.DateTimeFormat
+}): EventLayout | null {
+  const { event, dayYmd, timeZone, stepMinutes, timeFormatter } = args
+
+  const eventStart = new Date(event.startsAt)
+  const eventEnd = new Date(event.endsAt)
+
+  if (!isValidDate(eventStart)) return null
+
+  const durationMinutes = getEventDurationMinutes(event, stepMinutes)
+  const startYmd = ymdInTimeZone(eventStart, timeZone)
+
+  const endYmdInclusive = isValidDate(eventEnd)
+    ? ymdInTimeZone(new Date(eventEnd.getTime() - 1), timeZone)
+    : startYmd
+
+  const startMinutesRaw =
+    dayYmd === startYmd
+      ? minutesSinceMidnightInTimeZone(eventStart, timeZone)
+      : 0
+
+  const endMinutesRaw =
+    dayYmd === endYmdInclusive && isValidDate(eventEnd)
+      ? minutesSinceMidnightInTimeZone(eventEnd, timeZone)
+      : TOTAL_MINUTES
+
+  const startMinutes = snapMinutes(startMinutesRaw, stepMinutes)
+  const minEndMinutes = startMinutes + stepMinutes
+  const naturalEndMinutes =
+    endMinutesRaw <= startMinutesRaw
+      ? startMinutesRaw + durationMinutes
+      : endMinutesRaw
+
+  const safeEndMinutes = Math.max(
+    minEndMinutes,
+    Math.min(TOTAL_MINUTES, naturalEndMinutes),
+  )
+
+  const heightMinutes = Math.max(stepMinutes, safeEndMinutes - startMinutes)
+  const topPx = startMinutes * PX_PER_MINUTE
+  const heightPx = heightMinutes * PX_PER_MINUTE
+
+  return {
+    apiId: eventApiId(event),
+    entityType: eventEntityType(event),
+    startMinutes,
+    durationMinutes,
+    topPx,
+    heightPx,
+    compact: heightPx < COMPACT_EVENT_HEIGHT_PX,
+    micro: heightPx < MICRO_EVENT_HEIGHT_PX,
+    timeLabel: timeFormatter.format(eventStart),
+  }
+}
+
+export function DayColumn(props: DayColumnProps) {
   const {
     day,
     dayIdx,
+    visibleDaysCount,
     timeZone,
     todayYmd,
     events,
@@ -118,52 +360,83 @@ export function DayColumn(props: {
     onBeginResize,
   } = props
 
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const dayYmd = stableYmdForVisibleDay(day, timeZone)
   const isToday = dayYmd === todayYmd
-
-  const salonWindow = getWorkingWindowForDateInTimeZone(day, workingHoursSalon, timeZone)
-  const mobileWindow = getWorkingWindowForDateInTimeZone(day, workingHoursMobile, timeZone)
-
-  const mergedWorking = useMemo<Window[]>(() => {
-    const list: Window[] = []
-    if (salonWindow) list.push(salonWindow)
-    if (mobileWindow) list.push(mobileWindow)
-    return mergeWindows(list)
-  }, [salonWindow, mobileWindow])
-
-  const dayEnabled = mergedWorking.length > 0
-
-  const zebraWash = dayIdx % 2 === 1 ? 'bg-white/2' : 'bg-transparent'
-  const leftBorder = dayIdx === 0 ? 'border-l-0' : 'border-l border-white/10'
-
-  const outsideDim = 'bg-black/55'
-
-  const salonFill = 'bg-amber-300/22'
-  const salonEdge = 'border-amber-200/70'
-  const salonSheen = 'bg-gradient-to-b from-white/10 via-transparent to-transparent'
-
-  const mobileFill = 'bg-teal-400/18'
-  const mobileEdge = 'border-teal-200/70'
-  const mobileSheen = 'bg-gradient-to-r from-white/10 via-transparent to-transparent'
-
-  const salonEdgeBoost =
-    activeLocationType === 'SALON' ? 'border-amber-200/85' : salonEdge
-  const mobileEdgeBoost =
-    activeLocationType === 'MOBILE' ? 'border-teal-200/85' : mobileEdge
-
-  function eventDurationMinutes(ev: CalendarEvent, currentStepMinutes: number) {
-    const raw =
-      typeof ev.durationMinutes === 'number' &&
-      Number.isFinite(ev.durationMinutes) &&
-      ev.durationMinutes > 0
-        ? ev.durationMinutes
-        : computeDurationMinutesFromIso(ev.startsAt, ev.endsAt)
-
-    return roundDurationMinutes(raw, currentStepMinutes)
-  }
-
   const dayEvents = useDayEvents({ day, timeZone, events })
-  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  const timeFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hour: 'numeric',
+        minute: '2-digit',
+      }),
+    [timeZone],
+  )
+
+  const schedule = useMemo(() => {
+    const salonWindow = getWorkingWindowForDate({
+      day,
+      workingHours: workingHoursSalon,
+      timeZone,
+    })
+
+    const mobileWindow = getWorkingWindowForDate({
+      day,
+      workingHours: workingHoursMobile,
+      timeZone,
+    })
+
+    const overlays: WorkingOverlay[] = []
+
+    if (salonWindow) {
+      overlays.push({
+        ...salonWindow,
+        locationType: 'SALON',
+        active: activeLocationType === 'SALON',
+      })
+    }
+
+    if (mobileWindow) {
+      overlays.push({
+        ...mobileWindow,
+        locationType: 'MOBILE',
+        active: activeLocationType === 'MOBILE',
+      })
+    }
+
+    const mergedWorkingWindows = mergeWindows(overlays)
+    const outsideHoursSegments = buildOutsideHoursSegments(mergedWorkingWindows)
+
+    return {
+      overlays,
+      outsideHoursSegments,
+    }
+  }, [
+    activeLocationType,
+    day,
+    timeZone,
+    workingHoursMobile,
+    workingHoursSalon,
+  ])
+
+  const eventLayouts = useMemo(
+    () =>
+      dayEvents
+        .map((event) => ({
+          event,
+          layout: buildEventLayout({
+            event,
+            dayYmd,
+            timeZone,
+            stepMinutes,
+            timeFormatter,
+          }),
+        }))
+        .filter((item) => item.layout !== null),
+    [dayEvents, dayYmd, timeFormatter, timeZone, stepMinutes],
+  )
 
   function getColumnTop() {
     return containerRef.current?.getBoundingClientRect().top ?? 0
@@ -173,209 +446,132 @@ export function DayColumn(props: {
     <div
       ref={containerRef}
       data-cal-col="1"
-      className={['relative min-w-0', leftBorder].join(' ')}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault()
-        const rect = e.currentTarget.getBoundingClientRect()
-        void onDropOnDayColumn(day, e.clientY, rect.top)
+      data-calendar-day={dayYmd}
+      data-calendar-days-visible={visibleDaysCount}
+      className={[
+        'relative min-w-0',
+        dayIdx === 0 ? 'border-l-0' : 'border-l border-[var(--line)]',
+      ].join(' ')}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault()
+
+        const rect = event.currentTarget.getBoundingClientRect()
+        onDropOnDayColumn(day, event.clientY, rect.top)
       }}
-      onMouseDown={(e) => {
+      onMouseDown={(event) => {
         if (isBusy) return
         if (suppressClickRef.current) return
-        if (e.button !== 0) return
+        if (event.button !== 0) return
 
-        const target = e.target instanceof HTMLElement ? e.target : null
-        if (target && target.closest('[data-cal-event="1"]')) return
+        const target = event.target instanceof Element ? event.target : null
+        if (target?.closest('[data-cal-event="1"]')) return
 
-        const rect = e.currentTarget.getBoundingClientRect()
-        onCreateForClick(day, e.clientY, rect.top)
+        const rect = event.currentTarget.getBoundingClientRect()
+        onCreateForClick(day, event.clientY, rect.top)
       }}
     >
-      <div className="relative" style={{ height: TOTAL_MINUTES * PX_PER_MINUTE }}>
-        <div className="pointer-events-none absolute inset-y-0 right-0 w-px bg-white/10" />
-        <div className={['pointer-events-none absolute inset-0', zebraWash].join(' ')} />
+      <div
+        className="relative"
+        style={{ height: TOTAL_MINUTES * PX_PER_MINUTE }}
+      >
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 w-px bg-[var(--paper)]/[0.08]"
+          aria-hidden="true"
+        />
+
+        <div
+          className={[
+            'pointer-events-none absolute inset-0',
+            dayIdx % 2 === 1
+              ? 'bg-[var(--paper)]/[0.018]'
+              : 'bg-transparent',
+          ].join(' ')}
+          aria-hidden="true"
+        />
+
         {isToday ? (
-          <div className="pointer-events-none absolute inset-0 bg-accentPrimary/8" />
-        ) : null}
-
-        {Array.from({ length: 24 * 4 }, (_, i) => {
-          const minute = i * 15
-          const isHour = minute % 60 === 0
-          const isHalf = minute % 30 === 0
-          const lineClass = isHour
-            ? 'border-t border-white/12'
-            : isHalf
-              ? 'border-t border-white/7'
-              : 'border-t border-white/5'
-
-          return (
-            <div
-              key={i}
-              className={lineClass}
-              style={{
-                position: 'absolute',
-                top: minute * PX_PER_MINUTE,
-                left: 0,
-                right: 0,
-                pointerEvents: 'none',
-              }}
-            />
-          )
-        })}
-
-        {!dayEnabled ? (
           <div
-            className={['pointer-events-none absolute inset-0', outsideDim].join(' ')}
+            className="pointer-events-none absolute inset-0 bg-[var(--terra)]/[0.055]"
+            aria-hidden="true"
           />
-        ) : (
-          <>
-            {mergedWorking[0].startMinutes > 0 ? (
-              <div
-                className={[
-                  'pointer-events-none absolute left-0 right-0',
-                  outsideDim,
-                ].join(' ')}
-                style={{
-                  top: 0,
-                  height: mergedWorking[0].startMinutes * PX_PER_MINUTE,
-                }}
-              />
-            ) : null}
-
-            {mergedWorking.length > 1
-              ? mergedWorking.slice(0, -1).map((seg, idx) => {
-                  const next = mergedWorking[idx + 1]
-                  const gap = next.startMinutes - seg.endMinutes
-                  if (gap <= 0) return null
-
-                  return (
-                    <div
-                      key={`gap-${idx}`}
-                      className={[
-                        'pointer-events-none absolute left-0 right-0',
-                        outsideDim,
-                      ].join(' ')}
-                      style={{
-                        top: seg.endMinutes * PX_PER_MINUTE,
-                        height: gap * PX_PER_MINUTE,
-                      }}
-                    />
-                  )
-                })
-              : null}
-
-            {mergedWorking[mergedWorking.length - 1].endMinutes < TOTAL_MINUTES ? (
-              <div
-                className={[
-                  'pointer-events-none absolute left-0 right-0',
-                  outsideDim,
-                ].join(' ')}
-                style={{
-                  top:
-                    mergedWorking[mergedWorking.length - 1].endMinutes * PX_PER_MINUTE,
-                  height:
-                    (TOTAL_MINUTES -
-                      mergedWorking[mergedWorking.length - 1].endMinutes) *
-                    PX_PER_MINUTE,
-                }}
-              />
-            ) : null}
-          </>
-        )}
-
-        {salonWindow ? (
-          <div
-            className="pointer-events-none absolute left-0 right-0"
-            style={{
-              top: salonWindow.startMinutes * PX_PER_MINUTE,
-              height: (salonWindow.endMinutes - salonWindow.startMinutes) * PX_PER_MINUTE,
-            }}
-          >
-            <div className={['absolute inset-0', salonFill].join(' ')} />
-            <div className={['absolute inset-0 opacity-70', salonSheen].join(' ')} />
-            <div
-              className={['absolute inset-x-0 top-0 border-t', salonEdgeBoost].join(' ')}
-            />
-            <div
-              className={['absolute inset-x-0 bottom-0 border-t', salonEdgeBoost].join(' ')}
-            />
-          </div>
         ) : null}
 
-        {mobileWindow ? (
+        {GRID_MARKS.map((mark) => (
           <div
-            className="pointer-events-none absolute left-0 right-0"
+            key={mark.minute}
+            className={gridMarkClass(mark.emphasis)}
             style={{
-              top: mobileWindow.startMinutes * PX_PER_MINUTE,
-              height: (mobileWindow.endMinutes - mobileWindow.startMinutes) * PX_PER_MINUTE,
+              position: 'absolute',
+              top: mark.minute * PX_PER_MINUTE,
+              left: 0,
+              right: 0,
+              pointerEvents: 'none',
             }}
+            aria-hidden="true"
+          />
+        ))}
+
+        {schedule.outsideHoursSegments.map((segment) => (
+          <div
+            key={segment.key}
+            className={[
+              'pointer-events-none absolute left-0 right-0',
+              'bg-black/45 backdrop-blur-[1px]',
+            ].join(' ')}
+            style={{
+              top: segment.startMinutes * PX_PER_MINUTE,
+              height:
+                (segment.endMinutes - segment.startMinutes) * PX_PER_MINUTE,
+            }}
+            aria-hidden="true"
+          />
+        ))}
+
+        {schedule.overlays.map((overlay) => (
+          <div
+            key={overlay.locationType}
+            className="pointer-events-none absolute left-0 right-0 px-1"
+            style={{
+              top: overlay.startMinutes * PX_PER_MINUTE,
+              height:
+                (overlay.endMinutes - overlay.startMinutes) * PX_PER_MINUTE,
+            }}
+            aria-hidden="true"
           >
-            <div className={['absolute inset-0', mobileFill].join(' ')} />
-            <div className={['absolute inset-0 opacity-70', mobileSheen].join(' ')} />
             <div
-              className={['absolute inset-x-0 top-0 border-t', mobileEdgeBoost].join(' ')}
+              className={[
+                'h-full rounded-xl border',
+                WORKING_OVERLAY_CLASSES[overlay.locationType],
+                overlay.active
+                  ? ACTIVE_WORKING_OVERLAY_CLASSES[overlay.locationType]
+                  : '',
+              ].join(' ')}
             />
-            <div
-              className={['absolute inset-x-0 bottom-0 border-t', mobileEdgeBoost].join(' ')}
-            />
+
+            <div className="absolute inset-x-1 top-0 h-10 rounded-t-xl bg-gradient-to-b from-white/[0.06] to-transparent" />
           </div>
-        ) : null}
+        ))}
 
-        {dayEvents.map((ev: CalendarEvent) => {
-          const isBlock = isBlockedEvent(ev)
-          const entityType: EntityType = isBlock ? 'block' : 'booking'
-          const apiId = isBlock ? extractBlockId(ev) : ev.id
+        {eventLayouts.map((item) => {
+          const { event, layout } = item
 
-          const dur = eventDurationMinutes(ev, stepMinutes)
-          const evStart = new Date(ev.startsAt)
-          const evEnd = new Date(ev.endsAt)
-
-          const startYmd = ymdInTimeZone(evStart, timeZone)
-          const endYmdInclusive = ymdInTimeZone(new Date(evEnd.getTime() - 1), timeZone)
-
-          const startMinutesRaw =
-            dayYmd === startYmd ? minutesSinceMidnightInTimeZone(evStart, timeZone) : 0
-
-          const endMinutesRaw =
-            dayYmd === endYmdInclusive ? minutesSinceMidnightInTimeZone(evEnd, timeZone) : 24 * 60
-
-          const startMinutes = snapMinutes(startMinutesRaw, stepMinutes)
-          const minEndMinutes = startMinutes + stepMinutes
-          const naturalEndMinutes =
-            endMinutesRaw <= startMinutesRaw ? startMinutesRaw + dur : endMinutesRaw
-          const safeEndMinutes = Math.max(
-            minEndMinutes,
-            Math.min(24 * 60, naturalEndMinutes),
-          )
-          const heightMinutes = Math.max(stepMinutes, safeEndMinutes - startMinutes)
-
-          const topPx = startMinutes * PX_PER_MINUTE
-          const heightPx = heightMinutes * PX_PER_MINUTE
-
-          const micro = heightPx < 28
-          const compact = heightPx < 52
-
-          const timeLabel = new Intl.DateTimeFormat('en-US', {
-            timeZone,
-            hour: 'numeric',
-            minute: '2-digit',
-          }).format(evStart)
+          if (!layout) return null
 
           return (
             <EventCard
-              key={ev.id}
-              ev={ev}
-              entityType={entityType}
-              apiId={apiId}
-              topPx={topPx}
-              heightPx={heightPx}
-              timeLabel={timeLabel}
-              compact={compact}
-              micro={micro}
+              key={event.id}
+              ev={event}
+              entityType={layout.entityType}
+              apiId={layout.apiId}
+              topPx={layout.topPx}
+              heightPx={layout.heightPx}
+              timeLabel={layout.timeLabel}
+              compact={layout.compact}
+              micro={layout.micro}
               day={day}
-              startMinutes={startMinutes}
-              originalDuration={dur}
+              startMinutes={layout.startMinutes}
+              originalDuration={layout.durationMinutes}
               getColumnTop={getColumnTop}
               suppressClickRef={suppressClickRef}
               onClickEvent={onClickEvent}

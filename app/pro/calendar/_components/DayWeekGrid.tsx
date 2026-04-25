@@ -2,16 +2,23 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DragEvent } from 'react'
+import type { DragEvent, MutableRefObject, RefObject } from 'react'
+
 import type {
   CalendarEvent,
+  EntityType,
   ViewMode,
   WorkingHoursJson,
-  EntityType,
 } from '../_types'
-import { minutesSinceMidnightInTimeZone, ymdInTimeZone } from '../_utils/date'
+
+import {
+  clamp,
+  minutesSinceMidnightInTimeZone,
+  ymdInTimeZone,
+} from '../_utils/date'
+
 import { PX_PER_MINUTE } from '../_utils/calendarMath'
-import { isValidIanaTimeZone } from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE, isValidIanaTimeZone } from '@/lib/timeZone'
 
 import { CalendarShell } from './_grid/CalendarShell'
 import { DayHeaderRow } from './_grid/DayHeaderRow'
@@ -19,18 +26,7 @@ import { TimeGutter } from './_grid/TimeGutter'
 import { DayColumn } from './_grid/DayColumn'
 import { NowLineOverlay } from './_grid/NowLineOverlay'
 
-const MIDDAY_MS = 12 * 60 * 60 * 1000
-const TOTAL_MINUTES = 24 * 60
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n))
-}
-
-function stableYmdForVisibleDay(d: Date, timeZone: string) {
-  return ymdInTimeZone(new Date(d.getTime() + MIDDAY_MS), timeZone)
-}
-
-export function DayWeekGrid(props: {
+type DayWeekGridProps = {
   view: ViewMode
   visibleDays: Date[]
   events: CalendarEvent[]
@@ -41,7 +37,7 @@ export function DayWeekGrid(props: {
   timeZone: string
   onClickEvent: (id: string) => void
   onCreateForClick: (day: Date, clientY: number, columnTop: number) => void
-  onDragStart: (ev: CalendarEvent, e: DragEvent<HTMLDivElement>) => void
+  onDragStart: (event: CalendarEvent, dragEvent: DragEvent<HTMLDivElement>) => void
   onDropOnDayColumn: (day: Date, clientY: number, columnTop: number) => void
   onBeginResize: (args: {
     entityType: EntityType
@@ -52,17 +48,174 @@ export function DayWeekGrid(props: {
     originalDuration: number
     columnTop: number
   }) => void
-  suppressClickRef: React.MutableRefObject<boolean>
+  suppressClickRef: MutableRefObject<boolean>
   isBusy: boolean
+}
+
+type ResolvedTimeZone = {
+  value: string
+  isValid: boolean
+}
+
+type NowSnapshot = {
+  todayYmd: string
+  nowMinutes: number
+}
+
+const MIDDAY_MS = 12 * 60 * 60 * 1000
+const TOTAL_MINUTES_IN_DAY = 24 * 60
+const NOW_REFRESH_INTERVAL_MS = 30_000
+const NOW_SCROLL_OFFSET_PX = 160
+const DAY_VIEW_COUNT = 1
+const WEEK_VIEW_COUNT = 7
+
+/**
+ * Converts a fractional minutes-since-midnight value into a short time string
+ * for the NOW · label on the now-line overlay (e.g. 811.4 → "1:31pm").
+ * Pure function — no side effects, no imports needed.
+ */
+function formatNowLabel(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60) % 24
+  const m = Math.floor(totalMinutes % 60)
+  const display = h > 12 ? h - 12 : h === 0 ? 12 : h
+  const ampm = h >= 12 ? 'pm' : 'am'
+  return `${display}:${String(m).padStart(2, '0')}${ampm}`
+}
+
+function resolveCalendarTimeZone(rawTimeZone: string): ResolvedTimeZone {
+  const candidate = rawTimeZone.trim()
+
+  if (!candidate) {
+    return {
+      value: DEFAULT_TIME_ZONE,
+      isValid: false,
+    }
+  }
+
+  if (!isValidIanaTimeZone(candidate)) {
+    return {
+      value: DEFAULT_TIME_ZONE,
+      isValid: false,
+    }
+  }
+
+  return {
+    value: candidate,
+    isValid: true,
+  }
+}
+
+function getTimelineDays(view: ViewMode, visibleDays: Date[]) {
+  if (view === 'day') return visibleDays.slice(0, DAY_VIEW_COUNT)
+  if (view === 'week') return visibleDays.slice(0, WEEK_VIEW_COUNT)
+  return []
+}
+
+function getGridColumns(dayCount: number) {
+  return `var(--cal-time-col) repeat(${dayCount}, minmax(0, 1fr))`
+}
+
+function visibleDayYmd(day: Date, timeZone: string) {
+  return ymdInTimeZone(new Date(day.getTime() + MIDDAY_MS), timeZone)
+}
+
+function useMeasuredElementHeight() {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [height, setHeight] = useState(0)
+
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+
+    const measure = () => {
+      setHeight(element.getBoundingClientRect().height)
+    }
+
+    measure()
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure)
+      return () => window.removeEventListener('resize', measure)
+    }
+
+    const resizeObserver = new ResizeObserver(measure)
+    resizeObserver.observe(element)
+
+    return () => resizeObserver.disconnect()
+  }, [])
+
+  return { ref, height }
+}
+
+function useNowSnapshot(args: {
+  timeZone: string
+  enabled: boolean
+}): NowSnapshot {
+  const { timeZone, enabled } = args
+  const [tick, setTick] = useState(0)
+
+  useEffect(() => {
+    if (!enabled) return
+
+    const refresh = () => setTick((currentTick) => currentTick + 1)
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState !== 'hidden') refresh()
+    }, NOW_REFRESH_INTERVAL_MS)
+
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [enabled, timeZone])
+
+  return useMemo(() => {
+    const now = new Date()
+
+    return {
+      todayYmd: ymdInTimeZone(now, timeZone),
+      nowMinutes: minutesSinceMidnightInTimeZone(now, timeZone),
+    }
+  }, [timeZone, tick])
+}
+
+function useAutoScrollToNow(args: {
+  scrollRef: RefObject<HTMLDivElement | null>
+  enabled: boolean
+  nowTopPx: number
+  scrollKey: string
 }) {
+  const { scrollRef, enabled, nowTopPx, scrollKey } = args
+  const lastScrollKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!enabled) return
+    if (lastScrollKeyRef.current === scrollKey) return
+
+    const scrollElement = scrollRef.current
+    if (!scrollElement) return
+
+    lastScrollKeyRef.current = scrollKey
+    scrollElement.scrollTop = Math.max(0, nowTopPx - NOW_SCROLL_OFFSET_PX)
+  }, [enabled, nowTopPx, scrollKey, scrollRef])
+}
+
+export function DayWeekGrid(props: DayWeekGridProps) {
   const {
+    view,
     visibleDays,
     events,
     workingHoursSalon,
     workingHoursMobile,
     activeLocationType = 'SALON',
     stepMinutes,
-    timeZone: timeZoneRaw,
+    timeZone: rawTimeZone,
     onClickEvent,
     onCreateForClick,
     onDragStart,
@@ -72,109 +225,124 @@ export function DayWeekGrid(props: {
     isBusy,
   } = props
 
-  const tzCandidate = typeof timeZoneRaw === 'string' ? timeZoneRaw.trim() : ''
-  const tzResolved = isValidIanaTimeZone(tzCandidate)
-  const timeZone = tzResolved ? tzCandidate : 'UTC'
+  const timelineDays = useMemo(
+    () => getTimelineDays(view, visibleDays),
+    [view, visibleDays],
+  )
 
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((t) => t + 1), 30_000)
-    return () => window.clearInterval(id)
-  }, [])
+  const resolvedTimeZone = useMemo(
+    () => resolveCalendarTimeZone(rawTimeZone),
+    [rawTimeZone],
+  )
 
+  const timeZone = resolvedTimeZone.value
+  const isTimelineView = view === 'day' || view === 'week'
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const header = useMeasuredElementHeight()
 
-  const headerRef = useRef<HTMLDivElement | null>(null)
-  const [headerH, setHeaderH] = useState(0)
-
-  useEffect(() => {
-    const el = headerRef.current
-    if (!el) return
-    const measure = () => setHeaderH(el.getBoundingClientRect().height)
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
-  const { todayYmd, nowMinutes } = useMemo(() => {
-    const now = new Date()
-    return {
-      todayYmd: ymdInTimeZone(now, timeZone),
-      nowMinutes: minutesSinceMidnightInTimeZone(now, timeZone),
-    }
-  }, [timeZone, tick])
-
-  const nowTopPx = clamp(nowMinutes, 0, TOTAL_MINUTES - 1) * PX_PER_MINUTE
+  const { todayYmd, nowMinutes } = useNowSnapshot({
+    timeZone,
+    enabled: isTimelineView,
+  })
 
   const visibleYmds = useMemo(
-    () => visibleDays.map((d) => stableYmdForVisibleDay(d, timeZone)),
-    [visibleDays, timeZone],
+    () => timelineDays.map((day) => visibleDayYmd(day, timeZone)),
+    [timelineDays, timeZone],
   )
 
   const todayIsInView = useMemo(
     () => visibleYmds.includes(todayYmd),
-    [visibleYmds, todayYmd],
+    [todayYmd, visibleYmds],
   )
-  const showNow = tzResolved && todayIsInView
+
+  const showNowLine = resolvedTimeZone.isValid && todayIsInView
+  const nowTopPx =
+    clamp(nowMinutes, 0, TOTAL_MINUTES_IN_DAY - 1) * PX_PER_MINUTE
 
   const gridCols = useMemo(
-    () => `var(--cal-time-col) repeat(${visibleDays.length}, minmax(0, 1fr))`,
-    [visibleDays.length],
+    () => getGridColumns(timelineDays.length),
+    [timelineDays.length],
   )
 
-  useEffect(() => {
-    const el = scrollRef.current
-    if (!el) return
-    if (!showNow) return
-    el.scrollTop = Math.max(0, nowTopPx - 160)
-  }, [showNow, nowTopPx])
+  const scrollKey = useMemo(
+    () => `${timeZone}:${view}:${visibleYmds.join('|')}`,
+    [timeZone, view, visibleYmds],
+  )
+
+  useAutoScrollToNow({
+    scrollRef,
+    enabled: showNowLine,
+    nowTopPx,
+    scrollKey,
+  })
+
+  if (!isTimelineView || timelineDays.length === 0) {
+    return null
+  }
 
   return (
     <CalendarShell
       scrollRef={scrollRef}
       gridCols={gridCols}
-      overlay={<NowLineOverlay topPx={nowTopPx + headerH} show={showNow} />}
+      overlay={
+        <NowLineOverlay
+          topPx={nowTopPx + header.height}
+          show={showNowLine}
+          nowLabel={formatNowLabel(nowMinutes)}
+        />
+      }
     >
-      <div ref={headerRef} className="sticky top-0 z-[200]">
-        <div className="backdrop-blur-md">
+      <div
+        ref={header.ref}
+        className="sticky top-0 z-[200]"
+        data-calendar-header="1"
+      >
+        <div>
           <DayHeaderRow
-            visibleDays={visibleDays}
+            visibleDays={timelineDays}
             timeZone={timeZone}
             todayYmd={todayYmd}
             gridCols={gridCols}
           />
         </div>
 
-        <div className="h-px bg-white/10" />
-        <div className="h-2 bg-gradient-to-b from-black/18 to-transparent" />
+        <div className="h-2 bg-gradient-to-b from-black/25 to-transparent" />
       </div>
 
-      <div className="relative grid" style={{ gridTemplateColumns: gridCols }}>
-        <TimeGutter totalMinutes={TOTAL_MINUTES} timeZone={timeZone} />
+      <div
+        className="relative grid"
+        style={{ gridTemplateColumns: gridCols }}
+        data-calendar-grid="timeline"
+        data-calendar-view={view}
+      >
+        <TimeGutter totalMinutes={TOTAL_MINUTES_IN_DAY} timeZone={timeZone} />
 
-        {visibleDays.map((day, dayIdx) => (
-          <DayColumn
-            key={stableYmdForVisibleDay(day, timeZone)}
-            day={day}
-            dayIdx={dayIdx}
-            visibleDaysCount={visibleDays.length}
-            timeZone={timeZone}
-            todayYmd={todayYmd}
-            events={events}
-            workingHoursSalon={workingHoursSalon}
-            workingHoursMobile={workingHoursMobile}
-            activeLocationType={activeLocationType}
-            stepMinutes={stepMinutes}
-            isBusy={isBusy}
-            suppressClickRef={suppressClickRef}
-            onClickEvent={onClickEvent}
-            onCreateForClick={onCreateForClick}
-            onDragStart={onDragStart}
-            onDropOnDayColumn={onDropOnDayColumn}
-            onBeginResize={onBeginResize}
-          />
-        ))}
+        {timelineDays.map((day, dayIdx) => {
+          const dayKey = visibleDayYmd(day, timeZone)
+
+          return (
+            <DayColumn
+              key={dayKey}
+              day={day}
+              dayIdx={dayIdx}
+              visibleDaysCount={timelineDays.length}
+              timeZone={timeZone}
+              todayYmd={todayYmd}
+              events={events}
+              workingHoursSalon={workingHoursSalon}
+              workingHoursMobile={workingHoursMobile}
+              activeLocationType={activeLocationType}
+              stepMinutes={stepMinutes}
+              isBusy={isBusy}
+              suppressClickRef={suppressClickRef}
+              onClickEvent={onClickEvent}
+              onCreateForClick={onCreateForClick}
+              onDragStart={onDragStart}
+              onDropOnDayColumn={onDropOnDayColumn}
+              onBeginResize={onBeginResize}
+            />
+          )
+        })}
       </div>
     </CalendarShell>
   )

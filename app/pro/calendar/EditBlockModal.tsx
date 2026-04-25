@@ -2,25 +2,27 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
+
 import {
   DEFAULT_TIME_ZONE,
+  minutesSinceMidnightInTimeZone,
   sanitizeTimeZone,
   ymdInTimeZone,
-  minutesSinceMidnightInTimeZone,
   zonedTimeToUtc,
 } from '@/lib/timeZone'
-import {
-  computeDurationMinutesFromIso,
-  normalizeStepMinutes,
-  roundDurationMinutes,
-  MAX_DURATION,
-} from './_utils/calendarMath'
-import { safeJson, readErrorMessage } from '@/lib/http'
-import { isRecord } from '@/lib/guards'
-import { pickStringOrEmpty } from '@/lib/pick'
+import { readErrorMessage, safeJson } from '@/lib/http'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
 
-type Props = {
+import {
+  computeDurationMinutesFromIso,
+  MAX_DURATION,
+  normalizeStepMinutes,
+  roundDurationMinutes,
+  snapMinutes,
+} from './_utils/calendarMath'
+
+type EditBlockModalProps = {
   open: boolean
   blockId: string | null
   timeZone: string
@@ -33,198 +35,426 @@ type BlockDto = {
   id: string
   startsAt: string
   endsAt: string
-  note?: string | null
+  note: string | null
 }
 
-function toTimeInputValueFromMinutes(minutes: number) {
-  const hh = String(Math.floor(minutes / 60)).padStart(2, '0')
-  const mm = String(minutes % 60).padStart(2, '0')
-  return `${hh}:${mm}`
+type DateParts = {
+  year: number
+  month: number
+  day: number
 }
 
-function parseYmd(ymd: string) {
-  const [yyyy, mm, dd] = (ymd || '').split('-').map((x) => Number(x))
-  if (!yyyy || !mm || !dd) return null
-  return { year: yyyy, month: mm, day: dd }
+type PatchBlockPayload = {
+  startsAt: string
+  endsAt: string
+  note: string | null
 }
 
-function parseBlockDto(data: unknown): BlockDto | null {
-  if (!isRecord(data)) return null
+const DEFAULT_DURATION_MINUTES = 60
+const MAX_NOTE_LENGTH = 160
 
-  const raw = isRecord(data.block) ? data.block : data
-  if (!isRecord(raw)) return null
-
-  const id = pickStringOrEmpty(raw.id)
-  const startsAt = pickStringOrEmpty(raw.startsAt)
-  const endsAt = pickStringOrEmpty(raw.endsAt)
-  if (!id || !startsAt || !endsAt) return null
-
-  const note =
-    typeof raw.note === 'string' ? raw.note : raw.note == null ? null : String(raw.note)
-
-  return { id, startsAt, endsAt, note }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-export default function EditBlockModal({
-  open,
-  blockId,
-  timeZone,
-  stepMinutes,
-  onClose,
-  onSaved,
-}: Props) {
-  const tz = useMemo(() => sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE), [timeZone])
-  const step = useMemo(() => normalizeStepMinutes(stepMinutes), [stepMinutes])
+function optionalString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function requiredString(value: unknown, errorMessage: string) {
+  const stringValue = optionalString(value)
+  if (!stringValue) throw new Error(errorMessage)
+  return stringValue
+}
+
+function parseBlockDto(data: unknown): BlockDto {
+  const raw = isRecord(data) && isRecord(data.block) ? data.block : data
+
+  if (!isRecord(raw)) {
+    throw new Error('Malformed block payload.')
+  }
+
+  return {
+    id: requiredString(raw.id, 'Block payload was missing an id.'),
+    startsAt: requiredString(
+      raw.startsAt,
+      'Block payload was missing a start time.',
+    ),
+    endsAt: requiredString(
+      raw.endsAt,
+      'Block payload was missing an end time.',
+    ),
+    note: typeof raw.note === 'string' ? raw.note : null,
+  }
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, '0')
+}
+
+function timeInputFromMinutes(minutes: number) {
+  const snapped = snapMinutes(minutes, 1)
+  const hour = Math.floor(snapped / 60)
+  const minute = snapped % 60
+
+  return `${pad2(hour)}:${pad2(minute)}`
+}
+
+function parseDateInput(value: string): DateParts | null {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+
+  if (!Number.isInteger(year) || year < 1900 || year > 3000) return null
+  if (!Number.isInteger(month) || month < 1 || month > 12) return null
+  if (!Number.isInteger(day) || day < 1 || day > 31) return null
+
+  const checkDate = new Date(Date.UTC(year, month - 1, day))
+  const valid =
+    checkDate.getUTCFullYear() === year &&
+    checkDate.getUTCMonth() === month - 1 &&
+    checkDate.getUTCDate() === day
+
+  return valid ? { year, month, day } : null
+}
+
+function parseDurationInput(value: string, stepMinutes: number) {
+  const raw = Number(value)
+
+  if (!Number.isFinite(raw) || raw <= 0) {
+    throw new Error('Pick a valid duration.')
+  }
+
+  return roundDurationMinutes(raw, stepMinutes)
+}
+
+function buildPatchPayload(args: {
+  date: string
+  startTime: string
+  durationInput: string
+  note: string
+  timeZone: string
+  stepMinutes: number
+}): PatchBlockPayload {
+  const parsedDate = parseDateInput(args.date)
+  if (!parsedDate) throw new Error('Pick a valid date.')
+
+  const parsedTime = parseHHMM(args.startTime)
+  if (!parsedTime) throw new Error('Pick a valid start time.')
+
+  const durationMinutes = parseDurationInput(
+    args.durationInput,
+    args.stepMinutes,
+  )
+
+  const startsAt = zonedTimeToUtc({
+    year: parsedDate.year,
+    month: parsedDate.month,
+    day: parsedDate.day,
+    hour: parsedTime.hh,
+    minute: parsedTime.mm,
+    second: 0,
+    timeZone: args.timeZone,
+  })
+
+  if (!Number.isFinite(startsAt.getTime())) {
+    throw new Error('Invalid start time.')
+  }
+
+  const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000)
+
+  if (endsAt.getTime() <= startsAt.getTime()) {
+    throw new Error('End time must be after start time.')
+  }
+
+  const trimmedNote = args.note.trim()
+
+  return {
+    startsAt: startsAt.toISOString(),
+    endsAt: endsAt.toISOString(),
+    note: trimmedNote ? trimmedNote : null,
+  }
+}
+
+function blockEndpoint(blockId: string) {
+  return `/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`
+}
+
+function readResponseError(data: unknown, fallback: string) {
+  return readErrorMessage(data) ?? fallback
+}
+
+function buttonClassName(tone: 'primary' | 'danger' | 'ghost' = 'ghost') {
+  const base = [
+    'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
+    'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+    'disabled:cursor-not-allowed disabled:opacity-60',
+  ].join(' ')
+
+  if (tone === 'primary') {
+    return [
+      base,
+      'border border-accentPrimary/30 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+    ].join(' ')
+  }
+
+  if (tone === 'danger') {
+    return [
+      base,
+      'border border-toneDanger/30 bg-toneDanger/10 text-toneDanger hover:bg-toneDanger/15',
+    ].join(' ')
+  }
+
+  return [
+    base,
+    'border border-[var(--line)] bg-transparent text-[var(--paper-mute)] hover:bg-[var(--paper)]/[0.05] hover:text-[var(--paper)]',
+  ].join(' ')
+}
+
+function fieldClassName() {
+  return [
+    'w-full rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2',
+    'text-sm font-semibold text-[var(--paper)]',
+    'placeholder:text-[var(--paper-mute)]',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+    'disabled:cursor-not-allowed disabled:opacity-60',
+  ].join(' ')
+}
+
+function lockBodyScroll(open: boolean) {
+  if (!open) return
+
+  const previousOverflow = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
+
+  return () => {
+    document.body.style.overflow = previousOverflow
+  }
+}
+
+function closeOnEscape(args: {
+  open: boolean
+  busy: boolean
+  onClose: () => void
+}) {
+  const { open, busy, onClose } = args
+
+  if (!open) return
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape' && !busy) {
+      onClose()
+    }
+  }
+
+  window.addEventListener('keydown', onKeyDown)
+
+  return () => window.removeEventListener('keydown', onKeyDown)
+}
+
+export default function EditBlockModal(props: EditBlockModalProps) {
+  const {
+    open,
+    blockId,
+    timeZone,
+    stepMinutes,
+    onClose,
+    onSaved,
+  } = props
+
+  const resolvedTimeZone = useMemo(
+    () => sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE),
+    [timeZone],
+  )
+
+  const step = useMemo(
+    () => normalizeStepMinutes(stepMinutes),
+    [stepMinutes],
+  )
 
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
   const [block, setBlock] = useState<BlockDto | null>(null)
 
-  const [dateStr, setDateStr] = useState('')
-  const [startTime, setStartTime] = useState('')
-  const [durationMinutes, setDurationMinutes] = useState<number>(60)
-  const [note, setNote] = useState<string>('')
+  const [dateInput, setDateInput] = useState('')
+  const [startTimeInput, setStartTimeInput] = useState('')
+  const [durationInput, setDurationInput] = useState(
+    String(DEFAULT_DURATION_MINUTES),
+  )
+  const [note, setNote] = useState('')
 
-  const canEdit = open && Boolean(blockId)
+  const busy = loading || saving || deleting
+  const canEdit = open && blockId !== null && block !== null && !loading
 
-  function close() {
-    if (saving || deleting) return
-    setError(null)
-    onClose()
-  }
+  useEffect(() => lockBodyScroll(open), [open])
+
+  useEffect(
+    () =>
+      closeOnEscape({
+        open,
+        busy: saving || deleting,
+        onClose,
+      }),
+    [open, saving, deleting, onClose],
+  )
 
   useEffect(() => {
-    if (!open) return
-    if (!blockId) return
+    if (!open) {
+      setError(null)
+      setBlock(null)
+      return
+    }
 
+    if (!blockId) {
+      setError(null)
+      setBlock(null)
+      setDateInput('')
+      setStartTimeInput('')
+      setDurationInput(String(DEFAULT_DURATION_MINUTES))
+      setNote('')
+      return
+    }
+
+    const selectedBlockId = blockId
     let cancelled = false
 
-    ;(async () => {
+    async function loadBlock() {
       setLoading(true)
       setError(null)
 
       try {
-        const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, {
+        const response = await fetch(blockEndpoint(selectedBlockId), {
           cache: 'no-store',
         })
-        const data = await safeJson(res)
 
-        if (!res.ok) {
-          throw new Error(readErrorMessage(data) ?? `Failed to load block (${res.status}).`)
+        const data: unknown = await safeJson(response)
+
+        if (!response.ok) {
+          throw new Error(
+            readResponseError(
+              data,
+              `Failed to load block (${response.status}).`,
+            ),
+          )
         }
 
-        const b = parseBlockDto(data)
-        if (!b) throw new Error('Malformed block payload.')
+        const loadedBlock = parseBlockDto(data)
 
         if (cancelled) return
 
-        setBlock(b)
+        const startsAt = new Date(loadedBlock.startsAt)
+        const startMinutes = minutesSinceMidnightInTimeZone(
+          startsAt,
+          resolvedTimeZone,
+        )
 
-        const start = new Date(b.startsAt)
-        const ymd = ymdInTimeZone(start, tz)
-        setDateStr(ymd)
-
-        const startMins = minutesSinceMidnightInTimeZone(start, tz)
-        setStartTime(toTimeInputValueFromMinutes(startMins))
-
-        const dur = roundDurationMinutes(
-          computeDurationMinutesFromIso(b.startsAt, b.endsAt),
+        const durationMinutes = roundDurationMinutes(
+          computeDurationMinutesFromIso(
+            loadedBlock.startsAt,
+            loadedBlock.endsAt,
+          ),
           step,
         )
-        setDurationMinutes(dur)
 
-        setNote((b.note ?? '').toString())
-      } catch (e: unknown) {
+        setBlock(loadedBlock)
+        setDateInput(ymdInTimeZone(startsAt, resolvedTimeZone))
+        setStartTimeInput(timeInputFromMinutes(startMinutes))
+        setDurationInput(String(durationMinutes))
+        setNote(loadedBlock.note ?? '')
+      } catch (caught) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load block.')
+          setError(
+            caught instanceof Error ? caught.message : 'Failed to load block.',
+          )
         }
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
-    })()
+    }
+
+    void loadBlock()
 
     return () => {
       cancelled = true
     }
-  }, [open, blockId, tz, step])
+  }, [blockId, open, resolvedTimeZone, step])
+
+  function close() {
+    if (saving || deleting) return
+
+    setError(null)
+    onClose()
+  }
 
   async function save() {
-    if (!blockId) return
-    if (!block) return
-    if (saving || deleting) return
+    const selectedBlockId = blockId
+
+    if (!selectedBlockId || !block || saving || deleting) return
 
     setSaving(true)
     setError(null)
 
     try {
-      const d = parseYmd(dateStr)
-      if (!d) throw new Error('Pick a valid date.')
-
-      const parsed = parseHHMM(startTime)
-      if (!parsed) throw new Error('Pick a valid start time.')
-
-      const dur = roundDurationMinutes(Number(durationMinutes || 60), step)
-
-      const startUtc = zonedTimeToUtc({
-        year: d.year,
-        month: d.month,
-        day: d.day,
-        hour: parsed.hh,
-        minute: parsed.mm,
-        second: 0,
-        timeZone: tz,
+      const payload = buildPatchPayload({
+        date: dateInput,
+        startTime: startTimeInput,
+        durationInput,
+        note,
+        timeZone: resolvedTimeZone,
+        stepMinutes: step,
       })
 
-      if (!Number.isFinite(startUtc.getTime())) throw new Error('Invalid start time.')
-
-      const endUtc = new Date(startUtc.getTime() + dur * 60_000)
-      if (endUtc.getTime() <= startUtc.getTime()) {
-        throw new Error('End time must be after start time.')
-      }
-
-      const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, {
+      const response = await fetch(blockEndpoint(selectedBlockId), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          startsAt: startUtc.toISOString(),
-          endsAt: endUtc.toISOString(),
-          note: note.trim() ? note.trim() : null,
-        }),
+        body: JSON.stringify(payload),
       })
 
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to save.')
+      const data: unknown = await safeJson(response)
+
+      if (!response.ok) {
+        throw new Error(readResponseError(data, 'Failed to save.'))
+      }
 
       onSaved()
-      close()
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to save.')
+      onClose()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to save.')
     } finally {
       setSaving(false)
     }
   }
 
   async function remove() {
-    if (!blockId) return
-    if (deleting || saving) return
+    const selectedBlockId = blockId
+
+    if (!selectedBlockId || deleting || saving) return
 
     setDeleting(true)
     setError(null)
 
     try {
-      const res = await fetch(`/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`, {
+      const response = await fetch(blockEndpoint(selectedBlockId), {
         method: 'DELETE',
       })
-      const data = await safeJson(res)
-      if (!res.ok) throw new Error(readErrorMessage(data) ?? 'Failed to delete.')
+
+      const data: unknown = await safeJson(response)
+
+      if (!response.ok) {
+        throw new Error(readResponseError(data, 'Failed to delete.'))
+      }
 
       onSaved()
-      close()
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to delete.')
+      onClose()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Failed to delete.')
     } finally {
       setDeleting(false)
     }
@@ -234,146 +464,258 @@ export default function EditBlockModal({
 
   return (
     <div
-      className="fixed inset-0 z-1400 flex items-center justify-center bg-black/50 p-4"
-      onClick={close}
+      className="fixed inset-0 z-[1400] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-4"
+      onMouseDown={close}
     >
-      <div
-        className="w-full max-w-xl overflow-hidden rounded-2xl border border-white/10 bg-bgPrimary shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          void save()
+        }}
+        onMouseDown={(event) => event.stopPropagation()}
+        className={[
+          'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-[24px]',
+          'border border-[var(--line-strong)] bg-[var(--ink)]',
+          'shadow-[0_28px_90px_rgb(0_0_0/0.62)]',
+          'sm:max-w-[34rem] sm:rounded-[24px]',
+        ].join(' ')}
         role="dialog"
         aria-modal="true"
+        aria-labelledby="edit-block-modal-title"
       >
-        <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-bgSecondary px-4 py-3">
-          <div className="text-sm font-extrabold text-textPrimary">Blocked time</div>
-          <button
-            type="button"
-            onClick={close}
-            disabled={saving || deleting}
-            className="rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-xs font-extrabold text-textPrimary hover:bg-bgSecondary/60 disabled:opacity-60"
-          >
-            Close
-          </button>
-        </div>
+        <header className="border-b border-[var(--line-strong)] bg-[var(--ink)]/92 px-4 py-4 backdrop-blur-xl sm:px-5">
+          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[var(--paper)]/20 sm:hidden" />
 
-        <div className="px-4 py-4">
-          {!blockId && <div className="text-xs text-textSecondary">No block selected.</div>}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[var(--terra-glow)]">
+                ◆ Calendar block
+              </p>
 
-          {blockId && loading && <div className="text-xs text-textSecondary">Loading…</div>}
+              <h2
+                id="edit-block-modal-title"
+                className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-[var(--paper)]"
+              >
+                Edit blocked time.
+              </h2>
 
-          {error && (
-            <div className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
-              {error}
+              <p className="mt-1 text-sm leading-6 text-[var(--paper-dim)]">
+                Adjust or remove the unavailable window from your calendar.
+              </p>
             </div>
-          )}
 
-          {canEdit && block && !loading && (
-            <>
-              <div className="mb-3 text-xs text-textSecondary">
-                Timezone: <span className="font-semibold text-textPrimary">{tz}</span>
-              </div>
+            <button
+              type="button"
+              onClick={close}
+              disabled={saving || deleting}
+              className={buttonClassName('ghost')}
+            >
+              Close
+            </button>
+          </div>
+        </header>
 
-              <div className="mb-3 text-xs text-textSecondary">
-                Step size: <span className="font-semibold text-textPrimary">{step} min</span>
-              </div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
+          {!blockId ? <StateCard>No block selected.</StateCard> : null}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <div className="mb-1 text-[11px] font-extrabold text-textSecondary">Date</div>
-                  <input
-                    type="date"
-                    value={dateStr}
-                    onChange={(e) => setDateStr(e.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none ring-0 placeholder:text-textSecondary focus:border-white/20"
-                  />
-                </div>
+          {blockId && loading ? <StateCard>Loading block…</StateCard> : null}
 
-                <div>
-                  <div className="mb-1 text-[11px] font-extrabold text-textSecondary">
-                    Start time
-                  </div>
-                  <input
-                    type="time"
-                    step={step * 60}
-                    value={startTime}
-                    onChange={(e) => setStartTime(e.target.value)}
-                    className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none ring-0 focus:border-white/20"
-                  />
-                </div>
-              </div>
+          {error ? <StateCard danger>{error}</StateCard> : null}
 
-              <div className="mt-3">
-                <div className="mb-1 text-[11px] font-extrabold text-textSecondary">
-                  Duration (minutes)
-                </div>
-                <input
-                  type="number"
-                  step={step}
-                  min={step}
-                  max={MAX_DURATION}
-                  value={durationMinutes}
-                  onChange={(e) => setDurationMinutes(Number(e.target.value))}
-                  className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none ring-0 focus:border-white/20"
+          {canEdit ? (
+            <div className="grid gap-4">
+              <section className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4">
+                <SectionHeading
+                  title="Block details"
+                  description="Edit the unavailable window using the calendar timezone and step size."
                 />
-              </div>
 
-              <div className="mt-3">
-                <div className="mb-1 text-[11px] font-extrabold text-textSecondary">
-                  Note (optional)
+                <div className="mt-4 grid gap-3">
+                  <InfoRow label="Timezone">
+                    {resolvedTimeZone} · {step} minute step
+                  </InfoRow>
                 </div>
-                <input
-                  type="text"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Lunch, admin time, school pickup…"
-                  className="w-full rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-sm text-textPrimary outline-none ring-0 placeholder:text-textSecondary focus:border-white/20"
+              </section>
+
+              <section className="rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.03] p-4">
+                <SectionHeading
+                  title="Time"
+                  description="Change when the block starts and how long it lasts."
                 />
-              </div>
 
-              <div className="mt-5 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => void remove()}
-                  disabled={deleting || saving}
-                  className={[
-                    'rounded-full border px-4 py-2 text-xs font-extrabold',
-                    'border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/15',
-                    deleting || saving ? 'cursor-not-allowed opacity-60' : '',
-                  ].join(' ')}
-                >
-                  {deleting ? 'Deleting…' : 'Delete block'}
-                </button>
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Date">
+                    <input
+                      type="date"
+                      value={dateInput}
+                      onChange={(event) => setDateInput(event.target.value)}
+                      disabled={busy}
+                      className={fieldClassName()}
+                    />
+                  </Field>
 
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={close}
-                    disabled={saving || deleting}
-                    className={[
-                      'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-xs font-extrabold text-textPrimary hover:bg-bgSecondary/60',
-                      saving || deleting ? 'cursor-not-allowed opacity-60' : '',
-                    ].join(' ')}
-                  >
-                    Cancel
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => void save()}
-                    disabled={saving || deleting}
-                    className={[
-                      'rounded-full px-4 py-2 text-xs font-extrabold text-black',
-                      'bg-brandGold hover:brightness-110',
-                      saving || deleting ? 'cursor-not-allowed opacity-60' : '',
-                    ].join(' ')}
-                  >
-                    {saving ? 'Saving…' : 'Save'}
-                  </button>
+                  <Field label="Start time">
+                    <input
+                      type="time"
+                      step={step * 60}
+                      value={startTimeInput}
+                      onChange={(event) =>
+                        setStartTimeInput(event.target.value)
+                      }
+                      disabled={busy}
+                      className={fieldClassName()}
+                    />
+                  </Field>
                 </div>
-              </div>
-            </>
-          )}
+
+                <div className="mt-3">
+                  <Field label="Duration minutes">
+                    <input
+                      type="number"
+                      step={step}
+                      min={step}
+                      max={MAX_DURATION}
+                      value={durationInput}
+                      onChange={(event) =>
+                        setDurationInput(event.target.value)
+                      }
+                      disabled={busy}
+                      inputMode="numeric"
+                      className={fieldClassName()}
+                    />
+                  </Field>
+                </div>
+
+                <div className="mt-3">
+                  <Field label="Note optional">
+                    <textarea
+                      value={note}
+                      onChange={(event) => setNote(event.target.value)}
+                      disabled={busy}
+                      maxLength={MAX_NOTE_LENGTH}
+                      placeholder="Lunch, admin time, school pickup…"
+                      className={[fieldClassName(), 'min-h-24 resize-none'].join(
+                        ' ',
+                      )}
+                    />
+                  </Field>
+
+                  <p className="mt-1 text-right font-mono text-[9px] font-black uppercase tracking-[0.08em] text-[var(--paper-mute)]">
+                    {note.length}/{MAX_NOTE_LENGTH}
+                  </p>
+                </div>
+              </section>
+            </div>
+          ) : null}
         </div>
-      </div>
+
+        <footer className="border-t border-[var(--line-strong)] bg-[var(--ink)]/92 px-4 py-4 backdrop-blur-xl sm:px-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <button
+              type="button"
+              onClick={() => void remove()}
+              disabled={!blockId || saving || deleting || loading}
+              className={buttonClassName('danger')}
+            >
+              {deleting ? 'Deleting…' : 'Delete block'}
+            </button>
+
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={close}
+                disabled={saving || deleting}
+                className={buttonClassName('ghost')}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="submit"
+                disabled={!canEdit || saving || deleting}
+                className={buttonClassName('primary')}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </footer>
+      </form>
+    </div>
+  )
+}
+
+function SectionHeading(props: {
+  title: string
+  description: string
+}) {
+  const { title, description } = props
+
+  return (
+    <div>
+      <h3 className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-[var(--paper)]">
+        {title}
+      </h3>
+
+      <p className="mt-1 text-sm leading-6 text-[var(--paper-dim)]">
+        {description}
+      </p>
+    </div>
+  )
+}
+
+function Field(props: {
+  label: string
+  children: ReactNode
+}) {
+  const { label, children } = props
+
+  return (
+    <label className="block">
+      <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+        {label}
+      </span>
+
+      {children}
+    </label>
+  )
+}
+
+function InfoRow(props: {
+  label: string
+  children: ReactNode
+}) {
+  const { label, children } = props
+
+  return (
+    <div className="rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-3 py-2">
+      <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)]">
+        {label}
+      </p>
+
+      <p className="mt-1 text-sm font-semibold text-[var(--paper)]">
+        {children}
+      </p>
+    </div>
+  )
+}
+
+function StateCard(props: {
+  children: ReactNode
+  danger?: boolean
+}) {
+  const { children, danger = false } = props
+
+  return (
+    <div
+      className={[
+        'mb-3 rounded-2xl border px-3 py-3 text-sm font-semibold',
+        danger
+          ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
+          : 'border-[var(--line)] bg-[var(--paper)]/[0.03] text-[var(--paper-dim)]',
+      ].join(' ')}
+    >
+      {children}
     </div>
   )
 }

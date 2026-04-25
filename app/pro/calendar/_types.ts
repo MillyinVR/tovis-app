@@ -1,4 +1,5 @@
 // app/pro/calendar/_types.ts
+
 import type { IanaTimeZone } from '@/lib/timeZone'
 
 export type ViewMode = 'day' | 'week' | 'month'
@@ -20,21 +21,33 @@ export type TimeZoneTruthSource =
   | 'PROFESSIONAL'
   | 'FALLBACK'
 
+/**
+ * Backend-facing location mode.
+ * Keep this extensible because backend/provider enums may grow.
+ */
 export type ServiceLocationType =
   | 'SALON'
   | 'MOBILE'
-  | (string & {})
+  | (string & Record<never, never>)
 
+/**
+ * Backend-facing booking status.
+ * Known values get strong handling, but future statuses should not break parsing.
+ */
 export type BookingCalendarStatus =
   | 'PENDING'
   | 'ACCEPTED'
   | 'COMPLETED'
   | 'CANCELLED'
+  | 'DECLINED'
+  | 'NO_SHOW'
+  | 'RESCHEDULE_REQUESTED'
   | 'WAITLIST'
   | 'UNKNOWN'
-  | (string & {})
+  | (string & Record<never, never>)
 
-export type CalendarStatus = BookingCalendarStatus | 'BLOCKED'
+export type BlockCalendarStatus = 'BLOCKED'
+export type CalendarStatus = BookingCalendarStatus | BlockCalendarStatus
 
 export type WorkingHoursDay = {
   enabled: boolean
@@ -44,14 +57,12 @@ export type WorkingHoursDay = {
 
 export type WorkingHoursJson = Record<WeekdayKey, WorkingHoursDay> | null
 
-export type CalendarStats =
-  | {
-      todaysBookings: number
-      availableHours: number | null
-      pendingRequests: number
-      blockedHours: number | null
-    }
-  | null
+export type CalendarStats = {
+  todaysBookings: number
+  availableHours: number | null
+  pendingRequests: number
+  blockedHours: number | null
+} | null
 
 export type ServiceOption = {
   id: string
@@ -61,20 +72,31 @@ export type ServiceOption = {
   priceStartingAt?: string | null
 }
 
+export type BookingServiceItemType =
+  | 'BASE'
+  | 'ADD_ON'
+  | (string & Record<never, never>)
+
 export type BookingServiceItem = {
   id: string
   serviceId: string
   offeringId: string | null
-  itemType: 'BASE' | 'ADD_ON' | (string & {})
+  itemType: BookingServiceItemType
   serviceName: string
   priceSnapshot: string
   durationMinutesSnapshot: number
   sortOrder: number
 }
 
+export type BookingClientSnapshot = {
+  fullName: string
+  email: string | null
+  phone: string | null
+}
+
 export type BookingDetails = {
   id: string
-  status: string
+  status: BookingCalendarStatus | string
   scheduledFor: string
   endsAt: string
 
@@ -90,11 +112,7 @@ export type BookingDetails = {
   bufferMinutes?: number
   subtotalSnapshot?: string
 
-  client: {
-    fullName: string
-    email: string | null
-    phone: string | null
-  }
+  client: BookingClientSnapshot
 
   timeZone: IanaTimeZone
   timeZoneSource?: TimeZoneTruthSource
@@ -115,69 +133,82 @@ export type BookingEventDetails = {
   serviceItems: CalendarServiceItem[]
 }
 
-export type BookingCalendarEvent = {
-  kind: 'BOOKING'
+type CalendarEventBase = {
   id: string
   startsAt: string
   endsAt: string
   title: string
   clientName: string
-  status: BookingCalendarStatus
-  locationId: string | null
-  locationType: ServiceLocationType
   durationMinutes?: number
+  locationId: string | null
+}
 
-  // Authoritative appointment-local timezone for this booking.
-  timeZone: IanaTimeZone | string
+export type BookingCalendarEvent = CalendarEventBase & {
+  kind: 'BOOKING'
+  status: BookingCalendarStatus
+  locationType: ServiceLocationType
+
+  /**
+   * Authoritative appointment-local timezone for this booking.
+   */
+  timeZone: IanaTimeZone
   timeZoneSource: TimeZoneTruthSource
 
-  // Day key in the booking's appointment timezone.
+  /**
+   * Day key in the booking appointment timezone.
+   */
   localDateKey: string
 
-  // Day key in the selected calendar viewport timezone.
+  /**
+   * Day key in the selected calendar viewport timezone.
+   */
   viewLocalDateKey?: string
 
   details: BookingEventDetails
+
   note?: never
   blockId?: never
 }
 
-export type BlockCalendarEvent = {
+export type BlockCalendarEvent = CalendarEventBase & {
   kind: 'BLOCK'
-  id: string
   blockId: string
-  startsAt: string
-  endsAt: string
-  title: string
-  clientName: string
-  status: 'BLOCKED'
-  durationMinutes?: number
+  status: BlockCalendarStatus
   note: string | null
-  locationId: string | null
 
-  // Block rows are viewport-scoped in the current calendar payload.
+  /**
+   * Block rows are viewport-scoped in the current calendar payload.
+   */
   localDateKey?: string
+
+  details?: never
+  locationType?: never
+  timeZone?: never
+  timeZoneSource?: never
+  viewLocalDateKey?: never
 }
 
 export type CalendarEvent = BookingCalendarEvent | BlockCalendarEvent
 
-export type PendingChange =
-  | {
-      kind: 'resize'
-      entityType: EntityType
-      eventId: string
-      apiId: string
-      nextTotalDurationMinutes: number
-      original: CalendarEvent
-    }
-  | {
-      kind: 'move'
-      entityType: EntityType
-      eventId: string
-      apiId: string
-      nextStartIso: string
-      original: CalendarEvent
-    }
+export type PendingResizeChange = {
+  kind: 'resize'
+  entityType: EntityType
+  eventId: string
+  apiId: string
+  nextTotalDurationMinutes: number
+  original: CalendarEvent
+}
+
+export type PendingMoveChange = {
+  kind: 'move'
+  entityType: EntityType
+  eventId: string
+  apiId: string
+  nextStartIso: string
+  original: CalendarEvent
+}
+
+export type PendingChange = PendingResizeChange | PendingMoveChange
 
 export type ManagementKey =
   | 'todaysBookings'
@@ -185,27 +216,25 @@ export type ManagementKey =
   | 'waitlistToday'
   | 'blockedToday'
 
-export type ManagementLists = {
-  todaysBookings: CalendarEvent[]
-  pendingRequests: CalendarEvent[]
-  waitlistToday: CalendarEvent[]
-  blockedToday: CalendarEvent[]
-}
+export type ManagementLists = Record<ManagementKey, CalendarEvent[]>
 
 export type BlockRow = {
   id: string
   startsAt: string | Date
   endsAt: string | Date
   note?: string | null
+  locationId?: string | null
+}
+
+export type CalendarResponseLocation = {
+  id: string
+  type: string
+  timeZone: string | null
+  timeZoneValid: boolean
 }
 
 export type CalendarResponse = {
-  location: {
-    id: string
-    type: string
-    timeZone: string | null
-    timeZoneValid: boolean
-  }
+  location: CalendarResponseLocation | null
   timeZone: string
   viewportTimeZone: string
   needsTimeZoneSetup: boolean

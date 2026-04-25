@@ -1,17 +1,22 @@
-// app/pro/calendar/_hooks/useCalendarNavigation.ts 
+// app/pro/calendar/_hooks/useCalendarNavigation.ts
 'use client'
 
-import { useCallback } from 'react'
-
+import { useCallback, useMemo } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 
 import type { ViewMode } from '../_types'
 
 import {
-  anchorNoonInTimeZone,
   addDaysAnchorNoonInTimeZone,
-  addMonthsAnchorNoonInTimeZone,
+  anchorNoonInTimeZone,
+  getZonedParts,
 } from '../_utils/date'
+
+import {
+  DEFAULT_TIME_ZONE,
+  sanitizeTimeZone,
+  zonedTimeToUtc,
+} from '@/lib/timeZone'
 
 type UseCalendarNavigationArgs = {
   view: ViewMode
@@ -19,34 +24,129 @@ type UseCalendarNavigationArgs = {
   setCurrentDate: Dispatch<SetStateAction<Date>>
 }
 
-function shiftDate(view: ViewMode, date: Date, step: number, timeZone: string) {
-  if (view === 'day') {
-    return addDaysAnchorNoonInTimeZone(date, step, timeZone)
-  }
-
-  if (view === 'week') {
-    return addDaysAnchorNoonInTimeZone(date, step * 7, timeZone)
-  }
-
-  return addMonthsAnchorNoonInTimeZone(date, step, timeZone)
+type LocalMonthParts = {
+  year: number
+  month: number
 }
 
-export function useCalendarNavigation({
-  view,
-  timeZone,
-  setCurrentDate,
-}: UseCalendarNavigationArgs) {
+const DAYS_PER_WEEK = 7
+const LOCAL_NOON_HOUR = 12
+
+function safeTimeZone(timeZone: string) {
+  return sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+}
+
+function daysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
+function shiftMonthParts(args: {
+  year: number
+  month: number
+  deltaMonths: number
+}): LocalMonthParts {
+  const zeroBasedMonthIndex =
+    args.year * 12 + (args.month - 1) + args.deltaMonths
+
+  const year = Math.floor(zeroBasedMonthIndex / 12)
+  const month = zeroBasedMonthIndex - year * 12 + 1
+
+  return {
+    year,
+    month,
+  }
+}
+
+function addMonthsClampedAnchorNoonInTimeZone(args: {
+  anchorUtc: Date
+  deltaMonths: number
+  timeZone: string
+}) {
+  const parts = getZonedParts(args.anchorUtc, args.timeZone)
+  const shifted = shiftMonthParts({
+    year: parts.year,
+    month: parts.month,
+    deltaMonths: args.deltaMonths,
+  })
+
+  const maxDay = daysInMonth(shifted.year, shifted.month)
+  const day = Math.min(parts.day, maxDay)
+
+  return zonedTimeToUtc({
+    year: shifted.year,
+    month: shifted.month,
+    day,
+    hour: LOCAL_NOON_HOUR,
+    minute: 0,
+    second: 0,
+    timeZone: args.timeZone,
+  })
+}
+
+function shiftDate(args: {
+  view: ViewMode
+  date: Date
+  step: number
+  timeZone: string
+}) {
+  const anchoredDate = anchorNoonInTimeZone(args.date, args.timeZone)
+
+  if (args.view === 'day') {
+    return addDaysAnchorNoonInTimeZone(
+      anchoredDate,
+      args.step,
+      args.timeZone,
+    )
+  }
+
+  if (args.view === 'week') {
+    return addDaysAnchorNoonInTimeZone(
+      anchoredDate,
+      args.step * DAYS_PER_WEEK,
+      args.timeZone,
+    )
+  }
+
+  return addMonthsClampedAnchorNoonInTimeZone({
+    anchorUtc: anchoredDate,
+    deltaMonths: args.step,
+    timeZone: args.timeZone,
+  })
+}
+
+export function useCalendarNavigation(args: UseCalendarNavigationArgs) {
+  const { view, timeZone, setCurrentDate } = args
+
+  const calendarTimeZone = useMemo(
+    () => safeTimeZone(timeZone),
+    [timeZone],
+  )
+
   const goToToday = useCallback(() => {
-    setCurrentDate(anchorNoonInTimeZone(new Date(), timeZone))
-  }, [setCurrentDate, timeZone])
+    setCurrentDate(anchorNoonInTimeZone(new Date(), calendarTimeZone))
+  }, [calendarTimeZone, setCurrentDate])
 
   const goBack = useCallback(() => {
-    setCurrentDate((date) => shiftDate(view, date, -1, timeZone))
-  }, [setCurrentDate, timeZone, view])
+    setCurrentDate((currentDate) =>
+      shiftDate({
+        view,
+        date: currentDate,
+        step: -1,
+        timeZone: calendarTimeZone,
+      }),
+    )
+  }, [calendarTimeZone, setCurrentDate, view])
 
   const goNext = useCallback(() => {
-    setCurrentDate((date) => shiftDate(view, date, 1, timeZone))
-  }, [setCurrentDate, timeZone, view])
+    setCurrentDate((currentDate) =>
+      shiftDate({
+        view,
+        date: currentDate,
+        step: 1,
+        timeZone: calendarTimeZone,
+      }),
+    )
+  }, [calendarTimeZone, setCurrentDate, view])
 
   return {
     goToToday,

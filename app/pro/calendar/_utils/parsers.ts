@@ -1,30 +1,32 @@
 // app/pro/calendar/_utils/parsers.ts
 //
-// Pure parser / normalizer functions extracted from useCalendarData.
-// Zero React dependency - safe to unit-test in isolation.
-//
+// Pure parser / normalizer functions extracted from calendar hooks.
+// Zero React dependency. Safe to unit-test in isolation.
 
 import type {
+  BookingCalendarEvent,
+  BookingCalendarStatus,
   BookingDetails,
   BookingServiceItem,
+  BlockCalendarEvent,
   CalendarEvent,
+  CalendarServiceItem,
   CalendarStats,
   ManagementLists,
   ServiceOption,
+  TimeZoneTruthSource,
   WorkingHoursDay,
   WorkingHoursJson,
-  BookingCalendarStatus,
-  TimeZoneTruthSource,
 } from '../_types'
-import { isRecord } from '@/lib/guards'
-import { pickNumber, pickString } from '@/lib/pick'
-import { readErrorMessage } from '@/lib/http'
-import { sanitizeTimeZone, DEFAULT_TIME_ZONE } from '@/lib/timeZone'
 
-// ── Local types (not React-specific) ─────────────────────────────────
+import { isRecord } from '@/lib/guards'
+import { pickBool, pickNumber, pickString } from '@/lib/pick'
+import { readErrorMessage } from '@/lib/http'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import { parseHHMM } from '@/lib/scheduling/workingHours'
 
 export type LocationType = 'SALON' | 'MOBILE'
-export type ProLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE' | (string & {})
+export type ProLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE' | string
 
 export type ProLocation = {
   id: string
@@ -44,41 +46,80 @@ export type CalendarRouteLocation = {
   timeZone: string | null
 }
 
-// ── Tiny helpers ────────────────────────────────────────────────────
+function normalizeText(value: unknown) {
+  return pickString(value)?.trim() ?? ''
+}
+
+function nullableText(value: unknown) {
+  const text = normalizeText(value)
+  return text ? text : null
+}
+
+function optionalText(value: unknown) {
+  const text = normalizeText(value)
+  return text ? text : undefined
+}
+
+function finiteNumberOrNull(value: unknown) {
+  const number = pickNumber(value)
+  return number !== null && Number.isFinite(number) ? number : null
+}
+
+function positiveNumberOrUndefined(value: unknown) {
+  const number = finiteNumberOrNull(value)
+  return number !== null && number > 0 ? number : undefined
+}
+
+function normalizeBoolean(value: unknown, fallback: boolean) {
+  return pickBool(value) ?? fallback
+}
+
+function validIsoString(value: unknown) {
+  const iso = nullableText(value)
+  if (!iso) return null
+
+  const date = new Date(iso)
+  return Number.isFinite(date.getTime()) ? iso : null
+}
+
+function normalizeHHMM(value: unknown) {
+  const parsed = parseHHMM(value)
+  if (!parsed) return null
+
+  return `${String(parsed.hh).padStart(2, '0')}:${String(parsed.mm).padStart(
+    2,
+    '0',
+  )}`
+}
+
+function emptyManagementLists(): ManagementLists {
+  return {
+    todaysBookings: [],
+    pendingRequests: [],
+    waitlistToday: [],
+    blockedToday: [],
+  }
+}
 
 export function apiMessage(data: unknown, fallback: string) {
-  return (
-    readErrorMessage(data) ??
-    (isRecord(data) ? pickString(data.message) : null) ??
-    fallback
-  )
+  return readErrorMessage(data) ?? nullableText(isRecord(data) ? data.message : null) ?? fallback
 }
 
-export function upper(v: unknown): string {
-  return (pickString(v) ?? '').toUpperCase()
-}
-
-function normalizeKnownBookingLocationType(value: unknown): 'SALON' | 'MOBILE' {
-  const raw = upper(value)
-  return raw === 'MOBILE' || raw === 'MOBILE_BASE' ? 'MOBILE' : 'SALON'
+export function upper(value: unknown): string {
+  return normalizeText(value).toUpperCase()
 }
 
 function normalizeBookingCalendarStatus(value: unknown): BookingCalendarStatus {
   const raw = upper(value)
 
-  if (
-    raw === 'PENDING' ||
-    raw === 'ACCEPTED' ||
-    raw === 'COMPLETED' ||
-    raw === 'CANCELLED' ||
-    raw === 'WAITLIST' ||
-    raw === 'UNKNOWN'
-  ) {
-    return raw
-  }
+  if (raw === 'PENDING') return 'PENDING'
+  if (raw === 'ACCEPTED') return 'ACCEPTED'
+  if (raw === 'COMPLETED') return 'COMPLETED'
+  if (raw === 'CANCELLED') return 'CANCELLED'
+  if (raw === 'WAITLIST') return 'WAITLIST'
+  if (raw === 'UNKNOWN') return 'UNKNOWN'
 
-  const fallback = pickString(value)
-  return (fallback ?? 'UNKNOWN') as BookingCalendarStatus
+  return nullableText(value) ?? 'UNKNOWN'
 }
 
 function normalizeTimeZoneTruthSource(value: unknown): TimeZoneTruthSource {
@@ -93,8 +134,6 @@ function normalizeTimeZoneTruthSource(value: unknown): TimeZoneTruthSource {
   return 'FALLBACK'
 }
 
-// ── Location-type normalisers ──────────────────────────────────────
-
 export function normalizeProLocationType(value: unknown): ProLocationType {
   const raw = upper(value)
 
@@ -102,14 +141,12 @@ export function normalizeProLocationType(value: unknown): ProLocationType {
   if (raw === 'SUITE') return 'SUITE'
   if (raw === 'MOBILE_BASE') return 'MOBILE_BASE'
 
-  const fallback = pickString(value)
-  return (fallback ?? 'SALON') as ProLocationType
+  return nullableText(value) ?? 'SALON'
 }
 
 export function normalizeLocationType(value: unknown): LocationType {
-  return upper(value) === 'MOBILE' || upper(value) === 'MOBILE_BASE'
-    ? 'MOBILE'
-    : 'SALON'
+  const raw = upper(value)
+  return raw === 'MOBILE' || raw === 'MOBILE_BASE' ? 'MOBILE' : 'SALON'
 }
 
 export function pickLocationType(
@@ -117,15 +154,11 @@ export function pickLocationType(
   canMobile: boolean,
   preferred?: LocationType,
 ): LocationType {
-  if (
-    preferred &&
-    ((preferred === 'SALON' && canSalon) ||
-      (preferred === 'MOBILE' && canMobile))
-  ) {
-    return preferred
-  }
+  if (preferred === 'SALON' && canSalon) return 'SALON'
+  if (preferred === 'MOBILE' && canMobile) return 'MOBILE'
   if (canSalon) return 'SALON'
   if (canMobile) return 'MOBILE'
+
   return 'SALON'
 }
 
@@ -137,287 +170,275 @@ export function locationTypeFromBookingValue(value: unknown): LocationType {
   return normalizeLocationType(value)
 }
 
-// ── Working-hours parsers ──────────────────────────────────────────
+export function parseWorkingHoursDay(value: unknown): WorkingHoursDay | null {
+  if (!isRecord(value)) return null
 
-export function parseWorkingHoursDay(v: unknown): WorkingHoursDay | null {
-  if (!isRecord(v)) return null
+  const enabled = pickBool(value.enabled)
+  const start = normalizeHHMM(value.start)
+  const end = normalizeHHMM(value.end)
 
-  const enabled = typeof v.enabled === 'boolean' ? v.enabled : null
-  const start = pickString(v.start)
-  const end = pickString(v.end)
+  if (enabled === null || !start || !end) return null
 
-  if (enabled == null || !start || !end) return null
-
-  return { enabled, start, end }
+  return {
+    enabled,
+    start,
+    end,
+  }
 }
 
-export function parseWorkingHoursJson(v: unknown): WorkingHoursJson {
-  if (!isRecord(v)) return null
+export function parseWorkingHoursJson(value: unknown): WorkingHoursJson {
+  if (!isRecord(value)) return null
 
-  const sun = parseWorkingHoursDay(v.sun)
-  const mon = parseWorkingHoursDay(v.mon)
-  const tue = parseWorkingHoursDay(v.tue)
-  const wed = parseWorkingHoursDay(v.wed)
-  const thu = parseWorkingHoursDay(v.thu)
-  const fri = parseWorkingHoursDay(v.fri)
-  const sat = parseWorkingHoursDay(v.sat)
+  const sun = parseWorkingHoursDay(value.sun)
+  const mon = parseWorkingHoursDay(value.mon)
+  const tue = parseWorkingHoursDay(value.tue)
+  const wed = parseWorkingHoursDay(value.wed)
+  const thu = parseWorkingHoursDay(value.thu)
+  const fri = parseWorkingHoursDay(value.fri)
+  const sat = parseWorkingHoursDay(value.sat)
 
   if (!sun || !mon || !tue || !wed || !thu || !fri || !sat) return null
 
-  return { sun, mon, tue, wed, thu, fri, sat }
+  return {
+    sun,
+    mon,
+    tue,
+    wed,
+    thu,
+    fri,
+    sat,
+  }
 }
-
-// ── Location parsers ───────────────────────────────────────────────
 
 export function parseCalendarRouteLocation(
-  v: unknown,
+  value: unknown,
 ): CalendarRouteLocation | null {
-  if (!isRecord(v)) return null
+  if (!isRecord(value)) return null
 
-  const id = pickString(v.id)
+  const id = nullableText(value.id)
   if (!id) return null
 
   return {
     id,
-    type: normalizeProLocationType(v.type),
-    timeZone: pickString(v.timeZone) ?? null,
+    type: normalizeProLocationType(value.type),
+    timeZone: nullableText(value.timeZone),
   }
 }
 
-export function parseProLocation(v: unknown): ProLocation | null {
-  if (!isRecord(v)) return null
+export function parseProLocation(value: unknown): ProLocation | null {
+  if (!isRecord(value)) return null
 
-  const id = pickString(v.id)
+  const id = nullableText(value.id)
   if (!id) return null
 
-  const stepMinutesRaw =
-    v.stepMinutes === null ? null : pickNumber(v.stepMinutes)
-  const stepMinutes =
-    stepMinutesRaw != null && Number.isFinite(stepMinutesRaw)
-      ? stepMinutesRaw
-      : null
-
   return {
     id,
-    type: normalizeProLocationType(v.type),
-    name: pickString(v.name) ?? null,
-    formattedAddress: pickString(v.formattedAddress) ?? null,
-    isPrimary: Boolean(v.isPrimary),
-    isBookable: v.isBookable === undefined ? true : Boolean(v.isBookable),
-    timeZone: pickString(v.timeZone) ?? null,
-    workingHours: parseWorkingHoursJson(v.workingHours),
-    stepMinutes,
+    type: normalizeProLocationType(value.type),
+    name: nullableText(value.name),
+    formattedAddress: nullableText(value.formattedAddress),
+    isPrimary: normalizeBoolean(value.isPrimary, false),
+    isBookable: normalizeBoolean(value.isBookable, true),
+    timeZone: nullableText(value.timeZone),
+    workingHours: parseWorkingHoursJson(value.workingHours),
+    stepMinutes: finiteNumberOrNull(value.stepMinutes),
   }
 }
 
-// ── Calendar-event parsers ─────────────────────────────────────────
+function parseCalendarServiceItem(value: unknown): CalendarServiceItem | null {
+  if (!isRecord(value)) return null
 
-function parseCalendarServiceItem(v: unknown): {
-  id: string
-  name: string | null
-  durationMinutes: number
-  price: unknown
-  sortOrder: number
-} | null {
-  if (!isRecord(v)) return null
+  const id = nullableText(value.id)
+  const durationMinutes = finiteNumberOrNull(value.durationMinutes)
+  const sortOrder = finiteNumberOrNull(value.sortOrder)
 
-  const id = pickString(v.id)
-  const sortOrder = pickNumber(v.sortOrder)
-  const durationMinutes = pickNumber(v.durationMinutes)
-
-  if (!id || sortOrder == null || durationMinutes == null) return null
+  if (!id || durationMinutes === null || sortOrder === null) return null
 
   return {
     id,
-    name: pickString(v.name) ?? null,
+    name: nullableText(value.name),
     durationMinutes,
-    price: 'price' in v ? v.price : null,
+    price: 'price' in value ? value.price : null,
     sortOrder,
   }
 }
 
-export function parseCalendarEvent(v: unknown): CalendarEvent | null {
-  if (!isRecord(v)) return null
+function parseCalendarServiceItems(value: unknown): CalendarServiceItem[] {
+  if (!Array.isArray(value)) return []
 
-  const kind = pickString(v.kind)
-  const id = pickString(v.id)
-  const startsAt = pickString(v.startsAt)
-  const endsAt = pickString(v.endsAt)
+  const items: CalendarServiceItem[] = []
 
-  if (!kind || !id || !startsAt || !endsAt) return null
+  for (const row of value) {
+    const item = parseCalendarServiceItem(row)
+    if (item) items.push(item)
+  }
 
-  const title =
-    pickString(v.title) ?? (kind === 'BLOCK' ? 'Blocked' : 'Booking')
-  const clientName = pickString(v.clientName) ?? ''
+  return items.sort((first, second) => first.sortOrder - second.sortOrder)
+}
 
-  const dur = pickNumber(v.durationMinutes)
-  const durationMinutes = dur != null && dur > 0 ? dur : undefined
+function parseBookingEvent(
+  value: Record<string, unknown>,
+): BookingCalendarEvent | null {
+  const id = nullableText(value.id)
+  const startsAt = validIsoString(value.startsAt)
+  const endsAt = validIsoString(value.endsAt)
+
+  if (!id || !startsAt || !endsAt) return null
+
+  const title = nullableText(value.title) ?? 'Booking'
+  const detailsRecord = isRecord(value.details) ? value.details : null
+  const viewLocalDateKey = optionalText(value.viewLocalDateKey)
+  const durationMinutes = positiveNumberOrUndefined(value.durationMinutes)
+
+  const event: BookingCalendarEvent = {
+    kind: 'BOOKING',
+    id,
+    startsAt,
+    endsAt,
+    title,
+    clientName: nullableText(value.clientName) ?? '',
+    status: normalizeBookingCalendarStatus(value.status),
+    locationId:
+      value.locationId === null ? null : nullableText(value.locationId),
+    locationType: normalizeLocationType(value.locationType),
+    timeZone: sanitizeTimeZone(value.timeZone, DEFAULT_TIME_ZONE),
+    timeZoneSource: normalizeTimeZoneTruthSource(value.timeZoneSource),
+    localDateKey:
+      nullableText(value.localDateKey) ??
+      nullableText(value.date) ??
+      startsAt.slice(0, 10),
+    details: {
+      serviceName: detailsRecord
+        ? nullableText(detailsRecord.serviceName) ?? title
+        : title,
+      bufferMinutes: detailsRecord
+        ? finiteNumberOrNull(detailsRecord.bufferMinutes) ?? 0
+        : 0,
+      serviceItems: parseCalendarServiceItems(detailsRecord?.serviceItems),
+    },
+    ...(viewLocalDateKey ? { viewLocalDateKey } : {}),
+    ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+  }
+
+  return event
+}
+
+function parseBlockEvent(
+  value: Record<string, unknown>,
+): BlockCalendarEvent | null {
+  const id = nullableText(value.id)
+  const startsAt = validIsoString(value.startsAt)
+  const endsAt = validIsoString(value.endsAt)
+
+  if (!id || !startsAt || !endsAt) return null
+
+  const derivedBlockId = id.startsWith('block:')
+    ? id.slice('block:'.length)
+    : null
+  const blockId = nullableText(value.blockId) ?? derivedBlockId
+  if (!blockId) return null
+
+  const localDateKey = optionalText(value.localDateKey)
+  const durationMinutes = positiveNumberOrUndefined(value.durationMinutes)
+
+  const event: BlockCalendarEvent = {
+    kind: 'BLOCK',
+    id,
+    blockId,
+    startsAt,
+    endsAt,
+    title: nullableText(value.title) ?? 'Blocked',
+    clientName: nullableText(value.clientName) ?? 'Personal time',
+    status: 'BLOCKED',
+    note: value.note === null ? null : nullableText(value.note),
+    locationId:
+      value.locationId === null ? null : nullableText(value.locationId),
+    ...(localDateKey ? { localDateKey } : {}),
+    ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+  }
+
+  return event
+}
+
+export function parseCalendarEvent(value: unknown): CalendarEvent | null {
+  if (!isRecord(value)) return null
+
+  const kind = upper(value.kind)
 
   if (kind === 'BOOKING') {
-    const locationId =
-      v.locationId === null ? null : (pickString(v.locationId) ?? null)
-
-    const locationType = normalizeKnownBookingLocationType(v.locationType)
-
-    const detailsRecord = isRecord(v.details) ? v.details : null
-    const rawServiceItems = detailsRecord?.serviceItems
-
-    const serviceItems = Array.isArray(rawServiceItems)
-      ? rawServiceItems.reduce<
-          {
-            id: string
-            name: string | null
-            durationMinutes: number
-            price: unknown
-            sortOrder: number
-          }[]
-        >((acc, row) => {
-          const item = parseCalendarServiceItem(row)
-          if (item) acc.push(item)
-          return acc
-        }, [])
-      : []
-
-    const timeZone = sanitizeTimeZone(v.timeZone, DEFAULT_TIME_ZONE)
-    const timeZoneSource = normalizeTimeZoneTruthSource(v.timeZoneSource)
-    const localDateKey =
-      pickString(v.localDateKey) ?? pickString(v.date) ?? startsAt.slice(0, 10)
-    const viewLocalDateKey = pickString(v.viewLocalDateKey) ?? undefined
-
-    return {
-      kind: 'BOOKING',
-      id,
-      startsAt,
-      endsAt,
-      title,
-      clientName,
-      status: normalizeBookingCalendarStatus(v.status),
-      locationId,
-      locationType,
-      timeZone,
-      timeZoneSource,
-      localDateKey,
-      ...(viewLocalDateKey ? { viewLocalDateKey } : {}),
-      details: {
-        serviceName: detailsRecord
-          ? pickString(detailsRecord.serviceName) ?? title
-          : title,
-        bufferMinutes: detailsRecord
-          ? pickNumber(detailsRecord.bufferMinutes) ?? 0
-          : 0,
-        serviceItems,
-      },
-      ...(durationMinutes != null ? { durationMinutes } : {}),
-    }
+    return parseBookingEvent(value)
   }
 
   if (kind === 'BLOCK') {
-    const derived = id.startsWith('block:') ? id.slice('block:'.length) : null
-    const blockId = pickString(v.blockId) ?? derived
-    if (!blockId) return null
-
-    const note = v.note === null ? null : pickString(v.note)
-    const locationId = v.locationId === null ? null : pickString(v.locationId)
-    const localDateKey = pickString(v.localDateKey) ?? undefined
-
-    return {
-      kind: 'BLOCK',
-      id,
-      blockId,
-      startsAt,
-      endsAt,
-      title,
-      clientName,
-      status: 'BLOCKED',
-      note: note ?? null,
-      locationId: locationId ?? null,
-      ...(localDateKey ? { localDateKey } : {}),
-      ...(durationMinutes != null ? { durationMinutes } : {}),
-    }
+    return parseBlockEvent(value)
   }
 
   return null
 }
 
-export function parseCalendarEvents(v: unknown): CalendarEvent[] {
-  if (!Array.isArray(v)) return []
+export function parseCalendarEvents(value: unknown): CalendarEvent[] {
+  if (!Array.isArray(value)) return []
 
-  const out: CalendarEvent[] = []
-  for (const row of v) {
-    const ev = parseCalendarEvent(row)
-    if (ev) out.push(ev)
+  const events: CalendarEvent[] = []
+
+  for (const row of value) {
+    const event = parseCalendarEvent(row)
+    if (event) events.push(event)
   }
 
-  return out
+  return events
 }
 
-// ── Management / stats parsers ────────────────────────────────────
-
-export function parseManagementLists(v: unknown): ManagementLists {
-  if (!isRecord(v)) {
-    return {
-      todaysBookings: [],
-      pendingRequests: [],
-      waitlistToday: [],
-      blockedToday: [],
-    }
-  }
+export function parseManagementLists(value: unknown): ManagementLists {
+  if (!isRecord(value)) return emptyManagementLists()
 
   return {
-    todaysBookings: parseCalendarEvents(v.todaysBookings),
-    pendingRequests: parseCalendarEvents(v.pendingRequests),
-    waitlistToday: parseCalendarEvents(v.waitlistToday),
-    blockedToday: parseCalendarEvents(v.blockedToday),
+    todaysBookings: parseCalendarEvents(value.todaysBookings),
+    pendingRequests: parseCalendarEvents(value.pendingRequests),
+    waitlistToday: parseCalendarEvents(value.waitlistToday),
+    blockedToday: parseCalendarEvents(value.blockedToday),
   }
 }
 
-export function parseCalendarStats(v: unknown): CalendarStats {
-  if (!isRecord(v)) return null
+export function parseCalendarStats(value: unknown): CalendarStats {
+  if (!isRecord(value)) return null
 
-  const todaysBookings = pickNumber(v.todaysBookings)
-  const pendingRequests = pickNumber(v.pendingRequests)
+  const todaysBookings = finiteNumberOrNull(value.todaysBookings)
+  const pendingRequests = finiteNumberOrNull(value.pendingRequests)
 
-  const availableHours =
-    v.availableHours === null ? null : (pickNumber(v.availableHours) ?? null)
-
-  const blockedHours =
-    v.blockedHours === null ? null : (pickNumber(v.blockedHours) ?? null)
-
-  if (todaysBookings == null || pendingRequests == null) return null
+  if (todaysBookings === null || pendingRequests === null) return null
 
   return {
     todaysBookings,
-    availableHours,
+    availableHours:
+      value.availableHours === null ? null : finiteNumberOrNull(value.availableHours),
     pendingRequests,
-    blockedHours,
+    blockedHours:
+      value.blockedHours === null ? null : finiteNumberOrNull(value.blockedHours),
   }
 }
 
-// ── Service-option parser ──────────────────────────────────────────
+export function parseServiceOptions(value: unknown): ServiceOption[] {
+  if (!Array.isArray(value)) return []
 
-export function parseServiceOptions(v: unknown): ServiceOption[] {
-  if (!Array.isArray(v)) return []
+  const options: ServiceOption[] = []
 
-  const out: ServiceOption[] = []
-  for (const row of v) {
+  for (const row of value) {
     if (!isRecord(row)) continue
 
-    const id = pickString(row.id)
-    const name = pickString(row.name)
+    const id = nullableText(row.id)
+    const name = nullableText(row.name)
     if (!id || !name) continue
 
     const durationMinutes =
       row.durationMinutes === null
         ? null
-        : (pickNumber(row.durationMinutes) ?? null)
+        : finiteNumberOrNull(row.durationMinutes)
 
-    const offeringId = pickString(row.offeringId) ?? undefined
+    const offeringId = optionalText(row.offeringId)
     const priceStartingAt =
-      row.priceStartingAt === null
-        ? null
-        : (pickString(row.priceStartingAt) ?? null)
+      row.priceStartingAt === null ? null : nullableText(row.priceStartingAt)
 
-    out.push({
+    options.push({
       id,
       name,
       ...(durationMinutes !== null ? { durationMinutes } : {}),
@@ -426,22 +447,23 @@ export function parseServiceOptions(v: unknown): ServiceOption[] {
     })
   }
 
-  return out
+  return options
 }
 
-// ── Booking-detail parsers ─────────────────────────────────────────
+export function parseBookingServiceItem(
+  value: unknown,
+): BookingServiceItem | null {
+  if (!isRecord(value)) return null
 
-export function parseBookingServiceItem(v: unknown): BookingServiceItem | null {
-  if (!isRecord(v)) return null
-
-  const id = pickString(v.id)
-  const serviceId = pickString(v.serviceId)
-  const offeringId = v.offeringId === null ? null : pickString(v.offeringId)
-  const itemType = pickString(v.itemType)
-  const serviceName = pickString(v.serviceName)
-  const priceSnapshot = pickString(v.priceSnapshot)
-  const durationMinutesSnapshot = pickNumber(v.durationMinutesSnapshot)
-  const sortOrder = pickNumber(v.sortOrder)
+  const id = nullableText(value.id)
+  const serviceId = nullableText(value.serviceId)
+  const itemType = nullableText(value.itemType)
+  const serviceName = nullableText(value.serviceName)
+  const priceSnapshot = nullableText(value.priceSnapshot)
+  const durationMinutesSnapshot = finiteNumberOrNull(
+    value.durationMinutesSnapshot,
+  )
+  const sortOrder = finiteNumberOrNull(value.sortOrder)
 
   if (
     !id ||
@@ -449,8 +471,8 @@ export function parseBookingServiceItem(v: unknown): BookingServiceItem | null {
     !itemType ||
     !serviceName ||
     !priceSnapshot ||
-    durationMinutesSnapshot == null ||
-    sortOrder == null
+    durationMinutesSnapshot === null ||
+    sortOrder === null
   ) {
     return null
   }
@@ -458,7 +480,8 @@ export function parseBookingServiceItem(v: unknown): BookingServiceItem | null {
   return {
     id,
     serviceId,
-    offeringId,
+    offeringId:
+      value.offeringId === null ? null : nullableText(value.offeringId),
     itemType,
     serviceName,
     priceSnapshot,
@@ -467,73 +490,57 @@ export function parseBookingServiceItem(v: unknown): BookingServiceItem | null {
   }
 }
 
-export function parseBookingServiceItems(v: unknown): BookingServiceItem[] {
-  if (!Array.isArray(v)) return []
+export function parseBookingServiceItems(value: unknown): BookingServiceItem[] {
+  if (!Array.isArray(value)) return []
 
-  const out: BookingServiceItem[] = []
-  for (const row of v) {
+  const items: BookingServiceItem[] = []
+
+  for (const row of value) {
     const item = parseBookingServiceItem(row)
-    if (item) out.push(item)
+    if (item) items.push(item)
   }
 
-  return out.sort((a, b) => a.sortOrder - b.sortOrder)
+  return items.sort((first, second) => first.sortOrder - second.sortOrder)
 }
 
-export function parseBookingDetails(v: unknown): BookingDetails | null {
-  if (!isRecord(v)) return null
+export function parseBookingDetails(value: unknown): BookingDetails | null {
+  if (!isRecord(value)) return null
 
-  const id = pickString(v.id)
-  const status = pickString(v.status)
-  const scheduledFor = pickString(v.scheduledFor)
-  const endsAt = pickString(v.endsAt)
-  const totalDurationMinutes = pickNumber(v.totalDurationMinutes)
-  const durationMinutes = pickNumber(v.durationMinutes) ?? undefined
-  const bufferMinutes = pickNumber(v.bufferMinutes) ?? undefined
-  const subtotalSnapshot = pickString(v.subtotalSnapshot) ?? undefined
+  const id = nullableText(value.id)
+  const status = nullableText(value.status)
+  const scheduledFor = validIsoString(value.scheduledFor)
+  const endsAt = validIsoString(value.endsAt)
+  const totalDurationMinutes = finiteNumberOrNull(value.totalDurationMinutes)
+
+  if (!id || !status || !scheduledFor || !endsAt || totalDurationMinutes === null) {
+    return null
+  }
+
+  const client = value.client
+  if (!isRecord(client)) return null
+
+  const fullName = nullableText(client.fullName)
+  if (!fullName) return null
 
   const locationId =
-    v.locationId === null ? null : (pickString(v.locationId) ?? undefined)
+    value.locationId === null ? null : optionalText(value.locationId)
 
-  const locationTypeRaw = pickString(v.locationType)
+  const locationTypeRaw = upper(value.locationType)
   const locationType =
     locationTypeRaw === 'SALON' || locationTypeRaw === 'MOBILE'
       ? locationTypeRaw
       : undefined
 
   const locationAddressSnapshot =
-    v.locationAddressSnapshot === null
+    value.locationAddressSnapshot === null
       ? null
-      : (pickString(v.locationAddressSnapshot) ?? undefined)
+      : optionalText(value.locationAddressSnapshot)
 
-  const rawLat = pickNumber(v.locationLatSnapshot)
-  const locationLatSnapshot =
-    rawLat != null && Number.isFinite(rawLat) ? rawLat : undefined
-
-  const rawLng = pickNumber(v.locationLngSnapshot)
-  const locationLngSnapshot =
-    rawLng != null && Number.isFinite(rawLng) ? rawLng : undefined
-
-  const client = v.client
-  if (!isRecord(client)) return null
-
-  const fullName = pickString(client.fullName)
-  const email = client.email === null ? null : pickString(client.email)
-  const phone = client.phone === null ? null : pickString(client.phone)
-
-  const timeZone = sanitizeTimeZone(v.timeZone, DEFAULT_TIME_ZONE)
-  const timeZoneSource = normalizeTimeZoneTruthSource(v.timeZoneSource)
-  const serviceItems = parseBookingServiceItems(v.serviceItems)
-
-  if (
-    !id ||
-    !status ||
-    !scheduledFor ||
-    !endsAt ||
-    totalDurationMinutes == null ||
-    !fullName
-  ) {
-    return null
-  }
+  const locationLatSnapshot = finiteNumberOrNull(value.locationLatSnapshot)
+  const locationLngSnapshot = finiteNumberOrNull(value.locationLngSnapshot)
+  const durationMinutes = positiveNumberOrUndefined(value.durationMinutes)
+  const bufferMinutes = positiveNumberOrUndefined(value.bufferMinutes)
+  const subtotalSnapshot = optionalText(value.subtotalSnapshot)
 
   return {
     id,
@@ -542,20 +549,22 @@ export function parseBookingDetails(v: unknown): BookingDetails | null {
     endsAt,
     ...(locationId !== undefined ? { locationId } : {}),
     ...(locationType ? { locationType } : {}),
-    ...(locationAddressSnapshot !== undefined ? { locationAddressSnapshot } : {}),
-    ...(locationLatSnapshot !== undefined ? { locationLatSnapshot } : {}),
-    ...(locationLngSnapshot !== undefined ? { locationLngSnapshot } : {}),
+    ...(locationAddressSnapshot !== undefined
+      ? { locationAddressSnapshot }
+      : {}),
+    ...(locationLatSnapshot !== null ? { locationLatSnapshot } : {}),
+    ...(locationLngSnapshot !== null ? { locationLngSnapshot } : {}),
     totalDurationMinutes,
-    ...(durationMinutes != null ? { durationMinutes } : {}),
-    ...(bufferMinutes != null ? { bufferMinutes } : {}),
+    ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+    ...(bufferMinutes !== undefined ? { bufferMinutes } : {}),
     ...(subtotalSnapshot ? { subtotalSnapshot } : {}),
     client: {
       fullName,
-      email: email ?? null,
-      phone: phone ?? null,
+      email: client.email === null ? null : nullableText(client.email),
+      phone: client.phone === null ? null : nullableText(client.phone),
     },
-    timeZone,
-    timeZoneSource,
-    serviceItems,
+    timeZone: sanitizeTimeZone(value.timeZone, DEFAULT_TIME_ZONE),
+    timeZoneSource: normalizeTimeZoneTruthSource(value.timeZoneSource),
+    serviceItems: parseBookingServiceItems(value.serviceItems),
   }
 }

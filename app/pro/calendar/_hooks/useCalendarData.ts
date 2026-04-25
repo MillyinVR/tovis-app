@@ -4,13 +4,22 @@
 // return shape consumed by page.tsx and its child components.
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useRouter } from 'next/navigation'
+
 import type { CalendarEvent, ViewMode } from '../_types'
+
 import { startOfMonth, startOfWeek } from '../_utils/date'
 import {
-  normalizeStepMinutes,
   isBlockedEvent,
+  normalizeStepMinutes,
+  PX_PER_MINUTE,
   snapMinutes,
 } from '../_utils/calendarMath'
 import {
@@ -18,12 +27,14 @@ import {
   type LocationType,
 } from '../_utils/parsers'
 import { toDatetimeLocalValueInTimeZone } from '../_utils/calendarRange'
+
 import {
   DEFAULT_TIME_ZONE,
   isValidIanaTimeZone,
   sanitizeTimeZone,
   utcFromDayAndMinutesInTimeZone,
 } from '@/lib/timeZone'
+
 import { useCalendarLocations } from './useCalendarLocations'
 import { useCalendarFetch } from './useCalendarFetch'
 import { useManagementPanel } from './useManagementPanel'
@@ -32,100 +43,70 @@ import { useConfirmChange } from './useConfirmChange'
 import { useDragDrop } from './useDragDrop'
 import { useBookingModal } from './useBookingModal'
 
-type Args = { view: ViewMode; currentDate: Date }
+type UseCalendarDataArgs = {
+  view: ViewMode
+  currentDate: Date
+}
 
-/** must match ProSessionFooter/useProSession.ts */
+type BookingSchedulingContextArgs = {
+  locationId: string | null
+  locationType: LocationType
+  fallbackTimeZone: string
+}
+
 const PRO_SESSION_FORCE_EVENT = 'tovis:pro-session:force'
+const TEMPORARY_ERROR_MS = 3000
 
 function forceProFooterRefresh() {
   try {
     window.dispatchEvent(new Event(PRO_SESSION_FORCE_EVENT))
   } catch {
-    // ignore
+    // Best-effort UI refresh only.
   }
 }
 
-export function useCalendarData({ view, currentDate }: Args) {
-  const router = useRouter()
+function validTimeZoneOrNull(value: string | null | undefined) {
+  const candidate = typeof value === 'string' ? value.trim() : ''
 
-  // ── Locations ─────────────────────────────────────────────────────
+  if (!candidate) return null
+  if (!isValidIanaTimeZone(candidate)) return null
+
+  return candidate
+}
+
+function sanitizeFallbackTimeZone(value: string | null | undefined) {
+  return sanitizeTimeZone(value ?? DEFAULT_TIME_ZONE, DEFAULT_TIME_ZONE)
+}
+
+export function useCalendarData(args: UseCalendarDataArgs) {
+  const { view, currentDate } = args
+  const router = useRouter()
 
   const loc = useCalendarLocations()
 
-  // ── Calendar fetch ────────────────────────────────────────────────
-  // Note:
-  // resolveActiveCalendarTimeZone closes over `cal.timeZoneRef`.
-  // That is okay because the callback is only used after `cal` exists.
+  const calendarTimeZoneFallbackRef = useRef(DEFAULT_TIME_ZONE)
+  const temporaryErrorTokenRef = useRef(0)
+  const temporaryErrorTimeoutRef = useRef<number | null>(null)
 
-  function resolveActiveCalendarTimeZone(fallback?: string) {
-    const fallbackTz = sanitizeTimeZone(
-      fallback ?? cal.timeZoneRef.current,
-      DEFAULT_TIME_ZONE,
-    )
+  const resolveActiveCalendarTimeZone = useCallback(
+    (fallback?: string) => {
+      const fallbackTimeZone = sanitizeTimeZone(
+        fallback ?? calendarTimeZoneFallbackRef.current,
+        DEFAULT_TIME_ZONE,
+      )
 
-    if (
-      loc.activeLocation?.timeZone &&
-      isValidIanaTimeZone(loc.activeLocation.timeZone)
-    ) {
-      return sanitizeTimeZone(loc.activeLocation.timeZone, fallbackTz)
-    }
+      const activeLocationTimeZone = validTimeZoneOrNull(
+        loc.activeLocation?.timeZone,
+      )
 
-    return fallbackTz
-  }
+      if (activeLocationTimeZone) {
+        return sanitizeTimeZone(activeLocationTimeZone, fallbackTimeZone)
+      }
 
-  function resolveBookingSchedulingContext(args: {
-    locationId: string | null
-    locationType: LocationType
-    fallbackTimeZone: string
-  }) {
-    const location = loc.resolveLocationById(args.locationId)
-
-    const resolvedTimeZone =
-      location?.timeZone && isValidIanaTimeZone(location.timeZone)
-        ? sanitizeTimeZone(location.timeZone, args.fallbackTimeZone)
-        : sanitizeTimeZone(args.fallbackTimeZone, DEFAULT_TIME_ZONE)
-
-    const resolvedWorkingHours =
-      location?.workingHours ??
-      (args.locationType === 'MOBILE'
-        ? cal.workingHoursMobile
-        : cal.workingHoursSalon)
-
-    const resolvedStepMinutes = normalizeStepMinutes(location?.stepMinutes)
-
-    return {
-      timeZone: resolvedTimeZone,
-      workingHours: resolvedWorkingHours,
-      stepMinutes: resolvedStepMinutes,
-    }
-  }
-
-  function resolveEventSchedulingContext(ev: CalendarEvent) {
-    if (ev.kind === 'BOOKING') {
-      return resolveBookingSchedulingContext({
-        locationId: ev.locationId ?? null,
-        locationType: locationTypeFromBookingValue(ev.locationType),
-        fallbackTimeZone: cal.timeZoneRef.current,
-      })
-    }
-
-    if (ev.locationId) {
-      return resolveBookingSchedulingContext({
-        locationId: ev.locationId,
-        locationType: loc.resolveLocationTypeFromId(
-          ev.locationId,
-          loc.activeLocationType,
-        ),
-        fallbackTimeZone: cal.timeZoneRef.current,
-      })
-    }
-
-    return {
-      timeZone: sanitizeTimeZone(cal.timeZoneRef.current, DEFAULT_TIME_ZONE),
-      workingHours: cal.workingHoursActive,
-      stepMinutes: loc.activeStepMinutes,
-    }
-  }
+      return fallbackTimeZone
+    },
+    [loc.activeLocation?.timeZone],
+  )
 
   const cal = useCalendarFetch({
     view,
@@ -140,15 +121,115 @@ export function useCalendarData({ view, currentDate }: Args) {
     resolveActiveCalendarTimeZone,
   })
 
-  // ── Management panel ──────────────────────────────────────────────
+  useEffect(() => {
+    calendarTimeZoneFallbackRef.current = sanitizeFallbackTimeZone(cal.timeZone)
+  }, [cal.timeZone])
+
+  useEffect(() => {
+    return () => {
+      if (temporaryErrorTimeoutRef.current !== null) {
+        window.clearTimeout(temporaryErrorTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const showTemporaryError = useCallback(
+    (message: string) => {
+      temporaryErrorTokenRef.current += 1
+      const token = temporaryErrorTokenRef.current
+
+      if (temporaryErrorTimeoutRef.current !== null) {
+        window.clearTimeout(temporaryErrorTimeoutRef.current)
+      }
+
+      cal.setError(message)
+
+      temporaryErrorTimeoutRef.current = window.setTimeout(() => {
+        if (temporaryErrorTokenRef.current !== token) return
+
+        cal.setError(null)
+        temporaryErrorTimeoutRef.current = null
+      }, TEMPORARY_ERROR_MS)
+    },
+    [cal.setError],
+  )
+
+  const resolveBookingSchedulingContext = useCallback(
+    (contextArgs: BookingSchedulingContextArgs) => {
+      const location = loc.resolveLocationById(contextArgs.locationId)
+
+      const locationTimeZone = validTimeZoneOrNull(location?.timeZone)
+      const fallbackTimeZone = sanitizeFallbackTimeZone(
+        contextArgs.fallbackTimeZone,
+      )
+
+      const resolvedTimeZone = locationTimeZone
+        ? sanitizeTimeZone(locationTimeZone, fallbackTimeZone)
+        : fallbackTimeZone
+
+      const resolvedWorkingHours =
+        location?.workingHours ??
+        (contextArgs.locationType === 'MOBILE'
+          ? cal.workingHoursMobile
+          : cal.workingHoursSalon)
+
+      const resolvedStepMinutes = normalizeStepMinutes(location?.stepMinutes)
+
+      return {
+        timeZone: resolvedTimeZone,
+        workingHours: resolvedWorkingHours,
+        stepMinutes: resolvedStepMinutes,
+      }
+    },
+    [
+      cal.workingHoursMobile,
+      cal.workingHoursSalon,
+      loc.resolveLocationById,
+    ],
+  )
+
+  const resolveEventSchedulingContext = useCallback(
+    (event: CalendarEvent) => {
+      if (event.kind === 'BOOKING') {
+        return resolveBookingSchedulingContext({
+          locationId: event.locationId ?? null,
+          locationType: locationTypeFromBookingValue(event.locationType),
+          fallbackTimeZone: cal.timeZoneRef.current,
+        })
+      }
+
+      if (event.locationId) {
+        return resolveBookingSchedulingContext({
+          locationId: event.locationId,
+          locationType: loc.resolveLocationTypeFromId(
+            event.locationId,
+            loc.activeLocationType,
+          ),
+          fallbackTimeZone: cal.timeZoneRef.current,
+        })
+      }
+
+      return {
+        timeZone: sanitizeFallbackTimeZone(cal.timeZoneRef.current),
+        workingHours: cal.workingHoursActive,
+        stepMinutes: loc.activeStepMinutes,
+      }
+    },
+    [
+      cal.timeZoneRef,
+      cal.workingHoursActive,
+      loc.activeLocationType,
+      loc.activeStepMinutes,
+      loc.resolveLocationTypeFromId,
+      resolveBookingSchedulingContext,
+    ],
+  )
 
   const mgmt = useManagementPanel({
     eventsRef: cal.eventsRef,
     reloadCalendar: cal.loadCalendar,
     forceProFooterRefresh,
   })
-
-  // ── Booking modal ─────────────────────────────────────────────────
 
   const bookingModal = useBookingModal({
     eventsRef: cal.eventsRef,
@@ -162,13 +243,17 @@ export function useCalendarData({ view, currentDate }: Args) {
     locations: loc.locations,
   })
 
-  // ── Services (load when active location type changes) ─────────────
+  const loadServicesForLocationRef = useRef(
+    bookingModal.loadServicesForLocation,
+  )
 
   useEffect(() => {
-    void bookingModal.loadServicesForLocation(loc.activeLocationType)
-  }, [bookingModal, loc.activeLocationType])
+    loadServicesForLocationRef.current = bookingModal.loadServicesForLocation
+  }, [bookingModal.loadServicesForLocation])
 
-  // ── Confirm change (drag/resize) ─────────────────────────────────
+  useEffect(() => {
+    void loadServicesForLocationRef.current(loc.activeLocationType)
+  }, [loc.activeLocationType])
 
   const confirm = useConfirmChange({
     eventsRef: cal.eventsRef,
@@ -180,8 +265,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     setError: cal.setError,
   })
 
-  // ── Drag & drop / resize ─────────────────────────────────────────
-
   const dragDrop = useDragDrop({
     eventsRef: cal.eventsRef,
     setEvents: cal.setEvents,
@@ -189,8 +272,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     activeStepMinutes: loc.activeStepMinutes,
     openConfirm: confirm.openConfirm,
   })
-
-  // ── Block actions ─────────────────────────────────────────────────
 
   const blocks = useBlockActions({
     activeLocationId: loc.activeLocationId,
@@ -202,76 +283,109 @@ export function useCalendarData({ view, currentDate }: Args) {
     setLoading: cal.setLoading,
   })
 
-  // Sync management data from calendar fetch
   useEffect(() => {
     mgmt.setManagement(cal.management)
-  }, [mgmt, cal.management])
-
-  // ── Shared UI state ──────────────────────────────────────────────
+  }, [cal.management, mgmt.setManagement])
 
   const [showHoursForm, setShowHoursForm] = useState(false)
 
-  // ── Composite helpers ─────────────────────────────────────────────
-
-  function openBookingOrBlock(id: string) {
-    const ev = cal.eventsRef.current.find((x) => x.id === id)
-
-    if (ev && isBlockedEvent(ev)) {
-      const locationId = blocks.openEditBlockFromEvent(ev)
-      if (locationId) {
-        loc.setActiveLocationId(locationId)
-      }
-      return
-    }
-
-    if (confirm.confirmOpen || confirm.pendingChange) return
-    if (mgmt.managementOpen) return
-    if (blocks.blockCreateOpen || blocks.editBlockOpen) return
-
-    void bookingModal.openBooking(id)
-  }
-
-  function openCreateForClick(day: Date, clientY: number, columnTop: number) {
-    if (
-      confirm.confirmOpen ||
-      confirm.pendingChange ||
-      bookingModal.openBookingId
-    ) {
-      return
-    }
-
-    if (mgmt.managementOpen) return
-    if (blocks.blockCreateOpen || blocks.editBlockOpen) return
-
-    if (!loc.activeLocationId) {
-      cal.setError('Select a location first.')
-      window.setTimeout(() => cal.setError(null), 3000)
-      return
-    }
-
-    const y = clientY - columnTop
-    const mins = snapMinutes(y / 1.5, loc.activeStepMinutes) // PX_PER_MINUTE = 1.5
-    const tz = resolveActiveCalendarTimeZone()
-
-    const startUtc = utcFromDayAndMinutesInTimeZone(day, mins, tz)
-    const scheduledAt = toDatetimeLocalValueInTimeZone(startUtc, tz)
-
-    const qs = new URLSearchParams({
-      locationId: loc.activeLocationId,
-      locationType: loc.activeLocationType,
-      scheduledAt,
-    })
-
-    router.push(`/pro/bookings/new?${qs.toString()}`)
-  }
-
-  const isOverlayOpen = Boolean(
-    confirm.confirmOpen ||
-      confirm.pendingChange ||
-      bookingModal.openBookingId ||
-      mgmt.managementOpen ||
-      blocks.blockCreateOpen ||
+  const isOverlayOpen = useMemo(
+    () =>
+      Boolean(
+        confirm.confirmOpen ||
+          confirm.pendingChange ||
+          bookingModal.openBookingId ||
+          mgmt.managementOpen ||
+          blocks.blockCreateOpen ||
+          blocks.editBlockOpen,
+      ),
+    [
+      blocks.blockCreateOpen,
       blocks.editBlockOpen,
+      bookingModal.openBookingId,
+      confirm.confirmOpen,
+      confirm.pendingChange,
+      mgmt.managementOpen,
+    ],
+  )
+
+  const openBookingOrBlock = useCallback(
+    (id: string) => {
+      const event = cal.eventsRef.current.find((entry) => entry.id === id)
+
+      if (event && isBlockedEvent(event)) {
+        const locationId = blocks.openEditBlockFromEvent(event)
+
+        if (locationId) {
+          loc.setActiveLocationId(locationId)
+        }
+
+        return
+      }
+
+      if (confirm.confirmOpen || confirm.pendingChange) return
+      if (mgmt.managementOpen) return
+      if (blocks.blockCreateOpen || blocks.editBlockOpen) return
+
+      void bookingModal.openBooking(id)
+    },
+    [
+      blocks,
+      bookingModal,
+      cal.eventsRef,
+      confirm.confirmOpen,
+      confirm.pendingChange,
+      loc,
+      mgmt.managementOpen,
+    ],
+  )
+
+  const openCreateForClick = useCallback(
+    (day: Date, clientY: number, columnTop: number) => {
+      if (
+        confirm.confirmOpen ||
+        confirm.pendingChange ||
+        bookingModal.openBookingId
+      ) {
+        return
+      }
+
+      if (mgmt.managementOpen) return
+      if (blocks.blockCreateOpen || blocks.editBlockOpen) return
+
+      if (!loc.activeLocationId) {
+        showTemporaryError('Select a location first.')
+        return
+      }
+
+      const y = clientY - columnTop
+      const minutes = snapMinutes(y / PX_PER_MINUTE, loc.activeStepMinutes)
+      const timeZone = resolveActiveCalendarTimeZone()
+      const startUtc = utcFromDayAndMinutesInTimeZone(day, minutes, timeZone)
+      const scheduledAt = toDatetimeLocalValueInTimeZone(startUtc, timeZone)
+
+      const query = new URLSearchParams({
+        locationId: loc.activeLocationId,
+        locationType: loc.activeLocationType,
+        scheduledAt,
+      })
+
+      router.push(`/pro/bookings/new?${query.toString()}`)
+    },
+    [
+      blocks.blockCreateOpen,
+      blocks.editBlockOpen,
+      bookingModal.openBookingId,
+      confirm.confirmOpen,
+      confirm.pendingChange,
+      loc.activeLocationId,
+      loc.activeLocationType,
+      loc.activeStepMinutes,
+      mgmt.managementOpen,
+      resolveActiveCalendarTimeZone,
+      router,
+      showTemporaryError,
+    ],
   )
 
   const utils = useMemo(
@@ -281,8 +395,6 @@ export function useCalendarData({ view, currentDate }: Args) {
     }),
     [],
   )
-
-  // ── Return the same flat shape consumed by page.tsx ───────────────
 
   return {
     view,

@@ -1,18 +1,29 @@
 // app/pro/calendar/_hooks/useBlockActions.ts
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+
 import type { CalendarEvent } from '../_types'
-import { extractBlockId, snapMinutes } from '../_utils/calendarMath'
-import { apiMessage } from '../_utils/parsers'
+
 import {
+  extractBlockId,
+  normalizeStepMinutes,
+  snapMinutes,
+} from '../_utils/calendarMath'
+
+import { apiMessage } from '../_utils/parsers'
+
+import {
+  DEFAULT_TIME_ZONE,
+  getZonedParts,
+  sanitizeTimeZone,
   startOfDayUtcInTimeZone,
   utcFromDayAndMinutesInTimeZone,
-  getZonedParts,
 } from '@/lib/timeZone'
+
 import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
-import { safeJson, errorMessageFromUnknown } from '@/lib/http'
+import { errorMessageFromUnknown, safeJson } from '@/lib/http'
 
 type BlockActionsDeps = {
   activeLocationId: string | null
@@ -24,124 +35,264 @@ type BlockActionsDeps = {
   setLoading: (loading: boolean) => void
 }
 
+type BlockRow = {
+  id: string
+  startsAt: string
+  endsAt: string
+  note: string | null
+}
+
+type CreateBlockPayload = {
+  startsAt: string
+  endsAt: string
+  note: string | null
+  locationId: string
+}
+
+const FULL_DAY_MINUTES = 24 * 60
+const TEMPORARY_ERROR_MS = 3500
+const SELECT_LOCATION_MESSAGE = 'Select a location first.'
+
+function normalizeNote(note: string | null | undefined) {
+  return typeof note === 'string' && note.trim() ? note.trim() : null
+}
+
+function errorFromUnknown(error: unknown) {
+  return errorMessageFromUnknown(error, 'Failed to update blocked time.')
+}
+
+function blockEndpoint() {
+  return '/api/pro/calendar/blocked'
+}
+
+function blockRowFromResponse(args: {
+  data: unknown
+  fallbackStartsAt: string
+  fallbackEndsAt: string
+  fallbackNote: string | null
+}): BlockRow {
+  if (!isRecord(args.data) || !isRecord(args.data.block)) {
+    return {
+      id: '',
+      startsAt: args.fallbackStartsAt,
+      endsAt: args.fallbackEndsAt,
+      note: args.fallbackNote,
+    }
+  }
+
+  const block = args.data.block
+
+  return {
+    id: pickString(block.id) ?? '',
+    startsAt: pickString(block.startsAt) ?? args.fallbackStartsAt,
+    endsAt: pickString(block.endsAt) ?? args.fallbackEndsAt,
+    note: block.note === null ? null : normalizeNote(pickString(block.note)),
+  }
+}
+
+function safeCalendarTimeZone(deps: BlockActionsDeps) {
+  return sanitizeTimeZone(
+    deps.resolveActiveCalendarTimeZone(DEFAULT_TIME_ZONE),
+    DEFAULT_TIME_ZONE,
+  )
+}
+
+function nextStepStartFromNow(args: {
+  now: Date
+  timeZone: string
+  stepMinutes: number
+}) {
+  const stepMinutes = normalizeStepMinutes(args.stepMinutes)
+  const zonedParts = getZonedParts(args.now, args.timeZone)
+  const currentMinutes = zonedParts.hour * 60 + zonedParts.minute
+  const roundedMinutes = snapMinutes(
+    Math.ceil(currentMinutes / stepMinutes) * stepMinutes,
+    stepMinutes,
+  )
+
+  if (roundedMinutes < FULL_DAY_MINUTES) {
+    return utcFromDayAndMinutesInTimeZone(
+      args.now,
+      roundedMinutes,
+      args.timeZone,
+    )
+  }
+
+  const todayStart = startOfDayUtcInTimeZone(args.now, args.timeZone)
+  const tomorrowStart = new Date(todayStart.getTime() + FULL_DAY_MINUTES * 60_000)
+
+  return utcFromDayAndMinutesInTimeZone(
+    tomorrowStart,
+    0,
+    args.timeZone,
+  )
+}
+
+async function postBlock(payload: CreateBlockPayload): Promise<BlockRow> {
+  const response = await fetch(blockEndpoint(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+
+  const data: unknown = await safeJson(response)
+
+  if (!response.ok) {
+    throw new Error(apiMessage(data, 'Failed to create block.'))
+  }
+
+  return blockRowFromResponse({
+    data,
+    fallbackStartsAt: payload.startsAt,
+    fallbackEndsAt: payload.endsAt,
+    fallbackNote: payload.note,
+  })
+}
+
 export function useBlockActions(deps: BlockActionsDeps) {
   const [blockCreateOpen, setBlockCreateOpen] = useState(false)
-  const [blockCreateInitialStart, setBlockCreateInitialStart] = useState<Date>(
-    new Date(),
-  )
+  const [blockCreateInitialStart, setBlockCreateInitialStart] =
+    useState<Date>(() => new Date())
 
   const [editBlockOpen, setEditBlockOpen] = useState(false)
   const [editBlockId, setEditBlockId] = useState<string | null>(null)
 
-  async function createBlock(
-    startsAtIso: string,
-    endsAtIso: string,
-    note?: string,
-  ) {
-    if (!deps.activeLocationId) throw new Error('Select a location first.')
+  const errorTokenRef = useRef(0)
+  const errorTimeoutRef = useRef<number | null>(null)
 
-    const res = await fetch('/api/pro/calendar/blocked', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        startsAt: startsAtIso,
-        endsAt: endsAtIso,
-        note: note ?? null,
-        locationId: deps.activeLocationId,
-      }),
-    })
+  const clearTemporaryErrorTimer = useCallback(() => {
+    if (errorTimeoutRef.current === null) return
 
-    const data: unknown = await safeJson(res)
-    if (!res.ok) throw new Error(apiMessage(data, 'Failed to create block.'))
+    window.clearTimeout(errorTimeoutRef.current)
+    errorTimeoutRef.current = null
+  }, [])
 
-    if (isRecord(data) && isRecord(data.block)) {
-      const id = pickString(data.block.id) ?? ''
-      const startsAt = pickString(data.block.startsAt) ?? startsAtIso
-      const endsAt = pickString(data.block.endsAt) ?? endsAtIso
-      const noteOut = data.block.note === null ? null : pickString(data.block.note)
+  const showTemporaryError = useCallback(
+    (message: string) => {
+      errorTokenRef.current += 1
+      const token = errorTokenRef.current
 
-      return {
-        id,
-        startsAt,
-        endsAt,
-        note: noteOut ?? null,
+      clearTemporaryErrorTimer()
+      deps.setError(message)
+
+      errorTimeoutRef.current = window.setTimeout(() => {
+        if (errorTokenRef.current !== token) return
+
+        deps.setError(null)
+        errorTimeoutRef.current = null
+      }, TEMPORARY_ERROR_MS)
+    },
+    [clearTemporaryErrorTimer, deps],
+  )
+
+  const createBlock = useCallback(
+    async (
+      startsAtIso: string,
+      endsAtIso: string,
+      note?: string,
+    ): Promise<BlockRow> => {
+      const locationId = deps.activeLocationId
+
+      if (!locationId) {
+        throw new Error(SELECT_LOCATION_MESSAGE)
       }
-    }
 
-    return {
-      id: '',
-      startsAt: startsAtIso,
-      endsAt: endsAtIso,
-      note: note ?? null,
-    }
-  }
+      const startsAt = new Date(startsAtIso)
+      const endsAt = new Date(endsAtIso)
 
-  async function oneClickBlockFullDay(day: Date) {
-    try {
-      if (!deps.activeLocationId) throw new Error('Select a location first.')
+      if (!Number.isFinite(startsAt.getTime())) {
+        throw new Error('Invalid block start time.')
+      }
+
+      if (!Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) {
+        throw new Error('Invalid block end time.')
+      }
+
+      return postBlock({
+        startsAt: startsAt.toISOString(),
+        endsAt: endsAt.toISOString(),
+        note: normalizeNote(note),
+        locationId,
+      })
+    },
+    [deps.activeLocationId],
+  )
+
+  const oneClickBlockFullDay = useCallback(
+    async (day: Date) => {
+      if (!deps.activeLocationId) {
+        showTemporaryError(SELECT_LOCATION_MESSAGE)
+        return
+      }
 
       deps.setLoading(true)
       deps.setError(null)
 
-      const tz = deps.resolveActiveCalendarTimeZone()
-      const startUtc = startOfDayUtcInTimeZone(day, tz)
-      const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60_000)
+      try {
+        const timeZone = safeCalendarTimeZone(deps)
+        const startUtc = startOfDayUtcInTimeZone(day, timeZone)
+        const endUtc = new Date(startUtc.getTime() + FULL_DAY_MINUTES * 60_000)
 
-      await createBlock(
-        startUtc.toISOString(),
-        endUtc.toISOString(),
-        'Full day off',
-      )
-      await deps.reloadCalendar()
-      deps.forceProFooterRefresh()
-    } catch (e: unknown) {
-      console.error(e)
-      deps.setError(errorMessageFromUnknown(e))
-      window.setTimeout(() => deps.setError(null), 3500)
-    } finally {
-      deps.setLoading(false)
-    }
-  }
+        await createBlock(
+          startUtc.toISOString(),
+          endUtc.toISOString(),
+          'Full day off',
+        )
 
-  function openCreateBlockNow() {
+        await deps.reloadCalendar()
+        deps.forceProFooterRefresh()
+      } catch (caught) {
+        showTemporaryError(errorFromUnknown(caught))
+      } finally {
+        deps.setLoading(false)
+      }
+    },
+    [createBlock, deps, showTemporaryError],
+  )
+
+  const openCreateBlockNow = useCallback(() => {
     if (!deps.activeLocationId) {
-      deps.setError('Select a location first.')
-      window.setTimeout(() => deps.setError(null), 3000)
+      showTemporaryError(SELECT_LOCATION_MESSAGE)
       return
     }
 
-    const tz = deps.resolveActiveCalendarTimeZone()
-    const nowUtc = new Date()
-    const p = getZonedParts(nowUtc, tz)
-    const minutesNow = p.hour * 60 + p.minute
-    const roundedUp =
-      Math.ceil(minutesNow / deps.activeStepMinutes) * deps.activeStepMinutes
-    const rounded = snapMinutes(roundedUp, deps.activeStepMinutes)
-    const startUtc = utcFromDayAndMinutesInTimeZone(nowUtc, rounded, tz)
+    const timeZone = safeCalendarTimeZone(deps)
+    const startUtc = nextStepStartFromNow({
+      now: new Date(),
+      timeZone,
+      stepMinutes: deps.activeStepMinutes,
+    })
 
     setBlockCreateInitialStart(startUtc)
     setBlockCreateOpen(true)
-  }
+  }, [deps, showTemporaryError])
 
-  function openEditBlockFromEvent(ev: CalendarEvent) {
-    const bid = extractBlockId(ev)
-    if (!bid) return
+  const openEditBlockFromEvent = useCallback((event: CalendarEvent) => {
+    const blockId = extractBlockId(event)
 
-    setEditBlockId(bid)
+    if (!blockId) return null
+
+    setEditBlockId(blockId)
     setEditBlockOpen(true)
 
-    return ev.locationId ?? null
-  }
+    return event.locationId ?? null
+  }, [])
+
+  useEffect(() => {
+    return () => clearTemporaryErrorTimer()
+  }, [clearTemporaryErrorTimer])
 
   return {
     blockCreateOpen,
     setBlockCreateOpen,
     blockCreateInitialStart,
     setBlockCreateInitialStart,
+
     editBlockOpen,
     setEditBlockOpen,
     editBlockId,
     setEditBlockId,
+
     createBlock,
     oneClickBlockFullDay,
     openCreateBlockNow,

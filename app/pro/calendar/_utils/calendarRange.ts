@@ -4,120 +4,196 @@
 // Zero React dependency.
 
 import type { ViewMode } from '../_types'
+
+import { WEEK_START } from './date'
+
 import {
   DEFAULT_TIME_ZONE,
-  sanitizeTimeZone,
   getZonedParts,
-  zonedTimeToUtc,
+  sanitizeTimeZone,
   startOfDayUtcInTimeZone,
+  zonedTimeToUtc,
 } from '@/lib/timeZone'
 
-// ── Day anchor ─────────────────────────────────────────────────────
+type DateRange = {
+  from: Date
+  to: Date
+}
+
+type LocalDateParts = {
+  year: number
+  month: number
+  day: number
+}
+
+const DAY_MS = 24 * 60 * 60_000
+const DAY_RANGE_LENGTH = 1
+const WEEK_RANGE_LENGTH = 7
+const MONTH_GRID_RANGE_LENGTH = 42
+
+const WEEKDAY_INDEX_SUNDAY_START: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, '0')
+}
+
+function safeTimeZone(timeZone: string) {
+  return sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)
+}
+
+function rangeFromStartAndDays(from: Date, dayCount: number): DateRange {
+  return {
+    from,
+    to: new Date(from.getTime() + dayCount * DAY_MS),
+  }
+}
+
+function weekdayIndexInTimeZone(dateUtc: Date, timeZone: string) {
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+  }).format(dateUtc)
+
+  return WEEKDAY_INDEX_SUNDAY_START[weekday] ?? 0
+}
+
+function weekStartOffsetFromSundayIndex(sundayStartIndex: number) {
+  if (WEEK_START === 'MON') {
+    return (sundayStartIndex + 6) % 7
+  }
+
+  return sundayStartIndex
+}
+
+function localMidnightUtc(parts: LocalDateParts, timeZone: string) {
+  return zonedTimeToUtc({
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour: 0,
+    minute: 0,
+    second: 0,
+    timeZone,
+  })
+}
+
+function localNoonUtc(parts: LocalDateParts, timeZone: string) {
+  return zonedTimeToUtc({
+    year: parts.year,
+    month: parts.month,
+    day: parts.day,
+    hour: 12,
+    minute: 0,
+    second: 0,
+    timeZone,
+  })
+}
+
+function startOfWeekUtcInTimeZone(focusUtc: Date, timeZone: string) {
+  const focusParts = getZonedParts(focusUtc, timeZone)
+  const weekdayIndex = weekdayIndexInTimeZone(focusUtc, timeZone)
+  const offsetDays = weekStartOffsetFromSundayIndex(weekdayIndex)
+
+  return localMidnightUtc(
+    {
+      year: focusParts.year,
+      month: focusParts.month,
+      day: focusParts.day - offsetDays,
+    },
+    timeZone,
+  )
+}
+
+function startOfMonthGridUtcInTimeZone(focusUtc: Date, timeZone: string) {
+  const focusParts = getZonedParts(focusUtc, timeZone)
+
+  const firstOfMonthNoonUtc = localNoonUtc(
+    {
+      year: focusParts.year,
+      month: focusParts.month,
+      day: 1,
+    },
+    timeZone,
+  )
+
+  const firstOfMonthParts = getZonedParts(firstOfMonthNoonUtc, timeZone)
+  const firstWeekdayIndex = weekdayIndexInTimeZone(
+    firstOfMonthNoonUtc,
+    timeZone,
+  )
+  const offsetDays = weekStartOffsetFromSundayIndex(firstWeekdayIndex)
+
+  return localMidnightUtc(
+    {
+      year: firstOfMonthParts.year,
+      month: firstOfMonthParts.month,
+      day: firstOfMonthParts.day - offsetDays,
+    },
+    timeZone,
+  )
+}
 
 /**
- * Anchor a "day" to local noon for working-hours weekday math (not timezone conversion).
+ * Anchor a day to local noon for working-hours weekday math.
+ * This is not timezone conversion; it is a stable browser-local Date anchor.
  */
 export function anchorDayLocalNoon(year: number, month1: number, day: number) {
   return new Date(year, month1 - 1, day, 12, 0, 0, 0)
 }
 
-// ── Formatting ─────────────────────────────────────────────────────
+export function toDateInputValueInTimeZone(dateUtc: Date, timeZone: string) {
+  const parts = getZonedParts(dateUtc, safeTimeZone(timeZone))
 
-export function pad2(n: number) {
-  return String(n).padStart(2, '0')
+  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`
 }
 
-export function toDateInputValueInTimeZone(dateUtc: Date, tz: string) {
-  const p = getZonedParts(dateUtc, tz)
-  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`
+export function toTimeInputValueInTimeZone(dateUtc: Date, timeZone: string) {
+  const parts = getZonedParts(dateUtc, safeTimeZone(timeZone))
+
+  return `${pad2(parts.hour)}:${pad2(parts.minute)}`
 }
 
-export function toTimeInputValueInTimeZone(dateUtc: Date, tz: string) {
-  const p = getZonedParts(dateUtc, tz)
-  return `${pad2(p.hour)}:${pad2(p.minute)}`
+export function toDatetimeLocalValueInTimeZone(
+  dateUtc: Date,
+  timeZone: string,
+) {
+  return [
+    toDateInputValueInTimeZone(dateUtc, timeZone),
+    toTimeInputValueInTimeZone(dateUtc, timeZone),
+  ].join('T')
 }
 
-export function toDatetimeLocalValueInTimeZone(dateUtc: Date, tz: string) {
-  return `${toDateInputValueInTimeZone(dateUtc, tz)}T${toTimeInputValueInTimeZone(dateUtc, tz)}`
-}
+export function rangeForViewUtcInTimeZone(
+  view: ViewMode,
+  focusUtc: Date,
+  timeZone: string,
+): DateRange {
+  const resolvedTimeZone = safeTimeZone(timeZone)
 
-// ── View range computation ─────────────────────────────────────────
-
-const mapMon: Record<string, number> = {
-  Mon: 0,
-  Tue: 1,
-  Wed: 2,
-  Thu: 3,
-  Fri: 4,
-  Sat: 5,
-  Sun: 6,
-}
-
-export function rangeForViewUtcInTimeZone(v: ViewMode, focusUtc: Date, tz: string) {
-  const safeTz = sanitizeTimeZone(tz, DEFAULT_TIME_ZONE)
-
-  if (v === 'day') {
-    const from = startOfDayUtcInTimeZone(focusUtc, safeTz)
-    const to = new Date(from.getTime() + 24 * 60 * 60_000)
-    return { from, to }
+  if (view === 'day') {
+    return rangeFromStartAndDays(
+      startOfDayUtcInTimeZone(focusUtc, resolvedTimeZone),
+      DAY_RANGE_LENGTH,
+    )
   }
 
-  if (v === 'week') {
-    const p = getZonedParts(focusUtc, safeTz)
-    const weekdayShort = new Intl.DateTimeFormat('en-US', {
-      timeZone: safeTz,
-      weekday: 'short',
-    }).format(focusUtc)
-
-    const dow = mapMon[weekdayShort] ?? 0
-    const weekStartDay = p.day - dow
-
-    const from = zonedTimeToUtc({
-      year: p.year,
-      month: p.month,
-      day: weekStartDay,
-      hour: 0,
-      minute: 0,
-      second: 0,
-      timeZone: safeTz,
-    })
-
-    const to = new Date(from.getTime() + 7 * 24 * 60 * 60_000)
-    return { from, to }
+  if (view === 'week') {
+    return rangeFromStartAndDays(
+      startOfWeekUtcInTimeZone(focusUtc, resolvedTimeZone),
+      WEEK_RANGE_LENGTH,
+    )
   }
 
-  // month view
-  const p = getZonedParts(focusUtc, safeTz)
-
-  const firstOfMonthUtc = zonedTimeToUtc({
-    year: p.year,
-    month: p.month,
-    day: 1,
-    hour: 12,
-    minute: 0,
-    second: 0,
-    timeZone: safeTz,
-  })
-
-  const firstWeekdayShort = new Intl.DateTimeFormat('en-US', {
-    timeZone: safeTz,
-    weekday: 'short',
-  }).format(firstOfMonthUtc)
-
-  const firstDow = mapMon[firstWeekdayShort] ?? 0
-  const firstParts = getZonedParts(firstOfMonthUtc, safeTz)
-  const gridStartDay = firstParts.day - firstDow
-
-  const from = zonedTimeToUtc({
-    year: firstParts.year,
-    month: firstParts.month,
-    day: gridStartDay,
-    hour: 0,
-    minute: 0,
-    second: 0,
-    timeZone: safeTz,
-  })
-
-  const to = new Date(from.getTime() + 42 * 24 * 60 * 60_000)
-  return { from, to }
+  return rangeFromStartAndDays(
+    startOfMonthGridUtcInTimeZone(focusUtc, resolvedTimeZone),
+    MONTH_GRID_RANGE_LENGTH,
+  )
 }

@@ -1,9 +1,15 @@
 // app/pro/calendar/WorkingHoursForm.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { safeJson, readErrorMessage } from '@/lib/http'
+
+import {
+  safeJson,
+  readErrorMessage,
+  errorMessageFromUnknown,
+} from '@/lib/http'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
 
 type Period = 'AM' | 'PM'
@@ -24,11 +30,10 @@ type WorkingHoursState = Record<WeekdayKey, DayConfig>
 
 type ApiDayConfig = {
   enabled: boolean
-  start: string // "HH:MM"
-  end: string // "HH:MM"
+  start: string
+  end: string
 }
 
-// ✅ keep API type strict (object), but allow prop to be null/undefined
 export type ApiWorkingHours = Record<WeekdayKey, ApiDayConfig>
 
 type WorkingHoursFormProps = {
@@ -37,278 +42,386 @@ type WorkingHoursFormProps = {
   locationType?: LocationType
 }
 
-type JsonObject = Record<string, unknown>
+type DayDefinition = {
+  key: WeekdayKey
+  label: string
+  fullLabel: string
+}
 
-const DAYS: Array<{ key: WeekdayKey; label: string }> = [
-  { key: 'mon', label: 'Mon' },
-  { key: 'tue', label: 'Tue' },
-  { key: 'wed', label: 'Wed' },
-  { key: 'thu', label: 'Thu' },
-  { key: 'fri', label: 'Fri' },
-  { key: 'sat', label: 'Sat' },
-  { key: 'sun', label: 'Sun' },
+type SelectProps = {
+  value: string | number
+  disabled?: boolean
+  onChange: (value: string) => void
+  children: ReactNode
+}
+
+const DAYS: ReadonlyArray<DayDefinition> = [
+  { key: 'mon', label: 'Mon', fullLabel: 'Monday' },
+  { key: 'tue', label: 'Tue', fullLabel: 'Tuesday' },
+  { key: 'wed', label: 'Wed', fullLabel: 'Wednesday' },
+  { key: 'thu', label: 'Thu', fullLabel: 'Thursday' },
+  { key: 'fri', label: 'Fri', fullLabel: 'Friday' },
+  { key: 'sat', label: 'Sat', fullLabel: 'Saturday' },
+  { key: 'sun', label: 'Sun', fullLabel: 'Sunday' },
 ]
 
-const DAY_KEYS: WeekdayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+const DAY_KEYS: ReadonlyArray<WeekdayKey> = [
+  'mon',
+  'tue',
+  'wed',
+  'thu',
+  'fri',
+  'sat',
+  'sun',
+]
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n))
+const HOUR_OPTIONS: ReadonlyArray<number> = [
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+]
+
+const MINUTE_OPTIONS: ReadonlyArray<number> = [0, 15, 30, 45]
+const PERIOD_OPTIONS: ReadonlyArray<Period> = ['AM', 'PM']
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
 }
 
-function isObject(x: unknown): x is Record<string, unknown> {
-  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-async function safeJsonObject(res: Response): Promise<JsonObject> {
-  const data = await safeJson(res)
-  return isObject(data) ? (data as JsonObject) : {}
+async function safeJsonObject(response: Response): Promise<Record<string, unknown>> {
+  const data: unknown = await safeJson(response)
+  return isObject(data) ? data : {}
 }
 
-function normalizeHHMM(v: unknown): string | null {
-  const parsed = parseHHMM(v)
+function normalizeHHMM(value: unknown) {
+  const parsed = parseHHMM(value)
   if (!parsed) return null
-  return `${String(parsed.hh).padStart(2, '0')}:${String(parsed.mm).padStart(2, '0')}`
+
+  return `${String(parsed.hh).padStart(2, '0')}:${String(parsed.mm).padStart(
+    2,
+    '0',
+  )}`
 }
-function looksLikeApiHours(v: unknown): v is ApiWorkingHours {
-  if (!isObject(v)) return false
-  for (const d of DAY_KEYS) {
-    const row = (v as Record<string, unknown>)[d]
-    if (!isObject(row)) return false
-    if (typeof row.enabled !== 'boolean') return false
-    if (typeof row.start !== 'string') return false
-    if (typeof row.end !== 'string') return false
+
+function looksLikeApiDay(value: unknown): value is ApiDayConfig {
+  if (!isObject(value)) return false
+
+  return (
+    typeof value.enabled === 'boolean' &&
+    typeof value.start === 'string' &&
+    typeof value.end === 'string'
+  )
+}
+
+function looksLikeApiHours(value: unknown): value is ApiWorkingHours {
+  if (!isObject(value)) return false
+
+  for (const day of DAY_KEYS) {
+    if (!looksLikeApiDay(value[day])) return false
   }
+
   return true
 }
 
-/**
- * ✅ Real default:
- * - Mon–Fri enabled 9–5
- * - Sat/Sun off
- */
+function makeApiDay(enabled: boolean): ApiDayConfig {
+  return {
+    enabled,
+    start: '09:00',
+    end: '17:00',
+  }
+}
+
 function defaultApiHours(): ApiWorkingHours {
-  const weekday: ApiDayConfig = { enabled: true, start: '09:00', end: '17:00' }
-  const weekend: ApiDayConfig = { enabled: false, start: '09:00', end: '17:00' }
+  return {
+    mon: makeApiDay(true),
+    tue: makeApiDay(true),
+    wed: makeApiDay(true),
+    thu: makeApiDay(true),
+    fri: makeApiDay(true),
+    sat: makeApiDay(false),
+    sun: makeApiDay(false),
+  }
+}
+
+function sanitizeApiDay(day: ApiDayConfig, fallback: ApiDayConfig): ApiDayConfig {
+  return {
+    enabled: day.enabled,
+    start: normalizeHHMM(day.start) ?? fallback.start,
+    end: normalizeHHMM(day.end) ?? fallback.end,
+  }
+}
+
+function sanitizeApiHours(hours: ApiWorkingHours): ApiWorkingHours {
+  const fallback = defaultApiHours()
 
   return {
-    mon: { ...weekday },
-    tue: { ...weekday },
-    wed: { ...weekday },
-    thu: { ...weekday },
-    fri: { ...weekday },
-    sat: { ...weekend },
-    sun: { ...weekend },
+    mon: sanitizeApiDay(hours.mon, fallback.mon),
+    tue: sanitizeApiDay(hours.tue, fallback.tue),
+    wed: sanitizeApiDay(hours.wed, fallback.wed),
+    thu: sanitizeApiDay(hours.thu, fallback.thu),
+    fri: sanitizeApiDay(hours.fri, fallback.fri),
+    sat: sanitizeApiDay(hours.sat, fallback.sat),
+    sun: sanitizeApiDay(hours.sun, fallback.sun),
   }
 }
 
-function parseTime24(time: string | null | undefined): { hour: number; minute: number; period: Period } {
+function parseTime24(time: string | null | undefined): {
+  hour: number
+  minute: number
+  period: Period
+} {
   const parsed = parseHHMM(time)
-  if (!parsed) return { hour: 9, minute: 0, period: 'AM' }
 
-  const hh24 = parsed.hh
-  const mm = parsed.mm
+  if (!parsed) {
+    return {
+      hour: 9,
+      minute: 0,
+      period: 'AM',
+    }
+  }
 
-  if (hh24 === 0) return { hour: 12, minute: mm, period: 'AM' }
-  if (hh24 === 12) return { hour: 12, minute: mm, period: 'PM' }
-  if (hh24 > 12) return { hour: hh24 - 12, minute: mm, period: 'PM' }
-  return { hour: hh24, minute: mm, period: 'AM' }
+  if (parsed.hh === 0) {
+    return {
+      hour: 12,
+      minute: parsed.mm,
+      period: 'AM',
+    }
+  }
+
+  if (parsed.hh === 12) {
+    return {
+      hour: 12,
+      minute: parsed.mm,
+      period: 'PM',
+    }
+  }
+
+  if (parsed.hh > 12) {
+    return {
+      hour: parsed.hh - 12,
+      minute: parsed.mm,
+      period: 'PM',
+    }
+  }
+
+  return {
+    hour: parsed.hh,
+    minute: parsed.mm,
+    period: 'AM',
+  }
 }
 
-function toTime24(hour: number, minute: number, period: Period): string {
-  let h = clamp(Math.floor(hour || 0), 1, 12)
-  const m = clamp(Math.floor(minute || 0), 0, 59)
+function toTime24(hour: number, minute: number, period: Period) {
+  let hour24 = clamp(Math.floor(hour || 0), 1, 12)
+  const safeMinute = clamp(Math.floor(minute || 0), 0, 59)
 
   if (period === 'AM') {
-    if (h === 12) h = 0
-  } else {
-    if (h !== 12) h = h + 12
+    if (hour24 === 12) hour24 = 0
+  } else if (hour24 !== 12) {
+    hour24 += 12
   }
 
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  return `${String(hour24).padStart(2, '0')}:${String(safeMinute).padStart(
+    2,
+    '0',
+  )}`
 }
 
 function minutesSinceMidnight(hour: number, minute: number, period: Period) {
-  let h = clamp(Math.floor(hour || 0), 1, 12)
-  const m = clamp(Math.floor(minute || 0), 0, 59)
+  const time24 = toTime24(hour, minute, period)
+  const parsed = parseHHMM(time24)
 
-  if (period === 'AM') {
-    if (h === 12) h = 0
-  } else {
-    if (h !== 12) h = h + 12
+  if (!parsed) return 0
+
+  return parsed.hh * 60 + parsed.mm
+}
+
+function dayConfigFromApi(day: ApiDayConfig): DayConfig {
+  const start = parseTime24(day.start)
+  const end = parseTime24(day.end)
+
+  return {
+    enabled: day.enabled,
+    startHour: start.hour,
+    startMinute: start.minute,
+    startPeriod: start.period,
+    endHour: end.hour,
+    endMinute: end.minute,
+    endPeriod: end.period,
+  }
+}
+
+function hydrateFromApi(raw: ApiWorkingHours | null | undefined): WorkingHoursState {
+  const source = looksLikeApiHours(raw)
+    ? sanitizeApiHours(raw)
+    : defaultApiHours()
+
+  return {
+    mon: dayConfigFromApi(source.mon),
+    tue: dayConfigFromApi(source.tue),
+    wed: dayConfigFromApi(source.wed),
+    thu: dayConfigFromApi(source.thu),
+    fri: dayConfigFromApi(source.fri),
+    sat: dayConfigFromApi(source.sat),
+    sun: dayConfigFromApi(source.sun),
+  }
+}
+
+function toApiDay(day: DayConfig): ApiDayConfig {
+  return {
+    enabled: day.enabled,
+    start: toTime24(day.startHour, day.startMinute, day.startPeriod),
+    end: toTime24(day.endHour, day.endMinute, day.endPeriod),
+  }
+}
+
+function toApiPayload(state: WorkingHoursState): ApiWorkingHours {
+  return {
+    mon: toApiDay(state.mon),
+    tue: toApiDay(state.tue),
+    wed: toApiDay(state.wed),
+    thu: toApiDay(state.thu),
+    fri: toApiDay(state.fri),
+    sat: toApiDay(state.sat),
+    sun: toApiDay(state.sun),
+  }
+}
+
+function validateState(state: WorkingHoursState) {
+  for (const day of DAYS) {
+    const config = state[day.key]
+
+    if (!config.enabled) continue
+
+    const start = minutesSinceMidnight(
+      config.startHour,
+      config.startMinute,
+      config.startPeriod,
+    )
+
+    const end = minutesSinceMidnight(
+      config.endHour,
+      config.endMinute,
+      config.endPeriod,
+    )
+
+    if (end <= start) {
+      return `${day.fullLabel}: End time must be after start time.`
+    }
   }
 
-  return h * 60 + m
+  return null
+}
+
+function parseHourSelection(value: string, fallback: number) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? clamp(Math.trunc(parsed), 1, 12) : fallback
+}
+
+function parseMinuteSelection(value: string) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? clamp(Math.trunc(parsed), 0, 59) : 0
+}
+
+function parsePeriodSelection(value: string): Period {
+  return value === 'PM' ? 'PM' : 'AM'
 }
 
 function currentPathWithQuery() {
   if (typeof window === 'undefined') return '/pro/calendar'
+
   return window.location.pathname + window.location.search + window.location.hash
 }
 
 function sanitizeFrom(from: string) {
   const trimmed = from.trim()
+
   if (!trimmed) return '/pro'
   if (!trimmed.startsWith('/')) return '/pro'
   if (trimmed.startsWith('//')) return '/pro'
+
   return trimmed
 }
 
-function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
-  const from = sanitizeFrom(currentPathWithQuery())
-  const qs = new URLSearchParams({ from })
-  if (reason) qs.set('reason', reason)
-  router.push(`/login?${qs.toString()}`)
+function redirectToLogin(
+  router: ReturnType<typeof useRouter>,
+  reason?: string,
+) {
+  const params = new URLSearchParams({
+    from: sanitizeFrom(currentPathWithQuery()),
+  })
+
+  if (reason) params.set('reason', reason)
+
+  router.push(`/login?${params.toString()}`)
 }
 
-function errorFromResponse(res: Response, data: unknown) {
-  const msg = readErrorMessage(data)
-  if (msg) return msg
+function workingHoursEndpoint(locationType: LocationType) {
+  const params = new URLSearchParams({ locationType })
+  return `/api/pro/working-hours?${params.toString()}`
+}
+
+function errorFromResponse(response: Response, data: unknown) {
+  const message = readErrorMessage(data)
+  if (message) return message
 
   if (isObject(data)) {
-    const m = data.message
-    if (typeof m === 'string' && m.trim()) return m.trim()
-  }
-
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-  return `Request failed (${res.status}).`
-}
-
-function buildDefaultState(): WorkingHoursState {
-  return hydrateFromApi(defaultApiHours())
-}
-
-function hydrateFromApi(raw: ApiWorkingHours | null | undefined): WorkingHoursState {
-  const base = defaultApiHours()
-
-  const src: ApiWorkingHours = looksLikeApiHours(raw)
-    ? {
-        mon: {
-          enabled: raw.mon.enabled,
-          start: normalizeHHMM(raw.mon.start) ?? base.mon.start,
-          end: normalizeHHMM(raw.mon.end) ?? base.mon.end,
-        },
-        tue: {
-          enabled: raw.tue.enabled,
-          start: normalizeHHMM(raw.tue.start) ?? base.tue.start,
-          end: normalizeHHMM(raw.tue.end) ?? base.tue.end,
-        },
-        wed: {
-          enabled: raw.wed.enabled,
-          start: normalizeHHMM(raw.wed.start) ?? base.wed.start,
-          end: normalizeHHMM(raw.wed.end) ?? base.wed.end,
-        },
-        thu: {
-          enabled: raw.thu.enabled,
-          start: normalizeHHMM(raw.thu.start) ?? base.thu.start,
-          end: normalizeHHMM(raw.thu.end) ?? base.thu.end,
-        },
-        fri: {
-          enabled: raw.fri.enabled,
-          start: normalizeHHMM(raw.fri.start) ?? base.fri.start,
-          end: normalizeHHMM(raw.fri.end) ?? base.fri.end,
-        },
-        sat: {
-          enabled: raw.sat.enabled,
-          start: normalizeHHMM(raw.sat.start) ?? base.sat.start,
-          end: normalizeHHMM(raw.sat.end) ?? base.sat.end,
-        },
-        sun: {
-          enabled: raw.sun.enabled,
-          start: normalizeHHMM(raw.sun.start) ?? base.sun.start,
-          end: normalizeHHMM(raw.sun.end) ?? base.sun.end,
-        },
-      }
-    : base
-
-  const dayState = (cfg: ApiDayConfig): DayConfig => {
-    const startParsed = parseTime24(cfg.start)
-    const endParsed = parseTime24(cfg.end)
-    return {
-      enabled: Boolean(cfg.enabled),
-      startHour: startParsed.hour,
-      startMinute: startParsed.minute,
-      startPeriod: startParsed.period,
-      endHour: endParsed.hour,
-      endMinute: endParsed.minute,
-      endPeriod: endParsed.period,
+    const rawMessage = data.message
+    if (typeof rawMessage === 'string' && rawMessage.trim()) {
+      return rawMessage.trim()
     }
   }
 
-  return {
-    mon: dayState(src.mon),
-    tue: dayState(src.tue),
-    wed: dayState(src.wed),
-    thu: dayState(src.thu),
-    fri: dayState(src.fri),
-    sat: dayState(src.sat),
-    sun: dayState(src.sun),
+  if (response.status === 401) return 'Please log in to continue.'
+  if (response.status === 403) return 'You do not have access to do that.'
+
+  return `Request failed (${response.status}).`
+}
+
+function locationTypeLabel(locationType: LocationType) {
+  return locationType === 'MOBILE' ? 'Mobile' : 'Salon'
+}
+
+function locationHintClassName(locationType: LocationType) {
+  if (locationType === 'MOBILE') {
+    return 'border-[var(--acid)]/25 bg-[var(--acid)]/10'
   }
+
+  return 'border-[var(--terra)]/35 bg-[var(--terra)]/10'
 }
 
-function toApiPayload(state: WorkingHoursState): ApiWorkingHours {
-  const day = (cfg: DayConfig): ApiDayConfig => ({
-    enabled: Boolean(cfg.enabled),
-    start: toTime24(cfg.startHour, cfg.startMinute, cfg.startPeriod),
-    end: toTime24(cfg.endHour, cfg.endMinute, cfg.endPeriod),
-  })
-
-  return {
-    mon: day(state.mon),
-    tue: day(state.tue),
-    wed: day(state.wed),
-    thu: day(state.thu),
-    fri: day(state.fri),
-    sat: day(state.sat),
-    sun: day(state.sun),
-  }
+function buttonClassName() {
+  return [
+    'inline-flex items-center justify-center rounded-full px-4 py-3',
+    'border border-accentPrimary/30 bg-accentPrimary',
+    'font-mono text-[11px] font-black uppercase tracking-[0.08em]',
+    'text-bgPrimary transition hover:bg-accentPrimaryHover',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+    'disabled:cursor-not-allowed disabled:opacity-60',
+  ].join(' ')
 }
 
-function validateState(state: WorkingHoursState): string | null {
-  for (const { key, label } of DAYS) {
-    const cfg = state[key]
-    if (!cfg.enabled) continue
-
-    const start = minutesSinceMidnight(cfg.startHour, cfg.startMinute, cfg.startPeriod)
-    const end = minutesSinceMidnight(cfg.endHour, cfg.endMinute, cfg.endPeriod)
-
-    if (end <= start) return `${label}: End time must be after start time.`
-  }
-  return null
+function selectClassName(disabled: boolean) {
+  return [
+    'h-10 rounded-xl border border-[var(--line)] bg-[var(--ink-2)] px-2',
+    'font-mono text-[11px] font-black uppercase tracking-[0.04em]',
+    'text-[var(--paper)] shadow-sm',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
+    disabled
+      ? 'cursor-not-allowed opacity-50'
+      : 'hover:border-[var(--line-strong)] hover:bg-[var(--paper)]/[0.05]',
+  ].join(' ')
 }
 
-function Select({
-  value,
-  disabled,
-  onChange,
-  children,
-  className = '',
-}: {
-  value: string | number
-  disabled?: boolean
-  onChange: (v: string) => void
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <select
-      value={value}
-      disabled={disabled}
-      onChange={(e) => onChange(e.target.value)}
-      className={[
-        'h-10 rounded-xl border border-white/10 bg-bgSecondary/40 px-2 text-[12px] font-extrabold text-textPrimary',
-        'shadow-sm backdrop-blur-md ring-1 ring-white/6',
-        'focus:outline-none focus:ring-2 focus:ring-accentPrimary/40',
-        disabled ? 'cursor-not-allowed opacity-50' : 'hover:border-white/20 hover:bg-bgSecondary/55',
-        className,
-      ].join(' ')}
-    >
-      {children}
-    </select>
-  )
-}
+export default function WorkingHoursForm(props: WorkingHoursFormProps) {
+  const {
+    initialHours,
+    onSaved,
+    locationType = 'SALON',
+  } = props
 
-export default function WorkingHoursForm({ initialHours, onSaved, locationType = 'SALON' }: WorkingHoursFormProps) {
   const router = useRouter()
 
   const [state, setState] = useState<WorkingHoursState | null>(null)
@@ -316,85 +429,79 @@ export default function WorkingHoursForm({ initialHours, onSaved, locationType =
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const minuteOptions = useMemo(() => [0, 15, 30, 45], [])
-
-  // ✅ token-only tint (no emerald/brand)
-  const locationHint =
-    locationType === 'MOBILE'
-      ? 'border-toneInfo/25 bg-toneInfo/10'
-      : 'border-accentPrimary/25 bg-accentPrimary/10'
-
   useEffect(() => {
-    let cancelled = false
+    const controller = new AbortController()
 
-    async function load() {
+    async function loadHours() {
+      setError(null)
+      setMessage(null)
+
+      if (initialHours !== undefined) {
+        setState(hydrateFromApi(initialHours))
+        return
+      }
+
       try {
-        setError(null)
-        setMessage(null)
-
-        // If parent gives us initialHours (even null), hydrate from it.
-        if (initialHours !== undefined) {
-          const next = hydrateFromApi(initialHours ?? null)
-          if (!cancelled) setState(next)
-          return
-        }
-
-        const res = await fetch(`/api/pro/working-hours?locationType=${encodeURIComponent(locationType)}`, {
+        const response = await fetch(workingHoursEndpoint(locationType), {
           method: 'GET',
           cache: 'no-store',
+          signal: controller.signal,
         })
 
-        if (res.status === 401) {
+        if (response.status === 401) {
           redirectToLogin(router, 'working-hours')
           return
         }
 
-        const data = await safeJsonObject(res)
+        const data = await safeJsonObject(response)
 
-        if (!res.ok) {
-          if (!cancelled) {
-            setError(errorFromResponse(res, data))
-            setState(buildDefaultState())
-          }
+        if (controller.signal.aborted) return
+
+        if (!response.ok) {
+          setError(errorFromResponse(response, data))
+          setState(hydrateFromApi(null))
           return
         }
 
-        const apiRaw = data.workingHours
-        const api = looksLikeApiHours(apiRaw) ? apiRaw : null
-        const next = hydrateFromApi(api)
+        const workingHours = looksLikeApiHours(data.workingHours)
+          ? data.workingHours
+          : null
 
-        if (!cancelled) setState(next)
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error(e)
-        if (!cancelled) {
-          setError('Network error loading hours.')
-          setState(buildDefaultState())
-        }
+        setState(hydrateFromApi(workingHours))
+      } catch (caught) {
+        if (controller.signal.aborted) return
+
+        setError(errorMessageFromUnknown(caught, 'Network error loading hours.'))
+        setState(hydrateFromApi(null))
       }
     }
 
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [initialHours, router, locationType])
+    void loadHours()
 
-  function updateDay<K extends keyof DayConfig>(dayKey: WeekdayKey, field: K, value: DayConfig[K]) {
-    setState((prev) => {
-      if (!prev) return prev
+    return () => controller.abort()
+  }, [initialHours, locationType, router])
+
+  function updateDay<K extends keyof DayConfig>(
+    dayKey: WeekdayKey,
+    field: K,
+    value: DayConfig[K],
+  ) {
+    setState((previous) => {
+      if (!previous) return previous
+
       return {
-        ...prev,
+        ...previous,
         [dayKey]: {
-          ...prev[dayKey],
+          ...previous[dayKey],
           [field]: value,
         },
       }
     })
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
     if (!state || saving) return
 
     setMessage(null)
@@ -408,191 +515,318 @@ export default function WorkingHoursForm({ initialHours, onSaved, locationType =
 
     const payload = toApiPayload(state)
 
-    try {
-      setSaving(true)
+    setSaving(true)
 
-      const res = await fetch(`/api/pro/working-hours?locationType=${encodeURIComponent(locationType)}`, {
+    try {
+      const response = await fetch(workingHoursEndpoint(locationType), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ workingHours: payload }),
       })
 
-      if (res.status === 401) {
+      if (response.status === 401) {
         redirectToLogin(router, 'working-hours')
         return
       }
 
-      const data = await safeJsonObject(res)
-      if (!res.ok) {
-        setError(errorFromResponse(res, data))
+      const data = await safeJsonObject(response)
+
+      if (!response.ok) {
+        setError(errorFromResponse(response, data))
         return
       }
 
       setMessage('Schedule saved.')
       onSaved?.(payload)
-
-      // Refresh so calendar overlay + any server components update
       router.refresh()
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(err)
-      setError(err instanceof Error && err.message.trim() ? err.message : 'Failed to save.')
+    } catch (caught) {
+      setError(errorMessageFromUnknown(caught, 'Failed to save.'))
     } finally {
       setSaving(false)
     }
   }
 
   if (!state) {
-    return <div className="text-[12px] text-textSecondary">Loading schedule…</div>
+    return <StateCard>Loading schedule…</StateCard>
   }
 
   return (
-    <form onSubmit={handleSubmit} className="text-textPrimary">
-      {/* context strip */}
+    <form
+      onSubmit={handleSubmit}
+      className="text-[var(--paper)]"
+      data-calendar-working-hours-form="1"
+    >
       <div
         className={[
-          'mb-3 rounded-2xl border px-3 py-2 text-[12px] font-semibold text-textSecondary',
-          locationHint,
+          'mb-4 rounded-2xl border px-3 py-3',
+          'text-sm font-semibold text-[var(--paper-dim)]',
+          locationHintClassName(locationType),
         ].join(' ')}
       >
-        Editing base schedule for{' '}
-        <span className="font-extrabold text-textPrimary">{locationType === 'SALON' ? 'Salon' : 'Mobile'}</span>
+        <p className="font-mono text-[10px] font-black uppercase tracking-[0.14em] text-[var(--paper-mute)]">
+          Base schedule
+        </p>
+
+        <p className="mt-1">
+          Editing availability for{' '}
+          <span className="font-black text-[var(--paper)]">
+            {locationTypeLabel(locationType)}
+          </span>
+          . Bookings and blocks still override these hours.
+        </p>
       </div>
 
       <div className="grid gap-2">
-        {/* header labels desktop */}
-        <div className="hidden grid-cols-[120px_1fr_1fr] items-center gap-2 text-[12px] md:grid">
-          <div />
-          <div className="font-extrabold text-textPrimary">Start</div>
-          <div className="font-extrabold text-textPrimary">End</div>
+        <div className="hidden grid-cols-[120px_1fr_1fr] items-center gap-3 px-1 font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)] md:grid">
+          <div>Day</div>
+          <div>Start</div>
+          <div>End</div>
         </div>
 
-        {DAYS.map(({ key, label }) => {
-          const cfg = state[key]
-          const faded = !cfg.enabled
+        {DAYS.map((day) => {
+          const config = state[day.key]
+          const disabled = !config.enabled
 
           return (
-            <div
-              key={key}
-              className={[
-                'tovis-glass-soft tovis-noise rounded-2xl border border-white/10 p-3',
-                'grid gap-2 md:grid-cols-[120px_1fr_1fr] md:items-center md:gap-3',
-                faded ? 'opacity-70' : 'opacity-100',
-              ].join(' ')}
-            >
-              <label className="flex items-center gap-2 text-[12px] font-extrabold">
-                <input
-                  type="checkbox"
-                  checked={cfg.enabled}
-                  onChange={(e) => updateDay(key, 'enabled', e.target.checked)}
-                  className="h-4 w-4 accent-accentPrimary"
-                />
-                <span className="text-textPrimary">{label}</span>
-                {!cfg.enabled ? <span className="text-textSecondary font-semibold">(off)</span> : null}
-              </label>
-
-              {/* Start */}
-              <div className="grid grid-cols-3 gap-2">
-                <div className="md:hidden col-span-3 text-[11px] font-semibold text-textSecondary">Start</div>
-
-                <Select
-                  value={cfg.startHour}
-                  disabled={!cfg.enabled}
-                  onChange={(v) => updateDay(key, 'startHour', clamp(parseInt(v, 10) || 9, 1, 12))}
-                >
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
-                    <option key={h} value={h}>
-                      {h}
-                    </option>
-                  ))}
-                </Select>
-
-                <Select
-                  value={cfg.startMinute}
-                  disabled={!cfg.enabled}
-                  onChange={(v) => updateDay(key, 'startMinute', clamp(parseInt(v, 10) || 0, 0, 59))}
-                >
-                  {minuteOptions.map((m) => (
-                    <option key={m} value={m}>
-                      {String(m).padStart(2, '0')}
-                    </option>
-                  ))}
-                </Select>
-
-                <Select
-                  value={cfg.startPeriod}
-                  disabled={!cfg.enabled}
-                  onChange={(v) => updateDay(key, 'startPeriod', (v === 'PM' ? 'PM' : 'AM') as Period)}
-                >
-                  <option value="AM">AM</option>
-                  <option value="PM">PM</option>
-                </Select>
-              </div>
-
-              {/* End */}
-              <div className="grid grid-cols-3 gap-2">
-                <div className="md:hidden col-span-3 text-[11px] font-semibold text-textSecondary">End</div>
-
-                <Select
-                  value={cfg.endHour}
-                  disabled={!cfg.enabled}
-                  onChange={(v) => updateDay(key, 'endHour', clamp(parseInt(v, 10) || 5, 1, 12))}
-                >
-                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
-                    <option key={h} value={h}>
-                      {h}
-                    </option>
-                  ))}
-                </Select>
-
-                <Select
-                  value={cfg.endMinute}
-                  disabled={!cfg.enabled}
-                  onChange={(v) => updateDay(key, 'endMinute', clamp(parseInt(v, 10) || 0, 0, 59))}
-                >
-                  {minuteOptions.map((m) => (
-                    <option key={m} value={m}>
-                      {String(m).padStart(2, '0')}
-                    </option>
-                  ))}
-                </Select>
-
-                <Select
-                  value={cfg.endPeriod}
-                  disabled={!cfg.enabled}
-                  onChange={(v) => updateDay(key, 'endPeriod', (v === 'PM' ? 'PM' : 'AM') as Period)}
-                >
-                  <option value="AM">AM</option>
-                  <option value="PM">PM</option>
-                </Select>
-              </div>
-            </div>
+            <DayRow
+              key={day.key}
+              day={day}
+              config={config}
+              disabled={disabled}
+              onToggleEnabled={(enabled) =>
+                updateDay(day.key, 'enabled', enabled)
+              }
+              onChangeStartHour={(value) =>
+                updateDay(
+                  day.key,
+                  'startHour',
+                  parseHourSelection(value, 9),
+                )
+              }
+              onChangeStartMinute={(value) =>
+                updateDay(day.key, 'startMinute', parseMinuteSelection(value))
+              }
+              onChangeStartPeriod={(value) =>
+                updateDay(day.key, 'startPeriod', parsePeriodSelection(value))
+              }
+              onChangeEndHour={(value) =>
+                updateDay(day.key, 'endHour', parseHourSelection(value, 5))
+              }
+              onChangeEndMinute={(value) =>
+                updateDay(day.key, 'endMinute', parseMinuteSelection(value))
+              }
+              onChangeEndPeriod={(value) =>
+                updateDay(day.key, 'endPeriod', parsePeriodSelection(value))
+              }
+            />
           )
         })}
 
-        <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
+        <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center">
           <button
             type="submit"
             disabled={saving}
-            className={[
-              'inline-flex items-center justify-center rounded-full border border-white/10 px-4 py-3 text-[12px] font-extrabold transition',
-              'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
-              'shadow-sm',
-              saving ? 'cursor-not-allowed opacity-70' : 'hover:scale-[1.01] active:scale-[0.99]',
-            ].join(' ')}
+            className={buttonClassName()}
           >
             {saving ? 'Saving…' : 'Save schedule'}
           </button>
 
-          {message ? <div className="text-[12px] font-extrabold text-toneSuccess">{message}</div> : null}
-          {error ? <div className="text-[12px] font-extrabold text-toneDanger">{error}</div> : null}
-        </div>
-
-        <div className="mt-2 text-[11px] text-textSecondary">
-          This sets your base availability for <span className="font-semibold">{locationType.toLowerCase()}</span>.
-          Bookings and blocks will still override it.
+          {message ? <InlineState tone="success">{message}</InlineState> : null}
+          {error ? <InlineState tone="danger">{error}</InlineState> : null}
         </div>
       </div>
     </form>
+  )
+}
+
+function DayRow(props: {
+  day: DayDefinition
+  config: DayConfig
+  disabled: boolean
+  onToggleEnabled: (enabled: boolean) => void
+  onChangeStartHour: (value: string) => void
+  onChangeStartMinute: (value: string) => void
+  onChangeStartPeriod: (value: string) => void
+  onChangeEndHour: (value: string) => void
+  onChangeEndMinute: (value: string) => void
+  onChangeEndPeriod: (value: string) => void
+}) {
+  const {
+    day,
+    config,
+    disabled,
+    onToggleEnabled,
+    onChangeStartHour,
+    onChangeStartMinute,
+    onChangeStartPeriod,
+    onChangeEndHour,
+    onChangeEndMinute,
+    onChangeEndPeriod,
+  } = props
+
+  return (
+    <div
+      className={[
+        'rounded-2xl border border-[var(--line)] bg-[var(--paper)]/[0.025] p-3',
+        'grid gap-3 md:grid-cols-[120px_1fr_1fr] md:items-center',
+        disabled ? 'opacity-65' : 'opacity-100',
+      ].join(' ')}
+    >
+      <label className="flex items-center gap-2 font-mono text-[11px] font-black uppercase tracking-[0.08em] text-[var(--paper)]">
+        <input
+          type="checkbox"
+          checked={config.enabled}
+          onChange={(event) => onToggleEnabled(event.target.checked)}
+          className="h-4 w-4 accent-accentPrimary"
+        />
+
+        <span>{day.label}</span>
+
+        {disabled ? (
+          <span className="text-[var(--paper-mute)]">Off</span>
+        ) : null}
+      </label>
+
+      <TimeControlGroup
+        label="Start"
+        disabled={disabled}
+        hour={config.startHour}
+        minute={config.startMinute}
+        period={config.startPeriod}
+        onChangeHour={onChangeStartHour}
+        onChangeMinute={onChangeStartMinute}
+        onChangePeriod={onChangeStartPeriod}
+      />
+
+      <TimeControlGroup
+        label="End"
+        disabled={disabled}
+        hour={config.endHour}
+        minute={config.endMinute}
+        period={config.endPeriod}
+        onChangeHour={onChangeEndHour}
+        onChangeMinute={onChangeEndMinute}
+        onChangePeriod={onChangeEndPeriod}
+      />
+    </div>
+  )
+}
+
+function TimeControlGroup(props: {
+  label: string
+  disabled: boolean
+  hour: number
+  minute: number
+  period: Period
+  onChangeHour: (value: string) => void
+  onChangeMinute: (value: string) => void
+  onChangePeriod: (value: string) => void
+}) {
+  const {
+    label,
+    disabled,
+    hour,
+    minute,
+    period,
+    onChangeHour,
+    onChangeMinute,
+    onChangePeriod,
+  } = props
+
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      <div className="col-span-3 font-mono text-[9px] font-black uppercase tracking-[0.12em] text-[var(--paper-mute)] md:hidden">
+        {label}
+      </div>
+
+      <Select
+        value={hour}
+        disabled={disabled}
+        onChange={onChangeHour}
+      >
+        {HOUR_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </Select>
+
+      <Select
+        value={minute}
+        disabled={disabled}
+        onChange={onChangeMinute}
+      >
+        {MINUTE_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {String(option).padStart(2, '0')}
+          </option>
+        ))}
+      </Select>
+
+      <Select
+        value={period}
+        disabled={disabled}
+        onChange={onChangePeriod}
+      >
+        {PERIOD_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </Select>
+    </div>
+  )
+}
+
+function Select(props: SelectProps) {
+  const { value, disabled = false, onChange, children } = props
+
+  return (
+    <select
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value)}
+      className={selectClassName(disabled)}
+    >
+      {children}
+    </select>
+  )
+}
+
+function StateCard(props: {
+  children: ReactNode
+  danger?: boolean
+}) {
+  const { children, danger = false } = props
+
+  return (
+    <div
+      className={[
+        'rounded-2xl border px-3 py-3 text-sm font-semibold',
+        danger
+          ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
+          : 'border-[var(--line)] bg-[var(--paper)]/[0.03] text-[var(--paper-dim)]',
+      ].join(' ')}
+    >
+      {children}
+    </div>
+  )
+}
+
+function InlineState(props: {
+  children: ReactNode
+  tone: 'success' | 'danger'
+}) {
+  const { children, tone } = props
+
+  return (
+    <p
+      className={[
+        'font-mono text-[10px] font-black uppercase tracking-[0.10em]',
+        tone === 'success' ? 'text-toneSuccess' : 'text-toneDanger',
+      ].join(' ')}
+    >
+      {children}
+    </p>
   )
 }
