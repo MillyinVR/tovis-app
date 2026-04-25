@@ -63,6 +63,8 @@ const WEEKDAY_INDEX_BY_SHORT_LABEL: Record<string, number> = {
   Sat: 6,
 }
 
+// ─── Basic helpers ────────────────────────────────────────────────────────────
+
 function isFiniteDate(date: Date) {
   return Number.isFinite(date.getTime())
 }
@@ -86,33 +88,35 @@ function validYmdParts(parts: YmdParts) {
 }
 
 function dateFormatter(
-  timeZone: string | undefined,
+  targetTimeZone: string | undefined,
   options: Intl.DateTimeFormatOptions,
 ) {
   return new Intl.DateTimeFormat(undefined, {
     ...options,
-    timeZone,
+    timeZone: targetTimeZone,
   })
 }
 
 function dateFormatterEnUs(
-  timeZone: string | undefined,
+  targetTimeZone: string | undefined,
   options: Intl.DateTimeFormatOptions,
 ) {
   return new Intl.DateTimeFormat('en-US', {
     ...options,
-    timeZone,
+    timeZone: targetTimeZone,
   })
 }
 
 function addLocalDays(date: Date, days: number) {
   const next = new Date(date)
+
   next.setDate(next.getDate() + days)
+
   return next
 }
 
-function weekdayIndexInTimeZone(anchorUtc: Date, timeZone: string) {
-  const weekday = dateFormatterEnUs(timeZone, {
+function weekdayIndexInTimeZone(anchorUtc: Date, targetTimeZone: string) {
+  const weekday = dateFormatterEnUs(targetTimeZone, {
     weekday: 'short',
   }).format(anchorUtc)
 
@@ -123,18 +127,19 @@ function weekStartDiff(dayIndex: number) {
   return WEEK_START === 'MON' ? (dayIndex + 6) % 7 : dayIndex
 }
 
-/**
- * Browser-local helpers.
- * Calendar timezone math should prefer the timezone-safe helpers below.
- */
+// ─── Browser-local helpers ────────────────────────────────────────────────────
+// Calendar timezone math should prefer the timezone-safe helpers below.
+
 export function startOfDay(date: Date) {
-  const next = new Date(date)
+  const next = safeDate(date)
+
   next.setHours(0, 0, 0, 0)
+
   return next
 }
 
 export function addDays(date: Date, days: number) {
-  return addLocalDays(date, days)
+  return addLocalDays(safeDate(date), days)
 }
 
 /**
@@ -146,6 +151,7 @@ export function startOfWeek(date: Date) {
   const diff = weekStartDiff(next.getDay())
 
   next.setDate(next.getDate() - diff)
+
   return next
 }
 
@@ -154,19 +160,23 @@ export function startOfMonth(date: Date) {
   const next = new Date(safe.getFullYear(), safe.getMonth(), 1)
 
   next.setHours(0, 0, 0, 0)
+
   return next
 }
 
 export function isSameDay(first: Date, second: Date) {
+  const safeFirst = safeDate(first)
+  const safeSecond = safeDate(second)
+
   return (
-    first.getFullYear() === second.getFullYear() &&
-    first.getMonth() === second.getMonth() &&
-    first.getDate() === second.getDate()
+    safeFirst.getFullYear() === safeSecond.getFullYear() &&
+    safeFirst.getMonth() === safeSecond.getMonth() &&
+    safeFirst.getDate() === safeSecond.getDate()
   )
 }
 
 export function formatDayLabel(date: Date) {
-  return date.toLocaleDateString(undefined, {
+  return safeDate(date).toLocaleDateString(undefined, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -174,7 +184,7 @@ export function formatDayLabel(date: Date) {
 }
 
 export function formatMonthRange(date: Date) {
-  return date.toLocaleDateString(undefined, {
+  return safeDate(date).toLocaleDateString(undefined, {
     month: 'long',
     year: 'numeric',
   })
@@ -197,9 +207,7 @@ export function formatWeekRange(date: Date) {
   return `${startLabel} – ${endLabel}`
 }
 
-/* ---------------------------------------------
-   Timezone-safe helpers for calendar UI
---------------------------------------------- */
+// ─── Timezone-safe helpers for calendar UI ────────────────────────────────────
 
 export function parseYmd(ymd: string): YmdParts | null {
   const match = ymd.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
@@ -223,8 +231,11 @@ export function parseYmd(ymd: string): YmdParts | null {
   return validYmdParts(parts) ? parts : null
 }
 
-export function ymdPartsInTimeZone(date: Date, timeZone: string): YmdParts {
-  const parts = parseYmd(ymdInTimeZone(date, timeZone))
+export function ymdPartsInTimeZone(
+  date: Date,
+  targetTimeZone: string,
+): YmdParts {
+  const parts = parseYmd(ymdInTimeZone(safeDate(date), targetTimeZone))
 
   return parts ?? FALLBACK_YMD_PARTS
 }
@@ -232,36 +243,45 @@ export function ymdPartsInTimeZone(date: Date, timeZone: string): YmdParts {
 export function isSameDayInTimeZone(
   first: Date,
   second: Date,
-  timeZone: string,
+  targetTimeZone: string,
 ) {
-  return ymdInTimeZone(first, timeZone) === ymdInTimeZone(second, timeZone)
+  return (
+    ymdInTimeZone(safeDate(first), targetTimeZone) ===
+    ymdInTimeZone(safeDate(second), targetTimeZone)
+  )
 }
 
-export function dayNumberInTimeZone(date: Date, timeZone: string) {
-  return ymdPartsInTimeZone(date, timeZone).day
+export function dayNumberInTimeZone(date: Date, targetTimeZone: string) {
+  return ymdPartsInTimeZone(date, targetTimeZone).day
 }
 
-export function monthIndexInTimeZone(date: Date, timeZone: string) {
-  return ymdPartsInTimeZone(date, timeZone).month - 1
+export function monthIndexInTimeZone(date: Date, targetTimeZone: string) {
+  return ymdPartsInTimeZone(date, targetTimeZone).month - 1
 }
 
-export function yearInTimeZone(date: Date, timeZone: string) {
-  return ymdPartsInTimeZone(date, timeZone).year
+export function yearInTimeZone(date: Date, targetTimeZone: string) {
+  return ymdPartsInTimeZone(date, targetTimeZone).year
 }
 
-export function formatDayLabelInTimeZone(date: Date, timeZone: string) {
-  return dateFormatter(timeZone, {
+export function formatDayLabelInTimeZone(
+  date: Date,
+  targetTimeZone: string,
+) {
+  return dateFormatter(targetTimeZone, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
-  }).format(date)
+  }).format(safeDate(date))
 }
 
-export function formatMonthRangeInTimeZone(date: Date, timeZone: string) {
-  return dateFormatter(timeZone, {
+export function formatMonthRangeInTimeZone(
+  date: Date,
+  targetTimeZone: string,
+) {
+  return dateFormatter(targetTimeZone, {
     month: 'long',
     year: 'numeric',
-  }).format(date)
+  }).format(safeDate(date))
 }
 
 /**
@@ -269,8 +289,8 @@ export function formatMonthRangeInTimeZone(date: Date, timeZone: string) {
  * represent the chosen calendar day as local noon in the calendar timezone,
  * stored as a UTC Date.
  */
-export function anchorNoonInTimeZone(dayUtc: Date, timeZone: string) {
-  const parts = getZonedParts(dayUtc, timeZone)
+export function anchorNoonInTimeZone(dayUtc: Date, targetTimeZone: string) {
+  const parts = getZonedParts(safeDate(dayUtc), targetTimeZone)
 
   return zonedTimeToUtc({
     year: parts.year,
@@ -279,16 +299,16 @@ export function anchorNoonInTimeZone(dayUtc: Date, timeZone: string) {
     hour: 12,
     minute: 0,
     second: 0,
-    timeZone,
+    timeZone: targetTimeZone,
   })
 }
 
 export function addDaysAnchorNoonInTimeZone(
   anchorUtc: Date,
   deltaDays: number,
-  timeZone: string,
+  targetTimeZone: string,
 ) {
-  const parts = getZonedParts(anchorUtc, timeZone)
+  const parts = getZonedParts(safeDate(anchorUtc), targetTimeZone)
 
   return zonedTimeToUtc({
     year: parts.year,
@@ -297,17 +317,18 @@ export function addDaysAnchorNoonInTimeZone(
     hour: 12,
     minute: 0,
     second: 0,
-    timeZone,
+    timeZone: targetTimeZone,
   })
 }
 
 export function startOfWeekAnchorNoonInTimeZone(
   anchorUtc: Date,
-  timeZone: string,
+  targetTimeZone: string,
 ) {
-  const dayIndex = weekdayIndexInTimeZone(anchorUtc, timeZone)
+  const safeAnchor = safeDate(anchorUtc)
+  const dayIndex = weekdayIndexInTimeZone(safeAnchor, targetTimeZone)
   const diff = weekStartDiff(dayIndex)
-  const parts = getZonedParts(anchorUtc, timeZone)
+  const parts = getZonedParts(safeAnchor, targetTimeZone)
 
   return zonedTimeToUtc({
     year: parts.year,
@@ -316,15 +337,15 @@ export function startOfWeekAnchorNoonInTimeZone(
     hour: 12,
     minute: 0,
     second: 0,
-    timeZone,
+    timeZone: targetTimeZone,
   })
 }
 
 export function startOfMonthAnchorNoonInTimeZone(
   anchorUtc: Date,
-  timeZone: string,
+  targetTimeZone: string,
 ) {
-  const parts = getZonedParts(anchorUtc, timeZone)
+  const parts = getZonedParts(safeDate(anchorUtc), targetTimeZone)
 
   return zonedTimeToUtc({
     year: parts.year,
@@ -333,16 +354,16 @@ export function startOfMonthAnchorNoonInTimeZone(
     hour: 12,
     minute: 0,
     second: 0,
-    timeZone,
+    timeZone: targetTimeZone,
   })
 }
 
 export function addMonthsAnchorNoonInTimeZone(
   anchorUtc: Date,
   deltaMonths: number,
-  timeZone: string,
+  targetTimeZone: string,
 ) {
-  const parts = getZonedParts(anchorUtc, timeZone)
+  const parts = getZonedParts(safeDate(anchorUtc), targetTimeZone)
 
   return zonedTimeToUtc({
     year: parts.year,
@@ -351,23 +372,31 @@ export function addMonthsAnchorNoonInTimeZone(
     hour: 12,
     minute: 0,
     second: 0,
-    timeZone,
+    timeZone: targetTimeZone,
   })
 }
 
 export function formatWeekRangeInTimeZone(
   anchorUtc: Date,
-  timeZone: string,
+  targetTimeZone: string,
 ) {
   const weekStartNoonUtc = startOfWeekAnchorNoonInTimeZone(
     anchorUtc,
-    timeZone,
+    targetTimeZone,
   )
 
-  const startUtc = startOfDayUtcInTimeZone(weekStartNoonUtc, timeZone)
-  const endUtc = new Date(startUtc.getTime() + 6 * DAY_MS)
+  const startUtc = startOfDayUtcInTimeZone(
+    weekStartNoonUtc,
+    targetTimeZone,
+  )
 
-  const formatter = dateFormatter(timeZone, {
+  const endUtc = addDaysAnchorNoonInTimeZone(
+    weekStartNoonUtc,
+    6,
+    targetTimeZone,
+  )
+
+  const formatter = dateFormatter(targetTimeZone, {
     month: 'short',
     day: 'numeric',
   })
@@ -375,8 +404,10 @@ export function formatWeekRangeInTimeZone(
   return `${formatter.format(startUtc)} – ${formatter.format(endUtc)}`
 }
 
+// ─── Input / ISO helpers ──────────────────────────────────────────────────────
+
 export function toIso(date: Date) {
-  return new Date(date).toISOString()
+  return safeDate(date).toISOString()
 }
 
 export function toDateInputValue(date: Date) {
@@ -401,7 +432,7 @@ export function setDateTimeParts(baseDate: Date, hhmm: string) {
   const hour = Number(hourText)
   const minute = Number(minuteText)
 
-  const next = new Date(baseDate)
+  const next = safeDate(baseDate)
 
   next.setHours(
     Number.isFinite(hour) ? hour : 0,
@@ -414,7 +445,7 @@ export function setDateTimeParts(baseDate: Date, hhmm: string) {
 }
 
 export function roundUpToNext15(date: Date) {
-  const next = new Date(date)
+  const next = safeDate(date)
 
   next.setSeconds(0, 0)
 
@@ -425,10 +456,12 @@ export function roundUpToNext15(date: Date) {
   if (roundedMinutes >= 60) {
     next.setMinutes(0)
     next.setHours(next.getHours() + 1)
+
     return next
   }
 
   next.setMinutes(roundedMinutes)
+
   return next
 }
 
@@ -436,10 +469,8 @@ export function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
 
-/* ---------------------------------------------
-   Re-export timezone helpers.
-   Some calendar components import these from this file.
---------------------------------------------- */
+// ─── Re-export timezone helpers ───────────────────────────────────────────────
+// Some calendar components import these from this file.
 
 export {
   getZonedParts,
