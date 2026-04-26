@@ -94,6 +94,11 @@ type GridMark = {
   minute: number
 }
 
+type ScheduleLayout = {
+  overlays: WorkingOverlay[]
+  outsideHoursSegments: OutsideHoursSegment[]
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MIDDAY_MS = 12 * 60 * 60 * 1000
@@ -160,9 +165,10 @@ function mergeWindows(windows: TimeWindow[]): TimeWindow[] {
     .filter(isTimeWindow)
     .sort((first, second) => first.startMinutes - second.startMinutes)
 
-  if (normalized.length === 0) return []
-
   const firstWindow = normalized[0]
+
+  if (!firstWindow) return []
+
   const merged: TimeWindow[] = [
     {
       startMinutes: firstWindow.startMinutes,
@@ -172,7 +178,18 @@ function mergeWindows(windows: TimeWindow[]): TimeWindow[] {
 
   for (let index = 1; index < normalized.length; index += 1) {
     const current = normalized[index]
+
+    if (!current) continue
+
     const previous = merged[merged.length - 1]
+
+    if (!previous) {
+      merged.push({
+        startMinutes: current.startMinutes,
+        endMinutes: current.endMinutes,
+      })
+      continue
+    }
 
     if (current.startMinutes <= previous.endMinutes) {
       previous.endMinutes = Math.max(previous.endMinutes, current.endMinutes)
@@ -191,7 +208,9 @@ function mergeWindows(windows: TimeWindow[]): TimeWindow[] {
 function buildOutsideHoursSegments(
   workingWindows: TimeWindow[],
 ): OutsideHoursSegment[] {
-  if (workingWindows.length === 0) {
+  const firstWindow = workingWindows[0]
+
+  if (!firstWindow) {
     return [
       {
         key: 'closed-all-day',
@@ -202,7 +221,6 @@ function buildOutsideHoursSegments(
   }
 
   const segments: OutsideHoursSegment[] = []
-  const firstWindow = workingWindows[0]
 
   if (firstWindow.startMinutes > 0) {
     segments.push({
@@ -216,6 +234,8 @@ function buildOutsideHoursSegments(
     const current = workingWindows[index]
     const next = workingWindows[index + 1]
 
+    if (!current || !next) continue
+
     if (next.startMinutes > current.endMinutes) {
       segments.push({
         key: `closed-gap-${index}`,
@@ -227,7 +247,7 @@ function buildOutsideHoursSegments(
 
   const lastWindow = workingWindows[workingWindows.length - 1]
 
-  if (lastWindow.endMinutes < TOTAL_MINUTES) {
+  if (lastWindow && lastWindow.endMinutes < TOTAL_MINUTES) {
     segments.push({
       key: 'closed-after-close',
       startMinutes: lastWindow.endMinutes,
@@ -327,76 +347,63 @@ function buildEventLayout(args: {
   }
 }
 
-function columnClassName(args: {
-  dayIdx: number
-  isToday: boolean
-}): string {
-  const { dayIdx, isToday } = args
+function buildScheduleLayout(args: {
+  day: Date
+  timeZone: string
+  workingHoursSalon: WorkingHoursJson
+  workingHoursMobile: WorkingHoursJson
+  activeLocationType: LocationType
+}): ScheduleLayout {
+  const {
+    day,
+    timeZone,
+    workingHoursSalon,
+    workingHoursMobile,
+    activeLocationType,
+  } = args
 
-  return [
-    'relative min-w-0 border-l',
-    dayIdx === 0 ? 'border-l-0' : '',
-    isToday ? 'border-terra/45' : 'border-[var(--line)]',
-  ].join(' ')
-}
+  const salonWindow = getWorkingWindowForDate({
+    day,
+    workingHours: workingHoursSalon,
+    timeZone,
+  })
 
-function columnStyle(args: {
-  dayIdx: number
-  isToday: boolean
-}): CSSProperties {
-  const { dayIdx, isToday } = args
+  const mobileWindow = getWorkingWindowForDate({
+    day,
+    workingHours: workingHoursMobile,
+    timeZone,
+  })
 
-  if (isToday) {
-    return {
-      backgroundColor: 'rgb(var(--accent-primary) / 0.14)',
-      boxShadow:
-        'inset 1px 0 0 rgb(var(--accent-primary) / 0.45), inset -1px 0 0 rgb(var(--accent-primary) / 0.26)',
-    }
+  const overlays: WorkingOverlay[] = []
+
+  if (salonWindow) {
+    overlays.push({
+      ...salonWindow,
+      locationType: 'SALON',
+      active: activeLocationType === 'SALON',
+    })
   }
 
-  if (dayIdx % 2 === 1) {
-    return {
-      backgroundColor: 'rgb(var(--surface-glass) / 0.026)',
-    }
+  if (mobileWindow) {
+    overlays.push({
+      ...mobileWindow,
+      locationType: 'MOBILE',
+      active: activeLocationType === 'MOBILE',
+    })
   }
+
+  const mergedWorkingWindows = mergeWindows(overlays)
+  const outsideHoursSegments = buildOutsideHoursSegments(mergedWorkingWindows)
 
   return {
-    backgroundColor: 'transparent',
-  }
-}
-
-function gridMarkStyle(isToday: boolean): CSSProperties {
-  return {
-    borderColor: isToday
-      ? 'rgb(var(--accent-primary) / 0.16)'
-      : 'rgb(var(--surface-glass) / 0.04)',
-  }
-}
-
-function sideRuleStyle(args: {
-  side: 'left' | 'right'
-  isToday: boolean
-}): CSSProperties {
-  const { side, isToday } = args
-
-  if (!isToday) {
-    return {
-      backgroundColor: 'rgb(var(--surface-glass) / 0.055)',
-    }
-  }
-
-  return {
-    backgroundColor:
-      side === 'left'
-        ? 'rgb(var(--accent-primary) / 0.60)'
-        : 'rgb(var(--accent-primary) / 0.32)',
+    overlays,
+    outsideHoursSegments,
   }
 }
 
-function todayOverlayStyle(): CSSProperties {
+function timelineHeightStyle(): CSSProperties {
   return {
-    background:
-      'linear-gradient(180deg, rgb(var(--accent-primary) / 0.12) 0%, rgb(var(--accent-primary) / 0.06) 42%, rgb(var(--accent-primary) / 0.10) 100%)',
+    height: TOTAL_MINUTES * PX_PER_MINUTE,
   }
 }
 
@@ -408,6 +415,10 @@ function renderPositionStyle(
     top: startMinutes * PX_PER_MINUTE,
     height: (endMinutes - startMinutes) * PX_PER_MINUTE,
   }
+}
+
+function dayParity(dayIdx: number): 'even' | 'odd' {
+  return dayIdx % 2 === 0 ? 'even' : 'odd'
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
@@ -448,51 +459,23 @@ export function DayColumn(props: DayColumnProps) {
     [timeZone],
   )
 
-  const schedule = useMemo(() => {
-    const salonWindow = getWorkingWindowForDate({
+  const schedule = useMemo(
+    () =>
+      buildScheduleLayout({
+        day,
+        timeZone,
+        workingHoursSalon,
+        workingHoursMobile,
+        activeLocationType,
+      }),
+    [
+      activeLocationType,
       day,
-      workingHours: workingHoursSalon,
       timeZone,
-    })
-
-    const mobileWindow = getWorkingWindowForDate({
-      day,
-      workingHours: workingHoursMobile,
-      timeZone,
-    })
-
-    const overlays: WorkingOverlay[] = []
-
-    if (salonWindow) {
-      overlays.push({
-        ...salonWindow,
-        locationType: 'SALON',
-        active: activeLocationType === 'SALON',
-      })
-    }
-
-    if (mobileWindow) {
-      overlays.push({
-        ...mobileWindow,
-        locationType: 'MOBILE',
-        active: activeLocationType === 'MOBILE',
-      })
-    }
-
-    const mergedWorkingWindows = mergeWindows(overlays)
-    const outsideHoursSegments = buildOutsideHoursSegments(mergedWorkingWindows)
-
-    return {
-      overlays,
-      outsideHoursSegments,
-    }
-  }, [
-    activeLocationType,
-    day,
-    timeZone,
-    workingHoursMobile,
-    workingHoursSalon,
-  ])
+      workingHoursMobile,
+      workingHoursSalon,
+    ],
+  )
 
   const eventLayouts = useMemo(
     () =>
@@ -518,12 +501,13 @@ export function DayColumn(props: DayColumnProps) {
   return (
     <div
       ref={containerRef}
+      className="brand-pro-calendar-day-column"
       data-cal-col="1"
       data-calendar-day={dayYmd}
       data-calendar-days-visible={visibleDaysCount}
-      data-calendar-today={isToday ? '1' : '0'}
-      className={columnClassName({ dayIdx, isToday })}
-      style={columnStyle({ dayIdx, isToday })}
+      data-calendar-today={isToday ? 'true' : 'false'}
+      data-day-index={dayIdx}
+      data-day-parity={dayParity(dayIdx)}
       onDragOver={(event) => event.preventDefault()}
       onDrop={(event) => {
         event.preventDefault()
@@ -543,40 +527,13 @@ export function DayColumn(props: DayColumnProps) {
         onCreateForClick(day, event.clientY, rect.top)
       }}
     >
-      <div
-        className="relative"
-        style={{ height: TOTAL_MINUTES * PX_PER_MINUTE }}
-      >
-        <div
-          className="pointer-events-none absolute inset-y-0 right-0 w-px"
-          style={sideRuleStyle({ side: 'right', isToday })}
-          aria-hidden="true"
-        />
-
-        {isToday ? (
-          <>
-            <div
-              className="pointer-events-none absolute inset-y-0 left-0 w-px"
-              style={sideRuleStyle({ side: 'left', isToday })}
-              aria-hidden="true"
-            />
-
-            <div
-              className="pointer-events-none absolute inset-0"
-              style={todayOverlayStyle()}
-              aria-hidden="true"
-            />
-          </>
-        ) : null}
-
+      <div className="relative" style={timelineHeightStyle()}>
         {GRID_MARKS.map((mark) => (
           <div
             key={mark.minute}
-            className="pointer-events-none absolute left-0 right-0 border-t"
-            style={{
-              top: mark.minute * PX_PER_MINUTE,
-              ...gridMarkStyle(isToday),
-            }}
+            className="brand-pro-calendar-grid-mark"
+            style={{ top: mark.minute * PX_PER_MINUTE }}
+            data-today={isToday ? 'true' : 'false'}
             aria-hidden="true"
           />
         ))}
@@ -586,6 +543,7 @@ export function DayColumn(props: DayColumnProps) {
             key={segment.key}
             className="brand-pro-calendar-closed-hours pointer-events-none absolute left-0 right-0 hidden md:block"
             style={renderPositionStyle(segment.startMinutes, segment.endMinutes)}
+            data-segment={segment.key}
             aria-hidden="true"
           />
         ))}
@@ -598,6 +556,9 @@ export function DayColumn(props: DayColumnProps) {
               overlay.startMinutes,
               overlay.endMinutes,
             )}
+            data-working-window-wrapper="true"
+            data-location-type={overlay.locationType}
+            data-active={overlay.active ? 'true' : 'false'}
             aria-hidden="true"
           >
             <div

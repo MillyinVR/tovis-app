@@ -13,6 +13,121 @@ const fontDisplay =
 const fontMono =
   'var(--font-mono-face), "JetBrains Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace'
 
+const proCalendar: BrandConfig['proCalendar'] = {
+  titles: {
+    day: 'Your day.',
+    week: 'This week.',
+    month: 'This month.',
+  },
+
+  pageHero: {
+    title: 'tovis',
+    accentMark: '.',
+    suffix: ' / pro',
+    dashboardHref: '/pro',
+    dashboardLabel: '← Pro dashboard',
+  },
+
+header: {
+  controlsAriaLabel: 'Calendar navigation',
+  viewTabsLabel: 'Calendar view',
+  viewLabels: {
+    day: 'Day',
+    week: 'Week',
+    month: 'Month',
+  },
+  viewAriaLabels: {
+    day: 'Switch to day view',
+    week: 'Switch to week view',
+    month: 'Switch to month view',
+  },
+  previousRangeLabel: 'Previous calendar range',
+  nextRangeLabel: 'Next calendar range',
+},
+
+  mobileHeader: {
+    backHref: '/',
+    backLabel: 'CLIENT',
+    backAriaLabel: 'Go to client view',
+  },
+
+  stats: {
+    booked: 'Booked',
+    pending: 'Pending',
+    waitlist: 'Waitlist',
+    free: 'Free',
+
+    bookedSub: 'today',
+    pendingSub: 'review',
+    waitlistSub: 'people',
+    freeSub: 'gaps',
+    blockedSuffix: 'blocked',
+  },
+
+  actions: {
+    today: 'Today',
+    blockTime: '+ Block time',
+    createBlock: 'Create blocked time',
+    editHours: 'Edit hours',
+    hideHours: 'Hide hours',
+    autoAccept: 'Auto-accept',
+    approveRequest: 'Approve request',
+    denyRequest: 'Deny request',
+    messageClient: 'Message',
+    reschedule: 'Reschedule',
+  },
+
+  labels: {
+    mode: '◆ Pro mode',
+    locationShort: 'Loc',
+    statusKey: 'Status key',
+    loadingCalendar: 'Loading calendar…',
+    loadingRefresh: 'Loading…',
+  },
+
+  locationPanel: {
+    eyebrow: '◆ Calendar location',
+    titleFallback: 'Select location.',
+    description:
+      'Booking creation and blocked-time actions use this selected location.',
+    selectLabel: 'Location',
+    selectAriaLabel: 'Select calendar location',
+    selectFallback: 'Select location',
+    timeZoneLabel: 'TZ',
+    emptyState:
+      'No bookable locations yet. Add a location to use the calendar.',
+  },
+
+  mobileAutoAccept: {
+    title: 'Auto-accept',
+    onLabel: 'On',
+    offLabel: 'Off',
+    savingLabel: 'Saving',
+    subtitle: 'new bookings go live',
+    ariaLabelOn: 'Auto-accept is on',
+    ariaLabelOff: 'Auto-accept is off',
+  },
+
+  mobilePendingRequest: {
+    label: '◆ Pending request',
+    clientFallback: 'Client',
+    appointmentFallback: 'Appointment',
+    moreSuffix: 'more',
+    openAllLabel: 'Open all pending requests',
+    openRequestsLabel: 'Open pending booking requests',
+    approveLabel: 'Approve pending booking',
+    denyLabel: 'Deny pending booking',
+  },
+
+  legend: {
+    accepted: 'Accepted',
+    pending: 'Pending request',
+    completed: 'Completed',
+    waitlist: 'Waitlist hold',
+    blocked: 'Blocked / break',
+  },
+}
+
 export const tovisBrand: BrandConfig = {
   id: 'tovis',
   displayName: 'TOVIS',
@@ -34,6 +149,8 @@ export const tovisBrand: BrandConfig = {
     supportEmail: 'Support@tovis.app',
     location: 'Encinitas, CA',
   },
+
+  proCalendar,
 
   tokensByMode: {
     dark: {

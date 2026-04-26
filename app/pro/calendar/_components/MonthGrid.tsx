@@ -8,7 +8,12 @@ import type { CalendarEvent } from '../_types'
 import { WEEKDAY_KEYS_DISPLAY } from '../_utils/date'
 import { isBlockedEvent } from '../_utils/calendarMath'
 import { buildMonthDayCells } from '../_utils/monthGrid'
-import { eventChipClassName, statusLabel } from '../_utils/statusStyles'
+import { eventStatusTone, statusLabel } from '../_utils/statusStyles'
+
+import {
+  buildMonthDensityMap,
+  monthDensityForDay,
+} from '../_viewModel/monthDensity'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,18 +23,75 @@ type MonthGridProps = {
   events: CalendarEvent[]
   timeZone: string
   onPickDay: (day: Date) => void
+
+  /**
+   * Bridge until desktop/tablet month-grid microcopy is moved into
+   * BrandProCalendarCopy.
+   */
+  copy?: Partial<MonthGridCopy>
+}
+
+type MonthGridCopy = {
+  blockedLabel: string
+  todayLabel: string
+  itemSingular: string
+  itemPlural: string
+  moreLabel: string
+  openDayPrefix: string
+}
+
+type MonthEventChipProps = {
+  event: CalendarEvent
+  copy: MonthGridCopy
+}
+
+type MonthDayCountBadgeProps = {
+  count: number
+}
+
+type MonthMoreCountProps = {
+  count: number
+  label: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_VISIBLE_EVENTS_PER_DAY = 3
 
+const DEFAULT_COPY: MonthGridCopy = {
+  blockedLabel: 'Blocked',
+  todayLabel: 'Today',
+  itemSingular: 'item',
+  itemPlural: 'items',
+  moreLabel: 'more',
+  openDayPrefix: 'Open',
+}
+
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function eventChipLabel(event: CalendarEvent): string {
-  if (isBlockedEvent(event)) return 'Blocked'
+function resolveCopy(
+  copy: Partial<MonthGridCopy> | undefined,
+): MonthGridCopy {
+  return {
+    ...DEFAULT_COPY,
+    ...copy,
+  }
+}
 
-  const title = event.title.trim()
+function normalizeText(value: string | null | undefined): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function eventChipLabel(args: {
+  event: CalendarEvent
+  copy: MonthGridCopy
+}): string {
+  const { event, copy } = args
+
+  if (isBlockedEvent(event)) return copy.blockedLabel
+
+  const title = normalizeText(event.title)
+
   if (title) return title
 
   return statusLabel(event.status)
@@ -39,51 +101,99 @@ function weekdayLabel(dayKey: string): string {
   return dayKey.slice(0, 3).toUpperCase()
 }
 
-function dayCellClassName(args: {
-  isLastColumn: boolean
-  isInCurrentMonth: boolean
-  isToday: boolean
+function itemLabel(args: {
+  count: number
+  copy: MonthGridCopy
 }): string {
-  const { isLastColumn, isInCurrentMonth, isToday } = args
+  const { count, copy } = args
 
-  return [
-    'group min-h-[6.75rem] border-b p-1.5 text-left transition',
-    'sm:min-h-[8.5rem] sm:p-2.5',
-    'border-[var(--line)]',
-    isLastColumn ? '' : 'border-r',
-    isInCurrentMonth
-      ? 'bg-paper/[0.018] hover:bg-paper/[0.04]'
-      : 'bg-black/20 text-paperMute hover:bg-black/10',
-    isToday ? 'bg-terra/[0.08]' : '',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40 focus-visible:ring-inset',
-  ].join(' ')
+  return count === 1 ? copy.itemSingular : copy.itemPlural
 }
 
-function dayNumberClassName(args: {
-  isInCurrentMonth: boolean
-  isToday: boolean
+function eventCountLabel(args: {
+  count: number
+  copy: MonthGridCopy
 }): string {
-  const { isInCurrentMonth, isToday } = args
+  const { count, copy } = args
 
-  return [
-    'font-display text-[22px] font-semibold leading-none tracking-[-0.04em]',
-    'sm:text-2xl',
-    isToday
-      ? 'text-terra'
-      : isInCurrentMonth
-        ? 'text-paper'
-        : 'text-paperMute',
-  ].join(' ')
+  return `${count} ${itemLabel({ count, copy })}`
 }
 
-function eventCountLabel(count: number): string {
-  return count === 1 ? '1 item' : `${count} items`
+function monthEventTone(event: CalendarEvent): string {
+  return eventStatusTone({
+    status: event.status,
+    isBlocked: isBlockedEvent(event),
+  })
+}
+
+function dayButtonAriaLabel(args: {
+  dayYmd: string
+  eventCount: number
+  copy: MonthGridCopy
+}): string {
+  const { dayYmd, eventCount, copy } = args
+
+  return `${copy.openDayPrefix} ${dayYmd}, ${eventCountLabel({
+    count: eventCount,
+    copy,
+  })}`
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function MonthEventChip(props: MonthEventChipProps) {
+  const { event, copy } = props
+  const label = eventChipLabel({ event, copy })
+
+  return (
+    <div
+      className="brand-pro-calendar-month-event-chip"
+      data-tone={monthEventTone(event)}
+      data-event-kind={event.kind}
+      title={label}
+    >
+      {label}
+    </div>
+  )
+}
+
+function MonthDayCountBadge(props: MonthDayCountBadgeProps) {
+  const { count } = props
+
+  if (count <= 0) return null
+
+  return (
+    <span className="brand-pro-calendar-month-count" aria-hidden="true">
+      {count}
+    </span>
+  )
+}
+
+function MonthMoreCount(props: MonthMoreCountProps) {
+  const { count, label } = props
+
+  if (count <= 0) return null
+
+  return (
+    <div className="brand-pro-calendar-month-more">
+      +{count} {label}
+    </div>
+  )
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export function MonthGrid(props: MonthGridProps) {
-  const { visibleDays, currentDate, events, timeZone, onPickDay } = props
+  const {
+    visibleDays,
+    currentDate,
+    events,
+    timeZone,
+    onPickDay,
+    copy: copyOverride,
+  } = props
+
+  const copy = resolveCopy(copyOverride)
 
   const dayCells = useMemo(
     () =>
@@ -96,34 +206,40 @@ export function MonthGrid(props: MonthGridProps) {
     [currentDate, events, timeZone, visibleDays],
   )
 
+  const densityMap = useMemo(
+    () =>
+      buildMonthDensityMap({
+        visibleDays,
+        events,
+        timeZone,
+      }),
+    [events, timeZone, visibleDays],
+  )
+
   return (
-    <section
-      className={[
-        'overflow-hidden rounded-[18px] border border-[var(--line-strong)]',
-        'bg-ink shadow-[0_28px_70px_rgb(0_0_0_/_0.38)]',
-      ].join(' ')}
-      data-calendar-month-grid="1"
-    >
-      <div className="grid grid-cols-7 border-b border-[var(--line-strong)] bg-paper/[0.03]">
+    <section className="brand-pro-calendar-month-desktop-grid">
+      <div className="brand-pro-calendar-month-desktop-weekdays">
         {WEEKDAY_KEYS_DISPLAY.map((dayKey) => (
           <div
             key={dayKey}
-            className={[
-              'px-1.5 py-2 text-center font-mono text-[8px] font-bold uppercase tracking-[0.12em]',
-              'text-paperMute sm:px-3 sm:py-3 sm:text-[10px]',
-            ].join(' ')}
+            className="brand-pro-calendar-month-desktop-weekday"
           >
             {weekdayLabel(dayKey)}
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-7">
+      <div className="brand-pro-calendar-month-desktop-cells">
         {dayCells.map((cell, index) => {
+          const density = monthDensityForDay({
+            densityMap,
+            dateKey: cell.dayYmd,
+          })
+
           const visibleEvents = cell.events.slice(0, MAX_VISIBLE_EVENTS_PER_DAY)
           const extraCount = Math.max(
             0,
-            cell.events.length - visibleEvents.length,
+            density.totalCount - visibleEvents.length,
           )
           const isLastColumn = (index + 1) % 7 === 0
 
@@ -132,75 +248,50 @@ export function MonthGrid(props: MonthGridProps) {
               key={cell.dayYmd}
               type="button"
               onClick={() => onPickDay(cell.day)}
-              className={dayCellClassName({
-                isLastColumn,
-                isInCurrentMonth: cell.isInCurrentMonth,
-                isToday: cell.isToday,
+              className="brand-pro-calendar-month-desktop-cell brand-focus"
+              data-current-month={cell.isInCurrentMonth ? 'true' : 'false'}
+              data-today={cell.isToday ? 'true' : 'false'}
+              data-last-column={isLastColumn ? 'true' : 'false'}
+              data-has-events={density.totalCount > 0 ? 'true' : 'false'}
+              data-density={density.density}
+              data-booking-count={density.bookingCount}
+              data-blocked-count={density.blockedCount}
+              data-pending-count={density.pendingCount}
+              aria-label={dayButtonAriaLabel({
+                dayYmd: cell.dayYmd,
+                eventCount: density.totalCount,
+                copy,
               })}
-              aria-label={`Open ${cell.dayYmd}, ${eventCountLabel(
-                cell.events.length,
-              )}`}
             >
-              <div className="flex items-start justify-between gap-1.5">
+              <div className="brand-pro-calendar-month-desktop-cell-header">
                 <div>
-                  <p
-                    className={dayNumberClassName({
-                      isInCurrentMonth: cell.isInCurrentMonth,
-                      isToday: cell.isToday,
-                    })}
-                  >
+                  <p className="brand-pro-calendar-month-desktop-day-number">
                     {cell.dayNumber}
                   </p>
 
                   {cell.isToday ? (
-                    <p className="mt-1 font-mono text-[7px] font-black uppercase tracking-[0.12em] text-terraGlow sm:text-[8px]">
-                      Today
+                    <p className="brand-pro-calendar-month-desktop-today-label">
+                      {copy.todayLabel}
                     </p>
                   ) : null}
                 </div>
 
-                {cell.events.length > 0 ? (
-                  <span
-                    className={[
-                      'rounded-full border border-[var(--line)] px-1.5 py-0.5',
-                      'font-mono text-[8px] font-black uppercase tracking-[0.06em]',
-                      'text-paperMute',
-                    ].join(' ')}
-                  >
-                    {cell.events.length}
-                  </span>
-                ) : null}
+                <MonthDayCountBadge count={density.totalCount} />
               </div>
 
-              <div className="mt-2 grid gap-1 sm:mt-3 sm:gap-1.5">
-                {visibleEvents.map((event) => {
-                  const isBlocked = isBlockedEvent(event)
-                  const label = eventChipLabel(event)
+              <div className="brand-pro-calendar-month-desktop-events">
+                {visibleEvents.map((event) => (
+                  <MonthEventChip
+                    key={event.id}
+                    event={event}
+                    copy={copy}
+                  />
+                ))}
 
-                  return (
-                    <div
-                      key={event.id}
-                      className={[
-                        'truncate rounded-full border px-1.5 py-0.5',
-                        'text-[8px] font-semibold ring-1 backdrop-blur-md',
-                        'sm:px-2.5 sm:py-1 sm:text-xs',
-                        eventChipClassName({
-                          status: event.status,
-                          isBlocked,
-                        }),
-                      ].join(' ')}
-                      title={label}
-                    >
-                      {label}
-                    </div>
-                  )
-                })}
-
-                {extraCount > 0 ? (
-                  <div className="font-mono text-[8px] font-black uppercase tracking-[0.08em] text-paperMute sm:text-[10px]">
-                    +{extraCount} more
-                  </div>
-                ) : null}
+                <MonthMoreCount
+                  count={extraCount}
+                  label={copy.moreLabel}
+                />
               </div>
             </button>
           )

@@ -11,21 +11,17 @@ import {
 
 import type {
   CalendarEvent,
+  CalendarRangeMeta,
   CalendarStats,
   ManagementLists,
   ViewMode,
   WorkingHoursJson,
 } from '../_types'
 
-import { isBlockedEvent } from '../_utils/calendarMath'
-
 import {
   apiMessage,
+  parseCalendarResponse,
   parseWorkingHoursJson,
-  parseCalendarRouteLocation,
-  parseCalendarEvents,
-  parseManagementLists,
-  parseCalendarStats,
   type LocationType,
   type ProLocation,
 } from '../_utils/parsers'
@@ -36,7 +32,6 @@ import {
   DEFAULT_TIME_ZONE,
   isValidIanaTimeZone,
   sanitizeTimeZone,
-  startOfDayUtcInTimeZone,
 } from '@/lib/timeZone'
 
 import { toIso } from '../_utils/date'
@@ -62,8 +57,6 @@ type CalendarFetchResult = {
   data: unknown
 }
 
-const DAY_MS = 24 * 60 * 60_000
-
 function emptyManagementLists(): ManagementLists {
   return {
     todaysBookings: [],
@@ -73,12 +66,13 @@ function emptyManagementLists(): ManagementLists {
   }
 }
 
-function isAbortError(error: unknown) {
+function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
-function workingHoursEndpoint(locationType: LocationType) {
+function workingHoursEndpoint(locationType: LocationType): string {
   const params = new URLSearchParams({ locationType })
+
   return `/api/pro/working-hours?${params.toString()}`
 }
 
@@ -86,7 +80,7 @@ function calendarEndpoint(args: {
   from: Date
   to: Date
   locationId: string | null
-}) {
+}): string {
   const params = new URLSearchParams({
     from: toIso(args.from),
     to: toIso(args.to),
@@ -99,79 +93,60 @@ function calendarEndpoint(args: {
   return `/api/pro/calendar?${params.toString()}`
 }
 
-function eventStartMs(event: CalendarEvent) {
+function eventStartMs(event: CalendarEvent): number {
   const ms = new Date(event.startsAt).getTime()
+
   return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER
 }
 
-function sortEventsByStart(events: CalendarEvent[]) {
+function sortEventsByStart(events: CalendarEvent[]): CalendarEvent[] {
   return [...events].sort((first, second) => {
     return eventStartMs(first) - eventStartMs(second)
   })
 }
 
-function parseApiTimeZone(record: Record<string, unknown> | null) {
-  const rawTimeZone = record ? pickString(record.timeZone) : null
+function pickValidTimeZone(value: unknown): string | null {
+  const rawTimeZone = pickString(value)
 
   if (rawTimeZone && isValidIanaTimeZone(rawTimeZone)) {
     return sanitizeTimeZone(rawTimeZone, DEFAULT_TIME_ZONE)
   }
 
-  return DEFAULT_TIME_ZONE
+  return null
+}
+
+function parseApiViewportTimeZone(record: Record<string, unknown> | null): string {
+  if (!record) return DEFAULT_TIME_ZONE
+
+  return (
+    pickValidTimeZone(record.viewportTimeZone) ??
+    pickValidTimeZone(record.timeZone) ??
+    DEFAULT_TIME_ZONE
+  )
+}
+
+function validApiViewportTimeZoneWasReturned(
+  record: Record<string, unknown> | null,
+): boolean {
+  if (!record) return false
+
+  return Boolean(
+    pickValidTimeZone(record.viewportTimeZone) ??
+      pickValidTimeZone(record.timeZone),
+  )
 }
 
 function shouldRefetchForApiTimeZone(args: {
   apiTimeZone: string
   apiTimeZoneWasValid: boolean
   guessedTimeZone: string
-}) {
+}): boolean {
   if (!args.apiTimeZoneWasValid) return false
 
   return (
     args.apiTimeZone !==
     sanitizeTimeZone(args.guessedTimeZone, DEFAULT_TIME_ZONE)
   )
-}
-
-function validApiTimeZoneWasReturned(record: Record<string, unknown> | null) {
-  const rawTimeZone = record ? pickString(record.timeZone) : null
-  return Boolean(rawTimeZone && isValidIanaTimeZone(rawTimeZone))
-}
-
-function blockedOverlapMinutesForToday(args: {
-  events: CalendarEvent[]
-  timeZone: string
-}) {
-  const timeZone = sanitizeTimeZone(args.timeZone, DEFAULT_TIME_ZONE)
-  const dayStartUtc = startOfDayUtcInTimeZone(new Date(), timeZone)
-  const dayStartMs = dayStartUtc.getTime()
-  const dayEndMs = dayStartMs + DAY_MS
-
-  let totalMinutes = 0
-
-  for (const event of args.events) {
-    if (!isBlockedEvent(event)) continue
-
-    const startsAtMs = new Date(event.startsAt).getTime()
-    const endsAtMs = new Date(event.endsAt).getTime()
-
-    if (
-      !Number.isFinite(startsAtMs) ||
-      !Number.isFinite(endsAtMs) ||
-      endsAtMs <= startsAtMs
-    ) {
-      continue
-    }
-
-    const overlapStartMs = Math.max(startsAtMs, dayStartMs)
-    const overlapEndMs = Math.min(endsAtMs, dayEndMs)
-
-    if (overlapEndMs > overlapStartMs) {
-      totalMinutes += Math.round((overlapEndMs - overlapStartMs) / 60_000)
-    }
-  }
-
-  return totalMinutes
 }
 
 export function useCalendarFetch(deps: CalendarFetchDeps) {
@@ -191,11 +166,15 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const eventsRef = useRef<CalendarEvent[]>([])
 
+  const [range, setRange] = useState<CalendarRangeMeta | null>(null)
+
   const [timeZone, setTimeZone] = useState(DEFAULT_TIME_ZONE)
   const timeZoneRef = useRef(timeZone)
 
   const [needsTimeZoneSetup, setNeedsTimeZoneSetup] = useState(false)
   const [stats, setStats] = useState<CalendarStats>(null)
+  const [blockedMinutesToday, setBlockedMinutesToday] = useState(0)
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -234,15 +213,6 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
     workingHoursMobile,
     workingHoursSalon,
   ])
-
-  const blockedMinutesToday = useMemo(
-    () =>
-      blockedOverlapMinutesForToday({
-        events,
-        timeZone,
-      }),
-    [events, timeZone],
-  )
 
   const loadWorkingHoursFor = useCallback(
     async (
@@ -384,9 +354,9 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
         ? calendarResult.data
         : null
 
-      const firstApiTimeZone = parseApiTimeZone(firstRecord)
+      const firstApiTimeZone = parseApiViewportTimeZone(firstRecord)
       const firstApiTimeZoneWasValid =
-        validApiTimeZoneWasReturned(firstRecord)
+        validApiViewportTimeZoneWasReturned(firstRecord)
 
       if (
         shouldRefetchForApiTimeZone({
@@ -409,30 +379,19 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
         }
       }
 
-      const record = isRecord(calendarResult.data)
-        ? calendarResult.data
-        : null
+      const parsedCalendar = parseCalendarResponse(calendarResult.data)
 
-      const apiLocation = record
-        ? parseCalendarRouteLocation(record.location)
-        : null
-
-      if (apiLocation?.id && apiLocation.id !== activeLocationId) {
-        setActiveLocationId(apiLocation.id)
+      if (!parsedCalendar) {
+        setError('Calendar response was invalid.')
+        return
       }
 
-      const finalTimeZone = parseApiTimeZone(record)
-      const nextNeedsTimeZoneSetup =
-        record ? pickBool(record.needsTimeZoneSetup) ?? false : false
-      const nextCanSalon = record ? pickBool(record.canSalon) ?? true : true
-      const nextCanMobile = record ? pickBool(record.canMobile) ?? false : false
-      const nextStats = record ? parseCalendarStats(record.stats) : null
-      const nextAutoAccept =
-        record ? pickBool(record.autoAcceptBookings) ?? false : false
-      const nextManagement = record
-        ? parseManagementLists(record.management)
-        : emptyManagementLists()
-      const nextEvents = record ? parseCalendarEvents(record.events) : []
+      if (
+        parsedCalendar.location?.id &&
+        parsedCalendar.location.id !== activeLocationId
+      ) {
+        setActiveLocationId(parsedCalendar.location.id)
+      }
 
       const [nextSalonHours, nextMobileHours] = await Promise.all([
         loadWorkingHoursFor('SALON', controller.signal),
@@ -446,16 +405,18 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
         return
       }
 
-      setTimeZone(finalTimeZone)
-      setNeedsTimeZoneSetup(nextNeedsTimeZoneSetup)
-      setCanSalon(nextCanSalon)
-      setCanMobile(nextCanMobile)
-      setStats(nextStats)
-      setAutoAccept(nextAutoAccept)
-      setManagement(nextManagement)
+      setRange(parsedCalendar.range)
+      setTimeZone(parsedCalendar.viewportTimeZone)
+      setNeedsTimeZoneSetup(parsedCalendar.needsTimeZoneSetup)
+      setCanSalon(parsedCalendar.canSalon)
+      setCanMobile(parsedCalendar.canMobile)
+      setStats(parsedCalendar.stats)
+      setBlockedMinutesToday(parsedCalendar.blockedMinutesToday)
+      setAutoAccept(parsedCalendar.autoAcceptBookings)
+      setManagement(parsedCalendar.management)
       setWorkingHoursSalon(nextSalonHours)
       setWorkingHoursMobile(nextMobileHours)
-      setEvents(sortEventsByStart(nextEvents))
+      setEvents(sortEventsByStart(parsedCalendar.events))
     } catch (caught) {
       if (isAbortError(caught)) return
 
@@ -503,6 +464,8 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
     events,
     setEvents,
     eventsRef,
+
+    range,
 
     timeZone,
     timeZoneRef,

@@ -6,13 +6,15 @@ import type { ReactNode } from 'react'
 
 import type { BookingDetails, ServiceOption } from '../_types'
 
+import {
+  DEFAULT_CALENDAR_STEP_MINUTES,
+  SECONDS_PER_MINUTE,
+} from '../_constants'
+
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 
-import {
-  calendarStatusMeta,
-  eventBadgeClassName,
-} from '../_utils/statusStyles'
+import { calendarStatusMeta } from '../_utils/statusStyles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,6 +48,74 @@ type BookingModalProps = {
   onSave: () => void
   onApprove: () => void
   onDeny: () => void
+
+  /**
+   * Bridge until booking modal copy moves fully into BrandProCalendarCopy.
+   */
+  copy?: Partial<BookingModalCopy>
+}
+
+type BookingModalCopy = {
+  eyebrow: string
+  closeLabel: string
+  cancelLabel: string
+
+  appointmentFallback: string
+  appointmentDetailsFallback: string
+  loadingBooking: string
+  bookingUnavailable: string
+
+  mobileModeLabel: string
+  salonModeLabel: string
+
+  editAppointmentTitle: string
+  editAppointmentDescription: string
+
+  clientLabel: string
+  whenLabel: string
+  modeLabel: string
+  subtotalLabel: string
+  summaryDescription: string
+
+  dateLabel: string
+  timeLabel: string
+
+  pendingRequestLabel: string
+  pendingRequestDescription: string
+  approveLabel: string
+  denyLabel: string
+
+  mobileDestinationLabel: string
+  mobileDestinationFallback: string
+  openMapsLabel: string
+
+  outsideHoursTitle: string
+  outsideHoursDescription: string
+  allowOutsideHoursLabel: string
+
+  selectServicesLabel: string
+  selectedLabel: string
+  noActiveServices: string
+  durationNotSet: string
+
+  currentServiceItemsLabel: string
+  unsavedChangesLabel: string
+  noServiceItemsSelected: string
+  baseServiceLabel: string
+  addOnServiceLabel: string
+
+  totalDurationLabel: string
+  minutesLabel: string
+  notifyClientLabel: string
+
+  messageClientLabel: string
+  saveChangesLabel: string
+  savingLabel: string
+
+  noServicesSelectedError: string
+  outsideHoursSaveError: string
+  noServicesSelectedTitle: string
+  outsideHoursSaveTitle: string
 }
 
 type BookingLocationMeta = {
@@ -67,6 +137,7 @@ type ModalHeaderProps = {
   bookingLabel: string
   modeLabel: string
   saving: boolean
+  copy: BookingModalCopy
   onClose: () => void
 }
 
@@ -76,16 +147,122 @@ type ModalFooterProps = {
   canSave: boolean
   noServicesSelected: boolean
   saveBlockedByOutsideHours: boolean
+  copy: BookingModalCopy
   onClose: () => void
   onSave: () => void
+}
+
+type ActionButtonProps = {
+  children: ReactNode
+  tone?: ButtonTone
+  disabled?: boolean
+  onClick?: () => void
+  title?: string
+  ariaLabel?: string
+}
+
+type StateCardProps = {
+  children: ReactNode
+  danger?: boolean
+}
+
+type FieldProps = {
+  label: string
+  children: ReactNode
+}
+
+type SectionHeadingProps = {
+  title: string
+  description?: string
+}
+
+type SummaryRowProps = {
+  label: string
+  children: ReactNode
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_DURATION_MINUTES = 60
-const TIME_INPUT_STEP_SECONDS = 15 * 60
+const TIME_INPUT_STEP_SECONDS =
+  DEFAULT_CALENDAR_STEP_MINUTES * SECONDS_PER_MINUTE
+
+const DEFAULT_COPY: BookingModalCopy = {
+  eyebrow: '◆ Appointment',
+  closeLabel: 'Close',
+  cancelLabel: 'Cancel',
+
+  appointmentFallback: 'Appointment',
+  appointmentDetailsFallback: 'Appointment details',
+  loadingBooking: 'Loading booking…',
+  bookingUnavailable: 'Booking details are not available.',
+
+  mobileModeLabel: 'Mobile',
+  salonModeLabel: 'In-salon',
+
+  editAppointmentTitle: 'Edit appointment',
+  editAppointmentDescription:
+    'Change the appointment time, services, and client notification settings.',
+
+  clientLabel: 'Client',
+  whenLabel: 'When',
+  modeLabel: 'Mode',
+  subtotalLabel: 'Subtotal',
+  summaryDescription: 'Client, timing, location, and payment snapshot.',
+
+  dateLabel: 'Date',
+  timeLabel: 'Time',
+
+  pendingRequestLabel: 'Pending request',
+  pendingRequestDescription: 'Approve this booking or deny it from here.',
+  approveLabel: 'Approve',
+  denyLabel: 'Deny',
+
+  mobileDestinationLabel: 'Mobile destination',
+  mobileDestinationFallback:
+    'Address will appear here when booking location snapshots are returned.',
+  openMapsLabel: 'Open in Maps',
+
+  outsideHoursTitle: 'Outside working hours',
+  outsideHoursDescription:
+    'This change falls outside your configured hours. You can still schedule it with a pro override.',
+  allowOutsideHoursLabel: 'Allow outside working hours',
+
+  selectServicesLabel: 'Select services',
+  selectedLabel: 'selected',
+  noActiveServices: 'No active services available for this booking type.',
+  durationNotSet: 'Duration not set',
+
+  currentServiceItemsLabel: 'Current service items',
+  unsavedChangesLabel: 'Unsaved changes',
+  noServiceItemsSelected: 'No service items selected.',
+  baseServiceLabel: 'Base service',
+  addOnServiceLabel: 'Add-on',
+
+  totalDurationLabel: 'Total duration',
+  minutesLabel: 'minutes',
+  notifyClientLabel: 'Notify client about changes',
+
+  messageClientLabel: 'Message client',
+  saveChangesLabel: 'Save changes',
+  savingLabel: 'Saving…',
+
+  noServicesSelectedError: 'Select at least one service before saving.',
+  outsideHoursSaveError: 'Enable the outside-hours override before saving.',
+  noServicesSelectedTitle: 'Select at least one service before saving.',
+  outsideHoursSaveTitle: 'Enable override to save outside working hours.',
+}
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+function resolveCopy(
+  copy: Partial<BookingModalCopy> | undefined,
+): BookingModalCopy {
+  return {
+    ...DEFAULT_COPY,
+    ...copy,
+  }
+}
 
 function normalizeText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -139,10 +316,13 @@ function messageHrefForBooking(bookingId: string): string {
   )}`
 }
 
-function locationModeLabel(
-  locationType: BookingDetails['locationType'] | null | undefined,
-): string {
-  return locationType === 'MOBILE' ? 'Mobile' : 'In-salon'
+function locationModeLabel(args: {
+  locationType: BookingDetails['locationType'] | null | undefined
+  copy: BookingModalCopy
+}): string {
+  return args.locationType === 'MOBILE'
+    ? args.copy.mobileModeLabel
+    : args.copy.salonModeLabel
 }
 
 function isPendingBooking(booking: BookingDetails | null): boolean {
@@ -172,6 +352,7 @@ function durationForBooking(args: {
 
 function formatMoneySnapshot(value: string | null | undefined): string | null {
   const trimmed = normalizeText(value)
+
   if (!trimmed) return null
 
   return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
@@ -180,82 +361,35 @@ function formatMoneySnapshot(value: string | null | undefined): string | null {
 function buildBookingLabel(args: {
   bookingServiceLabel?: string
   items: BookingDetails['serviceItems']
+  copy: BookingModalCopy
 }): string {
   const explicitLabel = normalizeText(args.bookingServiceLabel)
+
   if (explicitLabel) return explicitLabel
 
   const itemNames = args.items
     .map((item) => normalizeText(item.serviceName))
     .filter((name) => name.length > 0)
 
-  return itemNames.length > 0 ? itemNames.join(' + ') : 'Appointment'
+  return itemNames.length > 0
+    ? itemNames.join(' + ')
+    : args.copy.appointmentFallback
 }
 
 function saveButtonTitle(args: {
   noServicesSelected: boolean
   saveBlockedByOutsideHours: boolean
+  copy: BookingModalCopy
 }): string {
   if (args.noServicesSelected) {
-    return 'Select at least one service before saving.'
+    return args.copy.noServicesSelectedTitle
   }
 
   if (args.saveBlockedByOutsideHours) {
-    return 'Enable override to save outside working hours.'
+    return args.copy.outsideHoursSaveTitle
   }
 
   return ''
-}
-
-function buttonClassName(tone: ButtonTone = 'default'): string {
-  const base = [
-    'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
-    'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
-
-  if (tone === 'primary') {
-    return [
-      base,
-      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
-    ].join(' ')
-  }
-
-  if (tone === 'danger') {
-    return [
-      base,
-      'border border-toneDanger/30 bg-toneDanger/10 text-toneDanger hover:bg-toneDanger/15',
-    ].join(' ')
-  }
-
-  if (tone === 'ghost') {
-    return [
-      base,
-      'border border-[var(--line)] bg-transparent text-paperMute',
-      'hover:bg-paper/5 hover:text-paper',
-    ].join(' ')
-  }
-
-  return [
-    base,
-    'border border-[var(--line)] bg-paper/[0.04] text-paper hover:bg-paper/[0.07]',
-  ].join(' ')
-}
-
-function fieldClassName(): string {
-  return [
-    'w-full rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2',
-    'text-sm font-semibold text-paper',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
-}
-
-function checkboxClassName(): string {
-  return [
-    'h-4 w-4 rounded border-[var(--line)] bg-ink2',
-    'accent-accentPrimary',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-  ].join(' ')
 }
 
 function lockBodyScroll(open: boolean): (() => void) | undefined {
@@ -322,7 +456,10 @@ export function BookingModal(props: BookingModalProps) {
     onSave,
     onApprove,
     onDeny,
+    copy: copyOverride,
   } = props
+
+  const copy = useMemo(() => resolveCopy(copyOverride), [copyOverride])
 
   const timeZone = useMemo(
     () =>
@@ -346,8 +483,9 @@ export function BookingModal(props: BookingModalProps) {
       buildBookingLabel({
         bookingServiceLabel,
         items: serviceItems,
+        copy,
       }),
-    [bookingServiceLabel, serviceItems],
+    [bookingServiceLabel, copy, serviceItems],
   )
 
   const selectedServiceIds = useMemo(
@@ -363,7 +501,11 @@ export function BookingModal(props: BookingModalProps) {
   const mapsUrl = useMemo(() => mapsHref(locationMeta), [locationMeta])
 
   const totalDuration = durationForBooking({ durationMinutes, booking })
-  const modeLabel = locationModeLabel(booking?.locationType)
+  const modeLabel = locationModeLabel({
+    locationType: booking?.locationType,
+    copy,
+  })
+
   const isPending = isPendingBooking(booking)
   const noServicesSelected = selectedDraftServiceIds.length === 0
   const saveBlockedByOutsideHours = editOutside && !allowOutsideHours
@@ -388,6 +530,7 @@ export function BookingModal(props: BookingModalProps) {
 
   function close(): void {
     if (saving) return
+
     onClose()
   }
 
@@ -420,20 +563,21 @@ export function BookingModal(props: BookingModalProps) {
         bookingLabel={bookingLabel}
         modeLabel={modeLabel}
         saving={saving}
+        copy={copy}
         onClose={close}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
-        {loading ? <StateCard>Loading booking…</StateCard> : null}
+      <div className="brand-pro-calendar-booking-body">
+        {loading ? <StateCard>{copy.loadingBooking}</StateCard> : null}
 
         {error ? <StateCard danger>{error}</StateCard> : null}
 
         {!loading && !booking ? (
-          <StateCard>Booking details are not available.</StateCard>
+          <StateCard>{copy.bookingUnavailable}</StateCard>
         ) : null}
 
         {booking ? (
-          <div className="grid gap-5">
+          <div className="brand-pro-calendar-booking-content">
             <BookingSummary
               booking={booking}
               bookingLabel={bookingLabel}
@@ -442,32 +586,35 @@ export function BookingModal(props: BookingModalProps) {
               modeLabel={modeLabel}
               locationMeta={locationMeta}
               mapsUrl={mapsUrl}
+              copy={copy}
             />
 
             {isPending ? (
               <PendingRequestSection
                 saving={saving}
+                copy={copy}
                 onApprove={onApprove}
                 onDeny={onDeny}
               />
             ) : null}
 
-            <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
+            <section className="brand-pro-calendar-booking-section">
               <SectionHeading
-                title="Edit appointment"
-                description="Change the appointment time, services, and client notification settings."
+                title={copy.editAppointmentTitle}
+                description={copy.editAppointmentDescription}
               />
 
               {editOutside ? (
                 <OutsideHoursNotice
                   allowOutsideHours={allowOutsideHours}
                   saving={saving}
+                  copy={copy}
                   onToggleAllowOutsideHours={onToggleAllowOutsideHours}
                 />
               ) : null}
 
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Date">
+              <div className="brand-pro-calendar-booking-field-grid">
+                <Field label={copy.dateLabel}>
                   <input
                     type="date"
                     value={reschedDate}
@@ -475,11 +622,11 @@ export function BookingModal(props: BookingModalProps) {
                       onChangeReschedDate(event.target.value)
                     }
                     disabled={saving}
-                    className={fieldClassName()}
+                    className="brand-pro-calendar-booking-field brand-focus"
                   />
                 </Field>
 
-                <Field label="Time">
+                <Field label={copy.timeLabel}>
                   <input
                     type="time"
                     step={TIME_INPUT_STEP_SECONDS}
@@ -488,7 +635,7 @@ export function BookingModal(props: BookingModalProps) {
                       onChangeReschedTime(event.target.value)
                     }
                     disabled={saving}
-                    className={fieldClassName()}
+                    className="brand-pro-calendar-booking-field brand-focus"
                   />
                 </Field>
               </div>
@@ -498,31 +645,30 @@ export function BookingModal(props: BookingModalProps) {
                 selectedServiceIds={selectedServiceIds}
                 selectedDraftServiceIds={selectedDraftServiceIds}
                 saving={saving}
+                copy={copy}
                 onToggleService={toggleService}
               />
 
               <CurrentServiceItems
                 items={serviceItems}
                 hasChanges={Boolean(hasDraftServiceItemsChanges)}
+                copy={copy}
               />
 
               <AppointmentEditFooter
                 totalDuration={totalDuration}
                 notifyClient={notifyClient}
                 saving={saving}
+                copy={copy}
                 onToggleNotifyClient={onToggleNotifyClient}
               />
 
               {noServicesSelected ? (
-                <StateCard danger>
-                  Select at least one service before saving.
-                </StateCard>
+                <StateCard danger>{copy.noServicesSelectedError}</StateCard>
               ) : null}
 
               {saveBlockedByOutsideHours ? (
-                <StateCard danger>
-                  Enable the outside-hours override before saving.
-                </StateCard>
+                <StateCard danger>{copy.outsideHoursSaveError}</StateCard>
               ) : null}
             </section>
           </div>
@@ -535,6 +681,7 @@ export function BookingModal(props: BookingModalProps) {
         canSave={canSave}
         noServicesSelected={noServicesSelected}
         saveBlockedByOutsideHours={saveBlockedByOutsideHours}
+        copy={copy}
         onClose={close}
         onSave={onSave}
       />
@@ -549,18 +696,13 @@ function BookingModalFrame(props: BookingModalFrameProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[999] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-4"
+      className="brand-pro-calendar-booking-overlay"
       onMouseDown={() => {
         if (!saving) onClose()
       }}
     >
       <div
-        className={[
-          'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-[24px]',
-          'border border-[var(--line-strong)] bg-ink',
-          'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
-          'sm:max-w-[52rem] sm:rounded-[24px]',
-        ].join(' ')}
+        className="brand-pro-calendar-booking-panel"
         onMouseDown={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -573,7 +715,7 @@ function BookingModalFrame(props: BookingModalFrameProps) {
 }
 
 function ModalHeader(props: ModalHeaderProps) {
-  const { booking, bookingLabel, modeLabel, saving, onClose } = props
+  const { booking, bookingLabel, modeLabel, saving, copy, onClose } = props
 
   const statusMeta = booking
     ? calendarStatusMeta({
@@ -583,36 +725,29 @@ function ModalHeader(props: ModalHeaderProps) {
     : null
 
   return (
-    <header className="border-b border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
-      <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-paper/20 sm:hidden" />
+    <header className="brand-pro-calendar-booking-header">
+      <div className="brand-pro-calendar-booking-drag-handle" />
 
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
-            ◆ Appointment
-          </p>
+      <div className="brand-pro-calendar-booking-header-row">
+        <div className="brand-pro-calendar-booking-header-copy">
+          <p className="brand-pro-calendar-booking-eyebrow">{copy.eyebrow}</p>
 
           <h2
             id="booking-modal-title"
-            className="mt-1 truncate font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper"
+            className="brand-pro-calendar-booking-title"
           >
-            {booking ? bookingLabel : 'Appointment details'}
+            {booking ? bookingLabel : copy.appointmentDetailsFallback}
           </h2>
 
           {booking && statusMeta ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-[var(--line)] bg-paper/[0.04] px-2.5 py-1 font-mono text-[10px] font-black uppercase tracking-[0.08em] text-paper">
+            <div className="brand-pro-calendar-booking-status-row">
+              <span className="brand-pro-calendar-booking-chip">
                 {modeLabel}
               </span>
 
               <span
-                className={[
-                  'rounded-full border px-2.5 py-1 font-mono text-[10px] font-black uppercase tracking-[0.08em]',
-                  eventBadgeClassName({
-                    status: booking.status,
-                    isBlocked: false,
-                  }),
-                ].join(' ')}
+                className="brand-pro-calendar-booking-status-badge"
+                data-tone={statusMeta.tone}
               >
                 {statusMeta.label}
               </span>
@@ -620,15 +755,14 @@ function ModalHeader(props: ModalHeaderProps) {
           ) : null}
         </div>
 
-        <button
-          type="button"
+        <ActionButton
+          tone="ghost"
           onClick={onClose}
           disabled={saving}
-          className={buttonClassName('ghost')}
-          aria-label="Close appointment details"
+          ariaLabel={copy.closeLabel}
         >
-          Close
-        </button>
+          {copy.closeLabel}
+        </ActionButton>
       </div>
     </header>
   )
@@ -641,43 +775,40 @@ function ModalFooter(props: ModalFooterProps) {
     canSave,
     noServicesSelected,
     saveBlockedByOutsideHours,
+    copy,
     onClose,
     onSave,
   } = props
 
   return (
-    <footer className="border-t border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+    <footer className="brand-pro-calendar-booking-footer">
+      <div className="brand-pro-calendar-booking-footer-actions">
         {booking ? (
           <a
             href={messageHrefForBooking(booking.id)}
-            className={buttonClassName('ghost')}
+            className="brand-pro-calendar-booking-button brand-focus"
+            data-tone="ghost"
           >
-            Message client
+            {copy.messageClientLabel}
           </a>
         ) : null}
 
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={saving}
-          className={buttonClassName('ghost')}
-        >
-          Cancel
-        </button>
+        <ActionButton tone="ghost" onClick={onClose} disabled={saving}>
+          {copy.cancelLabel}
+        </ActionButton>
 
-        <button
-          type="button"
+        <ActionButton
+          tone="primary"
           onClick={onSave}
           disabled={!canSave}
-          className={buttonClassName('primary')}
           title={saveButtonTitle({
             noServicesSelected,
             saveBlockedByOutsideHours,
+            copy,
           })}
         >
-          {saving ? 'Saving…' : 'Save changes'}
-        </button>
+          {saving ? copy.savingLabel : copy.saveChangesLabel}
+        </ActionButton>
       </div>
     </footer>
   )
@@ -693,6 +824,7 @@ function BookingSummary(props: {
   modeLabel: string
   locationMeta: BookingLocationMeta
   mapsUrl: string | null
+  copy: BookingModalCopy
 }) {
   const {
     booking,
@@ -702,36 +834,43 @@ function BookingSummary(props: {
     modeLabel,
     locationMeta,
     mapsUrl,
+    copy,
   } = props
 
   const subtotal = formatMoneySnapshot(booking.subtotalSnapshot)
 
   return (
-    <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
+    <section className="brand-pro-calendar-booking-section">
       <SectionHeading
         title={bookingLabel}
-        description="Client, timing, location, and payment snapshot."
+        description={copy.summaryDescription}
       />
 
-      <div className="mt-4 grid gap-3">
-        <SummaryRow label="Client">
+      <div className="brand-pro-calendar-booking-summary-list">
+        <SummaryRow label={copy.clientLabel}>
           {booking.client.fullName}
           {booking.client.email ? ` · ${booking.client.email}` : ''}
           {booking.client.phone ? ` · ${booking.client.phone}` : ''}
         </SummaryRow>
 
-        <SummaryRow label="When">
+        <SummaryRow label={copy.whenLabel}>
           {formatAppointmentWhen(new Date(booking.scheduledFor), timeZone)} ·{' '}
           {timeZone} · {totalDuration} min
         </SummaryRow>
 
-        <SummaryRow label="Mode">{modeLabel}</SummaryRow>
+        <SummaryRow label={copy.modeLabel}>{modeLabel}</SummaryRow>
 
         {booking.locationType === 'MOBILE' ? (
-          <MobileDestination locationMeta={locationMeta} mapsUrl={mapsUrl} />
+          <MobileDestination
+            locationMeta={locationMeta}
+            mapsUrl={mapsUrl}
+            copy={copy}
+          />
         ) : null}
 
-        {subtotal ? <SummaryRow label="Subtotal">{subtotal}</SummaryRow> : null}
+        {subtotal ? (
+          <SummaryRow label={copy.subtotalLabel}>{subtotal}</SummaryRow>
+        ) : null}
       </div>
     </section>
   )
@@ -740,18 +879,18 @@ function BookingSummary(props: {
 function MobileDestination(props: {
   locationMeta: BookingLocationMeta
   mapsUrl: string | null
+  copy: BookingModalCopy
 }) {
-  const { locationMeta, mapsUrl } = props
+  const { locationMeta, mapsUrl, copy } = props
 
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-ink2 p-3">
-      <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-        Mobile destination
+    <div className="brand-pro-calendar-booking-mobile-destination">
+      <p className="brand-pro-calendar-booking-kicker">
+        {copy.mobileDestinationLabel}
       </p>
 
-      <p className="mt-1 text-sm font-semibold text-paper">
-        {locationMeta.address ||
-          'Address will appear here when booking location snapshots are returned.'}
+      <p className="brand-pro-calendar-booking-mobile-address">
+        {locationMeta.address || copy.mobileDestinationFallback}
       </p>
 
       {mapsUrl ? (
@@ -759,9 +898,10 @@ function MobileDestination(props: {
           href={mapsUrl}
           target="_blank"
           rel="noreferrer"
-          className={['mt-3 inline-flex', buttonClassName()].join(' ')}
+          className="brand-pro-calendar-booking-button brand-focus"
+          data-tone="default"
         >
-          Open in Maps
+          {copy.openMapsLabel}
         </a>
       ) : null}
     </div>
@@ -770,42 +910,33 @@ function MobileDestination(props: {
 
 function PendingRequestSection(props: {
   saving: boolean
+  copy: BookingModalCopy
   onApprove: () => void
   onDeny: () => void
 }) {
-  const { saving, onApprove, onDeny } = props
+  const { saving, copy, onApprove, onDeny } = props
 
   return (
-    <section className="rounded-2xl border border-tonePending/25 bg-tonePending/10 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <section className="brand-pro-calendar-booking-pending-section">
+      <div className="brand-pro-calendar-booking-pending-inner">
         <div>
-          <p className="font-mono text-[10px] font-black uppercase tracking-[0.14em] text-tonePending">
-            Pending request
+          <p className="brand-pro-calendar-booking-pending-label">
+            {copy.pendingRequestLabel}
           </p>
 
-          <p className="mt-1 text-sm leading-6 text-paperDim">
-            Approve this booking or deny it from here.
+          <p className="brand-pro-calendar-booking-pending-description">
+            {copy.pendingRequestDescription}
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={onDeny}
-            disabled={saving}
-            className={buttonClassName('danger')}
-          >
-            Deny
-          </button>
+        <div className="brand-pro-calendar-booking-pending-actions">
+          <ActionButton tone="danger" onClick={onDeny} disabled={saving}>
+            {copy.denyLabel}
+          </ActionButton>
 
-          <button
-            type="button"
-            onClick={onApprove}
-            disabled={saving}
-            className={buttonClassName('primary')}
-          >
-            Approve
-          </button>
+          <ActionButton tone="primary" onClick={onApprove} disabled={saving}>
+            {copy.approveLabel}
+          </ActionButton>
         </div>
       </div>
     </section>
@@ -816,31 +947,33 @@ function AppointmentEditFooter(props: {
   totalDuration: number
   notifyClient: boolean
   saving: boolean
+  copy: BookingModalCopy
   onToggleNotifyClient: (value: boolean) => void
 }) {
-  const { totalDuration, notifyClient, saving, onToggleNotifyClient } = props
+  const { totalDuration, notifyClient, saving, copy, onToggleNotifyClient } =
+    props
 
   return (
-    <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
-      <div className="rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2">
-        <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-          Total duration
+    <div className="brand-pro-calendar-booking-edit-footer">
+      <div className="brand-pro-calendar-booking-duration-card">
+        <p className="brand-pro-calendar-booking-kicker">
+          {copy.totalDurationLabel}
         </p>
 
-        <p className="mt-1 text-sm font-black text-paper">
-          {totalDuration} minutes
+        <p className="brand-pro-calendar-booking-duration-value">
+          {totalDuration} {copy.minutesLabel}
         </p>
       </div>
 
-      <label className="flex items-center gap-2 text-sm font-semibold text-paperDim">
+      <label className="brand-pro-calendar-booking-checkbox-label">
         <input
           type="checkbox"
           checked={notifyClient}
           onChange={(event) => onToggleNotifyClient(event.target.checked)}
           disabled={saving}
-          className={checkboxClassName()}
+          className="brand-pro-calendar-booking-checkbox brand-focus"
         />
-        Notify client about changes
+        {copy.notifyClientLabel}
       </label>
     </div>
   )
@@ -848,20 +981,15 @@ function AppointmentEditFooter(props: {
 
 // ─── Shared content pieces ────────────────────────────────────────────────────
 
-function SectionHeading(props: {
-  title: string
-  description?: string
-}) {
+function SectionHeading(props: SectionHeadingProps) {
   const { title, description } = props
 
   return (
-    <div>
-      <h3 className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-paper">
-        {title}
-      </h3>
+    <div className="brand-pro-calendar-booking-section-heading">
+      <h3 className="brand-pro-calendar-booking-section-title">{title}</h3>
 
       {description ? (
-        <p className="mt-1 text-sm leading-6 text-paperDim">
+        <p className="brand-pro-calendar-booking-section-description">
           {description}
         </p>
       ) : null}
@@ -869,35 +997,26 @@ function SectionHeading(props: {
   )
 }
 
-function SummaryRow(props: {
-  label: string
-  children: ReactNode
-}) {
+function SummaryRow(props: SummaryRowProps) {
   const { label, children } = props
 
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2 text-sm font-semibold text-paperDim">
-      <span className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-        {label}
-      </span>
+    <div className="brand-pro-calendar-booking-summary-row">
+      <span className="brand-pro-calendar-booking-kicker">{label}</span>
 
-      <div className="mt-1 text-paper">{children}</div>
+      <div className="brand-pro-calendar-booking-summary-value">
+        {children}
+      </div>
     </div>
   )
 }
 
-function Field(props: {
-  label: string
-  children: ReactNode
-}) {
+function Field(props: FieldProps) {
   const { label, children } = props
 
   return (
-    <label className="block">
-      <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-        {label}
-      </span>
-
+    <label className="brand-pro-calendar-booking-label">
+      <span className="brand-pro-calendar-booking-kicker">{label}</span>
       {children}
     </label>
   )
@@ -906,22 +1025,22 @@ function Field(props: {
 function OutsideHoursNotice(props: {
   allowOutsideHours: boolean
   saving: boolean
+  copy: BookingModalCopy
   onToggleAllowOutsideHours: (value: boolean) => void
 }) {
-  const { allowOutsideHours, saving, onToggleAllowOutsideHours } = props
+  const { allowOutsideHours, saving, copy, onToggleAllowOutsideHours } = props
 
   return (
-    <div className="mt-4 rounded-2xl border border-toneWarn/25 bg-toneWarn/10 p-3">
-      <p className="font-mono text-[10px] font-black uppercase tracking-[0.12em] text-toneWarn">
-        Outside working hours
+    <div className="brand-pro-calendar-booking-outside-notice">
+      <p className="brand-pro-calendar-booking-outside-title">
+        {copy.outsideHoursTitle}
       </p>
 
-      <p className="mt-1 text-sm leading-6 text-paperDim">
-        This change falls outside your configured hours. You can still schedule
-        it with a pro override.
+      <p className="brand-pro-calendar-booking-outside-description">
+        {copy.outsideHoursDescription}
       </p>
 
-      <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-paperDim">
+      <label className="brand-pro-calendar-booking-checkbox-label">
         <input
           type="checkbox"
           checked={allowOutsideHours}
@@ -929,9 +1048,9 @@ function OutsideHoursNotice(props: {
             onToggleAllowOutsideHours(event.target.checked)
           }
           disabled={saving}
-          className={checkboxClassName()}
+          className="brand-pro-calendar-booking-checkbox brand-focus"
         />
-        Allow outside working hours
+        {copy.allowOutsideHoursLabel}
       </label>
     </div>
   )
@@ -942,6 +1061,7 @@ function ServicePicker(props: {
   selectedServiceIds: Set<string>
   selectedDraftServiceIds: string[]
   saving: boolean
+  copy: BookingModalCopy
   onToggleService: (serviceId: string, checked: boolean) => void
 }) {
   const {
@@ -949,18 +1069,19 @@ function ServicePicker(props: {
     selectedServiceIds,
     selectedDraftServiceIds,
     saving,
+    copy,
     onToggleService,
   } = props
 
   return (
-    <div className="mt-4">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-          Select services
+    <div className="brand-pro-calendar-booking-service-picker">
+      <div className="brand-pro-calendar-booking-service-heading">
+        <p className="brand-pro-calendar-booking-kicker">
+          {copy.selectServicesLabel}
         </p>
 
-        <span className="font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paperMute">
-          {selectedDraftServiceIds.length} selected
+        <span className="brand-pro-calendar-booking-kicker">
+          {selectedDraftServiceIds.length} {copy.selectedLabel}
         </span>
       </div>
 
@@ -969,10 +1090,11 @@ function ServicePicker(props: {
           services={services}
           selectedServiceIds={selectedServiceIds}
           saving={saving}
+          copy={copy}
           onToggleService={onToggleService}
         />
       ) : (
-        <StateCard>No active services available for this booking type.</StateCard>
+        <StateCard>{copy.noActiveServices}</StateCard>
       )}
     </div>
   )
@@ -982,13 +1104,14 @@ function ServiceOptionList(props: {
   services: ServiceOption[]
   selectedServiceIds: Set<string>
   saving: boolean
+  copy: BookingModalCopy
   onToggleService: (serviceId: string, checked: boolean) => void
 }) {
-  const { services, selectedServiceIds, saving, onToggleService } = props
+  const { services, selectedServiceIds, saving, copy, onToggleService } = props
 
   return (
-    <div className="rounded-2xl border border-[var(--line)] bg-ink2 p-3">
-      <div className="grid gap-2">
+    <div className="brand-pro-calendar-booking-option-list">
+      <div className="brand-pro-calendar-booking-option-grid">
         {services.map((service) => {
           const checked = selectedServiceIds.has(service.id)
 
@@ -1004,7 +1127,7 @@ function ServiceOptionList(props: {
           return (
             <label
               key={service.id}
-              className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-paper/[0.025] px-3 py-2"
+              className="brand-pro-calendar-booking-option-row"
             >
               <input
                 type="checkbox"
@@ -1013,16 +1136,18 @@ function ServiceOptionList(props: {
                   onToggleService(service.id, event.target.checked)
                 }
                 disabled={saving}
-                className={checkboxClassName()}
+                className="brand-pro-calendar-booking-checkbox brand-focus"
               />
 
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-black text-paper">
+              <span className="brand-pro-calendar-booking-option-copy">
+                <span className="brand-pro-calendar-booking-option-name">
                   {service.name}
                 </span>
 
-                <span className="block text-xs font-semibold text-paperMute">
-                  {duration !== null ? `${duration} min` : 'Duration not set'}
+                <span className="brand-pro-calendar-booking-option-meta">
+                  {duration !== null
+                    ? `${duration} min`
+                    : copy.durationNotSet}
                   {price ? ` · ${price}` : ''}
                 </span>
               </span>
@@ -1037,27 +1162,28 @@ function ServiceOptionList(props: {
 function CurrentServiceItems(props: {
   items: BookingDetails['serviceItems']
   hasChanges: boolean
+  copy: BookingModalCopy
 }) {
-  const { items, hasChanges } = props
+  const { items, hasChanges, copy } = props
 
   return (
-    <div className="mt-4">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-          Current service items
+    <div className="brand-pro-calendar-booking-current-services">
+      <div className="brand-pro-calendar-booking-service-heading">
+        <p className="brand-pro-calendar-booking-kicker">
+          {copy.currentServiceItemsLabel}
         </p>
 
         {hasChanges ? (
-          <span className="rounded-full border border-[var(--line)] bg-paper/[0.04] px-2 py-1 font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paper">
-            Unsaved changes
+          <span className="brand-pro-calendar-booking-unsaved-badge">
+            {copy.unsavedChangesLabel}
           </span>
         ) : null}
       </div>
 
       {items.length > 0 ? (
-        <CurrentServiceItemList items={items} />
+        <CurrentServiceItemList items={items} copy={copy} />
       ) : (
-        <StateCard>No service items selected.</StateCard>
+        <StateCard>{copy.noServiceItemsSelected}</StateCard>
       )}
     </div>
   )
@@ -1065,28 +1191,31 @@ function CurrentServiceItems(props: {
 
 function CurrentServiceItemList(props: {
   items: BookingDetails['serviceItems']
+  copy: BookingModalCopy
 }) {
-  const { items } = props
+  const { items, copy } = props
 
   return (
-    <div className="rounded-2xl border border-[var(--line)] bg-ink2 p-3">
-      <div className="grid gap-2">
+    <div className="brand-pro-calendar-booking-option-list">
+      <div className="brand-pro-calendar-booking-option-grid">
         {items.map((item) => (
           <div
             key={item.id}
-            className="flex items-center justify-between gap-3 rounded-xl border border-[var(--line)] bg-paper/[0.025] px-3 py-2"
+            className="brand-pro-calendar-booking-current-service-row"
           >
-            <div className="min-w-0">
-              <p className="truncate text-sm font-black text-paper">
+            <div className="brand-pro-calendar-booking-option-copy">
+              <p className="brand-pro-calendar-booking-option-name">
                 {item.serviceName}
               </p>
 
-              <p className="text-xs font-semibold text-paperMute">
-                {item.itemType === 'BASE' ? 'Base service' : 'Add-on'}
+              <p className="brand-pro-calendar-booking-option-meta">
+                {item.itemType === 'BASE'
+                  ? copy.baseServiceLabel
+                  : copy.addOnServiceLabel}
               </p>
             </div>
 
-            <div className="shrink-0 text-right text-xs font-semibold text-paperMute">
+            <div className="brand-pro-calendar-booking-current-service-meta">
               <p>{item.durationMinutesSnapshot} min</p>
               <p>{formatMoneySnapshot(item.priceSnapshot)}</p>
             </div>
@@ -1097,22 +1226,40 @@ function CurrentServiceItemList(props: {
   )
 }
 
-function StateCard(props: {
-  children: ReactNode
-  danger?: boolean
-}) {
+function StateCard(props: StateCardProps) {
   const { children, danger = false } = props
 
   return (
     <div
-      className={[
-        'rounded-2xl border px-3 py-3 text-sm font-semibold',
-        danger
-          ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
-      ].join(' ')}
+      className="brand-pro-calendar-booking-state"
+      data-danger={danger ? 'true' : 'false'}
     >
       {children}
     </div>
+  )
+}
+
+function ActionButton(props: ActionButtonProps) {
+  const {
+    children,
+    tone = 'default',
+    disabled = false,
+    onClick,
+    title,
+    ariaLabel,
+  } = props
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
+      className="brand-pro-calendar-booking-button brand-focus"
+      data-tone={tone}
+    >
+      {children}
+    </button>
   )
 }

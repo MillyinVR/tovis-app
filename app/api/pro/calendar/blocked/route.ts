@@ -1,4 +1,5 @@
 // app/api/pro/calendar/blocked/route.ts
+
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
@@ -11,8 +12,8 @@ import {
   bookingError,
   getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+
 import {
   clampRange,
   parseLocationIdInput,
@@ -23,6 +24,8 @@ import {
 } from './_shared'
 
 export const dynamic = 'force-dynamic'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type BlockCollectionRouteLocalErrorCode =
   | 'BLOCK_WINDOW_REQUIRED'
@@ -35,27 +38,100 @@ type BlockCollectionRouteLocalErrorCode =
   | 'INVALID_BLOCK_WINDOW'
   | 'INTERNAL_ERROR'
 
+type CalendarBlockRow = {
+  id: string
+  startsAt: Date
+  endsAt: Date
+  note: string | null
+  locationId: string | null
+}
+
+type BlockCreateTransactionSuccess = {
+  ok: true
+  status: number
+  block: CalendarBlockRow
+}
+
+type BlockCreateTransactionFailure = {
+  ok: false
+  status: number
+  code: BlockCollectionRouteLocalErrorCode
+  error: string
+}
+
+type BlockCreateTransactionResult =
+  | BlockCreateTransactionSuccess
+  | BlockCreateTransactionFailure
+
+type BlockQueryRange = {
+  from: Date
+  to: Date
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const MS_PER_DAY = 24 * 60 * 60_000
+const DEFAULT_BLOCK_LOOKBACK_DAYS = 7
+const DEFAULT_BLOCK_LOOKAHEAD_DAYS = 60
+const BLOCK_GET_TAKE_LIMIT = 1000
+
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+
 function normalizeLocationBufferMinutes(value: unknown): number {
   return clampInt(value, 0, MAX_BUFFER_MINUTES)
 }
 
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+function blockCreateFailure(args: {
+  status: number
+  code: BlockCollectionRouteLocalErrorCode
+  error: string
+}): BlockCreateTransactionFailure {
+  return {
+    ok: false,
+    status: args.status,
+    code: args.code,
+    error: args.error,
+  }
 }
 
-function localJsonFail(
-  status: number,
-  code: BlockCollectionRouteLocalErrorCode,
-  error: string,
-) {
-  return jsonFail(status, error, { code })
+function blockCreateSuccess(args: {
+  status: number
+  block: CalendarBlockRow
+}): BlockCreateTransactionSuccess {
+  return {
+    ok: true,
+    status: args.status,
+    block: args.block,
+  }
+}
+
+function defaultBlockQueryRange(now = Date.now()): BlockQueryRange {
+  return {
+    from: new Date(now - DEFAULT_BLOCK_LOOKBACK_DAYS * MS_PER_DAY),
+    to: new Date(now + DEFAULT_BLOCK_LOOKAHEAD_DAYS * MS_PER_DAY),
+  }
+}
+
+function parseBlockQueryRange(url: URL): BlockQueryRange {
+  const fallback = defaultBlockQueryRange()
+
+  let from = toDateOrNull(url.searchParams.get('from')) ?? fallback.from
+  let to = toDateOrNull(url.searchParams.get('to')) ?? fallback.to
+
+  if (to < from) {
+    const previousFrom = from
+    from = to
+    to = previousFrom
+  }
+
+  return clampRange(from, to)
+}
+
+function hasOwnField(
+  record: Record<string, unknown>,
+  field: string,
+): boolean {
+  return Object.prototype.hasOwnProperty.call(record, field)
 }
 
 function logBlockConflict(args: {
@@ -64,7 +140,7 @@ function logBlockConflict(args: {
   requestedStart: Date
   requestedEnd: Date
   conflictType: 'BLOCKED' | 'BOOKING' | 'HOLD'
-}) {
+}): void {
   logBookingConflict({
     action: 'BLOCK_CREATE',
     professionalId: args.professionalId,
@@ -78,6 +154,8 @@ function logBlockConflict(args: {
   })
 }
 
+// ─── Route handlers ───────────────────────────────────────────────────────────
+
 export async function GET(req: Request) {
   try {
     const auth = await requirePro()
@@ -85,26 +163,26 @@ export async function GET(req: Request) {
 
     const professionalId = auth.professionalId
     const url = new URL(req.url)
+    const { from, to } = parseBlockQueryRange(url)
 
-    const defaultFrom = new Date(Date.now() - 7 * 24 * 60 * 60_000)
-    const defaultTo = new Date(Date.now() + 60 * 24 * 60 * 60_000)
+    const locationIdInput = parseLocationIdInput(
+      url.searchParams.get('locationId'),
+    )
 
-    let from = toDateOrNull(url.searchParams.get('from')) ?? defaultFrom
-    let to = toDateOrNull(url.searchParams.get('to')) ?? defaultTo
-
-    if (to < from) {
-      const tmp = from
-      from = to
-      to = tmp
+    if (!locationIdInput.ok) {
+      return jsonFail(400, 'Invalid locationId.', {
+        code: 'INVALID_LOCATION_ID',
+      })
     }
 
-    ;({ from, to } = clampRange(from, to))
+    const locationId = locationIdInput.value
 
     const blocks = await prisma.calendarBlock.findMany({
       where: {
         professionalId,
-        startsAt: { lte: to },
-        endsAt: { gte: from },
+        ...(locationId ? { locationId } : {}),
+        startsAt: { lt: to },
+        endsAt: { gt: from },
       },
       select: {
         id: true,
@@ -114,18 +192,25 @@ export async function GET(req: Request) {
         locationId: true,
       },
       orderBy: { startsAt: 'asc' },
-      take: 1000,
+      take: BLOCK_GET_TAKE_LIMIT,
     })
 
     return jsonOk(
       {
         blocks: blocks.map(toBlockDto),
+        range: {
+          from: from.toISOString(),
+          to: to.toISOString(),
+        },
       },
       200,
     )
   } catch (error) {
     console.error('GET /api/pro/calendar/blocked error:', error)
-    return localJsonFail(500, 'INTERNAL_ERROR', 'Failed to load blocked time.')
+
+    return jsonFail(500, 'Failed to load blocked time.', {
+      code: 'INTERNAL_ERROR',
+    })
   }
 }
 
@@ -134,58 +219,62 @@ export async function POST(req: Request) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const professionalId = auth.professionalId
     const rawBody: unknown = await req.json().catch(() => ({}))
     const body = isRecord(rawBody) ? rawBody : {}
 
-    const hasStartsAt = Object.prototype.hasOwnProperty.call(body, 'startsAt')
-    const hasEndsAt = Object.prototype.hasOwnProperty.call(body, 'endsAt')
-
-    if (!hasStartsAt || !hasEndsAt) {
-      return localJsonFail(
-        400,
-        'BLOCK_WINDOW_REQUIRED',
-        'Missing startsAt/endsAt.',
-      )
+    if (!hasOwnField(body, 'startsAt') || !hasOwnField(body, 'endsAt')) {
+      return jsonFail(400, 'Missing startsAt/endsAt.', {
+        code: 'BLOCK_WINDOW_REQUIRED',
+      })
     }
 
     const startsAt = toDateOrNull(body.startsAt)
     if (!startsAt) {
-      return localJsonFail(400, 'INVALID_STARTS_AT', 'Invalid startsAt.')
+      return jsonFail(400, 'Invalid startsAt.', {
+        code: 'INVALID_STARTS_AT',
+      })
     }
 
     const endsAt = toDateOrNull(body.endsAt)
     if (!endsAt) {
-      return localJsonFail(400, 'INVALID_ENDS_AT', 'Invalid endsAt.')
+      return jsonFail(400, 'Invalid endsAt.', {
+        code: 'INVALID_ENDS_AT',
+      })
     }
 
     const windowError = validateBlockWindow(startsAt, endsAt)
     if (windowError) {
-      return localJsonFail(400, 'INVALID_BLOCK_WINDOW', windowError)
+      return jsonFail(400, windowError, {
+        code: 'INVALID_BLOCK_WINDOW',
+      })
     }
 
     const noteInput = parseNoteInput(body.note, 'post')
     if (!noteInput.ok) {
-      return localJsonFail(400, 'INVALID_NOTE', 'Invalid note.')
+      return jsonFail(400, 'Invalid note.', {
+        code: 'INVALID_NOTE',
+      })
     }
 
     const locationIdInput = parseLocationIdInput(body.locationId)
     if (!locationIdInput.ok) {
-      return localJsonFail(400, 'INVALID_LOCATION_ID', 'Invalid locationId.')
+      return jsonFail(400, 'Invalid locationId.', {
+        code: 'INVALID_LOCATION_ID',
+      })
     }
 
     const locationId = locationIdInput.value
     if (!locationId) {
-      return localJsonFail(
-        400,
-        'LOCATION_ID_REQUIRED',
-        'Blocked time requires a locationId.',
-      )
+      return jsonFail(400, 'Blocked time requires a locationId.', {
+        code: 'LOCATION_ID_REQUIRED',
+      })
     }
+
+    const professionalId = auth.professionalId
 
     const result = await withLockedProfessionalTransaction(
       professionalId,
-      async ({ tx }) => {
+      async ({ tx }): Promise<BlockCreateTransactionResult> => {
         const location = await tx.professionalLocation.findFirst({
           where: {
             id: locationId,
@@ -199,12 +288,11 @@ export async function POST(req: Request) {
         })
 
         if (!location) {
-          return {
-            ok: false as const,
+          return blockCreateFailure({
             status: 404,
-            code: 'BLOCK_LOCATION_NOT_FOUND' as const,
+            code: 'BLOCK_LOCATION_NOT_FOUND',
             error: 'Location not found.',
-          }
+          })
         }
 
         const timeRangeConflict = await getTimeRangeConflict({
@@ -277,32 +365,39 @@ export async function POST(req: Request) {
           },
         })
 
-        return {
-          ok: true as const,
+        return blockCreateSuccess({
           status: 201,
           block: created,
-        }
+        })
       },
     )
 
     if (!result.ok) {
-      return localJsonFail(result.status, result.code, result.error)
-    }
-
-    return jsonOk({ block: toBlockDto(result.block) }, result.status)
-  } catch (error) {
-    if (isBookingError(error)) {
-      return bookingJsonFail(error.code, {
-        message: error.message,
-        userMessage: error.userMessage,
+      return jsonFail(result.status, result.error, {
+        code: result.code,
       })
     }
 
-    console.error('POST /api/pro/calendar/blocked error:', error)
-    return localJsonFail(
-      500,
-      'INTERNAL_ERROR',
-      'Failed to create blocked time.',
+    return jsonOk(
+      {
+        block: toBlockDto(result.block),
+      },
+      result.status,
     )
+  } catch (error) {
+    if (isBookingError(error)) {
+      const fail = getBookingFailPayload(error.code, {
+        message: error.message,
+        userMessage: error.userMessage,
+      })
+
+      return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+    }
+
+    console.error('POST /api/pro/calendar/blocked error:', error)
+
+    return jsonFail(500, 'Failed to create blocked time.', {
+      code: 'INTERNAL_ERROR',
+    })
   }
 }

@@ -5,27 +5,36 @@
 
 type MobileCalendarFabProps = {
   onClick: () => void
-  label?: string
+  label: string
+  symbol?: string
+  disabled?: boolean
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DEFAULT_LABEL = 'Create blocked time'
+const DEFAULT_SYMBOL = '+'
 
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export function MobileCalendarFab(props: MobileCalendarFabProps) {
-  const { onClick, label = DEFAULT_LABEL } = props
+  const {
+    onClick,
+    label,
+    symbol = DEFAULT_SYMBOL,
+    disabled = false,
+  } = props
 
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className="brand-pro-calendar-fab brand-focus"
+      data-disabled={disabled ? 'true' : 'false'}
       aria-label={label}
       title={label}
     >
-      <span aria-hidden="true">+</span>
+      <span aria-hidden="true">{symbol}</span>
     </button>
   )
 }

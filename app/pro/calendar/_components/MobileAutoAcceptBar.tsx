@@ -3,7 +3,18 @@
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export type MobileAutoAcceptBarCopy = {
+  title: string
+  onLabel: string
+  offLabel: string
+  savingLabel: string
+  subtitle: string
+  ariaLabelOn: string
+  ariaLabelOff: string
+}
+
 type MobileAutoAcceptBarProps = {
+  copy: MobileAutoAcceptBarCopy
   enabled: boolean
   saving: boolean
   onToggle: () => void
@@ -14,22 +25,44 @@ type MobileAutoAcceptBarProps = {
 function statusLabel(args: {
   enabled: boolean
   saving: boolean
+  copy: MobileAutoAcceptBarCopy
 }): string {
-  const { enabled, saving } = args
+  const { enabled, saving, copy } = args
 
-  if (saving) return 'Saving'
+  if (saving) return copy.savingLabel
 
-  return enabled ? 'On' : 'Off'
+  return enabled ? copy.onLabel : copy.offLabel
+}
+
+function ariaLabel(args: {
+  enabled: boolean
+  copy: MobileAutoAcceptBarCopy
+}): string {
+  return args.enabled ? args.copy.ariaLabelOn : args.copy.ariaLabelOff
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export function MobileAutoAcceptBar(props: MobileAutoAcceptBarProps) {
-  const { enabled, saving, onToggle } = props
-  const label = statusLabel({ enabled, saving })
+  const { copy, enabled, saving, onToggle } = props
+
+  const status = statusLabel({
+    enabled,
+    saving,
+    copy,
+  })
+
+  const switchLabel = ariaLabel({
+    enabled,
+    copy,
+  })
 
   return (
-    <div className="brand-pro-calendar-auto-bar">
+    <div
+      className="brand-pro-calendar-auto-bar"
+      data-enabled={enabled ? 'true' : 'false'}
+      data-saving={saving ? 'true' : 'false'}
+    >
       <div className="brand-pro-calendar-auto-copy">
         <span
           className="brand-pro-calendar-auto-dot"
@@ -38,10 +71,10 @@ export function MobileAutoAcceptBar(props: MobileAutoAcceptBarProps) {
         />
 
         <div>
-          <div className="brand-pro-calendar-auto-title">Auto-accept</div>
+          <div className="brand-pro-calendar-auto-title">{copy.title}</div>
 
           <div className="brand-pro-calendar-auto-subtitle">
-            {label} · new bookings go live
+            {status} · {copy.subtitle}
           </div>
         </div>
       </div>
@@ -52,9 +85,11 @@ export function MobileAutoAcceptBar(props: MobileAutoAcceptBarProps) {
         disabled={saving}
         className="brand-pro-calendar-switch brand-focus"
         data-enabled={enabled ? 'true' : 'false'}
-        aria-pressed={enabled}
-        aria-label={`Auto-accept is ${enabled ? 'on' : 'off'}`}
-        title={`Auto-accept is ${enabled ? 'on' : 'off'}`}
+        data-saving={saving ? 'true' : 'false'}
+        role="switch"
+        aria-checked={enabled}
+        aria-label={switchLabel}
+        title={switchLabel}
       >
         <span className="brand-pro-calendar-switch-thumb" />
       </button>

@@ -1,4 +1,4 @@
-// app/pro/calendar/EditBlockModal.tsx
+// app/pro/calendar/_components/EditBlockModal.tsx
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
@@ -12,7 +12,11 @@ import {
   zonedTimeToUtc,
 } from '@/lib/timeZone'
 import { readErrorMessage, safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
+import { CALENDAR_MS_PER_MINUTE } from '@/lib/calendar/constants'
+
+import { SECONDS_PER_MINUTE } from '../_constants'
 
 import {
   computeDurationMinutesFromIso,
@@ -20,7 +24,7 @@ import {
   normalizeStepMinutes,
   roundDurationMinutes,
   snapMinutes,
-} from './_utils/calendarMath'
+} from '../_utils/calendarMath'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +35,54 @@ type EditBlockModalProps = {
   stepMinutes?: number | null
   onClose: () => void
   onSaved: () => void
+
+  /**
+   * Bridge until edit-block modal copy moves fully into BrandProCalendarCopy.
+   */
+  copy?: Partial<EditBlockModalCopy>
+}
+
+type EditBlockModalCopy = {
+  eyebrow: string
+  title: string
+  description: string
+
+  closeLabel: string
+  cancelLabel: string
+  saveLabel: string
+  savingLabel: string
+  deleteLabel: string
+  deletingLabel: string
+
+  noBlockSelected: string
+  loadingBlock: string
+
+  blockDetailsTitle: string
+  blockDetailsDescription: string
+  timeZoneLabel: string
+
+  timeTitle: string
+  timeDescription: string
+  dateLabel: string
+  startTimeLabel: string
+  durationMinutesLabel: string
+  noteLabel: string
+  notePlaceholder: string
+
+  malformedPayloadError: string
+  missingIdError: string
+  missingStartError: string
+  missingEndError: string
+
+  invalidDateError: string
+  invalidStartTimeError: string
+  invalidDurationError: string
+  invalidUtcStartError: string
+  invalidEndTimeError: string
+
+  loadFailedError: string
+  saveFailedError: string
+  deleteFailedError: string
 }
 
 type BlockDto = {
@@ -52,24 +104,109 @@ type PatchBlockPayload = {
   note: string | null
 }
 
-type ButtonTone = 'primary' | 'danger' | 'ghost'
+type BuildPatchPayloadArgs = {
+  date: string
+  startTime: string
+  durationInput: string
+  note: string
+  timeZone: string
+  stepMinutes: number
+  copy: EditBlockModalCopy
+}
+
+type ActionButtonProps = {
+  children: ReactNode
+  tone?: 'primary' | 'danger' | 'ghost'
+  type?: 'button' | 'submit'
+  disabled?: boolean
+  onClick?: () => void
+}
+
+type SectionHeadingProps = {
+  title: string
+  description: string
+}
+
+type FieldProps = {
+  label: string
+  children: ReactNode
+}
+
+type InfoRowProps = {
+  label: string
+  children: ReactNode
+}
+
+type StateCardProps = {
+  children: ReactNode
+  danger?: boolean
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_DURATION_MINUTES = 60
 const MAX_NOTE_LENGTH = 160
 
-// ─── Pure helpers ─────────────────────────────────────────────────────────────
+const DEFAULT_COPY: EditBlockModalCopy = {
+  eyebrow: '◆ Calendar block',
+  title: 'Edit blocked time.',
+  description: 'Adjust or remove the unavailable window from your calendar.',
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+  closeLabel: 'Close',
+  cancelLabel: 'Cancel',
+  saveLabel: 'Save',
+  savingLabel: 'Saving…',
+  deleteLabel: 'Delete block',
+  deletingLabel: 'Deleting…',
+
+  noBlockSelected: 'No block selected.',
+  loadingBlock: 'Loading block…',
+
+  blockDetailsTitle: 'Block details',
+  blockDetailsDescription:
+    'Edit the unavailable window using the calendar timezone and step size.',
+  timeZoneLabel: 'Timezone',
+
+  timeTitle: 'Time',
+  timeDescription: 'Change when the block starts and how long it lasts.',
+  dateLabel: 'Date',
+  startTimeLabel: 'Start time',
+  durationMinutesLabel: 'Duration minutes',
+  noteLabel: 'Note optional',
+  notePlaceholder: 'Lunch, admin time, school pickup…',
+
+  malformedPayloadError: 'Malformed block payload.',
+  missingIdError: 'Block payload was missing an id.',
+  missingStartError: 'Block payload was missing a start time.',
+  missingEndError: 'Block payload was missing an end time.',
+
+  invalidDateError: 'Pick a valid date.',
+  invalidStartTimeError: 'Pick a valid start time.',
+  invalidDurationError: 'Pick a valid duration.',
+  invalidUtcStartError: 'Invalid start time.',
+  invalidEndTimeError: 'End time must be after start time.',
+
+  loadFailedError: 'Failed to load block.',
+  saveFailedError: 'Failed to save.',
+  deleteFailedError: 'Failed to delete.',
 }
 
-function optionalString(value: unknown) {
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+function resolveCopy(
+  copy: Partial<EditBlockModalCopy> | undefined,
+): EditBlockModalCopy {
+  return {
+    ...DEFAULT_COPY,
+    ...copy,
+  }
+}
+
+function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function requiredString(value: unknown, errorMessage: string) {
+function requiredString(value: unknown, errorMessage: string): string {
   const stringValue = optionalString(value)
 
   if (!stringValue) {
@@ -79,32 +216,29 @@ function requiredString(value: unknown, errorMessage: string) {
   return stringValue
 }
 
-function parseBlockDto(data: unknown): BlockDto {
+function parseBlockDto(
+  data: unknown,
+  copy: EditBlockModalCopy,
+): BlockDto {
   const raw = isRecord(data) && isRecord(data.block) ? data.block : data
 
   if (!isRecord(raw)) {
-    throw new Error('Malformed block payload.')
+    throw new Error(copy.malformedPayloadError)
   }
 
   return {
-    id: requiredString(raw.id, 'Block payload was missing an id.'),
-    startsAt: requiredString(
-      raw.startsAt,
-      'Block payload was missing a start time.',
-    ),
-    endsAt: requiredString(
-      raw.endsAt,
-      'Block payload was missing an end time.',
-    ),
+    id: requiredString(raw.id, copy.missingIdError),
+    startsAt: requiredString(raw.startsAt, copy.missingStartError),
+    endsAt: requiredString(raw.endsAt, copy.missingEndError),
     note: typeof raw.note === 'string' ? raw.note : null,
   }
 }
 
-function pad2(value: number) {
+function pad2(value: number): string {
   return String(value).padStart(2, '0')
 }
 
-function timeInputFromMinutes(minutes: number) {
+function timeInputFromMinutes(minutes: number): string {
   const snapped = snapMinutes(minutes, 1)
   const hour = Math.floor(snapped / 60)
   const minute = snapped % 60
@@ -114,6 +248,7 @@ function timeInputFromMinutes(minutes: number) {
 
 function parseDateInput(value: string): DateParts | null {
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+
   if (!match) return null
 
   const year = Number(match[1])
@@ -133,40 +268,38 @@ function parseDateInput(value: string): DateParts | null {
   return valid ? { year, month, day } : null
 }
 
-function parseDurationInput(value: string, stepMinutes: number) {
-  const raw = Number(value)
+function parseDurationInput(args: {
+  value: string
+  stepMinutes: number
+  copy: EditBlockModalCopy
+}): number {
+  const raw = Number(args.value)
 
   if (!Number.isFinite(raw) || raw <= 0) {
-    throw new Error('Pick a valid duration.')
+    throw new Error(args.copy.invalidDurationError)
   }
 
-  return roundDurationMinutes(raw, stepMinutes)
+  return roundDurationMinutes(raw, args.stepMinutes)
 }
 
-function buildPatchPayload(args: {
-  date: string
-  startTime: string
-  durationInput: string
-  note: string
-  timeZone: string
-  stepMinutes: number
-}): PatchBlockPayload {
+function buildPatchPayload(args: BuildPatchPayloadArgs): PatchBlockPayload {
   const parsedDate = parseDateInput(args.date)
 
   if (!parsedDate) {
-    throw new Error('Pick a valid date.')
+    throw new Error(args.copy.invalidDateError)
   }
 
   const parsedTime = parseHHMM(args.startTime)
 
   if (!parsedTime) {
-    throw new Error('Pick a valid start time.')
+    throw new Error(args.copy.invalidStartTimeError)
   }
 
-  const durationMinutes = parseDurationInput(
-    args.durationInput,
-    args.stepMinutes,
-  )
+  const durationMinutes = parseDurationInput({
+    value: args.durationInput,
+    stepMinutes: args.stepMinutes,
+    copy: args.copy,
+  })
 
   const startsAt = zonedTimeToUtc({
     year: parsedDate.year,
@@ -179,13 +312,15 @@ function buildPatchPayload(args: {
   })
 
   if (!Number.isFinite(startsAt.getTime())) {
-    throw new Error('Invalid start time.')
+    throw new Error(args.copy.invalidUtcStartError)
   }
 
-  const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000)
+  const endsAt = new Date(
+    startsAt.getTime() + durationMinutes * CALENDAR_MS_PER_MINUTE,
+  )
 
   if (endsAt.getTime() <= startsAt.getTime()) {
-    throw new Error('End time must be after start time.')
+    throw new Error(args.copy.invalidEndTimeError)
   }
 
   const trimmedNote = args.note.trim()
@@ -197,53 +332,16 @@ function buildPatchPayload(args: {
   }
 }
 
-function blockEndpoint(blockId: string) {
+function blockEndpoint(blockId: string): string {
   return `/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`
 }
 
-function readResponseError(data: unknown, fallback: string) {
+function readResponseError(data: unknown, fallback: string): string {
   return readErrorMessage(data) ?? fallback
 }
 
-function buttonClassName(tone: ButtonTone = 'ghost') {
-  const base = [
-    'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
-    'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
-
-  if (tone === 'primary') {
-    return [
-      base,
-      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
-    ].join(' ')
-  }
-
-  if (tone === 'danger') {
-    return [
-      base,
-      'border border-toneDanger/30 bg-toneDanger/10 text-toneDanger hover:bg-toneDanger/15',
-    ].join(' ')
-  }
-
-  return [
-    base,
-    'border border-[var(--line)] bg-transparent text-paperMute',
-    'hover:bg-paper/5 hover:text-paper',
-  ].join(' ')
-}
-
-function fieldClassName() {
-  return [
-    'w-full rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2',
-    'text-sm font-semibold text-paper placeholder:text-paperMute',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
-}
-
-function lockBodyScroll(open: boolean) {
-  if (!open) return
+function lockBodyScroll(open: boolean): (() => void) | undefined {
+  if (!open) return undefined
 
   const previousOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
@@ -257,10 +355,10 @@ function closeOnEscape(args: {
   open: boolean
   busy: boolean
   onClose: () => void
-}) {
+}): (() => void) | undefined {
   const { open, busy, onClose } = args
 
-  if (!open) return
+  if (!open) return undefined
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && !busy) {
@@ -273,6 +371,10 @@ function closeOnEscape(args: {
   return () => window.removeEventListener('keydown', onKeyDown)
 }
 
+function noteCountLabel(note: string): string {
+  return `${note.length}/${MAX_NOTE_LENGTH}`
+}
+
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export default function EditBlockModal(props: EditBlockModalProps) {
@@ -283,7 +385,10 @@ export default function EditBlockModal(props: EditBlockModalProps) {
     stepMinutes,
     onClose,
     onSaved,
+    copy: copyOverride,
   } = props
+
+  const copy = useMemo(() => resolveCopy(copyOverride), [copyOverride])
 
   const resolvedTimeZone = useMemo(
     () => sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE),
@@ -343,7 +448,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
     const selectedBlockId = blockId
     let cancelled = false
 
-    async function loadBlock() {
+    async function loadBlock(): Promise<void> {
       setLoading(true)
       setError(null)
 
@@ -358,12 +463,12 @@ export default function EditBlockModal(props: EditBlockModalProps) {
           throw new Error(
             readResponseError(
               data,
-              `Failed to load block (${response.status}).`,
+              `${copy.loadFailedError} (${response.status}).`,
             ),
           )
         }
 
-        const loadedBlock = parseBlockDto(data)
+        const loadedBlock = parseBlockDto(data, copy)
 
         if (cancelled) return
 
@@ -389,7 +494,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
       } catch (caught) {
         if (!cancelled) {
           setError(
-            caught instanceof Error ? caught.message : 'Failed to load block.',
+            caught instanceof Error ? caught.message : copy.loadFailedError,
           )
         }
       } finally {
@@ -404,16 +509,16 @@ export default function EditBlockModal(props: EditBlockModalProps) {
     return () => {
       cancelled = true
     }
-  }, [blockId, open, resolvedTimeZone, step])
+  }, [blockId, copy, open, resolvedTimeZone, step])
 
-  function close() {
+  function close(): void {
     if (saving || deleting) return
 
     setError(null)
     onClose()
   }
 
-  async function save() {
+  async function save(): Promise<void> {
     const selectedBlockId = blockId
 
     if (!selectedBlockId || !block || saving || deleting) return
@@ -429,6 +534,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
         note,
         timeZone: resolvedTimeZone,
         stepMinutes: step,
+        copy,
       })
 
       const response = await fetch(blockEndpoint(selectedBlockId), {
@@ -440,19 +546,19 @@ export default function EditBlockModal(props: EditBlockModalProps) {
       const data: unknown = await safeJson(response)
 
       if (!response.ok) {
-        throw new Error(readResponseError(data, 'Failed to save.'))
+        throw new Error(readResponseError(data, copy.saveFailedError))
       }
 
       onSaved()
       onClose()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Failed to save.')
+      setError(caught instanceof Error ? caught.message : copy.saveFailedError)
     } finally {
       setSaving(false)
     }
   }
 
-  async function remove() {
+  async function remove(): Promise<void> {
     const selectedBlockId = blockId
 
     if (!selectedBlockId || deleting || saving) return
@@ -468,13 +574,13 @@ export default function EditBlockModal(props: EditBlockModalProps) {
       const data: unknown = await safeJson(response)
 
       if (!response.ok) {
-        throw new Error(readResponseError(data, 'Failed to delete.'))
+        throw new Error(readResponseError(data, copy.deleteFailedError))
       }
 
       onSaved()
       onClose()
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Failed to delete.')
+      setError(caught instanceof Error ? caught.message : copy.deleteFailedError)
     } finally {
       setDeleting(false)
     }
@@ -484,7 +590,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[1400] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-4"
+      className="brand-pro-calendar-block-overlay"
       onMouseDown={close}
     >
       <form
@@ -493,103 +599,97 @@ export default function EditBlockModal(props: EditBlockModalProps) {
           void save()
         }}
         onMouseDown={(event) => event.stopPropagation()}
-        className={[
-          'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-[24px]',
-          'border border-[var(--line-strong)] bg-ink',
-          'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
-          'sm:max-w-[34rem] sm:rounded-[24px]',
-        ].join(' ')}
+        className="brand-pro-calendar-block-panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="edit-block-modal-title"
       >
-        <header className="border-b border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
-          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-paper/20 sm:hidden" />
+        <header className="brand-pro-calendar-block-header">
+          <div className="brand-pro-calendar-block-drag-handle" />
 
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
-                ◆ Calendar block
+          <div className="brand-pro-calendar-block-header-row">
+            <div className="brand-pro-calendar-block-header-copy">
+              <p className="brand-pro-calendar-block-eyebrow">
+                {copy.eyebrow}
               </p>
 
               <h2
                 id="edit-block-modal-title"
-                className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper"
+                className="brand-pro-calendar-block-title"
               >
-                Edit blocked time.
+                {copy.title}
               </h2>
 
-              <p className="mt-1 text-sm leading-6 text-paperDim">
-                Adjust or remove the unavailable window from your calendar.
+              <p className="brand-pro-calendar-block-description">
+                {copy.description}
               </p>
             </div>
 
-            <button
-              type="button"
+            <ActionButton
+              tone="ghost"
               onClick={close}
               disabled={saving || deleting}
-              className={buttonClassName('ghost')}
             >
-              Close
-            </button>
+              {copy.closeLabel}
+            </ActionButton>
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
-          {!blockId ? <StateCard>No block selected.</StateCard> : null}
+        <div className="brand-pro-calendar-block-body">
+          {!blockId ? <StateCard>{copy.noBlockSelected}</StateCard> : null}
 
-          {blockId && loading ? <StateCard>Loading block…</StateCard> : null}
+          {blockId && loading ? <StateCard>{copy.loadingBlock}</StateCard> : null}
 
           {error ? <StateCard danger>{error}</StateCard> : null}
 
           {canEdit ? (
-            <div className="grid gap-4">
-              <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
+            <div className="brand-pro-calendar-block-content">
+              <section className="brand-pro-calendar-block-section">
                 <SectionHeading
-                  title="Block details"
-                  description="Edit the unavailable window using the calendar timezone and step size."
+                  title={copy.blockDetailsTitle}
+                  description={copy.blockDetailsDescription}
                 />
 
-                <div className="mt-4 grid gap-3">
-                  <InfoRow label="Timezone">
+                <div className="brand-pro-calendar-block-section-grid">
+                  <InfoRow label={copy.timeZoneLabel}>
                     {resolvedTimeZone} · {step} minute step
                   </InfoRow>
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
+              <section className="brand-pro-calendar-block-section">
                 <SectionHeading
-                  title="Time"
-                  description="Change when the block starts and how long it lasts."
+                  title={copy.timeTitle}
+                  description={copy.timeDescription}
                 />
 
-                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Date">
+                <div className="brand-pro-calendar-block-field-grid">
+                  <Field label={copy.dateLabel}>
                     <input
                       type="date"
                       value={dateInput}
                       onChange={(event) => setDateInput(event.target.value)}
                       disabled={busy}
-                      className={fieldClassName()}
+                      className="brand-pro-calendar-block-field brand-focus"
                     />
                   </Field>
 
-                  <Field label="Start time">
+                  <Field label={copy.startTimeLabel}>
                     <input
                       type="time"
-                      step={step * 60}
+                      step={step * SECONDS_PER_MINUTE}
                       value={startTimeInput}
                       onChange={(event) =>
                         setStartTimeInput(event.target.value)
                       }
                       disabled={busy}
-                      className={fieldClassName()}
+                      className="brand-pro-calendar-block-field brand-focus"
                     />
                   </Field>
                 </div>
 
-                <div className="mt-3">
-                  <Field label="Duration minutes">
+                <div className="brand-pro-calendar-block-field-single">
+                  <Field label={copy.durationMinutesLabel}>
                     <input
                       type="number"
                       step={step}
@@ -601,27 +701,25 @@ export default function EditBlockModal(props: EditBlockModalProps) {
                       }
                       disabled={busy}
                       inputMode="numeric"
-                      className={fieldClassName()}
+                      className="brand-pro-calendar-block-field brand-focus"
                     />
                   </Field>
                 </div>
 
-                <div className="mt-3">
-                  <Field label="Note optional">
+                <div className="brand-pro-calendar-block-field-single">
+                  <Field label={copy.noteLabel}>
                     <textarea
                       value={note}
                       onChange={(event) => setNote(event.target.value)}
                       disabled={busy}
                       maxLength={MAX_NOTE_LENGTH}
-                      placeholder="Lunch, admin time, school pickup…"
-                      className={[fieldClassName(), 'min-h-24 resize-none'].join(
-                        ' ',
-                      )}
+                      placeholder={copy.notePlaceholder}
+                      className="brand-pro-calendar-block-field brand-pro-calendar-block-textarea brand-focus"
                     />
                   </Field>
 
-                  <p className="mt-1 text-right font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paperMute">
-                    {note.length}/{MAX_NOTE_LENGTH}
+                  <p className="brand-pro-calendar-block-note-count">
+                    {noteCountLabel(note)}
                   </p>
                 </div>
               </section>
@@ -629,34 +727,32 @@ export default function EditBlockModal(props: EditBlockModalProps) {
           ) : null}
         </div>
 
-        <footer className="border-t border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <button
-              type="button"
+        <footer className="brand-pro-calendar-block-footer">
+          <div className="brand-pro-calendar-block-footer-split">
+            <ActionButton
+              tone="danger"
               onClick={() => void remove()}
               disabled={!blockId || saving || deleting || loading}
-              className={buttonClassName('danger')}
             >
-              {deleting ? 'Deleting…' : 'Delete block'}
-            </button>
+              {deleting ? copy.deletingLabel : copy.deleteLabel}
+            </ActionButton>
 
-            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
+            <div className="brand-pro-calendar-block-footer-actions">
+              <ActionButton
+                tone="ghost"
                 onClick={close}
                 disabled={saving || deleting}
-                className={buttonClassName('ghost')}
               >
-                Cancel
-              </button>
+                {copy.cancelLabel}
+              </ActionButton>
 
-              <button
+              <ActionButton
                 type="submit"
+                tone="primary"
                 disabled={!canEdit || saving || deleting}
-                className={buttonClassName('primary')}
               >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
+                {saving ? copy.savingLabel : copy.saveLabel}
+              </ActionButton>
             </div>
           </div>
         </footer>
@@ -667,77 +763,74 @@ export default function EditBlockModal(props: EditBlockModalProps) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function SectionHeading(props: {
-  title: string
-  description: string
-}) {
+function SectionHeading(props: SectionHeadingProps) {
   const { title, description } = props
 
   return (
-    <div>
-      <h3 className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-paper">
-        {title}
-      </h3>
+    <div className="brand-pro-calendar-block-section-heading">
+      <h3 className="brand-pro-calendar-block-section-title">{title}</h3>
 
-      <p className="mt-1 text-sm leading-6 text-paperDim">
+      <p className="brand-pro-calendar-block-section-description">
         {description}
       </p>
     </div>
   )
 }
 
-function Field(props: {
-  label: string
-  children: ReactNode
-}) {
+function Field(props: FieldProps) {
   const { label, children } = props
 
   return (
-    <label className="block">
-      <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-        {label}
-      </span>
-
+    <label className="brand-pro-calendar-block-label">
+      <span className="brand-pro-calendar-block-kicker">{label}</span>
       {children}
     </label>
   )
 }
 
-function InfoRow(props: {
-  label: string
-  children: ReactNode
-}) {
+function InfoRow(props: InfoRowProps) {
   const { label, children } = props
 
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2">
-      <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-        {label}
-      </p>
+    <div className="brand-pro-calendar-block-info-row">
+      <p className="brand-pro-calendar-block-kicker">{label}</p>
 
-      <p className="mt-1 text-sm font-semibold text-paper">
-        {children}
-      </p>
+      <p className="brand-pro-calendar-block-info-value">{children}</p>
     </div>
   )
 }
 
-function StateCard(props: {
-  children: ReactNode
-  danger?: boolean
-}) {
+function StateCard(props: StateCardProps) {
   const { children, danger = false } = props
 
   return (
     <div
-      className={[
-        'mb-3 rounded-2xl border px-3 py-3 text-sm font-semibold',
-        danger
-          ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
-      ].join(' ')}
+      className="brand-pro-calendar-block-state"
+      data-danger={danger ? 'true' : 'false'}
     >
       {children}
     </div>
+  )
+}
+
+function ActionButton(props: ActionButtonProps) {
+  const {
+    children,
+    tone = 'ghost',
+    type = 'button',
+    disabled = false,
+    onClick,
+  } = props
+
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className="brand-pro-calendar-block-modal-button brand-focus"
+      data-tone={tone}
+    >
+      {children}
+    </button>
   )
 }

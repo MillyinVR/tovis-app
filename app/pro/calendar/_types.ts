@@ -44,6 +44,7 @@ export type ServiceLocationType =
 export type BookingCalendarStatus =
   | 'PENDING'
   | 'ACCEPTED'
+  | 'CONFIRMED'
   | 'COMPLETED'
   | 'CANCELLED'
   | 'DECLINED'
@@ -130,7 +131,7 @@ export type CalendarServiceItem = {
   id: string
   name: string | null
   durationMinutes: number
-  price: unknown | null
+  price: string | null
   sortOrder: number
 }
 
@@ -241,15 +242,30 @@ export type CalendarResponseLocation = {
   timeZoneValid: boolean
 }
 
+export type CalendarRangeMeta = {
+  from: string
+  requestedTo: string
+  effectiveTo: string
+  clamped: boolean
+  maxDays: number
+}
+
 export type CalendarResponse = {
   location: CalendarResponseLocation | null
+  range: CalendarRangeMeta
+
   timeZone: string
   viewportTimeZone: string
   needsTimeZoneSetup: boolean
+
   events: CalendarEvent[]
+
   canSalon: boolean
   canMobile: boolean
+
   stats: CalendarStats
+  blockedMinutesToday: number
+
   autoAcceptBookings: boolean
   management: ManagementLists
 }

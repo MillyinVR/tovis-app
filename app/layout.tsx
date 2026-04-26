@@ -2,13 +2,14 @@
 
 import type { Metadata } from 'next'
 import type { CSSProperties, ReactNode } from 'react'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { Fraunces, Inter_Tight, JetBrains_Mono } from 'next/font/google'
 
 import './globals.css'
 import '@/lib/brand/brand.css'
 import '@/lib/brand/proOverview.css'
 import '@/lib/brand/proSession.css'
+import '@/lib/brand/proCalendar.css'
 
 import RoleFooter from '@/app/_components/RoleFooter'
 import { BrandProvider } from '@/lib/brand/BrandProvider'
@@ -35,15 +36,12 @@ const jetBrainsMono = JetBrains_Mono({
 
 export const dynamic = 'force-dynamic'
 
-const brand = getBrandConfig()
-
-export const metadata: Metadata = {
-  title: brand.displayName,
-  description: brand.tagline ?? brand.displayName,
-}
-
 type RootLayoutProps = {
   children: ReactNode
+}
+
+type BrandRequestInput = {
+  host: string | null
 }
 
 const bodyClassName = [
@@ -70,6 +68,26 @@ const footerHostStyle: CSSProperties = {
 const footerMountStyle: CSSProperties = {
   width: '100%',
   pointerEvents: 'auto',
+}
+
+async function getBrandRequestInput(): Promise<BrandRequestInput> {
+  const requestHeaders = await headers()
+  const forwardedHost = requestHeaders.get('x-forwarded-host')
+  const host = forwardedHost ?? requestHeaders.get('host')
+
+  return {
+    host,
+  }
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const brandInput = await getBrandRequestInput()
+  const brand = getBrandConfig(brandInput)
+
+  return {
+    title: brand.displayName,
+    description: brand.tagline ?? brand.displayName,
+  }
 }
 
 export default async function RootLayout({ children }: RootLayoutProps) {

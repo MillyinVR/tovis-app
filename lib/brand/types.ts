@@ -6,6 +6,127 @@ export type BrandMode = 'dark' | 'light'
 
 export type RgbTriplet = `${number} ${number} ${number}`
 
+export type BrandCalendarViewKey = 'day' | 'week' | 'month'
+
+export type BrandCalendarViewLabels = Record<BrandCalendarViewKey, string>
+
+export type BrandProCalendarPageHeroCopy = {
+  title: string
+  accentMark: string
+  suffix: string
+  dashboardHref: string
+  dashboardLabel: string
+}
+
+export type BrandProCalendarHeaderCopy = {
+  controlsAriaLabel: string
+  viewTabsLabel: string
+  viewLabels: BrandCalendarViewLabels
+  viewAriaLabels: BrandCalendarViewLabels
+  previousRangeLabel: string
+  nextRangeLabel: string
+}
+
+export type BrandProCalendarMobileHeaderCopy = {
+  backHref: string
+  backLabel: string
+  backAriaLabel: string
+}
+
+export type BrandProCalendarStatsCopy = {
+  booked: string
+  pending: string
+  waitlist: string
+  free: string
+
+  bookedSub: string
+  pendingSub: string
+  waitlistSub: string
+  freeSub: string
+  blockedSuffix: string
+}
+
+export type BrandProCalendarActionsCopy = {
+  today: string
+  blockTime: string
+  createBlock: string
+  editHours: string
+  hideHours: string
+  autoAccept: string
+  approveRequest: string
+  denyRequest: string
+  messageClient: string
+  reschedule: string
+}
+
+export type BrandProCalendarLabelsCopy = {
+  mode: string
+  locationShort: string
+  statusKey: string
+  loadingCalendar: string
+  loadingRefresh: string
+}
+
+export type BrandProCalendarLocationPanelCopy = {
+  eyebrow: string
+  titleFallback: string
+  description: string
+  selectLabel: string
+  selectAriaLabel: string
+  selectFallback: string
+  timeZoneLabel: string
+  emptyState: string
+}
+
+export type BrandProCalendarAutoAcceptCopy = {
+  title: string
+  onLabel: string
+  offLabel: string
+  savingLabel: string
+  subtitle: string
+  ariaLabelOn: string
+  ariaLabelOff: string
+}
+
+export type BrandProCalendarPendingRequestCopy = {
+  label: string
+  clientFallback: string
+  appointmentFallback: string
+  moreSuffix: string
+  openAllLabel: string
+  openRequestsLabel: string
+  approveLabel: string
+  denyLabel: string
+}
+
+export type BrandProCalendarLegendCopy = {
+  accepted: string
+  pending: string
+  completed: string
+  waitlist: string
+  blocked: string
+}
+
+export type BrandProCalendarCopy = {
+  /**
+   * Brand-owned pro calendar UI copy.
+   *
+   * Keep product/brand language here instead of hard-coding it inside
+   * calendar components or storing it on a professional profile.
+   */
+  titles: BrandCalendarViewLabels
+  pageHero: BrandProCalendarPageHeroCopy
+  header: BrandProCalendarHeaderCopy
+  mobileHeader: BrandProCalendarMobileHeaderCopy
+  stats: BrandProCalendarStatsCopy
+  actions: BrandProCalendarActionsCopy
+  labels: BrandProCalendarLabelsCopy
+  locationPanel: BrandProCalendarLocationPanelCopy
+  mobileAutoAccept: BrandProCalendarAutoAcceptCopy
+  mobilePendingRequest: BrandProCalendarPendingRequestCopy
+  legend: BrandProCalendarLegendCopy
+}
+
 export type BrandTokens = {
   colors: {
     // ── Background layers ─────────────────────────────────────────
@@ -90,4 +211,5 @@ export type BrandConfig = {
   tokensByMode: Record<BrandMode, BrandTokens>
   assets: BrandAssets
   contact: BrandContact
+  proCalendar: BrandProCalendarCopy
 }

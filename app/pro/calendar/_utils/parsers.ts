@@ -12,6 +12,9 @@ import type {
   BlockCalendarEvent,
   CalendarEvent,
   CalendarLocationType,
+  CalendarRangeMeta,
+  CalendarResponse,
+  CalendarResponseLocation,
   CalendarServiceItem,
   CalendarStats,
   ManagementLists,
@@ -92,6 +95,18 @@ function validIsoString(value: unknown): string | null {
   return Number.isFinite(date.getTime()) ? iso : null
 }
 
+function nullablePriceText(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+
+  const text = nullableText(value)
+
+  if (text) return text
+
+  const number = finiteNumberOrNull(value)
+
+  return number === null ? null : String(number)
+}
+
 function normalizeHHMM(value: unknown): string | null {
   const parsed = parseHHMM(value)
   if (!parsed) return null
@@ -130,6 +145,7 @@ function normalizeBookingCalendarStatus(value: unknown): BookingCalendarStatus {
 
   if (raw === 'PENDING') return 'PENDING'
   if (raw === 'ACCEPTED') return 'ACCEPTED'
+  if (raw === 'CONFIRMED') return 'CONFIRMED'
   if (raw === 'COMPLETED') return 'COMPLETED'
   if (raw === 'CANCELLED') return 'CANCELLED'
   if (raw === 'DECLINED') return 'DECLINED'
@@ -271,6 +287,22 @@ export function parseCalendarRouteLocation(
   }
 }
 
+export function parseCalendarResponseLocation(
+  value: unknown,
+): CalendarResponseLocation | null {
+  if (!isRecord(value)) return null
+
+  const id = nullableText(value.id)
+  if (!id) return null
+
+  return {
+    id,
+    type: nullableText(value.type) ?? 'SALON',
+    timeZone: nullableText(value.timeZone),
+    timeZoneValid: normalizeBoolean(value.timeZoneValid, false),
+  }
+}
+
 export function parseProLocation(value: unknown): ProLocation | null {
   if (!isRecord(value)) return null
 
@@ -290,6 +322,29 @@ export function parseProLocation(value: unknown): ProLocation | null {
   }
 }
 
+// ─── Range parser ─────────────────────────────────────────────────────────────
+
+export function parseCalendarRangeMeta(
+  value: unknown,
+): CalendarRangeMeta | null {
+  if (!isRecord(value)) return null
+
+  const from = validIsoString(value.from)
+  const requestedTo = validIsoString(value.requestedTo)
+  const effectiveTo = validIsoString(value.effectiveTo)
+  const maxDays = finiteNumberOrNull(value.maxDays)
+
+  if (!from || !requestedTo || !effectiveTo || maxDays === null) return null
+
+  return {
+    from,
+    requestedTo,
+    effectiveTo,
+    clamped: normalizeBoolean(value.clamped, false),
+    maxDays,
+  }
+}
+
 // ─── Calendar event parsers ───────────────────────────────────────────────────
 
 function parseCalendarServiceItem(value: unknown): CalendarServiceItem | null {
@@ -305,7 +360,7 @@ function parseCalendarServiceItem(value: unknown): CalendarServiceItem | null {
     id,
     name: nullableText(value.name),
     durationMinutes,
-    price: 'price' in value ? value.price : null,
+    price: nullablePriceText(value.price),
     sortOrder,
   }
 }
@@ -467,6 +522,36 @@ export function parseCalendarStats(value: unknown): CalendarStats {
       value.blockedHours === null
         ? null
         : finiteNumberOrNull(value.blockedHours),
+  }
+}
+
+// ─── Calendar response parser ─────────────────────────────────────────────────
+
+export function parseCalendarResponse(value: unknown): CalendarResponse | null {
+  if (!isRecord(value)) return null
+
+  const range = parseCalendarRangeMeta(value.range)
+
+  if (!range) return null
+
+  return {
+    location: parseCalendarResponseLocation(value.location),
+    range,
+
+    timeZone: sanitizeTimeZone(value.timeZone, DEFAULT_TIME_ZONE),
+    viewportTimeZone: sanitizeTimeZone(value.viewportTimeZone, DEFAULT_TIME_ZONE),
+    needsTimeZoneSetup: normalizeBoolean(value.needsTimeZoneSetup, false),
+
+    events: parseCalendarEvents(value.events),
+
+    canSalon: normalizeBoolean(value.canSalon, false),
+    canMobile: normalizeBoolean(value.canMobile, false),
+
+    stats: parseCalendarStats(value.stats),
+    blockedMinutesToday: finiteNumberOrNull(value.blockedMinutesToday) ?? 0,
+
+    autoAcceptBookings: normalizeBoolean(value.autoAcceptBookings, false),
+    management: parseManagementLists(value.management),
   }
 }
 

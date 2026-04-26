@@ -11,13 +11,17 @@ import {
   zonedTimeToUtc,
 } from '@/lib/timeZone'
 import { safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
+import { CALENDAR_MS_PER_MINUTE } from '@/lib/calendar/constants'
+
+import { SECONDS_PER_MINUTE } from '../_constants'
 
 import {
   normalizeStepMinutes,
   roundDurationMinutes,
   snapMinutes,
-} from './_utils/calendarMath'
+} from '../_utils/calendarMath'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +42,52 @@ type BlockTimeModalProps = {
   locationLabel?: string | null
   stepMinutes?: number
   onCreated: (block: BlockRow) => void
+
+  /**
+   * Bridge until block modal copy moves fully into BrandProCalendarCopy.
+   */
+  copy?: Partial<BlockTimeModalCopy>
+}
+
+type BlockTimeModalCopy = {
+  eyebrow: string
+  title: string
+  description: string
+
+  closeLabel: string
+  cancelLabel: string
+  savingLabel: string
+  createBlockLabel: string
+
+  scopeTitle: string
+  scopeDescription: string
+  locationLabel: string
+  timeZoneLabel: string
+  allLocationsLabel: string
+  selectedLocationFallback: string
+  blockAllLocationsLabel: string
+  noLocationSelectedMessage: string
+
+  timeTitle: string
+  timeDescription: string
+  dateLabel: string
+  startTimeLabel: string
+  durationMinutesLabel: string
+  noteLabel: string
+  notePlaceholder: string
+
+  invalidDateError: string
+  invalidStartTimeError: string
+  invalidDurationError: string
+  locationRequiredError: string
+  invalidUtcStartError: string
+  invalidEndTimeError: string
+
+  responseMissingDataError: string
+  responseMissingIdError: string
+  responseMissingStartError: string
+  responseMissingEndError: string
+  createFailedError: string
 }
 
 type DateParts = {
@@ -53,7 +103,45 @@ type CreatedBlockPayload = {
   locationId: string | null
 }
 
-type ButtonTone = 'primary' | 'ghost'
+type BuildPayloadArgs = {
+  date: string
+  time: string
+  durationInput: string
+  note: string
+  timeZone: string
+  stepMinutes: number
+  blockAllLocations: boolean
+  locationId: string | null
+  copy: BlockTimeModalCopy
+}
+
+type ActionButtonProps = {
+  children: ReactNode
+  tone?: 'primary' | 'ghost'
+  type?: 'button' | 'submit'
+  disabled?: boolean
+  onClick?: () => void
+}
+
+type FieldProps = {
+  label: string
+  children: ReactNode
+}
+
+type InfoRowProps = {
+  label: string
+  children: ReactNode
+}
+
+type SectionHeadingProps = {
+  title: string
+  description: string
+}
+
+type StateCardProps = {
+  children: ReactNode
+  danger?: boolean
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -61,17 +149,73 @@ const DEFAULT_BLOCK_DURATION_MINUTES = 60
 const MAX_NOTE_LENGTH = 160
 const MAX_BLOCK_DURATION_MINUTES = 720
 
+const DEFAULT_COPY: BlockTimeModalCopy = {
+  eyebrow: '◆ Calendar block',
+  title: 'Block personal time.',
+  description:
+    'Protect breaks, admin time, travel, or a full-on human reset. Revolutionary concept.',
+
+  closeLabel: 'Close',
+  cancelLabel: 'Cancel',
+  savingLabel: 'Saving…',
+  createBlockLabel: 'Create block',
+
+  scopeTitle: 'Scope',
+  scopeDescription:
+    'Choose whether this block applies to the selected location or every location.',
+  locationLabel: 'Location',
+  timeZoneLabel: 'Timezone',
+  allLocationsLabel: 'All locations',
+  selectedLocationFallback: 'Selected location',
+  blockAllLocationsLabel: 'Block all locations',
+  noLocationSelectedMessage:
+    'No location is selected, so this block will apply to all locations.',
+
+  timeTitle: 'Time',
+  timeDescription: 'Pick the start and duration for the unavailable window.',
+  dateLabel: 'Date',
+  startTimeLabel: 'Start time',
+  durationMinutesLabel: 'Duration minutes',
+  noteLabel: 'Note optional',
+  notePlaceholder: 'Lunch, dentist, school pickup, deep sighing, etc.',
+
+  invalidDateError: 'Pick a valid date.',
+  invalidStartTimeError: 'Pick a valid start time.',
+  invalidDurationError: 'Pick a valid duration.',
+  locationRequiredError:
+    'Select a location first, or choose "Block all locations".',
+  invalidUtcStartError: 'Invalid start time.',
+  invalidEndTimeError: 'End time must be after start time.',
+
+  responseMissingDataError: 'Block created but response was missing data.',
+  responseMissingIdError: 'Block created but response was missing an id.',
+  responseMissingStartError:
+    'Block created but response was missing a start time.',
+  responseMissingEndError:
+    'Block created but response was missing an end time.',
+  createFailedError: 'Failed to create block.',
+}
+
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function pad2(value: number) {
+function resolveCopy(
+  copy: Partial<BlockTimeModalCopy> | undefined,
+): BlockTimeModalCopy {
+  return {
+    ...DEFAULT_COPY,
+    ...copy,
+  }
+}
+
+function pad2(value: number): string {
   return String(value).padStart(2, '0')
 }
 
-function dateInputFromParts(parts: DateParts) {
+function dateInputFromParts(parts: DateParts): string {
   return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`
 }
 
-function timeInputFromMinutes(minutes: number) {
+function timeInputFromMinutes(minutes: number): string {
   const hour = Math.floor(minutes / 60)
   const minute = minutes % 60
 
@@ -80,6 +224,7 @@ function timeInputFromMinutes(minutes: number) {
 
 function parseDateInput(value: string): DateParts | null {
   const parts = value.split('-')
+
   if (parts.length !== 3) return null
 
   const year = Number(parts[0])
@@ -90,18 +235,18 @@ function parseDateInput(value: string): DateParts | null {
   if (!Number.isInteger(month) || month < 1 || month > 12) return null
   if (!Number.isInteger(day) || day < 1 || day > 31) return null
 
-  return { year, month, day }
+  return {
+    year,
+    month,
+    day,
+  }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function optionalString(value: unknown) {
+function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function requiredString(value: unknown, errorMessage: string) {
+function requiredString(value: unknown, errorMessage: string): string {
   const stringValue = optionalString(value)
 
   if (!stringValue) {
@@ -111,66 +256,54 @@ function requiredString(value: unknown, errorMessage: string) {
   return stringValue
 }
 
-function errorFromResponse(data: unknown, fallback: string) {
+function errorFromResponse(data: unknown, fallback: string): string {
   if (!isRecord(data)) return fallback
 
   return optionalString(data.error) ?? optionalString(data.message) ?? fallback
 }
 
-function parseCreatedBlock(data: unknown): BlockRow {
+function parseCreatedBlock(
+  data: unknown,
+  copy: BlockTimeModalCopy,
+): BlockRow {
   if (!isRecord(data) || !isRecord(data.block)) {
-    throw new Error('Block created but response was missing data.')
+    throw new Error(copy.responseMissingDataError)
   }
 
   const block = data.block
 
   return {
-    id: requiredString(block.id, 'Block created but response was missing an id.'),
-    startsAt: requiredString(
-      block.startsAt,
-      'Block created but response was missing a start time.',
-    ),
-    endsAt: requiredString(
-      block.endsAt,
-      'Block created but response was missing an end time.',
-    ),
+    id: requiredString(block.id, copy.responseMissingIdError),
+    startsAt: requiredString(block.startsAt, copy.responseMissingStartError),
+    endsAt: requiredString(block.endsAt, copy.responseMissingEndError),
     note: optionalString(block.note),
     locationId: optionalString(block.locationId),
   }
 }
 
-function buildPayload(args: {
-  date: string
-  time: string
-  durationInput: string
-  note: string
-  timeZone: string
-  stepMinutes: number
-  blockAllLocations: boolean
-  locationId: string | null
-}): CreatedBlockPayload {
+function buildPayload(args: BuildPayloadArgs): CreatedBlockPayload {
   const parsedDate = parseDateInput(args.date)
 
   if (!parsedDate) {
-    throw new Error('Pick a valid date.')
+    throw new Error(args.copy.invalidDateError)
   }
 
   const parsedTime = parseHHMM(args.time)
 
   if (!parsedTime) {
-    throw new Error('Pick a valid start time.')
+    throw new Error(args.copy.invalidStartTimeError)
   }
 
   const rawDuration = Number(args.durationInput)
 
   if (!Number.isFinite(rawDuration) || rawDuration <= 0) {
-    throw new Error('Pick a valid duration.')
+    throw new Error(args.copy.invalidDurationError)
   }
 
   const durationMinutes = roundDurationMinutes(rawDuration, args.stepMinutes)
 
   if (!args.blockAllLocations && !args.locationId) {
-    throw new Error('Select a location first, or choose "Block all locations".')
+    throw new Error(args.copy.locationRequiredError)
   }
 
   const startsAt = zonedTimeToUtc({
@@ -184,13 +317,15 @@ function buildPayload(args: {
   })
 
   if (!Number.isFinite(startsAt.getTime())) {
-    throw new Error('Invalid start time.')
+    throw new Error(args.copy.invalidUtcStartError)
   }
 
-  const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000)
+  const endsAt = new Date(
+    startsAt.getTime() + durationMinutes * CALENDAR_MS_PER_MINUTE,
+  )
 
   if (endsAt.getTime() <= startsAt.getTime()) {
-    throw new Error('End time must be after start time.')
+    throw new Error(args.copy.invalidEndTimeError)
   }
 
   const trimmedNote = args.note.trim()
@@ -203,46 +338,8 @@ function buildPayload(args: {
   }
 }
 
-function buttonClassName(tone: ButtonTone = 'ghost') {
-  const base = [
-    'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
-    'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
-
-  if (tone === 'primary') {
-    return [
-      base,
-      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
-    ].join(' ')
-  }
-
-  return [
-    base,
-    'border border-[var(--line)] bg-transparent text-paperMute',
-    'hover:bg-paper/5 hover:text-paper',
-  ].join(' ')
-}
-
-function fieldClassName() {
-  return [
-    'w-full rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2',
-    'text-sm font-semibold text-paper placeholder:text-paperMute',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
-}
-
-function checkboxClassName() {
-  return [
-    'h-4 w-4 rounded border-[var(--line)] bg-ink2',
-    'accent-accentPrimary',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-  ].join(' ')
-}
-
-function lockBodyScroll(open: boolean) {
-  if (!open) return
+function lockBodyScroll(open: boolean): (() => void) | undefined {
+  if (!open) return undefined
 
   const previousOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
@@ -256,10 +353,10 @@ function closeOnEscape(args: {
   open: boolean
   saving: boolean
   onClose: () => void
-}) {
+}): (() => void) | undefined {
   const { open, saving, onClose } = args
 
-  if (!open) return
+  if (!open) return undefined
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Escape' && !saving) {
@@ -270,6 +367,10 @@ function closeOnEscape(args: {
   window.addEventListener('keydown', onKeyDown)
 
   return () => window.removeEventListener('keydown', onKeyDown)
+}
+
+function noteCountLabel(note: string): string {
+  return `${note.length}/${MAX_NOTE_LENGTH}`
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
@@ -284,7 +385,10 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
     locationLabel,
     stepMinutes,
     onCreated,
+    copy: copyOverride,
   } = props
+
+  const copy = useMemo(() => resolveCopy(copyOverride), [copyOverride])
 
   const resolvedTimeZone = useMemo(
     () => sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE),
@@ -345,14 +449,14 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
     setBlockAllLocations(locationId === null)
   }, [initialInputs.date, initialInputs.time, locationId, open])
 
-  function close() {
+  function close(): void {
     if (saving) return
 
     setError(null)
     onClose()
   }
 
-  async function submit() {
+  async function submit(): Promise<void> {
     if (saving) return
 
     setSaving(true)
@@ -368,6 +472,7 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
         stepMinutes: step,
         blockAllLocations,
         locationId,
+        copy,
       })
 
       const response = await fetch('/api/pro/calendar/blocked', {
@@ -379,16 +484,15 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
       const data: unknown = await safeJson(response)
 
       if (!response.ok) {
-        throw new Error(errorFromResponse(data, 'Failed to create block.'))
+        throw new Error(errorFromResponse(data, copy.createFailedError))
       }
 
-      const createdBlock = parseCreatedBlock(data)
+      const createdBlock = parseCreatedBlock(data, copy)
+
       onCreated(createdBlock)
       onClose()
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : 'Failed to create block.',
-      )
+      setError(caught instanceof Error ? caught.message : copy.createFailedError)
     } finally {
       setSaving(false)
     }
@@ -398,7 +502,7 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[1300] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-4"
+      className="brand-pro-calendar-block-overlay"
       onMouseDown={close}
     >
       <form
@@ -407,71 +511,64 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
           void submit()
         }}
         onMouseDown={(event) => event.stopPropagation()}
-        className={[
-          'flex max-h-[94vh] w-full flex-col overflow-hidden rounded-t-[24px]',
-          'border border-[var(--line-strong)] bg-ink',
-          'shadow-[0_28px_90px_rgb(0_0_0_/_0.62)]',
-          'sm:max-w-[34rem] sm:rounded-[24px]',
-        ].join(' ')}
+        className="brand-pro-calendar-block-panel"
         role="dialog"
         aria-modal="true"
         aria-labelledby="block-time-modal-title"
       >
-        <header className="border-b border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
-          <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-paper/20 sm:hidden" />
+        <header className="brand-pro-calendar-block-header">
+          <div className="brand-pro-calendar-block-drag-handle" />
 
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
-                ◆ Calendar block
+          <div className="brand-pro-calendar-block-header-row">
+            <div className="brand-pro-calendar-block-header-copy">
+              <p className="brand-pro-calendar-block-eyebrow">
+                {copy.eyebrow}
               </p>
 
               <h2
                 id="block-time-modal-title"
-                className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper"
+                className="brand-pro-calendar-block-title"
               >
-                Block personal time.
+                {copy.title}
               </h2>
 
-              <p className="mt-1 text-sm leading-6 text-paperDim">
-                Protect breaks, admin time, travel, or a full-on human reset.
-                Revolutionary concept.
+              <p className="brand-pro-calendar-block-description">
+                {copy.description}
               </p>
             </div>
 
-            <button
-              type="button"
+            <ActionButton
+              tone="ghost"
               onClick={close}
               disabled={saving}
-              className={buttonClassName('ghost')}
             >
-              Close
-            </button>
+              {copy.closeLabel}
+            </ActionButton>
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
+        <div className="brand-pro-calendar-block-body">
           {error ? <StateCard danger>{error}</StateCard> : null}
 
-          <section className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
+          <section className="brand-pro-calendar-block-section">
             <SectionHeading
-              title="Scope"
-              description="Choose whether this block applies to the selected location or every location."
+              title={copy.scopeTitle}
+              description={copy.scopeDescription}
             />
 
-            <div className="mt-4 grid gap-3">
-              <InfoRow label="Location">
+            <div className="brand-pro-calendar-block-section-grid">
+              <InfoRow label={copy.locationLabel}>
                 {blockAllLocations
-                  ? 'All locations'
-                  : locationLabel || locationId || 'Selected location'}
+                  ? copy.allLocationsLabel
+                  : locationLabel || locationId || copy.selectedLocationFallback}
               </InfoRow>
 
-              <InfoRow label="Timezone">
+              <InfoRow label={copy.timeZoneLabel}>
                 {resolvedTimeZone} · {step} minute step
               </InfoRow>
 
               {locationId ? (
-                <label className="flex items-center gap-2 rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2 text-sm font-semibold text-paperDim">
+                <label className="brand-pro-calendar-block-checkbox-label">
                   <input
                     type="checkbox"
                     checked={blockAllLocations}
@@ -479,50 +576,48 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
                       setBlockAllLocations(event.target.checked)
                     }
                     disabled={saving}
-                    className={checkboxClassName()}
+                    className="brand-pro-calendar-block-checkbox brand-focus"
                   />
-                  Block all locations
+
+                  {copy.blockAllLocationsLabel}
                 </label>
               ) : (
-                <StateCard>
-                  No location is selected, so this block will apply to all
-                  locations.
-                </StateCard>
+                <StateCard>{copy.noLocationSelectedMessage}</StateCard>
               )}
             </div>
           </section>
 
-          <section className="mt-4 rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
+          <section className="brand-pro-calendar-block-section">
             <SectionHeading
-              title="Time"
-              description="Pick the start and duration for the unavailable window."
+              title={copy.timeTitle}
+              description={copy.timeDescription}
             />
 
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Field label="Date">
+            <div className="brand-pro-calendar-block-field-grid">
+              <Field label={copy.dateLabel}>
                 <input
                   type="date"
                   value={date}
                   onChange={(event) => setDate(event.target.value)}
                   disabled={saving}
-                  className={fieldClassName()}
+                  className="brand-pro-calendar-block-field brand-focus"
                 />
               </Field>
 
-              <Field label="Start time">
+              <Field label={copy.startTimeLabel}>
                 <input
                   type="time"
-                  step={step * 60}
+                  step={step * SECONDS_PER_MINUTE}
                   value={time}
                   onChange={(event) => setTime(event.target.value)}
                   disabled={saving}
-                  className={fieldClassName()}
+                  className="brand-pro-calendar-block-field brand-focus"
                 />
               </Field>
             </div>
 
-            <div className="mt-3">
-              <Field label="Duration minutes">
+            <div className="brand-pro-calendar-block-field-single">
+              <Field label={copy.durationMinutesLabel}>
                 <input
                   type="number"
                   step={step}
@@ -532,50 +627,47 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
                   onChange={(event) => setDurationInput(event.target.value)}
                   disabled={saving}
                   inputMode="numeric"
-                  className={fieldClassName()}
+                  className="brand-pro-calendar-block-field brand-focus"
                 />
               </Field>
             </div>
 
-            <div className="mt-3">
-              <Field label="Note optional">
+            <div className="brand-pro-calendar-block-field-single">
+              <Field label={copy.noteLabel}>
                 <textarea
                   value={note}
                   onChange={(event) => setNote(event.target.value)}
                   disabled={saving}
                   maxLength={MAX_NOTE_LENGTH}
-                  placeholder="Lunch, dentist, school pickup, deep sighing, etc."
-                  className={[fieldClassName(), 'min-h-24 resize-none'].join(
-                    ' ',
-                  )}
+                  placeholder={copy.notePlaceholder}
+                  className="brand-pro-calendar-block-field brand-pro-calendar-block-textarea brand-focus"
                 />
               </Field>
 
-              <p className="mt-1 text-right font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paperMute">
-                {note.length}/{MAX_NOTE_LENGTH}
+              <p className="brand-pro-calendar-block-note-count">
+                {noteCountLabel(note)}
               </p>
             </div>
           </section>
         </div>
 
-        <footer className="border-t border-[var(--line-strong)] bg-ink/95 px-4 py-4 backdrop-blur-xl sm:px-5">
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button
-              type="button"
+        <footer className="brand-pro-calendar-block-footer">
+          <div className="brand-pro-calendar-block-footer-actions">
+            <ActionButton
+              tone="ghost"
               onClick={close}
               disabled={saving}
-              className={buttonClassName('ghost')}
             >
-              Cancel
-            </button>
+              {copy.cancelLabel}
+            </ActionButton>
 
-            <button
+            <ActionButton
               type="submit"
+              tone="primary"
               disabled={saving}
-              className={buttonClassName('primary')}
             >
-              {saving ? 'Saving…' : 'Create block'}
-            </button>
+              {saving ? copy.savingLabel : copy.createBlockLabel}
+            </ActionButton>
           </div>
         </footer>
       </form>
@@ -585,77 +677,74 @@ export default function BlockTimeModal(props: BlockTimeModalProps) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function SectionHeading(props: {
-  title: string
-  description: string
-}) {
+function SectionHeading(props: SectionHeadingProps) {
   const { title, description } = props
 
   return (
-    <div>
-      <h3 className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-paper">
-        {title}
-      </h3>
+    <div className="brand-pro-calendar-block-section-heading">
+      <h3 className="brand-pro-calendar-block-section-title">{title}</h3>
 
-      <p className="mt-1 text-sm leading-6 text-paperDim">
+      <p className="brand-pro-calendar-block-section-description">
         {description}
       </p>
     </div>
   )
 }
 
-function Field(props: {
-  label: string
-  children: ReactNode
-}) {
+function Field(props: FieldProps) {
   const { label, children } = props
 
   return (
-    <label className="block">
-      <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-        {label}
-      </span>
-
+    <label className="brand-pro-calendar-block-label">
+      <span className="brand-pro-calendar-block-kicker">{label}</span>
       {children}
     </label>
   )
 }
 
-function InfoRow(props: {
-  label: string
-  children: ReactNode
-}) {
+function InfoRow(props: InfoRowProps) {
   const { label, children } = props
 
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-ink2 px-3 py-2">
-      <p className="font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-        {label}
-      </p>
+    <div className="brand-pro-calendar-block-info-row">
+      <p className="brand-pro-calendar-block-kicker">{label}</p>
 
-      <p className="mt-1 text-sm font-semibold text-paper">
-        {children}
-      </p>
+      <p className="brand-pro-calendar-block-info-value">{children}</p>
     </div>
   )
 }
 
-function StateCard(props: {
-  children: ReactNode
-  danger?: boolean
-}) {
+function StateCard(props: StateCardProps) {
   const { children, danger = false } = props
 
   return (
     <div
-      className={[
-        'mb-3 rounded-2xl border px-3 py-3 text-sm font-semibold',
-        danger
-          ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
-      ].join(' ')}
+      className="brand-pro-calendar-block-state"
+      data-danger={danger ? 'true' : 'false'}
     >
       {children}
     </div>
+  )
+}
+
+function ActionButton(props: ActionButtonProps) {
+  const {
+    children,
+    tone = 'ghost',
+    type = 'button',
+    disabled = false,
+    onClick,
+  } = props
+
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className="brand-pro-calendar-block-modal-button brand-focus"
+      data-tone={tone}
+    >
+      {children}
+    </button>
   )
 }

@@ -3,14 +3,26 @@
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type CalendarLocation = {
+export type CalendarLocation = {
   id: string
   type?: string | null
   name?: string | null
   formattedAddress?: string | null
 }
 
+export type CalendarLocationPanelCopy = {
+  eyebrow: string
+  titleFallback: string
+  description: string
+  selectLabel: string
+  selectAriaLabel: string
+  selectFallback: string
+  timeZoneLabel: string
+  emptyState: string
+}
+
 type CalendarLocationPanelProps = {
+  copy: CalendarLocationPanelCopy
   locationsLoaded: boolean
   scopedLocations: CalendarLocation[]
   activeLocationId: string | null
@@ -33,16 +45,24 @@ function normalizeText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function locationTypeLabel(type: string | null | undefined): string {
+function locationTypeLabel(
+  type: string | null | undefined,
+  fallbackLabel: string,
+): string {
   const normalizedType = normalizeText(type).toUpperCase()
 
-  return LOCATION_TYPE_LABELS[normalizedType] ?? 'Location'
+  return LOCATION_TYPE_LABELS[normalizedType] ?? fallbackLabel
 }
 
-function labelForLocation(location: CalendarLocation): string {
+function labelForLocation(args: {
+  location: CalendarLocation
+  fallbackLabel: string
+}): string {
+  const { location, fallbackLabel } = args
+
   const name = normalizeText(location.name)
   const address = normalizeText(location.formattedAddress)
-  const baseLabel = name || locationTypeLabel(location.type)
+  const baseLabel = name || locationTypeLabel(location.type, fallbackLabel)
 
   return address ? `${baseLabel} — ${address}` : baseLabel
 }
@@ -51,80 +71,47 @@ function selectedLocationLabel(args: {
   activeLocationLabel: string | null
   activeLocationId: string | null
   locations: CalendarLocation[]
+  fallbackLabel: string
 }): string | null {
-  const explicitLabel = normalizeText(args.activeLocationLabel)
+  const {
+    activeLocationLabel,
+    activeLocationId,
+    locations,
+    fallbackLabel,
+  } = args
+
+  const explicitLabel = normalizeText(activeLocationLabel)
 
   if (explicitLabel) return explicitLabel
 
-  const selectedLocation = args.locations.find(
-    (location) => location.id === args.activeLocationId,
+  const selectedLocation = locations.find(
+    (location) => location.id === activeLocationId,
   )
 
-  return selectedLocation ? labelForLocation(selectedLocation) : null
+  if (!selectedLocation) return null
+
+  return labelForLocation({
+    location: selectedLocation,
+    fallbackLabel,
+  })
 }
 
-function panelClassName(): string {
-  return [
-    'rounded-2xl border border-[var(--line)]',
-    'bg-[rgb(var(--surface-glass)_/_0.03)] p-4',
-  ].join(' ')
-}
+function hasSelectedLocation(args: {
+  activeLocationId: string | null
+  locations: CalendarLocation[]
+}): boolean {
+  const selectedId = normalizeText(args.activeLocationId)
 
-function eyebrowClassName(): string {
-  return [
-    'font-mono text-[10px] font-black uppercase tracking-[0.16em]',
-    'text-[rgb(var(--accent-primary-hover))]',
-  ].join(' ')
-}
+  if (!selectedId) return false
 
-function titleClassName(): string {
-  return [
-    'mt-1 font-display text-2xl font-semibold italic tracking-[-0.04em]',
-    'text-[rgb(var(--text-primary))]',
-  ].join(' ')
-}
-
-function bodyTextClassName(): string {
-  return 'mt-2 text-sm leading-6 text-[rgb(var(--text-secondary))]'
-}
-
-function selectClassName(): string {
-  return [
-    'w-full rounded-xl border border-[var(--line)]',
-    'bg-[rgb(var(--bg-secondary))] px-3 py-2',
-    'font-mono text-[11px] font-black uppercase tracking-[0.06em]',
-    'text-[rgb(var(--text-primary))] outline-none',
-    'focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-    'md:w-auto md:min-w-[16rem]',
-  ].join(' ')
-}
-
-function selectLabelClassName(): string {
-  return [
-    'font-mono text-[9px] font-black uppercase tracking-[0.12em]',
-    'text-[rgb(var(--text-muted))]',
-  ].join(' ')
-}
-
-function timeZoneClassName(): string {
-  return [
-    'font-mono text-[9px] font-black uppercase tracking-[0.10em]',
-    'text-[rgb(var(--text-muted))]',
-  ].join(' ')
-}
-
-function emptyStateClassName(): string {
-  return [
-    'rounded-2xl border border-toneWarn/25 bg-toneWarn/10 px-3 py-3',
-    'text-sm font-semibold text-toneWarn',
-  ].join(' ')
+  return args.locations.some((location) => location.id === selectedId)
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export function CalendarLocationPanel(props: CalendarLocationPanelProps) {
   const {
+    copy,
     locationsLoaded,
     scopedLocations,
     activeLocationId,
@@ -141,62 +128,75 @@ export function CalendarLocationPanel(props: CalendarLocationPanelProps) {
     activeLocationLabel,
     activeLocationId,
     locations: scopedLocations,
+    fallbackLabel: copy.selectFallback,
+  })
+
+  const selectedIsValid = hasSelectedLocation({
+    activeLocationId,
+    locations: scopedLocations,
   })
 
   return (
     <section
-      className={panelClassName()}
-      data-calendar-location-panel="1"
+      className="brand-pro-calendar-location-panel"
+      data-calendar-location-panel="true"
+      data-has-locations={hasLocations ? 'true' : 'false'}
     >
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div className="min-w-0">
-          <p className={eyebrowClassName()}>◆ Calendar location</p>
+      <div className="brand-pro-calendar-location-panel-inner">
+        <div className="brand-pro-calendar-location-panel-copy">
+          <p className="brand-pro-calendar-location-panel-eyebrow">
+            {copy.eyebrow}
+          </p>
 
-          <h2 className={titleClassName()}>
-            {selectedLabel || 'Select location.'}
+          <h2 className="brand-pro-calendar-location-panel-title">
+            {selectedLabel || copy.titleFallback}
           </h2>
 
-          <p className={bodyTextClassName()}>
-            Booking creation and blocked-time actions use this selected
-            location.
+          <p className="brand-pro-calendar-location-panel-description">
+            {copy.description}
           </p>
         </div>
 
         {hasLocations ? (
-          <div className="grid gap-2 md:justify-items-end">
-            <label className="grid gap-1">
-              <span className={selectLabelClassName()}>Location</span>
+          <div className="brand-pro-calendar-location-panel-control">
+            <label className="brand-pro-calendar-location-panel-select-wrap">
+              <span className="brand-pro-calendar-location-panel-select-label">
+                {copy.selectLabel}
+              </span>
 
               <select
-                value={activeLocationId ?? ''}
+                value={selectedIsValid ? activeLocationId ?? '' : ''}
                 onChange={(event) =>
                   onChangeLocation(event.target.value || null)
                 }
-                className={selectClassName()}
-                aria-label="Select calendar location"
+                className="brand-pro-calendar-location-panel-select brand-focus"
+                aria-label={copy.selectAriaLabel}
               >
-                {activeLocationId ? null : (
-                  <option value="">Select location</option>
+                {selectedIsValid ? null : (
+                  <option value="">{copy.titleFallback}</option>
                 )}
 
                 {scopedLocations.map((location) => (
                   <option key={location.id} value={location.id}>
-                    {labelForLocation(location)}
+                    {labelForLocation({
+                      location,
+                      fallbackLabel: copy.selectFallback,
+                    })}
                   </option>
                 ))}
               </select>
             </label>
 
-            <p className={timeZoneClassName()}>
-              TZ:{' '}
-              <span className="text-[rgb(var(--text-primary))]">
+            <p className="brand-pro-calendar-location-panel-timezone">
+              {copy.timeZoneLabel}:{' '}
+              <span className="brand-pro-calendar-location-panel-timezone-value">
                 {calendarTimeZone}
               </span>
             </p>
           </div>
         ) : (
-          <div className={emptyStateClassName()}>
-            No bookable locations yet. Add a location to use the calendar.
+          <div className="brand-pro-calendar-location-panel-empty">
+            {copy.emptyState}
           </div>
         )}
       </div>

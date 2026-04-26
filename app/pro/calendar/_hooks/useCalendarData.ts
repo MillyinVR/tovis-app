@@ -1,7 +1,7 @@
 // app/pro/calendar/_hooks/useCalendarData.ts
 //
 // Thin orchestrator that composes focused hooks into the same flat
-// return shape consumed by page.tsx and its child components.
+// return shape consumed by calendar shells and child components.
 'use client'
 
 import {
@@ -13,7 +13,7 @@ import {
 } from 'react'
 import { useRouter } from 'next/navigation'
 
-import type { CalendarEvent, ViewMode } from '../_types'
+import type { CalendarEvent, ViewMode, WorkingHoursJson } from '../_types'
 
 import { startOfMonth, startOfWeek } from '../_utils/date'
 import {
@@ -43,6 +43,8 @@ import { useConfirmChange } from './useConfirmChange'
 import { useDragDrop } from './useDragDrop'
 import { useBookingModal } from './useBookingModal'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type UseCalendarDataArgs = {
   view: ViewMode
   currentDate: Date
@@ -54,10 +56,21 @@ type BookingSchedulingContextArgs = {
   fallbackTimeZone: string
 }
 
+type SchedulingContext = {
+  timeZone: string
+  workingHours: WorkingHoursJson
+  stepMinutes: number
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const PRO_SESSION_FORCE_EVENT = 'tovis:pro-session:force'
 const TEMPORARY_ERROR_MS = 3000
+const NO_LOCATION_SELECTED_MESSAGE = 'Select a location first.'
 
-function forceProFooterRefresh() {
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+function forceProFooterRefresh(): void {
   try {
     window.dispatchEvent(new Event(PRO_SESSION_FORCE_EVENT))
   } catch {
@@ -65,7 +78,7 @@ function forceProFooterRefresh() {
   }
 }
 
-function validTimeZoneOrNull(value: string | null | undefined) {
+function validTimeZoneOrNull(value: string | null | undefined): string | null {
   const candidate = typeof value === 'string' ? value.trim() : ''
 
   if (!candidate) return null
@@ -74,9 +87,17 @@ function validTimeZoneOrNull(value: string | null | undefined) {
   return candidate
 }
 
-function sanitizeFallbackTimeZone(value: string | null | undefined) {
+function sanitizeFallbackTimeZone(value: string | null | undefined): string {
   return sanitizeTimeZone(value ?? DEFAULT_TIME_ZONE, DEFAULT_TIME_ZONE)
 }
+
+function clearTemporaryErrorTimeout(timeoutId: number | null): void {
+  if (timeoutId !== null) {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+// ─── Exported hook ────────────────────────────────────────────────────────────
 
 export function useCalendarData(args: UseCalendarDataArgs) {
   const { view, currentDate } = args
@@ -89,7 +110,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
   const temporaryErrorTimeoutRef = useRef<number | null>(null)
 
   const resolveActiveCalendarTimeZone = useCallback(
-    (fallback?: string) => {
+    (fallback?: string): string => {
       const fallbackTimeZone = sanitizeTimeZone(
         fallback ?? calendarTimeZoneFallbackRef.current,
         DEFAULT_TIME_ZONE,
@@ -127,20 +148,16 @@ export function useCalendarData(args: UseCalendarDataArgs) {
 
   useEffect(() => {
     return () => {
-      if (temporaryErrorTimeoutRef.current !== null) {
-        window.clearTimeout(temporaryErrorTimeoutRef.current)
-      }
+      clearTemporaryErrorTimeout(temporaryErrorTimeoutRef.current)
     }
   }, [])
 
   const showTemporaryError = useCallback(
-    (message: string) => {
+    (message: string): void => {
       temporaryErrorTokenRef.current += 1
       const token = temporaryErrorTokenRef.current
 
-      if (temporaryErrorTimeoutRef.current !== null) {
-        window.clearTimeout(temporaryErrorTimeoutRef.current)
-      }
+      clearTemporaryErrorTimeout(temporaryErrorTimeoutRef.current)
 
       cal.setError(message)
 
@@ -155,7 +172,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
   )
 
   const resolveBookingSchedulingContext = useCallback(
-    (contextArgs: BookingSchedulingContextArgs) => {
+    (contextArgs: BookingSchedulingContextArgs): SchedulingContext => {
       const location = loc.resolveLocationById(contextArgs.locationId)
 
       const locationTimeZone = validTimeZoneOrNull(location?.timeZone)
@@ -189,7 +206,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
   )
 
   const resolveEventSchedulingContext = useCallback(
-    (event: CalendarEvent) => {
+    (event: CalendarEvent): SchedulingContext => {
       if (event.kind === 'BOOKING') {
         return resolveBookingSchedulingContext({
           locationId: event.locationId ?? null,
@@ -310,7 +327,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
   )
 
   const openBookingOrBlock = useCallback(
-    (id: string) => {
+    (id: string): void => {
       const event = cal.eventsRef.current.find((entry) => entry.id === id)
 
       if (event && isBlockedEvent(event)) {
@@ -330,18 +347,20 @@ export function useCalendarData(args: UseCalendarDataArgs) {
       void bookingModal.openBooking(id)
     },
     [
-      blocks,
-      bookingModal,
+      blocks.blockCreateOpen,
+      blocks.editBlockOpen,
+      blocks.openEditBlockFromEvent,
+      bookingModal.openBooking,
       cal.eventsRef,
       confirm.confirmOpen,
       confirm.pendingChange,
-      loc,
+      loc.setActiveLocationId,
       mgmt.managementOpen,
     ],
   )
 
   const openCreateForClick = useCallback(
-    (day: Date, clientY: number, columnTop: number) => {
+    (day: Date, clientY: number, columnTop: number): void => {
       if (
         confirm.confirmOpen ||
         confirm.pendingChange ||
@@ -354,7 +373,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
       if (blocks.blockCreateOpen || blocks.editBlockOpen) return
 
       if (!loc.activeLocationId) {
-        showTemporaryError('Select a location first.')
+        showTemporaryError(NO_LOCATION_SELECTED_MESSAGE)
         return
       }
 
@@ -399,8 +418,11 @@ export function useCalendarData(args: UseCalendarDataArgs) {
   return {
     view,
     currentDate,
+
     events: cal.events,
     setEvents: cal.setEvents,
+
+    range: cal.range,
 
     timeZone: cal.timeZone,
     needsTimeZoneSetup: cal.needsTimeZoneSetup,

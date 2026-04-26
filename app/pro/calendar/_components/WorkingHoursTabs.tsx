@@ -1,4 +1,4 @@
-// app/pro/calendar/WorkingHoursTabs.tsx
+// app/pro/calendar/_components/WorkingHoursTabs.tsx
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
@@ -14,6 +14,7 @@ import {
   readErrorMessage,
   safeJson,
 } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,11 +24,32 @@ type WorkingHoursTabsProps = {
   activeEditorType?: LocationType
   onChangeEditorType?: (next: LocationType) => void
   onSavedAny?: () => void
+
+  /**
+   * Bridge until working-hours copy moves fully into BrandProCalendarCopy.
+   */
+  copy?: Partial<WorkingHoursTabsCopy>
+}
+
+type WorkingHoursTabsCopy = {
+  eyebrow: string
+
+  salonLabel: string
+  salonShortLabel: string
+  salonDescription: string
+
+  mobileLabel: string
+  mobileShortLabel: string
+  mobileDescription: string
+
+  loadingSchedule: string
+  failedLoadHours: string
 }
 
 type LocationTab = {
   value: LocationType
   label: string
+  shortLabel: string
   description: string
   tone: 'salon' | 'mobile'
 }
@@ -47,21 +69,6 @@ type WeekdayKey = keyof ApiWorkingHours
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const LOCATION_TABS: ReadonlyArray<LocationTab> = [
-  {
-    value: 'SALON',
-    label: 'Salon hours',
-    description: 'Appointments at your salon, suite, or fixed location.',
-    tone: 'salon',
-  },
-  {
-    value: 'MOBILE',
-    label: 'Mobile hours',
-    description: 'Appointments where you travel to the client.',
-    tone: 'mobile',
-  },
-]
-
 const WEEKDAY_KEYS: ReadonlyArray<WeekdayKey> = [
   'mon',
   'tue',
@@ -72,10 +79,49 @@ const WEEKDAY_KEYS: ReadonlyArray<WeekdayKey> = [
   'sun',
 ]
 
+const DEFAULT_COPY: WorkingHoursTabsCopy = {
+  eyebrow: '◆ Availability editor',
+
+  salonLabel: 'Salon hours',
+  salonShortLabel: 'Salon',
+  salonDescription: 'Appointments at your salon, suite, or fixed location.',
+
+  mobileLabel: 'Mobile hours',
+  mobileShortLabel: 'Mobile',
+  mobileDescription: 'Appointments where you travel to the client.',
+
+  loadingSchedule: 'Loading schedule…',
+  failedLoadHours: 'Failed to load hours.',
+}
+
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+function resolveCopy(
+  copy: Partial<WorkingHoursTabsCopy> | undefined,
+): WorkingHoursTabsCopy {
+  return {
+    ...DEFAULT_COPY,
+    ...copy,
+  }
+}
+
+function locationTabs(copy: WorkingHoursTabsCopy): ReadonlyArray<LocationTab> {
+  return [
+    {
+      value: 'SALON',
+      label: copy.salonLabel,
+      shortLabel: copy.salonShortLabel,
+      description: copy.salonDescription,
+      tone: 'salon',
+    },
+    {
+      value: 'MOBILE',
+      label: copy.mobileLabel,
+      shortLabel: copy.mobileShortLabel,
+      description: copy.mobileDescription,
+      tone: 'mobile',
+    },
+  ]
 }
 
 function makeHoursDay(enabled: boolean) {
@@ -103,12 +149,12 @@ function defaultHours(): ApiWorkingHours {
 }
 
 function looksLikeHours(value: unknown): value is ApiWorkingHours {
-  if (!isObject(value)) return false
+  if (!isRecord(value)) return false
 
   for (const day of WEEKDAY_KEYS) {
     const row = value[day]
 
-    if (!isObject(row)) return false
+    if (!isRecord(row)) return false
     if (typeof row.enabled !== 'boolean') return false
     if (typeof row.start !== 'string') return false
     if (typeof row.end !== 'string') return false
@@ -118,48 +164,67 @@ function looksLikeHours(value: unknown): value is ApiWorkingHours {
 }
 
 function availableTabsForCapabilities(args: {
+  tabs: ReadonlyArray<LocationTab>
   canSalon: boolean
   canMobile: boolean
-}) {
-  const tabs = LOCATION_TABS.filter((tab) => {
+}): ReadonlyArray<LocationTab> {
+  const tabs = args.tabs.filter((tab) => {
     if (tab.value === 'SALON') return args.canSalon
     if (tab.value === 'MOBILE') return args.canMobile
 
     return false
   })
 
-  return tabs.length > 0 ? tabs : [LOCATION_TABS[0]]
+  return tabs.length > 0 ? tabs : [args.tabs[0]].filter(isLocationTab)
 }
 
-function tabForLocationType(locationType: LocationType) {
-  return LOCATION_TABS.find((tab) => tab.value === locationType) ?? LOCATION_TABS[0]
+function isLocationTab(value: LocationTab | undefined): value is LocationTab {
+  return value !== undefined
 }
 
-function firstAvailableType(tabs: ReadonlyArray<LocationTab>) {
-  return tabs[0].value
+function tabForLocationType(args: {
+  locationType: LocationType
+  tabs: ReadonlyArray<LocationTab>
+}): LocationTab {
+  return (
+    args.tabs.find((tab) => tab.value === args.locationType) ??
+    args.tabs[0] ?? {
+      value: 'SALON',
+      label: DEFAULT_COPY.salonLabel,
+      shortLabel: DEFAULT_COPY.salonShortLabel,
+      description: DEFAULT_COPY.salonDescription,
+      tone: 'salon',
+    }
+  )
+}
+
+function firstAvailableType(tabs: ReadonlyArray<LocationTab>): LocationType {
+  return tabs[0]?.value ?? 'SALON'
 }
 
 function isAvailableLocationType(
   locationType: LocationType,
   tabs: ReadonlyArray<LocationTab>,
-) {
+): boolean {
   return tabs.some((tab) => tab.value === locationType)
 }
 
-function endpointForLocationType(locationType: LocationType) {
+function endpointForLocationType(locationType: LocationType): string {
   const params = new URLSearchParams({ locationType })
 
   return `/api/pro/working-hours?${params.toString()}`
 }
 
-function errorFromResponse(
-  response: Response,
-  data: unknown,
-  locationType: LocationType,
-) {
+function errorFromResponse(args: {
+  response: Response
+  data: unknown
+  locationType: LocationType
+}): string {
   return (
-    readErrorMessage(data) ??
-    `Failed to load ${locationType.toLowerCase()} hours. (${response.status})`
+    readErrorMessage(args.data) ??
+    `Failed to load ${args.locationType.toLowerCase()} hours. (${
+      args.response.status
+    })`
   )
 }
 
@@ -176,34 +241,18 @@ async function loadWorkingHours(args: {
   const data: unknown = await safeJson(response)
 
   if (!response.ok) {
-    throw new Error(errorFromResponse(response, data, args.locationType))
+    throw new Error(
+      errorFromResponse({
+        response,
+        data,
+        locationType: args.locationType,
+      }),
+    )
   }
 
-  const rawWorkingHours = isObject(data) ? data.workingHours : null
+  const rawWorkingHours = isRecord(data) ? data.workingHours : null
 
   return looksLikeHours(rawWorkingHours) ? rawWorkingHours : defaultHours()
-}
-
-function tabToneClassName(tone: LocationTab['tone'], active: boolean) {
-  if (!active) {
-    return [
-      'border-[var(--line)] bg-transparent text-paperMute',
-      'hover:bg-paper/5 hover:text-paper',
-    ].join(' ')
-  }
-
-  if (tone === 'mobile') {
-    return 'border-acid/35 bg-acid/10 text-paper'
-  }
-
-  return 'border-terra/45 bg-terra/10 text-paper'
-}
-
-function formShellClassName() {
-  return [
-    'rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4',
-    'shadow-[0_16px_40px_rgb(0_0_0_/_0.20)]',
-  ].join(' ')
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
@@ -215,15 +264,20 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
     activeEditorType,
     onChangeEditorType,
     onSavedAny,
+    copy: copyOverride,
   } = props
+
+  const copy = useMemo(() => resolveCopy(copyOverride), [copyOverride])
+  const tabs = useMemo(() => locationTabs(copy), [copy])
 
   const availableTabs = useMemo(
     () =>
       availableTabsForCapabilities({
+        tabs,
         canSalon,
         canMobile,
       }),
-    [canSalon, canMobile],
+    [canSalon, canMobile, tabs],
   )
 
   const [localActive, setLocalActive] = useState<LocationType>(
@@ -236,7 +290,11 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
     ? active
     : firstAvailableType(availableTabs)
 
-  const activeTab = tabForLocationType(safeActive)
+  const activeTab = tabForLocationType({
+    locationType: safeActive,
+    tabs,
+  })
+
   const showTabs = availableTabs.length > 1
 
   const [initialByMode, setInitialByMode] = useState<
@@ -249,7 +307,7 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  function setActive(next: LocationType) {
+  function setActive(next: LocationType): void {
     if (onChangeEditorType) {
       onChangeEditorType(next)
       return
@@ -272,7 +330,7 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
   useEffect(() => {
     const controller = new AbortController()
 
-    async function loadAll() {
+    async function loadAll(): Promise<void> {
       setError(null)
       setLoading(true)
 
@@ -309,7 +367,7 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
       } catch (caught) {
         if (controller.signal.aborted) return
 
-        setError(errorMessageFromUnknown(caught, 'Failed to load hours.'))
+        setError(errorMessageFromUnknown(caught, copy.failedLoadHours))
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false)
@@ -320,32 +378,32 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
     void loadAll()
 
     return () => controller.abort()
-  }, [availableTabs])
+  }, [availableTabs, copy.failedLoadHours])
 
   return (
     <section
-      className="grid gap-4"
-      data-calendar-working-hours-tabs="1"
+      className="brand-pro-calendar-working-tabs"
+      data-calendar-working-hours-tabs="true"
     >
-      <div className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-4">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div className="min-w-0">
-            <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
-              ◆ Availability editor
+      <div className="brand-pro-calendar-working-tabs-header">
+        <div className="brand-pro-calendar-working-tabs-header-row">
+          <div className="brand-pro-calendar-working-tabs-copy">
+            <p className="brand-pro-calendar-working-tabs-eyebrow">
+              {copy.eyebrow}
             </p>
 
-            <h2 className="mt-1 font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper">
+            <h2 className="brand-pro-calendar-working-tabs-title">
               {activeTab.label}
             </h2>
 
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-paperDim">
+            <p className="brand-pro-calendar-working-tabs-description">
               {activeTab.description}
             </p>
           </div>
 
           {showTabs ? (
             <div
-              className="flex gap-2 overflow-x-auto pb-1 looksNoScrollbar"
+              className="brand-pro-calendar-working-tabs-list looksNoScrollbar"
               role="tablist"
               aria-label="Working hours type"
             >
@@ -359,19 +417,22 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
               ))}
             </div>
           ) : (
-            <span className="rounded-full border border-[var(--line)] bg-paper/[0.04] px-3 py-2 font-mono text-[10px] font-black uppercase tracking-[0.08em] text-paperMute">
-              {activeTab.value === 'SALON' ? 'Salon' : 'Mobile'}
+            <span
+              className="brand-pro-calendar-working-tabs-single"
+              data-tone={activeTab.tone}
+            >
+              {activeTab.shortLabel}
             </span>
           )}
         </div>
 
-        <div className="mt-4 grid gap-2">
-          {loading ? <StateCard>Loading schedule…</StateCard> : null}
+        <div className="brand-pro-calendar-working-tabs-state-list">
+          {loading ? <StateCard>{copy.loadingSchedule}</StateCard> : null}
           {error ? <StateCard danger>{error}</StateCard> : null}
         </div>
       </div>
 
-      <div className={formShellClassName()}>
+      <div className="brand-pro-calendar-working-tabs-form-shell">
         <WorkingHoursForm
           locationType={safeActive}
           initialHours={initialByMode[safeActive] ?? defaultHours()}
@@ -402,14 +463,11 @@ function TabButton(props: TabButtonProps) {
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={[
-        'shrink-0 rounded-full border px-3 py-2',
-        'font-mono text-[10px] font-black uppercase tracking-[0.08em]',
-        'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-        tabToneClassName(tab.tone, active),
-      ].join(' ')}
+      className="brand-pro-calendar-working-tabs-button brand-focus"
+      data-active={active ? 'true' : 'false'}
+      data-tone={tab.tone}
     >
-      {tab.value === 'SALON' ? 'Salon' : 'Mobile'}
+      {tab.shortLabel}
     </button>
   )
 }
@@ -419,12 +477,8 @@ function StateCard(props: StateCardProps) {
 
   return (
     <div
-      className={[
-        'rounded-2xl border px-3 py-3 text-sm font-semibold',
-        danger
-          ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
-      ].join(' ')}
+      className="brand-pro-calendar-working-tabs-state"
+      data-danger={danger ? 'true' : 'false'}
     >
       {children}
     </div>

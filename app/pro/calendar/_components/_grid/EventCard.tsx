@@ -10,11 +10,7 @@ import type {
 
 import type { CalendarEvent, EntityType } from '../../_types'
 
-import {
-  calendarStatusMeta,
-  eventAccentBgClassName,
-  eventCardClasses,
-} from '../../_utils/statusStyles'
+import { calendarStatusMeta } from '../../_utils/statusStyles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,6 +22,21 @@ type BeginResizeArgs = {
   startMinutes: number
   originalDuration: number
   columnTop: number
+}
+
+export type EventCardFallbackCopy = {
+  clientFallback: string
+  bookingFallback: string
+  blockFallback: string
+  bookingEyebrow: string
+  blockEyebrow: string
+  breakLabel: string
+  pendingBadge: string
+  blockTitle: string
+  bookingTitle: string
+  resizeLabelPrefix: string
+  serviceCountSingular: string
+  serviceCountPlural: string
 }
 
 type EventCardProps = {
@@ -49,9 +60,14 @@ type EventCardProps = {
   onDragStart: (event: CalendarEvent, dragEvent: DragEvent<HTMLDivElement>) => void
   onDropOnDayColumn: (day: Date, clientY: number, columnTop: number) => void
   onBeginResize: (args: BeginResizeArgs) => void
+
+  /**
+   * Bridge until event-card microcopy is moved into BrandProCalendarCopy.
+   */
+  copy?: Partial<EventCardFallbackCopy>
 }
 
-type EventCardCopy = {
+type EventCardDisplayCopy = {
   primary: string
   secondary: string
   eyebrow: string
@@ -64,11 +80,31 @@ type TextClampOptions = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const FALLBACK_CLIENT_LABEL = 'Client'
-const FALLBACK_BOOKING_LABEL = 'Appointment'
-const FALLBACK_BLOCK_LABEL = 'Personal time'
+const DEFAULT_COPY: EventCardFallbackCopy = {
+  clientFallback: 'Client',
+  bookingFallback: 'Appointment',
+  blockFallback: 'Personal time',
+  bookingEyebrow: 'Booking',
+  blockEyebrow: 'Break',
+  breakLabel: 'Break',
+  pendingBadge: 'Request',
+  blockTitle: 'Drag to move, drag bottom to resize. Click to edit block.',
+  bookingTitle: 'Drag to move, drag bottom to resize. Click to view booking.',
+  resizeLabelPrefix: 'Resize',
+  serviceCountSingular: 'service',
+  serviceCountPlural: 'services',
+}
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+function resolveCopy(
+  copy: Partial<EventCardFallbackCopy> | undefined,
+): EventCardFallbackCopy {
+  return {
+    ...DEFAULT_COPY,
+    ...copy,
+  }
+}
 
 function textClampStyle(options: TextClampOptions): CSSProperties {
   return {
@@ -83,55 +119,65 @@ function normalizeText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function serviceItemCountLabel(event: CalendarEvent): string | null {
+function serviceItemCountLabel(args: {
+  event: CalendarEvent
+  copy: EventCardFallbackCopy
+}): string | null {
+  const { event, copy } = args
+
   if (event.kind === 'BLOCK') return null
 
   const serviceCount = event.details.serviceItems.length
 
   if (serviceCount <= 1) return null
 
-  return `${serviceCount} services`
+  const label =
+    serviceCount === 1 ? copy.serviceCountSingular : copy.serviceCountPlural
+
+  return `${serviceCount} ${label}`
 }
 
 function buildEventCardCopy(args: {
   event: CalendarEvent
   statusLabel: string
-}): EventCardCopy {
-  const { event, statusLabel } = args
+  copy: EventCardFallbackCopy
+}): EventCardDisplayCopy {
+  const { event, statusLabel, copy } = args
 
   if (event.kind === 'BLOCK') {
     const note = normalizeText(event.note)
 
     return {
-      primary: note || FALLBACK_BLOCK_LABEL,
-      secondary: note ? 'Break' : '',
-      eyebrow: 'Break',
+      primary: note || copy.blockFallback,
+      secondary: note ? copy.breakLabel : '',
+      eyebrow: copy.blockEyebrow,
       status: statusLabel,
     }
   }
 
   const clientName = normalizeText(event.clientName)
   const bookingTitle = normalizeText(event.title)
-  const serviceCount = serviceItemCountLabel(event)
+  const serviceCount = serviceItemCountLabel({ event, copy })
 
   return {
-    primary: clientName || FALLBACK_CLIENT_LABEL,
-    secondary: bookingTitle || FALLBACK_BOOKING_LABEL,
-    eyebrow: serviceCount ?? 'Booking',
+    primary: clientName || copy.clientFallback,
+    secondary: bookingTitle || copy.bookingFallback,
+    eyebrow: serviceCount ?? copy.bookingEyebrow,
     status: statusLabel,
   }
 }
 
-function cardTitle(event: CalendarEvent): string {
-  if (event.kind === 'BLOCK') {
-    return 'Drag to move, drag bottom to resize. Click to edit block.'
-  }
+function cardTitle(args: {
+  event: CalendarEvent
+  copy: EventCardFallbackCopy
+}): string {
+  const { event, copy } = args
 
-  return 'Drag to move, drag bottom to resize. Click to view booking.'
+  return event.kind === 'BLOCK' ? copy.blockTitle : copy.bookingTitle
 }
 
 function cardAriaLabel(args: {
-  copy: EventCardCopy
+  copy: EventCardDisplayCopy
   timeLabel: string
 }): string {
   const { copy, timeLabel } = args
@@ -139,15 +185,6 @@ function cardAriaLabel(args: {
   return [copy.primary, copy.secondary, copy.status, timeLabel]
     .filter((part) => part.trim().length > 0)
     .join(', ')
-}
-
-function cardSurfaceOverlayClass(isBlocked: boolean): string {
-  return [
-    'before:pointer-events-none before:absolute before:inset-0',
-    isBlocked
-      ? 'before:bg-gradient-to-br before:from-paper/[0.06] before:to-transparent'
-      : 'before:bg-gradient-to-br before:from-paper/[0.12] before:via-transparent before:to-black/[0.10]',
-  ].join(' ')
 }
 
 function eventCardPositionStyle(args: {
@@ -177,80 +214,21 @@ function openOnKeyboard(args: {
   onClickEvent(eventId)
 }
 
-function innerPaddingClassName(args: {
-  compact: boolean
-  micro: boolean
-}): string {
-  const { compact, micro } = args
-
-  if (micro) return 'py-1 pl-2.5 pr-1.5'
-  if (compact) return 'py-1.5 pl-2.5 pr-2'
-
-  return 'py-2 pl-3 pr-2'
-}
-
-function rootClassName(args: {
-  isBlocked: boolean
-  border: string
-  ring?: string
-}): string {
-  const { isBlocked, border, ring } = args
-
-  return [
-    'absolute left-0.5 right-0.5 z-20 overflow-hidden rounded-[7px] border',
-    'md:left-1 md:right-1 md:rounded-xl',
-    'text-left text-paper',
-    'transition-transform duration-150 md:hover:scale-[1.01] active:scale-[0.995]',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    cardSurfaceOverlayClass(isBlocked),
-    border,
-    ring ?? '',
-  ].join(' ')
-}
-
-function primaryTextClassName(args: {
-  compact: boolean
-  micro: boolean
+function displayPrimaryText(args: {
+  value: string
   isBlocked: boolean
 }): string {
-  const { compact, micro, isBlocked } = args
+  const { value, isBlocked } = args
 
-  return [
-    'min-w-0 flex-1 truncate leading-none drop-shadow-[0_1px_1px_rgb(0_0_0_/_0.45)]',
-    isBlocked
-      ? 'font-mono uppercase tracking-[0.08em]'
-      : 'font-display italic tracking-[-0.025em]',
-    micro ? 'text-[9px]' : compact ? 'text-[10px]' : 'text-[11px]',
-    isBlocked ? 'font-bold text-paperDim' : 'font-semibold text-paper',
-  ].join(' ')
-}
-
-function secondaryTextClassName(compact: boolean): string {
-  return [
-    'mt-0.5 truncate font-sans leading-tight text-paperDim',
-    compact ? 'text-[8px]' : 'text-[9px]',
-  ].join(' ')
-}
-
-function timeTextClassName(compact: boolean): string {
-  return [
-    'mt-auto truncate font-mono uppercase tracking-[0.04em] text-paperMute',
-    compact ? 'pt-0.5 text-[7px]' : 'pt-1 text-[8px]',
-  ].join(' ')
+  return isBlocked ? value.toUpperCase() : value
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function PendingBadge() {
+function PendingBadge(props: { label: string }) {
   return (
-    <span
-      className={[
-        'hidden shrink-0 items-center rounded-sm border border-tonePending/35 bg-tonePending/15',
-        'px-1 py-px font-mono text-[7px] font-black uppercase tracking-[0.08em] text-tonePending',
-        'md:inline-flex',
-      ].join(' ')}
-    >
-      Request
+    <span className="brand-pro-calendar-event-badge" data-tone="pending">
+      {props.label}
     </span>
   )
 }
@@ -258,7 +236,7 @@ function PendingBadge() {
 function CompletedCheck() {
   return (
     <span
-      className="hidden shrink-0 text-fern md:inline-flex"
+      className="brand-pro-calendar-event-completed-check"
       aria-hidden="true"
     >
       <svg
@@ -298,16 +276,19 @@ export function EventCard(props: EventCardProps) {
     onDragStart,
     onDropOnDayColumn,
     onBeginResize,
+    copy: copyOverride,
   } = props
 
+  const eventCardCopy = resolveCopy(copyOverride)
   const isBlocked = ev.kind === 'BLOCK'
   const statusMeta = calendarStatusMeta({ status: ev.status, isBlocked })
-  const card = eventCardClasses({ status: ev.status, isBlocked })
-  const accent = eventAccentBgClassName({ status: ev.status, isBlocked })
-  const copy = buildEventCardCopy({ event: ev, statusLabel: statusMeta.label })
 
-  const isPending = statusMeta.tone === 'pending'
-  const isCompleted = statusMeta.tone === 'completed'
+  const displayCopy = buildEventCardCopy({
+    event: ev,
+    statusLabel: statusMeta.label,
+    copy: eventCardCopy,
+  })
+
   const canDragOrResize = apiId !== null
 
   return (
@@ -316,9 +297,12 @@ export function EventCard(props: EventCardProps) {
       data-calendar-event-kind={ev.kind}
       data-calendar-event-status={statusMeta.normalizedStatus || 'SCHEDULED'}
       data-calendar-event-tone={statusMeta.tone}
+      data-calendar-event-compact={compact ? 'true' : 'false'}
+      data-calendar-event-micro={micro ? 'true' : 'false'}
+      data-calendar-event-blocked={isBlocked ? 'true' : 'false'}
       role="button"
       tabIndex={0}
-      aria-label={cardAriaLabel({ copy, timeLabel })}
+      aria-label={cardAriaLabel({ copy: displayCopy, timeLabel })}
       draggable={canDragOrResize}
       onDragStart={(dragEvent) => {
         if (!apiId) {
@@ -342,6 +326,7 @@ export function EventCard(props: EventCardProps) {
       }}
       onClick={() => {
         if (suppressClickRef.current) return
+
         onClickEvent(ev.id)
       }}
       onKeyDown={(keyboardEvent) => {
@@ -352,79 +337,70 @@ export function EventCard(props: EventCardProps) {
           onClickEvent,
         })
       }}
-      className={rootClassName({
-        isBlocked,
-        border: card.border,
-        ring: card.ring,
-      })}
+      className="brand-pro-calendar-event-card brand-focus"
       style={eventCardPositionStyle({
         topPx,
         heightPx,
       })}
-      title={cardTitle(ev)}
+      title={cardTitle({ event: ev, copy: eventCardCopy })}
     >
       <div
-        className={['absolute inset-y-0 left-0 w-0.5 md:w-1', accent].join(' ')}
+        className="brand-pro-calendar-event-accent"
+        data-tone={statusMeta.tone}
         aria-hidden="true"
       />
 
       {isBlocked ? (
         <div
-          className="pointer-events-none absolute inset-0 rounded-[7px] border border-dashed border-paper/10 md:rounded-xl"
+          className="brand-pro-calendar-event-block-outline"
           aria-hidden="true"
         />
       ) : null}
 
-      <div
-        className={[
-          'relative flex h-full min-w-0 flex-col',
-          innerPaddingClassName({ compact, micro }),
-        ].join(' ')}
-      >
+      <div className="brand-pro-calendar-event-inner">
         {micro ? (
-          <div className="flex min-w-0 items-center gap-1">
-            <span
-              className={primaryTextClassName({
-                compact,
-                micro,
+          <div className="brand-pro-calendar-event-row">
+            <span className="brand-pro-calendar-event-primary">
+              {displayPrimaryText({
+                value: displayCopy.primary,
                 isBlocked,
               })}
-            >
-              {isBlocked ? copy.primary.toUpperCase() : copy.primary}
             </span>
           </div>
         ) : (
           <>
-            <div className="flex min-w-0 items-center gap-1">
+            <div className="brand-pro-calendar-event-row">
               <span
-                className={primaryTextClassName({
-                  compact,
-                  micro,
-                  isBlocked,
-                })}
+                className="brand-pro-calendar-event-primary"
                 style={textClampStyle({ lines: 1 })}
               >
-                {isBlocked ? copy.primary.toUpperCase() : copy.primary}
+                {displayPrimaryText({
+                  value: displayCopy.primary,
+                  isBlocked,
+                })}
               </span>
 
-              {isPending ? <PendingBadge /> : null}
-              {isCompleted ? <CompletedCheck /> : null}
+              {statusMeta.isPending ? (
+                <PendingBadge label={eventCardCopy.pendingBadge} />
+              ) : null}
+
+              {statusMeta.isCompleted ? <CompletedCheck /> : null}
             </div>
 
             {!isBlocked ? (
               <p
-                className={secondaryTextClassName(compact)}
+                className="brand-pro-calendar-event-secondary"
                 style={textClampStyle({ lines: compact ? 1 : 2 })}
               >
-                {copy.secondary}
+                {displayCopy.secondary}
               </p>
-            ) : copy.secondary ? (
-              <p className="mt-0.5 truncate font-mono text-[7px] uppercase tracking-[0.06em] text-paperMute">
-                {copy.secondary}
+            ) : displayCopy.secondary ? (
+              <p className="brand-pro-calendar-event-block-secondary">
+                {displayCopy.secondary}
               </p>
             ) : null}
 
-            <p className={timeTextClassName(compact)}>{timeLabel}</p>
+            <p className="brand-pro-calendar-event-time">{timeLabel}</p>
           </>
         )}
 
@@ -446,13 +422,9 @@ export function EventCard(props: EventCardProps) {
               columnTop: getColumnTop(),
             })
           }}
-          className={[
-            'absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize',
-            'bg-white/0 transition hover:bg-white/10',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-            canDragOrResize ? '' : 'cursor-default',
-          ].join(' ')}
-          aria-label={`Resize ${copy.primary}`}
+          className="brand-pro-calendar-event-resize brand-focus"
+          data-enabled={canDragOrResize ? 'true' : 'false'}
+          aria-label={`${eventCardCopy.resizeLabelPrefix} ${displayCopy.primary}`}
           disabled={!canDragOrResize}
         />
       </div>

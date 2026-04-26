@@ -5,22 +5,37 @@ import type { ViewMode } from '../_types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export type CalendarViewLabels = Record<ViewMode, string>
+
 type MobileCalendarControlsProps = {
   view: ViewMode
   setView: (view: ViewMode) => void
   headerLabel: string
+
+  todayLabel: string
+  previousLabel: string
+  nextLabel: string
+  viewTabsLabel: string
+  ariaLabel: string
+
   onToday: () => void
   onBack: () => void
   onNext: () => void
+
+  viewLabels: CalendarViewLabels
+  viewAriaLabels: CalendarViewLabels
 }
 
+type IconButtonDirection = 'previous' | 'next'
+
 type IconProps = {
-  className?: string
+  direction: IconButtonDirection
 }
 
 type ViewOption = {
   value: ViewMode
   label: string
+  ariaLabel: string
 }
 
 type ViewTabButtonProps = ViewOption & {
@@ -31,18 +46,27 @@ type ViewTabButtonProps = ViewOption & {
 type IconButtonProps = {
   label: string
   onClick: () => void
-  direction: 'previous' | 'next'
+  direction: IconButtonDirection
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VIEW_OPTIONS: ReadonlyArray<ViewOption> = [
-  { value: 'day', label: 'Day' },
-  { value: 'week', label: 'Week' },
-  { value: 'month', label: 'Month' },
-]
+const VIEW_ORDER: readonly ViewMode[] = ['day', 'week', 'month']
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+function buildViewOptions(args: {
+  labels: CalendarViewLabels
+  ariaLabels: CalendarViewLabels
+}): ViewOption[] {
+  const { labels, ariaLabels } = args
+
+  return VIEW_ORDER.map((value) => ({
+    value,
+    label: labels[value],
+    ariaLabel: ariaLabels[value],
+  }))
+}
 
 function viewTabClassName(): string {
   return 'brand-pro-calendar-segment-button brand-focus'
@@ -52,37 +76,31 @@ function iconButtonClassName(): string {
   return 'brand-pro-calendar-nav-button brand-focus'
 }
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
-
-function IconChevronLeft(props: IconProps) {
-  return (
-    <svg
-      viewBox="0 0 20 20"
-      fill="none"
-      aria-hidden="true"
-      className={props.className}
-    >
-      <path
-        d="M12.75 4.75L7.25 10L12.75 15.25"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
+function todayButtonClassName(): string {
+  return 'brand-pro-calendar-today-button brand-focus'
 }
 
-function IconChevronRight(props: IconProps) {
+// ─── Icons ────────────────────────────────────────────────────────────────────
+
+function IconChevron(props: IconProps) {
+  const { direction } = props
+
+  const path =
+    direction === 'previous'
+      ? 'M12.75 4.75L7.25 10L12.75 15.25'
+      : 'M7.25 4.75L12.75 10L7.25 15.25'
+
   return (
     <svg
       viewBox="0 0 20 20"
+      width="16"
+      height="16"
       fill="none"
       aria-hidden="true"
-      className={props.className}
+      focusable="false"
     >
       <path
-        d="M7.25 4.75L12.75 10L7.25 15.25"
+        d={path}
         stroke="currentColor"
         strokeWidth="1.8"
         strokeLinecap="round"
@@ -95,19 +113,20 @@ function IconChevronRight(props: IconProps) {
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function ViewTabButton(props: ViewTabButtonProps) {
-  const { value, label, active, onSelect } = props
+  const { value, label, ariaLabel, active, onSelect } = props
 
   return (
     <button
       type="button"
       role="tab"
       aria-selected={active}
-      aria-label={`Switch to ${label.toLowerCase()} view`}
+      aria-label={ariaLabel}
       onClick={() => {
         if (!active) onSelect(value)
       }}
       className={viewTabClassName()}
       data-active={active ? 'true' : 'false'}
+      data-calendar-view-option={value}
     >
       {label}
     </button>
@@ -124,12 +143,9 @@ function IconButton(props: IconButtonProps) {
       className={iconButtonClassName()}
       aria-label={label}
       title={label}
+      data-calendar-nav-direction={direction}
     >
-      {direction === 'previous' ? (
-        <IconChevronLeft className="h-4 w-4" />
-      ) : (
-        <IconChevronRight className="h-4 w-4" />
-      )}
+      <IconChevron direction={direction} />
     </button>
   )
 }
@@ -137,24 +153,44 @@ function IconButton(props: IconButtonProps) {
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export function MobileCalendarControls(props: MobileCalendarControlsProps) {
-  const { view, setView, headerLabel, onToday, onBack, onNext } = props
+  const {
+    view,
+    setView,
+    headerLabel,
+    onToday,
+    onBack,
+    onNext,
+    todayLabel,
+    previousLabel,
+    nextLabel,
+    viewTabsLabel,
+    viewLabels,
+    viewAriaLabels,
+    ariaLabel,
+  } = props
+
+  const viewOptions = buildViewOptions({
+    labels: viewLabels,
+    ariaLabels: viewAriaLabels,
+  })
 
   return (
     <div
       className="brand-pro-calendar-controls"
       role="group"
-      aria-label="Mobile calendar navigation"
+      aria-label={ariaLabel}
     >
       <div
         className="brand-pro-calendar-segment"
         role="tablist"
-        aria-label="Calendar view"
+        aria-label={viewTabsLabel}
       >
-        {VIEW_OPTIONS.map((option) => (
+        {viewOptions.map((option) => (
           <ViewTabButton
             key={option.value}
             value={option.value}
             label={option.label}
+            ariaLabel={option.ariaLabel}
             active={option.value === view}
             onSelect={setView}
           />
@@ -163,7 +199,7 @@ export function MobileCalendarControls(props: MobileCalendarControlsProps) {
 
       <div className="brand-pro-calendar-nav-row">
         <IconButton
-          label="Previous calendar range"
+          label={previousLabel}
           onClick={onBack}
           direction="previous"
         />
@@ -171,18 +207,14 @@ export function MobileCalendarControls(props: MobileCalendarControlsProps) {
         <button
           type="button"
           onClick={onToday}
-          className="brand-pro-calendar-today-button brand-focus"
-          aria-label="Go to today"
+          className={todayButtonClassName()}
+          aria-label={todayLabel}
           title={headerLabel}
         >
-          Today
+          {todayLabel}
         </button>
 
-        <IconButton
-          label="Next calendar range"
-          onClick={onNext}
-          direction="next"
-        />
+        <IconButton label={nextLabel} onClick={onNext} direction="next" />
       </div>
     </div>
   )

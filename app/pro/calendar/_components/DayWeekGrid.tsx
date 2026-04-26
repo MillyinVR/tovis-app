@@ -124,19 +124,6 @@ function visibleDayYmd(day: Date, timeZone: string): string {
   return ymdInTimeZone(new Date(day.getTime() + MIDDAY_MS), timeZone)
 }
 
-function shellStyle(): CSSProperties {
-  return {
-    backgroundColor: 'rgb(var(--bg-primary))',
-    borderColor: 'rgb(var(--surface-glass) / 0.12)',
-  }
-}
-
-function surfaceStyle(): CSSProperties {
-  return {
-    backgroundColor: 'rgb(var(--bg-primary))',
-  }
-}
-
 function timelineGridStyle(gridCols: string): CSSProperties {
   return {
     gridTemplateColumns: gridCols,
@@ -312,46 +299,25 @@ export function DayWeekGrid(props: DayWeekGridProps) {
 
   return (
     <section
-      className={[
-        'relative overflow-hidden border-y',
-        'md:rounded-[18px] md:border',
-        'md:shadow-[0_28px_70px_rgb(0_0_0_/_0.42)]',
-        '[--cal-time-col:32px] md:[--cal-time-col:72px]',
-      ].join(' ')}
-      style={shellStyle()}
-      data-calendar-shell="1"
+      className="brand-pro-calendar-timeline [--cal-time-col:32px] md:[--cal-time-col:72px]"
+      data-calendar-shell="timeline"
       data-calendar-view={view}
       data-calendar-days-visible={timelineDays.length}
     >
       <div
         ref={scrollRef}
-        className={[
-          'relative h-[calc(100dvh-17rem)] min-h-[430px]',
-          'overflow-auto overscroll-contain scroll-smooth',
-          'md:max-h-[calc(100vh-16rem)] md:min-h-[520px]',
-          'looksNoScrollbar',
-        ].join(' ')}
-        data-calendar-scroll="1"
+        className="brand-pro-calendar-timeline-scroll looksNoScrollbar"
+        data-calendar-scroll="timeline"
       >
         <div
-          className="relative min-w-0"
-          style={surfaceStyle()}
-          data-calendar-surface="1"
+          className="brand-pro-calendar-timeline-surface"
+          data-calendar-surface="timeline"
         >
-          <div
-            className="pointer-events-none absolute inset-0"
-            aria-hidden="true"
-          >
-            <div className="absolute inset-0 bg-black/[0.10]" />
-            <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-paper/[0.025] to-transparent" />
-            <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/20 to-transparent" />
-          </div>
-
           <div className="relative z-10">
             <div
               ref={header.ref}
               className="sticky top-0 z-[200]"
-              data-calendar-header="1"
+              data-calendar-header="timeline"
             >
               <DayHeaderRow
                 visibleDays={timelineDays}

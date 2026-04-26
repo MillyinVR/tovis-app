@@ -1,18 +1,13 @@
 // app/pro/calendar/_components/ManagementModal.tsx
 'use client'
 
-import { useEffect, useMemo, useState }
-from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 
 import type { CalendarEvent, ManagementKey, ManagementLists } from '../_types'
 
 import { isBlockedEvent } from '../_utils/calendarMath'
-import {
-  calendarStatusMeta,
-  eventBadgeClassName,
-  eventChipClassName,
-} from '../_utils/statusStyles'
+import { calendarStatusMeta } from '../_utils/statusStyles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +26,11 @@ type ManagementModalProps = {
   onDenyBookingId?: (bookingId: string) => void | Promise<void>
   actionBusyId?: string | null
   actionError?: string | null
+
+  /**
+   * Bridge until this modal copy moves fully into BrandProCalendarCopy.
+   */
+  copy?: ManagementModalCopyOverride
 }
 
 type ManagementTab = {
@@ -41,6 +41,44 @@ type ManagementTab = {
   emptyTitle: string
   emptyBody: string
 }
+
+type ManagementTabCopy = Omit<ManagementTab, 'key'>
+
+type ManagementModalCopy = {
+  eyebrow: string
+  closeLabel: string
+
+  blockTimeAction: string
+  blockFullDayAction: string
+
+  reviewRescheduleAction: string
+  openAction: string
+  messageAction: string
+
+  cancelAction: string
+  denyAction: string
+  confirmDenyAction: string
+  approveAction: string
+  workingLabel: string
+
+  timeUnavailable: string
+  blockedTimeTitle: string
+  personalTimeFallback: string
+  appointmentFallback: string
+  clientFallback: string
+  blockedInitials: string
+
+  pressEscPrefix: string
+  pressEscKeyLabel: string
+  pressEscSuffix: string
+
+  tabs: Record<ManagementKey, ManagementTabCopy>
+}
+
+type ManagementModalCopyOverride =
+  Partial<Omit<ManagementModalCopy, 'tabs'>> & {
+    tabs?: Partial<Record<ManagementKey, Partial<ManagementTabCopy>>>
+  }
 
 type EventRowCopy = {
   title: string
@@ -61,51 +99,153 @@ type ButtonProps = {
   title?: string
 }
 
+type ActionLinkProps = {
+  href: string
+  children: ReactNode
+  tone?: ButtonTone
+}
+
+type ManagementEventRowProps = {
+  event: CalendarEvent
+  activeKey: ManagementKey
+  viewportTimeZone: string
+  copy: ManagementModalCopy
+  confirmDenyId: string | null
+  actionBusyId: string | null
+  onSetConfirmDenyId: (id: string | null) => void
+  onPickEvent: (event: CalendarEvent) => void
+  onApproveBookingId?: (bookingId: string) => void | Promise<void>
+  onDenyBookingId?: (bookingId: string) => void | Promise<void>
+}
+
+type ModerationActionsProps = {
+  eventId: string
+  bookingId: string | null
+  busy: boolean
+  copy: ManagementModalCopy
+  confirmDenyId: string | null
+  onSetConfirmDenyId: (id: string | null) => void
+  onApproveBookingId?: (bookingId: string) => void | Promise<void>
+  onDenyBookingId?: (bookingId: string) => void | Promise<void>
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MANAGEMENT_TABS: ReadonlyArray<ManagementTab> = [
-  {
-    key: 'todaysBookings',
-    title: "Today's bookings",
-    shortTitle: 'Today',
-    description: 'Accepted and completed appointments happening today.',
-    emptyTitle: 'No bookings today.',
-    emptyBody: 'Nothing is scheduled for the selected calendar day.',
-  },
-  {
-    key: 'pendingRequests',
-    title: 'Pending requests',
-    shortTitle: 'Pending',
-    description: 'Client requests waiting for approval or denial.',
-    emptyTitle: 'No pending requests.',
-    emptyBody: 'Freshly calm. Suspicious, but we will take it.',
-  },
-  {
-    key: 'waitlistToday',
-    title: 'Waitlist today',
-    shortTitle: 'Waitlist',
-    description: 'Clients trying to get into an opening today.',
-    emptyTitle: 'No waitlist entries.',
-    emptyBody:
-      'When waitlist data is available, same-day holds will appear here.',
-  },
-  {
-    key: 'blockedToday',
-    title: 'Blocked time today',
-    shortTitle: 'Blocked',
-    description:
-      'Time you blocked off for breaks, admin work, or personal time.',
-    emptyTitle: 'No blocked time.',
-    emptyBody: 'Use block time to protect breaks or close off the full day.',
-  },
+const MANAGEMENT_KEY_ORDER: readonly ManagementKey[] = [
+  'todaysBookings',
+  'pendingRequests',
+  'waitlistToday',
+  'blockedToday',
 ]
+
+const DEFAULT_COPY: ManagementModalCopy = {
+  eyebrow: '◆ Calendar management',
+  closeLabel: 'Close',
+
+  blockTimeAction: '+ Block time',
+  blockFullDayAction: 'Block full day',
+
+  reviewRescheduleAction: 'Review / Reschedule',
+  openAction: 'Open',
+  messageAction: 'Message',
+
+  cancelAction: 'Cancel',
+  denyAction: 'Deny',
+  confirmDenyAction: 'Confirm deny',
+  approveAction: 'Approve',
+  workingLabel: 'Working…',
+
+  timeUnavailable: 'Time unavailable',
+  blockedTimeTitle: 'Blocked time',
+  personalTimeFallback: 'Personal time',
+  appointmentFallback: 'Appointment',
+  clientFallback: 'Client',
+  blockedInitials: '⏱',
+
+  pressEscPrefix: 'Press',
+  pressEscKeyLabel: 'Esc',
+  pressEscSuffix: 'to close.',
+
+  tabs: {
+    todaysBookings: {
+      title: "Today's bookings",
+      shortTitle: 'Today',
+      description: 'Accepted and completed appointments happening today.',
+      emptyTitle: 'No bookings today.',
+      emptyBody: 'Nothing is scheduled for the selected calendar day.',
+    },
+    pendingRequests: {
+      title: 'Pending requests',
+      shortTitle: 'Pending',
+      description: 'Client requests waiting for approval or denial.',
+      emptyTitle: 'No pending requests.',
+      emptyBody: 'Freshly calm. Suspicious, but we will take it.',
+    },
+    waitlistToday: {
+      title: 'Waitlist today',
+      shortTitle: 'Waitlist',
+      description: 'Clients trying to get into an opening today.',
+      emptyTitle: 'No waitlist entries.',
+      emptyBody:
+        'When waitlist data is available, same-day holds will appear here.',
+    },
+    blockedToday: {
+      title: 'Blocked time today',
+      shortTitle: 'Blocked',
+      description:
+        'Time you blocked off for breaks, admin work, or personal time.',
+      emptyTitle: 'No blocked time.',
+      emptyBody: 'Use block time to protect breaks or close off the full day.',
+    },
+  },
+}
 
 const PENDING_STATUS_PRIORITY = 'PENDING'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function tabForKey(key: ManagementKey): ManagementTab {
-  return MANAGEMENT_TABS.find((tab) => tab.key === key) ?? MANAGEMENT_TABS[0]
+function resolveCopy(
+  override: ManagementModalCopyOverride | undefined,
+): ManagementModalCopy {
+  return {
+    ...DEFAULT_COPY,
+    ...override,
+    tabs: {
+      todaysBookings: {
+        ...DEFAULT_COPY.tabs.todaysBookings,
+        ...override?.tabs?.todaysBookings,
+      },
+      pendingRequests: {
+        ...DEFAULT_COPY.tabs.pendingRequests,
+        ...override?.tabs?.pendingRequests,
+      },
+      waitlistToday: {
+        ...DEFAULT_COPY.tabs.waitlistToday,
+        ...override?.tabs?.waitlistToday,
+      },
+      blockedToday: {
+        ...DEFAULT_COPY.tabs.blockedToday,
+        ...override?.tabs?.blockedToday,
+      },
+    },
+  }
+}
+
+function managementTabs(copy: ManagementModalCopy): ManagementTab[] {
+  return MANAGEMENT_KEY_ORDER.map((key) => ({
+    key,
+    ...copy.tabs[key],
+  }))
+}
+
+function tabForKey(
+  key: ManagementKey,
+  tabs: readonly ManagementTab[],
+): ManagementTab {
+  return tabs.find((tab) => tab.key === key) ?? tabs[0] ?? {
+    key: 'todaysBookings',
+    ...DEFAULT_COPY.tabs.todaysBookings,
+  }
 }
 
 function managementListForKey(
@@ -143,6 +283,7 @@ function normalizeText(value: string | null | undefined): string {
 
 function initialsFromName(name: string): string {
   const trimmedName = name.trim()
+
   if (!trimmedName) return '?'
 
   const parts = trimmedName.split(/\s+/)
@@ -172,14 +313,18 @@ function buildTimeFormatter(timeZone: string): Intl.DateTimeFormat {
   })
 }
 
-function formatStartsAt(startsAt: string, timeZone: string): string {
-  const date = new Date(startsAt)
+function formatStartsAt(args: {
+  startsAt: string
+  timeZone: string
+  fallback: string
+}): string {
+  const date = new Date(args.startsAt)
 
   if (!Number.isFinite(date.getTime())) {
-    return 'Time unavailable'
+    return args.fallback
   }
 
-  return buildTimeFormatter(timeZone).format(date)
+  return buildTimeFormatter(args.timeZone).format(date)
 }
 
 function startMs(event: CalendarEvent): number {
@@ -188,8 +333,12 @@ function startMs(event: CalendarEvent): number {
   return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER
 }
 
+function normalizeStatus(value: string | null | undefined): string {
+  return typeof value === 'string' ? value.trim().toUpperCase() : ''
+}
+
 function statusPriority(event: CalendarEvent): number {
-  return event.status.toUpperCase() === PENDING_STATUS_PRIORITY ? 0 : 1
+  return normalizeStatus(event.status) === PENDING_STATUS_PRIORITY ? 0 : 1
 }
 
 function sortManagementEvents(
@@ -214,8 +363,9 @@ function sortManagementEvents(
 function buildEventRowCopy(args: {
   event: CalendarEvent
   viewportTimeZone: string
+  copy: ManagementModalCopy
 }): EventRowCopy {
-  const { event, viewportTimeZone } = args
+  const { event, viewportTimeZone, copy } = args
   const isBlock = isBlockedEvent(event)
 
   const statusMeta = calendarStatusMeta({
@@ -224,16 +374,20 @@ function buildEventRowCopy(args: {
   })
 
   const timeZone = eventDisplayTimeZone(event, viewportTimeZone)
-  const timeLabel = formatStartsAt(event.startsAt, timeZone)
+  const timeLabel = formatStartsAt({
+    startsAt: event.startsAt,
+    timeZone,
+    fallback: copy.timeUnavailable,
+  })
 
   if (event.kind === 'BLOCK') {
     const note = normalizeText(event.note)
     const title = normalizeText(event.title)
 
     return {
-      title: 'Blocked time',
-      subtitle: `${note || title || 'Personal time'} · ${timeLabel}`,
-      initials: '⏱',
+      title: copy.blockedTimeTitle,
+      subtitle: `${note || title || copy.personalTimeFallback} · ${timeLabel}`,
+      initials: copy.blockedInitials,
       timeLabel,
       statusLabel: statusMeta.label,
     }
@@ -243,8 +397,8 @@ function buildEventRowCopy(args: {
   const title = normalizeText(event.title)
 
   return {
-    title: title || 'Appointment',
-    subtitle: `${clientName || 'Client'} · ${timeLabel}`,
+    title: title || copy.appointmentFallback,
+    subtitle: `${clientName || copy.clientFallback} · ${timeLabel}`,
     initials: initialsFromName(clientName),
     timeLabel,
     statusLabel: statusMeta.label,
@@ -283,119 +437,6 @@ function lockBodyScroll(open: boolean): (() => void) | undefined {
   }
 }
 
-// ─── Class helpers ────────────────────────────────────────────────────────────
-
-function buttonClassName(tone: ButtonTone = 'default'): string {
-  const base = [
-    'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
-    'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-50',
-  ].join(' ')
-
-  if (tone === 'primary') {
-    return [
-      base,
-      'border border-accentPrimary/30',
-      'bg-[rgb(var(--accent-primary))] text-[rgb(var(--bg-primary))]',
-      'hover:bg-[rgb(var(--accent-primary-hover))]',
-    ].join(' ')
-  }
-
-  if (tone === 'danger') {
-    return [
-      base,
-      'border border-toneDanger/30 bg-toneDanger/10 text-toneDanger hover:bg-toneDanger/15',
-    ].join(' ')
-  }
-
-  if (tone === 'ghost') {
-    return [
-      base,
-      'border border-[var(--line)] bg-transparent',
-      'text-[rgb(var(--text-muted))]',
-      'hover:bg-[rgb(var(--surface-glass)_/_0.05)] hover:text-[rgb(var(--text-primary))]',
-    ].join(' ')
-  }
-
-  return [
-    base,
-    'border border-[var(--line)]',
-    'bg-[rgb(var(--surface-glass)_/_0.04)] text-[rgb(var(--text-primary))]',
-    'hover:bg-[rgb(var(--surface-glass)_/_0.07)]',
-  ].join(' ')
-}
-
-function tabButtonClassName(active: boolean): string {
-  return [
-    'shrink-0 rounded-full border px-3 py-2',
-    'font-mono text-[10px] font-black uppercase tracking-[0.08em]',
-    'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    active
-      ? [
-          'border-[rgb(var(--text-primary))]',
-          'bg-[rgb(var(--text-primary))]',
-          'text-[rgb(var(--bg-primary))]',
-        ].join(' ')
-      : [
-          'border-[var(--line)] bg-transparent',
-          'text-[rgb(var(--text-muted))]',
-          'hover:bg-[rgb(var(--surface-glass)_/_0.05)] hover:text-[rgb(var(--text-primary))]',
-        ].join(' '),
-  ].join(' ')
-}
-
-function eventArticleClassName(args: {
-  status: string
-  isBlocked: boolean
-}): string {
-  const { status, isBlocked } = args
-
-  return [
-    'rounded-2xl border p-4 transition',
-    'bg-[rgb(var(--surface-glass)_/_0.03)]',
-    'hover:bg-[rgb(var(--surface-glass)_/_0.05)]',
-    eventChipClassName({ status, isBlocked }),
-  ].join(' ')
-}
-
-function modalPanelClassName(): string {
-  return [
-    'w-full overflow-hidden rounded-t-[24px]',
-    'border border-[var(--line-strong)]',
-    'bg-[rgb(var(--bg-primary))]',
-    'shadow-[0_28px_80px_rgb(0_0_0_/_0.60)]',
-    'sm:max-w-[56rem] sm:rounded-[24px]',
-  ].join(' ')
-}
-
-function modalHeaderClassName(): string {
-  return [
-    'sticky top-0 z-10 border-b border-[var(--line-strong)]',
-    'bg-[rgb(var(--bg-primary)_/_0.95)] backdrop-blur-xl',
-  ].join(' ')
-}
-
-function modalFooterClassName(): string {
-  return [
-    'border-t border-[var(--line-strong)]',
-    'bg-[rgb(var(--bg-primary)_/_0.90)] px-4 py-3',
-    'font-mono text-[10px] font-semibold uppercase tracking-[0.10em]',
-    'text-[rgb(var(--text-muted))] backdrop-blur-xl sm:px-5',
-  ].join(' ')
-}
-
-function mutedTextClassName(): string {
-  return 'text-[rgb(var(--text-muted))]'
-}
-
-function primaryTextClassName(): string {
-  return 'text-[rgb(var(--text-primary))]'
-}
-
-function secondaryTextClassName(): string {
-  return 'text-[rgb(var(--text-secondary))]'
-}
-
 // ─── Small components ─────────────────────────────────────────────────────────
 
 function ActionButton(props: ButtonProps) {
@@ -413,7 +454,8 @@ function ActionButton(props: ButtonProps) {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={buttonClassName(tone)}
+      className="brand-pro-calendar-management-button brand-focus"
+      data-tone={tone}
       aria-label={ariaLabel}
       title={title}
     >
@@ -422,17 +464,46 @@ function ActionButton(props: ButtonProps) {
   )
 }
 
-function ActionLink(props: {
-  href: string
-  children: ReactNode
-  tone?: ButtonTone
-}) {
+function ActionLink(props: ActionLinkProps) {
   const { href, children, tone = 'ghost' } = props
 
   return (
-    <a href={href} className={buttonClassName(tone)}>
+    <a
+      href={href}
+      className="brand-pro-calendar-management-button brand-focus"
+      data-tone={tone}
+    >
       {children}
     </a>
+  )
+}
+
+function AvatarInitials(props: { initials: string }) {
+  const { initials } = props
+
+  return (
+    <div
+      className="brand-pro-calendar-management-avatar"
+      aria-hidden="true"
+    >
+      {initials}
+    </div>
+  )
+}
+
+function EmptyManagementState(props: { tab: ManagementTab }) {
+  const { tab } = props
+
+  return (
+    <div className="brand-pro-calendar-management-empty">
+      <p className="brand-pro-calendar-management-empty-title">
+        {tab.emptyTitle}
+      </p>
+
+      <p className="brand-pro-calendar-management-empty-body">
+        {tab.emptyBody}
+      </p>
+    </div>
   )
 }
 
@@ -453,11 +524,14 @@ export function ManagementModal(props: ManagementModalProps) {
     onDenyBookingId,
     actionBusyId = null,
     actionError = null,
+    copy: copyOverride,
   } = props
 
   const [confirmDenyId, setConfirmDenyId] = useState<string | null>(null)
 
-  const activeTab = tabForKey(activeKey)
+  const copy = useMemo(() => resolveCopy(copyOverride), [copyOverride])
+  const tabs = useMemo(() => managementTabs(copy), [copy])
+  const activeTab = tabForKey(activeKey, tabs)
 
   const sortedList = useMemo(
     () =>
@@ -479,41 +553,39 @@ export function ManagementModal(props: ManagementModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-[1100] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-6"
+      className="brand-pro-calendar-management-overlay"
       onMouseDown={onClose}
     >
       <div
-        className={modalPanelClassName()}
+        className="brand-pro-calendar-management-panel"
         onMouseDown={stopDialogMouseDown}
         role="dialog"
         aria-modal="true"
         aria-labelledby="calendar-management-title"
       >
-        <div className={modalHeaderClassName()}>
-          <div className="flex items-start justify-between gap-3 p-4 sm:p-5">
-            <div className="min-w-0">
-              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[rgb(var(--accent-primary-hover))]">
-                ◆ Calendar management
+        <div className="brand-pro-calendar-management-header">
+          <div className="brand-pro-calendar-management-heading-row">
+            <div className="brand-pro-calendar-management-heading-copy">
+              <p className="brand-pro-calendar-management-eyebrow">
+                {copy.eyebrow}
               </p>
 
               <h2
                 id="calendar-management-title"
-                className="mt-1 truncate font-display text-3xl font-semibold italic tracking-[-0.05em] text-[rgb(var(--text-primary))]"
+                className="brand-pro-calendar-management-title"
               >
                 {activeTab.title}
               </h2>
 
-              <p
-                className={[
-                  'mt-1 max-w-2xl text-sm leading-6',
-                  secondaryTextClassName(),
-                ].join(' ')}
-              >
+              <p className="brand-pro-calendar-management-description">
                 {activeTab.description}
               </p>
 
               {actionError ? (
-                <div className="mt-3 rounded-xl border border-toneDanger/30 bg-toneDanger/10 px-3 py-2 text-sm font-semibold text-toneDanger">
+                <div
+                  className="brand-pro-calendar-management-error"
+                  role="status"
+                >
                   {actionError}
                 </div>
               ) : null}
@@ -525,15 +597,15 @@ export function ManagementModal(props: ManagementModalProps) {
                 setConfirmDenyId(null)
                 onClose()
               }}
-              ariaLabel="Close calendar management"
+              ariaLabel={copy.closeLabel}
             >
-              Close
+              {copy.closeLabel}
             </ActionButton>
           </div>
 
-          <div className="px-4 pb-4 sm:px-5">
-            <div className="flex gap-2 overflow-x-auto pb-1 looksNoScrollbar">
-              {MANAGEMENT_TABS.map((tab) => {
+          <div className="brand-pro-calendar-management-tabs-wrap">
+            <div className="brand-pro-calendar-management-tabs looksNoScrollbar">
+              {tabs.map((tab) => {
                 const active = activeKey === tab.key
                 const count = managementListForKey(management, tab.key).length
 
@@ -542,17 +614,12 @@ export function ManagementModal(props: ManagementModalProps) {
                     key={tab.key}
                     type="button"
                     onClick={() => onSetKey(tab.key)}
-                    className={tabButtonClassName(active)}
+                    className="brand-pro-calendar-management-tab brand-focus"
+                    data-active={active ? 'true' : 'false'}
                     aria-pressed={active}
                   >
                     {tab.shortTitle}{' '}
-                    <span
-                      className={
-                        active
-                          ? 'text-[rgb(var(--bg-primary)_/_0.60)]'
-                          : mutedTextClassName()
-                      }
-                    >
+                    <span className="brand-pro-calendar-management-tab-count">
                       ({count})
                     </span>
                   </button>
@@ -562,7 +629,7 @@ export function ManagementModal(props: ManagementModalProps) {
           </div>
 
           {activeKey === 'blockedToday' ? (
-            <div className="flex flex-wrap gap-2 border-t border-[var(--line)] px-4 py-3 sm:px-5">
+            <div className="brand-pro-calendar-management-block-actions">
               <ActionButton
                 tone="primary"
                 onClick={() => {
@@ -570,7 +637,7 @@ export function ManagementModal(props: ManagementModalProps) {
                   onCreateBlockNow()
                 }}
               >
-                + Block time
+                {copy.blockTimeAction}
               </ActionButton>
 
               <ActionButton
@@ -579,23 +646,24 @@ export function ManagementModal(props: ManagementModalProps) {
                   onBlockFullDayToday()
                 }}
               >
-                Block full day
+                {copy.blockFullDayAction}
               </ActionButton>
             </div>
           ) : null}
         </div>
 
-        <div className="max-h-[72vh] overflow-auto p-4 sm:p-5">
+        <div className="brand-pro-calendar-management-body">
           {sortedList.length === 0 ? (
             <EmptyManagementState tab={activeTab} />
           ) : (
-            <div className="grid gap-3">
+            <div className="brand-pro-calendar-management-list">
               {sortedList.map((event) => (
                 <ManagementEventRow
                   key={event.id}
                   event={event}
                   activeKey={activeKey}
                   viewportTimeZone={viewportTimeZone}
+                  copy={copy}
                   confirmDenyId={confirmDenyId}
                   actionBusyId={actionBusyId}
                   onSetConfirmDenyId={setConfirmDenyId}
@@ -608,8 +676,12 @@ export function ManagementModal(props: ManagementModalProps) {
           )}
         </div>
 
-        <div className={modalFooterClassName()}>
-          Press <span className={primaryTextClassName()}>Esc</span> to close.
+        <div className="brand-pro-calendar-management-footer">
+          {copy.pressEscPrefix}{' '}
+          <span className="brand-pro-calendar-management-kbd">
+            {copy.pressEscKeyLabel}
+          </span>{' '}
+          {copy.pressEscSuffix}
         </div>
       </div>
     </div>
@@ -618,21 +690,12 @@ export function ManagementModal(props: ManagementModalProps) {
 
 // ─── Row components ───────────────────────────────────────────────────────────
 
-function ManagementEventRow(props: {
-  event: CalendarEvent
-  activeKey: ManagementKey
-  viewportTimeZone: string
-  confirmDenyId: string | null
-  actionBusyId: string | null
-  onSetConfirmDenyId: (id: string | null) => void
-  onPickEvent: (event: CalendarEvent) => void
-  onApproveBookingId?: (bookingId: string) => void | Promise<void>
-  onDenyBookingId?: (bookingId: string) => void | Promise<void>
-}) {
+function ManagementEventRow(props: ManagementEventRowProps) {
   const {
     event,
     activeKey,
     viewportTimeZone,
+    copy,
     confirmDenyId,
     actionBusyId,
     onSetConfirmDenyId,
@@ -647,6 +710,12 @@ function ManagementEventRow(props: {
   const rowCopy = buildEventRowCopy({
     event,
     viewportTimeZone,
+    copy,
+  })
+
+  const statusMeta = calendarStatusMeta({
+    status: event.status,
+    isBlocked: isBlock,
   })
 
   const busy = Boolean(actionBusyId && bookingId && actionBusyId === bookingId)
@@ -658,58 +727,43 @@ function ManagementEventRow(props: {
 
   return (
     <article
-      className={eventArticleClassName({
-        status: event.status,
-        isBlocked: isBlock,
-      })}
+      className="brand-pro-calendar-management-row"
+      data-calendar-event-kind={event.kind}
+      data-calendar-event-status={statusMeta.normalizedStatus || 'SCHEDULED'}
+      data-calendar-event-tone={statusMeta.tone}
+      data-calendar-event-blocked={isBlock ? 'true' : 'false'}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-3">
+      <div className="brand-pro-calendar-management-row-main">
+        <div className="brand-pro-calendar-management-row-copy">
           <AvatarInitials initials={rowCopy.initials} />
 
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="truncate font-display text-lg font-semibold italic tracking-[-0.04em] text-[rgb(var(--text-primary))]">
+          <div className="brand-pro-calendar-management-row-text">
+            <div className="brand-pro-calendar-management-row-titleline">
+              <h3 className="brand-pro-calendar-management-row-title">
                 {rowCopy.title}
               </h3>
 
               <span
-                className={[
-                  'rounded-full border px-2 py-0.5',
-                  'font-mono text-[9px] font-black uppercase tracking-[0.08em]',
-                  eventBadgeClassName({
-                    status: event.status,
-                    isBlocked: isBlock,
-                  }),
-                ].join(' ')}
+                className="brand-pro-calendar-management-status-badge"
+                data-tone={statusMeta.tone}
               >
                 {rowCopy.statusLabel}
               </span>
             </div>
 
-            <p
-              className={[
-                'mt-1 truncate text-sm font-semibold',
-                secondaryTextClassName(),
-              ].join(' ')}
-            >
+            <p className="brand-pro-calendar-management-row-subtitle">
               {rowCopy.subtitle}
             </p>
           </div>
         </div>
 
-        <p
-          className={[
-            'hidden shrink-0 text-right font-mono text-[10px] font-black uppercase tracking-[0.08em] sm:block',
-            mutedTextClassName(),
-          ].join(' ')}
-        >
+        <p className="brand-pro-calendar-management-row-time">
           {rowCopy.timeLabel}
         </p>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-2">
+      <div className="brand-pro-calendar-management-row-actions">
+        <div className="brand-pro-calendar-management-row-primary-actions">
           <ActionButton
             onClick={() => {
               onSetConfirmDenyId(null)
@@ -717,13 +771,13 @@ function ManagementEventRow(props: {
             }}
           >
             {activeKey === 'pendingRequests' && !isBlock
-              ? 'Review / Reschedule'
-              : 'Open'}
+              ? copy.reviewRescheduleAction
+              : copy.openAction}
           </ActionButton>
 
           {messageBookingId ? (
             <ActionLink href={messageHrefForBooking(messageBookingId)}>
-              Message
+              {copy.messageAction}
             </ActionLink>
           ) : null}
         </div>
@@ -733,6 +787,7 @@ function ManagementEventRow(props: {
             eventId={event.id}
             bookingId={bookingId}
             busy={busy}
+            copy={copy}
             confirmDenyId={confirmDenyId}
             onSetConfirmDenyId={onSetConfirmDenyId}
             onApproveBookingId={onApproveBookingId}
@@ -744,36 +799,12 @@ function ManagementEventRow(props: {
   )
 }
 
-function AvatarInitials(props: { initials: string }) {
-  const { initials } = props
-
-  return (
-    <div
-      className={[
-        'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
-        'border border-[var(--line)] bg-[rgb(var(--bg-secondary))]',
-        'font-mono text-xs font-black text-[rgb(var(--text-primary))]',
-      ].join(' ')}
-      aria-hidden="true"
-    >
-      {initials}
-    </div>
-  )
-}
-
-function ModerationActions(props: {
-  eventId: string
-  bookingId: string | null
-  busy: boolean
-  confirmDenyId: string | null
-  onSetConfirmDenyId: (id: string | null) => void
-  onApproveBookingId?: (bookingId: string) => void | Promise<void>
-  onDenyBookingId?: (bookingId: string) => void | Promise<void>
-}) {
+function ModerationActions(props: ModerationActionsProps) {
   const {
     eventId,
     bookingId,
     busy,
+    copy,
     confirmDenyId,
     onSetConfirmDenyId,
     onApproveBookingId,
@@ -783,7 +814,7 @@ function ModerationActions(props: {
   const confirmingDeny = confirmDenyId === eventId
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="brand-pro-calendar-management-moderation-actions">
       {confirmingDeny ? (
         <>
           <ActionButton
@@ -791,7 +822,7 @@ function ModerationActions(props: {
             disabled={busy}
             onClick={() => onSetConfirmDenyId(null)}
           >
-            Cancel
+            {copy.cancelAction}
           </ActionButton>
 
           <ActionButton
@@ -804,7 +835,7 @@ function ModerationActions(props: {
               onSetConfirmDenyId(null)
             }}
           >
-            {busy ? 'Working…' : 'Confirm deny'}
+            {busy ? copy.workingLabel : copy.confirmDenyAction}
           </ActionButton>
         </>
       ) : (
@@ -813,7 +844,7 @@ function ModerationActions(props: {
           disabled={busy || !onDenyBookingId || !bookingId}
           onClick={() => onSetConfirmDenyId(eventId)}
         >
-          Deny
+          {copy.denyAction}
         </ActionButton>
       )}
 
@@ -828,29 +859,8 @@ function ModerationActions(props: {
           void onApproveBookingId(bookingId)
         }}
       >
-        {busy ? 'Working…' : 'Approve'}
+        {busy ? copy.workingLabel : copy.approveAction}
       </ActionButton>
-    </div>
-  )
-}
-
-function EmptyManagementState(props: { tab: ManagementTab }) {
-  const { tab } = props
-
-  return (
-    <div className="rounded-2xl border border-[var(--line)] bg-[rgb(var(--surface-glass)_/_0.03)] p-5">
-      <p className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-[rgb(var(--text-primary))]">
-        {tab.emptyTitle}
-      </p>
-
-      <p
-        className={[
-          'mt-2 max-w-xl text-sm leading-6',
-          secondaryTextClassName(),
-        ].join(' ')}
-      >
-        {tab.emptyBody}
-      </p>
     </div>
   )
 }

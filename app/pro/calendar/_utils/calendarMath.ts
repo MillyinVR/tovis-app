@@ -7,7 +7,22 @@ import type {
   WorkingHoursJson,
 } from '../_types'
 
+import {
+  DEFAULT_CALENDAR_STEP_MINUTES,
+  MINUTES_PER_DAY,
+  MINUTES_PER_HOUR,
+} from '../_constants'
+
 import { addDays, clamp, startOfDay } from './date'
+
+import {
+  DEFAULT_BLOCK_CLIENT_NAME,
+  DEFAULT_BLOCK_TITLE,
+  DEFAULT_BOOKING_SERVICE_NAME,
+  CALENDAR_MS_PER_MINUTE,
+} from '@/lib/calendar/constants'
+
+import { overlapMinutes } from '@/lib/calendar/overlap'
 
 import {
   getWorkingWindowForDay as getWorkingWindowForDayLib,
@@ -16,13 +31,10 @@ import {
 
 export const PX_PER_MINUTE = 1.5
 
-export const MINUTES_PER_HOUR = 60
-export const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR
-
 /**
  * Default fallback only when a location-specific step is missing or invalid.
  */
-export const DEFAULT_STEP_MINUTES = 15
+export const DEFAULT_STEP_MINUTES = DEFAULT_CALENDAR_STEP_MINUTES
 export const MIN_STEP_MINUTES = 5
 export const MAX_STEP_MINUTES = 60
 export const DEFAULT_DURATION_MINUTES = 60
@@ -34,11 +46,13 @@ type WorkingWindow = {
   key: WeekdayKey
 }
 
+// ─── Primitive helpers ────────────────────────────────────────────────────────
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-function validDate(value: string | Date) {
+function validDate(value: string | Date): Date | null {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value)
 
   return Number.isFinite(date.getTime()) ? date : null
@@ -56,22 +70,26 @@ function weekdayKeyFromUnknown(value: unknown): WeekdayKey | null {
   return null
 }
 
-function eventIdText(event: CalendarEvent) {
+function eventIdText(event: CalendarEvent): string {
   return typeof event.id === 'string' ? event.id : ''
 }
 
-function rawDurationMinutes(startsAt: string | Date, endsAt: string | Date) {
+function rawDurationMinutes(startsAt: string | Date, endsAt: string | Date): number {
   const start = validDate(startsAt)
   const end = validDate(endsAt)
 
   if (!start || !end) return DEFAULT_DURATION_MINUTES
 
-  const minutes = Math.round((end.getTime() - start.getTime()) / 60_000)
+  const minutes = Math.round(
+    (end.getTime() - start.getTime()) / CALENDAR_MS_PER_MINUTE,
+  )
 
   return Number.isFinite(minutes) && minutes > 0
     ? minutes
     : DEFAULT_DURATION_MINUTES
 }
+
+// ─── Step / duration helpers ──────────────────────────────────────────────────
 
 export function normalizeStepMinutes(stepMinutes?: number | null): number {
   const raw = isFiniteNumber(stepMinutes)
@@ -81,7 +99,10 @@ export function normalizeStepMinutes(stepMinutes?: number | null): number {
   return clamp(raw, MIN_STEP_MINUTES, MAX_STEP_MINUTES)
 }
 
-export function snapMinutes(minutes: number, stepMinutes?: number | null) {
+export function snapMinutes(
+  minutes: number,
+  stepMinutes?: number | null,
+): number {
   const step = normalizeStepMinutes(stepMinutes)
   const raw = isFiniteNumber(minutes) ? minutes : 0
   const snapped = Math.round(raw / step) * step
@@ -92,7 +113,7 @@ export function snapMinutes(minutes: number, stepMinutes?: number | null) {
 export function roundDurationMinutes(
   minutes: number,
   stepMinutes?: number | null,
-) {
+): number {
   const step = normalizeStepMinutes(stepMinutes)
   const raw = isFiniteNumber(minutes) ? minutes : DEFAULT_DURATION_MINUTES
   const snapped = Math.round(raw / step) * step
@@ -103,9 +124,11 @@ export function roundDurationMinutes(
 export function computeDurationMinutesFromIso(
   startsAtIso: string,
   endsAtIso: string,
-) {
+): number {
   return rawDurationMinutes(startsAtIso, endsAtIso)
 }
+
+// ─── Working-hours helpers ────────────────────────────────────────────────────
 
 /**
  * Single source of truth: lib/scheduling/workingHours.
@@ -136,7 +159,7 @@ export function isOutsideWorkingHours(args: {
   endMinutes: number
   workingHours: WorkingHoursJson
   timeZone: string
-}) {
+}): boolean {
   return isOutsideWorkingHoursLib({
     day: args.day,
     startMinutes: args.startMinutes,
@@ -146,14 +169,17 @@ export function isOutsideWorkingHours(args: {
   })
 }
 
+// ─── Event helpers ────────────────────────────────────────────────────────────
+
 /**
  * Prefer discriminant `kind`.
  * Fallbacks stay here only so legacy hydrated rows do not break old sessions.
  */
-export function isBlockedEvent(event: CalendarEvent) {
+export function isBlockedEvent(event: CalendarEvent): boolean {
   if (event.kind === 'BLOCK') return true
 
   const status = String(event.status || '').trim().toUpperCase()
+
   if (status === 'BLOCKED') return true
 
   return eventIdText(event).startsWith('block:')
@@ -163,7 +189,7 @@ export function isBlockedEvent(event: CalendarEvent) {
  * Only BLOCK events have blockId.
  * Fallback parses legacy ids shaped like "block:xyz".
  */
-export function extractBlockId(event: CalendarEvent) {
+export function extractBlockId(event: CalendarEvent): string | null {
   if (event.kind === 'BLOCK') return event.blockId
 
   const id = eventIdText(event)
@@ -180,16 +206,18 @@ export function blockToEvent(
 
   const safeStartsAt = startsAt ?? new Date()
   const fallbackEndsAt = new Date(
-    safeStartsAt.getTime() + DEFAULT_DURATION_MINUTES * 60_000,
+    safeStartsAt.getTime() + DEFAULT_DURATION_MINUTES * CALENDAR_MS_PER_MINUTE,
   )
+
   const safeEndsAt =
     endsAt && endsAt.getTime() > safeStartsAt.getTime()
       ? endsAt
       : fallbackEndsAt
 
-  const note = typeof block.note === 'string' && block.note.trim()
-    ? block.note.trim()
-    : null
+  const note =
+    typeof block.note === 'string' && block.note.trim()
+      ? block.note.trim()
+      : null
 
   const durationMinutes = roundDurationMinutes(
     rawDurationMinutes(safeStartsAt, safeEndsAt),
@@ -201,45 +229,51 @@ export function blockToEvent(
     id: `block:${block.id}`,
     blockId: block.id,
     status: 'BLOCKED',
-    title: 'Blocked',
-    clientName: note || 'Personal time',
+    title: DEFAULT_BLOCK_TITLE,
+    clientName: note || DEFAULT_BLOCK_CLIENT_NAME,
     note,
-    locationId: null,
+    locationId: block.locationId ?? null,
     startsAt: safeStartsAt.toISOString(),
     endsAt: safeEndsAt.toISOString(),
     durationMinutes,
   }
 }
 
+// ─── Overlap / geometry helpers ───────────────────────────────────────────────
+
 export function overlapMinutesWithinDay(
   startsAtIso: string,
   endsAtIso: string,
   day: Date,
-) {
+): number {
   const dayStart = startOfDay(day)
   const dayEnd = addDays(dayStart, 1)
 
-  const startsAt = validDate(startsAtIso)
-  const endsAt = validDate(endsAtIso)
-
-  if (!startsAt || !endsAt || endsAt <= startsAt) return 0
-
-  const overlapStartMs = Math.max(startsAt.getTime(), dayStart.getTime())
-  const overlapEndMs = Math.min(endsAt.getTime(), dayEnd.getTime())
-  const minutes = Math.round((overlapEndMs - overlapStartMs) / 60_000)
-
-  return minutes > 0 ? minutes : 0
+  return overlapMinutes(
+    {
+      startsAt: startsAtIso,
+      endsAt: endsAtIso,
+    },
+    {
+      startsAt: dayStart,
+      endsAt: dayEnd,
+    },
+  )
 }
 
-export function clampMinutesToDay(minutes: number) {
+export function clampMinutesToDay(minutes: number): number {
   const raw = isFiniteNumber(minutes) ? minutes : 0
+
   return clamp(raw, 0, MINUTES_PER_DAY)
 }
 
-export function minutesToTopPx(minutes: number) {
+export function minutesToTopPx(minutes: number): number {
   return clampMinutesToDay(minutes) * PX_PER_MINUTE
 }
 
-export function durationToHeightPx(minutes: number, stepMinutes?: number | null) {
+export function durationToHeightPx(
+  minutes: number,
+  stepMinutes?: number | null,
+): number {
   return roundDurationMinutes(minutes, stepMinutes) * PX_PER_MINUTE
 }

@@ -1,4 +1,5 @@
 // app/api/pro/calendar/route.ts
+
 import {
   BookingStatus,
   Prisma,
@@ -26,9 +27,30 @@ import {
   startOfDayUtcInTimeZone,
 } from '@/lib/timeZone'
 
+import { overlapMinutes } from '@/lib/calendar/overlap'
+
+import {
+  CALENDAR_MS_PER_DAY,
+  DEFAULT_BLOCK_CLIENT_NAME,
+  DEFAULT_BLOCK_TITLE,
+  DEFAULT_BOOKING_CLIENT_NAME,
+  DEFAULT_BOOKING_SERVICE_NAME,
+  DEFAULT_CALENDAR_RANGE_DAYS,
+  MAX_CALENDAR_EVENTS_PER_RANGE,
+  MAX_CALENDAR_LOCATIONS_PER_PRO,
+  MAX_CALENDAR_RANGE_DAYS,
+  roundedCalendarHours,
+} from '@/lib/calendar/constants'
 export const dynamic = 'force-dynamic'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+type CalendarRouteErrorCode =
+  | 'PRO_PROFILE_NOT_FOUND'
+  | 'LOCATION_REQUIRED'
+  | 'LOCATION_NOT_FOUND'
+  | 'INVALID_RANGE'
+  | 'INTERNAL_ERROR'
 
 type CalendarServiceItem = {
   id: string
@@ -99,6 +121,7 @@ type CalendarRangeResult =
   | {
       ok: false
       status: number
+      code: CalendarRouteErrorCode
       message: string
     }
 
@@ -110,6 +133,7 @@ type SelectedLocationResult =
   | {
       ok: false
       status: number
+      code: CalendarRouteErrorCode
       message: string
     }
 
@@ -120,12 +144,6 @@ type ViewportTimeZoneResult = {
   needsTimeZoneSetup: boolean
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const DEFAULT_CALENDAR_RANGE_DAYS = 42
-const MAX_CALENDAR_RANGE_DAYS = 42
-const MAX_LOCATIONS_PER_PRO = 50
-const MAX_EVENTS_PER_RANGE = 1200
 
 // ─── Prisma selects ───────────────────────────────────────────────────────────
 
@@ -219,7 +237,7 @@ type CalendarBlockRow = Prisma.CalendarBlockGetPayload<{
 // ─── Date / number helpers ────────────────────────────────────────────────────
 
 function addDaysUtc(date: Date, days: number): Date {
-  return new Date(date.getTime() + days * 24 * 60 * 60_000)
+  return new Date(date.getTime() + days * CALENDAR_MS_PER_DAY)
 }
 
 function dateMs(value: string | Date): number {
@@ -229,14 +247,9 @@ function dateMs(value: string | Date): number {
   return Number.isFinite(ms) ? ms : Number.NaN
 }
 
-function hoursRounded(minutes: number): number {
-  const hours = minutes / 60
-
-  return Math.round(hours * 2) / 2
-}
-
 function toDateOrNull(value: string | null): Date | null {
   const raw = typeof value === 'string' ? value.trim() : ''
+
   if (!raw) return null
 
   const parsed = new Date(raw)
@@ -244,24 +257,21 @@ function toDateOrNull(value: string | null): Date | null {
   return Number.isFinite(parsed.getTime()) ? parsed : null
 }
 
-function overlapMinutes(args: {
-  startsAt: string
-  endsAt: string
+function blockOverlapMinutesForRange(args: {
+  block: BlockEvent
   rangeStart: Date
   rangeEnd: Date
 }): number {
-  const startMs = dateMs(args.startsAt)
-  const endMs = dateMs(args.endsAt)
-
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0
-  if (endMs <= startMs) return 0
-
-  const overlapStartMs = Math.max(startMs, args.rangeStart.getTime())
-  const overlapEndMs = Math.min(endMs, args.rangeEnd.getTime())
-
-  if (overlapEndMs <= overlapStartMs) return 0
-
-  return Math.round((overlapEndMs - overlapStartMs) / 60_000)
+  return overlapMinutes(
+    {
+      startsAt: args.block.startsAt,
+      endsAt: args.block.endsAt,
+    },
+    {
+      startsAt: args.rangeStart,
+      endsAt: args.rangeEnd,
+    },
+  )
 }
 
 // ─── Location / timezone helpers ──────────────────────────────────────────────
@@ -340,6 +350,7 @@ function getSelectedLocation(args: {
     return {
       ok: false,
       status: 409,
+      code: 'LOCATION_REQUIRED',
       message: 'Add a bookable location to use the calendar.',
     }
   }
@@ -353,11 +364,15 @@ function getSelectedLocation(args: {
       return {
         ok: false,
         status: 404,
+        code: 'LOCATION_NOT_FOUND',
         message: 'Selected location not found.',
       }
     }
 
-    return { ok: true, location: requested }
+    return {
+      ok: true,
+      location: requested,
+    }
   }
 
   const selected =
@@ -367,11 +382,15 @@ function getSelectedLocation(args: {
     return {
       ok: false,
       status: 409,
+      code: 'LOCATION_REQUIRED',
       message: 'Add a bookable location to use the calendar.',
     }
   }
 
-  return { ok: true, location: selected }
+  return {
+    ok: true,
+    location: selected,
+  }
 }
 
 // ─── Range helpers ────────────────────────────────────────────────────────────
@@ -387,7 +406,6 @@ function getCalendarRange(args: {
   )
 
   const from = toDateOrNull(args.url.searchParams.get('from')) ?? defaultFrom
-
   const defaultToExclusive = addDaysUtc(from, DEFAULT_CALENDAR_RANGE_DAYS)
 
   const requestedToExclusive =
@@ -397,6 +415,7 @@ function getCalendarRange(args: {
     return {
       ok: false,
       status: 400,
+      code: 'INVALID_RANGE',
       message: '`to` must be after `from`.',
     }
   }
@@ -433,14 +452,14 @@ function getClientName(booking: BookingRow): string {
     return `${firstName} ${lastName}`.trim()
   }
 
-  return email || 'Client'
+  return email || DEFAULT_BOOKING_CLIENT_NAME
 }
 
 function getServiceName(booking: BookingRow): string {
   const firstItemName = booking.serviceItems[0]?.service?.name?.trim() ?? ''
   const bookingServiceName = booking.service?.name?.trim() ?? ''
 
-  return firstItemName || bookingServiceName || 'Appointment'
+  return firstItemName || bookingServiceName || DEFAULT_BOOKING_SERVICE_NAME
 }
 
 function priceSnapshotToString(
@@ -488,6 +507,7 @@ async function toBookingEvent(args: {
   if (!booking.locationId) return null
 
   const start = new Date(booking.scheduledFor)
+
   if (!Number.isFinite(start.getTime())) return null
 
   const durationMinutes = safeDurationMinutes(booking.totalDurationMinutes)
@@ -557,7 +577,7 @@ function toBlockEvent(
 
   if (end.getTime() <= start.getTime()) return null
 
-  const title = block.note?.trim() ? block.note.trim() : 'Blocked time'
+  const title = block.note?.trim() ? block.note.trim() : DEFAULT_BLOCK_TITLE
 
   return {
     id: `block:${block.id}`,
@@ -566,7 +586,7 @@ function toBlockEvent(
     startsAt: start.toISOString(),
     endsAt: end.toISOString(),
     title,
-    clientName: 'Personal',
+    clientName: DEFAULT_BLOCK_CLIENT_NAME,
     status: 'BLOCKED',
     note: block.note ?? null,
     locationType: null,
@@ -582,6 +602,8 @@ function toBlockEvent(
   }
 }
 
+// ─── Stats / management helpers ───────────────────────────────────────────────
+
 function isBookingVisibleInTodaysStats(event: BookingEvent): boolean {
   return (
     event.status === BookingStatus.ACCEPTED ||
@@ -593,6 +615,23 @@ function isFuturePendingRequest(event: BookingEvent, now: Date): boolean {
   return (
     event.status === BookingStatus.PENDING &&
     dateMs(event.startsAt) >= now.getTime()
+  )
+}
+
+function blockedMinutesForToday(args: {
+  blocks: BlockEvent[]
+  todayStart: Date
+  tomorrowStart: Date
+}): number {
+  return args.blocks.reduce(
+    (sum, block) =>
+      sum +
+      blockOverlapMinutesForRange({
+        block,
+        rangeStart: args.todayStart,
+        rangeEnd: args.tomorrowStart,
+      }),
+    0,
   )
 }
 
@@ -624,7 +663,9 @@ export async function GET(req: Request) {
 
     const [proProfile, locations] = await Promise.all([
       prisma.professionalProfile.findUnique({
-        where: { id: professionalId },
+        where: {
+          id: professionalId,
+        },
         select: professionalProfileSelect,
       }),
       prisma.professionalLocation.findMany({
@@ -634,12 +675,14 @@ export async function GET(req: Request) {
         },
         select: professionalLocationSelect,
         orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-        take: MAX_LOCATIONS_PER_PRO,
+        take: MAX_CALENDAR_LOCATIONS_PER_PRO,
       }),
     ])
 
     if (!proProfile) {
-      return jsonFail(404, 'Professional profile not found.')
+      return jsonFail(404, 'Professional profile not found.', {
+        code: 'PRO_PROFILE_NOT_FOUND',
+      })
     }
 
     const selectedLocationResult = getSelectedLocation({
@@ -651,6 +694,9 @@ export async function GET(req: Request) {
       return jsonFail(
         selectedLocationResult.status,
         selectedLocationResult.message,
+        {
+          code: selectedLocationResult.code,
+        },
       )
     }
 
@@ -679,7 +725,9 @@ export async function GET(req: Request) {
     })
 
     if (!rangeResult.ok) {
-      return jsonFail(rangeResult.status, rangeResult.message)
+      return jsonFail(rangeResult.status, rangeResult.message, {
+        code: rangeResult.code,
+      })
     }
 
     const { from, requestedToExclusive, effectiveToExclusive, wasClamped } =
@@ -702,20 +750,24 @@ export async function GET(req: Request) {
         orderBy: {
           scheduledFor: 'asc',
         },
-        take: MAX_EVENTS_PER_RANGE,
+        take: MAX_CALENDAR_EVENTS_PER_RANGE
       }),
       prisma.calendarBlock.findMany({
         where: {
           professionalId,
-          startsAt: { lt: effectiveToExclusive },
-          endsAt: { gt: from },
+          startsAt: {
+            lt: effectiveToExclusive,
+          },
+          endsAt: {
+            gt: from,
+          },
           OR: [{ locationId: selectedLocation.id }, { locationId: null }],
         },
         select: calendarBlockSelect,
         orderBy: {
           startsAt: 'asc',
         },
-        take: MAX_EVENTS_PER_RANGE,
+        take: MAX_CALENDAR_EVENTS_PER_RANGE
       }),
     ])
 
@@ -756,31 +808,24 @@ export async function GET(req: Request) {
 
     const blockedTodayEvents = blockEvents.filter(
       (event) =>
-        overlapMinutes({
-          startsAt: event.startsAt,
-          endsAt: event.endsAt,
+        blockOverlapMinutesForRange({
+          block: event,
           rangeStart: viewportTodayStart,
           rangeEnd: viewportTomorrowStart,
         }) > 0,
     )
 
-    const blockedMinutesToday = blockedTodayEvents.reduce(
-      (sum, event) =>
-        sum +
-        overlapMinutes({
-          startsAt: event.startsAt,
-          endsAt: event.endsAt,
-          rangeStart: viewportTodayStart,
-          rangeEnd: viewportTomorrowStart,
-        }),
-      0,
-    )
+    const blockedMinutesToday = blockedMinutesForToday({
+      blocks: blockedTodayEvents,
+      todayStart: viewportTodayStart,
+      tomorrowStart: viewportTomorrowStart,
+    })
 
     const stats: CalendarStats = {
       todaysBookings: todaysBookingsEvents.length,
       availableHours: null,
       pendingRequests: pendingRequestEvents.length,
-      blockedHours: blockedMinutesToday ? hoursRounded(blockedMinutesToday) : 0,
+      blockedHours: roundedCalendarHours(blockedMinutesToday),
     }
 
     return jsonOk(
@@ -805,6 +850,7 @@ export async function GET(req: Request) {
         canSalon,
         canMobile,
         stats,
+        blockedMinutesToday,
         autoAcceptBookings: Boolean(proProfile.autoAcceptBookings),
         management: {
           todaysBookings: todaysBookingsEvents,
@@ -818,6 +864,8 @@ export async function GET(req: Request) {
   } catch (error) {
     console.error('GET /api/pro/calendar error:', error)
 
-    return jsonFail(500, 'Failed to load pro calendar.')
+    return jsonFail(500, 'Failed to load pro calendar.', {
+      code: 'INTERNAL_ERROR',
+    })
   }
 }
