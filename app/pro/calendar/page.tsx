@@ -14,18 +14,19 @@ import { useCalendarNavigation } from './_hooks/useCalendarNavigation'
 import { BookingModal } from './_components/BookingModal'
 import { CalendarHeaderControls } from './_components/CalendarHeader'
 import { CalendarLocationPanel } from './_components/CalendarLocationPanel'
+import { CalendarStatsPanel } from './_components/CalendarStatsPanel'
 import { ConfirmChangeModal } from './_components/ConfirmChangeModal'
 import { DayWeekGrid } from './_components/DayWeekGrid'
 import { ManagementModal } from './_components/ManagementModal'
+import { MobileAutoAcceptBar } from './_components/MobileAutoAcceptBar'
+import { MobileCalendarControls } from './_components/MobileCalendarControls'
+import { MobileCalendarFab } from './_components/MobileCalendarFab'
+import { MobileCalendarHeader } from './_components/MobileCalendarHeader'
+import { MobileMonthGrid } from './_components/MobileMonthGrid'
+import { MobilePendingRequestBar } from './_components/MobilePendingRequestBar'
 import { MonthGrid } from './_components/MonthGrid'
 
-import type {
-  CalendarEvent,
-  CalendarStats,
-  ManagementKey,
-  ManagementLists,
-  ViewMode,
-} from './_types'
+import type { CalendarEvent, ViewMode } from './_types'
 
 import {
   addDaysAnchorNoonInTimeZone,
@@ -52,17 +53,18 @@ type StatTone = 'paper' | 'terra' | 'pending' | 'acid' | 'fern' | 'muted'
 
 const WEEK_DAY_COUNT = 7
 const MONTH_GRID_DAY_COUNT = 42
+const DEFAULT_CALENDAR_VIEW: ViewMode = 'day'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function safeTz(value: unknown) {
+function safeTz(value: unknown): string {
   return sanitizeTimeZone(
     typeof value === 'string' ? value : '',
     DEFAULT_TIME_ZONE,
   )
 }
 
-function validTimeZoneOrFallback(value: unknown, fallback: string) {
+function validTimeZoneOrFallback(value: unknown, fallback: string): string {
   if (typeof value !== 'string') return fallback
 
   const candidate = value.trim()
@@ -74,14 +76,18 @@ function validTimeZoneOrFallback(value: unknown, fallback: string) {
   return sanitizeTimeZone(candidate, fallback)
 }
 
-function headerLabelFor(view: ViewMode, anchorUtc: Date, timeZone: string) {
+function headerLabelFor(
+  view: ViewMode,
+  anchorUtc: Date,
+  timeZone: string,
+): string {
   if (view === 'day') return formatDayLabelInTimeZone(anchorUtc, timeZone)
   if (view === 'week') return formatWeekRangeInTimeZone(anchorUtc, timeZone)
 
   return formatMonthRangeInTimeZone(anchorUtc, timeZone)
 }
 
-function titleForView(view: ViewMode) {
+function titleForView(view: ViewMode): string {
   if (view === 'day') return 'Your day.'
   if (view === 'month') return 'This month.'
 
@@ -92,7 +98,7 @@ function visibleDaysForView(args: {
   view: ViewMode
   anchoredCurrentDate: Date
   timeZone: string
-}) {
+}): Date[] {
   const { view, anchoredCurrentDate, timeZone } = args
 
   if (view === 'day') {
@@ -137,39 +143,7 @@ function visibleDaysForView(args: {
   })
 }
 
-function formatHours(hours: number | null | undefined) {
-  if (typeof hours !== 'number' || !Number.isFinite(hours)) return '—'
-
-  const rounded = Math.round(hours * 10) / 10
-  return Number.isInteger(rounded) ? `${rounded}h` : `${rounded.toFixed(1)}h`
-}
-
-function formatMinutesAsHours(minutes: number) {
-  if (!Number.isFinite(minutes) || minutes <= 0) return '0h'
-
-  const rounded = Math.round((minutes / 60) * 10) / 10
-  return Number.isInteger(rounded) ? `${rounded}h` : `${rounded.toFixed(1)}h`
-}
-
-function toneTextClass(tone: StatTone) {
-  switch (tone) {
-    case 'terra':
-      return 'text-terraGlow'
-    case 'pending':
-      return 'text-amber'
-    case 'acid':
-      return 'text-acid'
-    case 'fern':
-      return 'text-fern'
-    case 'muted':
-      return 'text-paperMute'
-    case 'paper':
-    default:
-      return 'text-paper'
-  }
-}
-
-function toneDotClass(tone: StatTone) {
+function toneDotClass(tone: StatTone): string {
   switch (tone) {
     case 'terra':
       return 'bg-terra shadow-[0_0_14px_rgb(var(--terra-glow)_/_0.65)]'
@@ -187,19 +161,20 @@ function toneDotClass(tone: StatTone) {
   }
 }
 
-function todayWeekdayLabel(timeZone: string) {
+function todayWeekdayLabel(timeZone: string): string {
   return new Intl.DateTimeFormat(undefined, {
     timeZone,
     weekday: 'long',
   }).format(new Date())
 }
 
-function bookingActionId(event: CalendarEvent | undefined) {
+function bookingActionId(event: CalendarEvent | undefined): string | null {
   if (!event || event.kind !== 'BOOKING') return null
+
   return event.id
 }
 
-function firstPendingBooking(events: CalendarEvent[]) {
+function firstPendingBooking(events: CalendarEvent[]): CalendarEvent | undefined {
   return events.find((event) => event.kind === 'BOOKING')
 }
 
@@ -207,7 +182,7 @@ function mobileSubtitleFor(args: {
   date: Date
   timeZone: string
   activeLocationLabel: string | null
-}) {
+}): string {
   const { date, timeZone, activeLocationLabel } = args
 
   const format = (options: Intl.DateTimeFormatOptions) =>
@@ -232,7 +207,7 @@ function mobileSubtitleFor(args: {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ProCalendarPage() {
-  const [view, setView] = useState<ViewMode>('week')
+  const [view, setView] = useState<ViewMode>(DEFAULT_CALENDAR_VIEW)
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date())
 
   const cal = useCalendarData({ view, currentDate })
@@ -305,11 +280,11 @@ export default function ProCalendarPage() {
   const topPendingBookingId = bookingActionId(topPendingRequest)
 
   return (
-    <main className="min-h-screen bg-ink px-0 pb-28 pt-0 font-sans text-paper md:px-8 md:pb-14 md:pt-10">
-      <div className="mx-auto max-w-[1600px]">
+    <main className="brand-pro-calendar-page">
+      <div className="brand-pro-calendar-desktop-wrap">
         <PageHero />
 
-        <section className="overflow-hidden bg-ink md:rounded-[18px] md:border md:border-[var(--line-strong)] md:shadow-[0_40px_80px_rgb(0_0_0_/_0.40)]">
+        <section className="brand-pro-calendar-panel">
           <div className="md:hidden">
             <MobileCalendarHeader
               title={titleForView(view)}
@@ -327,14 +302,13 @@ export default function ProCalendarPage() {
             </div>
 
             <div className="px-5 pb-3">
-              <CalendarHeaderControls
+              <MobileCalendarControls
                 view={view}
                 setView={setView}
                 headerLabel={headerLabel}
                 onToday={goToToday}
                 onBack={goBack}
                 onNext={goNext}
-                onBlockTime={cal.openCreateBlockNow}
               />
             </div>
           </div>
@@ -430,9 +404,13 @@ export default function ProCalendarPage() {
                     <StateBanner>Loading calendar…</StateBanner>
                   ) : null}
 
-                  {showReloadLoading ? <StateBanner>Loading…</StateBanner> : null}
+                  {showReloadLoading ? (
+                    <StateBanner>Loading…</StateBanner>
+                  ) : null}
 
-                  {cal.error ? <StateBanner danger>{cal.error}</StateBanner> : null}
+                  {cal.error ? (
+                    <StateBanner danger>{cal.error}</StateBanner>
+                  ) : null}
                 </div>
 
                 {(view === 'day' || view === 'week') && !showInitialLoading ? (
@@ -456,8 +434,8 @@ export default function ProCalendarPage() {
                 ) : null}
 
                 {view === 'month' && !showInitialLoading ? (
-                  <div className="p-3 md:p-0">
-                    <MonthGrid
+                  <>
+                    <MobileMonthGrid
                       visibleDays={visibleDays}
                       currentDate={currentDate}
                       events={cal.events}
@@ -469,7 +447,22 @@ export default function ProCalendarPage() {
                         setView('day')
                       }}
                     />
-                  </div>
+
+                    <div className="hidden p-3 md:block md:p-0">
+                      <MonthGrid
+                        visibleDays={visibleDays}
+                        currentDate={currentDate}
+                        events={cal.events}
+                        timeZone={calendarTimeZone}
+                        onPickDay={(date) => {
+                          setCurrentDate(
+                            anchorNoonInTimeZone(date, calendarTimeZone),
+                          )
+                          setView('day')
+                        }}
+                      />
+                    </div>
+                  </>
                 ) : null}
               </div>
             </section>
@@ -477,7 +470,15 @@ export default function ProCalendarPage() {
         </section>
       </div>
 
-      <PendingRequestBar
+      <MobileCalendarFab onClick={cal.openCreateBlockNow} />
+
+      <MobileAutoAcceptBar
+        enabled={cal.autoAccept}
+        saving={cal.savingAutoAccept}
+        onToggle={() => void cal.toggleAutoAccept(!cal.autoAccept)}
+      />
+
+      <MobilePendingRequestBar
         event={topPendingRequest}
         pendingCount={cal.management.pendingRequests.length}
         busy={Boolean(
@@ -620,181 +621,6 @@ function PageHero() {
   )
 }
 
-function MobileCalendarHeader(props: {
-  title: string
-  subtitle: string
-}) {
-  const { title, subtitle } = props
-
-  return (
-    <header className="bg-ink px-5 pb-3 pt-[58px]">
-      <div className="mb-3.5 flex items-center justify-between gap-4">
-        <a
-          href="/"
-          className={[
-            'inline-flex items-center gap-1.5',
-            'font-sans text-xs font-bold uppercase tracking-[0.08em]',
-            'text-paperMute transition hover:text-paper',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-          ].join(' ')}
-        >
-          <span aria-hidden="true">‹</span>
-          CLIENT
-        </a>
-
-        <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-terraGlow">
-          ◆ PRO MODE
-        </p>
-      </div>
-
-      <h1 className="font-display text-[34px] font-semibold italic leading-none tracking-[-0.03em] text-paper">
-        {title}
-      </h1>
-
-      <p className="mt-1.5 truncate font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-paperMute">
-        {subtitle}
-      </p>
-    </header>
-  )
-}
-
-function CalendarStatsPanel(props: {
-  stats: CalendarStats
-  management: ManagementLists
-  blockedMinutesToday: number
-  onOpenManagement: (key: ManagementKey) => void
-  compact?: boolean
-}) {
-  const {
-    stats,
-    management,
-    blockedMinutesToday,
-    onOpenManagement,
-    compact = false,
-  } = props
-
-  const bookedCount = stats?.todaysBookings ?? management.todaysBookings.length
-  const pendingCount =
-    stats?.pendingRequests ?? management.pendingRequests.length
-  const waitlistCount = management.waitlistToday.length
-  const freeHours = formatHours(stats?.availableHours)
-  const blockedHours = formatMinutesAsHours(blockedMinutesToday)
-
-  return (
-    <div className={compact ? 'grid grid-cols-4 gap-1.5' : 'grid gap-2.5'}>
-      <StatTile
-        label="Booked"
-        value={bookedCount}
-        sublabel="today"
-        tone="paper"
-        compact={compact}
-        onClick={() => onOpenManagement('todaysBookings')}
-      />
-
-      <StatTile
-        label="Pending"
-        value={pendingCount}
-        sublabel="review"
-        tone="pending"
-        pulse={pendingCount > 0}
-        compact={compact}
-        onClick={() => onOpenManagement('pendingRequests')}
-      />
-
-      <StatTile
-        label="Waitlist"
-        value={waitlistCount}
-        sublabel="people"
-        tone="acid"
-        compact={compact}
-        onClick={() => onOpenManagement('waitlistToday')}
-      />
-
-      <StatTile
-        label="Free"
-        value={freeHours}
-        sublabel={freeHours === '—' ? `${blockedHours} blocked` : 'gaps'}
-        tone="muted"
-        compact={compact}
-        onClick={() => onOpenManagement('blockedToday')}
-      />
-    </div>
-  )
-}
-
-function StatTile(props: {
-  label: string
-  value: string | number
-  sublabel: string
-  tone: StatTone
-  onClick: () => void
-  compact?: boolean
-  pulse?: boolean
-}) {
-  const {
-    label,
-    value,
-    sublabel,
-    tone,
-    onClick,
-    compact = false,
-    pulse = false,
-  } = props
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        'relative rounded-xl border border-[var(--line)] bg-paper/[0.02] text-left',
-        'transition hover:border-[var(--line-strong)] hover:bg-paper/[0.04]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-        compact ? 'px-2 py-2' : 'px-3.5 py-3',
-      ].join(' ')}
-    >
-      <span
-        className={[
-          'block font-mono font-semibold uppercase text-paperMute',
-          compact
-            ? 'text-[9px] tracking-[0.10em]'
-            : 'text-[10px] tracking-[0.14em]',
-        ].join(' ')}
-      >
-        {label}
-      </span>
-
-      <span
-        className={[
-          'mt-1 block font-display font-semibold leading-none',
-          toneTextClass(tone),
-          compact ? 'text-[22px]' : 'text-[28px]',
-        ].join(' ')}
-      >
-        {value}
-      </span>
-
-      <span
-        className={[
-          'mt-1 block text-paperMute',
-          compact ? 'text-[9.5px]' : 'text-xs',
-        ].join(' ')}
-      >
-        {sublabel}
-      </span>
-
-      {pulse ? (
-        <span
-          className={[
-            'absolute right-2 top-2 h-1.5 w-1.5 rounded-full',
-            toneDotClass(tone),
-          ].join(' ')}
-          aria-hidden="true"
-        />
-      ) : null}
-    </button>
-  )
-}
-
 function StatusLegend() {
   return (
     <div className="mt-6 border-t border-[var(--line)] pt-5">
@@ -889,171 +715,6 @@ function AutoAcceptCard(props: {
   )
 }
 
-/**
- * Floating pending-request tray — mobile only (lg:hidden).
- * Surfaces the top pending booking with inline approve/deny, keeping pros in
- * flow without a modal dive.
- */
-function PendingRequestBar(props: {
-  event: CalendarEvent | undefined
-  pendingCount: number
-  busy: boolean
-  error: string | null
-  onOpenAll: () => void
-  onApprove: () => void
-  onDeny: () => void
-}) {
-  const {
-    event,
-    pendingCount,
-    busy,
-    error,
-    onOpenAll,
-    onApprove,
-    onDeny,
-  } = props
-
-  if (!event || event.kind !== 'BOOKING' || pendingCount <= 0) return null
-
-  const clientName = event.clientName || 'Client'
-  const title = event.title || 'Appointment'
-  const moreCount = pendingCount - 1
-
-  return (
-    <div className="fixed bottom-24 left-4 right-4 z-20 lg:hidden">
-      <div
-        className={[
-          'relative overflow-hidden rounded-2xl border p-3',
-          'shadow-[0_16px_46px_rgb(0_0_0_/_0.62)] backdrop-blur-xl',
-        ].join(' ')}
-        style={{
-          background:
-            'linear-gradient(135deg, rgb(var(--amber) / 0.22), rgb(var(--ink-2) / 0.94) 46%, rgb(var(--terra) / 0.12))',
-          borderColor: 'rgb(var(--amber) / 0.30)',
-          boxShadow:
-            '0 0 0 1px rgb(var(--amber) / 0.10), 0 16px 46px rgb(0 0 0 / 0.62)',
-        }}
-      >
-        <div
-          className="pointer-events-none absolute inset-x-0 top-0 h-px"
-          style={{ backgroundColor: 'rgb(var(--amber) / 0.55)' }}
-          aria-hidden="true"
-        />
-
-        <div
-          className="pointer-events-none absolute -bottom-12 right-10 h-24 w-24 rounded-full blur-3xl"
-          style={{ backgroundColor: 'rgb(var(--terra) / 0.22)' }}
-          aria-hidden="true"
-        />
-
-        <div className="relative flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onOpenAll}
-            className={[
-              'grid h-11 w-11 shrink-0 place-items-center rounded-xl',
-              'border font-display text-xl font-semibold leading-none',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-            ].join(' ')}
-            style={{
-              backgroundColor: 'rgb(var(--amber) / 0.20)',
-              borderColor: 'rgb(var(--amber) / 0.42)',
-              color: 'rgb(var(--amber))',
-              boxShadow: 'inset 0 0 0 1px rgb(var(--amber) / 0.10)',
-            }}
-            aria-label="Open all pending requests"
-          >
-            {pendingCount}
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenAll}
-            className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40"
-          >
-            <p
-              className={[
-                'font-mono text-[9px] font-black uppercase tracking-[0.16em]',
-              ].join(' ')}
-              style={{ color: 'rgb(var(--amber))' }}
-            >
-              ◆ Pending request
-            </p>
-
-            <p className="mt-1 truncate text-sm font-black text-[var(--paper)]">
-              {clientName} — {title}
-            </p>
-
-            {moreCount > 0 ? (
-              <p className="mt-0.5 text-xs font-semibold text-[var(--paper-mute)]">
-                +{moreCount} more waiting
-              </p>
-            ) : null}
-          </button>
-
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              onApprove()
-            }}
-            disabled={busy}
-            className={[
-              'grid h-10 w-10 shrink-0 place-items-center rounded-xl',
-              'text-sm font-black',
-              'disabled:cursor-wait disabled:opacity-60',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-            ].join(' ')}
-            style={{
-              backgroundColor: 'rgb(var(--fern))',
-              border: '1px solid rgb(var(--fern) / 0.65)',
-              color: 'rgb(var(--paper))',
-              boxShadow:
-                '0 0 0 1px rgb(var(--fern) / 0.22), 0 8px 20px rgb(var(--fern) / 0.34)',
-            }}
-            aria-label="Approve pending booking"
-            title="Approve pending booking"
-          >
-            ✓
-          </button>
-
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              onDeny()
-            }}
-            disabled={busy}
-            className={[
-              'grid h-10 w-10 shrink-0 place-items-center rounded-xl',
-              'text-sm font-black',
-              'disabled:cursor-wait disabled:opacity-60',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-            ].join(' ')}
-            style={{
-              backgroundColor: 'rgb(var(--ember) / 0.92)',
-              border: '1px solid rgb(var(--ember) / 0.70)',
-              color: 'rgb(var(--paper))',
-              boxShadow:
-                '0 0 0 1px rgb(var(--ember) / 0.22), 0 8px 20px rgb(var(--ember) / 0.30)',
-            }}
-            aria-label="Deny pending booking"
-            title="Deny pending booking"
-          >
-            ×
-          </button>
-        </div>
-
-        {error ? (
-          <p className="relative mt-2 text-xs font-semibold text-toneDanger">
-            {error}
-          </p>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
 function ActionButton(props: {
   children: ReactNode
   onClick: () => void
@@ -1102,7 +763,9 @@ function MobileLocationBar(props: {
 
   const displayLabel =
     activeLocationLabel?.trim() ||
-    scopedLocations.find((location) => location.id === activeLocationId)?.name?.trim() ||
+    scopedLocations
+      .find((location) => location.id === activeLocationId)
+      ?.name?.trim() ||
     'Select location'
 
   return (
@@ -1141,7 +804,10 @@ function MobileLocationBar(props: {
   )
 }
 
-function StateBanner(props: { children: ReactNode; danger?: boolean }) {
+function StateBanner(props: {
+  children: ReactNode
+  danger?: boolean
+}) {
   const { children, danger = false } = props
 
   return (

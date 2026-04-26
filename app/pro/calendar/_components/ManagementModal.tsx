@@ -1,8 +1,9 @@
 // app/pro/calendar/_components/ManagementModal.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import type { MouseEvent } from 'react'
+import { useEffect, useMemo, useState }
+from 'react'
+import type { MouseEvent, ReactNode } from 'react'
 
 import type { CalendarEvent, ManagementKey, ManagementLists } from '../_types'
 
@@ -49,6 +50,17 @@ type EventRowCopy = {
   statusLabel: string
 }
 
+type ButtonTone = 'default' | 'danger' | 'primary' | 'ghost'
+
+type ButtonProps = {
+  children: ReactNode
+  tone?: ButtonTone
+  disabled?: boolean
+  onClick?: () => void
+  ariaLabel?: string
+  title?: string
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MANAGEMENT_TABS: ReadonlyArray<ManagementTab> = [
@@ -74,13 +86,15 @@ const MANAGEMENT_TABS: ReadonlyArray<ManagementTab> = [
     shortTitle: 'Waitlist',
     description: 'Clients trying to get into an opening today.',
     emptyTitle: 'No waitlist entries.',
-    emptyBody: 'When waitlist data is available, same-day holds will appear here.',
+    emptyBody:
+      'When waitlist data is available, same-day holds will appear here.',
   },
   {
     key: 'blockedToday',
     title: 'Blocked time today',
     shortTitle: 'Blocked',
-    description: 'Time you blocked off for breaks, admin work, or personal time.',
+    description:
+      'Time you blocked off for breaks, admin work, or personal time.',
     emptyTitle: 'No blocked time.',
     emptyBody: 'Use block time to protect breaks or close off the full day.',
   },
@@ -90,41 +104,44 @@ const PENDING_STATUS_PRIORITY = 'PENDING'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function tabForKey(key: ManagementKey) {
+function tabForKey(key: ManagementKey): ManagementTab {
   return MANAGEMENT_TABS.find((tab) => tab.key === key) ?? MANAGEMENT_TABS[0]
 }
 
-function managementListForKey(management: ManagementLists, key: ManagementKey) {
+function managementListForKey(
+  management: ManagementLists,
+  key: ManagementKey,
+): CalendarEvent[] {
   return management[key]
 }
 
-function bookingIdFor(event: CalendarEvent) {
+function bookingIdFor(event: CalendarEvent): string | null {
   return event.kind === 'BOOKING' ? event.id : null
 }
 
-function canMessageEvent(key: ManagementKey, event: CalendarEvent) {
+function canMessageEvent(key: ManagementKey, event: CalendarEvent): boolean {
   if (isBlockedEvent(event)) return false
 
   return key === 'pendingRequests' || key === 'todaysBookings'
 }
 
-function canModerateEvent(key: ManagementKey, event: CalendarEvent) {
+function canModerateEvent(key: ManagementKey, event: CalendarEvent): boolean {
   if (isBlockedEvent(event)) return false
 
   return key === 'pendingRequests'
 }
 
-function messageHrefForBooking(bookingId: string) {
+function messageHrefForBooking(bookingId: string): string {
   return `/messages/start?contextType=BOOKING&contextId=${encodeURIComponent(
     bookingId,
   )}`
 }
 
-function normalizeText(value: string | null | undefined) {
+function normalizeText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function initialsFromName(name: string) {
+function initialsFromName(name: string): string {
   const trimmedName = name.trim()
   if (!trimmedName) return '?'
 
@@ -136,13 +153,16 @@ function initialsFromName(name: string) {
   return `${firstInitial}${lastInitial}`.toUpperCase() || '?'
 }
 
-function eventDisplayTimeZone(event: CalendarEvent, viewportTimeZone: string) {
+function eventDisplayTimeZone(
+  event: CalendarEvent,
+  viewportTimeZone: string,
+): string {
   if (event.kind === 'BOOKING') return event.timeZone
 
   return viewportTimeZone
 }
 
-function buildTimeFormatter(timeZone: string) {
+function buildTimeFormatter(timeZone: string): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat(undefined, {
     timeZone,
     month: 'short',
@@ -152,7 +172,7 @@ function buildTimeFormatter(timeZone: string) {
   })
 }
 
-function formatStartsAt(startsAt: string, timeZone: string) {
+function formatStartsAt(startsAt: string, timeZone: string): string {
   const date = new Date(startsAt)
 
   if (!Number.isFinite(date.getTime())) {
@@ -162,31 +182,33 @@ function formatStartsAt(startsAt: string, timeZone: string) {
   return buildTimeFormatter(timeZone).format(date)
 }
 
-function startMs(event: CalendarEvent) {
+function startMs(event: CalendarEvent): number {
   const ms = new Date(event.startsAt).getTime()
 
   return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER
 }
 
-function sortManagementEvents(key: ManagementKey, events: CalendarEvent[]) {
-  const copy = [...events]
+function statusPriority(event: CalendarEvent): number {
+  return event.status.toUpperCase() === PENDING_STATUS_PRIORITY ? 0 : 1
+}
 
-  copy.sort((first, second) => {
+function sortManagementEvents(
+  key: ManagementKey,
+  events: CalendarEvent[],
+): CalendarEvent[] {
+  return [...events].sort((first, second) => {
     if (key === 'pendingRequests') {
-      const firstPending =
-        first.status.toUpperCase() === PENDING_STATUS_PRIORITY ? 0 : 1
-      const secondPending =
-        second.status.toUpperCase() === PENDING_STATUS_PRIORITY ? 0 : 1
+      const priorityDiff = statusPriority(first) - statusPriority(second)
 
-      if (firstPending !== secondPending) {
-        return firstPending - secondPending
-      }
+      if (priorityDiff !== 0) return priorityDiff
     }
 
-    return startMs(first) - startMs(second)
-  })
+    const startDiff = startMs(first) - startMs(second)
 
-  return copy
+    if (startDiff !== 0) return startDiff
+
+    return first.id.localeCompare(second.id)
+  })
 }
 
 function buildEventRowCopy(args: {
@@ -229,17 +251,17 @@ function buildEventRowCopy(args: {
   }
 }
 
-function stopDialogMouseDown(event: MouseEvent<HTMLDivElement>) {
+function stopDialogMouseDown(event: MouseEvent<HTMLDivElement>): void {
   event.stopPropagation()
 }
 
 function closeOnEscape(args: {
   open: boolean
   onClose: () => void
-}) {
+}): (() => void) | undefined {
   const { open, onClose } = args
 
-  if (!open) return
+  if (!open) return undefined
 
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') onClose()
@@ -250,8 +272,8 @@ function closeOnEscape(args: {
   return () => window.removeEventListener('keydown', onKeyDown)
 }
 
-function lockBodyScroll(open: boolean) {
-  if (!open) return
+function lockBodyScroll(open: boolean): (() => void) | undefined {
+  if (!open) return undefined
 
   const previousOverflow = document.body.style.overflow
   document.body.style.overflow = 'hidden'
@@ -261,11 +283,9 @@ function lockBodyScroll(open: boolean) {
   }
 }
 
-function buttonClassName(options?: {
-  tone?: 'default' | 'danger' | 'primary' | 'ghost'
-}) {
-  const tone = options?.tone ?? 'default'
+// ─── Class helpers ────────────────────────────────────────────────────────────
 
+function buttonClassName(tone: ButtonTone = 'default'): string {
   const base = [
     'rounded-full px-4 py-2 font-mono text-[11px] font-black uppercase tracking-[0.08em]',
     'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
@@ -275,7 +295,9 @@ function buttonClassName(options?: {
   if (tone === 'primary') {
     return [
       base,
-      'border border-accentPrimary/30 bg-accentPrimary text-ink hover:bg-accentPrimaryHover',
+      'border border-accentPrimary/30',
+      'bg-[rgb(var(--accent-primary))] text-[rgb(var(--bg-primary))]',
+      'hover:bg-[rgb(var(--accent-primary-hover))]',
     ].join(' ')
   }
 
@@ -289,39 +311,129 @@ function buttonClassName(options?: {
   if (tone === 'ghost') {
     return [
       base,
-      'border border-[var(--line)] bg-transparent text-paperMute',
-      'hover:bg-paper/5 hover:text-paper',
+      'border border-[var(--line)] bg-transparent',
+      'text-[rgb(var(--text-muted))]',
+      'hover:bg-[rgb(var(--surface-glass)_/_0.05)] hover:text-[rgb(var(--text-primary))]',
     ].join(' ')
   }
 
   return [
     base,
-    'border border-[var(--line)] bg-paper/[0.04] text-paper hover:bg-paper/[0.07]',
+    'border border-[var(--line)]',
+    'bg-[rgb(var(--surface-glass)_/_0.04)] text-[rgb(var(--text-primary))]',
+    'hover:bg-[rgb(var(--surface-glass)_/_0.07)]',
   ].join(' ')
 }
 
-function tabButtonClassName(active: boolean) {
+function tabButtonClassName(active: boolean): string {
   return [
     'shrink-0 rounded-full border px-3 py-2',
     'font-mono text-[10px] font-black uppercase tracking-[0.08em]',
     'transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
     active
-      ? 'border-paper bg-paper text-ink'
-      : 'border-[var(--line)] bg-transparent text-paperMute hover:bg-paper/5 hover:text-paper',
+      ? [
+          'border-[rgb(var(--text-primary))]',
+          'bg-[rgb(var(--text-primary))]',
+          'text-[rgb(var(--bg-primary))]',
+        ].join(' ')
+      : [
+          'border-[var(--line)] bg-transparent',
+          'text-[rgb(var(--text-muted))]',
+          'hover:bg-[rgb(var(--surface-glass)_/_0.05)] hover:text-[rgb(var(--text-primary))]',
+        ].join(' '),
   ].join(' ')
 }
 
 function eventArticleClassName(args: {
   status: string
   isBlocked: boolean
-}) {
+}): string {
   const { status, isBlocked } = args
 
   return [
     'rounded-2xl border p-4 transition',
-    'bg-paper/[0.03] hover:bg-paper/[0.05]',
+    'bg-[rgb(var(--surface-glass)_/_0.03)]',
+    'hover:bg-[rgb(var(--surface-glass)_/_0.05)]',
     eventChipClassName({ status, isBlocked }),
   ].join(' ')
+}
+
+function modalPanelClassName(): string {
+  return [
+    'w-full overflow-hidden rounded-t-[24px]',
+    'border border-[var(--line-strong)]',
+    'bg-[rgb(var(--bg-primary))]',
+    'shadow-[0_28px_80px_rgb(0_0_0_/_0.60)]',
+    'sm:max-w-[56rem] sm:rounded-[24px]',
+  ].join(' ')
+}
+
+function modalHeaderClassName(): string {
+  return [
+    'sticky top-0 z-10 border-b border-[var(--line-strong)]',
+    'bg-[rgb(var(--bg-primary)_/_0.95)] backdrop-blur-xl',
+  ].join(' ')
+}
+
+function modalFooterClassName(): string {
+  return [
+    'border-t border-[var(--line-strong)]',
+    'bg-[rgb(var(--bg-primary)_/_0.90)] px-4 py-3',
+    'font-mono text-[10px] font-semibold uppercase tracking-[0.10em]',
+    'text-[rgb(var(--text-muted))] backdrop-blur-xl sm:px-5',
+  ].join(' ')
+}
+
+function mutedTextClassName(): string {
+  return 'text-[rgb(var(--text-muted))]'
+}
+
+function primaryTextClassName(): string {
+  return 'text-[rgb(var(--text-primary))]'
+}
+
+function secondaryTextClassName(): string {
+  return 'text-[rgb(var(--text-secondary))]'
+}
+
+// ─── Small components ─────────────────────────────────────────────────────────
+
+function ActionButton(props: ButtonProps) {
+  const {
+    children,
+    tone = 'default',
+    disabled = false,
+    onClick,
+    ariaLabel,
+    title,
+  } = props
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={buttonClassName(tone)}
+      aria-label={ariaLabel}
+      title={title}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ActionLink(props: {
+  href: string
+  children: ReactNode
+  tone?: ButtonTone
+}) {
+  const { href, children, tone = 'ghost' } = props
+
+  return (
+    <a href={href} className={buttonClassName(tone)}>
+      {children}
+    </a>
+  )
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
@@ -369,33 +481,34 @@ export function ManagementModal(props: ManagementModalProps) {
     <div
       className="fixed inset-0 z-[1100] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-6"
       onMouseDown={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="calendar-management-title"
     >
       <div
-        className={[
-          'w-full overflow-hidden rounded-t-[24px] border border-[var(--line-strong)]',
-          'bg-ink shadow-[0_28px_80px_rgb(0_0_0_/_0.60)]',
-          'sm:max-w-[56rem] sm:rounded-[24px]',
-        ].join(' ')}
+        className={modalPanelClassName()}
         onMouseDown={stopDialogMouseDown}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="calendar-management-title"
       >
-        <div className="sticky top-0 z-10 border-b border-[var(--line-strong)] bg-ink/95 backdrop-blur-xl">
+        <div className={modalHeaderClassName()}>
           <div className="flex items-start justify-between gap-3 p-4 sm:p-5">
             <div className="min-w-0">
-              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-terraGlow">
+              <p className="font-mono text-[10px] font-black uppercase tracking-[0.16em] text-[rgb(var(--accent-primary-hover))]">
                 ◆ Calendar management
               </p>
 
               <h2
                 id="calendar-management-title"
-                className="mt-1 truncate font-display text-3xl font-semibold italic tracking-[-0.05em] text-paper"
+                className="mt-1 truncate font-display text-3xl font-semibold italic tracking-[-0.05em] text-[rgb(var(--text-primary))]"
               >
                 {activeTab.title}
               </h2>
 
-              <p className="mt-1 max-w-2xl text-sm leading-6 text-paperDim">
+              <p
+                className={[
+                  'mt-1 max-w-2xl text-sm leading-6',
+                  secondaryTextClassName(),
+                ].join(' ')}
+              >
                 {activeTab.description}
               </p>
 
@@ -406,17 +519,16 @@ export function ManagementModal(props: ManagementModalProps) {
               ) : null}
             </div>
 
-            <button
-              type="button"
+            <ActionButton
+              tone="ghost"
               onClick={() => {
                 setConfirmDenyId(null)
                 onClose()
               }}
-              className={buttonClassName({ tone: 'ghost' })}
-              aria-label="Close calendar management"
+              ariaLabel="Close calendar management"
             >
               Close
-            </button>
+            </ActionButton>
           </div>
 
           <div className="px-4 pb-4 sm:px-5">
@@ -434,7 +546,13 @@ export function ManagementModal(props: ManagementModalProps) {
                     aria-pressed={active}
                   >
                     {tab.shortTitle}{' '}
-                    <span className={active ? 'text-ink/60' : 'text-paperMute'}>
+                    <span
+                      className={
+                        active
+                          ? 'text-[rgb(var(--bg-primary)_/_0.60)]'
+                          : mutedTextClassName()
+                      }
+                    >
                       ({count})
                     </span>
                   </button>
@@ -445,27 +563,24 @@ export function ManagementModal(props: ManagementModalProps) {
 
           {activeKey === 'blockedToday' ? (
             <div className="flex flex-wrap gap-2 border-t border-[var(--line)] px-4 py-3 sm:px-5">
-              <button
-                type="button"
+              <ActionButton
+                tone="primary"
                 onClick={() => {
                   setConfirmDenyId(null)
                   onCreateBlockNow()
                 }}
-                className={buttonClassName({ tone: 'primary' })}
               >
                 + Block time
-              </button>
+              </ActionButton>
 
-              <button
-                type="button"
+              <ActionButton
                 onClick={() => {
                   setConfirmDenyId(null)
                   onBlockFullDayToday()
                 }}
-                className={buttonClassName()}
               >
                 Block full day
-              </button>
+              </ActionButton>
             </div>
           ) : null}
         </div>
@@ -475,168 +590,246 @@ export function ManagementModal(props: ManagementModalProps) {
             <EmptyManagementState tab={activeTab} />
           ) : (
             <div className="grid gap-3">
-              {sortedList.map((event) => {
-                const bookingId = bookingIdFor(event)
-                const isBlock = isBlockedEvent(event)
-                const rowCopy = buildEventRowCopy({
-                  event,
-                  viewportTimeZone,
-                })
-
-                const busy = Boolean(
-                  actionBusyId && bookingId && actionBusyId === bookingId,
-                )
-
-                const messageBookingId =
-                  canMessageEvent(activeKey, event) && bookingId
-                    ? bookingId
-                    : null
-
-                const showModeration = canModerateEvent(activeKey, event)
-
-                return (
-                  <article
-                    key={event.id}
-                    className={eventArticleClassName({
-                      status: event.status,
-                      isBlocked: isBlock,
-                    })}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex min-w-0 items-start gap-3">
-                        <div
-                          className={[
-                            'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
-                            'border border-[var(--line)] bg-ink',
-                            'font-mono text-xs font-black text-paper',
-                          ].join(' ')}
-                          aria-hidden="true"
-                        >
-                          {rowCopy.initials}
-                        </div>
-
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="truncate font-display text-lg font-semibold italic tracking-[-0.04em] text-paper">
-                              {rowCopy.title}
-                            </h3>
-
-                            <span
-                              className={[
-                                'rounded-full border px-2 py-0.5',
-                                'font-mono text-[9px] font-black uppercase tracking-[0.08em]',
-                                eventBadgeClassName({
-                                  status: event.status,
-                                  isBlocked: isBlock,
-                                }),
-                              ].join(' ')}
-                            >
-                              {rowCopy.statusLabel}
-                            </span>
-                          </div>
-
-                          <p className="mt-1 truncate text-sm font-semibold text-paperDim">
-                            {rowCopy.subtitle}
-                          </p>
-                        </div>
-                      </div>
-
-                      <p className="hidden shrink-0 text-right font-mono text-[10px] font-black uppercase tracking-[0.08em] text-paperMute sm:block">
-                        {rowCopy.timeLabel}
-                      </p>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConfirmDenyId(null)
-                            onPickEvent(event)
-                          }}
-                          className={buttonClassName()}
-                        >
-                          {activeKey === 'pendingRequests' && !isBlock
-                            ? 'Review / Reschedule'
-                            : 'Open'}
-                        </button>
-
-                        {messageBookingId ? (
-                          <a
-                            href={messageHrefForBooking(messageBookingId)}
-                            className={buttonClassName({ tone: 'ghost' })}
-                          >
-                            Message
-                          </a>
-                        ) : null}
-                      </div>
-
-                      {showModeration ? (
-                        <div className="flex flex-wrap items-center gap-2">
-                          {confirmDenyId === event.id ? (
-                            <>
-                              <button
-                                type="button"
-                                disabled={busy}
-                                onClick={() => setConfirmDenyId(null)}
-                                className={buttonClassName({ tone: 'ghost' })}
-                              >
-                                Cancel
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled={busy || !onDenyBookingId || !bookingId}
-                                onClick={() => {
-                                  if (!bookingId || !onDenyBookingId) return
-
-                                  void onDenyBookingId(bookingId)
-                                  setConfirmDenyId(null)
-                                }}
-                                className={buttonClassName({ tone: 'danger' })}
-                              >
-                                {busy ? 'Working…' : 'Confirm deny'}
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={busy || !onDenyBookingId || !bookingId}
-                              onClick={() => setConfirmDenyId(event.id)}
-                              className={buttonClassName({ tone: 'danger' })}
-                            >
-                              Deny
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            disabled={busy || !onApproveBookingId || !bookingId}
-                            onClick={() => {
-                              setConfirmDenyId(null)
-
-                              if (!bookingId || !onApproveBookingId) return
-
-                              void onApproveBookingId(bookingId)
-                            }}
-                            className={buttonClassName({ tone: 'primary' })}
-                          >
-                            {busy ? 'Working…' : 'Approve'}
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </article>
-                )
-              })}
+              {sortedList.map((event) => (
+                <ManagementEventRow
+                  key={event.id}
+                  event={event}
+                  activeKey={activeKey}
+                  viewportTimeZone={viewportTimeZone}
+                  confirmDenyId={confirmDenyId}
+                  actionBusyId={actionBusyId}
+                  onSetConfirmDenyId={setConfirmDenyId}
+                  onPickEvent={onPickEvent}
+                  onApproveBookingId={onApproveBookingId}
+                  onDenyBookingId={onDenyBookingId}
+                />
+              ))}
             </div>
           )}
         </div>
 
-        <div className="border-t border-[var(--line-strong)] bg-ink/90 px-4 py-3 font-mono text-[10px] font-semibold uppercase tracking-[0.10em] text-paperMute backdrop-blur-xl sm:px-5">
-          Press <span className="text-paper">Esc</span> to close.
+        <div className={modalFooterClassName()}>
+          Press <span className={primaryTextClassName()}>Esc</span> to close.
         </div>
       </div>
+    </div>
+  )
+}
+
+// ─── Row components ───────────────────────────────────────────────────────────
+
+function ManagementEventRow(props: {
+  event: CalendarEvent
+  activeKey: ManagementKey
+  viewportTimeZone: string
+  confirmDenyId: string | null
+  actionBusyId: string | null
+  onSetConfirmDenyId: (id: string | null) => void
+  onPickEvent: (event: CalendarEvent) => void
+  onApproveBookingId?: (bookingId: string) => void | Promise<void>
+  onDenyBookingId?: (bookingId: string) => void | Promise<void>
+}) {
+  const {
+    event,
+    activeKey,
+    viewportTimeZone,
+    confirmDenyId,
+    actionBusyId,
+    onSetConfirmDenyId,
+    onPickEvent,
+    onApproveBookingId,
+    onDenyBookingId,
+  } = props
+
+  const bookingId = bookingIdFor(event)
+  const isBlock = isBlockedEvent(event)
+
+  const rowCopy = buildEventRowCopy({
+    event,
+    viewportTimeZone,
+  })
+
+  const busy = Boolean(actionBusyId && bookingId && actionBusyId === bookingId)
+
+  const messageBookingId =
+    canMessageEvent(activeKey, event) && bookingId ? bookingId : null
+
+  const showModeration = canModerateEvent(activeKey, event)
+
+  return (
+    <article
+      className={eventArticleClassName({
+        status: event.status,
+        isBlocked: isBlock,
+      })}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <AvatarInitials initials={rowCopy.initials} />
+
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="truncate font-display text-lg font-semibold italic tracking-[-0.04em] text-[rgb(var(--text-primary))]">
+                {rowCopy.title}
+              </h3>
+
+              <span
+                className={[
+                  'rounded-full border px-2 py-0.5',
+                  'font-mono text-[9px] font-black uppercase tracking-[0.08em]',
+                  eventBadgeClassName({
+                    status: event.status,
+                    isBlocked: isBlock,
+                  }),
+                ].join(' ')}
+              >
+                {rowCopy.statusLabel}
+              </span>
+            </div>
+
+            <p
+              className={[
+                'mt-1 truncate text-sm font-semibold',
+                secondaryTextClassName(),
+              ].join(' ')}
+            >
+              {rowCopy.subtitle}
+            </p>
+          </div>
+        </div>
+
+        <p
+          className={[
+            'hidden shrink-0 text-right font-mono text-[10px] font-black uppercase tracking-[0.08em] sm:block',
+            mutedTextClassName(),
+          ].join(' ')}
+        >
+          {rowCopy.timeLabel}
+        </p>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2">
+          <ActionButton
+            onClick={() => {
+              onSetConfirmDenyId(null)
+              onPickEvent(event)
+            }}
+          >
+            {activeKey === 'pendingRequests' && !isBlock
+              ? 'Review / Reschedule'
+              : 'Open'}
+          </ActionButton>
+
+          {messageBookingId ? (
+            <ActionLink href={messageHrefForBooking(messageBookingId)}>
+              Message
+            </ActionLink>
+          ) : null}
+        </div>
+
+        {showModeration ? (
+          <ModerationActions
+            eventId={event.id}
+            bookingId={bookingId}
+            busy={busy}
+            confirmDenyId={confirmDenyId}
+            onSetConfirmDenyId={onSetConfirmDenyId}
+            onApproveBookingId={onApproveBookingId}
+            onDenyBookingId={onDenyBookingId}
+          />
+        ) : null}
+      </div>
+    </article>
+  )
+}
+
+function AvatarInitials(props: { initials: string }) {
+  const { initials } = props
+
+  return (
+    <div
+      className={[
+        'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
+        'border border-[var(--line)] bg-[rgb(var(--bg-secondary))]',
+        'font-mono text-xs font-black text-[rgb(var(--text-primary))]',
+      ].join(' ')}
+      aria-hidden="true"
+    >
+      {initials}
+    </div>
+  )
+}
+
+function ModerationActions(props: {
+  eventId: string
+  bookingId: string | null
+  busy: boolean
+  confirmDenyId: string | null
+  onSetConfirmDenyId: (id: string | null) => void
+  onApproveBookingId?: (bookingId: string) => void | Promise<void>
+  onDenyBookingId?: (bookingId: string) => void | Promise<void>
+}) {
+  const {
+    eventId,
+    bookingId,
+    busy,
+    confirmDenyId,
+    onSetConfirmDenyId,
+    onApproveBookingId,
+    onDenyBookingId,
+  } = props
+
+  const confirmingDeny = confirmDenyId === eventId
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {confirmingDeny ? (
+        <>
+          <ActionButton
+            tone="ghost"
+            disabled={busy}
+            onClick={() => onSetConfirmDenyId(null)}
+          >
+            Cancel
+          </ActionButton>
+
+          <ActionButton
+            tone="danger"
+            disabled={busy || !onDenyBookingId || !bookingId}
+            onClick={() => {
+              if (!bookingId || !onDenyBookingId) return
+
+              void onDenyBookingId(bookingId)
+              onSetConfirmDenyId(null)
+            }}
+          >
+            {busy ? 'Working…' : 'Confirm deny'}
+          </ActionButton>
+        </>
+      ) : (
+        <ActionButton
+          tone="danger"
+          disabled={busy || !onDenyBookingId || !bookingId}
+          onClick={() => onSetConfirmDenyId(eventId)}
+        >
+          Deny
+        </ActionButton>
+      )}
+
+      <ActionButton
+        tone="primary"
+        disabled={busy || !onApproveBookingId || !bookingId}
+        onClick={() => {
+          onSetConfirmDenyId(null)
+
+          if (!bookingId || !onApproveBookingId) return
+
+          void onApproveBookingId(bookingId)
+        }}
+      >
+        {busy ? 'Working…' : 'Approve'}
+      </ActionButton>
     </div>
   )
 }
@@ -645,12 +838,17 @@ function EmptyManagementState(props: { tab: ManagementTab }) {
   const { tab } = props
 
   return (
-    <div className="rounded-2xl border border-[var(--line)] bg-paper/[0.03] p-5">
-      <p className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-paper">
+    <div className="rounded-2xl border border-[var(--line)] bg-[rgb(var(--surface-glass)_/_0.03)] p-5">
+      <p className="font-display text-2xl font-semibold italic tracking-[-0.04em] text-[rgb(var(--text-primary))]">
         {tab.emptyTitle}
       </p>
 
-      <p className="mt-2 max-w-xl text-sm leading-6 text-paperDim">
+      <p
+        className={[
+          'mt-2 max-w-xl text-sm leading-6',
+          secondaryTextClassName(),
+        ].join(' ')}
+      >
         {tab.emptyBody}
       </p>
     </div>

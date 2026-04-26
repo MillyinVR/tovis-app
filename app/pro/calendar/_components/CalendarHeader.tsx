@@ -14,7 +14,11 @@ type CalendarHeaderControlsProps = {
   onToday: () => void
   onBack: () => void
   onNext: () => void
-  /** When provided, renders the "+ Block time" accent CTA inline with the controls. */
+
+  /**
+   * Desktop-only inline CTA.
+   * Mobile uses MobileCalendarFab instead.
+   */
   onBlockTime?: () => void
 }
 
@@ -48,65 +52,23 @@ const VIEW_OPTIONS: ReadonlyArray<ViewOption> = [
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function viewTabClassName(active: boolean) {
-  const base = [
-    'rounded-full px-3.5 py-1.5',
-    'text-[11px] font-extrabold uppercase tracking-[0.06em]',
-    'transition',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-  ].join(' ')
-
-  if (active) {
-    return [base, 'bg-paper text-ink'].join(' ')
-  }
-
-  return [base, 'bg-transparent text-paperMute hover:text-paper'].join(' ')
+function viewTabClassName(): string {
+  return 'brand-pro-calendar-segment-button brand-focus'
 }
 
-function iconButtonClassName() {
-  return [
-    'inline-flex h-[30px] w-[30px] shrink-0 items-center justify-center',
-    'rounded-lg border border-[var(--line-strong)] bg-transparent',
-    'text-paper transition hover:bg-paper/[0.06]',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-  ].join(' ')
+function iconButtonClassName(): string {
+  return 'brand-pro-calendar-nav-button brand-focus'
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function ViewTabButton(props: ViewTabButtonProps) {
-  const { value, label, active, onSelect } = props
-
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={() => {
-        if (!active) onSelect(value)
-      }}
-      className={viewTabClassName(active)}
-    >
-      {label}
-    </button>
-  )
+function todayButtonClassName(): string {
+  return 'brand-pro-calendar-today-button brand-focus'
 }
 
-function IconButton(props: IconButtonProps) {
-  const { label, onClick, children } = props
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={iconButtonClassName()}
-      aria-label={label}
-      title={label}
-    >
-      {children}
-    </button>
-  )
+function blockTimeButtonClassName(): string {
+  return 'brand-pro-calendar-block-button brand-focus'
 }
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
 
 function IconChevronLeft(props: IconProps) {
   return (
@@ -146,7 +108,45 @@ function IconChevronRight(props: IconProps) {
   )
 }
 
-// ─── Exported components ──────────────────────────────────────────────────────
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function ViewTabButton(props: ViewTabButtonProps) {
+  const { value, label, active, onSelect } = props
+
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      aria-label={`Switch to ${label.toLowerCase()} view`}
+      onClick={() => {
+        if (!active) onSelect(value)
+      }}
+      className={viewTabClassName()}
+      data-active={active ? 'true' : 'false'}
+    >
+      {label}
+    </button>
+  )
+}
+
+function IconButton(props: IconButtonProps) {
+  const { label, onClick, children } = props
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={iconButtonClassName()}
+      aria-label={label}
+      title={label}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ─── Exported component ───────────────────────────────────────────────────────
 
 export function CalendarHeaderControls(props: CalendarHeaderControlsProps) {
   const { view, setView, headerLabel, onToday, onBack, onNext, onBlockTime } =
@@ -154,15 +154,12 @@ export function CalendarHeaderControls(props: CalendarHeaderControlsProps) {
 
   return (
     <div
-      className="flex w-full items-center justify-between gap-2 md:w-auto md:flex-wrap md:justify-end"
+      className="brand-pro-calendar-controls"
       role="group"
       aria-label="Calendar navigation"
     >
       <div
-        className={[
-          'flex shrink-0 gap-0.5 rounded-full border border-[var(--line)]',
-          'bg-paper/[0.05] p-[3px]',
-        ].join(' ')}
+        className="brand-pro-calendar-segment"
         role="tablist"
         aria-label="Calendar view"
       >
@@ -177,7 +174,7 @@ export function CalendarHeaderControls(props: CalendarHeaderControlsProps) {
         ))}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="brand-pro-calendar-nav-row">
         <IconButton label="Previous calendar range" onClick={onBack}>
           <IconChevronLeft className="h-4 w-4" />
         </IconButton>
@@ -185,12 +182,7 @@ export function CalendarHeaderControls(props: CalendarHeaderControlsProps) {
         <button
           type="button"
           onClick={onToday}
-          className={[
-            'h-[30px] rounded-lg border border-[var(--line-strong)] bg-transparent px-2.5',
-            'font-mono text-[11px] font-extrabold uppercase tracking-[0.05em] text-paper',
-            'transition hover:bg-paper/[0.06]',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-          ].join(' ')}
+          className={todayButtonClassName()}
           aria-label="Go to today"
           title={headerLabel}
         >
@@ -201,18 +193,13 @@ export function CalendarHeaderControls(props: CalendarHeaderControlsProps) {
           <IconChevronRight className="h-4 w-4" />
         </IconButton>
 
-        {onBlockTime !== undefined ? (
+        {onBlockTime ? (
           <button
             type="button"
             onClick={onBlockTime}
-            className={[
-              'hidden md:inline-flex',
-              'h-[30px] items-center rounded-lg px-3',
-              'bg-terra font-mono text-[11px] font-extrabold uppercase tracking-[0.05em] text-paper',
-              'shadow-[0_8px_22px_rgb(var(--terra)_/_0.40)]',
-              'transition hover:brightness-110',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-            ].join(' ')}
+            className={blockTimeButtonClassName()}
+            aria-label="Create blocked time"
+            title="Create blocked time"
           >
             + Block time
           </button>
