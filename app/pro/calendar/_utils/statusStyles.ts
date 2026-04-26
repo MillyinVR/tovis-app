@@ -1,11 +1,11 @@
 // app/pro/calendar/_utils/statusStyles.ts
 
 /**
- * Centralized visual styles for calendar event statuses.
+ * Centralized presentation helpers for calendar event statuses.
  *
  * Used by:
  * - Day/week event cards
- * - Month chips
+ * - Month chips/dots
  * - Management modal rows
  * - Mobile pending request surfaces
  *
@@ -13,11 +13,12 @@
  * - No hex colors.
  * - No casts.
  * - No duplicated status branching in components.
- * - Components should ask this file for labels/classes instead of rebuilding them.
+ * - Components should ask this file for status labels/classes/tone.
  *
  * Important:
- * - EventCard owns the actual card fill color with CSS variable inline styles.
- * - This file owns labels, chips, badges, borders, rings, and accent stripes.
+ * - EventCard emits data-calendar-event-tone / data-calendar-event-kind.
+ * - brand.css owns card fill, shadow, blocked patterns, and white-label visuals.
+ * - This file owns status meaning, labels, chips, badges, borders, rings, and accent stripes.
  */
 
 export type CalendarEventLike = {
@@ -31,6 +32,7 @@ export type StatusTone =
   | 'completed'
   | 'danger'
   | 'blocked'
+  | 'waitlist'
   | 'scheduled'
 
 export type ChipClasses = {
@@ -62,10 +64,15 @@ export type CalendarStatusMeta = StatusPresentation & {
 
 const BLOCKED_STATUS = 'BLOCKED'
 
-const ACCEPTED_STATUSES = new Set(['ACCEPTED', 'CONFIRMED'])
-const PENDING_STATUSES = new Set(['PENDING', 'RESCHEDULE_REQUESTED'])
-const COMPLETED_STATUSES = new Set(['COMPLETED'])
-const DANGER_STATUSES = new Set(['CANCELLED', 'DECLINED', 'NO_SHOW'])
+const ACCEPTED_STATUSES = new Set<string>(['ACCEPTED', 'CONFIRMED'])
+const PENDING_STATUSES = new Set<string>(['PENDING', 'RESCHEDULE_REQUESTED'])
+const COMPLETED_STATUSES = new Set<string>(['COMPLETED'])
+const DANGER_STATUSES = new Set<string>([
+  'CANCELLED',
+  'DECLINED',
+  'NO_SHOW',
+])
+const WAITLIST_STATUSES = new Set<string>(['WAITLIST'])
 
 const STATUS_LABELS: Record<string, string> = {
   ACCEPTED: 'Accepted',
@@ -76,6 +83,7 @@ const STATUS_LABELS: Record<string, string> = {
   DECLINED: 'Declined',
   NO_SHOW: 'No show',
   RESCHEDULE_REQUESTED: 'Reschedule requested',
+  WAITLIST: 'Waitlist',
   BLOCKED: 'Blocked',
 }
 
@@ -109,7 +117,7 @@ const STATUS_PRESENTATION: Record<StatusTone, StatusPresentation> = {
       ring: 'ring-1 ring-inset ring-tonePending/35',
       accentBg: 'bg-tonePending',
     },
-    badge: 'border-tonePending/30 bg-tonePending/12 text-tonePending',
+    badge: 'border-tonePending/30 bg-tonePending/10 text-tonePending',
   },
 
   completed: {
@@ -147,17 +155,33 @@ const STATUS_PRESENTATION: Record<StatusTone, StatusPresentation> = {
   blocked: {
     tone: 'blocked',
     chip: {
-      bg: 'bg-paper/8',
+      bg: 'bg-paper/10',
       border: 'border-paper/15',
       text: 'text-textPrimary',
       ring: 'ring-1 ring-inset ring-paper/10',
     },
     card: {
       border: 'border-paper/20',
-      ring: 'ring-1 ring-inset ring-paper/12',
+      ring: 'ring-1 ring-inset ring-paper/10',
       accentBg: 'bg-paper/30',
     },
     badge: 'border-paper/15 bg-paper/10 text-textSecondary',
+  },
+
+  waitlist: {
+    tone: 'waitlist',
+    chip: {
+      bg: 'bg-acid/10',
+      border: 'border-acid/25',
+      text: 'text-textPrimary',
+      ring: 'ring-1 ring-inset ring-acid/15',
+    },
+    card: {
+      border: 'border-acid/40',
+      ring: 'ring-1 ring-inset ring-acid/25',
+      accentBg: 'bg-acid',
+    },
+    badge: 'border-acid/25 bg-acid/10 text-acid',
   },
 
   scheduled: {
@@ -179,11 +203,11 @@ const STATUS_PRESENTATION: Record<StatusTone, StatusPresentation> = {
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function normalizeStatus(status?: string | null) {
+function normalizeStatus(status?: string | null): string {
   return typeof status === 'string' ? status.trim().toUpperCase() : ''
 }
 
-function humanizeStatus(normalizedStatus: string) {
+function humanizeStatus(normalizedStatus: string): string {
   if (!normalizedStatus) return 'Scheduled'
 
   const explicitLabel = STATUS_LABELS[normalizedStatus]
@@ -202,6 +226,10 @@ function statusToneForEvent(event: CalendarEventLike): StatusTone {
 
   if (event.isBlocked || normalizedStatus === BLOCKED_STATUS) {
     return 'blocked'
+  }
+
+  if (WAITLIST_STATUSES.has(normalizedStatus)) {
+    return 'waitlist'
   }
 
   if (PENDING_STATUSES.has(normalizedStatus)) {
@@ -227,7 +255,7 @@ function isPresentClassName(value: string | undefined): value is string {
   return typeof value === 'string' && value.length > 0
 }
 
-function joinClasses(parts: ReadonlyArray<string | undefined>) {
+function joinClasses(parts: ReadonlyArray<string | undefined>): string {
   return parts.filter(isPresentClassName).join(' ')
 }
 
@@ -252,6 +280,10 @@ export function statusLabel(status?: string | null): string {
   return humanizeStatus(normalizeStatus(status))
 }
 
+export function eventStatusTone(event: CalendarEventLike): StatusTone {
+  return calendarStatusMeta(event).tone
+}
+
 /**
  * Small pill/chip UI.
  * These can include backgrounds because chips are intentionally tinted.
@@ -262,7 +294,7 @@ export function eventChipClasses(event: CalendarEventLike): ChipClasses {
 
 /**
  * Calendar event block chrome.
- * The card fill itself is handled by EventCard with inline CSS token colors.
+ * The card fill, shadow, and blocked pattern belong in brand.css.
  */
 export function eventCardClasses(event: CalendarEventLike): CardClasses {
   return calendarStatusMeta(event).card

@@ -8,11 +8,14 @@ import type {
   BookingCalendarStatus,
   BookingDetails,
   BookingServiceItem,
+  BookingServiceItemType,
   BlockCalendarEvent,
   CalendarEvent,
+  CalendarLocationType,
   CalendarServiceItem,
   CalendarStats,
   ManagementLists,
+  ServiceLocationType,
   ServiceOption,
   TimeZoneTruthSource,
   WorkingHoursDay,
@@ -20,12 +23,12 @@ import type {
 } from '../_types'
 
 import { isRecord } from '@/lib/guards'
-import { pickBool, pickNumber, pickString } from '@/lib/pick'
 import { readErrorMessage } from '@/lib/http'
-import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import { pickBool, pickNumber, pickString } from '@/lib/pick'
 import { parseHHMM } from '@/lib/scheduling/workingHours'
+import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 
-export type LocationType = 'SALON' | 'MOBILE'
+export type LocationType = CalendarLocationType
 export type ProLocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE' | string
 
 export type ProLocation = {
@@ -46,43 +49,50 @@ export type CalendarRouteLocation = {
   timeZone: string | null
 }
 
-function normalizeText(value: unknown) {
+// ─── Primitive helpers ────────────────────────────────────────────────────────
+
+function normalizeText(value: unknown): string {
   return pickString(value)?.trim() ?? ''
 }
 
-function nullableText(value: unknown) {
+function nullableText(value: unknown): string | null {
   const text = normalizeText(value)
+
   return text ? text : null
 }
 
-function optionalText(value: unknown) {
+function optionalText(value: unknown): string | undefined {
   const text = normalizeText(value)
+
   return text ? text : undefined
 }
 
-function finiteNumberOrNull(value: unknown) {
+function finiteNumberOrNull(value: unknown): number | null {
   const number = pickNumber(value)
+
   return number !== null && Number.isFinite(number) ? number : null
 }
 
-function positiveNumberOrUndefined(value: unknown) {
+function positiveNumberOrUndefined(value: unknown): number | undefined {
   const number = finiteNumberOrNull(value)
+
   return number !== null && number > 0 ? number : undefined
 }
 
-function normalizeBoolean(value: unknown, fallback: boolean) {
+function normalizeBoolean(value: unknown, fallback: boolean): boolean {
   return pickBool(value) ?? fallback
 }
 
-function validIsoString(value: unknown) {
+function validIsoString(value: unknown): string | null {
   const iso = nullableText(value)
   if (!iso) return null
 
   const date = new Date(iso)
+
   return Number.isFinite(date.getTime()) ? iso : null
 }
 
-function normalizeHHMM(value: unknown) {
+function normalizeHHMM(value: unknown): string | null {
   const parsed = parseHHMM(value)
   if (!parsed) return null
 
@@ -101,13 +111,19 @@ function emptyManagementLists(): ManagementLists {
   }
 }
 
-export function apiMessage(data: unknown, fallback: string) {
-  return readErrorMessage(data) ?? nullableText(isRecord(data) ? data.message : null) ?? fallback
+export function apiMessage(data: unknown, fallback: string): string {
+  return (
+    readErrorMessage(data) ??
+    nullableText(isRecord(data) ? data.message : null) ??
+    fallback
+  )
 }
 
 export function upper(value: unknown): string {
   return normalizeText(value).toUpperCase()
 }
+
+// ─── Status / enum-ish normalizers ────────────────────────────────────────────
 
 function normalizeBookingCalendarStatus(value: unknown): BookingCalendarStatus {
   const raw = upper(value)
@@ -116,6 +132,9 @@ function normalizeBookingCalendarStatus(value: unknown): BookingCalendarStatus {
   if (raw === 'ACCEPTED') return 'ACCEPTED'
   if (raw === 'COMPLETED') return 'COMPLETED'
   if (raw === 'CANCELLED') return 'CANCELLED'
+  if (raw === 'DECLINED') return 'DECLINED'
+  if (raw === 'NO_SHOW') return 'NO_SHOW'
+  if (raw === 'RESCHEDULE_REQUESTED') return 'RESCHEDULE_REQUESTED'
   if (raw === 'WAITLIST') return 'WAITLIST'
   if (raw === 'UNKNOWN') return 'UNKNOWN'
 
@@ -134,6 +153,15 @@ function normalizeTimeZoneTruthSource(value: unknown): TimeZoneTruthSource {
   return 'FALLBACK'
 }
 
+function normalizeBookingServiceItemType(value: unknown): BookingServiceItemType {
+  const raw = upper(value)
+
+  if (raw === 'BASE') return 'BASE'
+  if (raw === 'ADD_ON') return 'ADD_ON'
+
+  return nullableText(value) ?? 'ADD_ON'
+}
+
 export function normalizeProLocationType(value: unknown): ProLocationType {
   const raw = upper(value)
 
@@ -146,7 +174,21 @@ export function normalizeProLocationType(value: unknown): ProLocationType {
 
 export function normalizeLocationType(value: unknown): LocationType {
   const raw = upper(value)
+
   return raw === 'MOBILE' || raw === 'MOBILE_BASE' ? 'MOBILE' : 'SALON'
+}
+
+function normalizeServiceLocationType(
+  value: unknown,
+): ServiceLocationType | null {
+  if (value === null || value === undefined) return null
+
+  const raw = upper(value)
+
+  if (raw === 'SALON') return 'SALON'
+  if (raw === 'MOBILE') return 'MOBILE'
+
+  return nullableText(value)
 }
 
 export function pickLocationType(
@@ -169,6 +211,8 @@ export function locationTypeFromProfessionalType(value: unknown): LocationType {
 export function locationTypeFromBookingValue(value: unknown): LocationType {
   return normalizeLocationType(value)
 }
+
+// ─── Working hours parsers ────────────────────────────────────────────────────
 
 export function parseWorkingHoursDay(value: unknown): WorkingHoursDay | null {
   if (!isRecord(value)) return null
@@ -210,6 +254,8 @@ export function parseWorkingHoursJson(value: unknown): WorkingHoursJson {
   }
 }
 
+// ─── Location parsers ─────────────────────────────────────────────────────────
+
 export function parseCalendarRouteLocation(
   value: unknown,
 ): CalendarRouteLocation | null {
@@ -243,6 +289,8 @@ export function parseProLocation(value: unknown): ProLocation | null {
     stepMinutes: finiteNumberOrNull(value.stepMinutes),
   }
 }
+
+// ─── Calendar event parsers ───────────────────────────────────────────────────
 
 function parseCalendarServiceItem(value: unknown): CalendarServiceItem | null {
   if (!isRecord(value)) return null
@@ -299,7 +347,7 @@ function parseBookingEvent(
     status: normalizeBookingCalendarStatus(value.status),
     locationId:
       value.locationId === null ? null : nullableText(value.locationId),
-    locationType: normalizeLocationType(value.locationType),
+    locationType: normalizeServiceLocationType(value.locationType),
     timeZone: sanitizeTimeZone(value.timeZone, DEFAULT_TIME_ZONE),
     timeZoneSource: normalizeTimeZoneTruthSource(value.timeZoneSource),
     localDateKey:
@@ -334,6 +382,7 @@ function parseBlockEvent(
   const derivedBlockId = id.startsWith('block:')
     ? id.slice('block:'.length)
     : null
+
   const blockId = nullableText(value.blockId) ?? derivedBlockId
   if (!blockId) return null
 
@@ -410,12 +459,18 @@ export function parseCalendarStats(value: unknown): CalendarStats {
   return {
     todaysBookings,
     availableHours:
-      value.availableHours === null ? null : finiteNumberOrNull(value.availableHours),
+      value.availableHours === null
+        ? null
+        : finiteNumberOrNull(value.availableHours),
     pendingRequests,
     blockedHours:
-      value.blockedHours === null ? null : finiteNumberOrNull(value.blockedHours),
+      value.blockedHours === null
+        ? null
+        : finiteNumberOrNull(value.blockedHours),
   }
 }
+
+// ─── Service option parsers ───────────────────────────────────────────────────
 
 export function parseServiceOptions(value: unknown): ServiceOption[] {
   if (!Array.isArray(value)) return []
@@ -435,8 +490,11 @@ export function parseServiceOptions(value: unknown): ServiceOption[] {
         : finiteNumberOrNull(row.durationMinutes)
 
     const offeringId = optionalText(row.offeringId)
+
     const priceStartingAt =
-      row.priceStartingAt === null ? null : nullableText(row.priceStartingAt)
+      row.priceStartingAt === null
+        ? null
+        : nullableText(row.priceStartingAt)
 
     options.push({
       id,
@@ -450,6 +508,8 @@ export function parseServiceOptions(value: unknown): ServiceOption[] {
   return options
 }
 
+// ─── Booking detail parsers ───────────────────────────────────────────────────
+
 export function parseBookingServiceItem(
   value: unknown,
 ): BookingServiceItem | null {
@@ -459,7 +519,6 @@ export function parseBookingServiceItem(
   const serviceId = nullableText(value.serviceId)
   const itemType = nullableText(value.itemType)
   const serviceName = nullableText(value.serviceName)
-  const priceSnapshot = nullableText(value.priceSnapshot)
   const durationMinutesSnapshot = finiteNumberOrNull(
     value.durationMinutesSnapshot,
   )
@@ -470,7 +529,6 @@ export function parseBookingServiceItem(
     !serviceId ||
     !itemType ||
     !serviceName ||
-    !priceSnapshot ||
     durationMinutesSnapshot === null ||
     sortOrder === null
   ) {
@@ -482,9 +540,10 @@ export function parseBookingServiceItem(
     serviceId,
     offeringId:
       value.offeringId === null ? null : nullableText(value.offeringId),
-    itemType,
+    itemType: normalizeBookingServiceItemType(itemType),
     serviceName,
-    priceSnapshot,
+    priceSnapshot:
+      value.priceSnapshot === null ? null : nullableText(value.priceSnapshot),
     durationMinutesSnapshot,
     sortOrder,
   }
@@ -507,12 +566,11 @@ export function parseBookingDetails(value: unknown): BookingDetails | null {
   if (!isRecord(value)) return null
 
   const id = nullableText(value.id)
-  const status = nullableText(value.status)
   const scheduledFor = validIsoString(value.scheduledFor)
   const endsAt = validIsoString(value.endsAt)
   const totalDurationMinutes = finiteNumberOrNull(value.totalDurationMinutes)
 
-  if (!id || !status || !scheduledFor || !endsAt || totalDurationMinutes === null) {
+  if (!id || !scheduledFor || !endsAt || totalDurationMinutes === null) {
     return null
   }
 
@@ -525,11 +583,7 @@ export function parseBookingDetails(value: unknown): BookingDetails | null {
   const locationId =
     value.locationId === null ? null : optionalText(value.locationId)
 
-  const locationTypeRaw = upper(value.locationType)
-  const locationType =
-    locationTypeRaw === 'SALON' || locationTypeRaw === 'MOBILE'
-      ? locationTypeRaw
-      : undefined
+  const locationType = normalizeServiceLocationType(value.locationType)
 
   const locationAddressSnapshot =
     value.locationAddressSnapshot === null
@@ -540,15 +594,16 @@ export function parseBookingDetails(value: unknown): BookingDetails | null {
   const locationLngSnapshot = finiteNumberOrNull(value.locationLngSnapshot)
   const durationMinutes = positiveNumberOrUndefined(value.durationMinutes)
   const bufferMinutes = positiveNumberOrUndefined(value.bufferMinutes)
-  const subtotalSnapshot = optionalText(value.subtotalSnapshot)
+  const subtotalSnapshot =
+    value.subtotalSnapshot === null ? null : optionalText(value.subtotalSnapshot)
 
   return {
     id,
-    status,
+    status: normalizeBookingCalendarStatus(value.status),
     scheduledFor,
     endsAt,
     ...(locationId !== undefined ? { locationId } : {}),
-    ...(locationType ? { locationType } : {}),
+    ...(locationType !== null ? { locationType } : {}),
     ...(locationAddressSnapshot !== undefined
       ? { locationAddressSnapshot }
       : {}),
@@ -557,7 +612,7 @@ export function parseBookingDetails(value: unknown): BookingDetails | null {
     totalDurationMinutes,
     ...(durationMinutes !== undefined ? { durationMinutes } : {}),
     ...(bufferMinutes !== undefined ? { bufferMinutes } : {}),
-    ...(subtotalSnapshot ? { subtotalSnapshot } : {}),
+    ...(subtotalSnapshot !== undefined ? { subtotalSnapshot } : {}),
     client: {
       fullName,
       email: client.email === null ? null : nullableText(client.email),

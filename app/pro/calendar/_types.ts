@@ -5,6 +5,8 @@ import type { IanaTimeZone } from '@/lib/timeZone'
 export type ViewMode = 'day' | 'week' | 'month'
 export type EntityType = 'booking' | 'block'
 
+export type CalendarDisplayDensity = 'full' | 'compact' | 'micro'
+
 export type WeekdayKey =
   | 'sun'
   | 'mon'
@@ -22,12 +24,17 @@ export type TimeZoneTruthSource =
   | 'FALLBACK'
 
 /**
- * Backend-facing location mode.
+ * UI-facing location mode.
+ * Keep this narrow because calendar layout logic only understands these modes.
+ */
+export type CalendarLocationType = 'SALON' | 'MOBILE'
+
+/**
+ * Backend-facing service location mode.
  * Keep this extensible because backend/provider enums may grow.
  */
 export type ServiceLocationType =
-  | 'SALON'
-  | 'MOBILE'
+  | CalendarLocationType
   | (string & Record<never, never>)
 
 /**
@@ -83,7 +90,7 @@ export type BookingServiceItem = {
   offeringId: string | null
   itemType: BookingServiceItemType
   serviceName: string
-  priceSnapshot: string
+  priceSnapshot: string | null
   durationMinutesSnapshot: number
   sortOrder: number
 }
@@ -96,21 +103,21 @@ export type BookingClientSnapshot = {
 
 export type BookingDetails = {
   id: string
-  status: BookingCalendarStatus | string
+  status: BookingCalendarStatus
   scheduledFor: string
   endsAt: string
 
   locationId?: string | null
-  locationType?: ServiceLocationType
+  locationType?: ServiceLocationType | null
 
   locationAddressSnapshot?: string | null
   locationLatSnapshot?: number | null
   locationLngSnapshot?: number | null
 
   totalDurationMinutes: number
-  durationMinutes?: number
-  bufferMinutes?: number
-  subtotalSnapshot?: string
+  durationMinutes?: number | null
+  bufferMinutes?: number | null
+  subtotalSnapshot?: string | null
 
   client: BookingClientSnapshot
 
@@ -146,12 +153,13 @@ type CalendarEventBase = {
 export type BookingCalendarEvent = CalendarEventBase & {
   kind: 'BOOKING'
   status: BookingCalendarStatus
-  locationType: ServiceLocationType
+  locationType: ServiceLocationType | null
 
   /**
    * Authoritative appointment-local timezone for this booking.
    */
   timeZone: IanaTimeZone
+
   timeZoneSource: TimeZoneTruthSource
 
   /**
