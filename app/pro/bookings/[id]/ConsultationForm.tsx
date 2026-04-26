@@ -1,13 +1,15 @@
 // app/pro/bookings/[id]/ConsultationForm.tsx
 'use client'
 
+import type { FormEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { BookingServiceItemType } from '@prisma/client'
+
 import {
-  safeJson,
-  readErrorMessage,
   errorMessageFromUnknown,
+  readErrorMessage,
+  safeJson,
 } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickNumber, pickString } from '@/lib/pick'
@@ -57,40 +59,56 @@ type LineItem = {
   source: 'BOOKING' | 'PROPOSAL'
 }
 
+type NormalizedInput = {
+  value: string | null
+  ok: boolean
+}
+
 const FORCE_EVENT = 'tovis:pro-session:force'
 
-function pickNullableString(v: unknown): string | null {
-  return pickString(v)
+function pickNullableString(value: unknown): string | null {
+  return pickString(value)
 }
 
-function pickNullableNumber(v: unknown): number | null {
-  return pickNumber(v)
+function pickNullableNumber(value: unknown): number | null {
+  return pickNumber(value)
 }
 
-function isAbortError(err: unknown): boolean {
-  return isRecord(err) && err.name === 'AbortError'
+function isAbortError(error: unknown): boolean {
+  return isRecord(error) && error.name === 'AbortError'
 }
 
-function errorFromResponse(res: Response, data: unknown) {
-  const msg = readErrorMessage(data)
-  if (msg) return msg
+function errorFromResponse(response: Response, data: unknown): string {
+  const readableMessage = readErrorMessage(data)
+  if (readableMessage) return readableMessage
 
   if (isRecord(data)) {
     const message = pickString(data.message)
     if (message) return message
   }
 
-  if (res.status === 401) return 'Please log in to continue.'
-  if (res.status === 403) return 'You don’t have access to do that.'
-  return `Request failed (${res.status}).`
+  if (response.status === 401) return 'Please log in to continue.'
+  if (response.status === 403) return 'You don’t have access to do that.'
+
+  return `Request failed (${response.status}).`
 }
 
-function normalizeMoneyInput(raw: string) {
-  const s = String(raw || '').replace(/\$/g, '').replace(/,/g, '').trim()
-  if (!s) return { value: null as string | null, ok: true }
-  if (!/^\d*\.?\d{0,2}$/.test(s)) return { value: s, ok: false }
+function normalizeMoneyInput(raw: string): NormalizedInput {
+  const value = String(raw || '')
+    .replace(/\$/g, '')
+    .replace(/,/g, '')
+    .trim()
 
-  const normalized = s.startsWith('.') ? `0${s}` : s
+  if (!value) {
+    return { value: null, ok: true }
+  }
+
+  if (!/^\d*\.?\d{0,2}$/.test(value)) {
+    return { value, ok: false }
+  }
+
+  const normalized = value.startsWith('.') ? `0${value}` : value
+
   if (normalized === '.' || normalized === '0.') {
     return { value: null, ok: false }
   }
@@ -98,59 +116,74 @@ function normalizeMoneyInput(raw: string) {
   return { value: normalized, ok: true }
 }
 
-function normalizeDurationInput(raw: string) {
-  const s = String(raw || '').trim()
-  if (!s) return { value: null as string | null, ok: true }
-  if (!/^\d+$/.test(s)) return { value: s, ok: false }
+function normalizeDurationInput(raw: string): NormalizedInput {
+  const value = String(raw || '').trim()
 
-  const n = Number(s)
-  if (!Number.isFinite(n) || n <= 0) return { value: s, ok: false }
+  if (!value) {
+    return { value: null, ok: true }
+  }
 
-  return { value: String(Math.round(n)), ok: true }
+  if (!/^\d+$/.test(value)) {
+    return { value, ok: false }
+  }
+
+  const duration = Number(value)
+
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return { value, ok: false }
+  }
+
+  return { value: String(Math.round(duration)), ok: true }
 }
 
-function normalizeInitialPrice(v: unknown): string | null {
-  if (v == null) return null
+function normalizeInitialPrice(value: string | number | null): string | null {
+  if (value === null) return null
 
-  const s = String(v).trim()
-  if (!s) return null
+  const raw = String(value).trim()
+  if (!raw) return null
 
-  const parsed = normalizeMoneyInput(s)
-  if (!parsed.ok || parsed.value == null) return null
+  const parsed = normalizeMoneyInput(raw)
 
-  const n = Number(parsed.value)
-  if (!Number.isFinite(n) || n <= 0) return null
+  if (!parsed.ok || parsed.value === null) return null
 
-  return n.toFixed(2)
+  const amount = Number(parsed.value)
+
+  if (!Number.isFinite(amount) || amount <= 0) return null
+
+  return amount.toFixed(2)
 }
 
-function sumMoneyStrings(items: Array<{ price: string }>) {
+function sumMoneyStrings(items: Array<{ price: string }>): number {
   let total = 0
 
-  for (const it of items) {
-    const p = normalizeMoneyInput(it.price)
-    if (!p.ok || p.value == null) continue
+  for (const item of items) {
+    const parsed = normalizeMoneyInput(item.price)
 
-    const n = Number(p.value)
-    if (Number.isFinite(n)) total += n
+    if (!parsed.ok || parsed.value === null) continue
+
+    const amount = Number(parsed.value)
+
+    if (Number.isFinite(amount)) {
+      total += amount
+    }
   }
 
   return Math.round(total * 100) / 100
 }
 
-function uid() {
+function uid(): string {
   return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`
 }
 
 function parseServiceOptions(payload: unknown): ServiceOption[] {
   if (!isRecord(payload)) return []
 
-  const raw = payload.services
-  if (!Array.isArray(raw)) return []
+  const rawServices = payload.services
+  if (!Array.isArray(rawServices)) return []
 
-  const out: ServiceOption[] = []
+  const services: ServiceOption[] = []
 
-  for (const row of raw) {
+  for (const row of rawServices) {
     if (!isRecord(row)) continue
 
     const offeringId = pickString(row.offeringId) ?? ''
@@ -159,7 +192,7 @@ function parseServiceOptions(payload: unknown): ServiceOption[] {
 
     if (!offeringId || !serviceId || !serviceName) continue
 
-    out.push({
+    services.push({
       offeringId,
       serviceId,
       serviceName,
@@ -168,40 +201,106 @@ function parseServiceOptions(payload: unknown): ServiceOption[] {
     })
   }
 
-  out.sort((a, b) => {
-    const ac = a.categoryName ?? ''
-    const bc = b.categoryName ?? ''
-    if (ac !== bc) return ac.localeCompare(bc)
+  services.sort((a, b) => {
+    const categoryA = a.categoryName ?? ''
+    const categoryB = b.categoryName ?? ''
+
+    if (categoryA !== categoryB) {
+      return categoryA.localeCompare(categoryB)
+    }
+
     return a.serviceName.localeCompare(b.serviceName)
   })
 
-  return out
+  return services
 }
 
-function sortLineItems(items: LineItem[]) {
+function sortLineItems(items: LineItem[]): LineItem[] {
   return [...items].sort((a, b) => {
-    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
-    if (a.source !== b.source) return a.source === 'BOOKING' ? -1 : 1
+    if (a.sortOrder !== b.sortOrder) {
+      return a.sortOrder - b.sortOrder
+    }
+
+    if (a.source !== b.source) {
+      return a.source === 'BOOKING' ? -1 : 1
+    }
+
     return a.label.localeCompare(b.label)
   })
 }
 
 function normalizeInitialItems(items: ConsultationInitialItem[]): LineItem[] {
   return sortLineItems(
-    items.map((it, index) => ({
-      key: it.key || uid(),
-      bookingServiceItemId: it.bookingServiceItemId ?? null,
-      offeringId: it.offeringId ?? null,
-      serviceId: it.serviceId,
-      itemType: it.itemType,
-      label: it.label,
-      categoryName: it.categoryName ?? null,
-      price: it.price ?? '',
-      durationMinutes: it.durationMinutes ?? '',
-      notes: it.notes ?? '',
-      sortOrder: Number.isFinite(it.sortOrder) ? it.sortOrder : index,
-      source: it.source,
+    items.map((item, index) => ({
+      key: item.key || uid(),
+      bookingServiceItemId: item.bookingServiceItemId ?? null,
+      offeringId: item.offeringId ?? null,
+      serviceId: item.serviceId,
+      itemType: item.itemType,
+      label: item.label,
+      categoryName: item.categoryName ?? null,
+      price: item.price ?? '',
+      durationMinutes: item.durationMinutes ?? '',
+      notes: item.notes ?? '',
+      sortOrder: Number.isFinite(item.sortOrder) ? item.sortOrder : index,
+      source: item.source,
     })),
+  )
+}
+
+function serviceOptionLabel(service: ServiceOption): string {
+  const categoryPrefix = service.categoryName
+    ? `${service.categoryName} · `
+    : ''
+  const priceSuffix =
+    service.defaultPrice !== null ? ` ($${service.defaultPrice.toFixed(2)})` : ''
+
+  return `${categoryPrefix}${service.serviceName}${priceSuffix}`
+}
+
+function lineItemTypeLabel(itemType: BookingServiceItemType): string {
+  return itemType === BookingServiceItemType.ADD_ON ? 'ADD-ON' : 'SERVICE'
+}
+
+function lineItemSourceLabel(source: LineItem['source']): string {
+  return source === 'BOOKING' ? 'BOOKED' : 'PROPOSAL'
+}
+
+function AddIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  )
+}
+
+function SendIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="22" y1="2" x2="11" y2="13" />
+      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
   )
 }
 
@@ -223,7 +322,7 @@ export default function ConsultationForm({
   const [items, setItems] = useState<LineItem[]>(() =>
     normalizeInitialItems(initialItems),
   )
-  const [selectedOfferingId, setSelectedOfferingId] = useState<string>('')
+  const [selectedOfferingId, setSelectedOfferingId] = useState('')
 
   const [saving, setSaving] = useState(false)
   const [loadingServices, setLoadingServices] = useState(true)
@@ -246,37 +345,51 @@ export default function ConsultationForm({
   useEffect(() => {
     let cancelled = false
 
-    async function load() {
+    async function loadServices() {
       setLoadingServices(true)
       setError(null)
 
       try {
-        const res = await fetch(
-          `/api/pro/bookings/${encodeURIComponent(bookingId)}/consultation-services`,
+        const response = await fetch(
+          `/api/pro/bookings/${encodeURIComponent(
+            bookingId,
+          )}/consultation-services`,
           { cache: 'no-store' },
         )
-        const data: unknown = await safeJson(res)
 
-        if (!res.ok) {
-          throw new Error(errorFromResponse(res, data))
+        const data: unknown = await safeJson(response)
+
+        if (!response.ok) {
+          throw new Error(errorFromResponse(response, data))
         }
 
-        const list = parseServiceOptions(data)
+        const serviceOptions = parseServiceOptions(data)
 
         if (!cancelled) {
-          setServices(list)
-          setSelectedOfferingId((current) => current || list[0]?.offeringId || '')
+          setServices(serviceOptions)
+          setSelectedOfferingId(
+            (current) => current || serviceOptions[0]?.offeringId || '',
+          )
         }
-      } catch (e: unknown) {
+      } catch (caughtError: unknown) {
         if (!cancelled) {
-          setError(errorMessageFromUnknown(e, 'Failed to load services.'))
+          setError(
+            errorMessageFromUnknown(
+              caughtError,
+              'Failed to load services.',
+            ),
+          )
         }
       } finally {
-        if (!cancelled) setLoadingServices(false)
+        if (!cancelled) {
+          setLoadingServices(false)
+        }
       }
     }
 
-    if (bookingId) void load()
+    if (bookingId) {
+      void loadServices()
+    }
 
     return () => {
       cancelled = true
@@ -286,12 +399,48 @@ export default function ConsultationForm({
   const total = useMemo(() => sumMoneyStrings(items), [items])
   const totalLabel = useMemo(() => `$${total.toFixed(2)}`, [total])
 
+  const itemsValid = useMemo(() => {
+    if (items.length === 0) return false
+
+    for (const item of items) {
+      if (!item.serviceId) return false
+
+      if (
+        item.itemType === BookingServiceItemType.BASE &&
+        !item.offeringId
+      ) {
+        return false
+      }
+
+      const parsedPrice = normalizeMoneyInput(item.price)
+
+      if (!parsedPrice.ok || parsedPrice.value === null) return false
+
+      const amount = Number(parsedPrice.value)
+
+      if (!Number.isFinite(amount) || amount <= 0) return false
+
+      const parsedDuration = normalizeDurationInput(item.durationMinutes)
+
+      if (!parsedDuration.ok || parsedDuration.value === null) {
+        return false
+      }
+    }
+
+    return true
+  }, [items])
+
+  const canSubmit = Boolean(bookingId && !saving && itemsValid && total > 0)
+
   function addSelectedService() {
     setError(null)
     setMessage(null)
 
-    const opt = services.find((s) => s.offeringId === selectedOfferingId)
-    if (!opt) {
+    const selectedService = services.find(
+      (service) => service.offeringId === selectedOfferingId,
+    )
+
+    if (!selectedService) {
       setError('Select a service to add.')
       return
     }
@@ -299,25 +448,25 @@ export default function ConsultationForm({
     const price =
       items.length === 0 && suggestedTotal
         ? suggestedTotal
-        : opt.defaultPrice != null
-          ? opt.defaultPrice.toFixed(2)
+        : selectedService.defaultPrice !== null
+          ? selectedService.defaultPrice.toFixed(2)
           : ''
 
-    setItems((prev) =>
+    setItems((previousItems) =>
       sortLineItems([
-        ...prev,
+        ...previousItems,
         {
           key: uid(),
           bookingServiceItemId: null,
-          offeringId: opt.offeringId,
-          serviceId: opt.serviceId,
+          offeringId: selectedService.offeringId,
+          serviceId: selectedService.serviceId,
           itemType: BookingServiceItemType.BASE,
-          label: opt.serviceName,
-          categoryName: opt.categoryName,
+          label: selectedService.serviceName,
+          categoryName: selectedService.categoryName,
           price,
           durationMinutes: '',
           notes: '',
-          sortOrder: prev.length,
+          sortOrder: previousItems.length,
           source: 'PROPOSAL',
         },
       ]),
@@ -325,11 +474,14 @@ export default function ConsultationForm({
   }
 
   function removeItem(key: string) {
-    setItems((prev) =>
+    setItems((previousItems) =>
       sortLineItems(
-        prev
-          .filter((x) => x.key !== key)
-          .map((x, index) => ({ ...x, sortOrder: index })),
+        previousItems
+          .filter((item) => item.key !== key)
+          .map((item, index) => ({
+            ...item,
+            sortOrder: index,
+          })),
       ),
     )
   }
@@ -338,38 +490,15 @@ export default function ConsultationForm({
     key: string,
     patch: Partial<Pick<LineItem, 'price' | 'durationMinutes' | 'notes'>>,
   ) {
-    setItems((prev) =>
-      prev.map((x) => (x.key === key ? { ...x, ...patch } : x)),
+    setItems((previousItems) =>
+      previousItems.map((item) =>
+        item.key === key ? { ...item, ...patch } : item,
+      ),
     )
   }
 
-  const itemsValid = useMemo(() => {
-    if (!items.length) return false
-
-    for (const it of items) {
-      if (!it.serviceId) return false
-
-      if (it.itemType === BookingServiceItemType.BASE && !it.offeringId) {
-        return false
-      }
-
-      const p = normalizeMoneyInput(it.price)
-      if (!p.ok || p.value == null) return false
-
-      const n = Number(p.value)
-      if (!Number.isFinite(n) || n <= 0) return false
-
-      const d = normalizeDurationInput(it.durationMinutes)
-      if (!d.ok || d.value == null) return false
-    }
-
-    return true
-  }, [items])
-
-  const canSubmit = Boolean(bookingId && !saving && itemsValid && total > 0)
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     setError(null)
     setMessage(null)
 
@@ -377,17 +506,23 @@ export default function ConsultationForm({
       setError('Missing booking id.')
       return
     }
+
     if (saving) return
-    if (!items.length) {
+
+    if (items.length === 0) {
       setError('Add at least one service.')
       return
     }
+
     if (!itemsValid) {
-      setError('Fix line items before sending. Price must be valid and duration must be whole minutes.')
+      setError(
+        'Fix line items before sending. Price must be valid and duration must be whole minutes.',
+      )
       return
     }
 
     abortRef.current?.abort()
+
     const controller = new AbortController()
     abortRef.current = controller
     setSaving(true)
@@ -395,37 +530,40 @@ export default function ConsultationForm({
     try {
       const proposedServicesJson = {
         currency: 'USD',
-        items: items.map((it, index) => {
-          const parsedPrice = normalizeMoneyInput(it.price)
-          const parsedDuration = normalizeDurationInput(it.durationMinutes)
+        items: items.map((item, index) => {
+          const parsedPrice = normalizeMoneyInput(item.price)
+          const parsedDuration = normalizeDurationInput(item.durationMinutes)
 
-          if (!parsedPrice.ok || !parsedPrice.value) {
+          if (!parsedPrice.ok || parsedPrice.value === null) {
             throw new Error('Invalid price in line items.')
           }
-          if (!parsedDuration.ok || !parsedDuration.value) {
+
+          if (!parsedDuration.ok || parsedDuration.value === null) {
             throw new Error('Invalid duration in line items.')
           }
 
           return {
-            bookingServiceItemId: it.bookingServiceItemId,
-            offeringId: it.offeringId,
-            serviceId: it.serviceId,
-            itemType: it.itemType,
-            label: it.label,
-            categoryName: it.categoryName || null,
+            bookingServiceItemId: item.bookingServiceItemId,
+            offeringId: item.offeringId,
+            serviceId: item.serviceId,
+            itemType: item.itemType,
+            label: item.label,
+            categoryName: item.categoryName || null,
             price: parsedPrice.value,
             durationMinutes: parsedDuration.value,
-            notes: it.notes.trim() || null,
+            notes: item.notes.trim() || null,
             sortOrder: index,
-            source: it.source,
+            source: item.source,
           }
         }),
       }
 
       const proposedTotal = total.toFixed(2)
 
-      const res = await fetch(
-        `/api/pro/bookings/${encodeURIComponent(bookingId)}/consultation-proposal`,
+      const response = await fetch(
+        `/api/pro/bookings/${encodeURIComponent(
+          bookingId,
+        )}/consultation-proposal`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -438,261 +576,266 @@ export default function ConsultationForm({
         },
       )
 
-      const data: unknown = await safeJson(res)
-      if (!res.ok) {
-        setError(errorFromResponse(res, data))
+      const data: unknown = await safeJson(response)
+
+      if (!response.ok) {
+        setError(errorFromResponse(response, data))
         return
       }
 
       setMessage('Sent to client for approval.')
-
       router.refresh()
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event(FORCE_EVENT))
-      }
 
+      window.dispatchEvent(new Event(FORCE_EVENT))
       router.push(`/pro/bookings/${encodeURIComponent(bookingId)}/session`)
-    } catch (err: unknown) {
-      if (isAbortError(err)) return
+    } catch (caughtError: unknown) {
+      if (isAbortError(caughtError)) return
 
-      console.error(err)
+      console.error(caughtError)
+
       setError(
-        errorMessageFromUnknown(err, 'Network error sending consultation.'),
+        errorMessageFromUnknown(
+          caughtError,
+          'Network error sending consultation.',
+        ),
       )
     } finally {
-      if (abortRef.current === controller) abortRef.current = null
+      if (abortRef.current === controller) {
+        abortRef.current = null
+      }
+
       setSaving(false)
     }
   }
 
-  const field =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
-
-  const pillBase =
-    'inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black'
-
   return (
     <form
+      id="consultation-form"
       onSubmit={handleSubmit}
-      className="grid gap-4 rounded-card border border-white/10 bg-bgSecondary p-4 tovis-glass"
+      className="brand-pro-session-card"
     >
-      <div>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="text-[12px] font-black text-textPrimary">
-            Services (what you’re actually doing)
-          </div>
+      <div className="brand-pro-session-section-row">
+        <div className="brand-pro-session-section-title">Services</div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {suggestedTotal ? (
-              <span className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-1 text-[11px] font-black text-textSecondary">
-                Suggested: ${suggestedTotal}
-              </span>
-            ) : null}
-
-            <div className="text-[12px] font-black text-textPrimary">
-              Total: <span className="text-textPrimary">{totalLabel}</span>
-            </div>
-          </div>
+        <div className="brand-pro-session-section-total">
+          Total: <strong>{totalLabel}</strong>
         </div>
-
-        {loadingServices ? (
-          <div className="mt-3 text-[12px] text-textSecondary">
-            Loading your services…
-          </div>
-        ) : services.length ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <select
-              value={selectedOfferingId}
-              disabled={saving}
-              onChange={(e) => setSelectedOfferingId(e.target.value)}
-              className={field}
-              style={{ minWidth: 280 }}
-            >
-              {services.map((s) => (
-                <option key={s.offeringId} value={s.offeringId}>
-                  {(s.categoryName ? `${s.categoryName} · ` : '') + s.serviceName}
-                  {s.defaultPrice != null ? ` ($${s.defaultPrice.toFixed(2)})` : ''}
-                </option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              onClick={addSelectedService}
-              disabled={saving}
-              className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
-            >
-              + Add service
-            </button>
-          </div>
-        ) : (
-          <div className="mt-3 rounded-card border border-toneDanger/30 bg-bgPrimary p-3 text-[12px] text-toneDanger">
-            No services found for your profile. Add offerings before sending consult approvals.
-          </div>
-        )}
       </div>
 
-      <div className="grid gap-2">
-        {items.length ? (
-          items.map((it) => {
-            const parsedPrice = normalizeMoneyInput(it.price)
-            const parsedDuration = normalizeDurationInput(it.durationMinutes)
-            const isAddOn = it.itemType === BookingServiceItemType.ADD_ON
+      {suggestedTotal ? (
+        <div className="brand-pro-session-chip-row">
+          <span className="brand-pro-session-pill">
+            Suggested ${suggestedTotal}
+          </span>
+        </div>
+      ) : null}
+
+      <div>
+        {items.length > 0 ? (
+          items.map((item) => {
+            const parsedPrice = normalizeMoneyInput(item.price)
+            const parsedDuration = normalizeDurationInput(item.durationMinutes)
 
             return (
-              <div
-                key={it.key}
-                className="rounded-card border border-white/10 bg-bgPrimary p-3"
-              >
-                <div className="flex flex-wrap items-start gap-3">
-                  <div className="min-w-[220px] flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-[13px] font-black text-textPrimary">
-                        {it.label}
-                      </div>
+              <div key={item.key} className="brand-pro-session-line-item">
+                <div className="brand-pro-session-line-row">
+                  <div className="brand-pro-session-line-main">
+                    <div className="brand-pro-session-line-title">
+                      {item.label}
+                    </div>
 
-                      <span
-                        className={[
-                          pillBase,
-                          'border-white/10 bg-bgSecondary text-textSecondary',
-                        ].join(' ')}
-                      >
-                        {isAddOn ? 'Add-on' : 'Service'}
+                    <div className="brand-pro-session-line-meta">
+                      <span className="brand-pro-session-pill">
+                        {lineItemTypeLabel(item.itemType)}
                       </span>
 
                       <span
-                        className={[
-                          pillBase,
-                          it.source === 'BOOKING'
-                            ? 'border-accentPrimary/30 bg-bgSecondary text-textPrimary'
-                            : 'border-white/10 bg-bgSecondary text-textSecondary',
-                        ].join(' ')}
+                        className="brand-pro-session-pill"
+                        data-state={
+                          item.source === 'BOOKING' ? 'active' : undefined
+                        }
                       >
-                        {it.source === 'BOOKING' ? 'Booked' : 'Proposal'}
+                        {lineItemSourceLabel(item.source)}
                       </span>
                     </div>
 
-                    {it.categoryName ? (
-                      <div className="mt-1 text-[12px] text-textSecondary">
-                        {it.categoryName}
+                    {item.categoryName ? (
+                      <div className="brand-pro-session-line-price-sub">
+                        {item.categoryName}
                       </div>
                     ) : null}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => removeItem(it.key)}
-                    disabled={saving}
-                    className="ml-auto rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
-                  >
-                    Remove
-                  </button>
-                </div>
+                  <div className="brand-pro-session-line-price">
+                    <div className="brand-pro-session-line-price-value">
+                      ${item.price || '0.00'}
+                    </div>
 
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-[11px] font-black text-textPrimary">
-                      Line-item price
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] text-textSecondary">$</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={it.price}
-                        disabled={saving}
-                        onChange={(e) => updateItem(it.key, { price: e.target.value })}
-                        placeholder="0.00"
-                        className={[
-                          field,
-                          parsedPrice.ok ? '' : 'ring-2 ring-toneDanger/40',
-                        ].join(' ')}
-                      />
+                    <div className="brand-pro-session-line-price-sub">
+                      {item.durationMinutes || '—'} min
                     </div>
                   </div>
+                </div>
 
-                  <div>
-                    <label className="mb-1 block text-[11px] font-black text-textPrimary">
-                      Duration (minutes)
-                    </label>
+                <div className="brand-pro-session-add-row">
+                  <label className="brand-pro-session-line-main">
+                    <span className="brand-pro-session-section-title">
+                      Price
+                    </span>
+
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={item.price}
+                      disabled={saving}
+                      onChange={(event) =>
+                        updateItem(item.key, {
+                          price: event.target.value,
+                        })
+                      }
+                      placeholder="0.00"
+                      className="brand-pro-session-input"
+                      aria-invalid={!parsedPrice.ok}
+                    />
+                  </label>
+
+                  <label className="brand-pro-session-line-main">
+                    <span className="brand-pro-session-section-title">
+                      Duration
+                    </span>
+
                     <input
                       type="text"
                       inputMode="numeric"
-                      value={it.durationMinutes}
+                      value={item.durationMinutes}
                       disabled={saving}
-                      onChange={(e) =>
-                        updateItem(it.key, { durationMinutes: e.target.value })
+                      onChange={(event) =>
+                        updateItem(item.key, {
+                          durationMinutes: event.target.value,
+                        })
                       }
                       placeholder="60"
-                      className={[
-                        field,
-                        parsedDuration.ok ? '' : 'ring-2 ring-toneDanger/40',
-                      ].join(' ')}
+                      className="brand-pro-session-input"
+                      aria-invalid={!parsedDuration.ok}
                     />
-                  </div>
+                  </label>
                 </div>
 
-                <div className="mt-3">
-                  <label className="mb-1 block text-[11px] font-black text-textPrimary">
+                <label>
+                  <span className="brand-pro-session-section-title">
                     Line-item notes
-                  </label>
+                  </span>
+
                   <textarea
-                    value={it.notes}
-                    onChange={(e) => updateItem(it.key, { notes: e.target.value })}
+                    value={item.notes}
+                    onChange={(event) =>
+                      updateItem(item.key, {
+                        notes: event.target.value,
+                      })
+                    }
                     rows={2}
                     disabled={saving}
                     placeholder="Optional details for this line item…"
-                    className={field}
+                    className="brand-pro-session-textarea"
                   />
+                </label>
+
+                <div className="brand-pro-session-action-row">
+                  <button
+                    type="button"
+                    onClick={() => removeItem(item.key)}
+                    disabled={saving}
+                    className="brand-pro-session-button brand-focus"
+                    data-variant="ghost"
+                    data-full="true"
+                  >
+                    Remove
+                  </button>
                 </div>
               </div>
             )
           })
         ) : (
-          <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] text-textSecondary">
-            Add services above. Sending a consult with “nothing” is not a personality trait.
+          <div className="brand-pro-session-card-body">
+            Add services above. Sending a consult with “nothing” is not a
+            personality trait.
           </div>
         )}
       </div>
 
-      <div className="grid gap-2">
-        <label className="text-[12px] font-black text-textPrimary">
+      {loadingServices ? (
+        <div className="brand-pro-session-card-body">
+          Loading your services…
+        </div>
+      ) : services.length > 0 ? (
+        <div className="brand-pro-session-add-row">
+          <select
+            value={selectedOfferingId}
+            disabled={saving}
+            onChange={(event) => setSelectedOfferingId(event.target.value)}
+            className="brand-pro-session-input"
+            aria-label="Select a service"
+          >
+            {services.map((service) => (
+              <option key={service.offeringId} value={service.offeringId}>
+                {serviceOptionLabel(service)}
+              </option>
+            ))}
+          </select>
+
+          <button
+            type="button"
+            onClick={addSelectedService}
+            disabled={saving}
+            className="brand-pro-session-button brand-focus"
+            data-variant="ghost"
+            data-full="false"
+          >
+            <AddIcon />
+            Add
+          </button>
+        </div>
+      ) : (
+        <div className="brand-pro-session-error">
+          No services found for your profile. Add offerings before sending
+          consult approvals.
+        </div>
+      )}
+
+      <label>
+        <span className="brand-pro-session-section-title">
           Consultation notes
-        </label>
+        </span>
+
         <textarea
           value={notes}
-          onChange={(e) => setNotes(e.target.value)}
+          onChange={(event) => setNotes(event.target.value)}
           rows={4}
           disabled={saving}
           placeholder="Goals, techniques, anything you agreed on…"
-          className={field}
+          className="brand-pro-session-textarea"
         />
+      </label>
+
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        className="brand-pro-session-button brand-focus"
+        data-full="true"
+      >
+        <SendIcon />
+        {saving ? 'Sending…' : 'Send to client for approval'}
+      </button>
+
+      <div className="brand-pro-session-help-text">
+        Client sees line items + total and must approve before you proceed.
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="submit"
-          disabled={!canSubmit}
-          className="rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {saving ? 'Sending…' : 'Send to client for approval'}
-        </button>
+      {message ? (
+        <div className="brand-pro-session-success">{message}</div>
+      ) : null}
 
-        <span className="text-[12px] text-textSecondary">
-          Client sees line items + total and must approve before you proceed.
-        </span>
-
-        {message ? (
-          <span className="text-[12px] font-black text-toneSuccess">
-            {message}
-          </span>
-        ) : null}
-        {error ? (
-          <span className="text-[12px] font-black text-toneDanger">
-            {error}
-          </span>
-        ) : null}
-      </div>
+      {error ? <div className="brand-pro-session-error">{error}</div> : null}
     </form>
   )
 }

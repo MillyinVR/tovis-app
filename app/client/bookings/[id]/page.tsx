@@ -706,6 +706,119 @@ function PurchasedProductsCard(props: {
     </div>
   )
 }
+function ClientAftercarePill(props: {
+  children: ReactNode
+  tone?: 'success' | 'pending' | 'danger'
+}) {
+  return (
+    <span className="brand-pro-session-pill" data-tone={props.tone}>
+      {props.children}
+    </span>
+  )
+}
+
+function ClientAftercareCard(props: {
+  children: ReactNode
+  accent?: boolean
+  tone?: 'success' | 'danger'
+}) {
+  return (
+    <section
+      className="brand-pro-session-card"
+      data-accent={props.accent}
+      data-tone={props.tone}
+    >
+      {props.children}
+    </section>
+  )
+}
+
+function ClientAftercareSectionTitle(props: {
+  title: string
+  subtitle?: string | null
+  right?: ReactNode
+}) {
+  return (
+    <div className="brand-pro-session-section-row">
+      <div>
+        <div className="brand-pro-session-section-title">{props.title}</div>
+        {props.subtitle ? (
+          <div className="brand-pro-session-card-body mt-1">
+            {props.subtitle}
+          </div>
+        ) : null}
+      </div>
+
+      {props.right ? <div>{props.right}</div> : null}
+    </div>
+  )
+}
+
+function ClientAftercareMediaTile(props: {
+  label: 'Before' | 'After'
+  media: (LoadedMedia & { url: string }) | null
+}) {
+  const previewSrc =
+    props.media &&
+    typeof props.media.thumbUrl === 'string' &&
+    props.media.thumbUrl.trim()
+      ? props.media.thumbUrl
+      : props.media?.url ?? null
+
+  return (
+    <div className="brand-pro-session-photo-tile">
+      {previewSrc ? (
+        <img
+          src={previewSrc}
+          alt=""
+          className="brand-pro-session-photo-img"
+          loading="lazy"
+        />
+      ) : null}
+
+      <span
+        className="brand-pro-session-photo-label"
+        data-tone={props.label === 'After' ? 'after' : undefined}
+      >
+        {props.label.toUpperCase()}
+      </span>
+    </div>
+  )
+}
+
+function ClientAftercareBeforeAfter(props: {
+  beforeMedia: Array<LoadedMedia & { url: string }>
+  afterMedia: Array<LoadedMedia & { url: string }>
+}) {
+  const primaryBefore = props.beforeMedia[0] ?? null
+  const primaryAfter = props.afterMedia[0] ?? null
+  const hasMedia = Boolean(primaryBefore || primaryAfter)
+
+  if (!hasMedia) {
+    return (
+      <div className="brand-pro-session-card-body">
+        Your pro will attach photos during your appointment flow.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="brand-pro-session-photo-grid" data-columns="2">
+        <ClientAftercareMediaTile label="Before" media={primaryBefore} />
+        <ClientAftercareMediaTile label="After" media={primaryAfter} />
+      </div>
+
+      {props.beforeMedia.length > 1 ? (
+        <MediaStrip title="More before photos" items={props.beforeMedia.slice(1)} />
+      ) : null}
+
+      {props.afterMedia.length > 1 ? (
+        <MediaStrip title="More after photos" items={props.afterMedia.slice(1)} />
+      ) : null}
+    </div>
+  )
+}
 
 export default async function ClientBookingPage(props: {
   params: Promise<PageParams> | PageParams
@@ -1212,268 +1325,232 @@ export default async function ClientBookingPage(props: {
 
           {step === 'aftercare' ? (
             <section id="aftercare" className="mt-4 grid gap-4">
-              <SectionCard
-                title={COPY.bookings.aftercare.header}
-                subtitle={`Your ${brand.displayName} post-appointment summary.`}
-                right={
-                  showUnreadAftercareBadge ? (
-                    <TinyMetaPill>{COPY.bookings.badges.new}</TinyMetaPill>
-                  ) : null
-                }
-              >
-                <div className="grid gap-4">
-                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                    <div className="text-[12px] font-black text-textPrimary">
-                      Appointment summary
-                    </div>
+              <ClientAftercareCard accent>
+                <ClientAftercareSectionTitle
+                  title={COPY.bookings.aftercare.header}
+                  subtitle={`Your ${brand.displayName} post-appointment summary.`}
+                  right={
+                    showUnreadAftercareBadge ? (
+                      <ClientAftercarePill tone="success">
+                        {COPY.bookings.badges.new}
+                      </ClientAftercarePill>
+                    ) : null
+                  }
+                />
 
-                    <div className="mt-3 grid gap-1">
-                      <SummaryRow label="Provider" value={professionalLabel} />
-                      <SummaryRow label="Appointment" value={whenLabel} />
-                      <SummaryRow label="Time zone" value={appointmentTimeZone} />
-                      <SummaryRow
-                        label="Status"
-                        value={String(
-                          booking.status || COPY.bookings.status.pillUnknown,
-                        ).toUpperCase()}
-                      />
-                      {locationLine ? (
-                        <SummaryRow label="Location" value={locationLine} />
-                      ) : null}
-                    </div>
-                  </div>
+                <div className="brand-client-aftercare-pro-row">
+                  <ClientAftercarePill tone="success">
+                    {String(booking.status || COPY.bookings.status.pillUnknown).toUpperCase()}
+                  </ClientAftercarePill>
 
-                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <div className="text-[12px] font-black text-textPrimary">
-                        Before &amp; After
-                      </div>
-                      <div className="text-[11px] font-semibold text-textSecondary">
-                        {beforeMedia.length || afterMedia.length
-                          ? 'Swipe to view'
-                          : 'No photos attached'}
-                      </div>
-                    </div>
+                  <span className="brand-pro-session-muted text-[11px] font-bold">
+                    {appointmentTimeZone}
+                  </span>
+                </div>
 
-                    {beforeMedia.length || afterMedia.length ? (
-                      <div className="mt-3 grid gap-3">
-                        <MediaStrip title="Before" items={beforeMedia} />
-                        <MediaStrip title="After" items={afterMedia} />
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                        Your pro will attach photos during your appointment flow.
-                      </div>
-                    )}
-                  </div>
+                <div className="mt-3 brand-pro-session-card-body">
+                  Your final appointment details, care notes, product recommendations,
+                  checkout, and rebook guidance live here.
+                </div>
+              </ClientAftercareCard>
 
-                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                    <div className="text-[12px] font-black text-textPrimary">
-                      Final service breakdown
-                    </div>
-                    <div className="mt-3">
-                      <ServiceBreakdownCard
-                        items={booking.items}
-                        addOnCount={booking.display?.addOnCount ?? 0}
-                      />
-                    </div>
-                  </div>
+              <ClientAftercareCard>
+                <ClientAftercareSectionTitle title="Appointment summary" />
 
-                  {booking.productSales.length > 0 ? (
-                    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                      <div className="text-[12px] font-black text-textPrimary">
-                        Purchased products
-                      </div>
-                      <div className="mt-3">
-                        <PurchasedProductsCard productSales={booking.productSales} />
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                    <div className="text-[12px] font-black text-textPrimary">
-                      Final cost recap
-                    </div>
-
-                    <div className="mt-3 grid gap-1">
-                      <SummaryRow
-                        label="Services subtotal"
-                        value={serviceSubtotalLabel || COPY.common.notProvided}
-                      />
-                      {productSubtotalLabel ? (
-                        <SummaryRow
-                          label="Products subtotal"
-                          value={productSubtotalLabel}
-                        />
-                      ) : null}
-                      {discountLabel ? (
-                        <SummaryRow label="Discount" value={discountLabel} />
-                      ) : null}
-                      {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
-                      {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
-                      <SummaryRow label="Final total" value={finalTotalLabel} />
-                    </div>
-                  </div>
-
-                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                    <div className="text-[12px] font-black text-textPrimary">
-                      Care notes
-                    </div>
-
-                    {aftercare?.notes ? (
-                      <div className="mt-2 whitespace-pre-wrap text-[13px] leading-snug text-textPrimary">
-                        {aftercare.notes}
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                        {statusUpper === 'COMPLETED'
-                          ? COPY.bookings.aftercare.noAftercareNotesCompleted
-                          : COPY.bookings.aftercare.noAftercareNotesPending}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                    <div className="text-[12px] font-black text-textPrimary">
-                      Recommended products
-                    </div>
-                    <div className="mt-3">
-                      <AftercareProductRecommendationsCard
-                        bookingId={booking.id}
-                        checkoutStatus={booking.checkout.checkoutStatus}
-                        paymentCollectedAt={booking.checkout.paymentCollectedAt}
-                        recommendedProducts={aftercare?.recommendedProducts ?? []}
-                        purchasedProducts={booking.productSales}
-                        selectedCheckoutProducts={selectedCheckoutProducts}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-  <div className="text-[12px] font-black text-textPrimary">
-    Payment &amp; checkout
-  </div>
-
-  <div className="mt-3 grid gap-1">
-    <SummaryRow
-      label="Checkout status"
-      value={checkoutStatusLabel || COPY.common.notProvided}
-    />
-    {selectedPaymentMethodLabel ? (
-      <SummaryRow
-        label="Payment method"
-        value={selectedPaymentMethodLabel}
-      />
-    ) : null}
-    {collectionTimingLabel ? (
-      <SummaryRow
-        label="Collection timing"
-        value={collectionTimingLabel}
-      />
-    ) : null}
-    <SummaryRow
-      label="Services subtotal"
-      value={serviceSubtotalLabel || COPY.common.notProvided}
-    />
-    {productSubtotalLabel ? (
-      <SummaryRow
-        label="Products subtotal"
-        value={productSubtotalLabel}
-      />
-    ) : null}
-    {discountLabel ? (
-      <SummaryRow label="Discount" value={discountLabel} />
-    ) : null}
-    {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
-    {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
-    <SummaryRow label="Final total" value={finalTotalLabel} />
-    {paymentAuthorizedLabel ? (
-      <SummaryRow
-        label="Authorized"
-        value={paymentAuthorizedLabel}
-      />
-    ) : null}
-    {paymentCollectedLabel ? (
-      <SummaryRow
-        label="Collected"
-        value={paymentCollectedLabel}
-      />
-    ) : null}
-  </div>
-
-  {paymentSettings?.paymentNote ? (
-    <div className="mt-3 text-[12px] font-semibold text-textSecondary">
-      {paymentSettings.paymentNote}
-    </div>
-  ) : null}
-
-  <div className="mt-4">
-    <ClientCheckoutCard
-      bookingId={booking.id}
-      checkoutStatus={booking.checkout.checkoutStatus}
-      paymentCollectedAt={booking.checkout.paymentCollectedAt}
-      selectedPaymentMethod={booking.checkout.selectedPaymentMethod}
-      serviceSubtotalSnapshot={booking.checkout.serviceSubtotalSnapshot}
-      productSubtotalSnapshot={booking.checkout.productSubtotalSnapshot}
-      tipAmount={booking.checkout.tipAmount}
-      taxAmount={booking.checkout.taxAmount}
-      discountAmount={booking.checkout.discountAmount}
-      totalAmount={booking.checkout.totalAmount}
-      acceptedMethods={acceptedMethods}
-      tipsEnabled={paymentSettings?.tipsEnabled ?? true}
-      allowCustomTip={paymentSettings?.allowCustomTip ?? true}
-      tipSuggestions={paymentSettings?.tipSuggestions ?? true}
-    />
-  </div>
-</div>
-
-                  {!reviewCloseoutEligible ? (
-                    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                      <div className="text-[12px] font-black text-textPrimary">
-                        Review
-                      </div>
-                      <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                        Your review will unlock after the booking is fully closed out:
-                        payment must be collected, checkout must be paid or waived,
-                        and aftercare must be finalized.
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {aftercare && (rebookInfo.label || showRebookCTA) ? (
-                    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                      <div className="text-[12px] font-black text-textPrimary">
-                        {COPY.bookings.aftercare.rebookHeader}
-                      </div>
-
-                      {rebookInfo.label ? (
-                        <div className="mt-2 text-[13px] text-textPrimary">
-                          {rebookInfo.label}
-                          <span className="text-textSecondary">
-                            {' '}
-                            · {appointmentTimeZone}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                          {COPY.bookings.aftercare.noRebookRecommendation}
-                        </div>
-                      )}
-
-                      {showRebookCTA && aftercareToken ? (
-                        <a
-                          href={`/client/rebook/${encodeURIComponent(aftercareToken)}`}
-                          className="mt-3 inline-flex items-center rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
-                        >
-                          {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
-                            ? COPY.bookings.aftercare.rebookCtaViewDetails
-                            : COPY.bookings.aftercare.rebookCtaNow}
-                        </a>
-                      ) : null}
-                    </div>
+                <div className="grid gap-1">
+                  <SummaryRow label="Provider" value={professionalLabel} />
+                  <SummaryRow label="Appointment" value={whenLabel} />
+                  <SummaryRow label="Time zone" value={appointmentTimeZone} />
+                  <SummaryRow
+                    label="Status"
+                    value={String(
+                      booking.status || COPY.bookings.status.pillUnknown,
+                    ).toUpperCase()}
+                  />
+                  {locationLine ? (
+                    <SummaryRow label="Location" value={locationLine} />
                   ) : null}
                 </div>
-              </SectionCard>
+              </ClientAftercareCard>
+
+              <ClientAftercareCard>
+                <ClientAftercareSectionTitle
+                  title="Before & after"
+                  subtitle={
+                    beforeMedia.length || afterMedia.length
+                      ? 'Compare your appointment photos.'
+                      : 'No photos attached yet.'
+                  }
+                  right={
+                    beforeMedia.length || afterMedia.length ? (
+                      <ClientAftercarePill tone="success">
+                        {beforeMedia.length + afterMedia.length} photo
+                        {beforeMedia.length + afterMedia.length === 1 ? '' : 's'}
+                      </ClientAftercarePill>
+                    ) : null
+                  }
+                />
+
+                <ClientAftercareBeforeAfter
+                  beforeMedia={beforeMedia}
+                  afterMedia={afterMedia}
+                />
+              </ClientAftercareCard>
+
+              <ClientAftercareCard>
+                <ClientAftercareSectionTitle title="Final service breakdown" />
+
+                <ServiceBreakdownCard
+                  items={booking.items}
+                  addOnCount={booking.display?.addOnCount ?? 0}
+                />
+              </ClientAftercareCard>
+
+              {booking.productSales.length > 0 ? (
+                <ClientAftercareCard>
+                  <ClientAftercareSectionTitle title="Purchased products" />
+
+                  <PurchasedProductsCard productSales={booking.productSales} />
+                </ClientAftercareCard>
+              ) : null}
+
+              <ClientAftercareCard>
+                <ClientAftercareSectionTitle title="Care notes" />
+
+                {aftercare?.notes ? (
+                  <div className="brand-pro-session-card-body whitespace-pre-wrap">
+                    {aftercare.notes}
+                  </div>
+                ) : (
+                  <div className="brand-pro-session-card-body">
+                    {statusUpper === 'COMPLETED'
+                      ? COPY.bookings.aftercare.noAftercareNotesCompleted
+                      : COPY.bookings.aftercare.noAftercareNotesPending}
+                  </div>
+                )}
+              </ClientAftercareCard>
+
+              <ClientAftercareCard>
+                <ClientAftercareSectionTitle title="Recommended products" />
+
+                <AftercareProductRecommendationsCard
+                  bookingId={booking.id}
+                  checkoutStatus={booking.checkout.checkoutStatus}
+                  paymentCollectedAt={booking.checkout.paymentCollectedAt}
+                  recommendedProducts={aftercare?.recommendedProducts ?? []}
+                  purchasedProducts={booking.productSales}
+                  selectedCheckoutProducts={selectedCheckoutProducts}
+                />
+              </ClientAftercareCard>
+
+              <ClientAftercareCard>
+                <ClientAftercareSectionTitle title="Final cost recap" />
+
+                <div className="grid gap-1">
+                  <SummaryRow
+                    label="Services subtotal"
+                    value={serviceSubtotalLabel || COPY.common.notProvided}
+                  />
+                  {productSubtotalLabel ? (
+                    <SummaryRow label="Products subtotal" value={productSubtotalLabel} />
+                  ) : null}
+                  {discountLabel ? (
+                    <SummaryRow label="Discount" value={discountLabel} />
+                  ) : null}
+                  {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
+                  {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
+                  <SummaryRow label="Final total" value={finalTotalLabel} />
+                </div>
+              </ClientAftercareCard>
+
+              <ClientAftercareCard>
+                <ClientAftercareSectionTitle title="Payment & checkout" />
+
+                <div className="grid gap-1">
+                  <SummaryRow
+                    label="Checkout status"
+                    value={checkoutStatusLabel || COPY.common.notProvided}
+                  />
+
+                  {selectedPaymentMethodLabel ? (
+                    <SummaryRow label="Payment method" value={selectedPaymentMethodLabel} />
+                  ) : null}
+
+                  {collectionTimingLabel ? (
+                    <SummaryRow label="Collection timing" value={collectionTimingLabel} />
+                  ) : null}
+
+                  {paymentAuthorizedLabel ? (
+                    <SummaryRow label="Authorized" value={paymentAuthorizedLabel} />
+                  ) : null}
+
+                  {paymentCollectedLabel ? (
+                    <SummaryRow label="Collected" value={paymentCollectedLabel} />
+                  ) : null}
+                </div>
+
+                {paymentSettings?.paymentNote ? (
+                  <div className="brand-pro-session-card-body mt-3">
+                    {paymentSettings.paymentNote}
+                  </div>
+                ) : null}
+
+                <div className="mt-4">
+                  <ClientCheckoutCard
+                    bookingId={booking.id}
+                    checkoutStatus={booking.checkout.checkoutStatus}
+                    paymentCollectedAt={booking.checkout.paymentCollectedAt}
+                    selectedPaymentMethod={booking.checkout.selectedPaymentMethod}
+                    serviceSubtotalSnapshot={booking.checkout.serviceSubtotalSnapshot}
+                    productSubtotalSnapshot={booking.checkout.productSubtotalSnapshot}
+                    tipAmount={booking.checkout.tipAmount}
+                    taxAmount={booking.checkout.taxAmount}
+                    discountAmount={booking.checkout.discountAmount}
+                    totalAmount={booking.checkout.totalAmount}
+                    acceptedMethods={acceptedMethods}
+                    tipsEnabled={paymentSettings?.tipsEnabled ?? true}
+                    allowCustomTip={paymentSettings?.allowCustomTip ?? true}
+                    tipSuggestions={paymentSettings?.tipSuggestions ?? true}
+                  />
+                </div>
+              </ClientAftercareCard>
+
+              {!reviewCloseoutEligible ? (
+                <ClientAftercareCard>
+                  <ClientAftercareSectionTitle title="Review" />
+
+                  <div className="brand-pro-session-card-body">
+                    Your review will unlock after the booking is fully closed out:
+                    payment must be collected, checkout must be paid or waived, and
+                    aftercare must be finalized.
+                  </div>
+                </ClientAftercareCard>
+              ) : null}
+
+              {aftercare && (rebookInfo.label || showRebookCTA) ? (
+                <section className="brand-client-aftercare-rebook">
+                  <ClientAftercareSectionTitle
+                    title={COPY.bookings.aftercare.rebookHeader}
+                    subtitle={
+                      rebookInfo.label
+                        ? `${rebookInfo.label} · ${appointmentTimeZone}`
+                        : COPY.bookings.aftercare.noRebookRecommendation
+                    }
+                  />
+
+                  {showRebookCTA && aftercareToken ? (
+                    <a
+                      href={`/client/rebook/${encodeURIComponent(aftercareToken)}`}
+                      className="brand-pro-session-button brand-focus mt-3"
+                      data-full="true"
+                    >
+                      {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
+                        ? COPY.bookings.aftercare.rebookCtaViewDetails
+                        : COPY.bookings.aftercare.rebookCtaNow}
+                    </a>
+                  ) : null}
+                </section>
+              ) : null}
             </section>
           ) : null}
 
