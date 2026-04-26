@@ -1,13 +1,15 @@
 // app/layout.tsx
 import type { Metadata } from 'next'
+import type { ReactNode } from 'react'
 import { cookies } from 'next/headers'
-import { Inter_Tight, Fraunces, JetBrains_Mono } from 'next/font/google'
+import { Fraunces, Inter_Tight, JetBrains_Mono } from 'next/font/google'
 
 import './globals.css'
 import '@/lib/brand/brand.css'
+import '@/lib/brand/proOverview.css'
 
-import { BrandProvider } from '@/lib/brand/BrandProvider'
 import RoleFooter from '@/app/_components/RoleFooter'
+import { BrandProvider } from '@/lib/brand/BrandProvider'
 import { getBrandConfig } from '@/lib/brand'
 
 const interTight = Inter_Tight({
@@ -23,7 +25,7 @@ const fraunces = Fraunces({
   style: ['normal', 'italic'],
 })
 
-const jetbrainsMono = JetBrains_Mono({
+const jetBrainsMono = JetBrains_Mono({
   variable: '--font-mono-face',
   subsets: ['latin'],
   weight: ['400', '500'],
@@ -31,20 +33,32 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const dynamic = 'force-dynamic'
 
-const _brand = getBrandConfig()
+const brand = getBrandConfig()
+
 export const metadata: Metadata = {
-  title: _brand.displayName,
-  description: _brand.tagline ?? _brand.displayName,
+  title: brand.displayName,
+  description: brand.tagline ?? brand.displayName,
 }
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  cookies()
+type RootLayoutProps = {
+  children: ReactNode
+}
+
+export default async function RootLayout({ children }: RootLayoutProps) {
+  await cookies()
 
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${interTight.variable} ${fraunces.variable} ${jetbrainsMono.variable}`}>
+      <body
+        className={`${interTight.variable} ${fraunces.variable} ${jetBrainsMono.variable}`}
+      >
         <BrandProvider>
-          <div style={{ paddingBottom: 'calc(var(--app-footer-space, 0px) + env(safe-area-inset-bottom))' }}>
+          <div
+            style={{
+              paddingBottom:
+                'calc(var(--app-footer-space, 0px) + env(safe-area-inset-bottom))',
+            }}
+          >
             {children}
           </div>
 

@@ -15,80 +15,22 @@ export default function ProOverviewDashboard({
   overview,
 }: ProOverviewDashboardProps) {
   return (
-    <section className="brand-pro-overview-page">
-      <header className="brand-pro-overview-header">
-        <div className="brand-pro-overview-header-row">
-          <div>
-            <div className="brand-cap brand-pro-overview-kicker">
-              ◆ PRO MODE
-            </div>
+    <div className="brand-pro-overview-body no-scroll">
+      <MonthScroller months={overview.months} />
 
-            <h1 className="brand-pro-overview-title">Overview</h1>
-          </div>
+      <RevenueCard
+        activeMonthLabel={overview.activeMonth.label}
+        revenue={overview.revenue}
+      />
 
-          <Link
-            href="/pro/notifications"
-            className="brand-pro-overview-bell brand-focus"
-            aria-label="Notifications"
-            title="Notifications"
-          >
-            <BellIcon />
-            <span className="brand-pro-overview-bell-dot" aria-hidden />
-          </Link>
-        </div>
+      <MetricGrid items={overview.primaryStats} />
+      <MetricGrid items={overview.secondaryStats} />
 
-        <OverviewTabs activeHref="/pro/dashboard" />
-      </header>
-
-      <div className="brand-pro-overview-body no-scroll">
-        <MonthScroller months={overview.months} />
-
-        <RevenueCard overview={overview} />
-
-        <MetricGrid items={overview.primaryStats} />
-        <MetricGrid items={overview.secondaryStats} />
-
-        <TopServicesSection
-          activeMonthLabel={overview.activeMonth.label}
-          services={overview.topServices}
-        />
-      </div>
-    </section>
-  )
-}
-
-function OverviewTabs({
-  activeHref,
-}: {
-  activeHref: string
-}) {
-  const tabs = [
-    { href: '/pro/dashboard', label: 'Overview' },
-    { href: '/pro/reviews', label: 'Reviews' },
-    { href: '/pro/aftercare', label: 'Aftercare' },
-    { href: '/pro/bookings', label: 'Bookings' },
-    { href: '/pro/last-minute', label: 'Last Minute' },
-    { href: '/pro/store', label: 'Store' },
-  ]
-
-  return (
-    <nav className="brand-pro-overview-tabs no-scroll" aria-label="Pro tabs">
-      {tabs.map((tab) => {
-        const active = tab.href === activeHref
-
-        return (
-          <Link
-            key={tab.href}
-            href={tab.href}
-            data-active={active ? 'true' : 'false'}
-            aria-current={active ? 'page' : undefined}
-            className="brand-pro-overview-tab brand-focus"
-          >
-            {tab.label}
-          </Link>
-        )
-      })}
-    </nav>
+      <TopServicesSection
+        activeMonthLabel={overview.activeMonth.label}
+        services={overview.topServices}
+      />
+    </div>
   )
 }
 
@@ -119,34 +61,51 @@ function MonthScroller({
 }
 
 function RevenueCard({
-  overview,
+  activeMonthLabel,
+  revenue,
 }: {
-  overview: ProOverviewPageData
+  activeMonthLabel: string
+  revenue: ProOverviewPageData['revenue']
 }) {
   return (
-    <section className="brand-pro-overview-revenue-card">
-      <div className="brand-cap brand-pro-overview-revenue-kicker">
-        ◆ {overview.activeMonth.label.toUpperCase()} REVENUE
+    <section
+      className="brand-pro-overview-revenue-card"
+      aria-labelledby="pro-overview-revenue-title"
+    >
+      <div
+        id="pro-overview-revenue-title"
+        className="brand-cap brand-pro-overview-revenue-kicker"
+      >
+        ◆ {activeMonthLabel.toUpperCase()} REVENUE
       </div>
 
       <div className="brand-pro-overview-revenue-row">
         <div className="brand-pro-overview-revenue-value">
-          {overview.revenue.value}
+          {revenue.value}
         </div>
 
-        <div
-          className="brand-pro-overview-trend"
-          data-tone={overview.revenue.trendTone}
-        >
-          <TrendUpIcon />
-          <span>{overview.revenue.trendLabel}</span>
-        </div>
+        <RevenueTrend label={revenue.trendLabel} tone={revenue.trendTone} />
       </div>
 
       <div className="brand-pro-overview-muted brand-pro-overview-revenue-sub">
-        {overview.revenue.sub}
+        {revenue.sub}
       </div>
     </section>
+  )
+}
+
+function RevenueTrend({
+  label,
+  tone,
+}: {
+  label: string
+  tone: ProOverviewPageData['revenue']['trendTone']
+}) {
+  return (
+    <div className="brand-pro-overview-trend" data-tone={tone}>
+      <TrendUpIcon />
+      <span>{label}</span>
+    </div>
   )
 }
 
@@ -155,6 +114,8 @@ function MetricGrid({
 }: {
   items: ProOverviewMetricItem[]
 }) {
+  if (items.length === 0) return null
+
   return (
     <section className="brand-pro-overview-metric-grid">
       {items.map((item) => (
@@ -194,8 +155,14 @@ function TopServicesSection({
   services: ProOverviewTopServiceItem[]
 }) {
   return (
-    <section className="brand-pro-overview-section">
-      <div className="brand-cap brand-pro-overview-section-title">
+    <section
+      className="brand-pro-overview-section"
+      aria-labelledby="pro-overview-top-services-title"
+    >
+      <div
+        id="pro-overview-top-services-title"
+        className="brand-cap brand-pro-overview-section-title"
+      >
         ◆ TOP SERVICES · {activeMonthLabel.toUpperCase()}
       </div>
 
@@ -209,12 +176,18 @@ function TopServicesSection({
             />
           ))
         ) : (
-          <div className="brand-pro-overview-empty">
-            No completed services for this month yet.
-          </div>
+          <TopServicesEmptyState />
         )}
       </div>
     </section>
+  )
+}
+
+function TopServicesEmptyState() {
+  return (
+    <div className="brand-pro-overview-empty">
+      No completed services for this month yet.
+    </div>
   )
 }
 
@@ -247,21 +220,6 @@ function TopServiceRow({
         {service.revenueLabel}
       </div>
     </article>
-  )
-}
-
-function BellIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="brand-pro-overview-icon"
-    >
-      <path
-        d="M12 22a2.4 2.4 0 0 0 2.35-1.9h-4.7A2.4 2.4 0 0 0 12 22Zm7.2-5.4-1.65-1.65V10a5.58 5.58 0 0 0-4.35-5.45V3.7a1.2 1.2 0 0 0-2.4 0v.85A5.58 5.58 0 0 0 6.45 10v4.95L4.8 16.6a1 1 0 0 0 .7 1.7h13.0a1 1 0 0 0 .7-1.7Z"
-        fill="currentColor"
-      />
-    </svg>
   )
 }
 

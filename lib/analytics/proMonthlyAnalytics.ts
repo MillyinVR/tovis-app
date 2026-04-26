@@ -104,6 +104,37 @@ type BuiltMonthlyAnalytics = {
   products: BuiltProductAnalytics[]
 }
 
+type MonthlyAnalyticsWriteData = {
+  timeZone: string
+  periodStartUtc: Date
+  periodEndUtc: Date
+
+  serviceRevenueCents: number
+  productRevenueCents: number
+  revenueTotalCents: number
+  tipCents: number
+
+  completedBookingCount: number
+
+  uniqueClientCount: number
+  newClientCount: number
+  repeatClientCount: number
+  futureRebookedClientCount: number
+  noFutureRebookClientCount: number
+
+  requestedNewBookingCount: number
+  requestedRepeatBookingCount: number
+  discoveryNewBookingCount: number
+  discoveryRepeatBookingCount: number
+  aftercareBookingCount: number
+
+  reviewCount: number
+  ratingSum: number
+  averageRating: Prisma.Decimal | null
+
+  computedAt: Date
+}
+
 const TOP_SERVICE_LIMIT = 10
 const TOP_PRODUCT_LIMIT = 10
 const OVERVIEW_MONTH_NAV_COUNT = 4
@@ -248,6 +279,10 @@ function percentLabel(numerator: number, denominator: number): string {
   return `${Math.round((numerator / denominator) * 100)}%`
 }
 
+function pluralize(count: number, singular: string, plural: string): string {
+  return count === 1 ? singular : plural
+}
+
 function revenueTrend(args: {
   currentCents: number
   previousCents: number
@@ -307,6 +342,7 @@ function buildMonthNav(args: {
   timeZone: string
 }): ProOverviewMonthNavItem[] {
   const start = addMonths(args.activeMonth, -(OVERVIEW_MONTH_NAV_COUNT - 1))
+  const activeMonthKey = monthKey(args.activeMonth)
 
   return Array.from({ length: OVERVIEW_MONTH_NAV_COUNT }, (_, index) => {
     const month = addMonths(start, index)
@@ -316,9 +352,49 @@ function buildMonthNav(args: {
       key,
       label: monthLabel(month, args.timeZone),
       href: `/pro/dashboard?month=${key}`,
-      active: key === monthKey(args.activeMonth),
+      active: key === activeMonthKey,
     }
   })
+}
+
+function buildMonthlyAnalyticsWriteData(args: {
+  timeZone: string
+  periodStartUtc: Date
+  periodEndUtc: Date
+  stats: BuiltMonthlyAnalytics
+}): MonthlyAnalyticsWriteData {
+  const computedAt = new Date()
+
+  return {
+    timeZone: args.timeZone,
+    periodStartUtc: args.periodStartUtc,
+    periodEndUtc: args.periodEndUtc,
+
+    serviceRevenueCents: args.stats.serviceRevenueCents,
+    productRevenueCents: args.stats.productRevenueCents,
+    revenueTotalCents: args.stats.revenueTotalCents,
+    tipCents: args.stats.tipCents,
+
+    completedBookingCount: args.stats.completedBookingCount,
+
+    uniqueClientCount: args.stats.uniqueClientCount,
+    newClientCount: args.stats.newClientCount,
+    repeatClientCount: args.stats.repeatClientCount,
+    futureRebookedClientCount: args.stats.futureRebookedClientCount,
+    noFutureRebookClientCount: args.stats.noFutureRebookClientCount,
+
+    requestedNewBookingCount: args.stats.requestedNewBookingCount,
+    requestedRepeatBookingCount: args.stats.requestedRepeatBookingCount,
+    discoveryNewBookingCount: args.stats.discoveryNewBookingCount,
+    discoveryRepeatBookingCount: args.stats.discoveryRepeatBookingCount,
+    aftercareBookingCount: args.stats.aftercareBookingCount,
+
+    reviewCount: args.stats.reviewCount,
+    ratingSum: args.stats.ratingSum,
+    averageRating: args.stats.averageRating,
+
+    computedAt,
+  }
 }
 
 async function buildMonthlyAnalytics(args: {
@@ -635,8 +711,7 @@ async function buildMonthlyAnalytics(args: {
     newClientCount,
     repeatClientCount,
     futureRebookedClientCount,
-    noFutureRebookClientCount:
-      clientIds.length - futureRebookedClientCount,
+    noFutureRebookClientCount: clientIds.length - futureRebookedClientCount,
 
     requestedNewBookingCount,
     requestedRepeatBookingCount,
@@ -703,6 +778,13 @@ export async function recomputeProfessionalMonthlyAnalytics(args: {
     periodEndUtc,
   })
 
+  const monthlyAnalyticsData = buildMonthlyAnalyticsWriteData({
+    timeZone,
+    periodStartUtc,
+    periodEndUtc,
+    stats,
+  })
+
   await prisma.$transaction(async (tx) => {
     const analytics = await tx.professionalMonthlyAnalytics.upsert({
       where: {
@@ -714,63 +796,9 @@ export async function recomputeProfessionalMonthlyAnalytics(args: {
       create: {
         professionalId: args.professionalId,
         monthKey: args.monthKey,
-        timeZone,
-        periodStartUtc,
-        periodEndUtc,
-
-        serviceRevenueCents: stats.serviceRevenueCents,
-        productRevenueCents: stats.productRevenueCents,
-        revenueTotalCents: stats.revenueTotalCents,
-        tipCents: stats.tipCents,
-
-        completedBookingCount: stats.completedBookingCount,
-
-        uniqueClientCount: stats.uniqueClientCount,
-        newClientCount: stats.newClientCount,
-        repeatClientCount: stats.repeatClientCount,
-        futureRebookedClientCount: stats.futureRebookedClientCount,
-        noFutureRebookClientCount: stats.noFutureRebookClientCount,
-
-        requestedNewBookingCount: stats.requestedNewBookingCount,
-        requestedRepeatBookingCount: stats.requestedRepeatBookingCount,
-        discoveryNewBookingCount: stats.discoveryNewBookingCount,
-        discoveryRepeatBookingCount: stats.discoveryRepeatBookingCount,
-        aftercareBookingCount: stats.aftercareBookingCount,
-
-        reviewCount: stats.reviewCount,
-        ratingSum: stats.ratingSum,
-        averageRating: stats.averageRating,
-        computedAt: new Date(),
+        ...monthlyAnalyticsData,
       },
-      update: {
-        timeZone,
-        periodStartUtc,
-        periodEndUtc,
-
-        serviceRevenueCents: stats.serviceRevenueCents,
-        productRevenueCents: stats.productRevenueCents,
-        revenueTotalCents: stats.revenueTotalCents,
-        tipCents: stats.tipCents,
-
-        completedBookingCount: stats.completedBookingCount,
-
-        uniqueClientCount: stats.uniqueClientCount,
-        newClientCount: stats.newClientCount,
-        repeatClientCount: stats.repeatClientCount,
-        futureRebookedClientCount: stats.futureRebookedClientCount,
-        noFutureRebookClientCount: stats.noFutureRebookClientCount,
-
-        requestedNewBookingCount: stats.requestedNewBookingCount,
-        requestedRepeatBookingCount: stats.requestedRepeatBookingCount,
-        discoveryNewBookingCount: stats.discoveryNewBookingCount,
-        discoveryRepeatBookingCount: stats.discoveryRepeatBookingCount,
-        aftercareBookingCount: stats.aftercareBookingCount,
-
-        reviewCount: stats.reviewCount,
-        ratingSum: stats.ratingSum,
-        averageRating: stats.averageRating,
-        computedAt: new Date(),
-      },
+      update: monthlyAnalyticsData,
     })
 
     await tx.professionalMonthlyServiceAnalytics.deleteMany({
@@ -854,8 +882,7 @@ function buildOverviewStats(args: {
   const averageBookingValueCents =
     args.current.completedBookingCount > 0
       ? Math.round(
-          args.current.revenueTotalCents /
-            args.current.completedBookingCount,
+          args.current.revenueTotalCents / args.current.completedBookingCount,
         )
       : 0
 
@@ -868,6 +895,12 @@ function buildOverviewStats(args: {
     args.current.futureRebookedClientCount,
     args.current.uniqueClientCount,
   )
+
+  const reviewSubLabel = `${args.current.reviewCount} ${pluralize(
+    args.current.reviewCount,
+    'review',
+    'reviews',
+  )} this month`
 
   const primaryStats: ProOverviewMetricItem[] = [
     {
@@ -899,9 +932,9 @@ function buildOverviewStats(args: {
       sub: 'seen this month',
     },
     {
-      label: 'RETENTION',
-      value: retentionRate,
-      sub: `${args.current.futureRebookedClientCount} future rebooked`,
+      label: 'RATING',
+      value: ratingLabel(args.current.averageRating),
+      sub: reviewSubLabel,
     },
     {
       label: 'TIPS',
@@ -909,9 +942,9 @@ function buildOverviewStats(args: {
       sub: 'collected this month',
     },
     {
-      label: 'NO REBOOK',
-      value: String(args.current.noFutureRebookClientCount),
-      sub: 'no future booking yet',
+      label: 'RETENTION',
+      value: retentionRate,
+      sub: `${args.current.noFutureRebookClientCount} no rebook yet`,
     },
   ]
 

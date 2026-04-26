@@ -1,0 +1,400 @@
+/* lib/brand/proOverview.css */
+/*
+  Pro overview visual shell.
+
+  Dashboard components stay data-only. Visual values live here and resolve
+  through brand tokens from brand.css so the screen remains white-label ready.
+*/
+
+.brand-pro-overview-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100svh - var(--app-footer-space, 0px));
+  max-width: var(--mobile-shell-width);
+  margin-inline: auto;
+  overflow: hidden;
+  background: rgb(var(--bg-primary));
+  color: rgb(var(--text-primary));
+}
+
+.brand-pro-overview-header {
+  flex-shrink: 0;
+  padding: 58px 20px 0;
+  border-bottom: 1px solid rgb(var(--surface-glass) / 0.08);
+}
+
+.brand-pro-overview-header-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.brand-pro-overview-kicker {
+  margin-bottom: 4px;
+  color: rgb(var(--accent-primary-hover));
+}
+
+.brand-pro-overview-title {
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-style: italic;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: var(--ls-tight);
+}
+
+.brand-pro-overview-bell {
+  position: relative;
+  display: grid;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-pill);
+  color: rgb(var(--text-primary));
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.brand-pro-overview-bell:hover {
+  border-color: rgb(var(--surface-glass) / 0.24);
+  background: rgb(var(--surface-glass) / 0.04);
+}
+
+.brand-pro-overview-bell-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid rgb(var(--bg-primary));
+  border-radius: var(--radius-pill);
+  background: rgb(var(--accent-primary));
+}
+
+.brand-pro-overview-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.brand-pro-overview-tabs {
+  display: flex;
+  gap: 22px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.brand-pro-overview-tab {
+  position: relative;
+  padding: 0 0 13px;
+  color: rgb(var(--text-muted));
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  transition: color 160ms ease;
+}
+
+.brand-pro-overview-tab:hover {
+  color: rgb(var(--text-secondary));
+}
+
+.brand-pro-overview-tab::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  content: "";
+}
+
+.brand-pro-overview-tab[data-active="true"] {
+  color: rgb(var(--text-primary));
+}
+
+.brand-pro-overview-tab[data-active="true"]::after {
+  background: rgb(var(--accent-primary));
+}
+
+.brand-pro-overview-body {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.brand-pro-overview-months {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 14px 16px 4px;
+  white-space: nowrap;
+}
+
+.brand-pro-overview-month-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 14px;
+  border: 1px solid rgb(var(--surface-glass) / 0.08);
+  border-radius: var(--radius-pill);
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.brand-pro-overview-month-pill:hover {
+  border-color: rgb(var(--surface-glass) / 0.16);
+  color: rgb(var(--text-secondary));
+}
+
+.brand-pro-overview-month-pill[data-active="true"] {
+  border-color: rgb(var(--surface-glass) / 0.16);
+  background: rgb(var(--surface-glass) / 0.07);
+  box-shadow: 0 6px 20px rgb(var(--shadow-color) / 0.4);
+  color: rgb(var(--text-primary));
+}
+
+.brand-pro-overview-revenue-card {
+  margin: 14px 16px 12px;
+  padding: 20px 20px 18px;
+  border: 1px solid rgb(var(--accent-primary) / 0.18);
+  border-radius: var(--radius-panel);
+  background: rgb(var(--accent-primary) / 0.07);
+}
+
+.brand-pro-overview-revenue-kicker {
+  margin-bottom: 10px;
+  color: rgb(var(--accent-primary-hover));
+}
+
+.brand-pro-overview-revenue-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.brand-pro-overview-revenue-value {
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 52px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.brand-pro-overview-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: rgb(var(--text-muted));
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.brand-pro-overview-trend[data-tone="positive"] {
+  color: rgb(var(--tone-success));
+}
+
+.brand-pro-overview-trend[data-tone="negative"] {
+  color: rgb(var(--tone-danger));
+}
+
+.brand-pro-overview-trend-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.brand-pro-overview-muted {
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.brand-pro-overview-revenue-sub {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.brand-pro-overview-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 16px 16px;
+}
+
+.brand-pro-overview-metric-card {
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-card);
+  background: rgb(var(--surface-glass) / 0.01);
+}
+
+.brand-pro-overview-metric-label {
+  margin-bottom: 5px;
+  color: rgb(var(--text-muted));
+}
+
+.brand-pro-overview-metric-value {
+  overflow: hidden;
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: var(--ls-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-pro-overview-metric-card .brand-pro-overview-muted {
+  margin-top: 5px;
+}
+
+.brand-pro-overview-section {
+  padding: 0 16px 30px;
+}
+
+.brand-pro-overview-section-title {
+  margin-bottom: 12px;
+  color: rgb(var(--text-muted));
+}
+
+.brand-pro-overview-service-list {
+  display: grid;
+  gap: 6px;
+}
+
+.brand-pro-overview-service-row,
+.brand-pro-overview-empty {
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-card);
+  background: rgb(var(--surface-glass) / 0.01);
+}
+
+.brand-pro-overview-service-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.brand-pro-overview-service-rank {
+  flex-shrink: 0;
+  width: 16px;
+  color: rgb(var(--text-muted));
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  text-align: right;
+}
+
+.brand-pro-overview-service-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.brand-pro-overview-service-name {
+  overflow: hidden;
+  color: rgb(var(--text-primary));
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-pro-overview-service-bookings {
+  margin-top: 2px;
+}
+
+.brand-pro-overview-service-revenue {
+  flex-shrink: 0;
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.brand-pro-overview-empty {
+  padding: 14px;
+  color: rgb(var(--text-muted));
+  font-size: 12px;
+}
+
+@media (min-width: 720px) {
+  .brand-pro-overview-page {
+    border-inline: 1px solid rgb(var(--surface-glass) / 0.08);
+  }
+}
+
+@media (max-width: 380px) {
+  .brand-pro-overview-header {
+    padding-inline: 16px;
+  }
+
+  .brand-pro-overview-revenue-value {
+    font-size: 46px;
+  }
+
+  .brand-pro-overview-metric-card {
+    padding-inline: 13px;
+  }
+}
+/* ──────────────────────────────────────────────────────────────────
+   Real fixed pro app header
+────────────────────────────────────────────────────────────────── */
+
+:root {
+  --pro-header-h: 132px;
+}
+
+.brand-pro-app-header {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 900;
+  background: rgb(var(--bg-primary) / 0.98);
+  color: rgb(var(--text-primary));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.brand-pro-app-header-shell {
+  max-width: var(--mobile-shell-width);
+  margin-inline: auto;
+  background: rgb(var(--bg-primary));
+}
+
+.brand-pro-app-header .brand-pro-overview-header {
+  padding: 58px 20px 0;
+}
+
+.brand-pro-layout-main {
+  min-height: 100dvh;
+  padding-top: calc(var(--pro-header-h) + var(--pro-banner-h, 0px));
+}
+
+.brand-pro-layout-main > * {
+  margin-inline: auto;
+  max-width: var(--mobile-shell-width);
+}

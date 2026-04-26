@@ -1,15 +1,15 @@
+// app/pro/layout.tsx
+
 import type { ReactNode } from 'react'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
-
+import '@/lib/brand/proOverview.css'
 import ProHeader from './ProHeader'
-import ProTopTabs from './ProTopTabs'
 import ProComplianceBanner from './ProComplianceBanner'
 
 export const dynamic = 'force-dynamic'
 
-const UI = { headerH: 48, tabsH: 56 } as const
 const PRO_HOME = '/pro/calendar'
 
 function loginHref(
@@ -53,15 +53,9 @@ export default async function ProRootLayout({
     <div className="min-h-dvh bg-bgPrimary text-textPrimary">
       <ProHeader />
       <ProComplianceBanner />
-      <ProTopTabs />
 
-      <main
-        style={{
-          paddingTop: `calc(${UI.headerH + UI.tabsH}px + var(--pro-banner-h, 0px))`,
-          minHeight: '100dvh',
-        }}
-      >
-        <div className="mx-auto max-w-5xl px-4">{children}</div>
+      <main className="brand-pro-layout-main">
+        {children}
       </main>
 
       {modal}
