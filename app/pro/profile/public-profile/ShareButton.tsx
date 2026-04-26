@@ -1,36 +1,117 @@
+// app/pro/profile/public-profile/ShareButton.tsx
 'use client'
 
-export default function ShareButton({ url }: { url: string }) {
+import { useEffect, useRef, useState } from 'react'
+
+type ShareButtonProps = {
+  url: string
+  label?: string
+}
+
+type ShareStatus = 'idle' | 'copied' | 'error'
+
+type TimeoutHandle = ReturnType<typeof setTimeout>
+
+function resolveShareUrl(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed) return ''
+
+  if (typeof window === 'undefined') return trimmed
+
+  try {
+    return new URL(trimmed, window.location.origin).toString()
+  } catch {
+    return trimmed
+  }
+}
+
+export default function ShareButton({
+  url,
+  label = 'Share profile',
+}: ShareButtonProps) {
+  const resetTimerRef = useRef<TimeoutHandle | null>(null)
+
+  const [sharing, setSharing] = useState(false)
+  const [status, setStatus] = useState<ShareStatus>('idle')
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current)
+      }
+    }
+  }, [])
+
+  function scheduleStatusReset() {
+    if (resetTimerRef.current !== null) {
+      clearTimeout(resetTimerRef.current)
+    }
+
+    resetTimerRef.current = setTimeout(() => {
+      setStatus('idle')
+      resetTimerRef.current = null
+    }, 1800)
+  }
+
   async function share() {
+    if (sharing) return
+
+    const shareUrl = resolveShareUrl(url)
+    if (!shareUrl) {
+      setStatus('error')
+      scheduleStatusReset()
+      return
+    }
+
+    setSharing(true)
+    setStatus('idle')
+
     try {
       if (navigator.share) {
-        await navigator.share({ url })
+        await navigator.share({ url: shareUrl })
         return
       }
-      await navigator.clipboard.writeText(url)
-      alert('Link copied.')
+
+      if (!navigator.clipboard) {
+        setStatus('error')
+        scheduleStatusReset()
+        return
+      }
+
+      await navigator.clipboard.writeText(shareUrl)
+      setStatus('copied')
+      scheduleStatusReset()
     } catch {
-      // ignore
+      setStatus('error')
+      scheduleStatusReset()
+    } finally {
+      setSharing(false)
     }
   }
 
+  const statusText =
+    status === 'copied'
+      ? 'Link copied'
+      : status === 'error'
+        ? 'Could not share link'
+        : ''
+
   return (
-    <button
-      type="button"
-      onClick={share}
-      style={{
-        width: 44,
-        height: 44,
-        borderRadius: 999,
-        border: '1px solid #e5e7eb',
-        background: '#fff',
-        cursor: 'pointer',
-        fontSize: 16,
-      }}
-      title="Share"
-      aria-label="Share profile"
-    >
-      ↗
-    </button>
+    <span className="brand-share-button-wrap">
+      <button
+        type="button"
+        onClick={share}
+        disabled={sharing}
+        className="brand-share-button brand-focus"
+        title={label}
+        aria-label={label}
+      >
+        <span aria-hidden="true">↗</span>
+      </button>
+
+      <span className="brand-share-button-status" aria-live="polite">
+        {statusText}
+      </span>
+    </span>
   )
 }
