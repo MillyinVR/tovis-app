@@ -62,8 +62,13 @@ export const tovisBrand: BrandConfig = {
         glassBlurPx: 20,
         glassOpacity: 0.09,
         shadowColor: '10 9 7',
+
         radiusAppIconPx: 28,
         radiusCardPx: 14,
+        radiusPanelPx: 18,
+        radiusSheetPx: 24,
+        radiusInnerPx: 8,
+        radiusPillPx: 999,
       },
 
       typography: {
@@ -71,6 +76,12 @@ export const tovisBrand: BrandConfig = {
         fontDisplay,
         fontMono,
         letterSpacingCaps: '0.08em',
+        letterSpacingTight: '-0.03em',
+      },
+
+      layout: {
+        pageMaxWidthPx: 960,
+        mobileShellWidthPx: 430,
       },
     },
 
@@ -100,8 +111,13 @@ export const tovisBrand: BrandConfig = {
         glassBlurPx: 18,
         glassOpacity: 0.07,
         shadowColor: '30 22 18',
+
         radiusAppIconPx: 28,
         radiusCardPx: 14,
+        radiusPanelPx: 18,
+        radiusSheetPx: 24,
+        radiusInnerPx: 8,
+        radiusPillPx: 999,
       },
 
       typography: {
@@ -109,6 +125,12 @@ export const tovisBrand: BrandConfig = {
         fontDisplay,
         fontMono,
         letterSpacingCaps: '0.08em',
+        letterSpacingTight: '-0.03em',
+      },
+
+      layout: {
+        pageMaxWidthPx: 960,
+        mobileShellWidthPx: 430,
       },
     },
   },

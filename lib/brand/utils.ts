@@ -1,12 +1,18 @@
 // lib/brand/utils.ts
-import type { BrandTokens } from './types'
+import type { BrandTokens, RgbTriplet } from './types'
+
+function rgbChannels(value: RgbTriplet): string {
+  return value.split(' ').join(', ')
+}
 
 export function toCssVars(tokens: BrandTokens): Record<string, string> {
-  const { colors, effects, typography } = tokens
+  const { colors, effects, typography, layout } = tokens
 
   // CSS rgba() needs comma-separated channels.
   // Brand tokens store RGB as space-separated triplets: "244 239 231".
-  const textPrimaryRgb = colors.textPrimary.split(' ').join(', ')
+  const textPrimaryRgb = rgbChannels(colors.textPrimary)
+  const shadowRgb = rgbChannels(effects.shadowColor)
+  const accentRgb = rgbChannels(colors.accentPrimary)
 
   return {
     // ── Semantic names used by existing components ────────────────
@@ -29,6 +35,13 @@ export function toCssVars(tokens: BrandTokens): Record<string, string> {
     '--color-ember': colors.colorEmber,
     '--color-amber': colors.colorAmber,
 
+    // ── Status tones ──────────────────────────────────────────────
+    '--tone-danger': colors.colorEmber,
+    '--tone-warn': colors.colorAmber,
+    '--tone-pending': colors.colorAmber,
+    '--tone-success': colors.colorFern,
+    '--tone-info': colors.accentPrimary,
+
     // ── Prototype aliases used by editorial/new screens ───────────
     '--ink': colors.bgPrimary,
     '--ink-2': colors.bgSecondary,
@@ -46,26 +59,38 @@ export function toCssVars(tokens: BrandTokens): Record<string, string> {
     '--ember': colors.colorEmber,
     '--amber': colors.colorAmber,
 
-    // ── Computed borders ──────────────────────────────────────────
+    // ── Computed borders / dividers ───────────────────────────────
     '--line': `rgba(${textPrimaryRgb}, 0.08)`,
     '--line-strong': `rgba(${textPrimaryRgb}, 0.16)`,
-
-    // ── Status tones ──────────────────────────────────────────────
-    // Pending intentionally maps to prototype amber (#F0A830).
-    // Do not use tone-warn here; warning and pending are visually different.
-    '--tone-pending': colors.colorAmber,
+    '--line-heavy': `rgba(${textPrimaryRgb}, 0.24)`,
 
     // ── Effects ───────────────────────────────────────────────────
     '--glass-blur': `${effects.glassBlurPx}px`,
     '--glass-opacity': `${effects.glassOpacity}`,
     '--shadow-color': effects.shadowColor,
+
+    '--shadow-soft': `0 10px 30px rgb(${shadowRgb} / 0.32)`,
+    '--shadow-strong': `0 18px 55px rgb(${shadowRgb} / 0.48)`,
+    '--shadow-accent': `0 10px 28px rgb(${accentRgb} / 0.38)`,
+
+    // ── Radii ─────────────────────────────────────────────────────
     '--radius-app-icon': `${effects.radiusAppIconPx}px`,
     '--radius-card': `${effects.radiusCardPx}px`,
+    '--radius-panel': `${effects.radiusPanelPx}px`,
+    '--radius-sheet': `${effects.radiusSheetPx}px`,
+    '--radius-inner': `${effects.radiusInnerPx}px`,
+    '--radius-pill': `${effects.radiusPillPx}px`,
 
     // ── Typography ────────────────────────────────────────────────
     '--font-sans': typography.fontSans,
     '--font-display': typography.fontDisplay,
     '--font-mono': typography.fontMono,
     '--ls-caps': typography.letterSpacingCaps,
+    '--ls-tight': typography.letterSpacingTight,
+
+    // ── Layout ────────────────────────────────────────────────────
+    '--page-max-width': `${layout.pageMaxWidthPx}px`,
+    '--mobile-shell-width': `${layout.mobileShellWidthPx}px`,
+    '--overlay': colors.bgPrimary,
   }
 }

@@ -34,11 +34,20 @@ export type BrandTokens = {
   }
 
   effects: {
+    // ── Glass ─────────────────────────────────────────────────────
     glassBlurPx: number // 16–24 recommended
     glassOpacity: number // 0.06–0.12 recommended
+
+    // ── Shadows ───────────────────────────────────────────────────
     shadowColor: RgbTriplet
+
+    // ── Radii ─────────────────────────────────────────────────────
     radiusAppIconPx: number
     radiusCardPx: number
+    radiusPanelPx: number
+    radiusSheetPx: number
+    radiusInnerPx: number
+    radiusPillPx: number
   }
 
   typography: {
@@ -46,6 +55,12 @@ export type BrandTokens = {
     fontDisplay: string // editorial headlines → --font-display
     fontMono: string // data, labels, caps → --font-mono
     letterSpacingCaps: string // caps labels → --ls-caps
+    letterSpacingTight: string // editorial/display tightening → --ls-tight
+  }
+
+  layout: {
+    pageMaxWidthPx: number // app content max width → --page-max-width
+    mobileShellWidthPx: number // mobile shell / profile width → --mobile-shell-width
   }
 }
 
