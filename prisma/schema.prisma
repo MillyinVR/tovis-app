@@ -1108,6 +1108,7 @@ model ProfessionalProfile {
   bookingCloseoutAuditLogs   BookingCloseoutAuditLog[]
   bookingOverridePermissions BookingOverridePermission[] @relation("BookingOverridePermissionProfessional")
   productSales               ProductSale[]
+  monthlyAnalytics           ProfessionalMonthlyAnalytics[] @relation("ProMonthlyAnalytics")
   nfcCards                   NfcCard[]
 
   paymentSettings    ProfessionalPaymentSettings?
@@ -1123,6 +1124,107 @@ model ProfessionalProfile {
   viralRequestApprovalFanOuts ViralRequestApprovalFanOut[]
 
   @@index([handleNormalized])
+}
+
+model ProfessionalMonthlyAnalytics {
+  id String @id @default(cuid())
+
+  professionalId String
+  professional   ProfessionalProfile @relation("ProMonthlyAnalytics", fields: [professionalId], references: [id], onDelete: Cascade)
+
+  // Calendar month in the professional's timezone.
+  // Example: "2026-04"
+  monthKey String @db.VarChar(7)
+
+  // Snapshot of the timezone used when computing this row.
+  // This matters because calendar months are timezone-sensitive.
+  timeZone String @db.VarChar(64)
+
+  periodStartUtc DateTime
+  periodEndUtc   DateTime
+
+  // Money is stored as cents so dashboard reads avoid Decimal math.
+  // Revenue total intentionally excludes tips.
+  serviceRevenueCents Int @default(0)
+  productRevenueCents Int @default(0)
+  revenueTotalCents   Int @default(0)
+  tipCents            Int @default(0)
+
+  completedBookingCount Int @default(0)
+
+  uniqueClientCount         Int @default(0)
+  newClientCount            Int @default(0)
+  repeatClientCount         Int @default(0)
+  futureRebookedClientCount Int @default(0)
+  noFutureRebookClientCount Int @default(0)
+
+  requestedNewBookingCount    Int @default(0)
+  requestedRepeatBookingCount Int @default(0)
+  discoveryNewBookingCount    Int @default(0)
+  discoveryRepeatBookingCount Int @default(0)
+  aftercareBookingCount       Int @default(0)
+
+  reviewCount   Int      @default(0)
+  ratingSum     Int      @default(0)
+  averageRating Decimal? @db.Decimal(3, 2)
+
+  computedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  services ProfessionalMonthlyServiceAnalytics[]
+  products ProfessionalMonthlyProductAnalytics[]
+
+  @@unique([professionalId, monthKey])
+  @@index([professionalId, periodStartUtc])
+  @@index([monthKey])
+  @@index([computedAt])
+}
+
+model ProfessionalMonthlyServiceAnalytics {
+  id String @id @default(cuid())
+
+  analyticsId String
+  analytics   ProfessionalMonthlyAnalytics @relation(fields: [analyticsId], references: [id], onDelete: Cascade)
+
+  serviceId String
+  service   Service @relation("ServiceMonthlyAnalytics", fields: [serviceId], references: [id], onDelete: Restrict)
+
+  serviceNameSnapshot String
+
+  bookingCount Int @default(0)
+  revenueCents Int @default(0)
+  rank         Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([analyticsId, serviceId])
+  @@index([analyticsId, rank])
+  @@index([serviceId])
+}
+
+model ProfessionalMonthlyProductAnalytics {
+  id String @id @default(cuid())
+
+  analyticsId String
+  analytics   ProfessionalMonthlyAnalytics @relation(fields: [analyticsId], references: [id], onDelete: Cascade)
+
+  productId String?
+  product   Product? @relation("ProductMonthlyAnalytics", fields: [productId], references: [id], onDelete: SetNull)
+
+  productNameSnapshot String
+
+  quantity     Int @default(0)
+  revenueCents Int @default(0)
+  rank         Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([analyticsId, productId])
+  @@index([analyticsId, rank])
+  @@index([productId])
 }
 
 model ProfessionalPaymentSettings {
@@ -1288,6 +1390,7 @@ model Service {
   category            ServiceCategory               @relation(fields: [categoryId], references: [id])
   offerings           ProfessionalServiceOffering[]
   bookings            Booking[]
+  monthlyAnalytics    ProfessionalMonthlyServiceAnalytics[] @relation("ServiceMonthlyAnalytics")
   lastMinuteRules     LastMinuteServiceRule[]       @relation("ServiceLastMinuteRules")
   permissions         ServicePermission[]
   mediaServiceTags    MediaServiceTag[]
@@ -1966,9 +2069,10 @@ model Product {
   wholesalePrice Decimal? @db.Decimal(10, 2)
   isActive       Boolean  @default(true)
 
-  recommendations ProductRecommendation[]
-  checkoutItems   BookingCheckoutProductItem[]
-  productSales    ProductSale[]
+  recommendations  ProductRecommendation[]
+  checkoutItems    BookingCheckoutProductItem[]
+  productSales     ProductSale[]
+  monthlyAnalytics ProfessionalMonthlyProductAnalytics[] @relation("ProductMonthlyAnalytics")
 }
 
 model ProductRecommendation {
