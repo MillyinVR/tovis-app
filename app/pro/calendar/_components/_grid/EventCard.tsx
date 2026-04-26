@@ -14,7 +14,6 @@ import {
   calendarStatusMeta,
   eventAccentBgClassName,
   eventCardClasses,
-  type StatusTone,
 } from '../../_utils/statusStyles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -69,9 +68,6 @@ const FALLBACK_CLIENT_LABEL = 'Client'
 const FALLBACK_BOOKING_LABEL = 'Appointment'
 const FALLBACK_BLOCK_LABEL = 'Personal time'
 
-const BLOCKED_BG =
-  'repeating-linear-gradient(45deg, rgb(var(--paper) / 0.05) 0 5px, transparent 5px 12px)'
-
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
 function textClampStyle(options: TextClampOptions): CSSProperties {
@@ -83,11 +79,11 @@ function textClampStyle(options: TextClampOptions): CSSProperties {
   }
 }
 
-function normalizeText(value: string | null | undefined) {
+function normalizeText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function serviceItemCountLabel(event: CalendarEvent) {
+function serviceItemCountLabel(event: CalendarEvent): string | null {
   if (event.kind === 'BLOCK') return null
 
   const serviceCount = event.details.serviceItems.length
@@ -126,7 +122,7 @@ function buildEventCardCopy(args: {
   }
 }
 
-function cardTitle(event: CalendarEvent) {
+function cardTitle(event: CalendarEvent): string {
   if (event.kind === 'BLOCK') {
     return 'Drag to move, drag bottom to resize. Click to edit block.'
   }
@@ -134,7 +130,10 @@ function cardTitle(event: CalendarEvent) {
   return 'Drag to move, drag bottom to resize. Click to view booking.'
 }
 
-function cardAriaLabel(args: { copy: EventCardCopy; timeLabel: string }) {
+function cardAriaLabel(args: {
+  copy: EventCardCopy
+  timeLabel: string
+}): string {
   const { copy, timeLabel } = args
 
   return [copy.primary, copy.secondary, copy.status, timeLabel]
@@ -142,7 +141,7 @@ function cardAriaLabel(args: { copy: EventCardCopy; timeLabel: string }) {
     .join(', ')
 }
 
-function cardSurfaceOverlayClass(isBlocked: boolean) {
+function cardSurfaceOverlayClass(isBlocked: boolean): string {
   return [
     'before:pointer-events-none before:absolute before:inset-0',
     isBlocked
@@ -151,56 +150,13 @@ function cardSurfaceOverlayClass(isBlocked: boolean) {
   ].join(' ')
 }
 
-function statusBackgroundColor(tone: StatusTone) {
-  switch (tone) {
-    case 'accepted':
-    case 'scheduled':
-      return 'rgb(var(--terra) / 0.36)'
-    case 'pending':
-      return 'rgb(var(--amber) / 0.38)'
-    case 'completed':
-      return 'rgb(var(--fern) / 0.32)'
-    case 'danger':
-      return 'rgb(var(--ember) / 0.32)'
-    case 'blocked':
-      return 'rgb(var(--paper) / 0.08)'
-    default:
-      return 'rgb(var(--terra) / 0.36)'
-  }
-}
-
-function statusBoxShadow(tone: StatusTone) {
-  switch (tone) {
-    case 'accepted':
-    case 'scheduled':
-      return '0 0 0 1px rgb(var(--terra) / 0.28), 0 8px 18px rgb(0 0 0 / 0.42)'
-    case 'pending':
-      return '0 0 0 1px rgb(var(--amber) / 0.32), 0 8px 18px rgb(0 0 0 / 0.42)'
-    case 'completed':
-      return '0 0 0 1px rgb(var(--fern) / 0.28), 0 8px 18px rgb(0 0 0 / 0.42)'
-    case 'danger':
-      return '0 0 0 1px rgb(var(--ember) / 0.28), 0 8px 18px rgb(0 0 0 / 0.42)'
-    case 'blocked':
-      return '0 0 0 1px rgb(var(--paper) / 0.14), 0 8px 18px rgb(0 0 0 / 0.36)'
-    default:
-      return '0 0 0 1px rgb(var(--terra) / 0.28), 0 8px 18px rgb(0 0 0 / 0.42)'
-  }
-}
-
 function eventCardPositionStyle(args: {
   topPx: number
   heightPx: number
-  statusTone: StatusTone
-  isBlocked: boolean
 }): CSSProperties {
-  const { topPx, heightPx, statusTone, isBlocked } = args
-
   return {
-    top: topPx,
-    height: heightPx,
-    backgroundColor: statusBackgroundColor(statusTone),
-    backgroundImage: isBlocked ? BLOCKED_BG : undefined,
-    boxShadow: statusBoxShadow(statusTone),
+    top: args.topPx,
+    height: args.heightPx,
   }
 }
 
@@ -209,7 +165,7 @@ function openOnKeyboard(args: {
   eventId: string
   suppressClickRef: MutableRefObject<boolean>
   onClickEvent: (id: string) => void
-}) {
+}): void {
   const { event, eventId, suppressClickRef, onClickEvent } = args
 
   if (event.key !== 'Enter' && event.key !== ' ') return
@@ -224,7 +180,7 @@ function openOnKeyboard(args: {
 function innerPaddingClassName(args: {
   compact: boolean
   micro: boolean
-}) {
+}): string {
   const { compact, micro } = args
 
   if (micro) return 'py-1 pl-2.5 pr-1.5'
@@ -237,7 +193,7 @@ function rootClassName(args: {
   isBlocked: boolean
   border: string
   ring?: string
-}) {
+}): string {
   const { isBlocked, border, ring } = args
 
   return [
@@ -256,7 +212,7 @@ function primaryTextClassName(args: {
   compact: boolean
   micro: boolean
   isBlocked: boolean
-}) {
+}): string {
   const { compact, micro, isBlocked } = args
 
   return [
@@ -269,14 +225,14 @@ function primaryTextClassName(args: {
   ].join(' ')
 }
 
-function secondaryTextClassName(compact: boolean) {
+function secondaryTextClassName(compact: boolean): string {
   return [
     'mt-0.5 truncate font-sans leading-tight text-paperDim',
     compact ? 'text-[8px]' : 'text-[9px]',
   ].join(' ')
 }
 
-function timeTextClassName(compact: boolean) {
+function timeTextClassName(compact: boolean): string {
   return [
     'mt-auto truncate font-mono uppercase tracking-[0.04em] text-paperMute',
     compact ? 'pt-0.5 text-[7px]' : 'pt-1 text-[8px]',
@@ -301,7 +257,10 @@ function PendingBadge() {
 
 function CompletedCheck() {
   return (
-    <span className="hidden shrink-0 text-fern md:inline-flex" aria-hidden="true">
+    <span
+      className="hidden shrink-0 text-fern md:inline-flex"
+      aria-hidden="true"
+    >
       <svg
         width="10"
         height="10"
@@ -401,8 +360,6 @@ export function EventCard(props: EventCardProps) {
       style={eventCardPositionStyle({
         topPx,
         heightPx,
-        statusTone: statusMeta.tone,
-        isBlocked,
       })}
       title={cardTitle(ev)}
     >

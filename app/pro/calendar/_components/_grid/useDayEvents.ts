@@ -7,6 +7,8 @@ import type { CalendarEvent } from '../../_types'
 
 import { ymdInTimeZone } from '../../_utils/date'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type EventDayRange = {
   event: CalendarEvent
   startYmd: string
@@ -15,15 +17,30 @@ type EventDayRange = {
   endMs: number
 }
 
+type GetDayEventsArgs = {
+  day: Date
+  timeZone: string
+  events: CalendarEvent[]
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const MIDDAY_MS = 12 * 60 * 60 * 1000
 const END_INCLUSIVE_OFFSET_MS = 1
 
-function stableYmdForVisibleDay(day: Date, timeZone: string) {
-  return ymdInTimeZone(new Date(day.getTime() + MIDDAY_MS), timeZone)
+// ─── Pure helpers ─────────────────────────────────────────────────────────────
+
+function anchoredVisibleDay(day: Date): Date {
+  return new Date(day.getTime() + MIDDAY_MS)
 }
 
-function validMsFromIso(value: string) {
+function stableYmdForVisibleDay(day: Date, timeZone: string): string {
+  return ymdInTimeZone(anchoredVisibleDay(day), timeZone)
+}
+
+function validMsFromIso(value: string): number | null {
   const ms = new Date(value).getTime()
+
   return Number.isFinite(ms) ? ms : null
 }
 
@@ -49,11 +66,14 @@ function buildEventDayRange(
   }
 }
 
-function eventIntersectsDay(range: EventDayRange, dayYmd: string) {
+function eventIntersectsDay(range: EventDayRange, dayYmd: string): boolean {
   return dayYmd >= range.startYmd && dayYmd <= range.endYmdInclusive
 }
 
-function sortEventsForDay(first: EventDayRange, second: EventDayRange) {
+function sortEventsForDay(
+  first: EventDayRange,
+  second: EventDayRange,
+): number {
   if (first.startMs !== second.startMs) {
     return first.startMs - second.startMs
   }
@@ -65,11 +85,9 @@ function sortEventsForDay(first: EventDayRange, second: EventDayRange) {
   return first.event.id.localeCompare(second.event.id)
 }
 
-export function getDayEvents(args: {
-  day: Date
-  timeZone: string
-  events: CalendarEvent[]
-}) {
+// ─── Public helpers ───────────────────────────────────────────────────────────
+
+export function getDayEvents(args: GetDayEventsArgs): CalendarEvent[] {
   const { day, timeZone, events } = args
   const dayYmd = stableYmdForVisibleDay(day, timeZone)
   const ranges: EventDayRange[] = []
@@ -93,11 +111,7 @@ export function getDayEvents(args: {
  * End handling is inclusive by using end - 1ms, so an event ending exactly at
  * midnight belongs to the previous day, not the next day.
  */
-export function useDayEvents(args: {
-  day: Date
-  timeZone: string
-  events: CalendarEvent[]
-}) {
+export function useDayEvents(args: GetDayEventsArgs): CalendarEvent[] {
   const { day, timeZone, events } = args
 
   return useMemo(

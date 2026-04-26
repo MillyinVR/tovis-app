@@ -5,8 +5,9 @@ import { useMemo } from 'react'
 
 import type { CalendarEvent } from '../_types'
 
-import { ymdInTimeZone, WEEKDAY_KEYS_DISPLAY } from '../_utils/date'
+import { WEEKDAY_KEYS_DISPLAY } from '../_utils/date'
 import { isBlockedEvent } from '../_utils/calendarMath'
+import { buildMonthDayCells } from '../_utils/monthGrid'
 import { eventChipClassName, statusLabel } from '../_utils/statusStyles'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -19,90 +20,13 @@ type MonthGridProps = {
   onPickDay: (day: Date) => void
 }
 
-type MonthDayCell = {
-  day: Date
-  dayYmd: string
-  dayNumber: string
-  isToday: boolean
-  isInCurrentMonth: boolean
-  events: CalendarEvent[]
-}
-
-type EventRange = {
-  event: CalendarEvent
-  startYmd: string
-  endYmd: string
-}
-
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MIDDAY_MS = 12 * 60 * 60 * 1000
 const MAX_VISIBLE_EVENTS_PER_DAY = 3
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function anchoredVisibleDay(day: Date) {
-  return new Date(day.getTime() + MIDDAY_MS)
-}
-
-function visibleDayKey(day: Date, timeZone: string) {
-  return ymdInTimeZone(anchoredVisibleDay(day), timeZone)
-}
-
-function isValidDate(date: Date) {
-  return Number.isFinite(date.getTime())
-}
-
-function isEventRange(value: EventRange | null): value is EventRange {
-  return value !== null
-}
-
-function buildEventRange(
-  event: CalendarEvent,
-  timeZone: string,
-): EventRange | null {
-  const startsAt = new Date(event.startsAt)
-  const endsAt = new Date(event.endsAt)
-
-  if (!isValidDate(startsAt) || !isValidDate(endsAt)) return null
-  if (endsAt.getTime() <= startsAt.getTime()) return null
-
-  return {
-    event,
-    startYmd: ymdInTimeZone(startsAt, timeZone),
-    endYmd: ymdInTimeZone(new Date(endsAt.getTime() - 1), timeZone),
-  }
-}
-
-function buildEventsByVisibleDay(args: {
-  events: CalendarEvent[]
-  visibleDayKeys: string[]
-  timeZone: string
-}) {
-  const { events, visibleDayKeys, timeZone } = args
-
-  const grouped = new Map<string, CalendarEvent[]>()
-
-  for (const dayKey of visibleDayKeys) {
-    grouped.set(dayKey, [])
-  }
-
-  const eventRanges = events
-    .map((event) => buildEventRange(event, timeZone))
-    .filter(isEventRange)
-
-  for (const range of eventRanges) {
-    for (const dayKey of visibleDayKeys) {
-      if (dayKey >= range.startYmd && dayKey <= range.endYmd) {
-        grouped.get(dayKey)?.push(range.event)
-      }
-    }
-  }
-
-  return grouped
-}
-
-function eventChipLabel(event: CalendarEvent) {
+function eventChipLabel(event: CalendarEvent): string {
   if (isBlockedEvent(event)) return 'Blocked'
 
   const title = event.title.trim()
@@ -111,7 +35,7 @@ function eventChipLabel(event: CalendarEvent) {
   return statusLabel(event.status)
 }
 
-function weekdayLabel(dayKey: string) {
+function weekdayLabel(dayKey: string): string {
   return dayKey.slice(0, 3).toUpperCase()
 }
 
@@ -119,7 +43,7 @@ function dayCellClassName(args: {
   isLastColumn: boolean
   isInCurrentMonth: boolean
   isToday: boolean
-}) {
+}): string {
   const { isLastColumn, isInCurrentMonth, isToday } = args
 
   return [
@@ -138,7 +62,7 @@ function dayCellClassName(args: {
 function dayNumberClassName(args: {
   isInCurrentMonth: boolean
   isToday: boolean
-}) {
+}): string {
   const { isInCurrentMonth, isToday } = args
 
   return [
@@ -152,76 +76,24 @@ function dayNumberClassName(args: {
   ].join(' ')
 }
 
+function eventCountLabel(count: number): string {
+  return count === 1 ? '1 item' : `${count} items`
+}
+
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export function MonthGrid(props: MonthGridProps) {
   const { visibleDays, currentDate, events, timeZone, onPickDay } = props
 
-  const formatters = useMemo(
-    () => ({
-      monthYear: new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        month: 'numeric',
-        year: 'numeric',
-      }),
-      dayNumber: new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        day: 'numeric',
-      }),
-    }),
-    [timeZone],
-  )
-
-  const currentMonthKey = useMemo(
-    () => formatters.monthYear.format(currentDate),
-    [currentDate, formatters],
-  )
-
-  const todayYmd = useMemo(
-    () => ymdInTimeZone(new Date(), timeZone),
-    [timeZone],
-  )
-
-  const visibleDayKeys = useMemo(
-    () => visibleDays.map((day) => visibleDayKey(day, timeZone)),
-    [timeZone, visibleDays],
-  )
-
-  const eventsByVisibleDay = useMemo(
+  const dayCells = useMemo(
     () =>
-      buildEventsByVisibleDay({
+      buildMonthDayCells({
+        visibleDays,
+        currentDate,
         events,
-        visibleDayKeys,
         timeZone,
       }),
-    [events, timeZone, visibleDayKeys],
-  )
-
-  const dayCells = useMemo<MonthDayCell[]>(
-    () =>
-      visibleDays.map((day, index) => {
-        const dayYmd = visibleDayKeys[index]
-        const dayEvents = eventsByVisibleDay.get(dayYmd) ?? []
-        const anchoredDay = anchoredVisibleDay(day)
-
-        return {
-          day,
-          dayYmd,
-          dayNumber: formatters.dayNumber.format(anchoredDay),
-          isToday: dayYmd === todayYmd,
-          isInCurrentMonth:
-            formatters.monthYear.format(anchoredDay) === currentMonthKey,
-          events: dayEvents,
-        }
-      }),
-    [
-      currentMonthKey,
-      eventsByVisibleDay,
-      formatters,
-      todayYmd,
-      visibleDayKeys,
-      visibleDays,
-    ],
+    [currentDate, events, timeZone, visibleDays],
   )
 
   return (
@@ -265,7 +137,9 @@ export function MonthGrid(props: MonthGridProps) {
                 isInCurrentMonth: cell.isInCurrentMonth,
                 isToday: cell.isToday,
               })}
-              aria-label={`Open ${cell.dayYmd}`}
+              aria-label={`Open ${cell.dayYmd}, ${eventCountLabel(
+                cell.events.length,
+              )}`}
             >
               <div className="flex items-start justify-between gap-1.5">
                 <div>

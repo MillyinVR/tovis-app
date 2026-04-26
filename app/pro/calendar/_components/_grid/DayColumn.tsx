@@ -109,23 +109,13 @@ const GRID_MARKS: GridMark[] = Array.from(
   }),
 )
 
-const WORKING_OVERLAY_CLASSES: Record<LocationType, string> = {
-  SALON: 'border-terra/20 bg-terra/[0.025]',
-  MOBILE: 'border-acid/20 bg-acid/[0.025]',
-}
-
-const ACTIVE_WORKING_OVERLAY_CLASSES: Record<LocationType, string> = {
-  SALON: 'border-terra/35 bg-terra/[0.04]',
-  MOBILE: 'border-acid/30 bg-acid/[0.04]',
-}
-
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function stableYmdForVisibleDay(day: Date, timeZone: string) {
+function stableYmdForVisibleDay(day: Date, timeZone: string): string {
   return ymdInTimeZone(new Date(day.getTime() + MIDDAY_MS), timeZone)
 }
 
-function anchoredDayForWorkingHours(day: Date) {
+function anchoredDayForWorkingHours(day: Date): Date {
   return new Date(day.getTime() + MIDDAY_MS)
 }
 
@@ -160,18 +150,23 @@ function normalizeWindow(window: TimeWindow): TimeWindow | null {
   }
 }
 
-function mergeWindows(windows: TimeWindow[]) {
+function isTimeWindow(value: TimeWindow | null): value is TimeWindow {
+  return value !== null
+}
+
+function mergeWindows(windows: TimeWindow[]): TimeWindow[] {
   const normalized = windows
     .map(normalizeWindow)
-    .filter((window): window is TimeWindow => window !== null)
+    .filter(isTimeWindow)
     .sort((first, second) => first.startMinutes - second.startMinutes)
 
   if (normalized.length === 0) return []
 
+  const firstWindow = normalized[0]
   const merged: TimeWindow[] = [
     {
-      startMinutes: normalized[0].startMinutes,
-      endMinutes: normalized[0].endMinutes,
+      startMinutes: firstWindow.startMinutes,
+      endMinutes: firstWindow.endMinutes,
     },
   ]
 
@@ -193,7 +188,9 @@ function mergeWindows(windows: TimeWindow[]) {
   return merged
 }
 
-function buildOutsideHoursSegments(workingWindows: TimeWindow[]) {
+function buildOutsideHoursSegments(
+  workingWindows: TimeWindow[],
+): OutsideHoursSegment[] {
   if (workingWindows.length === 0) {
     return [
       {
@@ -241,7 +238,10 @@ function buildOutsideHoursSegments(workingWindows: TimeWindow[]) {
   return segments
 }
 
-function getEventDurationMinutes(event: CalendarEvent, stepMinutes: number) {
+function getEventDurationMinutes(
+  event: CalendarEvent,
+  stepMinutes: number,
+): number {
   const rawDuration =
     typeof event.durationMinutes === 'number' &&
     Number.isFinite(event.durationMinutes) &&
@@ -252,7 +252,7 @@ function getEventDurationMinutes(event: CalendarEvent, stepMinutes: number) {
   return roundDurationMinutes(rawDuration, stepMinutes)
 }
 
-function eventApiId(event: CalendarEvent) {
+function eventApiId(event: CalendarEvent): string | null {
   if (isBlockedEvent(event)) return extractBlockId(event)
 
   return event.id
@@ -262,7 +262,7 @@ function eventEntityType(event: CalendarEvent): EntityType {
   return isBlockedEvent(event) ? 'block' : 'booking'
 }
 
-function isValidDate(date: Date) {
+function isValidDate(date: Date): boolean {
   return Number.isFinite(date.getTime())
 }
 
@@ -330,12 +330,11 @@ function buildEventLayout(args: {
 function columnClassName(args: {
   dayIdx: number
   isToday: boolean
-}) {
+}): string {
   const { dayIdx, isToday } = args
 
   return [
-    'relative min-w-0',
-    'border-l',
+    'relative min-w-0 border-l',
     dayIdx === 0 ? 'border-l-0' : '',
     isToday ? 'border-terra/45' : 'border-[var(--line)]',
   ].join(' ')
@@ -349,15 +348,15 @@ function columnStyle(args: {
 
   if (isToday) {
     return {
-      backgroundColor: 'rgb(var(--terra) / 0.14)',
+      backgroundColor: 'rgb(var(--accent-primary) / 0.14)',
       boxShadow:
-        'inset 1px 0 0 rgb(var(--terra) / 0.45), inset -1px 0 0 rgb(var(--terra) / 0.26)',
+        'inset 1px 0 0 rgb(var(--accent-primary) / 0.45), inset -1px 0 0 rgb(var(--accent-primary) / 0.26)',
     }
   }
 
   if (dayIdx % 2 === 1) {
     return {
-      backgroundColor: 'rgb(var(--paper) / 0.026)',
+      backgroundColor: 'rgb(var(--surface-glass) / 0.026)',
     }
   }
 
@@ -369,8 +368,8 @@ function columnStyle(args: {
 function gridMarkStyle(isToday: boolean): CSSProperties {
   return {
     borderColor: isToday
-      ? 'rgb(var(--terra) / 0.16)'
-      : 'rgb(var(--paper) / 0.04)',
+      ? 'rgb(var(--accent-primary) / 0.16)'
+      : 'rgb(var(--surface-glass) / 0.04)',
   }
 }
 
@@ -382,26 +381,29 @@ function sideRuleStyle(args: {
 
   if (!isToday) {
     return {
-      backgroundColor: 'rgb(var(--paper) / 0.055)',
+      backgroundColor: 'rgb(var(--surface-glass) / 0.055)',
     }
   }
 
   return {
     backgroundColor:
       side === 'left'
-        ? 'rgb(var(--terra) / 0.60)'
-        : 'rgb(var(--terra) / 0.32)',
+        ? 'rgb(var(--accent-primary) / 0.60)'
+        : 'rgb(var(--accent-primary) / 0.32)',
   }
 }
 
 function todayOverlayStyle(): CSSProperties {
   return {
     background:
-      'linear-gradient(180deg, rgb(var(--terra) / 0.12) 0%, rgb(var(--terra) / 0.06) 42%, rgb(var(--terra) / 0.10) 100%)',
+      'linear-gradient(180deg, rgb(var(--accent-primary) / 0.12) 0%, rgb(var(--accent-primary) / 0.06) 42%, rgb(var(--accent-primary) / 0.10) 100%)',
   }
 }
 
-function renderPositionStyle(startMinutes: number, endMinutes: number) {
+function renderPositionStyle(
+  startMinutes: number,
+  endMinutes: number,
+): CSSProperties {
   return {
     top: startMinutes * PX_PER_MINUTE,
     height: (endMinutes - startMinutes) * PX_PER_MINUTE,
@@ -509,7 +511,7 @@ export function DayColumn(props: DayColumnProps) {
     [dayEvents, dayYmd, timeFormatter, timeZone, stepMinutes],
   )
 
-  function getColumnTop() {
+  function getColumnTop(): number {
     return containerRef.current?.getBoundingClientRect().top ?? 0
   }
 
@@ -582,7 +584,7 @@ export function DayColumn(props: DayColumnProps) {
         {schedule.outsideHoursSegments.map((segment) => (
           <div
             key={segment.key}
-            className="pointer-events-none absolute left-0 right-0 hidden bg-black/[0.12] md:block"
+            className="brand-pro-calendar-closed-hours pointer-events-none absolute left-0 right-0 hidden md:block"
             style={renderPositionStyle(segment.startMinutes, segment.endMinutes)}
             aria-hidden="true"
           />
@@ -599,13 +601,9 @@ export function DayColumn(props: DayColumnProps) {
             aria-hidden="true"
           >
             <div
-              className={[
-                'h-full rounded-xl border',
-                WORKING_OVERLAY_CLASSES[overlay.locationType],
-                overlay.active
-                  ? ACTIVE_WORKING_OVERLAY_CLASSES[overlay.locationType]
-                  : '',
-              ].join(' ')}
+              className="brand-pro-calendar-working-window"
+              data-location-type={overlay.locationType}
+              data-active={overlay.active ? 'true' : 'false'}
             />
           </div>
         ))}

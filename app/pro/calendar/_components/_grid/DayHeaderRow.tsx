@@ -32,11 +32,11 @@ const MIDDAY_MS = 12 * 60 * 60 * 1000
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function anchoredVisibleDay(date: Date) {
+function anchoredVisibleDay(date: Date): Date {
   return new Date(date.getTime() + MIDDAY_MS)
 }
 
-function visibleDayKey(date: Date, timeZone: string) {
+function visibleDayKey(date: Date, timeZone: string): string {
   return ymdInTimeZone(anchoredVisibleDay(date), timeZone)
 }
 
@@ -46,18 +46,31 @@ function buildDayHeaderParts(args: {
   dayFormatter: Intl.DateTimeFormat
 }): DayHeaderParts {
   const { date, weekdayFormatter, dayFormatter } = args
-  const safeDate = anchoredVisibleDay(date)
+  const anchoredDate = anchoredVisibleDay(date)
 
   return {
-    weekday: weekdayFormatter.format(safeDate),
-    dayNumber: dayFormatter.format(safeDate),
+    weekday: weekdayFormatter.format(anchoredDate),
+    dayNumber: dayFormatter.format(anchoredDate),
+  }
+}
+
+function rowStyle(gridCols: string): CSSProperties {
+  return {
+    gridTemplateColumns: gridCols,
+    backgroundColor: 'rgb(var(--bg-primary) / 0.95)',
+  }
+}
+
+function gutterCellStyle(): CSSProperties {
+  return {
+    backgroundColor: 'rgb(var(--bg-primary))',
   }
 }
 
 function dayHeaderClassName(args: {
   isToday: boolean
   dayIdx: number
-}) {
+}): string {
   const { isToday, dayIdx } = args
 
   return [
@@ -65,7 +78,7 @@ function dayHeaderClassName(args: {
     'border-l px-1 text-center',
     'transition-colors',
     isToday
-      ? 'border-terra/45'
+      ? 'border-accentPrimary/45'
       : dayIdx % 2 === 1
         ? 'border-[var(--line)]'
         : 'border-[var(--line)]',
@@ -80,15 +93,15 @@ function dayHeaderStyle(args: {
 
   if (isToday) {
     return {
-      backgroundColor: 'rgb(var(--terra) / 0.22)',
+      backgroundColor: 'rgb(var(--accent-primary) / 0.22)',
       boxShadow:
-        'inset 0 0 0 1px rgb(var(--terra) / 0.35), inset 0 -2px 0 rgb(var(--terra) / 0.95)',
+        'inset 0 0 0 1px rgb(var(--accent-primary) / 0.35), inset 0 -2px 0 rgb(var(--accent-primary) / 0.95)',
     }
   }
 
   if (dayIdx % 2 === 1) {
     return {
-      backgroundColor: 'rgb(var(--paper) / 0.025)',
+      backgroundColor: 'rgb(var(--surface-glass) / 0.025)',
     }
   }
 
@@ -97,7 +110,7 @@ function dayHeaderStyle(args: {
   }
 }
 
-function weekdayClassName() {
+function weekdayClassName(): string {
   return [
     'relative z-10 font-mono text-[9px] font-medium uppercase leading-none',
     'tracking-[0.08em]',
@@ -107,12 +120,12 @@ function weekdayClassName() {
 function weekdayStyle(isToday: boolean): CSSProperties {
   return {
     color: isToday
-      ? 'rgb(var(--terra-glow))'
-      : 'rgb(var(--paper-mute))',
+      ? 'rgb(var(--accent-primary-hover))'
+      : 'rgb(var(--text-muted))',
   }
 }
 
-function dayNumberClassName() {
+function dayNumberClassName(): string {
   return [
     'relative z-10 mt-1 font-display text-base font-semibold leading-none',
     'tracking-[-0.03em]',
@@ -122,9 +135,11 @@ function dayNumberClassName() {
 function dayNumberStyle(isToday: boolean): CSSProperties {
   return {
     color: isToday
-      ? 'rgb(var(--terra-glow))'
-      : 'rgb(var(--paper))',
-    textShadow: isToday ? '0 0 14px rgb(var(--terra-glow) / 0.35)' : undefined,
+      ? 'rgb(var(--accent-primary-hover))'
+      : 'rgb(var(--text-primary))',
+    textShadow: isToday
+      ? '0 0 14px rgb(var(--accent-primary-hover) / 0.35)'
+      : undefined,
   }
 }
 
@@ -147,7 +162,7 @@ export function DayHeaderRow(props: DayHeaderRowProps) {
     [timeZone],
   )
 
-  const dayHeaders: DayHeader[] = useMemo(
+  const dayHeaders = useMemo<DayHeader[]>(
     () =>
       visibleDays.map((date) => {
         const dayYmd = visibleDayKey(date, timeZone)
@@ -167,12 +182,13 @@ export function DayHeaderRow(props: DayHeaderRowProps) {
 
   return (
     <div
-      className="grid border-b border-[var(--line-strong)] bg-ink/95 backdrop-blur-xl"
-      style={{ gridTemplateColumns: gridCols }}
+      className="grid border-b border-[var(--line-strong)] backdrop-blur-xl"
+      style={rowStyle(gridCols)}
       data-calendar-day-header-row="1"
     >
       <div
-        className="relative h-[48px] border-r border-[var(--line-strong)] bg-ink"
+        className="relative h-[48px] border-r border-[var(--line-strong)]"
+        style={gutterCellStyle()}
         aria-hidden="true"
       />
 
@@ -194,12 +210,12 @@ export function DayHeaderRow(props: DayHeaderRowProps) {
           {header.isToday ? (
             <>
               <span
-                className="pointer-events-none absolute inset-y-0 left-0 w-px bg-terra/60"
+                className="pointer-events-none absolute inset-y-0 left-0 w-px bg-accentPrimary/60"
                 aria-hidden="true"
               />
 
               <span
-                className="pointer-events-none absolute inset-y-0 right-0 w-px bg-terra/35"
+                className="pointer-events-none absolute inset-y-0 right-0 w-px bg-accentPrimary/35"
                 aria-hidden="true"
               />
 

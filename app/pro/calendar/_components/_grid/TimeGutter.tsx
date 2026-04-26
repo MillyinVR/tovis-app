@@ -29,7 +29,7 @@ const LABEL_TOP_OFFSET_PX = 2
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function normalizeTotalMinutes(totalMinutes: number) {
+function normalizeTotalMinutes(totalMinutes: number): number {
   if (!Number.isFinite(totalMinutes)) return MINUTES_PER_DAY
 
   return clamp(
@@ -43,7 +43,7 @@ function normalizeTotalMinutes(totalMinutes: number) {
  * Compact 12-hour label with no AM/PM suffix.
  * Example: 0 → "12", 13 → "1".
  */
-function formatHourLabel(hour24: number) {
+function formatHourLabel(hour24: number): string {
   const hour = hour24 % 12
 
   return String(hour === 0 ? 12 : hour)
@@ -61,21 +61,33 @@ function buildHourMarks(totalMinutes: number): HourMark[] {
 
 function gutterStyle(): CSSProperties {
   return {
-    backgroundColor: 'rgb(var(--ink) / 0.96)',
-    color: 'rgb(var(--paper-mute))',
+    backgroundColor: 'rgb(var(--bg-primary) / 0.96)',
+    color: 'rgb(var(--text-muted))',
   }
 }
 
 function gutterRuleStyle(): CSSProperties {
   return {
-    backgroundColor: 'rgb(var(--paper) / 0.06)',
+    backgroundColor: 'rgb(var(--surface-glass) / 0.06)',
   }
 }
 
 function labelStyle(): CSSProperties {
   return {
     top: LABEL_TOP_OFFSET_PX,
-    color: 'rgb(var(--paper-mute) / 0.82)',
+    color: 'rgb(var(--text-muted) / 0.82)',
+  }
+}
+
+function timelineHeightStyle(totalMinutes: number): CSSProperties {
+  return {
+    height: totalMinutes * PX_PER_MINUTE,
+  }
+}
+
+function hourPositionStyle(minute: number): CSSProperties {
+  return {
+    top: minute * PX_PER_MINUTE,
   }
 }
 
@@ -107,10 +119,7 @@ export function TimeGutter(props: TimeGutterProps) {
         aria-hidden="true"
       />
 
-      <div
-        className="relative"
-        style={{ height: safeTotalMinutes * PX_PER_MINUTE }}
-      >
+      <div className="relative" style={timelineHeightStyle(safeTotalMinutes)}>
         {hourMarks.map((mark) => (
           <TimeGutterHour key={mark.hour} mark={mark} />
         ))}
@@ -127,7 +136,7 @@ function TimeGutterHour(props: { mark: HourMark }) {
   return (
     <div
       className="absolute left-0 right-0"
-      style={{ top: mark.minute * PX_PER_MINUTE }}
+      style={hourPositionStyle(mark.minute)}
     >
       <div
         className={[

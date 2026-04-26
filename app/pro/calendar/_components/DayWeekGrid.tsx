@@ -68,6 +68,11 @@ type NowSnapshot = {
   nowMinutes: number
 }
 
+type MeasuredElementHeight = {
+  ref: RefObject<HTMLDivElement | null>
+  height: number
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MIDDAY_MS = 12 * 60 * 60 * 1000
@@ -104,31 +109,31 @@ function resolveCalendarTimeZone(rawTimeZone: string): ResolvedTimeZone {
   }
 }
 
-function getTimelineDays(view: ViewMode, visibleDays: Date[]) {
+function getTimelineDays(view: ViewMode, visibleDays: Date[]): Date[] {
   if (view === 'day') return visibleDays.slice(0, DAY_VIEW_COUNT)
   if (view === 'week') return visibleDays.slice(0, WEEK_VIEW_COUNT)
 
   return []
 }
 
-function getGridColumns(dayCount: number) {
+function getGridColumns(dayCount: number): string {
   return `var(--cal-time-col) repeat(${dayCount}, minmax(0, 1fr))`
 }
 
-function visibleDayYmd(day: Date, timeZone: string) {
+function visibleDayYmd(day: Date, timeZone: string): string {
   return ymdInTimeZone(new Date(day.getTime() + MIDDAY_MS), timeZone)
 }
 
 function shellStyle(): CSSProperties {
   return {
-    backgroundColor: 'rgb(var(--ink))',
-    borderColor: 'rgb(var(--paper) / 0.12)',
+    backgroundColor: 'rgb(var(--bg-primary))',
+    borderColor: 'rgb(var(--surface-glass) / 0.12)',
   }
 }
 
 function surfaceStyle(): CSSProperties {
   return {
-    backgroundColor: 'rgb(var(--ink))',
+    backgroundColor: 'rgb(var(--bg-primary))',
   }
 }
 
@@ -140,7 +145,7 @@ function timelineGridStyle(gridCols: string): CSSProperties {
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 
-function useMeasuredElementHeight() {
+function useMeasuredElementHeight(): MeasuredElementHeight {
   const ref = useRef<HTMLDivElement | null>(null)
   const [height, setHeight] = useState(0)
 
@@ -212,7 +217,7 @@ function useAutoScrollToNow(args: {
   enabled: boolean
   nowTopPx: number
   scrollKey: string
-}) {
+}): void {
   const { scrollRef, enabled, nowTopPx, scrollKey } = args
   const lastScrollKeyRef = useRef<string | null>(null)
 
