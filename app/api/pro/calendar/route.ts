@@ -1,5 +1,10 @@
 // app/api/pro/calendar/route.ts
-import { Prisma, BookingStatus, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
+import {
+  BookingStatus,
+  Prisma,
+  ProfessionalLocationType,
+  ServiceLocationType,
+} from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import {
@@ -23,11 +28,13 @@ import {
 
 export const dynamic = 'force-dynamic'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type CalendarServiceItem = {
   id: string
   name: string | null
   durationMinutes: number
-  price: Prisma.Decimal | number | string | null | unknown
+  price: string | null
   sortOrder: number
 }
 
@@ -67,7 +74,9 @@ type BlockEvent = {
   locationId: string | null
   durationMinutes: number
   localDateKey: string
-  details: { note: string | null }
+  details: {
+    note: string | null
+  }
 }
 
 type CalendarEvent = BookingEvent | BlockEvent
@@ -78,6 +87,47 @@ type CalendarStats = {
   pendingRequests: number
   blockedHours: number
 }
+
+type CalendarRangeResult =
+  | {
+      ok: true
+      from: Date
+      requestedToExclusive: Date
+      effectiveToExclusive: Date
+      wasClamped: boolean
+    }
+  | {
+      ok: false
+      status: number
+      message: string
+    }
+
+type SelectedLocationResult =
+  | {
+      ok: true
+      location: ProfessionalLocationRow
+    }
+  | {
+      ok: false
+      status: number
+      message: string
+    }
+
+type ViewportTimeZoneResult = {
+  viewportTimeZone: string
+  selectedLocationTimeZoneRaw: string | null
+  selectedLocationTimeZoneValid: boolean
+  needsTimeZoneSetup: boolean
+}
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const DEFAULT_CALENDAR_RANGE_DAYS = 42
+const MAX_CALENDAR_RANGE_DAYS = 42
+const MAX_LOCATIONS_PER_PRO = 50
+const MAX_EVENTS_PER_RANGE = 1200
+
+// ─── Prisma selects ───────────────────────────────────────────────────────────
 
 const professionalProfileSelect = {
   id: true,
@@ -166,12 +216,22 @@ type CalendarBlockRow = Prisma.CalendarBlockGetPayload<{
   select: typeof calendarBlockSelect
 }>
 
+// ─── Date / number helpers ────────────────────────────────────────────────────
+
 function addDaysUtc(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 24 * 60 * 60_000)
 }
 
+function dateMs(value: string | Date): number {
+  const date = value instanceof Date ? value : new Date(value)
+  const ms = date.getTime()
+
+  return Number.isFinite(ms) ? ms : Number.NaN
+}
+
 function hoursRounded(minutes: number): number {
   const hours = minutes / 60
+
   return Math.round(hours * 2) / 2
 }
 
@@ -180,11 +240,37 @@ function toDateOrNull(value: string | null): Date | null {
   if (!raw) return null
 
   const parsed = new Date(raw)
+
   return Number.isFinite(parsed.getTime()) ? parsed : null
 }
 
+function overlapMinutes(args: {
+  startsAt: string
+  endsAt: string
+  rangeStart: Date
+  rangeEnd: Date
+}): number {
+  const startMs = dateMs(args.startsAt)
+  const endMs = dateMs(args.endsAt)
+
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0
+  if (endMs <= startMs) return 0
+
+  const overlapStartMs = Math.max(startMs, args.rangeStart.getTime())
+  const overlapEndMs = Math.min(endMs, args.rangeEnd.getTime())
+
+  if (overlapEndMs <= overlapStartMs) return 0
+
+  return Math.round((overlapEndMs - overlapStartMs) / 60_000)
+}
+
+// ─── Location / timezone helpers ──────────────────────────────────────────────
+
 function supportsSalon(type: ProfessionalLocationType): boolean {
-  return type === ProfessionalLocationType.SALON || type === ProfessionalLocationType.SUITE
+  return (
+    type === ProfessionalLocationType.SALON ||
+    type === ProfessionalLocationType.SUITE
+  )
 }
 
 function supportsMobile(type: ProfessionalLocationType): boolean {
@@ -199,80 +285,144 @@ function safeBufferMinutes(value: number | null | undefined): number {
   return clampInt(value, 0, 0, MAX_BUFFER_MINUTES)
 }
 
-function safeEventTimeZone(value: string): string {
-  const sanitized = sanitizeTimeZone(value, 'UTC')
+function safeEventTimeZone(value: string | null | undefined): string {
+  const sanitized = sanitizeTimeZone(value ?? 'UTC', 'UTC')
+
   return isValidIanaTimeZone(sanitized) ? sanitized : 'UTC'
+}
+
+function validTimeZoneOrNull(value: string | null | undefined): string | null {
+  const candidate = typeof value === 'string' ? value.trim() : ''
+
+  if (!candidate) return null
+  if (!isValidIanaTimeZone(candidate)) return null
+
+  return candidate
 }
 
 function getViewportTimeZone(args: {
   selectedLocation: ProfessionalLocationRow
   profile: ProfessionalProfileRow
-}): {
-  viewportTimeZone: string
-  selectedLocationTimeZoneRaw: string | null
-  selectedLocationTimeZoneValid: boolean
-  needsTimeZoneSetup: boolean
-} {
+}): ViewportTimeZoneResult {
   const selectedLocationTimeZoneRaw =
-    typeof args.selectedLocation.timeZone === 'string' && args.selectedLocation.timeZone.trim()
+    typeof args.selectedLocation.timeZone === 'string' &&
+    args.selectedLocation.timeZone.trim()
       ? args.selectedLocation.timeZone.trim()
       : null
 
-  const profileTimeZoneRaw =
-    typeof args.profile.timeZone === 'string' && args.profile.timeZone.trim()
-      ? args.profile.timeZone.trim()
-      : null
-
-  const selectedLocationTimeZoneValid = Boolean(
-    selectedLocationTimeZoneRaw && isValidIanaTimeZone(selectedLocationTimeZoneRaw),
+  const selectedLocationTimeZone = validTimeZoneOrNull(
+    selectedLocationTimeZoneRaw,
   )
-  const profileTimeZoneValid = Boolean(profileTimeZoneRaw && isValidIanaTimeZone(profileTimeZoneRaw))
+
+  const profileTimeZone = validTimeZoneOrNull(args.profile.timeZone)
 
   const viewportTimeZone = sanitizeTimeZone(
-    selectedLocationTimeZoneValid
-      ? selectedLocationTimeZoneRaw
-      : profileTimeZoneValid
-        ? profileTimeZoneRaw
-        : 'UTC',
+    selectedLocationTimeZone ?? profileTimeZone ?? 'UTC',
     'UTC',
   )
 
   return {
     viewportTimeZone,
     selectedLocationTimeZoneRaw,
-    selectedLocationTimeZoneValid,
-    needsTimeZoneSetup: !selectedLocationTimeZoneValid && !profileTimeZoneValid,
+    selectedLocationTimeZoneValid: selectedLocationTimeZone !== null,
+    needsTimeZoneSetup:
+      selectedLocationTimeZone === null && profileTimeZone === null,
   }
 }
 
 function getSelectedLocation(args: {
   locations: ProfessionalLocationRow[]
   requestedLocationId: string
-}): { ok: true; location: ProfessionalLocationRow } | { ok: false; status: number; message: string } {
+}): SelectedLocationResult {
   const { locations, requestedLocationId } = args
 
   if (!locations.length) {
-    return { ok: false, status: 409, message: 'Add a bookable location to use the calendar.' }
+    return {
+      ok: false,
+      status: 409,
+      message: 'Add a bookable location to use the calendar.',
+    }
   }
 
   if (requestedLocationId) {
-    const requested = locations.find((location) => location.id === requestedLocationId)
+    const requested = locations.find(
+      (location) => location.id === requestedLocationId,
+    )
+
     if (!requested) {
-      return { ok: false, status: 404, message: 'Selected location not found.' }
+      return {
+        ok: false,
+        status: 404,
+        message: 'Selected location not found.',
+      }
     }
+
     return { ok: true, location: requested }
   }
 
   const selected =
-    locations.find((location) => location.isPrimary) ??
-    locations[0]
+    locations.find((location) => location.isPrimary) ?? locations[0]
 
   if (!selected) {
-    return { ok: false, status: 409, message: 'Add a bookable location to use the calendar.' }
+    return {
+      ok: false,
+      status: 409,
+      message: 'Add a bookable location to use the calendar.',
+    }
   }
 
   return { ok: true, location: selected }
 }
+
+// ─── Range helpers ────────────────────────────────────────────────────────────
+
+function getCalendarRange(args: {
+  url: URL
+  now: Date
+  viewportTimeZone: string
+}): CalendarRangeResult {
+  const defaultFrom = startOfDayUtcInTimeZone(
+    args.now,
+    args.viewportTimeZone,
+  )
+
+  const from = toDateOrNull(args.url.searchParams.get('from')) ?? defaultFrom
+
+  const defaultToExclusive = addDaysUtc(from, DEFAULT_CALENDAR_RANGE_DAYS)
+
+  const requestedToExclusive =
+    toDateOrNull(args.url.searchParams.get('to')) ?? defaultToExclusive
+
+  if (requestedToExclusive.getTime() <= from.getTime()) {
+    return {
+      ok: false,
+      status: 400,
+      message: '`to` must be after `from`.',
+    }
+  }
+
+  const maxToExclusive = addDaysUtc(from, MAX_CALENDAR_RANGE_DAYS)
+
+  if (requestedToExclusive.getTime() > maxToExclusive.getTime()) {
+    return {
+      ok: true,
+      from,
+      requestedToExclusive,
+      effectiveToExclusive: maxToExclusive,
+      wasClamped: true,
+    }
+  }
+
+  return {
+    ok: true,
+    from,
+    requestedToExclusive,
+    effectiveToExclusive: requestedToExclusive,
+    wasClamped: false,
+  }
+}
+
+// ─── Event builders ───────────────────────────────────────────────────────────
 
 function getClientName(booking: BookingRow): string {
   const firstName = booking.client?.firstName?.trim() ?? ''
@@ -289,15 +439,39 @@ function getClientName(booking: BookingRow): string {
 function getServiceName(booking: BookingRow): string {
   const firstItemName = booking.serviceItems[0]?.service?.name?.trim() ?? ''
   const bookingServiceName = booking.service?.name?.trim() ?? ''
+
   return firstItemName || bookingServiceName || 'Appointment'
+}
+
+function priceSnapshotToString(
+  value: Prisma.Decimal | number | string | null | undefined,
+): string | null {
+  if (value === null || value === undefined) return null
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+
+    return trimmed || null
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : null
+  }
+
+  return value.toString()
 }
 
 function toCalendarServiceItems(booking: BookingRow): CalendarServiceItem[] {
   return booking.serviceItems.map((item) => ({
     id: item.id,
     name: item.service?.name?.trim() || null,
-    durationMinutes: clampInt(item.durationMinutesSnapshot, 0, 0, MAX_SLOT_DURATION_MINUTES),
-    price: item.priceSnapshot ?? null,
+    durationMinutes: clampInt(
+      item.durationMinutesSnapshot,
+      0,
+      0,
+      MAX_SLOT_DURATION_MINUTES,
+    ),
+    price: priceSnapshotToString(item.priceSnapshot),
     sortOrder: item.sortOrder ?? 0,
   }))
 }
@@ -308,7 +482,8 @@ async function toBookingEvent(args: {
   professionalTimeZone: string | null
   viewportTimeZone: string
 }): Promise<BookingEvent | null> {
-  const { booking, professionalId, professionalTimeZone, viewportTimeZone } = args
+  const { booking, professionalId, professionalTimeZone, viewportTimeZone } =
+    args
 
   if (!booking.locationId) return null
 
@@ -369,13 +544,18 @@ async function toBookingEvent(args: {
   }
 }
 
-function toBlockEvent(block: CalendarBlockRow, viewportTimeZone: string): BlockEvent | null {
+function toBlockEvent(
+  block: CalendarBlockRow,
+  viewportTimeZone: string,
+): BlockEvent | null {
   const start = new Date(block.startsAt)
   const end = new Date(block.endsAt)
 
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
     return null
   }
+
+  if (end.getTime() <= start.getTime()) return null
 
   const title = block.note?.trim() ? block.note.trim() : 'Blocked time'
 
@@ -391,13 +571,45 @@ function toBlockEvent(block: CalendarBlockRow, viewportTimeZone: string): BlockE
     note: block.note ?? null,
     locationType: null,
     locationId: block.locationId ?? null,
-    durationMinutes: Math.max(0, Math.round((end.getTime() - start.getTime()) / 60_000)),
+    durationMinutes: Math.max(
+      0,
+      Math.round((end.getTime() - start.getTime()) / 60_000),
+    ),
     localDateKey: utcDateToLocalYmd(start, viewportTimeZone),
     details: {
       note: block.note ?? null,
     },
   }
 }
+
+function isBookingVisibleInTodaysStats(event: BookingEvent): boolean {
+  return (
+    event.status === BookingStatus.ACCEPTED ||
+    event.status === BookingStatus.COMPLETED
+  )
+}
+
+function isFuturePendingRequest(event: BookingEvent, now: Date): boolean {
+  return (
+    event.status === BookingStatus.PENDING &&
+    dateMs(event.startsAt) >= now.getTime()
+  )
+}
+
+function sortCalendarEvents(events: CalendarEvent[]): CalendarEvent[] {
+  return [...events].sort((first, second) => {
+    const firstMs = dateMs(first.startsAt)
+    const secondMs = dateMs(second.startsAt)
+
+    if (!Number.isFinite(firstMs) && !Number.isFinite(secondMs)) return 0
+    if (!Number.isFinite(firstMs)) return 1
+    if (!Number.isFinite(secondMs)) return -1
+
+    return firstMs - secondMs
+  })
+}
+
+// ─── Route ────────────────────────────────────────────────────────────────────
 
 export async function GET(req: Request) {
   try {
@@ -406,26 +618,29 @@ export async function GET(req: Request) {
 
     const professionalId = auth.professionalId
     const url = new URL(req.url)
-    const requestedLocationId = (url.searchParams.get('locationId') || '').trim()
+    const requestedLocationId = (
+      url.searchParams.get('locationId') || ''
+    ).trim()
 
-    const proProfile = await prisma.professionalProfile.findUnique({
-      where: { id: professionalId },
-      select: professionalProfileSelect,
-    })
+    const [proProfile, locations] = await Promise.all([
+      prisma.professionalProfile.findUnique({
+        where: { id: professionalId },
+        select: professionalProfileSelect,
+      }),
+      prisma.professionalLocation.findMany({
+        where: {
+          professionalId,
+          isBookable: true,
+        },
+        select: professionalLocationSelect,
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+        take: MAX_LOCATIONS_PER_PRO,
+      }),
+    ])
 
     if (!proProfile) {
       return jsonFail(404, 'Professional profile not found.')
     }
-
-    const locations = await prisma.professionalLocation.findMany({
-      where: {
-        professionalId,
-        isBookable: true,
-      },
-      select: professionalLocationSelect,
-      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-      take: 50,
-    })
 
     const selectedLocationResult = getSelectedLocation({
       locations,
@@ -433,13 +648,17 @@ export async function GET(req: Request) {
     })
 
     if (!selectedLocationResult.ok) {
-      return jsonFail(selectedLocationResult.status, selectedLocationResult.message)
+      return jsonFail(
+        selectedLocationResult.status,
+        selectedLocationResult.message,
+      )
     }
 
     const selectedLocation = selectedLocationResult.location
-
     const canSalon = locations.some((location) => supportsSalon(location.type))
-    const canMobile = locations.some((location) => supportsMobile(location.type))
+    const canMobile = locations.some((location) =>
+      supportsMobile(location.type),
+    )
 
     const {
       viewportTimeZone,
@@ -452,55 +671,53 @@ export async function GET(req: Request) {
     })
 
     const now = new Date()
-    const defaultFrom = startOfDayUtcInTimeZone(now, viewportTimeZone)
-    const defaultToExclusive = addDaysUtc(defaultFrom, 90)
 
-    const from = toDateOrNull(url.searchParams.get('from')) ?? defaultFrom
-    const requestedToExclusive = toDateOrNull(url.searchParams.get('to')) ?? defaultToExclusive
+    const rangeResult = getCalendarRange({
+      url,
+      now,
+      viewportTimeZone,
+    })
 
-    if (requestedToExclusive.getTime() <= from.getTime()) {
-      return jsonFail(400, '`to` must be after `from`.')
+    if (!rangeResult.ok) {
+      return jsonFail(rangeResult.status, rangeResult.message)
     }
 
-    const maxSpanDays = 370
-    const maxToExclusive = addDaysUtc(from, maxSpanDays)
-    const effectiveToExclusive =
-      requestedToExclusive.getTime() > maxToExclusive.getTime()
-        ? maxToExclusive
-        : requestedToExclusive
+    const { from, requestedToExclusive, effectiveToExclusive, wasClamped } =
+      rangeResult
 
-    const bookings = await prisma.booking.findMany({
-      where: {
-        professionalId,
-        locationId: selectedLocation.id,
-        scheduledFor: {
-          gte: from,
-          lt: effectiveToExclusive,
+    const [bookings, blocks] = await Promise.all([
+      prisma.booking.findMany({
+        where: {
+          professionalId,
+          locationId: selectedLocation.id,
+          scheduledFor: {
+            gte: from,
+            lt: effectiveToExclusive,
+          },
+          NOT: {
+            status: BookingStatus.CANCELLED,
+          },
         },
-        NOT: {
-          status: BookingStatus.CANCELLED,
+        select: bookingSelect,
+        orderBy: {
+          scheduledFor: 'asc',
         },
-      },
-      select: bookingSelect,
-      orderBy: {
-        scheduledFor: 'asc',
-      },
-      take: 1200,
-    })
-
-    const blocks = await prisma.calendarBlock.findMany({
-      where: {
-        professionalId,
-        startsAt: { lt: effectiveToExclusive },
-        endsAt: { gt: from },
-        OR: [{ locationId: selectedLocation.id }, { locationId: null }],
-      },
-      select: calendarBlockSelect,
-      orderBy: {
-        startsAt: 'asc',
-      },
-      take: 1200,
-    })
+        take: MAX_EVENTS_PER_RANGE,
+      }),
+      prisma.calendarBlock.findMany({
+        where: {
+          professionalId,
+          startsAt: { lt: effectiveToExclusive },
+          endsAt: { gt: from },
+          OR: [{ locationId: selectedLocation.id }, { locationId: null }],
+        },
+        select: calendarBlockSelect,
+        orderBy: {
+          startsAt: 'asc',
+        },
+        take: MAX_EVENTS_PER_RANGE,
+      }),
+    ])
 
     const bookingEventsMaybe = await Promise.all(
       bookings.map((booking) =>
@@ -521,31 +738,41 @@ export async function GET(req: Request) {
       .map((block) => toBlockEvent(block, viewportTimeZone))
       .filter((event): event is BlockEvent => event !== null)
 
-    const events: CalendarEvent[] = [...bookingEvents, ...blockEvents].sort(
-      (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime(),
-    )
+    const events = sortCalendarEvents([...bookingEvents, ...blockEvents])
 
     const viewportTodayKey = utcDateToLocalYmd(now, viewportTimeZone)
+    const viewportTodayStart = startOfDayUtcInTimeZone(now, viewportTimeZone)
+    const viewportTomorrowStart = addDaysUtc(viewportTodayStart, 1)
 
     const todaysBookingsEvents = bookingEvents.filter(
       (event) =>
         event.viewLocalDateKey === viewportTodayKey &&
-        (event.status === BookingStatus.ACCEPTED ||
-          event.status === BookingStatus.COMPLETED),
+        isBookingVisibleInTodaysStats(event),
     )
 
-    const pendingRequestEvents = bookingEvents.filter(
-      (event) =>
-        event.status === BookingStatus.PENDING &&
-        new Date(event.startsAt).getTime() >= now.getTime(),
+    const pendingRequestEvents = bookingEvents.filter((event) =>
+      isFuturePendingRequest(event, now),
     )
 
     const blockedTodayEvents = blockEvents.filter(
-      (event) => event.localDateKey === viewportTodayKey,
+      (event) =>
+        overlapMinutes({
+          startsAt: event.startsAt,
+          endsAt: event.endsAt,
+          rangeStart: viewportTodayStart,
+          rangeEnd: viewportTomorrowStart,
+        }) > 0,
     )
 
     const blockedMinutesToday = blockedTodayEvents.reduce(
-      (sum, event) => sum + event.durationMinutes,
+      (sum, event) =>
+        sum +
+        overlapMinutes({
+          startsAt: event.startsAt,
+          endsAt: event.endsAt,
+          rangeStart: viewportTodayStart,
+          rangeEnd: viewportTomorrowStart,
+        }),
       0,
     )
 
@@ -567,6 +794,13 @@ export async function GET(req: Request) {
         timeZone: viewportTimeZone,
         viewportTimeZone,
         needsTimeZoneSetup,
+        range: {
+          from: from.toISOString(),
+          requestedTo: requestedToExclusive.toISOString(),
+          effectiveTo: effectiveToExclusive.toISOString(),
+          clamped: wasClamped,
+          maxDays: MAX_CALENDAR_RANGE_DAYS,
+        },
         events,
         canSalon,
         canMobile,
@@ -583,6 +817,7 @@ export async function GET(req: Request) {
     )
   } catch (error) {
     console.error('GET /api/pro/calendar error:', error)
+
     return jsonFail(500, 'Failed to load pro calendar.')
   }
 }
