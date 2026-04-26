@@ -2595,7 +2595,7 @@ function buildBookingOutput(args: {
     durationMinutes: totalDurationMinutes,
     totalDurationMinutes,
     status,
-    subtotalSnapshot: moneyToFixed2String(subtotalSnapshot),
+    subtotalSnapshot: moneyToFixed2String(subtotalSnapshot) ?? '0.00',
     timeZone: appointmentTimeZone,
     timeZoneSource,
     locationId: locationId ?? null,

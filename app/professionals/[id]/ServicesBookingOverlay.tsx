@@ -2,12 +2,17 @@
 'use client'
 
 import * as React from 'react'
+
 import AvailabilityDrawer from '@/app/(main)/booking/AvailabilityDrawer'
 import type { DrawerContext } from '@/app/(main)/booking/AvailabilityDrawer/types'
-import { loadViewerLocation, viewerLocationToDrawerContextFields } from '@/lib/viewerLocation'
+
+import {
+  loadViewerLocation,
+  viewerLocationToDrawerContextFields,
+} from '@/lib/viewerLocation'
 
 type UiOffering = {
-  id: string // offeringId
+  id: string
   serviceId: string
   name: string
   description: string | null
@@ -15,59 +20,99 @@ type UiOffering = {
   pricingLines: string[]
 }
 
-function currentPathWithQuery() {
+type ServicesBookingOverlayProps = {
+  professionalId: string
+  offerings: UiOffering[]
+  initialFavoritedServiceIds?: string[]
+}
+
+type FavoriteStatePatch = {
+  serviceId: string
+  favorited: boolean
+}
+
+function currentPathWithQuery(): string {
   if (typeof window === 'undefined') return '/looks'
+
   return window.location.pathname + window.location.search + window.location.hash
 }
 
-function sanitizeFrom(from: string) {
-  const trimmed = from.trim()
+function sanitizeLocalPath(value: string): string {
+  const trimmed = value.trim()
+
   if (!trimmed) return '/looks'
   if (!trimmed.startsWith('/')) return '/looks'
   if (trimmed.startsWith('//')) return '/looks'
+
   return trimmed
+}
+
+function favoriteSetFromServiceIds(serviceIds: string[] | undefined): Set<string> {
+  return new Set((serviceIds ?? []).filter(Boolean))
+}
+
+function patchFavoriteSet(
+  previous: Set<string>,
+  patch: FavoriteStatePatch,
+): Set<string> {
+  const next = new Set(previous)
+
+  if (patch.favorited) {
+    next.add(patch.serviceId)
+  } else {
+    next.delete(patch.serviceId)
+  }
+
+  return next
+}
+
+function isBusy(
+  busyByServiceId: Readonly<Record<string, boolean>>,
+  serviceId: string,
+): boolean {
+  return Boolean(busyByServiceId[serviceId])
 }
 
 export default function ServicesBookingOverlay({
   professionalId,
   offerings,
   initialFavoritedServiceIds,
-}: {
-  professionalId: string
-  offerings: UiOffering[]
-  initialFavoritedServiceIds?: string[]
-}) {
+}: ServicesBookingOverlayProps) {
   const [open, setOpen] = React.useState(false)
   const [ctx, setCtx] = React.useState<DrawerContext | null>(null)
 
-  const [favSet, setFavSet] = React.useState<Set<string>>(
-    () => new Set((initialFavoritedServiceIds ?? []).filter(Boolean)),
+  const [favSet, setFavSet] = React.useState<Set<string>>(() =>
+    favoriteSetFromServiceIds(initialFavoritedServiceIds),
   )
+
   const [favBusy, setFavBusy] = React.useState<Record<string, boolean>>({})
 
   React.useEffect(() => {
-    setFavSet(new Set((initialFavoritedServiceIds ?? []).filter(Boolean)))
+    setFavSet(favoriteSetFromServiceIds(initialFavoritedServiceIds))
   }, [initialFavoritedServiceIds])
 
   const close = React.useCallback(() => {
     setOpen(false)
-    window.setTimeout(() => setCtx(null), 150)
+
+    window.setTimeout(() => {
+      setCtx(null)
+    }, 150)
   }, [])
 
   const openForOffering = React.useCallback(
-    (off: UiOffering) => {
+    (offering: UiOffering) => {
       const viewer = loadViewerLocation()
 
-      const next: DrawerContext = {
+      const nextContext: DrawerContext = {
         professionalId,
-        serviceId: off.serviceId,
-        offeringId: off.id,
+        serviceId: offering.serviceId,
+        offeringId: offering.id,
         mediaId: null,
         source: 'REQUESTED',
         ...viewerLocationToDrawerContextFields(viewer),
       }
 
-      setCtx(next)
+      setCtx(nextContext)
       setOpen(true)
     },
     [professionalId],
@@ -75,175 +120,198 @@ export default function ServicesBookingOverlay({
 
   const redirectToLogin = React.useCallback((reason: string) => {
     if (typeof window === 'undefined') return
-    const from = sanitizeFrom(currentPathWithQuery())
-    const qs = new URLSearchParams({ from, reason })
-    window.location.href = `/login?${qs.toString()}`
+
+    const from = sanitizeLocalPath(currentPathWithQuery())
+    const params = new URLSearchParams({ from, reason })
+
+    window.location.href = `/login?${params.toString()}`
   }, [])
+
+  const markFavoriteBusy = React.useCallback(
+    (serviceId: string, busy: boolean) => {
+      setFavBusy((previous) => {
+        const next = { ...previous }
+
+        if (busy) {
+          next[serviceId] = true
+        } else {
+          delete next[serviceId]
+        }
+
+        return next
+      })
+    },
+    [],
+  )
+
+  const setFavoriteOptimistic = React.useCallback(
+    (serviceId: string, favorited: boolean) => {
+      setFavSet((previous) =>
+        patchFavoriteSet(previous, {
+          serviceId,
+          favorited,
+        }),
+      )
+    },
+    [],
+  )
 
   const toggleFavoriteService = React.useCallback(
     async (serviceId: string) => {
       if (!serviceId) return
-      if (favBusy[serviceId]) return
+      if (isBusy(favBusy, serviceId)) return
 
-      const before = favSet.has(serviceId)
-      const next = !before
+      const wasFavorited = favSet.has(serviceId)
+      const shouldFavorite = !wasFavorited
 
-      setFavBusy((p) => ({ ...p, [serviceId]: true }))
-      setFavSet((prev) => {
-        const copy = new Set(prev)
-        if (next) copy.add(serviceId)
-        else copy.delete(serviceId)
-        return copy
-      })
+      markFavoriteBusy(serviceId, true)
+      setFavoriteOptimistic(serviceId, shouldFavorite)
 
       try {
-        const res = await fetch(`/api/services/${encodeURIComponent(serviceId)}/favorite`, {
-          method: before ? 'DELETE' : 'POST',
-          headers: { Accept: 'application/json' },
-        })
+        const response = await fetch(
+          `/api/services/${encodeURIComponent(serviceId)}/favorite`,
+          {
+            method: wasFavorited ? 'DELETE' : 'POST',
+            headers: { Accept: 'application/json' },
+          },
+        )
 
-        if (res.status === 401) {
-          // revert + login
-          setFavSet((prev) => {
-            const copy = new Set(prev)
-            if (before) copy.add(serviceId)
-            else copy.delete(serviceId)
-            return copy
-          })
+        if (response.status === 401) {
+          setFavoriteOptimistic(serviceId, wasFavorited)
           redirectToLogin('favorite_service')
           return
         }
 
-        if (!res.ok) {
-          // revert on error
-          setFavSet((prev) => {
-            const copy = new Set(prev)
-            if (before) copy.add(serviceId)
-            else copy.delete(serviceId)
-            return copy
-          })
-          return
+        if (!response.ok) {
+          setFavoriteOptimistic(serviceId, wasFavorited)
         }
       } catch {
-        // revert on network fail
-        setFavSet((prev) => {
-          const copy = new Set(prev)
-          if (before) copy.add(serviceId)
-          else copy.delete(serviceId)
-          return copy
-        })
+        setFavoriteOptimistic(serviceId, wasFavorited)
       } finally {
-        setFavBusy((p) => {
-          const copy = { ...p }
-          delete copy[serviceId]
-          return copy
-        })
+        markFavoriteBusy(serviceId, false)
       }
     },
-    [favBusy, favSet, redirectToLogin],
+    [
+      favBusy,
+      favSet,
+      markFavoriteBusy,
+      redirectToLogin,
+      setFavoriteOptimistic,
+    ],
   )
 
-  const onRowKeyDown = React.useCallback(
-    (e: React.KeyboardEvent, off: UiOffering) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault()
-        openForOffering(off)
-      }
-    },
-    [openForOffering],
-  )
-
-  if (!offerings || offerings.length === 0) return null
+  if (offerings.length === 0) return null
 
   return (
     <>
-      <div className="tovis-glass grid gap-2 rounded-card border border-white/10 bg-bgSecondary p-3">
-        {offerings.map((off) => {
-          const isFav = favSet.has(off.serviceId)
-          const busy = Boolean(favBusy[off.serviceId])
-
-          return (
-            <div
-              key={off.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => openForOffering(off)}
-              onKeyDown={(e) => onRowKeyDown(e, off)}
-              className={[
-                'flex w-full items-start justify-between gap-3 rounded-card border border-white/10 bg-bgPrimary p-3 text-left text-textPrimary',
-                'transition hover:border-white/20 hover:bg-surfaceGlass',
-                'focus:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/50',
-                'cursor-pointer select-none',
-              ].join(' ')}
-              aria-label={`Book ${off.name}`}
-              title="Book this service"
-            >
-              {/* LEFT */}
-              <div className="flex min-w-0 flex-1 gap-3">
-                <div className="h-13 w-13 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-bgSecondary">
-                  {off.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={off.imageUrl} alt="" className="h-full w-full object-cover" />
-                  ) : null}
-                </div>
-
-                <div className="min-w-0">
-                  <div className="truncate text-[13px] font-black">{off.name}</div>
-
-                  {off.description ? (
-                    <div className="mt-1 line-clamp-2 text-[12px] font-semibold text-textSecondary">{off.description}</div>
-                  ) : null}
-
-                  {off.pricingLines.length ? (
-                    <div className="mt-2 grid gap-1 text-[12px] font-semibold">
-                      {off.pricingLines.map((line) => (
-                        <div key={line} className="text-textSecondary">
-                          {line}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="mt-2 text-[12px] font-semibold text-textSecondary opacity-80">Pricing not set</div>
-                  )}
-                </div>
-              </div>
-
-              {/* RIGHT actions */}
-              <div className="grid justify-items-end gap-2">
-                {/* Book pill with arrow inside */}
-                <div className="rounded-full bg-accentPrimary px-3 py-2 text-[12px] font-black text-bgPrimary">
-                  <span className="inline-flex items-center gap-1">
-                    Book <span aria-hidden>→</span>
-                  </span>
-                </div>
-
-                {/* Save pill (same “pill” feel, no outline box) */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    toggleFavoriteService(off.serviceId)
-                  }}
-                  disabled={busy}
-                  className={[
-                    'pointer-events-auto rounded-full px-3 py-2 text-[12px] font-black',
-                    // no border; just a fill
-                    isFav ? 'bg-white/12 text-white' : 'bg-bgPrimary/25 text-textPrimary hover:bg-white/8',
-                    busy ? 'opacity-70' : '',
-                  ].join(' ')}
-                  title={isFav ? 'Saved (tap to remove)' : 'Save this service'}
-                  aria-label={isFav ? 'Unsave service' : 'Save service'}
-                >
-                  {busy ? '…' : isFav ? 'Saved' : 'Save'}
-                </button>
-              </div>
-            </div>
-          )
-        })}
+      <div className="grid gap-3">
+        {offerings.map((offering) => (
+          <ServiceOfferingCard
+            key={offering.id}
+            offering={offering}
+            favorited={favSet.has(offering.serviceId)}
+            busy={isBusy(favBusy, offering.serviceId)}
+            onBook={openForOffering}
+            onToggleFavorite={toggleFavoriteService}
+          />
+        ))}
       </div>
 
-      {ctx ? <AvailabilityDrawer open={open} onClose={close} context={ctx} /> : null}
+      {ctx ? (
+        <AvailabilityDrawer open={open} onClose={close} context={ctx} />
+      ) : null}
     </>
+  )
+}
+
+function ServiceOfferingCard({
+  offering,
+  favorited,
+  busy,
+  onBook,
+  onToggleFavorite,
+}: {
+  offering: UiOffering
+  favorited: boolean
+  busy: boolean
+  onBook: (offering: UiOffering) => void
+  onToggleFavorite: (serviceId: string) => void
+}) {
+  const bookLabel = `Book ${offering.name}`
+  const favoriteLabel = favorited ? 'Unsave service' : 'Save service'
+
+  return (
+    <article className="brand-profile-service-card">
+      <div className="flex min-w-0 flex-1 gap-3">
+        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-[var(--radius-card)] border border-white/10 bg-bgSurface">
+          {offering.imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={offering.imageUrl}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="brand-profile-hero-fallback h-full w-full" aria-hidden />
+          )}
+        </div>
+
+        <div className="min-w-0">
+          <h3 className="truncate text-[14px] font-black text-textPrimary">
+            {offering.name}
+          </h3>
+
+          {offering.description ? (
+            <p className="mt-1 line-clamp-2 text-[12px] font-semibold text-textSecondary">
+              {offering.description}
+            </p>
+          ) : null}
+
+          {offering.pricingLines.length > 0 ? (
+            <div className="mt-2 grid gap-1 text-[12px] font-semibold text-textSecondary">
+              {offering.pricingLines.map((line) => (
+                <div key={line}>{line}</div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-2 text-[12px] font-semibold text-textSecondary opacity-80">
+              Pricing not set
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid shrink-0 justify-items-end gap-2">
+        <button
+          type="button"
+          onClick={() => onBook(offering)}
+          className="brand-button-primary brand-focus rounded-full px-3 py-2 text-[12px]"
+          aria-label={bookLabel}
+          title={bookLabel}
+        >
+          <span className="inline-flex items-center gap-1">
+            Book <span aria-hidden>→</span>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onToggleFavorite(offering.serviceId)}
+          disabled={busy}
+          className={[
+            'brand-focus rounded-full px-3 py-2 text-[12px] font-black transition',
+            favorited
+              ? 'bg-[rgb(var(--surface-glass)/0.14)] text-textPrimary'
+              : 'bg-[rgb(var(--bg-primary)/0.45)] text-textSecondary hover:text-textPrimary',
+            busy ? 'cursor-wait opacity-70' : '',
+          ].join(' ')}
+          title={favorited ? 'Saved. Tap to remove.' : 'Save this service'}
+          aria-label={favoriteLabel}
+          aria-pressed={favorited}
+        >
+          {busy ? '…' : favorited ? 'Saved' : 'Save'}
+        </button>
+      </div>
+    </article>
   )
 }

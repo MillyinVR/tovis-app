@@ -1,75 +1,103 @@
 /* lib/brand/brand.css */
-/* Pre-hydration defaults — must match dark mode tokens in brands/tovis.ts  */
-/* so there's no flash before BrandProvider mounts.                         */
+/*
+  Brand CSS source of truth.
+
+  Rules:
+  - Keep raw brand token values here, not inside feature components.
+  - Components should consume semantic tokens/classes from this file.
+  - Prototype aliases stay for migration compatibility, but they point back
+    to semantic tokens so we do not maintain the same value twice.
+  - Pre-hydration defaults must stay aligned with lib/brand/brands/tovis.ts.
+*/
+
 :root {
   /* ── Background layers ─────────────────────────────────────────── */
-  --bg-primary:   10 9 7;       /* Ink        #0A0907 */
-  --bg-secondary: 20 17 14;     /* Ink-2      #14110E */
-  --bg-surface:   30 26 21;     /* Ink-3      #1E1A15 */
+  --bg-primary: 10 9 7;
+  --bg-secondary: 20 17 14;
+  --bg-surface: 30 26 21;
 
-  /* ── Text layers ────────────────────────────────────────────────── */
-  --text-primary:   244 239 231; /* Paper      #F4EFE7 */
-  --text-secondary: 205 198 187; /* Paper-dim  #CDC6BB */
-  --text-muted:     122 117 105; /* Paper-mute #7A7569 */
+  /* ── Text layers ───────────────────────────────────────────────── */
+  --text-primary: 244 239 231;
+  --text-secondary: 205 198 187;
+  --text-muted: 122 117 105;
 
-  /* ── Glass surface ──────────────────────────────────────────────── */
-  --surface-glass: 244 239 231;  /* Paper-tinted glass on dark bg */
+  /* ── Glass surface ─────────────────────────────────────────────── */
+  --surface-glass: 244 239 231;
 
-  /* ── Accent ─────────────────────────────────────────────────────── */
-  --accent-primary:       224 90 40;  /* Terra      #E05A28 */
-  --accent-primary-hover: 255 106 54; /* Terra-glow #FF6A36 */
-  --micro-accent:         232 221 212; /* Linen      #E8DDD4 */
+  /* ── Accent ────────────────────────────────────────────────────── */
+  --accent-primary: 224 90 40;
+  --accent-primary-hover: 255 106 54;
+  --micro-accent: 232 221 212;
 
-  /* ── Brand palette ──────────────────────────────────────────────── */
-  --color-acid:  212 255 58;  /* Acid  #D4FF3A */
-  --color-fern:  98 168 122;  /* Fern  #62A87A */
-  --color-ember: 255 61 78;   /* Ember #FF3D4E */
-  --color-amber: 240 168 48;  /* Amber #F0A830 */
+  /* ── Brand palette ─────────────────────────────────────────────── */
+  --color-acid: 212 255 58;
+  --color-fern: 98 168 122;
+  --color-ember: 255 61 78;
+  --color-amber: 240 168 48;
 
-  /* ── Prototype aliases — kept in sync with semantic tokens above ── */
-  --ink:        10 9 7;
-  --ink-2:      20 17 14;
-  --ink-3:      30 26 21;
-  --paper:      244 239 231;
-  --paper-dim:  205 198 187;
-  --paper-mute: 122 117 105;
-  --terra:      224 90 40;
-  --terra-glow: 255 106 54;
-  --acid:       212 255 58;
-  --fern:       98 168 122;
-  --ember:      255 61 78;
-  --amber:      240 168 48;
+  /* ── Prototype aliases / migration aliases ─────────────────────── */
+  --ink: var(--bg-primary);
+  --ink-2: var(--bg-secondary);
+  --ink-3: var(--bg-surface);
 
-  /* ── Computed borders (paper at fixed opacity) ──────────────────── */
-  --line:        rgba(244, 239, 231, 0.08);
-  --line-strong: rgba(244, 239, 231, 0.16);
+  --paper: var(--text-primary);
+  --paper-dim: var(--text-secondary);
+  --paper-mute: var(--text-muted);
 
-  /* ── Status tones (not yet white-labelable, match brand palette) ── */
-  --tone-danger:  255 61 78;   /* ember  #FF3D4E */
-  --tone-warn:    196 146 58;  /* Ochre  #C4923A */
-  --tone-pending: 240 168 48;  /* Amber  #F0A830 */
-  --tone-success: 98 168 122;  /* fern   #62A87A */
-  --tone-info:    59 130 246;  /* blue-500 */
+  --terra: var(--accent-primary);
+  --terra-glow: var(--accent-primary-hover);
 
-  /* ── Effects ────────────────────────────────────────────────────── */
-  --glass-blur:    20px;
+  --acid: var(--color-acid);
+  --fern: var(--color-fern);
+  --ember: var(--color-ember);
+  --amber: var(--color-amber);
+
+  /* ── Derived borders / dividers ────────────────────────────────── */
+  --line: rgb(var(--surface-glass) / 0.08);
+  --line-strong: rgb(var(--surface-glass) / 0.16);
+  --line-heavy: rgb(var(--surface-glass) / 0.24);
+
+  /* ── Status tones ──────────────────────────────────────────────── */
+  --tone-danger: var(--color-ember);
+  --tone-warn: var(--color-amber);
+  --tone-pending: var(--color-amber);
+  --tone-success: var(--color-fern);
+  --tone-info: var(--accent-primary);
+
+  /* ── Effects ───────────────────────────────────────────────────── */
+  --glass-blur: 20px;
   --glass-opacity: 0.09;
-  --shadow-color:  10 9 7;
+  --shadow-color: 10 9 7;
 
-  /* ── Radii ──────────────────────────────────────────────────────── */
+  --shadow-soft: 0 10px 30px rgb(var(--shadow-color) / 0.32);
+  --shadow-strong: 0 18px 55px rgb(var(--shadow-color) / 0.48);
+  --shadow-accent: 0 10px 28px rgb(var(--accent-primary) / 0.38);
+
+  /* ── Radii ─────────────────────────────────────────────────────── */
   --radius-app-icon: 28px;
-  --radius-card:     14px;
-  --radius-inner:    8px;
+  --radius-card: 14px;
+  --radius-panel: 18px;
+  --radius-sheet: 24px;
+  --radius-inner: 8px;
+  --radius-pill: 999px;
 
-  /* ── Typography ─────────────────────────────────────────────────── */
-  --font-sans:    var(--font-body), "Inter Tight", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* ── Typography ────────────────────────────────────────────────── */
+  --font-sans: var(--font-body), "Inter Tight", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-display: var(--font-display-face), "Fraunces", Georgia, "Times New Roman", serif;
-  --font-mono:    var(--font-mono-face), "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
-  --ls-caps: 0.08em;
+  --font-mono: var(--font-mono-face), "JetBrains Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
 
-  /* ── Misc ────────────────────────────────────────────────────────── */
-  --overlay: 10 9 7;
+  --ls-caps: 0.08em;
+  --ls-tight: -0.03em;
+
+  /* ── Layout / overlays ─────────────────────────────────────────── */
+  --overlay: var(--bg-primary);
+  --page-max-width: 960px;
+  --mobile-shell-width: 430px;
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Base document
+────────────────────────────────────────────────────────────────── */
 
 html,
 body {
@@ -78,10 +106,447 @@ body {
   font-family: var(--font-sans);
 }
 
+body {
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+::selection {
+  background: rgb(var(--accent-primary) / 0.34);
+  color: rgb(var(--text-primary));
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Shared utilities
+────────────────────────────────────────────────────────────────── */
+
 .brand-glass {
   background: rgb(var(--surface-glass) / var(--glass-opacity));
-  backdrop-filter: blur(var(--glass-blur));
-  -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid rgb(var(--surface-glass) / 0.12);
   border-radius: var(--radius-card);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+.brand-card {
+  background: rgb(var(--surface-glass) / 0.015);
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-panel);
+}
+
+.brand-surface {
+  background: rgb(var(--bg-secondary));
+  border: 1px solid rgb(var(--surface-glass) / 0.1);
+  border-radius: var(--radius-card);
+}
+
+.brand-focus {
+  outline: none;
+}
+
+.brand-focus:focus-visible {
+  outline: 2px solid rgb(var(--accent-primary) / 0.72);
+  outline-offset: 3px;
+}
+
+.no-scroll {
+  scrollbar-width: none;
+}
+
+.no-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.text-shadow-strong {
+  text-shadow: 0 2px 12px rgb(var(--bg-primary) / 0.72);
+}
+
+.cap,
+.brand-cap {
+  color: rgb(var(--text-muted));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: var(--ls-caps);
+  text-transform: uppercase;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Buttons
+────────────────────────────────────────────────────────────────── */
+
+.brand-button-primary {
+  background: rgb(var(--accent-primary));
+  border: 1px solid rgb(var(--accent-primary) / 0.72);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-accent);
+  color: rgb(var(--bg-primary));
+  font-weight: 800;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.brand-button-primary:hover {
+  background: rgb(var(--accent-primary-hover));
+  border-color: rgb(var(--accent-primary-hover) / 0.8);
+}
+
+.brand-button-primary:active {
+  transform: translateY(1px);
+}
+
+.brand-button-secondary {
+  background: transparent;
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-card);
+  color: rgb(var(--text-primary));
+  font-weight: 800;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+
+.brand-button-secondary:hover {
+  background: rgb(var(--surface-glass) / 0.06);
+  border-color: rgb(var(--surface-glass) / 0.24);
+}
+
+.brand-button-ghost {
+  background: rgb(var(--bg-primary) / 0.55);
+  border: 1px solid rgb(var(--surface-glass) / 0.18);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-soft);
+  color: rgb(var(--text-primary));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Public professional profile
+────────────────────────────────────────────────────────────────── */
+
+.brand-profile-page {
+  background:
+    radial-gradient(
+      900px circle at 50% -10%,
+      rgb(var(--accent-primary) / 0.1),
+      transparent 55%
+    ),
+    rgb(var(--bg-primary));
+  color: rgb(var(--text-primary));
+}
+
+.brand-profile-shell {
+  margin-inline: auto;
+  max-width: var(--mobile-shell-width);
+  min-height: 100vh;
+  overflow: hidden;
+  background: rgb(var(--bg-primary));
+}
+
+.brand-profile-hero {
+  position: relative;
+  min-height: 330px;
+  overflow: hidden;
+  background: rgb(var(--bg-secondary));
+}
+
+.brand-profile-hero-media {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+
+.brand-profile-hero-fallback {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      520px circle at 30% 18%,
+      rgb(var(--accent-primary) / 0.24),
+      transparent 58%
+    ),
+    radial-gradient(
+      380px circle at 78% 8%,
+      rgb(var(--color-acid) / 0.12),
+      transparent 52%
+    ),
+    linear-gradient(
+      135deg,
+      rgb(var(--bg-secondary)),
+      rgb(var(--bg-surface))
+    );
+}
+
+.brand-profile-hero-overlay {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      180deg,
+      rgb(var(--bg-primary) / 0.38) 0%,
+      transparent 28%,
+      rgb(var(--bg-primary) / 0.98) 100%
+    );
+}
+
+.brand-profile-hero-actions {
+  position: absolute;
+  top: 58px;
+  left: 16px;
+  right: 16px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand-profile-hero-content {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 18px;
+  z-index: 2;
+}
+
+.brand-profile-display-name {
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-style: italic;
+  font-weight: 650;
+  letter-spacing: var(--ls-tight);
+  line-height: 1;
+}
+
+.brand-profile-subtext {
+  color: rgb(var(--text-secondary));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.brand-profile-muted {
+  color: rgb(var(--text-muted));
+}
+
+.brand-profile-quote {
+  color: rgb(var(--text-secondary));
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.brand-profile-divider {
+  border-bottom: 1px solid rgb(var(--surface-glass) / 0.08);
+}
+
+.brand-profile-divider-strong {
+  border-bottom: 1px solid rgb(var(--surface-glass) / 0.16);
+}
+
+.brand-profile-stat-value {
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.brand-profile-tab {
+  border-bottom: 2px solid transparent;
+  color: rgb(var(--text-muted));
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: capitalize;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.brand-profile-tab:hover {
+  color: rgb(var(--text-primary));
+}
+
+.brand-profile-tab[data-active="true"] {
+  border-bottom-color: rgb(var(--accent-primary));
+  color: rgb(var(--text-primary));
+}
+
+.brand-profile-media-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.brand-profile-media-tile {
+  position: relative;
+  overflow: hidden;
+  background: rgb(var(--bg-secondary));
+  aspect-ratio: 3 / 4;
+}
+
+.brand-profile-media-tile-square {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  background: rgb(var(--bg-secondary));
+  aspect-ratio: 1 / 1;
+}
+
+.brand-profile-media-img {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+
+.brand-profile-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 4px;
+  background: rgb(var(--bg-primary) / 0.72);
+  color: rgb(var(--color-acid));
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: var(--ls-caps);
+  line-height: 1;
+  padding: 3px 7px;
+}
+
+.brand-profile-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--bg-primary) / 0.6);
+  color: rgb(var(--text-primary));
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 6px 9px;
+}
+
+.brand-profile-service-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-card);
+  background: rgb(var(--surface-glass) / 0.01);
+  padding: 14px 16px;
+}
+
+.brand-profile-service-card[data-featured="true"] {
+  background: rgb(var(--accent-primary) / 0.04);
+}
+
+.brand-profile-service-price {
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.brand-profile-rating-large {
+  color: rgb(var(--text-primary));
+  font-family: var(--font-display);
+  font-size: 42px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.brand-profile-review-card {
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-card);
+  background: rgb(var(--surface-glass) / 0.01);
+  padding: 14px;
+}
+
+.brand-profile-review-quote {
+  color: rgb(var(--text-secondary));
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.brand-profile-upload-tile {
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgb(var(--surface-glass) / 0.16);
+  background: rgb(var(--surface-glass) / 0.015);
+  color: rgb(var(--text-muted));
+  aspect-ratio: 3 / 4;
+}
+
+.brand-profile-sheet-backdrop {
+  background: rgb(var(--bg-primary) / 0.72);
+}
+
+.brand-profile-sheet {
+  background: rgb(var(--bg-secondary));
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-bottom: 0;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+}
+
+.brand-profile-sheet-handle {
+  height: 4px;
+  width: 36px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--surface-glass) / 0.18);
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Motion
+────────────────────────────────────────────────────────────────── */
+
+.anim-slide-up {
+  animation: brand-slide-up 220ms ease-out both;
+}
+
+@keyframes brand-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Reduced motion
+────────────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
 }
