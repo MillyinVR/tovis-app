@@ -1,9 +1,14 @@
-// app/pro/calendar/WorkingHoursForm.tsx
+// app/pro/calendar/_components/WorkingHoursForm.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
+
+import type {
+  BrandWorkingHoursCopy,
+  BrandWorkingHoursDayKey,
+} from '@/lib/brand/types'
 
 import {
   errorMessageFromUnknown,
@@ -40,6 +45,7 @@ type ApiDayConfig = {
 export type ApiWorkingHours = Record<WeekdayKey, ApiDayConfig>
 
 type WorkingHoursFormProps = {
+  copy: BrandWorkingHoursCopy
   initialHours?: ApiWorkingHours | null
   onSaved?: (hours: ApiWorkingHours) => void
   locationType?: LocationType
@@ -47,15 +53,47 @@ type WorkingHoursFormProps = {
 
 type DayDefinition = {
   key: WeekdayKey
+  brandKey: BrandWorkingHoursDayKey
   label: string
   fullLabel: string
+}
+
+type DayDefinitionSeed = {
+  key: WeekdayKey
+  brandKey: BrandWorkingHoursDayKey
 }
 
 type SelectProps = {
   value: string | number
   disabled?: boolean
+  ariaLabel: string
   onChange: (value: string) => void
   children: ReactNode
+}
+
+type DayRowProps = {
+  copy: BrandWorkingHoursCopy
+  day: DayDefinition
+  config: DayConfig
+  disabled: boolean
+  onToggleEnabled: (enabled: boolean) => void
+  onChangeStartHour: (value: string) => void
+  onChangeStartMinute: (value: string) => void
+  onChangeStartPeriod: (value: string) => void
+  onChangeEndHour: (value: string) => void
+  onChangeEndMinute: (value: string) => void
+  onChangeEndPeriod: (value: string) => void
+}
+
+type TimeControlGroupProps = {
+  label: string
+  disabled: boolean
+  hour: number
+  minute: number
+  period: Period
+  onChangeHour: (value: string) => void
+  onChangeMinute: (value: string) => void
+  onChangePeriod: (value: string) => void
 }
 
 type StateCardProps = {
@@ -67,14 +105,14 @@ type InlineStateTone = 'success' | 'danger'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DAYS: ReadonlyArray<DayDefinition> = [
-  { key: 'mon', label: 'Mon', fullLabel: 'Monday' },
-  { key: 'tue', label: 'Tue', fullLabel: 'Tuesday' },
-  { key: 'wed', label: 'Wed', fullLabel: 'Wednesday' },
-  { key: 'thu', label: 'Thu', fullLabel: 'Thursday' },
-  { key: 'fri', label: 'Fri', fullLabel: 'Friday' },
-  { key: 'sat', label: 'Sat', fullLabel: 'Saturday' },
-  { key: 'sun', label: 'Sun', fullLabel: 'Sunday' },
+const DAY_DEFINITION_SEEDS: ReadonlyArray<DayDefinitionSeed> = [
+  { key: 'mon', brandKey: 'monday' },
+  { key: 'tue', brandKey: 'tuesday' },
+  { key: 'wed', brandKey: 'wednesday' },
+  { key: 'thu', brandKey: 'thursday' },
+  { key: 'fri', brandKey: 'friday' },
+  { key: 'sat', brandKey: 'saturday' },
+  { key: 'sun', brandKey: 'sunday' },
 ]
 
 const DAY_KEYS: ReadonlyArray<WeekdayKey> = [
@@ -96,7 +134,7 @@ const PERIOD_OPTIONS: ReadonlyArray<Period> = ['AM', 'PM']
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
-function clamp(value: number, min: number, max: number) {
+function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
 
@@ -104,13 +142,15 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-async function safeJsonObject(response: Response): Promise<Record<string, unknown>> {
+async function safeJsonObject(
+  response: Response,
+): Promise<Record<string, unknown>> {
   const data: unknown = await safeJson(response)
 
   return isObject(data) ? data : {}
 }
 
-function normalizeHHMM(value: unknown) {
+function normalizeHHMM(value: unknown): string | null {
   const parsed = parseHHMM(value)
 
   if (!parsed) return null
@@ -161,7 +201,10 @@ function defaultApiHours(): ApiWorkingHours {
   }
 }
 
-function sanitizeApiDay(day: ApiDayConfig, fallback: ApiDayConfig): ApiDayConfig {
+function sanitizeApiDay(
+  day: ApiDayConfig,
+  fallback: ApiDayConfig,
+): ApiDayConfig {
   return {
     enabled: day.enabled,
     start: normalizeHHMM(day.start) ?? fallback.start,
@@ -229,7 +272,7 @@ function parseTime24(time: string | null | undefined): {
   }
 }
 
-function toTime24(hour: number, minute: number, period: Period) {
+function toTime24(hour: number, minute: number, period: Period): string {
   let hour24 = clamp(Math.floor(hour || 0), 1, 12)
   const safeMinute = clamp(Math.floor(minute || 0), 0, 59)
 
@@ -245,7 +288,11 @@ function toTime24(hour: number, minute: number, period: Period) {
   )}`
 }
 
-function minutesSinceMidnight(hour: number, minute: number, period: Period) {
+function minutesSinceMidnight(
+  hour: number,
+  minute: number,
+  period: Period,
+): number {
   const time24 = toTime24(hour, minute, period)
   const parsed = parseHHMM(time24)
 
@@ -269,7 +316,9 @@ function dayConfigFromApi(day: ApiDayConfig): DayConfig {
   }
 }
 
-function hydrateFromApi(raw: ApiWorkingHours | null | undefined): WorkingHoursState {
+function hydrateFromApi(
+  raw: ApiWorkingHours | null | undefined,
+): WorkingHoursState {
   const source = looksLikeApiHours(raw)
     ? sanitizeApiHours(raw)
     : defaultApiHours()
@@ -305,8 +354,14 @@ function toApiPayload(state: WorkingHoursState): ApiWorkingHours {
   }
 }
 
-function validateState(state: WorkingHoursState) {
-  for (const day of DAYS) {
+function validateState(args: {
+  state: WorkingHoursState
+  days: ReadonlyArray<DayDefinition>
+  copy: BrandWorkingHoursCopy
+}): string | null {
+  const { state, days, copy } = args
+
+  for (const day of days) {
     const config = state[day.key]
 
     if (!config.enabled) continue
@@ -324,20 +379,20 @@ function validateState(state: WorkingHoursState) {
     )
 
     if (end <= start) {
-      return `${day.fullLabel}: End time must be after start time.`
+      return `${day.fullLabel}: ${copy.status.validationEndAfterStart}`
     }
   }
 
   return null
 }
 
-function parseHourSelection(value: string, fallback: number) {
+function parseHourSelection(value: string, fallback: number): number {
   const parsed = Number(value)
 
   return Number.isFinite(parsed) ? clamp(Math.trunc(parsed), 1, 12) : fallback
 }
 
-function parseMinuteSelection(value: string) {
+function parseMinuteSelection(value: string): number {
   const parsed = Number(value)
 
   return Number.isFinite(parsed) ? clamp(Math.trunc(parsed), 0, 59) : 0
@@ -347,13 +402,13 @@ function parsePeriodSelection(value: string): Period {
   return value === 'PM' ? 'PM' : 'AM'
 }
 
-function currentPathWithQuery() {
+function currentPathWithQuery(): string {
   if (typeof window === 'undefined') return '/pro/calendar'
 
   return window.location.pathname + window.location.search + window.location.hash
 }
 
-function sanitizeFrom(from: string) {
+function sanitizeFrom(from: string): string {
   const trimmed = from.trim()
 
   if (!trimmed) return '/pro'
@@ -366,7 +421,7 @@ function sanitizeFrom(from: string) {
 function redirectToLogin(
   router: ReturnType<typeof useRouter>,
   reason?: string,
-) {
+): void {
   const params = new URLSearchParams({
     from: sanitizeFrom(currentPathWithQuery()),
   })
@@ -376,13 +431,18 @@ function redirectToLogin(
   router.push(`/login?${params.toString()}`)
 }
 
-function workingHoursEndpoint(locationType: LocationType) {
+function workingHoursEndpoint(locationType: LocationType): string {
   const params = new URLSearchParams({ locationType })
 
   return `/api/pro/working-hours?${params.toString()}`
 }
 
-function errorFromResponse(response: Response, data: unknown) {
+function errorFromResponse(args: {
+  response: Response
+  data: unknown
+  fallback: string
+}): string {
+  const { response, data, fallback } = args
   const message = readErrorMessage(data)
 
   if (message) return message
@@ -395,59 +455,56 @@ function errorFromResponse(response: Response, data: unknown) {
     }
   }
 
-  if (response.status === 401) return 'Please log in to continue.'
-  if (response.status === 403) return 'You do not have access to do that.'
-
-  return `Request failed (${response.status}).`
+  return `${fallback} (${response.status})`
 }
 
-function locationTypeLabel(locationType: LocationType) {
-  return locationType === 'MOBILE' ? 'Mobile' : 'Salon'
+function locationCopy(args: {
+  locationType: LocationType
+  copy: BrandWorkingHoursCopy
+}) {
+  const { locationType, copy } = args
+
+  return locationType === 'MOBILE'
+    ? copy.locations.mobile
+    : copy.locations.salon
 }
 
-function locationHintClassName(locationType: LocationType) {
-  if (locationType === 'MOBILE') {
-    return 'border-acid/25 bg-acid/10'
-  }
-
-  return 'border-terra/35 bg-terra/10'
+function dayDefinitionsForCopy(
+  copy: BrandWorkingHoursCopy,
+): ReadonlyArray<DayDefinition> {
+  return DAY_DEFINITION_SEEDS.map((day) => ({
+    key: day.key,
+    brandKey: day.brandKey,
+    label: copy.days[day.brandKey].shortLabel,
+    fullLabel: copy.days[day.brandKey].fullLabel,
+  }))
 }
 
-function buttonClassName() {
-  return [
-    'inline-flex items-center justify-center rounded-full px-4 py-3',
-    'border border-accentPrimary/30 bg-accentPrimary',
-    'font-mono text-[11px] font-black uppercase tracking-[0.08em]',
-    'text-bgPrimary transition hover:bg-accentPrimaryHover',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    'disabled:cursor-not-allowed disabled:opacity-60',
-  ].join(' ')
+function enabledDayCount(state: WorkingHoursState | null): number {
+  if (!state) return 0
+
+  return DAY_KEYS.filter((day) => state[day].enabled).length
 }
 
-function selectClassName(disabled: boolean) {
-  return [
-    'h-10 rounded-xl border border-[var(--line)] bg-ink2 px-2',
-    'font-mono text-[11px] font-black uppercase tracking-[0.04em]',
-    'text-paper shadow-sm',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accentPrimary/40',
-    disabled
-      ? 'cursor-not-allowed opacity-50'
-      : 'hover:border-[var(--line-strong)] hover:bg-paper/[0.05]',
-  ].join(' ')
-}
+function formattedTime(config: DayConfig): string {
+  const start = `${config.startHour}:${String(config.startMinute).padStart(
+    2,
+    '0',
+  )} ${config.startPeriod}`
 
-function rowClassName(disabled: boolean) {
-  return [
-    'rounded-2xl border border-[var(--line)] bg-paper/[0.025] p-3',
-    'grid gap-3 md:grid-cols-[120px_1fr_1fr] md:items-center',
-    disabled ? 'opacity-65' : 'opacity-100',
-  ].join(' ')
+  const end = `${config.endHour}:${String(config.endMinute).padStart(
+    2,
+    '0',
+  )} ${config.endPeriod}`
+
+  return `${start} → ${end}`
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export default function WorkingHoursForm(props: WorkingHoursFormProps) {
   const {
+    copy,
     initialHours,
     onSaved,
     locationType = 'SALON',
@@ -455,15 +512,20 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
 
   const router = useRouter()
 
+  const days = useMemo(() => dayDefinitionsForCopy(copy), [copy])
+  const activeLocationCopy = locationCopy({ locationType, copy })
+
   const [state, setState] = useState<WorkingHoursState | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const daysOn = enabledDayCount(state)
+
   useEffect(() => {
     const controller = new AbortController()
 
-    async function loadHours() {
+    async function loadHours(): Promise<void> {
       setError(null)
       setMessage(null)
 
@@ -489,7 +551,13 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
         if (controller.signal.aborted) return
 
         if (!response.ok) {
-          setError(errorFromResponse(response, data))
+          setError(
+            errorFromResponse({
+              response,
+              data,
+              fallback: copy.status.failedLoadHours,
+            }),
+          )
           setState(hydrateFromApi(null))
           return
         }
@@ -502,7 +570,7 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
       } catch (caught) {
         if (controller.signal.aborted) return
 
-        setError(errorMessageFromUnknown(caught, 'Network error loading hours.'))
+        setError(errorMessageFromUnknown(caught, copy.status.failedLoadHours))
         setState(hydrateFromApi(null))
       }
     }
@@ -510,13 +578,13 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
     void loadHours()
 
     return () => controller.abort()
-  }, [initialHours, locationType, router])
+  }, [copy.status.failedLoadHours, initialHours, locationType, router])
 
   function updateDay<K extends keyof DayConfig>(
     dayKey: WeekdayKey,
     field: K,
     value: DayConfig[K],
-  ) {
+  ): void {
     setState((previous) => {
       if (!previous) return previous
 
@@ -530,7 +598,7 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
     })
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault()
 
     if (!state || saving) return
@@ -538,7 +606,11 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
     setMessage(null)
     setError(null)
 
-    const validationError = validateState(state)
+    const validationError = validateState({
+      state,
+      days,
+      copy,
+    })
 
     if (validationError) {
       setError(validationError)
@@ -564,128 +636,130 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
       const data = await safeJsonObject(response)
 
       if (!response.ok) {
-        setError(errorFromResponse(response, data))
+        setError(
+          errorFromResponse({
+            response,
+            data,
+            fallback: copy.status.failedSave,
+          }),
+        )
         return
       }
 
-      setMessage('Schedule saved.')
+      setMessage(copy.actions.saved)
       onSaved?.(payload)
       router.refresh()
     } catch (caught) {
-      setError(errorMessageFromUnknown(caught, 'Failed to save.'))
+      setError(errorMessageFromUnknown(caught, copy.status.failedSave))
     } finally {
       setSaving(false)
     }
   }
 
   if (!state) {
-    return <StateCard>Loading schedule…</StateCard>
+    return <StateCard>{copy.status.loadingSchedule}</StateCard>
   }
 
   return (
     <form
       onSubmit={handleSubmit}
-      className="text-paper"
-      data-calendar-working-hours-form="1"
+      className="brand-pro-calendar-working-form"
+      data-calendar-working-hours-form="true"
+      data-location-type={locationType}
     >
-      <div
-        className={[
-          'mb-4 rounded-2xl border px-3 py-3',
-          'text-sm font-semibold text-paperDim',
-          locationHintClassName(locationType),
-        ].join(' ')}
-      >
-        <p className="font-mono text-[10px] font-black uppercase tracking-[0.14em] text-paperMute">
-          Base schedule
-        </p>
+      <section className="brand-pro-calendar-working-form-hint">
+        <div>
+          <p className="brand-pro-calendar-working-form-eyebrow">
+            {activeLocationCopy.eyebrow}
+          </p>
 
-        <p className="mt-1">
-          Editing availability for{' '}
-          <span className="font-black text-paper">
-            {locationTypeLabel(locationType)}
-          </span>
-          . Bookings and blocks still override these hours.
-        </p>
-      </div>
+          <h3 className="brand-pro-calendar-working-form-title">
+            {copy.baseScheduleLabel}
+          </h3>
 
-      <div className="grid gap-2">
-        <div className="hidden grid-cols-[120px_1fr_1fr] items-center gap-3 px-1 font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute md:grid">
-          <div>Day</div>
-          <div>Start</div>
-          <div>End</div>
+          <p className="brand-pro-calendar-working-form-description">
+            {copy.baseScheduleDescription}
+          </p>
         </div>
 
-        {DAYS.map((day) => {
-          const config = state[day.key]
-          const disabled = !config.enabled
-
-          return (
-            <DayRow
-              key={day.key}
-              day={day}
-              config={config}
-              disabled={disabled}
-              onToggleEnabled={(enabled) =>
-                updateDay(day.key, 'enabled', enabled)
-              }
-              onChangeStartHour={(value) =>
-                updateDay(
-                  day.key,
-                  'startHour',
-                  parseHourSelection(value, 9),
-                )
-              }
-              onChangeStartMinute={(value) =>
-                updateDay(day.key, 'startMinute', parseMinuteSelection(value))
-              }
-              onChangeStartPeriod={(value) =>
-                updateDay(day.key, 'startPeriod', parsePeriodSelection(value))
-              }
-              onChangeEndHour={(value) =>
-                updateDay(day.key, 'endHour', parseHourSelection(value, 5))
-              }
-              onChangeEndMinute={(value) =>
-                updateDay(day.key, 'endMinute', parseMinuteSelection(value))
-              }
-              onChangeEndPeriod={(value) =>
-                updateDay(day.key, 'endPeriod', parsePeriodSelection(value))
-              }
-            />
-          )
-        })}
-
-        <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center">
-          <button
-            type="submit"
-            disabled={saving}
-            className={buttonClassName()}
-          >
-            {saving ? 'Saving…' : 'Save schedule'}
-          </button>
-
-          {message ? <InlineState tone="success">{message}</InlineState> : null}
-          {error ? <InlineState tone="danger">{error}</InlineState> : null}
+        <div className="brand-pro-calendar-working-form-count">
+          <span>{daysOn}</span>
+          <span>{copy.daysOnLabel}</span>
         </div>
-      </div>
+      </section>
+
+      <section className="brand-pro-calendar-working-form-table">
+        <div className="brand-pro-calendar-working-form-table-header">
+          <span>{copy.table.day}</span>
+          <span>{copy.table.on}</span>
+          <span>{copy.table.start}</span>
+          <span>{copy.table.end}</span>
+        </div>
+
+        <div className="brand-pro-calendar-working-form-row-list">
+          {days.map((day) => {
+            const config = state[day.key]
+            const disabled = !config.enabled
+
+            return (
+              <DayRow
+                key={day.key}
+                copy={copy}
+                day={day}
+                config={config}
+                disabled={disabled}
+                onToggleEnabled={(enabled) =>
+                  updateDay(day.key, 'enabled', enabled)
+                }
+                onChangeStartHour={(value) =>
+                  updateDay(
+                    day.key,
+                    'startHour',
+                    parseHourSelection(value, 9),
+                  )
+                }
+                onChangeStartMinute={(value) =>
+                  updateDay(day.key, 'startMinute', parseMinuteSelection(value))
+                }
+                onChangeStartPeriod={(value) =>
+                  updateDay(day.key, 'startPeriod', parsePeriodSelection(value))
+                }
+                onChangeEndHour={(value) =>
+                  updateDay(day.key, 'endHour', parseHourSelection(value, 5))
+                }
+                onChangeEndMinute={(value) =>
+                  updateDay(day.key, 'endMinute', parseMinuteSelection(value))
+                }
+                onChangeEndPeriod={(value) =>
+                  updateDay(day.key, 'endPeriod', parsePeriodSelection(value))
+                }
+              />
+            )
+          })}
+        </div>
+      </section>
+
+      <footer className="brand-pro-calendar-working-form-footer">
+        <button
+          type="submit"
+          disabled={saving}
+          className="brand-pro-calendar-working-form-save brand-focus"
+        >
+          {saving ? copy.actions.saving : copy.actions.saveSchedule}
+        </button>
+
+        {message ? <InlineState tone="success">{message}</InlineState> : null}
+        {error ? <InlineState tone="danger">{error}</InlineState> : null}
+      </footer>
     </form>
   )
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function DayRow(props: {
-  day: DayDefinition
-  config: DayConfig
-  disabled: boolean
-  onToggleEnabled: (enabled: boolean) => void
-  onChangeStartHour: (value: string) => void
-  onChangeStartMinute: (value: string) => void
-  onChangeStartPeriod: (value: string) => void
-  onChangeEndHour: (value: string) => void
-  onChangeEndMinute: (value: string) => void
-  onChangeEndPeriod: (value: string) => void
-}) {
+function DayRow(props: DayRowProps) {
   const {
+    copy,
     day,
     config,
     disabled,
@@ -699,22 +773,39 @@ function DayRow(props: {
   } = props
 
   return (
-    <div className={rowClassName(disabled)}>
-      <label className="flex items-center gap-2 font-mono text-[11px] font-black uppercase tracking-[0.08em] text-paper">
-        <input
-          type="checkbox"
-          checked={config.enabled}
-          onChange={(event) => onToggleEnabled(event.target.checked)}
-          className="h-4 w-4 accent-accentPrimary"
-        />
+    <div
+      className="brand-pro-calendar-working-day-row"
+      data-enabled={config.enabled ? 'true' : 'false'}
+    >
+      <div className="brand-pro-calendar-working-day-main">
+        <div className="brand-pro-calendar-working-day-copy">
+          <span className="brand-pro-calendar-working-day-short">
+            {day.label}
+          </span>
 
-        <span>{day.label}</span>
+          <span className="brand-pro-calendar-working-day-full">
+            {day.fullLabel}
+          </span>
+        </div>
 
-        {disabled ? <span className="text-paperMute">Off</span> : null}
-      </label>
+        <div className="brand-pro-calendar-working-day-summary">
+          {config.enabled ? formattedTime(config) : copy.offLabel}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        role="switch"
+        aria-checked={config.enabled}
+        onClick={() => onToggleEnabled(!config.enabled)}
+        className="brand-pro-calendar-working-day-toggle brand-focus"
+        data-enabled={config.enabled ? 'true' : 'false'}
+      >
+        <span className="brand-pro-calendar-working-day-toggle-thumb" />
+      </button>
 
       <TimeControlGroup
-        label="Start"
+        label={copy.table.start}
         disabled={disabled}
         hour={config.startHour}
         minute={config.startMinute}
@@ -725,7 +816,7 @@ function DayRow(props: {
       />
 
       <TimeControlGroup
-        label="End"
+        label={copy.table.end}
         disabled={disabled}
         hour={config.endHour}
         minute={config.endMinute}
@@ -738,16 +829,7 @@ function DayRow(props: {
   )
 }
 
-function TimeControlGroup(props: {
-  label: string
-  disabled: boolean
-  hour: number
-  minute: number
-  period: Period
-  onChangeHour: (value: string) => void
-  onChangeMinute: (value: string) => void
-  onChangePeriod: (value: string) => void
-}) {
+function TimeControlGroup(props: TimeControlGroupProps) {
   const {
     label,
     disabled,
@@ -760,59 +842,73 @@ function TimeControlGroup(props: {
   } = props
 
   return (
-    <div className="grid grid-cols-3 gap-2">
-      <div className="col-span-3 font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute md:hidden">
-        {label}
+    <div
+      className="brand-pro-calendar-working-time-group"
+      data-disabled={disabled ? 'true' : 'false'}
+    >
+      <span className="brand-pro-calendar-working-time-label">{label}</span>
+
+      <div className="brand-pro-calendar-working-time-selects">
+        <Select
+          value={hour}
+          disabled={disabled}
+          ariaLabel={`${label} hour`}
+          onChange={onChangeHour}
+        >
+          {HOUR_OPTIONS.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </Select>
+
+        <Select
+          value={minute}
+          disabled={disabled}
+          ariaLabel={`${label} minute`}
+          onChange={onChangeMinute}
+        >
+          {MINUTE_OPTIONS.map((option) => (
+            <option key={option} value={option}>
+              {String(option).padStart(2, '0')}
+            </option>
+          ))}
+        </Select>
+
+        <Select
+          value={period}
+          disabled={disabled}
+          ariaLabel={`${label} period`}
+          onChange={onChangePeriod}
+        >
+          {PERIOD_OPTIONS.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </Select>
       </div>
-
-      <Select
-        value={hour}
-        disabled={disabled}
-        onChange={onChangeHour}
-      >
-        {HOUR_OPTIONS.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </Select>
-
-      <Select
-        value={minute}
-        disabled={disabled}
-        onChange={onChangeMinute}
-      >
-        {MINUTE_OPTIONS.map((option) => (
-          <option key={option} value={option}>
-            {String(option).padStart(2, '0')}
-          </option>
-        ))}
-      </Select>
-
-      <Select
-        value={period}
-        disabled={disabled}
-        onChange={onChangePeriod}
-      >
-        {PERIOD_OPTIONS.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </Select>
     </div>
   )
 }
 
 function Select(props: SelectProps) {
-  const { value, disabled = false, onChange, children } = props
+  const {
+    value,
+    disabled = false,
+    ariaLabel,
+    onChange,
+    children,
+  } = props
 
   return (
     <select
       value={value}
       disabled={disabled}
+      aria-label={ariaLabel}
       onChange={(event) => onChange(event.target.value)}
-      className={selectClassName(disabled)}
+      className="brand-pro-calendar-working-select brand-focus"
+      data-disabled={disabled ? 'true' : 'false'}
     >
       {children}
     </select>
@@ -824,12 +920,8 @@ function StateCard(props: StateCardProps) {
 
   return (
     <div
-      className={[
-        'rounded-2xl border px-3 py-3 text-sm font-semibold',
-        danger
-          ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
-          : 'border-[var(--line)] bg-paper/[0.03] text-paperDim',
-      ].join(' ')}
+      className="brand-pro-calendar-working-state"
+      data-danger={danger ? 'true' : 'false'}
     >
       {children}
     </div>
@@ -844,10 +936,8 @@ function InlineState(props: {
 
   return (
     <p
-      className={[
-        'font-mono text-[10px] font-black uppercase tracking-[0.10em]',
-        tone === 'success' ? 'text-toneSuccess' : 'text-toneDanger',
-      ].join(' ')}
+      className="brand-pro-calendar-working-inline-state"
+      data-tone={tone}
     >
       {children}
     </p>

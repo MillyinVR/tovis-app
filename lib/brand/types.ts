@@ -236,6 +236,85 @@ export type BrandProCalendarConfirmChangeModalCopy = {
   applyingLabel: string
 }
 
+export type BrandWorkingHoursLocationKey = 'salon' | 'mobile'
+
+export type BrandWorkingHoursDayKey =
+  | 'monday'
+  | 'tuesday'
+  | 'wednesday'
+  | 'thursday'
+  | 'friday'
+  | 'saturday'
+  | 'sunday'
+
+export type BrandWorkingHoursLocationCopy = {
+  label: string
+  shortLabel: string
+  eyebrow: string
+  description: string
+}
+
+export type BrandWorkingHoursDayLabelCopy = {
+  shortLabel: string
+  fullLabel: string
+}
+
+export type BrandWorkingHoursOverlayCopy = {
+  eyebrow: string
+  title: string
+  description: string
+  dragHandleLabel: string
+}
+
+export type BrandWorkingHoursTableCopy = {
+  day: string
+  on: string
+  start: string
+  end: string
+}
+
+export type BrandWorkingHoursActionsCopy = {
+  cancel: string
+  close: string
+  saveSchedule: string
+  saving: string
+  saved: string
+}
+
+export type BrandWorkingHoursStatusCopy = {
+  loadingSchedule: string
+  failedLoadHours: string
+  failedSave: string
+  validationEndAfterStart: string
+}
+
+export type BrandWorkingHoursCopy = {
+  /**
+   * Brand-owned working-hours / edit-schedule copy.
+   *
+   * Keep wording here so the same real scheduling logic can render as
+   * desktop modal, tablet sheet, or mobile sheet without hardcoded UI text.
+   */
+  overlay: BrandWorkingHoursOverlayCopy
+
+  locationTabsAriaLabel: string
+  locations: Record<BrandWorkingHoursLocationKey, BrandWorkingHoursLocationCopy>
+
+  days: Record<BrandWorkingHoursDayKey, BrandWorkingHoursDayLabelCopy>
+  table: BrandWorkingHoursTableCopy
+
+  baseScheduleLabel: string
+  baseScheduleDescription: string
+  setHoursPerDayLabel: string
+  daysOnLabel: string
+
+  onLabel: string
+  offLabel: string
+
+  actions: BrandWorkingHoursActionsCopy
+  status: BrandWorkingHoursStatusCopy
+}
+
 export type BrandProCalendarCopy = {
   /**
    * Brand-owned pro calendar UI copy.
@@ -262,6 +341,7 @@ export type BrandProCalendarCopy = {
   emptyState: BrandProCalendarEmptyStateCopy
 
   management: BrandProCalendarManagementCopy
+  workingHours: BrandWorkingHoursCopy
   blockTimeModal: BrandProCalendarBlockTimeModalCopy
   editBlockModal: BrandProCalendarEditBlockModalCopy
   bookingModal: BrandProCalendarBookingModalCopy

@@ -3,16 +3,13 @@
 
 import { useMemo, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-
-import WorkingHoursTabs from './WorkingHoursTabs'
-
 import { CalendarHeaderControls } from './CalendarHeader'
 import { CalendarLocationPanel } from './CalendarLocationPanel'
 import { CalendarStatsPanel } from './CalendarStatsPanel'
 import { DayWeekGrid } from './DayWeekGrid'
 import { MonthGrid } from './MonthGrid'
 import { PendingRequestSurface } from './PendingRequestSurface'
-
+import { EditScheduleOverlay } from './EditScheduleOverlay'
 import type {
   BookingCalendarEvent,
   CalendarEvent,
@@ -98,17 +95,6 @@ type CalendarDesktopDetailPanelProps = {
   calendarTimeZone: string
   onClose: () => void
   onOpenFullDetails: (eventId: string) => void
-}
-
-type DesktopEditScheduleOverlayProps = {
-  open: boolean
-  copy: BrandProCalendarCopy
-  canSalon: boolean
-  canMobile: boolean
-  activeEditorType: CalendarData['hoursEditorLocationType']
-  onChangeEditorType: CalendarData['setHoursEditorLocationType']
-  onSavedAny: () => void
-  onClose: () => void
 }
 
 type StatusLegendProps = {
@@ -354,8 +340,9 @@ export function CalendarDesktopShell(props: CalendarDesktopShellProps) {
           </footer>
         </div>
 
-        <DesktopEditScheduleOverlay
+        <EditScheduleOverlay
           open={cal.showHoursForm}
+          device="desktop"
           copy={copy}
           canSalon={cal.canSalon}
           canMobile={cal.canMobile}
@@ -625,59 +612,6 @@ function BookingServiceList(props: {
           </div>
         ))}
       </div>
-    </div>
-  )
-}
-
-function DesktopEditScheduleOverlay(props: DesktopEditScheduleOverlayProps) {
-  const {
-    open,
-    copy,
-    canSalon,
-    canMobile,
-    activeEditorType,
-    onChangeEditorType,
-    onSavedAny,
-    onClose,
-  } = props
-
-  if (!open) return null
-
-  return (
-    <div className="brand-pro-calendar-desktop-edit-overlay">
-      <section className="brand-pro-calendar-desktop-edit-panel">
-        <header className="brand-pro-calendar-desktop-edit-header">
-          <div>
-            <p className="brand-pro-calendar-wide-eyebrow">
-              ◆ {copy.actions.editSchedule}
-            </p>
-
-            <h3 className="brand-pro-calendar-desktop-edit-title">
-              {copy.actions.editSchedule}
-            </h3>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="brand-pro-calendar-desktop-detail-close brand-focus"
-            aria-label={copy.actions.close}
-            title={copy.actions.close}
-          >
-            ×
-          </button>
-        </header>
-
-        <div className="brand-pro-calendar-desktop-edit-body">
-          <WorkingHoursTabs
-            canSalon={canSalon}
-            canMobile={canMobile}
-            activeEditorType={activeEditorType}
-            onChangeEditorType={onChangeEditorType}
-            onSavedAny={onSavedAny}
-          />
-        </div>
-      </section>
     </div>
   )
 }

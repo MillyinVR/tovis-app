@@ -2,9 +2,6 @@
 'use client'
 
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-
-import WorkingHoursTabs from './WorkingHoursTabs'
-
 import { CalendarStatsPanel } from './CalendarStatsPanel'
 import { DayWeekGrid } from './DayWeekGrid'
 import { MobileAutoAcceptBar } from './MobileAutoAcceptBar'
@@ -13,7 +10,7 @@ import { MobileCalendarFab } from './MobileCalendarFab'
 import { MobileCalendarHeader } from './MobileCalendarHeader'
 import { MobileMonthGrid } from './MobileMonthGrid'
 import { MobilePendingRequestBar } from './MobilePendingRequestBar'
-
+import { EditScheduleOverlay } from './EditScheduleOverlay'
 import type { CalendarData } from '../_hooks/useCalendarData'
 import type { CalendarEvent, ViewMode } from '../_types'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
@@ -140,19 +137,6 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
           activeLocationLabel={cal.activeLocationLabel}
           onChangeLocation={cal.setActiveLocationId}
         />
-
-        {cal.showHoursForm ? (
-          <section className="brand-pro-calendar-hours-panel">
-            <WorkingHoursTabs
-              canSalon={cal.canSalon}
-              canMobile={cal.canMobile}
-              activeEditorType={cal.hoursEditorLocationType}
-              onChangeEditorType={cal.setHoursEditorLocationType}
-              onSavedAny={cal.reload}
-            />
-          </section>
-        ) : null}
-
         <div className="p-0">
           <div className="px-4 pt-3">
             {showInitialLoading ? (
@@ -202,6 +186,19 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
         </div>
       </section>
 
+      <EditScheduleOverlay
+        open={cal.showHoursForm}
+        device="mobile"
+        copy={copy}
+        canSalon={cal.canSalon}
+        canMobile={cal.canMobile}
+        activeEditorType={cal.hoursEditorLocationType}
+        onChangeEditorType={cal.setHoursEditorLocationType}
+        onSavedAny={cal.reload}
+        onClose={() => {
+          cal.setShowHoursForm(false)
+        }}
+      />
       <MobileCalendarFab
         onClick={cal.openCreateBlockNow}
         label={copy.actions.createBlock}

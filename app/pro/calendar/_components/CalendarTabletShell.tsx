@@ -2,15 +2,12 @@
 'use client'
 
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-
-import WorkingHoursTabs from './WorkingHoursTabs'
-
 import { CalendarHeaderControls } from './CalendarHeader'
 import { CalendarStatsPanel } from './CalendarStatsPanel'
 import { DayWeekGrid } from './DayWeekGrid'
 import { MonthGrid } from './MonthGrid'
 import { PendingRequestSurface } from './PendingRequestSurface'
-
+import { EditScheduleOverlay } from './EditScheduleOverlay'
 import type { CalendarData } from '../_hooks/useCalendarData'
 import type { ViewMode } from '../_types'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
@@ -189,18 +186,6 @@ export function CalendarTabletShell(props: CalendarTabletShellProps) {
           }}
         />
 
-        {cal.showHoursForm ? (
-          <section className="brand-pro-calendar-tablet-hours-panel">
-            <WorkingHoursTabs
-              canSalon={cal.canSalon}
-              canMobile={cal.canMobile}
-              activeEditorType={cal.hoursEditorLocationType}
-              onChangeEditorType={cal.setHoursEditorLocationType}
-              onSavedAny={cal.reload}
-            />
-          </section>
-        ) : null}
-
         <TabletCalendarBody
           copy={copy}
           view={view}
@@ -217,6 +202,20 @@ export function CalendarTabletShell(props: CalendarTabletShellProps) {
         />
 
         <TabletPendingBar copy={copy} cal={cal} />
+
+        <EditScheduleOverlay
+          open={cal.showHoursForm}
+          device="tablet"
+          copy={copy}
+          canSalon={cal.canSalon}
+          canMobile={cal.canMobile}
+          activeEditorType={cal.hoursEditorLocationType}
+          onChangeEditorType={cal.setHoursEditorLocationType}
+          onSavedAny={cal.reload}
+          onClose={() => {
+            cal.setShowHoursForm(false)
+          }}
+        />
       </div>
     </section>
   )

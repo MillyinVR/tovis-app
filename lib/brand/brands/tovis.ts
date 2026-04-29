@@ -199,6 +199,97 @@ const proCalendar: BrandConfig['proCalendar'] = {
     blockFullDayTodayLabel: 'Block full day today',
   },
 
+    workingHours: {
+    overlay: {
+      eyebrow: '◆ Edit schedule',
+      title: 'Working hours.',
+      description:
+        'Set your base availability per location type. Individual bookings and blocked time will still override these hours.',
+      dragHandleLabel: 'Edit schedule sheet handle',
+    },
+
+    locationTabsAriaLabel: 'Working-hours location type',
+
+    locations: {
+      salon: {
+        label: 'Salon hours',
+        shortLabel: 'Salon',
+        eyebrow: '◆ Salon hours',
+        description:
+          'Fixed location availability. Applies to your salon, suite, or studio.',
+      },
+      mobile: {
+        label: 'Mobile hours',
+        shortLabel: 'Mobile',
+        eyebrow: '◆ Mobile hours',
+        description:
+          'When you travel to the client. Set your availability for on-location work.',
+      },
+    },
+
+    days: {
+      monday: {
+        shortLabel: 'Mon',
+        fullLabel: 'Monday',
+      },
+      tuesday: {
+        shortLabel: 'Tue',
+        fullLabel: 'Tuesday',
+      },
+      wednesday: {
+        shortLabel: 'Wed',
+        fullLabel: 'Wednesday',
+      },
+      thursday: {
+        shortLabel: 'Thu',
+        fullLabel: 'Thursday',
+      },
+      friday: {
+        shortLabel: 'Fri',
+        fullLabel: 'Friday',
+      },
+      saturday: {
+        shortLabel: 'Sat',
+        fullLabel: 'Saturday',
+      },
+      sunday: {
+        shortLabel: 'Sun',
+        fullLabel: 'Sunday',
+      },
+    },
+
+    table: {
+      day: 'Day',
+      on: 'On',
+      start: 'Start',
+      end: 'End',
+    },
+
+    baseScheduleLabel: 'Base schedule',
+    baseScheduleDescription:
+      'These hours control when clients can request appointments before booking-specific rules, blocks, and overrides are applied.',
+    setHoursPerDayLabel: 'Set hours per day',
+    daysOnLabel: 'Days on',
+
+    onLabel: 'On',
+    offLabel: 'Off',
+
+    actions: {
+      cancel: 'Cancel',
+      close: 'Close',
+      saveSchedule: 'Save schedule',
+      saving: 'Saving…',
+      saved: 'Saved',
+    },
+
+    status: {
+      loadingSchedule: 'Loading schedule…',
+      failedLoadHours: 'Could not load working hours.',
+      failedSave: 'Could not save working hours. Try again.',
+      validationEndAfterStart: 'End time must be after start time.',
+    },
+  },
+  
   blockTimeModal: {
     title: 'Block time',
     description:
