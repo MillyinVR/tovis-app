@@ -370,8 +370,27 @@ async function resolveFinalizeOwnershipContext(args: {
   }
 }
 
+function readFinalizeMeta(request: Request): {
+  requestId: string | null
+  idempotencyKey: string | null
+} {
+  const requestId =
+    pickString(request.headers.get('x-request-id')) ??
+    pickString(request.headers.get('request-id')) ??
+    null
+
+  const idempotencyKey =
+    pickString(request.headers.get('idempotency-key')) ??
+    pickString(request.headers.get('x-idempotency-key')) ??
+    null
+
+  return { requestId, idempotencyKey }
+}
+
 export async function POST(request: Request) {
   try {
+    const { requestId, idempotencyKey } = readFinalizeMeta(request)
+
     const rawBody: unknown = await request.json().catch(() => ({}))
     const parsedBody = parseFinalizeBody(rawBody)
 
@@ -411,6 +430,8 @@ export async function POST(request: Request) {
       rebookOfBookingId: ownershipOrFail.rebookOfBookingId,
       offering: toFinalizeOffering(offering),
       fallbackTimeZone: FALLBACK_TIME_ZONE,
+      requestId,
+      idempotencyKey,
     })
 
     try {

@@ -382,6 +382,8 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
       professionalTimeZone: 'America/Los_Angeles',
     },
     fallbackTimeZone: 'UTC',
+    requestId: null,
+    idempotencyKey: null,
   })
 
   expect(mocks.createProNotification).toHaveBeenCalledWith({
@@ -662,6 +664,8 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
         professionalTimeZone: 'America/Los_Angeles',
       },
       fallbackTimeZone: 'UTC',
+      requestId: null,
+      idempotencyKey: null,
     })
   })
 
@@ -719,6 +723,8 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
         professionalTimeZone: 'America/Los_Angeles',
       },
       fallbackTimeZone: 'UTC',
+      requestId: null,
+      idempotencyKey: null,
     })
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({

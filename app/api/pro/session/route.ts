@@ -147,7 +147,7 @@ export async function GET() {
     const active = await prisma.booking.findFirst({
       where: {
         professionalId: proId,
-        status: BookingStatus.ACCEPTED,
+        status: { in: [BookingStatus.ACCEPTED, BookingStatus.IN_PROGRESS] },
         startedAt: {
           not: null,
         },

@@ -212,7 +212,10 @@ function isCompletedBooking(booking: ClientBookingDTO): boolean {
 }
 
 function isAcceptedBooking(booking: ClientBookingDTO): boolean {
-  return booking.status === BookingStatus.ACCEPTED
+  return (
+    booking.status === BookingStatus.ACCEPTED ||
+    booking.status === BookingStatus.IN_PROGRESS
+  )
 }
 
 function compareByScheduledAsc(
@@ -276,7 +279,7 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
       where: {
         clientId,
         status: {
-          in: [BookingStatus.ACCEPTED, BookingStatus.COMPLETED],
+          in: [BookingStatus.ACCEPTED, BookingStatus.IN_PROGRESS, BookingStatus.COMPLETED],
         },
       },
       orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
@@ -314,7 +317,7 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
       where: {
         clientId,
         status: {
-          in: [BookingStatus.ACCEPTED, BookingStatus.COMPLETED],
+          in: [BookingStatus.ACCEPTED, BookingStatus.IN_PROGRESS, BookingStatus.COMPLETED],
         },
       },
     }),

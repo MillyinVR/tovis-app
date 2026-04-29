@@ -48,7 +48,7 @@ export default async function ProClientsPage() {
       { status: BookingStatus.PENDING },
       { startedAt: { not: null }, finishedAt: null },
       {
-        status: BookingStatus.ACCEPTED,
+        status: { in: [BookingStatus.ACCEPTED, BookingStatus.IN_PROGRESS] },
         scheduledFor: { gte: now },
       },
     ],

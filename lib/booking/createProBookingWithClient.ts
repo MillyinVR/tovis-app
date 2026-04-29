@@ -40,6 +40,8 @@ export type CreateProBookingWithClientArgs = {
   professionalId: string
   actorUserId: string
   overrideReason: string | null
+  requestId?: string | null
+  idempotencyKey?: string | null
 
   clientId?: string | null
   client?: NewClientInput | null
@@ -300,6 +302,8 @@ export async function createProBookingWithClient(
     allowOutsideWorkingHours: args.allowOutsideWorkingHours,
     allowShortNotice: args.allowShortNotice,
     allowFarFuture: args.allowFarFuture,
+    requestId: args.requestId ?? null,
+    idempotencyKey: args.idempotencyKey ?? null,
   })
 
   let inviteCandidate: CreatedInviteDeliveryCandidate | null = null

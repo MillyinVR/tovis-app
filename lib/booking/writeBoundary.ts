@@ -333,6 +333,8 @@ type FinalizeBookingFromHoldArgs = {
   initialStatus: BookingStatus
   rebookOfBookingId: string | null
   fallbackTimeZone?: string
+  requestId?: string | null
+  idempotencyKey?: string | null
   offering: {
     id: string
     professionalId: string
@@ -373,6 +375,8 @@ type CreateProBookingArgs = {
   allowOutsideWorkingHours: boolean
   allowShortNotice: boolean
   allowFarFuture: boolean
+  requestId?: string | null
+  idempotencyKey?: string | null
 }
 
 type CreateProBookingResult = {
@@ -824,6 +828,7 @@ type CancelBookingRecord = Prisma.BookingGetPayload<{
 
 const START_BOOKING_SELECT = {
   id: true,
+  clientId: true,
   professionalId: true,
   status: true,
   scheduledFor: true,
@@ -4007,6 +4012,7 @@ async function performLockedStartBookingSession(args: {
       where: { id: booking.id },
       data: {
         sessionStep: SessionStep.CONSULTATION,
+        status: BookingStatus.IN_PROGRESS,
       },
       select: {
         id: true,
@@ -4068,6 +4074,7 @@ async function performLockedStartBookingSession(args: {
     data: {
       startedAt: args.now,
       sessionStep: SessionStep.CONSULTATION,
+      status: BookingStatus.IN_PROGRESS,
     },
     select: {
       id: true,
@@ -4098,6 +4105,16 @@ async function performLockedStartBookingSession(args: {
       sessionStep: updated.sessionStep ?? SessionStep.NONE,
       status: updated.status,
     },
+  })
+
+  await upsertClientNotification({
+    tx: args.tx,
+    clientId: booking.clientId,
+    bookingId: booking.id,
+    eventKey: NotificationEventKey.BOOKING_STARTED,
+    title: 'Your appointment has started',
+    body: "Your pro has started your session. They'll be with you shortly.",
+    dedupeKey: `BOOKING_STARTED:${booking.id}`,
   })
 
   return {
@@ -6199,6 +6216,8 @@ async function performLockedFinalizeBookingFromHold(args: {
   rebookOfBookingId: string | null
   fallbackTimeZone: string
   offering: FinalizeBookingFromHoldArgs['offering']
+  requestId: string | null
+  idempotencyKey: string | null
 }): Promise<FinalizeBookingFromHoldResult> {
   const hold = await args.tx.bookingHold.findUnique({
     where: { id: args.holdId },
@@ -6652,6 +6671,8 @@ async function performLockedCreateProBooking(args: {
   allowFarFuture: boolean
   actorUserId: string
   overrideReason: string | null
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<CreateProBookingResult> {
 
     assertNonEmptyUserId(args.actorUserId)
@@ -9948,6 +9969,8 @@ export async function finalizeBookingFromHold(
         rebookOfBookingId: args.rebookOfBookingId,
         fallbackTimeZone: args.fallbackTimeZone ?? 'UTC',
         offering: args.offering,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
@@ -9990,6 +10013,8 @@ export async function createProBooking(
         allowFarFuture: args.allowFarFuture,
         actorUserId: args.actorUserId,
         overrideReason: args.overrideReason,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }

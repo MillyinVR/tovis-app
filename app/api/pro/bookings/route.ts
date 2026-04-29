@@ -91,6 +91,15 @@ export async function POST(req: Request) {
     const professionalId = auth.professionalId
     const actorUserId = auth.user.id
 
+    const requestId =
+      pickString(req.headers.get('x-request-id')) ??
+      pickString(req.headers.get('request-id')) ??
+      null
+    const idempotencyKey =
+      pickString(req.headers.get('idempotency-key')) ??
+      pickString(req.headers.get('x-idempotency-key')) ??
+      null
+
     if (!actorUserId || !actorUserId.trim()) {
       return bookingJsonFail('FORBIDDEN', {
         message: 'Authenticated actor user id is required.',
@@ -156,6 +165,8 @@ export async function POST(req: Request) {
       allowOutsideWorkingHours,
       allowShortNotice,
       allowFarFuture,
+      requestId,
+      idempotencyKey,
     })
 
     if (!result.ok) {

@@ -36,6 +36,7 @@ enum Role {
 enum BookingStatus {
   PENDING
   ACCEPTED
+  IN_PROGRESS
   COMPLETED
   CANCELLED
 }
@@ -82,6 +83,7 @@ enum VerificationStatus {
   APPROVED
   REJECTED
   NEEDS_INFO
+  PENDING_MANUAL_REVIEW
 }
 
 enum VerificationDocumentType {
@@ -344,6 +346,7 @@ enum NotificationRecipientKind {
 enum NotificationEventKey {
   BOOKING_REQUEST_CREATED
   BOOKING_CONFIRMED
+  BOOKING_STARTED
   BOOKING_RESCHEDULED
   BOOKING_CANCELLED_BY_CLIENT
   BOOKING_CANCELLED_BY_PRO
