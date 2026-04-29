@@ -744,6 +744,8 @@ type UpsertBookingAftercareResult = {
   remindersTouched: number
   clientNotified: boolean
   bookingFinished: boolean
+  /** Populated when sendToClient=true but booking could not be completed. */
+  completionBlockers: string[]
   booking: {
     status: BookingStatus
     sessionStep: SessionStep
@@ -1869,6 +1871,32 @@ function isReviewEligibleCloseout(args: {
     Boolean(args.paymentCollectedAt) &&
     isCheckoutCloseoutComplete(args.checkoutStatus)
   )
+}
+
+/**
+ * Returns a list of human-readable error codes that explain why a
+ * `sendToClient = true` aftercare submission did not complete the booking.
+ * Empty array means the booking was (or will be) completed normally.
+ */
+function buildCompletionBlockers(args: {
+  sendToClient: boolean
+  bookingFinished: boolean
+  checkoutStatus: BookingCheckoutStatus | null | undefined
+  paymentCollectedAt: Date | null | undefined
+}): string[] {
+  if (!args.sendToClient || args.bookingFinished) return []
+
+  const blockers: string[] = []
+
+  if (!args.paymentCollectedAt) {
+    blockers.push('PAYMENT_NOT_COLLECTED')
+  }
+
+  if (!isCheckoutCloseoutComplete(args.checkoutStatus)) {
+    blockers.push('CHECKOUT_NOT_COMPLETE')
+  }
+
+  return blockers
 }
 
 function isAftercareSessionStepEligible(
@@ -4921,7 +4949,9 @@ async function performLockedTransitionSessionStep(args: {
     where: { id: booking.id },
     data: {
       sessionStep: args.nextStep,
-      ...(shouldSetStartedAt ? { startedAt: new Date() } : {}),
+      ...(shouldSetStartedAt
+        ? { startedAt: new Date(), status: BookingStatus.IN_PROGRESS }
+        : {}),
     },
     select: {
       id: true,
@@ -8160,6 +8190,7 @@ if (
     remindersTouched: 0,
     clientNotified: false,
     bookingFinished: false,
+    completionBlockers: [],
     booking:
       booking.status === BookingStatus.COMPLETED || booking.finishedAt
         ? {
@@ -8543,6 +8574,12 @@ return {
     remindersTouched,
     clientNotified,
     bookingFinished,
+    completionBlockers: buildCompletionBlockers({
+      sendToClient: args.sendToClient,
+      bookingFinished,
+      checkoutStatus: booking.checkoutStatus,
+      paymentCollectedAt: booking.paymentCollectedAt,
+    }),
     booking: bookingNow,
     timeZoneUsed,
     meta: buildMeta(true),

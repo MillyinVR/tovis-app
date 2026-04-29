@@ -1,7 +1,14 @@
 import { NextResponse } from 'next/server'
 
+// States with automated verification (backed by DCA BreEZe API).
+const AUTOMATED_STATES = new Set(['CA'])
+
+// States that go through manual review instead of automated verification.
+// Set PENDING_MANUAL_REVIEW so pros can continue listing while review is in progress.
+const MANUAL_REVIEW_STATES = new Set(['NY', 'TX', 'FL'])
+
 type VerifyReq = {
-  state: 'CA'
+  state: string
   profession: 'COSMETOLOGIST' | 'BARBER' | 'ESTHETICIAN' | 'MANICURIST' | 'HAIRSTYLIST' | 'ELECTROLOGIST'
   licenseNumber: string
 }
@@ -77,14 +84,31 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => ({}))) as Partial<VerifyReq>
 
-    if (body.state !== 'CA') {
-      return NextResponse.json({ ok: false, error: 'Only CA is supported right now.' }, { status: 400 })
-    }
-
+    const state = String(body.state ?? '').trim().toUpperCase()
     const profession = String(body.profession ?? '')
     const licenseNumber = String(body.licenseNumber ?? '').trim().toUpperCase()
 
-    if (!licenseNumber || licenseNumber.length < 4) {
+    if (!state) {
+      return NextResponse.json({ ok: false, error: 'State is required.' }, { status: 400 })
+    }
+
+    // Non-automated states: queue for manual review instead of rejecting.
+    if (!AUTOMATED_STATES.has(state)) {
+      const isKnownState = MANUAL_REVIEW_STATES.has(state)
+      return NextResponse.json({
+        ok: true,
+        status: 'PENDING_MANUAL_REVIEW',
+        source: isKnownState ? `${state}_MANUAL_REVIEW` : 'MANUAL_REVIEW',
+        profession,
+        licenseNumber,
+        state,
+        message: isKnownState
+          ? `Automated verification is not yet available for ${state}. Your license will be reviewed manually within 2 business days.`
+          : `Automated verification is not yet available for your state. Your license will be reviewed manually within 2 business days.`,
+      })
+    }
+
+    if (licenseNumber.length < 4) {
       return NextResponse.json({ ok: false, error: 'Enter a valid license number.' }, { status: 400 })
     }
 

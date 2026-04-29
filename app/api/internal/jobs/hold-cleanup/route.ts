@@ -5,6 +5,7 @@
 //
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -49,6 +50,9 @@ async function runJob(req: Request) {
     where: {
       expiresAt: { lte: now },
     },
+  }).catch((err: unknown) => {
+    captureBookingException({ error: err, route: 'GET /api/internal/jobs/hold-cleanup', event: 'HOLD_SWEEP_ERROR' })
+    throw err
   })
 
   return jsonOk({

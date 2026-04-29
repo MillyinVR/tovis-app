@@ -341,6 +341,8 @@ describe('createProBookingWithClient', () => {
       allowOutsideWorkingHours: true,
       allowShortNotice: true,
       allowFarFuture: false,
+      requestId: null,
+      idempotencyKey: null,
     })
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({

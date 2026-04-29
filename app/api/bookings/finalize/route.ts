@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 import {
   BookingSource,
   BookingStatus,
@@ -465,7 +466,7 @@ export async function POST(request: Request) {
       })
     }
 
-    console.error('POST /api/bookings/finalize error:', error)
+    captureBookingException({ error, route: 'POST /api/bookings/finalize' })
     return bookingJsonFail('INTERNAL_ERROR', {
       message: error instanceof Error ? error.message : 'Internal server error',
       userMessage: 'Internal server error',

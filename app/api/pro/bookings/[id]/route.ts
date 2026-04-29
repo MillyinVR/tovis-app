@@ -1,5 +1,6 @@
 // app/api/pro/bookings/[id]/route.ts
 import { prisma } from '@/lib/prisma'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 import {
   jsonFail,
   jsonOk,
@@ -290,6 +291,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     }
 
     console.error('GET /api/pro/bookings/[id] error:', error)
+    captureBookingException({ error, route: 'GET /api/pro/bookings/[id]' })
     return bookingJsonFail('INTERNAL_ERROR', {
       message: error instanceof Error ? error.message : 'Failed to load booking.',
       userMessage: 'Failed to load booking.',
@@ -466,6 +468,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
 
     console.error('PATCH /api/pro/bookings/[id] error:', error)
+    captureBookingException({ error, route: 'PATCH /api/pro/bookings/[id]' })
     return bookingJsonFail('INTERNAL_ERROR', {
       message:
         error instanceof Error ? error.message : 'Failed to update booking.',

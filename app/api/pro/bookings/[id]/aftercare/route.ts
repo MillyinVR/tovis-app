@@ -11,6 +11,7 @@ import {
 } from '@/lib/booking/errors'
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
 import { createAftercareAccessDelivery } from '@/lib/clientActions/createAftercareAccessDelivery'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -844,6 +845,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     }
 
     console.error('GET /api/pro/bookings/[id]/aftercare error', error)
+    captureBookingException({ error, route: 'GET /api/pro/bookings/[id]/aftercare' })
     return jsonFail(500, 'Internal server error.')
   }
 }
@@ -915,6 +917,7 @@ export async function POST(req: Request, ctx: Ctx) {
         timeZoneUsed: result.timeZoneUsed,
         clientTimeZoneReceived: parsedBody.value.clientTimeZoneReceived,
         bookingFinished: result.bookingFinished,
+        completionBlockers: result.completionBlockers,
         booking: result.booking
           ? {
               status: result.booking.status,
@@ -936,6 +939,7 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     console.error('POST /api/pro/bookings/[id]/aftercare error', error)
+    captureBookingException({ error, route: 'POST /api/pro/bookings/[id]/aftercare' })
     return jsonFail(500, 'Internal server error.')
   }
 }

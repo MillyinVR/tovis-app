@@ -221,6 +221,7 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
 const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   booking_request_created: 'Review booking request',
   booking_confirmed: 'View booking',
+  booking_started: 'View booking',
   booking_rescheduled: 'View updated booking',
   booking_cancelled_by_client: 'View cancellation',
   booking_cancelled_by_pro: 'View cancellation',
@@ -244,6 +245,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   booking_confirmed: buildStandardTemplateRenderer(
     templateCtaLabels.booking_confirmed,
+  ),
+  booking_started: buildStandardTemplateRenderer(
+    templateCtaLabels.booking_started,
   ),
   booking_rescheduled: buildStandardTemplateRenderer(
     templateCtaLabels.booking_rescheduled,

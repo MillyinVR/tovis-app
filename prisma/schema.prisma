@@ -1065,6 +1065,10 @@ model ProfessionalProfile {
   mobileRadiusMiles    Int?
   mobileBasePostalCode String?
 
+  // Incremented whenever location/hours/offering config is published.
+  // Availability caches can use this to detect stale entries.
+  scheduleConfigVersion Int @default(0)
+
   // Relationships
   user           User                          @relation(fields: [userId], references: [id])
   locations      ProfessionalLocation[]

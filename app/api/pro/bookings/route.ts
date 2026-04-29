@@ -2,6 +2,7 @@
 import { Prisma } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
 import {
   getBookingFailPayload,
@@ -225,6 +226,7 @@ export async function POST(req: Request) {
     }
 
     console.error('POST /api/pro/bookings error', error)
+    captureBookingException({ error, route: 'POST /api/pro/bookings' })
     return bookingJsonFail('INTERNAL_ERROR', {
       message:
         error instanceof Error ? error.message : 'Failed to create booking.',
