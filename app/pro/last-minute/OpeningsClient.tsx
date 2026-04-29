@@ -1,28 +1,53 @@
 // app/pro/last-minute/OpeningsClient.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { getZonedParts, isValidIanaTimeZone, sanitizeTimeZone, zonedTimeToUtc } from '@/lib/timeZone'
-import { safeJsonRecord, readErrorMessage } from '@/lib/http'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
+
+import {
+  getZonedParts,
+  isValidIanaTimeZone,
+  sanitizeTimeZone,
+  zonedTimeToUtc,
+} from '@/lib/timeZone'
+import { readErrorMessage, safeJsonRecord } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
 
-type OfferingLite = {
+export type OfferingLite = {
   id: string
   serviceId: string
   name: string
   basePrice: string
 }
 
+export type LastMinuteOpeningsView = 'combined' | 'create' | 'list'
+
 type Props = {
   offerings: OfferingLite[]
+  view?: LastMinuteOpeningsView
+  onCreated?: () => void
 }
 
 type LocationType = 'SALON' | 'MOBILE'
-type VisibilityMode = 'TARGETED_ONLY' | 'PUBLIC_AT_DISCOVERY' | 'PUBLIC_IMMEDIATE'
+type VisibilityMode =
+  | 'TARGETED_ONLY'
+  | 'PUBLIC_AT_DISCOVERY'
+  | 'PUBLIC_IMMEDIATE'
 type Tier = 'WAITLIST' | 'REACTIVATION' | 'DISCOVERY'
-type OfferType = 'NONE' | 'PERCENT_OFF' | 'AMOUNT_OFF' | 'FREE_SERVICE' | 'FREE_ADD_ON'
+type OfferType =
+  | 'NONE'
+  | 'PERCENT_OFF'
+  | 'AMOUNT_OFF'
+  | 'FREE_SERVICE'
+  | 'FREE_ADD_ON'
 
 type TierPlanFormState = {
   tier: Tier
@@ -71,7 +96,10 @@ type TierPlanRow = {
   percentOff: number | null
   amountOff: string | null
   freeAddOnServiceId: string | null
-  freeAddOnService: { id: string; name: string } | null
+  freeAddOnService: {
+    id: string
+    name: string
+  } | null
   createdAt: string
   updatedAt: string
 }
@@ -109,147 +137,401 @@ type OpeningRow = {
   tierPlans: TierPlanRow[]
 }
 
+type Option<Value extends string> = {
+  value: Value
+  label: string
+}
+
+type TierPlanRequest =
+  | {
+      tier: Tier
+      offerType: 'NONE'
+    }
+  | {
+      tier: Tier
+      offerType: 'PERCENT_OFF'
+      percentOff: number
+    }
+  | {
+      tier: Tier
+      offerType: 'AMOUNT_OFF'
+      amountOff: string
+    }
+  | {
+      tier: Tier
+      offerType: 'FREE_SERVICE'
+    }
+  | {
+      tier: Tier
+      offerType: 'FREE_ADD_ON'
+      freeAddOnServiceId: string
+    }
+
+type LastMinuteOpeningsContextValue = {
+  offerings: OfferingLite[]
+  timeZone: string
+  items: OpeningRow[]
+  loading: boolean
+  busy: boolean
+  error: string | null
+  selectedOfferingIds: string[]
+  selectedOfferingCountLabel: string
+  locationType: LocationType
+  visibilityMode: VisibilityMode
+  startAtLocal: string
+  endAtLocal: string
+  useEndAt: boolean
+  note: string
+  tierPlans: TierPlanFormState[]
+  canCreateOpening: boolean
+  loadOpenings: () => Promise<void>
+  createOpening: () => Promise<void>
+  cancelOpening: (openingId: string) => Promise<void>
+  toggleOffering: (offeringId: string) => void
+  setLocationType: (value: LocationType) => void
+  setVisibilityMode: (value: VisibilityMode) => void
+  setStartAtLocal: (value: string) => void
+  setEndAtLocal: (value: string) => void
+  setUseEndAt: (value: boolean) => void
+  setNote: (value: string) => void
+  updateTierPlan: (tier: Tier, patch: Partial<TierPlanFormState>) => void
+}
+
+type LastMinuteOpeningsProviderProps = {
+  offerings: OfferingLite[]
+  onCreated?: () => void
+  children: ReactNode
+}
+
+const OPENINGS_LIST_ENDPOINT = '/api/pro/openings?hours=48&take=100'
+const OPENINGS_MUTATION_ENDPOINT = '/api/pro/openings'
+
 const DEFAULT_VISIBILITY_MODE: VisibilityMode = 'PUBLIC_AT_DISCOVERY'
 const DEFAULT_LOCATION_TYPE: LocationType = 'SALON'
 
-const INITIAL_TIER_PLANS: TierPlanFormState[] = [
+const TIERS: ReadonlyArray<Tier> = [
+  'WAITLIST',
+  'REACTIVATION',
+  'DISCOVERY',
+]
+
+const LOCATION_OPTIONS: ReadonlyArray<Option<LocationType>> = [
   {
-    tier: 'WAITLIST',
-    offerType: 'NONE',
-    percentOff: '',
-    amountOff: '',
-    freeAddOnServiceId: '',
+    value: 'SALON',
+    label: 'Salon',
   },
   {
-    tier: 'REACTIVATION',
-    offerType: 'NONE',
-    percentOff: '',
-    amountOff: '',
-    freeAddOnServiceId: '',
-  },
-  {
-    tier: 'DISCOVERY',
-    offerType: 'NONE',
-    percentOff: '',
-    amountOff: '',
-    freeAddOnServiceId: '',
+    value: 'MOBILE',
+    label: 'Mobile',
   },
 ]
 
+const VISIBILITY_OPTIONS: ReadonlyArray<Option<VisibilityMode>> = [
+  {
+    value: 'TARGETED_ONLY',
+    label: 'Targeted only',
+  },
+  {
+    value: 'PUBLIC_AT_DISCOVERY',
+    label: 'Public at discovery',
+  },
+  {
+    value: 'PUBLIC_IMMEDIATE',
+    label: 'Public immediately',
+  },
+]
+
+const OFFER_TYPE_OPTIONS: ReadonlyArray<Option<OfferType>> = [
+  {
+    value: 'NONE',
+    label: 'No incentive',
+  },
+  {
+    value: 'PERCENT_OFF',
+    label: 'Percent off',
+  },
+  {
+    value: 'AMOUNT_OFF',
+    label: 'Amount off',
+  },
+  {
+    value: 'FREE_SERVICE',
+    label: 'Free service',
+  },
+  {
+    value: 'FREE_ADD_ON',
+    label: 'Free add-on',
+  },
+]
+
+const LastMinuteOpeningsContext =
+  createContext<LastMinuteOpeningsContextValue | null>(null)
+
 function getBrowserTimeZone(): string {
   try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-    if (tz && isValidIanaTimeZone(tz)) return tz
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+    if (timeZone && isValidIanaTimeZone(timeZone)) {
+      return timeZone
+    }
   } catch {
-    // ignore
+    // Browser timezone detection is best-effort.
   }
+
   return 'UTC'
 }
 
+function buildInitialTierPlans(): TierPlanFormState[] {
+  return TIERS.map((tier) => ({
+    tier,
+    offerType: 'NONE',
+    percentOff: '',
+    amountOff: '',
+    freeAddOnServiceId: '',
+  }))
+}
+
 function parseDatetimeLocal(value: string) {
-  const m = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
-  if (!m) return null
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/,
+  )
 
-  const year = Number(m[1])
-  const month = Number(m[2])
-  const day = Number(m[3])
-  const hour = Number(m[4])
-  const minute = Number(m[5])
+  if (!match) {
+    return null
+  }
 
-  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
 
-  return { year, month, day, hour, minute }
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null
+  }
+
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null
+  }
+
+  return {
+    year,
+    month,
+    day,
+    hour,
+    minute,
+  }
 }
 
-function toDatetimeLocalFromIso(isoUtc: string, timeZone: string) {
-  const d = new Date(isoUtc)
-  if (Number.isNaN(d.getTime())) return ''
+function toDatetimeLocalFromIso(isoUtc: string, timeZone: string): string {
+  const date = new Date(isoUtc)
 
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-  const p = getZonedParts(d, tz)
-  const pad = (n: number) => String(n).padStart(2, '0')
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
 
-  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`
+  const safeTimeZone = sanitizeTimeZone(timeZone, 'UTC')
+  const parts = getZonedParts(date, safeTimeZone)
+  const pad = (value: number) => String(value).padStart(2, '0')
+
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(
+    parts.hour,
+  )}:${pad(parts.minute)}`
 }
 
-function datetimeLocalToIso(value: string, timeZone: string) {
+function datetimeLocalToIso(
+  value: string,
+  timeZone: string,
+): string | null {
   const parts = parseDatetimeLocal(value)
-  if (!parts) return null
 
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
-  const utc = zonedTimeToUtc({ ...parts, second: 0, timeZone: tz })
+  if (!parts) {
+    return null
+  }
+
+  const safeTimeZone = sanitizeTimeZone(timeZone, 'UTC')
+  const utc = zonedTimeToUtc({
+    ...parts,
+    second: 0,
+    timeZone: safeTimeZone,
+  })
+
   return Number.isNaN(utc.getTime()) ? null : utc.toISOString()
 }
 
-function prettyWhenInTimeZone(isoUtc: string, timeZone: string) {
-  const d = new Date(isoUtc)
-  if (Number.isNaN(d.getTime())) return 'Invalid date'
+function prettyWhenInTimeZone(isoUtc: string, timeZone: string): string {
+  const date = new Date(isoUtc)
 
-  const tz = sanitizeTimeZone(timeZone, 'UTC')
+  if (Number.isNaN(date.getTime())) {
+    return 'Invalid date'
+  }
+
+  const safeTimeZone = sanitizeTimeZone(timeZone, 'UTC')
+
   return new Intl.DateTimeFormat(undefined, {
-    timeZone: tz,
+    timeZone: safeTimeZone,
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(d)
+  }).format(date)
 }
 
-function asStringOrNull(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v : null
+function buildInitialStartAtLocal(timeZone: string): string {
+  const date = new Date()
+  date.setSeconds(0, 0)
+  date.setMinutes(0)
+  date.setHours(date.getHours() + 1)
+
+  return toDatetimeLocalFromIso(date.toISOString(), timeZone)
 }
 
-function asNumberOrNull(v: unknown): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
+function buildInitialEndAtLocal(timeZone: string): string {
+  const date = new Date()
+  date.setSeconds(0, 0)
+  date.setMinutes(0)
+  date.setHours(date.getHours() + 2)
+
+  return toDatetimeLocalFromIso(date.toISOString(), timeZone)
 }
 
-function readArrayField(data: Record<string, unknown> | null, key: string): unknown[] {
-  if (!data) return []
-  const v = data[key]
-  return Array.isArray(v) ? v : []
+function asStringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
 }
 
-function parseOpeningServiceRow(x: unknown): OpeningServiceRow | null {
-  if (!isRecord(x)) return null
+function asNumberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
 
-  const id = pickStringOrEmpty(x.id)
-  const openingId = pickStringOrEmpty(x.openingId)
-  const serviceId = pickStringOrEmpty(x.serviceId)
-  const offeringId = pickStringOrEmpty(x.offeringId)
-  const createdAt = pickStringOrEmpty(x.createdAt)
-  const sortOrder = asNumberOrNull(x.sortOrder)
+function nullableString(value: unknown): string | null {
+  return value === null || value === undefined ? null : asStringOrNull(value)
+}
 
-  if (!id || !openingId || !serviceId || !offeringId || !createdAt || sortOrder == null) {
+function readArrayField(
+  data: Record<string, unknown> | null,
+  key: string,
+): unknown[] {
+  if (!data) {
+    return []
+  }
+
+  const value = data[key]
+
+  return Array.isArray(value) ? value : []
+}
+
+function parseLocationType(value: string): LocationType | null {
+  if (value === 'SALON' || value === 'MOBILE') {
+    return value
+  }
+
+  return null
+}
+
+function parseVisibilityMode(value: string): VisibilityMode | null {
+  if (
+    value === 'TARGETED_ONLY' ||
+    value === 'PUBLIC_AT_DISCOVERY' ||
+    value === 'PUBLIC_IMMEDIATE'
+  ) {
+    return value
+  }
+
+  return null
+}
+
+function parseTier(value: string): Tier | null {
+  if (
+    value === 'WAITLIST' ||
+    value === 'REACTIVATION' ||
+    value === 'DISCOVERY'
+  ) {
+    return value
+  }
+
+  return null
+}
+
+function parseOfferType(value: string): OfferType | null {
+  if (
+    value === 'NONE' ||
+    value === 'PERCENT_OFF' ||
+    value === 'AMOUNT_OFF' ||
+    value === 'FREE_SERVICE' ||
+    value === 'FREE_ADD_ON'
+  ) {
+    return value
+  }
+
+  return null
+}
+
+function parseOpeningServiceRow(value: unknown): OpeningServiceRow | null {
+  if (!isRecord(value)) {
     return null
   }
 
-  if (!isRecord(x.service) || !isRecord(x.offering)) return null
+  const id = pickStringOrEmpty(value.id)
+  const openingId = pickStringOrEmpty(value.openingId)
+  const serviceId = pickStringOrEmpty(value.serviceId)
+  const offeringId = pickStringOrEmpty(value.offeringId)
+  const createdAt = pickStringOrEmpty(value.createdAt)
+  const sortOrder = asNumberOrNull(value.sortOrder)
 
-  const serviceName = asStringOrNull(x.service.name)
-  const serviceMinPrice = asStringOrNull(x.service.minPrice)
-  const serviceDefaultDurationMinutes = asNumberOrNull(x.service.defaultDurationMinutes)
-  const isAddOnEligible = typeof x.service.isAddOnEligible === 'boolean' ? x.service.isAddOnEligible : null
-  const addOnGroup = x.service.addOnGroup === null ? null : asStringOrNull(x.service.addOnGroup)
-
-  if (!serviceName || !serviceMinPrice || serviceDefaultDurationMinutes == null || isAddOnEligible == null) {
+  if (
+    !id ||
+    !openingId ||
+    !serviceId ||
+    !offeringId ||
+    !createdAt ||
+    sortOrder === null
+  ) {
     return null
   }
 
-  const offeringTitle = x.offering.title === null ? null : asStringOrNull(x.offering.title)
-  const offersInSalon = typeof x.offering.offersInSalon === 'boolean' ? x.offering.offersInSalon : null
-  const offersMobile = typeof x.offering.offersMobile === 'boolean' ? x.offering.offersMobile : null
-  const salonPriceStartingAt =
-    x.offering.salonPriceStartingAt === null ? null : asStringOrNull(x.offering.salonPriceStartingAt)
-  const salonDurationMinutes =
-    x.offering.salonDurationMinutes === null ? null : asNumberOrNull(x.offering.salonDurationMinutes)
-  const mobilePriceStartingAt =
-    x.offering.mobilePriceStartingAt === null ? null : asStringOrNull(x.offering.mobilePriceStartingAt)
-  const mobileDurationMinutes =
-    x.offering.mobileDurationMinutes === null ? null : asNumberOrNull(x.offering.mobileDurationMinutes)
+  const service = value.service
+  const offering = value.offering
 
-  if (offersInSalon == null || offersMobile == null) return null
+  if (!isRecord(service) || !isRecord(offering)) {
+    return null
+  }
+
+  const nestedServiceId = pickStringOrEmpty(service.id) || serviceId
+  const nestedOfferingId = pickStringOrEmpty(offering.id) || offeringId
+
+  const serviceName = asStringOrNull(service.name)
+  const serviceMinPrice = asStringOrNull(service.minPrice)
+  const serviceDefaultDurationMinutes = asNumberOrNull(
+    service.defaultDurationMinutes,
+  )
+  const isAddOnEligible =
+    typeof service.isAddOnEligible === 'boolean'
+      ? service.isAddOnEligible
+      : null
+  const addOnGroup = nullableString(service.addOnGroup)
+
+  if (
+    !serviceName ||
+    !serviceMinPrice ||
+    serviceDefaultDurationMinutes === null ||
+    isAddOnEligible === null
+  ) {
+    return null
+  }
+
+  const offersInSalon =
+    typeof offering.offersInSalon === 'boolean'
+      ? offering.offersInSalon
+      : null
+  const offersMobile =
+    typeof offering.offersMobile === 'boolean'
+      ? offering.offersMobile
+      : null
+
+  if (offersInSalon === null || offersMobile === null) {
+    return null
+  }
 
   return {
     id,
@@ -259,7 +541,7 @@ function parseOpeningServiceRow(x: unknown): OpeningServiceRow | null {
     sortOrder,
     createdAt,
     service: {
-      id: serviceId,
+      id: nestedServiceId,
       name: serviceName,
       minPrice: serviceMinPrice,
       defaultDurationMinutes: serviceDefaultDurationMinutes,
@@ -267,56 +549,60 @@ function parseOpeningServiceRow(x: unknown): OpeningServiceRow | null {
       addOnGroup,
     },
     offering: {
-      id: offeringId,
-      title: offeringTitle,
+      id: nestedOfferingId,
+      title: nullableString(offering.title),
       offersInSalon,
       offersMobile,
-      salonPriceStartingAt,
-      salonDurationMinutes,
-      mobilePriceStartingAt,
-      mobileDurationMinutes,
+      salonPriceStartingAt: nullableString(offering.salonPriceStartingAt),
+      salonDurationMinutes: asNumberOrNull(offering.salonDurationMinutes),
+      mobilePriceStartingAt: nullableString(offering.mobilePriceStartingAt),
+      mobileDurationMinutes: asNumberOrNull(offering.mobileDurationMinutes),
     },
   }
 }
 
-function isTier(value: string): value is Tier {
-  return value === 'WAITLIST' || value === 'REACTIVATION' || value === 'DISCOVERY'
-}
-
-function isOfferType(value: string): value is OfferType {
-  return (
-    value === 'NONE' ||
-    value === 'PERCENT_OFF' ||
-    value === 'AMOUNT_OFF' ||
-    value === 'FREE_SERVICE' ||
-    value === 'FREE_ADD_ON'
-  )
-}
-
-function parseTierPlanRow(x: unknown): TierPlanRow | null {
-  if (!isRecord(x)) return null
-
-  const id = pickStringOrEmpty(x.id)
-  const openingId = pickStringOrEmpty(x.openingId)
-  const tierRaw = pickStringOrEmpty(x.tier)
-  const scheduledFor = pickStringOrEmpty(x.scheduledFor)
-  const offerTypeRaw = pickStringOrEmpty(x.offerType)
-  const createdAt = pickStringOrEmpty(x.createdAt)
-  const updatedAt = pickStringOrEmpty(x.updatedAt)
-
-  if (!id || !openingId || !tierRaw || !scheduledFor || !offerTypeRaw || !createdAt || !updatedAt) {
+function parseTierPlanRow(value: unknown): TierPlanRow | null {
+  if (!isRecord(value)) {
     return null
   }
 
-  if (!isTier(tierRaw) || !isOfferType(offerTypeRaw)) return null
+  const id = pickStringOrEmpty(value.id)
+  const openingId = pickStringOrEmpty(value.openingId)
+  const tier = parseTier(pickStringOrEmpty(value.tier))
+  const scheduledFor = pickStringOrEmpty(value.scheduledFor)
+  const offerType = parseOfferType(pickStringOrEmpty(value.offerType))
+  const createdAt = pickStringOrEmpty(value.createdAt)
+  const updatedAt = pickStringOrEmpty(value.updatedAt)
+
+  if (
+    !id ||
+    !openingId ||
+    !tier ||
+    !scheduledFor ||
+    !offerType ||
+    !createdAt ||
+    !updatedAt
+  ) {
+    return null
+  }
 
   const freeAddOnService = (() => {
-    if (x.freeAddOnService === null || x.freeAddOnService === undefined) return null
-    if (!isRecord(x.freeAddOnService)) return null
+    const rawService = value.freeAddOnService
 
-    const serviceId = pickStringOrEmpty(x.freeAddOnService.id)
-    const serviceName = asStringOrNull(x.freeAddOnService.name)
-    if (!serviceId || !serviceName) return null
+    if (rawService === null || rawService === undefined) {
+      return null
+    }
+
+    if (!isRecord(rawService)) {
+      return null
+    }
+
+    const serviceId = pickStringOrEmpty(rawService.id)
+    const serviceName = asStringOrNull(rawService.name)
+
+    if (!serviceId || !serviceName) {
+      return null
+    }
 
     return {
       id: serviceId,
@@ -327,76 +613,88 @@ function parseTierPlanRow(x: unknown): TierPlanRow | null {
   return {
     id,
     openingId,
-    tier: tierRaw,
+    tier,
     scheduledFor,
-    processedAt: x.processedAt === null ? null : asStringOrNull(x.processedAt),
-    cancelledAt: x.cancelledAt === null ? null : asStringOrNull(x.cancelledAt),
-    lastError: x.lastError === null ? null : asStringOrNull(x.lastError),
-    offerType: offerTypeRaw,
-    percentOff: x.percentOff === null ? null : asNumberOrNull(x.percentOff),
-    amountOff: x.amountOff === null ? null : asStringOrNull(x.amountOff),
-    freeAddOnServiceId: x.freeAddOnServiceId === null ? null : asStringOrNull(x.freeAddOnServiceId),
+    processedAt: nullableString(value.processedAt),
+    cancelledAt: nullableString(value.cancelledAt),
+    lastError: nullableString(value.lastError),
+    offerType,
+    percentOff: asNumberOrNull(value.percentOff),
+    amountOff: nullableString(value.amountOff),
+    freeAddOnServiceId: nullableString(value.freeAddOnServiceId),
     freeAddOnService,
     createdAt,
     updatedAt,
   }
 }
 
-function parseOpeningRow(x: unknown): OpeningRow | null {
-  if (!isRecord(x)) return null
-
-  const id = pickStringOrEmpty(x.id)
-  const professionalId = pickStringOrEmpty(x.professionalId)
-  const status = pickStringOrEmpty(x.status)
-  const visibilityModeRaw = pickStringOrEmpty(x.visibilityMode)
-  const startAt = pickStringOrEmpty(x.startAt)
-  const locationTypeRaw = pickStringOrEmpty(x.locationType)
-  const locationId = pickStringOrEmpty(x.locationId)
-  const timeZone = pickStringOrEmpty(x.timeZone)
-  const recipientCount = asNumberOrNull(x.recipientCount)
-
-  if (!id || !professionalId || !status || !visibilityModeRaw || !startAt || !locationTypeRaw || !locationId || !timeZone) {
+function parseOpeningRow(value: unknown): OpeningRow | null {
+  if (!isRecord(value)) {
     return null
   }
 
+  const id = pickStringOrEmpty(value.id)
+  const professionalId = pickStringOrEmpty(value.professionalId)
+  const status = pickStringOrEmpty(value.status)
+  const visibilityMode = parseVisibilityMode(
+    pickStringOrEmpty(value.visibilityMode),
+  )
+  const startAt = pickStringOrEmpty(value.startAt)
+  const locationType = parseLocationType(pickStringOrEmpty(value.locationType))
+  const locationId = pickStringOrEmpty(value.locationId)
+  const timeZone = pickStringOrEmpty(value.timeZone)
+  const recipientCount = asNumberOrNull(value.recipientCount)
+
   if (
-    visibilityModeRaw !== 'TARGETED_ONLY' &&
-    visibilityModeRaw !== 'PUBLIC_AT_DISCOVERY' &&
-    visibilityModeRaw !== 'PUBLIC_IMMEDIATE'
+    !id ||
+    !professionalId ||
+    !status ||
+    !visibilityMode ||
+    !startAt ||
+    !locationType ||
+    !locationId ||
+    !timeZone ||
+    recipientCount === null
   ) {
     return null
   }
 
-  if (locationTypeRaw !== 'SALON' && locationTypeRaw !== 'MOBILE') return null
-  if (recipientCount == null) return null
-
   const location = (() => {
-    if (x.location === null || x.location === undefined) return null
-    if (!isRecord(x.location)) return null
+    const rawLocation = value.location
 
-    const locationInnerId = pickStringOrEmpty(x.location.id)
-    const type = pickStringOrEmpty(x.location.type)
-    if (!locationInnerId || !type) return null
+    if (rawLocation === null || rawLocation === undefined) {
+      return null
+    }
+
+    if (!isRecord(rawLocation)) {
+      return null
+    }
+
+    const innerLocationId = pickStringOrEmpty(rawLocation.id)
+    const type = pickStringOrEmpty(rawLocation.type)
+
+    if (!innerLocationId || !type) {
+      return null
+    }
 
     return {
-      id: locationInnerId,
+      id: innerLocationId,
       type,
-      name: x.location.name === null ? null : asStringOrNull(x.location.name),
-      city: x.location.city === null ? null : asStringOrNull(x.location.city),
-      state: x.location.state === null ? null : asStringOrNull(x.location.state),
-      formattedAddress:
-        x.location.formattedAddress === null ? null : asStringOrNull(x.location.formattedAddress),
-      timeZone: x.location.timeZone === null ? null : asStringOrNull(x.location.timeZone),
-      lat: x.location.lat === null ? null : asStringOrNull(x.location.lat),
-      lng: x.location.lng === null ? null : asStringOrNull(x.location.lng),
+      name: nullableString(rawLocation.name),
+      city: nullableString(rawLocation.city),
+      state: nullableString(rawLocation.state),
+      formattedAddress: nullableString(rawLocation.formattedAddress),
+      timeZone: nullableString(rawLocation.timeZone),
+      lat: nullableString(rawLocation.lat),
+      lng: nullableString(rawLocation.lng),
     }
   })()
 
-  const services = readArrayField(x, 'services')
+  const services = readArrayField(value, 'services')
     .map(parseOpeningServiceRow)
     .filter((row): row is OpeningServiceRow => row !== null)
 
-  const tierPlans = readArrayField(x, 'tierPlans')
+  const tierPlans = readArrayField(value, 'tierPlans')
     .map(parseTierPlanRow)
     .filter((row): row is TierPlanRow => row !== null)
 
@@ -404,17 +702,17 @@ function parseOpeningRow(x: unknown): OpeningRow | null {
     id,
     professionalId,
     status,
-    visibilityMode: visibilityModeRaw,
+    visibilityMode,
     startAt,
-    endAt: x.endAt === null ? null : asStringOrNull(x.endAt),
-    launchAt: x.launchAt === null ? null : asStringOrNull(x.launchAt),
-    expiresAt: x.expiresAt === null ? null : asStringOrNull(x.expiresAt),
-    publicVisibleFrom: x.publicVisibleFrom === null ? null : asStringOrNull(x.publicVisibleFrom),
-    publicVisibleUntil: x.publicVisibleUntil === null ? null : asStringOrNull(x.publicVisibleUntil),
-    bookedAt: x.bookedAt === null ? null : asStringOrNull(x.bookedAt),
-    cancelledAt: x.cancelledAt === null ? null : asStringOrNull(x.cancelledAt),
-    note: x.note === null ? null : asStringOrNull(x.note),
-    locationType: locationTypeRaw,
+    endAt: nullableString(value.endAt),
+    launchAt: nullableString(value.launchAt),
+    expiresAt: nullableString(value.expiresAt),
+    publicVisibleFrom: nullableString(value.publicVisibleFrom),
+    publicVisibleUntil: nullableString(value.publicVisibleUntil),
+    bookedAt: nullableString(value.bookedAt),
+    cancelledAt: nullableString(value.cancelledAt),
+    note: nullableString(value.note),
+    locationType,
     locationId,
     timeZone,
     recipientCount,
@@ -425,89 +723,208 @@ function parseOpeningRow(x: unknown): OpeningRow | null {
 }
 
 function tierLabel(tier: Tier): string {
-  if (tier === 'WAITLIST') return 'Tier 1 · Waitlist'
-  if (tier === 'REACTIVATION') return 'Tier 2 · Reactivation'
-  return 'Tier 3 · Discovery'
+  switch (tier) {
+    case 'WAITLIST':
+      return 'Tier 1 · Waitlist'
+    case 'REACTIVATION':
+      return 'Tier 2 · Reactivation'
+    case 'DISCOVERY':
+      return 'Tier 3 · Discovery'
+  }
+}
+
+function tierHint(tier: Tier): string {
+  switch (tier) {
+    case 'WAITLIST':
+      return 'Highest intent — recommended with no incentive.'
+    case 'REACTIVATION':
+      return 'Lapsed clients — use a gentle nudge if needed.'
+    case 'DISCOVERY':
+      return 'Broadest audience — use sparingly.'
+  }
 }
 
 function visibilityLabel(mode: VisibilityMode): string {
-  if (mode === 'TARGETED_ONLY') return 'Targeted only'
-  if (mode === 'PUBLIC_IMMEDIATE') return 'Public immediately'
-  return 'Public at discovery'
-}
-
-function offerTypeLabel(type: OfferType): string {
-  if (type === 'PERCENT_OFF') return 'Percent off'
-  if (type === 'AMOUNT_OFF') return 'Amount off'
-  if (type === 'FREE_SERVICE') return 'Free service'
-  if (type === 'FREE_ADD_ON') return 'Free add-on'
-  return 'No incentive'
+  switch (mode) {
+    case 'TARGETED_ONLY':
+      return 'Targeted only'
+    case 'PUBLIC_IMMEDIATE':
+      return 'Public immediately'
+    case 'PUBLIC_AT_DISCOVERY':
+      return 'Public at discovery'
+  }
 }
 
 function describeTierPlan(plan: TierPlanRow): string {
-  if (plan.offerType === 'PERCENT_OFF' && plan.percentOff != null) {
+  if (plan.offerType === 'PERCENT_OFF' && plan.percentOff !== null) {
     return `${plan.percentOff}% off`
   }
+
   if (plan.offerType === 'AMOUNT_OFF' && plan.amountOff) {
     return `$${plan.amountOff} off`
   }
+
   if (plan.offerType === 'FREE_SERVICE') {
     return 'Free service'
   }
+
   if (plan.offerType === 'FREE_ADD_ON') {
     return plan.freeAddOnService?.name || 'Free add-on'
   }
+
   return 'No incentive'
 }
 
-function buildInitialStartAtLocal(timeZone: string) {
-  const now = new Date()
-  now.setSeconds(0, 0)
-  now.setMinutes(0)
-  now.setHours(now.getHours() + 1)
-  return toDatetimeLocalFromIso(now.toISOString(), timeZone)
+function uniqueNonEmpty(values: string[]): string[] {
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter(Boolean)),
+  )
 }
 
-function buildInitialEndAtLocal(timeZone: string) {
-  const now = new Date()
-  now.setSeconds(0, 0)
-  now.setMinutes(0)
-  now.setHours(now.getHours() + 2)
-  return toDatetimeLocalFromIso(now.toISOString(), timeZone)
+function serviceSummary(opening: OpeningRow): string {
+  const names = uniqueNonEmpty(
+    opening.services.map((row) => row.service.name),
+  )
+
+  return names.length > 0 ? names.join(', ') : 'Services'
 }
 
-export default function OpeningsClient({ offerings }: Props) {
-  const router = useRouter()
+function locationSummary(opening: OpeningRow): string {
+  return (
+    opening.location?.name ||
+    opening.location?.formattedAddress ||
+    opening.locationType
+  )
+}
+
+function statusLabel(status: string): string {
+  return status.trim().toUpperCase() || 'UNKNOWN'
+}
+
+function sameStringArray(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((value, index) => value === right[index])
+}
+
+function reconcileSelectedOfferingIds(
+  selectedOfferingIds: string[],
+  offerings: OfferingLite[],
+): string[] {
+  const validOfferingIds = new Set(offerings.map((offering) => offering.id))
+  const nextSelectedOfferingIds = selectedOfferingIds.filter((id) =>
+    validOfferingIds.has(id),
+  )
+
+  if (nextSelectedOfferingIds.length > 0) {
+    return nextSelectedOfferingIds
+  }
+
+  const firstOfferingId = offerings[0]?.id
+
+  return firstOfferingId ? [firstOfferingId] : []
+}
+
+function buildTierPlanRequest(plan: TierPlanFormState): TierPlanRequest {
+  switch (plan.offerType) {
+    case 'PERCENT_OFF': {
+      const percentOff = Number(plan.percentOff)
+
+      if (!Number.isFinite(percentOff)) {
+        throw new Error(`${tierLabel(plan.tier)} needs a valid percent-off value.`)
+      }
+
+      return {
+        tier: plan.tier,
+        offerType: 'PERCENT_OFF',
+        percentOff: Math.trunc(percentOff),
+      }
+    }
+
+    case 'AMOUNT_OFF': {
+      const amountOff = plan.amountOff.trim()
+
+      if (!amountOff) {
+        throw new Error(`${tierLabel(plan.tier)} needs an amount-off value.`)
+      }
+
+      return {
+        tier: plan.tier,
+        offerType: 'AMOUNT_OFF',
+        amountOff,
+      }
+    }
+
+    case 'FREE_SERVICE':
+      return {
+        tier: plan.tier,
+        offerType: 'FREE_SERVICE',
+      }
+
+    case 'FREE_ADD_ON': {
+      const freeAddOnServiceId = plan.freeAddOnServiceId.trim()
+
+      if (!freeAddOnServiceId) {
+        throw new Error(`${tierLabel(plan.tier)} needs a free add-on service.`)
+      }
+
+      return {
+        tier: plan.tier,
+        offerType: 'FREE_ADD_ON',
+        freeAddOnServiceId,
+      }
+    }
+
+    case 'NONE':
+      return {
+        tier: plan.tier,
+        offerType: 'NONE',
+      }
+  }
+}
+
+function useLastMinuteOpeningsController({
+  offerings,
+  onCreated,
+}: {
+  offerings: OfferingLite[]
+  onCreated?: () => void
+}): LastMinuteOpeningsContextValue {
   const timeZone = useMemo(() => getBrowserTimeZone(), [])
 
   const [items, setItems] = useState<OpeningRow[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const [selectedOfferingIds, setSelectedOfferingIds] = useState<string[]>(() =>
-    offerings[0]?.id ? [offerings[0].id] : [],
+  const [selectedOfferingIds, setSelectedOfferingIds] = useState<string[]>(
+    () => reconcileSelectedOfferingIds([], offerings),
   )
-  const [locationType, setLocationType] = useState<LocationType>(DEFAULT_LOCATION_TYPE)
-  const [visibilityMode, setVisibilityMode] = useState<VisibilityMode>(DEFAULT_VISIBILITY_MODE)
-  const [startAtLocal, setStartAtLocal] = useState(() => buildInitialStartAtLocal(timeZone))
-  const [endAtLocal, setEndAtLocal] = useState(() => buildInitialEndAtLocal(timeZone))
+  const [locationType, setLocationType] =
+    useState<LocationType>(DEFAULT_LOCATION_TYPE)
+  const [visibilityMode, setVisibilityMode] = useState<VisibilityMode>(
+    DEFAULT_VISIBILITY_MODE,
+  )
+  const [startAtLocal, setStartAtLocal] = useState(() =>
+    buildInitialStartAtLocal(timeZone),
+  )
+  const [endAtLocal, setEndAtLocal] = useState(() =>
+    buildInitialEndAtLocal(timeZone),
+  )
   const [useEndAt, setUseEndAt] = useState(true)
   const [note, setNote] = useState('')
-  const [tierPlans, setTierPlans] = useState<TierPlanFormState[]>(INITIAL_TIER_PLANS)
+  const [tierPlans, setTierPlans] = useState<TierPlanFormState[]>(() =>
+    buildInitialTierPlans(),
+  )
 
   useEffect(() => {
-    if (selectedOfferingIds.length === 0 && offerings[0]?.id) {
-      setSelectedOfferingIds([offerings[0].id])
-    }
-  }, [offerings, selectedOfferingIds])
+    setSelectedOfferingIds((current) => {
+      const next = reconcileSelectedOfferingIds(current, offerings)
 
-  const offeringLabelById = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const offering of offerings) {
-      map.set(offering.id, `${offering.name} · $${offering.basePrice}`)
-    }
-    return map
+      return sameStringArray(current, next) ? current : next
+    })
   }, [offerings])
 
   const selectedOfferingCountLabel =
@@ -515,148 +932,127 @@ export default function OpeningsClient({ offerings }: Props) {
       ? '1 offering selected'
       : `${selectedOfferingIds.length} offerings selected`
 
-  async function loadOpenings() {
+  const canCreateOpening = offerings.length > 0 && selectedOfferingIds.length > 0
+
+  const loadOpenings = useCallback(async () => {
     setLoading(true)
-    setErr(null)
+    setError(null)
 
     try {
-      const res = await fetch('/api/pro/openings?hours=48&take=100', { cache: 'no-store' })
-      const data = await safeJsonRecord(res)
+      const response = await fetch(OPENINGS_LIST_ENDPOINT, {
+        cache: 'no-store',
+      })
+      const data = await safeJsonRecord(response)
 
-      if (!res.ok) {
-        throw new Error(readErrorMessage(data) ?? 'Failed to load openings.')
+      if (!response.ok) {
+        throw new Error(
+          readErrorMessage(data) ?? 'Failed to load openings.',
+        )
       }
 
-      const list = readArrayField(data, 'openings')
+      const openings = readArrayField(data, 'openings')
         .map(parseOpeningRow)
         .filter((row): row is OpeningRow => row !== null)
+        .sort(
+          (left, right) =>
+            new Date(left.startAt).getTime() -
+            new Date(right.startAt).getTime(),
+        )
 
-      list.sort((a, b) => +new Date(a.startAt) - +new Date(b.startAt))
-      setItems(list)
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Failed to load openings.')
+      setItems(openings)
+    } catch (caughtError: unknown) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Failed to load openings.',
+      )
       setItems([])
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     void loadOpenings()
+  }, [loadOpenings])
+
+  const toggleOffering = useCallback((offeringId: string) => {
+    setSelectedOfferingIds((current) =>
+      current.includes(offeringId)
+        ? current.filter((id) => id !== offeringId)
+        : [...current, offeringId],
+    )
   }, [])
 
-  function toggleOffering(offeringId: string) {
-    setSelectedOfferingIds((prev) =>
-      prev.includes(offeringId) ? prev.filter((id) => id !== offeringId) : [...prev, offeringId],
-    )
-  }
+  const updateTierPlan = useCallback(
+    (tier: Tier, patch: Partial<TierPlanFormState>) => {
+      setTierPlans((current) =>
+        current.map((plan) =>
+          plan.tier === tier
+            ? {
+                ...plan,
+                ...patch,
+              }
+            : plan,
+        ),
+      )
+    },
+    [],
+  )
 
-  function updateTierPlan(
-    tier: Tier,
-    patch: Partial<TierPlanFormState>,
-  ) {
-    setTierPlans((prev) =>
-      prev.map((plan) =>
-        plan.tier === tier
-          ? {
-              ...plan,
-              ...patch,
-            }
-          : plan,
-      ),
-    )
-  }
-
-  function resetCreateForm() {
-    setSelectedOfferingIds(offerings[0]?.id ? [offerings[0].id] : [])
+  const resetCreateForm = useCallback(() => {
+    setSelectedOfferingIds(reconcileSelectedOfferingIds([], offerings))
     setLocationType(DEFAULT_LOCATION_TYPE)
     setVisibilityMode(DEFAULT_VISIBILITY_MODE)
     setStartAtLocal(buildInitialStartAtLocal(timeZone))
     setEndAtLocal(buildInitialEndAtLocal(timeZone))
     setUseEndAt(true)
     setNote('')
-    setTierPlans(INITIAL_TIER_PLANS)
-  }
+    setTierPlans(buildInitialTierPlans())
+  }, [offerings, timeZone])
 
-  async function createOpening() {
-    if (busy) return
+  const createOpening = useCallback(async () => {
+    if (busy) {
+      return
+    }
+
     setBusy(true)
-    setErr(null)
+    setError(null)
 
     try {
       if (selectedOfferingIds.length === 0) {
         throw new Error('Select at least one offering.')
       }
 
-      const startIso = datetimeLocalToIso(startAtLocal, timeZone)
-      if (!startIso) {
+      const startAt = datetimeLocalToIso(startAtLocal, timeZone)
+
+      if (!startAt) {
         throw new Error('Start time is invalid.')
       }
 
-      let endIso: string | null = null
-      if (useEndAt) {
-        endIso = datetimeLocalToIso(endAtLocal, timeZone)
-        if (!endIso) {
-          throw new Error('End time is invalid.')
-        }
-        if (+new Date(endIso) <= +new Date(startIso)) {
-          throw new Error('End must be after start.')
-        }
+      const endAt = useEndAt
+        ? datetimeLocalToIso(endAtLocal, timeZone)
+        : null
+
+      if (useEndAt && !endAt) {
+        throw new Error('End time is invalid.')
       }
 
-      const requestTierPlans = tierPlans.map((plan) => {
-        if (plan.offerType === 'PERCENT_OFF') {
-          const percentOff = Number(plan.percentOff)
-          if (!Number.isFinite(percentOff)) {
-            throw new Error(`${tierLabel(plan.tier)} needs a valid percent-off value.`)
-          }
+      if (endAt && new Date(endAt).getTime() <= new Date(startAt).getTime()) {
+        throw new Error('End must be after start.')
+      }
 
-          return {
-            tier: plan.tier,
-            offerType: plan.offerType,
-            percentOff: Math.trunc(percentOff),
-          }
-        }
+      const requestTierPlans = tierPlans.map(buildTierPlanRequest)
 
-        if (plan.offerType === 'AMOUNT_OFF') {
-          const amountOff = plan.amountOff.trim()
-          if (!amountOff) {
-            throw new Error(`${tierLabel(plan.tier)} needs an amount-off value.`)
-          }
-
-          return {
-            tier: plan.tier,
-            offerType: plan.offerType,
-            amountOff,
-          }
-        }
-
-        if (plan.offerType === 'FREE_ADD_ON') {
-          const freeAddOnServiceId = plan.freeAddOnServiceId.trim()
-          if (!freeAddOnServiceId) {
-            throw new Error(`${tierLabel(plan.tier)} needs a free add-on service id.`)
-          }
-
-          return {
-            tier: plan.tier,
-            offerType: plan.offerType,
-            freeAddOnServiceId,
-          }
-        }
-
-        return {
-          tier: plan.tier,
-          offerType: plan.offerType,
-        }
-      })
-
-      const res = await fetch('/api/pro/openings', {
+      const response = await fetch(OPENINGS_MUTATION_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           offeringIds: selectedOfferingIds,
-          startAt: startIso,
-          endAt: useEndAt ? endIso : null,
+          startAt,
+          endAt,
           locationType,
           visibilityMode,
           note: note.trim() || null,
@@ -664,407 +1060,662 @@ export default function OpeningsClient({ offerings }: Props) {
         }),
       })
 
-      const data = await safeJsonRecord(res)
-      if (!res.ok) {
-        throw new Error(readErrorMessage(data) ?? 'Failed to create opening.')
+      const data = await safeJsonRecord(response)
+
+      if (!response.ok) {
+        throw new Error(
+          readErrorMessage(data) ?? 'Failed to create opening.',
+        )
       }
 
       resetCreateForm()
       await loadOpenings()
-      router.refresh()
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Failed to create opening.')
+      onCreated?.()
+    } catch (caughtError: unknown) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Failed to create opening.',
+      )
     } finally {
       setBusy(false)
     }
-  }
+  }, [
+    busy,
+    selectedOfferingIds,
+    startAtLocal,
+    timeZone,
+    useEndAt,
+    endAtLocal,
+    tierPlans,
+    locationType,
+    visibilityMode,
+    note,
+    resetCreateForm,
+    loadOpenings,
+    onCreated,
+  ])
 
-  async function cancelOpening(openingId: string) {
-    if (busy) return
-    setBusy(true)
-    setErr(null)
-
-    try {
-      const res = await fetch(`/api/pro/openings?id=${encodeURIComponent(openingId)}`, {
-        method: 'DELETE',
-      })
-      const data = await safeJsonRecord(res)
-
-      if (!res.ok) {
-        throw new Error(readErrorMessage(data) ?? 'Failed to cancel opening.')
+  const cancelOpening = useCallback(
+    async (openingId: string) => {
+      if (busy) {
+        return
       }
 
-      await loadOpenings()
-      router.refresh()
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Failed to cancel opening.')
-    } finally {
-      setBusy(false)
-    }
+      setBusy(true)
+      setError(null)
+
+      try {
+        const response = await fetch(
+          `${OPENINGS_MUTATION_ENDPOINT}?id=${encodeURIComponent(openingId)}`,
+          {
+            method: 'DELETE',
+          },
+        )
+        const data = await safeJsonRecord(response)
+
+        if (!response.ok) {
+          throw new Error(
+            readErrorMessage(data) ?? 'Failed to cancel opening.',
+          )
+        }
+
+        await loadOpenings()
+      } catch (caughtError: unknown) {
+        setError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : 'Failed to cancel opening.',
+        )
+      } finally {
+        setBusy(false)
+      }
+    },
+    [busy, loadOpenings],
+  )
+
+  return useMemo(
+    () => ({
+      offerings,
+      timeZone,
+      items,
+      loading,
+      busy,
+      error,
+      selectedOfferingIds,
+      selectedOfferingCountLabel,
+      locationType,
+      visibilityMode,
+      startAtLocal,
+      endAtLocal,
+      useEndAt,
+      note,
+      tierPlans,
+      canCreateOpening,
+      loadOpenings,
+      createOpening,
+      cancelOpening,
+      toggleOffering,
+      setLocationType,
+      setVisibilityMode,
+      setStartAtLocal,
+      setEndAtLocal,
+      setUseEndAt,
+      setNote,
+      updateTierPlan,
+    }),
+    [
+      offerings,
+      timeZone,
+      items,
+      loading,
+      busy,
+      error,
+      selectedOfferingIds,
+      selectedOfferingCountLabel,
+      locationType,
+      visibilityMode,
+      startAtLocal,
+      endAtLocal,
+      useEndAt,
+      note,
+      tierPlans,
+      canCreateOpening,
+      loadOpenings,
+      createOpening,
+      cancelOpening,
+      toggleOffering,
+      updateTierPlan,
+    ],
+  )
+}
+
+function useLastMinuteOpenings(): LastMinuteOpeningsContextValue {
+  const context = useContext(LastMinuteOpeningsContext)
+
+  if (!context) {
+    throw new Error(
+      'Last Minute openings components must be used inside LastMinuteOpeningsProvider.',
+    )
   }
 
-  const card = 'tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4'
-  const label = 'text-[12px] font-black text-textPrimary'
-  const hint = 'text-[12px] font-semibold text-textSecondary'
-  const field =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40 disabled:opacity-60'
-  const btnPrimary =
-    'rounded-full border border-accentPrimary/60 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60'
-  const btnGhost =
-    'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass disabled:opacity-60'
-  const btnDanger =
-    'rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-toneDanger hover:bg-surfaceGlass disabled:opacity-60'
-  const subCard = 'rounded-card border border-white/10 bg-bgPrimary p-3'
+  return context
+}
+
+export function LastMinuteOpeningsProvider({
+  offerings,
+  onCreated,
+  children,
+}: LastMinuteOpeningsProviderProps) {
+  const value = useLastMinuteOpeningsController({
+    offerings,
+    onCreated,
+  })
 
   return (
-    <div className="grid gap-3">
-      <section className={card}>
-        <div className="text-[14px] font-black text-textPrimary">Create a last-minute opening</div>
-        <div className={`${hint} mt-1`}>
-          Build the slot once, then let waitlist, reactivation, and discovery roll out automatically.
+    <LastMinuteOpeningsContext.Provider value={value}>
+      {children}
+    </LastMinuteOpeningsContext.Provider>
+  )
+}
+
+function OpeningErrorMessage() {
+  const { error } = useLastMinuteOpenings()
+
+  if (!error) {
+    return null
+  }
+
+  return (
+    <div className="lm-opening-error" role="alert">
+      {error}
+    </div>
+  )
+}
+
+function FieldCaption({ children }: { children: ReactNode }) {
+  return <div className="lm-opening-field-caption">{children}</div>
+}
+
+function FieldLabel({ children }: { children: ReactNode }) {
+  return <span className="lm-opening-field-label">{children}</span>
+}
+
+function TierPlanEditor({ plan }: { plan: TierPlanFormState }) {
+  const { busy, updateTierPlan } = useLastMinuteOpenings()
+
+  return (
+    <div className="lm-tier-plan-editor">
+      <div className="lm-tier-plan-editor-header">
+        <div className="lm-tier-plan-copy">
+          <div className="lm-tier-plan-title">{tierLabel(plan.tier)}</div>
+          <div className="lm-tier-plan-hint">{tierHint(plan.tier)}</div>
         </div>
 
-        <div className="mt-4 grid gap-4">
-          <div className="grid gap-2">
-            <div className={label}>Offerings</div>
-            <div className={`${hint}`}>{selectedOfferingCountLabel}</div>
+        <label className="lm-opening-select-wrap">
+          <FieldLabel>Incentive</FieldLabel>
+          <select
+            value={plan.offerType}
+            disabled={busy}
+            className="lm-opening-field"
+            onChange={(event) => {
+              const next = parseOfferType(event.currentTarget.value)
 
-            <div className="grid gap-2">
-              {offerings.length === 0 ? (
-                <div className={hint}>No active offerings available.</div>
-              ) : (
-                offerings.map((offering) => {
-                  const checked = selectedOfferingIds.includes(offering.id)
-                  return (
-                    <label
-                      key={offering.id}
-                      className={`${subCard} flex items-center justify-between gap-3 cursor-pointer`}
-                    >
-                      <div className="min-w-0">
-                        <div className="text-[13px] font-black text-textPrimary truncate">{offering.name}</div>
-                        <div className={hint}>Starting at ${offering.basePrice}</div>
-                      </div>
+              if (!next) {
+                return
+              }
 
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={busy}
-                        onChange={() => toggleOffering(offering.id)}
-                        className="accent-accentPrimary"
-                      />
-                    </label>
-                  )
+              updateTierPlan(plan.tier, {
+                offerType: next,
+                percentOff: '',
+                amountOff: '',
+                freeAddOnServiceId: '',
+              })
+            }}
+          >
+            {OFFER_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {plan.offerType === 'PERCENT_OFF' ? (
+        <label className="lm-opening-field-group">
+          <FieldLabel>Percent off</FieldLabel>
+          <input
+            value={plan.percentOff}
+            disabled={busy}
+            inputMode="numeric"
+            placeholder="e.g. 10"
+            className="lm-opening-field"
+            onChange={(event) =>
+              updateTierPlan(plan.tier, {
+                percentOff: event.currentTarget.value,
+              })
+            }
+          />
+        </label>
+      ) : null}
+
+      {plan.offerType === 'AMOUNT_OFF' ? (
+        <label className="lm-opening-field-group">
+          <FieldLabel>Amount off</FieldLabel>
+          <input
+            value={plan.amountOff}
+            disabled={busy}
+            inputMode="decimal"
+            placeholder="e.g. 20"
+            className="lm-opening-field"
+            onChange={(event) =>
+              updateTierPlan(plan.tier, {
+                amountOff: event.currentTarget.value,
+              })
+            }
+          />
+        </label>
+      ) : null}
+
+      {plan.offerType === 'FREE_ADD_ON' ? (
+        <div className="lm-opening-field-group">
+          <label className="lm-opening-field-group">
+            <FieldLabel>Free add-on service ID</FieldLabel>
+            <input
+              value={plan.freeAddOnServiceId}
+              disabled={busy}
+              placeholder="Paste add-on service ID"
+              className="lm-opening-field"
+              onChange={(event) =>
+                updateTierPlan(plan.tier, {
+                  freeAddOnServiceId: event.currentTarget.value,
                 })
-              )}
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="grid gap-2">
-              <span className={label}>Location type</span>
-              <select
-                value={locationType}
-                disabled={busy}
-                onChange={(e) => {
-                  const next = e.target.value
-                  if (next === 'SALON' || next === 'MOBILE') {
-                    setLocationType(next)
-                  }
-                }}
-                className={field}
-              >
-                <option value="SALON">Salon</option>
-                <option value="MOBILE">Mobile</option>
-              </select>
-            </label>
-
-            <label className="grid gap-2">
-              <span className={label}>Visibility</span>
-              <select
-                value={visibilityMode}
-                disabled={busy}
-                onChange={(e) => {
-                  const next = e.target.value
-                  if (
-                    next === 'TARGETED_ONLY' ||
-                    next === 'PUBLIC_AT_DISCOVERY' ||
-                    next === 'PUBLIC_IMMEDIATE'
-                  ) {
-                    setVisibilityMode(next)
-                  }
-                }}
-                className={field}
-              >
-                <option value="TARGETED_ONLY">Targeted only</option>
-                <option value="PUBLIC_AT_DISCOVERY">Public at discovery</option>
-                <option value="PUBLIC_IMMEDIATE">Public immediately</option>
-              </select>
-            </label>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="grid gap-2">
-              <span className={label}>Start</span>
-              <input
-                type="datetime-local"
-                value={startAtLocal}
-                disabled={busy}
-                onChange={(e) => setStartAtLocal(e.target.value)}
-                className={field}
-              />
-            </label>
-
-            <label className="grid gap-2">
-              <span className={label}>End {useEndAt ? '' : '(optional)'}</span>
-              <input
-                type="datetime-local"
-                value={endAtLocal}
-                disabled={busy || !useEndAt}
-                onChange={(e) => setEndAtLocal(e.target.value)}
-                className={[field, !useEndAt ? 'opacity-60' : ''].join(' ')}
-              />
-            </label>
-          </div>
-
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={useEndAt}
-              disabled={busy}
-              onChange={() => setUseEndAt((value) => !value)}
-              className="accent-accentPrimary"
-            />
-            <span className="text-[12px] font-semibold text-textPrimary">Include an end time</span>
-          </label>
-
-          <label className="grid gap-2">
-            <span className={label}>Note (optional)</span>
-            <input
-              value={note}
-              disabled={busy}
-              placeholder="e.g. Great for trims, touch-ups, or quick maintenance."
-              onChange={(e) => setNote(e.target.value)}
-              className={field}
+              }
             />
           </label>
 
-          <div className="grid gap-3">
-            <div>
-              <div className="text-[13px] font-black text-textPrimary">Tier plans</div>
-              <div className={`${hint} mt-1`}>
-                Waitlist goes first, then reactivation, then discovery. Launch timing is handled by the backend.
+          <FieldCaption>
+            This is still an ID field until the page payload includes eligible
+            add-on services.
+          </FieldCaption>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+export function LastMinuteCreateOpeningPanel() {
+  const {
+    offerings,
+    timeZone,
+    busy,
+    selectedOfferingIds,
+    selectedOfferingCountLabel,
+    locationType,
+    visibilityMode,
+    startAtLocal,
+    endAtLocal,
+    useEndAt,
+    note,
+    tierPlans,
+    canCreateOpening,
+    createOpening,
+    toggleOffering,
+    setLocationType,
+    setVisibilityMode,
+    setStartAtLocal,
+    setEndAtLocal,
+    setUseEndAt,
+    setNote,
+  } = useLastMinuteOpenings()
+
+  return (
+    <section
+      className="lm-opening-create-panel"
+      aria-label="Create a last-minute opening"
+    >
+      <div className="lm-opening-panel-header">
+        <div className="lm-opening-panel-title">
+          Create a last-minute opening
+        </div>
+        <p className="lm-opening-panel-copy">
+          Build the slot once, then let waitlist, reactivation, and discovery
+          roll out through the backend workflow.
+        </p>
+      </div>
+
+      <form
+        className="lm-opening-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void createOpening()
+        }}
+      >
+        <div className="lm-opening-form-section">
+          <div className="lm-opening-form-section-header">
+            <FieldLabel>Offerings</FieldLabel>
+            <FieldCaption>{selectedOfferingCountLabel}</FieldCaption>
+          </div>
+
+          <div className="lm-offering-option-list">
+            {offerings.length === 0 ? (
+              <div className="lm-opening-empty">
+                No active offerings available.
               </div>
-            </div>
+            ) : (
+              offerings.map((offering) => {
+                const checked = selectedOfferingIds.includes(offering.id)
 
-            {tierPlans.map((plan) => (
-              <div key={plan.tier} className={subCard}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-[13px] font-black text-textPrimary">{tierLabel(plan.tier)}</div>
-                    <div className={hint}>
-                      {plan.tier === 'WAITLIST'
-                        ? 'Recommended: no incentive.'
-                        : plan.tier === 'REACTIVATION'
-                          ? 'Use a gentle nudge if needed.'
-                          : 'This is your broadest audience.'}
-                    </div>
-                  </div>
+                return (
+                  <label
+                    key={offering.id}
+                    className="lm-offering-option"
+                    data-selected={checked ? 'true' : 'false'}
+                  >
+                    <span className="lm-offering-option-copy">
+                      <span className="lm-offering-option-name">
+                        {offering.name}
+                      </span>
+                      <span className="lm-offering-option-meta">
+                        Starting at ${offering.basePrice}
+                      </span>
+                    </span>
 
-                  <div className="min-w-[220px]">
-                    <select
-                      value={plan.offerType}
+                    <input
+                      type="checkbox"
+                      checked={checked}
                       disabled={busy}
-                      onChange={(e) => {
-                        const next = e.target.value
-                        if (
-                          next === 'NONE' ||
-                          next === 'PERCENT_OFF' ||
-                          next === 'AMOUNT_OFF' ||
-                          next === 'FREE_SERVICE' ||
-                          next === 'FREE_ADD_ON'
-                        ) {
-                          updateTierPlan(plan.tier, {
-                            offerType: next,
-                            percentOff: '',
-                            amountOff: '',
-                            freeAddOnServiceId: '',
-                          })
-                        }
-                      }}
-                      className={field}
-                    >
-                      <option value="NONE">No incentive</option>
-                      <option value="PERCENT_OFF">Percent off</option>
-                      <option value="AMOUNT_OFF">Amount off</option>
-                      <option value="FREE_SERVICE">Free service</option>
-                      <option value="FREE_ADD_ON">Free add-on</option>
-                    </select>
-                  </div>
-                </div>
+                      className="lm-opening-checkbox"
+                      onChange={() => toggleOffering(offering.id)}
+                    />
+                  </label>
+                )
+              })
+            )}
+          </div>
+        </div>
 
-                {plan.offerType === 'PERCENT_OFF' ? (
-                  <div className="mt-3">
-                    <label className="grid gap-2">
-                      <span className={label}>Percent off</span>
-                      <input
-                        value={plan.percentOff}
-                        disabled={busy}
-                        inputMode="numeric"
-                        placeholder="e.g. 10"
-                        onChange={(e) => updateTierPlan(plan.tier, { percentOff: e.target.value })}
-                        className={field}
-                      />
-                    </label>
-                  </div>
-                ) : null}
+        <div className="lm-opening-form-grid">
+          <label className="lm-opening-field-group">
+            <FieldLabel>Location type</FieldLabel>
+            <select
+              value={locationType}
+              disabled={busy}
+              className="lm-opening-field"
+              onChange={(event) => {
+                const next = parseLocationType(event.currentTarget.value)
 
-                {plan.offerType === 'AMOUNT_OFF' ? (
-                  <div className="mt-3">
-                    <label className="grid gap-2">
-                      <span className={label}>Amount off</span>
-                      <input
-                        value={plan.amountOff}
-                        disabled={busy}
-                        inputMode="decimal"
-                        placeholder="e.g. 20"
-                        onChange={(e) => updateTierPlan(plan.tier, { amountOff: e.target.value })}
-                        className={field}
-                      />
-                    </label>
-                  </div>
-                ) : null}
+                if (next) {
+                  setLocationType(next)
+                }
+              }}
+            >
+              {LOCATION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
 
-                {plan.offerType === 'FREE_ADD_ON' ? (
-                  <div className="mt-3 grid gap-2">
-                    <label className="grid gap-2">
-                      <span className={label}>Free add-on service id</span>
-                      <input
-                        value={plan.freeAddOnServiceId}
-                        disabled={busy}
-                        placeholder="Paste add-on service id"
-                        onChange={(e) =>
-                          updateTierPlan(plan.tier, { freeAddOnServiceId: e.target.value })
-                        }
-                        className={field}
-                      />
-                    </label>
-                    <div className={hint}>
-                      This file does not have add-on service options yet. We’ll wire the selector once page data includes them.
-                    </div>
-                  </div>
-                ) : null}
-              </div>
+          <label className="lm-opening-field-group">
+            <FieldLabel>Visibility</FieldLabel>
+            <select
+              value={visibilityMode}
+              disabled={busy}
+              className="lm-opening-field"
+              onChange={(event) => {
+                const next = parseVisibilityMode(event.currentTarget.value)
+
+                if (next) {
+                  setVisibilityMode(next)
+                }
+              }}
+            >
+              {VISIBILITY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="lm-opening-form-grid">
+          <label className="lm-opening-field-group">
+            <FieldLabel>Start</FieldLabel>
+            <input
+              type="datetime-local"
+              value={startAtLocal}
+              disabled={busy}
+              className="lm-opening-field"
+              onChange={(event) => setStartAtLocal(event.currentTarget.value)}
+            />
+          </label>
+
+          <label className="lm-opening-field-group">
+            <FieldLabel>End {useEndAt ? '' : '(optional)'}</FieldLabel>
+            <input
+              type="datetime-local"
+              value={endAtLocal}
+              disabled={busy || !useEndAt}
+              className="lm-opening-field"
+              data-muted={!useEndAt ? 'true' : 'false'}
+              onChange={(event) => setEndAtLocal(event.currentTarget.value)}
+            />
+          </label>
+        </div>
+
+        <label className="lm-opening-inline-check">
+          <input
+            type="checkbox"
+            checked={useEndAt}
+            disabled={busy}
+            className="lm-opening-checkbox"
+            onChange={() => setUseEndAt(!useEndAt)}
+          />
+          <span>Include an end time</span>
+        </label>
+
+        <label className="lm-opening-field-group">
+          <FieldLabel>Note optional</FieldLabel>
+          <input
+            value={note}
+            disabled={busy}
+            placeholder="e.g. Great for trims, touch-ups, or quick maintenance."
+            className="lm-opening-field"
+            onChange={(event) => setNote(event.currentTarget.value)}
+          />
+        </label>
+
+        <div className="lm-opening-form-section">
+          <div className="lm-opening-form-section-header">
+            <FieldLabel>Tier plans</FieldLabel>
+            <FieldCaption>
+              Waitlist goes first, then reactivation, then discovery. Launch
+              timing stays server-owned.
+            </FieldCaption>
+          </div>
+
+          <div className="lm-tier-plan-list">
+            {tierPlans.map((plan) => (
+              <TierPlanEditor key={plan.tier} plan={plan} />
             ))}
           </div>
+        </div>
 
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-[12px] font-semibold text-textSecondary">
-              Times entered in <span className="font-black">{sanitizeTimeZone(timeZone, 'UTC')}</span>
-            </div>
-
-            <button
-              type="button"
-              disabled={busy || offerings.length === 0}
-              onClick={createOpening}
-              className={btnPrimary}
-            >
-              {busy ? 'Working…' : 'Create opening'}
-            </button>
+        <div className="lm-opening-form-footer">
+          <div className="lm-opening-timezone-note">
+            Times entered in{' '}
+            <strong>{sanitizeTimeZone(timeZone, 'UTC')}</strong>
           </div>
 
-          {err ? <div className="text-[12px] font-black text-toneDanger">{err}</div> : null}
-        </div>
-      </section>
-
-      <section className={card}>
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="text-[14px] font-black text-textPrimary">Your openings</div>
-          <button type="button" disabled={loading || busy} onClick={loadOpenings} className={btnGhost}>
-            Refresh
+          <button
+            type="submit"
+            disabled={busy || !canCreateOpening}
+            className="lm-opening-button"
+            data-variant="primary"
+          >
+            {busy ? 'Working…' : 'Create opening'}
           </button>
         </div>
 
-        <div className={`${hint} mt-1`}>
-          Next 48 hours. Rollouts schedule automatically from the tier plan you saved on the opening.
-        </div>
+        <OpeningErrorMessage />
+      </form>
+    </section>
+  )
+}
 
-        <div className="mt-4 grid gap-3">
-          {loading ? (
-            <div className={hint}>Loading…</div>
-          ) : items.length === 0 ? (
-            <div className={hint}>No openings yet.</div>
-          ) : (
-            items.map((opening) => {
-              const when = prettyWhenInTimeZone(opening.startAt, opening.timeZone)
-              const locationLabel = opening.location?.name || opening.location?.formattedAddress || opening.locationType
-              const uniqueServiceNames = Array.from(
-                new Set(opening.services.map((row) => row.service.name).filter((name) => name.length > 0)),
-              )
-              const serviceSummary = uniqueServiceNames.length > 0 ? uniqueServiceNames.join(', ') : 'Services'
-              const status = String(opening.status || 'UNKNOWN').toUpperCase()
+function TierPlanChip({ plan, timeZone }: { plan: TierPlanRow; timeZone: string }) {
+  return (
+    <div className="lm-opening-tier-chip">
+      <div className="lm-opening-tier-chip-main">
+        <span className="lm-opening-tier-chip-title">
+          {tierLabel(plan.tier)}
+        </span>
+        <span className="lm-opening-tier-chip-time">
+          {prettyWhenInTimeZone(plan.scheduledFor, timeZone)}
+        </span>
+      </div>
 
-              return (
-                <div key={opening.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-black text-textPrimary">{serviceSummary}</div>
-                      <div className="text-[12px] font-semibold text-textSecondary">
-                        {when} · {sanitizeTimeZone(opening.timeZone, 'UTC')}
-                      </div>
-                      <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                        {opening.locationType} · {visibilityLabel(opening.visibilityMode)} · {locationLabel}
-                      </div>
-                    </div>
-
-                    <div className="text-right text-[12px] font-semibold text-textSecondary">
-                      <div>{status}</div>
-                      <div>{opening.recipientCount} recipients</div>
-                    </div>
-                  </div>
-
-                  {opening.note ? (
-                    <div className="mt-2 text-[12px] font-semibold text-textSecondary">{opening.note}</div>
-                  ) : null}
-
-                  <div className="mt-3 grid gap-2">
-                    {opening.tierPlans.map((plan) => (
-                      <div
-                        key={plan.id}
-                        className="rounded-xl border border-white/10 bg-bgSecondary/60 px-3 py-2 text-[12px] font-semibold text-textSecondary"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-black text-textPrimary">{tierLabel(plan.tier)}</span>
-                          <span>{prettyWhenInTimeZone(plan.scheduledFor, opening.timeZone)}</span>
-                        </div>
-
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                          <span>{describeTierPlan(plan)}</span>
-                          {plan.processedAt ? <span>· processed</span> : null}
-                          {plan.cancelledAt ? <span>· cancelled</span> : null}
-                          {plan.lastError ? <span className="text-toneDanger">· {plan.lastError}</span> : null}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-3 flex flex-wrap justify-end gap-2">
-                    <button
-                      type="button"
-                      disabled={busy || status !== 'ACTIVE'}
-                      onClick={() => cancelOpening(opening.id)}
-                      className={btnDanger}
-                    >
-                      Cancel opening
-                    </button>
-                  </div>
-                </div>
-              )
-            })
-          )}
-
-          {err ? <div className="text-[12px] font-black text-toneDanger">{err}</div> : null}
-        </div>
-      </section>
+      <div className="lm-opening-tier-chip-meta">
+        <span>{describeTierPlan(plan)}</span>
+        {plan.processedAt ? <span>Processed</span> : null}
+        {plan.cancelledAt ? <span>Cancelled</span> : null}
+        {plan.lastError ? (
+          <span className="lm-opening-tier-chip-error">{plan.lastError}</span>
+        ) : null}
+      </div>
     </div>
+  )
+}
+
+function OpeningCard({ opening }: { opening: OpeningRow }) {
+  const { busy, cancelOpening } = useLastMinuteOpenings()
+  const status = statusLabel(opening.status)
+  const isActive = status === 'ACTIVE'
+
+  return (
+    <article className="lm-opening-card">
+      <div className="lm-opening-card-header">
+        <div className="lm-opening-card-main">
+          <h3 className="lm-opening-card-title">{serviceSummary(opening)}</h3>
+
+          <div className="lm-opening-card-time">
+            {prettyWhenInTimeZone(opening.startAt, opening.timeZone)} ·{' '}
+            {sanitizeTimeZone(opening.timeZone, 'UTC')}
+          </div>
+
+          <div className="lm-opening-card-meta">
+            {opening.locationType} · {visibilityLabel(opening.visibilityMode)} ·{' '}
+            {locationSummary(opening)}
+          </div>
+        </div>
+
+        <div className="lm-opening-card-status">
+          <span className="lm-opening-status-pill">{status}</span>
+          <span>{opening.recipientCount} recipients</span>
+        </div>
+      </div>
+
+      {opening.note ? (
+        <p className="lm-opening-card-note">{opening.note}</p>
+      ) : null}
+
+      <div className="lm-opening-tier-chip-list">
+        {opening.tierPlans.map((plan) => (
+          <TierPlanChip
+            key={plan.id}
+            plan={plan}
+            timeZone={opening.timeZone}
+          />
+        ))}
+      </div>
+
+      <div className="lm-opening-card-actions">
+        <button
+          type="button"
+          disabled={busy || !isActive}
+          className="lm-opening-button"
+          data-variant="danger"
+          onClick={() => {
+            void cancelOpening(opening.id)
+          }}
+        >
+          Cancel opening
+        </button>
+      </div>
+    </article>
+  )
+}
+
+export function LastMinuteOpeningsListPanel() {
+  const { items, loading, busy, loadOpenings } = useLastMinuteOpenings()
+
+  return (
+    <section
+      className="lm-opening-list-panel"
+      aria-label="Last-minute openings list"
+    >
+      <div className="lm-opening-panel-header" data-layout="split">
+        <div>
+          <div className="lm-opening-panel-title">Your openings</div>
+          <p className="lm-opening-panel-copy">
+            Next 48 hours. Rollouts schedule automatically from the opening
+            tier plan.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          disabled={loading || busy}
+          className="lm-opening-button"
+          data-variant="ghost"
+          onClick={() => {
+            void loadOpenings()
+          }}
+        >
+          Refresh
+        </button>
+      </div>
+
+      <div className="lm-opening-list">
+        {loading ? (
+          <div className="lm-opening-empty">Loading…</div>
+        ) : items.length === 0 ? (
+          <div className="lm-opening-empty">No openings yet.</div>
+        ) : (
+          items.map((opening) => (
+            <OpeningCard key={opening.id} opening={opening} />
+          ))
+        )}
+      </div>
+
+      <OpeningErrorMessage />
+    </section>
+  )
+}
+
+function LastMinuteCombinedOpenings() {
+  return (
+    <div className="lm-openings-client" data-view="combined">
+      <LastMinuteCreateOpeningPanel />
+      <LastMinuteOpeningsListPanel />
+    </div>
+  )
+}
+
+export default function OpeningsClient({
+  offerings,
+  view = 'combined',
+  onCreated,
+}: Props) {
+  return (
+    <LastMinuteOpeningsProvider offerings={offerings} onCreated={onCreated}>
+      {view === 'create' ? <LastMinuteCreateOpeningPanel /> : null}
+      {view === 'list' ? <LastMinuteOpeningsListPanel /> : null}
+      {view === 'combined' ? <LastMinuteCombinedOpenings /> : null}
+    </LastMinuteOpeningsProvider>
   )
 }

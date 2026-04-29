@@ -10,6 +10,7 @@ import '@/lib/brand/brand.css'
 import '@/lib/brand/proOverview.css'
 import '@/lib/brand/proSession.css'
 import '@/lib/brand/proCalendar.css'
+import '@/lib/brand/proLastMinute.css'
 
 import RoleFooter from '@/app/_components/RoleFooter'
 import { BrandProvider } from '@/lib/brand/BrandProvider'
