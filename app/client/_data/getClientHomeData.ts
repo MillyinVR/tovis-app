@@ -383,7 +383,7 @@ export async function getClientHomeData({
     prisma.booking.findFirst({
       where: {
         clientId,
-        status: BookingStatus.ACCEPTED,
+        status: { in: [BookingStatus.ACCEPTED, BookingStatus.IN_PROGRESS] },
         scheduledFor: {
           gte: now,
         },

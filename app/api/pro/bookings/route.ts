@@ -2,6 +2,7 @@
 import { Prisma } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
 import {
   getBookingFailPayload,
@@ -91,6 +92,15 @@ export async function POST(req: Request) {
     const professionalId = auth.professionalId
     const actorUserId = auth.user.id
 
+    const requestId =
+      pickString(req.headers.get('x-request-id')) ??
+      pickString(req.headers.get('request-id')) ??
+      null
+    const idempotencyKey =
+      pickString(req.headers.get('idempotency-key')) ??
+      pickString(req.headers.get('x-idempotency-key')) ??
+      null
+
     if (!actorUserId || !actorUserId.trim()) {
       return bookingJsonFail('FORBIDDEN', {
         message: 'Authenticated actor user id is required.',
@@ -156,6 +166,8 @@ export async function POST(req: Request) {
       allowOutsideWorkingHours,
       allowShortNotice,
       allowFarFuture,
+      requestId,
+      idempotencyKey,
     })
 
     if (!result.ok) {
@@ -214,6 +226,7 @@ export async function POST(req: Request) {
     }
 
     console.error('POST /api/pro/bookings error', error)
+    captureBookingException({ error, route: 'POST /api/pro/bookings' })
     return bookingJsonFail('INTERNAL_ERROR', {
       message:
         error instanceof Error ? error.message : 'Failed to create booking.',

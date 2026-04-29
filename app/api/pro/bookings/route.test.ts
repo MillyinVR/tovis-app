@@ -328,6 +328,8 @@ describe('POST /api/pro/bookings', () => {
       allowOutsideWorkingHours: true,
       allowShortNotice: false,
       allowFarFuture: true,
+      requestId: null,
+      idempotencyKey: null,
     })
   })
 
@@ -396,6 +398,8 @@ describe('POST /api/pro/bookings', () => {
       allowOutsideWorkingHours: false,
       allowShortNotice: false,
       allowFarFuture: false,
+      requestId: null,
+      idempotencyKey: null,
     })
   })
 
@@ -487,6 +491,8 @@ describe('POST /api/pro/bookings', () => {
       allowOutsideWorkingHours: false,
       allowShortNotice: false,
       allowFarFuture: false,
+      requestId: null,
+      idempotencyKey: null,
     })
 
     expect(mocks.computeRequestedEndUtc).toHaveBeenCalledWith({

@@ -607,6 +607,7 @@ function toBlockEvent(
 function isBookingVisibleInTodaysStats(event: BookingEvent): boolean {
   return (
     event.status === BookingStatus.ACCEPTED ||
+    event.status === BookingStatus.IN_PROGRESS ||
     event.status === BookingStatus.COMPLETED
   )
 }

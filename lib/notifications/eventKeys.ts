@@ -8,6 +8,7 @@ import {
 export type NotificationTemplateKey =
   | 'booking_request_created'
   | 'booking_confirmed'
+  | 'booking_started'
   | 'booking_rescheduled'
   | 'booking_cancelled_by_client'
   | 'booking_cancelled_by_pro'
@@ -74,6 +75,7 @@ const CLIENT_EMAIL_SMS_CHANNELS: readonly NotificationChannel[] = [
 export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.BOOKING_REQUEST_CREATED,
   NotificationEventKey.BOOKING_CONFIRMED,
+  NotificationEventKey.BOOKING_STARTED,
   NotificationEventKey.BOOKING_RESCHEDULED,
   NotificationEventKey.BOOKING_CANCELLED_BY_CLIENT,
   NotificationEventKey.BOOKING_CANCELLED_BY_PRO,
@@ -119,6 +121,18 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.BOOKING_STARTED]: {
+    key: NotificationEventKey.BOOKING_STARTED,
+    defaultPriority: NotificationPriority.HIGH,
+    transactional: true,
+    allowQuietHoursBypass: true,
+    templateKey: 'booking_started',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
     },
   },

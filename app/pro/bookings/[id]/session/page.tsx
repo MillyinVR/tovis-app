@@ -720,7 +720,8 @@ function ConsultationView({
   toBefore: ServerAction
 }) {
   const canProceedToBefore =
-    bookingStatus === BookingStatus.ACCEPTED &&
+    (bookingStatus === BookingStatus.ACCEPTED ||
+      bookingStatus === BookingStatus.IN_PROGRESS) &&
     isConsultationApproved(approvalStatus)
 
   return (

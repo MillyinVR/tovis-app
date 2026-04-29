@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/internal/jobs/hold-cleanup",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/internal/jobs/notifications/process",
       "schedule": "*/5 * * * *"
     },

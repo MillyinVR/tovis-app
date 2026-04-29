@@ -40,6 +40,10 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
+vi.mock('@/lib/notifications/clientNotifications', () => ({
+  upsertClientNotification: vi.fn().mockResolvedValue(undefined),
+}))
+
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
   withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
   withLockedClientOwnedBookingTransaction:
@@ -75,10 +79,12 @@ function makeStartableBooking(
     startedAt: Date | null
     finishedAt: Date | null
     sessionStep: SessionStep | null
+    clientId: string
   }>,
 ) {
   return {
     id: 'booking_1',
+    clientId: overrides?.clientId ?? 'client_1',
     professionalId: 'pro_1',
     status: overrides?.status ?? BookingStatus.ACCEPTED,
     scheduledFor: overrides?.scheduledFor ?? SCHEDULED_FOR,
@@ -254,6 +260,7 @@ describe('lib/booking/writeBoundary closeout audit behavior', () => {
       data: {
         startedAt: TEST_NOW,
         sessionStep: SessionStep.CONSULTATION,
+        status: BookingStatus.IN_PROGRESS,
       },
       select: {
         id: true,
@@ -449,6 +456,7 @@ describe('lib/booking/writeBoundary closeout audit behavior', () => {
       data: {
         sessionStep: SessionStep.SERVICE_IN_PROGRESS,
         startedAt: TEST_NOW,
+        status: BookingStatus.IN_PROGRESS,
       },
       select: {
         id: true,

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 import {
   BookingSource,
   BookingStatus,
@@ -370,8 +371,27 @@ async function resolveFinalizeOwnershipContext(args: {
   }
 }
 
+function readFinalizeMeta(request: Request): {
+  requestId: string | null
+  idempotencyKey: string | null
+} {
+  const requestId =
+    pickString(request.headers.get('x-request-id')) ??
+    pickString(request.headers.get('request-id')) ??
+    null
+
+  const idempotencyKey =
+    pickString(request.headers.get('idempotency-key')) ??
+    pickString(request.headers.get('x-idempotency-key')) ??
+    null
+
+  return { requestId, idempotencyKey }
+}
+
 export async function POST(request: Request) {
   try {
+    const { requestId, idempotencyKey } = readFinalizeMeta(request)
+
     const rawBody: unknown = await request.json().catch(() => ({}))
     const parsedBody = parseFinalizeBody(rawBody)
 
@@ -411,6 +431,8 @@ export async function POST(request: Request) {
       rebookOfBookingId: ownershipOrFail.rebookOfBookingId,
       offering: toFinalizeOffering(offering),
       fallbackTimeZone: FALLBACK_TIME_ZONE,
+      requestId,
+      idempotencyKey,
     })
 
     try {
@@ -445,6 +467,7 @@ export async function POST(request: Request) {
     }
 
     console.error('POST /api/bookings/finalize error:', error)
+    captureBookingException({ error, route: 'POST /api/bookings/finalize' })
     return bookingJsonFail('INTERNAL_ERROR', {
       message: error instanceof Error ? error.message : 'Internal server error',
       userMessage: 'Internal server error',

@@ -333,6 +333,8 @@ type FinalizeBookingFromHoldArgs = {
   initialStatus: BookingStatus
   rebookOfBookingId: string | null
   fallbackTimeZone?: string
+  requestId?: string | null
+  idempotencyKey?: string | null
   offering: {
     id: string
     professionalId: string
@@ -373,6 +375,8 @@ type CreateProBookingArgs = {
   allowOutsideWorkingHours: boolean
   allowShortNotice: boolean
   allowFarFuture: boolean
+  requestId?: string | null
+  idempotencyKey?: string | null
 }
 
 type CreateProBookingResult = {
@@ -740,6 +744,8 @@ type UpsertBookingAftercareResult = {
   remindersTouched: number
   clientNotified: boolean
   bookingFinished: boolean
+  /** Populated when sendToClient=true but booking could not be completed. */
+  completionBlockers: string[]
   booking: {
     status: BookingStatus
     sessionStep: SessionStep
@@ -824,6 +830,7 @@ type CancelBookingRecord = Prisma.BookingGetPayload<{
 
 const START_BOOKING_SELECT = {
   id: true,
+  clientId: true,
   professionalId: true,
   status: true,
   scheduledFor: true,
@@ -1864,6 +1871,35 @@ function isReviewEligibleCloseout(args: {
     Boolean(args.paymentCollectedAt) &&
     isCheckoutCloseoutComplete(args.checkoutStatus)
   )
+}
+
+/**
+ * Returns a list of human-readable error codes that explain why a
+ * `sendToClient = true` aftercare submission did not complete the booking.
+ * Empty array means the booking was (or will be) completed normally.
+ *
+ * NOTE: This mirrors the conditions checked in `isReviewEligibleCloseout`.
+ * If you change the completion criteria in either function, update both.
+ */
+function buildCompletionBlockers(args: {
+  sendToClient: boolean
+  bookingFinished: boolean
+  checkoutStatus: BookingCheckoutStatus | null | undefined
+  paymentCollectedAt: Date | null | undefined
+}): string[] {
+  if (!args.sendToClient || args.bookingFinished) return []
+
+  const blockers: string[] = []
+
+  if (!args.paymentCollectedAt) {
+    blockers.push('PAYMENT_NOT_COLLECTED')
+  }
+
+  if (!isCheckoutCloseoutComplete(args.checkoutStatus)) {
+    blockers.push('CHECKOUT_NOT_COMPLETE')
+  }
+
+  return blockers
 }
 
 function isAftercareSessionStepEligible(
@@ -4007,6 +4043,7 @@ async function performLockedStartBookingSession(args: {
       where: { id: booking.id },
       data: {
         sessionStep: SessionStep.CONSULTATION,
+        status: BookingStatus.IN_PROGRESS,
       },
       select: {
         id: true,
@@ -4068,6 +4105,7 @@ async function performLockedStartBookingSession(args: {
     data: {
       startedAt: args.now,
       sessionStep: SessionStep.CONSULTATION,
+      status: BookingStatus.IN_PROGRESS,
     },
     select: {
       id: true,
@@ -4098,6 +4136,16 @@ async function performLockedStartBookingSession(args: {
       sessionStep: updated.sessionStep ?? SessionStep.NONE,
       status: updated.status,
     },
+  })
+
+  await upsertClientNotification({
+    tx: args.tx,
+    clientId: booking.clientId,
+    bookingId: booking.id,
+    eventKey: NotificationEventKey.BOOKING_STARTED,
+    title: 'Your appointment has started',
+    body: "Your pro has started your session. They'll be with you shortly.",
+    dedupeKey: `BOOKING_STARTED:${booking.id}`,
   })
 
   return {
@@ -4904,7 +4952,9 @@ async function performLockedTransitionSessionStep(args: {
     where: { id: booking.id },
     data: {
       sessionStep: args.nextStep,
-      ...(shouldSetStartedAt ? { startedAt: new Date() } : {}),
+      ...(shouldSetStartedAt
+        ? { startedAt: new Date(), status: BookingStatus.IN_PROGRESS }
+        : {}),
     },
     select: {
       id: true,
@@ -6199,6 +6249,8 @@ async function performLockedFinalizeBookingFromHold(args: {
   rebookOfBookingId: string | null
   fallbackTimeZone: string
   offering: FinalizeBookingFromHoldArgs['offering']
+  requestId: string | null
+  idempotencyKey: string | null
 }): Promise<FinalizeBookingFromHoldResult> {
   const hold = await args.tx.bookingHold.findUnique({
     where: { id: args.holdId },
@@ -6652,6 +6704,8 @@ async function performLockedCreateProBooking(args: {
   allowFarFuture: boolean
   actorUserId: string
   overrideReason: string | null
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<CreateProBookingResult> {
 
     assertNonEmptyUserId(args.actorUserId)
@@ -8139,6 +8193,7 @@ if (
     remindersTouched: 0,
     clientNotified: false,
     bookingFinished: false,
+    completionBlockers: [],
     booking:
       booking.status === BookingStatus.COMPLETED || booking.finishedAt
         ? {
@@ -8522,6 +8577,12 @@ return {
     remindersTouched,
     clientNotified,
     bookingFinished,
+    completionBlockers: buildCompletionBlockers({
+      sendToClient: args.sendToClient,
+      bookingFinished,
+      checkoutStatus: booking.checkoutStatus,
+      paymentCollectedAt: booking.paymentCollectedAt,
+    }),
     booking: bookingNow,
     timeZoneUsed,
     meta: buildMeta(true),
@@ -9948,6 +10009,8 @@ export async function finalizeBookingFromHold(
         rebookOfBookingId: args.rebookOfBookingId,
         fallbackTimeZone: args.fallbackTimeZone ?? 'UTC',
         offering: args.offering,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
@@ -9990,6 +10053,8 @@ export async function createProBooking(
         allowFarFuture: args.allowFarFuture,
         actorUserId: args.actorUserId,
         overrideReason: args.overrideReason,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
