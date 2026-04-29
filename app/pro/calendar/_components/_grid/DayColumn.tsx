@@ -4,6 +4,7 @@
 import { useMemo, useRef } from 'react'
 import type { CSSProperties, DragEvent, MutableRefObject } from 'react'
 
+import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type { CalendarEvent, EntityType, WorkingHoursJson } from '../../_types'
 
 import {
@@ -61,6 +62,8 @@ type EventLayoutItem = {
 }
 
 type DayColumnProps = {
+  copy: BrandProCalendarCopy
+
   day: Date
   dayIdx: number
   visibleDaysCount: number
@@ -178,18 +181,9 @@ function mergeWindows(windows: TimeWindow[]): TimeWindow[] {
 
   for (let index = 1; index < normalized.length; index += 1) {
     const current = normalized[index]
-
-    if (!current) continue
-
     const previous = merged[merged.length - 1]
 
-    if (!previous) {
-      merged.push({
-        startMinutes: current.startMinutes,
-        endMinutes: current.endMinutes,
-      })
-      continue
-    }
+    if (!current || !previous) continue
 
     if (current.startMinutes <= previous.endMinutes) {
       previous.endMinutes = Math.max(previous.endMinutes, current.endMinutes)
@@ -417,14 +411,35 @@ function renderPositionStyle(
   }
 }
 
+function gridMarkPositionStyle(minute: number): CSSProperties {
+  return {
+    top: minute * PX_PER_MINUTE,
+  }
+}
+
+function eventTimeFormatter(timeZone: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 function dayParity(dayIdx: number): 'even' | 'odd' {
   return dayIdx % 2 === 0 ? 'even' : 'odd'
+}
+
+function hasInteractiveEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+
+  return Boolean(target.closest('[data-cal-event="1"]'))
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export function DayColumn(props: DayColumnProps) {
   const {
+    copy,
     day,
     dayIdx,
     visibleDaysCount,
@@ -450,12 +465,7 @@ export function DayColumn(props: DayColumnProps) {
   const dayEvents = useDayEvents({ day, timeZone, events })
 
   const timeFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat('en-US', {
-        timeZone,
-        hour: 'numeric',
-        minute: '2-digit',
-      }),
+    () => eventTimeFormatter(timeZone),
     [timeZone],
   )
 
@@ -491,7 +501,7 @@ export function DayColumn(props: DayColumnProps) {
           }),
         }))
         .filter((item): item is EventLayoutItem => item.layout !== null),
-    [dayEvents, dayYmd, timeFormatter, timeZone, stepMinutes],
+    [dayEvents, dayYmd, stepMinutes, timeFormatter, timeZone],
   )
 
   function getColumnTop(): number {
@@ -519,20 +529,21 @@ export function DayColumn(props: DayColumnProps) {
         if (isBusy) return
         if (suppressClickRef.current) return
         if (event.button !== 0) return
-
-        const target = event.target instanceof Element ? event.target : null
-        if (target?.closest('[data-cal-event="1"]')) return
+        if (hasInteractiveEventTarget(event.target)) return
 
         const rect = event.currentTarget.getBoundingClientRect()
         onCreateForClick(day, event.clientY, rect.top)
       }}
     >
-      <div className="relative" style={timelineHeightStyle()}>
+      <div
+        className="brand-pro-calendar-day-column-track"
+        style={timelineHeightStyle()}
+      >
         {GRID_MARKS.map((mark) => (
           <div
             key={mark.minute}
             className="brand-pro-calendar-grid-mark"
-            style={{ top: mark.minute * PX_PER_MINUTE }}
+            style={gridMarkPositionStyle(mark.minute)}
             data-today={isToday ? 'true' : 'false'}
             aria-hidden="true"
           />
@@ -541,7 +552,7 @@ export function DayColumn(props: DayColumnProps) {
         {schedule.outsideHoursSegments.map((segment) => (
           <div
             key={segment.key}
-            className="brand-pro-calendar-closed-hours pointer-events-none absolute left-0 right-0 hidden md:block"
+            className="brand-pro-calendar-closed-hours"
             style={renderPositionStyle(segment.startMinutes, segment.endMinutes)}
             data-segment={segment.key}
             aria-hidden="true"
@@ -551,7 +562,7 @@ export function DayColumn(props: DayColumnProps) {
         {schedule.overlays.map((overlay) => (
           <div
             key={overlay.locationType}
-            className="pointer-events-none absolute left-1 right-1 hidden md:block"
+            className="brand-pro-calendar-working-window-frame"
             style={renderPositionStyle(
               overlay.startMinutes,
               overlay.endMinutes,
@@ -572,6 +583,7 @@ export function DayColumn(props: DayColumnProps) {
         {eventLayouts.map(({ event, layout }) => (
           <EventCard
             key={event.id}
+            copy={copy}
             ev={event}
             entityType={layout.entityType}
             apiId={layout.apiId}

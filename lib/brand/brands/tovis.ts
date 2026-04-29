@@ -20,6 +20,15 @@ const proCalendar: BrandConfig['proCalendar'] = {
     month: 'This month.',
   },
 
+  statusLabels: {
+    accepted: 'Accepted',
+    pending: 'Pending',
+    completed: 'Completed',
+    waitlist: 'Waitlist',
+    blocked: 'Blocked',
+    cancelled: 'Cancelled',
+  },
+
   pageHero: {
     title: 'tovis',
     accentMark: '.',
@@ -28,27 +37,49 @@ const proCalendar: BrandConfig['proCalendar'] = {
     dashboardLabel: '← Pro dashboard',
   },
 
-header: {
-  controlsAriaLabel: 'Calendar navigation',
-  viewTabsLabel: 'Calendar view',
-  viewLabels: {
-    day: 'Day',
-    week: 'Week',
-    month: 'Month',
+  header: {
+    controlsAriaLabel: 'Calendar navigation',
+    viewTabsLabel: 'Calendar view',
+    viewLabels: {
+      day: 'Day',
+      week: 'Week',
+      month: 'Month',
+    },
+    viewAriaLabels: {
+      day: 'Switch to day view',
+      week: 'Switch to week view',
+      month: 'Switch to month view',
+    },
+    previousRangeLabel: 'Previous calendar range',
+    nextRangeLabel: 'Next calendar range',
   },
-  viewAriaLabels: {
-    day: 'Switch to day view',
-    week: 'Switch to week view',
-    month: 'Switch to month view',
-  },
-  previousRangeLabel: 'Previous calendar range',
-  nextRangeLabel: 'Next calendar range',
-},
 
   mobileHeader: {
     backHref: '/',
     backLabel: 'CLIENT',
     backAriaLabel: 'Go to client view',
+  },
+
+  tablet: {
+    eyebrowPrefix: '◆ Pro mode',
+    layoutNote:
+      'Horizontal stats strip · No sidebar · Full-width calendar · Pending bar',
+    pendingBarLabel: '◆ Pending request',
+    locationToolbarLabel: 'Location',
+  },
+
+  desktop: {
+    calendarHref: '/pro/calendar',
+    mobileHref: '/pro/calendar',
+    mobileLabel: '← Mobile layout',
+    dashboardHref: '/pro',
+    dashboardLabel: 'Dashboard →',
+    sidebarTodayPrefix: 'Today',
+    sidebarStatusKeyTitle: 'Status key',
+    sidebarLocationTitle: 'Location',
+    sidebarEditScheduleLabel: 'Edit schedule',
+    pendingFooterLabel: '◆ Pending request',
+    pendingFooterViewAllLabel: 'View all requests',
   },
 
   stats: {
@@ -68,13 +99,21 @@ header: {
     today: 'Today',
     blockTime: '+ Block time',
     createBlock: 'Create blocked time',
+    editSchedule: 'Edit schedule',
     editHours: 'Edit hours',
     hideHours: 'Hide hours',
     autoAccept: 'Auto-accept',
     approveRequest: 'Approve request',
     denyRequest: 'Deny request',
+    viewAllRequests: 'View all requests',
     messageClient: 'Message',
     reschedule: 'Reschedule',
+    checkIn: 'Check in',
+    save: 'Save',
+    cancel: 'Cancel',
+    close: 'Close',
+    delete: 'Delete',
+    confirm: 'Confirm',
   },
 
   labels: {
@@ -83,6 +122,18 @@ header: {
     statusKey: 'Status key',
     loadingCalendar: 'Loading calendar…',
     loadingRefresh: 'Loading…',
+    total: 'Total',
+    service: 'Service',
+    services: 'Services',
+    time: 'Time',
+    status: 'Status',
+    client: 'Client',
+    clientNote: 'Client note',
+    appointment: 'Appointment',
+    lastVisit: 'Last visit',
+    lifetime: 'Lifetime',
+    noShows: 'No-shows',
+    timeZone: 'TZ',
   },
 
   locationPanel: {
@@ -126,6 +177,88 @@ header: {
     waitlist: 'Waitlist hold',
     blocked: 'Blocked / break',
   },
+
+  emptyState: {
+    dayTitle: 'No bookings yet.',
+    weekTitle: 'No bookings this week.',
+    monthTitle: 'No bookings this month.',
+    description:
+      'Your calendar is ready. Add blocked time or wait for new bookings to come in.',
+    createBlockLabel: 'Block time',
+  },
+
+  management: {
+    title: 'Calendar management',
+    pendingRequestsTitle: 'Pending requests',
+    waitlistTitle: 'Waitlist',
+    blocksTitle: 'Blocked time',
+    emptyPendingRequests: 'No pending requests right now.',
+    emptyWaitlist: 'No waitlist holds right now.',
+    emptyBlocks: 'No blocked time in this range.',
+    createBlockNowLabel: 'Create block now',
+    blockFullDayTodayLabel: 'Block full day today',
+  },
+
+  blockTimeModal: {
+    title: 'Block time',
+    description:
+      'Hold time on your calendar so clients cannot book over it.',
+    startLabel: 'Start',
+    endLabel: 'End',
+    locationLabel: 'Location',
+    reasonLabel: 'Reason',
+    reasonPlaceholder: 'Lunch, errands, prep time…',
+    saveLabel: 'Create block',
+    savingLabel: 'Creating…',
+    successLabel: 'Blocked time created.',
+    errorFallback: 'Could not create blocked time. Try again.',
+  },
+
+  editBlockModal: {
+    title: 'Edit blocked time',
+    description:
+      'Update or remove this blocked window from your calendar.',
+    startLabel: 'Start',
+    endLabel: 'End',
+    reasonLabel: 'Reason',
+    reasonPlaceholder: 'Lunch, errands, prep time…',
+    saveLabel: 'Save changes',
+    savingLabel: 'Saving…',
+    deleteLabel: 'Delete block',
+    deletingLabel: 'Deleting…',
+    errorFallback: 'Could not update blocked time. Try again.',
+  },
+
+  bookingModal: {
+    title: 'Appointment',
+    clientFallback: 'Client',
+    serviceFallback: 'Service',
+    appointmentTimeLabel: 'Appointment time',
+    servicesLabel: 'Services',
+    rescheduleDateLabel: 'New date',
+    rescheduleTimeLabel: 'New time',
+    notifyClientLabel: 'Notify client',
+    allowOutsideHoursLabel: 'Allow outside working hours',
+    saveChangesLabel: 'Save changes',
+    savingLabel: 'Saving…',
+    approveLabel: 'Approve request',
+    denyLabel: 'Deny request',
+    errorFallback: 'Could not load this booking. Try again.',
+  },
+
+  confirmChangeModal: {
+    title: 'Confirm calendar change',
+    description:
+      'Review this change before it updates the appointment.',
+    outsideHoursTitle: 'Outside working hours',
+    outsideHoursDescription:
+      'This time is outside the current working-hours rules. Add a reason to override it.',
+    overrideReasonLabel: 'Override reason',
+    overrideReasonPlaceholder: 'Why is this appointment allowed here?',
+    cancelLabel: 'Cancel',
+    confirmLabel: 'Confirm change',
+    applyingLabel: 'Applying…',
+  },
 }
 
 export const tovisBrand: BrandConfig = {
@@ -155,24 +288,24 @@ export const tovisBrand: BrandConfig = {
   tokensByMode: {
     dark: {
       colors: {
-        bgPrimary: '10 9 7', // Ink #0A0907
-        bgSecondary: '20 17 14', // Ink-2 #14110E
-        bgSurface: '30 26 21', // Ink-3 #1E1A15
+        bgPrimary: '10 9 7',
+        bgSecondary: '20 17 14',
+        bgSurface: '30 26 21',
 
-        textPrimary: '244 239 231', // Paper #F4EFE7
-        textSecondary: '205 198 187', // Paper-dim #CDC6BB
-        textMuted: '122 117 105', // Paper-mute #7A7569
+        textPrimary: '244 239 231',
+        textSecondary: '205 198 187',
+        textMuted: '122 117 105',
 
-        surfaceGlass: '244 239 231', // Paper-tinted glass on dark
+        surfaceGlass: '244 239 231',
 
-        accentPrimary: '224 90 40', // Terra #E05A28
-        accentPrimaryHover: '255 106 54', // Terra-glow #FF6A36
-        microAccent: '232 221 212', // Linen #E8DDD4
+        accentPrimary: '224 90 40',
+        accentPrimaryHover: '255 106 54',
+        microAccent: '232 221 212',
 
-        colorAcid: '212 255 58', // Acid #D4FF3A
-        colorFern: '98 168 122', // Fern #62A87A
-        colorEmber: '255 61 78', // Ember #FF3D4E
-        colorAmber: '240 168 48', // Amber / pending #F0A830
+        colorAcid: '212 255 58',
+        colorFern: '98 168 122',
+        colorEmber: '255 61 78',
+        colorAmber: '240 168 48',
       },
 
       effects: {
@@ -204,24 +337,24 @@ export const tovisBrand: BrandConfig = {
 
     light: {
       colors: {
-        bgPrimary: '244 239 231', // Paper #F4EFE7
-        bgSecondary: '255 255 255', // White
-        bgSurface: '250 247 244', // Warm white
+        bgPrimary: '244 239 231',
+        bgSecondary: '255 255 255',
+        bgSurface: '250 247 244',
 
-        textPrimary: '10 9 7', // Ink #0A0907
-        textSecondary: '122 117 105', // Paper-mute #7A7569
-        textMuted: '154 148 140', // Very muted
+        textPrimary: '10 9 7',
+        textSecondary: '122 117 105',
+        textMuted: '154 148 140',
 
-        surfaceGlass: '10 9 7', // Ink-tinted glass on light bg
+        surfaceGlass: '10 9 7',
 
-        accentPrimary: '224 90 40', // Terra #E05A28
-        accentPrimaryHover: '255 106 54', // Terra-glow #FF6A36
-        microAccent: '154 123 92', // Driftwood #9A7B5C
+        accentPrimary: '224 90 40',
+        accentPrimaryHover: '255 106 54',
+        microAccent: '154 123 92',
 
-        colorAcid: '180 200 0', // Acid — darkened for legibility on light
-        colorFern: '68 130 90', // Fern — darkened for light
-        colorEmber: '210 40 55', // Ember — darkened for light
-        colorAmber: '240 168 48', // Amber / pending #F0A830
+        colorAcid: '180 200 0',
+        colorFern: '68 130 90',
+        colorEmber: '210 40 55',
+        colorAmber: '240 168 48',
       },
 
       effects: {

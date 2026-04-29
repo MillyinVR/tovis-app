@@ -17,7 +17,8 @@ type TimeGutterProps = {
 type HourMark = {
   hour: number
   minute: number
-  label: string
+  displayHour: string
+  meridiem: 'am' | 'pm'
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -25,7 +26,6 @@ type HourMark = {
 const MINUTES_PER_HOUR = 60
 const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR
 const MIN_RENDER_MINUTES = MINUTES_PER_HOUR
-const LABEL_TOP_OFFSET_PX = 2
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
@@ -39,44 +39,34 @@ function normalizeTotalMinutes(totalMinutes: number): number {
   )
 }
 
-/**
- * Compact 12-hour label with no AM/PM suffix.
- * Example: 0 → "12", 13 → "1".
- */
-function formatHourLabel(hour24: number): string {
-  const hour = hour24 % 12
+function hourDisplayLabel(hour24: number): {
+  displayHour: string
+  meridiem: 'am' | 'pm'
+} {
+  const normalizedHour = hour24 % 24
+  const hour12 = normalizedHour % 12
+  const displayHour = hour12 === 0 ? 12 : hour12
+  const meridiem = normalizedHour < 12 ? 'am' : 'pm'
 
-  return String(hour === 0 ? 12 : hour)
+  return {
+    displayHour: String(displayHour),
+    meridiem,
+  }
 }
 
 function buildHourMarks(totalMinutes: number): HourMark[] {
   const hourCount = Math.ceil(totalMinutes / MINUTES_PER_HOUR)
 
-  return Array.from({ length: hourCount }, (_, hour) => ({
-    hour,
-    minute: hour * MINUTES_PER_HOUR,
-    label: formatHourLabel(hour),
-  }))
-}
+  return Array.from({ length: hourCount }, (_, hour) => {
+    const label = hourDisplayLabel(hour)
 
-function gutterStyle(): CSSProperties {
-  return {
-    backgroundColor: 'rgb(var(--bg-primary) / 0.96)',
-    color: 'rgb(var(--text-muted))',
-  }
-}
-
-function gutterRuleStyle(): CSSProperties {
-  return {
-    backgroundColor: 'rgb(var(--surface-glass) / 0.06)',
-  }
-}
-
-function labelStyle(): CSSProperties {
-  return {
-    top: LABEL_TOP_OFFSET_PX,
-    color: 'rgb(var(--text-muted) / 0.82)',
-  }
+    return {
+      hour,
+      minute: hour * MINUTES_PER_HOUR,
+      displayHour: label.displayHour,
+      meridiem: label.meridiem,
+    }
+  })
 }
 
 function timelineHeightStyle(totalMinutes: number): CSSProperties {
@@ -108,18 +98,19 @@ export function TimeGutter(props: TimeGutterProps) {
 
   return (
     <div
-      className="relative border-r border-[var(--line)] font-mono"
-      style={gutterStyle()}
+      className="brand-pro-calendar-time-gutter"
       aria-label={`Calendar time gutter, ${timeZone}`}
       data-calendar-time-gutter="1"
     >
       <div
-        className="pointer-events-none absolute inset-y-0 right-0 w-px"
-        style={gutterRuleStyle()}
+        className="brand-pro-calendar-time-gutter-rule"
         aria-hidden="true"
       />
 
-      <div className="relative" style={timelineHeightStyle(safeTotalMinutes)}>
+      <div
+        className="brand-pro-calendar-time-gutter-track"
+        style={timelineHeightStyle(safeTotalMinutes)}
+      >
         {hourMarks.map((mark) => (
           <TimeGutterHour key={mark.hour} mark={mark} />
         ))}
@@ -135,18 +126,15 @@ function TimeGutterHour(props: { mark: HourMark }) {
 
   return (
     <div
-      className="absolute left-0 right-0"
+      className="brand-pro-calendar-time-gutter-hour"
       style={hourPositionStyle(mark.minute)}
+      data-calendar-hour={mark.hour}
     >
-      <div
-        className={[
-          'absolute right-1.5 whitespace-nowrap text-right',
-          'font-mono text-[8px] font-medium leading-none tracking-[0.04em]',
-          'md:right-3 md:text-[10px]',
-        ].join(' ')}
-        style={labelStyle()}
-      >
-        {mark.label}
+      <div className="brand-pro-calendar-time-gutter-label">
+        <span>{mark.displayHour}</span>
+        <span className="brand-pro-calendar-time-gutter-meridiem">
+          {mark.meridiem}
+        </span>
       </div>
     </div>
   )

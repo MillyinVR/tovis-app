@@ -8,6 +8,7 @@ import type {
   MutableRefObject,
 } from 'react'
 
+import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type { CalendarEvent, EntityType } from '../../_types'
 
 import { calendarStatusMeta } from '../../_utils/statusStyles'
@@ -24,22 +25,9 @@ type BeginResizeArgs = {
   columnTop: number
 }
 
-export type EventCardFallbackCopy = {
-  clientFallback: string
-  bookingFallback: string
-  blockFallback: string
-  bookingEyebrow: string
-  blockEyebrow: string
-  breakLabel: string
-  pendingBadge: string
-  blockTitle: string
-  bookingTitle: string
-  resizeLabelPrefix: string
-  serviceCountSingular: string
-  serviceCountPlural: string
-}
-
 type EventCardProps = {
+  copy: BrandProCalendarCopy
+
   ev: CalendarEvent
   entityType: EntityType
   apiId: string | null
@@ -60,11 +48,6 @@ type EventCardProps = {
   onDragStart: (event: CalendarEvent, dragEvent: DragEvent<HTMLDivElement>) => void
   onDropOnDayColumn: (day: Date, clientY: number, columnTop: number) => void
   onBeginResize: (args: BeginResizeArgs) => void
-
-  /**
-   * Bridge until event-card microcopy is moved into BrandProCalendarCopy.
-   */
-  copy?: Partial<EventCardFallbackCopy>
 }
 
 type EventCardDisplayCopy = {
@@ -78,33 +61,7 @@ type TextClampOptions = {
   lines: number
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const DEFAULT_COPY: EventCardFallbackCopy = {
-  clientFallback: 'Client',
-  bookingFallback: 'Appointment',
-  blockFallback: 'Personal time',
-  bookingEyebrow: 'Booking',
-  blockEyebrow: 'Break',
-  breakLabel: 'Break',
-  pendingBadge: 'Request',
-  blockTitle: 'Drag to move, drag bottom to resize. Click to edit block.',
-  bookingTitle: 'Drag to move, drag bottom to resize. Click to view booking.',
-  resizeLabelPrefix: 'Resize',
-  serviceCountSingular: 'service',
-  serviceCountPlural: 'services',
-}
-
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
-
-function resolveCopy(
-  copy: Partial<EventCardFallbackCopy> | undefined,
-): EventCardFallbackCopy {
-  return {
-    ...DEFAULT_COPY,
-    ...copy,
-  }
-}
 
 function textClampStyle(options: TextClampOptions): CSSProperties {
   return {
@@ -121,7 +78,7 @@ function normalizeText(value: string | null | undefined): string {
 
 function serviceItemCountLabel(args: {
   event: CalendarEvent
-  copy: EventCardFallbackCopy
+  copy: BrandProCalendarCopy
 }): string | null {
   const { event, copy } = args
 
@@ -132,25 +89,41 @@ function serviceItemCountLabel(args: {
   if (serviceCount <= 1) return null
 
   const label =
-    serviceCount === 1 ? copy.serviceCountSingular : copy.serviceCountPlural
+    serviceCount === 1 ? copy.labels.service : copy.labels.services
 
-  return `${serviceCount} ${label}`
+  return `${serviceCount} ${label.toLowerCase()}`
+}
+
+function eventStatusLabel(
+  event: CalendarEvent,
+  copy: BrandProCalendarCopy,
+): string {
+  if (event.kind === 'BLOCK') return copy.statusLabels.blocked
+
+  if (event.status === 'PENDING') return copy.statusLabels.pending
+  if (event.status === 'COMPLETED') return copy.statusLabels.completed
+  if (event.status === 'WAITLIST') return copy.statusLabels.waitlist
+  if (event.status === 'CANCELLED' || event.status === 'DECLINED') {
+    return copy.statusLabels.cancelled
+  }
+
+  return copy.statusLabels.accepted
 }
 
 function buildEventCardCopy(args: {
   event: CalendarEvent
-  statusLabel: string
-  copy: EventCardFallbackCopy
+  copy: BrandProCalendarCopy
 }): EventCardDisplayCopy {
-  const { event, statusLabel, copy } = args
+  const { event, copy } = args
+  const statusLabel = eventStatusLabel(event, copy)
 
   if (event.kind === 'BLOCK') {
     const note = normalizeText(event.note)
 
     return {
-      primary: note || copy.blockFallback,
-      secondary: note ? copy.breakLabel : '',
-      eyebrow: copy.blockEyebrow,
+      primary: note || copy.editBlockModal.title,
+      secondary: note ? copy.legend.blocked : '',
+      eyebrow: copy.legend.blocked,
       status: statusLabel,
     }
   }
@@ -160,20 +133,11 @@ function buildEventCardCopy(args: {
   const serviceCount = serviceItemCountLabel({ event, copy })
 
   return {
-    primary: clientName || copy.clientFallback,
-    secondary: bookingTitle || copy.bookingFallback,
-    eyebrow: serviceCount ?? copy.bookingEyebrow,
+    primary: clientName || copy.bookingModal.clientFallback,
+    secondary: bookingTitle || copy.bookingModal.serviceFallback,
+    eyebrow: serviceCount ?? copy.labels.appointment,
     status: statusLabel,
   }
-}
-
-function cardTitle(args: {
-  event: CalendarEvent
-  copy: EventCardFallbackCopy
-}): string {
-  const { event, copy } = args
-
-  return event.kind === 'BLOCK' ? copy.blockTitle : copy.bookingTitle
 }
 
 function cardAriaLabel(args: {
@@ -185,6 +149,19 @@ function cardAriaLabel(args: {
   return [copy.primary, copy.secondary, copy.status, timeLabel]
     .filter((part) => part.trim().length > 0)
     .join(', ')
+}
+
+function resizeControlLabel(args: {
+  event: CalendarEvent
+  copy: BrandProCalendarCopy
+  displayCopy: EventCardDisplayCopy
+}): string {
+  const { event, copy, displayCopy } = args
+
+  const action =
+    event.kind === 'BLOCK' ? copy.editBlockModal.title : copy.actions.reschedule
+
+  return `${action}: ${displayCopy.primary}`
 }
 
 function eventCardPositionStyle(args: {
@@ -259,6 +236,7 @@ function CompletedCheck() {
 
 export function EventCard(props: EventCardProps) {
   const {
+    copy,
     ev,
     entityType,
     apiId,
@@ -276,20 +254,18 @@ export function EventCard(props: EventCardProps) {
     onDragStart,
     onDropOnDayColumn,
     onBeginResize,
-    copy: copyOverride,
   } = props
 
-  const eventCardCopy = resolveCopy(copyOverride)
   const isBlocked = ev.kind === 'BLOCK'
   const statusMeta = calendarStatusMeta({ status: ev.status, isBlocked })
 
   const displayCopy = buildEventCardCopy({
     event: ev,
-    statusLabel: statusMeta.label,
-    copy: eventCardCopy,
+    copy,
   })
 
   const canDragOrResize = apiId !== null
+  const accessibleLabel = cardAriaLabel({ copy: displayCopy, timeLabel })
 
   return (
     <div
@@ -302,7 +278,7 @@ export function EventCard(props: EventCardProps) {
       data-calendar-event-blocked={isBlocked ? 'true' : 'false'}
       role="button"
       tabIndex={0}
-      aria-label={cardAriaLabel({ copy: displayCopy, timeLabel })}
+      aria-label={accessibleLabel}
       draggable={canDragOrResize}
       onDragStart={(dragEvent) => {
         if (!apiId) {
@@ -342,7 +318,7 @@ export function EventCard(props: EventCardProps) {
         topPx,
         heightPx,
       })}
-      title={cardTitle({ event: ev, copy: eventCardCopy })}
+      title={accessibleLabel}
     >
       <div
         className="brand-pro-calendar-event-accent"
@@ -381,7 +357,7 @@ export function EventCard(props: EventCardProps) {
               </span>
 
               {statusMeta.isPending ? (
-                <PendingBadge label={eventCardCopy.pendingBadge} />
+                <PendingBadge label={copy.statusLabels.pending} />
               ) : null}
 
               {statusMeta.isCompleted ? <CompletedCheck /> : null}
@@ -424,7 +400,11 @@ export function EventCard(props: EventCardProps) {
           }}
           className="brand-pro-calendar-event-resize brand-focus"
           data-enabled={canDragOrResize ? 'true' : 'false'}
-          aria-label={`${eventCardCopy.resizeLabelPrefix} ${displayCopy.primary}`}
+          aria-label={resizeControlLabel({
+            event: ev,
+            copy,
+            displayCopy,
+          })}
           disabled={!canDragOrResize}
         />
       </div>

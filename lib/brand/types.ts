@@ -8,7 +8,18 @@ export type RgbTriplet = `${number} ${number} ${number}`
 
 export type BrandCalendarViewKey = 'day' | 'week' | 'month'
 
+export type BrandCalendarStatusKey =
+  | 'accepted'
+  | 'pending'
+  | 'completed'
+  | 'waitlist'
+  | 'blocked'
+  | 'cancelled'
+
 export type BrandCalendarViewLabels = Record<BrandCalendarViewKey, string>
+
+export type BrandCalendarStatusLabels =
+  Record<BrandCalendarStatusKey, string>
 
 export type BrandProCalendarPageHeroCopy = {
   title: string
@@ -33,6 +44,27 @@ export type BrandProCalendarMobileHeaderCopy = {
   backAriaLabel: string
 }
 
+export type BrandProCalendarTabletCopy = {
+  eyebrowPrefix: string
+  layoutNote: string
+  pendingBarLabel: string
+  locationToolbarLabel: string
+}
+
+export type BrandProCalendarDesktopCopy = {
+  calendarHref: string
+  mobileHref: string
+  mobileLabel: string
+  dashboardHref: string
+  dashboardLabel: string
+  sidebarTodayPrefix: string
+  sidebarStatusKeyTitle: string
+  sidebarLocationTitle: string
+  sidebarEditScheduleLabel: string
+  pendingFooterLabel: string
+  pendingFooterViewAllLabel: string
+}
+
 export type BrandProCalendarStatsCopy = {
   booked: string
   pending: string
@@ -50,13 +82,21 @@ export type BrandProCalendarActionsCopy = {
   today: string
   blockTime: string
   createBlock: string
+  editSchedule: string
   editHours: string
   hideHours: string
   autoAccept: string
   approveRequest: string
   denyRequest: string
+  viewAllRequests: string
   messageClient: string
   reschedule: string
+  checkIn: string
+  save: string
+  cancel: string
+  close: string
+  delete: string
+  confirm: string
 }
 
 export type BrandProCalendarLabelsCopy = {
@@ -65,6 +105,18 @@ export type BrandProCalendarLabelsCopy = {
   statusKey: string
   loadingCalendar: string
   loadingRefresh: string
+  total: string
+  service: string
+  services: string
+  time: string
+  status: string
+  client: string
+  clientNote: string
+  appointment: string
+  lastVisit: string
+  lifetime: string
+  noShows: string
+  timeZone: string
 }
 
 export type BrandProCalendarLocationPanelCopy = {
@@ -107,6 +159,83 @@ export type BrandProCalendarLegendCopy = {
   blocked: string
 }
 
+export type BrandProCalendarEmptyStateCopy = {
+  dayTitle: string
+  weekTitle: string
+  monthTitle: string
+  description: string
+  createBlockLabel: string
+}
+
+export type BrandProCalendarManagementCopy = {
+  title: string
+  pendingRequestsTitle: string
+  waitlistTitle: string
+  blocksTitle: string
+  emptyPendingRequests: string
+  emptyWaitlist: string
+  emptyBlocks: string
+  createBlockNowLabel: string
+  blockFullDayTodayLabel: string
+}
+
+export type BrandProCalendarBlockTimeModalCopy = {
+  title: string
+  description: string
+  startLabel: string
+  endLabel: string
+  locationLabel: string
+  reasonLabel: string
+  reasonPlaceholder: string
+  saveLabel: string
+  savingLabel: string
+  successLabel: string
+  errorFallback: string
+}
+
+export type BrandProCalendarEditBlockModalCopy = {
+  title: string
+  description: string
+  startLabel: string
+  endLabel: string
+  reasonLabel: string
+  reasonPlaceholder: string
+  saveLabel: string
+  savingLabel: string
+  deleteLabel: string
+  deletingLabel: string
+  errorFallback: string
+}
+
+export type BrandProCalendarBookingModalCopy = {
+  title: string
+  clientFallback: string
+  serviceFallback: string
+  appointmentTimeLabel: string
+  servicesLabel: string
+  rescheduleDateLabel: string
+  rescheduleTimeLabel: string
+  notifyClientLabel: string
+  allowOutsideHoursLabel: string
+  saveChangesLabel: string
+  savingLabel: string
+  approveLabel: string
+  denyLabel: string
+  errorFallback: string
+}
+
+export type BrandProCalendarConfirmChangeModalCopy = {
+  title: string
+  description: string
+  outsideHoursTitle: string
+  outsideHoursDescription: string
+  overrideReasonLabel: string
+  overrideReasonPlaceholder: string
+  cancelLabel: string
+  confirmLabel: string
+  applyingLabel: string
+}
+
 export type BrandProCalendarCopy = {
   /**
    * Brand-owned pro calendar UI copy.
@@ -115,9 +244,14 @@ export type BrandProCalendarCopy = {
    * calendar components or storing it on a professional profile.
    */
   titles: BrandCalendarViewLabels
+  statusLabels: BrandCalendarStatusLabels
+
   pageHero: BrandProCalendarPageHeroCopy
   header: BrandProCalendarHeaderCopy
   mobileHeader: BrandProCalendarMobileHeaderCopy
+  tablet: BrandProCalendarTabletCopy
+  desktop: BrandProCalendarDesktopCopy
+
   stats: BrandProCalendarStatsCopy
   actions: BrandProCalendarActionsCopy
   labels: BrandProCalendarLabelsCopy
@@ -125,6 +259,13 @@ export type BrandProCalendarCopy = {
   mobileAutoAccept: BrandProCalendarAutoAcceptCopy
   mobilePendingRequest: BrandProCalendarPendingRequestCopy
   legend: BrandProCalendarLegendCopy
+  emptyState: BrandProCalendarEmptyStateCopy
+
+  management: BrandProCalendarManagementCopy
+  blockTimeModal: BrandProCalendarBlockTimeModalCopy
+  editBlockModal: BrandProCalendarEditBlockModalCopy
+  bookingModal: BrandProCalendarBookingModalCopy
+  confirmChangeModal: BrandProCalendarConfirmChangeModalCopy
 }
 
 export type BrandTokens = {
@@ -132,7 +273,7 @@ export type BrandTokens = {
     // ── Background layers ─────────────────────────────────────────
     bgPrimary: RgbTriplet // darkest page bg → --bg-primary / --ink
     bgSecondary: RgbTriplet // elevated surface → --bg-secondary / --ink-2
-    bgSurface: RgbTriplet // card / inner surface → --bg-surface / --ink-3
+    bgSurface: RgbTriplet // card / inner surface → --ink-3
 
     // ── Text layers ───────────────────────────────────────────────
     textPrimary: RgbTriplet // primary readable text → --text-primary / --paper
@@ -144,14 +285,14 @@ export type BrandTokens = {
 
     // ── Accent ───────────────────────────────────────────────────
     accentPrimary: RgbTriplet // brand signature → --accent-primary / --terra
-    accentPrimaryHover: RgbTriplet // hover/glow state → --accent-primary-hover / --terra-glow
+    accentPrimaryHover: RgbTriplet // hover/glow state → --terra-glow
     microAccent: RgbTriplet // warm highlight → --micro-accent
 
     // ── Brand palette ────────────────────────────────────────────
-    colorAcid: RgbTriplet // yellow-green CTAs / approvals → --color-acid / --acid
-    colorFern: RgbTriplet // success / completed → --color-fern / --fern
-    colorEmber: RgbTriplet // danger / cancelled / error → --color-ember / --ember
-    colorAmber: RgbTriplet // pending / review / warm attention → --color-amber / --amber / --tone-pending
+    colorAcid: RgbTriplet // yellow-green CTAs / approvals → --acid
+    colorFern: RgbTriplet // success / completed → --fern
+    colorEmber: RgbTriplet // danger / cancelled / error → --ember
+    colorAmber: RgbTriplet // pending / review / attention → --amber
   }
 
   effects: {

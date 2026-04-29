@@ -9,12 +9,19 @@ import { CalendarHeaderControls } from './CalendarHeader'
 import { CalendarStatsPanel } from './CalendarStatsPanel'
 import { DayWeekGrid } from './DayWeekGrid'
 import { MonthGrid } from './MonthGrid'
+import { PendingRequestSurface } from './PendingRequestSurface'
 
 import type { CalendarData } from '../_hooks/useCalendarData'
 import type { ViewMode } from '../_types'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 
 import { anchorNoonInTimeZone } from '../_utils/date'
+
+import {
+  bookingActionId,
+  calendarLocationDisplayLabel,
+  firstPendingBooking,
+} from '../_viewModel/proCalendarDisplay'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,8 +51,34 @@ type CalendarTabletShellProps = {
 
 type CalendarLocationOption = CalendarData['scopedLocations'][number]
 
-type TabletLocationBarProps = {
-  shortLabel: string
+type TabletHeaderProps = {
+  copy: BrandProCalendarCopy
+  view: ViewMode
+  setView: Dispatch<SetStateAction<ViewMode>>
+  headerLabel: string
+  title: string
+  showHoursForm: boolean
+  onToday: () => void
+  onBack: () => void
+  onNext: () => void
+  onBlockTime: () => void
+  onToggleHoursForm: () => void
+}
+
+type TabletToolbarProps = {
+  copy: BrandProCalendarCopy
+  locationsLoaded: boolean
+  scopedLocations: CalendarLocationOption[]
+  activeLocationId: string | null
+  activeLocationLabel: string | null
+  autoAccept: boolean
+  savingAutoAccept: boolean
+  onChangeLocation: (id: string | null) => void
+  onToggleAutoAccept: () => void
+}
+
+type TabletLocationPickerProps = {
+  label: string
   selectAriaLabel: string
   selectFallbackLabel: string
   optionFallbackLabel: string
@@ -56,13 +89,17 @@ type TabletLocationBarProps = {
   onChangeLocation: (id: string | null) => void
 }
 
-type WideCalendarHeaderProps = {
-  eyebrow: string
-  title: string
-  children: ReactNode
+type TabletAutoAcceptProps = {
+  label: string
+  copy: BrandProCalendarCopy['mobileAutoAccept']
+  enabled: boolean
+  saving: boolean
+  onToggle: () => void
 }
 
-type CalendarTabletBodyProps = {
+type TabletCalendarBodyProps = {
+  copy: BrandProCalendarCopy
+
   view: ViewMode
   currentDate: Date
   setCurrentDate: Dispatch<SetStateAction<Date>>
@@ -76,45 +113,14 @@ type CalendarTabletBodyProps = {
   cal: CalendarData
 }
 
+type TabletPendingBarProps = {
+  copy: BrandProCalendarCopy
+  cal: CalendarData
+}
+
 type StateBannerProps = {
   children: ReactNode
   danger?: boolean
-}
-
-// ─── Pure helpers ─────────────────────────────────────────────────────────────
-
-function locationOptionName(args: {
-  location: CalendarLocationOption
-  fallback: string
-}): string {
-  const { location, fallback } = args
-
-  return location.name?.trim() || location.type?.trim() || fallback
-}
-
-function activeLocationDisplayLabel(args: {
-  activeLocationLabel: string | null
-  scopedLocations: CalendarLocationOption[]
-  activeLocationId: string | null
-  optionFallbackLabel: string
-  selectFallbackLabel: string
-}): string {
-  const explicitLabel = args.activeLocationLabel?.trim()
-
-  if (explicitLabel) return explicitLabel
-
-  const activeLocation = args.scopedLocations.find(
-    (location) => location.id === args.activeLocationId,
-  )
-
-  if (activeLocation) {
-    return locationOptionName({
-      location: activeLocation,
-      fallback: args.optionFallbackLabel,
-    })
-  }
-
-  return args.selectFallbackLabel
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
@@ -140,10 +146,110 @@ export function CalendarTabletShell(props: CalendarTabletShellProps) {
 
   return (
     <section className="brand-pro-calendar-shell" data-device="tablet">
-      <WideCalendarHeader
-        eyebrow={`${copy.labels.mode} · ${headerLabel}`}
-        title={title}
-      >
+      <div className="brand-pro-calendar-tablet-frame">
+        <TabletHeader
+          copy={copy}
+          view={view}
+          setView={setView}
+          headerLabel={headerLabel}
+          title={title}
+          showHoursForm={cal.showHoursForm}
+          onToday={onToday}
+          onBack={onBack}
+          onNext={onNext}
+          onBlockTime={cal.openCreateBlockNow}
+          onToggleHoursForm={() => {
+            cal.setShowHoursForm((current) => !current)
+          }}
+        />
+
+        <section className="brand-pro-calendar-tablet-stats-strip">
+          <CalendarStatsPanel
+            copy={copy.stats}
+            stats={cal.stats}
+            management={cal.management}
+            blockedMinutesToday={cal.blockedMinutesToday}
+            onOpenManagement={cal.openManagement}
+            variant="tablet"
+            compact
+          />
+        </section>
+
+        <TabletToolbar
+          copy={copy}
+          locationsLoaded={cal.locationsLoaded}
+          scopedLocations={cal.scopedLocations}
+          activeLocationId={cal.activeLocationId}
+          activeLocationLabel={cal.activeLocationLabel}
+          autoAccept={cal.autoAccept}
+          savingAutoAccept={cal.savingAutoAccept}
+          onChangeLocation={cal.setActiveLocationId}
+          onToggleAutoAccept={() => {
+            void cal.toggleAutoAccept(!cal.autoAccept)
+          }}
+        />
+
+        {cal.showHoursForm ? (
+          <section className="brand-pro-calendar-tablet-hours-panel">
+            <WorkingHoursTabs
+              canSalon={cal.canSalon}
+              canMobile={cal.canMobile}
+              activeEditorType={cal.hoursEditorLocationType}
+              onChangeEditorType={cal.setHoursEditorLocationType}
+              onSavedAny={cal.reload}
+            />
+          </section>
+        ) : null}
+
+        <TabletCalendarBody
+          copy={copy}
+          view={view}
+          currentDate={currentDate}
+          setCurrentDate={setCurrentDate}
+          setView={setView}
+          calendarTimeZone={calendarTimeZone}
+          visibleDays={visibleDays}
+          showInitialLoading={showInitialLoading}
+          showReloadLoading={showReloadLoading}
+          loadingCalendarLabel={copy.labels.loadingCalendar}
+          loadingRefreshLabel={copy.labels.loadingRefresh}
+          cal={cal}
+        />
+
+        <TabletPendingBar copy={copy} cal={cal} />
+      </div>
+    </section>
+  )
+}
+
+// ─── Tablet layout sections ───────────────────────────────────────────────────
+
+function TabletHeader(props: TabletHeaderProps) {
+  const {
+    copy,
+    view,
+    setView,
+    headerLabel,
+    title,
+    showHoursForm,
+    onToday,
+    onBack,
+    onNext,
+    onBlockTime,
+    onToggleHoursForm,
+  } = props
+
+  return (
+    <header className="brand-pro-calendar-tablet-header">
+      <div className="brand-pro-calendar-tablet-header-copy">
+        <p className="brand-pro-calendar-tablet-eyebrow">
+          {copy.tablet.eyebrowPrefix} · {headerLabel}
+        </p>
+
+        <h2 className="brand-pro-calendar-tablet-title">{title}</h2>
+      </div>
+
+      <div className="brand-pro-calendar-tablet-header-controls">
         <CalendarHeaderControls
           view={view}
           setView={setView}
@@ -158,99 +264,65 @@ export function CalendarTabletShell(props: CalendarTabletShellProps) {
           onToday={onToday}
           onBack={onBack}
           onNext={onNext}
-          onBlockTime={cal.openCreateBlockNow}
+          onBlockTime={onBlockTime}
           blockTimeLabel={copy.actions.blockTime}
         />
-      </WideCalendarHeader>
 
-      <div className="brand-pro-calendar-tablet-main">
-        <CalendarStatsPanel
-          copy={copy.stats}
-          stats={cal.stats}
-          management={cal.management}
-          blockedMinutesToday={cal.blockedMinutesToday}
-          onOpenManagement={cal.openManagement}
-          variant="tablet"
-          compact
-        />
-
-        <section className="brand-pro-calendar-tablet-toolbar">
-          <TabletLocationBar
-            shortLabel={copy.labels.locationShort}
-            selectAriaLabel={copy.locationPanel.selectAriaLabel}
-            selectFallbackLabel={copy.locationPanel.selectFallback}
-            optionFallbackLabel={copy.locationPanel.selectLabel}
-            locationsLoaded={cal.locationsLoaded}
-            scopedLocations={cal.scopedLocations}
-            activeLocationId={cal.activeLocationId}
-            activeLocationLabel={cal.activeLocationLabel}
-            onChangeLocation={cal.setActiveLocationId}
-          />
-
-          <button
-            type="button"
-            onClick={() =>
-              cal.setShowHoursForm((current: boolean) => !current)
-            }
-            className="brand-pro-calendar-sidebar-action brand-focus"
-            data-active={cal.showHoursForm ? 'true' : 'false'}
-          >
-            {cal.showHoursForm
-              ? copy.actions.hideHours
-              : copy.actions.editHours}
-          </button>
-        </section>
-
-        {cal.showHoursForm ? (
-          <section className="brand-pro-calendar-hours-panel">
-            <WorkingHoursTabs
-              canSalon={cal.canSalon}
-              canMobile={cal.canMobile}
-              activeEditorType={cal.hoursEditorLocationType}
-              onChangeEditorType={cal.setHoursEditorLocationType}
-              onSavedAny={cal.reload}
-            />
-          </section>
-        ) : null}
-
-        <CalendarTabletBody
-          view={view}
-          currentDate={currentDate}
-          setCurrentDate={setCurrentDate}
-          setView={setView}
-          calendarTimeZone={calendarTimeZone}
-          visibleDays={visibleDays}
-          showInitialLoading={showInitialLoading}
-          showReloadLoading={showReloadLoading}
-          loadingCalendarLabel={copy.labels.loadingCalendar}
-          loadingRefreshLabel={copy.labels.loadingRefresh}
-          cal={cal}
-        />
+        <button
+          type="button"
+          onClick={onToggleHoursForm}
+          className="brand-pro-calendar-tablet-schedule-button brand-focus"
+          data-active={showHoursForm ? 'true' : 'false'}
+          aria-pressed={showHoursForm}
+        >
+          {showHoursForm ? copy.actions.hideHours : copy.actions.editSchedule}
+        </button>
       </div>
+    </header>
+  )
+}
+
+function TabletToolbar(props: TabletToolbarProps) {
+  const {
+    copy,
+    locationsLoaded,
+    scopedLocations,
+    activeLocationId,
+    activeLocationLabel,
+    autoAccept,
+    savingAutoAccept,
+    onChangeLocation,
+    onToggleAutoAccept,
+  } = props
+
+  return (
+    <section className="brand-pro-calendar-tablet-toolbar">
+      <TabletLocationPicker
+        label={copy.tablet.locationToolbarLabel}
+        selectAriaLabel={copy.locationPanel.selectAriaLabel}
+        selectFallbackLabel={copy.locationPanel.selectFallback}
+        optionFallbackLabel={copy.locationPanel.selectLabel}
+        locationsLoaded={locationsLoaded}
+        scopedLocations={scopedLocations}
+        activeLocationId={activeLocationId}
+        activeLocationLabel={activeLocationLabel}
+        onChangeLocation={onChangeLocation}
+      />
+
+      <TabletAutoAccept
+        label={copy.actions.autoAccept}
+        copy={copy.mobileAutoAccept}
+        enabled={autoAccept}
+        saving={savingAutoAccept}
+        onToggle={onToggleAutoAccept}
+      />
     </section>
   )
 }
 
-// ─── Sections ─────────────────────────────────────────────────────────────────
-
-function WideCalendarHeader(props: WideCalendarHeaderProps) {
-  const { eyebrow, title, children } = props
-
-  return (
-    <div className="brand-pro-calendar-wide-header">
-      <div>
-        <p className="brand-pro-calendar-wide-eyebrow">{eyebrow}</p>
-
-        <h2 className="brand-pro-calendar-wide-title">{title}</h2>
-      </div>
-
-      {children}
-    </div>
-  )
-}
-
-function CalendarTabletBody(props: CalendarTabletBodyProps) {
+function TabletCalendarBody(props: TabletCalendarBodyProps) {
   const {
+    copy,
     view,
     currentDate,
     setCurrentDate,
@@ -265,7 +337,7 @@ function CalendarTabletBody(props: CalendarTabletBodyProps) {
   } = props
 
   return (
-    <section className="brand-pro-calendar-tablet-content">
+    <section className="brand-pro-calendar-tablet-calendar-area">
       <div className="brand-pro-calendar-tablet-state-list">
         {showInitialLoading ? (
           <StateBanner>{loadingCalendarLabel}</StateBanner>
@@ -280,6 +352,7 @@ function CalendarTabletBody(props: CalendarTabletBodyProps) {
 
       {(view === 'day' || view === 'week') && !showInitialLoading ? (
         <DayWeekGrid
+          copy={copy}
           view={view}
           visibleDays={visibleDays}
           events={cal.events}
@@ -299,7 +372,7 @@ function CalendarTabletBody(props: CalendarTabletBodyProps) {
       ) : null}
 
       {view === 'month' && !showInitialLoading ? (
-        <div className="brand-pro-calendar-month-desktop">
+        <div className="brand-pro-calendar-tablet-month-wrap">
           <MonthGrid
             visibleDays={visibleDays}
             currentDate={currentDate}
@@ -316,11 +389,46 @@ function CalendarTabletBody(props: CalendarTabletBodyProps) {
   )
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+function TabletPendingBar(props: TabletPendingBarProps) {
+  const { copy, cal } = props
 
-function TabletLocationBar(props: TabletLocationBarProps) {
+  const topPendingRequest = firstPendingBooking(cal.management.pendingRequests)
+  const topPendingBookingId = bookingActionId(topPendingRequest)
+
+  return (
+    <div className="brand-pro-calendar-tablet-pending-bar">
+      <PendingRequestSurface
+        copy={copy.mobilePendingRequest}
+        event={topPendingRequest}
+        pendingCount={cal.management.pendingRequests.length}
+        busy={Boolean(
+          topPendingBookingId &&
+            cal.managementActionBusyId === topPendingBookingId,
+        )}
+        error={cal.managementActionError}
+        variant="tablet"
+        actionMode="label"
+        onOpenAll={() => cal.openManagement('pendingRequests')}
+        onApprove={() => {
+          if (topPendingBookingId) {
+            void cal.approveBookingById(topPendingBookingId)
+          }
+        }}
+        onDeny={() => {
+          if (topPendingBookingId) {
+            void cal.denyBookingById(topPendingBookingId)
+          }
+        }}
+      />
+    </div>
+  )
+}
+
+// ─── Tablet controls ──────────────────────────────────────────────────────────
+
+function TabletLocationPicker(props: TabletLocationPickerProps) {
   const {
-    shortLabel,
+    label,
     selectAriaLabel,
     selectFallbackLabel,
     optionFallbackLabel,
@@ -331,37 +439,104 @@ function TabletLocationBar(props: TabletLocationBarProps) {
     onChangeLocation,
   } = props
 
-  if (!locationsLoaded || scopedLocations.length <= 1) return null
+  if (!locationsLoaded) return null
 
-  const displayLabel = activeLocationDisplayLabel({
+  const firstLocation = scopedLocations[0]
+
+  const singleLocationFallbackLabel = firstLocation
+    ? calendarLocationDisplayLabel({
+        activeLocationId: firstLocation.id,
+        activeLocationLabel: null,
+        scopedLocations,
+        fallbackLabel: selectFallbackLabel,
+      })
+    : selectFallbackLabel
+
+  const displayLabel = calendarLocationDisplayLabel({
+    activeLocationId,
     activeLocationLabel,
     scopedLocations,
-    activeLocationId,
-    optionFallbackLabel,
-    selectFallbackLabel,
+    fallbackLabel: singleLocationFallbackLabel,
   })
 
+  const hasMultipleLocations = scopedLocations.length > 1
+
   return (
-    <div className="brand-pro-calendar-location-bar" data-density="tablet">
-      <span className="brand-pro-calendar-location-label">{shortLabel}</span>
+    <div className="brand-pro-calendar-tablet-location">
+      <span className="brand-pro-calendar-tablet-toolbar-label">{label}</span>
 
-      <select
-        value={activeLocationId ?? ''}
-        onChange={(event) => onChangeLocation(event.target.value || null)}
-        aria-label={selectAriaLabel}
-        className="brand-pro-calendar-location-select brand-focus"
+      {hasMultipleLocations ? (
+        <select
+          value={activeLocationId ?? ''}
+          onChange={(event) => onChangeLocation(event.target.value || null)}
+          aria-label={selectAriaLabel}
+          className="brand-pro-calendar-tablet-location-select brand-focus"
+        >
+          {!activeLocationId ? <option value="">{displayLabel}</option> : null}
+
+          {scopedLocations.map((location) => (
+            <option key={location.id} value={location.id}>
+              {calendarLocationDisplayLabel({
+                activeLocationId: location.id,
+                activeLocationLabel: null,
+                scopedLocations,
+                fallbackLabel: optionFallbackLabel,
+              })}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="brand-pro-calendar-tablet-location-static">
+          {displayLabel}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function TabletAutoAccept(props: TabletAutoAcceptProps) {
+  const { label, copy, enabled, saving, onToggle } = props
+
+  const statusLabel = saving
+    ? copy.savingLabel
+    : enabled
+      ? copy.onLabel
+      : copy.offLabel
+
+  const ariaLabel = enabled ? copy.ariaLabelOn : copy.ariaLabelOff
+
+  return (
+    <div className="brand-pro-calendar-tablet-auto-accept">
+      <div className="brand-pro-calendar-tablet-auto-copy">
+        <span
+          className="brand-pro-calendar-tablet-auto-dot"
+          data-enabled={enabled ? 'true' : 'false'}
+          aria-hidden="true"
+        />
+
+        <span className="brand-pro-calendar-tablet-auto-label">
+          {label}
+        </span>
+
+        <span className="brand-pro-calendar-tablet-auto-subtitle">
+          {copy.subtitle}
+        </span>
+      </div>
+
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={saving}
+        className="brand-pro-calendar-switch brand-focus"
+        data-enabled={enabled ? 'true' : 'false'}
+        data-saving={saving ? 'true' : 'false'}
+        role="switch"
+        aria-checked={enabled}
+        aria-label={ariaLabel}
+        title={`${label}: ${statusLabel}`}
       >
-        {!activeLocationId ? <option value="">{displayLabel}</option> : null}
-
-        {scopedLocations.map((location) => (
-          <option key={location.id} value={location.id}>
-            {locationOptionName({
-              location,
-              fallback: optionFallbackLabel,
-            })}
-          </option>
-        ))}
-      </select>
+        <span className="brand-pro-calendar-switch-thumb" />
+      </button>
     </div>
   )
 }

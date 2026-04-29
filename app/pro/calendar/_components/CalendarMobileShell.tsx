@@ -19,6 +19,7 @@ import type { CalendarEvent, ViewMode } from '../_types'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 
 import { anchorNoonInTimeZone } from '../_utils/date'
+import { calendarLocationDisplayLabel } from '../_viewModel/proCalendarDisplay'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -69,42 +70,6 @@ type StateBannerProps = {
   danger?: boolean
 }
 
-// ─── Pure helpers ─────────────────────────────────────────────────────────────
-
-function locationOptionName(args: {
-  location: CalendarLocationOption
-  fallback: string
-}): string {
-  const { location, fallback } = args
-
-  return location.name?.trim() || location.type?.trim() || fallback
-}
-
-function activeLocationDisplayLabel(args: {
-  activeLocationLabel: string | null
-  scopedLocations: CalendarLocationOption[]
-  activeLocationId: string | null
-  optionFallbackLabel: string
-  selectFallbackLabel: string
-}): string {
-  const explicitLabel = args.activeLocationLabel?.trim()
-
-  if (explicitLabel) return explicitLabel
-
-  const activeLocation = args.scopedLocations.find(
-    (location) => location.id === args.activeLocationId,
-  )
-
-  if (activeLocation) {
-    return locationOptionName({
-      location: activeLocation,
-      fallback: args.optionFallbackLabel,
-    })
-  }
-
-  return args.selectFallbackLabel
-}
-
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export function CalendarMobileShell(props: CalendarMobileShellProps) {
@@ -132,7 +97,7 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
   return (
     <>
       <section className="brand-pro-calendar-shell" data-device="mobile">
-      <MobileCalendarHeader title={title} subtitle={subtitle} />
+        <MobileCalendarHeader title={title} subtitle={subtitle} />
 
         <div className="px-5 pb-3">
           <CalendarStatsPanel
@@ -203,6 +168,7 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
 
           {(view === 'day' || view === 'week') && !showInitialLoading ? (
             <DayWeekGrid
+              copy={copy}
               view={view}
               visibleDays={visibleDays}
               events={cal.events}
@@ -290,12 +256,11 @@ function MobileLocationBar(props: MobileLocationBarProps) {
 
   if (!locationsLoaded || scopedLocations.length <= 1) return null
 
-  const displayLabel = activeLocationDisplayLabel({
+  const displayLabel = calendarLocationDisplayLabel({
+    activeLocationId,
     activeLocationLabel,
     scopedLocations,
-    activeLocationId,
-    optionFallbackLabel,
-    selectFallbackLabel,
+    fallbackLabel: selectFallbackLabel,
   })
 
   return (
@@ -312,9 +277,11 @@ function MobileLocationBar(props: MobileLocationBarProps) {
 
         {scopedLocations.map((location) => (
           <option key={location.id} value={location.id}>
-            {locationOptionName({
-              location,
-              fallback: optionFallbackLabel,
+            {calendarLocationDisplayLabel({
+              activeLocationId: location.id,
+              activeLocationLabel: null,
+              scopedLocations,
+              fallbackLabel: optionFallbackLabel,
             })}
           </option>
         ))}

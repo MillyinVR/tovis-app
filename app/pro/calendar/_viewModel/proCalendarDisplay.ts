@@ -8,6 +8,11 @@ import type {
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 
 import {
+  MONTH_GRID_DAY_COUNT,
+  WEEK_DAY_COUNT,
+} from '../_constants'
+
+import {
   addDaysAnchorNoonInTimeZone,
   anchorNoonInTimeZone,
   formatDayLabelInTimeZone,
@@ -23,6 +28,8 @@ import {
   sanitizeTimeZone,
   startOfDayUtcInTimeZone,
 } from '@/lib/timeZone'
+
+export { DEFAULT_CALENDAR_VIEW } from '../_constants'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,14 +59,7 @@ type CalendarLocationDisplayLabelArgs = {
   fallbackLabel: string
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-export const DEFAULT_CALENDAR_VIEW: ViewMode = 'day'
-
-const WEEK_DAY_COUNT = 7
-const MONTH_GRID_DAY_COUNT = 42
-
-// ─── Timezone helpers ─────────────────────────────────────────────────────────
+// ─── Time zone helpers ────────────────────────────────────────────────────────
 
 export function safeCalendarTimeZone(value: unknown): string {
   return sanitizeTimeZone(
@@ -169,7 +169,7 @@ export function todayWeekdayLabel(timeZone: string, now = new Date()): string {
 export function mobileCalendarSubtitleFor(args: MobileSubtitleArgs): string {
   const { date, timeZone, activeLocationLabel } = args
 
-  const format = (options: Intl.DateTimeFormatOptions) =>
+  const format = (options: Intl.DateTimeFormatOptions): string =>
     new Intl.DateTimeFormat(undefined, { timeZone, ...options })
       .format(date)
       .toUpperCase()
@@ -199,7 +199,9 @@ export function isBookingCalendarEvent(
 export function bookingActionId(
   event: CalendarEvent | undefined,
 ): string | null {
-  if (!event || !isBookingCalendarEvent(event)) return null
+  if (!event || !isBookingCalendarEvent(event)) {
+    return null
+  }
 
   return event.id
 }
@@ -224,7 +226,9 @@ export function calendarLocationDisplayLabel(
 
   const trimmedActiveLabel = activeLocationLabel?.trim()
 
-  if (trimmedActiveLabel) return trimmedActiveLabel
+  if (trimmedActiveLabel) {
+    return trimmedActiveLabel
+  }
 
   const activeLocation = scopedLocations.find(
     (location) => location.id === activeLocationId,
@@ -232,11 +236,16 @@ export function calendarLocationDisplayLabel(
 
   const locationName = activeLocation?.name?.trim()
 
-  if (locationName) return locationName
+  if (locationName) {
+    return locationName
+  }
 
   const locationType = activeLocation?.type?.trim()
 
-  if (locationType) return locationType
+  if (locationType) {
+    return locationType
+  }
 
   return fallbackLabel
 }
+

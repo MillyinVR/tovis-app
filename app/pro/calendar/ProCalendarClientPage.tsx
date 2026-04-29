@@ -16,171 +16,28 @@ import { ManagementModal } from './_components/ManagementModal'
 import { useCalendarData } from './_hooks/useCalendarData'
 import { useCalendarNavigation } from './_hooks/useCalendarNavigation'
 
-import type { CalendarEvent, ViewMode } from './_types'
+import { DEFAULT_CALENDAR_VIEW } from './_constants'
+
+import {
+  anchoredCalendarDate,
+  bookingActionId,
+  calendarHeaderLabelForView,
+  calendarTitleForView,
+  firstPendingBooking,
+  mobileCalendarSubtitleFor,
+  safeCalendarTimeZone,
+  todayWeekdayLabel,
+  validTimeZoneOrFallback,
+  visibleDaysForCalendarView,
+} from './_viewModel/proCalendarDisplay'
+
+import type { ViewMode } from './_types'
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
-
-import {
-  DEFAULT_CALENDAR_VIEW,
-  MONTH_GRID_DAY_COUNT,
-  WEEK_DAY_COUNT,
-} from './_constants'
-
-import {
-  addDaysAnchorNoonInTimeZone,
-  anchorNoonInTimeZone,
-  formatDayLabelInTimeZone,
-  formatMonthRangeInTimeZone,
-  formatWeekRangeInTimeZone,
-  startOfMonthAnchorNoonInTimeZone,
-  startOfWeekAnchorNoonInTimeZone,
-} from './_utils/date'
-
-import {
-  DEFAULT_TIME_ZONE,
-  isValidIanaTimeZone,
-  sanitizeTimeZone,
-  startOfDayUtcInTimeZone,
-} from '@/lib/timeZone'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ProCalendarClientPageProps = {
   copy: BrandProCalendarCopy
-}
-
-// ─── Pure helpers ─────────────────────────────────────────────────────────────
-
-function safeTz(value: unknown): string {
-  return sanitizeTimeZone(
-    typeof value === 'string' ? value : '',
-    DEFAULT_TIME_ZONE,
-  )
-}
-
-function validTimeZoneOrFallback(value: unknown, fallback: string): string {
-  if (typeof value !== 'string') return fallback
-
-  const candidate = value.trim()
-
-  if (!candidate || !isValidIanaTimeZone(candidate)) {
-    return fallback
-  }
-
-  return sanitizeTimeZone(candidate, fallback)
-}
-
-function headerLabelFor(args: {
-  view: ViewMode
-  anchorUtc: Date
-  timeZone: string
-}): string {
-  const { view, anchorUtc, timeZone } = args
-
-  if (view === 'day') return formatDayLabelInTimeZone(anchorUtc, timeZone)
-  if (view === 'week') return formatWeekRangeInTimeZone(anchorUtc, timeZone)
-
-  return formatMonthRangeInTimeZone(anchorUtc, timeZone)
-}
-
-function titleForView(args: {
-  view: ViewMode
-  titles: BrandProCalendarCopy['titles']
-}): string {
-  return args.titles[args.view]
-}
-
-function visibleDaysForView(args: {
-  view: ViewMode
-  anchoredCurrentDate: Date
-  timeZone: string
-}): Date[] {
-  const { view, anchoredCurrentDate, timeZone } = args
-
-  if (view === 'day') {
-    return [startOfDayUtcInTimeZone(anchoredCurrentDate, timeZone)]
-  }
-
-  if (view === 'week') {
-    const weekStartNoon = startOfWeekAnchorNoonInTimeZone(
-      anchoredCurrentDate,
-      timeZone,
-    )
-
-    return Array.from({ length: WEEK_DAY_COUNT }, (_, index) => {
-      const dayNoon = addDaysAnchorNoonInTimeZone(
-        weekStartNoon,
-        index,
-        timeZone,
-      )
-
-      return startOfDayUtcInTimeZone(dayNoon, timeZone)
-    })
-  }
-
-  const monthStartNoon = startOfMonthAnchorNoonInTimeZone(
-    anchoredCurrentDate,
-    timeZone,
-  )
-
-  const firstGridDayNoon = startOfWeekAnchorNoonInTimeZone(
-    monthStartNoon,
-    timeZone,
-  )
-
-  return Array.from({ length: MONTH_GRID_DAY_COUNT }, (_, index) => {
-    const dayNoon = addDaysAnchorNoonInTimeZone(
-      firstGridDayNoon,
-      index,
-      timeZone,
-    )
-
-    return startOfDayUtcInTimeZone(dayNoon, timeZone)
-  })
-}
-
-function todayWeekdayLabel(timeZone: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    timeZone,
-    weekday: 'long',
-  }).format(new Date())
-}
-
-function bookingActionId(event: CalendarEvent | undefined): string | null {
-  if (!event || event.kind !== 'BOOKING') return null
-
-  return event.id
-}
-
-function firstPendingBooking(
-  events: CalendarEvent[],
-): CalendarEvent | undefined {
-  return events.find((event) => event.kind === 'BOOKING')
-}
-
-function mobileSubtitleFor(args: {
-  date: Date
-  timeZone: string
-  activeLocationLabel: string | null
-}): string {
-  const { date, timeZone, activeLocationLabel } = args
-
-  const format = (options: Intl.DateTimeFormatOptions): string =>
-    new Intl.DateTimeFormat(undefined, { timeZone, ...options })
-      .format(date)
-      .toUpperCase()
-
-  const parts = [
-    format({ weekday: 'short' }),
-    format({ month: 'short', day: 'numeric' }),
-  ]
-
-  const locationName = activeLocationLabel?.split(' — ')[0]?.trim()
-
-  if (locationName) {
-    parts.push(locationName.toUpperCase())
-  }
-
-  return parts.join(' · ')
 }
 
 // ─── Exported client page ─────────────────────────────────────────────────────
@@ -193,7 +50,10 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
 
   const cal = useCalendarData({ view, currentDate })
 
-  const calendarTimeZone = useMemo(() => safeTz(cal.timeZone), [cal.timeZone])
+  const calendarTimeZone = useMemo(
+    () => safeCalendarTimeZone(cal.timeZone),
+    [cal.timeZone],
+  )
 
   const activeLocationTimeZone = useMemo(
     () =>
@@ -205,12 +65,12 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
   )
 
   const bookingModalTimeZone = useMemo(
-    () => safeTz(cal.booking?.timeZone ?? calendarTimeZone),
+    () => safeCalendarTimeZone(cal.booking?.timeZone ?? calendarTimeZone),
     [cal.booking?.timeZone, calendarTimeZone],
   )
 
   const anchoredCurrentDate = useMemo(
-    () => anchorNoonInTimeZone(currentDate, calendarTimeZone),
+    () => anchoredCalendarDate(currentDate, calendarTimeZone),
     [calendarTimeZone, currentDate],
   )
 
@@ -222,7 +82,7 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
 
   const visibleDays = useMemo(
     () =>
-      visibleDaysForView({
+      visibleDaysForCalendarView({
         view,
         anchoredCurrentDate,
         timeZone: calendarTimeZone,
@@ -232,11 +92,11 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
 
   const headerLabel = useMemo(
     () =>
-      headerLabelFor({
+      calendarHeaderLabelForView(
         view,
-        anchorUtc: anchoredCurrentDate,
-        timeZone: calendarTimeZone,
-      }),
+        anchoredCurrentDate,
+        calendarTimeZone,
+      ),
     [anchoredCurrentDate, calendarTimeZone, view],
   )
 
@@ -247,7 +107,7 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
 
   const mobileSubtitle = useMemo(
     () =>
-      mobileSubtitleFor({
+      mobileCalendarSubtitleFor({
         date: anchoredCurrentDate,
         timeZone: calendarTimeZone,
         activeLocationLabel: cal.activeLocationLabel,
@@ -263,12 +123,15 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
     [cal.management.pendingRequests],
   )
 
-  const topPendingBookingId = bookingActionId(topPendingRequest)
+  const topPendingBookingId = useMemo(
+    () => bookingActionId(topPendingRequest),
+    [topPendingRequest],
+  )
 
-  const viewTitle = titleForView({
-    view,
-    titles: copy.titles,
-  })
+  const viewTitle = useMemo(
+    () => calendarTitleForView(view, copy.titles),
+    [copy.titles, view],
+  )
 
   return (
     <main className="brand-pro-calendar-page">
@@ -372,10 +235,12 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
           cal.closeManagement()
           void cal.oneClickBlockFullDay(new Date())
         }}
-        onApproveBookingId={(bookingId) =>
+        onApproveBookingId={(bookingId) => {
           void cal.approveBookingById(bookingId)
-        }
-        onDenyBookingId={(bookingId) => void cal.denyBookingById(bookingId)}
+        }}
+        onDenyBookingId={(bookingId) => {
+          void cal.denyBookingById(bookingId)
+        }}
         actionBusyId={cal.managementActionBusyId}
         actionError={cal.managementActionError}
       />
@@ -415,9 +280,15 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onChangeSelectedDraftServiceIds={cal.setDraftServiceIds}
         onToggleNotifyClient={cal.setNotifyClient}
         onToggleAllowOutsideHours={cal.setAllowOutsideHours}
-        onSave={() => void cal.submitChanges()}
-        onApprove={() => void cal.approveBooking()}
-        onDeny={() => void cal.denyBooking()}
+        onSave={() => {
+          void cal.submitChanges()
+        }}
+        onApprove={() => {
+          void cal.approveBooking()
+        }}
+        onDeny={() => {
+          void cal.denyBooking()
+        }}
       />
     </main>
   )

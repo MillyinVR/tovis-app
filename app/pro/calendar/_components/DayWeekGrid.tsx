@@ -9,6 +9,7 @@ import type {
   RefObject,
 } from 'react'
 
+import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type {
   CalendarEvent,
   EntityType,
@@ -25,14 +26,16 @@ import {
 import { PX_PER_MINUTE } from '../_utils/calendarMath'
 import { DEFAULT_TIME_ZONE, isValidIanaTimeZone } from '@/lib/timeZone'
 
-import { DayHeaderRow } from './_grid/DayHeaderRow'
-import { TimeGutter } from './_grid/TimeGutter'
 import { DayColumn } from './_grid/DayColumn'
+import { DayHeaderRow } from './_grid/DayHeaderRow'
 import { NowLineOverlay } from './_grid/NowLineOverlay'
+import { TimeGutter } from './_grid/TimeGutter'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type DayWeekGridProps = {
+  copy: BrandProCalendarCopy
+
   view: ViewMode
   visibleDays: Date[]
   events: CalendarEvent[]
@@ -78,9 +81,14 @@ type MeasuredElementHeight = {
 const MIDDAY_MS = 12 * 60 * 60 * 1000
 const TOTAL_MINUTES_IN_DAY = 24 * 60
 const NOW_REFRESH_INTERVAL_MS = 30_000
-const NOW_SCROLL_OFFSET_PX = 160
+
 const DAY_VIEW_COUNT = 1
 const WEEK_VIEW_COUNT = 7
+
+const PROTOTYPE_START_MINUTE = 8 * 60
+const PROTOTYPE_END_MINUTE = 20 * 60
+
+const TIME_COLUMN_WIDTH = 'var(--brand-pro-calendar-time-column, 64px)'
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
@@ -117,7 +125,7 @@ function getTimelineDays(view: ViewMode, visibleDays: Date[]): Date[] {
 }
 
 function getGridColumns(dayCount: number): string {
-  return `var(--cal-time-col) repeat(${dayCount}, minmax(0, 1fr))`
+  return `${TIME_COLUMN_WIDTH} repeat(${dayCount}, minmax(0, 1fr))`
 }
 
 function visibleDayYmd(day: Date, timeZone: string): string {
@@ -128,6 +136,10 @@ function timelineGridStyle(gridCols: string): CSSProperties {
   return {
     gridTemplateColumns: gridCols,
   }
+}
+
+function initialScrollTopPx(): number {
+  return PROTOTYPE_START_MINUTE * PX_PER_MINUTE
 }
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
@@ -199,13 +211,13 @@ function useNowSnapshot(args: {
   }, [timeZone, tick])
 }
 
-function useAutoScrollToNow(args: {
+function useInitialTimelineScroll(args: {
   scrollRef: RefObject<HTMLDivElement | null>
   enabled: boolean
-  nowTopPx: number
+  targetTopPx: number
   scrollKey: string
 }): void {
-  const { scrollRef, enabled, nowTopPx, scrollKey } = args
+  const { scrollRef, enabled, targetTopPx, scrollKey } = args
   const lastScrollKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -216,14 +228,15 @@ function useAutoScrollToNow(args: {
     if (!scrollElement) return
 
     lastScrollKeyRef.current = scrollKey
-    scrollElement.scrollTop = Math.max(0, nowTopPx - NOW_SCROLL_OFFSET_PX)
-  }, [enabled, nowTopPx, scrollKey, scrollRef])
+    scrollElement.scrollTop = Math.max(0, targetTopPx)
+  }, [enabled, scrollKey, scrollRef, targetTopPx])
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
 
 export function DayWeekGrid(props: DayWeekGridProps) {
   const {
+    copy,
     view,
     visibleDays,
     events,
@@ -241,6 +254,8 @@ export function DayWeekGrid(props: DayWeekGridProps) {
     isBusy,
   } = props
 
+  const isTimelineView = view === 'day' || view === 'week'
+
   const timelineDays = useMemo(
     () => getTimelineDays(view, visibleDays),
     [view, visibleDays],
@@ -252,7 +267,6 @@ export function DayWeekGrid(props: DayWeekGridProps) {
   )
 
   const timeZone = resolvedTimeZone.value
-  const isTimelineView = view === 'day' || view === 'week'
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const header = useMeasuredElementHeight()
 
@@ -286,10 +300,10 @@ export function DayWeekGrid(props: DayWeekGridProps) {
     [timeZone, view, visibleYmds],
   )
 
-  useAutoScrollToNow({
+  useInitialTimelineScroll({
     scrollRef,
-    enabled: showNowLine,
-    nowTopPx,
+    enabled: isTimelineView,
+    targetTopPx: initialScrollTopPx(),
     scrollKey,
   })
 
@@ -299,24 +313,28 @@ export function DayWeekGrid(props: DayWeekGridProps) {
 
   return (
     <section
-      className="brand-pro-calendar-timeline [--cal-time-col:32px] md:[--cal-time-col:72px]"
+      className="brand-pro-calendar-timeline"
       data-calendar-shell="timeline"
       data-calendar-view={view}
       data-calendar-days-visible={timelineDays.length}
+      data-calendar-time-zone-valid={resolvedTimeZone.isValid ? 'true' : 'false'}
+      data-calendar-now-visible={showNowLine ? 'true' : 'false'}
+      data-calendar-prototype-start-minute={PROTOTYPE_START_MINUTE}
+      data-calendar-prototype-end-minute={PROTOTYPE_END_MINUTE}
     >
       <div
         ref={scrollRef}
-        className="brand-pro-calendar-timeline-scroll looksNoScrollbar"
+        className="brand-pro-calendar-timeline-scroll"
         data-calendar-scroll="timeline"
       >
         <div
           className="brand-pro-calendar-timeline-surface"
           data-calendar-surface="timeline"
         >
-          <div className="relative z-10">
+          <div className="brand-pro-calendar-timeline-content-layer">
             <div
               ref={header.ref}
-              className="sticky top-0 z-[200]"
+              className="brand-pro-calendar-timeline-header"
               data-calendar-header="timeline"
             >
               <DayHeaderRow
@@ -328,7 +346,7 @@ export function DayWeekGrid(props: DayWeekGridProps) {
             </div>
 
             <div
-              className="relative grid"
+              className="brand-pro-calendar-timeline-grid"
               style={timelineGridStyle(gridCols)}
               data-calendar-grid="timeline"
               data-calendar-view={view}
@@ -344,6 +362,7 @@ export function DayWeekGrid(props: DayWeekGridProps) {
                 return (
                   <DayColumn
                     key={dayKey}
+                    copy={copy}
                     day={day}
                     dayIdx={dayIdx}
                     visibleDaysCount={timelineDays.length}
@@ -368,7 +387,7 @@ export function DayWeekGrid(props: DayWeekGridProps) {
           </div>
 
           <div
-            className="pointer-events-none absolute inset-0 z-50"
+            className="brand-pro-calendar-timeline-now-layer"
             aria-hidden="true"
           >
             <NowLineOverlay
