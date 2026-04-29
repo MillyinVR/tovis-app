@@ -25,7 +25,7 @@ export type ProReadinessBlocker =
   | 'VERIFICATION_NOT_APPROVED'
 
 export type ProReadiness =
-  | { ok: true; liveModes: LiveBookingMode[] }
+  | { ok: true; liveModes: LiveBookingMode[]; readyLocationIds: string[] }
   | { ok: false; blockers: ProReadinessBlocker[] }
 
 // ─── Internal data ────────────────────────────────────────────────────────────
@@ -36,13 +36,15 @@ const proReadinessSelect = {
   mobileBasePostalCode: true,
   verificationStatus: true,
   locations: {
-    where: { isBookable: true },
+    // Validate ALL locations (not just currently bookable) so the publish
+    // route can determine which ones are safe to activate.
     select: {
       id: true,
       type: true,
       formattedAddress: true,
       timeZone: true,
       workingHours: true,
+      isBookable: true,
     },
   },
   offerings: {
@@ -107,6 +109,7 @@ type ProReadinessRecord = {
     formattedAddress: string | null
     timeZone: string | null
     workingHours: unknown
+    isBookable: boolean
   }>
   offerings: Array<{
     id: string
@@ -123,6 +126,9 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
   const blockers: ProReadinessBlocker[] = []
 
   // ── Verification ──────────────────────────────────────────────────────────
+  // PENDING_MANUAL_REVIEW is intentionally allowed — pros in manual review can
+  // still list and accept bookings while their license is being verified by ops.
+  // Only REJECTED or NEEDS_INFO (which require pro action) block readiness.
   if (
     pro.verificationStatus === VerificationStatus.REJECTED ||
     pro.verificationStatus === VerificationStatus.NEEDS_INFO
@@ -137,39 +143,54 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
   }
 
   // ── Locations ─────────────────────────────────────────────────────────────
-  const bookableLocations = pro.locations ?? []
-  if (bookableLocations.length === 0) {
+  // Evaluate ALL locations (not just currently bookable ones) so the publish
+  // route can determine which location IDs are safe to activate.
+  const allLocations = pro.locations ?? []
+  if (allLocations.length === 0) {
     blockers.push('NO_BOOKABLE_LOCATION')
   }
 
-  const salonLocations = bookableLocations.filter(
+  // Identify which locations are individually ready (have valid timezone + hours)
+  const readyLocationIds: string[] = []
+  for (const loc of allLocations) {
+    const hasTimezone = Boolean(loc.timeZone) && isValidIanaTimeZone(loc.timeZone)
+    const hasWorkingHours = isValidWorkingHours(loc.workingHours)
+    const hasSalonAddress = (
+      loc.type !== ProfessionalLocationType.SALON &&
+      loc.type !== ProfessionalLocationType.SUITE
+    ) || Boolean(loc.formattedAddress)
+
+    if (hasTimezone && hasWorkingHours && hasSalonAddress) {
+      readyLocationIds.push(loc.id)
+    }
+  }
+
+  const salonLocations = allLocations.filter(
     (l) => l.type === ProfessionalLocationType.SALON || l.type === ProfessionalLocationType.SUITE,
   )
-  const mobileLocation = bookableLocations.find(
+  const mobileLocation = allLocations.find(
     (l) => l.type === ProfessionalLocationType.MOBILE_BASE,
   )
 
-  // Validate location-level fields
-  for (const loc of bookableLocations) {
-    if (!loc.timeZone || !isValidIanaTimeZone(loc.timeZone)) {
-      blockers.push('LOCATION_MISSING_TIMEZONE')
-      break
-    }
+  // Validate location-level fields across all locations
+  const anyMissingTimezone = allLocations.some(
+    (l) => !l.timeZone || !isValidIanaTimeZone(l.timeZone),
+  )
+  if (anyMissingTimezone) {
+    blockers.push('LOCATION_MISSING_TIMEZONE')
   }
 
-  for (const loc of bookableLocations) {
-    if (!isValidWorkingHours(loc.workingHours)) {
-      blockers.push('LOCATION_MISSING_WORKING_HOURS')
-      break
-    }
+  const anyMissingWorkingHours = allLocations.some(
+    (l) => !isValidWorkingHours(l.workingHours),
+  )
+  if (anyMissingWorkingHours) {
+    blockers.push('LOCATION_MISSING_WORKING_HOURS')
   }
 
   // Salon-specific checks
-  for (const loc of salonLocations) {
-    if (!loc.formattedAddress) {
-      blockers.push('SALON_MISSING_ADDRESS')
-      break
-    }
+  const anySalonMissingAddress = salonLocations.some((l) => !l.formattedAddress)
+  if (anySalonMissingAddress) {
+    blockers.push('SALON_MISSING_ADDRESS')
   }
 
   // Mobile-specific checks
@@ -179,6 +200,12 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
     if (!hasMobileBase) {
       blockers.push('MOBILE_MISSING_BASE_CONFIG')
     }
+  }
+
+  if (readyLocationIds.length === 0 && allLocations.length > 0) {
+    // All locations have validation errors — surface NO_BOOKABLE_LOCATION
+    // in addition to the specific field errors.
+    blockers.push('NO_BOOKABLE_LOCATION')
   }
 
   // ── Offering price/duration checks per mode ───────────────────────────────
@@ -233,7 +260,7 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
     }
   }
 
-  return { ok: true, liveModes }
+  return { ok: true, liveModes, readyLocationIds }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

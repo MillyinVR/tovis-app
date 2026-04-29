@@ -1877,6 +1877,9 @@ function isReviewEligibleCloseout(args: {
  * Returns a list of human-readable error codes that explain why a
  * `sendToClient = true` aftercare submission did not complete the booking.
  * Empty array means the booking was (or will be) completed normally.
+ *
+ * NOTE: This mirrors the conditions checked in `isReviewEligibleCloseout`.
+ * If you change the completion criteria in either function, update both.
  */
 function buildCompletionBlockers(args: {
   sendToClient: boolean

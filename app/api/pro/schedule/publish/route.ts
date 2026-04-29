@@ -34,14 +34,14 @@ export async function POST(req: Request) {
       })
     }
 
-    // Atomic publish: set every location to isBookable and bump the config
-    // version so availability caches know to invalidate.
+    // Atomic publish: only set isBookable=true for locations that individually
+    // passed readiness validation (correct timezone, working hours, etc.).
+    // This prevents unready locations from being inadvertently published.
     const result = await prisma.$transaction(async (tx) => {
       const updated = await tx.professionalLocation.updateMany({
         where: {
+          id: { in: readiness.readyLocationIds },
           professionalId,
-          // Only update locations that are not already bookable, to keep
-          // the write idempotent.
           isBookable: false,
         },
         data: {
