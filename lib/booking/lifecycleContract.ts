@@ -233,3 +233,168 @@ export function isLegalStepTransition(
     return false
   }
 }
+
+/**
+ * Returns true when the requested BookingStatus transition is in the legal contract
+ * for the given actor, without throwing.
+ */
+export function isLegalStatusTransition(
+  from: BookingStatus,
+  to: BookingStatus,
+  actor: LifecycleActor,
+): boolean {
+  try {
+    assertLegalStatusTransition(from, to, actor)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ─── Drift telemetry ──────────────────────────────────────────────────────────
+
+/**
+ * Strict mode toggle. When `LIFECYCLE_STRICT_MODE=true` (or `1`), drift recorders
+ * throw on contract violations instead of just logging telemetry.
+ *
+ * Default OFF: drift is captured but does not change runtime behavior. This lets
+ * us roll out contract enforcement safely — observe first, enforce later.
+ */
+export function isLifecycleStrictMode(): boolean {
+  const raw = process.env.LIFECYCLE_STRICT_MODE
+  if (typeof raw !== 'string') return false
+  const v = raw.trim().toLowerCase()
+  return v === '1' || v === 'true' || v === 'yes'
+}
+
+export type LifecycleDriftKind =
+  | 'STEP_TRANSITION_OUTSIDE_CONTRACT'
+  | 'STATUS_TRANSITION_OUTSIDE_CONTRACT'
+  | 'UNAUTHORIZED_ACTOR'
+
+export type LifecycleDriftEvent = {
+  kind: LifecycleDriftKind
+  from: SessionStep | BookingStatus
+  to: SessionStep | BookingStatus
+  actor: LifecycleActor
+  route: string
+  bookingId?: string | null
+  professionalId?: string | null
+  reason: string
+}
+
+/**
+ * Pluggable sink for drift events. The default sink is a no-op so this module
+ * stays free of side-effect imports; the booking write boundary wires in a
+ * Sentry/structured-log sink during initialization.
+ *
+ * Multiple sinks can be registered (e.g. tests can attach a recorder).
+ */
+type LifecycleDriftSink = (event: LifecycleDriftEvent) => void
+
+const driftSinks: LifecycleDriftSink[] = []
+
+export function registerLifecycleDriftSink(sink: LifecycleDriftSink): () => void {
+  driftSinks.push(sink)
+  return () => {
+    const i = driftSinks.indexOf(sink)
+    if (i >= 0) driftSinks.splice(i, 1)
+  }
+}
+
+function emitDrift(event: LifecycleDriftEvent): void {
+  for (const sink of driftSinks) {
+    try {
+      sink(event)
+    } catch {
+      // Sinks must never break the caller. Swallow.
+    }
+  }
+}
+
+/**
+ * Records a SessionStep transition through the contract. If the transition is
+ * not legal for the actor, emits a drift event. In strict mode, also throws.
+ *
+ * No-op when `from === to` (idempotent retries are not drift).
+ *
+ * This is designed to be called *alongside* existing manual validation in
+ * writeBoundary — it adds telemetry without changing current behavior.
+ */
+export function recordStepTransition(args: {
+  from: SessionStep
+  to: SessionStep
+  actor: LifecycleActor
+  route: string
+  bookingId?: string | null
+  professionalId?: string | null
+}): void {
+  if (args.from === args.to) return
+
+  try {
+    assertLegalStepTransition(args.from, args.to, args.actor)
+    return
+  } catch (err) {
+    const violation = err instanceof LifecycleViolationError ? err : null
+    const kind: LifecycleDriftKind =
+      violation?.code === 'UNAUTHORIZED_ACTOR'
+        ? 'UNAUTHORIZED_ACTOR'
+        : 'STEP_TRANSITION_OUTSIDE_CONTRACT'
+
+    emitDrift({
+      kind,
+      from: args.from,
+      to: args.to,
+      actor: args.actor,
+      route: args.route,
+      bookingId: args.bookingId ?? null,
+      professionalId: args.professionalId ?? null,
+      reason: violation?.message ?? String(err),
+    })
+
+    if (isLifecycleStrictMode()) {
+      throw err
+    }
+  }
+}
+
+/**
+ * Records a BookingStatus transition through the contract. Mirrors
+ * `recordStepTransition`.
+ */
+export function recordStatusTransition(args: {
+  from: BookingStatus
+  to: BookingStatus
+  actor: LifecycleActor
+  route: string
+  bookingId?: string | null
+  professionalId?: string | null
+}): void {
+  if (args.from === args.to) return
+
+  try {
+    assertLegalStatusTransition(args.from, args.to, args.actor)
+    return
+  } catch (err) {
+    const violation = err instanceof LifecycleViolationError ? err : null
+    const kind: LifecycleDriftKind =
+      violation?.code === 'UNAUTHORIZED_ACTOR'
+        ? 'UNAUTHORIZED_ACTOR'
+        : 'STATUS_TRANSITION_OUTSIDE_CONTRACT'
+
+    emitDrift({
+      kind,
+      from: args.from,
+      to: args.to,
+      actor: args.actor,
+      route: args.route,
+      bookingId: args.bookingId ?? null,
+      professionalId: args.professionalId ?? null,
+      reason: violation?.message ?? String(err),
+    })
+
+    if (isLifecycleStrictMode()) {
+      throw err
+    }
+  }
+}

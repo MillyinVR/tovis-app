@@ -117,6 +117,13 @@ import {
   buildConsultationApprovalProofSnapshot,
   createConsultationApprovalProof,
 } from '@/lib/consultation/consultationConfirmationProof'
+import {
+  recordStatusTransition,
+  recordStepTransition,
+} from '@/lib/booking/lifecycleContract'
+// Side-effect import: registers the Sentry sink for lifecycle drift events.
+// Must come after recordStepTransition import so the contract module loads first.
+import '@/lib/observability/bookingEvents'
 
 
 type MutationMeta = {
@@ -4110,6 +4117,23 @@ async function performLockedStartBookingSession(args: {
       }
     }
 
+    recordStepTransition({
+      from: booking.sessionStep ?? SessionStep.NONE,
+      to: SessionStep.CONSULTATION,
+      actor: 'PRO',
+      route: 'lib/booking/writeBoundary.ts:startBookingSession#heal',
+      bookingId: booking.id,
+      professionalId: args.professionalId,
+    })
+    recordStatusTransition({
+      from: booking.status,
+      to: BookingStatus.IN_PROGRESS,
+      actor: 'PRO',
+      route: 'lib/booking/writeBoundary.ts:startBookingSession#heal',
+      bookingId: booking.id,
+      professionalId: args.professionalId,
+    })
+
     const healed = await args.tx.booking.update({
       where: { id: booking.id },
       data: {
@@ -4170,6 +4194,23 @@ async function performLockedStartBookingSession(args: {
         'You can start this appointment 15 minutes before or after the scheduled time.',
     })
   }
+
+  recordStepTransition({
+    from: booking.sessionStep ?? SessionStep.NONE,
+    to: SessionStep.CONSULTATION,
+    actor: 'PRO',
+    route: 'lib/booking/writeBoundary.ts:startBookingSession',
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+  })
+  recordStatusTransition({
+    from: booking.status,
+    to: BookingStatus.IN_PROGRESS,
+    actor: 'PRO',
+    route: 'lib/booking/writeBoundary.ts:startBookingSession',
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+  })
 
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
@@ -4303,6 +4344,15 @@ async function performLockedFinishBookingSession(args: {
       meta: buildMeta(false),
     }
   }
+
+  recordStepTransition({
+    from: step,
+    to: SessionStep.FINISH_REVIEW,
+    actor: 'PRO',
+    route: 'lib/booking/writeBoundary.ts:finishBookingSession',
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+  })
 
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
@@ -4698,6 +4748,15 @@ async function performLockedConfirmBookingFinalReview(args: {
     })
   }
 
+  recordStepTransition({
+    from: currentStep,
+    to: SessionStep.AFTER_PHOTOS,
+    actor: 'PRO',
+    route: 'lib/booking/writeBoundary.ts:confirmBookingFinalReview',
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+  })
+
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
     data: {
@@ -5018,6 +5077,25 @@ async function performLockedTransitionSessionStep(args: {
   const shouldSetStartedAt =
     args.nextStep === SessionStep.SERVICE_IN_PROGRESS &&
     !booking.startedAt
+
+  recordStepTransition({
+    from,
+    to: args.nextStep,
+    actor: 'PRO',
+    route: 'lib/booking/writeBoundary.ts:transitionSessionStep',
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+  })
+  if (shouldSetStartedAt) {
+    recordStatusTransition({
+      from: booking.status,
+      to: BookingStatus.IN_PROGRESS,
+      actor: 'PRO',
+      route: 'lib/booking/writeBoundary.ts:transitionSessionStep#implicitStart',
+      bookingId: booking.id,
+      professionalId: args.professionalId,
+    })
+  }
 
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
@@ -8627,6 +8705,23 @@ if (args.sendToClient) {
   })
 
   if (shouldCompleteBooking) {
+    recordStepTransition({
+      from: booking.sessionStep ?? SessionStep.NONE,
+      to: SessionStep.DONE,
+      actor: 'PRO',
+      route: 'lib/booking/writeBoundary.ts:upsertBookingAftercare#complete',
+      bookingId: booking.id,
+      professionalId: args.professionalId,
+    })
+    recordStatusTransition({
+      from: booking.status,
+      to: BookingStatus.COMPLETED,
+      actor: 'PRO',
+      route: 'lib/booking/writeBoundary.ts:upsertBookingAftercare#complete',
+      bookingId: booking.id,
+      professionalId: args.professionalId,
+    })
+
     const updatedBooking = await args.tx.booking.update({
       where: { id: booking.id },
       data: {
