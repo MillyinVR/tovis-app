@@ -1784,6 +1784,11 @@ model Booking {
   source            BookingSource @default(DISCOVERY)
   rebookOfBookingId String?
 
+  // Optional client-supplied idempotency key for booking-creation dedupe.
+  // Combined with clientId in @@unique below so identical retries return
+  // the existing booking instead of creating a duplicate.
+  creationIdempotencyKey String?
+
   internalNotes String?
   clientNotes   String?
 
@@ -1826,6 +1831,7 @@ model Booking {
   clientProfessionalNotes ClientProfessionalNote[]
 
   @@unique([professionalId, scheduledFor])
+  @@unique([clientId, creationIdempotencyKey])
   @@index([professionalId, scheduledFor])
   @@index([clientId, scheduledFor])
   @@index([locationId, scheduledFor])

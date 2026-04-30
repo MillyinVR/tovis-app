@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tovis — Feed Animations &amp; Motion Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400;1,600;1,700&family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-primary:10 9 7;
+  --bg-secondary:20 17 14;
+  --bg-surface:30 26 21;
+  --text-primary:244 239 231;
+  --text-secondary:205 198 187;
+  --text-muted:122 117 105;
+  --surface-glass:244 239 231;
+  --accent-primary:224 90 40;
+  --accent-primary-hover:255 106 54;
+  --color-acid:212 255 58;
+  --color-ember:255 61 78;
+  --font-sans:'Inter Tight',ui-sans-serif,system-ui,sans-serif;
+  --font-display:'Fraunces',Georgia,serif;
+  --font-mono:'JetBrains Mono',ui-monospace,monospace;
+  --radius-card:14px;
+  --radius-pill:999px;
+}
+html{color-scheme:dark}
+body{
+  background:rgb(var(--bg-primary));
+  color:rgb(var(--text-primary));
+  font-family:var(--font-sans);
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+  height:100dvh;
+  width:100vw;
+}
+
+/* Feed container */
+.feed{
+  height:100dvh;
+  width:100%;
+  overflow-y:auto;
+  scroll-snap-type:y mandatory;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:none;
+}
+.feed::-webkit-scrollbar{display:none}
+
+/* Each slide */
+.slide{
+  height:100dvh;
+  scroll-snap-align:start;
+  scroll-snap-stop:always;
+  position:relative;
+  overflow:hidden;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+/* Placeholder image area */
+.slide-media{
+  position:absolute;inset:0;
+  background:linear-gradient(135deg,
+    rgb(var(--bg-secondary)),
+    rgb(var(--bg-surface)) 40%,
+    rgb(var(--bg-secondary)));
+}
+.slide:nth-child(2) .slide-media{
+  background:linear-gradient(200deg,
+    rgb(30 20 18),rgb(22 18 15) 50%,rgb(35 25 20));
+}
+.slide:nth-child(3) .slide-media{
+  background:linear-gradient(160deg,
+    rgb(18 22 28),rgb(14 17 20) 50%,rgb(25 20 18));
+}
+
+/* Bottom gradient fade */
+.slide-fade{
+  position:absolute;bottom:0;left:0;right:0;height:280px;
+  background:linear-gradient(to top,rgba(10,9,7,0.92) 0%,rgba(10,9,7,0.4) 45%,transparent 100%);
+  z-index:5;pointer-events:none;
+}
+
+/* ── Top Bar ── */
+.topbar{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  padding:max(env(safe-area-inset-top,0px),12px) 16px 0;
+  pointer-events:none;
+}
+.topbar-inner{
+  max-width:560px;margin:0 auto;
+  display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+  pointer-events:auto;
+}
+.topbar-title{
+  font-family:var(--font-display);font-style:italic;font-weight:600;font-size:20px;
+  color:rgb(var(--text-primary));text-shadow:0 2px 20px rgba(0,0,0,0.85);
+  flex-shrink:0;position:relative;cursor:pointer;
+}
+.topbar-title::after{
+  content:'';position:absolute;left:0;right:0;bottom:-6px;height:2px;
+  border-radius:999px;background:rgb(var(--text-primary));
+  box-shadow:0 0 10px rgba(244,239,231,0.4);
+}
+.topbar-tabs{
+  display:flex;align-items:baseline;gap:16px;overflow-x:auto;
+  scrollbar-width:none;white-space:nowrap;padding-bottom:8px;
+}
+.topbar-tabs::-webkit-scrollbar{display:none}
+.topbar-tab{
+  font-family:var(--font-mono);font-size:10px;font-weight:500;
+  letter-spacing:0.14em;text-transform:uppercase;
+  color:rgba(244,239,231,0.65);text-shadow:0 2px 20px rgba(0,0,0,0.85);
+  cursor:pointer;border:none;background:none;padding:0;flex-shrink:0;
+  position:relative;
+  opacity:0;animation:topbar-tab-in 500ms cubic-bezier(0.16,1,0.3,1) forwards;
+}
+.topbar-tab:nth-child(1){animation-delay:200ms}
+.topbar-tab:nth-child(2){animation-delay:300ms}
+.topbar-tab:nth-child(3){animation-delay:400ms}
+.topbar-tab:nth-child(4){animation-delay:500ms}
+.topbar-tab.active{color:rgb(var(--text-primary))}
+.topbar-tab.active::after{
+  content:'';position:absolute;left:0;right:0;bottom:-6px;height:2px;
+  border-radius:999px;background:rgb(var(--text-primary));
+  box-shadow:0 0 10px rgba(244,239,231,0.4);
+}
+@keyframes topbar-tab-in{
+  from{opacity:0;transform:translateY(-8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+/* ── Overlays (left side text) ── */
+.overlay-content{
+  position:absolute;left:16px;right:92px;bottom:120px;z-index:25;
+  text-shadow:0 2px 20px rgba(0,0,0,0.85),0 1px 4px rgba(0,0,0,0.9);
+}
+
+/* Staggered entry for overlay elements */
+.overlay-content > *{
+  opacity:0;
+  transform:translateY(18px);
+  animation:overlay-in 600ms cubic-bezier(0.16,1,0.3,1) forwards;
+}
+.overlay-content > :nth-child(1){animation-delay:100ms}
+.overlay-content > :nth-child(2){animation-delay:220ms}
+.overlay-content > :nth-child(3){animation-delay:340ms}
+.overlay-content > :nth-child(4){animation-delay:460ms}
+
+@keyframes overlay-in{
+  from{opacity:0;transform:translateY(18px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+.overlay-pro-row{
+  display:flex;align-items:center;gap:8px;margin-bottom:8px;
+}
+.overlay-pro-name{font-size:15px;font-weight:700;color:rgb(var(--text-primary))}
+.overlay-follow{
+  padding:2px 8px;border:1px solid rgba(244,239,231,0.35);border-radius:999px;
+  font-family:var(--font-mono);font-size:10px;font-weight:700;
+  letter-spacing:0.06em;color:rgb(var(--text-primary));cursor:pointer;
+  flex-shrink:0;background:none;
+  transition:background 200ms,border-color 200ms;
+}
+.overlay-follow:hover{
+  background:rgba(244,239,231,0.1);border-color:rgba(244,239,231,0.5);
+}
+.overlay-caption{
+  font-family:var(--font-display);font-style:italic;font-size:18px;
+  line-height:1.3;color:rgb(var(--text-primary));margin-bottom:10px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.overlay-pills{display:flex;gap:6px;flex-wrap:wrap}
+.overlay-pill{
+  padding:4px 10px;
+  background:rgba(20,17,14,0.65);border:1px solid rgba(244,239,231,0.18);
+  border-radius:999px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:0.08em;text-transform:uppercase;color:rgba(244,239,231,0.9);
+}
+
+/* ── Right Action Rail ── */
+.rail{
+  position:absolute;right:10px;bottom:120px;z-index:80;
+  display:grid;gap:18px;justify-items:center;
+}
+
+/* Spring-in animation for each rail button */
+.rail > *{
+  opacity:0;
+  transform:translateX(20px) scale(0.8);
+  animation:rail-spring-in 600ms cubic-bezier(0.34,1.56,0.64,1) forwards;
+}
+.rail > :nth-child(1){animation-delay:100ms}
+.rail > :nth-child(2){animation-delay:200ms}
+.rail > :nth-child(3){animation-delay:300ms}
+.rail > :nth-child(4){animation-delay:400ms}
+.rail > :nth-child(5){animation-delay:500ms}
+.rail > :nth-child(6){animation-delay:600ms}
+
+@keyframes rail-spring-in{
+  0%{opacity:0;transform:translateX(20px) scale(0.8)}
+  60%{opacity:1;transform:translateX(-3px) scale(1.04)}
+  100%{opacity:1;transform:translateX(0) scale(1)}
+}
+
+.rail-btn{
+  display:grid;justify-items:center;gap:2px;
+  background:none;border:none;padding:0;cursor:pointer;color:rgb(var(--text-primary));
+  transition:transform 180ms cubic-bezier(0.34,1.56,0.64,1);
+}
+.rail-btn:active{transform:scale(0.88)}
+.rail-btn:hover{transform:scale(1.08)}
+.rail-btn svg{
+  filter:drop-shadow(0 2px 8px rgba(0,0,0,0.7));
+  transition:transform 200ms cubic-bezier(0.34,1.56,0.64,1);
+}
+.rail-btn:hover svg{transform:scale(1.1)}
+.rail-count{
+  font-size:11px;font-weight:800;line-height:1;
+  text-shadow:0 2px 20px rgba(0,0,0,0.85);
+}
+
+/* Avatar circle */
+.rail-avatar{
+  width:48px;height:48px;border-radius:50%;
+  border:2px solid rgba(244,239,231,0.4);overflow:hidden;
+  background:rgba(244,239,231,0.08);display:grid;place-items:center;
+  font-size:18px;font-weight:900;position:relative;
+  transition:transform 200ms cubic-bezier(0.34,1.56,0.64,1);
+}
+.rail-avatar:hover{transform:scale(1.08)}
+.rail-avatar-plus{
+  position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);
+  width:20px;height:20px;border-radius:50%;
+  background:rgb(var(--accent-primary));color:#fff;
+  display:grid;place-items:center;font-weight:900;font-size:14px;line-height:1;
+  box-shadow:0 4px 12px rgba(0,0,0,0.6);
+}
+
+/* BOOK button with pulse glow */
+.rail-book{
+  width:52px;height:52px;border-radius:50%;
+  background:rgb(var(--accent-primary));color:#fff;
+  display:grid;place-items:center;border:none;cursor:pointer;
+  box-shadow:0 8px 24px rgba(224,90,40,0.55),0 2px 6px rgba(0,0,0,0.6);
+  transition:transform 200ms cubic-bezier(0.34,1.56,0.64,1),box-shadow 200ms;
+  position:relative;
+}
+.rail-book:hover{
+  transform:scale(1.1);
+  box-shadow:0 12px 32px rgba(224,90,40,0.7),0 4px 10px rgba(0,0,0,0.5);
+}
+.rail-book:active{transform:scale(0.92)}
+.rail-book::before{
+  content:'';position:absolute;inset:-4px;border-radius:50%;
+  background:rgb(var(--accent-primary));opacity:0;
+  animation:book-pulse 2.5s ease-in-out infinite;
+}
+@keyframes book-pulse{
+  0%,100%{opacity:0;transform:scale(1)}
+  50%{opacity:0.15;transform:scale(1.2)}
+}
+.rail-book-label{
+  font-family:var(--font-mono);font-size:11px;font-weight:800;
+  letter-spacing:0.06em;margin-top:-2px;
+  text-shadow:0 2px 20px rgba(0,0,0,0.85);
+}
+
+/* Like heart animation */
+.heart-liked{
+  animation:heart-pop 400ms cubic-bezier(0.34,1.56,0.64,1);
+}
+@keyframes heart-pop{
+  0%{transform:scale(1)}
+  30%{transform:scale(1.35)}
+  60%{transform:scale(0.9)}
+  100%{transform:scale(1)}
+}
+
+/* Double-tap heart overlay */
+.dbl-heart{
+  position:absolute;top:50%;left:50%;z-index:200;
+  transform:translate(-50%,-50%) scale(0);opacity:0;
+  pointer-events:none;
+}
+.dbl-heart.pop{
+  animation:dbl-heart-pop 800ms cubic-bezier(0.34,1.56,0.64,1) forwards;
+}
+@keyframes dbl-heart-pop{
+  0%{transform:translate(-50%,-50%) scale(0);opacity:0}
+  25%{transform:translate(-50%,-50%) scale(1.3);opacity:1}
+  50%{transform:translate(-50%,-50%) scale(1);opacity:1}
+  100%{transform:translate(-50%,-50%) scale(1.2);opacity:0}
+}
+
+/* ── Footer bar ── */
+.footer{
+  position:fixed;bottom:0;left:0;right:0;z-index:100;
+  background:#0A0907;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.footer-inner{
+  max-width:560px;margin:0 auto;height:72px;
+  display:flex;align-items:center;justify-content:space-around;padding:0 16px;
+}
+.footer-item{
+  display:grid;gap:2px;justify-items:center;
+  color:rgb(var(--text-muted));text-decoration:none;
+  transition:color 200ms;cursor:pointer;
+}
+.footer-item.active{color:rgb(var(--text-primary))}
+.footer-item:hover{color:rgb(var(--text-secondary))}
+.footer-label{
+  font-family:var(--font-mono);font-size:9px;font-weight:800;
+  letter-spacing:0.06em;text-transform:uppercase;
+}
+.footer-center{
+  width:68px;height:68px;border-radius:50%;
+  background:rgb(var(--text-primary));color:rgb(var(--bg-primary));
+  display:grid;place-items:center;position:relative;top:-14px;
+  box-shadow:0 10px 30px rgba(244,239,231,0.15);cursor:pointer;
+  transition:transform 200ms cubic-bezier(0.34,1.56,0.64,1),box-shadow 200ms;
+}
+.footer-center:hover{transform:scale(1.06);box-shadow:0 14px 38px rgba(244,239,231,0.22)}
+.footer-center:active{transform:scale(0.96)}
+
+/* ── Reduced motion ── */
+@media(prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}
+}
+
+/* ── Responsive ── */
+@media(min-width:768px){
+  .slide-media{border-radius:18px;margin:0 auto;max-width:520px}
+  .overlay-content{left:calc(50% - 260px + 16px);right:calc(50% - 260px + 92px)}
+  .rail{right:calc(50% - 260px + 10px)}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <button class="topbar-title">Looks</button>
+    <div class="topbar-tabs">
+      <button class="topbar-tab active">Spotlight</button>
+      <button class="topbar-tab">Braids</button>
+      <button class="topbar-tab">Color</button>
+      <button class="topbar-tab">Cuts</button>
+    </div>
+  </div>
+</div>
+
+<div class="feed" id="feed">
+
+  <!-- Slide 1 -->
+  <article class="slide" id="slide-0">
+    <div class="slide-media"></div>
+    <div class="slide-fade"></div>
+
+    <div class="dbl-heart" id="dbl-heart-0">
+      <svg width="100" height="100" viewBox="0 0 24 24" fill="rgb(255,61,78)" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+    </div>
+
+    <div class="overlay-content">
+      <div class="overlay-pro-row">
+        <span class="overlay-pro-name">Marcus Rivera</span>
+        <button class="overlay-follow">FOLLOW</button>
+      </div>
+      <div class="overlay-caption">&ldquo;Sharp fade with texture on top. Low maintenance, high confidence.&rdquo;</div>
+      <div class="overlay-pills">
+        <div class="overlay-pill">Fade + Texture</div>
+        <div class="overlay-pill">45 min</div>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="rail-avatar">MR<div class="rail-avatar-plus">+</div></div>
+      <div style="display:grid;justify-items:center;gap:0">
+        <button class="rail-book" aria-label="Book">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </button>
+        <div class="rail-book-label">BOOK</div>
+      </div>
+      <button class="rail-btn" id="like-0" onclick="toggleLike(0)">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        <span class="rail-count">247</span>
+      </button>
+      <button class="rail-btn">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+        <span class="rail-count">18</span>
+      </button>
+      <button class="rail-btn">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button class="rail-btn">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </button>
+    </div>
+  </article>
+
+  <!-- Slide 2 -->
+  <article class="slide" id="slide-1">
+    <div class="slide-media"></div>
+    <div class="slide-fade"></div>
+
+    <div class="dbl-heart" id="dbl-heart-1">
+      <svg width="100" height="100" viewBox="0 0 24 24" fill="rgb(255,61,78)" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+    </div>
+
+    <div class="overlay-content">
+      <div class="overlay-pro-row">
+        <span class="overlay-pro-name">Kaia Chen Studio</span>
+        <button class="overlay-follow">FOLLOW</button>
+      </div>
+      <div class="overlay-caption">&ldquo;Dimensional color that moves with you. No two angles the same.&rdquo;</div>
+      <div class="overlay-pills">
+        <div class="overlay-pill">Balayage</div>
+        <div class="overlay-pill">2h 30m</div>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="rail-avatar">KC<div class="rail-avatar-plus">+</div></div>
+      <div style="display:grid;justify-items:center;gap:0">
+        <button class="rail-book" aria-label="Book">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </button>
+        <div class="rail-book-label">BOOK</div>
+      </div>
+      <button class="rail-btn" id="like-1" onclick="toggleLike(1)">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        <span class="rail-count">1.2K</span>
+      </button>
+      <button class="rail-btn">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+        <span class="rail-count">42</span>
+      </button>
+      <button class="rail-btn">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button class="rail-btn">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </button>
+    </div>
+  </article>
+
+  <!-- Slide 3 -->
+  <article class="slide" id="slide-2">
+    <div class="slide-media"></div>
+    <div class="slide-fade"></div>
+
+    <div class="dbl-heart" id="dbl-heart-2">
+      <svg width="100" height="100" viewBox="0 0 24 24" fill="rgb(255,61,78)" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+    </div>
+
+    <div class="overlay-content">
+      <div class="overlay-pro-row">
+        <span class="overlay-pro-name">Devon Park</span>
+        <button class="overlay-follow">FOLLOW</button>
+      </div>
+      <div class="overlay-caption">&ldquo;Clean lines, zero product needed. Walk out ready.&rdquo;</div>
+      <div class="overlay-pills">
+        <div class="overlay-pill">Precision Cut</div>
+        <div class="overlay-pill">30 min</div>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="rail-avatar">DP<div class="rail-avatar-plus">+</div></div>
+      <div style="display:grid;justify-items:center;gap:0">
+        <button class="rail-book" aria-label="Book">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </button>
+        <div class="rail-book-label">BOOK</div>
+      </div>
+      <button class="rail-btn" id="like-2" onclick="toggleLike(2)">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        <span class="rail-count">89</span>
+      </button>
+      <button class="rail-btn">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+        <span class="rail-count">7</span>
+      </button>
+      <button class="rail-btn">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button class="rail-btn">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      </button>
+    </div>
+  </article>
+</div>
+
+<div class="footer">
+  <div class="footer-inner">
+    <a class="footer-item" href="#">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span class="footer-label">Home</span>
+    </a>
+    <a class="footer-item" href="#">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <span class="footer-label">Search</span>
+    </a>
+    <div class="footer-center active">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+    </div>
+    <a class="footer-item" href="#">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <span class="footer-label">Bookings</span>
+    </a>
+    <a class="footer-item" href="#">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span class="footer-label">Me</span>
+    </a>
+  </div>
+</div>
+
+<script>
+var likeState = [false, false, false];
+
+function toggleLike(idx) {
+  likeState[idx] = !likeState[idx];
+  var btn = document.getElementById('like-' + idx);
+  var svg = btn.querySelector('svg');
+  var liked = likeState[idx];
+
+  svg.setAttribute('fill', liked ? 'rgb(255,61,78)' : 'none');
+  svg.setAttribute('stroke', liked ? 'rgb(255,61,78)' : 'currentColor');
+  svg.classList.remove('heart-liked');
+  if (liked) {
+    void svg.offsetWidth;
+    svg.classList.add('heart-liked');
+  }
+}
+
+var lastTap = {};
+document.querySelectorAll('.slide').forEach(function(slide, idx) {
+  slide.addEventListener('dblclick', function() { doubleTapLike(idx); });
+  slide.addEventListener('touchend', function() {
+    var now = Date.now();
+    var last = lastTap[idx] || 0;
+    lastTap[idx] = now;
+    if (now - last < 300) { doubleTapLike(idx); }
+  });
+});
+
+function doubleTapLike(idx) {
+  if (!likeState[idx]) { toggleLike(idx); }
+  var heart = document.getElementById('dbl-heart-' + idx);
+  heart.classList.remove('pop');
+  void heart.offsetWidth;
+  heart.classList.add('pop');
+}
+
+/* Re-trigger overlay animations on scroll snap */
+var observer = new IntersectionObserver(function(entries) {
+  entries.forEach(function(entry) {
+    if (entry.isIntersecting && entry.intersectionRatio > 0.6) {
+      var overlay = entry.target.querySelector('.overlay-content');
+      var rail = entry.target.querySelector('.rail');
+      if (overlay) {
+        overlay.querySelectorAll(':scope > *').forEach(function(el) {
+          el.style.animation = 'none';
+          void el.offsetWidth;
+          el.style.animation = '';
+        });
+      }
+      if (rail) {
+        rail.querySelectorAll(':scope > *').forEach(function(el) {
+          el.style.animation = 'none';
+          void el.offsetWidth;
+          el.style.animation = '';
+        });
+      }
+    }
+  });
+}, { root: document.getElementById('feed'), threshold: [0.6] });
+
+document.querySelectorAll('.slide').forEach(function(s) { observer.observe(s); });
+</script>
+</body>
+</html>

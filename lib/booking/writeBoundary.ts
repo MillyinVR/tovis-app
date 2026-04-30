@@ -1846,6 +1846,77 @@ function computeRebookReminderDueAt(args: {
   return addDaysByMs(base, -Math.abs(args.daysBefore))
 }
 
+// Read the unique-constraint target field name(s) from a P2002 error.
+// Prisma sets `meta.target` to either a string or string[] depending on driver.
+function p2002TargetIncludes(
+  error: Prisma.PrismaClientKnownRequestError,
+  fieldName: string,
+): boolean {
+  const target = error.meta?.target
+  if (Array.isArray(target)) {
+    return target.some(
+      (entry) => typeof entry === 'string' && entry.includes(fieldName),
+    )
+  }
+  if (typeof target === 'string') {
+    return target.includes(fieldName)
+  }
+  return false
+}
+
+// Re-hydrate a CreateProBookingResult from a previously-created booking when an
+// idempotency replay is detected. Returns null if no matching booking exists.
+async function tryHydrateProBookingByIdempotency(args: {
+  tx: Prisma.TransactionClient
+  clientId: string
+  idempotencyKey: string
+}): Promise<CreateProBookingResult | null> {
+  const existing = await args.tx.booking.findFirst({
+    where: {
+      clientId: args.clientId,
+      creationIdempotencyKey: args.idempotencyKey,
+    },
+    select: {
+      id: true,
+      scheduledFor: true,
+      totalDurationMinutes: true,
+      bufferMinutes: true,
+      status: true,
+      subtotalSnapshot: true,
+      locationId: true,
+      locationType: true,
+      locationTimeZone: true,
+      clientAddressId: true,
+      service: { select: { name: true } },
+    } satisfies Prisma.BookingSelect,
+  })
+
+  if (!existing) return null
+
+  return {
+    booking: {
+      id: existing.id,
+      scheduledFor: existing.scheduledFor,
+      totalDurationMinutes: existing.totalDurationMinutes,
+      bufferMinutes: existing.bufferMinutes,
+      status: existing.status,
+    },
+    subtotalSnapshot: existing.subtotalSnapshot,
+    // stepMinutes is a derived display value; on replay we cannot recompute it
+    // without re-running location resolution. The booking is already persisted
+    // with its final duration/buffer, so 0 is a safe sentinel for clients that
+    // only navigate to the booking; the original create response carried the
+    // authoritative value.
+    stepMinutes: 0,
+    appointmentTimeZone: existing.locationTimeZone ?? 'UTC',
+    locationId: existing.locationId,
+    locationType: existing.locationType,
+    clientAddressId: existing.clientAddressId,
+    serviceName: existing.service?.name || 'Appointment',
+    meta: buildMeta(false),
+  }
+}
+
 function isCheckoutCloseoutComplete(
   checkoutStatus: BookingCheckoutStatus | null | undefined,
 ): boolean {
@@ -6252,6 +6323,30 @@ async function performLockedFinalizeBookingFromHold(args: {
   requestId: string | null
   idempotencyKey: string | null
 }): Promise<FinalizeBookingFromHoldResult> {
+  // Idempotency replay: if a prior call with the same (clientId, idempotencyKey)
+  // already created a booking, return it without re-running the finalize work.
+  if (args.idempotencyKey) {
+    const existing = await args.tx.booking.findFirst({
+      where: {
+        clientId: args.clientId,
+        creationIdempotencyKey: args.idempotencyKey,
+      },
+      select: {
+        id: true,
+        status: true,
+        scheduledFor: true,
+        professionalId: true,
+      } satisfies Prisma.BookingSelect,
+    })
+
+    if (existing) {
+      return {
+        booking: existing,
+        meta: buildMeta(false),
+      }
+    }
+  }
+
   const hold = await args.tx.bookingHold.findUnique({
     where: { id: args.holdId },
     select: FINALIZE_HOLD_SELECT,
@@ -6565,6 +6660,7 @@ async function performLockedFinalizeBookingFromHold(args: {
         source: args.source,
         locationType: args.locationType,
         rebookOfBookingId: args.rebookOfBookingId,
+        creationIdempotencyKey: args.idempotencyKey ?? null,
         subtotalSnapshot: subtotal,
         serviceSubtotalSnapshot: subtotal,
         productSubtotalSnapshot: zeroMoney(),
@@ -6616,6 +6712,31 @@ async function performLockedFinalizeBookingFromHold(args: {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
+      // Idempotency race: another concurrent request with the same
+      // (clientId, idempotencyKey) won the unique-index insert. Re-fetch
+      // and return the existing booking instead of throwing TIME_NOT_AVAILABLE.
+      if (args.idempotencyKey && p2002TargetIncludes(error, 'creationIdempotencyKey')) {
+        const existing = await args.tx.booking.findFirst({
+          where: {
+            clientId: args.clientId,
+            creationIdempotencyKey: args.idempotencyKey,
+          },
+          select: {
+            id: true,
+            status: true,
+            scheduledFor: true,
+            professionalId: true,
+          } satisfies Prisma.BookingSelect,
+        })
+
+        if (existing) {
+          return {
+            booking: existing,
+            meta: buildMeta(false),
+          }
+        }
+      }
+
       throw bookingError('TIME_NOT_AVAILABLE')
     }
 
@@ -6709,6 +6830,17 @@ async function performLockedCreateProBooking(args: {
 }): Promise<CreateProBookingResult> {
 
     assertNonEmptyUserId(args.actorUserId)
+
+  // Idempotency replay: if a prior call with the same (clientId, idempotencyKey)
+  // already created a booking, return it without re-running creation work.
+  if (args.idempotencyKey) {
+    const replayed = await tryHydrateProBookingByIdempotency({
+      tx: args.tx,
+      clientId: args.clientId,
+      idempotencyKey: args.idempotencyKey,
+    })
+    if (replayed) return replayed
+  }
 
   const normalizedOverrideReason = assertExplicitOverrideReasonIfNeeded({
     allowShortNotice: args.allowShortNotice,
@@ -6928,6 +7060,7 @@ async function performLockedCreateProBooking(args: {
         offeringId: offering.id,
         scheduledFor: requestedStart,
         status: getProCreatedBookingStatus(),
+        creationIdempotencyKey: args.idempotencyKey ?? null,
 
         locationType: args.locationType,
         locationId: locationContext.locationId,
@@ -6975,6 +7108,17 @@ async function performLockedCreateProBooking(args: {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === 'P2002'
     ) {
+      // Idempotency race: another concurrent pro-create with the same
+      // (clientId, idempotencyKey) won. Re-hydrate and return that booking.
+      if (args.idempotencyKey && p2002TargetIncludes(error, 'creationIdempotencyKey')) {
+        const replayed = await tryHydrateProBookingByIdempotency({
+          tx: args.tx,
+          clientId: args.clientId,
+          idempotencyKey: args.idempotencyKey,
+        })
+        if (replayed) return replayed
+      }
+
       throw bookingError('TIME_BOOKED')
     }
 
