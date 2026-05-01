@@ -7,6 +7,11 @@ import {
 } from '@prisma/client'
 import { bookingError } from '@/lib/booking/errors'
 
+const scheduledForIso = '2026-03-11T19:30:00.000Z'
+const scheduledFor = new Date(scheduledForIso)
+const endsAt = new Date('2026-03-11T20:45:00.000Z')
+const IDEMPOTENCY_ROUTE = 'POST /api/pro/bookings'
+
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
   jsonFail: vi.fn(),
@@ -21,6 +26,10 @@ const mocks = vi.hoisted(() => ({
   normalizeLocationType: vi.fn(),
 
   createProBookingWithClient: vi.fn(),
+
+  beginIdempotency: vi.fn(),
+  completeIdempotency: vi.fn(),
+  failIdempotency: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -51,19 +60,134 @@ vi.mock('@/lib/booking/createProBookingWithClient', () => ({
   createProBookingWithClient: mocks.createProBookingWithClient,
 }))
 
+vi.mock('@/lib/idempotency', () => ({
+  beginIdempotency: mocks.beginIdempotency,
+  completeIdempotency: mocks.completeIdempotency,
+  failIdempotency: mocks.failIdempotency,
+  IDEMPOTENCY_ROUTES: {
+    PRO_BOOKING_CREATE: 'POST /api/pro/bookings',
+  },
+}))
+
 import { POST } from './route'
 
-function makeRequest(body: unknown): Request {
+function makeRequest(
+  body: unknown,
+  headers?: Record<string, string>,
+): Request {
   return new Request('http://localhost/api/pro/bookings', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(headers ?? {}),
+    },
     body: JSON.stringify(body),
   })
 }
 
-const scheduledForIso = '2026-03-11T19:30:00.000Z'
-const scheduledFor = new Date(scheduledForIso)
-const endsAt = new Date('2026-03-11T20:45:00.000Z')
+function makeIdempotentRequest(
+  body: unknown,
+  key = 'idem_pro_booking_1',
+): Request {
+  return makeRequest(body, {
+    'idempotency-key': key,
+  })
+}
+
+function validBody(overrides?: Record<string, unknown>) {
+  return {
+    clientId: 'client_1',
+    scheduledFor: scheduledForIso,
+    locationId: 'loc_1',
+    locationType: 'SALON',
+    offeringId: 'offering_1',
+    ...(overrides ?? {}),
+  }
+}
+
+function expectedBaseClientPayload() {
+  return {
+    firstName: undefined,
+    lastName: undefined,
+    email: undefined,
+    phone: undefined,
+  }
+}
+
+function expectedBaseServiceAddressPayload() {
+  return {
+    label: undefined,
+    formattedAddress: undefined,
+    addressLine1: undefined,
+    addressLine2: undefined,
+    city: undefined,
+    state: undefined,
+    postalCode: undefined,
+    countryCode: undefined,
+    placeId: undefined,
+    lat: undefined,
+    lng: undefined,
+    isDefault: undefined,
+  }
+}
+
+function expectedSuccessBody(overrides?: {
+  bookingId?: string
+  clientId?: string
+  clientUserId?: string | null
+  clientEmail?: string | null
+  claimStatus?: ClientClaimStatus
+  invite?: unknown
+}) {
+  const clientId = overrides?.clientId ?? 'client_1'
+
+  const clientUserId =
+    overrides && 'clientUserId' in overrides
+      ? overrides.clientUserId
+      : 'user_client_1'
+
+  const clientEmail =
+    overrides && 'clientEmail' in overrides
+      ? overrides.clientEmail
+      : 'client@example.com'
+
+  const claimStatus =
+    overrides && 'claimStatus' in overrides
+      ? overrides.claimStatus
+      : ClientClaimStatus.CLAIMED
+
+  const body: Record<string, unknown> = {
+    booking: {
+      id: overrides?.bookingId ?? 'booking_1',
+      clientId,
+      scheduledFor: '2026-03-11T19:30:00.000Z',
+      endsAt: '2026-03-11T20:45:00.000Z',
+      totalDurationMinutes: 60,
+      bufferMinutes: 15,
+      status: BookingStatus.ACCEPTED,
+      serviceName: 'Haircut',
+      subtotalSnapshot: '50.00',
+      subtotalCents: 5000,
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      clientAddressId: null,
+      stepMinutes: 15,
+      timeZone: 'America/Los_Angeles',
+    },
+    client: {
+      id: clientId,
+      userId: clientUserId,
+      email: clientEmail,
+      claimStatus,
+    },
+  }
+
+  if (overrides && 'invite' in overrides && overrides.invite !== null) {
+    body.invite = overrides.invite
+  }
+
+  return body
+}
 
 describe('POST /api/pro/bookings', () => {
   beforeEach(() => {
@@ -119,6 +243,25 @@ describe('POST /api/pro/bookings', () => {
     mocks.computeRequestedEndUtc.mockReturnValue(endsAt)
     mocks.moneyToString.mockReturnValue('50.00')
 
+    mocks.beginIdempotency.mockImplementation(
+      async (args: { key: string | null }) => {
+        const key = args.key?.trim()
+
+        if (!key) {
+          return { kind: 'missing_key' }
+        }
+
+        return {
+          kind: 'started',
+          idempotencyRecordId: 'idem_record_1',
+          requestHash: 'hash_1',
+        }
+      },
+    )
+
+    mocks.completeIdempotency.mockResolvedValue(undefined)
+    mocks.failIdempotency.mockResolvedValue(undefined)
+
     mocks.createProBookingWithClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
@@ -161,6 +304,7 @@ describe('POST /api/pro/bookings', () => {
     const result = await POST(makeRequest({}))
 
     expect(result).toBe(authRes)
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
   })
 
@@ -182,6 +326,7 @@ describe('POST /api/pro/bookings', () => {
         code: 'INVALID_SCHEDULED_FOR',
       }),
     )
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -209,6 +354,7 @@ describe('POST /api/pro/bookings', () => {
         code: 'LOCATION_ID_REQUIRED',
       }),
     )
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -236,6 +382,7 @@ describe('POST /api/pro/bookings', () => {
         code: 'LOCATION_TYPE_REQUIRED',
       }),
     )
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -263,6 +410,7 @@ describe('POST /api/pro/bookings', () => {
         code: 'OFFERING_ID_REQUIRED',
       }),
     )
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -273,51 +421,164 @@ describe('POST /api/pro/bookings', () => {
     )
   })
 
+  it('returns missing idempotency key when valid authenticated request has no idempotency header', async () => {
+    const result = await POST(makeRequest(validBody()))
+
+    expect(result).toEqual({
+      ok: false,
+      status: 400,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    })
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_123',
+        actorRole: 'PRO',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: null,
+      requestBody: {
+        professionalId: 'pro_123',
+        actorUserId: 'user_123',
+        clientId: 'client_1',
+        client: expectedBaseClientPayload(),
+        clientAddressId: null,
+        serviceAddress: expectedBaseServiceAddressPayload(),
+        offeringId: 'offering_1',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        scheduledFor: scheduledForIso,
+        internalNotes: null,
+        overrideReason: null,
+        requestedBufferMinutes: null,
+        requestedTotalDurationMinutes: null,
+        allowOutsideWorkingHours: false,
+        allowShortNotice: false,
+        allowFarFuture: false,
+      },
+    })
+    expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns in-progress when idempotency ledger has an active matching request', async () => {
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'in_progress',
+    })
+
+    const result = await POST(makeIdempotentRequest(validBody()))
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'A matching pro booking request is already in progress.',
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    })
+
+    expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns conflict when idempotency key was reused with a different body', async () => {
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'conflict',
+    })
+
+    const result = await POST(makeIdempotentRequest(validBody()))
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'This idempotency key was already used with a different request body.',
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    })
+
+    expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('replays completed idempotency response without creating another booking', async () => {
+    const replayBody = expectedSuccessBody({
+      bookingId: 'booking_replay_1',
+    })
+
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'replay',
+      responseStatus: 201,
+      responseBody: replayBody,
+    })
+
+    const result = await POST(makeIdempotentRequest(validBody()))
+
+    expect(result).toEqual({
+      ok: true,
+      status: 201,
+      data: replayBody,
+    })
+
+    expect(mocks.createProBookingWithClient).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
   it('calls createProBookingWithClient with the parsed request payload', async () => {
     await POST(
-      makeRequest({
+      makeIdempotentRequest(
+        {
+          clientId: 'client_1',
+          clientAddressId: 'addr_1',
+          scheduledFor: scheduledForIso,
+          locationId: 'loc_1',
+          locationType: 'MOBILE',
+          offeringId: 'offering_1',
+          internalNotes: '  bring reference photos  ',
+          bufferMinutes: '20',
+          totalDurationMinutes: '90',
+          allowOutsideWorkingHours: true,
+          allowShortNotice: false,
+          allowFarFuture: true,
+          overrideReason: '  VIP manual exception  ',
+        },
+        'idem_parsed_payload_1',
+      ),
+    )
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_123',
+        actorRole: 'PRO',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: 'idem_parsed_payload_1',
+      requestBody: {
+        professionalId: 'pro_123',
+        actorUserId: 'user_123',
         clientId: 'client_1',
+        client: expectedBaseClientPayload(),
         clientAddressId: 'addr_1',
-        scheduledFor: scheduledForIso,
-        locationId: 'loc_1',
-        locationType: 'MOBILE',
+        serviceAddress: expectedBaseServiceAddressPayload(),
         offeringId: 'offering_1',
-        internalNotes: '  bring reference photos  ',
-        bufferMinutes: '20',
-        totalDurationMinutes: '90',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.MOBILE,
+        scheduledFor: scheduledForIso,
+        internalNotes: 'bring reference photos',
+        overrideReason: 'VIP manual exception',
+        requestedBufferMinutes: 20,
+        requestedTotalDurationMinutes: 90,
         allowOutsideWorkingHours: true,
         allowShortNotice: false,
         allowFarFuture: true,
-        overrideReason: '  VIP manual exception  ',
-      }),
-    )
+      },
+    })
 
     expect(mocks.createProBookingWithClient).toHaveBeenCalledWith({
       professionalId: 'pro_123',
       actorUserId: 'user_123',
       overrideReason: 'VIP manual exception',
       clientId: 'client_1',
-      client: {
-        firstName: undefined,
-        lastName: undefined,
-        email: undefined,
-        phone: undefined,
-      },
+      client: expectedBaseClientPayload(),
       clientAddressId: 'addr_1',
-      serviceAddress: {
-        label: undefined,
-        formattedAddress: undefined,
-        addressLine1: undefined,
-        addressLine2: undefined,
-        city: undefined,
-        state: undefined,
-        postalCode: undefined,
-        countryCode: undefined,
-        placeId: undefined,
-        lat: undefined,
-        lng: undefined,
-        isDefault: undefined,
-      },
+      serviceAddress: expectedBaseServiceAddressPayload(),
       offeringId: 'offering_1',
       locationId: 'loc_1',
       locationType: ServiceLocationType.MOBILE,
@@ -329,36 +590,71 @@ describe('POST /api/pro/bookings', () => {
       allowShortNotice: false,
       allowFarFuture: true,
       requestId: null,
-      idempotencyKey: null,
+      idempotencyKey: 'idem_parsed_payload_1',
     })
   })
 
   it('passes nested client and serviceAddress payloads through to createProBookingWithClient', async () => {
     await POST(
-      makeRequest({
-        scheduledFor: scheduledForIso,
-        locationId: 'loc_1',
-        locationType: 'MOBILE',
-        offeringId: 'offering_1',
-        client: {
-          firstName: 'Tori',
-          lastName: 'Morales',
-          email: 'tori@example.com',
-          phone: '+16195551234',
+      makeIdempotentRequest(
+        {
+          scheduledFor: scheduledForIso,
+          locationId: 'loc_1',
+          locationType: 'MOBILE',
+          offeringId: 'offering_1',
+          client: {
+            firstName: 'Tori',
+            lastName: 'Morales',
+            email: 'tori@example.com',
+            phone: '+16195551234',
+          },
+          serviceAddress: {
+            label: 'Home',
+            formattedAddress: '123 Main St, San Diego, CA',
+            addressLine1: '123 Main St',
+            city: 'San Diego',
+            state: 'CA',
+            postalCode: '92101',
+            countryCode: 'US',
+            placeId: 'place_123',
+            lat: 32.7157,
+            lng: -117.1611,
+            isDefault: true,
+          },
         },
-        serviceAddress: {
-          label: 'Home',
-          formattedAddress: '123 Main St, San Diego, CA',
-          addressLine1: '123 Main St',
-          city: 'San Diego',
-          state: 'CA',
-          postalCode: '92101',
-          countryCode: 'US',
-          placeId: 'place_123',
-          lat: 32.7157,
-          lng: -117.1611,
-          isDefault: true,
-        },
+        'idem_nested_payload_1',
+      ),
+    )
+
+    const client = {
+      firstName: 'Tori',
+      lastName: 'Morales',
+      email: 'tori@example.com',
+      phone: '+16195551234',
+    }
+
+    const serviceAddress = {
+      label: 'Home',
+      formattedAddress: '123 Main St, San Diego, CA',
+      addressLine1: '123 Main St',
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      placeId: 'place_123',
+      lat: 32.7157,
+      lng: -117.1611,
+      isDefault: true,
+    }
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'idem_nested_payload_1',
+        requestBody: expect.objectContaining({
+          client,
+          serviceAddress,
+          locationType: ServiceLocationType.MOBILE,
+        }),
       }),
     )
 
@@ -367,27 +663,9 @@ describe('POST /api/pro/bookings', () => {
       actorUserId: 'user_123',
       overrideReason: null,
       clientId: null,
-      client: {
-        firstName: 'Tori',
-        lastName: 'Morales',
-        email: 'tori@example.com',
-        phone: '+16195551234',
-      },
+      client,
       clientAddressId: null,
-      serviceAddress: {
-        label: 'Home',
-        formattedAddress: '123 Main St, San Diego, CA',
-        addressLine1: '123 Main St',
-        addressLine2: undefined,
-        city: 'San Diego',
-        state: 'CA',
-        postalCode: '92101',
-        countryCode: 'US',
-        placeId: 'place_123',
-        lat: 32.7157,
-        lng: -117.1611,
-        isDefault: true,
-      },
+      serviceAddress,
       offeringId: 'offering_1',
       locationId: 'loc_1',
       locationType: ServiceLocationType.MOBILE,
@@ -399,11 +677,11 @@ describe('POST /api/pro/bookings', () => {
       allowShortNotice: false,
       allowFarFuture: false,
       requestId: null,
-      idempotencyKey: null,
+      idempotencyKey: 'idem_nested_payload_1',
     })
   })
 
-  it('passes through helper validation failures', async () => {
+  it('passes through helper validation failures and marks idempotency failed', async () => {
     mocks.createProBookingWithClient.mockResolvedValueOnce({
       ok: false,
       status: 409,
@@ -413,19 +691,26 @@ describe('POST /api/pro/bookings', () => {
     })
 
     const result = await POST(
-      makeRequest({
-        scheduledFor: scheduledForIso,
-        locationId: 'loc_1',
-        locationType: 'SALON',
-        offeringId: 'offering_1',
-        client: {
-          firstName: 'Tori',
-          lastName: 'Morales',
-          email: 'tori@example.com',
-          phone: '+16195551234',
+      makeIdempotentRequest(
+        {
+          scheduledFor: scheduledForIso,
+          locationId: 'loc_1',
+          locationType: 'SALON',
+          offeringId: 'offering_1',
+          client: {
+            firstName: 'Tori',
+            lastName: 'Morales',
+            email: 'tori@example.com',
+            phone: '+16195551234',
+          },
         },
-      }),
+        'idem_identity_conflict_1',
+      ),
     )
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
@@ -444,15 +729,9 @@ describe('POST /api/pro/bookings', () => {
     })
   })
 
-  it('creates a booking successfully and formats the response', async () => {
+  it('creates a booking successfully, completes idempotency, and formats the response', async () => {
     const result = await POST(
-      makeRequest({
-        clientId: 'client_1',
-        scheduledFor: scheduledForIso,
-        locationId: 'loc_1',
-        locationType: 'SALON',
-        offeringId: 'offering_1',
-      }),
+      makeIdempotentRequest(validBody(), 'idem_success_1'),
     )
 
     expect(mocks.createProBookingWithClient).toHaveBeenCalledWith({
@@ -460,27 +739,9 @@ describe('POST /api/pro/bookings', () => {
       actorUserId: 'user_123',
       overrideReason: null,
       clientId: 'client_1',
-      client: {
-        firstName: undefined,
-        lastName: undefined,
-        email: undefined,
-        phone: undefined,
-      },
+      client: expectedBaseClientPayload(),
       clientAddressId: null,
-      serviceAddress: {
-        label: undefined,
-        formattedAddress: undefined,
-        addressLine1: undefined,
-        addressLine2: undefined,
-        city: undefined,
-        state: undefined,
-        postalCode: undefined,
-        countryCode: undefined,
-        placeId: undefined,
-        lat: undefined,
-        lng: undefined,
-        isDefault: undefined,
-      },
+      serviceAddress: expectedBaseServiceAddressPayload(),
       offeringId: 'offering_1',
       locationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
@@ -492,7 +753,7 @@ describe('POST /api/pro/bookings', () => {
       allowShortNotice: false,
       allowFarFuture: false,
       requestId: null,
-      idempotencyKey: null,
+      idempotencyKey: 'idem_success_1',
     })
 
     expect(mocks.computeRequestedEndUtc).toHaveBeenCalledWith({
@@ -501,65 +762,20 @@ describe('POST /api/pro/bookings', () => {
       bufferMinutes: 15,
     })
 
-    expect(mocks.jsonOk).toHaveBeenCalledWith(
-      {
-        booking: {
-          id: 'booking_1',
-          clientId: 'client_1',
-          scheduledFor: '2026-03-11T19:30:00.000Z',
-          endsAt: '2026-03-11T20:45:00.000Z',
-          totalDurationMinutes: 60,
-          bufferMinutes: 15,
-          status: BookingStatus.ACCEPTED,
-          serviceName: 'Haircut',
-          subtotalSnapshot: '50.00',
-          subtotalCents: 5000,
-          locationId: 'loc_1',
-          locationType: ServiceLocationType.SALON,
-          clientAddressId: null,
-          stepMinutes: 15,
-          timeZone: 'America/Los_Angeles',
-        },
-        client: {
-          id: 'client_1',
-          userId: 'user_client_1',
-          email: 'client@example.com',
-          claimStatus: ClientClaimStatus.CLAIMED,
-        },
-        invite: null,
-      },
-      201,
-    )
+    const responseBody = expectedSuccessBody()
+
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 201,
+      responseBody,
+    })
+
+    expect(mocks.jsonOk).toHaveBeenCalledWith(responseBody, 201)
 
     expect(result).toEqual({
       ok: true,
       status: 201,
-      data: {
-        booking: {
-          id: 'booking_1',
-          clientId: 'client_1',
-          scheduledFor: '2026-03-11T19:30:00.000Z',
-          endsAt: '2026-03-11T20:45:00.000Z',
-          totalDurationMinutes: 60,
-          bufferMinutes: 15,
-          status: BookingStatus.ACCEPTED,
-          serviceName: 'Haircut',
-          subtotalSnapshot: '50.00',
-          subtotalCents: 5000,
-          locationId: 'loc_1',
-          locationType: ServiceLocationType.SALON,
-          clientAddressId: null,
-          stepMinutes: 15,
-          timeZone: 'America/Los_Angeles',
-        },
-        client: {
-          id: 'client_1',
-          userId: 'user_client_1',
-          email: 'client@example.com',
-          claimStatus: ClientClaimStatus.CLAIMED,
-        },
-        invite: null,
-      },
+      data: responseBody,
     })
   })
 
@@ -598,132 +814,112 @@ describe('POST /api/pro/bookings', () => {
     })
 
     const result = await POST(
-      makeRequest({
-        scheduledFor: scheduledForIso,
-        locationId: 'loc_1',
-        locationType: 'SALON',
-        offeringId: 'offering_1',
-        client: {
-          firstName: 'New',
-          lastName: 'Client',
-          email: 'newclient@example.com',
+      makeIdempotentRequest(
+        {
+          scheduledFor: scheduledForIso,
+          locationId: 'loc_1',
+          locationType: 'SALON',
+          offeringId: 'offering_1',
+          client: {
+            firstName: 'New',
+            lastName: 'Client',
+            email: 'newclient@example.com',
+          },
         },
-      }),
+        'idem_invite_1',
+      ),
     )
+
+    const responseBody = expectedSuccessBody({
+      bookingId: 'booking_invite_1',
+      clientId: 'client_unclaimed_1',
+      clientUserId: null,
+      clientEmail: 'newclient@example.com',
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+      invite: {
+        id: 'invite_1',
+        token: 'token_1',
+      },
+    })
+
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 201,
+      responseBody,
+    })
 
     expect(result).toEqual({
       ok: true,
       status: 201,
-      data: {
-        booking: {
-          id: 'booking_invite_1',
-          clientId: 'client_unclaimed_1',
-          scheduledFor: '2026-03-11T19:30:00.000Z',
-          endsAt: '2026-03-11T20:45:00.000Z',
-          totalDurationMinutes: 60,
-          bufferMinutes: 15,
-          status: BookingStatus.ACCEPTED,
-          serviceName: 'Haircut',
-          subtotalSnapshot: '50.00',
-          subtotalCents: 5000,
-          locationId: 'loc_1',
-          locationType: ServiceLocationType.SALON,
-          clientAddressId: null,
-          stepMinutes: 15,
-          timeZone: 'America/Los_Angeles',
-        },
-        client: {
-          id: 'client_unclaimed_1',
-          userId: null,
-          email: 'newclient@example.com',
-          claimStatus: ClientClaimStatus.UNCLAIMED,
-        },
-        invite: {
-          id: 'invite_1',
-          token: 'token_1',
-        },
-      },
+      data: responseBody,
     })
   })
 
   it('still returns booking success for an unclaimed client when invite is null', async () => {
-  mocks.createProBookingWithClient.mockResolvedValueOnce({
-    ok: true,
-    clientId: 'client_unclaimed_2',
-    clientUserId: null,
-    clientEmail: 'nudgefree@example.com',
-    clientClaimStatus: ClientClaimStatus.UNCLAIMED,
-    clientAddressId: null,
-    bookingResult: {
-      booking: {
-        id: 'booking_no_invite_1',
-        scheduledFor,
-        totalDurationMinutes: 60,
-        bufferMinutes: 15,
-        status: BookingStatus.ACCEPTED,
-      },
-      subtotalSnapshot: new Prisma.Decimal('50.00'),
-      stepMinutes: 15,
-      appointmentTimeZone: 'America/Los_Angeles',
-      locationId: 'loc_1',
-      locationType: ServiceLocationType.SALON,
+    mocks.createProBookingWithClient.mockResolvedValueOnce({
+      ok: true,
+      clientId: 'client_unclaimed_2',
+      clientUserId: null,
+      clientEmail: 'nudgefree@example.com',
+      clientClaimStatus: ClientClaimStatus.UNCLAIMED,
       clientAddressId: null,
-      serviceName: 'Haircut',
-      meta: {
-        mutated: true,
-        noOp: false,
-      },
-    },
-    invite: null,
-  })
-
-  const result = await POST(
-    makeRequest({
-      scheduledFor: scheduledForIso,
-      locationId: 'loc_1',
-      locationType: 'SALON',
-      offeringId: 'offering_1',
-      client: {
-        firstName: 'No',
-        lastName: 'Invite',
-        email: 'nudgefree@example.com',
-      },
-    }),
-  )
-
-  expect(result).toEqual({
-    ok: true,
-    status: 201,
-    data: {
-      booking: {
-        id: 'booking_no_invite_1',
-        clientId: 'client_unclaimed_2',
-        scheduledFor: '2026-03-11T19:30:00.000Z',
-        endsAt: '2026-03-11T20:45:00.000Z',
-        totalDurationMinutes: 60,
-        bufferMinutes: 15,
-        status: BookingStatus.ACCEPTED,
-        serviceName: 'Haircut',
-        subtotalSnapshot: '50.00',
-        subtotalCents: 5000,
+      bookingResult: {
+        booking: {
+          id: 'booking_no_invite_1',
+          scheduledFor,
+          totalDurationMinutes: 60,
+          bufferMinutes: 15,
+          status: BookingStatus.ACCEPTED,
+        },
+        subtotalSnapshot: new Prisma.Decimal('50.00'),
+        stepMinutes: 15,
+        appointmentTimeZone: 'America/Los_Angeles',
         locationId: 'loc_1',
         locationType: ServiceLocationType.SALON,
         clientAddressId: null,
-        stepMinutes: 15,
-        timeZone: 'America/Los_Angeles',
-      },
-      client: {
-        id: 'client_unclaimed_2',
-        userId: null,
-        email: 'nudgefree@example.com',
-        claimStatus: ClientClaimStatus.UNCLAIMED,
+        serviceName: 'Haircut',
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
       },
       invite: null,
-    },
-  })
-})
+    })
 
-  it('maps booking errors to jsonFail', async () => {
+    const result = await POST(
+      makeIdempotentRequest(
+        {
+          scheduledFor: scheduledForIso,
+          locationId: 'loc_1',
+          locationType: 'SALON',
+          offeringId: 'offering_1',
+          client: {
+            firstName: 'No',
+            lastName: 'Invite',
+            email: 'nudgefree@example.com',
+          },
+        },
+        'idem_no_invite_1',
+      ),
+    )
+
+    const responseBody = expectedSuccessBody({
+      bookingId: 'booking_no_invite_1',
+      clientId: 'client_unclaimed_2',
+      clientUserId: null,
+      clientEmail: 'nudgefree@example.com',
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+      invite: null,
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      status: 201,
+      data: responseBody,
+    })
+  })
+
+  it('maps booking errors to jsonFail and marks idempotency failed', async () => {
     mocks.createProBookingWithClient.mockRejectedValueOnce(
       bookingError('TIME_BLOCKED', {
         message: 'Requested time is blocked.',
@@ -732,14 +928,12 @@ describe('POST /api/pro/bookings', () => {
     )
 
     const result = await POST(
-      makeRequest({
-        clientId: 'client_1',
-        scheduledFor: scheduledForIso,
-        locationId: 'loc_1',
-        locationType: 'SALON',
-        offeringId: 'offering_1',
-      }),
+      makeIdempotentRequest(validBody(), 'idem_time_blocked_1'),
     )
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       409,
