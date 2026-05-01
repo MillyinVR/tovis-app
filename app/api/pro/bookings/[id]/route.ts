@@ -13,6 +13,8 @@ import {
 import {
   BookingServiceItemType,
   BookingStatus,
+  Prisma,
+  Role,
 } from '@prisma/client'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import { resolveAppointmentSchedulingContext } from '@/lib/booking/timeZoneTruth'
@@ -35,6 +37,12 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { updateProBooking } from '@/lib/booking/writeBoundary'
+import {
+  beginIdempotency,
+  completeIdempotency,
+  failIdempotency,
+  IDEMPOTENCY_ROUTES,
+} from '@/lib/idempotency'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,6 +51,16 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 type RequestedStatus =
   | typeof BookingStatus.ACCEPTED
   | typeof BookingStatus.CANCELLED
+
+type PatchBookingMeta = {
+  requestId: string | null
+  idempotencyKey: string | null
+}
+
+type NestedInputJsonValue = Prisma.InputJsonValue | null
+type JsonObjectPayload = {
+  [key: string]: NestedInputJsonValue
+}
 
 function normalizeRequestedStatus(value: unknown): RequestedStatus | null {
   const normalized = typeof value === 'string' ? value.trim().toUpperCase() : ''
@@ -62,6 +80,97 @@ function bookingJsonFail(
 ) {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
+
+function idempotencyMissingKeyFail(): Response {
+  return jsonFail(400, 'Missing idempotency key.', {
+    code: 'IDEMPOTENCY_KEY_REQUIRED',
+  })
+}
+
+function idempotencyInProgressFail(): Response {
+  return jsonFail(409, 'A matching booking update is already in progress.', {
+    code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+  })
+}
+
+function idempotencyConflictFail(): Response {
+  return jsonFail(
+    409,
+    'This idempotency key was already used with a different request body.',
+    {
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    },
+  )
+}
+
+function readPatchBookingMeta(request: Request): PatchBookingMeta {
+  const requestId =
+    pickString(request.headers.get('x-request-id')) ??
+    pickString(request.headers.get('request-id')) ??
+    null
+
+  const idempotencyKey =
+    pickString(request.headers.get('idempotency-key')) ??
+    pickString(request.headers.get('x-idempotency-key')) ??
+    null
+
+  return { requestId, idempotencyKey }
+}
+
+function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    return value.toString()
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeNestedJsonValue(item))
+  }
+
+  if (typeof value === 'object') {
+    const input = value as Record<string, unknown>
+    const out: Record<string, NestedInputJsonValue> = {}
+
+    for (const key of Object.keys(input).sort()) {
+      out[key] = normalizeNestedJsonValue(input[key])
+    }
+
+    return out
+  }
+
+  return String(value)
+}
+
+function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
+  if (!isRecord(value)) {
+    return {
+      value: normalizeNestedJsonValue(value),
+    }
+  }
+
+  const out: JsonObjectPayload = {}
+
+  for (const key of Object.keys(value).sort()) {
+    out[key] = normalizeNestedJsonValue(value[key])
+  }
+
+  return out
 }
 
 function parseRequestedServiceItems(
@@ -293,7 +402,8 @@ export async function GET(_req: Request, ctx: Ctx) {
     console.error('GET /api/pro/bookings/[id] error:', error)
     captureBookingException({ error, route: 'GET /api/pro/bookings/[id]' })
     return bookingJsonFail('INTERNAL_ERROR', {
-      message: error instanceof Error ? error.message : 'Failed to load booking.',
+      message:
+        error instanceof Error ? error.message : 'Failed to load booking.',
       userMessage: 'Failed to load booking.',
     })
   }
@@ -304,12 +414,16 @@ export async function GET(_req: Request, ctx: Ctx) {
 --------------------------------------------- */
 
 export async function PATCH(req: Request, ctx: Ctx) {
+  let idempotencyRecordId: string | null = null
+
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
     const actorUserId = auth.user.id
+    const { requestId, idempotencyKey } = readPatchBookingMeta(req)
+
     const params = await Promise.resolve(ctx.params)
     const bookingId = pickString(params?.id)
 
@@ -418,8 +532,14 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return bookingJsonFail('INVALID_DURATION_MINUTES')
     }
 
-    const overrideReason = hasOverrideReason ? pickString(rec.overrideReason) : null
-    if (hasOverrideReason && rec.overrideReason != null && overrideReason == null) {
+    const overrideReason = hasOverrideReason
+      ? pickString(rec.overrideReason)
+      : null
+    if (
+      hasOverrideReason &&
+      rec.overrideReason != null &&
+      overrideReason == null
+    ) {
       return bookingJsonFail('FORBIDDEN', {
         message: 'overrideReason must be a string when provided.',
         userMessage: 'Override reason must be text.',
@@ -438,6 +558,51 @@ export async function PATCH(req: Request, ctx: Ctx) {
       }
       throw error
     }
+
+    const idempotency = await beginIdempotency<JsonObjectPayload>({
+      actor: {
+        actorUserId,
+        actorRole: Role.PRO,
+      },
+      route: IDEMPOTENCY_ROUTES.PRO_BOOKING_UPDATE,
+      key: idempotencyKey,
+      requestBody: {
+        professionalId,
+        actorUserId,
+        bookingId,
+        nextStatus,
+        notifyClient: notifyClient === true,
+        allowOutsideWorkingHours: allowOutsideWorkingHours === true,
+        allowShortNotice: allowShortNotice === true,
+        allowFarFuture: allowFarFuture === true,
+        nextStart: nextStart ? nextStart.toISOString() : null,
+        nextBuffer,
+        nextDuration,
+        parsedRequestedItems,
+        hasBuffer,
+        hasDuration,
+        hasServiceItems,
+        overrideReason,
+      },
+    })
+
+    if (idempotency.kind === 'missing_key') {
+      return idempotencyMissingKeyFail()
+    }
+
+    if (idempotency.kind === 'in_progress') {
+      return idempotencyInProgressFail()
+    }
+
+    if (idempotency.kind === 'conflict') {
+      return idempotencyConflictFail()
+    }
+
+    if (idempotency.kind === 'replay') {
+      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    }
+
+    idempotencyRecordId = idempotency.idempotencyRecordId
 
     const result = await updateProBooking({
       professionalId,
@@ -458,8 +623,25 @@ export async function PATCH(req: Request, ctx: Ctx) {
       hasServiceItems,
     })
 
-    return jsonOk(result, 200)
+const responseBody = normalizeJsonObjectPayload(result)
+
+await completeIdempotency({
+  idempotencyRecordId,
+  responseStatus: 200,
+  responseBody,
+})
+
+return jsonOk(responseBody, 200)
   } catch (error: unknown) {
+    if (idempotencyRecordId) {
+      await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+        console.error(
+          'PATCH /api/pro/bookings/[id] idempotency failure update error:',
+          failError,
+        )
+      })
+    }
+
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
