@@ -10,6 +10,9 @@ import {
   SessionStep,
 } from '@prisma/client'
 
+const IDEMPOTENCY_ROUTE =
+  'POST /api/pro/bookings/[id]/consultation-proposal'
+
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
   jsonFail: vi.fn(),
@@ -32,6 +35,12 @@ const mocks = vi.hoisted(() => ({
 
   upsertClientNotification: vi.fn(),
   createConsultationActionDelivery: vi.fn(),
+
+  beginIdempotency: vi.fn(),
+  completeIdempotency: vi.fn(),
+  failIdempotency: vi.fn(),
+
+  captureBookingException: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -55,7 +64,8 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
-  transitionSessionStepInTransaction: mocks.transitionSessionStepInTransaction,
+  transitionSessionStepInTransaction:
+    mocks.transitionSessionStepInTransaction,
 }))
 
 vi.mock('@/lib/booking/closeoutAudit', () => ({
@@ -69,6 +79,20 @@ vi.mock('@/lib/notifications/clientNotifications', () => ({
 
 vi.mock('@/lib/clientActions/createConsultationActionDelivery', () => ({
   createConsultationActionDelivery: mocks.createConsultationActionDelivery,
+}))
+
+vi.mock('@/lib/idempotency', () => ({
+  beginIdempotency: mocks.beginIdempotency,
+  completeIdempotency: mocks.completeIdempotency,
+  failIdempotency: mocks.failIdempotency,
+  IDEMPOTENCY_ROUTES: {
+    CONSULTATION_PROPOSAL_SEND:
+      'POST /api/pro/bookings/[id]/consultation-proposal',
+  },
+}))
+
+vi.mock('@/lib/observability/bookingEvents', () => ({
+  captureBookingException: mocks.captureBookingException,
 }))
 
 import { POST } from './route'
@@ -103,6 +127,20 @@ function makeRequest(args?: {
       body: args?.body === undefined ? undefined : JSON.stringify(args.body),
     },
   )
+}
+
+function makeIdempotentRequest(args?: {
+  body?: unknown
+  key?: string
+  headers?: Record<string, string>
+}): Request {
+  return makeRequest({
+    body: args?.body,
+    headers: {
+      'idempotency-key': args?.key ?? 'idem_consultation_proposal_1',
+      ...(args?.headers ?? {}),
+    },
+  })
 }
 
 function makeRawProposalBody(overrides?: {
@@ -179,6 +217,56 @@ function makeExpectedProposalJson(): Prisma.InputJsonObject {
         source: 'PROPOSAL',
       },
     ],
+  }
+}
+
+function makeExpectedIdempotencyRequestBody() {
+  return {
+    professionalId: 'pro_1',
+    actorUserId: 'user_1',
+    bookingId: 'booking_1',
+    proposedServicesJson: makeExpectedProposalJson(),
+    proposedTotal: '125.00',
+    proposedCents: 12500,
+    notes: 'Please review the updated plan.',
+  }
+}
+
+function makeSuccessResponseBody(overrides?: {
+  approvalId?: string
+  proposedTotal?: string
+  updatedAt?: string
+  consultationActionDelivery?: {
+    attempted: boolean
+    queued: boolean
+    href: string | null
+  }
+  meta?: {
+    mutated: boolean
+    noOp: boolean
+  }
+}) {
+  return {
+    approval: {
+      id: overrides?.approvalId ?? 'approval_1',
+      status: ConsultationApprovalStatus.PENDING,
+      proposedTotal: overrides?.proposedTotal ?? '125',
+      updatedAt:
+        overrides?.updatedAt ?? '2026-04-13T18:30:00.000Z',
+    },
+    sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+    proposedCents: 12500,
+    consultationActionDelivery:
+      overrides?.consultationActionDelivery ?? {
+        attempted: true,
+        queued: true,
+        href: '/client/consultation/raw_consult_token_1',
+      },
+    meta:
+      overrides?.meta ?? {
+        mutated: true,
+        noOp: false,
+      },
   }
 }
 
@@ -389,6 +477,25 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
         }),
     )
 
+    mocks.beginIdempotency.mockImplementation(
+      async (args: { key: string | null }) => {
+        const key = args.key?.trim()
+
+        if (!key) {
+          return { kind: 'missing_key' }
+        }
+
+        return {
+          kind: 'started',
+          idempotencyRecordId: 'idem_record_1',
+          requestHash: 'hash_1',
+        }
+      },
+    )
+
+    mocks.completeIdempotency.mockResolvedValue(undefined)
+    mocks.failIdempotency.mockResolvedValue(undefined)
+
     mocks.txBookingFindUnique.mockResolvedValue(makeTxBooking())
     mocks.txActiveOfferingsFindMany.mockResolvedValue(makeActiveOfferings())
     mocks.txConsultationApprovalUpsert.mockResolvedValue(makeApproval())
@@ -424,6 +531,7 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     const result = await POST(makeRequest({ body: {} }), makeCtx())
 
     expect(result).toBe(authRes)
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
@@ -438,9 +546,14 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     expect(result.status).toBe(400)
     await expect(result.json()).resolves.toEqual({
       ok: false,
-      error: 'Missing booking id.',
+      error: expect.any(String),
+      code: 'BOOKING_ID_REQUIRED',
+      retryable: expect.any(Boolean),
+      uiAction: expect.any(String),
+      message: expect.any(String),
     })
 
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
@@ -453,6 +566,7 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
       error: 'Invalid request body.',
     })
 
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
@@ -472,20 +586,137 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
       error: 'Proposal total must equal the sum of the line items.',
     })
 
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
-  it('sends a consultation proposal, writes notification/audit data, and queues consultation action delivery', async () => {
+  it('returns missing idempotency key for a valid consultation proposal request without idempotency header', async () => {
     const result = await POST(
       makeRequest({
+        body: makeRawProposalBody(),
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    })
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: 'PRO',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: null,
+      requestBody: makeExpectedIdempotencyRequestBody(),
+    })
+
+    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns in-progress when the idempotency ledger has an active matching request', async () => {
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'in_progress',
+    })
+
+    const result = await POST(
+      makeIdempotentRequest({
+        body: makeRawProposalBody(),
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(409)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error:
+        'A matching consultation proposal request is already in progress.',
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    })
+
+    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns conflict when idempotency key was reused with a different body', async () => {
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'conflict',
+    })
+
+    const result = await POST(
+      makeIdempotentRequest({
+        body: makeRawProposalBody(),
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(409)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error:
+        'This idempotency key was already used with a different request body.',
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    })
+
+    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('replays completed idempotency response without running the transaction or delivery again', async () => {
+    const replayBody = makeSuccessResponseBody({
+      approvalId: 'approval_replay_1',
+    })
+
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'replay',
+      responseStatus: 200,
+      responseBody: replayBody,
+    })
+
+    const result = await POST(
+      makeIdempotentRequest({
+        body: makeRawProposalBody(),
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      ...replayBody,
+    })
+
+    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
+    expect(mocks.createConsultationActionDelivery).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('sends a consultation proposal, writes notification/audit data, queues delivery, and completes idempotency', async () => {
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_1',
         headers: {
           'x-request-id': 'req_1',
-          'idempotency-key': 'idem_1',
         },
         body: makeRawProposalBody(),
       }),
       makeCtx(),
     )
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: 'PRO',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: 'idem_1',
+      requestBody: makeExpectedIdempotencyRequestBody(),
+    })
 
     expect(mocks.txBookingFindUnique).toHaveBeenCalledWith({
       where: { id: 'booking_1' },
@@ -504,7 +735,10 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
         addOns: {
           where: {
             isActive: true,
-            addOnService: { isActive: true, isAddOnEligible: true },
+            addOnService: {
+              isActive: true,
+              isAddOnEligible: true,
+            },
           },
           select: {
             addOnServiceId: true,
@@ -615,30 +849,22 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
       recipientTimeZone: 'America/Los_Angeles',
     })
 
+    const responseBody = makeSuccessResponseBody()
+
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody,
+    })
+
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
-      approval: {
-        id: 'approval_1',
-        status: ConsultationApprovalStatus.PENDING,
-        proposedTotal: '125',
-        updatedAt: '2026-04-13T18:30:00.000Z',
-      },
-      sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
-      proposedCents: 12500,
-      consultationActionDelivery: {
-        attempted: true,
-        queued: true,
-        href: '/client/consultation/raw_consult_token_1',
-      },
-      meta: {
-        mutated: true,
-        noOp: false,
-      },
+      ...responseBody,
     })
   })
 
-  it('skips consultation action delivery for true no-op proposal sends', async () => {
+  it('skips consultation action delivery for true no-op proposal sends and completes idempotency', async () => {
     const existingProposalJson = makeExpectedProposalJson()
 
     mocks.txBookingFindUnique.mockResolvedValueOnce(
@@ -656,7 +882,8 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     )
 
     const result = await POST(
-      makeRequest({
+      makeIdempotentRequest({
+        key: 'idem_noop_1',
         body: makeRawProposalBody(),
       }),
       makeCtx(),
@@ -667,17 +894,9 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
     expect(mocks.createConsultationActionDelivery).not.toHaveBeenCalled()
 
-    expect(result.status).toBe(200)
-    await expect(result.json()).resolves.toEqual({
-      ok: true,
-      approval: {
-        id: 'approval_existing_1',
-        status: ConsultationApprovalStatus.PENDING,
-        proposedTotal: '125',
-        updatedAt: '2026-04-13T18:15:00.000Z',
-      },
-      sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
-      proposedCents: 12500,
+    const responseBody = makeSuccessResponseBody({
+      approvalId: 'approval_existing_1',
+      updatedAt: '2026-04-13T18:15:00.000Z',
       consultationActionDelivery: {
         attempted: false,
         queued: false,
@@ -688,9 +907,21 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
         noOp: true,
       },
     })
+
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody,
+    })
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      ...responseBody,
+    })
   })
 
-  it('still returns 200 when consultation action delivery enqueue fails', async () => {
+  it('still returns 200 when consultation action delivery enqueue fails and completes idempotency', async () => {
     mocks.createConsultationActionDelivery.mockRejectedValueOnce(
       new Error('dispatch enqueue failed'),
     )
@@ -701,7 +932,8 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
 
     try {
       const result = await POST(
-        makeRequest({
+        makeIdempotentRequest({
+          key: 'idem_delivery_fail_1',
           body: makeRawProposalBody(),
         }),
         makeCtx(),
@@ -720,33 +952,31 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
         }),
       )
 
-      expect(result.status).toBe(200)
-      await expect(result.json()).resolves.toEqual({
-        ok: true,
-        approval: {
-          id: 'approval_1',
-          status: ConsultationApprovalStatus.PENDING,
-          proposedTotal: '125',
-          updatedAt: '2026-04-13T18:30:00.000Z',
-        },
-        sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
-        proposedCents: 12500,
+      const responseBody = makeSuccessResponseBody({
         consultationActionDelivery: {
           attempted: true,
           queued: false,
           href: null,
         },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
+      })
+
+      expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_1',
+        responseStatus: 200,
+        responseBody,
+      })
+
+      expect(result.status).toBe(200)
+      await expect(result.json()).resolves.toEqual({
+        ok: true,
+        ...responseBody,
       })
     } finally {
       consoleErrorSpy.mockRestore()
     }
   })
 
-  it('returns transaction failure with forcedStep when session transition fails', async () => {
+  it('returns transaction failure with forcedStep and marks idempotency failed', async () => {
     mocks.transitionSessionStepInTransaction.mockResolvedValueOnce({
       ok: false,
       status: 409,
@@ -755,11 +985,16 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
     })
 
     const result = await POST(
-      makeRequest({
+      makeIdempotentRequest({
+        key: 'idem_forced_step_1',
         body: makeRawProposalBody(),
       }),
       makeCtx(),
     )
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
 
     expect(result.status).toBe(409)
     await expect(result.json()).resolves.toEqual({
@@ -768,18 +1003,29 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
       forcedStep: SessionStep.AFTER_PHOTOS,
     })
 
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
     expect(mocks.createConsultationActionDelivery).not.toHaveBeenCalled()
   })
 
-  it('returns 500 for unexpected errors', async () => {
+  it('marks idempotency failed when the transaction throws unexpectedly', async () => {
     mocks.prismaTransaction.mockRejectedValueOnce(new Error('boom'))
 
     const result = await POST(
-      makeRequest({
+      makeIdempotentRequest({
+        key: 'idem_boom_1',
         body: makeRawProposalBody(),
       }),
       makeCtx(),
     )
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(mocks.captureBookingException).toHaveBeenCalledWith({
+      error: expect.any(Error),
+      route: 'POST /api/pro/bookings/[id]/consultation-proposal',
+    })
 
     expect(result.status).toBe(500)
     await expect(result.json()).resolves.toEqual({
