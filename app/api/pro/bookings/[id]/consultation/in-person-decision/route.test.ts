@@ -1,5 +1,66 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ConsultationDecision, ConsultationApprovalStatus } from '@prisma/client'
+import { ConsultationApprovalStatus, ConsultationDecision } from '@prisma/client'
+
+const IDEMPOTENCY_ROUTE =
+  'POST /api/pro/bookings/[id]/consultation/in-person-decision'
+
+const approvedResponseBody = {
+  action: ConsultationDecision.APPROVED,
+  booking: {
+    id: 'booking_1',
+    serviceId: 'svc_1',
+    offeringId: 'off_1',
+    subtotalSnapshot: '125.00',
+    totalDurationMinutes: 75,
+    consultationConfirmedAt: '2026-04-12T20:00:00.000Z',
+  },
+  approval: {
+    id: 'approval_1',
+    status: ConsultationApprovalStatus.APPROVED,
+    approvedAt: '2026-04-12T20:00:00.000Z',
+    rejectedAt: null,
+  },
+  proof: {
+    id: 'proof_1',
+    decision: ConsultationDecision.APPROVED,
+    method: 'IN_PERSON_PRO_DEVICE',
+    actedAt: '2026-04-12T20:00:00.000Z',
+    recordedByUserId: 'user_1',
+    clientActionTokenId: null,
+    contactMethod: null,
+    destinationSnapshot: null,
+  },
+  nextHref: '/pro/bookings/booking_1/session',
+  meta: {
+    mutated: true,
+    noOp: false,
+  },
+}
+
+const rejectedResponseBody = {
+  action: ConsultationDecision.REJECTED,
+  approval: {
+    id: 'approval_1',
+    status: ConsultationApprovalStatus.REJECTED,
+    approvedAt: null,
+    rejectedAt: '2026-04-12T20:15:00.000Z',
+  },
+  proof: {
+    id: 'proof_2',
+    decision: ConsultationDecision.REJECTED,
+    method: 'IN_PERSON_PRO_DEVICE',
+    actedAt: '2026-04-12T20:15:00.000Z',
+    recordedByUserId: 'user_1',
+    clientActionTokenId: null,
+    contactMethod: null,
+    destinationSnapshot: null,
+  },
+  nextHref: '/pro/bookings/booking_1/session',
+  meta: {
+    mutated: true,
+    noOp: false,
+  },
+}
 
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
@@ -14,6 +75,12 @@ const mocks = vi.hoisted(() => ({
   isBookingError: vi.fn(),
 
   recordInPersonConsultationDecision: vi.fn(),
+
+  beginIdempotency: vi.fn(),
+  completeIdempotency: vi.fn(),
+  failIdempotency: vi.fn(),
+
+  captureBookingException: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -36,6 +103,20 @@ vi.mock('@/lib/booking/errors', () => ({
 vi.mock('@/lib/booking/writeBoundary', () => ({
   recordInPersonConsultationDecision:
     mocks.recordInPersonConsultationDecision,
+}))
+
+vi.mock('@/lib/idempotency', () => ({
+  beginIdempotency: mocks.beginIdempotency,
+  completeIdempotency: mocks.completeIdempotency,
+  failIdempotency: mocks.failIdempotency,
+  IDEMPOTENCY_ROUTES: {
+    CONSULTATION_IN_PERSON_DECISION:
+      'POST /api/pro/bookings/[id]/consultation/in-person-decision',
+  },
+}))
+
+vi.mock('@/lib/observability/bookingEvents', () => ({
+  captureBookingException: mocks.captureBookingException,
 }))
 
 import { POST } from './route'
@@ -61,6 +142,31 @@ function makeRequest(args?: {
       body: JSON.stringify(args?.body ?? {}),
     },
   )
+}
+
+function makeIdempotentRequest(args?: {
+  body?: unknown
+  key?: string
+  headers?: Record<string, string>
+}): Request {
+  return makeRequest({
+    body: args?.body,
+    headers: {
+      'idempotency-key': args?.key ?? 'idem_in_person_decision_1',
+      ...(args?.headers ?? {}),
+    },
+  })
+}
+
+function expectedIdempotencyRequestBody(
+  decision: ConsultationDecision = ConsultationDecision.APPROVED,
+) {
+  return {
+    professionalId: 'pro_1',
+    recordedByUserId: 'user_1',
+    bookingId: 'booking_1',
+    decision,
+  }
 }
 
 describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', () => {
@@ -117,7 +223,9 @@ describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', (
             ? 403
             : code === 'BOOKING_NOT_FOUND'
               ? 404
-              : 400,
+              : code === 'BOOKING_ID_REQUIRED'
+                ? 400
+                : 400,
         userMessage: overrides?.userMessage ?? overrides?.message ?? code,
         extra: {
           code,
@@ -125,6 +233,25 @@ describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', (
         },
       }),
     )
+
+    mocks.beginIdempotency.mockImplementation(
+      async (args: { key: string | null }) => {
+        const key = args.key?.trim()
+
+        if (!key) {
+          return { kind: 'missing_key' }
+        }
+
+        return {
+          kind: 'started',
+          idempotencyRecordId: 'idem_record_1',
+          requestHash: 'hash_1',
+        }
+      },
+    )
+
+    mocks.completeIdempotency.mockResolvedValue(undefined)
+    mocks.failIdempotency.mockResolvedValue(undefined)
 
     mocks.recordInPersonConsultationDecision.mockResolvedValue({
       booking: {
@@ -169,6 +296,7 @@ describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', (
     const result = await POST(makeRequest(), makeCtx('booking_1'))
 
     expect(result).toBe(authRes)
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.recordInPersonConsultationDecision).not.toHaveBeenCalled()
   })
 
@@ -209,22 +337,29 @@ describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', (
       message: 'Authenticated actor user id is required.',
     })
 
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.recordInPersonConsultationDecision).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when booking id is missing after trim', async () => {
+  it('returns BOOKING_ID_REQUIRED when booking id is missing after trim', async () => {
     const result = await POST(
       makeRequest({ body: { action: 'APPROVED' } }),
       makeCtx('   '),
     )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing booking id.')
+    expect(mocks.getBookingFailPayload).toHaveBeenCalledWith(
+      'BOOKING_ID_REQUIRED',
+      undefined,
+    )
+
     expect(result).toEqual({
       ok: false,
       status: 400,
-      error: 'Missing booking id.',
+      error: 'BOOKING_ID_REQUIRED',
+      code: 'BOOKING_ID_REQUIRED',
     })
 
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.recordInPersonConsultationDecision).not.toHaveBeenCalled()
   })
 
@@ -238,27 +373,142 @@ describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', (
       400,
       'Invalid action. Use APPROVED or REJECTED.',
     )
+
     expect(result).toEqual({
       ok: false,
       status: 400,
       error: 'Invalid action. Use APPROVED or REJECTED.',
     })
 
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.recordInPersonConsultationDecision).not.toHaveBeenCalled()
   })
 
-  it('calls recordInPersonConsultationDecision for APPROVED and returns booking payload', async () => {
+  it('returns missing idempotency key for a valid in-person decision without idempotency header', async () => {
     const result = await POST(
-      makeRequest({
+      makeRequest({ body: { action: 'APPROVED' } }),
+      makeCtx('booking_1'),
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 400,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    })
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: 'PRO',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: null,
+      requestBody: expectedIdempotencyRequestBody(
+        ConsultationDecision.APPROVED,
+      ),
+    })
+
+    expect(mocks.recordInPersonConsultationDecision).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns in-progress when idempotency ledger has an active matching request', async () => {
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'in_progress',
+    })
+
+    const result = await POST(
+      makeIdempotentRequest({
+        body: { action: 'APPROVED' },
+      }),
+      makeCtx('booking_1'),
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error:
+        'A matching in-person consultation decision request is already in progress.',
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    })
+
+    expect(mocks.recordInPersonConsultationDecision).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns conflict when idempotency key was reused with a different request body', async () => {
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'conflict',
+    })
+
+    const result = await POST(
+      makeIdempotentRequest({
+        body: { action: 'APPROVED' },
+      }),
+      makeCtx('booking_1'),
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error:
+        'This idempotency key was already used with a different request body.',
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    })
+
+    expect(mocks.recordInPersonConsultationDecision).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('replays completed idempotency response without recording the decision again', async () => {
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'replay',
+      responseStatus: 200,
+      responseBody: approvedResponseBody,
+    })
+
+    const result = await POST(
+      makeIdempotentRequest({
+        body: { action: 'APPROVED' },
+      }),
+      makeCtx('booking_1'),
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: approvedResponseBody,
+    })
+
+    expect(mocks.recordInPersonConsultationDecision).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('calls recordInPersonConsultationDecision for APPROVED, completes idempotency, and returns booking payload', async () => {
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_1',
         body: { action: 'approved' },
         headers: {
           'x-request-id': 'req_1',
-          'idempotency-key': 'idem_1',
           'user-agent': 'iPad kiosk',
         },
       }),
       makeCtx('booking_1'),
     )
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: 'PRO',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: 'idem_1',
+      requestBody: expectedIdempotencyRequestBody(
+        ConsultationDecision.APPROVED,
+      ),
+    })
 
     expect(mocks.recordInPersonConsultationDecision).toHaveBeenCalledWith({
       bookingId: 'booking_1',
@@ -270,81 +520,22 @@ describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', (
       userAgent: 'iPad kiosk',
     })
 
-    expect(mocks.jsonOk).toHaveBeenCalledWith(
-      {
-        action: ConsultationDecision.APPROVED,
-        booking: {
-          id: 'booking_1',
-          serviceId: 'svc_1',
-          offeringId: 'off_1',
-          subtotalSnapshot: '125.00',
-          totalDurationMinutes: 75,
-          consultationConfirmedAt: '2026-04-12T20:00:00.000Z',
-        },
-        approval: {
-          id: 'approval_1',
-          status: ConsultationApprovalStatus.APPROVED,
-          approvedAt: '2026-04-12T20:00:00.000Z',
-          rejectedAt: null,
-        },
-        proof: {
-          id: 'proof_1',
-          decision: ConsultationDecision.APPROVED,
-          method: 'IN_PERSON_PRO_DEVICE',
-          actedAt: '2026-04-12T20:00:00.000Z',
-          recordedByUserId: 'user_1',
-          clientActionTokenId: null,
-          contactMethod: null,
-          destinationSnapshot: null,
-        },
-        nextHref: '/pro/bookings/booking_1/session',
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
-      200,
-    )
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody: approvedResponseBody,
+    })
+
+    expect(mocks.jsonOk).toHaveBeenCalledWith(approvedResponseBody, 200)
 
     expect(result).toEqual({
       ok: true,
       status: 200,
-      data: {
-        action: ConsultationDecision.APPROVED,
-        booking: {
-          id: 'booking_1',
-          serviceId: 'svc_1',
-          offeringId: 'off_1',
-          subtotalSnapshot: '125.00',
-          totalDurationMinutes: 75,
-          consultationConfirmedAt: '2026-04-12T20:00:00.000Z',
-        },
-        approval: {
-          id: 'approval_1',
-          status: ConsultationApprovalStatus.APPROVED,
-          approvedAt: '2026-04-12T20:00:00.000Z',
-          rejectedAt: null,
-        },
-        proof: {
-          id: 'proof_1',
-          decision: ConsultationDecision.APPROVED,
-          method: 'IN_PERSON_PRO_DEVICE',
-          actedAt: '2026-04-12T20:00:00.000Z',
-          recordedByUserId: 'user_1',
-          clientActionTokenId: null,
-          contactMethod: null,
-          destinationSnapshot: null,
-        },
-        nextHref: '/pro/bookings/booking_1/session',
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
+      data: approvedResponseBody,
     })
   })
 
-  it('calls recordInPersonConsultationDecision for REJECTED and returns rejection payload', async () => {
+  it('calls recordInPersonConsultationDecision for REJECTED, completes idempotency, and returns rejection payload', async () => {
     mocks.recordInPersonConsultationDecision.mockResolvedValueOnce({
       approval: {
         id: 'approval_1',
@@ -369,16 +560,28 @@ describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', (
     })
 
     const result = await POST(
-      makeRequest({
+      makeIdempotentRequest({
+        key: 'idem_2',
         body: { action: 'REJECTED' },
         headers: {
           'request-id': 'req_2',
-          'x-idempotency-key': 'idem_2',
           'user-agent': 'iPad kiosk',
         },
       }),
       makeCtx('booking_1'),
     )
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: 'PRO',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: 'idem_2',
+      requestBody: expectedIdempotencyRequestBody(
+        ConsultationDecision.REJECTED,
+      ),
+    })
 
     expect(mocks.recordInPersonConsultationDecision).toHaveBeenCalledWith({
       bookingId: 'booking_1',
@@ -390,37 +593,20 @@ describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', (
       userAgent: 'iPad kiosk',
     })
 
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody: rejectedResponseBody,
+    })
+
     expect(result).toEqual({
       ok: true,
       status: 200,
-      data: {
-        action: ConsultationDecision.REJECTED,
-        approval: {
-          id: 'approval_1',
-          status: ConsultationApprovalStatus.REJECTED,
-          approvedAt: null,
-          rejectedAt: '2026-04-12T20:15:00.000Z',
-        },
-        proof: {
-          id: 'proof_2',
-          decision: ConsultationDecision.REJECTED,
-          method: 'IN_PERSON_PRO_DEVICE',
-          actedAt: '2026-04-12T20:15:00.000Z',
-          recordedByUserId: 'user_1',
-          clientActionTokenId: null,
-          contactMethod: null,
-          destinationSnapshot: null,
-        },
-        nextHref: '/pro/bookings/booking_1/session',
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
+      data: rejectedResponseBody,
     })
   })
 
-  it('maps BookingError through getBookingFailPayload', async () => {
+  it('maps BookingError through getBookingFailPayload and marks idempotency failed', async () => {
     const bookingError = {
       name: 'BookingError',
       code: 'FORBIDDEN',
@@ -440,9 +626,16 @@ describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', (
     })
 
     const result = await POST(
-      makeRequest({ body: { action: 'APPROVED' } }),
+      makeIdempotentRequest({
+        key: 'idem_booking_error_1',
+        body: { action: 'APPROVED' },
+      }),
       makeCtx('booking_1'),
     )
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
 
     expect(mocks.getBookingFailPayload).toHaveBeenCalledWith('FORBIDDEN', {
       message: 'Consultation proposal is no longer pending.',
@@ -467,17 +660,31 @@ describe('app/api/pro/bookings/[id]/consultation/in-person-decision/route.ts', (
     })
   })
 
-  it('returns 500 for unknown errors', async () => {
+  it('returns 500 for unknown errors, captures exception, and marks idempotency failed', async () => {
     mocks.recordInPersonConsultationDecision.mockRejectedValueOnce(
       new Error('boom'),
     )
 
     const result = await POST(
-      makeRequest({ body: { action: 'APPROVED' } }),
+      makeIdempotentRequest({
+        key: 'idem_boom_1',
+        body: { action: 'APPROVED' },
+      }),
       makeCtx('booking_1'),
     )
 
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(mocks.captureBookingException).toHaveBeenCalledWith({
+      error: expect.any(Error),
+      route:
+        'POST /api/pro/bookings/[id]/consultation/in-person-decision',
+    })
+
     expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
+
     expect(result).toEqual({
       ok: false,
       status: 500,
