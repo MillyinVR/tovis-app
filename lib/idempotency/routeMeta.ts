@@ -14,6 +14,9 @@ export const IDEMPOTENCY_ROUTES = {
   BOOKING_MEDIA_CREATE: 'POST /api/pro/bookings/[id]/media',
   CLIENT_CHECKOUT_CONFIRM: 'POST /api/client/bookings/[id]/checkout',
   BOOKING_AFTERCARE_SEND: 'POST /api/pro/bookings/[id]/aftercare',
+  CLIENT_AFTERCARE_REBOOK: 'POST /api/client/rebook/[token]',
+  CLIENT_REVIEW_CREATE: 'POST /api/client/bookings/[id]/review',
+  CLIENT_CONSULTATION_DECISION: 'POST /api/client/bookings/[id]/consultation',
 } as const
 
 export type IdempotencyRoute =

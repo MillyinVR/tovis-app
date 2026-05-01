@@ -1,3 +1,5 @@
+// app/api/client/bookings/[id]/consultation/_decision.ts
+
 import { prisma } from '@/lib/prisma'
 import {
   jsonFail,
@@ -15,7 +17,15 @@ import {
   ConsultationApprovalStatus,
   NotificationEventKey,
   Prisma,
+  Role,
 } from '@prisma/client'
+import {
+  beginIdempotency,
+  completeIdempotency,
+  failIdempotency,
+  IDEMPOTENCY_ROUTES,
+} from '@/lib/idempotency'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export type ConsultationDecisionAction = 'APPROVE' | 'REJECT'
 
@@ -26,6 +36,12 @@ export type ConsultationDecisionCtx = {
 export type ConsultationDecisionRequestMeta = {
   requestId?: string | null
   idempotencyKey?: string | null
+}
+
+type NestedInputJsonValue = Prisma.InputJsonValue | null
+
+type JsonObjectPayload = {
+  [key: string]: NestedInputJsonValue
 }
 
 const CONSULTATION_APPROVAL_SELECT = {
@@ -135,10 +151,124 @@ async function createConsultationDecisionNotification(args: {
   }
 }
 
+function idempotencyMissingKeyFail(): Response {
+  return jsonFail(400, 'Missing idempotency key.', {
+    code: 'IDEMPOTENCY_KEY_REQUIRED',
+  })
+}
+
+function idempotencyInProgressFail(): Response {
+  return jsonFail(
+    409,
+    'A matching consultation decision request is already in progress.',
+    {
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    },
+  )
+}
+
+function idempotencyConflictFail(): Response {
+  return jsonFail(
+    409,
+    'This idempotency key was already used with a different request body.',
+    {
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    },
+  )
+}
+
+function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    return value.toString()
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeNestedJsonValue(item))
+  }
+
+  if (typeof value === 'object') {
+    const input = value as Record<string, unknown>
+    const out: JsonObjectPayload = {}
+
+    for (const key of Object.keys(input).sort()) {
+      out[key] = normalizeNestedJsonValue(input[key])
+    }
+
+    return out
+  }
+
+  return String(value)
+}
+
+function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
+  if (value === null || value === undefined) {
+    return {}
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      value: normalizeNestedJsonValue(value),
+    }
+  }
+
+  const input = value as Record<string, unknown>
+  const out: JsonObjectPayload = {}
+
+  for (const key of Object.keys(input).sort()) {
+    out[key] = normalizeNestedJsonValue(input[key])
+  }
+
+  return out
+}
+
+function buildDecisionResponseBody(args: {
+  bookingId: string
+  action: ConsultationDecisionAction
+  approval: unknown
+  alreadyDecided?: boolean
+}): JsonObjectPayload {
+  return normalizeJsonObjectPayload({
+    bookingId: args.bookingId,
+    action: args.action,
+    ...(args.alreadyDecided === true ? { alreadyDecided: true } : {}),
+    approval: args.approval,
+  })
+}
+
+async function failStartedIdempotency(
+  idempotencyRecordId: string | null,
+): Promise<void> {
+  if (!idempotencyRecordId) return
+
+  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+    console.error(
+      'POST /api/client/bookings/[id]/consultation idempotency failure update error:',
+      failError,
+    )
+  })
+}
+
 /**
  * Client consultation decision boundary:
  * - ensure client owns booking
- * - ensure consultationApproval exists + is PENDING
+ * - ensure consultationApproval exists
+ * - begin durable idempotency before approve/reject writes
  * - APPROVE: materialize approved proposal into canonical Booking state
  * - REJECT: preserve ConsultationApproval as rejected history only
  * - notify pro (best effort)
@@ -149,6 +279,8 @@ export async function handleConsultationDecision(
   ctx: ConsultationDecisionCtx,
   requestMeta: ConsultationDecisionRequestMeta = {},
 ) {
+  let idempotencyRecordId: string | null = null
+
   try {
     if (action !== 'APPROVE' && action !== 'REJECT') {
       return jsonFail(400, 'Invalid consultation decision action.')
@@ -156,6 +288,7 @@ export async function handleConsultationDecision(
 
     const auth = await requireClient()
     if (!auth.ok) return auth.res
+
     const { clientId, user } = auth
 
     const params = await Promise.resolve(ctx.params)
@@ -164,17 +297,6 @@ export async function handleConsultationDecision(
 
     const requestId = pickString(requestMeta.requestId) ?? null
     const idempotencyKey = pickString(requestMeta.idempotencyKey) ?? null
-
-    try {
-      const rl = await enforceRateLimit({
-        bucket: 'consultation:decision',
-        identity: await rateLimitIdentity(user.id),
-        keySuffix: `booking:${bookingId}`,
-      })
-      if (rl) return rl
-    } catch (e) {
-      console.warn('Rate limit skipped (limiter error):', e)
-    }
 
     const booking: ConsultationDecisionBookingRecord | null =
       await prisma.booking.findUnique({
@@ -187,16 +309,80 @@ export async function handleConsultationDecision(
 
     const approval = booking.consultationApproval
     if (!approval?.id) {
-      return jsonFail(409, 'No consultation proposal found for this booking yet.')
+      return jsonFail(
+        409,
+        'No consultation proposal found for this booking yet.',
+      )
+    }
+
+    const idempotency = await beginIdempotency<JsonObjectPayload>({
+      actor: {
+        actorUserId: user.id,
+        actorRole: Role.CLIENT,
+      },
+      route: IDEMPOTENCY_ROUTES.CLIENT_CONSULTATION_DECISION,
+      key: idempotencyKey,
+      requestBody: {
+        bookingId,
+        clientId,
+        actorUserId: user.id,
+        professionalId: booking.professionalId,
+        approvalId: approval.id,
+        action,
+      },
+    })
+
+    if (idempotency.kind === 'missing_key') {
+      return idempotencyMissingKeyFail()
+    }
+
+    if (idempotency.kind === 'in_progress') {
+      return idempotencyInProgressFail()
+    }
+
+    if (idempotency.kind === 'conflict') {
+      return idempotencyConflictFail()
+    }
+
+    if (idempotency.kind === 'replay') {
+      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    }
+
+    const startedIdempotencyRecordId = idempotency.idempotencyRecordId
+    idempotencyRecordId = startedIdempotencyRecordId
+
+    try {
+      const rl = await enforceRateLimit({
+        bucket: 'consultation:decision',
+        identity: await rateLimitIdentity(user.id),
+        keySuffix: `booking:${bookingId}`,
+      })
+
+      if (rl) {
+        await failStartedIdempotency(idempotencyRecordId)
+        idempotencyRecordId = null
+
+        return rl
+      }
+    } catch (e) {
+      console.warn('Rate limit skipped (limiter error):', e)
     }
 
     if (approval.status !== ConsultationApprovalStatus.PENDING) {
-      return jsonOk({
+      const responseBody = buildDecisionResponseBody({
         bookingId,
         action,
         alreadyDecided: true,
         approval,
       })
+
+  await completeIdempotency({
+      idempotencyRecordId: startedIdempotencyRecordId,
+      responseStatus: 200,
+      responseBody,
+    })
+
+      return jsonOk(responseBody, 200)
     }
 
     if (action === 'APPROVE') {
@@ -208,6 +394,18 @@ export async function handleConsultationDecision(
         idempotencyKey,
       })
 
+      const responseBody = buildDecisionResponseBody({
+        bookingId,
+        action,
+        approval: result.approval,
+      })
+
+      await completeIdempotency({
+        idempotencyRecordId: startedIdempotencyRecordId,
+        responseStatus: 200,
+        responseBody,
+      })
+
       await createConsultationDecisionNotification({
         bookingId,
         professionalId: booking.professionalId,
@@ -215,11 +413,7 @@ export async function handleConsultationDecision(
         action,
       })
 
-      return jsonOk({
-        bookingId,
-        action,
-        approval: result.approval,
-      })
+      return jsonOk(responseBody, 200)
     }
 
     const rejectResult = await prisma.$transaction(async (tx) => {
@@ -310,13 +504,33 @@ export async function handleConsultationDecision(
     })
 
     if (!rejectResult.mutated) {
-      return jsonOk({
+      const responseBody = buildDecisionResponseBody({
         bookingId,
         action,
         alreadyDecided: true,
         approval: rejectResult.approval,
       })
+
+    await completeIdempotency({
+      idempotencyRecordId: startedIdempotencyRecordId,
+      responseStatus: 200,
+      responseBody,
+    })
+
+      return jsonOk(responseBody, 200)
     }
+
+    const responseBody = buildDecisionResponseBody({
+      bookingId,
+      action,
+      approval: rejectResult.approval,
+    })
+
+    await completeIdempotency({
+      idempotencyRecordId: startedIdempotencyRecordId,
+      responseStatus: 200,
+      responseBody,
+    })
 
     await createConsultationDecisionNotification({
       bookingId,
@@ -325,13 +539,18 @@ export async function handleConsultationDecision(
       action,
     })
 
-    return jsonOk({
-      bookingId,
-      action,
-      approval: rejectResult.approval,
-    })
-  } catch (e) {
+    return jsonOk(responseBody, 200)
+  } catch (e: unknown) {
+    if (idempotencyRecordId) {
+      await failStartedIdempotency(idempotencyRecordId)
+    }
+
     console.error('handleConsultationDecision error', e)
+    captureBookingException({
+      error: e,
+      route: 'POST /api/client/bookings/[id]/consultation',
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }
