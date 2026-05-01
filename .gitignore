@@ -49,8 +49,3 @@ next-env.d.ts
 .claude/
 .vercel
 .env*.local
-
-# Logs
-*.log
-server.log
-test-results-baseline.log
