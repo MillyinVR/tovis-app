@@ -1,4 +1,9 @@
-import { AftercareRebookMode, ContactMethod, Prisma } from '@prisma/client'
+import {
+  AftercareRebookMode,
+  ContactMethod,
+  Prisma,
+  Role,
+} from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { isRecord } from '@/lib/guards'
@@ -12,6 +17,12 @@ import {
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
 import { createAftercareAccessDelivery } from '@/lib/clientActions/createAftercareAccessDelivery'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
+import {
+  beginIdempotency,
+  completeIdempotency,
+  failIdempotency,
+  IDEMPOTENCY_ROUTES,
+} from '@/lib/idempotency'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -95,6 +106,12 @@ type AftercareAccessDeliverySummary = {
   attempted: boolean
   queued: boolean
   href: string | null
+}
+
+type NestedInputJsonValue = Prisma.InputJsonValue | null
+
+type JsonObjectPayload = {
+  [key: string]: NestedInputJsonValue
 }
 
 const NOTES_MAX = 4000
@@ -491,6 +508,32 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
+function idempotencyMissingKeyFail(): Response {
+  return jsonFail(400, 'Missing idempotency key.', {
+    code: 'IDEMPOTENCY_KEY_REQUIRED',
+  })
+}
+
+function idempotencyInProgressFail(): Response {
+  return jsonFail(
+    409,
+    'A matching aftercare request is already in progress.',
+    {
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    },
+  )
+}
+
+function idempotencyConflictFail(): Response {
+  return jsonFail(
+    409,
+    'This idempotency key was already used with a different request body.',
+    {
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    },
+  )
+}
+
 function toIsoOrNull(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
 }
@@ -585,6 +628,66 @@ async function getBookingIdFromContext(ctx: Ctx): Promise<string | null> {
   return pickString(params?.id)
 }
 
+function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    return value.toString()
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeNestedJsonValue(item))
+  }
+
+  if (typeof value === 'object') {
+    const input = value as Record<string, unknown>
+    const out: JsonObjectPayload = {}
+
+    for (const key of Object.keys(input).sort()) {
+      out[key] = normalizeNestedJsonValue(input[key])
+    }
+
+    return out
+  }
+
+  return String(value)
+}
+
+function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
+  if (value === null || value === undefined) {
+    return {}
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      value: normalizeNestedJsonValue(value),
+    }
+  }
+
+  const input = value as Record<string, unknown>
+  const out: JsonObjectPayload = {}
+
+  for (const key of Object.keys(input).sort()) {
+    out[key] = normalizeNestedJsonValue(input[key])
+  }
+
+  return out
+}
+
 function parsePostBody(
   rawBody: unknown,
 ): { ok: true; value: ParsedPostBody } | { ok: false; error: string } {
@@ -651,6 +754,72 @@ function parsePostBody(
       version: parseOptionalVersion(rawBody.version),
     },
   }
+}
+
+function buildIdempotencyRequestBody(args: {
+  bookingId: string
+  professionalId: string
+  actorUserId: string
+  parsedBody: ParsedPostBody
+}): JsonObjectPayload {
+  const rebook = args.parsedBody.normalizedRebook
+
+  return normalizeJsonObjectPayload({
+    bookingId: args.bookingId,
+    professionalId: args.professionalId,
+    actorUserId: args.actorUserId,
+    notes: args.parsedBody.notes,
+    sendToClient: args.parsedBody.sendToClient,
+    recommendedProducts: args.parsedBody.recommendedProducts,
+    rebookMode: rebook.rebookMode,
+    rebookedFor: rebook.rebookedFor,
+    rebookWindowStart: rebook.rebookWindowStart,
+    rebookWindowEnd: rebook.rebookWindowEnd,
+    createRebookReminder: args.parsedBody.createRebookReminder,
+    rebookReminderDaysBefore: args.parsedBody.rebookReminderDaysBefore,
+    createProductReminder: args.parsedBody.createProductReminder,
+    productReminderDaysAfter: args.parsedBody.productReminderDaysAfter,
+    clientTimeZoneReceived: args.parsedBody.clientTimeZoneReceived,
+    version: args.parsedBody.version,
+  })
+}
+
+function buildAftercareResponseBody(args: {
+  result: Awaited<ReturnType<typeof upsertBookingAftercare>>
+  parsedBody: ParsedPostBody
+  aftercareAccessDelivery: AftercareAccessDeliverySummary
+}): JsonObjectPayload {
+  return normalizeJsonObjectPayload({
+    aftercare: {
+      id: args.result.aftercare.id,
+      rebookMode: args.result.aftercare.rebookMode,
+      rebookedFor: toIsoOrNull(args.result.aftercare.rebookedFor),
+      rebookWindowStart: toIsoOrNull(args.result.aftercare.rebookWindowStart),
+      rebookWindowEnd: toIsoOrNull(args.result.aftercare.rebookWindowEnd),
+      draftSavedAt: toIsoOrNull(args.result.aftercare.draftSavedAt),
+      sentToClientAt: toIsoOrNull(args.result.aftercare.sentToClientAt),
+      lastEditedAt: toIsoOrNull(args.result.aftercare.lastEditedAt),
+      version: args.result.aftercare.version,
+      isFinalized: Boolean(args.result.aftercare.sentToClientAt),
+      publicAccess: args.result.aftercare.publicAccess,
+    },
+    remindersTouched: args.result.remindersTouched,
+    clientNotified: args.result.clientNotified,
+    aftercareAccessDelivery: args.aftercareAccessDelivery,
+    timeZoneUsed: args.result.timeZoneUsed,
+    clientTimeZoneReceived: args.parsedBody.clientTimeZoneReceived,
+    bookingFinished: args.result.bookingFinished,
+    completionBlockers: args.result.completionBlockers,
+    booking: args.result.booking
+      ? {
+          status: args.result.booking.status,
+          sessionStep: args.result.booking.sessionStep,
+          finishedAt: toIsoOrNull(args.result.booking.finishedAt),
+        }
+      : null,
+    redirectTo: args.result.bookingFinished ? '/pro/calendar' : null,
+    meta: args.result.meta,
+  })
 }
 
 function pickFirstNonEmpty(
@@ -797,6 +966,19 @@ async function maybeQueueAftercareAccessDelivery(args: {
   }
 }
 
+async function failStartedIdempotency(
+  idempotencyRecordId: string | null,
+): Promise<void> {
+  if (!idempotencyRecordId) return
+
+  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+    console.error(
+      'POST /api/pro/bookings/[id]/aftercare idempotency failure update error:',
+      failError,
+    )
+  })
+}
+
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
@@ -804,7 +986,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 
     const bookingId = await getBookingIdFromContext(ctx)
     if (!bookingId) {
-      return jsonFail(400, 'Missing booking id.')
+      return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
     const booking: GetBookingRecord | null = await prisma.booking.findUnique({
@@ -845,19 +1027,34 @@ export async function GET(_req: Request, ctx: Ctx) {
     }
 
     console.error('GET /api/pro/bookings/[id]/aftercare error', error)
-    captureBookingException({ error, route: 'GET /api/pro/bookings/[id]/aftercare' })
+    captureBookingException({
+      error,
+      route: 'GET /api/pro/bookings/[id]/aftercare',
+    })
     return jsonFail(500, 'Internal server error.')
   }
 }
 
 export async function POST(req: Request, ctx: Ctx) {
+  let idempotencyRecordId: string | null = null
+
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
+    const professionalId = auth.professionalId
+    const actorUserId = auth.user.id
+
+    if (!actorUserId || !actorUserId.trim()) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'Authenticated actor user id is required.',
+        userMessage: 'You are not allowed to save aftercare for this booking.',
+      })
+    }
+
     const bookingId = await getBookingIdFromContext(ctx)
     if (!bookingId) {
-      return jsonFail(400, 'Missing booking id.')
+      return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
     const rawBody: unknown = await req.json().catch(() => null)
@@ -868,9 +1065,42 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const requestMeta = readRequestMeta(req)
 
+    const idempotency = await beginIdempotency<JsonObjectPayload>({
+      actor: {
+        actorUserId,
+        actorRole: Role.PRO,
+      },
+      route: IDEMPOTENCY_ROUTES.BOOKING_AFTERCARE_SEND,
+      key: requestMeta.idempotencyKey,
+      requestBody: buildIdempotencyRequestBody({
+        bookingId,
+        professionalId,
+        actorUserId,
+        parsedBody: parsedBody.value,
+      }),
+    })
+
+    if (idempotency.kind === 'missing_key') {
+      return idempotencyMissingKeyFail()
+    }
+
+    if (idempotency.kind === 'in_progress') {
+      return idempotencyInProgressFail()
+    }
+
+    if (idempotency.kind === 'conflict') {
+      return idempotencyConflictFail()
+    }
+
+    if (idempotency.kind === 'replay') {
+      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    }
+
+    idempotencyRecordId = idempotency.idempotencyRecordId
+
     const result = await upsertBookingAftercare({
       bookingId,
-      professionalId: auth.professionalId,
+      professionalId,
       notes: parsedBody.value.notes,
       rebookMode: parsedBody.value.normalizedRebook.rebookMode,
       rebookedFor: parsedBody.value.normalizedRebook.rebookedFor,
@@ -889,48 +1119,32 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const aftercareAccessDelivery = await maybeQueueAftercareAccessDelivery({
       bookingId,
-      professionalId: auth.professionalId,
+      professionalId,
       aftercareId: result.aftercare.id,
       aftercareVersion: result.aftercare.version,
       shouldAttempt:
-        parsedBody.value.sendToClient && Boolean(result.aftercare.sentToClientAt),
+        parsedBody.value.sendToClient &&
+        Boolean(result.aftercare.sentToClientAt),
     })
 
-    return jsonOk(
-      {
-        aftercare: {
-          id: result.aftercare.id,
-          rebookMode: result.aftercare.rebookMode,
-          rebookedFor: toIsoOrNull(result.aftercare.rebookedFor),
-          rebookWindowStart: toIsoOrNull(result.aftercare.rebookWindowStart),
-          rebookWindowEnd: toIsoOrNull(result.aftercare.rebookWindowEnd),
-          draftSavedAt: toIsoOrNull(result.aftercare.draftSavedAt),
-          sentToClientAt: toIsoOrNull(result.aftercare.sentToClientAt),
-          lastEditedAt: toIsoOrNull(result.aftercare.lastEditedAt),
-          version: result.aftercare.version,
-          isFinalized: Boolean(result.aftercare.sentToClientAt),
-          publicAccess: result.aftercare.publicAccess,
-        },
-        remindersTouched: result.remindersTouched,
-        clientNotified: result.clientNotified,
-        aftercareAccessDelivery,
-        timeZoneUsed: result.timeZoneUsed,
-        clientTimeZoneReceived: parsedBody.value.clientTimeZoneReceived,
-        bookingFinished: result.bookingFinished,
-        completionBlockers: result.completionBlockers,
-        booking: result.booking
-          ? {
-              status: result.booking.status,
-              sessionStep: result.booking.sessionStep,
-              finishedAt: toIsoOrNull(result.booking.finishedAt),
-            }
-          : null,
-        redirectTo: result.bookingFinished ? '/pro/calendar' : null,
-        meta: result.meta,
-      },
-      200,
-    )
+    const responseBody = buildAftercareResponseBody({
+      result,
+      parsedBody: parsedBody.value,
+      aftercareAccessDelivery,
+    })
+
+    await completeIdempotency({
+      idempotencyRecordId,
+      responseStatus: 200,
+      responseBody,
+    })
+
+    return jsonOk(responseBody, 200)
   } catch (error: unknown) {
+    if (idempotencyRecordId) {
+      await failStartedIdempotency(idempotencyRecordId)
+    }
+
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
@@ -939,7 +1153,10 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     console.error('POST /api/pro/bookings/[id]/aftercare error', error)
-    captureBookingException({ error, route: 'POST /api/pro/bookings/[id]/aftercare' })
+    captureBookingException({
+      error,
+      route: 'POST /api/pro/bookings/[id]/aftercare',
+    })
     return jsonFail(500, 'Internal server error.')
   }
 }
