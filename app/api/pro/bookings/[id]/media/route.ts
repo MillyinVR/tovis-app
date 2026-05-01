@@ -1,7 +1,7 @@
 // app/api/pro/bookings/[id]/media/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { MediaPhase, MediaType } from '@prisma/client'
+import { MediaPhase, MediaType, Prisma, Role } from '@prisma/client'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
@@ -11,6 +11,13 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { uploadProBookingMedia } from '@/lib/booking/writeBoundary'
+import {
+  beginIdempotency,
+  completeIdempotency,
+  failIdempotency,
+  IDEMPOTENCY_ROUTES,
+} from '@/lib/idempotency'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,6 +30,17 @@ const BUCKET_MAX = 128
 const SESSION_BUCKET = BUCKETS.mediaPrivate
 const SIGNED_URL_TTL_SECONDS = 60 * 10
 
+type RequestMeta = {
+  requestId: string | null
+  idempotencyKey: string | null
+}
+
+type NestedInputJsonValue = Prisma.InputJsonValue | null
+
+type JsonObjectPayload = {
+  [key: string]: NestedInputJsonValue
+}
+
 function bookingJsonFail(
   code: BookingErrorCode,
   overrides?: {
@@ -34,7 +52,47 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
-function upper(v: unknown) {
+function idempotencyMissingKeyFail(): Response {
+  return jsonFail(400, 'Missing idempotency key.', {
+    code: 'IDEMPOTENCY_KEY_REQUIRED',
+  })
+}
+
+function idempotencyInProgressFail(): Response {
+  return jsonFail(
+    409,
+    'A matching media upload request is already in progress.',
+    {
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    },
+  )
+}
+
+function idempotencyConflictFail(): Response {
+  return jsonFail(
+    409,
+    'This idempotency key was already used with a different request body.',
+    {
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    },
+  )
+}
+
+function readRequestMeta(request: Request): RequestMeta {
+  const requestId =
+    pickString(request.headers.get('x-request-id')) ??
+    pickString(request.headers.get('request-id')) ??
+    null
+
+  const idempotencyKey =
+    pickString(request.headers.get('idempotency-key')) ??
+    pickString(request.headers.get('x-idempotency-key')) ??
+    null
+
+  return { requestId, idempotencyKey }
+}
+
+function upper(v: unknown): string {
   return typeof v === 'string' ? v.trim().toUpperCase() : ''
 }
 
@@ -77,15 +135,78 @@ function safeCaption(raw: unknown): string | null {
   return s.slice(0, CAPTION_MAX)
 }
 
-function mustStartWithBookingPrefix(path: string, bookingId: string) {
+function mustStartWithBookingPrefix(path: string, bookingId: string): boolean {
   return path.startsWith(`bookings/${bookingId}/`)
+}
+
+function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    return value.toString()
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeNestedJsonValue(item))
+  }
+
+  if (typeof value === 'object') {
+    const input = value as Record<string, unknown>
+    const out: JsonObjectPayload = {}
+
+    for (const key of Object.keys(input).sort()) {
+      out[key] = normalizeNestedJsonValue(input[key])
+    }
+
+    return out
+  }
+
+  return String(value)
+}
+
+function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
+  if (value === null || value === undefined) {
+    return {}
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      value: normalizeNestedJsonValue(value),
+    }
+  }
+
+  const input = value as Record<string, unknown>
+  const out: JsonObjectPayload = {}
+
+  for (const key of Object.keys(input).sort()) {
+    out[key] = normalizeNestedJsonValue(input[key])
+  }
+
+  return out
 }
 
 /**
  * Verify object exists before writing DB row.
  * For private bucket: createSignedUrl then HEAD/GET it.
  */
-async function objectExistsViaSignedUrl(bucket: string, path: string): Promise<boolean> {
+async function objectExistsViaSignedUrl(
+  bucket: string,
+  path: string,
+): Promise<boolean> {
   try {
     const admin = getSupabaseAdmin()
     const { data, error } = await admin.storage
@@ -108,16 +229,32 @@ async function objectExistsViaSignedUrl(bucket: string, path: string): Promise<b
   }
 }
 
+async function failStartedIdempotency(
+  idempotencyRecordId: string | null,
+): Promise<void> {
+  if (!idempotencyRecordId) return
+
+  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+    console.error(
+      'POST /api/pro/bookings/[id]/media idempotency failure update error:',
+      failError,
+    )
+  })
+}
+
 export async function GET(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const proId = auth.professionalId
+    const professionalId = auth.professionalId
 
     const params = await Promise.resolve(ctx.params)
-    const bookingId = pickString((params as any)?.id)
-    if (!bookingId) return jsonFail(400, 'Missing booking id.')
+    const bookingId = pickString(params.id)
+
+    if (!bookingId) {
+      return bookingJsonFail('BOOKING_ID_REQUIRED')
+    }
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -125,11 +262,12 @@ export async function GET(req: Request, ctx: Ctx) {
     })
 
     if (!booking) return jsonFail(404, 'Booking not found.')
-    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden.')
+    if (booking.professionalId !== professionalId) return jsonFail(403, 'Forbidden.')
 
     const urlObj = new URL(req.url)
     const phaseParam = urlObj.searchParams.get('phase')
     const phase = phaseParam == null ? null : parsePhase(phaseParam)
+
     if (phaseParam != null && !phase) {
       return jsonFail(400, 'Invalid phase query param.')
     }
@@ -181,23 +319,40 @@ export async function GET(req: Request, ctx: Ctx) {
     )
 
     return jsonOk({ items }, 200)
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('GET /api/pro/bookings/[id]/media error', error)
+    captureBookingException({
+      error,
+      route: 'GET /api/pro/bookings/[id]/media',
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }
 
 export async function POST(req: Request, ctx: Ctx) {
+  let idempotencyRecordId: string | null = null
+
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const proId = auth.professionalId
-    const user = auth.user
+    const professionalId = auth.professionalId
+    const actorUserId = auth.user.id
+
+    if (!actorUserId || !actorUserId.trim()) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'Authenticated actor user id is required.',
+        userMessage: 'You are not allowed to upload media for this booking.',
+      })
+    }
 
     const params = await Promise.resolve(ctx.params)
-    const bookingId = pickString((params as any)?.id)
-    if (!bookingId) return jsonFail(400, 'Missing booking id.')
+    const bookingId = pickString(params.id)
+
+    if (!bookingId) {
+      return bookingJsonFail('BOOKING_ID_REQUIRED')
+    }
 
     const body = (await req.json().catch(() => ({}))) as {
       storageBucket?: unknown
@@ -211,6 +366,7 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const storageBucket = safeBucket(body.storageBucket)
     const storagePath = safeStoragePath(body.storagePath)
+
     if (!storageBucket || !storagePath) {
       return jsonFail(400, 'Missing storageBucket/storagePath.')
     }
@@ -253,22 +409,69 @@ export async function POST(req: Request, ctx: Ctx) {
       return jsonFail(400, `Session thumb must upload to ${SESSION_BUCKET}.`)
     }
 
+    const { idempotencyKey } = readRequestMeta(req)
+
+    const idempotency = await beginIdempotency<JsonObjectPayload>({
+      actor: {
+        actorUserId,
+        actorRole: Role.PRO,
+      },
+      route: IDEMPOTENCY_ROUTES.BOOKING_MEDIA_CREATE,
+      key: idempotencyKey,
+      requestBody: {
+        professionalId,
+        actorUserId,
+        bookingId,
+        storageBucket,
+        storagePath,
+        thumbBucket,
+        thumbPath,
+        caption,
+        phase,
+        mediaType,
+      },
+    })
+
+    if (idempotency.kind === 'missing_key') {
+      return idempotencyMissingKeyFail()
+    }
+
+    if (idempotency.kind === 'in_progress') {
+      return idempotencyInProgressFail()
+    }
+
+    if (idempotency.kind === 'conflict') {
+      return idempotencyConflictFail()
+    }
+
+    if (idempotency.kind === 'replay') {
+      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    }
+
+    idempotencyRecordId = idempotency.idempotencyRecordId
+
     const mainExists = await objectExistsViaSignedUrl(storageBucket, storagePath)
     if (!mainExists) {
+      await failStartedIdempotency(idempotencyRecordId)
+      idempotencyRecordId = null
+
       return jsonFail(400, 'Uploaded file not found in storage.')
     }
 
     if (thumbBucket && thumbPath) {
       const thumbExists = await objectExistsViaSignedUrl(thumbBucket, thumbPath)
       if (!thumbExists) {
+        await failStartedIdempotency(idempotencyRecordId)
+        idempotencyRecordId = null
+
         return jsonFail(400, 'Uploaded thumb not found in storage.')
       }
     }
 
     const result = await uploadProBookingMedia({
       bookingId,
-      professionalId: proId,
-      uploadedByUserId: user.id,
+      professionalId,
+      uploadedByUserId: actorUserId,
       storageBucket,
       storagePath,
       thumbBucket,
@@ -287,20 +490,29 @@ export async function POST(req: Request, ctx: Ctx) {
       thumbUrl: result.created.thumbUrl,
     })
 
-    return jsonOk(
-      {
-        item: {
-          ...result.created,
-          renderUrl,
-          renderThumbUrl,
-          url: renderUrl,
-          thumbUrl: renderThumbUrl,
-        },
-        advancedTo: result.advancedTo,
+    const responseBody = normalizeJsonObjectPayload({
+      item: {
+        ...result.created,
+        renderUrl,
+        renderThumbUrl,
+        url: renderUrl,
+        thumbUrl: renderThumbUrl,
       },
-      200,
-    )
+      advancedTo: result.advancedTo,
+    })
+
+    await completeIdempotency({
+      idempotencyRecordId,
+      responseStatus: 200,
+      responseBody,
+    })
+
+    return jsonOk(responseBody, 200)
   } catch (error: unknown) {
+    if (idempotencyRecordId) {
+      await failStartedIdempotency(idempotencyRecordId)
+    }
+
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
@@ -309,6 +521,11 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     console.error('POST /api/pro/bookings/[id]/media error', error)
+    captureBookingException({
+      error,
+      route: 'POST /api/pro/bookings/[id]/media',
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }
