@@ -141,7 +141,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
     // AFTER_PHOTOS → DONE: handled via aftercare finalize
     if (currentStep === SessionStep.AFTER_PHOTOS && nextStep === SessionStep.DONE) {
-      return jsonFail(409, 'Use POST /api/bookings/[id]/aftercare to complete')
+      return jsonFail(409, 'Use POST /api/bookings/[id]/aftercare to complete.')
     }
 
     // CONSULTATION_PENDING_CLIENT → BEFORE_PHOTOS: client OR pro allowed

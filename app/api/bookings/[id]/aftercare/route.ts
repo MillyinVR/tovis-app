@@ -88,7 +88,8 @@ export async function POST(_req: Request, ctx: Ctx) {
     if (!summary) return jsonFail(409, 'Aftercare summary not found.')
     if (summary.sentToClientAt) return jsonFail(409, 'Aftercare already sent.')
 
-    const proId = isAdmin ? booking.professionalId : professionalId!
+    const proId = isAdmin ? booking.professionalId : professionalId
+    if (!proId) return jsonFail(403, 'Could not resolve professional for this booking.')
 
     // Enqueue the aftercare send (idempotent — sets sentToClientAt)
     await enqueueAftercareSend({

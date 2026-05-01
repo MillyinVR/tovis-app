@@ -42,6 +42,10 @@ export async function enqueueAftercareSend(args: {
     select: { email: true, phone: true, userId: true },
   })
 
+  if (!client) {
+    throw new Error(`Client profile not found for clientId=${args.clientId}`)
+  }
+
   await prisma.notificationDispatch.create({
     data: {
       sourceKey,
