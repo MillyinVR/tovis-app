@@ -1,10 +1,11 @@
-// app/api/client/bookings/[id]/checkout/route.ts 
+// app/api/client/bookings/[id]/checkout/route.ts
 
 import type { NextRequest } from 'next/server'
 import {
   BookingCheckoutStatus,
   PaymentMethod,
   Prisma,
+  Role,
 } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
@@ -15,6 +16,13 @@ import {
 } from '@/lib/booking/errors'
 import { updateClientBookingCheckout } from '@/lib/booking/writeBoundary'
 import { prisma } from '@/lib/prisma'
+import {
+  beginIdempotency,
+  completeIdempotency,
+  failIdempotency,
+  IDEMPOTENCY_ROUTES,
+} from '@/lib/idempotency'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +37,16 @@ type ParsedBodyResult =
       ok: false
       error: string
     }
+
+type RequestMeta = {
+  idempotencyKey: string | null
+}
+
+type NestedInputJsonValue = Prisma.InputJsonValue | null
+
+type JsonObjectPayload = {
+  [key: string]: NestedInputJsonValue
+}
 
 function trimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -89,6 +107,7 @@ function parseTipAmount(value: unknown):
     if (!Number.isFinite(value) || value < 0) {
       return { ok: false, error: 'tipAmount must be a non-negative number.' }
     }
+
     return { ok: true, value: value.toFixed(2) }
   }
 
@@ -174,19 +193,184 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
+function idempotencyMissingKeyFail(): Response {
+  return jsonFail(400, 'Missing idempotency key.', {
+    code: 'IDEMPOTENCY_KEY_REQUIRED',
+  })
+}
+
+function idempotencyInProgressFail(): Response {
+  return jsonFail(
+    409,
+    'A matching checkout request is already in progress.',
+    {
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    },
+  )
+}
+
+function idempotencyConflictFail(): Response {
+  return jsonFail(
+    409,
+    'This idempotency key was already used with a different request body.',
+    {
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    },
+  )
+}
+
+function readRequestMeta(req: NextRequest): RequestMeta {
+  const idempotencyKey =
+    trimmedString(req.headers.get('idempotency-key')) ??
+    trimmedString(req.headers.get('x-idempotency-key')) ??
+    null
+
+  return { idempotencyKey }
+}
+
+function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    return value.toString()
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeNestedJsonValue(item))
+  }
+
+  if (typeof value === 'object') {
+    const input = value as Record<string, unknown>
+    const out: JsonObjectPayload = {}
+
+    for (const key of Object.keys(input).sort()) {
+      out[key] = normalizeNestedJsonValue(input[key])
+    }
+
+    return out
+  }
+
+  return String(value)
+}
+
+function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
+  if (value === null || value === undefined) {
+    return {}
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      value: normalizeNestedJsonValue(value),
+    }
+  }
+
+  const input = value as Record<string, unknown>
+  const out: JsonObjectPayload = {}
+
+  for (const key of Object.keys(input).sort()) {
+    out[key] = normalizeNestedJsonValue(input[key])
+  }
+
+  return out
+}
+
+function buildIdempotencyRequestBody(args: {
+  bookingId: string
+  clientId: string
+  actorUserId: string
+  parsed: Extract<ParsedBodyResult, { ok: true }>
+}): JsonObjectPayload {
+  return normalizeJsonObjectPayload({
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    actorUserId: args.actorUserId,
+    tipAmountProvided: args.parsed.tipAmount !== undefined,
+    tipAmount: args.parsed.tipAmount ?? null,
+    selectedPaymentMethodProvided:
+      args.parsed.selectedPaymentMethod !== undefined,
+    selectedPaymentMethod: args.parsed.selectedPaymentMethod ?? null,
+    confirmPayment: args.parsed.confirmPayment,
+  })
+}
+
+function buildCheckoutResponseBody(args: {
+  result: Awaited<ReturnType<typeof updateClientBookingCheckout>>
+}): JsonObjectPayload {
+  const booking = args.result.booking
+
+  return normalizeJsonObjectPayload({
+    booking: {
+      id: booking.id,
+      checkoutStatus: booking.checkoutStatus,
+      selectedPaymentMethod: booking.selectedPaymentMethod,
+      serviceSubtotalSnapshot:
+        booking.serviceSubtotalSnapshot?.toString() ?? null,
+      productSubtotalSnapshot:
+        booking.productSubtotalSnapshot?.toString() ?? null,
+      subtotalSnapshot: booking.subtotalSnapshot?.toString() ?? null,
+      tipAmount: booking.tipAmount?.toString() ?? null,
+      taxAmount: booking.taxAmount?.toString() ?? null,
+      discountAmount: booking.discountAmount?.toString() ?? null,
+      totalAmount: booking.totalAmount?.toString() ?? null,
+      paymentAuthorizedAt:
+        booking.paymentAuthorizedAt?.toISOString() ?? null,
+      paymentCollectedAt: booking.paymentCollectedAt?.toISOString() ?? null,
+    },
+    meta: args.result.meta,
+  })
+}
+
+async function failStartedIdempotency(
+  idempotencyRecordId: string | null,
+): Promise<void> {
+  if (!idempotencyRecordId) return
+
+  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+    console.error(
+      'POST /api/client/bookings/[id]/checkout idempotency failure update error:',
+      failError,
+    )
+  })
+}
+
 export async function POST(
   req: NextRequest,
   props: { params: Promise<{ id: string }> },
 ) {
+  let idempotencyRecordId: string | null = null
+
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
+
+    const actorUserId = auth.user.id
+
+    if (!actorUserId || !actorUserId.trim()) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'Authenticated actor user id is required.',
+        userMessage: 'You are not allowed to update this checkout.',
+      })
+    }
 
     const { id } = await props.params
     const bookingId = trimmedString(id)
 
     if (!bookingId) {
-      return jsonFail(400, 'Missing booking id.')
+      return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
@@ -196,6 +380,41 @@ export async function POST(
     if (!parsed.ok) {
       return jsonFail(400, parsed.error)
     }
+
+    const requestMeta = readRequestMeta(req)
+
+    const idempotency = await beginIdempotency<JsonObjectPayload>({
+      actor: {
+        actorUserId,
+        actorRole: Role.CLIENT,
+      },
+      route: IDEMPOTENCY_ROUTES.CLIENT_CHECKOUT_CONFIRM,
+      key: requestMeta.idempotencyKey,
+      requestBody: buildIdempotencyRequestBody({
+        bookingId,
+        clientId: auth.clientId,
+        actorUserId,
+        parsed,
+      }),
+    })
+
+    if (idempotency.kind === 'missing_key') {
+      return idempotencyMissingKeyFail()
+    }
+
+    if (idempotency.kind === 'in_progress') {
+      return idempotencyInProgressFail()
+    }
+
+    if (idempotency.kind === 'conflict') {
+      return idempotencyConflictFail()
+    }
+
+    if (idempotency.kind === 'replay') {
+      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    }
+
+    idempotencyRecordId = idempotency.idempotencyRecordId
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
@@ -207,6 +426,8 @@ export async function POST(
     })
 
     if (!booking) {
+      await failStartedIdempotency(idempotencyRecordId)
+      idempotencyRecordId = null
       return bookingJsonFail('BOOKING_NOT_FOUND')
     }
 
@@ -229,6 +450,9 @@ export async function POST(
       parsed.selectedPaymentMethod &&
       !acceptedMethods.has(parsed.selectedPaymentMethod)
     ) {
+      await failStartedIdempotency(idempotencyRecordId)
+      idempotencyRecordId = null
+
       return jsonFail(
         400,
         'That payment method is not enabled by this provider.',
@@ -240,6 +464,9 @@ export async function POST(
 
     if (parsed.confirmPayment) {
       if (!effectivePaymentMethod) {
+        await failStartedIdempotency(idempotencyRecordId)
+        idempotencyRecordId = null
+
         return jsonFail(
           400,
           'Choose a payment method before confirming payment.',
@@ -247,6 +474,9 @@ export async function POST(
       }
 
       if (!acceptedMethods.has(effectivePaymentMethod)) {
+        await failStartedIdempotency(idempotencyRecordId)
+        idempotencyRecordId = null
+
         return jsonFail(
           400,
           'That payment method is not enabled by this provider.',
@@ -260,6 +490,9 @@ export async function POST(
       parsed.tipAmount !== null &&
       Number(parsed.tipAmount) > 0
     ) {
+      await failStartedIdempotency(idempotencyRecordId)
+      idempotencyRecordId = null
+
       return jsonFail(400, 'Tips are not enabled for this provider.')
     }
 
@@ -275,31 +508,20 @@ export async function POST(
       markPaymentCollected: parsed.confirmPayment,
     })
 
-    return jsonOk(
-      {
-        booking: {
-          id: result.booking.id,
-          checkoutStatus: result.booking.checkoutStatus,
-          selectedPaymentMethod: result.booking.selectedPaymentMethod,
-          serviceSubtotalSnapshot:
-            result.booking.serviceSubtotalSnapshot?.toString() ?? null,
-          productSubtotalSnapshot:
-            result.booking.productSubtotalSnapshot?.toString() ?? null,
-          subtotalSnapshot: result.booking.subtotalSnapshot?.toString() ?? null,
-          tipAmount: result.booking.tipAmount?.toString() ?? null,
-          taxAmount: result.booking.taxAmount?.toString() ?? null,
-          discountAmount: result.booking.discountAmount?.toString() ?? null,
-          totalAmount: result.booking.totalAmount?.toString() ?? null,
-          paymentAuthorizedAt:
-            result.booking.paymentAuthorizedAt?.toISOString() ?? null,
-          paymentCollectedAt:
-            result.booking.paymentCollectedAt?.toISOString() ?? null,
-        },
-        meta: result.meta,
-      },
-      200,
-    )
+    const responseBody = buildCheckoutResponseBody({ result })
+
+    await completeIdempotency({
+      idempotencyRecordId,
+      responseStatus: 200,
+      responseBody,
+    })
+
+    return jsonOk(responseBody, 200)
   } catch (error: unknown) {
+    if (idempotencyRecordId) {
+      await failStartedIdempotency(idempotencyRecordId)
+    }
+
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
@@ -308,6 +530,11 @@ export async function POST(
     }
 
     console.error('POST /api/client/bookings/[id]/checkout error', error)
+    captureBookingException({
+      error,
+      route: 'POST /api/client/bookings/[id]/checkout',
+    })
+
     return jsonFail(500, 'Internal server error.')
   }
 }
