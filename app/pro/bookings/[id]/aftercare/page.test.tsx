@@ -419,12 +419,14 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
 
     const markup = renderMarkup(page)
 
-    expect(markup).toContain('Aftercare: Haircut')
-    expect(markup).toContain('Client: Tori Morales')
-    expect(markup).toContain('Aftercare status:')
-    expect(markup).toContain('📝 draft saved')
-    expect(markup).toContain('Client access:')
-    expect(markup).toContain('📝 draft only')
+    expect(markup).toContain('Aftercare')
+    expect(markup).toContain('Tori Morales · Haircut')
+    expect(markup).toContain('Aftercare status')
+    expect(markup).toContain('Draft saved')
+    expect(markup).toContain('Client access')
+    expect(markup).toContain('Draft only')
+    expect(markup).toContain('DRAFT SAVED')
+    expect(markup).toContain('CLIENT-FACING')
     expect(markup).toContain(
       'The aftercare draft exists, but client access is not live until you send/finalize it.',
     )
@@ -478,13 +480,15 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
       600,
     )
 
-    expect(markup).toContain('✅ finalized + sent')
-    expect(markup).toContain('✅ secure client access ready')
+    expect(markup).toContain('Finalized + sent')
+    expect(markup).toContain('Secure client access ready')
     expect(markup).toContain(
       'Client-facing aftercare access is available through the secure aftercare link flow.',
     )
-    expect(markup).toContain('Sent to client:')
-    expect(markup).toContain('Version:')
+    expect(markup).toContain('FINALIZED')
+    expect(markup).toContain('CLIENT-FACING')
+    expect(markup).toContain('SENT')
+    expect(markup).toContain('VERSION')
     expect(markup).toContain('data-existing-rebook-mode="BOOKED_NEXT_APPOINTMENT"')
     expect(markup).toContain(
       'data-existing-rebooked-for="2026-05-01T18:00:00.000Z"',
@@ -503,9 +507,11 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
 
     const markup = renderMarkup(page)
 
-    expect(markup).toContain('❌ not started')
-    expect(markup).toContain('Client access:')
-    expect(markup).toContain('❌ not ready')
+    expect(markup).toContain('Not started')
+    expect(markup).toContain('Client access')
+    expect(markup).toContain('Not ready')
+    expect(markup).toContain('NOT STARTED')
+    expect(markup).toContain('CLIENT-FACING')
     expect(markup).toContain(
       'No client-facing aftercare access exists yet.',
     )

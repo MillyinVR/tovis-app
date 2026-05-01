@@ -1938,6 +1938,38 @@ function isCheckoutCloseoutComplete(
   )
 }
 
+function isCloseoutPaymentAndAftercareComplete(args: {
+  aftercareSentAt: Date | null | undefined
+  checkoutStatus: BookingCheckoutStatus | null | undefined
+  paymentCollectedAt: Date | null | undefined
+}): boolean {
+  return (
+    Boolean(args.aftercareSentAt) &&
+    Boolean(args.paymentCollectedAt) &&
+    isCheckoutCloseoutComplete(args.checkoutStatus)
+  )
+}
+
+function canCompleteBookingCloseout(args: {
+  bookingStatus: BookingStatus | null | undefined
+  aftercareSentAt: Date | null | undefined
+  checkoutStatus: BookingCheckoutStatus | null | undefined
+  paymentCollectedAt: Date | null | undefined
+}): boolean {
+  if (
+    args.bookingStatus === BookingStatus.CANCELLED ||
+    args.bookingStatus === BookingStatus.COMPLETED
+  ) {
+    return false
+  }
+
+  return isCloseoutPaymentAndAftercareComplete({
+    aftercareSentAt: args.aftercareSentAt,
+    checkoutStatus: args.checkoutStatus,
+    paymentCollectedAt: args.paymentCollectedAt,
+  })
+}
+
 function isReviewEligibleCloseout(args: {
   bookingStatus: BookingStatus | null | undefined
   finishedAt: Date | null | undefined
@@ -1945,14 +1977,14 @@ function isReviewEligibleCloseout(args: {
   checkoutStatus: BookingCheckoutStatus | null | undefined
   paymentCollectedAt: Date | null | undefined
 }): boolean {
-  const isCompleted =
-    args.bookingStatus === BookingStatus.COMPLETED || Boolean(args.finishedAt)
-
   return (
-    isCompleted &&
-    Boolean(args.aftercareSentAt) &&
-    Boolean(args.paymentCollectedAt) &&
-    isCheckoutCloseoutComplete(args.checkoutStatus)
+    args.bookingStatus === BookingStatus.COMPLETED &&
+    Boolean(args.finishedAt) &&
+    isCloseoutPaymentAndAftercareComplete({
+      aftercareSentAt: args.aftercareSentAt,
+      checkoutStatus: args.checkoutStatus,
+      paymentCollectedAt: args.paymentCollectedAt,
+    })
   )
 }
 
@@ -8659,13 +8691,12 @@ let bookingNow: {
 } | null = null
 
 if (args.sendToClient) {
-  const shouldCompleteBooking = isReviewEligibleCloseout({
-    bookingStatus: booking.status,
-    finishedAt: booking.finishedAt,
-    aftercareSentAt: aftercare.sentToClientAt,
-    checkoutStatus: booking.checkoutStatus,
-    paymentCollectedAt: booking.paymentCollectedAt,
-  })
+const shouldCompleteBooking = canCompleteBookingCloseout({
+  bookingStatus: booking.status,
+  aftercareSentAt: aftercare.sentToClientAt,
+  checkoutStatus: booking.checkoutStatus,
+  paymentCollectedAt: booking.paymentCollectedAt,
+})
 
   if (shouldCompleteBooking) {
     recordStepTransition({
@@ -8909,14 +8940,13 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
   }
 }
 
-  const shouldCompleteBooking = isReviewEligibleCloseout({
-  bookingStatus: booking.status,
-  finishedAt: booking.finishedAt,
-  aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
-  checkoutStatus: nextCheckoutStatus,
-  paymentCollectedAt:
-    shouldSetCollectedAt ? booking.paymentCollectedAt ?? args.now : booking.paymentCollectedAt,
-})
+  const shouldCompleteBooking = canCompleteBookingCloseout({
+    bookingStatus: booking.status,
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: nextCheckoutStatus,
+    paymentCollectedAt:
+      shouldSetCollectedAt ? booking.paymentCollectedAt ?? args.now : booking.paymentCollectedAt,
+  })
 
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
@@ -9171,9 +9201,8 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
     } satisfies Prisma.BookingSelect,
   })
 
-  const shouldCompleteBooking = isReviewEligibleCloseout({
+  const shouldCompleteBooking = canCompleteBookingCloseout({
     bookingStatus: booking.status,
-    finishedAt: booking.finishedAt,
     aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
     checkoutStatus: updated.checkoutStatus,
     paymentCollectedAt: updated.paymentCollectedAt,

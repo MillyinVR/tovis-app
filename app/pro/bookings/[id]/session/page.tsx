@@ -154,8 +154,12 @@ function formatElapsed(startedAt: Date | null | undefined): string {
   ].join(':')
 }
 
-function sumDurations(items: BookingServiceItemForInitial[]): number {
-  return items.reduce((total, item) => {
+function sumDurations(
+  items: BookingServiceItemForInitial[] | null | undefined,
+) {
+  const rows = Array.isArray(items) ? items : []
+
+  return rows.reduce((total, item) => {
     const duration = Number(item.durationMinutesSnapshot)
     return Number.isFinite(duration) && duration > 0
       ? total + duration
@@ -164,9 +168,11 @@ function sumDurations(items: BookingServiceItemForInitial[]): number {
 }
 
 function buildInitialConsultationItems(
-  items: BookingServiceItemForInitial[],
+  items: BookingServiceItemForInitial[] | null | undefined,
 ): ConsultationInitialItem[] {
-  return items.map((item, index) => ({
+  const rows = Array.isArray(items) ? items : []
+
+  return rows.map((item, index) => ({
     key: item.id,
     bookingServiceItemId: item.id,
     serviceId: item.serviceId,

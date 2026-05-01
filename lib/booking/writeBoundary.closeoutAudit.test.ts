@@ -551,20 +551,24 @@ describe('lib/booking/writeBoundary closeout audit behavior', () => {
       .mockResolvedValueOnce(booking)
       .mockResolvedValueOnce(booking)
 
-    mocks.txBookingUpdate.mockResolvedValueOnce({
-      id: 'booking_1',
-      checkoutStatus: BookingCheckoutStatus.PAID,
-      selectedPaymentMethod: PaymentMethod.ZELLE,
-      serviceSubtotalSnapshot: new Prisma.Decimal(100),
-      productSubtotalSnapshot: new Prisma.Decimal(20),
-      subtotalSnapshot: new Prisma.Decimal(100),
-      tipAmount: new Prisma.Decimal(10),
-      taxAmount: new Prisma.Decimal(0),
-      discountAmount: new Prisma.Decimal(0),
-      totalAmount: new Prisma.Decimal(130),
-      paymentAuthorizedAt: TEST_NOW,
-      paymentCollectedAt: TEST_NOW,
-    })
+    mocks.txBookingUpdate
+      .mockResolvedValueOnce({
+        id: 'booking_1',
+        checkoutStatus: BookingCheckoutStatus.PAID,
+        selectedPaymentMethod: PaymentMethod.ZELLE,
+        serviceSubtotalSnapshot: new Prisma.Decimal(100),
+        productSubtotalSnapshot: new Prisma.Decimal(20),
+        subtotalSnapshot: new Prisma.Decimal(100),
+        tipAmount: new Prisma.Decimal(10),
+        taxAmount: new Prisma.Decimal(0),
+        discountAmount: new Prisma.Decimal(0),
+        totalAmount: new Prisma.Decimal(130),
+        paymentAuthorizedAt: TEST_NOW,
+        paymentCollectedAt: TEST_NOW,
+      })
+      .mockResolvedValueOnce({
+        id: 'booking_1',
+      })
 
     const result = await updateClientBookingCheckout({
       bookingId: 'booking_1',
@@ -578,7 +582,19 @@ describe('lib/booking/writeBoundary closeout audit behavior', () => {
       idempotencyKey: 'idem_checkout_1',
     })
 
-    expect(mocks.txBookingUpdate).toHaveBeenCalledTimes(1)
+    expect(mocks.txBookingUpdate).toHaveBeenCalledTimes(2)
+
+    const completionUpdateArgs = mocks.txBookingUpdate.mock.calls[1]?.[0]
+    expect(completionUpdateArgs).toEqual({
+      where: { id: 'booking_1' },
+      data: {
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: TEST_NOW,
+      },
+      select: { id: true },
+    })
+
     expect(mocks.createBookingCloseoutAuditLog).toHaveBeenCalledTimes(4)
 
     const actions = mocks.createBookingCloseoutAuditLog.mock.calls.map(

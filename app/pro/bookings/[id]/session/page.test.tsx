@@ -325,14 +325,21 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
       afterCount: 0,
       aftercare: null,
     })
-
-    expect(hasText(page, 'Waiting on client approval')).toBe(true)
-    expect(hasText(page, 'Client hasn’t approved yet. Locked so you can’t accidentally proceed.')).toBe(true)
-    expect(hasText(page, 'Record in-person approval')).toBe(true)
-    expect(hasText(page, 'Record in-person decline')).toBe(true)
-    expect(hasText(page, 'Remote approval stays the default path.')).toBe(true)
-    expect(hasText(page, 'in-person on pro device')).toBe(true)
-    expect(hasText(page, 'While you wait…')).toBe(true)
+      expect(hasText(page, 'AWAITING APPROVAL')).toBe(true)
+      expect(hasText(page, 'Waiting on client')).toBe(true)
+      expect(
+        hasText(page, 'Secure approval is required before the session can move forward.'),
+      ).toBe(true)
+      expect(hasText(page, 'In-person fallback')).toBe(true)
+      expect(
+        hasText(
+          page,
+          'Only use this if the client is physically present and cannot access their secure link.',
+        ),
+      ).toBe(true)
+      expect(hasText(page, 'Record approval')).toBe(true)
+      expect(hasText(page, 'Record decline')).toBe(true)
+      expect(hasText(page, '← Back to consultation')).toBe(true)
   })
 
   it('maps approved waiting state forward to before photos', async () => {
@@ -354,10 +361,10 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
     })
 
     expect(hasText(page, 'Before photos')).toBe(true)
-    expect(hasText(page, 'Client approved. Capture before photos, then start the service.')).toBe(true)
-    expect(hasText(page, 'Open before photos')).toBe(true)
+    expect(hasText(page, 'CONSULTATION APPROVED')).toBe(true)
     expect(hasText(page, 'Start service')).toBe(true)
-    expect(hasText(page, 'Waiting on client approval')).toBe(false)
+    expect(hasText(page, 'Or add more before photos first')).toBe(true)
+    expect(hasText(page, '+ Add photo via camera')).toBe(true)
   })
 
   it('shows proof details and suppresses in-person fallback when proof already exists', async () => {
