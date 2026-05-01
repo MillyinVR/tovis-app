@@ -1,5 +1,7 @@
+// app/api/pro/bookings/[id]/rebook/route.ts
 import crypto from 'node:crypto'
-import { prisma } from '@/lib/prisma'
+import { AftercareRebookMode, BookingStatus, Prisma, Role } from '@prisma/client'
+
 import {
   jsonFail,
   jsonOk,
@@ -8,19 +10,27 @@ import {
   requirePro,
 } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
+import { prisma } from '@/lib/prisma'
 import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { createRebookedBookingFromCompletedBooking } from '@/lib/booking/writeBoundary'
-import { AftercareRebookMode, BookingStatus, Prisma } from '@prisma/client'
+import {
+  beginIdempotency,
+  completeIdempotency,
+  failIdempotency,
+} from '@/lib/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency/routeMeta'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 type RebookMode = 'BOOK' | 'RECOMMEND_WINDOW' | 'CLEAR'
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
+
+type RebookResponseBody = Prisma.InputJsonObject
 
 const AFTERCARE_REBOOK_SELECT = {
   id: true,
@@ -55,6 +65,27 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
+function readRequestMeta(req: Request): {
+  requestId: string | null
+  idempotencyKey: string | null
+} {
+  const requestId =
+    pickString(req.headers.get('x-request-id')) ??
+    pickString(req.headers.get('request-id')) ??
+    null
+
+  const idempotencyKey =
+    pickString(req.headers.get('idempotency-key')) ??
+    pickString(req.headers.get('x-idempotency-key')) ??
+    null
+
+  return { requestId, idempotencyKey }
+}
+
+function replayJson(body: RebookResponseBody, status: number) {
+  return Response.json(body, { status })
+}
+
 function toAftercareResponse(aftercare: AftercareRebookRecord) {
   return {
     id: aftercare.id,
@@ -76,6 +107,38 @@ function toAftercareResponse(aftercare: AftercareRebookRecord) {
   }
 }
 
+function toRebookedAftercareResponse(aftercare: {
+  id: string
+  rebookMode: AftercareRebookMode
+  rebookedFor: Date | null
+}) {
+  return {
+    id: aftercare.id,
+    rebookMode: aftercare.rebookMode,
+    rebookedFor: aftercare.rebookedFor
+      ? aftercare.rebookedFor.toISOString()
+      : null,
+  }
+}
+
+function buildIdempotencyRequestBody(args: {
+  bookingId: string
+  professionalId: string
+  mode: RebookMode
+  scheduledFor: Date | null
+  windowStart: Date | null
+  windowEnd: Date | null
+}): Prisma.InputJsonObject {
+  return {
+    bookingId: args.bookingId,
+    professionalId: args.professionalId,
+    mode: args.mode,
+    scheduledFor: args.scheduledFor ? args.scheduledFor.toISOString() : null,
+    windowStart: args.windowStart ? args.windowStart.toISOString() : null,
+    windowEnd: args.windowEnd ? args.windowEnd.toISOString() : null,
+  }
+}
+
 async function upsertAftercareRebookState(args: {
   bookingId: string
   mode: AftercareRebookMode
@@ -87,7 +150,6 @@ async function upsertAftercareRebookState(args: {
     where: { bookingId: args.bookingId },
     create: {
       bookingId: args.bookingId,
-      // Current schema still requires a token-backed public access record on create.
       publicToken: createAftercarePublicToken(),
       rebookMode: args.mode,
       rebookWindowStart: args.windowStart ?? null,
@@ -105,6 +167,8 @@ async function upsertAftercareRebookState(args: {
 }
 
 export async function POST(req: Request, ctx: Ctx) {
+  let idempotencyRecordId: string | null = null
+
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -121,6 +185,75 @@ export async function POST(req: Request, ctx: Ctx) {
     const body = isRecord(rawBody) ? rawBody : {}
 
     const mode = isMode(body.mode) ? body.mode : 'BOOK'
+
+    const scheduledFor = mode === 'BOOK' ? pickIsoDate(body.scheduledFor) : null
+    const windowStart =
+      mode === 'RECOMMEND_WINDOW' ? pickIsoDate(body.windowStart) : null
+    const windowEnd =
+      mode === 'RECOMMEND_WINDOW' ? pickIsoDate(body.windowEnd) : null
+
+    if (mode === 'BOOK' && !scheduledFor) {
+      return jsonFail(
+        400,
+        'scheduledFor is required (ISO string) for BOOK mode.',
+      )
+    }
+
+    if (mode === 'RECOMMEND_WINDOW' && (!windowStart || !windowEnd)) {
+      return jsonFail(
+        400,
+        'windowStart and windowEnd are required ISO strings for RECOMMEND_WINDOW.',
+      )
+    }
+
+    if (
+      mode === 'RECOMMEND_WINDOW' &&
+      windowStart &&
+      windowEnd &&
+      windowEnd <= windowStart
+    ) {
+      return jsonFail(400, 'windowEnd must be after windowStart.')
+    }
+
+    const { requestId, idempotencyKey } = readRequestMeta(req)
+
+    const idempotency = await beginIdempotency<RebookResponseBody>({
+      actor: {
+        actorUserId: auth.userId,
+        actorRole: Role.PRO,
+      },
+      route: IDEMPOTENCY_ROUTES.PRO_BOOKING_REBOOK,
+      key: idempotencyKey,
+      requestBody: buildIdempotencyRequestBody({
+        bookingId,
+        professionalId,
+        mode,
+        scheduledFor,
+        windowStart,
+        windowEnd,
+      }),
+    })
+
+    if (idempotency.kind === 'missing_key') {
+      return jsonFail(400, 'Missing idempotency key.')
+    }
+
+    if (idempotency.kind === 'conflict') {
+      return jsonFail(
+        409,
+        'This idempotency key was already used with a different request.',
+      )
+    }
+
+    if (idempotency.kind === 'in_progress') {
+      return jsonFail(409, 'A matching request is already in progress.')
+    }
+
+    if (idempotency.kind === 'replay') {
+      return replayJson(idempotency.responseBody, idempotency.responseStatus)
+    }
+
+    idempotencyRecordId = idempotency.idempotencyRecordId
 
     const existing = await prisma.booking.findFirst({
       where: {
@@ -150,30 +283,26 @@ export async function POST(req: Request, ctx: Ctx) {
         windowEnd: null,
       })
 
-      return jsonOk(
-        {
-          mode,
-          aftercare: toAftercareResponse(aftercare),
-        },
-        200,
-      )
+      const data = {
+        mode,
+        aftercare: toAftercareResponse(aftercare),
+      }
+
+      const responseBody = {
+        ok: true,
+        ...data,
+      } satisfies RebookResponseBody
+
+      await completeIdempotency({
+        idempotencyRecordId,
+        responseStatus: 200,
+        responseBody,
+      })
+
+      return jsonOk(data, 200)
     }
 
     if (mode === 'RECOMMEND_WINDOW') {
-      const windowStart = pickIsoDate(body.windowStart)
-      const windowEnd = pickIsoDate(body.windowEnd)
-
-      if (!windowStart || !windowEnd) {
-        return jsonFail(
-          400,
-          'windowStart and windowEnd are required ISO strings for RECOMMEND_WINDOW.',
-        )
-      }
-
-      if (windowEnd <= windowStart) {
-        return jsonFail(400, 'windowEnd must be after windowStart.')
-      }
-
       const aftercare = await upsertAftercareRebookState({
         bookingId: existing.id,
         mode: AftercareRebookMode.RECOMMENDED_WINDOW,
@@ -182,17 +311,28 @@ export async function POST(req: Request, ctx: Ctx) {
         rebookedFor: null,
       })
 
-      return jsonOk(
-        {
-          mode,
-          aftercare: toAftercareResponse(aftercare),
-        },
-        200,
-      )
+      const data = {
+        mode,
+        aftercare: toAftercareResponse(aftercare),
+      }
+
+      const responseBody = {
+        ok: true,
+        ...data,
+      } satisfies RebookResponseBody
+
+      await completeIdempotency({
+        idempotencyRecordId,
+        responseStatus: 200,
+        responseBody,
+      })
+
+      return jsonOk(data, 200)
     }
 
-    const scheduledFor = pickIsoDate(body.scheduledFor)
-    if (!scheduledFor) {
+    const bookedFor = scheduledFor
+
+    if (!bookedFor) {
       return jsonFail(
         400,
         'scheduledFor is required (ISO string) for BOOK mode.',
@@ -202,18 +342,39 @@ export async function POST(req: Request, ctx: Ctx) {
     const result = await createRebookedBookingFromCompletedBooking({
       bookingId: existing.id,
       professionalId,
-      scheduledFor,
+      scheduledFor: bookedFor,
+      requestId,
+      idempotencyKey,
     })
 
-    return jsonOk(
-      {
-        mode,
-        nextBookingId: result.booking.id,
-        aftercare: result.aftercare,
-      },
-      201,
-    )
+    const data = {
+      mode,
+      nextBookingId: result.booking.id,
+      aftercare: toRebookedAftercareResponse(result.aftercare),
+    }
+
+    const responseBody = {
+      ok: true,
+      ...data,
+    } satisfies RebookResponseBody
+
+    await completeIdempotency({
+      idempotencyRecordId,
+      responseStatus: 201,
+      responseBody,
+    })
+
+    return jsonOk(data, 201)
   } catch (error: unknown) {
+    if (idempotencyRecordId) {
+      await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+        console.error(
+          'POST /api/pro/bookings/[id]/rebook idempotency fail error',
+          failError,
+        )
+      })
+    }
+
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
