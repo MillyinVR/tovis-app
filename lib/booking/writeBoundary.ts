@@ -498,6 +498,8 @@ type PerformLockedCreateRebookedBookingArgs = {
   professionalId: string
   scheduledFor: Date
   initialStatus: BookingStatus
+  clientId?: string | null
+  aftercareId?: string | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -1118,6 +1120,15 @@ const REBOOK_SOURCE_BOOKING_SELECT = {
   status: true,
   clientId: true,
   professionalId: true,
+  finishedAt: true,
+  checkoutStatus: true,
+  paymentCollectedAt: true,
+  aftercareSummary: {
+    select: {
+      id: true,
+      sentToClientAt: true,
+    },
+  },
 
   locationType: true,
   locationId: true,
@@ -7319,12 +7330,11 @@ async function performLockedCreateRebookedBooking(
     throw bookingError('BOOKING_NOT_FOUND')
   }
 
-  if (source.status !== BookingStatus.COMPLETED) {
-    throw bookingError('AFTERCARE_NOT_COMPLETED', {
-      message: 'Only COMPLETED bookings can be rebooked.',
-      userMessage: 'Only COMPLETED bookings can be rebooked.',
-    })
-  }
+assertCanCreateRebookFromSourceBooking({
+  source,
+  clientId: args.clientId ?? null,
+  aftercareId: args.aftercareId ?? null,
+})
 
   const requestedStart = normalizeToMinute(new Date(args.scheduledFor))
   if (!Number.isFinite(requestedStart.getTime())) {
@@ -9069,6 +9079,68 @@ await createCheckoutAuditLogs({
   }
 }
 
+function assertCanCreateRebookFromSourceBooking(args: {
+  source: RebookSourceBookingRecord
+  clientId?: string | null
+  aftercareId?: string | null
+}): void {
+  if (args.clientId && args.source.clientId !== args.clientId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (args.source.status !== BookingStatus.COMPLETED) {
+    throw bookingError('AFTERCARE_NOT_COMPLETED', {
+      message: 'Only COMPLETED bookings can be rebooked.',
+      userMessage: 'Only COMPLETED bookings can be rebooked.',
+    })
+  }
+
+  if (!args.source.finishedAt) {
+    throw bookingError('AFTERCARE_NOT_COMPLETED', {
+      message: 'Only finished bookings can be rebooked.',
+      userMessage: 'This appointment is not ready to rebook yet.',
+    })
+  }
+
+  if (!args.source.aftercareSummary?.id) {
+    throw bookingError('AFTERCARE_NOT_COMPLETED', {
+      message: 'Rebooking requires finalized aftercare.',
+      userMessage: 'This appointment is not ready to rebook yet.',
+    })
+  }
+
+  if (
+    args.aftercareId &&
+    args.source.aftercareSummary.id !== args.aftercareId
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Aftercare does not belong to the requested source booking.',
+      userMessage: 'That aftercare link is invalid or expired.',
+    })
+  }
+
+  if (!args.source.aftercareSummary.sentToClientAt) {
+    throw bookingError('AFTERCARE_NOT_COMPLETED', {
+      message: 'Rebooking requires finalized aftercare.',
+      userMessage: 'This appointment is not ready to rebook yet.',
+    })
+  }
+
+  if (!isCheckoutCloseoutComplete(args.source.checkoutStatus)) {
+    throw bookingError('AFTERCARE_NOT_COMPLETED', {
+      message: 'Rebooking requires completed checkout.',
+      userMessage: 'This appointment is not ready to rebook yet.',
+    })
+  }
+
+  if (!args.source.paymentCollectedAt) {
+    throw bookingError('AFTERCARE_NOT_COMPLETED', {
+      message: 'Rebooking requires collected payment.',
+      userMessage: 'This appointment is not ready to rebook yet.',
+    })
+  }
+}
+
 async function performLockedUpdateClientBookingCheckout(args: {
   tx: Prisma.TransactionClient
   now: Date
@@ -10423,6 +10495,10 @@ export async function createClientRebookedBookingFromAftercare(
       professionalId: lockedAftercareRef.booking.professionalId,
       scheduledFor: args.scheduledFor,
       initialStatus: BookingStatus.PENDING,
+      clientId: args.clientId,
+      aftercareId: args.aftercareId,
+      requestId: args.requestId ?? null,
+      idempotencyKey: args.idempotencyKey ?? null,
     })
   })
 }
