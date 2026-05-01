@@ -1,13 +1,21 @@
 // app/api/client/bookings/[id]/checkout/products/route.ts
 import type { NextRequest } from 'next/server'
+import { Prisma, Role } from '@prisma/client'
 
-import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
 import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { upsertClientBookingCheckoutProducts } from '@/lib/booking/writeBoundary'
+import {
+  beginIdempotency,
+  completeIdempotency,
+  failIdempotency,
+  IDEMPOTENCY_ROUTES,
+} from '@/lib/idempotency'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +28,17 @@ type SelectedCheckoutProductInput = {
 type ParsedItemsResult =
   | { ok: true; value: SelectedCheckoutProductInput[] }
   | { ok: false; error: string }
+
+type RequestMeta = {
+  requestId: string | null
+  idempotencyKey: string | null
+}
+
+type NestedInputJsonValue = Prisma.InputJsonValue | null
+
+type JsonObjectPayload = {
+  [key: string]: NestedInputJsonValue
+}
 
 const MAX_ITEMS = 25
 const MAX_ID_LENGTH = 191
@@ -131,13 +150,186 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
+function idempotencyMissingKeyFail(): Response {
+  return jsonFail(400, 'Missing idempotency key.', {
+    code: 'IDEMPOTENCY_KEY_REQUIRED',
+  })
+}
+
+function idempotencyInProgressFail(): Response {
+  return jsonFail(
+    409,
+    'A matching checkout products request is already in progress.',
+    {
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    },
+  )
+}
+
+function idempotencyConflictFail(): Response {
+  return jsonFail(
+    409,
+    'This idempotency key was already used with a different request body.',
+    {
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    },
+  )
+}
+
+function readHeaderValue(req: Request, name: string): string | null {
+  return pickString(req.headers.get(name))
+}
+
+function readRequestMeta(
+  req: Request,
+  body: Record<string, unknown>,
+): RequestMeta {
+  return {
+    requestId:
+      readHeaderValue(req, 'x-request-id') ??
+      readHeaderValue(req, 'request-id') ??
+      null,
+    idempotencyKey:
+      readHeaderValue(req, 'idempotency-key') ??
+      readHeaderValue(req, 'x-idempotency-key') ??
+      pickString(body.idempotencyKey) ??
+      null,
+  }
+}
+
+function normalizeItemsForIdempotency(
+  items: SelectedCheckoutProductInput[],
+): SelectedCheckoutProductInput[] {
+  return [...items].sort((a, b) =>
+    `${a.recommendationId}:${a.productId}`.localeCompare(
+      `${b.recommendationId}:${b.productId}`,
+    ),
+  )
+}
+
+function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    return value.toString()
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeNestedJsonValue(item))
+  }
+
+  if (typeof value === 'object') {
+    const input = value as Record<string, unknown>
+    const out: JsonObjectPayload = {}
+
+    for (const key of Object.keys(input).sort()) {
+      out[key] = normalizeNestedJsonValue(input[key])
+    }
+
+    return out
+  }
+
+  return String(value)
+}
+
+function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
+  if (value === null || value === undefined) {
+    return {}
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      value: normalizeNestedJsonValue(value),
+    }
+  }
+
+  const input = value as Record<string, unknown>
+  const out: JsonObjectPayload = {}
+
+  for (const key of Object.keys(input).sort()) {
+    out[key] = normalizeNestedJsonValue(input[key])
+  }
+
+  return out
+}
+
+function buildCheckoutProductsResponseBody(args: {
+  result: Awaited<ReturnType<typeof upsertClientBookingCheckoutProducts>>
+}): JsonObjectPayload {
+  return normalizeJsonObjectPayload({
+    booking: {
+      id: args.result.booking.id,
+      checkoutStatus: args.result.booking.checkoutStatus,
+      serviceSubtotalSnapshot:
+        args.result.booking.serviceSubtotalSnapshot?.toString() ?? null,
+      productSubtotalSnapshot:
+        args.result.booking.productSubtotalSnapshot?.toString() ?? null,
+      subtotalSnapshot: args.result.booking.subtotalSnapshot?.toString() ?? null,
+      tipAmount: args.result.booking.tipAmount?.toString() ?? null,
+      taxAmount: args.result.booking.taxAmount?.toString() ?? null,
+      discountAmount: args.result.booking.discountAmount?.toString() ?? null,
+      totalAmount: args.result.booking.totalAmount?.toString() ?? null,
+      paymentAuthorizedAt:
+        args.result.booking.paymentAuthorizedAt?.toISOString() ?? null,
+      paymentCollectedAt:
+        args.result.booking.paymentCollectedAt?.toISOString() ?? null,
+    },
+    selectedProducts: args.result.selectedProducts.map((item) => ({
+      recommendationId: item.recommendationId,
+      productId: item.productId,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice.toString(),
+      lineTotal: item.lineTotal.toString(),
+    })),
+    meta: args.result.meta,
+  })
+}
+
+async function failStartedIdempotency(
+  idempotencyRecordId: string | null,
+): Promise<void> {
+  if (!idempotencyRecordId) return
+
+  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+    console.error(
+      'POST /api/client/bookings/[id]/checkout/products idempotency failure update error:',
+      failError,
+    )
+  })
+}
+
 export async function POST(
   req: NextRequest,
   props: { params: Promise<{ id: string }> },
 ) {
+  let idempotencyRecordId: string | null = null
+
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
+
+    const actorUserId = pickString(auth.user?.id)
+
+    if (!actorUserId) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'Authenticated actor user id is required.',
+        userMessage: 'You are not allowed to update this checkout.',
+      })
+    }
 
     const { id } = await props.params
     const bookingId = trimmedString(id)
@@ -154,43 +346,66 @@ export async function POST(
       return jsonFail(400, parsedItems.error)
     }
 
+    const { requestId, idempotencyKey } = readRequestMeta(req, body)
+
+    const idempotencyItems = normalizeItemsForIdempotency(parsedItems.value)
+
+    const idempotency = await beginIdempotency<JsonObjectPayload>({
+      actor: {
+        actorUserId,
+        actorRole: Role.CLIENT,
+      },
+      route: IDEMPOTENCY_ROUTES.CLIENT_CHECKOUT_PRODUCTS,
+      key: idempotencyKey,
+      requestBody: {
+        actorUserId,
+        clientId: auth.clientId,
+        bookingId,
+        items: idempotencyItems,
+      },
+    })
+
+    if (idempotency.kind === 'missing_key') {
+      return idempotencyMissingKeyFail()
+    }
+
+    if (idempotency.kind === 'in_progress') {
+      return idempotencyInProgressFail()
+    }
+
+    if (idempotency.kind === 'conflict') {
+      return idempotencyConflictFail()
+    }
+
+    if (idempotency.kind === 'replay') {
+      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    }
+
+    const startedIdempotencyRecordId = idempotency.idempotencyRecordId
+    idempotencyRecordId = startedIdempotencyRecordId
+
     const result = await upsertClientBookingCheckoutProducts({
       bookingId,
       clientId: auth.clientId,
       items: parsedItems.value,
+      requestId,
+      idempotencyKey,
     })
 
-    return jsonOk(
-      {
-        booking: {
-          id: result.booking.id,
-          checkoutStatus: result.booking.checkoutStatus,
-          serviceSubtotalSnapshot:
-            result.booking.serviceSubtotalSnapshot?.toString() ?? null,
-          productSubtotalSnapshot:
-            result.booking.productSubtotalSnapshot?.toString() ?? null,
-          subtotalSnapshot: result.booking.subtotalSnapshot?.toString() ?? null,
-          tipAmount: result.booking.tipAmount?.toString() ?? null,
-          taxAmount: result.booking.taxAmount?.toString() ?? null,
-          discountAmount: result.booking.discountAmount?.toString() ?? null,
-          totalAmount: result.booking.totalAmount?.toString() ?? null,
-          paymentAuthorizedAt:
-            result.booking.paymentAuthorizedAt?.toISOString() ?? null,
-          paymentCollectedAt:
-            result.booking.paymentCollectedAt?.toISOString() ?? null,
-        },
-        selectedProducts: result.selectedProducts.map((item) => ({
-          recommendationId: item.recommendationId,
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice.toString(),
-          lineTotal: item.lineTotal.toString(),
-        })),
-        meta: result.meta,
-      },
-      200,
-    )
+    const responseBody = buildCheckoutProductsResponseBody({ result })
+
+    await completeIdempotency({
+      idempotencyRecordId: startedIdempotencyRecordId,
+      responseStatus: 200,
+      responseBody,
+    })
+
+    return jsonOk(responseBody, 200)
   } catch (error: unknown) {
+    if (idempotencyRecordId) {
+      await failStartedIdempotency(idempotencyRecordId)
+    }
+
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
@@ -202,6 +417,11 @@ export async function POST(
       'POST /api/client/bookings/[id]/checkout/products error',
       error,
     )
+    captureBookingException({
+      error,
+      route: 'POST /api/client/bookings/[id]/checkout/products',
+    })
+
     return jsonFail(500, 'Internal server error.')
   }
 }

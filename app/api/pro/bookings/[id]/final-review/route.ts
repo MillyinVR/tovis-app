@@ -15,7 +15,16 @@ import { confirmBookingFinalReview } from '@/lib/booking/writeBoundary'
 import {
   AftercareRebookMode,
   BookingServiceItemType,
+  Prisma,
+  Role,
 } from '@prisma/client'
+import {
+  beginIdempotency,
+  completeIdempotency,
+  failIdempotency,
+  IDEMPOTENCY_ROUTES,
+} from '@/lib/idempotency'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,6 +77,17 @@ type NormalizedRecommendedProduct = {
   note: string | null
 }
 
+type RequestMeta = {
+  requestId: string | null
+  idempotencyKey: string | null
+}
+
+type NestedInputJsonValue = Prisma.InputJsonValue | null
+
+type JsonObjectPayload = {
+  [key: string]: NestedInputJsonValue
+}
+
 function bookingJsonFail(
   code: BookingErrorCode,
   overrides?: {
@@ -77,6 +97,32 @@ function bookingJsonFail(
 ) {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
+
+function idempotencyMissingKeyFail(): Response {
+  return jsonFail(400, 'Missing idempotency key.', {
+    code: 'IDEMPOTENCY_KEY_REQUIRED',
+  })
+}
+
+function idempotencyInProgressFail(): Response {
+  return jsonFail(
+    409,
+    'A matching final review request is already in progress.',
+    {
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    },
+  )
+}
+
+function idempotencyConflictFail(): Response {
+  return jsonFail(
+    409,
+    'This idempotency key was already used with a different request body.',
+    {
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    },
+  )
 }
 
 function asTrimmedString(value: unknown): string {
@@ -157,7 +203,9 @@ function parseRebookMode(value: unknown): AftercareRebookMode | null {
   return null
 }
 
-function normalizeFinalLineItems(value: unknown): NormalizedFinalLineItem[] | null {
+function normalizeFinalLineItems(
+  value: unknown,
+): NormalizedFinalLineItem[] | null {
   if (!Array.isArray(value) || value.length === 0) {
     return null
   }
@@ -229,12 +277,132 @@ function normalizeRecommendedProducts(
   return normalized
 }
 
+function readHeaderValue(req: Request, name: string): string | null {
+  return pickString(req.headers.get(name))
+}
+
+function readRequestMeta(req: Request): RequestMeta {
+  return {
+    requestId:
+      readHeaderValue(req, 'x-request-id') ??
+      readHeaderValue(req, 'request-id') ??
+      null,
+    idempotencyKey:
+      readHeaderValue(req, 'idempotency-key') ??
+      readHeaderValue(req, 'x-idempotency-key') ??
+      null,
+  }
+}
+
+function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    return value.toString()
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeNestedJsonValue(item))
+  }
+
+  if (typeof value === 'object') {
+    const input = value as Record<string, unknown>
+    const out: JsonObjectPayload = {}
+
+    for (const key of Object.keys(input).sort()) {
+      out[key] = normalizeNestedJsonValue(input[key])
+    }
+
+    return out
+  }
+
+  return String(value)
+}
+
+function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
+  if (value === null || value === undefined) {
+    return {}
+  }
+
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      value: normalizeNestedJsonValue(value),
+    }
+  }
+
+  const input = value as Record<string, unknown>
+  const out: JsonObjectPayload = {}
+
+  for (const key of Object.keys(input).sort()) {
+    out[key] = normalizeNestedJsonValue(input[key])
+  }
+
+  return out
+}
+
+function buildFinalReviewResponseBody(args: {
+  result: Awaited<ReturnType<typeof confirmBookingFinalReview>>
+}): JsonObjectPayload {
+  return normalizeJsonObjectPayload({
+    booking: {
+      id: args.result.booking.id,
+      status: args.result.booking.status,
+      sessionStep: args.result.booking.sessionStep,
+      serviceId: args.result.booking.serviceId,
+      offeringId: args.result.booking.offeringId,
+      subtotalSnapshot:
+        args.result.booking.subtotalSnapshot == null
+          ? null
+          : String(args.result.booking.subtotalSnapshot),
+      totalDurationMinutes: args.result.booking.totalDurationMinutes,
+    },
+    meta: args.result.meta,
+  })
+}
+
+async function failStartedIdempotency(
+  idempotencyRecordId: string | null,
+): Promise<void> {
+  if (!idempotencyRecordId) return
+
+  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+    console.error(
+      'POST /api/pro/bookings/[id]/final-review idempotency failure update error:',
+      failError,
+    )
+  })
+}
+
 export async function POST(req: Request, ctx: Ctx) {
+  let idempotencyRecordId: string | null = null
+
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
+    const actorUserId = pickString(auth.user?.id)
+
+    if (!actorUserId) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'Authenticated actor user id is required.',
+        userMessage: 'You are not allowed to confirm this final review.',
+      })
+    }
 
     const params = await Promise.resolve(ctx.params)
     const bookingId = pickString(params?.id)
@@ -297,6 +465,48 @@ export async function POST(req: Request, ctx: Ctx) {
       return jsonFail(400, 'Invalid rebookWindowEnd date.')
     }
 
+    const { requestId, idempotencyKey } = readRequestMeta(req)
+
+    const idempotency = await beginIdempotency<JsonObjectPayload>({
+      actor: {
+        actorUserId,
+        actorRole: Role.PRO,
+      },
+      route: IDEMPOTENCY_ROUTES.PRO_BOOKING_FINAL_REVIEW,
+      key: idempotencyKey,
+      requestBody: {
+        actorUserId,
+        professionalId,
+        bookingId,
+        finalLineItems,
+        expectedSubtotal,
+        recommendedProducts,
+        rebookMode,
+        rebookedFor,
+        rebookWindowStart,
+        rebookWindowEnd,
+      },
+    })
+
+    if (idempotency.kind === 'missing_key') {
+      return idempotencyMissingKeyFail()
+    }
+
+    if (idempotency.kind === 'in_progress') {
+      return idempotencyInProgressFail()
+    }
+
+    if (idempotency.kind === 'conflict') {
+      return idempotencyConflictFail()
+    }
+
+    if (idempotency.kind === 'replay') {
+      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    }
+
+    const startedIdempotencyRecordId = idempotency.idempotencyRecordId
+    idempotencyRecordId = startedIdempotencyRecordId
+
     const result = await confirmBookingFinalReview({
       bookingId,
       professionalId,
@@ -307,27 +517,24 @@ export async function POST(req: Request, ctx: Ctx) {
       rebookedFor,
       rebookWindowStart,
       rebookWindowEnd,
+      requestId,
+      idempotencyKey,
     })
 
-    return jsonOk(
-      {
-        booking: {
-          id: result.booking.id,
-          status: result.booking.status,
-          sessionStep: result.booking.sessionStep,
-          serviceId: result.booking.serviceId,
-          offeringId: result.booking.offeringId,
-          subtotalSnapshot:
-            result.booking.subtotalSnapshot == null
-              ? null
-              : String(result.booking.subtotalSnapshot),
-          totalDurationMinutes: result.booking.totalDurationMinutes,
-        },
-        meta: result.meta,
-      },
-      200,
-    )
+    const responseBody = buildFinalReviewResponseBody({ result })
+
+    await completeIdempotency({
+      idempotencyRecordId: startedIdempotencyRecordId,
+      responseStatus: 200,
+      responseBody,
+    })
+
+    return jsonOk(responseBody, 200)
   } catch (error: unknown) {
+    if (idempotencyRecordId) {
+      await failStartedIdempotency(idempotencyRecordId)
+    }
+
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
@@ -336,6 +543,11 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     console.error('POST /api/pro/bookings/[id]/final-review error', error)
+    captureBookingException({
+      error,
+      route: 'POST /api/pro/bookings/[id]/final-review',
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }
