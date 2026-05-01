@@ -2184,6 +2184,21 @@ function assertClientCanEditBookingCheckoutProducts(
     })
   }
 
+  if (!booking.aftercareSummary?.id || !booking.aftercareSummary.sentToClientAt) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Product checkout requires finalized aftercare.',
+      userMessage: 'Products can only be selected after aftercare is finalized.',
+    })
+  }
+
+  if (booking.paymentAuthorizedAt) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Payment has already been authorized for this booking.',
+      userMessage:
+        'This checkout is already in payment and cannot be changed.',
+    })
+  }
+
   if (booking.paymentCollectedAt) {
     throw bookingError('FORBIDDEN', {
       message: 'Checkout is already paid and cannot be changed.',
@@ -2191,10 +2206,14 @@ function assertClientCanEditBookingCheckoutProducts(
     })
   }
 
-  if (!booking.aftercareSummary?.id || !booking.aftercareSummary.sentToClientAt) {
+  if (
+    booking.checkoutStatus === BookingCheckoutStatus.PARTIALLY_PAID ||
+    booking.checkoutStatus === BookingCheckoutStatus.PAID ||
+    booking.checkoutStatus === BookingCheckoutStatus.WAIVED
+  ) {
     throw bookingError('FORBIDDEN', {
-      message: 'Product checkout requires finalized aftercare.',
-      userMessage: 'Products can only be selected after aftercare is finalized.',
+      message: 'Checkout status is locked and cannot be changed.',
+      userMessage: 'This checkout is already locked and cannot be changed.',
     })
   }
 }
