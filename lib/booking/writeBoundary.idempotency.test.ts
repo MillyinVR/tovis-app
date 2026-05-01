@@ -72,6 +72,7 @@ function makeStartedBooking(
     startedAt: Date | null
     finishedAt: Date | null
     sessionStep: SessionStep | null
+    consultationApproval: { status: string } | null
   }>,
 ) {
   return {
@@ -82,6 +83,9 @@ function makeStartedBooking(
     startedAt: overrides?.startedAt ?? STARTED_AT,
     finishedAt: overrides?.finishedAt ?? null,
     sessionStep: overrides?.sessionStep ?? SessionStep.CONSULTATION,
+    consultationApproval: overrides?.consultationApproval ?? {
+      status: 'APPROVED',
+    },
   }
 }
 
@@ -286,6 +290,102 @@ describe('lib/booking/writeBoundary idempotency', () => {
     })
   })
 
+  it('rejects finishBookingSession when consultation is not approved', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeStartedBooking({
+        sessionStep: SessionStep.SERVICE_IN_PROGRESS,
+        consultationApproval: { status: 'PENDING' },
+      }),
+    )
+    mocks.txMediaAssetCount.mockResolvedValueOnce(0)
+
+    await expect(
+      finishBookingSession({
+        bookingId: 'booking_1',
+        professionalId: 'pro_1',
+        requestId: 'req_finish_unapproved',
+        idempotencyKey: 'idem_finish_unapproved',
+      }),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    })
+
+    expect(mocks.txMediaAssetCount).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking_1',
+        phase: 'AFTER',
+        uploadedByRole: 'PRO',
+      },
+    })
+
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+    expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
+  })
+
+  it('rejects finishBookingSession from CONSULTATION even when consultation is approved', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeStartedBooking({
+        sessionStep: SessionStep.CONSULTATION,
+        consultationApproval: { status: 'APPROVED' },
+      }),
+    )
+    mocks.txMediaAssetCount.mockResolvedValueOnce(0)
+
+    await expect(
+      finishBookingSession({
+        bookingId: 'booking_1',
+        professionalId: 'pro_1',
+        requestId: 'req_finish_wrong_step',
+        idempotencyKey: 'idem_finish_wrong_step',
+      }),
+    ).rejects.toMatchObject({
+      code: 'STEP_MISMATCH',
+    })
+
+    expect(mocks.txMediaAssetCount).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking_1',
+        phase: 'AFTER',
+        uploadedByRole: 'PRO',
+      },
+    })
+
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+    expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
+  })
+
+  it('rejects finishBookingSession from BEFORE_PHOTOS even when consultation is approved', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeStartedBooking({
+        sessionStep: SessionStep.BEFORE_PHOTOS,
+        consultationApproval: { status: 'APPROVED' },
+      }),
+    )
+    mocks.txMediaAssetCount.mockResolvedValueOnce(0)
+
+    await expect(
+      finishBookingSession({
+        bookingId: 'booking_1',
+        professionalId: 'pro_1',
+        requestId: 'req_finish_before_photos',
+        idempotencyKey: 'idem_finish_before_photos',
+      }),
+    ).rejects.toMatchObject({
+      code: 'STEP_MISMATCH',
+    })
+
+    expect(mocks.txMediaAssetCount).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking_1',
+        phase: 'AFTER',
+        uploadedByRole: 'PRO',
+      },
+    })
+
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+    expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
+  })
+
   it('returns a no-op when transitionSessionStep is asked to move to the current step', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(
       makeTransitionBooking({
@@ -323,6 +423,39 @@ describe('lib/booking/writeBoundary idempotency', () => {
       },
     })
   })
+
+  it('rejects manual transitionSessionStep to DONE because closeout owns completion', async () => {
+  mocks.txBookingFindUnique.mockResolvedValueOnce(
+    makeTransitionBooking({
+      sessionStep: SessionStep.AFTER_PHOTOS,
+      consultationApproval: { status: 'APPROVED' },
+    }),
+  )
+
+  const result = await transitionSessionStep({
+    bookingId: 'booking_1',
+    professionalId: 'pro_1',
+    nextStep: SessionStep.DONE,
+    requestId: 'req_transition_done',
+    idempotencyKey: 'idem_transition_done',
+  })
+
+  expect(result).toEqual({
+    ok: false,
+    status: 409,
+    error:
+      'Use aftercare and checkout completion before marking the booking done.',
+    forcedStep: SessionStep.AFTER_PHOTOS,
+    meta: {
+      mutated: false,
+      noOp: true,
+    },
+  })
+
+  expect(mocks.txMediaAssetCount).not.toHaveBeenCalled()
+  expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+  expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
+})
 
   it('returns a no-op when updateClientBookingCheckout receives the same effective checkout state', async () => {
     const booking = makeClientCheckoutBooking({

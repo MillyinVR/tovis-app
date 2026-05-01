@@ -100,6 +100,7 @@ function makeFinishableBooking(
     startedAt: Date | null
     finishedAt: Date | null
     sessionStep: SessionStep | null
+    consultationApproval: { status: string } | null
   }>,
 ) {
   return {
@@ -109,6 +110,9 @@ function makeFinishableBooking(
     startedAt: overrides?.startedAt ?? STARTED_AT,
     finishedAt: overrides?.finishedAt ?? null,
     sessionStep: overrides?.sessionStep ?? SessionStep.SERVICE_IN_PROGRESS,
+    consultationApproval: overrides?.consultationApproval ?? {
+      status: 'APPROVED',
+    },
   }
 }
 
@@ -313,6 +317,7 @@ describe('lib/booking/writeBoundary closeout audit behavior', () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(
       makeFinishableBooking({
         sessionStep: SessionStep.SERVICE_IN_PROGRESS,
+        consultationApproval: { status: 'APPROVED' },
       }),
     )
     mocks.txMediaAssetCount.mockResolvedValueOnce(2)

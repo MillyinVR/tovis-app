@@ -999,6 +999,11 @@ const FINISH_BOOKING_SELECT = {
   startedAt: true,
   finishedAt: true,
   sessionStep: true,
+  consultationApproval: {
+    select: {
+      status: true,
+    },
+  },
 } satisfies Prisma.BookingSelect
 
 type FinishBookingRecord = Prisma.BookingGetPayload<{
@@ -4327,32 +4332,50 @@ async function performLockedFinishBookingSession(args: {
 
   const step = booking.sessionStep ?? SessionStep.NONE
 
-  if (
-    step === SessionStep.FINISH_REVIEW ||
-    step === SessionStep.AFTER_PHOTOS ||
-    step === SessionStep.DONE
-  ) {
-    return {
-      booking: {
-        id: booking.id,
-        status: booking.status,
-        startedAt: booking.startedAt,
-        finishedAt: booking.finishedAt,
-        sessionStep: step,
-      },
-      afterCount,
-      meta: buildMeta(false),
-    }
+if (
+  step === SessionStep.FINISH_REVIEW ||
+  step === SessionStep.AFTER_PHOTOS ||
+  step === SessionStep.DONE
+) {
+  return {
+    booking: {
+      id: booking.id,
+      status: booking.status,
+      startedAt: booking.startedAt,
+      finishedAt: booking.finishedAt,
+      sessionStep: step,
+    },
+    afterCount,
+    meta: buildMeta(false),
   }
+}
 
-  recordStepTransition({
-    from: step,
-    to: SessionStep.FINISH_REVIEW,
-    actor: 'PRO',
-    route: 'lib/booking/writeBoundary.ts:finishBookingSession',
-    bookingId: booking.id,
-    professionalId: args.professionalId,
+const approval = upper(booking.consultationApproval?.status)
+
+if (approval !== 'APPROVED') {
+  throw bookingError('FORBIDDEN', {
+    message: 'Consultation must be approved before finishing the service.',
+    userMessage:
+      'Consultation must be approved before finishing the service.',
   })
+}
+
+if (step !== SessionStep.SERVICE_IN_PROGRESS) {
+  throw bookingError('STEP_MISMATCH', {
+    message: `Finish is only allowed from SERVICE_IN_PROGRESS. Current step: ${step}.`,
+    userMessage:
+      'Move through the required session steps before finishing the service.',
+  })
+}
+
+recordStepTransition({
+  from: step,
+  to: SessionStep.FINISH_REVIEW,
+  actor: 'PRO',
+  route: 'lib/booking/writeBoundary.ts:finishBookingSession',
+  bookingId: booking.id,
+  professionalId: args.professionalId,
+})
 
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
@@ -5034,45 +5057,15 @@ async function performLockedTransitionSessionStep(args: {
   }
 
   if (args.nextStep === SessionStep.DONE) {
-    const [beforeCount, afterCount, aftercare] = await Promise.all([
-      args.tx.mediaAsset.count({
-        where: {
-          bookingId: booking.id,
-          phase: MediaPhase.BEFORE,
-          uploadedByRole: Role.PRO,
-        },
-      }),
-      args.tx.mediaAsset.count({
-        where: {
-          bookingId: booking.id,
-          phase: MediaPhase.AFTER,
-          uploadedByRole: Role.PRO,
-        },
-      }),
-      args.tx.aftercareSummary.findFirst({
-        where: { bookingId: booking.id },
-        select: {
-          id: true,
-          sentToClientAt: true,
-        },
-      }),
-    ])
-
-    const missing: string[] = []
-    if (beforeCount <= 0) missing.push('BEFORE photo')
-    if (afterCount <= 0) missing.push('AFTER photo')
-    if (!aftercare?.sentToClientAt) missing.push('finalized aftercare')
-
-    if (missing.length > 0) {
-      return {
-        ok: false,
-        status: 409,
-        error: `Wrap-up incomplete: add ${missing.join(' + ')} before completing the session.`,
-        forcedStep: SessionStep.AFTER_PHOTOS,
-        meta: buildMeta(false),
-      }
-    }
+  return {
+    ok: false,
+    status: 409,
+    error:
+      'Use aftercare and checkout completion before marking the booking done.',
+    forcedStep: SessionStep.AFTER_PHOTOS,
+    meta: buildMeta(false),
   }
+}
 
   const shouldSetStartedAt =
     args.nextStep === SessionStep.SERVICE_IN_PROGRESS &&
