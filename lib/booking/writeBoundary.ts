@@ -2076,19 +2076,11 @@ function canUploadBookingMediaPhase(
   const step = sessionStep ?? SessionStep.NONE
 
   if (phase === MediaPhase.BEFORE) {
-    return (
-      step === SessionStep.CONSULTATION ||
-      step === SessionStep.CONSULTATION_PENDING_CLIENT ||
-      step === SessionStep.BEFORE_PHOTOS ||
-      step === SessionStep.SERVICE_IN_PROGRESS ||
-      step === SessionStep.FINISH_REVIEW ||
-      step === SessionStep.AFTER_PHOTOS ||
-      step === SessionStep.DONE
-    )
+    return step === SessionStep.BEFORE_PHOTOS
   }
 
   if (phase === MediaPhase.AFTER) {
-    return step === SessionStep.AFTER_PHOTOS || step === SessionStep.DONE
+    return step === SessionStep.AFTER_PHOTOS
   }
 
   return true
@@ -5256,29 +5248,7 @@ async function performLockedUploadProBookingMedia(args: {
     select: BOOKING_MEDIA_ASSET_SELECT,
   })
 
-  let advancedTo: SessionStep | null = null
-  const step = booking.sessionStep ?? SessionStep.NONE
-
-  if (
-    args.phase === MediaPhase.BEFORE &&
-    (step === SessionStep.CONSULTATION ||
-      step === SessionStep.CONSULTATION_PENDING_CLIENT ||
-      step === SessionStep.BEFORE_PHOTOS)
-  ) {
-    await args.tx.booking.update({
-      where: { id: booking.id },
-      data: { sessionStep: SessionStep.SERVICE_IN_PROGRESS },
-      select: { id: true } satisfies Prisma.BookingSelect,
-    })
-    advancedTo = SessionStep.SERVICE_IN_PROGRESS
-  }
-
-  if (
-    args.phase === MediaPhase.AFTER &&
-    booking.sessionStep === SessionStep.AFTER_PHOTOS
-  ) {
-    advancedTo = null
-  }
+  const advancedTo: SessionStep | null = null
 
   return {
     created,
