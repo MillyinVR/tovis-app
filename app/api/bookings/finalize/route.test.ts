@@ -12,6 +12,8 @@ import { BookingError, getBookingErrorDescriptor } from '@/lib/booking/errors'
 const HOLD_START = new Date('2026-03-11T19:30:00.000Z')
 const NOW = new Date('2026-03-11T19:00:00.000Z')
 
+const IDEMPOTENCY_ROUTE = 'POST /api/bookings/finalize'
+
 const mocks = vi.hoisted(() => ({
   requireClient: vi.fn(),
   pickString: vi.fn((value: unknown) =>
@@ -25,6 +27,10 @@ const mocks = vi.hoisted(() => ({
 
   finalizeBookingFromHold: vi.fn(),
   createProNotification: vi.fn(),
+
+  beginIdempotency: vi.fn(),
+  completeIdempotency: vi.fn(),
+  failIdempotency: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -70,6 +76,15 @@ vi.mock('@/lib/aftercare/unclaimedAftercareAccess', () => ({
   resolveAftercareAccessByToken: mocks.resolveAftercareAccessByToken,
 }))
 
+vi.mock('@/lib/idempotency', () => ({
+  beginIdempotency: mocks.beginIdempotency,
+  completeIdempotency: mocks.completeIdempotency,
+  failIdempotency: mocks.failIdempotency,
+  IDEMPOTENCY_ROUTES: {
+    BOOKING_FINALIZE: 'POST /api/bookings/finalize',
+  },
+}))
+
 import { POST } from './route'
 
 function makeJsonResponse(status: number, payload: unknown): Response {
@@ -81,11 +96,26 @@ function makeJsonResponse(status: number, payload: unknown): Response {
   })
 }
 
-function makeRequest(body: unknown): Request {
+function makeRequest(
+  body: unknown,
+  headers?: Record<string, string>,
+): Request {
   return new Request('http://localhost/api/bookings/finalize', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(headers ?? {}),
+    },
     body: JSON.stringify(body),
+  })
+}
+
+function makeIdempotentRequest(
+  body: unknown,
+  key = 'idem_finalize_1',
+): Request {
+  return makeRequest(body, {
+    'idempotency-key': key,
   })
 }
 
@@ -166,6 +196,26 @@ function makeResolvedAftercareAccess(overrides?: {
   }
 }
 
+function expectBookingFailPayload(
+  responseBody: unknown,
+  code: Parameters<typeof getBookingErrorDescriptor>[0],
+  overrides?: {
+    error?: string
+    message?: string
+  },
+) {
+  const descriptor = getBookingErrorDescriptor(code)
+
+  expect(responseBody).toEqual({
+    ok: false,
+    error: overrides?.error ?? descriptor.userMessage,
+    code: descriptor.code,
+    retryable: descriptor.retryable,
+    uiAction: descriptor.uiAction,
+    message: overrides?.message ?? descriptor.message,
+  })
+}
+
 describe('POST /api/bookings/finalize', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -215,6 +265,22 @@ describe('POST /api/bookings/finalize', () => {
     })
 
     mocks.createProNotification.mockResolvedValue(undefined)
+
+    mocks.beginIdempotency.mockImplementation(
+      async (args: { key: string | null }) => {
+        const key = args.key?.trim()
+        if (!key) return { kind: 'missing_key' }
+
+        return {
+          kind: 'started',
+          idempotencyRecordId: 'idem_record_1',
+          requestHash: 'hash_1',
+        }
+      },
+    )
+
+    mocks.completeIdempotency.mockResolvedValue(undefined)
+    mocks.failIdempotency.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -232,17 +298,11 @@ describe('POST /api/bookings/finalize', () => {
     )
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
-    })
+    expectBookingFailPayload(await result.json(), 'LOCATION_TYPE_REQUIRED')
 
     expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
   })
 
   it('returns OFFERING_ID_REQUIRED when offeringId is missing', async () => {
@@ -256,17 +316,11 @@ describe('POST /api/bookings/finalize', () => {
     )
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
-    })
+    expectBookingFailPayload(await result.json(), 'OFFERING_ID_REQUIRED')
 
     expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
   })
 
   it('returns HOLD_ID_REQUIRED when holdId is missing', async () => {
@@ -280,17 +334,11 @@ describe('POST /api/bookings/finalize', () => {
     )
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
-    })
+    expectBookingFailPayload(await result.json(), 'HOLD_ID_REQUIRED')
 
     expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
   })
 
   it('returns ADDONS_INVALID when addOnIds contains duplicates', async () => {
@@ -306,117 +354,35 @@ describe('POST /api/bookings/finalize', () => {
     )
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
+    expectBookingFailPayload(await result.json(), 'ADDONS_INVALID')
+
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns MISSING_MEDIA_ID when source is discovery without lookPostId or mediaId', async () => {
+    const descriptor = getBookingErrorDescriptor('MISSING_MEDIA_ID')
+
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'DISCOVERY',
+      }),
+    )
+
+    expect(result.status).toBe(descriptor.httpStatus)
+    expectBookingFailPayload(await result.json(), 'MISSING_MEDIA_ID', {
+      error: 'Discovery bookings require a look post id or media id.',
+      message: 'Discovery bookings require a lookPostId or mediaId.',
     })
 
     expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
   })
-
-it('returns MISSING_MEDIA_ID when source is discovery without lookPostId or mediaId', async () => {
-  const descriptor = getBookingErrorDescriptor('MISSING_MEDIA_ID')
-
-  const result = await POST(
-    makeRequest({
-      offeringId: 'offering_1',
-      holdId: 'hold_1',
-      locationType: 'SALON',
-      source: 'DISCOVERY',
-    }),
-  )
-
-  expect(result.status).toBe(descriptor.httpStatus)
-  await expect(result.json()).resolves.toEqual({
-    ok: false,
-    error: 'Discovery bookings require a look post id or media id.',
-    code: descriptor.code,
-    retryable: descriptor.retryable,
-    uiAction: descriptor.uiAction,
-    message: 'Discovery bookings require a lookPostId or mediaId.',
-  })
-
-  expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
-  expect(mocks.requireClient).not.toHaveBeenCalled()
-})
-
-it('allows discovery finalize when lookPostId is provided without mediaId', async () => {
-  const result = await POST(
-    makeRequest({
-      offeringId: 'offering_1',
-      holdId: 'hold_1',
-      locationType: 'SALON',
-      source: 'DISCOVERY',
-      lookPostId: 'look_123',
-    }),
-  )
-
-  expect(result.status).toBe(201)
-
-  expect(mocks.requireClient).toHaveBeenCalledTimes(1)
-
-  expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
-    clientId: 'client_1',
-    holdId: 'hold_1',
-    openingId: null,
-    addOnIds: [],
-    locationType: ServiceLocationType.SALON,
-    source: BookingSource.DISCOVERY,
-    initialStatus: BookingStatus.PENDING,
-    rebookOfBookingId: null,
-    offering: {
-      id: 'offering_1',
-      professionalId: 'pro_123',
-      serviceId: 'service_1',
-      offersInSalon: true,
-      offersMobile: true,
-      salonPriceStartingAt: new Prisma.Decimal('100'),
-      salonDurationMinutes: 60,
-      mobilePriceStartingAt: new Prisma.Decimal('120'),
-      mobileDurationMinutes: 75,
-      professionalTimeZone: 'America/Los_Angeles',
-    },
-    fallbackTimeZone: 'UTC',
-    requestId: null,
-    idempotencyKey: null,
-  })
-
-  expect(mocks.createProNotification).toHaveBeenCalledWith({
-    professionalId: 'pro_123',
-    eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
-    title: 'New booking request',
-    body: '',
-    href: '/pro/bookings/booking_1',
-    actorUserId: 'user_1',
-    bookingId: 'booking_1',
-    dedupeKey: 'PRO_NOTIF:BOOKING_REQUEST_CREATED:booking_1',
-    data: {
-      bookingId: 'booking_1',
-      bookingStatus: BookingStatus.PENDING,
-      source: BookingSource.DISCOVERY,
-      locationType: ServiceLocationType.SALON,
-    },
-  })
-
-  await expect(result.json()).resolves.toEqual({
-    ok: true,
-    booking: {
-      id: 'booking_1',
-      status: BookingStatus.PENDING,
-      scheduledFor: HOLD_START.toISOString(),
-      professionalId: 'pro_123',
-    },
-    meta: {
-      mutated: true,
-      noOp: false,
-    },
-  })
-})
 
   it('returns OFFERING_NOT_FOUND when offering is missing', async () => {
     const descriptor = getBookingErrorDescriptor('OFFERING_NOT_FOUND')
@@ -431,16 +397,10 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     )
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
-    })
+    expectBookingFailPayload(await result.json(), 'OFFERING_NOT_FOUND')
 
     expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
@@ -460,16 +420,10 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     )
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
-    })
+    expectBookingFailPayload(await result.json(), 'OFFERING_NOT_FOUND')
 
     expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
@@ -485,7 +439,7 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     })
 
     const result = await POST(
-      makeRequest({
+      makeIdempotentRequest({
         offeringId: 'offering_1',
         holdId: 'hold_1',
         locationType: 'SALON',
@@ -499,7 +453,253 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     })
     expect(mocks.requireClient).toHaveBeenCalledTimes(1)
     expect(result).toBe(authRes)
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+  })
+
+  it('returns missing idempotency key for authenticated finalize without idempotency header', async () => {
+    const result = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'REQUESTED',
+      }),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    })
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: 'CLIENT',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: null,
+      requestBody: {
+        clientId: 'client_1',
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        openingId: null,
+        addOnIds: [],
+        locationType: ServiceLocationType.SALON,
+        source: BookingSource.REQUESTED,
+        mediaId: null,
+        lookPostId: null,
+        aftercareToken: null,
+        rebookOfBookingId: null,
+      },
+    })
+
+    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns in-progress when idempotency ledger has an active matching request', async () => {
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'in_progress',
+    })
+
+    const result = await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+      }),
+    )
+
+    expect(result.status).toBe(409)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'A matching booking request is already in progress.',
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    })
+
+    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns conflict when idempotency key was reused with a different body', async () => {
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'conflict',
+    })
+
+    const result = await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+      }),
+    )
+
+    expect(result.status).toBe(409)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'This idempotency key was already used with a different request body.',
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    })
+
+    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('replays a completed idempotency response without finalizing or notifying again', async () => {
+    const replayBody = {
+      booking: {
+        id: 'booking_replayed',
+        status: BookingStatus.PENDING,
+        scheduledFor: HOLD_START.toISOString(),
+        professionalId: 'pro_123',
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    }
+
+    mocks.beginIdempotency.mockResolvedValueOnce({
+      kind: 'replay',
+      responseStatus: 201,
+      responseBody: replayBody,
+    })
+
+    const result = await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+      }),
+    )
+
+    expect(result.status).toBe(201)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      ...replayBody,
+    })
+
+    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('allows discovery finalize when lookPostId is provided without mediaId', async () => {
+    const result = await POST(
+      makeIdempotentRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+          source: 'DISCOVERY',
+          lookPostId: 'look_123',
+        },
+        'idem_discovery_1',
+      ),
+    )
+
+    expect(result.status).toBe(201)
+
+    expect(mocks.requireClient).toHaveBeenCalledTimes(1)
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: 'CLIENT',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: 'idem_discovery_1',
+      requestBody: {
+        clientId: 'client_1',
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        openingId: null,
+        addOnIds: [],
+        locationType: ServiceLocationType.SALON,
+        source: BookingSource.DISCOVERY,
+        mediaId: null,
+        lookPostId: 'look_123',
+        aftercareToken: null,
+        rebookOfBookingId: null,
+      },
+    })
+
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      holdId: 'hold_1',
+      openingId: null,
+      addOnIds: [],
+      locationType: ServiceLocationType.SALON,
+      source: BookingSource.DISCOVERY,
+      initialStatus: BookingStatus.PENDING,
+      rebookOfBookingId: null,
+      offering: {
+        id: 'offering_1',
+        professionalId: 'pro_123',
+        serviceId: 'service_1',
+        offersInSalon: true,
+        offersMobile: true,
+        salonPriceStartingAt: new Prisma.Decimal('100'),
+        salonDurationMinutes: 60,
+        mobilePriceStartingAt: new Prisma.Decimal('120'),
+        mobileDurationMinutes: 75,
+        professionalTimeZone: 'America/Los_Angeles',
+      },
+      fallbackTimeZone: 'UTC',
+      requestId: null,
+      idempotencyKey: 'idem_discovery_1',
+    })
+
+    expect(mocks.createProNotification).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      eventKey: NotificationEventKey.BOOKING_REQUEST_CREATED,
+      title: 'New booking request',
+      body: '',
+      href: '/pro/bookings/booking_1',
+      actorUserId: 'user_1',
+      bookingId: 'booking_1',
+      dedupeKey: 'PRO_NOTIF:BOOKING_REQUEST_CREATED:booking_1',
+      data: {
+        bookingId: 'booking_1',
+        bookingStatus: BookingStatus.PENDING,
+        source: BookingSource.DISCOVERY,
+        locationType: ServiceLocationType.SALON,
+      },
+    })
+
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 201,
+      responseBody: {
+        booking: {
+          id: 'booking_1',
+          status: BookingStatus.PENDING,
+          scheduledFor: HOLD_START.toISOString(),
+          professionalId: 'pro_123',
+        },
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
+      },
+    })
+
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      booking: {
+        id: 'booking_1',
+        status: BookingStatus.PENDING,
+        scheduledFor: HOLD_START.toISOString(),
+        professionalId: 'pro_123',
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
   })
 
   it('returns AFTERCARE_TOKEN_MISSING when source is aftercare without token', async () => {
@@ -515,17 +715,11 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     )
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
-    })
+    expectBookingFailPayload(await result.json(), 'AFTERCARE_TOKEN_MISSING')
 
     expect(mocks.requireClient).not.toHaveBeenCalled()
     expect(mocks.resolveAftercareAccessByToken).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
@@ -541,6 +735,7 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     )
 
     expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.resolveAftercareAccessByToken).toHaveBeenCalledWith({
       rawToken: 'token_1',
     })
@@ -578,14 +773,7 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     })
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
-    })
+    expectBookingFailPayload(await result.json(), 'AFTERCARE_NOT_COMPLETED')
   })
 
   it('returns AFTERCARE_OFFERING_MISMATCH when aftercare booking does not match offering', async () => {
@@ -610,14 +798,10 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     )
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
-    })
+    expectBookingFailPayload(
+      await result.json(),
+      'AFTERCARE_OFFERING_MISMATCH',
+    )
   })
 
   it('calls finalizeBookingFromHold with token-resolved client ownership for aftercare', async () => {
@@ -641,6 +825,7 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     )
 
     expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
 
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
       clientId: 'client_from_token',
@@ -680,6 +865,7 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
       }),
     )
 
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
       expect.objectContaining({
         clientId: 'client_1',
@@ -689,17 +875,42 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     )
   })
 
-  it('creates the booking through the boundary and notifies the pro for standard requested flow', async () => {
+  it('creates the booking through the boundary, completes idempotency, and notifies the pro for standard requested flow', async () => {
     const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-        source: 'REQUESTED',
-      }),
+      makeIdempotentRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+          source: 'REQUESTED',
+        },
+        'idem_requested_1',
+      ),
     )
 
     expect(mocks.requireClient).toHaveBeenCalledTimes(1)
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: 'CLIENT',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: 'idem_requested_1',
+      requestBody: {
+        clientId: 'client_1',
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        openingId: null,
+        addOnIds: [],
+        locationType: ServiceLocationType.SALON,
+        source: BookingSource.REQUESTED,
+        mediaId: null,
+        lookPostId: null,
+        aftercareToken: null,
+        rebookOfBookingId: null,
+      },
+    })
 
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
       clientId: 'client_1',
@@ -724,7 +935,7 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
       },
       fallbackTimeZone: 'UTC',
       requestId: null,
-      idempotencyKey: null,
+      idempotencyKey: 'idem_requested_1',
     })
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
@@ -741,6 +952,23 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
         bookingStatus: BookingStatus.PENDING,
         source: BookingSource.REQUESTED,
         locationType: ServiceLocationType.SALON,
+      },
+    })
+
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 201,
+      responseBody: {
+        booking: {
+          id: 'booking_1',
+          status: BookingStatus.PENDING,
+          scheduledFor: HOLD_START.toISOString(),
+          professionalId: 'pro_123',
+        },
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
       },
     })
 
@@ -770,6 +998,8 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
         aftercareToken: 'token_1',
       }),
     )
+
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
       professionalId: 'pro_123',
@@ -812,11 +1042,14 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     })
 
     await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-      }),
+      makeIdempotentRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+        },
+        'idem_auto_accept_1',
+      ),
     )
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
@@ -833,6 +1066,23 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
         bookingStatus: BookingStatus.ACCEPTED,
         source: BookingSource.REQUESTED,
         locationType: ServiceLocationType.SALON,
+      },
+    })
+
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 201,
+      responseBody: {
+        booking: {
+          id: 'booking_1',
+          status: BookingStatus.ACCEPTED,
+          scheduledFor: HOLD_START.toISOString(),
+          professionalId: 'pro_123',
+        },
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
       },
     })
   })
@@ -858,17 +1108,16 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     )
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
+    expectBookingFailPayload(await result.json(), 'AFTERCARE_TOKEN_INVALID', {
       error: 'That aftercare link is invalid or expired.',
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
       message: 'Aftercare access token was not found.',
     })
+
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failIdempotency).not.toHaveBeenCalled()
   })
 
-  it('maps BookingError from finalizeBookingFromHold', async () => {
+  it('maps BookingError from finalizeBookingFromHold and marks idempotency failed', async () => {
     const descriptor = getBookingErrorDescriptor('TIME_HELD')
 
     mocks.finalizeBookingFromHold.mockRejectedValueOnce(
@@ -876,33 +1125,37 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
     )
 
     const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-      }),
+      makeIdempotentRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+        },
+        'idem_time_held_1',
+      ),
     )
 
     expect(result.status).toBe(descriptor.httpStatus)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: descriptor.userMessage,
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: descriptor.message,
+    expectBookingFailPayload(await result.json(), 'TIME_HELD')
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
     })
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns internal error for unexpected failures', async () => {
+  it('returns internal error for unexpected failures and marks idempotency failed', async () => {
     mocks.finalizeBookingFromHold.mockRejectedValueOnce(new Error('boom'))
 
     const result = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-      }),
+      makeIdempotentRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+        },
+        'idem_boom_1',
+      ),
     )
 
     expect(result.status).toBe(500)
@@ -914,5 +1167,10 @@ it('allows discovery finalize when lookPostId is provided without mediaId', asyn
       uiAction: 'CONTACT_SUPPORT',
       message: 'boom',
     })
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
   })
 })

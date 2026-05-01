@@ -33,6 +33,12 @@ enum Role {
   ADMIN
 }
 
+enum IdempotencyStatus {
+  STARTED
+  COMPLETED
+  FAILED
+}
+
 enum BookingStatus {
   PENDING
   ACCEPTED
@@ -889,6 +895,7 @@ model User {
   bookingOverridePermissionsAsActor BookingOverridePermission[] @relation("BookingOverridePermissionActor")
 
   bookingCloseoutAuditLogs BookingCloseoutAuditLog[] @relation("BookingCloseoutActor")
+  idempotencyKeys          IdempotencyKey[]          @relation("UserIdempotencyKeys")
 
   // NFC attribution events
   attributionActorEvents    AttributionEvent[] @relation("AttributionActor")
@@ -917,6 +924,34 @@ model User {
   supportTicketsHandled SupportTicket[]        @relation("SupportTicketHandledBy")
   verificationDocuments VerificationDocument[]
   viralServiceRequests  ViralServiceRequest[]  @relation("ViralServiceRequestReviewedByUser")
+}
+
+model IdempotencyKey {
+  id String @id @default(cuid())
+
+  actorUserId String
+  actor       User   @relation("UserIdempotencyKeys", fields: [actorUserId], references: [id], onDelete: Cascade)
+
+  actorRole Role
+
+  route String @db.VarChar(191)
+  key   String @db.VarChar(191)
+
+  requestHash String @db.VarChar(128)
+
+  responseStatus   Int?
+  responseBodyJson Json?
+
+  status IdempotencyStatus @default(STARTED)
+
+  lockedUntil DateTime
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@unique([actorUserId, route, key])
+  @@index([status, lockedUntil])
+  @@index([actorUserId, createdAt])
 }
 
 model PhoneVerification {
@@ -1110,10 +1145,10 @@ model ProfessionalProfile {
 
   // Admin / internal
   adminPermissions           AdminPermission[]
-  adminActionLogs            AdminActionLog[]            @relation("ProfessionalLogs")
+  adminActionLogs            AdminActionLog[]               @relation("ProfessionalLogs")
   bookingOverrideAuditLogs   BookingOverrideAuditLog[]
   bookingCloseoutAuditLogs   BookingCloseoutAuditLog[]
-  bookingOverridePermissions BookingOverridePermission[] @relation("BookingOverridePermissionProfessional")
+  bookingOverridePermissions BookingOverridePermission[]    @relation("BookingOverridePermissionProfessional")
   productSales               ProductSale[]
   monthlyAnalytics           ProfessionalMonthlyAnalytics[] @relation("ProMonthlyAnalytics")
   nfcCards                   NfcCard[]
@@ -1394,20 +1429,20 @@ model Service {
 
   adminPermissions AdminPermission[]
 
-  category            ServiceCategory               @relation(fields: [categoryId], references: [id])
+  category            ServiceCategory                       @relation(fields: [categoryId], references: [id])
   offerings           ProfessionalServiceOffering[]
   bookings            Booking[]
   monthlyAnalytics    ProfessionalMonthlyServiceAnalytics[] @relation("ServiceMonthlyAnalytics")
-  lastMinuteRules     LastMinuteServiceRule[]       @relation("ServiceLastMinuteRules")
+  lastMinuteRules     LastMinuteServiceRule[]               @relation("ServiceLastMinuteRules")
   permissions         ServicePermission[]
   mediaServiceTags    MediaServiceTag[]
   waitlistEntries     WaitlistEntry[]
-  adminActionLogs     AdminActionLog[]              @relation("ServiceLogs")
-  messageThreads      MessageThread[]               @relation("ServiceThreads")
-  quotes              Quote[]                       @relation("ServiceQuotes")
+  adminActionLogs     AdminActionLog[]                      @relation("ServiceLogs")
+  messageThreads      MessageThread[]                       @relation("ServiceThreads")
+  quotes              Quote[]                               @relation("ServiceQuotes")
   bookingServiceItems BookingServiceItem[]
   favoritedBy         ServiceFavorite[]
-  offeringAddOnLinks  OfferingAddOn[]               @relation("AddOnService")
+  offeringAddOnLinks  OfferingAddOn[]                       @relation("AddOnService")
 
   lookPosts LookPost[]
 }

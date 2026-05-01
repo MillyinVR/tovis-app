@@ -1,3 +1,5 @@
+// app/api/bookings/finalize/route.ts
+
 import { prisma } from '@/lib/prisma'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import {
@@ -5,6 +7,7 @@ import {
   BookingStatus,
   NotificationEventKey,
   Prisma,
+  Role,
   type ServiceLocationType,
 } from '@prisma/client'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
@@ -21,6 +24,12 @@ import {
 } from '@/lib/booking/errors'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
 import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
+import {
+  beginIdempotency,
+  completeIdempotency,
+  failIdempotency,
+  IDEMPOTENCY_ROUTES,
+} from '@/lib/idempotency'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -95,6 +104,19 @@ type FinalizeOwnershipContext = {
   rebookOfBookingId: string | null
 }
 
+type FinalizeSuccessBody = {
+  booking: {
+    id: string
+    status: BookingStatus
+    scheduledFor: string
+    professionalId: string
+  }
+  meta: {
+    mutated: boolean
+    noOp: boolean
+  }
+}
+
 function bookingJsonFail(
   code: BookingErrorCode,
   overrides?: {
@@ -111,6 +133,28 @@ function discoveryContextMissingFail(): Response {
     userMessage: 'Discovery bookings require a look post id or media id.',
     message: 'Discovery bookings require a lookPostId or mediaId.',
   })
+}
+
+function idempotencyMissingKeyFail(): Response {
+  return jsonFail(400, 'Missing idempotency key.', {
+    code: 'IDEMPOTENCY_KEY_REQUIRED',
+  })
+}
+
+function idempotencyInProgressFail(): Response {
+  return jsonFail(409, 'A matching booking request is already in progress.', {
+    code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+  })
+}
+
+function idempotencyConflictFail(): Response {
+  return jsonFail(
+    409,
+    'This idempotency key was already used with a different request body.',
+    {
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    },
+  )
 }
 
 function pickStringArray(value: unknown): string[] {
@@ -388,7 +432,32 @@ function readFinalizeMeta(request: Request): {
   return { requestId, idempotencyKey }
 }
 
+function buildFinalizeSuccessBody(args: {
+  booking: {
+    id: string
+    status: BookingStatus
+    scheduledFor: Date
+    professionalId: string
+  }
+  meta: {
+    mutated: boolean
+    noOp: boolean
+  }
+}): FinalizeSuccessBody {
+  return {
+    booking: {
+      id: args.booking.id,
+      status: args.booking.status,
+      scheduledFor: args.booking.scheduledFor.toISOString(),
+      professionalId: args.booking.professionalId,
+    },
+    meta: args.meta,
+  }
+}
+
 export async function POST(request: Request) {
+  let idempotencyRecordId: string | null = null
+
   try {
     const { requestId, idempotencyKey } = readFinalizeMeta(request)
 
@@ -418,6 +487,48 @@ export async function POST(request: Request) {
     })
     if (ownershipOrFail instanceof Response) {
       return ownershipOrFail
+    }
+
+    if (ownershipOrFail.actorUserId) {
+      const idempotency = await beginIdempotency<FinalizeSuccessBody>({
+        actor: {
+          actorUserId: ownershipOrFail.actorUserId,
+          actorRole: Role.CLIENT,
+        },
+        route: IDEMPOTENCY_ROUTES.BOOKING_FINALIZE,
+        key: idempotencyKey,
+        requestBody: {
+          clientId: ownershipOrFail.clientId,
+          offeringId: body.offeringId,
+          holdId: body.holdId,
+          openingId: body.openingId,
+          addOnIds: body.addOnIds,
+          locationType: body.locationType,
+          source: body.source,
+          mediaId: body.mediaId,
+          lookPostId: body.lookPostId,
+          aftercareToken: body.aftercareToken,
+          rebookOfBookingId: ownershipOrFail.rebookOfBookingId,
+        },
+      })
+
+      if (idempotency.kind === 'missing_key') {
+        return idempotencyMissingKeyFail()
+      }
+
+      if (idempotency.kind === 'in_progress') {
+        return idempotencyInProgressFail()
+      }
+
+      if (idempotency.kind === 'conflict') {
+        return idempotencyConflictFail()
+      }
+
+      if (idempotency.kind === 'replay') {
+        return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+      }
+
+      idempotencyRecordId = idempotency.idempotencyRecordId
     }
 
     const result = await finalizeBookingFromHold({
@@ -451,14 +562,30 @@ export async function POST(request: Request) {
       )
     }
 
-    return jsonOk(
-      {
-        booking: result.booking,
-        meta: result.meta,
-      },
-      201,
-    )
+    const responseBody = buildFinalizeSuccessBody({
+      booking: result.booking,
+      meta: result.meta,
+    })
+
+    if (idempotencyRecordId) {
+      await completeIdempotency({
+        idempotencyRecordId,
+        responseStatus: 201,
+        responseBody,
+      })
+    }
+
+    return jsonOk(responseBody, 201)
   } catch (error: unknown) {
+    if (idempotencyRecordId) {
+      await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+        console.error(
+          'POST /api/bookings/finalize idempotency failure update error:',
+          failError,
+        )
+      })
+    }
+
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
