@@ -1,17 +1,21 @@
 export {
   beginIdempotency,
+  buildPublicAftercareTokenActorKey,
+  buildPublicConsultationTokenActorKey,
   completeIdempotency,
   failIdempotency,
   type BeginIdempotencyResult,
   type IdempotencyActor,
-} from './idempotencyLedger'
-
-export { buildRequestHash } from './requestHash'
-
-export { IDEMPOTENCY_ROUTES, type IdempotencyRoute } from './routeMeta'
+  type IdempotencyConflict,
+  type IdempotencyInProgress,
+  type IdempotencyMissingKey,
+  type IdempotencyReplay,
+  type IdempotencyStarted,
+} from '@/lib/idempotency/idempotencyLedger'
 
 export {
-  toStoredIdempotencyResponse,
-  type IdempotencyResponseBody,
-  type StoredIdempotencyResponse,
-} from './response'
+  IDEMPOTENCY_ROUTES,
+  type IdempotencyRoute,
+} from '@/lib/idempotency/routeMeta'
+
+export { buildRequestHash } from '@/lib/idempotency/requestHash'

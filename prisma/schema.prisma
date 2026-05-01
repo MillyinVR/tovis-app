@@ -929,9 +929,10 @@ model User {
 model IdempotencyKey {
   id String @id @default(cuid())
 
-  actorUserId String
-  actor       User   @relation("UserIdempotencyKeys", fields: [actorUserId], references: [id], onDelete: Cascade)
+  actorUserId String?
+  actor       User?   @relation("UserIdempotencyKeys", fields: [actorUserId], references: [id], onDelete: SetNull)
 
+  actorKey  String @db.VarChar(191)
   actorRole Role
 
   route String @db.VarChar(191)
@@ -949,9 +950,10 @@ model IdempotencyKey {
   createdAt   DateTime  @default(now())
   completedAt DateTime?
 
-  @@unique([actorUserId, route, key])
+  @@unique([actorKey, route, key])
   @@index([status, lockedUntil])
   @@index([actorUserId, createdAt])
+  @@index([actorKey, createdAt])
 }
 
 model PhoneVerification {
