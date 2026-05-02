@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingCheckoutStatus,
   BookingStatus,
+  MediaPhase,
   PaymentMethod,
   Prisma,
+  Role,
   SessionStep,
 } from '@prisma/client'
 
@@ -21,6 +23,7 @@ const mocks = vi.hoisted(() => ({
 
   txBookingFindUnique: vi.fn(),
   txBookingUpdate: vi.fn(),
+  txMediaAssetCount: vi.fn(),
   txBookingCloseoutAuditLogCreate: vi.fn(),
 }))
 
@@ -45,6 +48,9 @@ const tx = {
   booking: {
     findUnique: mocks.txBookingFindUnique,
     update: mocks.txBookingUpdate,
+  },
+  mediaAsset: {
+    count: mocks.txMediaAssetCount,
   },
   bookingCloseoutAuditLog: {
     create: mocks.txBookingCloseoutAuditLogCreate,
@@ -231,6 +237,8 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
       .mockResolvedValueOnce(booking)
       .mockResolvedValueOnce(booking)
 
+    mocks.txMediaAssetCount.mockResolvedValueOnce(1)
+
     mocks.txBookingUpdate
       .mockResolvedValueOnce({
         id: 'booking_1',
@@ -261,6 +269,14 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
     })
 
     expect(mocks.txBookingUpdate).toHaveBeenCalledTimes(2)
+
+    expect(mocks.txMediaAssetCount).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking_1',
+        phase: MediaPhase.AFTER,
+        uploadedByRole: Role.PRO,
+      },
+    })
 
     const checkoutUpdateArgs = mocks.txBookingUpdate.mock.calls[0]?.[0]
     expect(checkoutUpdateArgs.where).toEqual({ id: 'booking_1' })
@@ -306,29 +322,83 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
     })
   })
 
-  it('rejects checkout updates before aftercare is finalized', async () => {
-  const booking = makeClientCheckoutBooking({
-    aftercareSummary: {
-      id: 'aftercare_1',
-      sentToClientAt: null,
-    },
-  })
+  it('does not complete booking closeout when after photos are missing', async () => {
+    const booking = makeClientCheckoutBooking({
+      status: BookingStatus.ACCEPTED,
+      sessionStep: SessionStep.AFTER_PHOTOS,
+      finishedAt: FINISHED_AT,
+      selectedPaymentMethod: null,
+    })
 
-  mocks.txBookingFindUnique.mockResolvedValue(booking)
+    mocks.txBookingFindUnique
+      .mockResolvedValueOnce(booking)
+      .mockResolvedValueOnce(booking)
 
-  await expect(
-    updateClientBookingCheckout({
+    mocks.txMediaAssetCount.mockResolvedValueOnce(0)
+
+    mocks.txBookingUpdate.mockResolvedValueOnce({
+      id: 'booking_1',
+      checkoutStatus: BookingCheckoutStatus.PAID,
+      selectedPaymentMethod: PaymentMethod.ZELLE,
+      serviceSubtotalSnapshot: new Prisma.Decimal(100),
+      productSubtotalSnapshot: new Prisma.Decimal(20),
+      subtotalSnapshot: new Prisma.Decimal(100),
+      tipAmount: new Prisma.Decimal(10),
+      taxAmount: new Prisma.Decimal(0),
+      discountAmount: new Prisma.Decimal(0),
+      totalAmount: new Prisma.Decimal(130),
+      paymentAuthorizedAt: TEST_NOW,
+      paymentCollectedAt: TEST_NOW,
+    })
+
+    await updateClientBookingCheckout({
       bookingId: 'booking_1',
       clientId: 'client_1',
-      tipAmount: '5.00',
-      selectedPaymentMethod: PaymentMethod.CASH,
-    }),
-  ).rejects.toMatchObject({
-    code: 'FORBIDDEN',
+      tipAmount: '10.00',
+      selectedPaymentMethod: PaymentMethod.ZELLE,
+      checkoutStatus: BookingCheckoutStatus.PAID,
+      markPaymentAuthorized: true,
+      markPaymentCollected: true,
+    })
+
+    expect(mocks.txMediaAssetCount).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking_1',
+        phase: MediaPhase.AFTER,
+        uploadedByRole: Role.PRO,
+      },
+    })
+
+    expect(mocks.txBookingUpdate).toHaveBeenCalledTimes(1)
+    expect(mocks.txBookingUpdate.mock.calls[0]?.[0].data).not.toMatchObject({
+      status: BookingStatus.COMPLETED,
+      sessionStep: SessionStep.DONE,
+    })
   })
 
-  expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
-})
+  it('rejects checkout updates before aftercare is finalized', async () => {
+    const booking = makeClientCheckoutBooking({
+      aftercareSummary: {
+        id: 'aftercare_1',
+        sentToClientAt: null,
+      },
+    })
+
+    mocks.txBookingFindUnique.mockResolvedValue(booking)
+
+    await expect(
+      updateClientBookingCheckout({
+        bookingId: 'booking_1',
+        clientId: 'client_1',
+        tipAmount: '5.00',
+        selectedPaymentMethod: PaymentMethod.CASH,
+      }),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    })
+
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+  })
 
   it('rejects confirming payment without a payment method', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(

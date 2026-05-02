@@ -239,6 +239,7 @@ describe('conflictQueries', () => {
             in: [
               BookingStatus.PENDING,
               BookingStatus.ACCEPTED,
+              BookingStatus.IN_PROGRESS,
               BookingStatus.COMPLETED,
             ],
           },
@@ -250,6 +251,52 @@ describe('conflictQueries', () => {
         },
         take: 2000,
       })
+    })
+
+    it('treats IN_PROGRESS bookings as active conflicts', async () => {
+      prismaMockFns.bookingFindMany.mockResolvedValue([
+        {
+          scheduledFor: new Date('2026-03-10T10:15:00.000Z'),
+          totalDurationMinutes: 45,
+          bufferMinutes: 0,
+        },
+      ])
+
+      const result = await hasBookingConflict({
+        professionalId,
+        requestedStart,
+        requestedEnd,
+      })
+
+      expect(result).toBe(true)
+      expect(prismaMockFns.bookingFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: {
+              in: expect.arrayContaining([BookingStatus.IN_PROGRESS]),
+            },
+          }),
+        }),
+      )
+    })
+
+    it('does not include CANCELLED as a blocking booking status', async () => {
+      await hasBookingConflict({
+        professionalId,
+        requestedStart,
+        requestedEnd,
+      })
+
+      const call = prismaMockFns.bookingFindMany.mock.calls[0]?.[0]
+      const statuses = call?.where?.status?.in
+
+      expect(statuses).toEqual([
+        BookingStatus.PENDING,
+        BookingStatus.ACCEPTED,
+        BookingStatus.IN_PROGRESS,
+        BookingStatus.COMPLETED,
+      ])
+      expect(statuses).not.toContain(BookingStatus.CANCELLED)
     })
 
     it('returns false when no booking overlaps', async () => {

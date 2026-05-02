@@ -1961,7 +1961,26 @@ function isCloseoutPaymentAndAftercareComplete(args: {
   )
 }
 
-function canCompleteBookingCloseout(args: {
+async function countProAfterMediaForBooking(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+}): Promise<number> {
+  return args.tx.mediaAsset.count({
+    where: {
+      bookingId: args.bookingId,
+      phase: MediaPhase.AFTER,
+      uploadedByRole: Role.PRO,
+    },
+  })
+}
+
+function hasRequiredAfterPhotos(
+  afterMediaCount: number | null | undefined,
+): boolean {
+  return (afterMediaCount ?? 0) > 0
+}
+
+function isPaymentAndAftercareCloseoutCandidate(args: {
   bookingStatus: BookingStatus | null | undefined
   aftercareSentAt: Date | null | undefined
   checkoutStatus: BookingCheckoutStatus | null | undefined
@@ -1979,6 +1998,19 @@ function canCompleteBookingCloseout(args: {
     checkoutStatus: args.checkoutStatus,
     paymentCollectedAt: args.paymentCollectedAt,
   })
+}
+
+function canCompleteBookingCloseout(args: {
+  bookingStatus: BookingStatus | null | undefined
+  aftercareSentAt: Date | null | undefined
+  checkoutStatus: BookingCheckoutStatus | null | undefined
+  paymentCollectedAt: Date | null | undefined
+  afterMediaCount: number | null | undefined
+}): boolean {
+  return (
+    isPaymentAndAftercareCloseoutCandidate(args) &&
+    hasRequiredAfterPhotos(args.afterMediaCount)
+  )
 }
 
 function isReviewEligibleCloseout(args: {
@@ -2012,6 +2044,7 @@ function buildCompletionBlockers(args: {
   bookingFinished: boolean
   checkoutStatus: BookingCheckoutStatus | null | undefined
   paymentCollectedAt: Date | null | undefined
+  afterMediaCount: number | null | undefined
 }): string[] {
   if (!args.sendToClient || args.bookingFinished) return []
 
@@ -2025,6 +2058,9 @@ function buildCompletionBlockers(args: {
     blockers.push('CHECKOUT_NOT_COMPLETE')
   }
 
+  if (!hasRequiredAfterPhotos(args.afterMediaCount)) {
+    blockers.push('AFTER_PHOTOS_REQUIRED')
+  }
   return blockers
 }
 
@@ -8713,61 +8749,69 @@ await createUpdateClientNotification({
   }
 
   let bookingFinished = false
-let bookingNow: {
-  status: BookingStatus
-  sessionStep: SessionStep
-  finishedAt: Date | null
-} | null = null
+  let bookingNow: {
+    status: BookingStatus
+    sessionStep: SessionStep
+    finishedAt: Date | null
+  } | null = null
 
-if (args.sendToClient) {
-const shouldCompleteBooking = canCompleteBookingCloseout({
-  bookingStatus: booking.status,
-  aftercareSentAt: aftercare.sentToClientAt,
-  checkoutStatus: booking.checkoutStatus,
-  paymentCollectedAt: booking.paymentCollectedAt,
-})
+  const afterMediaCount = args.sendToClient
+    ? await countProAfterMediaForBooking({
+        tx: args.tx,
+        bookingId: booking.id,
+      })
+    : 0
 
-  if (shouldCompleteBooking) {
-    recordStepTransition({
-      from: booking.sessionStep ?? SessionStep.NONE,
-      to: SessionStep.DONE,
-      actor: 'PRO',
-      route: 'lib/booking/writeBoundary.ts:upsertBookingAftercare#complete',
-      bookingId: booking.id,
-      professionalId: args.professionalId,
-    })
-    recordStatusTransition({
-      from: booking.status,
-      to: BookingStatus.COMPLETED,
-      actor: 'PRO',
-      route: 'lib/booking/writeBoundary.ts:upsertBookingAftercare#complete',
-      bookingId: booking.id,
-      professionalId: args.professionalId,
+  if (args.sendToClient) {
+    const shouldCompleteBooking = canCompleteBookingCloseout({
+      bookingStatus: booking.status,
+      aftercareSentAt: aftercare.sentToClientAt,
+      checkoutStatus: booking.checkoutStatus,
+      paymentCollectedAt: booking.paymentCollectedAt,
+      afterMediaCount,
     })
 
-    const updatedBooking = await args.tx.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: BookingStatus.COMPLETED,
-        sessionStep: SessionStep.DONE,
-        finishedAt: booking.finishedAt ?? now,
-      },
-      select: {
-        status: true,
-        sessionStep: true,
-        finishedAt: true,
-      } satisfies Prisma.BookingSelect,
-    })
+    if (shouldCompleteBooking) {
+      recordStepTransition({
+        from: booking.sessionStep ?? SessionStep.NONE,
+        to: SessionStep.DONE,
+        actor: 'PRO',
+        route: 'lib/booking/writeBoundary.ts:upsertBookingAftercare#complete',
+        bookingId: booking.id,
+        professionalId: args.professionalId,
+      })
+      recordStatusTransition({
+        from: booking.status,
+        to: BookingStatus.COMPLETED,
+        actor: 'PRO',
+        route: 'lib/booking/writeBoundary.ts:upsertBookingAftercare#complete',
+        bookingId: booking.id,
+        professionalId: args.professionalId,
+      })
 
-    bookingNow = {
-      status: updatedBooking.status,
-      sessionStep: updatedBooking.sessionStep ?? SessionStep.NONE,
-      finishedAt: updatedBooking.finishedAt,
+      const updatedBooking = await args.tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          status: BookingStatus.COMPLETED,
+          sessionStep: SessionStep.DONE,
+          finishedAt: booking.finishedAt ?? now,
+        },
+        select: {
+          status: true,
+          sessionStep: true,
+          finishedAt: true,
+        } satisfies Prisma.BookingSelect,
+      })
+
+      bookingNow = {
+        status: updatedBooking.status,
+        sessionStep: updatedBooking.sessionStep ?? SessionStep.NONE,
+        finishedAt: updatedBooking.finishedAt,
+      }
+
+      bookingFinished = true
     }
-
-    bookingFinished = true
   }
-}
 
 const oldAftercareState = {
   notes: normalizeReason(booking.aftercareSummary?.notes),
@@ -8844,6 +8888,7 @@ return {
       bookingFinished,
       checkoutStatus: booking.checkoutStatus,
       paymentCollectedAt: booking.paymentCollectedAt,
+      afterMediaCount,
     }),
     booking: bookingNow,
     timeZoneUsed,
@@ -8969,12 +9014,30 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
   }
 }
 
+  const paymentCollectedAtForCloseout = shouldSetCollectedAt
+    ? booking.paymentCollectedAt ?? args.now
+    : booking.paymentCollectedAt
+
+  const closeoutCandidate = isPaymentAndAftercareCloseoutCandidate({
+    bookingStatus: booking.status,
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: nextCheckoutStatus,
+    paymentCollectedAt: paymentCollectedAtForCloseout,
+  })
+
+  const afterMediaCount = closeoutCandidate
+    ? await countProAfterMediaForBooking({
+        tx: args.tx,
+        bookingId: booking.id,
+      })
+    : 0
+
   const shouldCompleteBooking = canCompleteBookingCloseout({
     bookingStatus: booking.status,
     aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
     checkoutStatus: nextCheckoutStatus,
-    paymentCollectedAt:
-      shouldSetCollectedAt ? booking.paymentCollectedAt ?? args.now : booking.paymentCollectedAt,
+    paymentCollectedAt: paymentCollectedAtForCloseout,
+    afterMediaCount,
   })
 
   const updated = await args.tx.booking.update({
@@ -9292,11 +9355,26 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
     } satisfies Prisma.BookingSelect,
   })
 
+  const closeoutCandidate = isPaymentAndAftercareCloseoutCandidate({
+    bookingStatus: booking.status,
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: updated.checkoutStatus,
+    paymentCollectedAt: updated.paymentCollectedAt,
+  })
+
+  const afterMediaCount = closeoutCandidate
+    ? await countProAfterMediaForBooking({
+        tx: args.tx,
+        bookingId: booking.id,
+      })
+    : 0
+
   const shouldCompleteBooking = canCompleteBookingCloseout({
     bookingStatus: booking.status,
     aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
     checkoutStatus: updated.checkoutStatus,
     paymentCollectedAt: updated.paymentCollectedAt,
+    afterMediaCount,
   })
 
   if (
