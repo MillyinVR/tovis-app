@@ -478,7 +478,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
-  it('POST rejects storage paths outside the booking prefix before idempotency', async () => {
+  it('POST rejects storage paths outside the booking phase prefix before idempotency', async () => {
     const result = await POST(
       makePostRequest({
         body: {
@@ -492,7 +492,51 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     expect(result.status).toBe(400)
     await expect(result.json()).resolves.toEqual({
       ok: false,
-      error: 'storagePath must be under bookings/<bookingId>/.',
+      error: 'storagePath must be under bookings/<bookingId>/<phase>/.',
+    })
+
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
+  })
+
+  it('POST rejects storage paths outside the submitted phase prefix before idempotency', async () => {
+    const result = await POST(
+      makePostRequest({
+        body: {
+          ...validBody,
+          phase: 'BEFORE',
+          storagePath: 'bookings/booking_1/after/main.jpg',
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'storagePath must be under bookings/<bookingId>/<phase>/.',
+    })
+
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
+  })
+
+  it('POST rejects thumb paths outside the submitted phase prefix before idempotency', async () => {
+    const result = await POST(
+      makePostRequest({
+        body: {
+          ...validBody,
+          phase: 'BEFORE',
+          thumbPath: 'bookings/booking_1/after/thumb.jpg',
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'thumbPath must be under bookings/<bookingId>/<phase>/.',
     })
 
     expect(mocks.beginIdempotency).not.toHaveBeenCalled()
