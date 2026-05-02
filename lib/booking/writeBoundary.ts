@@ -121,6 +121,7 @@ import {
   recordStatusTransition,
   recordStepTransition,
 } from '@/lib/booking/lifecycleContract'
+import { checkProReadinessWithDb } from '@/lib/pro/readiness/proReadiness'
 // Side-effect import: registers the Sentry sink for lifecycle drift events.
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
@@ -2721,6 +2722,22 @@ function mapSchedulingReadinessFailure(
     case 'COORDINATES_REQUIRED':
       return buildHoldCreateFailure('COORDINATES_REQUIRED')
   }
+}
+
+async function assertProfessionalIsBookingReady(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+}): Promise<void> {
+  const readiness = await checkProReadinessWithDb({
+    db: args.tx,
+    professionalId: args.professionalId,
+  })
+
+  if (readiness.ok) return
+
+  throw bookingError('PRO_NOT_READY', {
+    message: `Professional is not ready to accept bookings: ${readiness.blockers.join(', ')}`,
+  })
 }
 
 function makeWorkingHoursGuardMessage(code: WorkingHoursGuardCode): string {
@@ -5375,7 +5392,12 @@ async function performLockedCreateHold(args: {
     clientAddressId,
   } = args
 
-const startedAtMs = Date.now()
+  await assertProfessionalIsBookingReady({
+    tx,
+    professionalId: offering.professionalId,
+  })
+
+  const startedAtMs = Date.now()
   let afterClientAddressLoadMs = startedAtMs
   let afterValidatedContextMs = startedAtMs
   let afterHoldPolicyMs = startedAtMs
@@ -6486,6 +6508,11 @@ async function performLockedFinalizeBookingFromHold(args: {
     }
   }
 
+  await assertProfessionalIsBookingReady({
+    tx: args.tx,
+    professionalId: args.offering.professionalId,
+  })
+
   const hold = await args.tx.bookingHold.findUnique({
     where: { id: args.holdId },
     select: FINALIZE_HOLD_SELECT,
@@ -6980,6 +7007,11 @@ async function performLockedCreateProBooking(args: {
     })
     if (replayed) return replayed
   }
+
+  await assertProfessionalIsBookingReady({
+    tx: args.tx,
+    professionalId: args.professionalId,
+  })
 
   const normalizedOverrideReason = assertExplicitOverrideReasonIfNeeded({
     allowShortNotice: args.allowShortNotice,

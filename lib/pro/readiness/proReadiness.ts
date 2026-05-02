@@ -2,10 +2,15 @@
 //
 // Evaluates whether a professional is "live" and bookable.
 // Used by: dashboard banners, profile publishing, discovery/search filters,
-// availability bootstrap/day routes, and POST /api/bookings/finalize.
+// availability bootstrap/day routes, and booking mutation gates.
 //
 
-import { ProfessionalLocationType, VerificationStatus } from '@prisma/client'
+import {
+  Prisma,
+  ProfessionalLocationType,
+  VerificationStatus,
+} from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 
@@ -36,8 +41,6 @@ const proReadinessSelect = {
   mobileBasePostalCode: true,
   verificationStatus: true,
   locations: {
-    // Validate ALL locations (not just currently bookable) so the publish
-    // route can determine which ones are safe to activate.
     select: {
       id: true,
       type: true,
@@ -71,64 +74,51 @@ type WorkingDay = {
 
 type WorkingHoursShape = Record<string, WorkingDay>
 
+const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+
 function isValidWorkingHours(raw: unknown): boolean {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
 
-  const wh = raw as WorkingHoursShape
-  const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  const workingHours = raw as WorkingHoursShape
 
-  // Must have at least these 7 keys
   for (const day of DAY_KEYS) {
-    if (!(day in wh)) return false
+    if (!(day in workingHours)) return false
   }
 
-  // At least one day must be enabled with valid hours
-  const hasEnabledDay = DAY_KEYS.some((day) => {
-    const d = wh[day]
+  return DAY_KEYS.some((day) => {
+    const value = workingHours[day]
+
     return (
-      d?.enabled === true &&
-      typeof d.start === 'string' &&
-      typeof d.end === 'string' &&
-      d.start.length > 0 &&
-      d.end.length > 0
+      value?.enabled === true &&
+      typeof value.start === 'string' &&
+      typeof value.end === 'string' &&
+      value.start.trim().length > 0 &&
+      value.end.trim().length > 0
     )
   })
-
-  return hasEnabledDay
 }
 
 // ─── Core evaluation ──────────────────────────────────────────────────────────
 
-type ProReadinessRecord = {
-  mobileRadiusMiles: number | null
-  mobileBasePostalCode: string | null
-  verificationStatus: VerificationStatus
-  locations: Array<{
-    id: string
-    type: ProfessionalLocationType
-    formattedAddress: string | null
-    timeZone: string | null
-    workingHours: unknown
-    isBookable: boolean
-  }>
-  offerings: Array<{
-    id: string
-    offersInSalon: boolean
-    offersMobile: boolean
-    salonPriceStartingAt: unknown
-    salonDurationMinutes: number | null
-    mobilePriceStartingAt: unknown
-    mobileDurationMinutes: number | null
-  }>
+type ProReadinessRecord = Prisma.ProfessionalProfileGetPayload<{
+  select: typeof proReadinessSelect
+}>
+
+type ProReadinessDb = Pick<Prisma.TransactionClient, 'professionalProfile'>
+
+function isSalonLikeLocation(type: ProfessionalLocationType): boolean {
+  return (
+    type === ProfessionalLocationType.SALON ||
+    type === ProfessionalLocationType.SUITE
+  )
 }
 
 function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
   const blockers: ProReadinessBlocker[] = []
 
   // ── Verification ──────────────────────────────────────────────────────────
-  // PENDING_MANUAL_REVIEW is intentionally allowed — pros in manual review can
-  // still list and accept bookings while their license is being verified by ops.
-  // Only REJECTED or NEEDS_INFO (which require pro action) block readiness.
+  // PENDING/manual-review style states are intentionally allowed for booking
+  // readiness. REJECTED and NEEDS_INFO require action and block readiness.
   if (
     pro.verificationStatus === VerificationStatus.REJECTED ||
     pro.verificationStatus === VerificationStatus.NEEDS_INFO
@@ -138,75 +128,95 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
 
   // ── Offerings ─────────────────────────────────────────────────────────────
   const activeOfferings = pro.offerings ?? []
+
   if (activeOfferings.length === 0) {
     blockers.push('NO_ACTIVE_OFFERING')
   }
 
   // ── Locations ─────────────────────────────────────────────────────────────
-  // Evaluate ALL locations (not just currently bookable ones) so the publish
-  // route can determine which location IDs are safe to activate.
+  // Booking readiness is based only on locations explicitly marked bookable.
+  // Draft/unbookable locations should neither make a Pro bookable nor block an
+  // otherwise valid bookable location.
   const allLocations = pro.locations ?? []
-  if (allLocations.length === 0) {
+  const bookableLocations = allLocations.filter((location) =>
+    Boolean(location.isBookable),
+  )
+
+  if (bookableLocations.length === 0) {
     blockers.push('NO_BOOKABLE_LOCATION')
   }
 
-  // Identify which locations are individually ready (have valid timezone + hours)
-  const readyLocationIds: string[] = []
-  for (const loc of allLocations) {
-    const hasTimezone = Boolean(loc.timeZone) && isValidIanaTimeZone(loc.timeZone)
-    const hasWorkingHours = isValidWorkingHours(loc.workingHours)
-    const hasSalonAddress = (
-      loc.type !== ProfessionalLocationType.SALON &&
-      loc.type !== ProfessionalLocationType.SUITE
-    ) || Boolean(loc.formattedAddress)
-
-    if (hasTimezone && hasWorkingHours && hasSalonAddress) {
-      readyLocationIds.push(loc.id)
-    }
-  }
-
-  const salonLocations = allLocations.filter(
-    (l) => l.type === ProfessionalLocationType.SALON || l.type === ProfessionalLocationType.SUITE,
-  )
-  const mobileLocation = allLocations.find(
-    (l) => l.type === ProfessionalLocationType.MOBILE_BASE,
+  const anyMissingTimezone = bookableLocations.some(
+    (location) =>
+      !location.timeZone || !isValidIanaTimeZone(location.timeZone),
   )
 
-  // Validate location-level fields across all locations
-  const anyMissingTimezone = allLocations.some(
-    (l) => !l.timeZone || !isValidIanaTimeZone(l.timeZone),
-  )
   if (anyMissingTimezone) {
     blockers.push('LOCATION_MISSING_TIMEZONE')
   }
 
-  const anyMissingWorkingHours = allLocations.some(
-    (l) => !isValidWorkingHours(l.workingHours),
+  const anyMissingWorkingHours = bookableLocations.some(
+    (location) => !isValidWorkingHours(location.workingHours),
   )
+
   if (anyMissingWorkingHours) {
     blockers.push('LOCATION_MISSING_WORKING_HOURS')
   }
 
-  // Salon-specific checks
-  const anySalonMissingAddress = salonLocations.some((l) => !l.formattedAddress)
+  const bookableSalonLocations = bookableLocations.filter((location) =>
+    isSalonLikeLocation(location.type),
+  )
+
+  const anySalonMissingAddress = bookableSalonLocations.some(
+    (location) => !location.formattedAddress,
+  )
+
   if (anySalonMissingAddress) {
     blockers.push('SALON_MISSING_ADDRESS')
   }
 
-  // Mobile-specific checks
-  if (mobileLocation) {
+  const bookableMobileLocation = bookableLocations.find(
+    (location) => location.type === ProfessionalLocationType.MOBILE_BASE,
+  )
+
+  if (bookableMobileLocation) {
     const hasMobileBase =
       Boolean(pro.mobileBasePostalCode) && Boolean(pro.mobileRadiusMiles)
+
     if (!hasMobileBase) {
       blockers.push('MOBILE_MISSING_BASE_CONFIG')
     }
   }
 
-  if (readyLocationIds.length === 0 && allLocations.length > 0) {
-    // All locations have validation errors — surface NO_BOOKABLE_LOCATION
-    // in addition to the specific field errors.
+  const readyLocationIds = bookableLocations
+    .filter((location) => {
+      const hasTimezone =
+        Boolean(location.timeZone) && isValidIanaTimeZone(location.timeZone)
+      const hasWorkingHours = isValidWorkingHours(location.workingHours)
+      const hasSalonAddress =
+        !isSalonLikeLocation(location.type) || Boolean(location.formattedAddress)
+
+      return hasTimezone && hasWorkingHours && hasSalonAddress
+    })
+    .map((location) => location.id)
+
+  if (readyLocationIds.length === 0 && bookableLocations.length > 0) {
     blockers.push('NO_BOOKABLE_LOCATION')
   }
+
+  const readyLocationIdSet = new Set(readyLocationIds)
+
+  const readyBookableLocations = bookableLocations.filter((location) =>
+    readyLocationIdSet.has(location.id),
+  )
+
+  const salonLocations = readyBookableLocations.filter((location) =>
+    isSalonLikeLocation(location.type),
+  )
+
+  const mobileLocation = readyBookableLocations.find(
+    (location) => location.type === ProfessionalLocationType.MOBILE_BASE,
+  )
 
   // ── Offering price/duration checks per mode ───────────────────────────────
   if (activeOfferings.length > 0) {
@@ -215,11 +225,13 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
 
     if (hasSalonMode) {
       const missingSalon = activeOfferings
-        .filter((o) => o.offersInSalon)
+        .filter((offering) => offering.offersInSalon)
         .some(
-          (o) =>
-            o.salonPriceStartingAt == null || o.salonDurationMinutes == null,
+          (offering) =>
+            offering.salonPriceStartingAt == null ||
+            offering.salonDurationMinutes == null,
         )
+
       if (missingSalon) {
         blockers.push('OFFERING_MISSING_SALON_PRICE_OR_DURATION')
       }
@@ -227,33 +239,43 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
 
     if (hasMobileMode) {
       const missingMobile = activeOfferings
-        .filter((o) => o.offersMobile)
+        .filter((offering) => offering.offersMobile)
         .some(
-          (o) =>
-            o.mobilePriceStartingAt == null || o.mobileDurationMinutes == null,
+          (offering) =>
+            offering.mobilePriceStartingAt == null ||
+            offering.mobileDurationMinutes == null,
         )
+
       if (missingMobile) {
         blockers.push('OFFERING_MISSING_MOBILE_PRICE_OR_DURATION')
       }
     }
   }
 
-  if (blockers.length > 0) {
-    return { ok: false, blockers: [...new Set(blockers)] }
+  const uniqueBlockers = [...new Set(blockers)]
+
+  if (uniqueBlockers.length > 0) {
+    return { ok: false, blockers: uniqueBlockers }
   }
 
   // ── Determine live modes ──────────────────────────────────────────────────
   const liveModes: LiveBookingMode[] = []
 
-  if (salonLocations.length > 0 && activeOfferings.some((o) => o.offersInSalon)) {
+  if (
+    salonLocations.length > 0 &&
+    activeOfferings.some((offering) => offering.offersInSalon)
+  ) {
     liveModes.push('SALON')
   }
-  if (mobileLocation && activeOfferings.some((o) => o.offersMobile)) {
+
+  if (
+    mobileLocation &&
+    activeOfferings.some((offering) => offering.offersMobile)
+  ) {
     liveModes.push('MOBILE')
   }
 
   if (liveModes.length === 0) {
-    // Edge case: locations + offerings exist but no mode overlap
     return {
       ok: false,
       blockers: ['NO_ACTIVE_OFFERING'],
@@ -265,18 +287,12 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Loads all fields needed for readiness evaluation from the DB and returns
- * a structured `ProReadiness` result.
- *
- * Callers that already have the data can use `evaluateProReadinessFromData`
- * to avoid an extra DB round-trip.
- */
-export async function checkProReadiness(
-  professionalId: string,
-): Promise<ProReadiness> {
-  const pro = await prisma.professionalProfile.findUnique({
-    where: { id: professionalId },
+export async function checkProReadinessWithDb(args: {
+  db: ProReadinessDb
+  professionalId: string
+}): Promise<ProReadiness> {
+  const pro = await args.db.professionalProfile.findUnique({
+    where: { id: args.professionalId },
     select: proReadinessSelect,
   })
 
@@ -284,7 +300,16 @@ export async function checkProReadiness(
     return { ok: false, blockers: ['NO_BOOKABLE_LOCATION'] }
   }
 
-  return evaluateProReadiness(pro as ProReadinessRecord)
+  return evaluateProReadiness(pro)
+}
+
+export async function checkProReadiness(
+  professionalId: string,
+): Promise<ProReadiness> {
+  return checkProReadinessWithDb({
+    db: prisma,
+    professionalId,
+  })
 }
 
 export { evaluateProReadiness, proReadinessSelect }

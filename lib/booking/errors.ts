@@ -17,6 +17,7 @@ export type BookingErrorCode =
   | "BOOKING_NOT_FOUND"
   | "HOLD_NOT_FOUND"
   | "OFFERING_NOT_FOUND"
+  | "PRO_NOT_READY"
   | "LOCATION_NOT_FOUND"
   | "FORBIDDEN"
   | "HOLD_FORBIDDEN"
@@ -213,6 +214,14 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Offering not found.",
     userMessage: "This service is no longer available.",
+  },
+  PRO_NOT_READY: {
+    httpStatus: 409,
+    retryable: false,
+    uiAction: "REFRESH_AVAILABILITY",
+    message: "Professional is not ready to accept bookings.",
+    userMessage:
+      "This professional is not currently accepting bookings. Please choose another provider or try again later.",
   },
   LOCATION_NOT_FOUND: {
     httpStatus: 409,
