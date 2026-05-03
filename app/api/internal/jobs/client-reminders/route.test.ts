@@ -435,7 +435,7 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
         processedAt: null,
       },
       data: {
-        failedAt: TEST_NOW,
+        failedAt: null,
         lastError: 'Reminder delivery failed',
       },
     })
@@ -504,7 +504,7 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
         processedAt: null,
       },
       data: {
-        failedAt: TEST_NOW,
+        failedAt: null,
         lastError: 'Reminder delivery failed',
       },
     })

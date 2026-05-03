@@ -1042,6 +1042,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       bookingId: 'booking_1',
       aftercareId: 'aftercare_1',
       aftercareVersion: 4,
+      issuedByUserId: 'user_1',
       recipientUserId: null,
       recipientEmail: 'client@example.com',
       recipientPhone: null,

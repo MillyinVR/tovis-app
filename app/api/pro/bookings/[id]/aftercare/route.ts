@@ -862,6 +862,7 @@ function resolveAftercareRecipientTimeZone(
 async function maybeQueueAftercareAccessDelivery(args: {
   bookingId: string
   professionalId: string
+  actorUserId: string
   aftercareId: string
   aftercareVersion: number
   shouldAttempt: boolean
@@ -930,6 +931,7 @@ async function maybeQueueAftercareAccessDelivery(args: {
       bookingId: booking.id,
       aftercareId: args.aftercareId,
       aftercareVersion: args.aftercareVersion,
+      issuedByUserId: args.actorUserId,
       recipientUserId: booking.client.userId ?? null,
       recipientEmail,
       recipientPhone,
@@ -1120,6 +1122,7 @@ export async function POST(req: Request, ctx: Ctx) {
     const aftercareAccessDelivery = await maybeQueueAftercareAccessDelivery({
       bookingId,
       professionalId,
+      actorUserId,
       aftercareId: result.aftercare.id,
       aftercareVersion: result.aftercare.version,
       shouldAttempt:

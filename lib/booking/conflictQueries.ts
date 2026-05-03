@@ -104,6 +104,7 @@ export type TimeRangeConflictCode = 'BLOCKED' | 'BOOKING' | 'HOLD'
 const BOOKING_BLOCKING_STATUSES: BookingStatus[] = [
   BookingStatus.PENDING,
   BookingStatus.ACCEPTED,
+  BookingStatus.IN_PROGRESS,
   BookingStatus.COMPLETED,
 ]
 

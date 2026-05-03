@@ -98,9 +98,8 @@ async function markReminderProcessedIfPending(args: {
   return result.count === 1
 }
 
-async function markReminderFailedIfPending(args: {
+async function markReminderRetryableFailureIfPending(args: {
   rowId: string
-  failedAt: Date
   error: string
 }): Promise<boolean> {
   const result = await prisma.scheduledClientNotification.updateMany({
@@ -110,7 +109,7 @@ async function markReminderFailedIfPending(args: {
       processedAt: null,
     },
     data: {
-      failedAt: args.failedAt,
+      failedAt: null,
       lastError: args.error,
     },
   })
@@ -191,13 +190,13 @@ async function processReminder(args: {
   } catch (err: unknown) {
     const message = getErrorMessage(err)
 
-    const markedFailed = await markReminderFailedIfPending({
-      rowId: args.rowId,
-      failedAt: args.now,
-      error: message,
-    })
+    const markedRetryableFailure =
+      await markReminderRetryableFailureIfPending({
+        rowId: args.rowId,
+        error: message,
+      })
 
-    if (!markedFailed) {
+    if (!markedRetryableFailure) {
       return {
         id: args.rowId,
         status: 'skipped',

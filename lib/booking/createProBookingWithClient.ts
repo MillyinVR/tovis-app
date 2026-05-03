@@ -15,6 +15,7 @@ import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClien
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
+import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
 
 type NewClientInput = {
   firstName?: unknown
@@ -269,6 +270,16 @@ async function tryEnqueueInviteDelivery(args: {
 export async function createProBookingWithClient(
   args: CreateProBookingWithClientArgs,
 ): Promise<CreateProBookingWithClientResult> {
+  const readiness = await checkProReadiness(args.professionalId)
+
+  if (!readiness.ok) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'This professional is not currently accepting bookings.',
+      code: 'PRO_NOT_READY',
+    }
+  }
   const normalizedClient = normalizeClientInput(args.client)
   const normalizedServiceAddress = normalizeServiceAddressInput(
     args.serviceAddress,

@@ -18,6 +18,7 @@ const LOCATION_TIME_ZONE = 'America/Los_Angeles'
 
 const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
+  checkProReadinessWithDb: vi.fn(),
 
   buildBookingOverrideAuditRows: vi.fn(),
   assertCanUseBookingOverride: vi.fn(),
@@ -44,6 +45,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
   withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
+}))
+
+vi.mock('@/lib/pro/readiness/proReadiness', () => ({
+  checkProReadinessWithDb: mocks.checkProReadinessWithDb,
 }))
 
 vi.mock('@/lib/booking/overrideAudit', () => ({
@@ -181,6 +186,12 @@ describe('lib/booking/writeBoundary override audit', () => {
     vi.useFakeTimers()
     vi.setSystemTime(TEST_NOW)
 
+    mocks.checkProReadinessWithDb.mockResolvedValue({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_1'],
+    })
+
     mocks.withLockedProfessionalTransaction.mockImplementation(
       async (
         _professionalId: string,
@@ -273,6 +284,46 @@ describe('lib/booking/writeBoundary override audit', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('blocks pro-created bookings when the professional is not booking-ready', async () => {
+    mocks.checkProReadinessWithDb.mockResolvedValueOnce({
+      ok: false,
+      blockers: ['NO_BOOKABLE_LOCATION'],
+    })
+
+    await expect(
+      createProBooking({
+        professionalId: PROFESSIONAL_ID,
+        actorUserId: 'user_1',
+        overrideReason: null,
+        clientId: CLIENT_ID,
+        offeringId: 'offering_1',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        scheduledFor: REQUESTED_START,
+        clientAddressId: null,
+        internalNotes: null,
+        requestedBufferMinutes: null,
+        requestedTotalDurationMinutes: null,
+        allowOutsideWorkingHours: false,
+        allowShortNotice: false,
+        allowFarFuture: false,
+      }),
+    ).rejects.toMatchObject({
+      code: 'PRO_NOT_READY',
+    })
+
+    expect(mocks.checkProReadinessWithDb).toHaveBeenCalledWith({
+      db: tx,
+      professionalId: PROFESSIONAL_ID,
+    })
+
+    expect(mocks.txClientProfileFindUnique).not.toHaveBeenCalled()
+    expect(mocks.txProfessionalServiceOfferingFindFirst).not.toHaveBeenCalled()
+    expect(mocks.txBookingCreate).not.toHaveBeenCalled()
+    expect(mocks.txBookingServiceItemCreate).not.toHaveBeenCalled()
+    expect(mocks.txBookingOverrideAuditLogCreateMany).not.toHaveBeenCalled()
   })
 
   it('creates audit rows when an applied override is actually used', async () => {

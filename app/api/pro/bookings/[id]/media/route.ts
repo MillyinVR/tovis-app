@@ -135,8 +135,20 @@ function safeCaption(raw: unknown): string | null {
   return s.slice(0, CAPTION_MAX)
 }
 
-function mustStartWithBookingPrefix(path: string, bookingId: string): boolean {
-  return path.startsWith(`bookings/${bookingId}/`)
+const BOOKING_MEDIA_PHASE_PATH_SEGMENTS: Record<MediaPhase, string> = {
+  [MediaPhase.BEFORE]: 'before',
+  [MediaPhase.AFTER]: 'after',
+  [MediaPhase.OTHER]: 'other',
+}
+
+function mustStartWithBookingPhasePrefix(
+  path: string,
+  bookingId: string,
+  phase: MediaPhase,
+): boolean {
+  return path.startsWith(
+    `bookings/${bookingId}/${BOOKING_MEDIA_PHASE_PATH_SEGMENTS[phase]}/`,
+  )
 }
 
 function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
@@ -393,12 +405,21 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const caption = safeCaption(body.caption)
 
-    if (!mustStartWithBookingPrefix(storagePath, bookingId)) {
-      return jsonFail(400, 'storagePath must be under bookings/<bookingId>/.')
+    if (!mustStartWithBookingPhasePrefix(storagePath, bookingId, phase)) {
+      return jsonFail(
+        400,
+        'storagePath must be under bookings/<bookingId>/<phase>/.',
+      )
     }
 
-    if (thumbPath && !mustStartWithBookingPrefix(thumbPath, bookingId)) {
-      return jsonFail(400, 'thumbPath must be under bookings/<bookingId>/.')
+    if (
+      thumbPath &&
+      !mustStartWithBookingPhasePrefix(thumbPath, bookingId, phase)
+    ) {
+      return jsonFail(
+        400,
+        'thumbPath must be under bookings/<bookingId>/<phase>/.',
+      )
     }
 
     if (storageBucket !== SESSION_BUCKET) {

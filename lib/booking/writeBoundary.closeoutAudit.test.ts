@@ -570,6 +570,8 @@ describe('lib/booking/writeBoundary closeout audit behavior', () => {
         id: 'booking_1',
       })
 
+      mocks.txMediaAssetCount.mockResolvedValueOnce(1)
+
     const result = await updateClientBookingCheckout({
       bookingId: 'booking_1',
       clientId: 'client_1',
@@ -583,6 +585,14 @@ describe('lib/booking/writeBoundary closeout audit behavior', () => {
     })
 
     expect(mocks.txBookingUpdate).toHaveBeenCalledTimes(2)
+
+    expect(mocks.txMediaAssetCount).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking_1',
+        phase: MediaPhase.AFTER,
+        uploadedByRole: Role.PRO,
+      },
+    })
 
     const completionUpdateArgs = mocks.txBookingUpdate.mock.calls[1]?.[0]
     expect(completionUpdateArgs).toEqual({

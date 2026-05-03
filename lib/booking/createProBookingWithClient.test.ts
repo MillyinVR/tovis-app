@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   upsertClientClaimLink: vi.fn(),
   clientProfileFindUnique: vi.fn(),
   createClientClaimInviteDelivery: vi.fn(),
+  checkProReadiness: vi.fn(),
 }))
 
 vi.mock('@/lib/booking/resolveProBookingClient', () => ({
@@ -30,6 +31,10 @@ vi.mock('@/lib/clients/clientClaimLinks', () => ({
 
 vi.mock('@/lib/clientActions/createClientClaimInviteDelivery', () => ({
   createClientClaimInviteDelivery: mocks.createClientClaimInviteDelivery,
+}))
+
+vi.mock('@/lib/pro/readiness/proReadiness', () => ({
+  checkProReadiness: mocks.checkProReadiness,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -165,6 +170,12 @@ describe('createProBookingWithClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
+    mocks.checkProReadiness.mockResolvedValue({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_1'],
+    })
+
     mocks.resolveProBookingClient.mockResolvedValue(makeResolvedClient())
     mocks.createProBooking.mockResolvedValue(makeBookingResult())
     mocks.clientProfileFindUnique.mockResolvedValue(makeInviteClientSnapshot())
@@ -172,6 +183,49 @@ describe('createProBookingWithClient', () => {
     mocks.createClientClaimInviteDelivery.mockResolvedValue(
       makeInviteDeliveryResult(),
     )
+  })
+
+  it('blocks unready professionals before resolving clients or creating side effects', async () => {
+    mocks.checkProReadiness.mockResolvedValueOnce({
+      ok: false,
+      blockers: ['NO_BOOKABLE_LOCATION'],
+    })
+
+    const result = await createProBookingWithClient({
+      professionalId: 'pro_1',
+      actorUserId: 'user_1',
+      overrideReason: null,
+      client: {
+        firstName: 'Tori',
+        lastName: 'Morales',
+        email: 'tori@example.com',
+        phone: '+16195551234',
+      },
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      status: 409,
+      error: 'This professional is not currently accepting bookings.',
+      code: 'PRO_NOT_READY',
+    })
+
+    expect(mocks.checkProReadiness).toHaveBeenCalledWith('pro_1')
+    expect(mocks.resolveProBookingClient).not.toHaveBeenCalled()
+    expect(mocks.createProBooking).not.toHaveBeenCalled()
+    expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+    expect(mocks.clientProfileFindUnique).not.toHaveBeenCalled()
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
   })
 
   it('passes through resolveProBookingClient failures unchanged', async () => {
