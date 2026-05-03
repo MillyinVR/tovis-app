@@ -63,11 +63,15 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20.19.0
-          cache: npm
+          node-version: 20.20.2
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
@@ -76,9 +80,9 @@ jobs:
         run: npx prisma db push --skip-generate
 
       - name: Seed test data
-        run: npm run seed
+        run: pnpm run seed
       - name: Run browser E2E
-        run: npm run test:e2e:ci
+        run: pnpm run test:e2e:ci
 
       - name: Upload Playwright report
         if: always()

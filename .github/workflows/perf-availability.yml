@@ -27,18 +27,17 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Node
-      - uses: actions/setup-node@v4
+        uses: actions/setup-node@v4
         with:
           node-version: 20.20.2
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: Enable Corepack
+        run: corepack enable
+
       - name: Install dependencies
-        run: pnpm install
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
-
+        run: pnpm install --frozen-lockfile
       - name: Ensure perf artifact directories
         run: |
           mkdir -p artifacts/perf/availability
