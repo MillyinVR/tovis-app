@@ -73,11 +73,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Push Prisma schema
-        run: pnpm exec prisma db push --skip-generate
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps
 
       - name: Push Prisma schema
-        run: npx prisma db push --skip-generate
+        run: pnpm exec prisma db push --skip-generate
 
       - name: Seed test data
         run: pnpm run seed
