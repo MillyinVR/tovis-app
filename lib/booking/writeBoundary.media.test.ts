@@ -329,6 +329,30 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
   })
 
+  it('rejects AFTER media during AFTER_PHOTOS when the booking session has not started', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce({
+      ...makeBooking({
+        sessionStep: SessionStep.AFTER_PHOTOS,
+      }),
+      startedAt: null,
+    })
+
+    await expect(
+      uploadProBookingMedia(
+        makeUploadArgs({
+          phase: MediaPhase.AFTER,
+          caption: 'After photo',
+          storagePath: 'bookings/booking_1/after.jpg',
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: 'STEP_MISMATCH',
+    })
+
+    expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+  })
+
   it('rejects media uploads for completed bookings', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(
       makeBooking({

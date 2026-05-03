@@ -2108,6 +2108,9 @@ model AftercareSummary {
   recommendedProducts ProductRecommendation[]
   clientNotifications ClientNotification[]
   clientActionTokens  ClientActionToken[]
+
+  @@index([sentToClientAt, createdAt])
+  @@index([bookingId, sentToClientAt])
 }
 
 model Product {
@@ -2358,6 +2361,8 @@ model MediaAsset {
   @@index([professionalId, isEligibleForLooks, createdAt])
   @@index([professionalId, isFeaturedInPortfolio, createdAt])
   @@index([uploadedByUserId, createdAt])
+  @@index([bookingId, phase, createdAt])
+  @@index([bookingId, createdAt])
 }
 
 model MediaServiceTag {

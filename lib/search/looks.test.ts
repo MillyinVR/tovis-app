@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => {
     lookLike: {
       findMany: vi.fn(),
     },
+    boardItem: {
+      findMany: vi.fn(),
+    },
   }
 
   const getCurrentUser = vi.fn()
@@ -92,6 +95,7 @@ function makeMappedDto(
   id: string,
   overrides?: Partial<{
     viewerLiked: boolean
+    viewerSaved: boolean
   }>,
 ) {
   return {
@@ -118,6 +122,7 @@ function makeMappedDto(
       comments: 1,
     },
     viewerLiked: false,
+    viewerSaved: false,
     uploadedByRole: null,
     reviewId: null,
     reviewHelpfulCount: null,
@@ -147,6 +152,7 @@ describe('lib/search/looks.ts', () => {
 
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
+    mocks.prisma.boardItem.findMany.mockResolvedValue([])
 
     mocks.mapLooksFeedMediaToDto.mockResolvedValue(null)
   })
@@ -200,6 +206,7 @@ describe('lib/search/looks.ts', () => {
     })
 
     expect(mocks.prisma.lookLike.findMany).not.toHaveBeenCalled()
+    expect(mocks.prisma.boardItem.findMany).not.toHaveBeenCalled()
     expect(mocks.mapLooksFeedMediaToDto).not.toHaveBeenCalled()
     expect(mocks.encodeLooksFeedCursor).not.toHaveBeenCalled()
   })
@@ -298,18 +305,24 @@ describe('lib/search/looks.ts', () => {
       select: mocks.looksFeedSelect,
     })
 
+    expect(mocks.mapLooksFeedMediaToDto).toHaveBeenCalledWith({
+      item: look1,
+      viewerLiked: false,
+      viewerSaved: false,
+    })
+
     expect(result).toEqual({
       items: [dto1],
       nextCursor: null,
     })
   })
 
-  it('hydrates viewer likes and viewerContext for an authenticated viewer', async () => {
+  it('hydrates viewer likes, saved state, and viewerContext for an authenticated viewer', async () => {
     const look1 = makeLookRow('look_1')
     const look2 = makeLookRow('look_2')
     const look3 = makeLookRow('look_3')
 
-    const dto1 = makeMappedDto('look_1')
+    const dto1 = makeMappedDto('look_1', { viewerSaved: true })
     const dto2 = makeMappedDto('look_2', { viewerLiked: true })
 
     mocks.getCurrentUser.mockResolvedValue({
@@ -320,6 +333,9 @@ describe('lib/search/looks.ts', () => {
     mocks.prisma.lookPost.findMany.mockResolvedValue([look1, look2, look3])
     mocks.prisma.lookLike.findMany.mockResolvedValue([
       { lookPostId: 'look_2' },
+    ])
+    mocks.prisma.boardItem.findMany.mockResolvedValue([
+      { lookPostId: 'look_1' },
     ])
 
     mocks.mapLooksFeedMediaToDto
@@ -343,16 +359,28 @@ describe('lib/search/looks.ts', () => {
       select: { lookPostId: true },
     })
 
+    expect(mocks.prisma.boardItem.findMany).toHaveBeenCalledWith({
+      where: {
+        lookPostId: { in: ['look_1', 'look_2'] },
+        board: {
+          clientId: 'client_1',
+        },
+      },
+      select: { lookPostId: true },
+    })
+
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenCalledTimes(2)
 
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(1, {
       item: look1,
       viewerLiked: false,
+      viewerSaved: true,
     })
 
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(2, {
       item: look2,
       viewerLiked: true,
+      viewerSaved: false,
     })
 
     expect(mocks.encodeLooksFeedCursor).toHaveBeenCalledWith({

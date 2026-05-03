@@ -34,6 +34,15 @@ const mocks = vi.hoisted(() => ({
   txMediaAssetCreate: vi.fn(),
 
   txAftercareSummaryFindUnique: vi.fn(),
+  txAftercareSummaryUpsert: vi.fn(),
+
+  txProductRecommendationDeleteMany: vi.fn(),
+  txProductRecommendationCreateMany: vi.fn(),
+  txProductFindMany: vi.fn(),
+
+  txReminderUpsert: vi.fn(),
+  txReminderDeleteMany: vi.fn(),
+
   txProfessionalProfileUpdate: vi.fn(),
   txExecuteRaw: vi.fn(),
   txQueryRaw: vi.fn(),
@@ -76,6 +85,7 @@ import {
   transitionSessionStep,
   updateClientBookingCheckout,
   uploadProBookingMedia,
+  upsertBookingAftercare,
 } from './writeBoundary'
 
 const tx = {
@@ -90,6 +100,18 @@ const tx = {
   },
   aftercareSummary: {
     findUnique: mocks.txAftercareSummaryFindUnique,
+    upsert: mocks.txAftercareSummaryUpsert,
+  },
+  productRecommendation: {
+    deleteMany: mocks.txProductRecommendationDeleteMany,
+    createMany: mocks.txProductRecommendationCreateMany,
+  },
+  product: {
+    findMany: mocks.txProductFindMany,
+  },
+  reminder: {
+    upsert: mocks.txReminderUpsert,
+    deleteMany: mocks.txReminderDeleteMany,
   },
   professionalProfile: {
     update: mocks.txProfessionalProfileUpdate,
@@ -258,6 +280,47 @@ function makeClientCheckoutBooking(overrides?: {
   }
 }
 
+function makeAftercareCloseoutBookingWithoutAfterPhotos() {
+  return {
+    id: 'booking_1',
+    clientId: 'client_1',
+    professionalId: 'pro_1',
+    status: BookingStatus.ACCEPTED,
+    sessionStep: SessionStep.AFTER_PHOTOS,
+    finishedAt: FINISHED_AT,
+    scheduledFor: TEST_NOW,
+    locationTimeZone: 'America/Los_Angeles',
+    checkoutStatus: BookingCheckoutStatus.PAID,
+    paymentCollectedAt: PAYMENT_COLLECTED_AT,
+    aftercareSummary: null,
+    professional: {
+      timeZone: 'America/Los_Angeles',
+    },
+    client: {
+      firstName: 'Client',
+      lastName: 'One',
+    },
+    service: {
+      name: 'Haircut',
+    },
+  }
+}
+
+function makeSentAftercareResult() {
+  return {
+    id: 'aftercare_1',
+    publicToken: 'public_aftercare_token_1',
+    rebookMode: AftercareRebookMode.NONE,
+    rebookedFor: null,
+    rebookWindowStart: null,
+    rebookWindowEnd: null,
+    draftSavedAt: null,
+    sentToClientAt: TEST_NOW,
+    lastEditedAt: TEST_NOW,
+    version: 1,
+  }
+}
+
 function makeReviewEligibleBooking() {
   return {
     id: 'booking_1',
@@ -360,6 +423,81 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
     mocks.txProfessionalProfileUpdate.mockResolvedValue({ id: 'pro_1' })
     mocks.txExecuteRaw.mockResolvedValue(1)
     mocks.txQueryRaw.mockResolvedValue([])
+  })
+
+    it('sends aftercare but does not complete the booking when AFTER photos are missing', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeAftercareCloseoutBookingWithoutAfterPhotos(),
+    )
+
+    mocks.txAftercareSummaryUpsert.mockResolvedValueOnce(makeSentAftercareResult())
+
+    mocks.txProductRecommendationDeleteMany.mockResolvedValueOnce({
+      count: 0,
+    })
+
+    mocks.txReminderDeleteMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 0 })
+
+    mocks.txMediaAssetCount.mockResolvedValueOnce(0)
+
+    const updateCountBeforeAftercare = mocks.txBookingUpdate.mock.calls.length
+
+    const result = await upsertBookingAftercare({
+      bookingId: 'booking_1',
+      professionalId: 'pro_1',
+      notes: 'Use gentle cleanser tonight.',
+      rebookMode: AftercareRebookMode.NONE,
+      rebookedFor: null,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      createRebookReminder: false,
+      rebookReminderDaysBefore: 7,
+      createProductReminder: false,
+      productReminderDaysAfter: 14,
+      recommendedProducts: [],
+      sendToClient: true,
+      version: null,
+      requestId: 'req_aftercare_without_after_1',
+      idempotencyKey: 'idem_aftercare_without_after_1',
+    })
+
+    expect(mocks.txMediaAssetCount).toHaveBeenCalledWith({
+      where: {
+        bookingId: 'booking_1',
+        phase: MediaPhase.AFTER,
+        uploadedByRole: 'PRO',
+      },
+    })
+
+    expect(mocks.txBookingUpdate).toHaveBeenCalledTimes(
+      updateCountBeforeAftercare,
+    )
+
+    expect(result).toMatchObject({
+      aftercare: {
+        id: 'aftercare_1',
+        rebookMode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+        rebookWindowStart: null,
+        rebookWindowEnd: null,
+        draftSavedAt: null,
+        sentToClientAt: TEST_NOW,
+        lastEditedAt: TEST_NOW,
+        version: 1,
+      },
+      remindersTouched: 0,
+      clientNotified: true,
+      bookingFinished: false,
+      completionBlockers: ['AFTER_PHOTOS_REQUIRED'],
+      booking: null,
+      timeZoneUsed: 'America/Los_Angeles',
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
   })
 
   it('connects session start, media gates, finish review, checkout completion, review eligibility, and client rebook', async () => {

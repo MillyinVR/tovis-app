@@ -1175,8 +1175,9 @@ const BOOKING_MEDIA_UPLOAD_SELECT = {
   id: true,
   professionalId: true,
   status: true,
-  sessionStep: true,
+  startedAt: true,
   finishedAt: true,
+  sessionStep: true,
 } satisfies Prisma.BookingSelect
 
 type BookingMediaUploadRecord = Prisma.BookingGetPayload<{
@@ -2164,6 +2165,143 @@ function canUploadBookingMediaPhase(
   }
 
   return true
+}
+
+function isValidLatitude(value: number | null | undefined): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= -90 &&
+    value <= 90
+  )
+}
+
+function isValidLongitude(value: number | null | undefined): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= -180 &&
+    value <= 180
+  )
+}
+
+function degreesToRadians(value: number): number {
+  return (value * Math.PI) / 180
+}
+
+function distanceMilesBetweenCoordinates(args: {
+  fromLat: number
+  fromLng: number
+  toLat: number
+  toLng: number
+}): number {
+  const earthRadiusMiles = 3958.7613
+
+  const fromLatRad = degreesToRadians(args.fromLat)
+  const toLatRad = degreesToRadians(args.toLat)
+  const deltaLatRad = degreesToRadians(args.toLat - args.fromLat)
+  const deltaLngRad = degreesToRadians(args.toLng - args.fromLng)
+
+  const sinDeltaLat = Math.sin(deltaLatRad / 2)
+  const sinDeltaLng = Math.sin(deltaLngRad / 2)
+
+  const a =
+    sinDeltaLat * sinDeltaLat +
+    Math.cos(fromLatRad) *
+      Math.cos(toLatRad) *
+      sinDeltaLng *
+      sinDeltaLng
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+  return earthRadiusMiles * c
+}
+
+async function getProfessionalMobileRadiusMiles(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+}): Promise<number | null> {
+  const professional = await args.tx.professionalProfile.findUnique({
+    where: { id: args.professionalId },
+    select: {
+      mobileRadiusMiles: true,
+    } satisfies Prisma.ProfessionalProfileSelect,
+  })
+
+  return professional?.mobileRadiusMiles ?? null
+}
+
+async function assertMobileBookingWithinRadius(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+  locationType: ServiceLocationType
+  locationLat: number | null | undefined
+  locationLng: number | null | undefined
+  clientAddressId: string | null | undefined
+  clientLat: number | null | undefined
+  clientLng: number | null | undefined
+}): Promise<void> {
+  if (args.locationType !== ServiceLocationType.MOBILE) {
+    return
+  }
+
+  if (!args.clientAddressId) {
+    throw bookingError('CLIENT_SERVICE_ADDRESS_REQUIRED')
+  }
+
+  const radiusMiles = await getProfessionalMobileRadiusMiles({
+    tx: args.tx,
+    professionalId: args.professionalId,
+  })
+
+  if (
+    typeof radiusMiles !== 'number' ||
+    !Number.isFinite(radiusMiles) ||
+    radiusMiles <= 0
+  ) {
+    throw bookingError('BAD_LOCATION', {
+      message: 'Professional mobile service radius is not configured.',
+      userMessage:
+        'This professional has not finished mobile travel settings.',
+    })
+  }
+
+  if (
+    !isValidLatitude(args.locationLat) ||
+    !isValidLongitude(args.locationLng)
+  ) {
+    throw bookingError('COORDINATES_REQUIRED', {
+      message:
+        'Mobile base coordinates are required before booking mobile services.',
+      userMessage:
+        'This professional mobile base is missing map coordinates.',
+    })
+  }
+
+  if (!isValidLatitude(args.clientLat) || !isValidLongitude(args.clientLng)) {
+    throw bookingError('CLIENT_SERVICE_ADDRESS_INVALID', {
+      message:
+        'Client service address coordinates are required before booking mobile services.',
+      userMessage:
+        'This service address is missing map coordinates. Please update the address and try again.',
+    })
+  }
+
+  const distanceMiles = distanceMilesBetweenCoordinates({
+    fromLat: args.locationLat,
+    fromLng: args.locationLng,
+    toLat: args.clientLat,
+    toLng: args.clientLng,
+  })
+
+  if (distanceMiles > radiusMiles) {
+    throw bookingError('CLIENT_SERVICE_ADDRESS_INVALID', {
+      message: `Client service address is ${distanceMiles.toFixed(
+        2,
+      )} miles from the professional mobile base, which exceeds the ${radiusMiles}-mile service radius.`,
+      userMessage: `This service address is outside this professional's ${radiusMiles}-mile mobile service area.`,
+    })
+  }
 }
 
 function normalizePositiveDurationMinutes(value: unknown): number | null {
@@ -5334,6 +5472,13 @@ async function performLockedUploadProBookingMedia(args: {
     })
   }
 
+  if (args.phase === MediaPhase.AFTER && !booking.startedAt) {
+    throw bookingError('STEP_MISMATCH', {
+      message: 'AFTER media uploads require a started booking session.',
+      userMessage: 'After photos can only be uploaded after the booking session has started.',
+    })
+  }
+
   const created: BookingMediaAssetRecord = await args.tx.mediaAsset.create({
     data: {
       professionalId: booking.professionalId,
@@ -5491,6 +5636,27 @@ if (locationType === ServiceLocationType.MOBILE && clientAddressId && !selectedC
 
   locationContextOrNull = locationContext
   durationMinutesOrNull = durationMinutes
+
+  await assertMobileBookingWithinRadius({
+    tx,
+    professionalId: offering.professionalId,
+    locationType,
+    locationLat: locationContext.lat,
+    locationLng: locationContext.lng,
+    clientAddressId:
+      locationType === ServiceLocationType.MOBILE
+        ? selectedClientAddress?.id ?? clientAddressId
+        : null,
+    clientLat:
+      locationType === ServiceLocationType.MOBILE && selectedClientAddress
+        ? decimalToNumber(selectedClientAddress.lat)
+        : null,
+    clientLng:
+      locationType === ServiceLocationType.MOBILE && selectedClientAddress
+        ? decimalToNumber(selectedClientAddress.lng)
+        : null,
+  })
+
   const salonLocationAddress =
     locationType === ServiceLocationType.SALON
       ? normalizeAddress(locationContext.formattedAddress)
@@ -6570,6 +6736,19 @@ async function performLockedFinalizeBookingFromHold(args: {
   const baseDurationMinutes = validatedContextResult.durationMinutes
   const priceStartingAt = validatedContextResult.priceStartingAt
 
+  await assertMobileBookingWithinRadius({
+    tx: args.tx,
+    professionalId: args.offering.professionalId,
+    locationType: validatedHold.value.locationType,
+    locationLat:
+      decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
+    locationLng:
+      decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
+    clientAddressId: hold.clientAddressId,
+    clientLat: decimalToNumber(hold.clientAddressLatSnapshot),
+    clientLng: decimalToNumber(hold.clientAddressLngSnapshot),
+  })
+
   const salonAddressResolution = resolveHeldSalonAddressText({
     holdLocationType: validatedHold.value.locationType,
     holdLocationAddressSnapshot: hold.locationAddressSnapshot,
@@ -7113,6 +7292,26 @@ async function performLockedCreateProBooking(args: {
   const baseDurationMinutes = validatedContextResult.durationMinutes
   const basePrice = decimalFromUnknown(validatedContextResult.priceStartingAt)
 
+  await assertMobileBookingWithinRadius({
+    tx: args.tx,
+    professionalId: args.professionalId,
+    locationType: args.locationType,
+    locationLat: locationContext.lat,
+    locationLng: locationContext.lng,
+    clientAddressId:
+      args.locationType === ServiceLocationType.MOBILE
+        ? clientAddress?.id ?? args.clientAddressId
+        : null,
+    clientLat:
+      args.locationType === ServiceLocationType.MOBILE && clientAddress
+        ? decimalToNumber(clientAddress.lat)
+        : null,
+    clientLng:
+      args.locationType === ServiceLocationType.MOBILE && clientAddress
+        ? decimalToNumber(clientAddress.lng)
+        : null,
+  })
+
   const salonLocationAddress =
     args.locationType === ServiceLocationType.SALON
       ? normalizeAddress(locationContext.formattedAddress)
@@ -7552,6 +7751,19 @@ assertCanCreateRebookFromSourceBooking({
   }
 
   const locationContext = validatedContextResult.context
+
+  await assertMobileBookingWithinRadius({
+    tx: args.tx,
+    professionalId: source.professionalId,
+    locationType: source.locationType,
+    locationLat:
+      decimalToNumber(source.locationLatSnapshot) ?? locationContext.lat,
+    locationLng:
+      decimalToNumber(source.locationLngSnapshot) ?? locationContext.lng,
+    clientAddressId: source.clientAddressId,
+    clientLat: decimalToNumber(source.clientAddressLatSnapshot),
+    clientLng: decimalToNumber(source.clientAddressLngSnapshot),
+  })
 
   await enforceProCreateScheduling({
     tx: args.tx,
