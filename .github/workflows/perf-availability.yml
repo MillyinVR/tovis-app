@@ -16,13 +16,18 @@ jobs:
       CI: true
       NODE_ENV: test
       JWT_SECRET: ci-test-jwt-secret-do-not-use-in-production
+      AUTH_TRUSTED_IP_HEADER: x-forwarded-for
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-test-supabase-anon-key
+      SUPABASE_ANON_KEY: ci-test-supabase-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-test-supabase-service-role-key
       PERF_SAMPLES: 30
       PERF_BOOKING_URL: ${{ secrets.PERF_BOOKING_URL }}
       PERF_BOOKING_TRIGGER_SELECTOR: ${{ secrets.PERF_BOOKING_TRIGGER_SELECTOR }}
       PERF_SLOT_BUTTON_SELECTOR: ${{ secrets.PERF_SLOT_BUTTON_SELECTOR }}
       PERF_DRAWER_CONTINUE_SELECTOR: ${{ secrets.PERF_DRAWER_CONTINUE_SELECTOR }}
       PERF_BACKGROUND_REFRESH_TRIGGER_SELECTOR: '[data-testid="availability-refresh-button"]'
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
