@@ -1,4 +1,4 @@
-const path = require('path')
+const { requireSafeScriptRun } = require('./_safe-script-guard.cjs')
 const { loadEnvConfig } = require('@next/env')
 const { PrismaClient } = require('@prisma/client')
 
@@ -26,6 +26,14 @@ function parseArgs(argv) {
 
 async function main() {
   const { apply, verbose } = parseArgs(process.argv)
+
+  if (apply) {
+  requireSafeScriptRun({
+    scriptName: 'scripts/repair-user-email-casing.cjs',
+    destructive: true,
+    allowEnvVar: 'ALLOW_EMAIL_REPAIR_SCRIPT',
+  })
+}
 
   if (!process.env.DATABASE_URL) {
     throw new Error('DATABASE_URL is missing')

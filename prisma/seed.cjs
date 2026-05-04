@@ -3,6 +3,14 @@ const { loadEnvConfig } = require('@next/env')
 
 loadEnvConfig(path.join(__dirname, '..'))
 
+const { requireSafeScriptRun } = require('../scripts/_safe-script-guard.cjs')
+
+requireSafeScriptRun({
+  scriptName: 'prisma/seed.cjs',
+  destructive: true,
+  allowEnvVar: 'ALLOW_SEED_SCRIPT',
+})
+
 const {
   PrismaClient,
   Prisma,

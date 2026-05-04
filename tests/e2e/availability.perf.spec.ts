@@ -1,11 +1,13 @@
-import { promises as fs } from 'fs'
-import path from 'path'
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import {
   expect,
   test,
   type APIRequestContext,
+  type ConsoleMessage,
   type Locator,
   type Page,
+  type Request,
 } from '@playwright/test'
 
 import type {
@@ -120,7 +122,7 @@ function attachPageDiagnostics(page: Page): {
     requestFailures: [],
   }
 
-  const onConsole = (msg: Parameters<Page['on']>[1] extends never ? never : any) => {
+  const onConsole = (msg: ConsoleMessage) => {
     if (msg.type() !== 'error') return
     diagnostics.consoleErrors.push(msg.text())
   }
@@ -131,7 +133,7 @@ function attachPageDiagnostics(page: Page): {
     )
   }
 
-  const onRequestFailed = (request: any) => {
+  const onRequestFailed = (request: Request) => {
     diagnostics.requestFailures.push(
       `${request.method()} ${request.url()} :: ${request.failure()?.errorText ?? 'request_failed'}`,
     )

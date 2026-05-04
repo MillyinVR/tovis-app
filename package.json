@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "seed": "node prisma/seed.cjs",
+    "seed:dev": "ALLOW_SEED_SCRIPT=1 CONFIRM_NON_PRODUCTION_DB=1 node prisma/seed.cjs",
     "test": "vitest run --config vitest.config.mts",
     "test:watch": "vitest --config vitest.config.mts",
     "test:e2e": "playwright test",
