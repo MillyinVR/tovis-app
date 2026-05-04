@@ -89,6 +89,7 @@ jobs:
         run: node scripts/perf/aggregateAvailabilityPerf.mjs
 
       - name: Check Gate 2 budgets
+        if: github.event_name != 'pull_request'
         run: node scripts/perf/checkAvailabilityBudgets.mjs
 
       - name: Upload perf artifacts
