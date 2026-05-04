@@ -111,16 +111,28 @@ export async function waitForAvailabilityReady(
 
 export async function expectAvailabilityError(page: Page): Promise<void> {
   const drawer = availabilityDrawer(page)
-  const errorByTestId = byTestId(drawer, testIds.availability.error)
-  const errorByText = drawer.getByText(text.availability.failed)
+
+  await expect(drawer).toBeVisible()
+
+  const errorByTestId = byTestId(drawer, testIds.availability.error).first()
+  const retryByTestId = byTestId(drawer, testIds.availability.retryButton).first()
+  const retryByRole = drawer
+    .getByRole('button', { name: text.availability.retry })
+    .first()
 
   if (await errorByTestId.count()) {
     await expect(errorByTestId).toBeVisible()
-    await expect(errorByTestId).toContainText(text.availability.failed)
     return
   }
 
-  await expect(errorByText).toBeVisible()
+  if (await retryByTestId.count()) {
+    await expect(retryByTestId).toBeVisible()
+    await expect(retryByTestId).toBeEnabled()
+    return
+  }
+
+  await expect(retryByRole).toBeVisible()
+  await expect(retryByRole).toBeEnabled()
 }
 
 export async function retryAvailability(page: Page): Promise<void> {

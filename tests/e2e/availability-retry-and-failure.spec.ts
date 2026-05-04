@@ -125,7 +125,7 @@ test.describe('availability retry and failure browser flow', () => {
   let seed: SeedBookingFlowResult | null = null
 
   test.afterEach(async ({ page }) => {
-    await page.unroute('**/api/availability/day**')
+    await page.unroute('**/api/availability/**')
     await page.unroute('**/api/holds')
 
     await teardownBookingFlow({
@@ -150,7 +150,7 @@ test.describe('availability retry and failure browser flow', () => {
 
     let failedOnce = false
 
-    await page.route('**/api/availability/day**', async (route) => {
+    await page.route('**/api/availability/**', async (route) => {
       const request = route.request()
 
       if (request.method() !== 'GET') {
