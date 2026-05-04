@@ -83,7 +83,13 @@ function readRequestMeta(req: Request): {
 }
 
 function replayJson(body: RebookResponseBody, status: number) {
-  return Response.json(body, { status })
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'Cache-Control': 'no-store',
+      'Content-Type': 'application/json',
+    },
+  })
 }
 
 function toAftercareResponse(aftercare: AftercareRebookRecord) {

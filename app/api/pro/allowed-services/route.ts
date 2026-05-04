@@ -1,9 +1,9 @@
 // app/api/pro/allowed-services/route.ts
-import { NextResponse } from 'next/server'
+import { Prisma, type ProfessionType } from '@prisma/client'
+
+import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
 import { moneyToString } from '@/lib/money'
-import { requirePro } from '@/app/api/_utils'
-import { Prisma, type ProfessionType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,7 +72,7 @@ export async function GET() {
     })
 
     if (!isServicePermissionFilterEnabled()) {
-      return NextResponse.json(services.map(toDto), { status: 200 })
+      return jsonOk({ services: services.map(toDto) }, 200)
     }
 
     const proProfile = await prisma.professionalProfile.findUnique({
@@ -83,7 +83,7 @@ export async function GET() {
     if (!proProfile?.professionType) {
       // Pro hasn't set their profession yet — fall back to current behavior so
       // we never lock pros out of the catalog mid-onboarding.
-      return NextResponse.json(services.map(toDto), { status: 200 })
+      return jsonOk({ services: services.map(toDto) }, 200)
     }
 
     const explicitlyAllowed = await resolveExplicitlyAllowedServiceIds({
@@ -106,9 +106,9 @@ export async function GET() {
       return explicitlyAllowed.has(svc.id)
     })
 
-    return NextResponse.json(filtered.map(toDto), { status: 200 })
+    return jsonOk({ services: filtered.map(toDto) }, 200)
   } catch (error) {
     console.error('Allowed services error', error)
-    return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 })
+    return jsonFail(500, 'Internal server error')
   }
 }

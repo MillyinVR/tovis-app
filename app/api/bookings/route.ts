@@ -1,17 +1,11 @@
-import { NextResponse } from 'next/server'
+import { jsonFail } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  return NextResponse.json(
-    { ok: false, error: 'Not implemented. Use /api/bookings/* routes.' },
-    { status: 404 },
-  )
+  return jsonFail(404, 'Not implemented. Use /api/bookings/* routes.')
 }
 
 export async function POST() {
-  return NextResponse.json(
-    { ok: false, error: 'Not implemented. Use /api/bookings/* routes.' },
-    { status: 404 },
-  )
+  return jsonFail(404, 'Not implemented. Use /api/bookings/* routes.')
 }
