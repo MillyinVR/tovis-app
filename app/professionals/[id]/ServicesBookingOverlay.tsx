@@ -243,7 +243,7 @@ function ServiceOfferingCard({
   return (
     <article className="brand-profile-service-card">
       <div className="flex min-w-0 flex-1 gap-3">
-        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-[var(--radius-card)] border border-white/10 bg-bgSurface">
+        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-[var(--radius-card)] border border-white/10 bg-bgSurface">
           {offering.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -252,7 +252,10 @@ function ServiceOfferingCard({
               className="h-full w-full object-cover"
             />
           ) : (
-            <div className="brand-profile-hero-fallback h-full w-full" aria-hidden />
+            <div
+              className="brand-profile-hero-fallback pointer-events-none h-full w-full"
+              aria-hidden
+            />
           )}
         </div>
 

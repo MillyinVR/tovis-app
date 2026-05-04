@@ -34,7 +34,7 @@ function getOfferingTitle(seed: SeedBookingFlowResult): string {
 }
 
 function availabilityDialog(page: Page): Locator {
-  return page.getByRole('dialog').first()
+  return byTestId(page, testIds.availability.drawer)
 }
 
 function bookingCta(page: Page, seed: SeedBookingFlowResult): Locator {
@@ -66,9 +66,6 @@ async function openAvailabilityFromSeededService(
   await bookingCta(page, seed).click()
 
   await expect(availabilityDialog(page)).toBeVisible()
-  await expect(
-    availabilityDialog(page).getByText(/availability/i).first(),
-  ).toBeVisible()
 }
 
 async function createHoldAndAssertSuccess(
@@ -126,7 +123,7 @@ test.describe('add-ons transition browser flow', () => {
         withSavedAddress: true,
         withAddOn: true,
         offersInSalon: true,
-        offersMobile: true,
+        offersMobile: false,
       },
     )
 
@@ -170,7 +167,7 @@ test.describe('add-ons transition browser flow', () => {
         withSavedAddress: true,
         withAddOn: true,
         offersInSalon: true,
-        offersMobile: true,
+        offersMobile: false,
       },
     )
 

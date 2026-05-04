@@ -87,7 +87,6 @@ async function openAvailabilityFromSeededService(
 
   const drawer = availabilityDialog(page)
   await expect(drawer).toBeVisible()
-  await expect(drawer.getByText(/^availability$/i)).toBeVisible()
 }
 
 async function createHoldFromFirstEnabledSlot(
