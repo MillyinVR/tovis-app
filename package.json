@@ -31,6 +31,7 @@
     "jobs:looks-social:run-local": "node scripts/run-looks-social-jobs.mjs"
   },
   "dependencies": {
+    "@next/env": "16.1.1",
     "@prisma/client": "^6.19.0",
     "@radix-ui/react-select": "^2.2.6",
     "@sentry/nextjs": "^10.48.0",

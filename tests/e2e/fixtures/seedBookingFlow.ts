@@ -236,6 +236,12 @@ export async function seedBookingFlow(
       handleNormalized: professionalHandle,
       location: 'San Diego, CA',
       timeZone: DEFAULT_TIME_ZONE,
+      ...(offersMobile
+        ? {
+            mobileBasePostalCode: '92101',
+            mobileRadiusMiles: 25,
+          }
+        : {}),
       licenseVerified: true,
       verificationStatus: VerificationStatus.APPROVED,
       licenseVerifiedAt: approvedAt,

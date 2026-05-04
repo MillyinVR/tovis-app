@@ -4,6 +4,8 @@ import { getTrustedClientIpFromRequest } from '@/lib/trustedClientIp'
 const TURNSTILE_VERIFY_URL =
   'https://challenges.cloudflare.com/turnstile/v0/siteverify'
 
+const AUTH_TURNSTILE_FAIL_OPEN_ENV = 'AUTH_TURNSTILE_FAIL_OPEN'
+
 export const AUTH_TURNSTILE_FAIL_OPEN_EVENT = 'auth.turnstile.fail_open'
 
 type VerifyTurnstileResult =
@@ -20,6 +22,30 @@ function envOrNull(name: string): string | null {
   return value ? value : null
 }
 
+function isTurnstileFailOpenAllowed(): boolean {
+  return (
+    process.env.NODE_ENV !== 'production' &&
+    envOrNull(AUTH_TURNSTILE_FAIL_OPEN_ENV) === '1'
+  )
+}
+
+function turnstileUnavailableResult(reason: string): VerifyTurnstileResult {
+  if (isTurnstileFailOpenAllowed()) {
+    return {
+      ok: true,
+      failOpen: true,
+      eventName: AUTH_TURNSTILE_FAIL_OPEN_EVENT,
+      reason,
+    }
+  }
+
+  return {
+    ok: false,
+    code: 'CAPTCHA_UNAVAILABLE',
+    message: 'Captcha is temporarily unavailable. Please try again.',
+  }
+}
+
 type TurnstileVerifyPayload = {
   success?: boolean
 }
@@ -28,21 +54,17 @@ export async function verifyTurnstileOrFailOpen(args: {
   request: Request
   token: string | null
 }): Promise<VerifyTurnstileResult> {
-  const secret = envOrNull('TURNSTILE_SECRET_KEY')
-  if (!secret) {
-    return {
-      ok: false,
-      code: 'CAPTCHA_UNAVAILABLE',
-      message: 'Captcha is not configured.',
-    }
-  }
-
   if (!args.token) {
     return {
       ok: false,
       code: 'CAPTCHA_REQUIRED',
       message: 'Complete the captcha and try again.',
     }
+  }
+
+  const secret = envOrNull('TURNSTILE_SECRET_KEY')
+  if (!secret) {
+    return turnstileUnavailableResult('turnstile_secret_missing')
   }
 
   const body = new URLSearchParams({
@@ -67,12 +89,7 @@ export async function verifyTurnstileOrFailOpen(args: {
     })
 
     if (response.status >= 500) {
-      return {
-        ok: true,
-        failOpen: true,
-        eventName: AUTH_TURNSTILE_FAIL_OPEN_EVENT,
-        reason: `turnstile_http_${response.status}`,
-      }
+      return turnstileUnavailableResult(`turnstile_http_${response.status}`)
     }
 
     const payload =
@@ -96,11 +113,6 @@ export async function verifyTurnstileOrFailOpen(args: {
       message: 'Captcha verification failed. Please try again.',
     }
   } catch {
-    return {
-      ok: true,
-      failOpen: true,
-      eventName: AUTH_TURNSTILE_FAIL_OPEN_EVENT,
-      reason: 'turnstile_network_or_timeout',
-    }
+    return turnstileUnavailableResult('turnstile_network_or_timeout')
   }
 }

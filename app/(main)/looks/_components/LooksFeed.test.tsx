@@ -301,6 +301,7 @@ function makeFeedItem(
       comments: 1,
     },
     viewerLiked: false,
+    viewerSaved: false,
     serviceId: 'service_1',
     serviceName: 'Fade',
     category: 'Hair',

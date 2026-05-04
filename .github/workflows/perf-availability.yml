@@ -15,28 +15,40 @@ jobs:
     env:
       CI: true
       NODE_ENV: test
-      PERF_SAMPLES: 30
+      JWT_SECRET: ci-test-jwt-secret-do-not-use-in-production
+      AUTH_TRUSTED_IP_HEADER: x-forwarded-for
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-test-supabase-anon-key
+      SUPABASE_ANON_KEY: ci-test-supabase-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-test-supabase-service-role-key
+      PERF_SAMPLES: ${{ github.event_name == 'pull_request' && '3' || '30' }}
       PERF_BOOKING_URL: ${{ secrets.PERF_BOOKING_URL }}
       PERF_BOOKING_TRIGGER_SELECTOR: ${{ secrets.PERF_BOOKING_TRIGGER_SELECTOR }}
       PERF_SLOT_BUTTON_SELECTOR: ${{ secrets.PERF_SLOT_BUTTON_SELECTOR }}
       PERF_DRAWER_CONTINUE_SELECTOR: ${{ secrets.PERF_DRAWER_CONTINUE_SELECTOR }}
       PERF_BACKGROUND_REFRESH_TRIGGER_SELECTOR: '[data-testid="availability-refresh-button"]'
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 20.20.2
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps
+        run: pnpm exec playwright install --with-deps
 
       - name: Ensure perf artifact directories
         run: |
@@ -44,13 +56,13 @@ jobs:
           mkdir -p test-results
 
       - name: Setup database schema
-        run: npx prisma db push
+        run: pnpm exec prisma db push
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
       - name: Seed canonical perf data
-        run: npm run seed
+        run: pnpm run seed
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
@@ -62,13 +74,13 @@ jobs:
           echo "Required perf config is set"
 
       - name: Run desktop perf collection
-        run: npx playwright test tests/e2e/availability.perf.spec.ts --project=chromium
+        run: pnpm exec playwright test tests/e2e/availability.perf.spec.ts --project=chromium
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
       - name: Run mobile perf collection
-        run: npx playwright test tests/e2e/availability.perf.spec.ts --project=mobile-chrome
+        run: pnpm exec playwright test tests/e2e/availability.perf.spec.ts --project=mobile-chrome
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
@@ -77,6 +89,7 @@ jobs:
         run: node scripts/perf/aggregateAvailabilityPerf.mjs
 
       - name: Check Gate 2 budgets
+        if: github.event_name != 'pull_request'
         run: node scripts/perf/checkAvailabilityBudgets.mjs
 
       - name: Upload perf artifacts

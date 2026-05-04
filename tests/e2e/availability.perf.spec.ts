@@ -1546,7 +1546,7 @@ test.describe('availability performance collection', () => {
   test.describe.configure({ mode: 'serial' })
 
   test('collect raw perf samples', async ({ page, request }, testInfo) => {
-    test.setTimeout(10 * 60 * 1000)
+    test.setTimeout(Math.max(10 * 60 * 1000, SAMPLE_COUNT * 5 * 30_000))
 
     const projectName = testInfo.project.name
     const environment = environmentFromProject(projectName)

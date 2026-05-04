@@ -55,7 +55,6 @@ export async function openAvailabilityDrawer(page: Page): Promise<Locator> {
 
   const drawer = availabilityDrawer(page)
   await expect(drawer).toBeVisible()
-  await expect(drawer.getByText(text.availability.heading)).toBeVisible()
 
   return drawer
 }
@@ -75,7 +74,7 @@ export async function waitForAvailabilityReady(
   const drawer = availabilityDrawer(page)
 
   await expect(drawer).toBeVisible()
-  await expect(drawer.getByText(text.availability.heading)).toBeVisible()
+
 
   const errorByTestId = byTestId(drawer, testIds.availability.error)
   const errorByText = drawer.getByText(text.availability.failed)

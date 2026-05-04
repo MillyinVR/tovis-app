@@ -340,6 +340,7 @@ describe('lib/looks/mappers.ts', () => {
       const result = await mapLooksFeedMediaToDto({
         item: row,
         viewerLiked: false,
+        viewerSaved: false,
       })
 
       expect(result).toEqual({
@@ -362,6 +363,7 @@ describe('lib/looks/mappers.ts', () => {
           comments: 3,
         },
         viewerLiked: false,
+        viewerSaved: false,
         serviceId: 'service_1',
         serviceName: null,
         category: null,
@@ -380,6 +382,7 @@ describe('lib/looks/mappers.ts', () => {
       const result = await mapLooksFeedMediaToDto({
         item: row,
         viewerLiked: true,
+        viewerSaved: false,
       })
 
       expect(result).toEqual({
@@ -402,6 +405,7 @@ describe('lib/looks/mappers.ts', () => {
           comments: 3,
         },
         viewerLiked: true,
+        viewerSaved: false,
         serviceId: 'service_1',
         serviceName: 'Fade',
         category: 'Hair',
@@ -435,6 +439,7 @@ describe('lib/looks/mappers.ts', () => {
       const result = await mapLooksFeedMediaToDto({
         item: row,
         viewerLiked: false,
+        viewerSaved: false,
       })
 
       expect(mocks.renderMediaUrls).toHaveBeenCalledWith({
@@ -476,6 +481,7 @@ describe('lib/looks/mappers.ts', () => {
       const result = await mapLooksFeedMediaToDto({
         item: row,
         viewerLiked: false,
+        viewerSaved: false,
       })
 
       expect(result).toBeNull()

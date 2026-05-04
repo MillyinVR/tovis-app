@@ -36,6 +36,7 @@ function makeFeedDto(
       comments: number
     }
     viewerLiked: boolean
+    viewerSaved: boolean
     serviceId: string | null
     serviceName: string | null
     category: string | null
@@ -67,6 +68,7 @@ function makeFeedDto(
       comments: 3,
     },
     viewerLiked: true,
+    viewerSaved: false,
     serviceId: 'service_1',
     serviceName: 'Fade',
     category: 'Hair',
@@ -164,6 +166,7 @@ describe('lib/looks/parsers.ts', () => {
             comments: 2,
           },
           viewerLiked: false,
+          viewerSaved: false,
           serviceId: null,
           serviceName: null,
           category: null,

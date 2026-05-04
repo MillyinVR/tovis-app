@@ -312,6 +312,7 @@ button {
 .brand-profile-hero-fallback {
   position: absolute;
   inset: 0;
+  pointer-events: none;
   background:
     radial-gradient(
       520px circle at 30% 18%,

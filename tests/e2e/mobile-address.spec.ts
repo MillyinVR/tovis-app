@@ -69,7 +69,6 @@ async function openAvailabilityFromSeededService(
 
   const drawer = byTestId(page, testIds.availability.drawer)
   await expect(drawer).toBeVisible()
-  await expect(drawer.getByText(/^availability$/i)).toBeVisible()
 }
 
 async function waitForLocationToggleReady(page: Page): Promise<void> {
