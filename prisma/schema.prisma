@@ -318,6 +318,39 @@ enum PaymentMethod {
   VENMO
   ZELLE
   APPLE_CASH
+  STRIPE_CARD
+}
+
+enum PaymentProvider {
+  MANUAL
+  STRIPE
+}
+
+enum StripeAccountStatus {
+  NOT_STARTED
+  ONBOARDING_STARTED
+  RESTRICTED
+  ENABLED
+  DISABLED
+}
+
+enum StripeCheckoutSessionStatus {
+  OPEN
+  COMPLETE
+  EXPIRED
+}
+
+enum StripePaymentStatus {
+  NOT_STARTED
+  REQUIRES_PAYMENT_METHOD
+  REQUIRES_CONFIRMATION
+  REQUIRES_ACTION
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  CANCELED
+  REFUNDED
+  DISPUTED
 }
 
 enum BookingCloseoutAuditAction {
@@ -1284,6 +1317,20 @@ model ProfessionalPaymentSettings {
   acceptZelle      Boolean @default(false)
   acceptAppleCash  Boolean @default(false)
 
+  // New Stripe / card payment support
+  acceptStripeCard Boolean @default(false)
+
+  stripeAccountId             String? @unique
+  stripeAccountStatus         StripeAccountStatus @default(NOT_STARTED)
+  stripeChargesEnabled        Boolean @default(false)
+  stripePayoutsEnabled        Boolean @default(false)
+  stripeDetailsSubmitted      Boolean @default(false)
+  stripeRequirementsCurrentlyDue Json?
+  stripeRequirementsEventuallyDue Json?
+  stripeOnboardingStartedAt   DateTime?
+  stripeOnboardingCompletedAt DateTime?
+  stripeAccountUpdatedAt      DateTime?
+
   tipsEnabled    Boolean @default(true)
   allowCustomTip Boolean @default(true)
   tipSuggestions Json?
@@ -1299,6 +1346,8 @@ model ProfessionalPaymentSettings {
   professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
 
   @@index([professionalId])
+  @@index([stripeAccountId])
+  @@index([stripeAccountStatus])
 }
 
 model ProfessionalLocation {
@@ -1815,6 +1864,20 @@ model Booking {
   paymentCollectedAt    DateTime?
   paymentAuthorizedAt   DateTime?
 
+  paymentProvider PaymentProvider @default(MANUAL)
+
+  stripeCheckoutSessionId     String? @unique
+  stripePaymentIntentId       String? @unique
+  stripeConnectedAccountId    String?
+  stripeCheckoutSessionStatus StripeCheckoutSessionStatus?
+  stripePaymentStatus         StripePaymentStatus?
+  stripeAmountSubtotal        Int?
+  stripeAmountTotal           Int?
+  stripeApplicationFeeAmount  Int?
+  stripeCurrency              String? @db.VarChar(3)
+  stripePaidAt                DateTime?
+  stripeLastEventId           String?
+
   totalDurationMinutes Int
   bufferMinutes        Int @default(0)
 
@@ -1874,6 +1937,10 @@ model Booking {
   @@index([locationId, scheduledFor])
   @@index([professionalId, source])
   @@index([clientAddressId])
+  @@index([stripePaymentIntentId])
+  @@index([stripeCheckoutSessionId])
+  @@index([stripeConnectedAccountId])
+  @@index([paymentProvider, checkoutStatus])
 }
 
 model BookingOverrideAuditLog {
@@ -2167,6 +2234,26 @@ model BookingCheckoutProductItem {
   @@index([bookingId])
   @@index([recommendationId])
   @@index([productId])
+}
+
+model StripeWebhookEvent {
+  id String @id @default(cuid())
+
+  stripeEventId String @unique
+  eventType     String
+  livemode      Boolean @default(false)
+
+  processedAt DateTime?
+  failedAt    DateTime?
+  lastError   String?
+
+  payload Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([eventType, createdAt])
+  @@index([processedAt, createdAt])
+  @@index([failedAt, createdAt])
 }
 
 model ProductSale {

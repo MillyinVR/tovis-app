@@ -87,6 +87,8 @@ function normalizePaymentMethodInput(value: unknown): PaymentMethod | undefined 
       return PaymentMethod.ZELLE
     case PaymentMethod.APPLE_CASH:
       return PaymentMethod.APPLE_CASH
+    case PaymentMethod.STRIPE_CARD:
+      return PaymentMethod.STRIPE_CARD
     default:
       return undefined
   }
@@ -143,7 +145,7 @@ function parseBody(body: Record<string, unknown>): ParsedBodyResult {
       return {
         ok: false,
         error:
-          'selectedPaymentMethod must be one of: cash, card on file, tap to pay, Venmo, Zelle, Apple Cash.',
+          'selectedPaymentMethod must be one of: cash, card on file, tap to pay, Venmo, Zelle, Apple Cash, Stripe card.',
       }
     }
   }
@@ -158,14 +160,15 @@ function parseBody(body: Record<string, unknown>): ParsedBodyResult {
 
 function buildAcceptedPaymentMethods(
   settings:
-    | {
-        acceptCash: boolean
-        acceptCardOnFile: boolean
-        acceptTapToPay: boolean
-        acceptVenmo: boolean
-        acceptZelle: boolean
-        acceptAppleCash: boolean
-      }
+        | {
+            acceptCash: boolean
+            acceptCardOnFile: boolean
+            acceptTapToPay: boolean
+            acceptVenmo: boolean
+            acceptZelle: boolean
+            acceptAppleCash: boolean
+            acceptStripeCard: boolean
+          }
     | null,
 ): Set<PaymentMethod> {
   const out = new Set<PaymentMethod>()
@@ -178,7 +181,7 @@ function buildAcceptedPaymentMethods(
   if (settings.acceptVenmo) out.add(PaymentMethod.VENMO)
   if (settings.acceptZelle) out.add(PaymentMethod.ZELLE)
   if (settings.acceptAppleCash) out.add(PaymentMethod.APPLE_CASH)
-
+  if (settings.acceptStripeCard) out.add(PaymentMethod.STRIPE_CARD)
   return out
 }
 
@@ -440,6 +443,7 @@ export async function POST(
         acceptVenmo: true,
         acceptZelle: true,
         acceptAppleCash: true,
+        acceptStripeCard: true,
         tipsEnabled: true,
       } satisfies Prisma.ProfessionalPaymentSettingsSelect,
     })
@@ -473,6 +477,18 @@ export async function POST(
         )
       }
 
+      if (effectivePaymentMethod === PaymentMethod.STRIPE_CARD) {
+        await failStartedIdempotency(idempotencyRecordId)
+        idempotencyRecordId = null
+
+        return jsonFail(
+          400,
+          'Card payments must be confirmed through Stripe checkout.',
+          {
+            code: 'STRIPE_CHECKOUT_REQUIRED',
+          },
+        )
+      }
       if (!acceptedMethods.has(effectivePaymentMethod)) {
         await failStartedIdempotency(idempotencyRecordId)
         idempotencyRecordId = null

@@ -35,6 +35,7 @@
     "@prisma/client": "^6.19.0",
     "@radix-ui/react-select": "^2.2.6",
     "@sentry/nextjs": "^10.48.0",
+    "@stripe/stripe-js": "^9.4.0",
     "@supabase/supabase-js": "^2.90.1",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.1",
@@ -52,6 +53,7 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-leaflet": "^5.0.0",
+    "stripe": "^22.1.0",
     "tailwind-merge": "^3.4.0",
     "twilio": "^5.12.0"
   },

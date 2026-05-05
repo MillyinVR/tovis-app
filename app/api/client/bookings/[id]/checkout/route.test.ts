@@ -1,4 +1,5 @@
 // app/api/client/bookings/[id]/checkout/route.test.ts
+
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -115,12 +116,12 @@ function makeCtx(id = 'booking_1') {
   }
 }
 
-function makePaidResult() {
+function makePaidResult(paymentMethod: PaymentMethod = PaymentMethod.CASH) {
   return {
     booking: {
       id: 'booking_1',
       checkoutStatus: BookingCheckoutStatus.PAID,
-      selectedPaymentMethod: PaymentMethod.CASH,
+      selectedPaymentMethod: paymentMethod,
       serviceSubtotalSnapshot: new Prisma.Decimal(100),
       productSubtotalSnapshot: new Prisma.Decimal(20),
       subtotalSnapshot: new Prisma.Decimal(100),
@@ -138,12 +139,37 @@ function makePaidResult() {
   }
 }
 
-function expectedPaidResponseBody() {
+function makeStripeSelectionResult() {
+  return {
+    booking: {
+      id: 'booking_1',
+      checkoutStatus: BookingCheckoutStatus.READY,
+      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
+      serviceSubtotalSnapshot: new Prisma.Decimal(100),
+      productSubtotalSnapshot: new Prisma.Decimal(20),
+      subtotalSnapshot: new Prisma.Decimal(100),
+      tipAmount: new Prisma.Decimal(15),
+      taxAmount: new Prisma.Decimal(0),
+      discountAmount: new Prisma.Decimal(0),
+      totalAmount: new Prisma.Decimal(135),
+      paymentAuthorizedAt: null,
+      paymentCollectedAt: null,
+    },
+    meta: {
+      mutated: true,
+      noOp: false,
+    },
+  }
+}
+
+function expectedPaidResponseBody(
+  paymentMethod: PaymentMethod = PaymentMethod.CASH,
+) {
   return {
     booking: {
       id: 'booking_1',
       checkoutStatus: BookingCheckoutStatus.PAID,
-      selectedPaymentMethod: PaymentMethod.CASH,
+      selectedPaymentMethod: paymentMethod,
       serviceSubtotalSnapshot: '100',
       productSubtotalSnapshot: '20',
       subtotalSnapshot: '100',
@@ -153,6 +179,29 @@ function expectedPaidResponseBody() {
       totalAmount: '135',
       paymentAuthorizedAt: '2026-03-25T16:00:00.000Z',
       paymentCollectedAt: '2026-03-25T16:00:00.000Z',
+    },
+    meta: {
+      mutated: true,
+      noOp: false,
+    },
+  }
+}
+
+function expectedStripeSelectionResponseBody() {
+  return {
+    booking: {
+      id: 'booking_1',
+      checkoutStatus: BookingCheckoutStatus.READY,
+      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
+      serviceSubtotalSnapshot: '100',
+      productSubtotalSnapshot: '20',
+      subtotalSnapshot: '100',
+      tipAmount: '15',
+      taxAmount: '0',
+      discountAmount: '0',
+      totalAmount: '135',
+      paymentAuthorizedAt: null,
+      paymentCollectedAt: null,
     },
     meta: {
       mutated: true,
@@ -242,7 +291,9 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
         return {
           httpStatus: statusByCode[code] ?? 403,
           userMessage:
-            overrides?.userMessage ?? messageByCode[code] ?? `booking error: ${code}`,
+            overrides?.userMessage ??
+            messageByCode[code] ??
+            `booking error: ${code}`,
           extra: {
             code,
           },
@@ -282,6 +333,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       acceptVenmo: true,
       acceptZelle: true,
       acceptAppleCash: true,
+      acceptStripeCard: true,
       tipsEnabled: true,
     })
 
@@ -330,7 +382,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
     expect(response.status).toBe(400)
     await expect(response.json()).resolves.toEqual({
       error:
-        'selectedPaymentMethod must be one of: cash, card on file, tap to pay, Venmo, Zelle, Apple Cash.',
+        'selectedPaymentMethod must be one of: cash, card on file, tap to pay, Venmo, Zelle, Apple Cash, Stripe card.',
     })
 
     expect(mocks.beginIdempotency).not.toHaveBeenCalled()
@@ -518,6 +570,154 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
   })
 
+  it('rejects STRIPE_CARD manual confirmation and marks idempotency failed', async () => {
+    const response = await POST(
+      makeIdempotentRequest(
+        {
+          tipAmount: '15.00',
+          selectedPaymentMethod: 'stripe_card',
+          confirmPayment: true,
+        },
+        'idem_stripe_manual_confirm_1',
+      ),
+      makeCtx(),
+    )
+
+    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: 'CLIENT',
+      },
+      route: IDEMPOTENCY_ROUTE,
+      key: 'idem_stripe_manual_confirm_1',
+      requestBody: expectedIdempotencyBody({
+        tipAmount: '15.00',
+        selectedPaymentMethodProvided: true,
+        selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
+        confirmPayment: true,
+      }),
+    })
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      error: 'Card payments must be confirmed through Stripe checkout.',
+      code: 'STRIPE_CHECKOUT_REQUIRED',
+    })
+
+    expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
+    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('allows selecting STRIPE_CARD without marking payment collected', async () => {
+    mocks.updateClientBookingCheckout.mockResolvedValueOnce(
+      makeStripeSelectionResult(),
+    )
+
+    const response = await POST(
+      makeIdempotentRequest(
+        {
+          tipAmount: '15.00',
+          selectedPaymentMethod: 'stripe_card',
+          confirmPayment: false,
+        },
+        'idem_stripe_select_1',
+      ),
+      makeCtx(),
+    )
+
+    expect(mocks.updateClientBookingCheckout).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      clientId: 'client_1',
+      tipAmount: '15.00',
+      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
+      checkoutStatus: undefined,
+      markPaymentAuthorized: false,
+      markPaymentCollected: false,
+    })
+
+    const responseBody = expectedStripeSelectionResponseBody()
+
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody,
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual(responseBody)
+  })
+
+  it('rejects STRIPE_CARD when the provider has not enabled Stripe card payments', async () => {
+    mocks.prismaProfessionalPaymentSettingsFindUnique.mockResolvedValueOnce({
+      acceptCash: true,
+      acceptCardOnFile: true,
+      acceptTapToPay: true,
+      acceptVenmo: true,
+      acceptZelle: true,
+      acceptAppleCash: true,
+      acceptStripeCard: false,
+      tipsEnabled: true,
+    })
+
+    const response = await POST(
+      makeIdempotentRequest(
+        {
+          tipAmount: '15.00',
+          selectedPaymentMethod: 'stripe_card',
+          confirmPayment: false,
+        },
+        'idem_stripe_disabled_1',
+      ),
+      makeCtx(),
+    )
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      error: 'That payment method is not enabled by this provider.',
+    })
+
+    expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
+  })
+
+  it('rejects existing STRIPE_CARD manual confirmation and marks idempotency failed', async () => {
+    mocks.prismaBookingFindUnique.mockResolvedValueOnce({
+      id: 'booking_1',
+      professionalId: 'pro_1',
+      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
+    })
+
+    const response = await POST(
+      makeIdempotentRequest(
+        {
+          tipAmount: '15.00',
+          confirmPayment: true,
+        },
+        'idem_existing_stripe_manual_confirm_1',
+      ),
+      makeCtx(),
+    )
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      error: 'Card payments must be confirmed through Stripe checkout.',
+      code: 'STRIPE_CHECKOUT_REQUIRED',
+    })
+
+    expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
+  })
+
   it('rejects a positive tip when tips are disabled for the provider and marks idempotency failed', async () => {
     mocks.prismaProfessionalPaymentSettingsFindUnique.mockResolvedValueOnce({
       acceptCash: true,
@@ -526,6 +726,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       acceptVenmo: true,
       acceptZelle: true,
       acceptAppleCash: true,
+      acceptStripeCard: true,
       tipsEnabled: false,
     })
 
@@ -553,7 +754,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
   })
 
-  it('forwards a valid payload to updateClientBookingCheckout, completes idempotency, and returns the booking payload', async () => {
+  it('forwards a valid manual cash payload to updateClientBookingCheckout, completes idempotency, and returns the booking payload', async () => {
     const response = await POST(
       makeIdempotentRequest(
         {
@@ -598,7 +799,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
     await expect(response.json()).resolves.toEqual(responseBody)
   })
 
-  it('uses existing selected payment method when confirming payment without selectedPaymentMethod', async () => {
+  it('uses existing manual selected payment method when confirming payment without selectedPaymentMethod', async () => {
     mocks.prismaBookingFindUnique.mockResolvedValueOnce({
       id: 'booking_1',
       professionalId: 'pro_1',
