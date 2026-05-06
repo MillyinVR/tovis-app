@@ -353,9 +353,19 @@ export default function AddOnsClient({
     setError(null)
 
     try {
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `booking-finalize-${Date.now()}-${Math.random()
+              .toString(36)
+              .slice(2)}`
+
       const response = await fetch('/api/bookings/finalize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
         body: JSON.stringify({
           holdId,
           offeringId,
