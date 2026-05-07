@@ -292,6 +292,7 @@ async function patchBooking(args: {
     headers: {
       'Content-Type': 'application/json',
       'Idempotency-Key': idempotencyKey,
+      'x-idempotency-key': idempotencyKey,
     },
     body: JSON.stringify(args.payload),
   })

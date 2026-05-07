@@ -122,6 +122,7 @@ async function patchBookingStatus(args: {
     headers: {
       'Content-Type': 'application/json',
       'Idempotency-Key': idempotencyKey,
+      'x-idempotency-key': idempotencyKey,
     },
     body: JSON.stringify(bookingStatusPayload(args.status)),
   })
