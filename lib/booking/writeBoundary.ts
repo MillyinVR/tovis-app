@@ -2148,13 +2148,17 @@ function isAllowedSessionTransition(
 }
 
 function canUploadBookingMediaPhase(
-  sessionStep: SessionStep | null,
+  sessionStep: SessionStep | null | undefined,
   phase: MediaPhase,
 ): boolean {
   const step = sessionStep ?? SessionStep.NONE
 
   if (phase === MediaPhase.BEFORE) {
-    return step === SessionStep.BEFORE_PHOTOS
+    return (
+      step === SessionStep.CONSULTATION ||
+      step === SessionStep.CONSULTATION_PENDING_CLIENT ||
+      step === SessionStep.BEFORE_PHOTOS
+    )
   }
 
   if (phase === MediaPhase.AFTER) {

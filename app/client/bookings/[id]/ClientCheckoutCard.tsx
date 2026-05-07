@@ -4,6 +4,10 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 type CheckoutStatus =
   | 'NOT_READY'
@@ -195,12 +199,19 @@ async function submitCheckout(args: {
   selectedPaymentMethod?: string
   confirmPayment: boolean
 }): Promise<SubmitResponse> {
+  const idempotencyKey = buildClientIdempotencyKey({
+    scope: 'client-checkout',
+    entityId: args.bookingId,
+    action: args.confirmPayment ? 'confirm-payment' : 'save-checkout',
+  })
+
   const response = await fetch(
     `/api/client/bookings/${encodeURIComponent(args.bookingId)}/checkout`,
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...idempotencyHeaders(idempotencyKey),
       },
       body: JSON.stringify({
         tipAmount: args.tipAmount,
@@ -265,15 +276,16 @@ export default function ClientCheckoutCard(props: Props) {
 
   const tipsEnabled = props.tipsEnabled !== false
   const allowCustomTip = props.allowCustomTip !== false
-const serviceSubtotal = useMemo(
-  () => getNumericMoney(props.serviceSubtotalSnapshot) ?? 0,
-  [props.serviceSubtotalSnapshot],
-)
 
-const configuredTipSuggestions = useMemo(
-  () => normalizeTipSuggestionPercents(props.tipSuggestions),
-  [props.tipSuggestions],
-)
+  const serviceSubtotal = useMemo(
+    () => getNumericMoney(props.serviceSubtotalSnapshot) ?? 0,
+    [props.serviceSubtotalSnapshot],
+  )
+
+  const configuredTipSuggestions = useMemo(
+    () => normalizeTipSuggestionPercents(props.tipSuggestions),
+    [props.tipSuggestions],
+  )
 
   const productSubtotal = useMemo(
     () => getNumericMoney(props.productSubtotalSnapshot) ?? 0,
@@ -309,15 +321,16 @@ const configuredTipSuggestions = useMemo(
     return serviceSubtotal + productSubtotal + tipAmount + taxAmount - discountAmount
   }, [serviceSubtotal, productSubtotal, tipAmount, taxAmount, discountAmount])
 
-const presetPercents = useMemo(() => {
-  if (!tipsEnabled || serviceSubtotal <= 0) return []
+  const presetPercents = useMemo(() => {
+    if (!tipsEnabled || serviceSubtotal <= 0) return []
 
-  const base = configuredTipSuggestions.length > 0
-    ? configuredTipSuggestions
-    : [15, 20, 25]
+    const base =
+      configuredTipSuggestions.length > 0
+        ? configuredTipSuggestions
+        : [15, 20, 25]
 
-  return Array.from(new Set([0, ...base]))
-}, [configuredTipSuggestions, serviceSubtotal, tipsEnabled])
+    return Array.from(new Set([0, ...base]))
+  }, [configuredTipSuggestions, serviceSubtotal, tipsEnabled])
 
   const confirmDisabled =
     checkoutLocked ||

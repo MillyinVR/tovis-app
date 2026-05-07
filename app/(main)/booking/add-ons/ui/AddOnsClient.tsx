@@ -9,6 +9,10 @@ import type {
   BookingSource,
   ServiceLocationType,
 } from '../../AvailabilityDrawer/types'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 type AddOnDTO = {
   id: string
@@ -353,18 +357,17 @@ export default function AddOnsClient({
     setError(null)
 
     try {
-      const idempotencyKey =
-        typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? crypto.randomUUID()
-          : `booking-finalize-${Date.now()}-${Math.random()
-              .toString(36)
-              .slice(2)}`
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'booking-finalize',
+        entityId: holdId,
+        action: 'complete',
+      })
 
       const response = await fetch('/api/bookings/finalize', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKey,
+          ...idempotencyHeaders(idempotencyKey),
         },
         body: JSON.stringify({
           holdId,

@@ -4,6 +4,10 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 type CheckoutStatus =
   | 'NOT_READY'
@@ -144,11 +148,6 @@ function isInternalRecommendation(
   )
 }
 
-function hasExternalLink(item: RecommendedProduct): boolean {
-  return (
-    typeof item.externalUrl === 'string' && item.externalUrl.trim().length > 0
-  )
-}
 
 function clampQuantity(value: number): number {
   if (!Number.isFinite(value)) return 0
@@ -158,34 +157,96 @@ function clampQuantity(value: number): number {
   return whole
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 function parseSubmitErrorMessage(data: unknown): string | null {
-  if (!data || typeof data !== 'object') return null
+  if (!isRecord(data)) return null
 
-  if ('error' in data && typeof data.error === 'string' && data.error.trim()) {
-    return data.error
-  }
+  const error = data.error
+  if (typeof error === 'string' && error.trim()) return error.trim()
 
-  if (
-    'message' in data &&
-    typeof data.message === 'string' &&
-    data.message.trim()
-  ) {
-    return data.message
-  }
+  const message = data.message
+  if (typeof message === 'string' && message.trim()) return message.trim()
 
   return null
+}
+
+function parseSubmitResponse(data: unknown): SubmitResponse {
+  if (!isRecord(data)) return {}
+
+  const response: SubmitResponse = {}
+
+  if (isRecord(data.booking)) {
+    const bookingId = typeof data.booking.id === 'string' ? data.booking.id : null
+
+    if (bookingId) {
+      response.booking = {
+        id: bookingId,
+        checkoutStatus:
+          typeof data.booking.checkoutStatus === 'string'
+            ? data.booking.checkoutStatus
+            : null,
+        serviceSubtotalSnapshot:
+          typeof data.booking.serviceSubtotalSnapshot === 'string'
+            ? data.booking.serviceSubtotalSnapshot
+            : null,
+        productSubtotalSnapshot:
+          typeof data.booking.productSubtotalSnapshot === 'string'
+            ? data.booking.productSubtotalSnapshot
+            : null,
+        subtotalSnapshot:
+          typeof data.booking.subtotalSnapshot === 'string'
+            ? data.booking.subtotalSnapshot
+            : null,
+        tipAmount:
+          typeof data.booking.tipAmount === 'string' ? data.booking.tipAmount : null,
+        taxAmount:
+          typeof data.booking.taxAmount === 'string' ? data.booking.taxAmount : null,
+        discountAmount:
+          typeof data.booking.discountAmount === 'string'
+            ? data.booking.discountAmount
+            : null,
+        totalAmount:
+          typeof data.booking.totalAmount === 'string'
+            ? data.booking.totalAmount
+            : null,
+        paymentAuthorizedAt:
+          typeof data.booking.paymentAuthorizedAt === 'string'
+            ? data.booking.paymentAuthorizedAt
+            : null,
+        paymentCollectedAt:
+          typeof data.booking.paymentCollectedAt === 'string'
+            ? data.booking.paymentCollectedAt
+            : null,
+      }
+    }
+  }
+
+  if (typeof data.error === 'string') response.error = data.error
+  if (typeof data.message === 'string') response.message = data.message
+
+  return response
 }
 
 async function submitRecommendedProducts(args: {
   bookingId: string
   lines: SelectedLine[]
 }): Promise<SubmitResponse> {
+  const idempotencyKey = buildClientIdempotencyKey({
+    scope: 'client-checkout-products',
+    entityId: args.bookingId,
+    action: 'save-selection',
+  })
+
   const response = await fetch(
     `/api/client/bookings/${encodeURIComponent(args.bookingId)}/checkout/products`,
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...idempotencyHeaders(idempotencyKey),
       },
       body: JSON.stringify({
         items: args.lines,
@@ -193,12 +254,7 @@ async function submitRecommendedProducts(args: {
     },
   )
 
-  let data: unknown = null
-  try {
-    data = await response.json()
-  } catch {
-    data = null
-  }
+  const data: unknown = await response.json().catch(() => null)
 
   if (!response.ok) {
     throw new Error(
@@ -206,7 +262,7 @@ async function submitRecommendedProducts(args: {
     )
   }
 
-  return (data ?? {}) as SubmitResponse
+  return parseSubmitResponse(data)
 }
 
 export default function AftercareProductRecommendationsCard(props: Props) {
@@ -516,9 +572,11 @@ export default function AftercareProductRecommendationsCard(props: Props) {
           {externalRecommendations.map((recommendation) => {
             const productName =
               recommendation.externalName?.trim() || 'Recommended product'
-            const href = hasExternalLink(recommendation)
-              ? recommendation.externalUrl!.trim()
-              : null
+            const href =
+              typeof recommendation.externalUrl === 'string' &&
+              recommendation.externalUrl.trim()
+                ? recommendation.externalUrl.trim()
+                : null
 
             const content = (
               <div className="rounded-card border border-white/10 bg-bgPrimary px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.25)]">

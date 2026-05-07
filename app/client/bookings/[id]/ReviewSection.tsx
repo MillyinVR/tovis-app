@@ -7,6 +7,10 @@ import { supabaseBrowser } from '@/lib/supabaseBrowser'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
 import { safeJsonRecord, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 
@@ -33,6 +37,16 @@ type AppointmentMediaOption = {
   mediaType: MediaType
   createdAt: string
   phase?: 'BEFORE' | 'AFTER' | 'OTHER'
+}
+
+type ReviewMediaSubmitItem = {
+  mediaType: MediaType
+  storageBucket: string
+  storagePath: string
+  thumbBucket: string | null
+  thumbPath: string | null
+  url: string | null
+  thumbUrl: string | null
 }
 
 type PendingUpload = {
@@ -146,25 +160,41 @@ function coercePhase(v: unknown): AppointmentMediaOption['phase'] | undefined {
   return undefined
 }
 
-function coerceApptMediaOption(x: unknown): AppointmentMediaOption | null {
-  if (!isRecord(x)) return null
-  const id = pickStringOrEmpty((x as any).id)
-  const url = pickStringOrEmpty((x as any).url)
-  const thumbUrl = pickStringOrEmpty((x as any).thumbUrl) || null
-  const mediaType = coerceMediaType((x as any).mediaType)
-  const createdAt = pickStringOrEmpty((x as any).createdAt)
-  const phase = coercePhase((x as any).phase)
+function isAppointmentMediaOption(value: AppointmentMediaOption | null): value is AppointmentMediaOption {
+  return value !== null
+}
+
+function coerceApptMediaOption(value: unknown): AppointmentMediaOption | null {
+  if (!isRecord(value)) return null
+
+  const id = pickStringOrEmpty(value.id)
+  const url = pickStringOrEmpty(value.url)
+  const thumbUrl = pickStringOrEmpty(value.thumbUrl) || null
+  const mediaType = coerceMediaType(value.mediaType)
+  const createdAt = pickStringOrEmpty(value.createdAt)
+  const phase = coercePhase(value.phase)
 
   if (!id || !url || !mediaType || !createdAt) return null
-  return { id, url, thumbUrl, mediaType, createdAt, phase }
+
+  return {
+    id,
+    url,
+    thumbUrl,
+    mediaType,
+    createdAt,
+    phase,
+  }
 }
 
 function parseReviewMediaOptionsPayload(data: unknown): AppointmentMediaOption[] {
   if (!isRecord(data)) return []
-  const itemsRaw = (data as any).items
+
+  const itemsRaw = data.items
   if (!Array.isArray(itemsRaw)) return []
-  return itemsRaw.map(coerceApptMediaOption).filter(Boolean) as AppointmentMediaOption[]
+
+  return itemsRaw.map(coerceApptMediaOption).filter(isAppointmentMediaOption)
 }
+
 
 type SignedUploadInit = {
   bucket: string
@@ -177,16 +207,25 @@ type SignedUploadInit = {
 function parseSignedUploadInit(data: unknown): SignedUploadInit | null {
   if (!isRecord(data)) return null
 
-  const bucket = pickStringOrEmpty((data as any).bucket)
-  const path = pickStringOrEmpty((data as any).path)
-  const token = pickStringOrEmpty((data as any).token)
-  const publicUrl = pickStringOrEmpty((data as any).publicUrl) || null
-  const cacheBuster = typeof (data as any).cacheBuster === 'number' && Number.isFinite((data as any).cacheBuster)
-    ? (data as any).cacheBuster
-    : null
+  const bucket = pickStringOrEmpty(data.bucket)
+  const path = pickStringOrEmpty(data.path)
+  const token = pickStringOrEmpty(data.token)
+  const publicUrl = pickStringOrEmpty(data.publicUrl) || null
+
+  const cacheBuster =
+    typeof data.cacheBuster === 'number' && Number.isFinite(data.cacheBuster)
+      ? data.cacheBuster
+      : null
 
   if (!bucket || !path || !token) return null
-  return { bucket, path, token, publicUrl, cacheBuster }
+
+  return {
+    bucket,
+    path,
+    token,
+    publicUrl,
+    cacheBuster,
+  }
 }
 
 export default function ReviewSection({
@@ -207,8 +246,12 @@ export default function ReviewSection({
     setRating(existingReview?.rating ?? 5)
     setHeadline(existingReview?.headline ?? '')
     setBody(existingReview?.body ?? '')
-  }, [existingReview?.id])
-
+  }, [
+    existingReview?.id,
+    existingReview?.rating,
+    existingReview?.headline,
+    existingReview?.body,
+  ])
   const [apptMedia, setApptMedia] = useState<AppointmentMediaOption[]>([])
   const [selectedApptMediaIds, setSelectedApptMediaIds] = useState<string[]>([])
   const [pending, setPending] = useState<PendingUpload[]>([])
@@ -244,7 +287,6 @@ export default function ReviewSection({
         return prev
       })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load appointment media options (only when creating a new review)
@@ -479,21 +521,26 @@ export default function ReviewSection({
     }
   }
 
-  function pendingForSubmit() {
-    return pending
-      .filter((p) => p.status === 'UPLOADED' && p.storageBucket && p.storagePath)
-      .map((p) => ({
-        mediaType: p.mediaType,
-        storageBucket: p.storageBucket as string,
-        storagePath: p.storagePath as string,
-        thumbBucket: p.thumbBucket ?? null,
-        thumbPath: p.thumbPath ?? null,
+function pendingForSubmit(): ReviewMediaSubmitItem[] {
+  const media: ReviewMediaSubmitItem[] = []
 
-        // legacy compatibility (optional)
-        url: p.renderUrl ?? null,
-        thumbUrl: null as string | null,
-      }))
+  for (const item of pending) {
+    if (item.status !== 'UPLOADED') continue
+    if (!item.storageBucket || !item.storagePath) continue
+
+    media.push({
+      mediaType: item.mediaType,
+      storageBucket: item.storageBucket,
+      storagePath: item.storagePath,
+      thumbBucket: item.thumbBucket ?? null,
+      thumbPath: item.thumbPath ?? null,
+      url: item.renderUrl ?? null,
+      thumbUrl: null,
+    })
   }
+
+  return media
+}
 
   async function submitReview() {
     if (loading) return
@@ -512,11 +559,19 @@ export default function ReviewSection({
 
     setLoading(true)
     try {
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'client-review',
+        entityId: bookingId,
+        action: 'create',
+      })
       const result = await requestOrRedirect(
         `/api/client/bookings/${encodeURIComponent(bookingId)}/review`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...idempotencyHeaders(idempotencyKey),
+          },
           body: JSON.stringify({
             rating,
             headline,
