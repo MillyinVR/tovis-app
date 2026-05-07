@@ -166,6 +166,17 @@ type MutationPayload =
       notifyClient: boolean
     }
 
+function buildBookingActionIdempotencyKey(args: {
+  bookingId: string
+  action: LoadingAction
+}): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `pro-booking-action-${args.bookingId}-${args.action}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`
+}
+
 function getPatchPayload(action: LoadingAction): MutationPayload | null {
   if (action === 'ACCEPT') {
     return {
@@ -273,8 +284,13 @@ export default function BookingActions({
     const controller = new AbortController()
     abortRef.current = controller
 
-    try {
-      let res: Response
+      try {
+        let res: Response
+
+        const idempotencyKey = buildBookingActionIdempotencyKey({
+          bookingId: id,
+          action,
+        })
 
       if (action === 'ACCEPT' || action === 'CANCEL') {
         const body = getPatchPayload(action)
@@ -282,20 +298,32 @@ export default function BookingActions({
           throw new Error('Unsupported booking action.')
         }
 
-        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        })
+      res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+          'x-idempotency-key': idempotencyKey,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
       } else if (action === 'START') {
-        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/start`, {
-          method: 'POST',
-          signal: controller.signal,
-        })
+      res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/session/start`, {
+        method: 'POST',
+        headers: {
+          'Idempotency-Key': idempotencyKey,
+          'x-idempotency-key': idempotencyKey,
+        },
+        signal: controller.signal,
+      })
       } else {
-        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/finish`, {
+        res = await fetch(`/api/pro/bookings/${encodeURIComponent(id)}/session/finish`, {
           method: 'POST',
+          headers: {
+            'Idempotency-Key': idempotencyKey,
+            'x-idempotency-key': idempotencyKey,
+          },
           signal: controller.signal,
         })
       }
