@@ -12,6 +12,25 @@ import { clampInt } from '@/lib/guards'
 import { cn } from '@/lib/utils'
 
 type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
+const ADVANCE_NOTICE_OPTIONS = [
+  { value: 15, label: '15 minutes' },
+  { value: 30, label: '30 minutes' },
+  { value: 60, label: '1 hour' },
+  { value: 120, label: '2 hours' },
+  { value: 240, label: '4 hours' },
+  { value: 720, label: '12 hours' },
+  { value: 1440, label: '24 hours' },
+  { value: 2880, label: '48 hours' },
+] as const
+
+function formatAdvanceNotice(minutes: number | null | undefined): string {
+  const normalized = Number(minutes ?? 15)
+  const match = ADVANCE_NOTICE_OPTIONS.find((option) => option.value === normalized)
+  if (match) return match.label
+  if (normalized < 60) return `${normalized} minutes`
+  if (normalized % 60 === 0) return `${normalized / 60} hours`
+  return `${normalized} minutes`
+}
 
 function isValidUsZip(v: string) {
   return /^\d{5}(-\d{4})?$/.test(v.trim())
@@ -146,6 +165,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
   const [type, setType] = useState<LocationType>('SALON')
   const [name, setName] = useState('')
   const [makePrimary, setMakePrimary] = useState<boolean>(() => initialLocations.length === 0)
+  const [advanceNoticeMinutes, setAdvanceNoticeMinutes] = useState(15)
 
   // picked place (SALON/SUITE)
   const [pickedPlace, setPickedPlace] = useState<PickedPlace | null>(null)
@@ -216,6 +236,51 @@ export default function LocationsClient({ initialLocations }: { initialLocations
     }
   }
 
+async function updateAdvanceNotice(
+  id: string,
+  nextAdvanceNoticeMinutes: number,
+) {
+  setBusy(true)
+  setBusyId(id)
+  setError(null)
+
+  const previousLocations = locations
+
+  setLocations((prev) =>
+    prev.map((location) =>
+      location.id === id
+        ? { ...location, advanceNoticeMinutes: nextAdvanceNoticeMinutes }
+        : location,
+    ),
+  )
+
+  try {
+    const res = await fetch(`/api/pro/locations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ advanceNoticeMinutes: nextAdvanceNoticeMinutes }),
+    })
+
+    const data = await safeJson(res)
+    if (!res.ok) {
+      throw new Error(
+        readErrorMessage(data) ?? `Failed to update advance notice (${res.status}).`,
+      )
+    }
+
+    showToast({ tone: 'success', title: 'Advance notice updated' })
+    await refresh()
+  } catch (e: unknown) {
+    const msg = errorMessageFromUnknown(e, 'Failed to update advance notice.')
+    setLocations(previousLocations)
+    setError(msg)
+    showToast({ tone: 'error', title: 'Couldn’t update notice', body: msg })
+  } finally {
+    setBusy(false)
+    setBusyId(null)
+  }
+}
+
   async function deleteLocationConfirmed(id: string) {
     setBusy(true)
     setBusyId(id)
@@ -266,6 +331,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
           placeId,
           locationName: name.trim() || null,
           sessionToken: pickedPlace?.sessionToken ?? null,
+          advanceNoticeMinutes,
         }),
       })
 
@@ -329,6 +395,7 @@ export default function LocationsClient({ initialLocations }: { initialLocations
           postalCode: zip,
           radiusKm: radius,
           locationName: name.trim() || null,
+          advanceNoticeMinutes,
         }),
       })
 
@@ -463,6 +530,32 @@ export default function LocationsClient({ initialLocations }: { initialLocations
               disabled={busy}
             />
             Make primary <span className="text-[12px] font-semibold text-textSecondary">(what clients see first)</span>
+          </label>
+
+          <label className="grid gap-2">
+            <div className="text-[12px] font-black text-textSecondary">
+              Minimum advance notice
+            </div>
+
+            <select
+              value={advanceNoticeMinutes}
+              onChange={(e) => setAdvanceNoticeMinutes(Number(e.target.value))}
+              className={cn(
+                'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                'text-[13px] font-bold text-textPrimary outline-none',
+              )}
+              disabled={busy}
+            >
+              {ADVANCE_NOTICE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+
+            <div className="text-[11px] font-semibold text-textSecondary">
+              Clients can only book this location at least this far in advance. Pros can still adjust their own calendar.
+            </div>
           </label>
 
           {showPlacePicker ? (
@@ -628,7 +721,8 @@ export default function LocationsClient({ initialLocations }: { initialLocations
                       <div className="mt-2 text-[13px] font-semibold text-textPrimary/85">{formatLocationAddress(l)}</div>
 
                       <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                        TZ: {l.timeZone || '—'} • Lat/Lng: {l.lat ?? '—'},{l.lng ?? '—'}
+                        TZ: {l.timeZone || '—'} • Lat/Lng: {l.lat ?? '—'},{l.lng ?? '—'} • Notice:{' '}
+                        {formatAdvanceNotice(l.advanceNoticeMinutes)}
                       </div>
                     </div>
 
@@ -655,6 +749,32 @@ export default function LocationsClient({ initialLocations }: { initialLocations
                         </a>
                       ) : null}
                     </div>
+                  </div>
+
+                  <div className="mt-3 max-w-xs">
+                    <label className="grid gap-1">
+                      <span className="text-[11px] font-black text-textSecondary">
+                        Minimum advance notice
+                      </span>
+
+                      <select
+                        value={Number(l.advanceNoticeMinutes ?? 15)}
+                        onChange={(event) =>
+                          void updateAdvanceNotice(l.id, Number(event.target.value))
+                        }
+                        disabled={busy}
+                        className={cn(
+                          'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                          'text-[13px] font-bold text-textPrimary outline-none disabled:opacity-60',
+                        )}
+                      >
+                        {ADVANCE_NOTICE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2">

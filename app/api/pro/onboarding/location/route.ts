@@ -32,6 +32,13 @@ function pickBool(v: unknown): boolean | null {
   return typeof v === 'boolean' ? v : null
 }
 
+function normalizeAdvanceNoticeMinutes(v: unknown): number {
+  const parsed = pickInt(v)
+  if (parsed == null) return 15
+
+  return Math.max(0, Math.min(parsed, 30 * 24 * 60))
+}
+
 function componentMap(addressComponents: unknown) {
   const out: Record<string, string> = {}
 
@@ -197,8 +204,10 @@ export async function POST(req: Request) {
     if (!mode) return jsonFail(400, 'Missing or invalid mode.', { code: 'INVALID_MODE' })
 
     const makePrimary = pickBool(body['makePrimary']) ?? true
+    const advanceNoticeMinutes = normalizeAdvanceNoticeMinutes(
+      body['advanceNoticeMinutes'],
+    )
     const workingHours = defaultWorkingHours()
-
     // Prisma-validated type for `type`
     type LocationType = Prisma.ProfessionalLocationCreateInput['type']
 
@@ -245,9 +254,16 @@ export async function POST(req: Request) {
             lng: loc.lng,
 
             timeZone: tz,
+            advanceNoticeMinutes,
             workingHours,
           },
-          select: { id: true, type: true, timeZone: true, isPrimary: true },
+          select: {
+            id: true,
+            type: true,
+            timeZone: true,
+            isPrimary: true,
+            advanceNoticeMinutes: true,
+          },
         })
 
         // Keep pro-level timezone aligned to latest “real” location timezone
@@ -322,9 +338,16 @@ export async function POST(req: Request) {
           lng: geo.lng,
 
           timeZone: tz,
+          advanceNoticeMinutes,
           workingHours,
         },
-        select: { id: true, type: true, timeZone: true, isPrimary: true },
+        select: {
+          id: true,
+          type: true,
+          timeZone: true,
+          isPrimary: true,
+          advanceNoticeMinutes: true,
+        },  
       })
 
       await tx.professionalProfile.update({

@@ -21,6 +21,7 @@ export type ProLocation = {
   lat: number | null
   lng: number | null
   timeZone: string | null
+  advanceNoticeMinutes: number
   createdAt: string
 }
 
@@ -51,6 +52,13 @@ function readBool(v: unknown): boolean {
 
 function readNullableNumber(v: unknown): number | null {
   return pickNumber(v)
+}
+
+function readAdvanceNoticeMinutes(v: unknown): number {
+  const parsed = pickNumber(v)
+  if (parsed == null || !Number.isFinite(parsed)) return 15
+
+  return Math.max(0, Math.min(Math.trunc(parsed), 30 * 24 * 60))
 }
 
 export function parseLocationType(v: unknown): LocationType {
@@ -105,6 +113,7 @@ export function parseProLocationsPayload(v: unknown): ProLocation[] {
       lat: readNullableNumber(item.lat),
       lng: readNullableNumber(item.lng),
       timeZone: readNullableString(item.timeZone),
+      advanceNoticeMinutes: readAdvanceNoticeMinutes(item.advanceNoticeMinutes),
 
       createdAt: readString(item.createdAt) || new Date().toISOString(),
     })
