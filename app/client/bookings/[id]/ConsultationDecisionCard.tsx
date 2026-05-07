@@ -6,6 +6,10 @@ import { useMemo, useState } from 'react'
 import { moneyToString } from '@/lib/money'
 import { COPY } from '@/lib/copy'
 import { safeJson } from '@/lib/http'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -84,17 +88,6 @@ function Pill({ children }: { children: React.ReactNode }) {
 type DecisionAction = 'APPROVE' | 'REJECT'
 
 
-function buildClientConsultationDecisionIdempotencyKey(args: {
-  bookingId: string
-  action: DecisionAction
-}): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `client-consultation-decision-${args.bookingId}-${args.action}-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}`
-} 
-
 export default function ConsultationDecisionCard(props: {
   bookingId: string
   appointmentTz: string
@@ -127,8 +120,9 @@ export default function ConsultationDecisionCard(props: {
     setLoading(action)
 
     try {
-      const idempotencyKey = buildClientConsultationDecisionIdempotencyKey({
-        bookingId,
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'client-consultation-decision',
+        entityId: bookingId,
         action,
       })
 
@@ -138,8 +132,7 @@ export default function ConsultationDecisionCard(props: {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Idempotency-Key': idempotencyKey,
-            'x-idempotency-key': idempotencyKey,
+            ...idempotencyHeaders(idempotencyKey),
           },
           body: JSON.stringify({ action }),
         },

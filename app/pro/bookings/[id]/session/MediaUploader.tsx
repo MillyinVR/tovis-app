@@ -9,6 +9,10 @@ import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
 type MediaType = 'IMAGE' | 'VIDEO'
@@ -24,13 +28,13 @@ type SignedUploadResponse = {
   bucket: string
   path: string
   token: string
-  signedUrl?: string | null
-  publicUrl?: string | null
-  isPublic?: boolean
-  cacheBuster?: number
+  signedUrl: string | null
+  publicUrl: string | null
+  isPublic: boolean | null
+  cacheBuster: number | null
 }
 
-function errorFrom(res: Response, data: unknown) {
+function errorFrom(res: Response, data: unknown): string {
   if (isRecord(data)) {
     const message = pickString(data.message)
     if (message) return message
@@ -45,15 +49,49 @@ function errorFrom(res: Response, data: unknown) {
 }
 
 function guessMediaType(file: File): MediaType {
-  const t = (file.type || '').toLowerCase()
-  return t.startsWith('video/') ? 'VIDEO' : 'IMAGE'
+  const type = file.type.toLowerCase()
+  return type.startsWith('video/') ? 'VIDEO' : 'IMAGE'
 }
 
 function parseMediaType(value: string): MediaType {
   return value === 'VIDEO' ? 'VIDEO' : 'IMAGE'
 }
 
-function bytesFromMb(mb: number) {
+function readBooleanOrNull(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null
+}
+
+function readNumberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function readSignedUploadResponse(value: unknown): SignedUploadResponse | null {
+  if (!isRecord(value)) return null
+
+  const ok = value.ok === true
+  const kind = pickString(value.kind)
+  const bucket = pickString(value.bucket)
+  const path = pickString(value.path)
+  const token = pickString(value.token)
+
+  if (!ok || !kind || !bucket || !path || !token) {
+    return null
+  }
+
+  return {
+    ok,
+    kind,
+    bucket,
+    path,
+    token,
+    signedUrl: pickString(value.signedUrl),
+    publicUrl: pickString(value.publicUrl),
+    isPublic: readBooleanOrNull(value.isPublic),
+    cacheBuster: readNumberOrNull(value.cacheBuster),
+  }
+}
+
+function bytesFromMb(mb: number): number {
   return mb * 1024 * 1024
 }
 
@@ -90,12 +128,12 @@ export default function MediaUploader({
 
   useEffect(() => {
     return () => {
-      if (previewUrl) {
-        try {
-          URL.revokeObjectURL(previewUrl)
-        } catch {
-          // ignore
-        }
+      if (!previewUrl) return
+
+      try {
+        URL.revokeObjectURL(previewUrl)
+      } catch {
+        // Ignore cleanup failure.
       }
     }
   }, [previewUrl])
@@ -126,8 +164,9 @@ export default function MediaUploader({
       try {
         URL.revokeObjectURL(previewUrl)
       } catch {
-        // ignore
+        // Ignore cleanup failure.
       }
+
       setPreviewUrl(null)
     }
 
@@ -142,8 +181,7 @@ export default function MediaUploader({
     setMediaType(inferred)
 
     try {
-      const p = URL.createObjectURL(next)
-      setPreviewUrl(p)
+      setPreviewUrl(URL.createObjectURL(next))
     } catch {
       setPreviewUrl(null)
     }
@@ -151,9 +189,11 @@ export default function MediaUploader({
 
   async function submit() {
     if (!canSubmit || !file || disabled) return
+
     resetMessages()
 
     abortRef.current?.abort()
+
     const controller = new AbortController()
     abortRef.current = controller
 
@@ -177,9 +217,6 @@ export default function MediaUploader({
       })
 
       const signDataUnknown: unknown = await safeJson(signRes)
-      const signData = isRecord(signDataUnknown)
-        ? (signDataUnknown as Partial<SignedUploadResponse>)
-        : {}
 
       if (!signRes.ok) {
         setError(errorFrom(signRes, signDataUnknown))
@@ -187,19 +224,17 @@ export default function MediaUploader({
         return
       }
 
-      const bucket = String(signData.bucket || '')
-      const path = String(signData.path || '')
-      const token = String(signData.token || '')
+      const signData = readSignedUploadResponse(signDataUnknown)
 
-      if (!bucket || !path || !token) {
+      if (!signData) {
         setError('Upload signing failed (missing bucket/path/token).')
         setStatus('IDLE')
         return
       }
 
       const uploadRes = await supabaseBrowser.storage
-        .from(bucket)
-        .uploadToSignedUrl(path, token, file, {
+        .from(signData.bucket)
+        .uploadToSignedUrl(signData.path, signData.token, file, {
           upsert: false,
           contentType: file.type || undefined,
         })
@@ -215,6 +250,7 @@ export default function MediaUploader({
 
       if (mt === 'IMAGE') {
         const thumbBlob = await maybeCreateImageThumb(file)
+
         if (thumbBlob) {
           thumbBucket = null
           thumbPath = null
@@ -223,15 +259,24 @@ export default function MediaUploader({
 
       setStatus('SAVING')
 
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'booking-media',
+        entityId: bookingId,
+        action: `${phase}-${mt}`,
+      })
+
       const res = await fetch(
         `/api/pro/bookings/${encodeURIComponent(bookingId)}/media`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...idempotencyHeaders(idempotencyKey),
+          },
           signal: controller.signal,
           body: JSON.stringify({
-            storageBucket: bucket,
-            storagePath: path,
+            storageBucket: signData.bucket,
+            storagePath: signData.path,
             thumbBucket,
             thumbPath,
             caption: cap,
@@ -242,6 +287,7 @@ export default function MediaUploader({
       )
 
       const data: unknown = await safeJson(res)
+
       if (!res.ok) {
         setError(errorFrom(res, data))
         setStatus('IDLE')
@@ -253,12 +299,18 @@ export default function MediaUploader({
       await onPickFile(null)
 
       router.refresh()
-    } catch (e: unknown) {
-      if (isRecord(e) && e.name === 'AbortError') return
-      console.error(e)
+    } catch (caught: unknown) {
+      if (caught instanceof DOMException && caught.name === 'AbortError') {
+        return
+      }
+
+      console.error(caught)
       setError('Network error. Try again.')
     } finally {
-      if (abortRef.current === controller) abortRef.current = null
+      if (abortRef.current === controller) {
+        abortRef.current = null
+      }
+
       setStatus('IDLE')
     }
   }
@@ -279,11 +331,13 @@ export default function MediaUploader({
 
   const hint = (() => {
     if (!file) return `Choose a ${phase.toLowerCase()} file to upload.`
+
     if (file.size > maxBytes) {
       const mb = (file.size / (1024 * 1024)).toFixed(1)
       const limit = mediaType === 'VIDEO' ? MAX_VIDEO_MB : MAX_IMAGE_MB
       return `That file is ${mb}MB — over the ${limit}MB limit.`
     }
+
     return 'Ready to upload to private storage.'
   })()
 
@@ -299,13 +353,17 @@ export default function MediaUploader({
           <label className="mb-1 block text-xs font-black text-textSecondary">
             File
           </label>
+
           <input
             type="file"
             disabled={disabled}
             accept="image/*,video/*"
-            onChange={(e) => onPickFile(e.target.files?.[0] ?? null)}
+            onChange={(event) =>
+              void onPickFile(event.target.files?.[0] ?? null)
+            }
             className="block w-full text-sm text-textSecondary file:mr-3 file:rounded-full file:border file:border-white/10 file:bg-bgPrimary file:px-4 file:py-2 file:text-xs file:font-black file:text-textPrimary hover:file:bg-surfaceGlass"
           />
+
           <div className="mt-2 text-[11px] font-semibold text-textSecondary">
             {hint}
           </div>
@@ -341,9 +399,12 @@ export default function MediaUploader({
             <label className="mb-1 block text-xs font-black text-textSecondary">
               Type
             </label>
+
             <select
               value={mediaType}
-              onChange={(e) => setMediaType(parseMediaType(e.target.value))}
+              onChange={(event) =>
+                setMediaType(parseMediaType(event.target.value))
+              }
               disabled={disabled || Boolean(file)}
               className={cn(select, Boolean(file) ? 'opacity-70' : '')}
               title={file ? 'Type is inferred from the selected file.' : undefined}
@@ -365,14 +426,16 @@ export default function MediaUploader({
           <label className="mb-1 block text-xs font-black text-textSecondary">
             Caption (optional)
           </label>
+
           <input
             value={caption}
-            onChange={(e) => setCaption(e.target.value)}
+            onChange={(event) => setCaption(event.target.value)}
             maxLength={CAPTION_MAX}
             placeholder="e.g. After: blended caramel, face-framing"
             disabled={disabled}
             className={input}
           />
+
           <div className="mt-1 text-[11px] font-semibold text-textSecondary">
             {caption.trim().length}/{CAPTION_MAX}
           </div>
@@ -381,7 +444,7 @@ export default function MediaUploader({
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={submit}
+            onClick={() => void submit()}
             disabled={!canSubmit || disabled}
             className={btn}
           >
@@ -397,8 +460,11 @@ export default function MediaUploader({
               {message}
             </span>
           ) : null}
+
           {error ? (
-            <span className="text-xs font-black text-microAccent">{error}</span>
+            <span className="text-xs font-black text-microAccent">
+              {error}
+            </span>
           ) : null}
         </div>
       </div>

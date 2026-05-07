@@ -10,6 +10,10 @@ import {
 } from '@/lib/timeZone'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import {
+  buildClientIdempotencyKey,
+  idempotencyHeaders,
+} from '@/lib/idempotency/client'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 type MediaVisibility = 'PUBLIC' | 'PRO_CLIENT'
@@ -618,10 +622,6 @@ export default function AftercareForm({
       return 'Fix product links/names before continuing.'
     }
 
-    if (sendToClient && !notes.trim()) {
-      return 'Add aftercare notes before sending to the client.'
-    }
-
     return null
   }
 
@@ -650,12 +650,21 @@ export default function AftercareForm({
 
     try {
       const payload = buildPayload(sendToClient)
+      const idempotencyKey = buildClientIdempotencyKey({
+        scope: 'booking-aftercare',
+        entityId: bookingId,
+        action: sendToClient ? 'send' : 'draft',
+      })
 
+      
       const res = await fetch(
         `/api/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...idempotencyHeaders(idempotencyKey),
+          },
           body: JSON.stringify(payload),
           signal: controller.signal,
         },
