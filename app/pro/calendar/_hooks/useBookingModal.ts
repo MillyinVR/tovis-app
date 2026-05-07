@@ -85,6 +85,7 @@ type BookingPatchServiceItem = {
 type BookingPatchPayload = {
   scheduledFor?: string
   notifyClient?: boolean
+  allowShortNotice?: boolean
   allowOutsideWorkingHours?: boolean
   status?: 'ACCEPTED' | 'CANCELLED'
   serviceItems?: BookingPatchServiceItem[]
@@ -660,6 +661,7 @@ export function useBookingModal(deps: BookingModalDeps) {
       const payload: BookingPatchPayload = {
         scheduledFor: nextStartIso,
         notifyClient,
+        allowShortNotice: true,
         allowOutsideWorkingHours: outside ? Boolean(allowOutsideHours) : false,
       }
 

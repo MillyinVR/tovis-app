@@ -68,6 +68,7 @@ type BookingPatchPayload = {
   notifyClient: true
   durationMinutes?: number
   scheduledFor?: string
+  allowShortNotice?: boolean
   allowOutsideWorkingHours?: boolean
   overrideReason?: string
 }
@@ -199,6 +200,7 @@ function buildBookingPatchPayload(args: {
 
   const payload: BookingPatchPayload = {
     notifyClient: true,
+    allowShortNotice: true,
   }
 
   if (change.kind === 'resize') {
