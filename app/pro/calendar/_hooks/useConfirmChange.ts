@@ -213,7 +213,11 @@ function buildBookingPatchPayload(args: {
 
   if (outsideWorkingHours) {
     payload.allowOutsideWorkingHours = true
-    payload.overrideReason = overrideReason
+
+    const trimmedOverrideReason = overrideReason.trim()
+    if (trimmedOverrideReason) {
+      payload.overrideReason = overrideReason.trim()
+    }
   }
 
   return payload
@@ -408,14 +412,7 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
 
         const reason = overrideReason.trim()
 
-        if (pendingOutsideWorkingHours && !reason) {
-          throw new Error('Please add a reason for this override.')
-        }
-
         await patchJson({
-          idempotencyKey: buildProBookingPatchIdempotencyKey(
-            pendingChange.apiId,
-          ),
           url: bookingEndpoint(pendingChange.apiId),
           payload: buildBookingPatchPayload({
             change: pendingChange,

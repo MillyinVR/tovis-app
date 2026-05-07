@@ -1725,16 +1725,13 @@ function assertExplicitOverrideReasonIfNeeded(args: {
 }): string | null {
   const reason = normalizeReason(args.overrideReason)
 
-  if (
-    hasAnyRequestedBookingOverride({
-      allowShortNotice: args.allowShortNotice,
-      allowFarFuture: args.allowFarFuture,
-      allowOutsideWorkingHours: args.allowOutsideWorkingHours,
-    }) &&
-    !reason
-  ) {
+  const requiresExplicitReason =
+    args.allowShortNotice || args.allowFarFuture
+
+  if (requiresExplicitReason && !reason) {
     throw bookingError('FORBIDDEN', {
-      message: 'Override reason is required when using booking rule overrides.',
+      message:
+        'Override reason is required when using short-notice or far-future booking rule overrides.',
       userMessage: 'Please add a reason for this override.',
     })
   }
