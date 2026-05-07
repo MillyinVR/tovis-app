@@ -202,6 +202,7 @@ type ApproveConsultationMaterializationResult = {
     subtotalSnapshot: Prisma.Decimal | null
     totalDurationMinutes: number
     consultationConfirmedAt: Date | null
+    sessionStep: SessionStep
   }
   approval: {
     id: string
@@ -900,6 +901,7 @@ const APPROVE_CONSULTATION_BOOKING_SELECT = {
   subtotalSnapshot: true,
   totalDurationMinutes: true,
   consultationConfirmedAt: true,
+  sessionStep: true,
   consultationApproval: {
     select: {
       id: true,
@@ -5212,7 +5214,21 @@ async function performLockedTransitionSessionStep(args: {
     }
   }
 
-  if (!isAllowedSessionTransition(from, args.nextStep)) {
+  const approval = upper(booking.consultationApproval?.status)
+
+  const shouldHealApprovedPendingConsultation =
+    from === SessionStep.CONSULTATION_PENDING_CLIENT &&
+    approval === 'APPROVED' &&
+    (
+      args.nextStep === SessionStep.BEFORE_PHOTOS ||
+      args.nextStep === SessionStep.SERVICE_IN_PROGRESS
+    )
+
+  const effectiveFrom = shouldHealApprovedPendingConsultation
+    ? SessionStep.BEFORE_PHOTOS
+    : from
+
+  if (!isAllowedSessionTransition(effectiveFrom, args.nextStep)) {
     return {
       ok: false,
       status: 409,
@@ -5221,10 +5237,11 @@ async function performLockedTransitionSessionStep(args: {
     }
   }
 
-    if (
-    from === SessionStep.FINISH_REVIEW &&
+  if (
+    effectiveFrom === SessionStep.FINISH_REVIEW &&
     args.nextStep === SessionStep.AFTER_PHOTOS
   ) {
+
     return {
       ok: false,
       status: 409,
@@ -5232,8 +5249,6 @@ async function performLockedTransitionSessionStep(args: {
       meta: buildMeta(false),
     }
   }
-
-  const approval = upper(booking.consultationApproval?.status)
 
   if (
     requiresApprovedConsultForStep(args.nextStep) &&
@@ -5318,7 +5333,7 @@ async function performLockedTransitionSessionStep(args: {
     !booking.startedAt
 
   recordStepTransition({
-    from,
+    from: effectiveFrom,
     to: args.nextStep,
     actor: 'PRO',
     route: 'lib/booking/writeBoundary.ts:transitionSessionStep',
@@ -5357,7 +5372,7 @@ async function performLockedTransitionSessionStep(args: {
     status: booking.status,
     startedAt: booking.startedAt,
     finishedAt: booking.finishedAt,
-    sessionStep: from,
+    sessionStep: effectiveFrom,
   })
 
   const newSessionState = buildSessionAuditSnapshot({
@@ -5380,7 +5395,7 @@ async function performLockedTransitionSessionStep(args: {
       newValue: newSessionState,
       metadata: {
         trigger: 'implicit_start_from_session_step_transition',
-        previousStep: from,
+        previousStep: effectiveFrom,
         nextStep: updated.sessionStep ?? SessionStep.NONE,
       },
     })
@@ -5395,13 +5410,13 @@ async function performLockedTransitionSessionStep(args: {
     requestId: args.requestId,
     idempotencyKey: args.idempotencyKey,
     oldValue: {
-      sessionStep: from,
+      sessionStep: effectiveFrom,
     },
     newValue: {
       sessionStep: updated.sessionStep ?? SessionStep.NONE,
     },
     metadata: {
-      previousStep: from,
+      previousStep: effectiveFrom,
       nextStep: updated.sessionStep ?? SessionStep.NONE,
       implicitStart: shouldSetStartedAt && !booking.startedAt,
     },
@@ -6345,6 +6360,7 @@ const offeringIds = Array.from(
       totalAmount: checkoutRollup.totalAmount,
       totalDurationMinutes: computedDurationMinutes,
       consultationConfirmedAt: args.now,
+      sessionStep: SessionStep.BEFORE_PHOTOS,
     },
     select: {
       id: true,
@@ -6353,10 +6369,11 @@ const offeringIds = Array.from(
       subtotalSnapshot: true,
       totalDurationMinutes: true,
       consultationConfirmedAt: true,
+      sessionStep: true,
     },
   })
 
-    const updatedApproval = await args.tx.consultationApproval.update({
+  const updatedApproval = await args.tx.consultationApproval.update({
     where: { bookingId: booking.id },
     data: {
       status: ConsultationApprovalStatus.APPROVED,
@@ -6430,6 +6447,7 @@ const offeringIds = Array.from(
         consultationConfirmedAt: normalizeDateCmp(
           booking.consultationConfirmedAt,
         ),
+        sessionStep: booking.sessionStep ?? SessionStep.NONE,
       },
       proof: approval.proof
         ? buildConsultationApprovalProofSnapshot(approval.proof)
@@ -6450,6 +6468,7 @@ const offeringIds = Array.from(
         consultationConfirmedAt: normalizeDateCmp(
           updatedBooking.consultationConfirmedAt,
         ),
+        sessionStep: updatedBooking.sessionStep ?? SessionStep.NONE,
       },
       proof: buildConsultationApprovalProofSnapshot(createdProof),
     },
