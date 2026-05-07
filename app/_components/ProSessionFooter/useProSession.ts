@@ -188,6 +188,17 @@ function nextHrefFromStartFinish(data: unknown): string | null {
   return isSafeInternalHref(href) ? href : null
 }
 
+function buildProSessionIdempotencyKey(args: {
+  bookingId: string
+  action: 'START' | 'FINISH'
+}): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `pro-session-${args.action.toLowerCase()}-${args.bookingId}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`
+}
+
 export function useProSession() {
   const router = useRouter()
   const pathname = usePathname()
@@ -402,7 +413,21 @@ export function useProSession() {
       const fallbackHub = bookingSessionHub(cleanId)
 
       try {
-        const res = await fetch(`/api/pro/bookings/${encodeURIComponent(cleanId)}/start`, { method: 'POST' })
+        const idempotencyKey = buildProSessionIdempotencyKey({
+          bookingId: cleanId,
+          action: 'START',
+        })
+
+        const res = await fetch(
+          `/api/pro/bookings/${encodeURIComponent(cleanId)}/session/start`,
+          {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': idempotencyKey,
+              'x-idempotency-key': idempotencyKey,
+            },
+          },
+        )
         if (res.status === 401) {
           redirectToLogin(router, 'pro-start')
           return
@@ -450,7 +475,21 @@ export function useProSession() {
         if (!bookingId) return
         setActionLoading('start')
 
-        const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/start`, { method: 'POST' })
+        const idempotencyKey = buildProSessionIdempotencyKey({
+          bookingId,
+          action: 'START',
+        })
+
+        const res = await fetch(
+          `/api/pro/bookings/${encodeURIComponent(bookingId)}/session/start`,
+          {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': idempotencyKey,
+              'x-idempotency-key': idempotencyKey,
+            },
+          },
+        )
         if (res.status === 401) return redirectToLogin(router, 'pro-start')
 
         const data = await safeJson(res)
@@ -474,7 +513,21 @@ export function useProSession() {
         if (!bookingId) return
         setActionLoading('nav')
 
-        const res = await fetch(`/api/pro/bookings/${encodeURIComponent(bookingId)}/finish`, { method: 'POST' })
+        const idempotencyKey = buildProSessionIdempotencyKey({
+          bookingId,
+          action: 'FINISH',
+        })
+
+        const res = await fetch(
+          `/api/pro/bookings/${encodeURIComponent(bookingId)}/session/finish`,
+          {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': idempotencyKey,
+              'x-idempotency-key': idempotencyKey,
+            },
+          },
+        )
         if (res.status === 401) return redirectToLogin(router, 'pro-finish')
 
         const data = await safeJson(res)
