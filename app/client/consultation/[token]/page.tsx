@@ -11,6 +11,17 @@ type PageProps = {
 
 type DecisionAction = 'APPROVE' | 'REJECT'
 
+function buildPublicConsultationDecisionIdempotencyKey(args: {
+  token: string
+  action: DecisionAction
+}): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `public-consultation-decision-${args.token}-${args.action}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`
+}
+
 type ActionState = {
   canApproveOrReject: boolean
   isExpired: boolean
@@ -335,7 +346,244 @@ function SectionCard(props: {
     </section>
   )
 }
+function readStringOrNull(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
 
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function parseActionState(value: unknown): ActionState | null {
+  if (!isRecord(value)) return null
+
+  const canApproveOrReject = readBoolean(value.canApproveOrReject)
+  const isExpired = readBoolean(value.isExpired)
+  const isRevoked = readBoolean(value.isRevoked)
+  const isUsed = readBoolean(value.isUsed)
+  const hasProof = readBoolean(value.hasProof)
+  const isPending = readBoolean(value.isPending)
+
+  if (
+    canApproveOrReject === null ||
+    isExpired === null ||
+    isRevoked === null ||
+    isUsed === null ||
+    hasProof === null ||
+    isPending === null
+  ) {
+    return null
+  }
+
+  return {
+    canApproveOrReject,
+    isExpired,
+    isRevoked,
+    isUsed,
+    hasProof,
+    isPending,
+  }
+}
+
+function parseProof(value: unknown): ProofDto | null {
+  if (!isRecord(value)) return null
+
+  const id = readStringOrNull(value.id)
+  const decision = readStringOrNull(value.decision)
+  const method = readStringOrNull(value.method)
+
+  if (!id || !decision || !method) return null
+
+  return {
+    id,
+    decision,
+    method,
+    actedAt: readStringOrNull(value.actedAt),
+    recordedByUserId: readStringOrNull(value.recordedByUserId),
+    clientActionTokenId: readStringOrNull(value.clientActionTokenId),
+    contactMethod: readStringOrNull(value.contactMethod),
+    destinationSnapshot: readStringOrNull(value.destinationSnapshot),
+    ipAddress: readStringOrNull(value.ipAddress),
+    userAgent: readStringOrNull(value.userAgent),
+  }
+}
+
+function parseApproval(value: unknown): ApprovalDto | null {
+  if (!isRecord(value)) return null
+
+  const id = readStringOrNull(value.id)
+  const status = readStringOrNull(value.status)
+
+  if (!id || !status) return null
+
+  return {
+    id,
+    status,
+    proposedServicesJson: value.proposedServicesJson,
+    proposedTotal: value.proposedTotal,
+    notes: readStringOrNull(value.notes),
+    createdAt: readStringOrNull(value.createdAt),
+    updatedAt: readStringOrNull(value.updatedAt),
+    approvedAt: readStringOrNull(value.approvedAt),
+    rejectedAt: readStringOrNull(value.rejectedAt),
+    clientId: readStringOrNull(value.clientId),
+    proId: readStringOrNull(value.proId),
+    proof: parseProof(value.proof),
+  }
+}
+
+function parseBooking(value: unknown): BookingDto | null {
+  if (!isRecord(value)) return null
+
+  const id = readStringOrNull(value.id)
+  const status = readStringOrNull(value.status)
+  const client = isRecord(value.client) ? value.client : null
+  const professional = isRecord(value.professional) ? value.professional : null
+
+  if (!id || !status || !client || !professional) return null
+
+  const service = isRecord(value.service)
+    ? {
+        id: readStringOrNull(value.service.id) ?? '',
+        name: readStringOrNull(value.service.name),
+      }
+    : null
+
+  return {
+    id,
+    status,
+    sessionStep: readStringOrNull(value.sessionStep),
+    scheduledFor: readStringOrNull(value.scheduledFor),
+    startedAt: readStringOrNull(value.startedAt),
+    finishedAt: readStringOrNull(value.finishedAt),
+    locationType: readStringOrNull(value.locationType),
+    service,
+    client: {
+      id: readStringOrNull(client.id) ?? '',
+      firstName: readStringOrNull(client.firstName),
+      lastName: readStringOrNull(client.lastName),
+      claimStatus: readStringOrNull(client.claimStatus),
+    },
+    professional: {
+      id: readStringOrNull(professional.id) ?? '',
+      businessName: readStringOrNull(professional.businessName),
+      timeZone: readStringOrNull(professional.timeZone),
+    },
+  }
+}
+
+function parseToken(value: unknown): TokenDto | null {
+  if (!isRecord(value)) return null
+
+  const id = readStringOrNull(value.id)
+  const useCount = readNumber(value.useCount)
+  const singleUse = readBoolean(value.singleUse)
+
+  if (!id || useCount === null || singleUse === null) return null
+
+  return {
+    id,
+    deliveryMethod: readStringOrNull(value.deliveryMethod),
+    destinationSnapshot: readStringOrNull(value.destinationSnapshot),
+    expiresAt: readStringOrNull(value.expiresAt),
+    firstUsedAt: readStringOrNull(value.firstUsedAt),
+    lastUsedAt: readStringOrNull(value.lastUsedAt),
+    useCount,
+    singleUse,
+    revokedAt: readStringOrNull(value.revokedAt),
+    revokeReason: readStringOrNull(value.revokeReason),
+  }
+}
+
+function parsePublicConsultationDto(value: unknown): PublicConsultationDto | null {
+  if (!isRecord(value)) return null
+
+  const booking = parseBooking(value.booking)
+  const approval = parseApproval(value.approval)
+  const token = parseToken(value.token)
+  const actionState = parseActionState(value.actionState)
+
+  if (!booking || !approval || !token || !actionState) return null
+
+  return {
+    booking,
+    approval,
+    token,
+    actionState,
+  }
+}
+
+function parseDecisionResponse(value: unknown): DecisionResponse | null {
+  if (!isRecord(value)) return null
+
+  const action = readStringOrNull(value.action)
+  const approvalRaw = isRecord(value.approval) ? value.approval : null
+  const proof = parseProof(value.proof)
+  const metaRaw = isRecord(value.meta) ? value.meta : null
+
+  if (!approvalRaw || !proof || !metaRaw) return null
+
+  const approvalId = readStringOrNull(approvalRaw.id)
+  const approvalStatus = readStringOrNull(approvalRaw.status)
+  const mutated = readBoolean(metaRaw.mutated)
+  const noOp = readBoolean(metaRaw.noOp)
+
+  if (!approvalId || !approvalStatus || mutated === null || noOp === null) {
+    return null
+  }
+
+  const base = {
+    approval: {
+      id: approvalId,
+      status: approvalStatus,
+      approvedAt: readStringOrNull(approvalRaw.approvedAt),
+      rejectedAt: readStringOrNull(approvalRaw.rejectedAt),
+    },
+    proof,
+    meta: {
+      mutated,
+      noOp,
+    },
+  }
+
+  if (action === 'REJECT') {
+    return {
+      action,
+      ...base,
+    }
+  }
+
+  if (action === 'APPROVE') {
+    const bookingRaw = isRecord(value.booking) ? value.booking : null
+    if (!bookingRaw) return null
+
+    const bookingId = readStringOrNull(bookingRaw.id)
+    const totalDurationMinutes = readNumber(bookingRaw.totalDurationMinutes)
+
+    if (!bookingId || totalDurationMinutes === null) return null
+
+    return {
+      action,
+      booking: {
+        id: bookingId,
+        serviceId: readStringOrNull(bookingRaw.serviceId),
+        offeringId: readStringOrNull(bookingRaw.offeringId),
+        subtotalSnapshot: bookingRaw.subtotalSnapshot,
+        totalDurationMinutes,
+        consultationConfirmedAt: readStringOrNull(
+          bookingRaw.consultationConfirmedAt,
+        ),
+      },
+      ...base,
+    }
+  }
+
+  return null
+}
 export default function PublicConsultationPage({ params }: PageProps) {
   const token = safeText(params?.token)
   const [state, setState] = useState<LoadState>(() =>
@@ -343,12 +591,15 @@ export default function PublicConsultationPage({ params }: PageProps) {
   )
   const [submittingAction, setSubmittingAction] = useState<DecisionAction | null>(null)
 
-  useEffect(() => {
+    useEffect(() => {
     let cancelled = false
 
     async function load() {
       if (!token) {
-        setState({ kind: 'error', message: 'Missing consultation link.' })
+        setState({
+          kind: 'error',
+          message: 'Missing consultation link.',
+        })
         return
       }
 
@@ -370,23 +621,42 @@ export default function PublicConsultationPage({ params }: PageProps) {
             isRecord(payload) && typeof payload.error === 'string'
               ? payload.error
               : 'Unable to load this consultation link.'
+
           if (!cancelled) {
             setState({ kind: 'error', message })
           }
+
           return
         }
 
-        if (!isRecord(payload) || !('data' in payload) || !isRecord(payload.data)) {
+        if (!isRecord(payload) || !isRecord(payload.data)) {
           if (!cancelled) {
-            setState({ kind: 'error', message: 'Invalid consultation response.' })
+            setState({
+              kind: 'error',
+              message: 'Invalid consultation response.',
+            })
           }
+
+          return
+        }
+
+        const parsed = parsePublicConsultationDto(payload.data)
+
+        if (!parsed) {
+          if (!cancelled) {
+            setState({
+              kind: 'error',
+              message: 'Invalid consultation response.',
+            })
+          }
+
           return
         }
 
         if (!cancelled) {
           setState({
             kind: 'ready',
-            data: payload.data as unknown as PublicConsultationDto,
+            data: parsed,
           })
         }
       } catch {
@@ -419,12 +689,19 @@ export default function PublicConsultationPage({ params }: PageProps) {
     setSubmittingAction(action)
 
     try {
+      const idempotencyKey = buildPublicConsultationDecisionIdempotencyKey({
+        token,
+        action,
+      })
+
       const response = await fetch(
         `/api/public/consultation/${encodeURIComponent(token)}/decision`,
         {
           method: 'POST',
           headers: {
-            'content-type': 'application/json',
+            'Content-Type': 'application/json',
+            'Idempotency-Key': idempotencyKey,
+            'x-idempotency-key': idempotencyKey,
           },
           body: JSON.stringify({ action }),
         },
@@ -440,11 +717,15 @@ export default function PublicConsultationPage({ params }: PageProps) {
         throw new Error(message)
       }
 
-      if (!isRecord(payload) || !('data' in payload) || !isRecord(payload.data)) {
+      if (!isRecord(payload) || !isRecord(payload.data)) {
         throw new Error('Invalid decision response.')
       }
 
-      const decision = payload.data as unknown as DecisionResponse
+      const decision = parseDecisionResponse(payload.data)
+
+        if (!decision) {
+          throw new Error('Invalid decision response.')
+        }
 
       if (state.kind !== 'ready') return
 

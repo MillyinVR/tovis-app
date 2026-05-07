@@ -7,23 +7,57 @@ import { moneyToString } from '@/lib/money'
 import { COPY } from '@/lib/copy'
 import { safeJson } from '@/lib/http'
 
-function errorFrom(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function errorFrom(res: Response, data: unknown): string {
+  const error = isRecord(data) ? readString(data.error) : null
+  if (error) return error
+
   if (res.status === 401) return 'Please log in again.'
   if (res.status === 403) return 'You don’t have access to do that.'
-  if (res.status === 409) return data?.error || 'This consultation can’t be changed right now.'
+  if (res.status === 409) return 'This consultation can’t be changed right now.'
+
   return `Request failed (${res.status}).`
 }
 
 type ProposedItem = {
-  label?: string
-  categoryName?: string | null
-  price?: unknown
+  label: string | null
+  categoryName: string | null
+  price: unknown
+}
+
+function parseProposedItem(value: unknown): ProposedItem | null {
+  if (!isRecord(value)) return null
+
+  return {
+    label: readString(value.label),
+    categoryName: readString(value.categoryName),
+    price: value.price,
+  }
 }
 
 function asItems(proposedServicesJson: unknown): ProposedItem[] {
-  const j: any = proposedServicesJson
-  return Array.isArray(j?.items) ? (j.items as ProposedItem[]) : []
+  if (!isRecord(proposedServicesJson)) return []
+
+  const rawItems = proposedServicesJson.items
+  if (!Array.isArray(rawItems)) return []
+
+  const items: ProposedItem[] = []
+
+  for (const rawItem of rawItems) {
+    const parsed = parseProposedItem(rawItem)
+    if (parsed) {
+      items.push(parsed)
+    }
+  }
+
+  return items
 }
 
 function formatMoneyLike(v: unknown): string | null {
@@ -48,6 +82,18 @@ function Pill({ children }: { children: React.ReactNode }) {
 }
 
 type DecisionAction = 'APPROVE' | 'REJECT'
+
+
+function buildClientConsultationDecisionIdempotencyKey(args: {
+  bookingId: string
+  action: DecisionAction
+}): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `client-consultation-decision-${args.bookingId}-${args.action}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`
+} 
 
 export default function ConsultationDecisionCard(props: {
   bookingId: string
@@ -81,11 +127,23 @@ export default function ConsultationDecisionCard(props: {
     setLoading(action)
 
     try {
-      const res = await fetch(`/api/client/bookings/${encodeURIComponent(bookingId)}/consultation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+      const idempotencyKey = buildClientConsultationDecisionIdempotencyKey({
+        bookingId,
+        action,
       })
+
+      const res = await fetch(
+        `/api/client/bookings/${encodeURIComponent(bookingId)}/consultation`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': idempotencyKey,
+            'x-idempotency-key': idempotencyKey,
+          },
+          body: JSON.stringify({ action }),
+        },
+      )
 
       const data = await safeJson(res)
       if (!res.ok) throw new Error(errorFrom(res, data))
@@ -97,9 +155,13 @@ export default function ConsultationDecisionCard(props: {
 
       // Keep your existing UX
       const qp = action === 'APPROVE' ? 'approve' : 'reject'
-      router.push(`/client/bookings/${encodeURIComponent(bookingId)}?step=consult&consultation=${qp}`)
-    } catch (e: any) {
-      setErr(e?.message || 'Something went wrong.')
+      router.push(
+        `/client/bookings/${encodeURIComponent(
+          bookingId,
+        )}?step=consult&consultation=${qp}`,
+      )
+    } catch (error: unknown) {
+      setErr(error instanceof Error ? error.message : 'Something went wrong.')
     } finally {
       setLoading(null)
     }
@@ -118,12 +180,14 @@ export default function ConsultationDecisionCard(props: {
         <div className="mt-2 grid gap-2">
           {items.map((it, idx) => {
             const label =
-              typeof it?.label === 'string' && it.label.trim()
+              typeof it.label === 'string' && it.label.trim()
                 ? it.label.trim()
                 : COPY.consultationDecisionCard.serviceFallback
 
             const category =
-              typeof it?.categoryName === 'string' && it.categoryName.trim() ? it.categoryName.trim() : null
+              typeof it.categoryName === 'string' && it.categoryName.trim()
+                ? it.categoryName.trim()
+                : null
 
             const key = `${label}:${category ?? ''}:${idx}`
 
@@ -137,7 +201,7 @@ export default function ConsultationDecisionCard(props: {
                   {category ? <div className="text-xs font-semibold text-textSecondary">{category}</div> : null}
                 </div>
 
-                <div className="text-sm font-black text-textPrimary">{moneyLabel(it?.price)}</div>
+                <div className="text-sm font-black text-textPrimary">{moneyLabel(it.price)}</div>
               </div>
             )
           })}
