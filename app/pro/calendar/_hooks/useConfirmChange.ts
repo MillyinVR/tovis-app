@@ -413,6 +413,7 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
         const reason = overrideReason.trim()
 
         await patchJson({
+          idempotencyKey: buildProBookingPatchIdempotencyKey(pendingChange.apiId),
           url: bookingEndpoint(pendingChange.apiId),
           payload: buildBookingPatchPayload({
             change: pendingChange,
