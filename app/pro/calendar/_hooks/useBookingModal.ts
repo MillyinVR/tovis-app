@@ -280,9 +280,19 @@ async function patchBooking(args: {
   payload: BookingPatchPayload
   fallbackError: string
 }) {
+  const idempotencyKey =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `pro-booking-patch-${args.bookingId}-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2)}`
+
   const response = await fetch(bookingEndpoint(args.bookingId), {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
     body: JSON.stringify(args.payload),
   })
 
