@@ -150,6 +150,7 @@ function hasMatchingPermission(args: {
 
   return false
 }
+
 function isActorOwnProfessional(args: {
   actor: OverrideAuthActorRecord
   professionalId: string
@@ -161,6 +162,7 @@ function isActorOwnProfessional(args: {
     actorOwnProfessionalId === args.professionalId
   )
 }
+
 export async function assertCanUseBookingOverride(
   args: AssertCanUseBookingOverrideArgs,
 ): Promise<void> {
@@ -183,31 +185,31 @@ export async function assertCanUseBookingOverride(
     })
   }
 
-    /**
-     * Hard fail for client users.
-     * Override authority must come from a pro-side or admin-side account.
-     */
-    if (actor.role === Role.CLIENT) {
-      throw bookingError('FORBIDDEN', {
-        message: `Client users cannot use booking overrides. actorUserId=${actorUserId}`,
-        userMessage: 'You are not allowed to use that override.',
-      })
-    }
+  /**
+   * Hard fail for client users.
+   * Override authority must come from a pro-side or admin-side account.
+   */
+  if (actor.role === Role.CLIENT) {
+    throw bookingError('FORBIDDEN', {
+      message: `Client users cannot use booking overrides. actorUserId=${actorUserId}`,
+      userMessage: 'You are not allowed to use that override.',
+    })
+  }
 
-    /**
-     * A pro can adjust their own booking outside normal working hours.
-     * Keep ADVANCE_NOTICE and MAX_DAYS_AHEAD protected so those still require
-     * explicit override permission.
-     */
-    if (
-      rule === 'WORKING_HOURS' &&
-      actor.role === Role.PRO &&
-      isActorOwnProfessional({ actor, professionalId })
-    ) {
-      return
-    }
+  /**
+   * Pros can override their own working-hours and advance-notice rules.
+   * Keep MAX_DAYS_AHEAD protected so pros cannot casually schedule absurdly far out
+   * without explicit override permission.
+   */
+  if (
+    (rule === 'WORKING_HOURS' || rule === 'ADVANCE_NOTICE') &&
+    actor.role === Role.PRO &&
+    isActorOwnProfessional({ actor, professionalId })
+  ) {
+    return
+  }
 
-    const now = new Date()
+  const now = new Date()
   if (
     !hasMatchingPermission({
       actor,

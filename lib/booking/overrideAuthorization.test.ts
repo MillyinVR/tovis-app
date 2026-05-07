@@ -107,27 +107,67 @@ describe('assertCanUseBookingOverride', () => {
     })
   })
 
-  it('rejects when there is no matching permission', async () => {
-    mocks.userFindUnique.mockResolvedValueOnce({
-      id: 'user_pro_1',
-      role: Role.PRO,
-      professionalProfile: {
-        id: 'pro_1',
-        userId: 'user_pro_1',
-      },
-      bookingOverridePermissionsAsActor: [],
-    })
-
-    await expect(
-      assertCanUseBookingOverride({
-        actorUserId: 'user_pro_1',
-        professionalId: 'pro_1',
-        rule: 'ADVANCE_NOTICE',
-      }),
-    ).rejects.toMatchObject({
-      code: 'FORBIDDEN',
-    })
+it('rejects max-days-ahead when there is no matching permission', async () => {
+  mocks.userFindUnique.mockResolvedValueOnce({
+    id: 'user_pro_1',
+    role: Role.PRO,
+    professionalProfile: {
+      id: 'pro_1',
+      userId: 'user_pro_1',
+    },
+    bookingOverridePermissionsAsActor: [],
   })
+
+  await expect(
+    assertCanUseBookingOverride({
+      actorUserId: 'user_pro_1',
+      professionalId: 'pro_1',
+      rule: 'MAX_DAYS_AHEAD',
+    }),
+  ).rejects.toMatchObject({
+    code: 'FORBIDDEN',
+  })
+})
+
+it('allows a pro to override advance notice for their own professional profile', async () => {
+  mocks.userFindUnique.mockResolvedValueOnce({
+    id: 'user_pro_1',
+    role: Role.PRO,
+    professionalProfile: {
+      id: 'pro_1',
+      userId: 'user_pro_1',
+    },
+    bookingOverridePermissionsAsActor: [],
+  })
+
+  await expect(
+    assertCanUseBookingOverride({
+      actorUserId: 'user_pro_1',
+      professionalId: 'pro_1',
+      rule: 'ADVANCE_NOTICE',
+    }),
+  ).resolves.toBeUndefined()
+})
+
+it('allows a pro to override working hours for their own professional profile', async () => {
+  mocks.userFindUnique.mockResolvedValueOnce({
+    id: 'user_pro_1',
+    role: Role.PRO,
+    professionalProfile: {
+      id: 'pro_1',
+      userId: 'user_pro_1',
+    },
+    bookingOverridePermissionsAsActor: [],
+  })
+
+  await expect(
+    assertCanUseBookingOverride({
+      actorUserId: 'user_pro_1',
+      professionalId: 'pro_1',
+      rule: 'WORKING_HOURS',
+    }),
+  ).resolves.toBeUndefined()
+})
 
   it('allows SELF_ONLY for the actor’s own professional profile', async () => {
     mocks.userFindUnique.mockResolvedValueOnce({
