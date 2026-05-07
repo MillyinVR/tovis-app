@@ -150,7 +150,17 @@ function hasMatchingPermission(args: {
 
   return false
 }
+function isActorOwnProfessional(args: {
+  actor: OverrideAuthActorRecord
+  professionalId: string
+}): boolean {
+  const actorOwnProfessionalId = args.actor.professionalProfile?.id ?? null
 
+  return (
+    actorOwnProfessionalId != null &&
+    actorOwnProfessionalId === args.professionalId
+  )
+}
 export async function assertCanUseBookingOverride(
   args: AssertCanUseBookingOverrideArgs,
 ): Promise<void> {
@@ -182,6 +192,19 @@ export async function assertCanUseBookingOverride(
       message: `Client users cannot use booking overrides. actorUserId=${actorUserId}`,
       userMessage: 'You are not allowed to use that override.',
     })
+  }
+
+  /**
+   * A pro can schedule their own booking outside their own working hours.
+   * This is not the same as bypassing advance notice or max-days-ahead rules,
+   * which still require explicit override permission.
+   */
+  if (
+    rule === 'WORKING_HOURS' &&
+    actor.role === Role.PRO &&
+    isActorOwnProfessional({ actor, professionalId })
+  ) {
+    return
   }
 
   const now = new Date()
