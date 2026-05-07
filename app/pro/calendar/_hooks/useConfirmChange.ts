@@ -254,18 +254,36 @@ function bookingEndpoint(bookingId: string) {
   return `/api/pro/bookings/${encodeURIComponent(bookingId)}`
 }
 
+function buildProBookingPatchIdempotencyKey(bookingId: string): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `pro-booking-patch-${bookingId}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`
+}
+
 function blockEndpoint(blockId: string) {
   return `/api/pro/calendar/blocked/${encodeURIComponent(blockId)}`
 }
 
 async function patchJson(args: {
+  idempotencyKey?: string
   url: string
   payload: BookingPatchPayload | BlockPatchPayload
   fallbackError: string
 }) {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+
+  if (args.idempotencyKey) {
+    headers['Idempotency-Key'] = args.idempotencyKey
+    headers['x-idempotency-key'] = args.idempotencyKey
+  }
+
   const response = await fetch(args.url, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(args.payload),
   })
 
@@ -395,6 +413,9 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
         }
 
         await patchJson({
+          idempotencyKey: buildProBookingPatchIdempotencyKey(
+            pendingChange.apiId,
+          ),
           url: bookingEndpoint(pendingChange.apiId),
           payload: buildBookingPatchPayload({
             change: pendingChange,
