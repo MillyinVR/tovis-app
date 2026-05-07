@@ -175,6 +175,14 @@ function uid(): string {
   return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`
 }
 
+function buildConsultationProposalIdempotencyKey(bookingId: string): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `consultation-proposal-${bookingId}-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`
+}
+
 function parseServiceOptions(payload: unknown): ServiceOption[] {
   if (!isRecord(payload)) return []
 
@@ -559,6 +567,7 @@ export default function ConsultationForm({
       }
 
       const proposedTotal = total.toFixed(2)
+      const idempotencyKey = buildConsultationProposalIdempotencyKey(bookingId)
 
       const response = await fetch(
         `/api/pro/bookings/${encodeURIComponent(
@@ -566,10 +575,14 @@ export default function ConsultationForm({
         )}/consultation-proposal`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': idempotencyKey,
+            'x-idempotency-key': idempotencyKey,
+          },
           signal: controller.signal,
           body: JSON.stringify({
-            notes,
+            notes: notes.trim() || null,
             proposedTotal,
             proposedServicesJson,
           }),
@@ -812,7 +825,7 @@ export default function ConsultationForm({
           onChange={(event) => setNotes(event.target.value)}
           rows={4}
           disabled={saving}
-          placeholder="Goals, techniques, anything you agreed on…"
+          placeholder="Optional: goals, techniques, anything you agreed on…"
           className="brand-pro-session-textarea"
         />
       </label>
