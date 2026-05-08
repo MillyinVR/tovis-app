@@ -13,6 +13,8 @@ export const IDEMPOTENCY_ROUTES = {
     'POST /api/pro/bookings/[id]/consultation/in-person-decision',
   BOOKING_MEDIA_CREATE: 'POST /api/pro/bookings/[id]/media',
   CLIENT_CHECKOUT_CONFIRM: 'POST /api/client/bookings/[id]/checkout',
+  CLIENT_CHECKOUT_STRIPE_SESSION:
+    'POST /api/client/bookings/[id]/checkout/stripe-session',
   BOOKING_AFTERCARE_SEND: 'POST /api/pro/bookings/[id]/aftercare',
   CLIENT_AFTERCARE_REBOOK: 'POST /api/client/rebook/[token]',
   CLIENT_REVIEW_CREATE: 'POST /api/client/bookings/[id]/review',

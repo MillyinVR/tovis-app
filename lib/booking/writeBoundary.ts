@@ -21,11 +21,14 @@ import {
   NotificationPriority,
   OpeningStatus,
   PaymentMethod,
+  PaymentProvider,
   Prisma,
   ProfessionalLocationType,
   Role,
   ServiceLocationType,
   SessionStep,
+  StripeCheckoutSessionStatus,
+  StripePaymentStatus,
   ReminderType,
 } from '@prisma/client'
 
@@ -474,6 +477,99 @@ type UpsertClientBookingCheckoutProductsArgs = {
   items: ClientCheckoutProductSelectionInput[]
   requestId?: string | null
   idempotencyKey?: string | null
+}
+
+type PrepareClientStripeCheckoutSessionArgs = {
+  bookingId: string
+  clientId: string
+  tipAmount?: Prisma.Decimal | string | number | null
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type PrepareClientStripeCheckoutSessionResult = {
+  booking: {
+    id: string
+    professionalId: string
+    serviceSubtotalSnapshot: Prisma.Decimal | null
+    productSubtotalSnapshot: Prisma.Decimal | null
+    subtotalSnapshot: Prisma.Decimal | null
+    tipAmount: Prisma.Decimal | null
+    taxAmount: Prisma.Decimal | null
+    discountAmount: Prisma.Decimal | null
+    totalAmount: Prisma.Decimal | null
+    checkoutStatus: BookingCheckoutStatus
+    selectedPaymentMethod: PaymentMethod | null
+    paymentProvider: PaymentProvider
+  }
+  stripe: {
+    amountCents: number
+    currency: string
+    lineItemDescription: string
+    connectedAccountId: string
+  }
+  meta: MutationMeta
+}
+
+type RecordStripeCheckoutSessionAttachedArgs = {
+  bookingId: string
+  clientId: string
+  stripeCheckoutSessionId: string
+  stripePaymentIntentId: string | null
+  stripeConnectedAccountId: string
+  stripeAmountSubtotal: number | null
+  stripeAmountTotal: number | null
+  stripeCurrency: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type RecordStripeCheckoutSessionAttachedResult = {
+  booking: {
+    id: string
+    checkoutStatus: BookingCheckoutStatus
+    selectedPaymentMethod: PaymentMethod | null
+    paymentProvider: PaymentProvider
+    stripeCheckoutSessionId: string | null
+    stripePaymentIntentId: string | null
+    stripeCheckoutSessionStatus: StripeCheckoutSessionStatus | null
+    stripePaymentStatus: StripePaymentStatus | null
+    stripeAmountSubtotal: number | null
+    stripeAmountTotal: number | null
+    stripeCurrency: string | null
+  }
+  meta: MutationMeta
+}
+
+type ApplyStripePaymentSucceededArgs = {
+  stripePaymentIntentId: string
+  stripeEventId: string
+  amountReceivedCents: number | null
+  currency: string | null
+  bookingIdHint?: string | null
+  occurredAt?: Date
+}
+
+type ApplyStripePaymentResult = {
+  bookingId: string
+  bookingCompleted: boolean
+  meta: MutationMeta
+}
+
+type ApplyStripePaymentFailedArgs = {
+  stripePaymentIntentId: string
+  stripeEventId: string
+  bookingIdHint?: string | null
+}
+
+type ApplyStripeCheckoutSessionStatusArgs = {
+  stripeCheckoutSessionId: string
+  stripePaymentIntentId: string | null
+  stripeAmountSubtotal: number | null
+  stripeAmountTotal: number | null
+  stripeCurrency: string | null
+  status: StripeCheckoutSessionStatus
+  bookingIdHint?: string | null
 }
 
 type CreateRebookedBookingFromCompletedBookingArgs = {
@@ -1354,6 +1450,109 @@ const CLIENT_BOOKING_CHECKOUT_SELECT = {
 
 type ClientBookingCheckoutRecord = Prisma.BookingGetPayload<{
   select: typeof CLIENT_BOOKING_CHECKOUT_SELECT
+}>
+
+const CLIENT_STRIPE_CHECKOUT_BOOKING_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  status: true,
+  finishedAt: true,
+  subtotalSnapshot: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  totalAmount: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  paymentProvider: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
+  stripeCheckoutSessionId: true,
+  stripePaymentIntentId: true,
+  stripeConnectedAccountId: true,
+  stripeCheckoutSessionStatus: true,
+  stripePaymentStatus: true,
+  stripeAmountSubtotal: true,
+  stripeAmountTotal: true,
+  stripeCurrency: true,
+  aftercareSummary: {
+    select: {
+      id: true,
+      sentToClientAt: true,
+    },
+  },
+  productSales: {
+    select: {
+      unitPrice: true,
+      quantity: true,
+    },
+  },
+  service: {
+    select: {
+      name: true,
+    },
+  },
+  professional: {
+    select: {
+      paymentSettings: {
+        select: {
+          acceptStripeCard: true,
+          stripeAccountId: true,
+          stripeChargesEnabled: true,
+          stripePayoutsEnabled: true,
+          tipsEnabled: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type ClientStripeCheckoutBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof CLIENT_STRIPE_CHECKOUT_BOOKING_SELECT
+}>
+
+const STRIPE_WEBHOOK_BOOKING_SELECT = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  status: true,
+  finishedAt: true,
+  sessionStep: true,
+  subtotalSnapshot: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  totalAmount: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  paymentProvider: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
+  stripeCheckoutSessionId: true,
+  stripePaymentIntentId: true,
+  stripeConnectedAccountId: true,
+  stripeCheckoutSessionStatus: true,
+  stripePaymentStatus: true,
+  stripeAmountSubtotal: true,
+  stripeAmountTotal: true,
+  stripeCurrency: true,
+  stripePaidAt: true,
+  stripeLastEventId: true,
+  aftercareSummary: {
+    select: {
+      id: true,
+      sentToClientAt: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type StripeWebhookBookingRecord = Prisma.BookingGetPayload<{
+  select: typeof STRIPE_WEBHOOK_BOOKING_SELECT
 }>
 
 const CLIENT_CHECKOUT_PRODUCTS_BOOKING_SELECT = {
@@ -10843,4 +11042,884 @@ export async function createClientRebookedBookingFromAftercare(
       idempotencyKey: args.idempotencyKey ?? null,
     })
   })
+}
+
+// ---------------------------------------------------------------------------
+// Stripe checkout — single internal boundary
+// ---------------------------------------------------------------------------
+
+const STRIPE_DEFAULT_CURRENCY = 'USD'
+
+function normalizeStripeCurrency(value: string | null | undefined): string {
+  if (typeof value !== 'string') return STRIPE_DEFAULT_CURRENCY
+  const trimmed = value.trim().toUpperCase()
+  if (!trimmed) return STRIPE_DEFAULT_CURRENCY
+  return trimmed.slice(0, 3)
+}
+
+function decimalToCents(value: Prisma.Decimal | null | undefined): number {
+  if (!value) return 0
+  const amount = value.toNumber()
+  if (!Number.isFinite(amount)) return 0
+  return Math.round(amount * 100)
+}
+
+function buildStripeLineItemDescription(args: {
+  bookingId: string
+  serviceName: string | null
+}): string {
+  const trimmed = args.serviceName?.trim() ?? ''
+  return trimmed ? `TOVIS booking: ${trimmed}` : `TOVIS booking ${args.bookingId}`
+}
+
+function assertProSettingsAcceptStripeCard(
+  settings: ClientStripeCheckoutBookingRecord['professional']['paymentSettings'],
+): asserts settings is NonNullable<
+  ClientStripeCheckoutBookingRecord['professional']['paymentSettings']
+> & { stripeAccountId: string } {
+  if (!settings) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Provider has not configured payment settings.',
+      userMessage: 'This provider is not ready to accept card payments.',
+    })
+  }
+
+  if (!settings.stripeAccountId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Provider has not connected Stripe.',
+      userMessage: 'This provider has not connected Stripe yet.',
+    })
+  }
+
+  if (
+    !settings.acceptStripeCard ||
+    !settings.stripeChargesEnabled ||
+    !settings.stripePayoutsEnabled
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Provider Stripe account is not ready to accept payments.',
+      userMessage: 'This provider is not ready to accept card payments.',
+    })
+  }
+}
+
+async function performLockedPrepareClientStripeCheckoutSession(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  clientId: string
+  tipAmount?: Prisma.Decimal | string | number | null
+  requestId?: string | null
+  idempotencyKey?: string | null
+}): Promise<PrepareClientStripeCheckoutSessionResult> {
+  const booking: ClientStripeCheckoutBookingRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: CLIENT_STRIPE_CHECKOUT_BOOKING_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.clientId !== args.clientId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+  }
+
+  if (!booking.aftercareSummary?.id || !booking.aftercareSummary.sentToClientAt) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Client checkout requires finalized aftercare.',
+      userMessage: 'Checkout becomes available after aftercare is finalized.',
+    })
+  }
+
+  if (
+    booking.checkoutStatus === BookingCheckoutStatus.PAID ||
+    booking.checkoutStatus === BookingCheckoutStatus.WAIVED ||
+    booking.paymentCollectedAt
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Checkout is already closed.',
+      userMessage: 'This checkout is already finished.',
+    })
+  }
+
+  const paymentSettings = booking.professional.paymentSettings
+  assertProSettingsAcceptStripeCard(paymentSettings)
+
+  const nextTipAmount =
+    args.tipAmount === undefined
+      ? undefined
+      : normalizePositiveMoneyDecimal(args.tipAmount) ?? zeroMoney()
+
+  if (
+    nextTipAmount &&
+    nextTipAmount.greaterThan(zeroMoney()) &&
+    paymentSettings.tipsEnabled === false
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Tips are not enabled for this provider.',
+      userMessage: 'Tips are not enabled for this provider.',
+    })
+  }
+
+  const rollup = await buildBookingCheckoutRollupUpdate({
+    tx: args.tx,
+    bookingId: booking.id,
+    nextTipAmount,
+  })
+
+  const amountCents = decimalToCents(rollup.totalAmount)
+  if (amountCents <= 0) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe checkout requires a positive total.',
+      userMessage: 'Booking total must be greater than zero.',
+    })
+  }
+
+  const oldState = buildCheckoutAuditSnapshot({
+    checkoutStatus: booking.checkoutStatus,
+    selectedPaymentMethod: booking.selectedPaymentMethod,
+    serviceSubtotalSnapshot: booking.serviceSubtotalSnapshot,
+    productSubtotalSnapshot: booking.productSubtotalSnapshot,
+    subtotalSnapshot: booking.subtotalSnapshot,
+    tipAmount: booking.tipAmount,
+    taxAmount: booking.taxAmount,
+    discountAmount: booking.discountAmount,
+    totalAmount: booking.totalAmount,
+    paymentAuthorizedAt: booking.paymentAuthorizedAt,
+    paymentCollectedAt: booking.paymentCollectedAt,
+  })
+
+  const nextCheckoutStatus =
+    booking.checkoutStatus === BookingCheckoutStatus.NOT_READY
+      ? BookingCheckoutStatus.READY
+      : booking.checkoutStatus
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      serviceSubtotalSnapshot: rollup.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: rollup.productSubtotalSnapshot,
+      subtotalSnapshot: rollup.subtotalSnapshot,
+      tipAmount: rollup.tipAmount,
+      taxAmount: rollup.taxAmount,
+      discountAmount: rollup.discountAmount,
+      totalAmount: rollup.totalAmount,
+      paymentProvider: PaymentProvider.STRIPE,
+      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
+      checkoutStatus: nextCheckoutStatus,
+      stripeConnectedAccountId: paymentSettings.stripeAccountId,
+    },
+    select: {
+      id: true,
+      professionalId: true,
+      checkoutStatus: true,
+      selectedPaymentMethod: true,
+      paymentProvider: true,
+      serviceSubtotalSnapshot: true,
+      productSubtotalSnapshot: true,
+      subtotalSnapshot: true,
+      tipAmount: true,
+      taxAmount: true,
+      discountAmount: true,
+      totalAmount: true,
+      paymentAuthorizedAt: true,
+      paymentCollectedAt: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  const newState = buildCheckoutAuditSnapshot({
+    checkoutStatus: updated.checkoutStatus,
+    selectedPaymentMethod: updated.selectedPaymentMethod,
+    serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+    productSubtotalSnapshot: updated.productSubtotalSnapshot,
+    subtotalSnapshot: updated.subtotalSnapshot,
+    tipAmount: updated.tipAmount,
+    taxAmount: updated.taxAmount,
+    discountAmount: updated.discountAmount,
+    totalAmount: updated.totalAmount,
+    paymentAuthorizedAt: updated.paymentAuthorizedAt,
+    paymentCollectedAt: updated.paymentCollectedAt,
+  })
+
+  await createCheckoutAuditLogs({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: booking.professionalId,
+    route: 'lib/booking/writeBoundary.ts:prepareClientStripeCheckoutSession',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldState,
+    newState,
+  })
+
+  const mutated = !areAuditValuesEqual(oldState, newState)
+
+  return {
+    booking: {
+      id: updated.id,
+      professionalId: updated.professionalId,
+      serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: updated.productSubtotalSnapshot,
+      subtotalSnapshot: updated.subtotalSnapshot,
+      tipAmount: updated.tipAmount,
+      taxAmount: updated.taxAmount,
+      discountAmount: updated.discountAmount,
+      totalAmount: updated.totalAmount,
+      checkoutStatus: updated.checkoutStatus,
+      selectedPaymentMethod: updated.selectedPaymentMethod,
+      paymentProvider: updated.paymentProvider,
+    },
+    stripe: {
+      amountCents,
+      currency: STRIPE_DEFAULT_CURRENCY,
+      lineItemDescription: buildStripeLineItemDescription({
+        bookingId: booking.id,
+        serviceName: booking.service?.name ?? null,
+      }),
+      connectedAccountId: paymentSettings.stripeAccountId,
+    },
+    meta: buildMeta(mutated),
+  }
+}
+
+async function performLockedRecordStripeCheckoutSessionAttached(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  clientId: string
+  stripeCheckoutSessionId: string
+  stripePaymentIntentId: string | null
+  stripeConnectedAccountId: string
+  stripeAmountSubtotal: number | null
+  stripeAmountTotal: number | null
+  stripeCurrency: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}): Promise<RecordStripeCheckoutSessionAttachedResult> {
+  const booking: ClientStripeCheckoutBookingRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: CLIENT_STRIPE_CHECKOUT_BOOKING_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.clientId !== args.clientId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.checkoutStatus === BookingCheckoutStatus.PAID) {
+    return {
+      booking: {
+        id: booking.id,
+        checkoutStatus: booking.checkoutStatus,
+        selectedPaymentMethod: booking.selectedPaymentMethod,
+        paymentProvider: booking.paymentProvider,
+        stripeCheckoutSessionId: booking.stripeCheckoutSessionId,
+        stripePaymentIntentId: booking.stripePaymentIntentId,
+        stripeCheckoutSessionStatus: booking.stripeCheckoutSessionStatus,
+        stripePaymentStatus: booking.stripePaymentStatus,
+        stripeAmountSubtotal: booking.stripeAmountSubtotal,
+        stripeAmountTotal: booking.stripeAmountTotal,
+        stripeCurrency: booking.stripeCurrency,
+      },
+      meta: buildMeta(false),
+    }
+  }
+
+  const alreadyAttached =
+    booking.stripeCheckoutSessionId === args.stripeCheckoutSessionId &&
+    booking.stripePaymentIntentId === args.stripePaymentIntentId &&
+    booking.stripeConnectedAccountId === args.stripeConnectedAccountId &&
+    booking.stripeCheckoutSessionStatus === StripeCheckoutSessionStatus.OPEN &&
+    booking.stripePaymentStatus === StripePaymentStatus.NOT_STARTED &&
+    booking.stripeAmountSubtotal === args.stripeAmountSubtotal &&
+    booking.stripeAmountTotal === args.stripeAmountTotal &&
+    booking.stripeCurrency === args.stripeCurrency
+
+  if (alreadyAttached) {
+    return {
+      booking: {
+        id: booking.id,
+        checkoutStatus: booking.checkoutStatus,
+        selectedPaymentMethod: booking.selectedPaymentMethod,
+        paymentProvider: booking.paymentProvider,
+        stripeCheckoutSessionId: booking.stripeCheckoutSessionId,
+        stripePaymentIntentId: booking.stripePaymentIntentId,
+        stripeCheckoutSessionStatus: booking.stripeCheckoutSessionStatus,
+        stripePaymentStatus: booking.stripePaymentStatus,
+        stripeAmountSubtotal: booking.stripeAmountSubtotal,
+        stripeAmountTotal: booking.stripeAmountTotal,
+        stripeCurrency: booking.stripeCurrency,
+      },
+      meta: buildMeta(false),
+    }
+  }
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      paymentProvider: PaymentProvider.STRIPE,
+      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
+      stripeCheckoutSessionId: args.stripeCheckoutSessionId,
+      stripePaymentIntentId: args.stripePaymentIntentId,
+      stripeConnectedAccountId: args.stripeConnectedAccountId,
+      stripeCheckoutSessionStatus: StripeCheckoutSessionStatus.OPEN,
+      stripePaymentStatus: StripePaymentStatus.NOT_STARTED,
+      stripeAmountSubtotal: args.stripeAmountSubtotal,
+      stripeAmountTotal: args.stripeAmountTotal,
+      stripeCurrency: args.stripeCurrency,
+      stripeApplicationFeeAmount: null,
+      stripeLastEventId: null,
+    },
+    select: {
+      id: true,
+      checkoutStatus: true,
+      selectedPaymentMethod: true,
+      paymentProvider: true,
+      stripeCheckoutSessionId: true,
+      stripePaymentIntentId: true,
+      stripeCheckoutSessionStatus: true,
+      stripePaymentStatus: true,
+      stripeAmountSubtotal: true,
+      stripeAmountTotal: true,
+      stripeCurrency: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  await createBookingCloseoutAuditLog({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: booking.professionalId,
+    action: BookingCloseoutAuditAction.CHECKOUT_UPDATED,
+    route: 'lib/booking/writeBoundary.ts:recordStripeCheckoutSessionAttached',
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldValue: {
+      stripeCheckoutSessionId: booking.stripeCheckoutSessionId,
+      stripePaymentIntentId: booking.stripePaymentIntentId,
+      stripeCheckoutSessionStatus: booking.stripeCheckoutSessionStatus,
+      stripePaymentStatus: booking.stripePaymentStatus,
+    },
+    newValue: {
+      stripeCheckoutSessionId: updated.stripeCheckoutSessionId,
+      stripePaymentIntentId: updated.stripePaymentIntentId,
+      stripeCheckoutSessionStatus: updated.stripeCheckoutSessionStatus,
+      stripePaymentStatus: updated.stripePaymentStatus,
+    },
+  })
+
+  return {
+    booking: {
+      id: updated.id,
+      checkoutStatus: updated.checkoutStatus,
+      selectedPaymentMethod: updated.selectedPaymentMethod,
+      paymentProvider: updated.paymentProvider,
+      stripeCheckoutSessionId: updated.stripeCheckoutSessionId,
+      stripePaymentIntentId: updated.stripePaymentIntentId,
+      stripeCheckoutSessionStatus: updated.stripeCheckoutSessionStatus,
+      stripePaymentStatus: updated.stripePaymentStatus,
+      stripeAmountSubtotal: updated.stripeAmountSubtotal,
+      stripeAmountTotal: updated.stripeAmountTotal,
+      stripeCurrency: updated.stripeCurrency,
+    },
+    meta: buildMeta(true),
+  }
+}
+
+export async function prepareClientStripeCheckoutSession(
+  args: PrepareClientStripeCheckoutSessionArgs,
+): Promise<PrepareClientStripeCheckoutSessionResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    run: async ({ tx, now }) =>
+      performLockedPrepareClientStripeCheckoutSession({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        clientId: args.clientId,
+        tipAmount: args.tipAmount,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      }),
+  })
+}
+
+export async function recordStripeCheckoutSessionAttached(
+  args: RecordStripeCheckoutSessionAttachedArgs,
+): Promise<RecordStripeCheckoutSessionAttachedResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+
+  if (!args.stripeCheckoutSessionId.trim()) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe checkout session id is required.',
+    })
+  }
+
+  if (!args.stripeConnectedAccountId.trim()) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe connected account id is required.',
+    })
+  }
+
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    run: async ({ tx }) =>
+      performLockedRecordStripeCheckoutSessionAttached({
+        tx,
+        bookingId: args.bookingId,
+        clientId: args.clientId,
+        stripeCheckoutSessionId: args.stripeCheckoutSessionId,
+        stripePaymentIntentId: args.stripePaymentIntentId,
+        stripeConnectedAccountId: args.stripeConnectedAccountId,
+        stripeAmountSubtotal: args.stripeAmountSubtotal,
+        stripeAmountTotal: args.stripeAmountTotal,
+        stripeCurrency: normalizeStripeCurrency(args.stripeCurrency),
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Stripe webhook entry points — single internal boundary
+// ---------------------------------------------------------------------------
+
+async function findBookingForStripeWebhook(args: {
+  bookingIdHint?: string | null
+  stripePaymentIntentId?: string | null
+  stripeCheckoutSessionId?: string | null
+}): Promise<{ id: string; professionalId: string } | null> {
+  const trimmedHint =
+    typeof args.bookingIdHint === 'string' ? args.bookingIdHint.trim() : ''
+
+  if (trimmedHint) {
+    const byHint = await prisma.booking.findUnique({
+      where: { id: trimmedHint },
+      select: { id: true, professionalId: true },
+    })
+    if (byHint) return byHint
+  }
+
+  const trimmedPaymentIntentId =
+    typeof args.stripePaymentIntentId === 'string'
+      ? args.stripePaymentIntentId.trim()
+      : ''
+
+  if (trimmedPaymentIntentId) {
+    const byPaymentIntent = await prisma.booking.findFirst({
+      where: { stripePaymentIntentId: trimmedPaymentIntentId },
+      select: { id: true, professionalId: true },
+    })
+    if (byPaymentIntent) return byPaymentIntent
+  }
+
+  const trimmedSessionId =
+    typeof args.stripeCheckoutSessionId === 'string'
+      ? args.stripeCheckoutSessionId.trim()
+      : ''
+
+  if (trimmedSessionId) {
+    const bySession = await prisma.booking.findFirst({
+      where: { stripeCheckoutSessionId: trimmedSessionId },
+      select: { id: true, professionalId: true },
+    })
+    if (bySession) return bySession
+  }
+
+  return null
+}
+
+async function performLockedApplyStripePaymentSucceeded(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  stripePaymentIntentId: string
+  stripeEventId: string
+  amountReceivedCents: number | null
+  currency: string | null
+}): Promise<ApplyStripePaymentResult> {
+  const booking: StripeWebhookBookingRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: STRIPE_WEBHOOK_BOOKING_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  const alreadyApplied =
+    booking.stripeLastEventId === args.stripeEventId &&
+    booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED &&
+    booking.checkoutStatus === BookingCheckoutStatus.PAID &&
+    booking.paymentCollectedAt !== null
+
+  if (alreadyApplied) {
+    return {
+      bookingId: booking.id,
+      bookingCompleted: booking.status === BookingStatus.COMPLETED,
+      meta: buildMeta(false),
+    }
+  }
+
+  const oldState = buildCheckoutAuditSnapshot({
+    checkoutStatus: booking.checkoutStatus,
+    selectedPaymentMethod: booking.selectedPaymentMethod,
+    serviceSubtotalSnapshot: booking.serviceSubtotalSnapshot,
+    productSubtotalSnapshot: booking.productSubtotalSnapshot,
+    subtotalSnapshot: booking.subtotalSnapshot,
+    tipAmount: booking.tipAmount,
+    taxAmount: booking.taxAmount,
+    discountAmount: booking.discountAmount,
+    totalAmount: booking.totalAmount,
+    paymentAuthorizedAt: booking.paymentAuthorizedAt,
+    paymentCollectedAt: booking.paymentCollectedAt,
+  })
+
+  const nextAuthorizedAt = booking.paymentAuthorizedAt ?? args.now
+  const nextCollectedAt = booking.paymentCollectedAt ?? args.now
+  const nextCurrency = normalizeStripeCurrency(
+    args.currency ?? booking.stripeCurrency,
+  )
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      paymentProvider: PaymentProvider.STRIPE,
+      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
+      checkoutStatus: BookingCheckoutStatus.PAID,
+      paymentAuthorizedAt: nextAuthorizedAt,
+      paymentCollectedAt: nextCollectedAt,
+      stripePaymentIntentId: args.stripePaymentIntentId,
+      stripePaymentStatus: StripePaymentStatus.SUCCEEDED,
+      stripeAmountTotal:
+        args.amountReceivedCents ?? booking.stripeAmountTotal ?? undefined,
+      stripeCurrency: nextCurrency,
+      stripePaidAt: booking.stripePaidAt ?? args.now,
+      stripeLastEventId: args.stripeEventId,
+    },
+    select: {
+      id: true,
+      status: true,
+      sessionStep: true,
+      finishedAt: true,
+      checkoutStatus: true,
+      selectedPaymentMethod: true,
+      serviceSubtotalSnapshot: true,
+      productSubtotalSnapshot: true,
+      subtotalSnapshot: true,
+      tipAmount: true,
+      taxAmount: true,
+      discountAmount: true,
+      totalAmount: true,
+      paymentAuthorizedAt: true,
+      paymentCollectedAt: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  const closeoutCandidate = isPaymentAndAftercareCloseoutCandidate({
+    bookingStatus: booking.status,
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: updated.checkoutStatus,
+    paymentCollectedAt: updated.paymentCollectedAt,
+  })
+
+  const afterMediaCount = closeoutCandidate
+    ? await countProAfterMediaForBooking({
+        tx: args.tx,
+        bookingId: booking.id,
+      })
+    : 0
+
+  const shouldCompleteBooking = canCompleteBookingCloseout({
+    bookingStatus: booking.status,
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: updated.checkoutStatus,
+    paymentCollectedAt: updated.paymentCollectedAt,
+    afterMediaCount,
+  })
+
+  let bookingCompleted = booking.status === BookingStatus.COMPLETED
+
+  if (
+    shouldCompleteBooking &&
+    (booking.status !== BookingStatus.COMPLETED ||
+      booking.sessionStep !== SessionStep.DONE ||
+      !booking.finishedAt)
+  ) {
+    await args.tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: booking.finishedAt ?? args.now,
+      },
+      select: { id: true } satisfies Prisma.BookingSelect,
+    })
+    bookingCompleted = true
+  }
+
+  const newState = buildCheckoutAuditSnapshot({
+    checkoutStatus: updated.checkoutStatus,
+    selectedPaymentMethod: updated.selectedPaymentMethod,
+    serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+    productSubtotalSnapshot: updated.productSubtotalSnapshot,
+    subtotalSnapshot: updated.subtotalSnapshot,
+    tipAmount: updated.tipAmount,
+    taxAmount: updated.taxAmount,
+    discountAmount: updated.discountAmount,
+    totalAmount: updated.totalAmount,
+    paymentAuthorizedAt: updated.paymentAuthorizedAt,
+    paymentCollectedAt: updated.paymentCollectedAt,
+  })
+
+  await createCheckoutAuditLogs({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: booking.professionalId,
+    route: 'lib/booking/writeBoundary.ts:applyStripePaymentSucceeded',
+    requestId: args.stripeEventId,
+    idempotencyKey: args.stripeEventId,
+    oldState,
+    newState,
+  })
+
+  return {
+    bookingId: booking.id,
+    bookingCompleted,
+    meta: buildMeta(true),
+  }
+}
+
+async function performLockedApplyStripePaymentFailed(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  stripePaymentIntentId: string
+  stripeEventId: string
+}): Promise<ApplyStripePaymentResult> {
+  const booking: StripeWebhookBookingRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: STRIPE_WEBHOOK_BOOKING_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  const alreadyApplied =
+    booking.stripeLastEventId === args.stripeEventId &&
+    booking.stripePaymentStatus === StripePaymentStatus.FAILED
+
+  if (alreadyApplied) {
+    return {
+      bookingId: booking.id,
+      bookingCompleted: booking.status === BookingStatus.COMPLETED,
+      meta: buildMeta(false),
+    }
+  }
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      paymentProvider: PaymentProvider.STRIPE,
+      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
+      stripePaymentIntentId: args.stripePaymentIntentId,
+      stripePaymentStatus: StripePaymentStatus.FAILED,
+      stripeLastEventId: args.stripeEventId,
+    },
+    select: {
+      id: true,
+      status: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  return {
+    bookingId: updated.id,
+    bookingCompleted: updated.status === BookingStatus.COMPLETED,
+    meta: buildMeta(true),
+  }
+}
+
+async function performLockedApplyStripeCheckoutSessionStatus(args: {
+  tx: Prisma.TransactionClient
+  bookingId: string
+  stripeCheckoutSessionId: string
+  stripePaymentIntentId: string | null
+  stripeAmountSubtotal: number | null
+  stripeAmountTotal: number | null
+  stripeCurrency: string | null
+  status: StripeCheckoutSessionStatus
+}): Promise<ApplyStripePaymentResult> {
+  const booking: StripeWebhookBookingRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: STRIPE_WEBHOOK_BOOKING_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  const targetCurrency = normalizeStripeCurrency(
+    args.stripeCurrency ?? booking.stripeCurrency,
+  )
+
+  const alreadyApplied =
+    booking.stripeCheckoutSessionId === args.stripeCheckoutSessionId &&
+    booking.stripeCheckoutSessionStatus === args.status &&
+    (args.stripePaymentIntentId === null ||
+      booking.stripePaymentIntentId === args.stripePaymentIntentId)
+
+  if (alreadyApplied) {
+    return {
+      bookingId: booking.id,
+      bookingCompleted: booking.status === BookingStatus.COMPLETED,
+      meta: buildMeta(false),
+    }
+  }
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      paymentProvider: PaymentProvider.STRIPE,
+      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
+      stripeCheckoutSessionId: args.stripeCheckoutSessionId,
+      stripeCheckoutSessionStatus: args.status,
+      ...(args.stripePaymentIntentId
+        ? { stripePaymentIntentId: args.stripePaymentIntentId }
+        : {}),
+      ...(args.stripeAmountSubtotal != null
+        ? { stripeAmountSubtotal: args.stripeAmountSubtotal }
+        : {}),
+      ...(args.stripeAmountTotal != null
+        ? { stripeAmountTotal: args.stripeAmountTotal }
+        : {}),
+      stripeCurrency: targetCurrency,
+    },
+    select: {
+      id: true,
+      status: true,
+    } satisfies Prisma.BookingSelect,
+  })
+
+  return {
+    bookingId: updated.id,
+    bookingCompleted: updated.status === BookingStatus.COMPLETED,
+    meta: buildMeta(true),
+  }
+}
+
+export async function applyStripePaymentSucceeded(
+  args: ApplyStripePaymentSucceededArgs,
+): Promise<ApplyStripePaymentResult | null> {
+  const stripePaymentIntentId = args.stripePaymentIntentId.trim()
+  const stripeEventId = args.stripeEventId.trim()
+
+  if (!stripePaymentIntentId || !stripeEventId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe payment intent id and event id are required.',
+    })
+  }
+
+  const booking = await findBookingForStripeWebhook({
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripePaymentIntentId,
+  })
+
+  if (!booking) return null
+
+  return withLockedProfessionalTransaction(
+    booking.professionalId,
+    async ({ tx, now }) =>
+      performLockedApplyStripePaymentSucceeded({
+        tx,
+        now: args.occurredAt ?? now,
+        bookingId: booking.id,
+        stripePaymentIntentId,
+        stripeEventId,
+        amountReceivedCents: args.amountReceivedCents,
+        currency: args.currency,
+      }),
+  )
+}
+
+export async function applyStripePaymentFailed(
+  args: ApplyStripePaymentFailedArgs,
+): Promise<ApplyStripePaymentResult | null> {
+  const stripePaymentIntentId = args.stripePaymentIntentId.trim()
+  const stripeEventId = args.stripeEventId.trim()
+
+  if (!stripePaymentIntentId || !stripeEventId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe payment intent id and event id are required.',
+    })
+  }
+
+  const booking = await findBookingForStripeWebhook({
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripePaymentIntentId,
+  })
+
+  if (!booking) return null
+
+  return withLockedProfessionalTransaction(
+    booking.professionalId,
+    async ({ tx }) =>
+      performLockedApplyStripePaymentFailed({
+        tx,
+        bookingId: booking.id,
+        stripePaymentIntentId,
+        stripeEventId,
+      }),
+  )
+}
+
+export async function applyStripeCheckoutSessionStatus(
+  args: ApplyStripeCheckoutSessionStatusArgs,
+): Promise<ApplyStripePaymentResult | null> {
+  const stripeCheckoutSessionId = args.stripeCheckoutSessionId.trim()
+
+  if (!stripeCheckoutSessionId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe checkout session id is required.',
+    })
+  }
+
+  const booking = await findBookingForStripeWebhook({
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripeCheckoutSessionId,
+    stripePaymentIntentId: args.stripePaymentIntentId,
+  })
+
+  if (!booking) return null
+
+  return withLockedProfessionalTransaction(
+    booking.professionalId,
+    async ({ tx }) =>
+      performLockedApplyStripeCheckoutSessionStatus({
+        tx,
+        bookingId: booking.id,
+        stripeCheckoutSessionId,
+        stripePaymentIntentId: args.stripePaymentIntentId,
+        stripeAmountSubtotal: args.stripeAmountSubtotal,
+        stripeAmountTotal: args.stripeAmountTotal,
+        stripeCurrency: args.stripeCurrency,
+        status: args.status,
+      }),
+  )
 }

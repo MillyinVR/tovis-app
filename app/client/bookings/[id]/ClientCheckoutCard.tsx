@@ -45,6 +45,8 @@ type Props = {
   tipSuggestions?: unknown
 }
 
+const STRIPE_METHOD_KEY = 'stripe_card'
+
 type SubmitResponse = {
   booking?: {
     id: string
@@ -368,9 +370,17 @@ export default function ClientCheckoutCard(props: Props) {
     [props.acceptedMethods, selectedMethodKey],
   )
 
-  const selectedMethodIsStripe = selectedMethodKey === 'stripe_card'
+  const selectedMethodIsStripe = selectedMethodKey === STRIPE_METHOD_KEY
 
-  const previewTotal = useMemo(() => {
+  // Server-rendered total = service + product + tip + tax - discount,
+  // computed by the booking rollup. We mirror it locally only as a hint
+  // while the user is editing the tip; the *charged* amount always comes
+  // from the server.
+  const totalSnapshot = useMemo(
+    () => getNumericMoney(props.totalAmount),
+    [props.totalAmount],
+  )
+  const livePreviewTotal = useMemo(() => {
     return serviceSubtotal + productSubtotal + tipAmount + taxAmount - discountAmount
   }, [serviceSubtotal, productSubtotal, tipAmount, taxAmount, discountAmount])
 
@@ -385,7 +395,7 @@ export default function ClientCheckoutCard(props: Props) {
     return Array.from(new Set([0, ...base]))
   }, [configuredTipSuggestions, serviceSubtotal, tipsEnabled])
 
-  const confirmDisabled =
+  const ctaDisabled =
     checkoutLocked ||
     isPending ||
     props.acceptedMethods.length === 0 ||
@@ -420,8 +430,8 @@ export default function ClientCheckoutCard(props: Props) {
     setSelectedMethodKey(nextKey)
   }
 
-  function handleSubmit(confirmPayment: boolean) {
-    if (checkoutLocked || isPending) return
+  function handlePrimaryCta() {
+    if (ctaDisabled) return
 
     setError(null)
     setSuccess(null)
@@ -468,12 +478,10 @@ export default function ClientCheckoutCard(props: Props) {
         bookingId: props.bookingId,
         tipAmount: tipAmount.toFixed(2),
         selectedPaymentMethod: requestMethod,
-        confirmPayment,
+        confirmPayment: true,
       })
         .then(() => {
-          setSuccess(
-            confirmPayment ? 'Payment confirmed.' : 'Checkout updated.',
-          )
+          setSuccess('Payment confirmed.')
           router.refresh()
         })
         .catch((submitError: unknown) => {
@@ -485,6 +493,58 @@ export default function ClientCheckoutCard(props: Props) {
         })
     })
   }
+
+  function handleSaveTip() {
+    if (checkoutLocked || isPending) return
+
+    setError(null)
+    setSuccess(null)
+
+    if (!tipsEnabled && tipAmount > 0) {
+      setError('Tips are not enabled for this provider.')
+      return
+    }
+
+    const requestMethod = methodKeyToRequestValue(selectedMethodKey)
+
+    startTransition(() => {
+      void submitCheckout({
+        bookingId: props.bookingId,
+        tipAmount: tipAmount.toFixed(2),
+        // Only forward a method if the user chose a non-Stripe method.
+        // Manual checkout endpoint rejects STRIPE_CARD on the confirm path,
+        // and we don't want save-tip to touch the method otherwise.
+        selectedPaymentMethod:
+          requestMethod && requestMethod !== 'STRIPE_CARD'
+            ? requestMethod
+            : undefined,
+        confirmPayment: false,
+      })
+        .then(() => {
+          setSuccess('Tip saved.')
+          router.refresh()
+        })
+        .catch((submitError: unknown) => {
+          const message =
+            submitError instanceof Error && submitError.message.trim()
+              ? submitError.message
+              : 'Could not update booking checkout.'
+          setError(message)
+        })
+    })
+  }
+
+  const ctaLabel = (() => {
+    if (isPending) {
+      return selectedMethodIsStripe ? 'Opening Stripe…' : 'Confirming…'
+    }
+    if (!selectedMethod) return 'Choose a payment method'
+    const total = formatMoneyFromUnknown(totalSnapshot ?? livePreviewTotal)
+    if (selectedMethodIsStripe) {
+      return total ? `Pay ${total} with card` : 'Pay with card'
+    }
+    return total ? `Confirm payment of ${total}` : 'Confirm payment'
+  })()
 
   return (
     <div className="grid gap-4">
@@ -530,8 +590,11 @@ export default function ClientCheckoutCard(props: Props) {
             value={formatMoneyFromUnknown(tipAmount) || '$0.00'}
           />
           <SummaryRow
-            label="Preview total"
-            value={formatMoneyFromUnknown(previewTotal) || '$0.00'}
+            label={totalSnapshot != null ? 'Total' : 'Preview total'}
+            value={
+              formatMoneyFromUnknown(totalSnapshot ?? livePreviewTotal) ||
+              '$0.00'
+            }
           />
         </div>
       </div>
@@ -662,36 +725,37 @@ export default function ClientCheckoutCard(props: Props) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <div className="text-[12px] font-black text-textPrimary">
-              Confirm booking-linked checkout
+              {selectedMethodIsStripe
+                ? 'Pay securely with card'
+                : 'Confirm payment'}
             </div>
             <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-              Save the selected tip and payment method, confirm a manual payment, or continue to secure card checkout.
+              {selectedMethodIsStripe
+                ? 'Card payment opens Stripe Checkout. Tips are saved before redirect.'
+                : 'Once your pro confirms they received payment, your booking will close out.'}
             </div>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => handleSubmit(false)}
-              disabled={checkoutLocked || isPending || selectedMethodIsStripe}
-              className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {isPending ? 'Saving…' : 'Save checkout'}
-            </button>
+            {tipsEnabled ? (
+              <button
+                type="button"
+                onClick={handleSaveTip}
+                disabled={checkoutLocked || isPending}
+                className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Save tip without confirming payment"
+              >
+                {isPending ? 'Saving…' : 'Save tip'}
+              </button>
+            ) : null}
 
             <button
               type="button"
-              onClick={() => handleSubmit(true)}
-              disabled={confirmDisabled}
+              onClick={handlePrimaryCta}
+              disabled={ctaDisabled}
               className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isPending
-                ? selectedMethodIsStripe
-                  ? 'Opening Stripe…'
-                  : 'Confirming…'
-                : selectedMethodIsStripe
-                  ? 'Pay with card'
-                  : 'Confirm payment'}
+              {ctaLabel}
             </button>
           </div>
         </div>
