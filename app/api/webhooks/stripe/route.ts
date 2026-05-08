@@ -1,17 +1,18 @@
 import type Stripe from 'stripe'
 import {
-  BookingCheckoutStatus,
-  PaymentMethod,
-  PaymentProvider,
   Prisma,
   StripeAccountStatus,
   StripeCheckoutSessionStatus,
-  StripePaymentStatus,
 } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
 import { getStripe, getStripeWebhookSecret } from '@/lib/stripe/server'
+import {
+  applyStripeCheckoutSessionStatus,
+  applyStripePaymentFailed,
+  applyStripePaymentSucceeded,
+} from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,15 +59,22 @@ function getMetadataString(
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function normalizeCurrency(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-  const normalized = value.trim().toUpperCase()
-  return normalized ? normalized.slice(0, 3) : null
+function getSessionPaymentIntentId(
+  session: Stripe.Checkout.Session,
+): string | null {
+  if (typeof session.payment_intent === 'string') return session.payment_intent
+  if (
+    session.payment_intent &&
+    typeof session.payment_intent === 'object' &&
+    typeof session.payment_intent.id === 'string'
+  ) {
+    return session.payment_intent.id
+  }
+  return null
 }
 
 async function markEventProcessed(args: {
   stripeEventId: string
-  message: string
 }): Promise<void> {
   await prisma.stripeWebhookEvent.update({
     where: { stripeEventId: args.stripeEventId },
@@ -86,185 +94,90 @@ async function markEventFailed(args: {
     where: { stripeEventId: args.stripeEventId },
     data: {
       failedAt: new Date(),
-      lastError: args.error instanceof Error ? args.error.message : String(args.error),
+      lastError:
+        args.error instanceof Error ? args.error.message : String(args.error),
     },
   })
 }
 
-async function handleCheckoutSessionCompleted(
+async function handleCheckoutSession(
   session: Stripe.Checkout.Session,
+  status: StripeCheckoutSessionStatus,
+  eventLabel: string,
 ): Promise<StripeWebhookResult> {
-  const bookingId =
+  const bookingIdHint =
     getMetadataString(session.metadata, 'bookingId') ??
     (typeof session.client_reference_id === 'string'
-      ? session.client_reference_id
+      ? session.client_reference_id.trim()
       : null)
 
-  if (!bookingId) {
+  const stripeCheckoutSessionId = session.id
+  if (!stripeCheckoutSessionId) {
     return {
       handled: false,
-      message: 'checkout.session.completed missing booking metadata.',
+      message: `${eventLabel} missing session id.`,
     }
   }
 
-  const paymentIntentId =
-    typeof session.payment_intent === 'string'
-      ? session.payment_intent
-      : session.payment_intent?.id ?? null
-
-  await prisma.booking.update({
-    where: { id: bookingId },
-    data: {
-      paymentProvider: PaymentProvider.STRIPE,
-      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
-      stripeCheckoutSessionId: session.id,
-      stripePaymentIntentId: paymentIntentId,
-      stripeCheckoutSessionStatus: StripeCheckoutSessionStatus.COMPLETE,
-      stripeAmountSubtotal:
-        typeof session.amount_subtotal === 'number'
-          ? session.amount_subtotal
-          : undefined,
-      stripeAmountTotal:
-        typeof session.amount_total === 'number' ? session.amount_total : undefined,
-      stripeCurrency: normalizeCurrency(session.currency) ?? undefined,
-    },
+  const result = await applyStripeCheckoutSessionStatus({
+    bookingIdHint,
+    stripeCheckoutSessionId,
+    stripePaymentIntentId: getSessionPaymentIntentId(session),
+    stripeAmountSubtotal:
+      typeof session.amount_subtotal === 'number'
+        ? session.amount_subtotal
+        : null,
+    stripeAmountTotal:
+      typeof session.amount_total === 'number' ? session.amount_total : null,
+    stripeCurrency: typeof session.currency === 'string' ? session.currency : null,
+    status,
   })
 
-  return {
-    handled: true,
-    message: 'checkout.session.completed synced.',
-  }
-}
-
-async function handleCheckoutSessionExpired(
-  session: Stripe.Checkout.Session,
-): Promise<StripeWebhookResult> {
-  const bookingId =
-    getMetadataString(session.metadata, 'bookingId') ??
-    (typeof session.client_reference_id === 'string'
-      ? session.client_reference_id
-      : null)
-
-  if (!bookingId) {
+  if (!result) {
     return {
       handled: false,
-      message: 'checkout.session.expired missing booking metadata.',
+      message: `${eventLabel} booking not found.`,
     }
   }
 
-  await prisma.booking.update({
-    where: { id: bookingId },
-    data: {
-      stripeCheckoutSessionId: session.id,
-      stripeCheckoutSessionStatus: StripeCheckoutSessionStatus.EXPIRED,
-    },
-  })
-
   return {
     handled: true,
-    message: 'checkout.session.expired synced.',
+    message: `${eventLabel} synced.`,
   }
-}
-
-async function findBookingForPaymentIntent(
-  paymentIntent: Stripe.PaymentIntent,
-): Promise<{
-  id: string
-  professionalId: string
-  checkoutStatus: BookingCheckoutStatus
-} | null> {
-  const bookingId = getMetadataString(paymentIntent.metadata, 'bookingId')
-
-  if (bookingId) {
-    return prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: {
-        id: true,
-        professionalId: true,
-        checkoutStatus: true,
-      },
-    })
-  }
-
-  return prisma.booking.findFirst({
-    where: { stripePaymentIntentId: paymentIntent.id },
-    select: {
-      id: true,
-      professionalId: true,
-      checkoutStatus: true,
-    },
-  })
 }
 
 async function handlePaymentIntentSucceeded(
   paymentIntent: Stripe.PaymentIntent,
   stripeEventId: string,
 ): Promise<StripeWebhookResult> {
-  const booking = await findBookingForPaymentIntent(paymentIntent)
+  const bookingIdHint = getMetadataString(paymentIntent.metadata, 'bookingId')
 
-  if (!booking) {
+  const result = await applyStripePaymentSucceeded({
+    bookingIdHint,
+    stripePaymentIntentId: paymentIntent.id,
+    stripeEventId,
+    amountReceivedCents:
+      typeof paymentIntent.amount_received === 'number'
+        ? paymentIntent.amount_received
+        : typeof paymentIntent.amount === 'number'
+          ? paymentIntent.amount
+          : null,
+    currency:
+      typeof paymentIntent.currency === 'string' ? paymentIntent.currency : null,
+  })
+
+  if (!result) {
     return {
       handled: false,
       message: 'payment_intent.succeeded booking not found.',
     }
   }
 
-  const now = new Date()
-  const currency = normalizeCurrency(paymentIntent.currency)
-
-  await prisma.$transaction(async (tx) => {
-    await tx.booking.update({
-      where: { id: booking.id },
-      data: {
-        paymentProvider: PaymentProvider.STRIPE,
-        selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
-        checkoutStatus: BookingCheckoutStatus.PAID,
-        paymentAuthorizedAt: now,
-        paymentCollectedAt: now,
-        stripePaymentIntentId: paymentIntent.id,
-        stripePaymentStatus: StripePaymentStatus.SUCCEEDED,
-        stripeAmountTotal:
-          typeof paymentIntent.amount_received === 'number'
-            ? paymentIntent.amount_received
-            : paymentIntent.amount,
-        stripeCurrency: currency ?? undefined,
-        stripePaidAt: now,
-        stripeLastEventId: stripeEventId,
-      },
-    })
-
-    await tx.bookingCloseoutAuditLog.create({
-      data: {
-        bookingId: booking.id,
-        professionalId: booking.professionalId,
-        actorUserId: null,
-        action: 'PAYMENT_COLLECTED',
-        route: 'POST /api/webhooks/stripe',
-        requestId: stripeEventId,
-        idempotencyKey: stripeEventId,
-        oldValue: {
-          checkoutStatus: booking.checkoutStatus,
-        },
-        newValue: {
-          checkoutStatus: BookingCheckoutStatus.PAID,
-          paymentProvider: PaymentProvider.STRIPE,
-          stripePaymentIntentId: paymentIntent.id,
-        },
-        metadata: {
-          source: 'stripe_webhook',
-          stripeEventId,
-          stripePaymentIntentId: paymentIntent.id,
-          amountReceived: paymentIntent.amount_received,
-          amount: paymentIntent.amount,
-          currency,
-        },
-      },
-    })
-  })
-
   return {
     handled: true,
-    message: 'payment_intent.succeeded marked booking paid.',
+    message: result.bookingCompleted
+      ? 'payment_intent.succeeded marked booking paid and completed.'
+      : 'payment_intent.succeeded marked booking paid.',
   }
 }
 
@@ -272,25 +185,20 @@ async function handlePaymentIntentFailed(
   paymentIntent: Stripe.PaymentIntent,
   stripeEventId: string,
 ): Promise<StripeWebhookResult> {
-  const booking = await findBookingForPaymentIntent(paymentIntent)
+  const bookingIdHint = getMetadataString(paymentIntent.metadata, 'bookingId')
 
-  if (!booking) {
+  const result = await applyStripePaymentFailed({
+    bookingIdHint,
+    stripePaymentIntentId: paymentIntent.id,
+    stripeEventId,
+  })
+
+  if (!result) {
     return {
       handled: false,
       message: 'payment_intent.payment_failed booking not found.',
     }
   }
-
-  await prisma.booking.update({
-    where: { id: booking.id },
-    data: {
-      paymentProvider: PaymentProvider.STRIPE,
-      selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
-      stripePaymentIntentId: paymentIntent.id,
-      stripePaymentStatus: StripePaymentStatus.FAILED,
-      stripeLastEventId: stripeEventId,
-    },
-  })
 
   return {
     handled: true,
@@ -355,16 +263,22 @@ async function handleAccountUpdated(
   }
 }
 
-async function handleStripeEvent(event: Stripe.Event): Promise<StripeWebhookResult> {
+async function handleStripeEvent(
+  event: Stripe.Event,
+): Promise<StripeWebhookResult> {
   switch (event.type) {
     case 'checkout.session.completed':
-      return handleCheckoutSessionCompleted(
+      return handleCheckoutSession(
         event.data.object as Stripe.Checkout.Session,
+        StripeCheckoutSessionStatus.COMPLETE,
+        'checkout.session.completed',
       )
 
     case 'checkout.session.expired':
-      return handleCheckoutSessionExpired(
+      return handleCheckoutSession(
         event.data.object as Stripe.Checkout.Session,
+        StripeCheckoutSessionStatus.EXPIRED,
+        'checkout.session.expired',
       )
 
     case 'payment_intent.succeeded':
@@ -410,7 +324,10 @@ export async function POST(req: Request) {
       getStripeWebhookSecret(),
     )
   } catch (error: unknown) {
-    console.error('POST /api/webhooks/stripe signature verification failed', error)
+    console.error(
+      'POST /api/webhooks/stripe signature verification failed',
+      error,
+    )
 
     return jsonFail(400, 'Invalid Stripe webhook signature.', {
       code: 'STRIPE_SIGNATURE_INVALID',
@@ -462,10 +379,7 @@ export async function POST(req: Request) {
 
     const result = await handleStripeEvent(event)
 
-    await markEventProcessed({
-      stripeEventId: event.id,
-      message: result.message,
-    })
+    await markEventProcessed({ stripeEventId: event.id })
 
     return jsonOk(
       {
