@@ -258,20 +258,39 @@ function labelClass() {
 
 function toDisplayDateTime(iso: string | null | undefined, timeZone: string) {
   if (!iso) return null
+
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return null
 
   try {
-    return new Intl.DateTimeFormat('en-US', {
+    const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: sanitizeTimeZone(timeZone, 'UTC') || 'UTC',
       month: 'short',
       day: 'numeric',
       year: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
-    }).format(d)
+      hour12: true,
+      formatMatcher: 'basic',
+    }).formatToParts(d)
+
+    const get = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((part) => part.type === type)?.value ?? ''
+
+    const month = get('month')
+    const day = get('day')
+    const year = get('year')
+    const hour = get('hour')
+    const minute = get('minute')
+    const dayPeriod = get('dayPeriod')
+
+    if (!month || !day || !year || !hour || !minute || !dayPeriod) {
+      return d.toISOString()
+    }
+
+    return `${month} ${day}, ${year} at ${hour}:${minute} ${dayPeriod}`
   } catch {
-    return d.toLocaleString()
+    return d.toISOString()
   }
 }
 
@@ -316,6 +335,7 @@ export default function AftercareForm({
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
   // Explicit server-backed state
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(
@@ -400,6 +420,7 @@ export default function AftercareForm({
 
   function markDirty() {
     setError(null)
+    setSuccess(null)
     setProductsError(null)
   }
 
@@ -538,13 +559,33 @@ export default function AftercareForm({
     const daysAfterRaw = parseInt(productDaysAfter, 10)
 
     const sanitizedProducts = products
+      .map((p) => {
+        const name = p.name.trim().slice(0, PRODUCT_NAME_MAX)
+        const url = p.url.trim()
+        const note = pickString(p.note).trim().slice(0, PRODUCT_NOTE_MAX) || null
+
+        return {
+          name,
+          url,
+          note,
+        }
+      })
+      .filter((p) => {
+        const hasName = p.name.length > 0
+        const hasValidUrl = isValidHttpUrl(p.url)
+
+        if (sendToClient) {
+          return p.name || p.url || p.note
+        }
+
+        return hasName && hasValidUrl
+      })
       .map((p) => ({
-        id: p.id,
-        name: p.name.trim().slice(0, PRODUCT_NAME_MAX),
-        url: p.url.trim(),
-        note: pickString(p.note).trim().slice(0, PRODUCT_NOTE_MAX) || null,
+        productId: null,
+        externalName: p.name,
+        externalUrl: p.url,
+        note: p.note,
       }))
-      .filter((p) => p.name || p.url || p.note)
 
     return {
       notes: notes.trim().slice(0, NOTES_MAX) || '',
@@ -564,6 +605,7 @@ export default function AftercareForm({
       productReminderDaysAfter: clampInt(daysAfterRaw, 1, 180, 7),
       sendToClient,
       timeZone: tz,
+      version: version ?? existingVersion ?? null,
     }
   }
 
@@ -617,9 +659,16 @@ export default function AftercareForm({
     }
 
     const prodErr = validateProducts(products)
-    if (prodErr) {
+
+    if (prodErr && sendToClient) {
       setProductsError(prodErr)
       return 'Fix product links/names before continuing.'
+    }
+
+    if (prodErr && !sendToClient) {
+      setProductsError(
+        'Incomplete products will not be saved until they have both a name and link.',
+      )
     }
 
     return null
@@ -632,6 +681,7 @@ export default function AftercareForm({
 
   async function postAftercare(sendToClient: boolean) {
     setError(null)
+    setSuccess(null)
     setProductsError(null)
 
     const validationError = validateBeforePost(sendToClient)
@@ -677,7 +727,14 @@ export default function AftercareForm({
 
       const data = await safeJson(res)
       if (!res.ok) {
-        setError(errorFromResponse(res, data))
+        const nextError = errorFromResponse(res, data)
+        setError(nextError)
+
+        if (nextError.toLowerCase().includes('out of date')) {
+          router.refresh()
+          dispatchForceRefresh()
+        }
+
         return
       }
 
@@ -686,6 +743,12 @@ export default function AftercareForm({
 
       const clientNotified = r?.clientNotified === true
       const bookingFinished = r?.bookingFinished === true
+
+      const completionBlockers = Array.isArray(r?.completionBlockers)
+        ? r.completionBlockers.filter(
+            (item): item is string => typeof item === 'string' && item.trim().length > 0,
+          )
+        : []
 
       const redirectTo =
         typeof r?.redirectTo === 'string' &&
@@ -717,13 +780,27 @@ export default function AftercareForm({
         typeof aftercare?.version === 'number' ? aftercare.version : null,
       )
 
-      router.refresh()
-      dispatchForceRefresh()
+    router.refresh()
+    dispatchForceRefresh()
 
-      if (sendToClient && clientNotified && bookingFinished && redirectTo) {
-        router.replace(redirectTo)
-        return
-      }
+    if (sendToClient && clientNotified && bookingFinished && redirectTo) {
+      setSuccess('Aftercare sent. Booking completed.')
+      router.replace(redirectTo)
+      return
+    }
+
+    if (sendToClient) {
+      setSuccess(
+        completionBlockers.length > 0
+          ? `Aftercare sent. Booking is not complete yet: ${completionBlockers.join(', ')}.`
+          : clientNotified
+            ? 'Aftercare sent to client.'
+            : 'Aftercare saved and marked sent, but client delivery was not queued.',
+      )
+      return
+    }
+
+    setSuccess('Aftercare draft saved.')
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       console.error(err)
@@ -1180,6 +1257,12 @@ export default function AftercareForm({
         {error ? (
           <div className="mt-3 text-sm font-semibold text-microAccent">
             {error}
+          </div>
+        ) : null}
+
+        {success ? (
+          <div className="mt-3 text-sm font-semibold text-textPrimary">
+            {success}
           </div>
         ) : null}
 

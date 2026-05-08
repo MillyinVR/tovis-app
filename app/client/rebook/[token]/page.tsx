@@ -5,6 +5,8 @@ import {
   AftercareRebookMode,
   BookingSource,
   BookingStatus,
+  MediaPhase,
+  MediaVisibility,
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
@@ -44,6 +46,49 @@ type RebookInfo =
       mode: 'NONE'
       label: null
     }
+function MediaStrip(props: {
+  title: string
+  items: Array<{
+    id: string
+    url: string | null
+    thumbUrl: string | null
+    mediaType: string
+  }>
+}) {
+  return (
+    <SectionCard title={props.title}>
+      {props.items.length > 0 ? (
+        <div className="grid grid-cols-3 gap-2">
+          {props.items.map((item) => {
+            const src = item.thumbUrl || item.url
+
+            return (
+              <div
+                key={item.id}
+                className="aspect-square overflow-hidden rounded-card border border-white/10 bg-bgPrimary"
+              >
+                {src ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={src}
+                    alt={props.title}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-xs text-textSecondary">
+                    Unavailable
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="text-sm text-textSecondary/75">No photos available.</div>
+      )}
+    </SectionCard>
+  )
+}
 
 function toDate(value: unknown): Date | null {
   if (!value) return null
@@ -336,6 +381,24 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
     bookingId: booking.id,
   })
 
+  const media = await prisma.mediaAsset.findMany({
+  where: {
+    bookingId: booking.id,
+    visibility: MediaVisibility.PRO_CLIENT,
+  },
+  orderBy: { createdAt: 'asc' },
+  select: {
+    id: true,
+    url: true,
+    thumbUrl: true,
+    mediaType: true,
+    phase: true,
+  },
+})
+
+  const beforeMedia = media.filter((item) => item.phase === MediaPhase.BEFORE)
+  const afterMedia = media.filter((item) => item.phase === MediaPhase.AFTER)
+
   const bookParams = applyRebookRecommendationParams({
     params: buildBaseBookParams({
       routeToken,
@@ -413,6 +476,9 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
             </div>
           )}
         </SectionCard>
+
+        <MediaStrip title="Before photos" items={beforeMedia} />
+        <MediaStrip title="After photos" items={afterMedia} />
 
         <SectionCard
           title="Appointment details"
@@ -517,7 +583,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
             <div>
               Token expires:{' '}
               <span className="font-black text-textPrimary">
-                {accessToken.expiresAt.toLocaleString()}
+                {formatAppointmentWhen(accessToken.expiresAt, appointmentTimeZone)}
               </span>
             </div>
 

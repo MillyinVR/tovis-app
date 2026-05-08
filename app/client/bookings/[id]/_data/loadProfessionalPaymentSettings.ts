@@ -13,6 +13,14 @@ const professionalPaymentSettingsSelect = {
   acceptZelle: true,
   acceptAppleCash: true,
 
+  // Stripe / hosted card checkout
+  acceptStripeCard: true,
+  stripeAccountId: true,
+  stripeAccountStatus: true,
+  stripeChargesEnabled: true,
+  stripePayoutsEnabled: true,
+  stripeDetailsSubmitted: true,
+
   tipsEnabled: true,
   allowCustomTip: true,
   tipSuggestions: true,
@@ -30,14 +38,33 @@ export type ClientVisibleProfessionalPaymentSettings =
 
 function normalizePublicHandle(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
+
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
 }
 
 function normalizePaymentNote(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
+
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+function canAcceptStripeCard(
+  settings: Pick<
+    ClientVisibleProfessionalPaymentSettings,
+    | 'acceptStripeCard'
+    | 'stripeAccountId'
+    | 'stripeChargesEnabled'
+    | 'stripePayoutsEnabled'
+  >,
+): boolean {
+  return Boolean(
+    settings.acceptStripeCard &&
+      settings.stripeAccountId &&
+      settings.stripeChargesEnabled &&
+      settings.stripePayoutsEnabled,
+  )
 }
 
 export async function loadProfessionalPaymentSettings(args: {
@@ -55,6 +82,10 @@ export async function loadProfessionalPaymentSettings(args: {
 
   return {
     ...settings,
+
+    // Never expose Stripe as client-usable unless the account is actually usable.
+    acceptStripeCard: canAcceptStripeCard(settings),
+
     venmoHandle: normalizePublicHandle(settings.venmoHandle),
     zelleHandle: normalizePublicHandle(settings.zelleHandle),
     appleCashHandle: normalizePublicHandle(settings.appleCashHandle),

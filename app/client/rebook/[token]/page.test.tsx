@@ -8,6 +8,7 @@ const TOKEN = 'token_1'
 const mocks = vi.hoisted(() => ({
   bookingFindFirst: vi.fn(),
   professionalServiceOfferingFindFirst: vi.fn(),
+  mediaAssetFindMany: vi.fn(),
 
   sanitizeTimeZone: vi.fn(),
   formatAppointmentWhen: vi.fn(),
@@ -46,6 +47,9 @@ vi.mock('@/lib/prisma', () => ({
     },
     professionalServiceOffering: {
       findFirst: mocks.professionalServiceOfferingFindFirst,
+    },
+    mediaAsset: {
+      findMany: mocks.mediaAssetFindMany,
     },
   },
 }))
@@ -229,6 +233,7 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     )
 
     mocks.isBookingError.mockReturnValue(false)
+    mocks.mediaAssetFindMany.mockResolvedValue([])
   })
 
   it('calls notFound when token is missing', async () => {

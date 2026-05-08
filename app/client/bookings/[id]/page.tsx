@@ -1,6 +1,7 @@
 // app/client/bookings/[id]/page.tsx 
 
 import type { ReactNode } from 'react'
+import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
 import { COPY } from '@/lib/copy'
@@ -205,6 +206,7 @@ function friendlyPaymentMethod(value: unknown): string | null {
   if (normalized === 'VENMO') return 'Venmo'
   if (normalized === 'ZELLE') return 'Zelle'
   if (normalized === 'APPLE_CASH') return 'Apple Cash'
+  if (normalized === 'STRIPE_CARD') return 'Credit/debit card'
 
   return normalized
     .toLowerCase()
@@ -265,6 +267,14 @@ function buildAcceptedMethods(
       key: 'apple_cash',
       label: 'Apple Cash',
       handle: paymentSettings.appleCashHandle ?? null,
+    })
+  }
+
+  if (paymentSettings.acceptStripeCard) {
+    methods.push({
+      key: 'stripe_card',
+      label: 'Credit/debit card',
+      handle: null,
     })
   }
 
@@ -479,16 +489,22 @@ function getAftercareRebookInfo(
   return NO_REBOOK_INFO
 }
 
-function pickAftercareToken(aftercare: LoadedAftercare): string | null {
-  if (!aftercare) return null
-  const token = aftercare.publicToken
-  return typeof token === 'string' && token.trim() ? token.trim() : null
+function hasFinalizedAftercare(aftercare: LoadedAftercare): boolean {
+  return Boolean(aftercare?.id && aftercare.sentToClientAt)
+}
+
+type LoadedRenderableMedia = LoadedMedia & {
+  url: string | null
+  thumbUrl: string | null
 }
 
 function hasUsableMediaUrl(
   media: LoadedMedia | null | undefined,
-): media is LoadedMedia & { url: string } {
-  return typeof media?.url === 'string' && media.url.trim().length > 0
+): media is LoadedRenderableMedia {
+  const url = typeof media?.url === 'string' ? media.url.trim() : ''
+  const thumbUrl = typeof media?.thumbUrl === 'string' ? media.thumbUrl.trim() : ''
+
+  return Boolean(url || thumbUrl)
 }
 
 function hasUsableReviewMediaUrl(
@@ -579,7 +595,7 @@ function SummaryRow(props: { label: string; value: ReactNode }) {
 
 function MediaStrip(props: {
   title: string
-  items: Array<LoadedMedia & { url: string }>
+  items: LoadedRenderableMedia[]
 }) {
   if (props.items.length === 0) return null
 
@@ -590,26 +606,35 @@ function MediaStrip(props: {
       </div>
       <div className="looksNoScrollbar flex gap-2 overflow-x-auto pb-1">
         {props.items.map((mediaItem) => {
-          const previewSrc =
-            typeof mediaItem.thumbUrl === 'string' && mediaItem.thumbUrl.trim()
-              ? mediaItem.thumbUrl
-              : mediaItem.url
+            const href =
+              typeof mediaItem.url === 'string' && mediaItem.url.trim()
+                ? mediaItem.url
+                : typeof mediaItem.thumbUrl === 'string' && mediaItem.thumbUrl.trim()
+                  ? mediaItem.thumbUrl
+                  : null
 
-          return (
-            <a
-              key={mediaItem.id}
-              href={mediaItem.url}
-              className="block h-32 w-32 shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
-            >
-              <img
-                src={previewSrc}
-                alt=""
-                className="h-full w-full object-cover"
-                loading="lazy"
-              />
-            </a>
-          )
-        })}
+            const previewSrc =
+              typeof mediaItem.thumbUrl === 'string' && mediaItem.thumbUrl.trim()
+                ? mediaItem.thumbUrl
+                : href
+
+            if (!href || !previewSrc) return null
+
+            return (
+              <a
+                key={mediaItem.id}
+                href={href}
+                className="block h-32 w-32 shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
+              >
+                <img
+                  src={previewSrc}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              </a>
+            )
+          })}
       </div>
     </div>
   )
@@ -756,7 +781,7 @@ function ClientAftercareSectionTitle(props: {
 
 function ClientAftercareMediaTile(props: {
   label: 'Before' | 'After'
-  media: (LoadedMedia & { url: string }) | null
+  media: LoadedRenderableMedia | null
 }) {
   const previewSrc =
     props.media &&
@@ -787,8 +812,8 @@ function ClientAftercareMediaTile(props: {
 }
 
 function ClientAftercareBeforeAfter(props: {
-  beforeMedia: Array<LoadedMedia & { url: string }>
-  afterMedia: Array<LoadedMedia & { url: string }>
+  beforeMedia: LoadedRenderableMedia[]
+  afterMedia: LoadedRenderableMedia[]
 }) {
   const primaryBefore = props.beforeMedia[0] ?? null
   const primaryAfter = props.afterMedia[0] ?? null
@@ -985,7 +1010,7 @@ export default async function ClientBookingPage(props: {
     null
 
   const rebookInfo = getAftercareRebookInfo(aftercare, appointmentTimeZone)
-  const aftercareToken = pickAftercareToken(aftercare)
+  const finalizedAftercare = hasFinalizedAftercare(aftercare)
 
   const reviewCloseoutEligible = canBookingAcceptClientReview({
     bookingStatus: raw.status,
@@ -996,8 +1021,8 @@ export default async function ClientBookingPage(props: {
   })
 
   const showRebookCTA =
-    statusUpper === 'COMPLETED' && typeof aftercareToken === 'string'
-
+    statusUpper === 'COMPLETED' && finalizedAftercare
+    
   const professionalEmail =
     typeof raw.professional?.user?.email === 'string' &&
     raw.professional.user.email.trim()
@@ -1144,12 +1169,12 @@ export default async function ClientBookingPage(props: {
               ).toUpperCase()}
             </span>
 
-            <a
+            <Link
               href="/client/bookings"
               className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[11px] font-black text-textPrimary hover:bg-surfaceGlass"
             >
               ← {COPY.bookings.backToBookings}
-            </a>
+            </Link>
           </div>
         </div>
 
@@ -1528,7 +1553,7 @@ export default async function ClientBookingPage(props: {
               ) : null}
 
               {aftercare && (rebookInfo.label || showRebookCTA) ? (
-                <section className="brand-client-aftercare-rebook">
+                <section id="rebook" className="brand-client-aftercare-rebook">
                   <ClientAftercareSectionTitle
                     title={COPY.bookings.aftercare.rebookHeader}
                     subtitle={
@@ -1538,17 +1563,17 @@ export default async function ClientBookingPage(props: {
                     }
                   />
 
-                  {showRebookCTA && aftercareToken ? (
-                    <a
-                      href={`/client/rebook/${encodeURIComponent(aftercareToken)}`}
-                      className="brand-pro-session-button brand-focus mt-3"
-                      data-full="true"
-                    >
-                      {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
-                        ? COPY.bookings.aftercare.rebookCtaViewDetails
-                        : COPY.bookings.aftercare.rebookCtaNow}
-                    </a>
-                  ) : null}
+                    {showRebookCTA ? (
+                      <a
+                        href={`/client/bookings/${encodeURIComponent(booking.id)}?step=aftercare#rebook`}
+                        className="brand-pro-session-button brand-focus mt-3"
+                        data-full="true"
+                      >
+                        {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
+                          ? COPY.bookings.aftercare.rebookCtaViewDetails
+                          : COPY.bookings.aftercare.rebookCtaNow}
+                      </a>
+                    ) : null}
                 </section>
               ) : null}
             </section>

@@ -64,6 +64,18 @@ function getAppUrl(): string {
   return normalizeBaseUrl(appUrl.startsWith('http') ? appUrl : `https://${appUrl}`)
 }
 
+function buildAftercareCheckoutReturnUrl(bookingId: string, status: 'success' | 'cancelled'): string {
+  const url = new URL(
+    `/client/bookings/${encodeURIComponent(bookingId)}`,
+    getAppUrl(),
+  )
+
+  url.searchParams.set('step', 'aftercare')
+  url.searchParams.set('checkout', status)
+
+  return url.toString()
+}
+
 function buildSuccessUrl(bookingId: string): string {
   const explicit = process.env.STRIPE_CHECKOUT_SUCCESS_URL
 
@@ -71,9 +83,7 @@ function buildSuccessUrl(bookingId: string): string {
     return explicit.replace('{BOOKING_ID}', encodeURIComponent(bookingId))
   }
 
-  return `${getAppUrl()}/client/bookings/${encodeURIComponent(
-    bookingId,
-  )}/checkout/success`
+  return buildAftercareCheckoutReturnUrl(bookingId, 'success')
 }
 
 function buildCancelUrl(bookingId: string): string {
@@ -83,9 +93,7 @@ function buildCancelUrl(bookingId: string): string {
     return explicit.replace('{BOOKING_ID}', encodeURIComponent(bookingId))
   }
 
-  return `${getAppUrl()}/client/bookings/${encodeURIComponent(
-    bookingId,
-  )}/checkout`
+  return buildAftercareCheckoutReturnUrl(bookingId, 'cancelled')
 }
 
 function decimalToCents(value: Prisma.Decimal | null): number | null {
@@ -101,6 +109,7 @@ function buildIdempotencyRequestBody(args: {
   bookingId: string
   clientId: string
   actorUserId: string
+  amountCents?: number | null
 }): JsonObjectPayload {
   return {
     bookingId: args.bookingId,
@@ -108,6 +117,7 @@ function buildIdempotencyRequestBody(args: {
     actorUserId: args.actorUserId,
     provider: PaymentProvider.STRIPE,
     method: PaymentMethod.STRIPE_CARD,
+    amountCents: args.amountCents ?? null,
   }
 }
 

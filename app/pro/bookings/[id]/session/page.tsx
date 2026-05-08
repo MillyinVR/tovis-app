@@ -19,6 +19,7 @@ import ConsultationForm, {
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import {
+  confirmBookingFinalReview,
   recordInPersonConsultationDecision,
   transitionSessionStep,
 } from '@/lib/booking/writeBoundary'
@@ -273,6 +274,81 @@ async function inPersonDecisionAction(
   })
 
   redirect(sessionHubHref(bookingId))
+}
+
+async function wrapUpAction(bookingId: string) {
+  'use server'
+
+  const user = await getCurrentUser().catch(() => null)
+  const professionalId =
+    user?.role === 'PRO' ? user.professionalProfile?.id ?? null : null
+
+  if (!professionalId) {
+    redirect(loginHref(bookingId))
+  }
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: {
+      id: true,
+      professionalId: true,
+      status: true,
+      finishedAt: true,
+      sessionStep: true,
+      subtotalSnapshot: true,
+      serviceItems: {
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          serviceId: true,
+          offeringId: true,
+          itemType: true,
+          priceSnapshot: true,
+          durationMinutesSnapshot: true,
+          notes: true,
+          sortOrder: true,
+        },
+      },
+    },
+  })
+
+  if (!booking) notFound()
+  if (booking.professionalId !== professionalId) redirect('/pro')
+
+  if (isTerminalBooking(booking.status, booking.finishedAt)) {
+    redirect(sessionHubHref(bookingId))
+  }
+
+  if (booking.sessionStep !== SessionStep.FINISH_REVIEW) {
+    redirect(sessionHubHref(bookingId))
+  }
+
+  if (booking.serviceItems.length === 0) {
+    redirect(sessionHubHref(bookingId))
+  }
+
+  await confirmBookingFinalReview({
+    bookingId,
+    professionalId,
+    finalLineItems: booking.serviceItems.map((item, index) => ({
+      bookingServiceItemId: item.id,
+      serviceId: item.serviceId,
+      offeringId: item.offeringId,
+      itemType:
+        item.itemType ??
+        (index === 0
+          ? BookingServiceItemType.BASE
+          : BookingServiceItemType.ADD_ON),
+      price: item.priceSnapshot,
+      durationMinutes: item.durationMinutesSnapshot,
+      notes: item.notes,
+      sortOrder: item.sortOrder,
+    })),
+    expectedSubtotal: booking.subtotalSnapshot,
+    recommendedProducts: [],
+  })
+
+  redirect(afterPhotosHref(bookingId))
 }
 
 function ChevronLeftIcon({ size = 13 }: { size?: number }) {
@@ -1609,11 +1685,7 @@ export default async function ProBookingSessionPage(props: PageProps) {
     bookingId,
     SessionStep.FINISH_REVIEW,
   )
-  const toWrapUp = transitionAction.bind(
-    null,
-    bookingId,
-    SessionStep.AFTER_PHOTOS,
-  )
+  const toWrapUp = wrapUpAction.bind(null, bookingId)
   const approveInPerson = inPersonDecisionAction.bind(
     null,
     bookingId,

@@ -218,7 +218,7 @@ function AftercarePaymentCard({ action }: { action: AftercarePaymentAction }) {
               {total ? `Pay ${total}` : 'Complete payment'}
             </Link>
             <Link
-              href={`/client/bookings/${encodeURIComponent(booking.id)}`}
+              href={`/client/bookings/${encodeURIComponent(booking.id)}?step=aftercare`}
               className="flex items-center justify-center rounded-[10px] border border-textPrimary/16 py-3 text-[12px] font-bold text-textSecondary transition hover:border-textPrimary/25"
             >
               View full

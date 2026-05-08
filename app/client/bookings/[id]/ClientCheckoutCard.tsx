@@ -64,6 +64,14 @@ type SubmitResponse = {
   message?: string
 }
 
+type StripeSessionResponse = {
+  stripeCheckout?: {
+    url?: string | null
+  } | null
+  error?: string
+  message?: string
+}
+
 function upper(value: unknown): string {
   return typeof value === 'string' ? value.trim().toUpperCase() : ''
 }
@@ -134,6 +142,7 @@ function normalizePaymentMethodKey(value: unknown): string {
   if (normalized === 'CARD_ON_FILE') return 'card_on_file'
   if (normalized === 'TAP_TO_PAY') return 'tap_to_pay'
   if (normalized === 'APPLE_CASH') return 'apple_cash'
+  if (normalized === 'STRIPE_CARD') return 'stripe_card'
   if (normalized === 'CASH') return 'cash'
   if (normalized === 'VENMO') return 'venmo'
   if (normalized === 'ZELLE') return 'zelle'
@@ -151,6 +160,7 @@ function methodKeyToRequestValue(value: string): string | null {
   if (normalized === 'venmo') return 'VENMO'
   if (normalized === 'zelle') return 'ZELLE'
   if (normalized === 'apple_cash') return 'APPLE_CASH'
+  if (normalized === 'stripe_card') return 'STRIPE_CARD'
 
   return null
 }
@@ -237,6 +247,47 @@ async function submitCheckout(args: {
   return (data ?? {}) as SubmitResponse
 }
 
+async function createStripeCheckoutSession(args: {
+  bookingId: string
+  tipAmount: string
+}): Promise<StripeSessionResponse> {
+  const idempotencyKey = buildClientIdempotencyKey({
+    scope: 'client-checkout-stripe-session',
+    entityId: args.bookingId,
+    action: 'create-stripe-session',
+  })
+
+  const response = await fetch(
+    `/api/client/bookings/${encodeURIComponent(args.bookingId)}/checkout/stripe-session`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...idempotencyHeaders(idempotencyKey),
+      },
+      body: JSON.stringify({
+        tipAmount: args.tipAmount,
+      }),
+    },
+  )
+
+  let data: unknown = null
+  try {
+    data = await response.json()
+  } catch {
+    data = null
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      parseSubmitErrorMessage(data) ||
+        'Could not start secure card checkout.',
+    )
+  }
+
+  return (data ?? {}) as StripeSessionResponse
+}
+
 function SummaryRow(props: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-3 border-b border-white/10 py-2 last:border-b-0 last:pb-0 first:pt-0">
@@ -317,6 +368,8 @@ export default function ClientCheckoutCard(props: Props) {
     [props.acceptedMethods, selectedMethodKey],
   )
 
+  const selectedMethodIsStripe = selectedMethodKey === 'stripe_card'
+
   const previewTotal = useMemo(() => {
     return serviceSubtotal + productSubtotal + tipAmount + taxAmount - discountAmount
   }, [serviceSubtotal, productSubtotal, tipAmount, taxAmount, discountAmount])
@@ -375,8 +428,8 @@ export default function ClientCheckoutCard(props: Props) {
 
     const requestMethod = methodKeyToRequestValue(selectedMethodKey)
 
-    if (confirmPayment && !requestMethod) {
-      setError('Choose a payment method before confirming payment.')
+    if (!requestMethod) {
+      setError('Choose a payment method before continuing.')
       return
     }
 
@@ -386,10 +439,35 @@ export default function ClientCheckoutCard(props: Props) {
     }
 
     startTransition(() => {
+      if (selectedMethodIsStripe) {
+        void createStripeCheckoutSession({
+          bookingId: props.bookingId,
+          tipAmount: tipAmount.toFixed(2),
+        })
+          .then((data) => {
+            const checkoutUrl = data.stripeCheckout?.url?.trim()
+
+            if (!checkoutUrl) {
+              throw new Error('Stripe checkout did not return a payment link.')
+            }
+
+            window.location.assign(checkoutUrl)
+          })
+          .catch((submitError: unknown) => {
+            const message =
+              submitError instanceof Error && submitError.message.trim()
+                ? submitError.message
+                : 'Could not start secure card checkout.'
+            setError(message)
+          })
+
+        return
+      }
+
       void submitCheckout({
         bookingId: props.bookingId,
         tipAmount: tipAmount.toFixed(2),
-        selectedPaymentMethod: requestMethod ?? undefined,
+        selectedPaymentMethod: requestMethod,
         confirmPayment,
       })
         .then(() => {
@@ -587,8 +665,7 @@ export default function ClientCheckoutCard(props: Props) {
               Confirm booking-linked checkout
             </div>
             <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-              Save the selected tip and payment method, or confirm payment to
-              close out this booking checkout.
+              Save the selected tip and payment method, confirm a manual payment, or continue to secure card checkout.
             </div>
           </div>
 
@@ -596,7 +673,7 @@ export default function ClientCheckoutCard(props: Props) {
             <button
               type="button"
               onClick={() => handleSubmit(false)}
-              disabled={checkoutLocked || isPending}
+              disabled={checkoutLocked || isPending || selectedMethodIsStripe}
               className="inline-flex items-center justify-center rounded-full border border-white/10 bg-bgSecondary px-4 py-2 text-[12px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isPending ? 'Saving…' : 'Save checkout'}
@@ -608,7 +685,13 @@ export default function ClientCheckoutCard(props: Props) {
               disabled={confirmDisabled}
               className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isPending ? 'Confirming…' : 'Confirm payment'}
+              {isPending
+                ? selectedMethodIsStripe
+                  ? 'Opening Stripe…'
+                  : 'Confirming…'
+                : selectedMethodIsStripe
+                  ? 'Pay with card'
+                  : 'Confirm payment'}
             </button>
           </div>
         </div>
