@@ -81,7 +81,10 @@ import {
   evaluateProSchedulingDecision,
   type ProSchedulingAppliedOverride,
 } from '@/lib/booking/policies/proSchedulingPolicy'
-import { bumpScheduleVersion } from '@/lib/booking/cacheVersion'
+import {
+  bumpScheduleConfigVersion,
+  bumpScheduleVersion,
+} from '@/lib/booking/cacheVersion'
 import {
   deleteActiveHoldsForClient,
   deleteExpiredHoldsForProfessional,
@@ -11922,4 +11925,54 @@ export async function applyStripeCheckoutSessionStatus(
         status: args.status,
       }),
   )
+}
+
+// ─── Hold cleanup sweep ──────────────────────────────────────────────────────
+
+/**
+ * Deletes all expired BookingHold rows in a single sweep and bumps the
+ * scheduleConfigVersion for every affected professional so cached availability
+ * surfaces (`/api/availability/*`, openings, search) re-render the freed slots.
+ *
+ * Used by the `/api/internal/jobs/hold-cleanup` cron. Routing the deleteMany
+ * through the write-boundary keeps the BookingHold mutation tripwire green
+ * (see `tools/check-booking-write-boundary.mjs`) and ensures the cache bump
+ * happens transactionally with the delete from the caller's perspective.
+ *
+ * The bump is best-effort: if Redis is unreachable, the underlying
+ * `bumpScheduleConfigVersion` swallows the error and logs. The next sweep
+ * (5 minutes later) catches up.
+ */
+export async function cleanupAllExpiredHolds(args: {
+  now: Date
+}): Promise<{
+  deletedCount: number
+  affectedProfessionalIds: string[]
+}> {
+  const distinctRows = await prisma.bookingHold.findMany({
+    where: { expiresAt: { lte: args.now } },
+    select: { professionalId: true },
+    distinct: ['professionalId'],
+  })
+
+  const affectedProfessionalIds = distinctRows
+    .map((row) => row.professionalId)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+
+  const deletedResult = await prisma.bookingHold.deleteMany({
+    where: { expiresAt: { lte: args.now } },
+  })
+
+  if (deletedResult.count > 0 && affectedProfessionalIds.length > 0) {
+    await Promise.all(
+      affectedProfessionalIds.map((professionalId) =>
+        bumpScheduleConfigVersion(professionalId),
+      ),
+    )
+  }
+
+  return {
+    deletedCount: deletedResult.count,
+    affectedProfessionalIds,
+  }
 }

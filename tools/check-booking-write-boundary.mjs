@@ -5,6 +5,13 @@ const ROOT = process.cwd()
 
 const ALLOWED_FILES = new Set([
   normalize('lib/booking/writeBoundary.ts'),
+  // Internal helper module of the write boundary. Only called from
+  // writeBoundary.ts (`deleteExpiredHoldsForProfessional`,
+  // `deleteActiveHoldsForClient`); not a user-facing surface.
+  normalize('lib/booking/holdCleanup.ts'),
+  // Test-data reset script for the last-minute booking suite. Runs only
+  // against the test database via `scripts/with-test-db.mjs`.
+  normalize('prisma/test-data/resetLastMinuteTestData.cjs'),
 ])
 
 const TEMP_ALLOWED_FILES = new Set([
@@ -13,6 +20,7 @@ const TEMP_ALLOWED_FILES = new Set([
 const IGNORE_DIRS = new Set([
   '.git',
   '.next',
+  '.claude',
   'node_modules',
   'dist',
   'build',

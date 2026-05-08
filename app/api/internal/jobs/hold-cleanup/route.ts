@@ -1,10 +1,12 @@
 // app/api/internal/jobs/hold-cleanup/route.ts
 //
 // Cron: */5 * * * * (every 5 minutes)
-// Deletes expired BookingHold rows so stale holds never permanently lock slots.
+// Sweeps expired BookingHold rows so stale holds never permanently lock slots,
+// and bumps the scheduleConfigVersion for every affected professional so
+// cached availability surfaces re-render the freed slots immediately.
 //
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { prisma } from '@/lib/prisma'
+import { cleanupAllExpiredHolds } from '@/lib/booking/writeBoundary'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
@@ -46,19 +48,23 @@ async function runJob(req: Request) {
 
   const now = new Date()
 
-  const result = await prisma.bookingHold.deleteMany({
-    where: {
-      expiresAt: { lte: now },
-    },
-  }).catch((err: unknown) => {
-    captureBookingException({ error: err, route: 'GET /api/internal/jobs/hold-cleanup', event: 'HOLD_SWEEP_ERROR' })
-    throw err
-  })
+  try {
+    const { deletedCount, affectedProfessionalIds } =
+      await cleanupAllExpiredHolds({ now })
 
-  return jsonOk({
-    deleted: result.count,
-    ranAt: now.toISOString(),
-  })
+    return jsonOk({
+      deleted: deletedCount,
+      affectedProfessionalIds: affectedProfessionalIds.length,
+      ranAt: now.toISOString(),
+    })
+  } catch (error: unknown) {
+    captureBookingException({
+      error,
+      route: 'GET /api/internal/jobs/hold-cleanup',
+      event: 'HOLD_SWEEP_ERROR',
+    })
+    throw error
+  }
 }
 
 export async function GET(req: Request) {

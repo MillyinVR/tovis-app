@@ -9,6 +9,7 @@ import {
   toInputJsonValue,
   type WorkingHoursObj,
 } from '@/lib/scheduling/workingHoursValidation'
+import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 
 export const dynamic = 'force-dynamic'
 
@@ -226,6 +227,8 @@ export async function POST(req: Request) {
         'No bookable locations were updated. Check your location types and isBookable flags.',
       )
     }
+
+    await bumpScheduleConfigVersion(professionalId)
 
     const representative = result.updatedLocations[0] ?? null
 
