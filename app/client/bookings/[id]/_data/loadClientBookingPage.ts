@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { loadProfessionalPaymentSettings } from './loadProfessionalPaymentSettings'
 
 type CurrentUserResult = Awaited<ReturnType<typeof getCurrentUser>>
@@ -184,6 +185,10 @@ const reviewSelect = {
       id: true,
       url: true,
       thumbUrl: true,
+      storageBucket: true,
+      storagePath: true,
+      thumbBucket: true,
+      thumbPath: true,
       mediaType: true,
       createdAt: true,
       isFeaturedInPortfolio: true,
@@ -196,6 +201,10 @@ const bookingMediaSelect = {
   id: true,
   url: true,
   thumbUrl: true,
+  storageBucket: true,
+  storagePath: true,
+  thumbBucket: true,
+  thumbPath: true,
   mediaType: true,
   phase: true,
   createdAt: true,
@@ -203,6 +212,92 @@ const bookingMediaSelect = {
   uploadedByRole: true,
   reviewId: true,
 } satisfies Prisma.MediaAssetSelect
+
+type RawBookingMedia = Prisma.MediaAssetGetPayload<{
+  select: typeof bookingMediaSelect
+}>
+
+type RawReviewMedia = Prisma.ReviewGetPayload<{
+  select: typeof reviewSelect
+}>['mediaAssets'][number]
+
+export type RenderableBookingMedia = Omit<
+  RawBookingMedia,
+  'storageBucket' | 'storagePath' | 'thumbBucket' | 'thumbPath' | 'url' | 'thumbUrl'
+> & {
+  url: string | null
+  thumbUrl: string | null
+}
+
+export type RenderableReviewMedia = Omit<
+  RawReviewMedia,
+  'storageBucket' | 'storagePath' | 'thumbBucket' | 'thumbPath' | 'url' | 'thumbUrl'
+> & {
+  url: string | null
+  thumbUrl: string | null
+}
+
+async function renderBookingMedia(
+  rows: RawBookingMedia[],
+): Promise<RenderableBookingMedia[]> {
+  return Promise.all(
+    rows.map(async (row) => {
+      const { renderUrl, renderThumbUrl } = await renderMediaUrls(row)
+      const {
+        storageBucket: _storageBucket,
+        storagePath: _storagePath,
+        thumbBucket: _thumbBucket,
+        thumbPath: _thumbPath,
+        url: _url,
+        thumbUrl: _thumbUrl,
+        ...rest
+      } = row
+      void _storageBucket
+      void _storagePath
+      void _thumbBucket
+      void _thumbPath
+      void _url
+      void _thumbUrl
+
+      return {
+        ...rest,
+        url: renderUrl,
+        thumbUrl: renderThumbUrl,
+      }
+    }),
+  )
+}
+
+async function renderReviewMedia(
+  rows: RawReviewMedia[],
+): Promise<RenderableReviewMedia[]> {
+  return Promise.all(
+    rows.map(async (row) => {
+      const { renderUrl, renderThumbUrl } = await renderMediaUrls(row)
+      const {
+        storageBucket: _storageBucket,
+        storagePath: _storagePath,
+        thumbBucket: _thumbBucket,
+        thumbPath: _thumbPath,
+        url: _url,
+        thumbUrl: _thumbUrl,
+        ...rest
+      } = row
+      void _storageBucket
+      void _storagePath
+      void _thumbBucket
+      void _thumbPath
+      void _url
+      void _thumbUrl
+
+      return {
+        ...rest,
+        url: renderUrl,
+        thumbUrl: renderThumbUrl,
+      }
+    }),
+  )
+}
 
 function isAuthedClientUser(
   user: CurrentUserResult | null,
@@ -244,7 +339,7 @@ export async function loadClientBookingPage(bookingId: string) {
     redirect('/client/bookings')
   }
 
-  const [aftercare, existingReview, media, paymentSettings] =
+  const [aftercare, rawReview, rawMedia, paymentSettings] =
     await Promise.all([
       prisma.aftercareSummary.findFirst({
         where: {
@@ -276,6 +371,16 @@ export async function loadClientBookingPage(bookingId: string) {
         professionalId: raw.professional.id,
       }),
     ])
+
+  const media = await renderBookingMedia(rawMedia)
+
+  const existingReview =
+    rawReview != null
+      ? {
+          ...rawReview,
+          mediaAssets: await renderReviewMedia(rawReview.mediaAssets),
+        }
+      : null
 
   return {
     user,
