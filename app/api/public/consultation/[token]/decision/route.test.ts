@@ -66,6 +66,10 @@ const mocks = vi.hoisted(() => ({
   pickString: vi.fn(),
   upper: vi.fn(),
 
+  enforceRateLimit: vi.fn(),
+  rateLimitIdentity: vi.fn(),
+  tokenRateLimitIdentity: vi.fn(),
+
   getBookingFailPayload: vi.fn(),
   isBookingError: vi.fn(),
 
@@ -74,6 +78,7 @@ const mocks = vi.hoisted(() => ({
 
   clientActionTokenFindUnique: vi.fn(),
   hashClientActionToken: vi.fn(),
+  clientActionTokenRateLimitPrefix: vi.fn(),
 
   beginIdempotency: vi.fn(),
   buildPublicConsultationTokenActorKey: vi.fn(),
@@ -88,6 +93,12 @@ vi.mock('@/app/api/_utils', () => ({
   jsonFail: mocks.jsonFail,
   pickString: mocks.pickString,
   upper: mocks.upper,
+}))
+
+vi.mock('@/app/api/_utils/rateLimit', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+  rateLimitIdentity: mocks.rateLimitIdentity,
+  tokenRateLimitIdentity: mocks.tokenRateLimitIdentity,
 }))
 
 vi.mock('@/lib/booking/errors', () => ({
@@ -112,6 +123,7 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/consultation/clientActionTokens', () => ({
   hashClientActionToken: mocks.hashClientActionToken,
+  clientActionTokenRateLimitPrefix: mocks.clientActionTokenRateLimitPrefix,
 }))
 
 vi.mock('@/lib/idempotency', () => ({
@@ -294,6 +306,15 @@ describe('POST /api/public/consultation/[token]/decision', () => {
     )
 
     mocks.hashClientActionToken.mockReturnValue('hashed_token_1')
+    mocks.clientActionTokenRateLimitPrefix.mockReturnValue('hash_prefix_1')
+
+    // Rate-limit guards default to allow (return null = not limited).
+    mocks.enforceRateLimit.mockResolvedValue(null)
+    mocks.rateLimitIdentity.mockResolvedValue({ kind: 'ip', id: '1.2.3.4' })
+    mocks.tokenRateLimitIdentity.mockImplementation((prefix: string) => ({
+      kind: 'token' as const,
+      id: prefix,
+    }))
 
     mocks.clientActionTokenFindUnique.mockResolvedValue({
       id: 'token_row_1',
@@ -401,6 +422,58 @@ describe('POST /api/public/consultation/[token]/decision', () => {
     expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.approveConsultationByClientActionToken).not.toHaveBeenCalled()
     expect(mocks.rejectConsultationByClientActionToken).not.toHaveBeenCalled()
+  })
+
+  it('returns 429 from the IP rate-limit guard before any DB lookup', async () => {
+    const limitResponse = new Response(
+      JSON.stringify({ ok: false, error: 'Too many requests.' }),
+      { status: 429 },
+    )
+    mocks.enforceRateLimit.mockResolvedValueOnce(limitResponse)
+
+    const response = await POST(
+      makeIdempotentRequest({
+        body: { action: 'APPROVE' },
+      }),
+      makeCtx(),
+    )
+
+    expect(response).toBe(limitResponse)
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith(
+      expect.objectContaining({ bucket: 'consultation:decision' }),
+    )
+    expect(mocks.clientActionTokenFindUnique).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.approveConsultationByClientActionToken).not.toHaveBeenCalled()
+  })
+
+  it('returns 429 from the token-prefix rate-limit guard before any DB lookup', async () => {
+    const limitResponse = new Response(
+      JSON.stringify({ ok: false, error: 'Too many requests.' }),
+      { status: 429 },
+    )
+    // First call (IP bucket) allows; second call (token bucket) blocks.
+    mocks.enforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(limitResponse)
+
+    const response = await POST(
+      makeIdempotentRequest({
+        body: { action: 'APPROVE' },
+      }),
+      makeCtx(),
+    )
+
+    expect(response).toBe(limitResponse)
+    expect(mocks.tokenRateLimitIdentity).toHaveBeenCalledWith('hash_prefix_1')
+    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        bucket: 'consultation:decision:token',
+      }),
+    )
+    expect(mocks.clientActionTokenFindUnique).not.toHaveBeenCalled()
+    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
   })
 
   it('returns invalid token when token kind is not consultation action', async () => {

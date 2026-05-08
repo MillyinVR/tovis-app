@@ -20,6 +20,7 @@ import {
   type WorkingHoursObj,
 } from '@/lib/scheduling/workingHoursValidation'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 
 export const dynamic = 'force-dynamic'
 
@@ -130,6 +131,12 @@ export async function POST(req: Request) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
+
+    const limited = await enforceRateLimit({
+      bucket: 'pro:locations:write',
+      identity: await rateLimitIdentity(auth.userId),
+    })
+    if (limited) return limited
 
     const raw: unknown = await req.json().catch(() => ({}))
     const body: UnknownRecord = isRecord(raw) ? raw : {}

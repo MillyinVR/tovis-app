@@ -118,6 +118,18 @@ export function hashClientActionToken(rawToken: string): string {
   return sha256(assertRawTokenPresent(rawToken))
 }
 
+/**
+ * Stable, opaque prefix derived from the raw token. Used as the bucket key
+ * for the per-token brute-force rate limit so a partial-token leak can't
+ * be exploited from many IPs in parallel.
+ *
+ * 16 hex chars = 64 bits of prefix, more than enough collision resistance
+ * for the workload.
+ */
+export function clientActionTokenRateLimitPrefix(rawToken: string): string {
+  return hashClientActionToken(rawToken).slice(0, 16)
+}
+
 const CONSUME_CONSULTATION_ACTION_TOKEN_SELECT = {
   id: true,
   kind: true,

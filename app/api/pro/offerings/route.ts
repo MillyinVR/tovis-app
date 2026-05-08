@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma, ProfessionalLocationType } from '@prisma/client'
 import { jsonFail, jsonOk, pickBool, pickInt, pickString } from '@/app/api/_utils'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { parseMoney, moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
@@ -219,6 +220,12 @@ export async function POST(request: Request) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
+
+    const limited = await enforceRateLimit({
+      bucket: 'pro:offerings:write',
+      identity: await rateLimitIdentity(auth.userId),
+    })
+    if (limited) return limited
 
     const raw: unknown = await request.json().catch(() => null)
     if (!isRecord(raw)) return jsonFail(400, 'Invalid JSON body.')

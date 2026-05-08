@@ -10,6 +10,10 @@ export type RateLimitBucket =
   | 'looks:like'
   | 'looks:comment'
   | 'consultation:decision'
+  | 'consultation:decision:token'
+  | 'pro:offerings:write'
+  | 'pro:locations:write'
+  | 'pro:working-hours:write'
   | 'google:proxy'
   | 'messages:send'
   | 'messages:read'
@@ -59,6 +63,36 @@ const LIMITS: Record<RateLimitBucket, LimitConfig> = {
     limit: 8,
     windowSeconds: 5 * 60,
     prefix: 'rl:consultation:decision',
+    mode: 'redis-only',
+  },
+  // Per-token-prefix bucket. Caps brute-force attempts against a partial
+  // token leak (e.g., from logs or screenshots) even when the attack is
+  // distributed across IPs.
+  'consultation:decision:token': {
+    limit: 12,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:consultation:decision:token',
+    mode: 'redis-only',
+  },
+  // Pro catalog/availability writes. Tuned to allow normal bulk-edit usage
+  // (a pro setting up a dozen offerings during onboarding) while shutting
+  // down spam at scale.
+  'pro:offerings:write': {
+    limit: 30,
+    windowSeconds: 60,
+    prefix: 'rl:pro:offerings:write',
+    mode: 'redis-only',
+  },
+  'pro:locations:write': {
+    limit: 12,
+    windowSeconds: 60,
+    prefix: 'rl:pro:locations:write',
+    mode: 'redis-only',
+  },
+  'pro:working-hours:write': {
+    limit: 12,
+    windowSeconds: 60,
+    prefix: 'rl:pro:working-hours:write',
     mode: 'redis-only',
   },
   'google:proxy': {
@@ -261,6 +295,7 @@ export type RateLimitIdentity =
   | { kind: 'user'; id: string }
   | { kind: 'ip'; id: string }
   | { kind: 'phone'; id: string }
+  | { kind: 'token'; id: string }
 
 export function phoneRateLimitIdentity(phone: string): RateLimitIdentity {
   const normalized = phone.trim()
@@ -269,6 +304,20 @@ export function phoneRateLimitIdentity(phone: string): RateLimitIdentity {
   }
 
   return { kind: 'phone', id: normalized }
+}
+
+/**
+ * Identity for rate limiting by an opaque token-prefix. Used to cap
+ * brute-force attempts against a single (partial) leaked token across
+ * many IPs.
+ */
+export function tokenRateLimitIdentity(tokenPrefix: string): RateLimitIdentity {
+  const normalized = tokenPrefix.trim()
+  if (!normalized) {
+    throw new Error('tokenRateLimitIdentity requires a non-empty token prefix.')
+  }
+
+  return { kind: 'token', id: normalized }
 }
 
 export async function rateLimitIdentity(
@@ -307,6 +356,7 @@ function buildIdentityEventFields(identity: RateLimitIdentity): {
     }
   }
 
+  // 'ip' and 'token' kinds — log identity kind/id without leaking PII.
   return {
     meta: {
       identityKind: identity.kind,

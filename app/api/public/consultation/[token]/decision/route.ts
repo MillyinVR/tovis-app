@@ -1,6 +1,11 @@
 // app/api/public/consultation/[token]/decision/route.ts
 import { jsonFail, jsonOk, pickString, upper } from '@/app/api/_utils'
 import {
+  enforceRateLimit,
+  rateLimitIdentity,
+  tokenRateLimitIdentity,
+} from '@/app/api/_utils/rateLimit'
+import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
@@ -10,7 +15,10 @@ import {
   rejectConsultationByClientActionToken,
 } from '@/lib/booking/writeBoundary'
 import { prisma } from '@/lib/prisma'
-import { hashClientActionToken } from '@/lib/consultation/clientActionTokens'
+import {
+  clientActionTokenRateLimitPrefix,
+  hashClientActionToken,
+} from '@/lib/consultation/clientActionTokens'
 import { ClientActionTokenKind, Prisma, Role } from '@prisma/client'
 import {
   beginIdempotency,
@@ -315,6 +323,22 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!action) {
       return jsonFail(400, 'Invalid action.')
     }
+
+    // Brute-force guard: rate-limit by IP and by token-prefix BEFORE any DB
+    // lookup. The token-prefix bucket caps attempts against a leaked
+    // partial token across many IPs.
+    const ipIdentity = await rateLimitIdentity()
+    const ipLimited = await enforceRateLimit({
+      bucket: 'consultation:decision',
+      identity: ipIdentity,
+    })
+    if (ipLimited) return ipLimited
+
+    const tokenLimited = await enforceRateLimit({
+      bucket: 'consultation:decision:token',
+      identity: tokenRateLimitIdentity(clientActionTokenRateLimitPrefix(token)),
+    })
+    if (tokenLimited) return tokenLimited
 
     const { requestId, idempotencyKey, ipAddress, userAgent } =
       readRequestMeta(req)
