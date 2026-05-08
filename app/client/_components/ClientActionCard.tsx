@@ -115,7 +115,7 @@ function PendingConsultationCard({ booking }: { booking: ClientHomeBooking }) {
               Review &amp; approve
             </Link>
             <Link
-              href={`/client/bookings/${encodeURIComponent(booking.id)}`}
+              href={`/client/bookings/${encodeURIComponent(booking.id)}?step=consult`}
               className="flex items-center justify-center rounded-[10px] border border-textPrimary/16 py-3 text-[12px] font-bold text-textSecondary transition hover:border-textPrimary/25"
             >
               View full

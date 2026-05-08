@@ -77,6 +77,15 @@ function normalizeStep(raw: unknown): StepKey {
   return 'overview'
 }
 
+type CheckoutBanner = 'success' | 'cancelled' | null
+
+function normalizeCheckoutBanner(raw: unknown): CheckoutBanner {
+  const normalized = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  if (normalized === 'success') return 'success'
+  if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled'
+  return null
+}
+
 function firstSearchParam(
   value: string | string[] | undefined,
 ): string | undefined {
@@ -861,6 +870,9 @@ export default async function ClientBookingPage(props: {
     {},
   )
   const step = normalizeStep(firstSearchParam(resolvedSearchParams.step))
+  const checkoutBanner = normalizeCheckoutBanner(
+    firstSearchParam(resolvedSearchParams.checkout),
+  )
 
   const {
     user,
@@ -1520,6 +1532,27 @@ export default async function ClientBookingPage(props: {
                   </div>
                 ) : null}
 
+                {checkoutBanner === 'success' ? (
+                  <div
+                    role="status"
+                    className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
+                  >
+                    Card payment received. We're finalizing your booking — this
+                    page will reflect the paid status as soon as the
+                    confirmation finishes processing.
+                  </div>
+                ) : null}
+
+                {checkoutBanner === 'cancelled' ? (
+                  <div
+                    role="status"
+                    className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
+                  >
+                    Card checkout was cancelled. You can try again or pick a
+                    different payment method below.
+                  </div>
+                ) : null}
+
                 <div className="mt-4">
                   <ClientCheckoutCard
                     bookingId={booking.id}
@@ -1563,9 +1596,9 @@ export default async function ClientBookingPage(props: {
                     }
                   />
 
-                    {showRebookCTA ? (
+                    {showRebookCTA && aftercare.publicToken ? (
                       <a
-                        href={`/client/bookings/${encodeURIComponent(booking.id)}?step=aftercare#rebook`}
+                        href={`/client/rebook/${encodeURIComponent(aftercare.publicToken)}`}
                         className="brand-pro-session-button brand-focus mt-3"
                         data-full="true"
                       >
