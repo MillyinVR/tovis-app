@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { MediaVisibility } from '@prisma/client'
 import { resolveStoragePointers, safeUrl } from '@/lib/media'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,7 +116,6 @@ export async function POST(_req: NextRequest, props: Props) {
         isEligibleForLooks: true,
         visibility: true,
 
-        // Keep returning pointers so callers can render consistently
         storageBucket: true,
         storagePath: true,
         thumbBucket: true,
@@ -125,7 +125,18 @@ export async function POST(_req: NextRequest, props: Props) {
       },
     })
 
-    return jsonOk({ media: updated }, 200)
+    const { renderUrl, renderThumbUrl } = await renderMediaUrls(updated)
+
+    return jsonOk(
+      {
+        media: {
+          ...updated,
+          url: renderUrl,
+          thumbUrl: renderThumbUrl,
+        },
+      },
+      200,
+    )
   } catch (e) {
     console.error('POST /api/pro/media/[id]/portfolio error', e)
     return jsonFail(500, errorMessage(e))
@@ -169,7 +180,18 @@ export async function DELETE(_req: NextRequest, props: Props) {
       },
     })
 
-    return jsonOk({ media: updated }, 200)
+    const { renderUrl, renderThumbUrl } = await renderMediaUrls(updated)
+
+    return jsonOk(
+      {
+        media: {
+          ...updated,
+          url: renderUrl,
+          thumbUrl: renderThumbUrl,
+        },
+      },
+      200,
+    )
   } catch (e) {
     console.error('DELETE /api/pro/media/[id]/portfolio error', e)
     return jsonFail(500, errorMessage(e))

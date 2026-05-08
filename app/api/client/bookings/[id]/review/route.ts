@@ -19,6 +19,7 @@ import {
   resolveStoragePointers,
 } from '@/app/api/_utils'
 import { parseIdArray, parseRating1to5 } from '@/lib/media'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundary'
 import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 import { createProNotification } from '@/lib/notifications/proNotifications'
@@ -309,6 +310,22 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
   }
 
   return out
+}
+
+async function renderReviewMediaUrls(
+  review: NonNullable<ReviewTransactionResult['review']>,
+) {
+  const mediaAssets = await Promise.all(
+    review.mediaAssets.map(async (row) => {
+      const { renderUrl, renderThumbUrl } = await renderMediaUrls(row)
+      return {
+        ...row,
+        url: renderUrl,
+        thumbUrl: renderThumbUrl,
+      }
+    }),
+  )
+  return { ...review, mediaAssets }
 }
 
 function buildReviewResponseBody(review: ReviewTransactionResult['review']) {
@@ -630,7 +647,8 @@ export async function POST(
     }
 
     const responseStatus = reviewResult.created ? 201 : 200
-    const responseBody = buildReviewResponseBody(reviewResult.review)
+    const renderedReview = await renderReviewMediaUrls(reviewResult.review)
+    const responseBody = buildReviewResponseBody(renderedReview)
 
     await completeIdempotency({
       idempotencyRecordId,

@@ -19,6 +19,7 @@ import { pickString } from '@/lib/pick'
 import { cn } from '@/lib/utils'
 import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
 import { isBookingError } from '@/lib/booking/errors'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -381,20 +382,37 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
     bookingId: booking.id,
   })
 
-  const media = await prisma.mediaAsset.findMany({
-  where: {
-    bookingId: booking.id,
-    visibility: MediaVisibility.PRO_CLIENT,
-  },
-  orderBy: { createdAt: 'asc' },
-  select: {
-    id: true,
-    url: true,
-    thumbUrl: true,
-    mediaType: true,
-    phase: true,
-  },
-})
+  const rawMedia = await prisma.mediaAsset.findMany({
+    where: {
+      bookingId: booking.id,
+      visibility: MediaVisibility.PRO_CLIENT,
+    },
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      storageBucket: true,
+      storagePath: true,
+      thumbBucket: true,
+      thumbPath: true,
+      url: true,
+      thumbUrl: true,
+      mediaType: true,
+      phase: true,
+    },
+  })
+
+  const media = await Promise.all(
+    rawMedia.map(async (row) => {
+      const { renderUrl, renderThumbUrl } = await renderMediaUrls(row)
+      return {
+        id: row.id,
+        url: renderUrl,
+        thumbUrl: renderThumbUrl,
+        mediaType: row.mediaType,
+        phase: row.phase,
+      }
+    }),
+  )
 
   const beforeMedia = media.filter((item) => item.phase === MediaPhase.BEFORE)
   const afterMedia = media.filter((item) => item.phase === MediaPhase.AFTER)
