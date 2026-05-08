@@ -192,7 +192,8 @@ export default async function ProBookingDetailPage(props: {
           <div className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2">
             <BookingActions
               bookingId={booking.id}
-              currentStatus={booking.status}
+              status={booking.status}
+              sessionStep={booking.sessionStep}
               startedAt={booking.startedAt ? booking.startedAt.toISOString() : null}
               finishedAt={booking.finishedAt ? booking.finishedAt.toISOString() : null}
               timeZone={apptTz}

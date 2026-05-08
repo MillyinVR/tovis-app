@@ -28,10 +28,12 @@ type HoldSelection = {
 type Props = {
   bookingId: string
   status: unknown
+  sessionStep?: string | null
   scheduledFor: string
   durationMinutesSnapshot?: number | null
   appointmentTz?: string | null
   locationType?: BookingLocationType
+  hasAftercareLink?: boolean
   drawerContext: DrawerContext
 }
 
@@ -54,10 +56,12 @@ function errorFromResponse(res: Response, data: unknown) {
 export default function ClientBookingActionsCard({
   bookingId,
   status,
+  sessionStep,
   scheduledFor,
   durationMinutesSnapshot,
   appointmentTz,
   locationType,
+  hasAftercareLink,
   drawerContext,
 }: Props) {
   const router = useRouter()
@@ -110,11 +114,13 @@ export default function ClientBookingActionsCard({
       <BookingActions
         bookingId={bookingId}
         status={status}
+        sessionStep={sessionStep ?? null}
         scheduledFor={scheduledFor}
         durationMinutesSnapshot={durationMinutesSnapshot}
         appointmentTz={appointmentTz}
         locationType={selectedHold?.locationType ?? locationType ?? null}
         rescheduleHoldId={selectedHold?.holdId ?? null}
+        hasAftercareLink={hasAftercareLink}
         onRequestReschedule={() => {
           setSelectedHold(null)
           setDrawerOpen(true)

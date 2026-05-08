@@ -1,4 +1,9 @@
 // app/client/bookings/[id]/consultation/page.tsx
+//
+// Deprecated route. Kept as a redirect to the canonical client booking page
+// with `?step=consult` so saved links and notification deep-links continue to
+// work. The canonical consultation surface lives on the client booking page
+// itself, driven by `ConsultationApproval` + `ConsultationApprovalProof`.
 import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
 

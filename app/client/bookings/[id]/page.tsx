@@ -1343,12 +1343,14 @@ export default async function ClientBookingPage(props: {
               <ClientBookingActionsCard
                 bookingId={booking.id}
                 status={booking.status}
+                sessionStep={booking.sessionStep ?? null}
                 scheduledFor={
                   scheduled ? scheduled.toISOString() : new Date().toISOString()
                 }
                 durationMinutesSnapshot={durationMinutes ?? null}
                 appointmentTz={appointmentTimeZone}
                 locationType={safeLocationType}
+                hasAftercareLink={Boolean(booking.hasUnreadAftercare)}
                 drawerContext={{
                   professionalId: drawerProfessionalId,
                   serviceId: drawerServiceId,
@@ -1537,7 +1539,7 @@ export default async function ClientBookingPage(props: {
                     role="status"
                     className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
                   >
-                    Card payment received. We're finalizing your booking — this
+                    Card payment received. We&apos;re finalizing your booking — this
                     page will reflect the paid status as soon as the
                     confirmation finishes processing.
                   </div>

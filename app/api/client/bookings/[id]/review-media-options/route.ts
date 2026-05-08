@@ -18,6 +18,7 @@ import {
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 export const dynamic = 'force-dynamic'
 
 const PHASE_RANK: Record<MediaPhase, number> = {
@@ -81,6 +82,10 @@ export async function GET(
       },
       select: {
         id: true,
+        storageBucket: true,
+        storagePath: true,
+        thumbBucket: true,
+        thumbPath: true,
         url: true,
         thumbUrl: true,
         mediaType: true,
@@ -90,7 +95,19 @@ export async function GET(
       take: 80,
     })
 
-    const items = raw.sort(sortKey)
+    const items = await Promise.all(
+      raw.sort(sortKey).map(async (row) => {
+        const { renderUrl, renderThumbUrl } = await renderMediaUrls(row)
+        return {
+          id: row.id,
+          url: renderUrl,
+          thumbUrl: renderThumbUrl,
+          mediaType: row.mediaType,
+          createdAt: row.createdAt,
+          phase: row.phase,
+        }
+      }),
+    )
 
     return jsonOk({ items })
   } catch (error: unknown) {

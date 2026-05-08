@@ -1900,6 +1900,13 @@ model Booking {
   rebookOf Booking?  @relation("RebookChain", fields: [rebookOfBookingId], references: [id])
   rebooks  Booking[] @relation("RebookChain")
 
+  /// @deprecated Legacy. No code reads or writes through this relation. The
+  /// canonical surface is `consultationApproval` + `consultationApprovalProof`
+  /// for the approval workflow, and the scalar fields below for the
+  /// negotiated outcome. Will be dropped in a follow-up migration after a
+  /// burn-in window confirming zero database reads from the legacy table.
+  /// New code is forbidden from accessing this relation — see
+  /// tools/check-consultation-canonical.mjs.
   consultation              BookingConsultation?
   consultationNotes         String?
   consultationPrice         Decimal?                   @db.Decimal(10, 2)

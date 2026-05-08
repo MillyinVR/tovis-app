@@ -33,6 +33,7 @@ const BOOKING_STATUS = {
 const bookingSelect = {
   id: true,
   status: true,
+  sessionStep: true,
   scheduledFor: true,
   startedAt: true,
   finishedAt: true,
@@ -419,7 +420,8 @@ function Section({
                   <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
                     <BookingActions
                       bookingId={booking.id}
-                      currentStatus={booking.status}
+                      status={booking.status}
+                      sessionStep={booking.sessionStep}
                       startedAt={
                         booking.startedAt ? booking.startedAt.toISOString() : null
                       }

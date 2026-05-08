@@ -3,26 +3,45 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { BookingStatus, SessionStep } from '@prisma/client'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { safeJson } from '@/lib/http'
+import {
+  buildLifecycleActionViewModel,
+  type LifecycleAction,
+} from '@/lib/booking/lifecycleActionViewModel'
 
 type BookingLocationType = 'SALON' | 'MOBILE' | null
 
 type Props = {
   bookingId: string
   status: unknown
+  sessionStep?: string | null
   scheduledFor: string // ISO UTC
   durationMinutesSnapshot?: number | null
   appointmentTz?: string | null
   rescheduleHoldId?: string | null
   locationType?: BookingLocationType
+  hasAftercareLink?: boolean
   onRequestReschedule?: () => void
   onConfirmReschedule?: () => Promise<void> | void
 }
 
-function upper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+function toBookingStatus(v: unknown): BookingStatus | null {
+  if (typeof v !== 'string') return null
+  const s = v.trim().toUpperCase()
+  return (Object.values(BookingStatus) as string[]).includes(s)
+    ? (s as BookingStatus)
+    : null
+}
+
+function toSessionStep(v: unknown): SessionStep | null {
+  if (typeof v !== 'string') return null
+  const s = v.trim().toUpperCase()
+  return (Object.values(SessionStep) as string[]).includes(s)
+    ? (s as SessionStep)
+    : null
 }
 
 function toDateIsoUtc(v: unknown): Date | null {
@@ -55,25 +74,17 @@ function pillClass(on: boolean) {
 export default function BookingActions({
   bookingId,
   status,
+  sessionStep,
   scheduledFor,
   durationMinutesSnapshot,
   appointmentTz,
   rescheduleHoldId,
   locationType,
+  hasAftercareLink,
   onRequestReschedule,
   onConfirmReschedule,
 }: Props) {
   const router = useRouter()
-
-  const statusUpper = upper(status)
-  const isPending = statusUpper === 'PENDING'
-  const isAccepted = statusUpper === 'ACCEPTED'
-  const isCancelled = statusUpper === 'CANCELLED'
-  const isCompleted = statusUpper === 'COMPLETED'
-
-  const canCancel = !isCancelled && !isCompleted
-  const canReschedule =
-    (isPending || isAccepted) && !isCancelled && !isCompleted
 
   const tz = useMemo(
     () => sanitizeTimeZone(appointmentTz, DEFAULT_TIME_ZONE),
@@ -86,6 +97,27 @@ export default function BookingActions({
     if (!scheduledDate) return 'Unknown time'
     return formatAppointmentWhen(scheduledDate, tz)
   }, [scheduledDate, tz])
+
+  const normalizedStatus = useMemo(() => toBookingStatus(status), [status])
+  const normalizedStep = useMemo(() => toSessionStep(sessionStep), [sessionStep])
+
+  const viewModel = useMemo(() => {
+    if (!normalizedStatus) return null
+    return buildLifecycleActionViewModel({
+      bookingId,
+      status: normalizedStatus,
+      sessionStep: normalizedStep,
+      role: 'CLIENT',
+      rescheduleHoldId: rescheduleHoldId ?? null,
+      hasAftercareLink: Boolean(hasAftercareLink),
+    })
+  }, [
+    bookingId,
+    normalizedStatus,
+    normalizedStep,
+    rescheduleHoldId,
+    hasAftercareLink,
+  ])
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -106,7 +138,14 @@ export default function BookingActions({
     setSuccess(null)
   }
 
-  async function post(url: string, body?: Record<string, unknown>) {
+  async function postAction(action: LifecycleAction) {
+    if (!action.href) {
+      setError('Action is missing a destination.')
+      return
+    }
+
+    if (action.confirmCopy && !window.confirm(action.confirmCopy)) return
+
     resetAlerts()
     setBusy(true)
 
@@ -115,10 +154,12 @@ export default function BookingActions({
     abortRef.current = controller
 
     try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: body ? { 'Content-Type': 'application/json' } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
+      const res = await fetch(action.href, {
+        method: action.method === 'POST' ? 'POST' : 'PATCH',
+        headers: action.payload
+          ? { 'Content-Type': 'application/json' }
+          : undefined,
+        body: action.payload ? JSON.stringify(action.payload) : undefined,
         signal: controller.signal,
       })
 
@@ -140,17 +181,8 @@ export default function BookingActions({
     }
   }
 
-  async function cancelBooking() {
-    if (!canCancel || busy) return
-    resetAlerts()
-
-    if (!window.confirm('Cancel this booking?')) return
-
-    await post(`/api/bookings/${encodeURIComponent(bookingId)}/cancel`)
-  }
-
   async function confirmReschedule() {
-    if (!canReschedule || busy) return
+    if (busy) return
     resetAlerts()
 
     if (!rescheduleHoldId) {
@@ -184,38 +216,45 @@ export default function BookingActions({
     }
   }
 
-  const timeline = useMemo(() => {
-    const base = [
-      {
-        key: 'requested',
-        label: 'Requested',
-        on: isPending || isAccepted || isCompleted || isCancelled,
-      },
-      { key: 'confirmed', label: 'Confirmed', on: isAccepted || isCompleted },
-      { key: 'completed', label: 'Completed', on: isCompleted },
-    ] as const
-
-    if (isCancelled) {
-      return [
-        { key: 'requested', label: 'Requested', on: true },
-        { key: 'cancelled', label: 'Cancelled', on: true },
-      ] as const
+  function handleAction(action: LifecycleAction) {
+    if (action.verb === 'CLIENT_RESCHEDULE') {
+      resetAlerts()
+      setMode((m) => (m === 'reschedule' ? 'none' : 'reschedule'))
+      return
     }
 
-    return base
-  }, [isPending, isAccepted, isCompleted, isCancelled])
+    if (action.method === 'NAVIGATE' && action.href) {
+      router.push(action.href)
+      return
+    }
+
+    if (action.method === 'POST' || action.method === 'PATCH') {
+      void postAction(action)
+      return
+    }
+  }
+
+  if (!viewModel) {
+    return (
+      <section className="mt-4 grid gap-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
+        <div className="text-sm font-black">
+          Booking status unavailable
+        </div>
+      </section>
+    )
+  }
 
   return (
     <section className="mt-4 grid gap-3 rounded-card border border-white/10 bg-bgSecondary p-3 text-textPrimary">
       <div className="flex items-baseline justify-between gap-3">
-        <div className="text-sm font-black">Booking status</div>
+        <div className="text-sm font-black">{viewModel.displayLabel}</div>
         <div className="text-xs font-semibold text-textSecondary">
           {whenLabel} · {tz}
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {timeline.map((t) => (
+        {viewModel.timelinePills.map((t) => (
           <span
             key={t.key}
             className={[
@@ -229,47 +268,40 @@ export default function BookingActions({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {canCancel ? (
-          <button
-            type="button"
-            onClick={cancelBooking}
-            disabled={busy}
-            className={[
-              'rounded-full px-4 py-2 text-sm font-black transition',
-              busy
-                ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary'
-                : 'border border-white/10 bg-bgPrimary text-microAccent hover:bg-surfaceGlass',
-            ].join(' ')}
-          >
-            {busy ? 'Working…' : 'Cancel booking'}
-          </button>
-        ) : null}
+        {viewModel.actions.map((action) => {
+          const isDestructive = action.verb === 'CLIENT_CANCEL'
+          const className = [
+            'rounded-full px-4 py-2 text-sm font-black transition',
+            busy
+              ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary'
+              : action.primary
+                ? 'border border-white/10 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
+                : isDestructive
+                  ? 'border border-white/10 bg-bgPrimary text-microAccent hover:bg-surfaceGlass'
+                  : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
+          ].join(' ')
 
-        {canReschedule ? (
-          <button
-            type="button"
-            onClick={() => {
-              resetAlerts()
-              setMode((m) => (m === 'reschedule' ? 'none' : 'reschedule'))
-            }}
-            disabled={busy}
-            className={[
-              'rounded-full px-4 py-2 text-sm font-black transition',
-              busy
-                ? 'cursor-not-allowed border border-white/10 bg-bgPrimary text-textSecondary'
-                : 'border border-white/10 bg-bgPrimary text-textPrimary hover:bg-surfaceGlass',
-            ].join(' ')}
-          >
-            Reschedule
-          </button>
-        ) : null}
+          return (
+            <button
+              key={action.verb}
+              type="button"
+              onClick={() => handleAction(action)}
+              disabled={busy}
+              className={className}
+            >
+              {busy && action.verb === 'CLIENT_CANCEL'
+                ? 'Working…'
+                : action.label}
+            </button>
+          )
+        })}
 
         <div className="ml-auto text-xs font-semibold text-textSecondary">
           {durationMinutesSnapshot ? `${durationMinutesSnapshot} min` : null}
         </div>
       </div>
 
-      {mode === 'reschedule' && canReschedule ? (
+      {mode === 'reschedule' ? (
         <div className="grid gap-2 rounded-card border border-white/10 bg-bgPrimary p-3">
           <div className="text-xs font-black">
             Choose a new time slot before confirming
