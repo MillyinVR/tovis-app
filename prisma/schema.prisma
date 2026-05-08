@@ -1201,6 +1201,7 @@ model ProfessionalProfile {
   viralRequestApprovalFanOuts ViralRequestApprovalFanOut[]
 
   @@index([handleNormalized])
+  @@index([verificationStatus])
 }
 
 model ProfessionalMonthlyAnalytics {
@@ -1320,16 +1321,16 @@ model ProfessionalPaymentSettings {
   // New Stripe / card payment support
   acceptStripeCard Boolean @default(false)
 
-  stripeAccountId             String? @unique
-  stripeAccountStatus         StripeAccountStatus @default(NOT_STARTED)
-  stripeChargesEnabled        Boolean @default(false)
-  stripePayoutsEnabled        Boolean @default(false)
-  stripeDetailsSubmitted      Boolean @default(false)
-  stripeRequirementsCurrentlyDue Json?
+  stripeAccountId                 String?             @unique
+  stripeAccountStatus             StripeAccountStatus @default(NOT_STARTED)
+  stripeChargesEnabled            Boolean             @default(false)
+  stripePayoutsEnabled            Boolean             @default(false)
+  stripeDetailsSubmitted          Boolean             @default(false)
+  stripeRequirementsCurrentlyDue  Json?
   stripeRequirementsEventuallyDue Json?
-  stripeOnboardingStartedAt   DateTime?
-  stripeOnboardingCompletedAt DateTime?
-  stripeAccountUpdatedAt      DateTime?
+  stripeOnboardingStartedAt       DateTime?
+  stripeOnboardingCompletedAt     DateTime?
+  stripeAccountUpdatedAt          DateTime?
 
   tipsEnabled    Boolean @default(true)
   allowCustomTip Boolean @default(true)
@@ -1578,6 +1579,7 @@ model ProfessionalServiceOffering {
   lastMinuteOpeningServices LastMinuteOpeningService[]
 
   @@unique([professionalId, serviceId])
+  @@index([professionalId, isActive])
 }
 
 model LastMinuteSettings {
@@ -1866,15 +1868,15 @@ model Booking {
 
   paymentProvider PaymentProvider @default(MANUAL)
 
-  stripeCheckoutSessionId     String? @unique
-  stripePaymentIntentId       String? @unique
+  stripeCheckoutSessionId     String?                      @unique
+  stripePaymentIntentId       String?                      @unique
   stripeConnectedAccountId    String?
   stripeCheckoutSessionStatus StripeCheckoutSessionStatus?
   stripePaymentStatus         StripePaymentStatus?
   stripeAmountSubtotal        Int?
   stripeAmountTotal           Int?
   stripeApplicationFeeAmount  Int?
-  stripeCurrency              String? @db.VarChar(3)
+  stripeCurrency              String?                      @db.VarChar(3)
   stripePaidAt                DateTime?
   stripeLastEventId           String?
 
@@ -2108,6 +2110,7 @@ model BookingHold {
   endsAtSnapshot          DateTime?
 
   @@unique([professionalId, scheduledFor])
+  @@index([expiresAt])
   @@index([locationId, scheduledFor])
   @@index([professionalId, expiresAt])
   @@index([professionalId, scheduledFor, expiresAt])
@@ -2246,7 +2249,7 @@ model BookingCheckoutProductItem {
 model StripeWebhookEvent {
   id String @id @default(cuid())
 
-  stripeEventId String @unique
+  stripeEventId String  @unique
   eventType     String
   livemode      Boolean @default(false)
 
