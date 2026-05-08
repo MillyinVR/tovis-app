@@ -11,6 +11,7 @@ import {
   normalizeWorkingHours,
   toInputJsonValue,
 } from '@/lib/scheduling/workingHoursValidation'
+import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 
 export const dynamic = 'force-dynamic'
 
@@ -241,6 +242,9 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     })
 
     if (!result) return jsonFail(404, 'Location not found')
+
+    await bumpScheduleConfigVersion(professionalId)
+
     return jsonOk({ location: result })
   } catch (e) {
     console.error('PATCH /api/pro/locations/[id] error', e)
@@ -265,6 +269,9 @@ export async function DELETE(_req: NextRequest, ctx: Params) {
       })
 
       if (deleted.count !== 1) return jsonFail(404, 'Location not found')
+
+      await bumpScheduleConfigVersion(professionalId)
+
       return jsonOk({})
     } catch (e: unknown) {
       const code = isRecord(e)

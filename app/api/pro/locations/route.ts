@@ -19,6 +19,7 @@ import {
   toInputJsonValue,
   type WorkingHoursObj,
 } from '@/lib/scheduling/workingHoursValidation'
+import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 
 export const dynamic = 'force-dynamic'
 
@@ -323,6 +324,8 @@ export async function POST(req: Request) {
         },
       })
     })
+
+    await bumpScheduleConfigVersion(professionalId)
 
     return jsonOk(
       {
