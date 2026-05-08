@@ -10,6 +10,7 @@ import {
   type WorkingHoursObj,
 } from '@/lib/scheduling/workingHoursValidation'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 
 export const dynamic = 'force-dynamic'
 
@@ -147,6 +148,13 @@ export async function POST(req: Request) {
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
+
+    const limited = await enforceRateLimit({
+      bucket: 'pro:working-hours:write',
+      identity: await rateLimitIdentity(auth.userId),
+    })
+    if (limited) return limited
+
     const { searchParams } = new URL(req.url)
 
     const mode = parseMode(searchParams.get('locationType'))

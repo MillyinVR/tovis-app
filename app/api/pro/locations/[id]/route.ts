@@ -12,6 +12,7 @@ import {
   toInputJsonValue,
 } from '@/lib/scheduling/workingHoursValidation'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +31,12 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
+
+    const limited = await enforceRateLimit({
+      bucket: 'pro:locations:write',
+      identity: await rateLimitIdentity(auth.userId),
+    })
+    if (limited) return limited
 
     const { id } = await readParams(ctx)
     const locationId = pickString(id)
@@ -258,6 +265,12 @@ export async function DELETE(_req: NextRequest, ctx: Params) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
+
+    const limited = await enforceRateLimit({
+      bucket: 'pro:locations:write',
+      identity: await rateLimitIdentity(auth.userId),
+    })
+    if (limited) return limited
 
     const { id } = await readParams(ctx)
     const locationId = pickString(id)
