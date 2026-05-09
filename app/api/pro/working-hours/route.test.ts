@@ -46,6 +46,15 @@ vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
 }))
 
+// P2.4a — search-index refresh is best-effort and side-effect only.
+// Stub it out so the route tests can focus on the original handler
+// behaviour without having to mock every helper inside the refresher.
+vi.mock('@/lib/search/index/refreshSearchIndex', () => ({
+  refreshLocation: vi.fn(),
+  refreshProfessional: vi.fn(),
+  deleteLocationFromIndex: vi.fn(),
+}))
+
 import { GET, POST } from './route'
 
 function makeRequest(

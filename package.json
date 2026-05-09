@@ -31,7 +31,8 @@
     "check:consultation-canonical": "node tools/check-consultation-canonical.mjs",
     "seed:booking-overrides": "tsx prisma/seeds/bookingOverridePermissions.ts",
     "lookup:booking-override-ids": "tsx prisma/seeds/lookupBookingOverrideIds.ts",
-    "jobs:looks-social:run-local": "node scripts/run-looks-social-jobs.mjs"
+    "jobs:looks-social:run-local": "node scripts/run-looks-social-jobs.mjs",
+    "backfill:search-index": "tsx scripts/backfill-search-index.ts"
   },
   "dependencies": {
     "@next/env": "16.1.1",

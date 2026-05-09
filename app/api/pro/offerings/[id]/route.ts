@@ -4,6 +4,7 @@ import { Prisma, ProfessionalLocationType } from '@prisma/client'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
+import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { parseMoney, moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
@@ -575,6 +576,8 @@ export async function PATCH(request: Request, ctx: Ctx) {
       return jsonFail(result.status, result.msg, result.extra)
     }
 
+    await refreshProfessional(professionalId, 'offering.update')
+
     return jsonOk({ offering: toDto(result.offering) }, 200)
   } catch (error) {
     console.error('PATCH /api/pro/offerings/[id] error', error)
@@ -616,6 +619,8 @@ export async function DELETE(_request: Request, ctx: Ctx) {
       where: { id: existing.id },
       data: { isActive: false },
     })
+
+    await refreshProfessional(professionalId, 'offering.delete')
 
     return jsonOk({}, 200)
   } catch (error) {

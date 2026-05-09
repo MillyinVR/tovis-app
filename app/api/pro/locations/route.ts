@@ -20,6 +20,7 @@ import {
   type WorkingHoursObj,
 } from '@/lib/scheduling/workingHoursValidation'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
+import { refreshLocation } from '@/lib/search/index/refreshSearchIndex'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 
 export const dynamic = 'force-dynamic'
@@ -333,6 +334,7 @@ export async function POST(req: Request) {
     })
 
     await bumpScheduleConfigVersion(professionalId)
+    await refreshLocation(created.id, 'location.create')
 
     return jsonOk(
       {

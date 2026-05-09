@@ -10,6 +10,7 @@ import {
   type WorkingHoursObj,
 } from '@/lib/scheduling/workingHoursValidation'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
+import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 
 export const dynamic = 'force-dynamic'
@@ -237,6 +238,9 @@ export async function POST(req: Request) {
     }
 
     await bumpScheduleConfigVersion(professionalId)
+    // Refresh every index row for this pro — the route currently
+    // updates ALL bookable locations of a mode (P1.4 will narrow this).
+    await refreshProfessional(professionalId, 'workingHours.update')
 
     const representative = result.updatedLocations[0] ?? null
 

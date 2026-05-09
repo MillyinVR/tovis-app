@@ -1200,6 +1200,8 @@ model ProfessionalProfile {
   reminders                   Reminder[]
   viralRequestApprovalFanOuts ViralRequestApprovalFanOut[]
 
+  searchIndexEntries ProfessionalSearchIndex[]
+
   @@index([handleNormalized])
   @@index([verificationStatus])
 }
@@ -1397,12 +1399,84 @@ model ProfessionalLocation {
   blocks             CalendarBlock[]
   lastMinuteOpenings LastMinuteOpening[]
 
+  searchIndexEntry ProfessionalSearchIndex?
+
   @@index([placeId])
   @@index([professionalId])
   @@index([professionalId, isPrimary])
   @@index([professionalId, isBookable])
   @@index([lat, lng])
   @@index([isBookable, type, lat, lng])
+}
+
+// P2.4a foundation — denormalized search/discovery index.
+//
+// One row per ProfessionalLocation; refreshed by hooks in mutation
+// routes (locations, working-hours, offerings) via
+// `lib/search/index/refreshSearchIndex.ts`. The `geom` column is a
+// PostGIS `geography(Point, 4326)` — Prisma cannot model it natively,
+// so all upserts go through raw SQL helpers. Reads via the typed
+// Prisma client work for every column EXCEPT `geom`; geo radius
+// queries use raw SQL with `ST_DWithin`.
+//
+// This table is dark-loaded in P2.4a — population happens on every
+// mutation, but `searchPros` and `loadNearbyPros` still query the
+// source tables. P2.4b will swap the read paths to this index.
+model ProfessionalSearchIndex {
+  // 1:1 with a ProfessionalLocation (PK + FK).
+  locationId     String @id
+  professionalId String
+
+  // Geography column — created by raw SQL in the migration; written
+  // exclusively via $executeRaw in refreshLocation/refreshProfessional.
+  // Typed Prisma writes against this column will throw at runtime.
+  geom Unsupported("geography(Point, 4326)")
+  lat  Decimal                               @db.Decimal(10, 7)
+  lng  Decimal                               @db.Decimal(10, 7)
+
+  // Pro-level filter columns (denormalized from ProfessionalProfile).
+  verificationStatus VerificationStatus
+  professionType     ProfessionType?
+  businessName       String?
+  handle             String?
+  handleNormalized   String?
+  avatarUrl          String?
+  mobileRadiusMiles  Int?
+
+  // Location-level filter columns (denormalized from ProfessionalLocation).
+  locationType     ProfessionalLocationType
+  isPrimary        Boolean
+  isBookable       Boolean
+  city             String?
+  state            String?
+  formattedAddress String?
+  timeZone         String?
+  workingHours     Json
+
+  // Offering rollups (denormalized from ProfessionalServiceOffering joined to Service).
+  // Arrays enable GIN-indexed `category_id = ANY(category_ids)` filters.
+  categoryIds    String[]
+  serviceIds     String[]
+  offersInSalon  Boolean  @default(false)
+  offersMobile   Boolean  @default(false)
+  minSalonPrice  Decimal? @db.Decimal(10, 2)
+  minMobilePrice Decimal? @db.Decimal(10, 2)
+  minAnyPrice    Decimal? @db.Decimal(10, 2)
+
+  // Rating rollup (denormalized from Review.groupBy).
+  ratingAvg   Float?
+  ratingCount Int    @default(0)
+
+  // Bookkeeping for debugging stale rows.
+  refreshedAt   DateTime @default(now()) @updatedAt
+  refreshSource String?
+
+  professional ProfessionalProfile  @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  location     ProfessionalLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  // GIST and GIN indexes are created in raw SQL in the migration.
+
+  @@index([professionalId])
+  @@index([verificationStatus, isBookable])
 }
 
 model AdminActionLog {
