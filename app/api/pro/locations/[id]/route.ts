@@ -12,6 +12,10 @@ import {
   toInputJsonValue,
 } from '@/lib/scheduling/workingHoursValidation'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
+import {
+  deleteLocationFromIndex,
+  refreshLocation,
+} from '@/lib/search/index/refreshSearchIndex'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 
 export const dynamic = 'force-dynamic'
@@ -251,6 +255,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     if (!result) return jsonFail(404, 'Location not found')
 
     await bumpScheduleConfigVersion(professionalId)
+    await refreshLocation(locationId, 'location.update')
 
     return jsonOk({ location: result })
   } catch (e) {
@@ -284,6 +289,7 @@ export async function DELETE(_req: NextRequest, ctx: Params) {
       if (deleted.count !== 1) return jsonFail(404, 'Location not found')
 
       await bumpScheduleConfigVersion(professionalId)
+      await deleteLocationFromIndex(locationId)
 
       return jsonOk({})
     } catch (e: unknown) {

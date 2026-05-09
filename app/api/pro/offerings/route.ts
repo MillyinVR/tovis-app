@@ -4,6 +4,7 @@ import { Prisma, ProfessionalLocationType } from '@prisma/client'
 import { jsonFail, jsonOk, pickBool, pickInt, pickString } from '@/app/api/_utils'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
+import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { parseMoney, moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
@@ -360,6 +361,8 @@ export async function POST(request: Request) {
         },
       })
     })
+
+    await refreshProfessional(professionalId, 'offering.create')
 
     return jsonOk({ offering: toDto(offering) }, 201)
   } catch (error: unknown) {
