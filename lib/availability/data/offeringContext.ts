@@ -18,6 +18,8 @@ import {
 import { type BookingErrorCode } from '@/lib/booking/errors'
 import { prisma } from '@/lib/prisma'
 
+type AvailabilityDbClient = Prisma.TransactionClient | typeof prisma
+
 const TTL_PLACEMENT_SECONDS = 300
 const AVAILABILITY_PLACEMENT_CACHE_VERSION = 'phase2'
 
@@ -317,6 +319,7 @@ function buildCachedPlacementValue(args: {
 async function loadFreshAvailabilitySource(args: {
   professionalId: string
   serviceId: string
+  client: AvailabilityDbClient
 }): Promise<
   | {
       ok: true
@@ -327,8 +330,9 @@ async function loadFreshAvailabilitySource(args: {
       result: LoadAvailabilityOfferingContextResult
     }
 > {
+  const { client } = args
   const [pro, offering] = await Promise.all([
-    prisma.professionalProfile.findUnique({
+    client.professionalProfile.findUnique({
       where: { id: args.professionalId },
       select: {
         businessName: true,
@@ -337,7 +341,7 @@ async function loadFreshAvailabilitySource(args: {
         timeZone: true,
       },
     }),
-    prisma.professionalServiceOffering.findUnique({
+    client.professionalServiceOffering.findUnique({
       where: {
         professionalId_serviceId: {
           professionalId: args.professionalId,
@@ -374,7 +378,7 @@ async function loadFreshAvailabilitySource(args: {
   }
 
   if (!offering) {
-    const serviceExists = await prisma.service.findUnique({
+    const serviceExists = await client.service.findUnique({
       where: { id: args.serviceId },
       select: { id: true },
     })
@@ -430,7 +434,9 @@ export async function loadAvailabilityOfferingContext(args: {
   scheduleConfigVersion: number
   cacheEnabled: boolean
   onTiming?: LoadAvailabilityOfferingContextTimingFn
+  client?: AvailabilityDbClient
 }): Promise<LoadAvailabilityOfferingContextResult> {
+  const client = args.client ?? prisma
   const placementCacheKey = args.cacheEnabled
     ? buildVersionedPlacementCacheKey({
         professionalId: args.professionalId,
@@ -461,6 +467,7 @@ export async function loadAvailabilityOfferingContext(args: {
     loadFreshAvailabilitySource({
       professionalId: args.professionalId,
       serviceId: args.serviceId,
+      client,
     }),
   )
 
@@ -470,6 +477,13 @@ export async function loadAvailabilityOfferingContext(args: {
 
   const source = sourceResult.value
 
+  // Placement reads (`professionalLocation.findMany`/`findFirst` inside
+  // `resolveAvailabilityPlacement`) intentionally stay on primary `prisma`.
+  // The placement result is cached at the offering-context layer above
+  // (`buildVersionedPlacementCacheKey`), so the cold-cache cost is paid
+  // once per (proId, scheduleConfigVersion); replica routing here would
+  // require threading `client` through several nested helpers for
+  // marginal benefit.
   const placement = await timed('placement_resolve', args.onTiming, async () =>
     resolveAvailabilityPlacement({
       professionalId: args.professionalId,

@@ -1,5 +1,7 @@
 // lib/availability/data/busyIntervals.ts
 
+import { Prisma } from '@prisma/client'
+
 import { pickString } from '@/app/api/_utils/pick'
 import { type BusyInterval } from '@/lib/booking/conflicts'
 import { loadBusyIntervalsForWindow } from '@/lib/booking/conflictQueries'
@@ -9,6 +11,9 @@ import {
   cacheSetJson,
 } from '@/lib/availability/data/cache'
 import { isRecord } from '@/lib/guards'
+import { prisma } from '@/lib/prisma'
+
+type AvailabilityDbClient = Prisma.TransactionClient | typeof prisma
 
 const TTL_BUSY_SECONDS = 60
 
@@ -22,10 +27,12 @@ export type LoadBusyIntervalsArgs = {
   locationBufferMinutes: number
   scheduleVersion: number
   cache?: { enabled: boolean }
+  client?: AvailabilityDbClient
 }
 
 function queryBusyIntervals(args: LoadBusyIntervalsArgs): Promise<BusyInterval[]> {
   return loadBusyIntervalsForWindow({
+    tx: args.client,
     professionalId: args.professionalId,
     locationId: args.locationId,
     windowStartUtc: args.windowStartUtc,

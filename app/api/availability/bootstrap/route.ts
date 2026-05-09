@@ -5,11 +5,7 @@ import { createHash } from 'node:crypto'
 import { ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import {
-  buildSummaryCacheKey,
-  cacheGetJson,
-  cacheSetJson,
-} from '@/lib/availability/data/cache'
+import { buildSummaryCacheKey } from '@/lib/availability/data/cache'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
 import { loadAvailabilityOfferingContext } from '@/lib/availability/data/offeringContext'
@@ -32,6 +28,8 @@ import {
   getScheduleConfigVersion,
   getScheduleVersion,
 } from '@/lib/booking/cacheVersion'
+import { withVersionedCache } from '@/lib/cache/versionedCache'
+import { prismaRead } from '@/lib/prisma'
 import {
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
@@ -262,14 +260,6 @@ function resolveDebugClientAddressId(args: {
     : null
 }
 
-function isBootstrapCacheHit(value: unknown): value is Record<string, unknown> {
-  return (
-    isRecord(value) &&
-    value.ok === true &&
-    (value.mode === 'BOOTSTRAP' || value.mode === 'SUMMARY')
-  )
-}
-
 function buildAvailabilityVersion(args: {
   professionalId: string
   serviceId: string
@@ -447,38 +437,8 @@ async function resolveRequestedDurationMinutes(args: {
     addOnIds: args.addOnIds,
     locationType: args.locationType,
     baseDurationMinutes: args.baseDurationMinutes,
+    client: prismaRead,
   })
-}
-
-function normalizeBootstrapCacheHit(args: {
-  cached: Record<string, unknown>
-  mediaId: string | null
-  request: AvailabilityBootstrapRequestPayload
-  availabilityVersion: string
-  generatedAt: string
-  todayDate: string
-}) {
-  const availableDays = pickAvailableDays(args.cached.availableDays)
-
-  const selectedDay =
-    deriveSelectedDayFromCachedBootstrap({
-      cached: args.cached,
-      availableDays,
-      todayDate: args.todayDate,
-    }) ?? null
-
-  return {
-    ...args.cached,
-    ok: true as const,
-    mode: 'BOOTSTRAP' as const,
-    mediaId: args.mediaId,
-    request: isRecord(args.cached.request) ? args.cached.request : args.request,
-    availabilityVersion:
-      pickString(args.cached.availabilityVersion) ?? args.availabilityVersion,
-    generatedAt: pickString(args.cached.generatedAt) ?? args.generatedAt,
-    availableDays,
-    selectedDay,
-  }
 }
 
 export async function GET(req: Request) {
@@ -533,6 +493,7 @@ export async function GET(req: Request) {
       clientAddressId,
       scheduleConfigVersion,
       cacheEnabled: !debug,
+      client: prismaRead,
       onTiming: (label, durationMs) => {
         recordMeasuredSection(timers, `offering:${label}`, durationMs)
       },
@@ -626,7 +587,29 @@ export async function GET(req: Request) {
       ? ymdToString(summaryWindow.nextStartYMD)
       : null
 
-    const summaryCacheKey = debug
+    // Resolve add-on duration up-front so it participates in the cache key
+    // (via `addOnIds` in `buildSummaryCacheKey`) and the cached payload always
+    // carries the final durationMinutes. Cost is one extra Prisma round-trip
+    // when addOns are non-empty; the empty path returns immediately.
+    markTimer(timers, 'addons:start')
+    const addOnResult = await resolveRequestedDurationMinutes({
+      professionalId,
+      offeringId: offeringDbId,
+      addOnIds,
+      locationType: effectiveLocationType,
+      baseDurationMinutes: durationMinutes,
+    })
+
+    if (!addOnResult.ok) {
+      return bookingJsonFail(addOnResult.code, {
+        userMessage: 'One or more add-ons are invalid for this offering.',
+      })
+    }
+
+    durationMinutes = addOnResult.durationMinutes
+    markTimer(timers, 'addons:end')
+
+    const summaryKeyExtra = debug
       ? null
       : buildSummaryCacheKey({
           professionalId,
@@ -651,319 +634,288 @@ export async function GET(req: Request) {
           clientAddressId: resolvedClientAddressId,
         })
 
-    if (summaryCacheKey) {
-      const hit = await cacheGetJson<unknown>(summaryCacheKey)
-
-      if (isBootstrapCacheHit(hit)) {
-        const cachedDurationMinutes = pickNumber(hit.durationMinutes)
-
-        if (cachedDurationMinutes != null) {
-          const request = buildBootstrapRequestPayload({
-            professionalId,
-            serviceId,
-            offeringId: offeringDbId,
-            locationType: effectiveLocationType,
-            locationId,
-            clientAddressId: resolvedClientAddressId,
-            addOnIds,
-            durationMinutes: cachedDurationMinutes,
-          })
-
-          const generatedAt = new Date().toISOString()
-          const availabilityVersion = buildAvailabilityVersion({
-            professionalId,
-            serviceId,
-            offeringId: offeringDbId,
-            locationType: effectiveLocationType,
-            locationId,
-            clientAddressId: resolvedClientAddressId,
-            addOnIds,
-            durationMinutes: cachedDurationMinutes,
-            scheduleVersion,
-            scheduleConfigVersion,
-            windowStartDate,
-            windowEndDate,
-            includeOtherPros,
-            viewerLat,
-            viewerLng,
-            radiusMiles,
-          })
-
-          markInstantSection(timers, 'addons')
-          markInstantSection(timers, 'busy')
-          markInstantSection(timers, 'otherpros')
-          markInstantSection(timers, 'slots')
-          markTimer(timers, 'total:end')
-
-          return withServerTiming(
-            jsonOk(
-              normalizeBootstrapCacheHit({
-                cached: hit,
-                mediaId: mediaId || null,
-                request,
-                availabilityVersion,
-                generatedAt,
-                todayDate,
-              }),
-            ),
-            timers,
-          )
-        }
-      }
-    }
-
-    markTimer(timers, 'addons:start')
-    const addOnResult = await resolveRequestedDurationMinutes({
-      professionalId,
-      offeringId: offeringDbId,
-      addOnIds,
-      locationType: effectiveLocationType,
-      baseDurationMinutes: durationMinutes,
-    })
-
-    if (!addOnResult.ok) {
-      return bookingJsonFail(addOnResult.code, {
-        userMessage: 'One or more add-ons are invalid for this offering.',
-      })
-    }
-
-    durationMinutes = addOnResult.durationMinutes
-    markTimer(timers, 'addons:end')
-
-    const ymds = summaryWindow.ymds
-    const firstBounds = computeDayBoundsUtc(ymds[0] ?? todayYMD, timeZone)
-    const lastBounds = computeDayBoundsUtc(
-      ymds[ymds.length - 1] ?? todayYMD,
-      timeZone,
-    )
-
-    const windowStartUtc = addMinutes(
-      firstBounds.dayStartUtc,
-      -OCCUPANCY_WINDOW_PADDING_MINUTES,
-    )
-    const windowEndUtc = addMinutes(
-      lastBounds.dayEndExclusiveUtc,
-      OCCUPANCY_WINDOW_PADDING_MINUTES,
-    )
-
     const hasViewer =
       typeof viewerLat === 'number' && typeof viewerLng === 'number'
     const centerLat = hasViewer ? viewerLat : placementLat
     const centerLng = hasViewer ? viewerLng : placementLng
 
-    const busyPromise = (async () => {
-      markTimer(timers, 'busy:start')
-      const result = await loadBusyIntervals({
-        professionalId,
-        locationId,
-        windowStartUtc,
-        windowEndUtc,
-        nowUtc,
-        fallbackDurationMinutes: durationMinutes,
-        locationBufferMinutes,
-        scheduleVersion,
-        cache: { enabled: !debug },
-      })
-      markTimer(timers, 'busy:end')
-      return result
-    })()
+    const computeBootstrapPayload = async () => {
+      const ymds = summaryWindow.ymds
+      const firstBounds = computeDayBoundsUtc(ymds[0] ?? todayYMD, timeZone)
+      const lastBounds = computeDayBoundsUtc(
+        ymds[ymds.length - 1] ?? todayYMD,
+        timeZone,
+      )
 
-    const otherProsPromise = (async () => {
-      markTimer(timers, 'otherpros:start')
+      const windowStartUtc = addMinutes(
+        firstBounds.dayStartUtc,
+        -OCCUPANCY_WINDOW_PADDING_MINUTES,
+      )
+      const windowEndUtc = addMinutes(
+        lastBounds.dayEndExclusiveUtc,
+        OCCUPANCY_WINDOW_PADDING_MINUTES,
+      )
 
-      const result =
-        includeOtherPros && centerLat != null && centerLng != null
-          ? await loadOtherProsNearbyCached({
-              centerLat,
-              centerLng,
-              radiusMiles,
-              serviceId,
-              locationType: effectiveLocationType,
-              excludeProfessionalId: professionalId,
-              limit: 6,
-              cacheEnabled: !debug,
-            })
-          : ([] as OtherProRow[])
-
-      markTimer(timers, 'otherpros:end')
-      return result
-    })()
-
-    const [busy, otherPros] = await Promise.all([busyPromise, otherProsPromise])
-
-    markTimer(timers, 'slots:start')
-    const dayResults = await Promise.all(
-      ymds.map(async (ymd) => {
-        const result = await computeDaySlotsFast({
-          dateYMD: ymd,
-          durationMinutes,
-          stepMinutes,
-          timeZone,
-          workingHours,
-          leadTimeMinutes,
+      const busyPromise = (async () => {
+        markTimer(timers, 'busy:start')
+        const result = await loadBusyIntervals({
+          professionalId,
+          locationId,
+          windowStartUtc,
+          windowEndUtc,
+          nowUtc,
+          fallbackDurationMinutes: durationMinutes,
           locationBufferMinutes,
-          maxAdvanceDays,
-          busy,
-          debug: false,
+          scheduleVersion,
+          cache: { enabled: !debug },
+          client: prismaRead,
+        })
+        markTimer(timers, 'busy:end')
+        return result
+      })()
+
+      const otherProsPromise = (async () => {
+        markTimer(timers, 'otherpros:start')
+
+        const result =
+          includeOtherPros && centerLat != null && centerLng != null
+            ? await loadOtherProsNearbyCached({
+                centerLat,
+                centerLng,
+                radiusMiles,
+                serviceId,
+                locationType: effectiveLocationType,
+                excludeProfessionalId: professionalId,
+                limit: 6,
+                cacheEnabled: !debug,
+                client: prismaRead,
+              })
+            : ([] as OtherProRow[])
+
+        markTimer(timers, 'otherpros:end')
+        return result
+      })()
+
+      const [busy, otherPros] = await Promise.all([
+        busyPromise,
+        otherProsPromise,
+      ])
+
+      markTimer(timers, 'slots:start')
+      const dayResults = await Promise.all(
+        ymds.map(async (ymd) => {
+          const result = await computeDaySlotsFast({
+            dateYMD: ymd,
+            durationMinutes,
+            stepMinutes,
+            timeZone,
+            workingHours,
+            leadTimeMinutes,
+            locationBufferMinutes,
+            maxAdvanceDays,
+            busy,
+            debug: false,
+          })
+
+          return { ymd, result }
+        }),
+      )
+      markTimer(timers, 'slots:end')
+
+      const availableDays: SummaryAvailableDay[] = []
+      let todaySelectedDay: SummarySeededDay | null = null
+      let firstAvailableSelectedDay: SummarySeededDay | null = null
+      let firstErrorCode: BookingErrorCode | null = null
+
+      for (const row of dayResults) {
+        if (!row.result.ok) {
+          firstErrorCode = firstErrorCode ?? row.result.code
+          continue
+        }
+
+        const slotCount = row.result.slots.length
+        if (slotCount <= 0) continue
+
+        const date = ymdToString(row.ymd)
+        const slots = row.result.slots.slice()
+
+        availableDays.push({
+          date,
+          slotCount,
         })
 
-        return { ymd, result }
-      }),
-    )
-    markTimer(timers, 'slots:end')
+        if (date === todayDate && !todaySelectedDay) {
+          todaySelectedDay = {
+            date,
+            slots,
+          }
+        }
 
-    const availableDays: SummaryAvailableDay[] = []
-    let todaySelectedDay: SummarySeededDay | null = null
-    let firstAvailableSelectedDay: SummarySeededDay | null = null
-    let firstErrorCode: BookingErrorCode | null = null
-
-    for (const row of dayResults) {
-      if (!row.result.ok) {
-        firstErrorCode = firstErrorCode ?? row.result.code
-        continue
+        if (!firstAvailableSelectedDay) {
+          firstAvailableSelectedDay = {
+            date,
+            slots,
+          }
+        }
       }
 
-      const slotCount = row.result.slots.length
-      if (slotCount <= 0) continue
-
-      const date = ymdToString(row.ymd)
-      const slots = row.result.slots.slice()
-
-      availableDays.push({
-        date,
-        slotCount,
+      const selectedDay = resolveSelectedDay({
+        availableDays,
+        todayDate,
+        todaySelectedDay,
+        firstAvailableSelectedDay,
       })
 
-      if (date === todayDate && !todaySelectedDay) {
-        todaySelectedDay = {
-          date,
-          slots,
-        }
-      }
-
-      if (!firstAvailableSelectedDay) {
-        firstAvailableSelectedDay = {
-          date,
-          slots,
-        }
-      }
-    }
-
-    const selectedDay = resolveSelectedDay({
-      availableDays,
-      todayDate,
-      todaySelectedDay,
-      firstAvailableSelectedDay,
-    })
-
-    const request = buildBootstrapRequestPayload({
-      professionalId,
-      serviceId,
-      offeringId: offeringDbId,
-      locationType: effectiveLocationType,
-      locationId,
-      clientAddressId: resolvedClientAddressId,
-      addOnIds,
-      durationMinutes,
-    })
-
-    const generatedAt = new Date().toISOString()
-    const availabilityVersion = buildAvailabilityVersion({
-      professionalId,
-      serviceId,
-      offeringId: offeringDbId,
-      locationType: effectiveLocationType,
-      locationId,
-      clientAddressId: resolvedClientAddressId,
-      addOnIds,
-      durationMinutes,
-      scheduleVersion,
-      scheduleConfigVersion,
-      windowStartDate,
-      windowEndDate,
-      includeOtherPros,
-      viewerLat,
-      viewerLng,
-      radiusMiles,
-    })
-
-    const payload = {
-      ok: true,
-      mode: 'BOOTSTRAP' as const,
-      availabilityVersion,
-      generatedAt,
-      request,
-      mediaId: mediaId || null,
-      serviceId,
-      professionalId,
-
-      serviceName,
-      serviceCategoryName,
-
-      locationType: effectiveLocationType,
-      locationId,
-      timeZone,
-      timeZoneSource,
-
-      stepMinutes,
-      leadTimeMinutes,
-      locationBufferMinutes,
-      adjacencyBufferMinutes: locationBufferMinutes,
-      maxDaysAhead: maxAdvanceDays,
-      durationMinutes,
-
-      windowStartDate,
-      windowEndDate,
-      nextStartDate,
-      hasMoreDays: summaryWindow.hasMoreDays,
-
-      primaryPro: {
-        id: professionalId,
-        businessName: proBusinessName,
-        avatarUrl: proAvatarUrl,
-        location: proLocation,
+      const request = buildBootstrapRequestPayload({
+        professionalId,
+        serviceId,
         offeringId: offeringDbId,
-        isCreator: true as const,
+        locationType: effectiveLocationType,
+        locationId,
+        clientAddressId: resolvedClientAddressId,
+        addOnIds,
+        durationMinutes,
+      })
+
+      const generatedAt = new Date().toISOString()
+      const availabilityVersion = buildAvailabilityVersion({
+        professionalId,
+        serviceId,
+        offeringId: offeringDbId,
+        locationType: effectiveLocationType,
+        locationId,
+        clientAddressId: resolvedClientAddressId,
+        addOnIds,
+        durationMinutes,
+        scheduleVersion,
+        scheduleConfigVersion,
+        windowStartDate,
+        windowEndDate,
+        includeOtherPros,
+        viewerLat,
+        viewerLng,
+        radiusMiles,
+      })
+
+      // mediaId stays null in the cached payload — it's per-request and gets
+      // applied after the cache returns. Same for selectedDay refresh below
+      // when today's date moves between cache write and read.
+      return {
+        ok: true,
+        mode: 'BOOTSTRAP' as const,
+        availabilityVersion,
+        generatedAt,
+        request,
+        mediaId: null as string | null,
+        serviceId,
+        professionalId,
+
+        serviceName,
+        serviceCategoryName,
+
+        locationType: effectiveLocationType,
+        locationId,
         timeZone,
         timeZoneSource,
-        locationId,
-      },
 
-      availableDays,
-      selectedDay,
-      otherPros,
-      waitlistSupported: true,
-      offering: offeringPayload,
+        stepMinutes,
+        leadTimeMinutes,
+        locationBufferMinutes,
+        adjacencyBufferMinutes: locationBufferMinutes,
+        maxDaysAhead: maxAdvanceDays,
+        durationMinutes,
 
-      ...(debug
-        ? {
-            debug: {
-              emptyReason: !availableDays.length ? firstErrorCode : null,
-              otherProsCount: otherPros.length,
-              includeOtherPros,
-              center:
-                centerLat != null && centerLng != null
-                  ? { lat: centerLat, lng: centerLng, radiusMiles }
-                  : null,
-              usedViewerCenter: Boolean(hasViewer),
-              addOnIds,
-              clientAddressId: resolvedClientAddressId,
-              requestedSummaryDays,
-            },
-          }
-        : {}),
+        windowStartDate,
+        windowEndDate,
+        nextStartDate,
+        hasMoreDays: summaryWindow.hasMoreDays,
+
+        primaryPro: {
+          id: professionalId,
+          businessName: proBusinessName,
+          avatarUrl: proAvatarUrl,
+          location: proLocation,
+          offeringId: offeringDbId,
+          isCreator: true as const,
+          timeZone,
+          timeZoneSource,
+          locationId,
+        },
+
+        availableDays,
+        selectedDay,
+        otherPros,
+        waitlistSupported: true,
+        offering: offeringPayload,
+
+        ...(debug
+          ? {
+              debug: {
+                emptyReason: !availableDays.length ? firstErrorCode : null,
+                otherProsCount: otherPros.length,
+                includeOtherPros,
+                center:
+                  centerLat != null && centerLng != null
+                    ? { lat: centerLat, lng: centerLng, radiusMiles }
+                    : null,
+                usedViewerCenter: Boolean(hasViewer),
+                addOnIds,
+                clientAddressId: resolvedClientAddressId,
+                requestedSummaryDays,
+              },
+            }
+          : {}),
+      }
     }
 
-    if (summaryCacheKey) {
-      void cacheSetJson(
-        summaryCacheKey,
-        { ...payload, mediaId: null },
+    let cachedPayload
+    if (summaryKeyExtra) {
+      // Cache trade-off (replica lag + version bumps):
+      //   primary write commits → bumpScheduleConfigVersion runs → next request
+      //   reads new version → cache miss → loader uses prismaRead which can be
+      //   1–5s behind primary → stale snapshot caches under the new v{N} key →
+      //   served until TTL expires. The 120s TTL is the staleness backstop.
+      //   Don't lower it without first ensuring replica lag stays well below.
+      const result = await withVersionedCache(
+        {
+          scope: 'availability:bootstrap',
+          scopeId: professionalId,
+          version: scheduleConfigVersion,
+          extra: summaryKeyExtra,
+        },
+        computeBootstrapPayload,
         TTL_BOOTSTRAP_SECONDS,
       )
+      cachedPayload = result.value
+
+      if (result.cacheHit) {
+        markInstantSection(timers, 'busy')
+        markInstantSection(timers, 'otherpros')
+        markInstantSection(timers, 'slots')
+      }
+    } else {
+      cachedPayload = await computeBootstrapPayload()
+    }
+
+    // Per-request refresh: mediaId reflects the current request, and selectedDay
+    // is re-derived against today's date in case the cached entry crossed a
+    // day boundary.
+    const refreshedAvailableDays = pickAvailableDays(cachedPayload.availableDays)
+    const refreshedSelectedDay = deriveSelectedDayFromCachedBootstrap({
+      cached: cachedPayload as unknown as Record<string, unknown>,
+      availableDays: refreshedAvailableDays,
+      todayDate,
+    })
+
+    const finalPayload = {
+      ...cachedPayload,
+      mediaId: mediaId || null,
+      availableDays: refreshedAvailableDays,
+      selectedDay: refreshedSelectedDay,
     }
 
     markTimer(timers, 'total:end')
-    return withServerTiming(jsonOk(payload), timers)
+    return withServerTiming(jsonOk(finalPayload), timers)
   } catch (err: unknown) {
     console.error('GET /api/availability/bootstrap error', err)
     return bookingJsonFail('INTERNAL_ERROR', {

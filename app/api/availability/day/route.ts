@@ -5,11 +5,7 @@ import { createHash } from 'node:crypto'
 import { ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import {
-  buildDayCacheKey,
-  cacheGetJson,
-  cacheSetJson,
-} from '@/lib/availability/data/cache'
+import { buildDayCacheKey } from '@/lib/availability/data/cache'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
 import { loadAvailabilityOfferingContext } from '@/lib/availability/data/offeringContext'
@@ -27,6 +23,8 @@ import {
   getScheduleConfigVersion,
   getScheduleVersion,
 } from '@/lib/booking/cacheVersion'
+import { withVersionedCache } from '@/lib/cache/versionedCache'
+import { prismaRead } from '@/lib/prisma'
 import {
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
@@ -38,7 +36,6 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
-import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
@@ -85,10 +82,6 @@ function toInt(value: string | null, fallback: number): number {
   return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback
 }
 
-function pickString(x: unknown): string | null {
-  return typeof x === 'string' && x.trim() ? x.trim() : null
-}
-
 function resolveDebugClientAddressId(args: {
   locationType: ServiceLocationType
   clientAddressId: string | null
@@ -96,10 +89,6 @@ function resolveDebugClientAddressId(args: {
   return args.locationType === ServiceLocationType.MOBILE
     ? args.clientAddressId
     : null
-}
-
-function isDayCacheHit(value: unknown): value is Record<string, unknown> {
-  return isRecord(value) && value.ok === true && value.mode === 'DAY'
 }
 
 function buildAvailabilityVersion(args: {
@@ -169,29 +158,8 @@ async function resolveRequestedDurationMinutes(args: {
     addOnIds: args.addOnIds,
     locationType: args.locationType,
     baseDurationMinutes: args.baseDurationMinutes,
+    client: prismaRead,
   })
-}
-
-function normalizeDayCacheHit(args: {
-  cached: Record<string, unknown>
-  request: AvailabilityDayRequestPayload
-  availabilityVersion: string
-  generatedAt: string
-}) {
-  return {
-    ...args.cached,
-    mode: 'DAY' as const,
-    request: isRecord(args.cached.request) ? args.cached.request : args.request,
-    availabilityVersion:
-      pickString(args.cached.availabilityVersion) ?? args.availabilityVersion,
-    generatedAt: pickString(args.cached.generatedAt) ?? args.generatedAt,
-    professionalId: args.request.professionalId,
-    serviceId: args.request.serviceId,
-    locationType: args.request.locationType,
-    locationId: args.request.locationId,
-    date: args.request.date,
-    durationMinutes: args.request.durationMinutes,
-  }
 }
 
 export async function GET(req: Request) {
@@ -238,6 +206,7 @@ export async function GET(req: Request) {
       clientAddressId,
       scheduleConfigVersion,
       cacheEnabled: !debug,
+      client: prismaRead,
     })
 
     if (!baseContext.ok) {
@@ -346,7 +315,7 @@ export async function GET(req: Request) {
       date: dateStr,
     })
 
-    const dayCacheKey = debug
+    const dayKeyExtra = debug
       ? null
       : buildDayCacheKey({
           professionalId,
@@ -365,76 +334,162 @@ export async function GET(req: Request) {
           clientAddressId: resolvedClientAddressId,
         })
 
-    if (dayCacheKey) {
-      const hit = await cacheGetJson<unknown>(dayCacheKey)
-      if (isDayCacheHit(hit)) {
-        return jsonOk(
-          normalizeDayCacheHit({
-            cached: hit,
-            request,
-            availabilityVersion,
-            generatedAt,
-          }),
-        )
+    type DaySuccessPayload = {
+      ok: true
+      mode: 'DAY'
+      availabilityVersion: string
+      generatedAt: string
+      request: AvailabilityDayRequestPayload
+      professionalId: string
+      serviceId: string
+      locationType: ServiceLocationType
+      date: string
+      locationId: string
+      timeZone: string
+      timeZoneSource: typeof timeZoneSource
+      stepMinutes: number
+      leadTimeMinutes: number
+      locationBufferMinutes: number
+      adjacencyBufferMinutes: number
+      maxDaysAhead: number
+      durationMinutes: number
+      dayStartUtc: string
+      dayEndExclusiveUtc: string
+      slots: string[]
+      offering: typeof offeringPayload
+      debug?: unknown
+    }
+
+    type DayLoaderResult =
+      | { kind: 'ok'; payload: DaySuccessPayload }
+      | {
+          kind: 'fail'
+          code: BookingErrorCode
+          debug?: unknown
+        }
+
+    const computeDayPayload = async (): Promise<DayLoaderResult> => {
+      const bounds = computeDayBoundsUtc(ymd, timeZone)
+
+      const dayAnchorUtc =
+        localSlotToUtcOrNull({
+          year: ymd.year,
+          month: ymd.month,
+          day: ymd.day,
+          hour: 12,
+          minute: 0,
+          timeZone,
+        }) ?? new Date(bounds.dayStartUtc.getTime() + 12 * 60 * 60 * 1000)
+
+      const windowForLoad = getWorkingWindowForDay(
+        dayAnchorUtc,
+        workingHours,
+        timeZone,
+      )
+
+      const windowStartUtc = addMinutes(
+        bounds.dayStartUtc,
+        -OCCUPANCY_WINDOW_PADDING_MINUTES,
+      )
+
+      const windowEndUtc = addMinutes(
+        bounds.dayStartUtc,
+        (windowForLoad.ok ? windowForLoad.endMinutes : 1440) +
+          OCCUPANCY_WINDOW_PADDING_MINUTES,
+      )
+
+      const busy = await loadBusyIntervals({
+        professionalId,
+        locationId,
+        windowStartUtc,
+        windowEndUtc,
+        nowUtc,
+        fallbackDurationMinutes: durationMinutes,
+        locationBufferMinutes,
+        scheduleVersion,
+        cache: { enabled: !debug },
+        client: prismaRead,
+      })
+
+      const result = await computeDaySlotsFast({
+        dateYMD: ymd,
+        durationMinutes,
+        stepMinutes,
+        timeZone,
+        workingHours,
+        leadTimeMinutes,
+        locationBufferMinutes,
+        maxAdvanceDays,
+        busy,
+        debug,
+      })
+
+      if (!result.ok) {
+        return {
+          kind: 'fail',
+          code: result.code,
+          debug: result.debug,
+        }
+      }
+
+      return {
+        kind: 'ok',
+        payload: {
+          ok: true,
+          mode: 'DAY',
+          availabilityVersion,
+          generatedAt,
+          request,
+          professionalId,
+          serviceId,
+          locationType: effectiveLocationType,
+          date: dateStr,
+
+          locationId,
+          timeZone,
+          timeZoneSource,
+          stepMinutes,
+          leadTimeMinutes,
+          locationBufferMinutes,
+          adjacencyBufferMinutes: locationBufferMinutes,
+          maxDaysAhead: maxAdvanceDays,
+
+          durationMinutes,
+          dayStartUtc: result.dayStartUtc.toISOString(),
+          dayEndExclusiveUtc: result.dayEndExclusiveUtc.toISOString(),
+          slots: result.slots,
+
+          offering: offeringPayload,
+          ...(debug ? { debug: result.debug } : {}),
+        },
       }
     }
 
-    const bounds = computeDayBoundsUtc(ymd, timeZone)
+    let loaderResult: DayLoaderResult
+    if (dayKeyExtra) {
+      // Cache trade-off (replica lag + version bumps): write commits on
+      // primary → bumpScheduleConfigVersion runs → next request reads new
+      // version → cache miss → loader uses prismaRead which can be 1–5s
+      // behind primary → stale snapshot caches under the new v{N} key →
+      // served until 120s TTL backstops. Don't lower the TTL without
+      // verifying replica lag is well under it.
+      const cached = await withVersionedCache(
+        {
+          scope: 'availability:day',
+          scopeId: professionalId,
+          version: scheduleConfigVersion,
+          extra: dayKeyExtra,
+        },
+        computeDayPayload,
+        TTL_DAY_SECONDS,
+      )
+      loaderResult = cached.value
+    } else {
+      loaderResult = await computeDayPayload()
+    }
 
-    const dayAnchorUtc =
-      localSlotToUtcOrNull({
-        year: ymd.year,
-        month: ymd.month,
-        day: ymd.day,
-        hour: 12,
-        minute: 0,
-        timeZone,
-      }) ?? new Date(bounds.dayStartUtc.getTime() + 12 * 60 * 60 * 1000)
-
-    const windowForLoad = getWorkingWindowForDay(
-      dayAnchorUtc,
-      workingHours,
-      timeZone,
-    )
-
-    const windowStartUtc = addMinutes(
-      bounds.dayStartUtc,
-      -OCCUPANCY_WINDOW_PADDING_MINUTES,
-    )
-
-    const windowEndUtc = addMinutes(
-      bounds.dayStartUtc,
-      (windowForLoad.ok ? windowForLoad.endMinutes : 1440) +
-        OCCUPANCY_WINDOW_PADDING_MINUTES,
-    )
-
-    const busy = await loadBusyIntervals({
-      professionalId,
-      locationId,
-      windowStartUtc,
-      windowEndUtc,
-      nowUtc,
-      fallbackDurationMinutes: durationMinutes,
-      locationBufferMinutes,
-      scheduleVersion,
-      cache: { enabled: !debug },
-    })
-
-    const result = await computeDaySlotsFast({
-      dateYMD: ymd,
-      durationMinutes,
-      stepMinutes,
-      timeZone,
-      workingHours,
-      leadTimeMinutes,
-      locationBufferMinutes,
-      maxAdvanceDays,
-      busy,
-      debug,
-    })
-
-    if (!result.ok) {
-      return bookingJsonFail(result.code, undefined, {
+    if (loaderResult.kind === 'fail') {
+      return bookingJsonFail(loaderResult.code, undefined, {
         locationId,
         timeZone,
         timeZoneSource,
@@ -442,44 +497,11 @@ export async function GET(req: Request) {
         leadTimeMinutes,
         locationBufferMinutes,
         maxDaysAhead: maxAdvanceDays,
-        ...(debug ? { debug: result.debug } : {}),
+        ...(debug ? { debug: loaderResult.debug } : {}),
       })
     }
 
-    const payload = {
-      ok: true,
-      mode: 'DAY' as const,
-      availabilityVersion,
-      generatedAt,
-      request,
-      professionalId,
-      serviceId,
-      locationType: effectiveLocationType,
-      date: dateStr,
-
-      locationId,
-      timeZone,
-      timeZoneSource,
-      stepMinutes,
-      leadTimeMinutes,
-      locationBufferMinutes,
-      adjacencyBufferMinutes: locationBufferMinutes,
-      maxDaysAhead: maxAdvanceDays,
-
-      durationMinutes,
-      dayStartUtc: result.dayStartUtc.toISOString(),
-      dayEndExclusiveUtc: result.dayEndExclusiveUtc.toISOString(),
-      slots: result.slots,
-
-      offering: offeringPayload,
-      ...(debug ? { debug: result.debug } : {}),
-    }
-
-    if (dayCacheKey) {
-      void cacheSetJson(dayCacheKey, payload, TTL_DAY_SECONDS)
-    }
-
-    return jsonOk(payload)
+    return jsonOk(loaderResult.payload)
   } catch (err: unknown) {
     console.error('GET /api/availability/day error', err)
     return bookingJsonFail('INTERNAL_ERROR', {
