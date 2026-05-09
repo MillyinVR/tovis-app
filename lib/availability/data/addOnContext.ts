@@ -1,6 +1,6 @@
 // lib/availability/data/addOnContext.ts
 
-import { ServiceLocationType } from '@prisma/client'
+import { Prisma, ServiceLocationType } from '@prisma/client'
 
 import {
   MAX_SLOT_DURATION_MINUTES,
@@ -9,12 +9,15 @@ import { type BookingErrorCode } from '@/lib/booking/errors'
 import { clampInt } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 
+type AvailabilityDbClient = Prisma.TransactionClient | typeof prisma
+
 export type ResolveDurationWithAddOnsArgs = {
   professionalId: string
   offeringId: string
   addOnIds: string[]
   locationType: ServiceLocationType
   baseDurationMinutes: number
+  client?: AvailabilityDbClient
 }
 
 export type ResolveDurationWithAddOnsResult =
@@ -39,7 +42,9 @@ export async function resolveDurationWithAddOns(
     }
   }
 
-  const addOnLinks = await prisma.offeringAddOn.findMany({
+  const client = args.client ?? prisma
+
+  const addOnLinks = await client.offeringAddOn.findMany({
     where: {
       id: { in: args.addOnIds },
       offeringId: args.offeringId,
@@ -72,7 +77,7 @@ export async function resolveDurationWithAddOns(
 
   const addOnServiceIds = addOnLinks.map((link) => link.addOnServiceId)
 
-  const proAddOnOfferings = await prisma.professionalServiceOffering.findMany({
+  const proAddOnOfferings = await client.professionalServiceOffering.findMany({
     where: {
       professionalId: args.professionalId,
       isActive: true,

@@ -7,8 +7,7 @@ const mocks = vi.hoisted(() => ({
   getScheduleConfigVersion: vi.fn(),
 
   buildDayCacheKey: vi.fn(),
-  cacheGetJson: vi.fn(),
-  cacheSetJson: vi.fn(),
+  withVersionedCache: vi.fn(),
 
   resolveDurationWithAddOns: vi.fn(),
   loadBusyIntervals: vi.fn(),
@@ -24,8 +23,13 @@ vi.mock('@/lib/booking/cacheVersion', () => ({
 
 vi.mock('@/lib/availability/data/cache', () => ({
   buildDayCacheKey: mocks.buildDayCacheKey,
-  cacheGetJson: mocks.cacheGetJson,
-  cacheSetJson: mocks.cacheSetJson,
+}))
+
+// `withVersionedCache` defaults to "always miss + run the loader" so the
+// existing assertions exercise the compute path. Tests that want to assert
+// cache hit behavior can override per-test via mockResolvedValueOnce.
+vi.mock('@/lib/cache/versionedCache', () => ({
+  withVersionedCache: mocks.withVersionedCache,
 }))
 
 vi.mock('@/lib/availability/data/addOnContext', () => ({
@@ -216,9 +220,11 @@ describe('GET /api/availability/day', () => {
     mocks.getScheduleVersion.mockResolvedValue('sched-v1')
     mocks.getScheduleConfigVersion.mockResolvedValue('cfg-v1')
 
-    mocks.buildDayCacheKey.mockReturnValue(null)
-    mocks.cacheGetJson.mockResolvedValue(null)
-    mocks.cacheSetJson.mockResolvedValue(undefined)
+    mocks.buildDayCacheKey.mockReturnValue('day-cache-key')
+    mocks.withVersionedCache.mockImplementation(async (_key, loader) => ({
+      value: await loader(),
+      cacheHit: false,
+    }))
 
     mocks.resolveDurationWithAddOns.mockResolvedValue({
       ok: true,
@@ -397,9 +403,11 @@ describe('GET /api/availability/day phase 2 placement', () => {
 
     mocks.getScheduleVersion.mockResolvedValue('sched-v1')
     mocks.getScheduleConfigVersion.mockResolvedValue('cfg-v1')
-    mocks.buildDayCacheKey.mockReturnValue(null)
-    mocks.cacheGetJson.mockResolvedValue(null)
-    mocks.cacheSetJson.mockResolvedValue(undefined)
+    mocks.buildDayCacheKey.mockReturnValue('day-cache-key')
+    mocks.withVersionedCache.mockImplementation(async (_key, loader) => ({
+      value: await loader(),
+      cacheHit: false,
+    }))
     mocks.resolveDurationWithAddOns.mockResolvedValue({
       ok: true,
       durationMinutes: 60,
@@ -502,9 +510,11 @@ describe('GET /api/availability/day parity regressions', () => {
 
     mocks.getScheduleVersion.mockResolvedValue('sched-v1')
     mocks.getScheduleConfigVersion.mockResolvedValue('cfg-v1')
-    mocks.buildDayCacheKey.mockReturnValue(null)
-    mocks.cacheGetJson.mockResolvedValue(null)
-    mocks.cacheSetJson.mockResolvedValue(undefined)
+    mocks.buildDayCacheKey.mockReturnValue('day-cache-key')
+    mocks.withVersionedCache.mockImplementation(async (_key, loader) => ({
+      value: await loader(),
+      cacheHit: false,
+    }))
     mocks.resolveDurationWithAddOns.mockResolvedValue({
       ok: true,
       durationMinutes: 15,
@@ -651,9 +661,11 @@ describe('GET /api/availability/day DST behavior', () => {
 
     mocks.getScheduleVersion.mockResolvedValue('sched-v1')
     mocks.getScheduleConfigVersion.mockResolvedValue('cfg-v1')
-    mocks.buildDayCacheKey.mockReturnValue(null)
-    mocks.cacheGetJson.mockResolvedValue(null)
-    mocks.cacheSetJson.mockResolvedValue(undefined)
+    mocks.buildDayCacheKey.mockReturnValue('day-cache-key')
+    mocks.withVersionedCache.mockImplementation(async (_key, loader) => ({
+      value: await loader(),
+      cacheHit: false,
+    }))
     mocks.resolveDurationWithAddOns.mockResolvedValue({
       ok: true,
       durationMinutes: 60,

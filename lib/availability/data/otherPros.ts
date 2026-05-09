@@ -22,6 +22,8 @@ import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 
+type AvailabilityDbClient = Prisma.TransactionClient | typeof prisma
+
 const TTL_OTHER_PROS_SECONDS = 600
 
 export type OtherProRow = {
@@ -43,6 +45,7 @@ export type LoadOtherProsNearbyArgs = {
   locationType: ServiceLocationType
   excludeProfessionalId: string
   limit: number
+  client?: AvailabilityDbClient
 }
 
 export type LoadOtherProsNearbyCachedArgs = LoadOtherProsNearbyArgs & {
@@ -118,10 +121,11 @@ export async function loadOtherProsNearby(
     limit,
   } = args
 
+  const client = args.client ?? prisma
   const bounds = boundsForRadiusMiles(centerLat, centerLng, radiusMiles)
   const allowedTypes = allowedProfessionalTypes(locationType)
 
-  const candidateLocations = await prisma.professionalLocation.findMany({
+  const candidateLocations = await client.professionalLocation.findMany({
     where: {
       isBookable: true,
       professionalId: { not: excludeProfessionalId },
@@ -234,7 +238,7 @@ export async function loadOtherProsNearby(
   const professionalIds = Array.from(bestLocationByPro.keys())
   if (!professionalIds.length) return []
 
-  const offeringRows = await prisma.professionalServiceOffering.findMany({
+  const offeringRows = await client.professionalServiceOffering.findMany({
     where: {
       professionalId: { in: professionalIds },
       serviceId,
@@ -325,6 +329,7 @@ export async function loadOtherProsNearbyCached(
       locationType: args.locationType,
       excludeProfessionalId: args.excludeProfessionalId,
       limit: args.limit,
+      client: args.client,
     })
   }
 
@@ -352,6 +357,7 @@ export async function loadOtherProsNearbyCached(
     locationType: args.locationType,
     excludeProfessionalId: args.excludeProfessionalId,
     limit: args.limit,
+    client: args.client,
   })
 
   void cacheSetJson(key, fresh, TTL_OTHER_PROS_SECONDS)

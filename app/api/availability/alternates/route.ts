@@ -7,6 +7,7 @@ import { ServiceLocationType } from '@prisma/client'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
+import { stableHash } from '@/lib/availability/data/cache'
 import { loadAvailabilityOfferingContext } from '@/lib/availability/data/offeringContext'
 import {
   loadOtherProsNearbyCached,
@@ -23,6 +24,8 @@ import {
   getScheduleConfigVersion,
   getScheduleVersion,
 } from '@/lib/booking/cacheVersion'
+import { withVersionedCache } from '@/lib/cache/versionedCache'
+import { prismaRead } from '@/lib/prisma'
 import {
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
@@ -45,6 +48,15 @@ const OCCUPANCY_WINDOW_PADDING_MINUTES =
 const MAX_ALTERNATES = 12
 const DEFAULT_ALTERNATES_LIMIT = 6
 const ALTERNATE_COMPUTE_CONCURRENCY = 4
+// Shorter TTL than bootstrap/day (120s): the cache key uses only the primary
+// pro's `scheduleConfigVersion`, so an alternate pro's hold/booking won't
+// invalidate this entry. The 60s TTL is the staleness backstop.
+const TTL_ALTERNATES_SECONDS = 60
+
+function roundCoord(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.round(value * 1000) / 1000
+}
 
 type AlternatesRequestPayload = {
   serviceId: string
@@ -149,6 +161,7 @@ async function resolveRequestedDurationMinutes(args: {
     addOnIds: args.addOnIds,
     locationType: args.locationType,
     baseDurationMinutes: args.baseDurationMinutes,
+    client: prismaRead,
   })
 }
 
@@ -201,6 +214,7 @@ async function computeAlternateForDay(args: {
     clientAddressId: args.clientAddressId,
     scheduleConfigVersion,
     cacheEnabled: !args.debug,
+    client: prismaRead,
   })
 
   if (!baseContext.ok) {
@@ -293,6 +307,7 @@ async function computeAlternateForDay(args: {
     locationBufferMinutes,
     scheduleVersion,
     cache: { enabled: !args.debug },
+    client: prismaRead,
   })
 
   const result = await computeDaySlotsFast({
@@ -372,6 +387,7 @@ export async function GET(req: Request) {
       clientAddressId,
       scheduleConfigVersion: primaryScheduleConfigVersion,
       cacheEnabled: !debug,
+      client: prismaRead,
     })
 
     if (!primaryContext.ok) {
@@ -506,99 +522,170 @@ export async function GET(req: Request) {
       })
     }
 
-    const otherPros = await loadOtherProsNearbyCached({
-      centerLat,
-      centerLng,
-      radiusMiles,
-      serviceId,
-      locationType: effectiveLocationType,
-      excludeProfessionalId: professionalId,
-      limit,
-      cacheEnabled: !debug,
-    })
+    type AlternateRow = {
+      pro: {
+        id: string
+        businessName: string | null
+        avatarUrl: string | null
+        location: string | null
+        offeringId: string
+        timeZone: string
+        locationId: string
+        distanceMiles: number
+      }
+      slots: string[]
+    }
 
-    const computedAlternates = await mapWithConcurrencyLimit(
-      otherPros,
-      ALTERNATE_COMPUTE_CONCURRENCY,
-      async (pro): Promise<AlternateResult | null> =>
-        computeAlternateForDay({
-          pro,
-          serviceId,
-          requestedLocationType: effectiveLocationType,
-          clientAddressId: resolvedClientAddressId,
-          addOnIds,
-          ymd,
-          dateStr,
-          stepRaw,
-          leadRaw,
-          debug,
-          nowUtc,
-        }),
-    )
+    type AlternatesCacheValue = {
+      alternates: AlternateRow[]
+      availabilityVersion: string
+      fetchedCandidates: number
+    }
 
-    const alternates = computedAlternates
-      .filter((row): row is AlternateResult => row !== null)
-      .map((row) => ({
-        pro: {
-          id: row.pro.id,
-          businessName: row.pro.businessName,
-          avatarUrl: row.pro.avatarUrl,
-          location: row.pro.location,
-          offeringId: row.pro.offeringId,
-          timeZone: row.pro.timeZone,
-          locationId: row.pro.locationId,
-          distanceMiles: row.pro.distanceMiles,
-        },
-        slots: row.slots,
-      }))
+    const computeAlternatesPayload = async (): Promise<AlternatesCacheValue> => {
+      const otherPros = await loadOtherProsNearbyCached({
+        centerLat,
+        centerLng,
+        radiusMiles,
+        serviceId,
+        locationType: effectiveLocationType,
+        excludeProfessionalId: professionalId,
+        limit,
+        cacheEnabled: !debug,
+        client: prismaRead,
+      })
 
-    const availabilityVersion = buildAlternatesVersion({
-      professionalId,
-      serviceId,
-      offeringId: offeringDbId,
-      locationType: effectiveLocationType,
-      locationId,
-      clientAddressId: resolvedClientAddressId,
-      addOnIds,
-      durationMinutes,
-      date: dateStr,
-      viewerLat: hasViewer ? viewerLat : null,
-      viewerLng: hasViewer ? viewerLng : null,
-      radiusMiles: radiusMiles ?? null,
-      alternates: [
-        {
-          id: professionalId,
-          offeringId: offeringDbId,
-          locationId,
-          scheduleVersion: primaryScheduleVersion,
-          scheduleConfigVersion: primaryScheduleConfigVersion,
-        },
-        ...computedAlternates
-          .filter((row): row is AlternateResult => row !== null)
-          .map((row) => ({
+      const computedAlternates = await mapWithConcurrencyLimit(
+        otherPros,
+        ALTERNATE_COMPUTE_CONCURRENCY,
+        async (pro): Promise<AlternateResult | null> =>
+          computeAlternateForDay({
+            pro,
+            serviceId,
+            requestedLocationType: effectiveLocationType,
+            clientAddressId: resolvedClientAddressId,
+            addOnIds,
+            ymd,
+            dateStr,
+            stepRaw,
+            leadRaw,
+            debug,
+            nowUtc,
+          }),
+      )
+
+      const alternateRows = computedAlternates
+        .filter((row): row is AlternateResult => row !== null)
+        .map((row) => ({
+          pro: {
             id: row.pro.id,
+            businessName: row.pro.businessName,
+            avatarUrl: row.pro.avatarUrl,
+            location: row.pro.location,
             offeringId: row.pro.offeringId,
+            timeZone: row.pro.timeZone,
             locationId: row.pro.locationId,
-            scheduleVersion: row.scheduleVersion,
-            scheduleConfigVersion: row.scheduleConfigVersion,
-          })),
-      ],
-    })
+            distanceMiles: row.pro.distanceMiles,
+          },
+          slots: row.slots,
+        }))
+
+      const computedVersion = buildAlternatesVersion({
+        professionalId,
+        serviceId,
+        offeringId: offeringDbId,
+        locationType: effectiveLocationType,
+        locationId,
+        clientAddressId: resolvedClientAddressId,
+        addOnIds,
+        durationMinutes,
+        date: dateStr,
+        viewerLat: hasViewer ? viewerLat : null,
+        viewerLng: hasViewer ? viewerLng : null,
+        radiusMiles: radiusMiles ?? null,
+        alternates: [
+          {
+            id: professionalId,
+            offeringId: offeringDbId,
+            locationId,
+            scheduleVersion: primaryScheduleVersion,
+            scheduleConfigVersion: primaryScheduleConfigVersion,
+          },
+          ...computedAlternates
+            .filter((row): row is AlternateResult => row !== null)
+            .map((row) => ({
+              id: row.pro.id,
+              offeringId: row.pro.offeringId,
+              locationId: row.pro.locationId,
+              scheduleVersion: row.scheduleVersion,
+              scheduleConfigVersion: row.scheduleConfigVersion,
+            })),
+        ],
+      })
+
+      return {
+        alternates: alternateRows,
+        availabilityVersion: computedVersion,
+        fetchedCandidates: otherPros.length,
+      }
+    }
+
+    let alternatesPayload: AlternatesCacheValue
+    if (!debug) {
+      // Cache trade-off: keyed only on the *primary* pro's
+      // `scheduleConfigVersion`, so an alternate pro's hold/booking will
+      // not invalidate this entry. The 60s TTL is the staleness backstop.
+      // `nowUtc` baked into busy-intervals computation can be up to 60s
+      // stale on a hit; acceptable because lead-time minimums are minutes.
+      const cacheExtra = stableHash({
+        serviceId,
+        offeringId: offeringDbId,
+        locationType: effectiveLocationType,
+        locationId,
+        dateStr,
+        stepMinutes,
+        leadTimeMinutes,
+        locationBufferMinutes,
+        maxAdvanceDays,
+        durationMinutes,
+        addOnIds,
+        clientAddressId: resolvedClientAddressId,
+        viewerLat: hasViewer ? roundCoord(viewerLat) : null,
+        viewerLng: hasViewer ? roundCoord(viewerLng) : null,
+        radiusMiles: radiusMiles ?? null,
+        limit,
+        sv: primaryScheduleVersion,
+      })
+
+      const cached = await withVersionedCache(
+        {
+          scope: 'availability:alternates',
+          scopeId: professionalId,
+          version: primaryScheduleConfigVersion,
+          extra: cacheExtra,
+        },
+        computeAlternatesPayload,
+        TTL_ALTERNATES_SECONDS,
+      )
+      alternatesPayload = cached.value
+    } else {
+      alternatesPayload = await computeAlternatesPayload()
+    }
 
     return jsonOk({
       ok: true,
       mode: 'ALTERNATES' as const,
-      availabilityVersion,
+      availabilityVersion: alternatesPayload.availabilityVersion,
       generatedAt,
       request,
       selectedDay: dateStr,
-      alternates,
+      alternates: alternatesPayload.alternates,
       ...(debug
         ? {
             debug: {
               requestedLimit: limit,
-              fetchedCandidates: otherPros.length,
-              computedAlternates: alternates.length,
+              fetchedCandidates: alternatesPayload.fetchedCandidates,
+              computedAlternates: alternatesPayload.alternates.length,
               center: {
                 lat: centerLat,
                 lng: centerLng,
