@@ -18,7 +18,11 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # postgis/postgis bundles PostGIS 3.x on Postgres 16 and runs
+        # `CREATE EXTENSION postgis` against POSTGRES_DB on init, so
+        # `prisma db push` can create the geography column for the
+        # P2.4a ProfessionalSearchIndex table.
+        image: postgis/postgis:16-3.4
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

@@ -19,7 +19,7 @@
     "test:e2e:debug": "playwright test --debug",
     "test:e2e:install": "playwright install --with-deps",
     "test:e2e:ci": "playwright test",
-    "db:test:up": "docker run --name tovis-test-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=tovis_test -p 5433:5432 -d postgres:16",
+    "db:test:up": "docker run --name tovis-test-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_USER=postgres -e POSTGRES_DB=tovis_test -p 5433:5432 -d postgis/postgis:16-3.4",
     "db:test:start": "docker start tovis-test-postgres",
     "db:test:stop": "docker stop tovis-test-postgres",
     "db:test:down": "docker rm -f tovis-test-postgres",
