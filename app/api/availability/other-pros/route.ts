@@ -10,6 +10,7 @@ import {
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { pickString } from '@/app/api/_utils/pick'
 import { loadOtherProsNearbyCached } from '@/lib/availability/data/otherPros'
+import { getScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 import {
   normalizeLocationType,
   pickEffectiveLocationType,
@@ -17,14 +18,18 @@ import {
   type OfferingSchedulingSnapshot,
   type SchedulingReadinessError,
 } from '@/lib/booking/locationContext'
-import { isRecord } from '@/lib/guards'
-import { prisma } from '@/lib/prisma'
-import { getRedis } from '@/lib/redis'
+import { withVersionedCache } from '@/lib/cache/versionedCache'
+import { prisma, prismaRead } from '@/lib/prisma'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
-const TTL_PLACEMENT_SECONDS = 600
+// Replaces the prior 600s TTL on the hand-rolled placement cache. Now that
+// the cache key embeds `scheduleConfigVersion`, location/working-hours
+// edits (which bump the version per P1.6) invalidate cache entries
+// instantly; the TTL is just the staleness backstop. 120s mirrors the
+// other availability routes.
+const TTL_PLACEMENT_SECONDS = 120
 
 const LOCATION_SELECT = {
   id: true,
@@ -87,15 +92,21 @@ type AvailabilityPlacementResult =
       error: string
     }
 
-type CachedPlacement = {
-  locationId: string
-  locationType: ServiceLocationType
-  timeZone: string
-  lat: number | undefined
-  lng: number | undefined
-}
-
-const redis = getRedis()
+type PlacementCacheValue =
+  | {
+      kind: 'ok'
+      locationId: string
+      locationType: ServiceLocationType
+      timeZone: string
+      lat: number | null
+      lng: number | null
+    }
+  | { kind: 'offering_not_found' }
+  | {
+      kind: 'placement_failed'
+      code: AvailabilityPlacementErrorCode
+      error: string
+    }
 
 function clampFloat(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min
@@ -111,89 +122,6 @@ function parseFloatParam(v: string | null): number | null {
 
   const n = Number(v)
   return Number.isFinite(n) ? n : null
-}
-
-async function cacheGetJson<T>(key: string): Promise<T | null> {
-  if (!redis) return null
-
-  try {
-    const raw = await redis.get<string>(key)
-    if (!raw) return null
-    return JSON.parse(raw) as T
-  } catch {
-    return null
-  }
-}
-
-async function cacheSetJson(
-  key: string,
-  value: unknown,
-  ttlSeconds: number,
-): Promise<void> {
-  if (!redis) return
-
-  try {
-    await redis.set(key, JSON.stringify(value), { ex: ttlSeconds })
-  } catch {
-    // fail-open
-  }
-}
-
-function buildPlacementCacheKey(args: {
-  professionalId: string
-  serviceId: string
-  locationType: string | null
-  locationId: string | null
-  clientAddressId: string | null
-}): string {
-  return [
-    'avail:other-pros:placement:v2',
-    args.professionalId,
-    args.serviceId,
-    args.locationType ?? 'AUTO',
-    args.locationId ?? 'AUTO',
-    args.clientAddressId ?? 'none',
-  ].join(':')
-}
-
-function parseCachedPlacement(raw: unknown): CachedPlacement | null {
-  if (!isRecord(raw)) return null
-
-  const locationId =
-    typeof raw.locationId === 'string' && raw.locationId.trim()
-      ? raw.locationId.trim()
-      : null
-
-  const locationType =
-    raw.locationType === ServiceLocationType.SALON ||
-    raw.locationType === ServiceLocationType.MOBILE
-      ? raw.locationType
-      : null
-
-  const timeZone =
-    typeof raw.timeZone === 'string' && raw.timeZone.trim()
-      ? sanitizeTimeZone(raw.timeZone, 'UTC')
-      : null
-
-  if (!locationId || !locationType || !timeZone) return null
-
-  const lat =
-    typeof raw.lat === 'number' && Number.isFinite(raw.lat)
-      ? raw.lat
-      : undefined
-
-  const lng =
-    typeof raw.lng === 'number' && Number.isFinite(raw.lng)
-      ? raw.lng
-      : undefined
-
-  return {
-    locationId,
-    locationType,
-    timeZone,
-    lat,
-    lng,
-  }
 }
 
 function locationTypeForLocation(
@@ -498,35 +426,13 @@ export async function GET(req: Request) {
       return jsonFail(400, 'Missing professionalId or serviceId.')
     }
 
-    const placementCacheKey = debug
-      ? null
-      : buildPlacementCacheKey({
-          professionalId,
-          serviceId,
-          locationType: requestedLocationType,
-          locationId: requestedLocationId,
-          clientAddressId,
-        })
-
-    const cachedPlacement = placementCacheKey
-      ? parseCachedPlacement(
-          await cacheGetJson<unknown>(placementCacheKey),
-        )
-      : null
-
-    let effectiveLocationType: ServiceLocationType
-    let placementLat: number | undefined
-    let placementLng: number | undefined
-    let locationId: string
-    let timeZone: string
-
-    if (cachedPlacement) {
-      effectiveLocationType = cachedPlacement.locationType
-      placementLat = cachedPlacement.lat
-      placementLng = cachedPlacement.lng
-      locationId = cachedPlacement.locationId
-      timeZone = cachedPlacement.timeZone
-    } else {
+    // Placement reads (offering findFirst + resolveAvailabilityPlacement's
+    // location queries) intentionally stay on primary `prisma`, consistent
+    // with the bootstrap/day routes. The placement cache below absorbs
+    // cold-cache cost; threading `prismaRead` through the validation chain
+    // (resolveValidatedBookingContext + nested helpers) would be a deeper
+    // change for marginal benefit.
+    const loadPlacement = async (): Promise<PlacementCacheValue> => {
       const offering = await prisma.professionalServiceOffering.findFirst({
         where: {
           professionalId,
@@ -545,7 +451,7 @@ export async function GET(req: Request) {
       })
 
       if (!offering) {
-        return jsonFail(404, 'Offering not found')
+        return { kind: 'offering_not_found' }
       }
 
       const placement = await resolveAvailabilityPlacement({
@@ -557,29 +463,70 @@ export async function GET(req: Request) {
       })
 
       if (!placement.ok) {
-        return jsonFail(400, placement.error)
+        return {
+          kind: 'placement_failed',
+          code: placement.code,
+          error: placement.error,
+        }
       }
 
-      effectiveLocationType = placement.locationType
-      placementLat = placement.lat
-      placementLng = placement.lng
-      locationId = placement.locationId
-      timeZone = placement.timeZone
-
-      if (placementCacheKey) {
-        void cacheSetJson(
-          placementCacheKey,
-          {
-            locationId,
-            locationType: effectiveLocationType,
-            timeZone,
-            lat: placementLat,
-            lng: placementLng,
-          } satisfies CachedPlacement,
-          TTL_PLACEMENT_SECONDS,
-        )
+      return {
+        kind: 'ok',
+        locationId: placement.locationId,
+        locationType: placement.locationType,
+        timeZone: placement.timeZone,
+        lat: placement.lat ?? null,
+        lng: placement.lng ?? null,
       }
     }
+
+    let placementResult: PlacementCacheValue
+    if (debug) {
+      placementResult = await loadPlacement()
+    } else {
+      // Replaces the prior hand-rolled placement cache (TTL 600s, no
+      // version keying). Now that `version` = scheduleConfigVersion, P1.6
+      // bumps on location/working-hours edits invalidate this cache
+      // instantly; TTL is the staleness backstop only.
+      const scheduleConfigVersion = await getScheduleConfigVersion(
+        professionalId,
+      )
+      const cacheExtra = [
+        serviceId,
+        requestedLocationType ?? 'AUTO',
+        requestedLocationId ?? 'AUTO',
+        clientAddressId ?? 'none',
+      ].join(':')
+
+      const cached = await withVersionedCache<PlacementCacheValue>(
+        {
+          scope: 'availability:other-pros:placement',
+          scopeId: professionalId,
+          version: scheduleConfigVersion,
+          extra: cacheExtra,
+        },
+        loadPlacement,
+        TTL_PLACEMENT_SECONDS,
+      )
+      placementResult = cached.value
+    }
+
+    if (placementResult.kind === 'offering_not_found') {
+      return jsonFail(404, 'Offering not found')
+    }
+
+    if (placementResult.kind === 'placement_failed') {
+      return jsonFail(400, placementResult.error)
+    }
+
+    const effectiveLocationType: ServiceLocationType =
+      placementResult.locationType
+    const placementLat: number | undefined =
+      placementResult.lat ?? undefined
+    const placementLng: number | undefined =
+      placementResult.lng ?? undefined
+    const locationId: string = placementResult.locationId
+    const timeZone: string = placementResult.timeZone
 
     const hasViewer =
       typeof viewerLat === 'number' && typeof viewerLng === 'number'
@@ -650,6 +597,7 @@ export async function GET(req: Request) {
       excludeProfessionalId: professionalId,
       limit,
       cacheEnabled: !debug,
+      client: prismaRead,
     })
 
     return jsonOk({
