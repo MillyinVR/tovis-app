@@ -1,11 +1,14 @@
 import {
   ClientClaimStatus,
   ContactMethod,
+  NotificationChannel,
+  NotificationEventKey,
+  NotificationRecipientKind,
   Prisma,
   ProClientInviteStatus,
   ServiceLocationType,
 } from '@prisma/client'
-
+import { enqueueDispatch } from '@/lib/notifications/dispatch/enqueueDispatch'
 import {
   resolveProBookingClient,
   type ProBookingServiceAddressInput,
@@ -26,6 +29,7 @@ type NewClientInput = {
 
 const inviteClientSelect = {
   id: true,
+  userId: true,
   firstName: true,
   lastName: true,
   email: true,
@@ -267,6 +271,74 @@ async function tryEnqueueInviteDelivery(args: {
   }
 }
 
+async function tryEnqueueBookingConfirmedDelivery(args: {
+  professionalId: string
+  bookingId: string
+  clientId: string
+}): Promise<void> {
+  const clientSnapshot = await loadInviteClientSnapshot(args.clientId)
+
+  if (!clientSnapshot) {
+    console.error('createProBookingWithClient booking confirmation client lookup failed', {
+      professionalId: args.professionalId,
+      bookingId: args.bookingId,
+      clientId: args.clientId,
+    })
+    return
+  }
+
+  const recipientEmail = normalizeOptionalString(clientSnapshot.email)
+  const recipientPhone = normalizeOptionalString(clientSnapshot.phone)
+  const now = new Date()
+
+  if (!clientSnapshot.userId && !recipientEmail && !recipientPhone) {
+    return
+  }
+
+  try {
+    await enqueueDispatch({
+      key: NotificationEventKey.BOOKING_CONFIRMED,
+      sourceKey: `PRO_BOOKING_CONFIRMED:${args.bookingId}:CLIENT`,
+      recipient: {
+        kind: NotificationRecipientKind.CLIENT,
+        clientId: args.clientId,
+        userId: clientSnapshot.userId,
+        inAppTargetId: clientSnapshot.userId ? args.clientId : null,
+        email: recipientEmail,
+        phone: recipientPhone,
+        /**
+         * Pro-created bookings target contact snapshots entered/selected by the Pro.
+         * This mirrors the snapshot-delivery behavior used by client claim invites.
+         */
+        emailVerifiedAt: recipientEmail ? now : null,
+        phoneVerifiedAt: recipientPhone ? now : null,
+        timeZone: null,
+      },
+      title: 'Booking confirmed',
+      body: 'Your appointment has been booked.',
+      href: `/client/bookings/${args.bookingId}`,
+      payload: {
+        source: 'proCreatedBooking',
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        clientId: args.clientId,
+      },
+      requestedChannels: [
+        NotificationChannel.IN_APP,
+        NotificationChannel.EMAIL,
+        NotificationChannel.SMS,
+      ],
+    })
+  } catch (error: unknown) {
+    console.error('createProBookingWithClient booking confirmation delivery enqueue failed', {
+      professionalId: args.professionalId,
+      bookingId: args.bookingId,
+      clientId: args.clientId,
+      error,
+    })
+  }
+}
+
 export async function createProBookingWithClient(
   args: CreateProBookingWithClientArgs,
 ): Promise<CreateProBookingWithClientResult> {
@@ -316,6 +388,12 @@ export async function createProBookingWithClient(
     requestId: args.requestId ?? null,
     idempotencyKey: args.idempotencyKey ?? null,
   })
+
+await tryEnqueueBookingConfirmedDelivery({
+  professionalId: args.professionalId,
+  bookingId: bookingResult.booking.id,
+  clientId: resolvedClient.clientId,
+})
 
   let inviteCandidate: CreatedInviteDeliveryCandidate | null = null
 

@@ -1,6 +1,8 @@
+// app/pro/bookings/new/NewBookingForm.tsx 
+
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { safeJson, readErrorMessage } from '@/lib/http'
@@ -105,6 +107,17 @@ function readBookingId(data: unknown): string | null {
   if (!isRecord(booking)) return null
   const id = booking.id
   return typeof id === 'string' && id.trim() ? id.trim() : null
+}
+
+function createClientIdempotencyKey(): string {
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.randomUUID === 'function'
+  ) {
+    return crypto.randomUUID()
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 function errorFromResponse(res: Response, data: unknown) {
@@ -435,6 +448,7 @@ export default function NewBookingForm({
   const [internalNotes, setInternalNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const submitIdempotencyKeyRef = useRef<string | null>(null)
 
   const offeringOptions = useMemo(() => offerings ?? [], [offerings])
 
@@ -735,17 +749,28 @@ export default function NewBookingForm({
   const newClientReady = isNewClientComplete(newClient)
   const newServiceAddressReady = isServiceAddressComplete(serviceAddress)
 
-  const submitDisabled =
-    loading ||
-    !selectedOffering ||
-    !locationId ||
-    !scheduledAt ||
-    (clientMode === 'existing' ? !clientId : !newClientReady) ||
-    (locationType === 'MOBILE'
-      ? addressMode === 'existing'
-        ? !clientAddressId || clientAddressesLoading
-        : !newServiceAddressReady
-      : false)
+  const submitBlockers = [
+    loading ? 'Still loading' : null,
+    !selectedOffering ? 'Select a service' : null,
+    !locationId ? 'Select a pro location' : null,
+    !scheduledAt ? 'Select date and time' : null,
+    clientMode === 'existing' && !clientId ? 'Select an existing client' : null,
+    clientMode === 'new' && !newClientReady
+      ? 'Enter new client first name, last name, and email'
+      : null,
+    locationType === 'MOBILE' &&
+    addressMode === 'existing' &&
+    (!clientAddressId || clientAddressesLoading)
+      ? 'Select a saved client service address'
+      : null,
+    locationType === 'MOBILE' &&
+    addressMode === 'new' &&
+    !newServiceAddressReady
+      ? 'Enter a valid mobile service address'
+      : null,
+  ].filter((blocker): blocker is string => Boolean(blocker))
+
+  const submitDisabled = submitBlockers.length > 0
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -848,52 +873,64 @@ export default function NewBookingForm({
     setLoading(true)
 
     try {
-      const res = await fetch('/api/pro/bookings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId: clientMode === 'existing' ? clientId : null,
-          client: clientPayload,
-          offeringId: selectedOffering.id,
-          locationType,
-          locationId,
-          clientAddressId:
-            locationType === 'MOBILE' && addressMode === 'existing'
-              ? clientAddressId
-              : null,
-          serviceAddress: serviceAddressPayload,
-          scheduledFor: scheduledForISO,
-          internalNotes: internalNotes.trim() || null,
-        }),
-      })
+      const idempotencyKey =
+        submitIdempotencyKeyRef.current ?? createClientIdempotencyKey()
 
-      if (res.status === 401) {
-        redirectToLogin(router, 'new-booking')
-        return
-      }
+      submitIdempotencyKeyRef.current = idempotencyKey
 
-      const data = await safeJson(res)
+  const res = await fetch('/api/pro/bookings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'idempotency-key': idempotencyKey,
+    },
+    body: JSON.stringify({
+      clientId: clientMode === 'existing' ? clientId : null,
+      client: clientPayload,
+      offeringId: selectedOffering.id,
+      locationType,
+      locationId,
+      clientAddressId:
+        locationType === 'MOBILE' && addressMode === 'existing'
+          ? clientAddressId
+          : null,
+      serviceAddress: serviceAddressPayload,
+      scheduledFor: scheduledForISO,
+      internalNotes: internalNotes.trim() || null,
+    }),
+  })
 
-      if (!res.ok) {
-        setError(errorFromResponse(res, data))
-        return
-      }
+  if (res.status === 401) {
+    submitIdempotencyKeyRef.current = null
+    redirectToLogin(router, 'new-booking')
+    return
+  }
 
-      const nextBookingId = readBookingId(data)
+  const data = await safeJson(res)
 
-      if (nextBookingId) {
-        router.push(`/pro/bookings/${encodeURIComponent(nextBookingId)}`)
-      } else {
-        router.push('/pro/bookings')
-      }
+  if (!res.ok) {
+    submitIdempotencyKeyRef.current = null
+    setError(errorFromResponse(res, data))
+    return
+  }
 
-      router.refresh()
-    } catch (err) {
-      console.error(err)
-      setError('Network error creating booking.')
-    } finally {
-      setLoading(false)
-    }
+  submitIdempotencyKeyRef.current = null
+
+  const nextBookingId = readBookingId(data)
+
+  if (nextBookingId) {
+    router.push(`/pro/bookings/${encodeURIComponent(nextBookingId)}`)
+  } else {
+    router.push('/pro/bookings')
+  }
+
+  router.refresh()
+} catch (err) {
+  console.error(err)
+  setError('Network error creating booking. Try again.')
+} finally {
+  setLoading(false)
+}
   }
 
   const field =
@@ -1511,6 +1548,12 @@ export default function NewBookingForm({
       {error ? (
         <div className="rounded-card border border-toneDanger/20 bg-toneDanger/10 px-3 py-2 text-[12px] font-black text-toneDanger">
           {error}
+        </div>
+      ) : null}
+
+      {submitBlockers.length > 0 ? (
+        <div className="rounded-card border border-toneDanger/20 bg-toneDanger/10 px-3 py-2 text-[12px] font-black text-toneDanger">
+          To create this booking: {submitBlockers[0]}
         </div>
       ) : null}
 
