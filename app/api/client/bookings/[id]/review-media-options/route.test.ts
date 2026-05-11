@@ -1,4 +1,5 @@
 // app/api/client/bookings/[id]/review-media-options/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   MediaPhase,
@@ -20,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   getBookingFailPayload: vi.fn(),
   isBookingError: vi.fn(),
 }))
+
+const mockRenderMediaUrls = vi.hoisted(() => vi.fn())
 
 vi.mock('@/app/api/_utils', () => ({
   requireClient: mocks.requireClient,
@@ -44,6 +47,10 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 vi.mock('@/lib/booking/errors', () => ({
   getBookingFailPayload: mocks.getBookingFailPayload,
   isBookingError: mocks.isBookingError,
+}))
+
+vi.mock('@/lib/media/renderUrls', () => ({
+  renderMediaUrls: mockRenderMediaUrls,
 }))
 
 import { GET } from './route'
@@ -80,9 +87,15 @@ function makeMedia(overrides?: {
   createdAt?: Date
   mediaType?: MediaType
 }) {
+  const id = overrides?.id ?? 'media_1'
+
   return {
-    id: overrides?.id ?? 'media_1',
-    url: `https://example.com/${overrides?.id ?? 'media_1'}.jpg`,
+    id,
+    storageBucket: 'booking-media',
+    storagePath: `${id}.jpg`,
+    thumbBucket: 'booking-media-thumbs',
+    thumbPath: `${id}-thumb.jpg`,
+    url: null,
     thumbUrl: null,
     mediaType: overrides?.mediaType ?? MediaType.IMAGE,
     createdAt: overrides?.createdAt ?? new Date('2026-04-12T18:00:00.000Z'),
@@ -93,6 +106,30 @@ function makeMedia(overrides?: {
 describe('app/api/client/bookings/[id]/review-media-options/route.ts GET', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    mockRenderMediaUrls.mockReset()
+
+    mockRenderMediaUrls.mockImplementation(
+      async (row: {
+        storageBucket: string | null
+        storagePath: string | null
+        thumbBucket: string | null
+        thumbPath: string | null
+        url: string | null
+        thumbUrl: string | null
+      }) => ({
+        renderUrl:
+          row.url ??
+          (row.storageBucket && row.storagePath
+            ? `https://media.test/${row.storageBucket}/${row.storagePath}`
+            : null),
+        renderThumbUrl:
+          row.thumbUrl ??
+          (row.thumbBucket && row.thumbPath
+            ? `https://media.test/${row.thumbBucket}/${row.thumbPath}`
+            : null),
+      }),
+    )
 
     mocks.requireClient.mockResolvedValue({
       ok: true,
@@ -115,12 +152,17 @@ describe('app/api/client/bookings/[id]/review-media-options/route.ts GET', () =>
         }),
     )
 
-    mocks.jsonOk.mockImplementation((body: unknown, status = 200) =>
-      makeJsonResponse(status, {
+    mocks.jsonOk.mockImplementation((body: unknown, status = 200) => {
+      const payload =
+        typeof body === 'object' && body !== null && !Array.isArray(body)
+          ? body
+          : {}
+
+      return makeJsonResponse(status, {
         ok: true,
-        ...(body as Record<string, unknown>),
-      }),
-    )
+        ...payload,
+      })
+    })
 
     mocks.assertClientBookingReviewEligibility.mockResolvedValue(
       makeEligibility(),
@@ -146,6 +188,7 @@ describe('app/api/client/bookings/[id]/review-media-options/route.ts GET', () =>
     expect(response).toBe(authRes)
     expect(mocks.assertClientBookingReviewEligibility).not.toHaveBeenCalled()
     expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+    expect(mockRenderMediaUrls).not.toHaveBeenCalled()
   })
 
   it('returns 400 when booking id is missing', async () => {
@@ -159,6 +202,7 @@ describe('app/api/client/bookings/[id]/review-media-options/route.ts GET', () =>
 
     expect(mocks.assertClientBookingReviewEligibility).not.toHaveBeenCalled()
     expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+    expect(mockRenderMediaUrls).not.toHaveBeenCalled()
   })
 
   it('maps booking eligibility errors through bookingJsonFail', async () => {
@@ -196,6 +240,7 @@ describe('app/api/client/bookings/[id]/review-media-options/route.ts GET', () =>
       userMessage: 'You do not have access to that booking.',
     })
     expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+    expect(mockRenderMediaUrls).not.toHaveBeenCalled()
   })
 
   it('returns eligible review media sorted by phase and newest within each phase', async () => {
@@ -232,11 +277,15 @@ describe('app/api/client/bookings/[id]/review-media-options/route.ts GET', () =>
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
-    ok: true,
-    items: [beforeNewer, beforeOlder, after, other].map((item) => ({
-        ...item,
+      ok: true,
+      items: [beforeNewer, beforeOlder, after, other].map((item) => ({
+        id: item.id,
+        url: `https://media.test/${item.storageBucket}/${item.storagePath}`,
+        thumbUrl: `https://media.test/${item.thumbBucket}/${item.thumbPath}`,
+        mediaType: item.mediaType,
         createdAt: item.createdAt.toISOString(),
-    })),
+        phase: item.phase,
+      })),
     })
 
     expect(mocks.assertClientBookingReviewEligibility).toHaveBeenCalledWith({
@@ -256,6 +305,10 @@ describe('app/api/client/bookings/[id]/review-media-options/route.ts GET', () =>
       },
       select: {
         id: true,
+        storageBucket: true,
+        storagePath: true,
+        thumbBucket: true,
+        thumbPath: true,
         url: true,
         thumbUrl: true,
         mediaType: true,
@@ -264,30 +317,75 @@ describe('app/api/client/bookings/[id]/review-media-options/route.ts GET', () =>
       },
       take: 80,
     })
+
+    expect(mockRenderMediaUrls).toHaveBeenCalledTimes(4)
+
+    expect(mockRenderMediaUrls).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'before_newer',
+        storageBucket: 'booking-media',
+        storagePath: 'before_newer.jpg',
+        thumbBucket: 'booking-media-thumbs',
+        thumbPath: 'before_newer-thumb.jpg',
+      }),
+    )
+
+    expect(mockRenderMediaUrls).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'before_older',
+        storageBucket: 'booking-media',
+        storagePath: 'before_older.jpg',
+        thumbBucket: 'booking-media-thumbs',
+        thumbPath: 'before_older-thumb.jpg',
+      }),
+    )
+
+    expect(mockRenderMediaUrls).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'after_1',
+        storageBucket: 'booking-media',
+        storagePath: 'after_1.jpg',
+        thumbBucket: 'booking-media-thumbs',
+        thumbPath: 'after_1-thumb.jpg',
+      }),
+    )
+
+    expect(mockRenderMediaUrls).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'other_1',
+        storageBucket: 'booking-media',
+        storagePath: 'other_1.jpg',
+        thumbBucket: 'booking-media-thumbs',
+        thumbPath: 'other_1-thumb.jpg',
+      }),
+    )
   })
 
   it('returns 500 for unexpected errors', async () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     mocks.assertClientBookingReviewEligibility.mockRejectedValueOnce(
       new Error('boom'),
     )
     mocks.isBookingError.mockReturnValueOnce(false)
 
-    const response = await GET(new Request('http://localhost'), makeCtx())
+    try {
+      const response = await GET(new Request('http://localhost'), makeCtx())
 
-    expect(response.status).toBe(500)
-    await expect(response.json()).resolves.toEqual({
-      ok: false,
-      error: 'Internal server error.',
-    })
+      expect(response.status).toBe(500)
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'Internal server error.',
+      })
 
-    expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
-    expect(spy).toHaveBeenCalledWith(
-      'GET /api/client/bookings/[id]/review-media-options error',
-      expect.any(Error),
-    )
-
-    spy.mockRestore()
+      expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+      expect(mockRenderMediaUrls).not.toHaveBeenCalled()
+      expect(spy).toHaveBeenCalledWith(
+        'GET /api/client/bookings/[id]/review-media-options error',
+        expect.any(Error),
+      )
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

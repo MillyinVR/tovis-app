@@ -5,16 +5,14 @@ import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { createActiveToken, createVerificationToken } from '@/lib/auth'
-import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
+import { checkTwilioVerifyPhoneCode } from '@/lib/twilio/verify'
 import {
-  logAuthEvent,
   captureAuthException,
+  logAuthEvent,
 } from '@/lib/observability/authEvents'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-const MAX_VERIFY_ATTEMPTS = 5
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -51,9 +49,13 @@ function resolveCookieDomain(hostname: string | null): string | undefined {
 }
 
 function resolveIsHttps(request: Request): boolean {
-  const xfProto = request.headers.get('x-forwarded-proto')?.trim().toLowerCase()
-  if (xfProto === 'https') return true
-  if (xfProto === 'http') return false
+  const forwardedProto = request.headers
+    .get('x-forwarded-proto')
+    ?.trim()
+    .toLowerCase()
+
+  if (forwardedProto === 'https') return true
+  if (forwardedProto === 'http') return false
 
   try {
     return new URL(request.url).protocol === 'https:'
@@ -69,6 +71,37 @@ function getRequestHostname(request: Request): string | null {
   return hostToHostname(host)
 }
 
+function normalizeVerificationCode(value: unknown): string | null {
+  const code = pickString(value)?.trim()
+  if (!code) return null
+  return code
+}
+
+function isSixDigitCode(code: string): boolean {
+  return /^\d{6}$/.test(code)
+}
+
+type CookieWritableResponse = ReturnType<typeof jsonOk>
+
+function setSessionCookie(args: {
+  response: CookieWritableResponse
+  request: Request
+  token: string
+}): void {
+  const hostname = getRequestHostname(args.request)
+  const cookieDomain = resolveCookieDomain(hostname)
+  const isHttps = resolveIsHttps(args.request)
+
+  args.response.cookies.set('tovis_token', args.token, {
+    httpOnly: true,
+    secure: isHttps,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 7,
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
+  })
+}
+
 export async function POST(request: Request) {
   let userIdForLog: string | null = null
   let phoneForLog: string | null = null
@@ -77,39 +110,29 @@ export async function POST(request: Request) {
     const auth = await requireUser({ allowVerificationSession: true })
     if (!auth.ok) return auth.res
 
-    const userId = auth.user.id
+    const user = auth.user
+    const userId = user.id
+
     userIdForLog = userId
 
-    const raw: unknown = await request.json().catch(() => ({}))
-    const body = isRecord(raw) ? raw : {}
-    const codeRaw = pickString(body.code)?.trim()
+    const rawBody: unknown = await request.json().catch(() => ({}))
+    const body = isRecord(rawBody) ? rawBody : {}
 
-    if (!codeRaw) {
+    const code = normalizeVerificationCode(body.code)
+
+    if (!code) {
       return jsonFail(400, 'Verification code is required.', {
         code: 'CODE_REQUIRED',
       })
     }
 
-    if (!/^\d{6}$/.test(codeRaw)) {
+    if (!isSixDigitCode(code)) {
       return jsonFail(400, 'Invalid code format.', {
         code: 'CODE_INVALID',
       })
     }
 
-    if (auth.user.phoneVerifiedAt) {
-      return jsonOk(
-        {
-          ok: true,
-          alreadyVerified: true,
-          isPhoneVerified: true,
-          isEmailVerified: auth.user.isEmailVerified,
-          isFullyVerified: auth.user.isFullyVerified,
-        },
-        200,
-      )
-    }
-
-    const phone = auth.user.phone?.trim() ?? ''
+    const phone = user.phone?.trim() ?? ''
     phoneForLog = phone || null
 
     if (!phone) {
@@ -118,113 +141,125 @@ export async function POST(request: Request) {
       })
     }
 
+    if (user.phoneVerifiedAt) {
+      return jsonOk(
+        {
+          ok: true,
+          alreadyVerified: true,
+          isPhoneVerified: true,
+          isEmailVerified: user.isEmailVerified,
+          isFullyVerified: user.isFullyVerified,
+          requiresEmailVerification: !user.isEmailVerified,
+        },
+        200,
+      )
+    }
+
     const throttleRes = await enforceVerificationVerifyThrottle({
       request,
       scope: 'phone-verify',
       subjectKey: userId,
     })
+
     if (throttleRes) return throttleRes
 
-    const now = new Date()
-    const submittedCodeHash = sha256Hex(codeRaw)
+    const verifyResult = await checkTwilioVerifyPhoneCode({
+      to: phone,
+      code,
+    })
 
-    const record = await prisma.phoneVerification.findFirst({
-      where: {
+    if (!verifyResult.ok) {
+      logAuthEvent({
+        level:
+          verifyResult.code === 'TWILIO_VERIFY_NOT_CONFIGURED'
+            ? 'error'
+            : 'warn',
+        event: 'auth.phone.verify.twilio_check_failed',
+        route: 'auth.phone.verify',
+        provider: 'twilio_verify',
+        code: verifyResult.code,
         userId,
         phone,
-        usedAt: null,
-        expiresAt: { gt: now },
-      },
-      select: {
-        id: true,
-        codeHash: true,
-        attempts: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    })
-
-    if (!record) {
-      return jsonFail(400, 'Incorrect or expired code.', {
-        code: 'CODE_MISMATCH',
-      })
-    }
-
-    const isMatch = timingSafeEqualHex(submittedCodeHash, record.codeHash)
-
-    if (!isMatch) {
-      const nextAttempts = record.attempts + 1
-      const shouldLock = nextAttempts >= MAX_VERIFY_ATTEMPTS
-
-      const updateResult = await prisma.phoneVerification.updateMany({
-        where: {
-          id: record.id,
-          usedAt: null,
-          attempts: record.attempts,
+        meta: {
+          message: verifyResult.message,
         },
-        data: shouldLock
-          ? {
-              attempts: { increment: 1 },
-              usedAt: now,
-            }
-          : {
-              attempts: { increment: 1 },
-            },
       })
 
-      if (shouldLock && updateResult.count > 0) {
-        return jsonFail(
-          429,
-          'Too many incorrect verification attempts. Request a new verification code.',
-          {
-            code: 'CODE_LOCKED',
-            resendRequired: true,
-          },
-        )
-      }
+      const status =
+        verifyResult.code === 'TWILIO_VERIFY_NOT_CONFIGURED' ? 503 : 502
+
+      return jsonFail(status, 'Phone verification is unavailable.', {
+        code: verifyResult.code,
+      })
+    }
+
+    if (!verifyResult.approved) {
+      logAuthEvent({
+        level: 'warn',
+        event: 'auth.phone.verify.code_rejected',
+        route: 'auth.phone.verify',
+        provider: 'twilio_verify',
+        userId,
+        phone,
+        meta: {
+          sid: verifyResult.sid,
+          status: verifyResult.status,
+        },
+      })
 
       return jsonFail(400, 'Incorrect or expired code.', {
         code: 'CODE_MISMATCH',
       })
     }
+
+    const verifiedAt = new Date()
 
     await prisma.$transaction(async (tx) => {
-      await tx.phoneVerification.update({
-        where: { id: record.id },
-        data: { usedAt: now },
-      })
-
       await tx.user.update({
         where: { id: userId },
-        data: { phoneVerifiedAt: now },
+        data: {
+          phoneVerifiedAt: verifiedAt,
+        },
       })
 
-      await tx.clientProfile.updateMany({
-        where: { userId },
-        data: { phoneVerifiedAt: now },
-      })
+      if (user.role === 'CLIENT') {
+        await tx.clientProfile.updateMany({
+          where: { userId },
+          data: {
+            phoneVerifiedAt: verifiedAt,
+          },
+        })
+      }
 
-      await tx.professionalProfile.updateMany({
-        where: { userId },
-        data: { phoneVerifiedAt: now },
-      })
+      if (user.role === 'PRO') {
+        await tx.professionalProfile.updateMany({
+          where: { userId },
+          data: {
+            phoneVerifiedAt: verifiedAt,
+          },
+        })
+      }
     })
 
-    const isEmailVerified = auth.user.isEmailVerified
+    const isEmailVerified = user.isEmailVerified
     const isFullyVerified = isEmailVerified
 
     logAuthEvent({
       level: 'info',
       event: 'auth.phone.verify.success',
       route: 'auth.phone.verify',
+      provider: 'twilio_verify',
       userId,
       phone,
       meta: {
+        sid: verifyResult.sid,
+        status: verifyResult.status,
         isEmailVerified,
         isFullyVerified,
       },
     })
 
-    const res = jsonOk(
+    const response = jsonOk(
       {
         ok: true,
         isPhoneVerified: true,
@@ -238,39 +273,35 @@ export async function POST(request: Request) {
     const sessionToken = isFullyVerified
       ? createActiveToken({
           userId,
-          role: auth.user.role,
-          authVersion: auth.user.authVersion,
+          role: user.role,
+          authVersion: user.authVersion,
         })
       : createVerificationToken({
           userId,
-          role: auth.user.role,
-          authVersion: auth.user.authVersion,
+          role: user.role,
+          authVersion: user.authVersion,
         })
 
-    const hostname = getRequestHostname(request)
-    const cookieDomain = resolveCookieDomain(hostname)
-    const isHttps = resolveIsHttps(request)
-
-    res.cookies.set('tovis_token', sessionToken, {
-      httpOnly: true,
-      secure: isHttps,
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7,
-      ...(cookieDomain ? { domain: cookieDomain } : {}),
+    setSessionCookie({
+      response,
+      request,
+      token: sessionToken,
     })
 
-    return res
-  } catch (err: unknown) {
+    return response
+  } catch (error: unknown) {
     captureAuthException({
       event: 'auth.phone.verify.failed',
       route: 'auth.phone.verify',
+      provider: 'twilio_verify',
       userId: userIdForLog,
       phone: phoneForLog,
       code: 'INTERNAL',
-      error: err,
+      error,
     })
 
-    return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
+    return jsonFail(500, 'Internal server error', {
+      code: 'INTERNAL',
+    })
   }
 }

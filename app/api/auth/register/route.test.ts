@@ -24,17 +24,11 @@ const mockVerifyTurnstileOrFailOpen = vi.hoisted(() => vi.fn())
 const mockIsRuntimeFlagEnabled = vi.hoisted(() => vi.fn())
 const mockValidateSmsDestinationCountry = vi.hoisted(() => vi.fn())
 
+const mockStartTwilioVerifyPhoneVerification = vi.hoisted(() => vi.fn())
+
 const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
-const mockTwilioMessagesCreate = vi.hoisted(() => vi.fn())
-const mockTwilio = vi.hoisted(() =>
-  vi.fn(() => ({
-    messages: {
-      create: mockTwilioMessagesCreate,
-    },
-  })),
-)
 
 const mockFetch = vi.hoisted(() => vi.fn())
 
@@ -89,8 +83,8 @@ vi.mock('@/app/api/_utils', async () => {
   }
 })
 
-vi.mock('twilio', () => ({
-  default: mockTwilio,
+vi.mock('@/lib/twilio/verify', () => ({
+  startTwilioVerifyPhoneVerification: mockStartTwilioVerifyPhoneVerification,
 }))
 
 vi.mock('@/lib/passwordPolicy', () => ({
@@ -273,10 +267,6 @@ function makeSuccessfulRegisterTx(args: {
         authVersion: 1,
       }),
     },
-    phoneVerification: {
-      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      create: vi.fn().mockResolvedValue({ id: `pv_${args.userId}` }),
-    },
   }
 }
 
@@ -379,8 +369,7 @@ describe('app/api/auth/register/route', () => {
     mockLogAuthEvent.mockReset()
     mockCaptureAuthException.mockReset()
 
-    mockTwilio.mockReset()
-    mockTwilioMessagesCreate.mockReset()
+    mockStartTwilioVerifyPhoneVerification.mockReset()
 
     mockFetch.mockReset()
     vi.stubGlobal('fetch', mockFetch)
@@ -427,12 +416,15 @@ describe('app/api/auth/register/route', () => {
     mockPrisma.user.findFirst.mockResolvedValue(null)
     mockPrisma.professionalProfile.findFirst.mockResolvedValue(null)
 
-    mockTwilioMessagesCreate.mockResolvedValue({
-      sid: 'SM123456789',
+    mockStartTwilioVerifyPhoneVerification.mockResolvedValue({
+      ok: true,
+      sid: 'VE123456789',
+      status: 'pending',
     })
 
     process.env.TWILIO_ACCOUNT_SID = 'AC_test_sid'
     process.env.TWILIO_AUTH_TOKEN = 'test_auth_token'
+    process.env.TWILIO_VERIFY_SERVICE_SID = 'VA_test_verify_service'
     process.env.TWILIO_FROM_NUMBER = '+15550001111'
   })
 
@@ -621,10 +613,6 @@ describe('app/api/auth/register/route', () => {
           authVersion: 1,
         }),
       },
-      phoneVerification: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        create: vi.fn().mockResolvedValue({ id: 'pv_failopen' }),
-      },
     }
 
     mockPrisma.$transaction.mockImplementation(
@@ -784,10 +772,6 @@ describe('app/api/auth/register/route', () => {
           authVersion: 1,
         }),
       },
-      phoneVerification: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        create: vi.fn().mockResolvedValue({ id: 'pv_pro_1' }),
-      },
     }
 
     mockPrisma.$transaction.mockImplementation(
@@ -846,18 +830,21 @@ describe('app/api/auth/register/route', () => {
           authVersion: 1,
         }),
       },
-      phoneVerification: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        create: vi.fn().mockResolvedValue({ id: 'pv_1' }),
-      },
     }
 
     mockPrisma.$transaction.mockImplementation(
       async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
     )
 
-    const smsDeferred = createDeferred<{ sid: string }>()
-    mockTwilioMessagesCreate.mockReturnValueOnce(smsDeferred.promise)
+    const verifyDeferred = createDeferred<{
+      ok: true
+      sid: string
+      status: string
+    }>()
+
+    mockStartTwilioVerifyPhoneVerification.mockReturnValueOnce(
+      verifyDeferred.promise,
+    )
 
     const result = await POST(makeRequest(makeClientSignupBody()))
     const body = await result.json()
@@ -956,31 +943,18 @@ describe('app/api/auth/register/route', () => {
       },
     })
 
-    expect(tx.phoneVerification.updateMany).toHaveBeenCalledWith({
-      where: {
-        userId: 'user_1',
-        usedAt: null,
-      },
-      data: {
-        usedAt: expect.any(Date),
-      },
-    })
-
-    expect(tx.phoneVerification.create).toHaveBeenCalledWith({
-      data: {
-        userId: 'user_1',
-        phone: '+15551234567',
-        codeHash: expect.any(String),
-        expiresAt: expect.any(Date),
-      },
-      select: { id: true },
-    })
+    expect(tx).not.toHaveProperty('phoneVerification')
 
     expect(mockWaitUntil).toHaveBeenCalledTimes(1)
     expect(mockIssueAndSendEmailVerification).not.toHaveBeenCalled()
     expect(mockConsumeTapIntent).not.toHaveBeenCalled()
 
-    smsDeferred.resolve({ sid: 'SM123456789' })
+    verifyDeferred.resolve({
+      ok: true,
+      sid: 'VE123456789',
+      status: 'pending',
+    })
+
     await flushWaitUntilTasks()
 
     expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(
@@ -999,17 +973,20 @@ describe('app/api/auth/register/route', () => {
       userId: 'user_1',
     })
 
-    expect(mockTwilio).toHaveBeenCalledWith('AC_test_sid', 'test_auth_token')
-    expect(mockTwilioMessagesCreate).toHaveBeenCalledTimes(1)
+    expect(mockStartTwilioVerifyPhoneVerification).toHaveBeenCalledWith({
+      to: '+15551234567',
+    })
 
     expect(mockLogAuthEvent).toHaveBeenCalledWith({
       level: 'info',
-      event: 'auth.phone.send.success',
+      event: 'auth.phone.verify.start.success',
       route: 'auth.register',
-      provider: 'twilio',
+      provider: 'twilio_verify',
+      userId: 'user_1',
       phone: '+15551234567',
       meta: {
-        sid: 'SM123456789',
+        sid: 'VE123456789',
+        status: 'pending',
       },
     })
 
@@ -1039,10 +1016,6 @@ describe('app/api/auth/register/route', () => {
           phone: '+15551234567',
           authVersion: 1,
         }),
-      },
-      phoneVerification: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        create: vi.fn().mockResolvedValue({ id: 'pv_2' }),
       },
     }
 
@@ -1092,7 +1065,7 @@ describe('app/api/auth/register/route', () => {
     expect(setCookie).toContain('tovis_token=verification_token')
   })
 
-  it('still returns 201 immediately when sms send fails in the background tail', async () => {
+  it('still returns 201 immediately when Twilio Verify start fails in the background tail', async () => {
     const tx = {
       user: {
         create: vi.fn().mockResolvedValue({
@@ -1103,17 +1076,17 @@ describe('app/api/auth/register/route', () => {
           authVersion: 1,
         }),
       },
-      phoneVerification: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        create: vi.fn().mockResolvedValue({ id: 'pv_3' }),
-      },
     }
 
     mockPrisma.$transaction.mockImplementation(
       async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
     )
 
-    mockTwilioMessagesCreate.mockRejectedValue(new Error('Twilio timeout'))
+    mockStartTwilioVerifyPhoneVerification.mockResolvedValueOnce({
+      ok: false,
+      code: 'TWILIO_VERIFY_SEND_FAILED',
+      message: 'Twilio Verify failed.',
+    })
 
     const result = await POST(makeRequest(makeClientSignupBody()))
     const body = await result.json()
@@ -1135,13 +1108,17 @@ describe('app/api/auth/register/route', () => {
 
     await flushWaitUntilTasks()
 
-    expect(mockCaptureAuthException).toHaveBeenCalledWith({
-      event: 'auth.phone.send.failed',
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.phone.verify.start.failed',
       route: 'auth.register',
-      provider: 'twilio',
-      code: 'SMS_SEND_FAILED',
+      provider: 'twilio_verify',
+      code: 'TWILIO_VERIFY_SEND_FAILED',
+      userId: 'user_3',
       phone: '+15551234567',
-      error: expect.any(Error),
+      meta: {
+        message: 'Twilio Verify failed.',
+      },
     })
 
     expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(
@@ -1172,18 +1149,18 @@ describe('app/api/auth/register/route', () => {
           authVersion: 1,
         }),
       },
-      phoneVerification: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-        create: vi.fn().mockResolvedValue({ id: 'pv_4' }),
-      },
     }
 
     mockPrisma.$transaction.mockImplementation(
       async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
     )
 
-    delete process.env.TWILIO_ACCOUNT_SID
-
+    mockStartTwilioVerifyPhoneVerification.mockResolvedValueOnce({
+      ok: false,
+      code: 'TWILIO_VERIFY_NOT_CONFIGURED',
+      message:
+        'Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_VERIFY_SERVICE_SID.',
+    })
     const result = await POST(makeRequest(makeClientSignupBody()))
     const body = await result.json()
 
@@ -1197,11 +1174,16 @@ describe('app/api/auth/register/route', () => {
 
     expect(mockLogAuthEvent).toHaveBeenCalledWith({
       level: 'error',
-      event: 'auth.phone.send.not_configured',
+      event: 'auth.phone.verify.start.failed',
       route: 'auth.register',
-      provider: 'twilio',
-      code: 'SMS_NOT_CONFIGURED',
+      provider: 'twilio_verify',
+      code: 'TWILIO_VERIFY_NOT_CONFIGURED',
+      userId: 'user_4',
       phone: '+15551234567',
+      meta: {
+        message:
+          'Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_VERIFY_SERVICE_SID.',
+      },
     })
 
     expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith(

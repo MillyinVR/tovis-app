@@ -1,3 +1,5 @@
+// app/api/auth/phone/send/route.test.ts
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
@@ -6,11 +8,9 @@ const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
 const mockPhoneRateLimitIdentity = vi.hoisted(() => vi.fn())
 const mockIsRuntimeFlagEnabled = vi.hoisted(() => vi.fn())
 const mockValidateSmsDestinationCountry = vi.hoisted(() => vi.fn())
+const mockStartTwilioVerifyPhoneVerification = vi.hoisted(() => vi.fn())
 
-const mockEnforcePhoneVerificationOtpLimits = vi.hoisted(() => vi.fn())
-const mockIssueAndSendPhoneVerificationCode = vi.hoisted(() => vi.fn())
-const mockReadPhoneSendErrorCode = vi.hoisted(() => vi.fn())
-
+const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 vi.mock('@/app/api/_utils/auth/requireUser', () => ({
@@ -37,14 +37,12 @@ vi.mock('@/lib/smsCountryPolicy', () => ({
   validateSmsDestinationCountry: mockValidateSmsDestinationCountry,
 }))
 
-vi.mock('@/app/api/_utils/auth/phoneVerificationSend', () => ({
-  PHONE_VERIFICATION_RESEND_COOLDOWN_SECONDS: 60,
-  enforcePhoneVerificationOtpLimits: mockEnforcePhoneVerificationOtpLimits,
-  issueAndSendPhoneVerificationCode: mockIssueAndSendPhoneVerificationCode,
-  readPhoneSendErrorCode: mockReadPhoneSendErrorCode,
+vi.mock('@/lib/twilio/verify', () => ({
+  startTwilioVerifyPhoneVerification: mockStartTwilioVerifyPhoneVerification,
 }))
 
 vi.mock('@/lib/observability/authEvents', () => ({
+  logAuthEvent: mockLogAuthEvent,
   captureAuthException: mockCaptureAuthException,
 }))
 
@@ -71,6 +69,7 @@ function makeUser(args?: {
     sessionKind: args?.sessionKind ?? 'VERIFICATION',
     phoneVerifiedAt,
     emailVerifiedAt,
+    authVersion: 1,
     isPhoneVerified: Boolean(phoneVerifiedAt),
     isEmailVerified: Boolean(emailVerifiedAt),
     isFullyVerified: Boolean(phoneVerifiedAt && emailVerifiedAt),
@@ -112,30 +111,26 @@ describe('app/api/auth/phone/send/route', () => {
     mockPhoneRateLimitIdentity.mockReset()
     mockIsRuntimeFlagEnabled.mockReset()
     mockValidateSmsDestinationCountry.mockReset()
-    mockEnforcePhoneVerificationOtpLimits.mockReset()
-    mockIssueAndSendPhoneVerificationCode.mockReset()
-    mockReadPhoneSendErrorCode.mockReset()
+    mockStartTwilioVerifyPhoneVerification.mockReset()
+    mockLogAuthEvent.mockReset()
     mockCaptureAuthException.mockReset()
 
     mockIsRuntimeFlagEnabled.mockResolvedValue(false)
-    mockPhoneRateLimitIdentity.mockReturnValue({
+    mockPhoneRateLimitIdentity.mockImplementation((phone: string) => ({
       kind: 'phone',
-      id: '+15551234567',
-    })
+      id: phone,
+    }))
     mockEnforceRateLimit.mockResolvedValue(null)
     mockValidateSmsDestinationCountry.mockReturnValue({
       ok: true,
       phone: '+15551234567',
       countryCode: 'US',
     })
-    mockEnforcePhoneVerificationOtpLimits.mockResolvedValue({
+    mockStartTwilioVerifyPhoneVerification.mockResolvedValue({
       ok: true,
-      retryAfterSeconds: 0,
+      sid: 'VE123456789',
+      status: 'pending',
     })
-    mockIssueAndSendPhoneVerificationCode.mockResolvedValue({
-      sid: 'SM123456789',
-    })
-    mockReadPhoneSendErrorCode.mockReturnValue('INTERNAL')
   })
 
   afterEach(() => {
@@ -144,6 +139,7 @@ describe('app/api/auth/phone/send/route', () => {
 
   it('passes through a failed auth result unchanged', async () => {
     const res = new Response(null, { status: 401 })
+
     mockRequireUser.mockResolvedValue({
       ok: false,
       res,
@@ -175,12 +171,15 @@ describe('app/api/auth/phone/send/route', () => {
       ok: true,
       alreadyVerified: true,
       sent: false,
+      isPhoneVerified: true,
+      isEmailVerified: false,
+      isFullyVerified: false,
+      requiresEmailVerification: true,
     })
 
     expect(mockIsRuntimeFlagEnabled).not.toHaveBeenCalled()
     expect(mockValidateSmsDestinationCountry).not.toHaveBeenCalled()
-    expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
-    expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
@@ -204,7 +203,7 @@ describe('app/api/auth/phone/send/route', () => {
 
     expect(mockIsRuntimeFlagEnabled).not.toHaveBeenCalled()
     expect(mockValidateSmsDestinationCountry).not.toHaveBeenCalled()
-    expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
@@ -213,6 +212,7 @@ describe('app/api/auth/phone/send/route', () => {
       ok: true,
       user: makeUser(),
     })
+
     mockIsRuntimeFlagEnabled.mockImplementation(async (name: string) => {
       return name === 'sms_disabled'
     })
@@ -230,8 +230,7 @@ describe('app/api/auth/phone/send/route', () => {
     expect(mockIsRuntimeFlagEnabled).toHaveBeenCalledWith('sms_disabled')
     expect(mockValidateSmsDestinationCountry).not.toHaveBeenCalled()
     expect(mockEnforceRateLimit).not.toHaveBeenCalled()
-    expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
-    expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
@@ -242,6 +241,7 @@ describe('app/api/auth/phone/send/route', () => {
         phone: '+442079460123',
       }),
     })
+
     mockValidateSmsDestinationCountry.mockReturnValue({
       ok: false,
       code: 'SMS_COUNTRY_UNSUPPORTED',
@@ -265,18 +265,18 @@ describe('app/api/auth/phone/send/route', () => {
       '+442079460123',
     )
     expect(mockEnforceRateLimit).not.toHaveBeenCalled()
-    expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
-    expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns the shared per-phone quota response unchanged when SMS quota blocks resend', async () => {
+  it('returns the shared per-phone quota response unchanged when hourly SMS quota blocks resend', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
     })
 
     const quotaRes = new Response(null, { status: 429 })
+
     mockEnforceRateLimit
       .mockResolvedValueOnce(quotaRes)
       .mockResolvedValueOnce(null)
@@ -295,33 +295,23 @@ describe('app/api/auth/phone/send/route', () => {
 
     expect(result).toBe(quotaRes)
     expect(result.status).toBe(429)
-    expect(mockEnforcePhoneVerificationOtpLimits).not.toHaveBeenCalled()
-    expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns 429 and Retry-After when resend is rate limited by cooldown', async () => {
+  it('returns the shared per-phone quota response unchanged when daily SMS quota blocks resend', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
     })
 
-    mockEnforcePhoneVerificationOtpLimits.mockResolvedValue({
-      ok: false,
-      retryAfterSeconds: 60,
-    })
+    const quotaRes = new Response(null, { status: 429 })
+
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(quotaRes)
 
     const result = await POST(makeRequest())
-    const body = await result.json()
-
-    expect(result.status).toBe(429)
-    expect(result.headers.get('Retry-After')).toBe('60')
-    expect(body).toEqual({
-      ok: false,
-      error: 'Too many requests. Try again shortly.',
-      code: 'RATE_LIMITED',
-      retryAfterSeconds: 60,
-    })
 
     expect(mockIsRuntimeFlagEnabled).toHaveBeenCalledWith('sms_disabled')
     expect(mockValidateSmsDestinationCountry).toHaveBeenCalledWith(
@@ -336,64 +326,20 @@ describe('app/api/auth/phone/send/route', () => {
       bucket: 'auth:sms-phone-day',
       identity: { kind: 'phone', id: '+15551234567' },
     })
-    expect(mockEnforcePhoneVerificationOtpLimits).toHaveBeenCalledWith('user_1')
-    expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
-    expect(mockCaptureAuthException).not.toHaveBeenCalled()
-  })
 
-  it('returns 429 and Retry-After when hourly cap is exceeded', async () => {
-    mockRequireUser.mockResolvedValue({
-      ok: true,
-      user: makeUser(),
-    })
-
-    mockEnforcePhoneVerificationOtpLimits.mockResolvedValue({
-      ok: false,
-      retryAfterSeconds: 600,
-    })
-
-    const result = await POST(makeRequest())
-    const body = await result.json()
-
+    expect(result).toBe(quotaRes)
     expect(result.status).toBe(429)
-    expect(result.headers.get('Retry-After')).toBe('600')
-    expect(body).toEqual({
-      ok: false,
-      error: 'Too many requests. Try again shortly.',
-      code: 'RATE_LIMITED',
-      retryAfterSeconds: 600,
-    })
-
-    expect(mockIsRuntimeFlagEnabled).toHaveBeenCalledWith('sms_disabled')
-    expect(mockValidateSmsDestinationCountry).toHaveBeenCalledWith(
-      '+15551234567',
-    )
-    expect(mockPhoneRateLimitIdentity).toHaveBeenCalledWith('+15551234567')
-    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
-      bucket: 'auth:sms-phone-hour',
-      identity: { kind: 'phone', id: '+15551234567' },
-    })
-    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(2, {
-      bucket: 'auth:sms-phone-day',
-      identity: { kind: 'phone', id: '+15551234567' },
-    })
-    expect(mockEnforcePhoneVerificationOtpLimits).toHaveBeenCalledWith('user_1')
-    expect(mockIssueAndSendPhoneVerificationCode).not.toHaveBeenCalled()
+    expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('issues and sends a fresh verification code when allowed', async () => {
+  it('starts Twilio Verify when resend is allowed', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
         role: Role.CLIENT,
         phone: '+15551234567',
       }),
-    })
-
-    mockEnforcePhoneVerificationOtpLimits.mockResolvedValue({
-      ok: true,
-      retryAfterSeconds: 0,
     })
 
     const result = await POST(makeRequest())
@@ -403,6 +349,10 @@ describe('app/api/auth/phone/send/route', () => {
     expect(body).toEqual({
       ok: true,
       sent: true,
+      isPhoneVerified: false,
+      isEmailVerified: false,
+      isFullyVerified: false,
+      requiresEmailVerification: true,
     })
 
     expect(mockIsRuntimeFlagEnabled).toHaveBeenCalledWith('sms_disabled')
@@ -418,56 +368,81 @@ describe('app/api/auth/phone/send/route', () => {
       bucket: 'auth:sms-phone-day',
       identity: { kind: 'phone', id: '+15551234567' },
     })
-    expect(mockEnforcePhoneVerificationOtpLimits).toHaveBeenCalledWith('user_1')
-    expect(mockIssueAndSendPhoneVerificationCode).toHaveBeenCalledWith({
+    expect(mockStartTwilioVerifyPhoneVerification).toHaveBeenCalledWith({
+      to: '+15551234567',
+    })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'info',
+      event: 'auth.phone.send.success',
+      route: 'auth.phone.send',
+      provider: 'twilio_verify',
       userId: 'user_1',
       phone: '+15551234567',
+      meta: {
+        sid: 'VE123456789',
+        status: 'pending',
+      },
     })
+
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns 500 with SMS_NOT_CONFIGURED when the helper reports missing Twilio config', async () => {
+  it('returns 503 when Twilio Verify is not configured', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
     })
 
-    mockIssueAndSendPhoneVerificationCode.mockRejectedValue(
-      new Error('Missing env var: TWILIO_ACCOUNT_SID'),
-    )
-    mockReadPhoneSendErrorCode.mockReturnValue('SMS_NOT_CONFIGURED')
+    mockStartTwilioVerifyPhoneVerification.mockResolvedValue({
+      ok: false,
+      code: 'TWILIO_VERIFY_NOT_CONFIGURED',
+      message:
+        'Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_VERIFY_SERVICE_SID.',
+    })
 
     const result = await POST(makeRequest())
     const body = await result.json()
 
-    expect(result.status).toBe(500)
+    expect(result.status).toBe(503)
     expect(body).toEqual({
       ok: false,
-      error: 'SMS provider is not configured.',
-      code: 'SMS_NOT_CONFIGURED',
+      error: 'Could not send verification code. Please try again.',
+      code: 'TWILIO_VERIFY_NOT_CONFIGURED',
     })
 
-    expect(mockCaptureAuthException).toHaveBeenCalledWith({
-      event: 'auth.phone.send.not_configured',
+    expect(mockStartTwilioVerifyPhoneVerification).toHaveBeenCalledWith({
+      to: '+15551234567',
+    })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'error',
+      event: 'auth.phone.send.failed',
       route: 'auth.phone.send',
-      provider: 'twilio',
-      code: 'SMS_NOT_CONFIGURED',
+      provider: 'twilio_verify',
+      code: 'TWILIO_VERIFY_NOT_CONFIGURED',
       userId: 'user_1',
       phone: '+15551234567',
-      error: expect.any(Error),
+      meta: {
+        message:
+          'Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_VERIFY_SERVICE_SID.',
+      },
     })
+
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns 502 with SMS_SEND_FAILED when the helper reports SMS send failure', async () => {
+  it('returns 502 when Twilio Verify send fails', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
     })
 
-    mockIssueAndSendPhoneVerificationCode.mockRejectedValue(
-      new Error('Twilio send failed'),
-    )
-    mockReadPhoneSendErrorCode.mockReturnValue('SMS_SEND_FAILED')
+    mockStartTwilioVerifyPhoneVerification.mockResolvedValue({
+      ok: false,
+      code: 'TWILIO_VERIFY_SEND_FAILED',
+      message: 'Twilio Verify failed.',
+    })
 
     const result = await POST(makeRequest())
     const body = await result.json()
@@ -476,30 +451,38 @@ describe('app/api/auth/phone/send/route', () => {
     expect(body).toEqual({
       ok: false,
       error: 'Could not send verification code. Please try again.',
-      code: 'SMS_SEND_FAILED',
+      code: 'TWILIO_VERIFY_SEND_FAILED',
     })
 
-    expect(mockCaptureAuthException).toHaveBeenCalledWith({
+    expect(mockStartTwilioVerifyPhoneVerification).toHaveBeenCalledWith({
+      to: '+15551234567',
+    })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
       event: 'auth.phone.send.failed',
       route: 'auth.phone.send',
-      provider: 'twilio',
-      code: 'SMS_SEND_FAILED',
+      provider: 'twilio_verify',
+      code: 'TWILIO_VERIFY_SEND_FAILED',
       userId: 'user_1',
       phone: '+15551234567',
-      error: expect.any(Error),
+      meta: {
+        message: 'Twilio Verify failed.',
+      },
     })
+
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns 500 for unexpected helper failures', async () => {
+  it('returns 500 for unexpected internal failures', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
     })
 
-    mockIssueAndSendPhoneVerificationCode.mockRejectedValue(
+    mockStartTwilioVerifyPhoneVerification.mockRejectedValue(
       new Error('Unexpected failure'),
     )
-    mockReadPhoneSendErrorCode.mockReturnValue('INTERNAL')
 
     const result = await POST(makeRequest())
     const body = await result.json()
@@ -514,6 +497,7 @@ describe('app/api/auth/phone/send/route', () => {
     expect(mockCaptureAuthException).toHaveBeenCalledWith({
       event: 'auth.phone.send.internal_error',
       route: 'auth.phone.send',
+      provider: 'twilio_verify',
       code: 'INTERNAL',
       userId: 'user_1',
       phone: '+15551234567',

@@ -11,6 +11,7 @@ import {
 } from '@prisma/client'
 
 const IDEMPOTENCY_ROUTE = 'POST /api/client/bookings/[id]/review'
+const mockRenderMediaUrls = vi.hoisted(() => vi.fn())
 
 const mocks = vi.hoisted(() => ({
   prismaTransaction: vi.fn(),
@@ -89,6 +90,10 @@ vi.mock('@/lib/idempotency', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
+}))
+
+vi.mock('@/lib/media/renderUrls', () => ({
+  renderMediaUrls: mockRenderMediaUrls,
 }))
 
 import { POST } from './route'
@@ -248,8 +253,8 @@ function expectedFullReviewJson() {
         storagePath: 'client/review-1.png',
         thumbBucket: 'reviews-thumbs',
         thumbPath: 'client/review-1-thumb.png',
-        url: null,
-        thumbUrl: null,
+        url: 'https://media.test/reviews/client/review-1.png',
+        thumbUrl: 'https://media.test/reviews-thumbs/client/review-1-thumb.png',
       },
     ],
   }
@@ -312,6 +317,30 @@ function expectedResponseBody() {
 describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+
+    mockRenderMediaUrls.mockReset()
+
+    mockRenderMediaUrls.mockImplementation(
+      async (row: {
+        storageBucket: string | null
+        storagePath: string | null
+        thumbBucket: string | null
+        thumbPath: string | null
+        url: string | null
+        thumbUrl: string | null
+      }) => ({
+        renderUrl:
+          row.url ??
+          (row.storageBucket && row.storagePath
+            ? `https://media.test/${row.storageBucket}/${row.storagePath}`
+            : null),
+        renderThumbUrl:
+          row.thumbUrl ??
+          (row.thumbBucket && row.thumbPath
+            ? `https://media.test/${row.thumbBucket}/${row.thumbPath}`
+            : null),
+      }),
+    )
 
     mocks.prismaTransaction.mockImplementation(
       async (run: (db: typeof tx) => Promise<unknown>) => run(tx),
@@ -686,6 +715,16 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
     const json = await res.json()
 
     expect(res.status).toBe(201)
+
+    expect(mockRenderMediaUrls).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'media_client_1',
+        storageBucket: 'reviews',
+        storagePath: 'client/review-1.png',
+        thumbBucket: 'reviews-thumbs',
+        thumbPath: 'client/review-1-thumb.png',
+      }),
+    )
 
     expect(mocks.assertClientBookingReviewEligibility).toHaveBeenCalledWith({
       bookingId: 'booking_1',

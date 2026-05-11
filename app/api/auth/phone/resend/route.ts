@@ -1,10 +1,11 @@
-// app/api/auth/phone/send/route.ts
+// app/api/auth/phone/resend/route.ts
 
 import {
   enforceRateLimit,
   jsonFail,
   jsonOk,
   phoneRateLimitIdentity,
+  rateLimitIdentity,
 } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
@@ -18,7 +19,7 @@ import {
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-export async function POST(_request: Request) {
+export async function POST(request: Request) {
   let userIdForLog: string | null = null
   let phoneForLog: string | null = null
 
@@ -28,25 +29,25 @@ export async function POST(_request: Request) {
 
     const user = auth.user
     const userId = user.id
+    const phone = user.phone?.trim() ?? ''
 
     userIdForLog = userId
+    phoneForLog = phone || null
 
     if (user.phoneVerifiedAt) {
       return jsonOk(
         {
+          ok: true,
           alreadyVerified: true,
-          sent: false,
           isPhoneVerified: true,
           isEmailVerified: user.isEmailVerified,
           isFullyVerified: user.isFullyVerified,
           requiresEmailVerification: !user.isEmailVerified,
+          phoneVerificationSent: false,
         },
         200,
       )
     }
-
-    const phone = user.phone?.trim() ?? ''
-    phoneForLog = phone || null
 
     if (!phone) {
       return jsonFail(400, 'Phone number missing.', {
@@ -61,7 +62,6 @@ export async function POST(_request: Request) {
     }
 
     const smsCountry = validateSmsDestinationCountry(phone)
-
     if (!smsCountry.ok) {
       return jsonFail(400, smsCountry.message, {
         code: smsCountry.code,
@@ -69,39 +69,45 @@ export async function POST(_request: Request) {
       })
     }
 
-    const normalizedPhone = smsCountry.phone
-    phoneForLog = normalizedPhone
+    const identity = await rateLimitIdentity()
 
-    const phoneIdentity = phoneRateLimitIdentity(normalizedPhone)
+    const resendIpLimit = await enforceRateLimit({
+      bucket: 'auth:register',
+      identity,
+    })
 
-    const smsPhoneHourRes = await enforceRateLimit({
+    if (resendIpLimit) return resendIpLimit
+
+    const phoneIdentity = phoneRateLimitIdentity(phone)
+
+    const smsPhoneHourLimit = await enforceRateLimit({
       bucket: 'auth:sms-phone-hour',
       identity: phoneIdentity,
     })
 
-    if (smsPhoneHourRes) return smsPhoneHourRes
+    if (smsPhoneHourLimit) return smsPhoneHourLimit
 
-    const smsPhoneDayRes = await enforceRateLimit({
+    const smsPhoneDayLimit = await enforceRateLimit({
       bucket: 'auth:sms-phone-day',
       identity: phoneIdentity,
     })
 
-    if (smsPhoneDayRes) return smsPhoneDayRes
+    if (smsPhoneDayLimit) return smsPhoneDayLimit
 
     const result = await startTwilioVerifyPhoneVerification({
-      to: normalizedPhone,
+      to: phone,
     })
 
     if (!result.ok) {
       logAuthEvent({
         level:
           result.code === 'TWILIO_VERIFY_NOT_CONFIGURED' ? 'error' : 'warn',
-        event: 'auth.phone.send.failed',
-        route: 'auth.phone.send',
+        event: 'auth.phone.resend.failed',
+        route: 'auth.phone.resend',
         provider: 'twilio_verify',
         code: result.code,
         userId,
-        phone: normalizedPhone,
+        phone,
         meta: {
           message: result.message,
         },
@@ -110,18 +116,18 @@ export async function POST(_request: Request) {
       const status =
         result.code === 'TWILIO_VERIFY_NOT_CONFIGURED' ? 503 : 502
 
-      return jsonFail(status, 'Could not send verification code. Please try again.', {
+      return jsonFail(status, 'Phone verification is unavailable.', {
         code: result.code,
       })
     }
 
     logAuthEvent({
       level: 'info',
-      event: 'auth.phone.send.success',
-      route: 'auth.phone.send',
+      event: 'auth.phone.resend.success',
+      route: 'auth.phone.resend',
       provider: 'twilio_verify',
       userId,
-      phone: normalizedPhone,
+      phone,
       meta: {
         sid: result.sid,
         status: result.status,
@@ -130,7 +136,8 @@ export async function POST(_request: Request) {
 
     return jsonOk(
       {
-        sent: true,
+        ok: true,
+        phoneVerificationSent: true,
         isPhoneVerified: false,
         isEmailVerified: user.isEmailVerified,
         isFullyVerified: false,
@@ -140,12 +147,12 @@ export async function POST(_request: Request) {
     )
   } catch (error: unknown) {
     captureAuthException({
-      event: 'auth.phone.send.internal_error',
-      route: 'auth.phone.send',
+      event: 'auth.phone.resend.failed',
+      route: 'auth.phone.resend',
       provider: 'twilio_verify',
-      code: 'INTERNAL',
       userId: userIdForLog,
       phone: phoneForLog,
+      code: 'INTERNAL',
       error,
     })
 

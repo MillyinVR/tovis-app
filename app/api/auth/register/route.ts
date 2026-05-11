@@ -20,8 +20,7 @@ import {
   rateLimitIdentity,
   phoneRateLimitIdentity,
 } from '@/app/api/_utils'
-import crypto from 'crypto'
-import Twilio from 'twilio'
+import { startTwilioVerifyPhoneVerification } from '@/lib/twilio/verify'
 import {
   Prisma,
   type ProfessionType,
@@ -80,12 +79,6 @@ type SignupLocation =
       timeZoneId: string
     }
 
-type SmsSendResult =
-  | { ok: true }
-  | {
-      ok: false
-      code: 'SMS_NOT_CONFIGURED' | 'SMS_SEND_FAILED'
-    }
 
 type RegisterBody = {
   email?: unknown
@@ -124,7 +117,7 @@ type RegisterBody = {
 ========================================================= */
 
 function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function asArray(v: unknown): unknown[] {
@@ -231,14 +224,6 @@ function defaultWorkingHours() {
   }
 }
 
-function sha256(input: string) {
-  return crypto.createHash('sha256').update(input).digest('hex')
-}
-
-function generateSmsCode() {
-  const n = crypto.randomInt(0, 1_000_000)
-  return String(n).padStart(6, '0')
-}
 
 function parseMaybeDate(v: string | null): Date | null {
   if (!v) return null
@@ -314,55 +299,6 @@ function createManualLicenseDocData(urlOrRef: string) {
   }
 }
 
-async function sendPhoneVerificationSms(args: {
-  to: string
-  code: string
-}): Promise<SmsSendResult> {
-  const accountSid = envOrNull('TWILIO_ACCOUNT_SID')
-  const authToken = envOrNull('TWILIO_AUTH_TOKEN')
-  const from = envOrNull('TWILIO_FROM_NUMBER')
-
-  if (!accountSid || !authToken || !from) {
-    logAuthEvent({
-      level: 'error',
-      event: 'auth.phone.send.not_configured',
-      route: 'auth.register',
-      provider: 'twilio',
-      code: 'SMS_NOT_CONFIGURED',
-      phone: args.to,
-    })
-    return { ok: false, code: 'SMS_NOT_CONFIGURED' }
-  }
-
-  try {
-    const client = Twilio(accountSid, authToken)
-    const body = `TOVIS verification code: ${args.code}. Expires in 10 minutes.`
-    const msg = await client.messages.create({ to: args.to, from, body })
-
-    logAuthEvent({
-      level: 'info',
-      event: 'auth.phone.send.success',
-      route: 'auth.register',
-      provider: 'twilio',
-      phone: args.to,
-      meta: {
-        sid: msg.sid,
-      },
-    })
-
-    return { ok: true }
-  } catch (err) {
-    captureAuthException({
-      event: 'auth.phone.send.failed',
-      route: 'auth.register',
-      provider: 'twilio',
-      code: 'SMS_SEND_FAILED',
-      phone: args.to,
-      error: err,
-    })
-    return { ok: false, code: 'SMS_SEND_FAILED' }
-  }
-}
 
 function readPrismaUniqueTargets(err: unknown): string[] {
   if (!isRecord(err)) return []
@@ -468,8 +404,10 @@ const ALL_PROFESSIONS: ProfessionType[] = [
   'MAKEUP_ARTIST',
 ]
 
+const ALL_PROFESSIONS_SET = new Set<string>(ALL_PROFESSIONS)
+
 function isAnyProfessionType(v: string): v is ProfessionType {
-  return (ALL_PROFESSIONS as readonly string[]).includes(v)
+  return ALL_PROFESSIONS_SET.has(v)
 }
 
 const CA_BBC_LICENSE_REQUIRED: ProfessionType[] = [
@@ -481,8 +419,12 @@ const CA_BBC_LICENSE_REQUIRED: ProfessionType[] = [
   'ELECTROLOGIST',
 ]
 
-function requiresCaBbcLicense(p: ProfessionType) {
-  return (CA_BBC_LICENSE_REQUIRED as readonly string[]).includes(p)
+const CA_BBC_LICENSE_REQUIRED_SET = new Set<ProfessionType>(
+  CA_BBC_LICENSE_REQUIRED,
+)
+
+function requiresCaBbcLicense(p: ProfessionType): boolean {
+  return CA_BBC_LICENSE_REQUIRED_SET.has(p)
 }
 
 /* =========================================================
@@ -705,7 +647,8 @@ export async function POST(request: Request) {
   let phoneForLog: string | null = null
 
   try {
-    const body = (await request.json().catch(() => ({}))) as RegisterBody
+    const rawBody: unknown = await request.json().catch(() => ({}))
+    const body: RegisterBody = isRecord(rawBody) ? rawBody : {}
 
     const email = normalizeEmail(body.email)
     const password = pickString(body.password)
@@ -989,7 +932,7 @@ export async function POST(request: Request) {
         licenseNumber,
       })
 
-    if (v.ok && v.verified) {
+      if (v.ok && v.verified) {
         verificationStatus = VerificationStatus.APPROVED
         licenseVerified = true
         licenseExpiryToStore = parseMaybeDate(v.expDate ?? null)
@@ -1066,7 +1009,7 @@ export async function POST(request: Request) {
 
     const passwordHash = await hashPassword(password)
 
-    const { user, code } = await prisma.$transaction(async (tx) => {
+    const { user } = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           email,
@@ -1201,21 +1144,7 @@ export async function POST(request: Request) {
         },
       })
 
-      await tx.phoneVerification.updateMany({
-        where: { userId: user.id, usedAt: null },
-        data: { usedAt: new Date() },
-      })
-
-      const code = generateSmsCode()
-      const codeHash = sha256(code)
-      const expiresAt = new Date(Date.now() + 1000 * 60 * 10)
-
-      await tx.phoneVerification.create({
-        data: { userId: user.id, phone, codeHash, expiresAt },
-        select: { id: true },
-      })
-
-      return { user, code }
+      return { user }
     })
 
     if (dcaTimedOutAtSignup) {
@@ -1231,7 +1160,43 @@ export async function POST(request: Request) {
 
     waitUntil(
       (async () => {
-        await sendPhoneVerificationSms({ to: user.phone!, code })
+        if (user.phone) {
+          const phoneVerification =
+            await startTwilioVerifyPhoneVerification({
+              to: user.phone,
+            })
+
+          if (phoneVerification.ok) {
+            logAuthEvent({
+              level: 'info',
+              event: 'auth.phone.verify.start.success',
+              route: 'auth.register',
+              provider: 'twilio_verify',
+              userId: user.id,
+              phone: user.phone,
+              meta: {
+                sid: phoneVerification.sid,
+                status: phoneVerification.status,
+              },
+            })
+          } else {
+            logAuthEvent({
+              level:
+                phoneVerification.code === 'TWILIO_VERIFY_NOT_CONFIGURED'
+                  ? 'error'
+                  : 'warn',
+              event: 'auth.phone.verify.start.failed',
+              route: 'auth.register',
+              provider: 'twilio_verify',
+              code: phoneVerification.code,
+              userId: user.id,
+              phone: user.phone,
+              meta: {
+                message: phoneVerification.message,
+              },
+            })
+          }
+        }
 
         if (verificationEmail) {
           try {

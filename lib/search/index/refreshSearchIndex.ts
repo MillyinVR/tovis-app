@@ -35,6 +35,7 @@ export type RefreshSource =
   | 'offering.create'
   | 'offering.update'
   | 'offering.delete'
+  | 'verification.status'
   | 'backfill'
   | 'manual'
 

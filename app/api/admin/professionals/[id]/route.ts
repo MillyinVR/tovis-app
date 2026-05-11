@@ -5,6 +5,7 @@ import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { pickBool, pickString } from '@/app/api/_utils/pick'
+import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { AdminPermissionRole, Role, VerificationStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -103,6 +104,17 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           where: { professionalId },
           data: { isBookable: true },
         })
+      }
+
+      // P2.4b — refresh ProfessionalSearchIndex for this pro when their
+      // verification status changes. Skipped when only `licenseVerified`
+      // changes (that field is not denormalized into the index). Passes
+      // `tx` so the refresh sees the just-updated status (and the
+      // just-bookable locations when approving). The refresh helper has
+      // its own try/catch and is best-effort — a refresh failure cannot
+      // roll back the verification mutation.
+      if (status != null) {
+        await refreshProfessional(professionalId, 'verification.status', tx)
       }
 
       return professional

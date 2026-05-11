@@ -1,155 +1,43 @@
+// app/api/internal/webhooks/twilio/notifications/status/route.ts
+
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { NotificationProvider } from '@prisma/client'
-import Twilio from 'twilio'
 
 import { applyDeliveryWebhookUpdate } from '@/lib/notifications/webhooks/applyDeliveryWebhookUpdate'
+import { readTwilioDeliveryWebhookFromRequest } from '@/lib/notifications/webhooks/twilio'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-type TwilioWebhookFields = Record<string, string>
+async function runWebhook(request: Request) {
+  const webhook = await readTwilioDeliveryWebhookFromRequest(request)
 
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim()
-  return value && value.length > 0 ? value : null
-}
-
-function requireEnv(name: string): string {
-  const value = readEnv(name)
-  if (!value) {
-    throw new Error(`Missing ${name} configuration.`)
+  if (!webhook.signature.ok) {
+    return jsonFail(webhook.signature.status, webhook.signature.message, {
+      code: webhook.signature.code,
+    })
   }
 
-  return value
-}
-
-function readOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
-}
-
-function formDataToFields(formData: FormData): TwilioWebhookFields {
-  const fields: TwilioWebhookFields = {}
-
-  for (const [key, value] of formData.entries()) {
-    if (typeof value === 'string') {
-      fields[key] = value
-    }
+  if (!webhook.parsed) {
+    return jsonFail(400, 'Invalid Twilio webhook payload.', {
+      code: 'TWILIO_WEBHOOK_INVALID',
+    })
   }
 
-  return fields
-}
-
-function buildExternalRequestUrl(req: Request): string {
-  const url = new URL(req.url)
-
-  const forwardedProto =
-    req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim() || url.protocol.replace(':', '')
-  const forwardedHost =
-    req.headers.get('x-forwarded-host')?.split(',')[0]?.trim() ||
-    req.headers.get('host')?.split(',')[0]?.trim() ||
-    url.host
-
-  return `${forwardedProto}://${forwardedHost}${url.pathname}${url.search}`
-}
-
-function isValidTwilioSignature(args: {
-  req: Request
-  fields: TwilioWebhookFields
-}): boolean {
-  const authToken = requireEnv('TWILIO_AUTH_TOKEN')
-  const signature = readOptionalString(
-    args.req.headers.get('x-twilio-signature'),
-  )
-
-  if (!signature) return false
-
-  return Twilio.validateRequest(
-    authToken,
-    signature,
-    buildExternalRequestUrl(args.req),
-    args.fields,
-  )
-}
-
-function readProviderMessageId(fields: TwilioWebhookFields): string | null {
-  return (
-    readOptionalString(fields.MessageSid) ??
-    readOptionalString(fields.SmsSid)
-  )
-}
-
-function readProviderStatus(fields: TwilioWebhookFields): string | null {
-  return (
-    readOptionalString(fields.MessageStatus) ??
-    readOptionalString(fields.SmsStatus)
-  )
-}
-
-function mapTwilioStatusToKind(
-  providerStatus: string,
-): 'STATUS_UPDATE' | 'DELIVERED' | 'FAILED_FINAL' {
-  const normalized = providerStatus.trim().toLowerCase()
-
-  if (normalized === 'delivered') {
-    return 'DELIVERED'
+  if (!webhook.parsed.ok) {
+    return jsonFail(webhook.parsed.status, webhook.parsed.message, {
+      code: webhook.parsed.code,
+    })
   }
 
-  if (
-    normalized === 'failed' ||
-    normalized === 'undelivered' ||
-    normalized === 'canceled'
-  ) {
-    return 'FAILED_FINAL'
-  }
-
-  return 'STATUS_UPDATE'
-}
-
-async function runWebhook(req: Request) {
-  requireEnv('TWILIO_AUTH_TOKEN')
-
-  const formData = await req.formData()
-  const fields = formDataToFields(formData)
-
-  if (!isValidTwilioSignature({ req, fields })) {
-    return jsonFail(401, 'Unauthorized')
-  }
-
-  const providerMessageId = readProviderMessageId(fields)
-  if (!providerMessageId) {
-    return jsonFail(400, 'Missing MessageSid or SmsSid.')
-  }
-
-  const providerStatus = readProviderStatus(fields)
-  if (!providerStatus) {
-    return jsonFail(400, 'Missing MessageStatus or SmsStatus.')
-  }
-
-  const kind = mapTwilioStatusToKind(providerStatus)
-  const errorCode = readOptionalString(fields.ErrorCode)
-  const errorMessage = readOptionalString(fields.ErrorMessage)
-  const occurredAt = new Date()
-
-  const result = await applyDeliveryWebhookUpdate({
-    provider: NotificationProvider.TWILIO,
-    providerMessageId,
-    providerStatus,
-    kind,
-    occurredAt,
-    errorCode,
-    errorMessage,
-    payload: fields,
-  })
+  const result = await applyDeliveryWebhookUpdate(webhook.parsed.webhook)
 
   return jsonOk({
     matched: result.matched,
     provider: NotificationProvider.TWILIO,
-    providerMessageId,
-    providerStatus,
-    kind,
+    providerMessageId: webhook.parsed.webhook.providerMessageId,
+    providerStatus: webhook.parsed.webhook.providerStatus,
+    kind: webhook.parsed.webhook.kind,
     ...(result.matched
       ? {
           deliveryId: result.delivery.id,
@@ -161,15 +49,17 @@ async function runWebhook(req: Request) {
   })
 }
 
-export async function POST(req: Request) {
+export async function POST(request: Request) {
   try {
-    return await runWebhook(req)
-  } catch (err: unknown) {
+    return await runWebhook(request)
+  } catch (error: unknown) {
     console.error(
       'POST /api/internal/webhooks/twilio/notifications/status error',
-      err,
+      error,
     )
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    return jsonFail(500, message)
+
+    return jsonFail(500, 'Internal server error', {
+      code: 'INTERNAL',
+    })
   }
 }

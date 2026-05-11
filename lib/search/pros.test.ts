@@ -1,21 +1,22 @@
 // lib/search/pros.test.ts
+//
+// P2.4b — searchPros now reads from ProfessionalSearchIndex via raw SQL
+// (prismaRead.$queryRaw). These tests mock $queryRaw to return synthetic
+// rows representing what PostGIS would have produced and exercise the
+// JS-side concerns: response shape, cursor slicing, open-now filter,
+// rating-count widening.
+//
+// They do NOT assert SQL strings — that's covered by the integration
+// suite under `tests/integration/` which runs the real query against
+// the postgis test container.
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Prisma, ProfessionType } from '@prisma/client'
+import { ProfessionType } from '@prisma/client'
 
 import { SearchRequestError, encodeIdCursor } from './contracts'
 
 const mocks = vi.hoisted(() => {
-  const prisma = {
-    professionalProfile: {
-      findMany: vi.fn(),
-    },
-    review: {
-      groupBy: vi.fn(),
-    },
-    professionalServiceOffering: {
-      findMany: vi.fn(),
-    },
-  }
+  const queryRaw = vi.fn()
 
   const inferProfessionTypesFromQuery = vi.fn(
     (query: string): ProfessionType[] => {
@@ -55,58 +56,6 @@ const mocks = vi.hoisted(() => {
     },
   )
 
-  const mapProfessionalLocation = vi.fn((input) => ({
-    id: input.id,
-    formattedAddress: input.formattedAddress ?? null,
-    city: input.city ?? null,
-    state: input.state ?? null,
-    timeZone: input.timeZone ?? null,
-    placeId: input.placeId ?? null,
-    lat:
-      typeof input.lat === 'number'
-        ? input.lat
-        : input.lat == null
-          ? null
-          : Number(input.lat),
-    lng:
-      typeof input.lng === 'number'
-        ? input.lng
-        : input.lng == null
-          ? null
-          : Number(input.lng),
-    isPrimary: Boolean(input.isPrimary),
-    workingHours: input.workingHours,
-  }))
-
-  const pickPrimaryLocation = vi.fn((locations) => {
-    return (
-      locations.find((location: { isPrimary: boolean }) => location.isPrimary) ??
-      locations[0] ??
-      null
-    )
-  })
-
-  const pickClosestLocationWithinRadius = vi.fn(
-    ({
-      locations,
-    }: {
-      origin: { lat: number; lng: number }
-      locations: Array<{
-        lat: number | null
-        lng: number | null
-      }>
-      radiusMiles: number
-    }) => {
-      const first = locations[0] ?? null
-      if (!first) return null
-
-      return {
-        location: first,
-        distanceMiles: 1.2,
-      }
-    },
-  )
-
   const isOpenNowAtLocation = vi.fn(() => true)
 
   const buildDiscoveryLocationLabel = vi.fn(
@@ -134,140 +83,21 @@ const mocks = vi.hoisted(() => {
     },
   )
 
-  function decToNum(value: unknown): number | null {
-    if (value == null) return null
-    if (typeof value === 'number') return Number.isFinite(value) ? value : null
-    if (typeof value === 'string') {
-      const n = Number(value)
-      return Number.isFinite(n) ? n : null
-    }
-    if (
-      typeof value === 'object' &&
-      value !== null &&
-      'toString' in value &&
-      typeof value.toString === 'function'
-    ) {
-      const n = Number(value.toString())
-      return Number.isFinite(n) ? n : null
-    }
-    return null
-  }
-
-  const buildDiscoveryOfferSummaryMap = vi.fn((offerings) => {
-    const byPro = new Map<
-      string,
-      {
-        professionalId: string
-        supportsSalon: boolean
-        supportsMobile: boolean
-        minSalon: number | null
-        minMobile: number | null
-        minAny: number | null
-        categoryIds: string[]
-      }
-    >()
-
-    for (const offering of offerings as Array<{
-      professionalId: string
-      offersInSalon: boolean
-      offersMobile: boolean
-      salonPriceStartingAt: unknown
-      mobilePriceStartingAt: unknown
-      categoryId: string | null
-    }>) {
-      const current = byPro.get(offering.professionalId) ?? {
-        professionalId: offering.professionalId,
-        supportsSalon: false,
-        supportsMobile: false,
-        minSalon: null,
-        minMobile: null,
-        minAny: null,
-        categoryIds: [],
-      }
-
-      const salonPrice = decToNum(offering.salonPriceStartingAt)
-      const mobilePrice = decToNum(offering.mobilePriceStartingAt)
-
-      if (offering.offersInSalon) {
-        current.supportsSalon = true
-        current.minSalon =
-          current.minSalon == null ||
-          (salonPrice != null && salonPrice < current.minSalon)
-            ? salonPrice
-            : current.minSalon
-      }
-
-      if (offering.offersMobile) {
-        current.supportsMobile = true
-        current.minMobile =
-          current.minMobile == null ||
-          (mobilePrice != null && mobilePrice < current.minMobile)
-            ? mobilePrice
-            : current.minMobile
-      }
-
-      if (
-        typeof offering.categoryId === 'string' &&
-        offering.categoryId.trim() &&
-        !current.categoryIds.includes(offering.categoryId)
-      ) {
-        current.categoryIds.push(offering.categoryId)
-      }
-
-      const prices = [current.minSalon, current.minMobile].filter(
-        (value): value is number => value != null,
-      )
-      current.minAny = prices.length > 0 ? Math.min(...prices) : null
-
-      byPro.set(offering.professionalId, current)
-    }
-
-    return byPro
-  })
-
-  const matchesDiscoveryOfferingFilters = vi.fn(
-    ({
-      offerSummary,
-      mobileOnly,
-      requestedCategoryId,
-    }: {
-      offerSummary: {
-        supportsMobile: boolean
-        categoryIds: string[]
-      }
-      mobileOnly?: boolean | null
-      requestedCategoryId?: string | null
-    }) => {
-      if (mobileOnly && !offerSummary.supportsMobile) {
-        return false
-      }
-
-      if (requestedCategoryId) {
-        return offerSummary.categoryIds.includes(requestedCategoryId)
-      }
-
-      return true
-    },
-  )
-
   const PUBLICLY_APPROVED_PRO_STATUSES = ['APPROVED'] as const
 
   return {
-    prisma,
+    queryRaw,
     inferProfessionTypesFromQuery,
-    mapProfessionalLocation,
-    pickPrimaryLocation,
-    pickClosestLocationWithinRadius,
     isOpenNowAtLocation,
     buildDiscoveryLocationLabel,
-    buildDiscoveryOfferSummaryMap,
-    matchesDiscoveryOfferingFilters,
     PUBLICLY_APPROVED_PRO_STATUSES,
   }
 })
 
 vi.mock('@/lib/prisma', () => ({
-  prisma: mocks.prisma,
+  prismaRead: {
+    $queryRaw: mocks.queryRaw,
+  },
 }))
 
 vi.mock('@/lib/proTrustState', () => ({
@@ -276,94 +106,131 @@ vi.mock('@/lib/proTrustState', () => ({
 
 vi.mock('@/lib/discovery/nearby', () => ({
   buildDiscoveryLocationLabel: mocks.buildDiscoveryLocationLabel,
-  buildDiscoveryOfferSummaryMap: mocks.buildDiscoveryOfferSummaryMap,
   inferProfessionTypesFromQuery: mocks.inferProfessionTypesFromQuery,
   isOpenNowAtLocation: mocks.isOpenNowAtLocation,
-  mapProfessionalLocation: mocks.mapProfessionalLocation,
-  matchesDiscoveryOfferingFilters: mocks.matchesDiscoveryOfferingFilters,
-  pickClosestLocationWithinRadius: mocks.pickClosestLocationWithinRadius,
-  pickPrimaryLocation: mocks.pickPrimaryLocation,
 }))
 
 import { parseSearchProsParams, searchPros } from './pros'
 
-const DEFAULT_LOCATION = {
-  id: 'loc_primary',
-  formattedAddress: '123 Main St',
-  city: 'San Diego',
-  state: 'CA',
-  timeZone: 'America/Los_Angeles',
-  placeId: 'place_1',
-  lat: 32.7157,
-  lng: -117.1611,
-  isPrimary: true,
-  workingHours: {
-    mon: { enabled: true, start: '09:00', end: '17:00' },
-  },
+type SyntheticCandidate = {
+  professionalId: string
+  businessName: string | null
+  handle: string | null
+  professionType: ProfessionType | null
+  avatarUrl: string | null
+  locationId: string
+  formattedAddress: string | null
+  city: string | null
+  state: string | null
+  timeZone: string | null
+  placeId: string | null
+  lat: number | null
+  lng: number | null
+  isPrimary: boolean
+  workingHours: unknown
+  ratingAvg: number | null
+  ratingCount: number | bigint
+  offersMobile: boolean
+  minMobilePrice: number | null
+  minAnyPrice: number | null
+  distanceMiles: number | null
 }
 
-function makeSearchablePro(overrides?: {
-  id?: string
-  businessName?: string
-  handle?: string
-  professionType?: ProfessionType
-  avatarUrl?: string | null
-  location?: string | null
-  locations?: Array<typeof DEFAULT_LOCATION>
-}) {
-  return {
-    id: overrides?.id ?? 'pro_1',
-    businessName: overrides?.businessName ?? 'TOVIS Studio',
-    handle: overrides?.handle ?? 'tovisstudio',
-    professionType: overrides?.professionType ?? ProfessionType.BARBER,
-    avatarUrl: overrides?.avatarUrl ?? null,
-    ...(overrides?.location !== undefined
-      ? { location: overrides.location }
-      : {}),
-    locations: overrides?.locations ?? [DEFAULT_LOCATION],
-  }
+type SyntheticPrimary = {
+  professionalId: string
+  locationId: string
+  formattedAddress: string | null
+  city: string | null
+  state: string | null
+  timeZone: string | null
+  placeId: string | null
+  lat: number | null
+  lng: number | null
+  isPrimary: boolean
+  workingHours: unknown
 }
 
-function makeRatingRow(overrides?: {
-  professionalId?: string
-  avg?: number
-  count?: number
-}) {
+function makeCandidate(
+  overrides: Partial<SyntheticCandidate> & { professionalId: string },
+): SyntheticCandidate {
   return {
-    professionalId: overrides?.professionalId ?? 'pro_1',
-    _avg: { rating: overrides?.avg ?? 4.8 },
-    _count: { _all: overrides?.count ?? 12 },
-  }
-}
-
-function makeOfferingRow(overrides?: {
-  professionalId?: string
-  offersInSalon?: boolean
-  offersMobile?: boolean
-  salonPriceStartingAt?: Prisma.Decimal | null
-  mobilePriceStartingAt?: Prisma.Decimal | null
-  categoryId?: string | null
-}) {
-  return {
-    professionalId: overrides?.professionalId ?? 'pro_1',
-    offersInSalon: overrides?.offersInSalon ?? true,
-    offersMobile: overrides?.offersMobile ?? false,
-    salonPriceStartingAt:
-      overrides?.salonPriceStartingAt ?? new Prisma.Decimal('85.00'),
-    mobilePriceStartingAt: overrides?.mobilePriceStartingAt ?? null,
-    service: {
-      categoryId: overrides?.categoryId ?? 'cat_hair',
+    businessName: 'TOVIS Studio',
+    handle: 'tovisstudio',
+    professionType: ProfessionType.BARBER,
+    avatarUrl: null,
+    locationId: 'loc_primary',
+    formattedAddress: '123 Main St',
+    city: 'San Diego',
+    state: 'CA',
+    timeZone: 'America/Los_Angeles',
+    placeId: 'place_1',
+    lat: 32.7157,
+    lng: -117.1611,
+    isPrimary: true,
+    workingHours: {
+      mon: { enabled: true, start: '09:00', end: '17:00' },
     },
+    ratingAvg: 4.8,
+    ratingCount: 12,
+    offersMobile: false,
+    minMobilePrice: null,
+    minAnyPrice: 85,
+    distanceMiles: null,
+    ...overrides,
   }
+}
+
+function makePrimaryRow(
+  overrides: Partial<SyntheticPrimary> & { professionalId: string },
+): SyntheticPrimary {
+  return {
+    locationId: 'loc_primary',
+    formattedAddress: '123 Main St',
+    city: 'San Diego',
+    state: 'CA',
+    timeZone: 'America/Los_Angeles',
+    placeId: 'place_1',
+    lat: 32.7157,
+    lng: -117.1611,
+    isPrimary: true,
+    workingHours: {
+      mon: { enabled: true, start: '09:00', end: '17:00' },
+    },
+    ...overrides,
+  }
+}
+
+// Helper: prime $queryRaw to return `candidates` then `primaries` then
+// keep returning [] for any further calls (defensive).
+function mockSearchRows(
+  candidates: SyntheticCandidate[],
+  primaries: SyntheticPrimary[],
+): void {
+  mocks.queryRaw
+    .mockResolvedValueOnce(candidates)
+    .mockResolvedValueOnce(primaries)
+    .mockResolvedValue([])
+}
+
+const DEFAULT_PARAMS: Parameters<typeof searchPros>[0] = {
+  q: null,
+  lat: null,
+  lng: null,
+  categoryId: null,
+  radiusMiles: 15,
+  mobileOnly: false,
+  openNowOnly: false,
+  minRating: null,
+  maxPrice: null,
+  sort: 'DISTANCE',
+  cursorId: null,
+  limit: 50,
 }
 
 describe('lib/search/pros.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-
-    mocks.prisma.professionalProfile.findMany.mockResolvedValue([])
-    mocks.prisma.review.groupBy.mockResolvedValue([])
-    mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([])
+    mocks.queryRaw.mockResolvedValue([])
   })
 
   describe('parseSearchProsParams', () => {
@@ -434,134 +301,23 @@ describe('lib/search/pros.ts', () => {
   })
 
   describe('searchPros', () => {
-    it('queries only publicly approved pros and only canonical bookable locations', async () => {
-      await searchPros({
-        q: 'barber',
-        lat: null,
-        lng: null,
-        categoryId: null,
-        radiusMiles: 15,
-        mobileOnly: false,
-        openNowOnly: false,
-        minRating: null,
-        maxPrice: null,
-        sort: 'DISTANCE',
-        cursorId: null,
-        limit: 50,
-      })
+    it('returns the stable DTO shape and strips workingHours from location previews', async () => {
+      mockSearchRows(
+        [
+          makeCandidate({
+            professionalId: 'pro_1',
+            businessName: 'TOVIS Studio',
+            handle: 'tovisstudio',
+            professionType: ProfessionType.MAKEUP_ARTIST,
+            ratingAvg: 4.8,
+            ratingCount: 12,
+            minAnyPrice: 85,
+          }),
+        ],
+        [makePrimaryRow({ professionalId: 'pro_1' })],
+      )
 
-      expect(mocks.inferProfessionTypesFromQuery).toHaveBeenCalledWith('barber')
-
-      expect(mocks.prisma.professionalProfile.findMany).toHaveBeenCalledWith({
-        where: {
-          verificationStatus: {
-            in: [...mocks.PUBLICLY_APPROVED_PRO_STATUSES],
-          },
-          OR: [
-            { businessName: { contains: 'barber', mode: 'insensitive' } },
-            { handle: { contains: 'barber', mode: 'insensitive' } },
-            {
-              locations: {
-                some: {
-                  isBookable: true,
-                  OR: [
-                    { name: { contains: 'barber', mode: 'insensitive' } },
-                    { city: { contains: 'barber', mode: 'insensitive' } },
-                    { state: { contains: 'barber', mode: 'insensitive' } },
-                    {
-                      formattedAddress: {
-                        contains: 'barber',
-                        mode: 'insensitive',
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-            { professionType: { in: [ProfessionType.BARBER] } },
-          ],
-        },
-        take: 200,
-        orderBy: [{ businessName: 'asc' }, { handleNormalized: 'asc' }],
-        select: {
-          id: true,
-          businessName: true,
-          handle: true,
-          professionType: true,
-          avatarUrl: true,
-          locations: {
-            where: {
-              isBookable: true,
-              lat: { not: null },
-              lng: { not: null },
-            },
-            take: 25,
-            select: {
-              id: true,
-              formattedAddress: true,
-              city: true,
-              state: true,
-              timeZone: true,
-              placeId: true,
-              lat: true,
-              lng: true,
-              isPrimary: true,
-              workingHours: true,
-            },
-            orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-          },
-        },
-      })
-
-      expect(mocks.prisma.review.groupBy).not.toHaveBeenCalled()
-      expect(
-        mocks.prisma.professionalServiceOffering.findMany,
-      ).not.toHaveBeenCalled()
-    })
-
-    it('returns the stable DTO shape with canonical pro ids and strips workingHours from location previews', async () => {
-      mocks.prisma.professionalProfile.findMany.mockResolvedValue([
-        makeSearchablePro({
-          id: 'pro_1',
-          businessName: 'TOVIS Studio',
-          handle: 'tovisstudio',
-          professionType: ProfessionType.MAKEUP_ARTIST,
-          location: 'Legacy Profile Label',
-        }),
-      ])
-
-      mocks.prisma.review.groupBy.mockResolvedValue([
-        makeRatingRow({
-          professionalId: 'pro_1',
-          avg: 4.8,
-          count: 12,
-        }),
-      ])
-
-      mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([
-        makeOfferingRow({
-          professionalId: 'pro_1',
-          offersInSalon: true,
-          offersMobile: false,
-          salonPriceStartingAt: new Prisma.Decimal('85.00'),
-          categoryId: 'cat_makeup',
-        }),
-      ])
-
-      const result = await searchPros({
-        q: null,
-        lat: null,
-        lng: null,
-        categoryId: null,
-        radiusMiles: 15,
-        mobileOnly: false,
-        openNowOnly: false,
-        minRating: null,
-        maxPrice: null,
-        sort: 'DISTANCE',
-        cursorId: null,
-        limit: 50,
-      })
+      const result = await searchPros(DEFAULT_PARAMS)
 
       expect(result).toEqual({
         items: [
@@ -604,164 +360,143 @@ describe('lib/search/pros.ts', () => {
         nextCursor: null,
       })
 
-      expect(result.items[0]?.id).toBe('pro_1')
       expect(result.items[0]?.closestLocation).not.toHaveProperty('workingHours')
       expect(result.items[0]?.primaryLocation).not.toHaveProperty('workingHours')
-
-      expect(mocks.buildDiscoveryLocationLabel).toHaveBeenCalledWith({
-        location: expect.objectContaining({
-          formattedAddress: '123 Main St',
-          city: 'San Diego',
-          state: 'CA',
-        }),
-      })
-
-      expect(
-        mocks.buildDiscoveryLocationLabel.mock.calls[0]?.[0],
-      ).not.toHaveProperty('profileLocation')
     })
 
-    it('filters pros through the shared discovery offering/category helper', async () => {
-      mocks.prisma.professionalProfile.findMany.mockResolvedValue([
-        makeSearchablePro({
-          id: 'pro_1',
-          businessName: 'Hair One',
-          handle: 'hairone',
-        }),
-        makeSearchablePro({
-          id: 'pro_2',
-          businessName: 'Hair Two',
-          handle: 'hairtwo',
-        }),
-      ])
+    it('runs only the candidates query when no pros match (skips primary lookup)', async () => {
+      mocks.queryRaw.mockResolvedValueOnce([])
 
-      mocks.prisma.review.groupBy.mockResolvedValue([
-        makeRatingRow({ professionalId: 'pro_1', avg: 4.7, count: 9 }),
-        makeRatingRow({ professionalId: 'pro_2', avg: 4.6, count: 8 }),
-      ])
+      const result = await searchPros(DEFAULT_PARAMS)
 
-      mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([
-        makeOfferingRow({
-          professionalId: 'pro_1',
-          categoryId: 'cat_hair',
-          offersMobile: true,
-          mobilePriceStartingAt: new Prisma.Decimal('95.00'),
-        }),
-        makeOfferingRow({
-          professionalId: 'pro_2',
-          categoryId: 'cat_makeup',
-          offersMobile: true,
-          mobilePriceStartingAt: new Prisma.Decimal('110.00'),
-        }),
-      ])
+      expect(result).toEqual({ items: [], nextCursor: null })
+      expect(mocks.queryRaw).toHaveBeenCalledTimes(1)
+    })
+
+    it('uses mobile-specific minPrice when mobileOnly is requested', async () => {
+      mockSearchRows(
+        [
+          makeCandidate({
+            professionalId: 'pro_1',
+            offersMobile: true,
+            minMobilePrice: 110,
+            minAnyPrice: 85,
+          }),
+        ],
+        [makePrimaryRow({ professionalId: 'pro_1' })],
+      )
 
       const result = await searchPros({
-        q: null,
+        ...DEFAULT_PARAMS,
         lat: 32.7,
         lng: -117.1,
-        categoryId: 'cat_hair',
-        radiusMiles: 15,
         mobileOnly: true,
-        openNowOnly: false,
-        minRating: null,
-        maxPrice: null,
-        sort: 'DISTANCE',
-        cursorId: null,
-        limit: 50,
       })
 
-      expect(mocks.matchesDiscoveryOfferingFilters).toHaveBeenCalledTimes(2)
-      expect(mocks.matchesDiscoveryOfferingFilters).toHaveBeenNthCalledWith(1, {
-        offerSummary: {
-          professionalId: 'pro_1',
-          supportsSalon: true,
-          supportsMobile: true,
-          minSalon: 85,
-          minMobile: 95,
-          minAny: 85,
-          categoryIds: ['cat_hair'],
-        },
-        mobileOnly: true,
-        requestedCategoryId: 'cat_hair',
-      })
-
-      expect(mocks.matchesDiscoveryOfferingFilters).toHaveBeenNthCalledWith(2, {
-        offerSummary: {
-          professionalId: 'pro_2',
-          supportsSalon: true,
-          supportsMobile: true,
-          minSalon: 85,
-          minMobile: 110,
-          minAny: 85,
-          categoryIds: ['cat_makeup'],
-        },
-        mobileOnly: true,
-        requestedCategoryId: 'cat_hair',
-      })
-
-      expect(result.items.map((item) => item.id)).toEqual(['pro_1'])
-      expect(result.nextCursor).toBeNull()
+      expect(result.items[0]?.minPrice).toBe(110)
+      expect(result.items[0]?.supportsMobile).toBe(true)
     })
 
-    it('supports cursor pagination over the final sorted results', async () => {
-      mocks.prisma.professionalProfile.findMany.mockResolvedValue([
-        makeSearchablePro({
-          id: 'pro_1',
+    it('attaches the primary location even when the candidate row reports the closest', async () => {
+      mockSearchRows(
+        [
+          makeCandidate({
+            professionalId: 'pro_1',
+            locationId: 'loc_closest',
+            isPrimary: false,
+            distanceMiles: 1.4,
+            city: 'La Jolla',
+          }),
+        ],
+        [
+          makePrimaryRow({
+            professionalId: 'pro_1',
+            locationId: 'loc_primary',
+            isPrimary: true,
+            city: 'San Diego',
+          }),
+        ],
+      )
+
+      const result = await searchPros({
+        ...DEFAULT_PARAMS,
+        lat: 32.7,
+        lng: -117.1,
+      })
+
+      expect(result.items[0]?.closestLocation?.id).toBe('loc_closest')
+      expect(result.items[0]?.primaryLocation?.id).toBe('loc_primary')
+      expect(result.items[0]?.distanceMiles).toBeCloseTo(1.4)
+    })
+
+    it('falls back to the closest location when no primary row is returned', async () => {
+      mockSearchRows(
+        [
+          makeCandidate({
+            professionalId: 'pro_solo',
+            locationId: 'loc_only',
+            isPrimary: false,
+          }),
+        ],
+        [],
+      )
+
+      const result = await searchPros(DEFAULT_PARAMS)
+
+      expect(result.items[0]?.primaryLocation?.id).toBe('loc_only')
+    })
+
+    it('coerces a bigint ratingCount to a finite number', async () => {
+      mockSearchRows(
+        [
+          makeCandidate({
+            professionalId: 'pro_1',
+            ratingAvg: 4.5,
+            ratingCount: BigInt(42),
+          }),
+        ],
+        [makePrimaryRow({ professionalId: 'pro_1' })],
+      )
+
+      const result = await searchPros(DEFAULT_PARAMS)
+
+      expect(result.items[0]?.ratingCount).toBe(42)
+    })
+
+    it('supports cursor pagination over the materialized candidate list', async () => {
+      const candidates = [
+        makeCandidate({
+          professionalId: 'pro_1',
           businessName: 'Alpha Studio',
-          handle: 'alpha',
         }),
-        makeSearchablePro({
-          id: 'pro_2',
+        makeCandidate({
+          professionalId: 'pro_2',
           businessName: 'Bravo Studio',
-          handle: 'bravo',
         }),
-        makeSearchablePro({
-          id: 'pro_3',
+        makeCandidate({
+          professionalId: 'pro_3',
           businessName: 'Charlie Studio',
-          handle: 'charlie',
         }),
-      ])
+      ]
+      const primaries = candidates.map((row) =>
+        makePrimaryRow({ professionalId: row.professionalId }),
+      )
 
-      mocks.prisma.review.groupBy.mockResolvedValue([
-        makeRatingRow({ professionalId: 'pro_1', avg: 4.5, count: 5 }),
-        makeRatingRow({ professionalId: 'pro_2', avg: 4.7, count: 6 }),
-        makeRatingRow({ professionalId: 'pro_3', avg: 4.9, count: 7 }),
-      ])
-
-      mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([
-        makeOfferingRow({ professionalId: 'pro_1', categoryId: 'cat_hair' }),
-        makeOfferingRow({ professionalId: 'pro_2', categoryId: 'cat_hair' }),
-        makeOfferingRow({ professionalId: 'pro_3', categoryId: 'cat_hair' }),
-      ])
+      mockSearchRows(candidates, primaries)
 
       const page1 = await searchPros({
-        q: null,
-        lat: null,
-        lng: null,
-        categoryId: null,
-        radiusMiles: 15,
-        mobileOnly: false,
-        openNowOnly: false,
-        minRating: null,
-        maxPrice: null,
+        ...DEFAULT_PARAMS,
         sort: 'NAME',
-        cursorId: null,
         limit: 1,
       })
 
       expect(page1.items.map((item) => item.id)).toEqual(['pro_1'])
-      expect(page1.nextCursor).toBeTruthy()
+      expect(page1.nextCursor).toBe(encodeIdCursor('pro_1'))
+
+      mockSearchRows(candidates, primaries)
 
       const page2 = await searchPros({
-        q: null,
-        lat: null,
-        lng: null,
-        categoryId: null,
-        radiusMiles: 15,
-        mobileOnly: false,
-        openNowOnly: false,
-        minRating: null,
-        maxPrice: null,
+        ...DEFAULT_PARAMS,
         sort: 'NAME',
         cursorId: 'pro_1',
         limit: 1,
@@ -771,44 +506,35 @@ describe('lib/search/pros.ts', () => {
       expect(page2.nextCursor).toBe(encodeIdCursor('pro_2'))
     })
 
-    it('applies open-now filtering through the shared location helper', async () => {
-      mocks.prisma.professionalProfile.findMany.mockResolvedValue([
-        makeSearchablePro({
-          id: 'pro_1',
-          businessName: 'Open Pro',
-        }),
-      ])
+    it('drops candidates whose closest location is not open now when openNowOnly is set', async () => {
+      mockSearchRows(
+        [
+          makeCandidate({
+            professionalId: 'pro_open',
+            businessName: 'Open Pro',
+          }),
+          makeCandidate({
+            professionalId: 'pro_closed',
+            businessName: 'Closed Pro',
+          }),
+        ],
+        [
+          makePrimaryRow({ professionalId: 'pro_open' }),
+          makePrimaryRow({ professionalId: 'pro_closed' }),
+        ],
+      )
 
-      mocks.prisma.review.groupBy.mockResolvedValue([
-        makeRatingRow({ professionalId: 'pro_1', avg: 4.8, count: 12 }),
-      ])
-
-      mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([
-        makeOfferingRow({ professionalId: 'pro_1', categoryId: 'cat_hair' }),
-      ])
-
-      mocks.isOpenNowAtLocation.mockReturnValueOnce(false)
+      mocks.isOpenNowAtLocation
+        .mockReturnValueOnce(true)
+        .mockReturnValueOnce(false)
 
       const result = await searchPros({
-        q: null,
-        lat: 32.7,
-        lng: -117.1,
-        categoryId: null,
-        radiusMiles: 15,
-        mobileOnly: false,
+        ...DEFAULT_PARAMS,
         openNowOnly: true,
-        minRating: null,
-        maxPrice: null,
-        sort: 'DISTANCE',
-        cursorId: null,
-        limit: 50,
       })
 
-      expect(mocks.isOpenNowAtLocation).toHaveBeenCalledTimes(1)
-      expect(result).toEqual({
-        items: [],
-        nextCursor: null,
-      })
+      expect(mocks.isOpenNowAtLocation).toHaveBeenCalledTimes(2)
+      expect(result.items.map((item) => item.id)).toEqual(['pro_open'])
     })
   })
 })

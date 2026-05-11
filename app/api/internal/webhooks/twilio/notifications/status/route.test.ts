@@ -1,3 +1,5 @@
+// app/api/internal/webhooks/twilio/notifications/status/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationDeliveryStatus, NotificationProvider } from '@prisma/client'
 
@@ -35,6 +37,8 @@ vi.mock('twilio', () => ({
 
 import { POST } from './route'
 
+const ORIGINAL_ENV = { ...process.env }
+
 function makeRequest(args?: {
   headers?: Record<string, string>
   fields?: Record<string, string>
@@ -60,6 +64,7 @@ function makeRequest(args?: {
 
 describe('app/api/internal/webhooks/twilio/notifications/status/route', () => {
   beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV }
     vi.clearAllMocks()
 
     process.env.TWILIO_AUTH_TOKEN = 'twilio-auth-token'
@@ -95,7 +100,8 @@ describe('app/api/internal/webhooks/twilio/notifications/status/route', () => {
     expect(response.status).toBe(500)
     expect(json).toEqual({
       ok: false,
-      error: 'Missing TWILIO_AUTH_TOKEN configuration.',
+      error: 'Twilio webhook authentication is not configured.',
+      code: 'TWILIO_AUTH_TOKEN_MISSING',
     })
     expect(mocks.validateRequest).not.toHaveBeenCalled()
     expect(mocks.applyDeliveryWebhookUpdate).not.toHaveBeenCalled()
@@ -115,7 +121,8 @@ describe('app/api/internal/webhooks/twilio/notifications/status/route', () => {
     expect(response.status).toBe(401)
     expect(json).toEqual({
       ok: false,
-      error: 'Unauthorized',
+      error: 'Unauthorized.',
+      code: 'TWILIO_SIGNATURE_MISSING',
     })
     expect(mocks.validateRequest).not.toHaveBeenCalled()
     expect(mocks.applyDeliveryWebhookUpdate).not.toHaveBeenCalled()
@@ -152,12 +159,42 @@ describe('app/api/internal/webhooks/twilio/notifications/status/route', () => {
     expect(response.status).toBe(401)
     expect(json).toEqual({
       ok: false,
-      error: 'Unauthorized',
+      error: 'Unauthorized.',
+      code: 'TWILIO_SIGNATURE_INVALID',
     })
     expect(mocks.applyDeliveryWebhookUpdate).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when MessageSid and SmsSid are missing', async () => {
+  it('builds the validation URL with search params intact', async () => {
+    const response = await POST(
+      makeRequest({
+        search: '?token=abc',
+        headers: {
+          'x-twilio-signature': 'sig_123',
+          'x-forwarded-proto': 'https',
+          'x-forwarded-host': 'api.tovis.app',
+        },
+        fields: {
+          MessageSid: 'SM123',
+          MessageStatus: 'delivered',
+        },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+
+    expect(mocks.validateRequest).toHaveBeenCalledWith(
+      'twilio-auth-token',
+      'sig_123',
+      'https://api.tovis.app/api/internal/webhooks/twilio/notifications/status?token=abc',
+      {
+        MessageSid: 'SM123',
+        MessageStatus: 'delivered',
+      },
+    )
+  })
+
+  it('returns 400 when MessageSid, SmsSid, and SmsMessageSid are missing', async () => {
     const response = await POST(
       makeRequest({
         headers: {
@@ -174,6 +211,7 @@ describe('app/api/internal/webhooks/twilio/notifications/status/route', () => {
     expect(json).toEqual({
       ok: false,
       error: 'Missing MessageSid or SmsSid.',
+      code: 'TWILIO_MESSAGE_ID_MISSING',
     })
     expect(mocks.applyDeliveryWebhookUpdate).not.toHaveBeenCalled()
   })
@@ -195,6 +233,7 @@ describe('app/api/internal/webhooks/twilio/notifications/status/route', () => {
     expect(json).toEqual({
       ok: false,
       error: 'Missing MessageStatus or SmsStatus.',
+      code: 'TWILIO_MESSAGE_STATUS_MISSING',
     })
     expect(mocks.applyDeliveryWebhookUpdate).not.toHaveBeenCalled()
   })
@@ -309,6 +348,45 @@ describe('app/api/internal/webhooks/twilio/notifications/status/route', () => {
     })
   })
 
+  it('accepts SmsMessageSid as a fallback provider message id', async () => {
+    const response = await POST(
+      makeRequest({
+        headers: {
+          'x-twilio-signature': 'sig_123',
+        },
+        fields: {
+          SmsMessageSid: 'SM_FALLBACK_1',
+          SmsStatus: 'sent',
+        },
+      }),
+    )
+    const json = await response.json()
+
+    expect(mocks.applyDeliveryWebhookUpdate).toHaveBeenCalledWith({
+      provider: NotificationProvider.TWILIO,
+      providerMessageId: 'SM_FALLBACK_1',
+      providerStatus: 'sent',
+      kind: 'STATUS_UPDATE',
+      occurredAt: expect.any(Date),
+      errorCode: null,
+      errorMessage: null,
+      payload: {
+        SmsMessageSid: 'SM_FALLBACK_1',
+        SmsStatus: 'sent',
+      },
+    })
+
+    expect(response.status).toBe(200)
+    expect(json).toMatchObject({
+      ok: true,
+      matched: true,
+      provider: NotificationProvider.TWILIO,
+      providerMessageId: 'SM_FALLBACK_1',
+      providerStatus: 'sent',
+      kind: 'STATUS_UPDATE',
+    })
+  })
+
   it('maps queued to STATUS_UPDATE', async () => {
     mocks.applyDeliveryWebhookUpdate.mockResolvedValueOnce({
       matched: true,
@@ -393,27 +471,41 @@ describe('app/api/internal/webhooks/twilio/notifications/status/route', () => {
   })
 
   it('returns 500 when the webhook update helper throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
     mocks.applyDeliveryWebhookUpdate.mockRejectedValueOnce(
       new Error('webhook update exploded'),
     )
 
-    const response = await POST(
-      makeRequest({
-        headers: {
-          'x-twilio-signature': 'sig_123',
-        },
-        fields: {
-          MessageSid: 'SM_ERR_1',
-          MessageStatus: 'delivered',
-        },
-      }),
-    )
-    const json = await response.json()
+    try {
+      const response = await POST(
+        makeRequest({
+          headers: {
+            'x-twilio-signature': 'sig_123',
+          },
+          fields: {
+            MessageSid: 'SM_ERR_1',
+            MessageStatus: 'delivered',
+          },
+        }),
+      )
+      const json = await response.json()
 
-    expect(response.status).toBe(500)
-    expect(json).toEqual({
-      ok: false,
-      error: 'webhook update exploded',
-    })
+      expect(response.status).toBe(500)
+      expect(json).toEqual({
+        ok: false,
+        error: 'Internal server error',
+        code: 'INTERNAL',
+      })
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'POST /api/internal/webhooks/twilio/notifications/status error',
+        expect.any(Error),
+      )
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 })

@@ -1,3 +1,5 @@
+// app/api/auth/phone/verify/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
@@ -5,17 +7,18 @@ const mockRequireUser = vi.hoisted(() => vi.fn())
 const mockCreateActiveToken = vi.hoisted(() => vi.fn())
 const mockCreateVerificationToken = vi.hoisted(() => vi.fn())
 const mockEnforceVerificationVerifyThrottle = vi.hoisted(() => vi.fn())
-const mockSha256Hex = vi.hoisted(() => vi.fn())
-const mockTimingSafeEqualHex = vi.hoisted(() => vi.fn())
+const mockCheckTwilioVerifyPhoneCode = vi.hoisted(() => vi.fn())
 const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
+const mockTxUserUpdate = vi.hoisted(() => vi.fn())
+const mockTxClientProfileUpdateMany = vi.hoisted(() => vi.fn())
+const mockTxProfessionalProfileUpdateMany = vi.hoisted(() => vi.fn())
+
+const mockPrismaTransaction = vi.hoisted(() => vi.fn())
+
 const mockPrisma = vi.hoisted(() => ({
-  phoneVerification: {
-    findFirst: vi.fn(),
-    updateMany: vi.fn(),
-  },
-  $transaction: vi.fn(),
+  $transaction: mockPrismaTransaction,
 }))
 
 vi.mock('@/app/api/_utils/auth/requireUser', () => ({
@@ -31,9 +34,8 @@ vi.mock('@/app/api/_utils/auth/verificationThrottle', () => ({
   enforceVerificationVerifyThrottle: mockEnforceVerificationVerifyThrottle,
 }))
 
-vi.mock('@/lib/auth/timingSafe', () => ({
-  sha256Hex: mockSha256Hex,
-  timingSafeEqualHex: mockTimingSafeEqualHex,
+vi.mock('@/lib/twilio/verify', () => ({
+  checkTwilioVerifyPhoneCode: mockCheckTwilioVerifyPhoneCode,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -46,12 +48,6 @@ vi.mock('@/lib/observability/authEvents', () => ({
 }))
 
 import { POST } from './route'
-
-function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
-  for (const fn of Object.values(group)) {
-    fn.mockReset()
-  }
-}
 
 function makeUser(args?: {
   role?: Role
@@ -111,29 +107,65 @@ function makeRequest(body: unknown, headers?: Record<string, string>) {
   })
 }
 
+function arrangeTransaction() {
+  const tx = {
+    user: {
+      update: mockTxUserUpdate,
+    },
+    clientProfile: {
+      updateMany: mockTxClientProfileUpdateMany,
+    },
+    professionalProfile: {
+      updateMany: mockTxProfessionalProfileUpdateMany,
+    },
+  }
+
+  mockPrismaTransaction.mockImplementation(
+    async (
+      run: (transactionClient: typeof tx) => Promise<unknown>,
+    ): Promise<unknown> => run(tx),
+  )
+}
+
 describe('app/api/auth/phone/verify/route', () => {
   beforeEach(() => {
-    resetMockGroup(mockPrisma.phoneVerification)
-    mockPrisma.$transaction.mockReset()
-
     mockRequireUser.mockReset()
     mockCreateActiveToken.mockReset()
     mockCreateVerificationToken.mockReset()
     mockEnforceVerificationVerifyThrottle.mockReset()
-    mockSha256Hex.mockReset()
-    mockTimingSafeEqualHex.mockReset()
+    mockCheckTwilioVerifyPhoneCode.mockReset()
     mockLogAuthEvent.mockReset()
     mockCaptureAuthException.mockReset()
+
+    mockPrismaTransaction.mockReset()
+    mockTxUserUpdate.mockReset()
+    mockTxClientProfileUpdateMany.mockReset()
+    mockTxProfessionalProfileUpdateMany.mockReset()
+
+    arrangeTransaction()
 
     mockCreateActiveToken.mockReturnValue('active_token')
     mockCreateVerificationToken.mockReturnValue('verification_token')
     mockEnforceVerificationVerifyThrottle.mockResolvedValue(null)
-    mockSha256Hex.mockReturnValue('submitted_hash')
-    mockTimingSafeEqualHex.mockReturnValue(true)
+
+    mockCheckTwilioVerifyPhoneCode.mockResolvedValue({
+      ok: true,
+      approved: true,
+      sid: 'VE123456789',
+      status: 'approved',
+    })
+
+    mockTxUserUpdate.mockResolvedValue({
+      id: 'user_1',
+      phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
+    })
+    mockTxClientProfileUpdateMany.mockResolvedValue({ count: 1 })
+    mockTxProfessionalProfileUpdateMany.mockResolvedValue({ count: 0 })
   })
 
   it('passes through a failed auth result unchanged', async () => {
     const res = new Response(null, { status: 401 })
+
     mockRequireUser.mockResolvedValue({
       ok: false,
       res,
@@ -146,6 +178,7 @@ describe('app/api/auth/phone/verify/route', () => {
     })
     expect(result).toBe(res)
     expect(result.status).toBe(401)
+    expect(mockCheckTwilioVerifyPhoneCode).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -165,6 +198,8 @@ describe('app/api/auth/phone/verify/route', () => {
       error: 'Verification code is required.',
       code: 'CODE_REQUIRED',
     })
+
+    expect(mockCheckTwilioVerifyPhoneCode).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -184,6 +219,8 @@ describe('app/api/auth/phone/verify/route', () => {
       error: 'Invalid code format.',
       code: 'CODE_INVALID',
     })
+
+    expect(mockCheckTwilioVerifyPhoneCode).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -207,9 +244,12 @@ describe('app/api/auth/phone/verify/route', () => {
       isPhoneVerified: true,
       isEmailVerified: false,
       isFullyVerified: false,
+      requiresEmailVerification: true,
     })
-    expect(mockPrisma.phoneVerification.findFirst).not.toHaveBeenCalled()
+
     expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
+    expect(mockCheckTwilioVerifyPhoneCode).not.toHaveBeenCalled()
+    expect(mockPrismaTransaction).not.toHaveBeenCalled()
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
     expect(mockCreateVerificationToken).not.toHaveBeenCalled()
     expect(result.headers.get('set-cookie')).toBeNull()
@@ -234,7 +274,10 @@ describe('app/api/auth/phone/verify/route', () => {
       error: 'Phone number missing.',
       code: 'PHONE_REQUIRED',
     })
+
     expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
+    expect(mockCheckTwilioVerifyPhoneCode).not.toHaveBeenCalled()
+    expect(mockPrismaTransaction).not.toHaveBeenCalled()
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
     expect(mockCreateVerificationToken).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
@@ -268,21 +311,123 @@ describe('app/api/auth/phone/verify/route', () => {
       scope: 'phone-verify',
       subjectKey: 'user_1',
     })
+
     expect(result).toBe(throttleResponse)
     expect(result.status).toBe(429)
-    expect(mockPrisma.phoneVerification.findFirst).not.toHaveBeenCalled()
+    expect(mockCheckTwilioVerifyPhoneCode).not.toHaveBeenCalled()
+    expect(mockPrismaTransaction).not.toHaveBeenCalled()
     expect(mockCreateActiveToken).not.toHaveBeenCalled()
     expect(mockCreateVerificationToken).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when there is no active verification record', async () => {
+  it('returns 503 when Twilio Verify is not configured', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
     })
-    mockPrisma.phoneVerification.findFirst.mockResolvedValue(null)
+
+    mockCheckTwilioVerifyPhoneCode.mockResolvedValue({
+      ok: false,
+      code: 'TWILIO_VERIFY_NOT_CONFIGURED',
+      message:
+        'Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_VERIFY_SERVICE_SID.',
+    })
+
+    const result = await POST(makeRequest({ code: '123456' }))
+    const body = await result.json()
+
+    expect(result.status).toBe(503)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Phone verification is unavailable.',
+      code: 'TWILIO_VERIFY_NOT_CONFIGURED',
+    })
+
+    expect(mockCheckTwilioVerifyPhoneCode).toHaveBeenCalledWith({
+      to: '+15551234567',
+      code: '123456',
+    })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'error',
+      event: 'auth.phone.verify.twilio_check_failed',
+      route: 'auth.phone.verify',
+      provider: 'twilio_verify',
+      code: 'TWILIO_VERIFY_NOT_CONFIGURED',
+      userId: 'user_1',
+      phone: '+15551234567',
+      meta: {
+        message:
+          'Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_VERIFY_SERVICE_SID.',
+      },
+    })
+
+    expect(mockPrismaTransaction).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('returns 502 when Twilio Verify check fails', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser(),
+    })
+
+    mockCheckTwilioVerifyPhoneCode.mockResolvedValue({
+      ok: false,
+      code: 'TWILIO_VERIFY_CHECK_FAILED',
+      message: 'Twilio Verify failed.',
+    })
+
+    const result = await POST(makeRequest({ code: '123456' }))
+    const body = await result.json()
+
+    expect(result.status).toBe(502)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Phone verification is unavailable.',
+      code: 'TWILIO_VERIFY_CHECK_FAILED',
+    })
+
+    expect(mockCheckTwilioVerifyPhoneCode).toHaveBeenCalledWith({
+      to: '+15551234567',
+      code: '123456',
+    })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.phone.verify.twilio_check_failed',
+      route: 'auth.phone.verify',
+      provider: 'twilio_verify',
+      code: 'TWILIO_VERIFY_CHECK_FAILED',
+      userId: 'user_1',
+      phone: '+15551234567',
+      meta: {
+        message: 'Twilio Verify failed.',
+      },
+    })
+
+    expect(mockPrismaTransaction).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when Twilio Verify rejects the code', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser(),
+    })
+
+    mockCheckTwilioVerifyPhoneCode.mockResolvedValue({
+      ok: true,
+      approved: false,
+      sid: 'VE123456789',
+      status: 'pending',
+    })
 
     const result = await POST(makeRequest({ code: '123456' }))
     const body = await result.json()
@@ -294,161 +439,38 @@ describe('app/api/auth/phone/verify/route', () => {
       code: 'CODE_MISMATCH',
     })
 
-    expect(mockSha256Hex).toHaveBeenCalledWith('123456')
-    expect(mockPrisma.phoneVerification.findFirst).toHaveBeenCalledWith({
-      where: expect.objectContaining({
-        userId: 'user_1',
-        phone: '+15551234567',
-        usedAt: null,
-        expiresAt: expect.objectContaining({
-          gt: expect.any(Date),
-        }),
+    expect(mockCheckTwilioVerifyPhoneCode).toHaveBeenCalledWith({
+      to: '+15551234567',
+      code: '123456',
+    })
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.phone.verify.code_rejected',
+      route: 'auth.phone.verify',
+      provider: 'twilio_verify',
+      userId: 'user_1',
+      phone: '+15551234567',
+      meta: {
+        sid: 'VE123456789',
+        status: 'pending',
+      },
+    })
+
+    expect(mockPrismaTransaction).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('marks a client phone verified and returns partial verification state when email is still unverified', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser({
+        role: Role.CLIENT,
+        emailVerifiedAt: null,
       }),
-      select: {
-        id: true,
-        codeHash: true,
-        attempts: true,
-      },
-      orderBy: { createdAt: 'desc' },
     })
-    expect(mockTimingSafeEqualHex).not.toHaveBeenCalled()
-    expect(mockCreateActiveToken).not.toHaveBeenCalled()
-    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
-    expect(mockLogAuthEvent).not.toHaveBeenCalled()
-    expect(mockCaptureAuthException).not.toHaveBeenCalled()
-  })
-
-  it('increments attempts when the code is incorrect and not yet locked', async () => {
-    mockRequireUser.mockResolvedValue({
-      ok: true,
-      user: makeUser(),
-    })
-
-    mockPrisma.phoneVerification.findFirst.mockResolvedValue({
-      id: 'pv_1',
-      codeHash: 'stored_hash',
-      attempts: 1,
-    })
-    mockTimingSafeEqualHex.mockReturnValue(false)
-    mockPrisma.phoneVerification.updateMany.mockResolvedValue({ count: 1 })
-
-    const result = await POST(makeRequest({ code: '123456' }))
-    const body = await result.json()
-
-    expect(result.status).toBe(400)
-    expect(body).toEqual({
-      ok: false,
-      error: 'Incorrect or expired code.',
-      code: 'CODE_MISMATCH',
-    })
-
-    expect(mockSha256Hex).toHaveBeenCalledWith('123456')
-    expect(mockTimingSafeEqualHex).toHaveBeenCalledWith(
-      'submitted_hash',
-      'stored_hash',
-    )
-
-    expect(mockPrisma.phoneVerification.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: 'pv_1',
-        usedAt: null,
-        attempts: 1,
-      },
-      data: {
-        attempts: { increment: 1 },
-      },
-    })
-
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
-    expect(mockCreateActiveToken).not.toHaveBeenCalled()
-    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
-    expect(mockLogAuthEvent).not.toHaveBeenCalled()
-    expect(mockCaptureAuthException).not.toHaveBeenCalled()
-  })
-
-  it('locks the current code on the fifth wrong attempt', async () => {
-    mockRequireUser.mockResolvedValue({
-      ok: true,
-      user: makeUser(),
-    })
-
-    mockPrisma.phoneVerification.findFirst.mockResolvedValue({
-      id: 'pv_lock',
-      codeHash: 'stored_hash',
-      attempts: 4,
-    })
-    mockTimingSafeEqualHex.mockReturnValue(false)
-    mockPrisma.phoneVerification.updateMany.mockResolvedValue({ count: 1 })
-
-    const result = await POST(makeRequest({ code: '123456' }))
-    const body = await result.json()
-
-    expect(result.status).toBe(429)
-    expect(body).toEqual({
-      ok: false,
-      error:
-        'Too many incorrect verification attempts. Request a new verification code.',
-      code: 'CODE_LOCKED',
-      resendRequired: true,
-    })
-
-    expect(mockPrisma.phoneVerification.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: 'pv_lock',
-        usedAt: null,
-        attempts: 4,
-      },
-      data: {
-        attempts: { increment: 1 },
-        usedAt: expect.any(Date),
-      },
-    })
-
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
-    expect(mockCreateActiveToken).not.toHaveBeenCalled()
-    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
-    expect(mockLogAuthEvent).not.toHaveBeenCalled()
-    expect(mockCaptureAuthException).not.toHaveBeenCalled()
-  })
-
-  it('marks the phone verified and returns partial verification state when email is still unverified', async () => {
-    const user = makeUser({
-      role: Role.CLIENT,
-      emailVerifiedAt: null,
-    })
-
-    mockRequireUser.mockResolvedValue({
-      ok: true,
-      user,
-    })
-
-    mockPrisma.phoneVerification.findFirst.mockResolvedValue({
-      id: 'pv_1',
-      codeHash: 'stored_hash',
-      attempts: 0,
-    })
-    mockTimingSafeEqualHex.mockReturnValue(true)
-
-    const tx = {
-      phoneVerification: {
-        update: vi.fn().mockResolvedValue({}),
-      },
-      user: {
-        update: vi.fn().mockResolvedValue({}),
-      },
-      clientProfile: {
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-      professionalProfile: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-    }
-
-    mockPrisma.$transaction.mockImplementation(
-      async (fn: (txArg: typeof tx) => Promise<void>) => {
-        return fn(tx)
-      },
-    )
 
     const result = await POST(makeRequest({ code: '123456' }))
     const body = await result.json()
@@ -468,44 +490,23 @@ describe('app/api/auth/phone/verify/route', () => {
       subjectKey: 'user_1',
     })
 
-    expect(mockPrisma.phoneVerification.findFirst).toHaveBeenCalledWith({
-      where: expect.objectContaining({
-        userId: 'user_1',
-        phone: '+15551234567',
-        usedAt: null,
-        expiresAt: expect.objectContaining({
-          gt: expect.any(Date),
-        }),
-      }),
-      select: {
-        id: true,
-        codeHash: true,
-        attempts: true,
-      },
-      orderBy: { createdAt: 'desc' },
+    expect(mockCheckTwilioVerifyPhoneCode).toHaveBeenCalledWith({
+      to: '+15551234567',
+      code: '123456',
     })
 
-    expect(tx.phoneVerification.update).toHaveBeenCalledWith({
-      where: { id: 'pv_1' },
-      data: { usedAt: expect.any(Date) },
-    })
-
-    expect(tx.user.update).toHaveBeenCalledWith({
+    expect(mockTxUserUpdate).toHaveBeenCalledWith({
       where: { id: 'user_1' },
       data: { phoneVerifiedAt: expect.any(Date) },
     })
 
-    expect(tx.clientProfile.updateMany).toHaveBeenCalledWith({
+    expect(mockTxClientProfileUpdateMany).toHaveBeenCalledWith({
       where: { userId: 'user_1' },
       data: { phoneVerifiedAt: expect.any(Date) },
     })
 
-    expect(tx.professionalProfile.updateMany).toHaveBeenCalledWith({
-      where: { userId: 'user_1' },
-      data: { phoneVerifiedAt: expect.any(Date) },
-    })
+    expect(mockTxProfessionalProfileUpdateMany).not.toHaveBeenCalled()
 
-    expect(mockPrisma.phoneVerification.updateMany).not.toHaveBeenCalled()
     expect(mockCreateVerificationToken).toHaveBeenCalledWith({
       userId: 'user_1',
       role: Role.CLIENT,
@@ -520,17 +521,24 @@ describe('app/api/auth/phone/verify/route', () => {
       level: 'info',
       event: 'auth.phone.verify.success',
       route: 'auth.phone.verify',
+      provider: 'twilio_verify',
       userId: 'user_1',
       phone: '+15551234567',
       meta: {
+        sid: 'VE123456789',
+        status: 'approved',
         isEmailVerified: false,
         isFullyVerified: false,
       },
     })
+
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('refreshes the cookie to an ACTIVE session when email is already verified', async () => {
+  it('marks a pro phone verified and refreshes the cookie to an ACTIVE session when email is already verified', async () => {
+    mockTxClientProfileUpdateMany.mockResolvedValue({ count: 0 })
+    mockTxProfessionalProfileUpdateMany.mockResolvedValue({ count: 1 })
+
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({
@@ -538,34 +546,6 @@ describe('app/api/auth/phone/verify/route', () => {
         emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
       }),
     })
-
-    mockPrisma.phoneVerification.findFirst.mockResolvedValue({
-      id: 'pv_2',
-      codeHash: 'stored_hash',
-      attempts: 0,
-    })
-    mockTimingSafeEqualHex.mockReturnValue(true)
-
-    const tx = {
-      phoneVerification: {
-        update: vi.fn().mockResolvedValue({}),
-      },
-      user: {
-        update: vi.fn().mockResolvedValue({}),
-      },
-      clientProfile: {
-        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      },
-      professionalProfile: {
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-      },
-    }
-
-    mockPrisma.$transaction.mockImplementation(
-      async (fn: (txArg: typeof tx) => Promise<void>) => {
-        return fn(tx)
-      },
-    )
 
     const result = await POST(
       makeRequest(
@@ -588,6 +568,18 @@ describe('app/api/auth/phone/verify/route', () => {
       requiresEmailVerification: false,
     })
 
+    expect(mockTxUserUpdate).toHaveBeenCalledWith({
+      where: { id: 'user_1' },
+      data: { phoneVerifiedAt: expect.any(Date) },
+    })
+
+    expect(mockTxClientProfileUpdateMany).not.toHaveBeenCalled()
+
+    expect(mockTxProfessionalProfileUpdateMany).toHaveBeenCalledWith({
+      where: { userId: 'user_1' },
+      data: { phoneVerifiedAt: expect.any(Date) },
+    })
+
     expect(mockCreateActiveToken).toHaveBeenCalledWith({
       userId: 'user_1',
       role: Role.PRO,
@@ -602,13 +594,17 @@ describe('app/api/auth/phone/verify/route', () => {
       level: 'info',
       event: 'auth.phone.verify.success',
       route: 'auth.phone.verify',
+      provider: 'twilio_verify',
       userId: 'user_1',
       phone: '+15551234567',
       meta: {
+        sid: 'VE123456789',
+        status: 'approved',
         isEmailVerified: true,
         isFullyVerified: true,
       },
     })
+
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
@@ -618,8 +614,8 @@ describe('app/api/auth/phone/verify/route', () => {
       user: makeUser(),
     })
 
-    mockPrisma.phoneVerification.findFirst.mockRejectedValue(
-      new Error('database blew up'),
+    mockCheckTwilioVerifyPhoneCode.mockRejectedValue(
+      new Error('Twilio SDK exploded'),
     )
 
     const result = await POST(makeRequest({ code: '123456' }))
@@ -635,6 +631,7 @@ describe('app/api/auth/phone/verify/route', () => {
     expect(mockCaptureAuthException).toHaveBeenCalledWith({
       event: 'auth.phone.verify.failed',
       route: 'auth.phone.verify',
+      provider: 'twilio_verify',
       userId: 'user_1',
       phone: '+15551234567',
       code: 'INTERNAL',
