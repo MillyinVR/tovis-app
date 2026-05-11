@@ -1,3 +1,5 @@
+// app/api/internal/webhooks/postmark/notifications/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationDeliveryStatus, NotificationProvider } from '@prisma/client'
 
@@ -28,8 +30,12 @@ vi.mock('@/lib/notifications/webhooks/applyDeliveryWebhookUpdate', () => ({
 
 import { POST } from './route'
 
+const ORIGINAL_ENV = { ...process.env }
+
 function makeBasicAuth(password: string, username = 'postmark'): string {
-  return `Basic ${Buffer.from(`${username}:${password}`, 'utf-8').toString('base64')}`
+  return `Basic ${Buffer.from(`${username}:${password}`, 'utf-8').toString(
+    'base64',
+  )}`
 }
 
 function makeRequest(args?: {
@@ -54,6 +60,7 @@ function makeRequest(args?: {
 
 describe('app/api/internal/webhooks/postmark/notifications/route', () => {
   beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV }
     vi.clearAllMocks()
 
     process.env.POSTMARK_WEBHOOK_SECRET = 'postmark-secret'
@@ -90,10 +97,54 @@ describe('app/api/internal/webhooks/postmark/notifications/route', () => {
     expect(response.status).toBe(500)
     expect(json).toEqual({
       ok: false,
-      error:
-        'Missing POSTMARK_WEBHOOK_SECRET or POSTMARK_WEBHOOK_TOKEN configuration.',
+      error: 'Postmark webhook authentication is not configured.',
+      code: 'POSTMARK_WEBHOOK_SECRET_MISSING',
     })
     expect(mocks.applyDeliveryWebhookUpdate).not.toHaveBeenCalled()
+  })
+
+  it('accepts POSTMARK_WEBHOOK_TOKEN as fallback secret', async () => {
+    delete process.env.POSTMARK_WEBHOOK_SECRET
+    process.env.POSTMARK_WEBHOOK_TOKEN = 'postmark-token'
+
+    const response = await POST(
+      makeRequest({
+        headers: {
+          authorization: 'Bearer postmark-token',
+        },
+        body: {
+          RecordType: 'Delivery',
+          MessageID: 'pm_token_1',
+          DeliveredAt: '2026-04-10T12:00:00.000Z',
+        },
+      }),
+    )
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(json).toMatchObject({
+      ok: true,
+      matched: true,
+      provider: NotificationProvider.POSTMARK,
+      providerMessageId: 'pm_token_1',
+      providerStatus: 'delivered',
+      kind: 'DELIVERED',
+    })
+
+    expect(mocks.applyDeliveryWebhookUpdate).toHaveBeenCalledWith({
+      provider: NotificationProvider.POSTMARK,
+      providerMessageId: 'pm_token_1',
+      providerStatus: 'delivered',
+      kind: 'DELIVERED',
+      occurredAt: new Date('2026-04-10T12:00:00.000Z'),
+      errorCode: null,
+      errorMessage: null,
+      payload: {
+        RecordType: 'Delivery',
+        MessageID: 'pm_token_1',
+        DeliveredAt: '2026-04-10T12:00:00.000Z',
+      },
+    })
   })
 
   it('returns 401 when the webhook request is unauthorized', async () => {
@@ -110,7 +161,31 @@ describe('app/api/internal/webhooks/postmark/notifications/route', () => {
     expect(response.status).toBe(401)
     expect(json).toEqual({
       ok: false,
-      error: 'Unauthorized',
+      error: 'Unauthorized.',
+      code: 'POSTMARK_WEBHOOK_UNAUTHORIZED',
+    })
+    expect(mocks.applyDeliveryWebhookUpdate).not.toHaveBeenCalled()
+  })
+
+  it('returns 401 when bearer auth is wrong', async () => {
+    const response = await POST(
+      makeRequest({
+        headers: {
+          authorization: 'Bearer wrong-secret',
+        },
+        body: {
+          RecordType: 'Delivery',
+          MessageID: 'pm_unauthorized_1',
+        },
+      }),
+    )
+    const json = await response.json()
+
+    expect(response.status).toBe(401)
+    expect(json).toEqual({
+      ok: false,
+      error: 'Unauthorized.',
+      code: 'POSTMARK_WEBHOOK_UNAUTHORIZED',
     })
     expect(mocks.applyDeliveryWebhookUpdate).not.toHaveBeenCalled()
   })
@@ -286,6 +361,118 @@ describe('app/api/internal/webhooks/postmark/notifications/route', () => {
     })
   })
 
+  it('maps SpamComplaint to FAILED_FINAL', async () => {
+    mocks.applyDeliveryWebhookUpdate.mockResolvedValueOnce({
+      matched: true,
+      delivery: {
+        id: 'delivery_spam_1',
+      },
+      previousStatus: NotificationDeliveryStatus.SENT,
+      nextStatus: NotificationDeliveryStatus.FAILED_FINAL,
+      statusChanged: true,
+    })
+
+    const response = await POST(
+      makeRequest({
+        headers: {
+          authorization: 'Bearer postmark-secret',
+        },
+        body: {
+          RecordType: 'SpamComplaint',
+          MessageID: 'pm_spam_1',
+          ReceivedAt: '2026-04-10T12:15:00.000Z',
+          Description: 'Recipient marked the email as spam.',
+        },
+      }),
+    )
+    const json = await response.json()
+
+    expect(mocks.applyDeliveryWebhookUpdate).toHaveBeenCalledWith({
+      provider: NotificationProvider.POSTMARK,
+      providerMessageId: 'pm_spam_1',
+      providerStatus: 'spam_complaint',
+      kind: 'FAILED_FINAL',
+      occurredAt: new Date('2026-04-10T12:15:00.000Z'),
+      errorCode: null,
+      errorMessage: 'Recipient marked the email as spam.',
+      payload: {
+        RecordType: 'SpamComplaint',
+        MessageID: 'pm_spam_1',
+        ReceivedAt: '2026-04-10T12:15:00.000Z',
+        Description: 'Recipient marked the email as spam.',
+      },
+    })
+
+    expect(response.status).toBe(200)
+    expect(json).toEqual({
+      ok: true,
+      matched: true,
+      provider: NotificationProvider.POSTMARK,
+      providerMessageId: 'pm_spam_1',
+      providerStatus: 'spam_complaint',
+      kind: 'FAILED_FINAL',
+      deliveryId: 'delivery_spam_1',
+      previousStatus: NotificationDeliveryStatus.SENT,
+      nextStatus: NotificationDeliveryStatus.FAILED_FINAL,
+      statusChanged: true,
+    })
+  })
+
+  it('maps Click to STATUS_UPDATE', async () => {
+    mocks.applyDeliveryWebhookUpdate.mockResolvedValueOnce({
+      matched: true,
+      delivery: {
+        id: 'delivery_click_1',
+      },
+      previousStatus: NotificationDeliveryStatus.SENT,
+      nextStatus: NotificationDeliveryStatus.SENT,
+      statusChanged: false,
+    })
+
+    const response = await POST(
+      makeRequest({
+        headers: {
+          authorization: 'Bearer postmark-secret',
+        },
+        body: {
+          RecordType: 'Click',
+          MessageID: 'pm_click_1',
+          ClickedAt: '2026-04-10T12:20:00.000Z',
+        },
+      }),
+    )
+    const json = await response.json()
+
+    expect(mocks.applyDeliveryWebhookUpdate).toHaveBeenCalledWith({
+      provider: NotificationProvider.POSTMARK,
+      providerMessageId: 'pm_click_1',
+      providerStatus: 'click',
+      kind: 'STATUS_UPDATE',
+      occurredAt: new Date('2026-04-10T12:20:00.000Z'),
+      errorCode: null,
+      errorMessage: null,
+      payload: {
+        RecordType: 'Click',
+        MessageID: 'pm_click_1',
+        ClickedAt: '2026-04-10T12:20:00.000Z',
+      },
+    })
+
+    expect(response.status).toBe(200)
+    expect(json).toEqual({
+      ok: true,
+      matched: true,
+      provider: NotificationProvider.POSTMARK,
+      providerMessageId: 'pm_click_1',
+      providerStatus: 'click',
+      kind: 'STATUS_UPDATE',
+      deliveryId: 'delivery_click_1',
+      previousStatus: NotificationDeliveryStatus.SENT,
+      nextStatus: NotificationDeliveryStatus.SENT,
+      statusChanged: false,
+    })
+  })
+
   it('returns 400 for invalid json body shape', async () => {
     const response = await POST(
       makeRequest({
@@ -301,6 +488,7 @@ describe('app/api/internal/webhooks/postmark/notifications/route', () => {
     expect(json).toEqual({
       ok: false,
       error: 'Invalid JSON body.',
+      code: 'POSTMARK_INVALID_JSON',
     })
     expect(mocks.applyDeliveryWebhookUpdate).not.toHaveBeenCalled()
   })
@@ -323,8 +511,50 @@ describe('app/api/internal/webhooks/postmark/notifications/route', () => {
     expect(json).toEqual({
       ok: false,
       error: 'Missing MessageID.',
+      code: 'POSTMARK_MESSAGE_ID_MISSING',
     })
     expect(mocks.applyDeliveryWebhookUpdate).not.toHaveBeenCalled()
+  })
+
+  it('accepts MessageId as a provider message id fallback', async () => {
+    const response = await POST(
+      makeRequest({
+        headers: {
+          authorization: 'Bearer postmark-secret',
+        },
+        body: {
+          RecordType: 'Delivery',
+          MessageId: 'pm_lower_d_1',
+          DeliveredAt: '2026-04-10T12:00:00.000Z',
+        },
+      }),
+    )
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(json).toMatchObject({
+      ok: true,
+      matched: true,
+      provider: NotificationProvider.POSTMARK,
+      providerMessageId: 'pm_lower_d_1',
+      providerStatus: 'delivered',
+      kind: 'DELIVERED',
+    })
+
+    expect(mocks.applyDeliveryWebhookUpdate).toHaveBeenCalledWith({
+      provider: NotificationProvider.POSTMARK,
+      providerMessageId: 'pm_lower_d_1',
+      providerStatus: 'delivered',
+      kind: 'DELIVERED',
+      occurredAt: new Date('2026-04-10T12:00:00.000Z'),
+      errorCode: null,
+      errorMessage: null,
+      payload: {
+        RecordType: 'Delivery',
+        MessageId: 'pm_lower_d_1',
+        DeliveredAt: '2026-04-10T12:00:00.000Z',
+      },
+    })
   })
 
   it('returns matched false when no delivery row matches the provider message id', async () => {
@@ -359,28 +589,42 @@ describe('app/api/internal/webhooks/postmark/notifications/route', () => {
   })
 
   it('returns 500 when the webhook helper throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
     mocks.applyDeliveryWebhookUpdate.mockRejectedValueOnce(
       new Error('postmark webhook exploded'),
     )
 
-    const response = await POST(
-      makeRequest({
-        headers: {
-          authorization: 'Bearer postmark-secret',
-        },
-        body: {
-          RecordType: 'Delivery',
-          MessageID: 'pm_err_1',
-          DeliveredAt: '2026-04-10T12:00:00.000Z',
-        },
-      }),
-    )
-    const json = await response.json()
+    try {
+      const response = await POST(
+        makeRequest({
+          headers: {
+            authorization: 'Bearer postmark-secret',
+          },
+          body: {
+            RecordType: 'Delivery',
+            MessageID: 'pm_err_1',
+            DeliveredAt: '2026-04-10T12:00:00.000Z',
+          },
+        }),
+      )
+      const json = await response.json()
 
-    expect(response.status).toBe(500)
-    expect(json).toEqual({
-      ok: false,
-      error: 'postmark webhook exploded',
-    })
+      expect(response.status).toBe(500)
+      expect(json).toEqual({
+        ok: false,
+        error: 'Internal server error',
+        code: 'INTERNAL',
+      })
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'POST /api/internal/webhooks/postmark/notifications error',
+        expect.any(Error),
+      )
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 })
