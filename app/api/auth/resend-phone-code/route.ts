@@ -24,8 +24,7 @@ export async function POST(req: Request) {
       return jsonFail(400, 'Missing phone number.')
     }
 
-    const channel = isRecord(raw) ? parsePhoneVerificationChannel(raw.channel) : 'sms'
-    const result = await sendPhoneVerificationCode({ phone, channel })
+  const result = await sendPhoneVerificationCode({ phone, channel: 'sms' })
 
     if (!result.ok) {
       return jsonFail(400, result.error)
