@@ -1,3 +1,5 @@
+// lib/notifications/webhooks/applyDeliveryWebhookUpdate.ts
+
 import { prisma } from '@/lib/prisma'
 import {
   NotificationDeliveryEventType,
@@ -5,6 +7,11 @@ import {
   NotificationProvider,
   Prisma,
 } from '@prisma/client'
+
+import {
+  mapWebhookKindToDeliveryTransition,
+  type ProviderDeliveryWebhookKind,
+} from '@/lib/notifications/providerStatus'
 
 const webhookUpdateSelect = {
   id: true,
@@ -44,7 +51,7 @@ export type ApplyDeliveryWebhookUpdateArgs = {
   provider: NotificationProvider
   providerMessageId: string
   providerStatus: string
-  kind: 'STATUS_UPDATE' | 'DELIVERED' | 'FAILED_FINAL'
+  kind: ProviderDeliveryWebhookKind
   occurredAt?: Date
   message?: string | null
   errorCode?: string | null
@@ -83,6 +90,7 @@ type MatchedDeliveryRecord = {
 
 type WebhookTransition = {
   nextStatus: NotificationDeliveryStatus
+  eventType: NotificationDeliveryEventType
   deliveredAt?: Date | null
   failedAt?: Date | null
   lastErrorCode?: string | null
@@ -126,53 +134,92 @@ function normalizeEventPayload(
   return value
 }
 
-function buildDefaultMessage(
-  kind: ApplyDeliveryWebhookUpdateArgs['kind'],
-  providerStatus: string,
-): string {
-  if (kind === 'DELIVERED') {
-    return `Provider webhook marked delivery delivered (${providerStatus}).`
+function buildDefaultMessage(args: {
+  kind: ProviderDeliveryWebhookKind
+  providerStatus: string
+  eventType: NotificationDeliveryEventType
+  statusChanged: boolean
+}): string {
+  if (args.kind === 'DELIVERED' && args.statusChanged) {
+    return `Provider webhook marked delivery delivered (${args.providerStatus}).`
   }
 
-  if (kind === 'FAILED_FINAL') {
-    return `Provider webhook marked delivery failed (${providerStatus}).`
+  if (args.kind === 'FAILED_FINAL' && args.statusChanged) {
+    return `Provider webhook marked delivery failed (${args.providerStatus}).`
   }
 
-  return `Provider webhook recorded status update (${providerStatus}).`
+  if (args.eventType === NotificationDeliveryEventType.WEBHOOK_UPDATE) {
+    return `Provider webhook recorded status update (${args.providerStatus}).`
+  }
+
+  return `Provider webhook recorded terminal status already applied (${args.providerStatus}).`
 }
 
-function isTerminalBlockedStatus(status: NotificationDeliveryStatus): boolean {
+function isDeliveryBlockedFromWebhookMutation(
+  status: NotificationDeliveryStatus,
+): boolean {
   return (
     status === NotificationDeliveryStatus.CANCELLED ||
     status === NotificationDeliveryStatus.SUPPRESSED
   )
 }
 
+function isDeliveredBlockedFromFailure(
+  status: NotificationDeliveryStatus,
+): boolean {
+  return status === NotificationDeliveryStatus.DELIVERED
+}
+
+function isFailedBlockedFromDelivery(
+  status: NotificationDeliveryStatus,
+): boolean {
+  return status === NotificationDeliveryStatus.FAILED_FINAL
+}
+
+function buildNoStatusChangeTransition(
+  current: MatchedDeliveryRecord,
+): WebhookTransition {
+  return {
+    nextStatus: current.status,
+    eventType: NotificationDeliveryEventType.WEBHOOK_UPDATE,
+  }
+}
+
 function resolveTransition(args: {
   current: MatchedDeliveryRecord
-  kind: ApplyDeliveryWebhookUpdateArgs['kind']
+  kind: ProviderDeliveryWebhookKind
   occurredAt: Date
   errorCode: string | null
   errorMessage: string | null
 }): WebhookTransition {
   if (args.kind === 'STATUS_UPDATE') {
-    return {
-      nextStatus: args.current.status,
-    }
+    return buildNoStatusChangeTransition(args.current)
   }
 
-  if (args.kind === 'DELIVERED') {
-    if (
-      args.current.status === NotificationDeliveryStatus.FAILED_FINAL ||
-      isTerminalBlockedStatus(args.current.status)
-    ) {
-      return {
-        nextStatus: args.current.status,
-      }
-    }
+  if (isDeliveryBlockedFromWebhookMutation(args.current.status)) {
+    return buildNoStatusChangeTransition(args.current)
+  }
 
+  if (
+    args.kind === 'DELIVERED' &&
+    isFailedBlockedFromDelivery(args.current.status)
+  ) {
+    return buildNoStatusChangeTransition(args.current)
+  }
+
+  if (
+    args.kind === 'FAILED_FINAL' &&
+    isDeliveredBlockedFromFailure(args.current.status)
+  ) {
+    return buildNoStatusChangeTransition(args.current)
+  }
+
+  const baseTransition = mapWebhookKindToDeliveryTransition(args.kind)
+
+  if (args.kind === 'DELIVERED') {
     return {
-      nextStatus: NotificationDeliveryStatus.DELIVERED,
+      nextStatus: baseTransition.nextStatus,
+      eventType: baseTransition.eventType,
       deliveredAt: args.current.deliveredAt ?? args.occurredAt,
       failedAt: null,
       lastErrorCode: null,
@@ -180,25 +227,21 @@ function resolveTransition(args: {
     }
   }
 
-  if (
-    args.current.status === NotificationDeliveryStatus.DELIVERED ||
-    isTerminalBlockedStatus(args.current.status)
-  ) {
+  if (args.kind === 'FAILED_FINAL') {
     return {
-      nextStatus: args.current.status,
+      nextStatus: baseTransition.nextStatus,
+      eventType: baseTransition.eventType,
+      failedAt: args.current.failedAt ?? args.occurredAt,
+      lastErrorCode: args.errorCode ?? args.current.lastErrorCode,
+      lastErrorMessage: args.errorMessage ?? args.current.lastErrorMessage,
     }
   }
 
-  return {
-    nextStatus: NotificationDeliveryStatus.FAILED_FINAL,
-    failedAt: args.current.failedAt ?? args.occurredAt,
-    lastErrorCode: args.errorCode ?? args.current.lastErrorCode,
-    lastErrorMessage: args.errorMessage ?? args.current.lastErrorMessage,
-  }
+  return buildNoStatusChangeTransition(args.current)
 }
 
 function buildWebhookEventPayload(args: {
-  kind: ApplyDeliveryWebhookUpdateArgs['kind']
+  kind: ProviderDeliveryWebhookKind
   occurredAt: Date
   payload?: Prisma.InputJsonValue | null
 }): Prisma.InputJsonValue {
@@ -225,9 +268,6 @@ export async function applyDeliveryWebhookUpdate(
   const occurredAt = normalizeDate(args.occurredAt, 'occurredAt')
   const errorCode = normalizeOptionalString(args.errorCode)
   const errorMessage = normalizeOptionalString(args.errorMessage)
-  const message =
-    normalizeOptionalString(args.message) ??
-    buildDefaultMessage(args.kind, providerStatus)
 
   return prisma.$transaction(async (tx) => {
     const current = await tx.notificationDelivery.findFirst({
@@ -267,6 +307,17 @@ export async function applyDeliveryWebhookUpdate(
       errorMessage,
     })
 
+    const statusChanged = current.status !== transition.nextStatus
+
+    const message =
+      normalizeOptionalString(args.message) ??
+      buildDefaultMessage({
+        kind: args.kind,
+        providerStatus,
+        eventType: transition.eventType,
+        statusChanged,
+      })
+
     await tx.notificationDelivery.update({
       where: {
         id: current.id,
@@ -305,7 +356,7 @@ export async function applyDeliveryWebhookUpdate(
           },
         },
         attemptNumber: current.attemptCount > 0 ? current.attemptCount : null,
-        type: NotificationDeliveryEventType.WEBHOOK_UPDATE,
+        type: transition.eventType,
         fromStatus: current.status,
         toStatus: transition.nextStatus,
         providerStatus,
@@ -336,7 +387,7 @@ export async function applyDeliveryWebhookUpdate(
       delivery,
       previousStatus: current.status,
       nextStatus: transition.nextStatus,
-      statusChanged: current.status !== transition.nextStatus,
+      statusChanged,
     }
   })
 }

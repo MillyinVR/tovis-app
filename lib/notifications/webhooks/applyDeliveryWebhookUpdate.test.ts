@@ -327,7 +327,7 @@ describe('lib/notifications/webhooks/applyDeliveryWebhookUpdate', () => {
           },
         },
         attemptNumber: 2,
-        type: NotificationDeliveryEventType.WEBHOOK_UPDATE,
+        type: NotificationDeliveryEventType.DELIVERED,
         fromStatus: NotificationDeliveryStatus.SENT,
         toStatus: NotificationDeliveryStatus.DELIVERED,
         providerStatus: 'delivered',
@@ -425,7 +425,7 @@ describe('lib/notifications/webhooks/applyDeliveryWebhookUpdate', () => {
           },
         },
         attemptNumber: 3,
-        type: NotificationDeliveryEventType.WEBHOOK_UPDATE,
+        type: NotificationDeliveryEventType.FAILED,
         fromStatus: NotificationDeliveryStatus.SENT,
         toStatus: NotificationDeliveryStatus.FAILED_FINAL,
         providerStatus: 'undelivered',
@@ -578,6 +578,31 @@ describe('lib/notifications/webhooks/applyDeliveryWebhookUpdate', () => {
       },
     })
 
+    expect(mockTx.notificationDeliveryEvent.create).toHaveBeenCalledWith({
+      data: {
+        delivery: {
+          connect: {
+            id: 'delivery_1',
+          },
+        },
+        attemptNumber: 2,
+        type: NotificationDeliveryEventType.WEBHOOK_UPDATE,
+        fromStatus: NotificationDeliveryStatus.DELIVERED,
+        toStatus: NotificationDeliveryStatus.DELIVERED,
+        providerStatus: 'undelivered',
+        providerMessageId: 'SM999',
+        errorCode: '30003',
+        errorMessage: 'Unreachable destination handset.',
+        message:
+          'Provider webhook recorded status update (undelivered).',
+        payload: {
+          source: 'applyDeliveryWebhookUpdate',
+          kind: 'FAILED_FINAL',
+          occurredAt: occurredAt.toISOString(),
+        },
+        createdAt: occurredAt,
+      },
+    })
     expect(result).toEqual({
       matched: true,
       delivery: makeUpdatedDelivery({
