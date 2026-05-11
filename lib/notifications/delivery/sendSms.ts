@@ -1,9 +1,20 @@
 // lib/notifications/delivery/sendSms.ts
+
+import Twilio from 'twilio'
 import {
   NotificationChannel,
   NotificationProvider,
-  Prisma,
 } from '@prisma/client'
+
+import {
+  requireTwilioSmsConfig,
+  isNotificationProviderConfigError,
+} from '@/lib/notifications/config'
+
+import {
+  mapProviderErrorToSendFailureKind,
+  mapProviderSendFailureToDeliveryTransition,
+} from '@/lib/notifications/providerStatus'
 
 import {
   type NotificationDeliveryProvider,
@@ -13,14 +24,18 @@ import {
 
 export type TwilioSmsMessage = {
   to: string
-  body: string
+  body?: string | null
   status?: string | null
   sid?: string | null
+  errorCode?: number | string | null
+  errorMessage?: string | null
 }
 
 export type TwilioSmsSendParams = {
   to: string
+  from: string
   body: string
+  statusCallback?: string
 }
 
 export type TwilioSmsClient = {
@@ -30,7 +45,9 @@ export type TwilioSmsClient = {
 }
 
 export type SendSmsProviderOptions = {
-  client: TwilioSmsClient
+  client?: TwilioSmsClient
+  fromNumber?: string
+  statusCallbackUrl?: string | null
 }
 
 function normalizeRequiredString(value: string, fieldName: string): string {
@@ -50,7 +67,42 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return normalized.length > 0 ? normalized : null
 }
 
+function readOptionalEnv(name: string): string | null {
+  return normalizeOptionalString(process.env[name])
+}
+
+function readDefaultStatusCallbackUrl(): string | null {
+  const explicit = readOptionalEnv('TWILIO_NOTIFICATION_STATUS_CALLBACK_URL')
+  if (explicit) return explicit
+
+  const appUrl = readOptionalEnv('NEXT_PUBLIC_APP_URL')
+  if (!appUrl) return null
+
+  return `${appUrl.replace(/\/+$/, '')}/api/internal/webhooks/twilio/notifications/status`
+}
+
+function readTwilioErrorCode(error: unknown): string | null {
+  if (typeof error !== 'object' || error === null) return null
+
+  const code = 'code' in error ? error.code : null
+
+  if (typeof code === 'string' && code.trim()) return code.trim()
+  if (typeof code === 'number' && Number.isFinite(code)) return String(code)
+
+  return null
+}
+
+function readTwilioErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim()
+  }
+
+  return 'Unknown SMS provider error.'
+}
+
 function buildConfigurationFailure(message: string): ProviderSendResult {
+  const transition = mapProviderSendFailureToDeliveryTransition('FAILED_FINAL')
+
   return {
     ok: false,
     retryable: false,
@@ -59,11 +111,15 @@ function buildConfigurationFailure(message: string): ProviderSendResult {
     providerStatus: 'misconfigured',
     responseMeta: {
       source: 'sendSms',
+      nextStatus: transition.nextStatus,
+      eventType: transition.eventType,
     },
   }
 }
 
 function buildRequestFailure(message: string): ProviderSendResult {
+  const transition = mapProviderSendFailureToDeliveryTransition('FAILED_FINAL')
+
   return {
     ok: false,
     retryable: false,
@@ -72,34 +128,89 @@ function buildRequestFailure(message: string): ProviderSendResult {
     providerStatus: 'invalid_request',
     responseMeta: {
       source: 'sendSms',
+      nextStatus: transition.nextStatus,
+      eventType: transition.eventType,
     },
   }
 }
 
 function buildThrownFailure(error: unknown): ProviderSendResult {
-  const message =
-    error instanceof Error && error.message.trim().length > 0
-      ? error.message
-      : 'Unknown SMS provider error.'
+  const errorCode = readTwilioErrorCode(error)
+  const message = readTwilioErrorMessage(error)
+
+  const failureKind = mapProviderErrorToSendFailureKind({
+    provider: NotificationProvider.TWILIO,
+    errorCode,
+    errorMessage: message,
+  })
+
+  const transition = mapProviderSendFailureToDeliveryTransition(failureKind)
 
   return {
     ok: false,
-    retryable: true,
-    code: 'SMS_PROVIDER_ERROR',
+    retryable: failureKind === 'FAILED_RETRYABLE',
+    code: errorCode ?? 'SMS_PROVIDER_ERROR',
     message,
-    providerStatus: 'error',
+    providerStatus: failureKind === 'FAILED_RETRYABLE' ? 'retryable_error' : 'failed',
     responseMeta: {
       source: 'sendSms',
       errorName: error instanceof Error ? error.name : 'UnknownError',
+      nextStatus: transition.nextStatus,
+      eventType: transition.eventType,
     },
   }
 }
 
-function buildTwilioParams(request: SmsProviderSendRequest): TwilioSmsSendParams {
-  return {
-    to: normalizeRequiredString(request.destination, 'destination'),
-    body: normalizeRequiredString(request.content.text, 'content.text'),
+function buildTwilioParams(args: {
+  request: SmsProviderSendRequest
+  fromNumber: string
+  statusCallbackUrl: string | null
+}): TwilioSmsSendParams {
+  const params: TwilioSmsSendParams = {
+    to: normalizeRequiredString(args.request.destination, 'destination'),
+    from: normalizeRequiredString(args.fromNumber, 'fromNumber'),
+    body: normalizeRequiredString(args.request.content.text, 'content.text'),
   }
+
+  if (args.statusCallbackUrl) {
+    params.statusCallback = args.statusCallbackUrl
+  }
+
+  return params
+}
+
+function createTwilioClientFromConfig(): {
+  client: TwilioSmsClient
+  fromNumber: string
+} {
+  const config = requireTwilioSmsConfig()
+
+  return {
+    client: Twilio(config.accountSid, config.authToken),
+    fromNumber: config.fromNumber,
+  }
+}
+
+function resolveClientAndFromNumber(options: SendSmsProviderOptions): {
+  client: TwilioSmsClient
+  fromNumber: string
+} {
+  if (options.client) {
+    const fromNumber = normalizeOptionalString(options.fromNumber)
+
+    if (!fromNumber) {
+      throw new Error(
+        'sendSms: fromNumber must be provided when using an injected client',
+      )
+    }
+
+    return {
+      client: options.client,
+      fromNumber,
+    }
+  }
+
+  return createTwilioClientFromConfig()
 }
 
 export class SmsDeliveryProvider
@@ -109,26 +220,37 @@ export class SmsDeliveryProvider
   readonly channel = NotificationChannel.SMS
 
   private readonly client: TwilioSmsClient
+  private readonly fromNumber: string
+  private readonly statusCallbackUrl: string | null
 
-  constructor(options: SendSmsProviderOptions) {
-    if (!options.client || typeof options.client !== 'object') {
+  constructor(options: SendSmsProviderOptions = {}) {
+    const resolved = resolveClientAndFromNumber(options)
+
+    if (!resolved.client || typeof resolved.client !== 'object') {
       throw new Error('sendSms: client must be provided')
     }
 
     if (
-      !options.client.messages ||
-      typeof options.client.messages !== 'object' ||
-      typeof options.client.messages.create !== 'function'
+      !resolved.client.messages ||
+      typeof resolved.client.messages !== 'object' ||
+      typeof resolved.client.messages.create !== 'function'
     ) {
       throw new Error('sendSms: client.messages.create must be a function')
     }
 
-    this.client = options.client
+    this.client = resolved.client
+    this.fromNumber = resolved.fromNumber
+    this.statusCallbackUrl =
+      options.statusCallbackUrl === undefined
+        ? readDefaultStatusCallbackUrl()
+        : normalizeOptionalString(options.statusCallbackUrl)
   }
 
   async send(request: SmsProviderSendRequest): Promise<ProviderSendResult> {
     if (request.provider !== NotificationProvider.TWILIO) {
-      return buildConfigurationFailure('Expected TWILIO provider for SMS delivery.')
+      return buildConfigurationFailure(
+        'Expected TWILIO provider for SMS delivery.',
+      )
     }
 
     if (request.channel !== NotificationChannel.SMS) {
@@ -138,7 +260,11 @@ export class SmsDeliveryProvider
     let params: TwilioSmsSendParams
 
     try {
-      params = buildTwilioParams(request)
+      params = buildTwilioParams({
+        request,
+        fromNumber: this.fromNumber,
+        statusCallbackUrl: this.statusCallbackUrl,
+      })
     } catch (error) {
       return buildRequestFailure(
         error instanceof Error ? error.message : 'Invalid SMS send request.',
@@ -157,6 +283,8 @@ export class SmsDeliveryProvider
         responseMeta: {
           source: 'sendSms',
           to: response.to,
+          from: params.from,
+          statusCallback: params.statusCallback ?? null,
         },
       }
     } catch (error) {
@@ -166,7 +294,15 @@ export class SmsDeliveryProvider
 }
 
 export function createSmsDeliveryProvider(
-  options: SendSmsProviderOptions,
+  options: SendSmsProviderOptions = {},
 ): SmsDeliveryProvider {
-  return new SmsDeliveryProvider(options)
+  try {
+    return new SmsDeliveryProvider(options)
+  } catch (error) {
+    if (isNotificationProviderConfigError(error)) {
+      throw error
+    }
+
+    throw error
+  }
 }
