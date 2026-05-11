@@ -1,10 +1,18 @@
+// lib/notifications/delivery/sendEmail.test.ts
+
 import { describe, expect, it, vi } from 'vitest'
-import { NotificationChannel, NotificationProvider } from '@prisma/client'
+import {
+  NotificationChannel,
+  NotificationDeliveryEventType,
+  NotificationDeliveryStatus,
+  NotificationProvider,
+} from '@prisma/client'
 
 import {
   EmailDeliveryProvider,
   createEmailDeliveryProvider,
 } from './sendEmail'
+import type { EmailProviderSendRequest } from './providerTypes'
 
 function makeFetchResponse(args: {
   ok: boolean
@@ -16,6 +24,37 @@ function makeFetchResponse(args: {
     status: args.status,
     text: vi.fn().mockResolvedValue(args.text),
   } as unknown as Response
+}
+
+function makeEmailRequest(
+  overrides?: {
+    destination?: string
+    subject?: string
+    text?: string
+    html?: string
+    attemptCount?: number
+    idempotencyKey?: string
+  },
+): EmailProviderSendRequest {
+  return {
+    provider: NotificationProvider.POSTMARK,
+    channel: NotificationChannel.EMAIL,
+    deliveryId: 'delivery_email_1',
+    dispatchId: 'dispatch_1',
+    destination: overrides?.destination ?? 'client@example.com',
+    attemptCount: overrides?.attemptCount ?? 0,
+    maxAttempts: 6,
+    idempotencyKey:
+      overrides?.idempotencyKey ?? 'delivery:delivery_email_1:attempt:1',
+    content: {
+      channel: NotificationChannel.EMAIL,
+      templateKey: 'booking_confirmed',
+      templateVersion: 1,
+      subject: overrides?.subject ?? 'TOVIS: Booking confirmed',
+      text: overrides?.text ?? 'Your booking is confirmed.',
+      html: overrides?.html ?? '<p>Your booking is confirmed.</p>',
+    },
+  }
 }
 
 describe('lib/notifications/delivery/sendEmail', () => {
@@ -54,24 +93,7 @@ describe('lib/notifications/delivery/sendEmail', () => {
       fetchImpl,
     })
 
-    const result = await provider.send({
-      provider: NotificationProvider.POSTMARK,
-      channel: NotificationChannel.EMAIL,
-      deliveryId: 'delivery_email_1',
-      dispatchId: 'dispatch_1',
-      destination: 'client@example.com',
-      attemptCount: 0,
-      maxAttempts: 6,
-      idempotencyKey: 'delivery:delivery_email_1:attempt:1',
-      content: {
-        channel: NotificationChannel.EMAIL,
-        templateKey: 'booking_confirmed',
-        templateVersion: 1,
-        subject: 'TOVIS: Booking confirmed',
-        text: 'Your booking is confirmed.',
-        html: '<p>Your booking is confirmed.</p>',
-      },
-    })
+    const result = await provider.send(makeEmailRequest())
 
     expect(fetchImpl).toHaveBeenCalledWith(
       'https://api.postmarkapp.com/email',
@@ -94,6 +116,7 @@ describe('lib/notifications/delivery/sendEmail', () => {
             dispatchId: 'dispatch_1',
             idempotencyKey: 'delivery:delivery_email_1:attempt:1',
             provider: NotificationProvider.POSTMARK,
+            channel: NotificationChannel.EMAIL,
           },
         }),
       },
@@ -107,6 +130,7 @@ describe('lib/notifications/delivery/sendEmail', () => {
         source: 'sendEmail',
         to: 'client@example.com',
         submittedAt: '2026-04-09T12:00:00Z',
+        messageStream: 'outbound',
       },
     })
   })
@@ -131,24 +155,15 @@ describe('lib/notifications/delivery/sendEmail', () => {
       fetchImpl,
     })
 
-    const result = await provider.send({
-      provider: NotificationProvider.POSTMARK,
-      channel: NotificationChannel.EMAIL,
-      deliveryId: 'delivery_email_1',
-      dispatchId: 'dispatch_1',
-      destination: 'client@example.com',
-      attemptCount: 1,
-      maxAttempts: 6,
-      idempotencyKey: 'delivery:delivery_email_1:attempt:2',
-      content: {
-        channel: NotificationChannel.EMAIL,
-        templateKey: 'aftercare_ready',
-        templateVersion: 1,
+    const result = await provider.send(
+      makeEmailRequest({
+        attemptCount: 1,
+        idempotencyKey: 'delivery:delivery_email_1:attempt:2',
         subject: 'TOVIS: Aftercare ready',
         text: 'Your aftercare is ready.',
         html: '<p>Your aftercare is ready.</p>',
-      },
-    })
+      }),
+    )
 
     expect(result).toEqual({
       ok: true,
@@ -158,6 +173,7 @@ describe('lib/notifications/delivery/sendEmail', () => {
         source: 'sendEmail',
         to: 'client@example.com',
         submittedAt: null,
+        messageStream: null,
       },
     })
   })
@@ -171,24 +187,11 @@ describe('lib/notifications/delivery/sendEmail', () => {
       fetchImpl,
     })
 
-    const result = await provider.send({
-      provider: NotificationProvider.POSTMARK,
-      channel: NotificationChannel.EMAIL,
-      deliveryId: 'delivery_email_1',
-      dispatchId: 'dispatch_1',
-      destination: 'client@example.com',
-      attemptCount: 0,
-      maxAttempts: 6,
-      idempotencyKey: 'delivery:delivery_email_1:attempt:1',
-      content: {
-        channel: NotificationChannel.EMAIL,
-        templateKey: 'booking_confirmed',
-        templateVersion: 1,
+    const result = await provider.send(
+      makeEmailRequest({
         subject: '   ',
-        text: 'Your booking is confirmed.',
-        html: '<p>Your booking is confirmed.</p>',
-      },
-    })
+      }),
+    )
 
     expect(result).toEqual({
       ok: false,
@@ -198,6 +201,78 @@ describe('lib/notifications/delivery/sendEmail', () => {
       providerStatus: 'invalid_request',
       responseMeta: {
         source: 'sendEmail',
+        nextStatus: NotificationDeliveryStatus.FAILED_FINAL,
+        eventType: NotificationDeliveryEventType.FAILED,
+      },
+    })
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('returns non-retryable configuration failure when provider is not Postmark', async () => {
+    const fetchImpl = vi.fn()
+
+    const provider = new EmailDeliveryProvider({
+      apiToken: 'postmark-token',
+      fromEmail: 'hello@tovis.com',
+      fetchImpl,
+    })
+
+    const request = {
+      ...makeEmailRequest(),
+      provider: NotificationProvider.TWILIO,
+    } as unknown as EmailProviderSendRequest
+
+    const result = await provider.send(request)
+
+    expect(result).toEqual({
+      ok: false,
+      retryable: false,
+      code: 'EMAIL_PROVIDER_MISCONFIGURED',
+      message: 'Expected POSTMARK provider for email delivery.',
+      providerStatus: 'misconfigured',
+      responseMeta: {
+        source: 'sendEmail',
+        nextStatus: NotificationDeliveryStatus.FAILED_FINAL,
+        eventType: NotificationDeliveryEventType.FAILED,
+      },
+    })
+
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('returns non-retryable configuration failure when channel is not EMAIL', async () => {
+    const fetchImpl = vi.fn()
+
+    const provider = new EmailDeliveryProvider({
+      apiToken: 'postmark-token',
+      fromEmail: 'hello@tovis.com',
+      fetchImpl,
+    })
+
+    const request = {
+      ...makeEmailRequest(),
+      channel: NotificationChannel.SMS,
+      content: {
+        channel: NotificationChannel.SMS,
+        templateKey: 'booking_confirmed',
+        templateVersion: 1,
+        text: 'TOVIS booking confirmed',
+      },
+    } as unknown as EmailProviderSendRequest
+
+    const result = await provider.send(request)
+
+    expect(result).toEqual({
+      ok: false,
+      retryable: false,
+      code: 'EMAIL_PROVIDER_MISCONFIGURED',
+      message: 'Expected EMAIL channel for email delivery.',
+      providerStatus: 'misconfigured',
+      responseMeta: {
+        source: 'sendEmail',
+        nextStatus: NotificationDeliveryStatus.FAILED_FINAL,
+        eventType: NotificationDeliveryEventType.FAILED,
       },
     })
 
@@ -219,24 +294,7 @@ describe('lib/notifications/delivery/sendEmail', () => {
       fetchImpl,
     })
 
-    const result = await provider.send({
-      provider: NotificationProvider.POSTMARK,
-      channel: NotificationChannel.EMAIL,
-      deliveryId: 'delivery_email_1',
-      dispatchId: 'dispatch_1',
-      destination: 'client@example.com',
-      attemptCount: 0,
-      maxAttempts: 6,
-      idempotencyKey: 'delivery:delivery_email_1:attempt:1',
-      content: {
-        channel: NotificationChannel.EMAIL,
-        templateKey: 'booking_confirmed',
-        templateVersion: 1,
-        subject: 'TOVIS: Booking confirmed',
-        text: 'Your booking is confirmed.',
-        html: '<p>Your booking is confirmed.</p>',
-      },
-    })
+    const result = await provider.send(makeEmailRequest())
 
     expect(result).toEqual({
       ok: false,
@@ -248,6 +306,8 @@ describe('lib/notifications/delivery/sendEmail', () => {
         source: 'sendEmail',
         status: 429,
         bodyText: 'Rate limited',
+        nextStatus: NotificationDeliveryStatus.FAILED_RETRYABLE,
+        eventType: NotificationDeliveryEventType.RETRY_SCHEDULED,
       },
     })
   })
@@ -267,24 +327,7 @@ describe('lib/notifications/delivery/sendEmail', () => {
       fetchImpl,
     })
 
-    const result = await provider.send({
-      provider: NotificationProvider.POSTMARK,
-      channel: NotificationChannel.EMAIL,
-      deliveryId: 'delivery_email_1',
-      dispatchId: 'dispatch_1',
-      destination: 'client@example.com',
-      attemptCount: 0,
-      maxAttempts: 6,
-      idempotencyKey: 'delivery:delivery_email_1:attempt:1',
-      content: {
-        channel: NotificationChannel.EMAIL,
-        templateKey: 'booking_confirmed',
-        templateVersion: 1,
-        subject: 'TOVIS: Booking confirmed',
-        text: 'Your booking is confirmed.',
-        html: '<p>Your booking is confirmed.</p>',
-      },
-    })
+    const result = await provider.send(makeEmailRequest())
 
     expect(result).toEqual({
       ok: false,
@@ -296,6 +339,8 @@ describe('lib/notifications/delivery/sendEmail', () => {
         source: 'sendEmail',
         status: 422,
         bodyText: 'Unprocessable entity',
+        nextStatus: NotificationDeliveryStatus.FAILED_FINAL,
+        eventType: NotificationDeliveryEventType.FAILED,
       },
     })
   })
@@ -320,24 +365,7 @@ describe('lib/notifications/delivery/sendEmail', () => {
       fetchImpl,
     })
 
-    const result = await provider.send({
-      provider: NotificationProvider.POSTMARK,
-      channel: NotificationChannel.EMAIL,
-      deliveryId: 'delivery_email_1',
-      dispatchId: 'dispatch_1',
-      destination: 'client@example.com',
-      attemptCount: 0,
-      maxAttempts: 6,
-      idempotencyKey: 'delivery:delivery_email_1:attempt:1',
-      content: {
-        channel: NotificationChannel.EMAIL,
-        templateKey: 'booking_confirmed',
-        templateVersion: 1,
-        subject: 'TOVIS: Booking confirmed',
-        text: 'Your booking is confirmed.',
-        html: '<p>Your booking is confirmed.</p>',
-      },
-    })
+    const result = await provider.send(makeEmailRequest())
 
     expect(result).toEqual({
       ok: false,
@@ -347,9 +375,50 @@ describe('lib/notifications/delivery/sendEmail', () => {
       providerStatus: 'rejected',
       responseMeta: {
         source: 'sendEmail',
-        errorCode: 300,
+        errorCode: '300',
         to: 'client@example.com',
         submittedAt: '2026-04-09T12:00:00Z',
+        nextStatus: NotificationDeliveryStatus.FAILED_FINAL,
+        eventType: NotificationDeliveryEventType.FAILED,
+      },
+    })
+  })
+
+  it('maps retryable postmark API rejection correctly', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      makeFetchResponse({
+        ok: true,
+        status: 200,
+        text: JSON.stringify({
+          ErrorCode: 500,
+          Message: 'Temporary Postmark failure',
+          To: 'client@example.com',
+          SubmittedAt: '2026-04-09T12:00:00Z',
+        }),
+      }),
+    )
+
+    const provider = new EmailDeliveryProvider({
+      apiToken: 'postmark-token',
+      fromEmail: 'hello@tovis.com',
+      fetchImpl,
+    })
+
+    const result = await provider.send(makeEmailRequest())
+
+    expect(result).toEqual({
+      ok: false,
+      retryable: true,
+      code: 'POSTMARK_API_500',
+      message: 'Temporary Postmark failure',
+      providerStatus: 'retryable_error',
+      responseMeta: {
+        source: 'sendEmail',
+        errorCode: '500',
+        to: 'client@example.com',
+        submittedAt: '2026-04-09T12:00:00Z',
+        nextStatus: NotificationDeliveryStatus.FAILED_RETRYABLE,
+        eventType: NotificationDeliveryEventType.RETRY_SCHEDULED,
       },
     })
   })
@@ -369,24 +438,7 @@ describe('lib/notifications/delivery/sendEmail', () => {
       fetchImpl,
     })
 
-    const result = await provider.send({
-      provider: NotificationProvider.POSTMARK,
-      channel: NotificationChannel.EMAIL,
-      deliveryId: 'delivery_email_1',
-      dispatchId: 'dispatch_1',
-      destination: 'client@example.com',
-      attemptCount: 0,
-      maxAttempts: 6,
-      idempotencyKey: 'delivery:delivery_email_1:attempt:1',
-      content: {
-        channel: NotificationChannel.EMAIL,
-        templateKey: 'booking_confirmed',
-        templateVersion: 1,
-        subject: 'TOVIS: Booking confirmed',
-        text: 'Your booking is confirmed.',
-        html: '<p>Your booking is confirmed.</p>',
-      },
-    })
+    const result = await provider.send(makeEmailRequest())
 
     expect(result).toEqual({
       ok: false,
@@ -397,6 +449,8 @@ describe('lib/notifications/delivery/sendEmail', () => {
       responseMeta: {
         source: 'sendEmail',
         bodyText: 'not-json',
+        nextStatus: NotificationDeliveryStatus.FAILED_RETRYABLE,
+        eventType: NotificationDeliveryEventType.RETRY_SCHEDULED,
       },
     })
   })
@@ -410,34 +464,19 @@ describe('lib/notifications/delivery/sendEmail', () => {
       fetchImpl,
     })
 
-    const result = await provider.send({
-      provider: NotificationProvider.POSTMARK,
-      channel: NotificationChannel.EMAIL,
-      deliveryId: 'delivery_email_1',
-      dispatchId: 'dispatch_1',
-      destination: 'client@example.com',
-      attemptCount: 0,
-      maxAttempts: 6,
-      idempotencyKey: 'delivery:delivery_email_1:attempt:1',
-      content: {
-        channel: NotificationChannel.EMAIL,
-        templateKey: 'booking_confirmed',
-        templateVersion: 1,
-        subject: 'TOVIS: Booking confirmed',
-        text: 'Your booking is confirmed.',
-        html: '<p>Your booking is confirmed.</p>',
-      },
-    })
+    const result = await provider.send(makeEmailRequest())
 
     expect(result).toEqual({
       ok: false,
       retryable: true,
       code: 'EMAIL_PROVIDER_ERROR',
       message: 'network down',
-      providerStatus: 'error',
+      providerStatus: 'retryable_error',
       responseMeta: {
         source: 'sendEmail',
         errorName: 'Error',
+        nextStatus: NotificationDeliveryStatus.FAILED_RETRYABLE,
+        eventType: NotificationDeliveryEventType.RETRY_SCHEDULED,
       },
     })
   })
@@ -462,5 +501,16 @@ describe('lib/notifications/delivery/sendEmail', () => {
           fetchImpl: vi.fn(),
         }),
     ).toThrow('sendEmail: missing fromEmail')
+  })
+
+  it('throws at construction time when fetchImpl is not a function', () => {
+    expect(
+      () =>
+        new EmailDeliveryProvider({
+          apiToken: 'postmark-token',
+          fromEmail: 'hello@tovis.com',
+          fetchImpl: null as never,
+        }),
+    ).toThrow('sendEmail: fetchImpl must be a function')
   })
 })

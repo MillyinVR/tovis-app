@@ -3,8 +3,15 @@
 import {
   NotificationChannel,
   NotificationProvider,
-  Prisma,
 } from '@prisma/client'
+
+import {
+  requirePostmarkEmailConfig,
+  isNotificationProviderConfigError,
+} from '@/lib/notifications/config'
+import {
+  mapProviderSendFailureToDeliveryTransition,
+} from '@/lib/notifications/providerStatus'
 
 import {
   type EmailProviderSendRequest,
@@ -24,15 +31,15 @@ export type PostmarkEmailRequest = {
 
 export type PostmarkEmailResponse = {
   MessageID?: string | null
-  ErrorCode?: number
+  ErrorCode?: number | string | null
   Message?: string | null
   SubmittedAt?: string | null
   To?: string | null
 }
 
 export type SendEmailProviderOptions = {
-  apiToken: string
-  fromEmail: string
+  apiToken?: string
+  fromEmail?: string
   messageStream?: string | null
   fetchImpl?: typeof fetch
 }
@@ -56,7 +63,35 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return normalized.length > 0 ? normalized : null
 }
 
+function readPostmarkErrorCode(value: number | string | null | undefined): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value)
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim()
+  }
+
+  return '0'
+}
+
+function isRetryableHttpStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500
+}
+
+function isRetryablePostmarkApiCode(code: string): boolean {
+  const numeric = Number(code)
+
+  if (!Number.isFinite(numeric)) {
+    return false
+  }
+
+  return numeric === 429 || numeric >= 500
+}
+
 function buildConfigurationFailure(message: string): ProviderSendResult {
+  const transition = mapProviderSendFailureToDeliveryTransition('FAILED_FINAL')
+
   return {
     ok: false,
     retryable: false,
@@ -65,11 +100,15 @@ function buildConfigurationFailure(message: string): ProviderSendResult {
     providerStatus: 'misconfigured',
     responseMeta: {
       source: 'sendEmail',
+      nextStatus: transition.nextStatus,
+      eventType: transition.eventType,
     },
   }
 }
 
 function buildRequestFailure(message: string): ProviderSendResult {
+  const transition = mapProviderSendFailureToDeliveryTransition('FAILED_FINAL')
+
   return {
     ok: false,
     retryable: false,
@@ -78,6 +117,8 @@ function buildRequestFailure(message: string): ProviderSendResult {
     providerStatus: 'invalid_request',
     responseMeta: {
       source: 'sendEmail',
+      nextStatus: transition.nextStatus,
+      eventType: transition.eventType,
     },
   }
 }
@@ -85,37 +126,38 @@ function buildRequestFailure(message: string): ProviderSendResult {
 function buildThrownFailure(error: unknown): ProviderSendResult {
   const message =
     error instanceof Error && error.message.trim().length > 0
-      ? error.message
+      ? error.message.trim()
       : 'Unknown email provider error.'
+
+  const transition = mapProviderSendFailureToDeliveryTransition(
+    'FAILED_RETRYABLE',
+  )
 
   return {
     ok: false,
     retryable: true,
     code: 'EMAIL_PROVIDER_ERROR',
     message,
-    providerStatus: 'error',
+    providerStatus: 'retryable_error',
     responseMeta: {
       source: 'sendEmail',
       errorName: error instanceof Error ? error.name : 'UnknownError',
+      nextStatus: transition.nextStatus,
+      eventType: transition.eventType,
     },
   }
 }
 
 function buildMetadata(
   request: EmailProviderSendRequest,
-): Record<string, string> | undefined {
-  const metadata: Record<string, string> = {
+): Record<string, string> {
+  return {
     deliveryId: request.deliveryId,
     dispatchId: request.dispatchId,
     idempotencyKey: request.idempotencyKey,
+    provider: request.provider,
+    channel: request.channel,
   }
-
-  const provider = normalizeOptionalString(request.provider)
-  if (provider) {
-    metadata.provider = provider
-  }
-
-  return metadata
 }
 
 function buildPostmarkRequest(args: {
@@ -126,32 +168,45 @@ function buildPostmarkRequest(args: {
   return {
     From: normalizeRequiredString(args.fromEmail, 'fromEmail'),
     To: normalizeRequiredString(args.request.destination, 'destination'),
-    Subject: normalizeRequiredString(args.request.content.subject, 'content.subject'),
-    TextBody: normalizeRequiredString(args.request.content.text, 'content.text'),
-    HtmlBody: normalizeRequiredString(args.request.content.html, 'content.html'),
+    Subject: normalizeRequiredString(
+      args.request.content.subject,
+      'content.subject',
+    ),
+    TextBody: normalizeRequiredString(
+      args.request.content.text,
+      'content.text',
+    ),
+    HtmlBody: normalizeRequiredString(
+      args.request.content.html,
+      'content.html',
+    ),
     ...(args.messageStream ? { MessageStream: args.messageStream } : {}),
     Metadata: buildMetadata(args.request),
   }
-}
-
-function isRetryableHttpStatus(status: number): boolean {
-  return status === 408 || status === 425 || status === 429 || status >= 500
 }
 
 function mapHttpFailure(args: {
   status: number
   bodyText: string
 }): ProviderSendResult {
+  const retryable = isRetryableHttpStatus(args.status)
+  const transition = mapProviderSendFailureToDeliveryTransition(
+    retryable ? 'FAILED_RETRYABLE' : 'FAILED_FINAL',
+  )
+
   return {
     ok: false,
-    retryable: isRetryableHttpStatus(args.status),
+    retryable,
     code: `POSTMARK_HTTP_${args.status}`,
-    message: args.bodyText || `Postmark request failed with HTTP ${args.status}.`,
+    message:
+      args.bodyText || `Postmark request failed with HTTP ${args.status}.`,
     providerStatus: `http_${args.status}`,
     responseMeta: {
       source: 'sendEmail',
       status: args.status,
       bodyText: args.bodyText,
+      nextStatus: transition.nextStatus,
+      eventType: transition.eventType,
     },
   }
 }
@@ -159,8 +214,12 @@ function mapHttpFailure(args: {
 function mapApiFailure(args: {
   response: PostmarkEmailResponse
 }): ProviderSendResult {
-  const errorCode = args.response.ErrorCode ?? 0
-  const retryable = errorCode >= 500 || errorCode === 429
+  const errorCode = readPostmarkErrorCode(args.response.ErrorCode)
+  const retryable = isRetryablePostmarkApiCode(errorCode)
+
+  const transition = mapProviderSendFailureToDeliveryTransition(
+    retryable ? 'FAILED_RETRYABLE' : 'FAILED_FINAL',
+  )
 
   return {
     ok: false,
@@ -169,13 +228,109 @@ function mapApiFailure(args: {
     message:
       normalizeOptionalString(args.response.Message) ??
       'Postmark API rejected the email.',
-    providerStatus: 'rejected',
+    providerStatus: retryable ? 'retryable_error' : 'rejected',
     responseMeta: {
       source: 'sendEmail',
       errorCode,
       to: normalizeOptionalString(args.response.To),
       submittedAt: normalizeOptionalString(args.response.SubmittedAt),
+      nextStatus: transition.nextStatus,
+      eventType: transition.eventType,
     },
+  }
+}
+
+function buildInvalidResponseFailure(rawText: string): ProviderSendResult {
+  const transition = mapProviderSendFailureToDeliveryTransition(
+    'FAILED_RETRYABLE',
+  )
+
+  return {
+    ok: false,
+    retryable: true,
+    code: 'POSTMARK_INVALID_RESPONSE',
+    message: 'Postmark returned an unreadable response body.',
+    providerStatus: 'invalid_response',
+    responseMeta: {
+      source: 'sendEmail',
+      bodyText: rawText,
+      nextStatus: transition.nextStatus,
+      eventType: transition.eventType,
+    },
+  }
+}
+
+function parsePostmarkResponse(rawText: string): PostmarkEmailResponse | null {
+  if (!rawText.trim()) return null
+
+  try {
+    const parsed: unknown = JSON.parse(rawText)
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return null
+    }
+
+    const record = parsed as Record<string, unknown>
+
+    return {
+      MessageID:
+        typeof record.MessageID === 'string' || record.MessageID === null
+          ? record.MessageID
+          : undefined,
+      ErrorCode:
+        typeof record.ErrorCode === 'number' ||
+        typeof record.ErrorCode === 'string' ||
+        record.ErrorCode === null
+          ? record.ErrorCode
+          : undefined,
+      Message:
+        typeof record.Message === 'string' || record.Message === null
+          ? record.Message
+          : undefined,
+      SubmittedAt:
+        typeof record.SubmittedAt === 'string' || record.SubmittedAt === null
+          ? record.SubmittedAt
+          : undefined,
+      To:
+        typeof record.To === 'string' || record.To === null
+          ? record.To
+          : undefined,
+    }
+  } catch {
+    return null
+  }
+}
+
+function resolvePostmarkOptions(options: SendEmailProviderOptions): {
+  apiToken: string
+  fromEmail: string
+  messageStream: string | null
+  fetchImpl: typeof fetch
+} {
+  const fetchImpl = options.fetchImpl === undefined ? fetch : options.fetchImpl
+
+  const hasInjectedConfig =
+    options.apiToken !== undefined || options.fromEmail !== undefined
+
+  if (hasInjectedConfig) {
+    return {
+      apiToken: normalizeRequiredString(options.apiToken ?? '', 'apiToken'),
+      fromEmail: normalizeRequiredString(options.fromEmail ?? '', 'fromEmail'),
+      messageStream: normalizeOptionalString(options.messageStream),
+      fetchImpl,
+    }
+  }
+
+  const config = requirePostmarkEmailConfig()
+
+  return {
+    apiToken: config.serverToken,
+    fromEmail: config.fromEmail,
+    messageStream:
+      options.messageStream === undefined
+        ? config.messageStream
+        : normalizeOptionalString(options.messageStream),
+    fetchImpl,
   }
 }
 
@@ -190,11 +345,13 @@ export class EmailDeliveryProvider
   private readonly messageStream: string | null
   private readonly fetchImpl: typeof fetch
 
-  constructor(options: SendEmailProviderOptions) {
-    this.apiToken = normalizeRequiredString(options.apiToken, 'apiToken')
-    this.fromEmail = normalizeRequiredString(options.fromEmail, 'fromEmail')
-    this.messageStream = normalizeOptionalString(options.messageStream)
-    this.fetchImpl = options.fetchImpl ?? fetch
+  constructor(options: SendEmailProviderOptions = {}) {
+    const resolved = resolvePostmarkOptions(options)
+
+    this.apiToken = resolved.apiToken
+    this.fromEmail = resolved.fromEmail
+    this.messageStream = resolved.messageStream
+    this.fetchImpl = resolved.fetchImpl
 
     if (typeof this.fetchImpl !== 'function') {
       throw new Error('sendEmail: fetchImpl must be a function')
@@ -240,13 +397,7 @@ export class EmailDeliveryProvider
       })
 
       const rawText = await response.text()
-      let parsed: PostmarkEmailResponse | null = null
-
-      try {
-        parsed = rawText ? (JSON.parse(rawText) as PostmarkEmailResponse) : null
-      } catch {
-        parsed = null
-      }
+      const parsed = parsePostmarkResponse(rawText)
 
       if (!response.ok) {
         return mapHttpFailure({
@@ -256,20 +407,10 @@ export class EmailDeliveryProvider
       }
 
       if (!parsed) {
-        return {
-          ok: false,
-          retryable: true,
-          code: 'POSTMARK_INVALID_RESPONSE',
-          message: 'Postmark returned an unreadable response body.',
-          providerStatus: 'invalid_response',
-          responseMeta: {
-            source: 'sendEmail',
-            bodyText: rawText,
-          },
-        }
+        return buildInvalidResponseFailure(rawText)
       }
 
-      if ((parsed.ErrorCode ?? 0) !== 0) {
+      if (readPostmarkErrorCode(parsed.ErrorCode) !== '0') {
         return mapApiFailure({ response: parsed })
       }
 
@@ -282,6 +423,7 @@ export class EmailDeliveryProvider
           source: 'sendEmail',
           to: normalizeOptionalString(parsed.To) ?? request.destination,
           submittedAt: normalizeOptionalString(parsed.SubmittedAt),
+          messageStream: this.messageStream,
         },
       }
     } catch (error) {
@@ -291,7 +433,15 @@ export class EmailDeliveryProvider
 }
 
 export function createEmailDeliveryProvider(
-  options: SendEmailProviderOptions,
+  options: SendEmailProviderOptions = {},
 ): EmailDeliveryProvider {
-  return new EmailDeliveryProvider(options)
+  try {
+    return new EmailDeliveryProvider(options)
+  } catch (error) {
+    if (isNotificationProviderConfigError(error)) {
+      throw error
+    }
+
+    throw error
+  }
 }
