@@ -1,0 +1,43 @@
+// app/api/auth/resend-phone-code/route.ts
+
+import { jsonFail, jsonOk } from '@/app/api/_utils'
+import {
+  isRecord,
+  normalizePhoneForVerification,
+  parsePhoneVerificationChannel,
+} from '@/lib/auth/verification'
+import { sendPhoneVerificationCode } from '@/lib/auth/phoneVerification'
+
+export const dynamic = 'force-dynamic'
+
+function readBodyPhone(raw: unknown): string {
+  if (!isRecord(raw)) return ''
+  return normalizePhoneForVerification(raw.phone)
+}
+
+export async function POST(req: Request) {
+  try {
+    const raw: unknown = await req.json().catch(() => null)
+    const phone = readBodyPhone(raw)
+
+    if (!phone) {
+      return jsonFail(400, 'Missing phone number.')
+    }
+
+    const channel = isRecord(raw) ? parsePhoneVerificationChannel(raw.channel) : 'sms'
+    const result = await sendPhoneVerificationCode({ phone, channel })
+
+    if (!result.ok) {
+      return jsonFail(400, result.error)
+    }
+
+    return jsonOk({
+      ok: true,
+      to: result.maskedTo,
+      status: result.status,
+    })
+  } catch (err: unknown) {
+    console.error('POST /api/auth/resend-phone-code error', err)
+    return jsonFail(500, 'Failed to resend phone code.')
+  }
+}
