@@ -133,6 +133,8 @@ function makeProviders() {
         }),
       },
     },
+    fromNumber: '+15550001111',
+    statusCallbackUrl: null,
   })
 
   const email = new EmailDeliveryProvider({
