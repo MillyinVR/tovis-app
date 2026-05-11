@@ -1,59 +1,252 @@
 // app/pro/clients/[id]/page.tsx
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { Prisma } from '@prisma/client'
+import type { ReactNode } from 'react'
+
+import ClientNameLink from '@/app/_components/ClientNameLink'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import NewNoteForm from './NewNoteForm'
-import NewAllergyForm from './NewAllergyForm'
-import EditAlertBannerForm from './EditAlertBannerForm'
 import { moneyToString } from '@/lib/money'
-import ClientNameLink from '@/app/_components/ClientNameLink'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
-import type { ReactNode } from 'react'
+
+import EditAlertBannerForm from './EditAlertBannerForm'
+import NewAllergyForm from './NewAllergyForm'
+import NewNoteForm from './NewNoteForm'
 
 export const dynamic = 'force-dynamic'
 
 type SearchParams = Record<string, string | string[] | undefined>
 
-function firstParam(v: string | string[] | undefined): string {
-  return Array.isArray(v) ? (v[0] ?? '') : (v ?? '')
+type BookingFilter =
+  | 'ALL'
+  | 'WITH_ME'
+  | 'MATCHES_MY_SERVICES'
+  | 'UPCOMING'
+  | 'PAST'
+  | 'COMPLETED'
+  | 'CANCELLED'
+
+const BOOKING_FILTERS: readonly BookingFilter[] = [
+  'ALL',
+  'WITH_ME',
+  'MATCHES_MY_SERVICES',
+  'UPCOMING',
+  'PAST',
+  'COMPLETED',
+  'CANCELLED',
+]
+
+const CLIENT_DETAIL_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  phone: true,
+  alertBanner: true,
+  user: { select: { email: true } },
+  notes: {
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      title: true,
+      body: true,
+      createdAt: true,
+    },
+  },
+  allergies: {
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      label: true,
+      severity: true,
+      description: true,
+      createdAt: true,
+      recordedBy: {
+        select: {
+          user: {
+            select: {
+              email: true,
+            },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.ClientProfileSelect
+
+const BOOKING_ROW_SELECT = {
+  id: true,
+  status: true,
+  scheduledFor: true,
+  totalDurationMinutes: true,
+  totalAmount: true,
+  subtotalSnapshot: true,
+  professionalId: true,
+  serviceId: true,
+  service: {
+    select: {
+      name: true,
+      category: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  },
+  professional: {
+    select: {
+      businessName: true,
+      user: {
+        select: {
+          email: true,
+        },
+      },
+    },
+  },
+  aftercareSummary: {
+    select: {
+      notes: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+const PRODUCT_REC_SELECT = {
+  id: true,
+  note: true,
+  product: {
+    select: {
+      name: true,
+      brand: true,
+    },
+  },
+  aftercareSummary: {
+    select: {
+      booking: {
+        select: {
+          scheduledFor: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.ProductRecommendationSelect
+
+const CLIENT_LEFT_REVIEW_SELECT = {
+  id: true,
+  rating: true,
+  headline: true,
+  body: true,
+  createdAt: true,
+  professional: {
+    select: {
+      businessName: true,
+      user: {
+        select: {
+          email: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.ReviewSelect
+
+const PRO_FEEDBACK_SELECT = {
+  id: true,
+  title: true,
+  body: true,
+  createdAt: true,
+  professional: {
+    select: {
+      businessName: true,
+      user: {
+        select: {
+          email: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.ClientProfessionalNoteSelect
+
+type ClientDetailRecord = Prisma.ClientProfileGetPayload<{
+  select: typeof CLIENT_DETAIL_SELECT
+}>
+
+type BookingRow = Prisma.BookingGetPayload<{
+  select: typeof BOOKING_ROW_SELECT
+}>
+
+type ProductRecommendationRow = Prisma.ProductRecommendationGetPayload<{
+  select: typeof PRODUCT_REC_SELECT
+}>
+
+type ClientLeftReviewRow = Prisma.ReviewGetPayload<{
+  select: typeof CLIENT_LEFT_REVIEW_SELECT
+}>
+
+type ProFeedbackRow = Prisma.ClientProfessionalNoteGetPayload<{
+  select: typeof PRO_FEEDBACK_SELECT
+}>
+
+function firstParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
 }
 
-function formatDate(d: Date | string) {
-  const date = typeof d === 'string' ? new Date(d) : d
-  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+function formatDate(value: Date | string): string {
+  const date = typeof value === 'string' ? new Date(value) : value
+
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })
 }
 
-function safeUpper(v: unknown) {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+function safeUpper(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toUpperCase() : ''
 }
 
-function buildProToClientMessageHref(args: { proId: string; clientId: string }) {
+function buildProToClientMessageHref(args: {
+  proId: string
+  clientId: string
+}): string {
   const { proId, clientId } = args
-  return `/messages/start?contextType=PRO_PROFILE&contextId=${encodeURIComponent(proId)}&clientId=${encodeURIComponent(
-    clientId,
-  )}`
+
+  return `/messages/start?contextType=PRO_PROFILE&contextId=${encodeURIComponent(
+    proId,
+  )}&clientId=${encodeURIComponent(clientId)}`
 }
 
+function statusTone(status: unknown): string {
+  const normalizedStatus = safeUpper(status)
 
-function statusTone(status: unknown) {
-  const s = safeUpper(status)
-  if (s === 'COMPLETED') return 'border-toneSuccess/30 text-toneSuccess'
-  if (s === 'CANCELLED') return 'border-toneDanger/30 text-toneDanger'
-  if (s === 'ACCEPTED') return 'border-accentPrimary/30 text-textPrimary'
-  if (s === 'PENDING') return 'border-white/10 text-textPrimary'
+  if (normalizedStatus === 'COMPLETED') {
+    return 'border-toneSuccess/30 text-toneSuccess'
+  }
+
+  if (normalizedStatus === 'CANCELLED') {
+    return 'border-toneDanger/30 text-toneDanger'
+  }
+
+  if (normalizedStatus === 'ACCEPTED') {
+    return 'border-accentPrimary/30 text-textPrimary'
+  }
+
+  if (normalizedStatus === 'PENDING') {
+    return 'border-white/10 text-textPrimary'
+  }
+
   return 'border-white/10 text-textSecondary'
 }
 
 function StatusPill({ status }: { status: unknown }) {
-  const s = safeUpper(status) || 'UNKNOWN'
+  const normalizedStatus = safeUpper(status) || 'UNKNOWN'
+
   return (
     <span
       className={[
         'inline-flex items-center rounded-full border bg-bgPrimary px-2 py-1 text-[11px] font-black',
-        statusTone(s),
+        statusTone(normalizedStatus),
       ].join(' ')}
     >
-      {s}
+      {normalizedStatus}
     </span>
   )
 }
@@ -76,43 +269,543 @@ function SectionCard({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-[15px] font-black text-textPrimary">{title}</h2>
-          {subtitle ? <div className="mt-1 text-[12px] font-semibold text-textSecondary">{subtitle}</div> : null}
+
+          {subtitle ? (
+            <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+              {subtitle}
+            </div>
+          ) : null}
         </div>
+
         {right ? <div className="shrink-0">{right}</div> : null}
       </div>
 
-      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">{children}</div>
+      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+        {children}
+      </div>
     </section>
   )
 }
 
-type BookingFilter = 'ALL' | 'WITH_ME' | 'MATCHES_MY_SERVICES' | 'UPCOMING' | 'PAST' | 'COMPLETED' | 'CANCELLED'
-
 function normalizeBookingFilter(raw: unknown): BookingFilter {
-  const s = String(raw || '').trim().toUpperCase()
-  if (s === 'ALL' || s === 'WITH_ME' || s === 'MATCHES_MY_SERVICES' || s === 'UPCOMING' || s === 'PAST' || s === 'COMPLETED' || s === 'CANCELLED') {
-    return s as BookingFilter
-  }
-  return 'ALL'
+  const normalized = String(raw || '').trim().toUpperCase()
+
+  return BOOKING_FILTERS.includes(normalized as BookingFilter)
+    ? (normalized as BookingFilter)
+    : 'ALL'
 }
 
-function buildBookingSearchIndex(b: any) {
+function buildBookingSearchIndex(booking: BookingRow): string {
   const parts = [
-    b?.service?.name,
-    b?.service?.category?.name,
-    b?.professional?.businessName,
-    b?.professional?.user?.email,
-    b?.status,
-    b?.aftercareSummary?.notes,
-    String(b?.totalDurationMinutes ?? ''),
-    String(b?.totalAmount ?? b?.subtotalSnapshot ?? ''),
-    b?.scheduledFor ? formatDate(b.scheduledFor) : '',
+    booking.service?.name,
+    booking.service?.category?.name,
+    booking.professional?.businessName,
+    booking.professional?.user?.email,
+    booking.status,
+    booking.aftercareSummary?.notes,
+    String(booking.totalDurationMinutes ?? ''),
+    String(booking.totalAmount ?? booking.subtotalSnapshot ?? ''),
+    booking.scheduledFor ? formatDate(booking.scheduledFor) : '',
   ]
 
   return parts
     .filter(Boolean)
-    .map((x) => String(x).toLowerCase())
+    .map((part) => String(part).toLowerCase())
     .join(' ')
+}
+
+function bookingWhereForFilter(args: {
+  clientId: string
+  proId: string
+  bookingFilter: BookingFilter
+  myServiceIds: string[]
+  now: Date
+}): Prisma.BookingWhereInput {
+  const { clientId, proId, bookingFilter, myServiceIds, now } = args
+
+  const where: Prisma.BookingWhereInput = { clientId }
+
+  if (bookingFilter === 'WITH_ME') {
+    where.professionalId = proId
+  }
+
+  if (bookingFilter === 'UPCOMING') {
+    where.scheduledFor = { gte: now }
+  }
+
+  if (bookingFilter === 'PAST') {
+    where.scheduledFor = { lt: now }
+  }
+
+  if (bookingFilter === 'COMPLETED') {
+    where.status = 'COMPLETED'
+  }
+
+  if (bookingFilter === 'CANCELLED') {
+    where.status = 'CANCELLED'
+  }
+
+  if (bookingFilter === 'MATCHES_MY_SERVICES') {
+    where.serviceId = { in: myServiceIds }
+  }
+
+  return where
+}
+
+function visibleClientIdSetFromRows(
+  rows: Array<{ clientId: string }>,
+): Set<string> {
+  return new Set(rows.map((row) => row.clientId).filter(Boolean))
+}
+
+function upcomingBookingFromRows(rows: BookingRow[]): BookingRow | null {
+  const nowMs = Date.now()
+
+  return (
+    rows
+      .filter((booking) => booking.scheduledFor.getTime() > nowMs)
+      .sort(
+        (first, second) =>
+          first.scheduledFor.getTime() - second.scheduledFor.getTime(),
+      )[0] ?? null
+  )
+}
+
+function filterBookingsBySearch(args: {
+  rows: BookingRow[]
+  query: string
+}): BookingRow[] {
+  const normalizedQuery = args.query.toLowerCase()
+
+  if (!normalizedQuery) return args.rows
+
+  return args.rows.filter((booking) =>
+    buildBookingSearchIndex(booking).includes(normalizedQuery),
+  )
+}
+
+function sortProductRecommendations(
+  rows: ProductRecommendationRow[],
+): ProductRecommendationRow[] {
+  return [...rows].sort(
+    (first, second) =>
+      second.aftercareSummary.booking.scheduledFor.getTime() -
+      first.aftercareSummary.booking.scheduledFor.getTime(),
+  )
+}
+
+function ClientNotesList({ client }: { client: ClientDetailRecord }) {
+  if (client.notes.length === 0) {
+    return (
+      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+        No notes yet. Start the “professional memory” file.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      {client.notes.map((note) => (
+        <div
+          key={note.id}
+          className="rounded-card border border-white/10 bg-bgPrimary p-4"
+        >
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
+              {note.title || 'Note'}
+            </div>
+
+            <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
+              {formatDate(note.createdAt)}
+            </div>
+          </div>
+
+          <div className="mt-2 whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">
+            {note.body}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ClientAllergiesList({ client }: { client: ClientDetailRecord }) {
+  if (client.allergies.length === 0) {
+    return (
+      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+        No allergies recorded yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      {client.allergies.map((allergy) => (
+        <div
+          key={allergy.id}
+          className="rounded-card border border-white/10 bg-bgPrimary p-4"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
+              {allergy.label}
+            </div>
+
+            <span className="shrink-0 rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textSecondary">
+              {String(allergy.severity || '').toUpperCase()}
+            </span>
+          </div>
+
+          {allergy.description ? (
+            <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+              {allergy.description}
+            </div>
+          ) : null}
+
+          <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">
+            Recorded {formatDate(allergy.createdAt)}
+            {allergy.recordedBy?.user?.email
+              ? ` • by ${allergy.recordedBy.user.email}`
+              : ''}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function BookingFilterForm({
+  clientId,
+  bookingFilter,
+  bookingQ,
+}: {
+  clientId: string
+  bookingFilter: BookingFilter
+  bookingQ: string
+}) {
+  return (
+    <form
+      className="flex flex-wrap items-center justify-end gap-2"
+      method="GET"
+      action=""
+    >
+      <div className="flex items-center gap-2">
+        <label
+          className="text-[11px] font-black text-textSecondary"
+          htmlFor="bookingFilter"
+        >
+          View
+        </label>
+
+        <select
+          id="bookingFilter"
+          name="bookingFilter"
+          defaultValue={bookingFilter}
+          className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary"
+        >
+          <option value="ALL">All bookings</option>
+          <option value="WITH_ME">Only bookings with me</option>
+          <option value="MATCHES_MY_SERVICES">Only services I offer</option>
+          <option value="UPCOMING">Upcoming</option>
+          <option value="PAST">Past</option>
+          <option value="COMPLETED">Completed</option>
+          <option value="CANCELLED">Cancelled</option>
+        </select>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="text-[11px] font-black text-textSecondary" htmlFor="q">
+          Search
+        </label>
+
+        <input
+          id="q"
+          name="q"
+          defaultValue={bookingQ}
+          placeholder="Service, category, notes, status…"
+          className="w-56 rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-semibold text-textPrimary placeholder:text-textSecondary/70"
+        />
+      </div>
+
+      <button
+        type="submit"
+        className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
+      >
+        Apply
+      </button>
+
+      {bookingQ || bookingFilter !== 'ALL' ? (
+        <Link
+          href={`/pro/clients/${encodeURIComponent(clientId)}#history`}
+          className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+        >
+          Clear
+        </Link>
+      ) : null}
+    </form>
+  )
+}
+
+function ServiceHistoryList({
+  bookingRowsFiltered,
+  bookingRowsAll,
+  proId,
+}: {
+  bookingRowsFiltered: BookingRow[]
+  bookingRowsAll: BookingRow[]
+  proId: string
+}) {
+  if (bookingRowsFiltered.length === 0) {
+    return (
+      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+        No bookings match your search/filter.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="text-[11px] font-semibold text-textSecondary">
+        Showing{' '}
+        <span className="font-black text-textPrimary">
+          {bookingRowsFiltered.length}
+        </span>{' '}
+        of{' '}
+        <span className="font-black text-textPrimary">
+          {bookingRowsAll.length}
+        </span>
+      </div>
+
+      {bookingRowsFiltered.map((booking) => {
+        const durationMinutes = Math.round(
+          Number(booking.totalDurationMinutes ?? 0),
+        )
+        const total =
+          moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ??
+          '0.00'
+        const when = formatDate(booking.scheduledFor)
+        const proName =
+          booking.professional?.businessName ||
+          booking.professional?.user?.email ||
+          'Professional'
+
+        return (
+          <Link
+            key={booking.id}
+            href={`/pro/bookings/${encodeURIComponent(booking.id)}`}
+            className="block rounded-card border border-white/10 bg-bgPrimary p-4 hover:bg-surfaceGlass"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <div className="truncate text-[13px] font-black text-textPrimary">
+                    {booking.service?.name ?? 'Service'}
+                  </div>
+
+                  <StatusPill status={booking.status} />
+                </div>
+
+                <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                  {booking.service?.category?.name
+                    ? `${booking.service.category.name} • `
+                    : ''}
+                  Pro:{' '}
+                  <span className="font-black text-textPrimary">
+                    {proName}
+                  </span>
+                  {booking.professionalId === proId ? (
+                    <span className="ml-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textSecondary">
+                      Me
+                    </span>
+                  ) : null}
+                </div>
+
+                {booking.aftercareSummary?.notes ? (
+                  <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                    <span className="font-black text-textPrimary">
+                      Aftercare:
+                    </span>{' '}
+                    {booking.aftercareSummary.notes.slice(0, 120)}
+                    {booking.aftercareSummary.notes.length > 120 ? '…' : ''}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="shrink-0 text-right">
+                <div className="text-[12px] font-semibold text-textSecondary">
+                  {when}
+                </div>
+
+                <div className="mt-1 text-[12px] font-black text-textPrimary">
+                  {durationMinutes ? `${durationMinutes} min` : '—'} • ${total}
+                </div>
+              </div>
+            </div>
+          </Link>
+        )
+      })}
+    </div>
+  )
+}
+
+function ProductRecommendationsList({
+  productRecs,
+}: {
+  productRecs: ProductRecommendationRow[]
+}) {
+  if (productRecs.length === 0) {
+    return (
+      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+        No product recommendations recorded yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      {sortProductRecommendations(productRecs).map((recommendation) => (
+        <div
+          key={recommendation.id}
+          className="rounded-card border border-white/10 bg-bgPrimary p-4"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-[13px] font-black text-textPrimary">
+                {recommendation.product?.name ?? 'Product'}
+              </div>
+
+              {recommendation.product?.brand ? (
+                <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                  {recommendation.product.brand}
+                </div>
+              ) : null}
+
+              {recommendation.note ? (
+                <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                  {recommendation.note}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="shrink-0 text-[12px] font-semibold text-textSecondary">
+              {formatDate(recommendation.aftercareSummary.booking.scheduledFor)}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ClientLeftReviewsList({
+  reviews,
+}: {
+  reviews: ClientLeftReviewRow[]
+}) {
+  if (reviews.length === 0) {
+    return (
+      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+        This client hasn&apos;t left any reviews yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      {reviews.map((review) => {
+        const proName =
+          review.professional?.businessName ||
+          review.professional?.user?.email ||
+          'Professional'
+
+        return (
+          <div
+            key={review.id}
+            className="rounded-card border border-white/10 bg-bgPrimary p-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-black text-textPrimary">
+                  {review.headline || 'Review'}
+                </div>
+
+                <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                  Rating:{' '}
+                  <span className="font-black text-textPrimary">
+                    {review.rating}
+                  </span>
+                  /5 • For{' '}
+                  <span className="font-black text-textPrimary">
+                    {proName}
+                  </span>
+                </div>
+              </div>
+
+              <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
+                {formatDate(review.createdAt)}
+              </div>
+            </div>
+
+            {review.body ? (
+              <div className="mt-2 text-[13px] font-semibold text-textSecondary">
+                {review.body}
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ProFeedbackList({ feedback }: { feedback: ProFeedbackRow[] }) {
+  if (feedback.length === 0) {
+    return (
+      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+        No pro feedback recorded yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      {feedback.map((note) => {
+        const proName =
+          note.professional?.businessName ||
+          note.professional?.user?.email ||
+          'Professional'
+
+        return (
+          <div
+            key={note.id}
+            className="rounded-card border border-white/10 bg-bgPrimary p-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-black text-textPrimary">
+                  {note.title || 'Feedback'}
+                </div>
+
+                <div className="mt-1 text-[12px] font-semibold text-textSecondary">
+                  By{' '}
+                  <span className="font-black text-textPrimary">
+                    {proName}
+                  </span>
+                </div>
+              </div>
+
+              <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
+                {formatDate(note.createdAt)}
+              </div>
+            </div>
+
+            <div className="mt-2 whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">
+              {note.body}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export default async function ClientDetailPage(props: {
@@ -120,179 +813,132 @@ export default async function ClientDetailPage(props: {
   searchParams?: Promise<SearchParams>
 }) {
   const { id } = await props.params
-  const clientId = String(id || '').trim()
+  const clientId = id.trim()
+
   if (!clientId) redirect('/pro/clients')
 
   const user = await getCurrentUser()
+
   if (!user || user.role !== 'PRO' || !user.professionalProfile) {
     redirect('/login?from=/pro/clients')
   }
 
   const proId = user.professionalProfile.id
 
-  // ✅ Hard gate (single source of truth)
   const gate = await assertProCanViewClient(proId, clientId)
   if (!gate.ok) redirect('/pro/clients')
 
-  // On this page, since it's gated, internal linking is safe.
-  const canSeeClient = true
   const messageHref = buildProToClientMessageHref({ proId, clientId })
 
-  const sp = (await props.searchParams?.catch(() => ({} as SearchParams))) ?? ({} as SearchParams)
-  const bookingQ = firstParam(sp.q).trim()
-  const bookingFilter = normalizeBookingFilter(firstParam(sp.bookingFilter))
+  const searchParams =
+    (await props.searchParams?.catch(() => ({} as SearchParams))) ??
+    ({} as SearchParams)
+
+  const bookingQ = firstParam(searchParams.q).trim()
+  const bookingFilter = normalizeBookingFilter(
+    firstParam(searchParams.bookingFilter),
+  )
 
   const now = new Date()
 
-  // Fetch "my services" first (only serviceId), to support MATCHES_MY_SERVICES
   const myOfferings = await prisma.professionalServiceOffering.findMany({
     where: { professionalId: proId, isActive: true },
     select: { serviceId: true },
     take: 500,
   })
-  const myServiceIdSet = new Set<string>(myOfferings.map((o) => String(o.serviceId)).filter(Boolean))
 
-  // Build booking where (apply filter at query-time when possible)
-  const bookingWhere: any = { clientId } // note: booking model uses clientId
-  if (bookingFilter === 'WITH_ME') bookingWhere.professionalId = proId
-  if (bookingFilter === 'UPCOMING') bookingWhere.scheduledFor = { gte: now }
-  if (bookingFilter === 'PAST') bookingWhere.scheduledFor = { lt: now }
-  if (bookingFilter === 'COMPLETED') bookingWhere.status = 'COMPLETED'
-  if (bookingFilter === 'CANCELLED') bookingWhere.status = 'CANCELLED'
-  if (bookingFilter === 'MATCHES_MY_SERVICES') {
-    bookingWhere.serviceId = { in: Array.from(myServiceIdSet) }
-  }
+  const myServiceIds = myOfferings
+    .map((offering) => offering.serviceId)
+    .filter(Boolean)
 
-  // Client core (tight select)
-  const client = await prisma.clientProfile.findUnique({
-    where: { id: clientId },
-    select: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      phone: true,
-      alertBanner: true,
-      user: { select: { email: true } },
-
-      // notes: private to this pro
-      notes: {
-        where: { professionalId: proId },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true, title: true, body: true, createdAt: true },
-      },
-
-      allergies: {
-        orderBy: { createdAt: 'desc' },
-        select: {
-          id: true,
-          label: true,
-          severity: true,
-          description: true,
-          createdAt: true,
-          recordedBy: { select: { user: { select: { email: true } } } },
-        },
-      },
-    },
+  const bookingWhere = bookingWhereForFilter({
+    clientId,
+    proId,
+    bookingFilter,
+    myServiceIds,
+    now,
   })
+
+  const [client, bookingRowsAll, productRecs, clientLeftReviews, proFeedback] =
+    await Promise.all([
+      prisma.clientProfile.findUnique({
+        where: { id: clientId },
+        select: {
+          ...CLIENT_DETAIL_SELECT,
+          notes: {
+            where: { professionalId: proId },
+            orderBy: { createdAt: 'desc' },
+            select: CLIENT_DETAIL_SELECT.notes.select,
+          },
+        },
+      }),
+      prisma.booking.findMany({
+        where: bookingWhere,
+        orderBy: { scheduledFor: 'desc' },
+        take: 2000,
+        select: BOOKING_ROW_SELECT,
+      }),
+      prisma.productRecommendation.findMany({
+        where: {
+          aftercareSummary: {
+            booking: {
+              clientId,
+            },
+          },
+        },
+        select: PRODUCT_REC_SELECT,
+        take: 2000,
+      }),
+      prisma.review.findMany({
+        where: { clientId },
+        orderBy: { createdAt: 'desc' },
+        take: 2000,
+        select: CLIENT_LEFT_REVIEW_SELECT,
+      }),
+      prisma.clientProfessionalNote.findMany({
+        where: {
+          clientId,
+          visibility: 'PROFESSIONALS_ONLY',
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 2000,
+        select: PRO_FEEDBACK_SELECT,
+      }),
+    ])
 
   if (!client) redirect('/pro/clients')
 
-  // Bookings (tight select; filter applied in query)
-  const bookingRowsAll = await prisma.booking.findMany({
-    where: bookingWhere,
-    orderBy: { scheduledFor: 'desc' },
-    // cap if you want safety; keep high if you truly need “all time”
-    take: 2000,
-    select: {
-      id: true,
-      status: true,
-      scheduledFor: true,
-      totalDurationMinutes: true,
-      totalAmount: true,
-      subtotalSnapshot: true,
-      professionalId: true,
-      serviceId: true,
-      service: { select: { name: true, category: { select: { name: true } } } },
-      professional: { select: { businessName: true, user: { select: { email: true } } } },
-      aftercareSummary: { select: { notes: true } },
-    },
-  })
+  const visibleClientIdSet = visibleClientIdSetFromRows([{ clientId }])
+  const canSeeClient = visibleClientIdSet.has(client.id)
 
-  // Product recs (tight select)
-  const productRecs = await prisma.productRecommendation.findMany({
-    where: { aftercareSummary: { booking: { clientId: client.id } } },
-    select: {
-      id: true,
-      note: true,
-      product: { select: { name: true, brand: true } },
-      aftercareSummary: { select: { booking: { select: { scheduledFor: true } } } },
-    },
-    take: 2000,
-  })
-
-  // Reviews this client left (tight select)
-  const clientLeftReviews = await prisma.review.findMany({
-    where: { clientId: client.id },
-    orderBy: { createdAt: 'desc' },
-    take: 2000,
-    select: {
-      id: true,
-      rating: true,
-      headline: true,
-      body: true,
-      createdAt: true,
-      professional: { select: { businessName: true, user: { select: { email: true } } } },
-    },
-  })
-
-  // Pro feedback (tight select)
-  const proFeedback = await prisma.clientProfessionalNote.findMany({
-    where: { clientId: client.id, visibility: 'PROFESSIONALS_ONLY' as any },
-    orderBy: { createdAt: 'desc' },
-    take: 2000,
-    select: {
-      id: true,
-      title: true,
-      body: true,
-      createdAt: true,
-      professional: { select: { businessName: true, user: { select: { email: true } } } },
-    },
-  })
-
-  // Derived summary
   const totalVisits = bookingRowsAll.length
   const lastVisit = totalVisits ? bookingRowsAll[0] : null
-  const upcoming =
-    bookingRowsAll
-      .filter((b: any) => new Date(b.scheduledFor) > new Date())
-      .sort((a: any, b: any) => +new Date(a.scheduledFor) - +new Date(b.scheduledFor))[0] ?? null
+  const upcoming = upcomingBookingFromRows(bookingRowsAll)
 
   const email = client.user?.email || ''
   const phone = client.phone || ''
 
-  // Search (still in memory)
-  const bookingRowsFiltered =
-    bookingQ.length >= 1
-      ? bookingRowsAll.filter((b: any) => buildBookingSearchIndex(b).includes(bookingQ.toLowerCase()))
-      : bookingRowsAll
+  const bookingRowsFiltered = filterBookingsBySearch({
+    rows: bookingRowsAll,
+    query: bookingQ,
+  })
 
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8 text-textPrimary">
-      {/* Top nav */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <a
+        <Link
           href="/pro/clients"
           className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
         >
           ← Back to clients
-        </a>
+        </Link>
 
         <div className="text-[11px] font-semibold text-textSecondary">
-          Visibility: <span className="font-black text-textPrimary">Granted</span>
+          Visibility:{' '}
+          <span className="font-black text-textPrimary">Granted</span>
         </div>
       </div>
 
-      {/* Header */}
       <header className="tovis-glass mb-6 rounded-card border border-white/10 bg-bgSecondary p-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
@@ -318,45 +964,59 @@ export default async function ClientDetailPage(props: {
           <div className="grid gap-2 md:text-right">
             <div className="text-[12px] font-semibold text-textSecondary">
               <div>
-                Total visits: <span className="font-black text-textPrimary">{totalVisits}</span>
+                Total visits:{' '}
+                <span className="font-black text-textPrimary">
+                  {totalVisits}
+                </span>
               </div>
+
               {lastVisit ? (
                 <div>
-                  Last visit: <span className="font-black text-textPrimary">{formatDate(lastVisit.scheduledFor)}</span>
+                  Last visit:{' '}
+                  <span className="font-black text-textPrimary">
+                    {formatDate(lastVisit.scheduledFor)}
+                  </span>
                 </div>
               ) : null}
+
               {upcoming ? (
                 <div>
-                  Next visit: <span className="font-black text-textPrimary">{formatDate(upcoming.scheduledFor)}</span>
+                  Next visit:{' '}
+                  <span className="font-black text-textPrimary">
+                    {formatDate(upcoming.scheduledFor)}
+                  </span>
                 </div>
               ) : null}
             </div>
 
             <div className="flex flex-wrap gap-2 md:justify-end">
-              <a
+              <Link
                 href={messageHref}
                 className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
               >
                 Message
-              </a>
+              </Link>
 
-              <a
-                href={`/pro/bookings/new?clientId=${encodeURIComponent(client.id)}`}
+              <Link
+                href={`/pro/bookings/new?clientId=${encodeURIComponent(
+                  client.id,
+                )}`}
                 className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
               >
                 + New booking
-              </a>
+              </Link>
 
               <div className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2">
-                <EditAlertBannerForm clientId={client.id} initialAlertBanner={client.alertBanner ?? null} />
+                <EditAlertBannerForm
+                  clientId={client.id}
+                  initialAlertBanner={client.alertBanner ?? null}
+                />
               </div>
             </div>
-
           </div>
         </div>
       </header>
 
-      {/* Tabs */}
       <nav className="mb-6 flex flex-wrap gap-2">
         {[
           { id: 'notes', label: 'Notes' },
@@ -366,18 +1026,17 @@ export default async function ClientDetailPage(props: {
           { id: 'reviews-left', label: 'Reviews they left' },
           { id: 'pro-feedback', label: 'Pro feedback' },
         ].map((tab) => (
-          <a
+          <Link
             key={tab.id}
             href={`#${tab.id}`}
             className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
           >
             {tab.label}
-          </a>
+          </Link>
         ))}
       </nav>
 
       <div className="grid gap-6">
-        {/* NOTES */}
         <SectionCard
           id="notes"
           title="Pro notes"
@@ -387,26 +1046,9 @@ export default async function ClientDetailPage(props: {
             <NewNoteForm clientId={client.id} />
           </div>
 
-          {client.notes.length === 0 ? (
-            <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
-              No notes yet. Start the “professional memory” file.
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {client.notes.map((note: any) => (
-                <div key={note.id} className="rounded-card border border-white/10 bg-bgPrimary p-4">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">{note.title || 'Note'}</div>
-                    <div className="shrink-0 text-[11px] font-semibold text-textSecondary">{formatDate(note.createdAt)}</div>
-                  </div>
-                  <div className="mt-2 whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">{note.body}</div>
-                </div>
-              ))}
-            </div>
-          )}
+          <ClientNotesList client={client} />
         </SectionCard>
 
-        {/* ALLERGIES */}
         <SectionCard
           id="allergies"
           title="Allergies & sensitivities"
@@ -416,241 +1058,50 @@ export default async function ClientDetailPage(props: {
             <NewAllergyForm clientId={client.id} />
           </div>
 
-          {client.allergies.length === 0 ? (
-            <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
-              No allergies recorded yet.
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {client.allergies.map((a: any) => (
-                <div key={a.id} className="rounded-card border border-white/10 bg-bgPrimary p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">{a.label}</div>
-                    <span className="shrink-0 rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textSecondary">
-                      {String(a.severity || '').toUpperCase()}
-                    </span>
-                  </div>
-
-                  {a.description ? <div className="mt-2 text-[12px] font-semibold text-textSecondary">{a.description}</div> : null}
-
-                  <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">
-                    Recorded {formatDate(a.createdAt)}
-                    {a.recordedBy?.user?.email ? ` • by ${a.recordedBy.user.email}` : ''}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <ClientAllergiesList client={client} />
         </SectionCard>
 
-        {/* SERVICE HISTORY + SEARCH/FILTER */}
         <SectionCard
           id="history"
           title="Service history"
           subtitle="Search and filter all bookings for this client."
           right={
-            <form className="flex flex-wrap items-center justify-end gap-2" method="GET" action="">
-              <div className="flex items-center gap-2">
-                <label className="text-[11px] font-black text-textSecondary" htmlFor="bookingFilter">
-                  View
-                </label>
-                <select
-                  id="bookingFilter"
-                  name="bookingFilter"
-                  defaultValue={bookingFilter}
-                  className="rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-black text-textPrimary"
-                >
-                  <option value="ALL">All bookings</option>
-                  <option value="WITH_ME">Only bookings with me</option>
-                  <option value="MATCHES_MY_SERVICES">Only services I offer</option>
-                  <option value="UPCOMING">Upcoming</option>
-                  <option value="PAST">Past</option>
-                  <option value="COMPLETED">Completed</option>
-                  <option value="CANCELLED">Cancelled</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <label className="text-[11px] font-black text-textSecondary" htmlFor="q">
-                  Search
-                </label>
-                <input
-                  id="q"
-                  name="q"
-                  defaultValue={bookingQ}
-                  placeholder="Service, category, notes, status…"
-                  className="w-56 rounded-full border border-white/10 bg-bgPrimary px-3 py-2 text-[12px] font-semibold text-textPrimary placeholder:text-textSecondary/70"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
-              >
-                Apply
-              </button>
-
-              {(bookingQ || bookingFilter !== 'ALL') ? (
-                <a
-                  href={`/pro/clients/${encodeURIComponent(client.id)}#history`}
-                  className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
-                >
-                  Clear
-                </a>
-              ) : null}
-            </form>
+            <BookingFilterForm
+              clientId={client.id}
+              bookingFilter={bookingFilter}
+              bookingQ={bookingQ}
+            />
           }
         >
-          {bookingRowsFiltered.length === 0 ? (
-            <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
-              No bookings match your search/filter.
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              <div className="text-[11px] font-semibold text-textSecondary">
-                Showing <span className="font-black text-textPrimary">{bookingRowsFiltered.length}</span> of{' '}
-                <span className="font-black text-textPrimary">{bookingRowsAll.length}</span>
-              </div>
-
-              {bookingRowsFiltered.map((b: any) => {
-                const dur = Math.round(Number(b.totalDurationMinutes ?? 0))
-                const total = moneyToString(b.totalAmount ?? b.subtotalSnapshot) ?? '0.00'
-                const when = formatDate(b.scheduledFor)
-                const proName = b?.professional?.businessName || b?.professional?.user?.email || 'Professional'
-
-                return (
-                  <a
-                    key={b.id}
-                    href={`/pro/bookings/${encodeURIComponent(b.id)}`}
-                    className="block rounded-card border border-white/10 bg-bgPrimary p-4 hover:bg-surfaceGlass"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <div className="truncate text-[13px] font-black text-textPrimary">{b.service?.name ?? 'Service'}</div>
-                          <StatusPill status={b.status} />
-                        </div>
-
-                        <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                          {b.service?.category?.name ? `${b.service.category.name} • ` : ''}
-                          Pro: <span className="font-black text-textPrimary">{proName}</span>
-                          {String(b?.professionalId || '') === proId ? (
-                            <span className="ml-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textSecondary">
-                              Me
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {b.aftercareSummary?.notes ? (
-                          <div className="mt-2 text-[12px] font-semibold text-textSecondary">
-                            <span className="font-black text-textPrimary">Aftercare:</span>{' '}
-                            {String(b.aftercareSummary.notes).slice(0, 120)}
-                            {String(b.aftercareSummary.notes).length > 120 ? '…' : ''}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="shrink-0 text-right">
-                        <div className="text-[12px] font-semibold text-textSecondary">{when}</div>
-                        <div className="mt-1 text-[12px] font-black text-textPrimary">
-                          {dur ? `${dur} min` : '—'} • ${total}
-                        </div>
-                      </div>
-                    </div>
-                  </a>
-                )
-              })}
-            </div>
-          )}
+          <ServiceHistoryList
+            bookingRowsFiltered={bookingRowsFiltered}
+            bookingRowsAll={bookingRowsAll}
+            proId={proId}
+          />
         </SectionCard>
 
-        {/* PRODUCTS */}
-        <SectionCard id="products" title="Products recommended" subtitle="Recommendations tied to aftercare entries.">
-          {productRecs.length === 0 ? (
-            <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
-              No product recommendations recorded yet.
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {productRecs
-                .sort((a: any, b: any) => +new Date(b.aftercareSummary.booking.scheduledFor) - +new Date(a.aftercareSummary.booking.scheduledFor))
-                .map((r: any) => (
-                  <div key={r.id} className="rounded-card border border-white/10 bg-bgPrimary p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-[13px] font-black text-textPrimary">{r.product?.name ?? 'Product'}</div>
-                        {r.product?.brand ? <div className="mt-1 text-[12px] font-semibold text-textSecondary">{r.product.brand}</div> : null}
-                        {r.note ? <div className="mt-2 text-[12px] font-semibold text-textSecondary">{r.note}</div> : null}
-                      </div>
-                      <div className="shrink-0 text-[12px] font-semibold text-textSecondary">
-                        {formatDate(r.aftercareSummary.booking.scheduledFor)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          )}
+        <SectionCard
+          id="products"
+          title="Products recommended"
+          subtitle="Recommendations tied to aftercare entries."
+        >
+          <ProductRecommendationsList productRecs={productRecs} />
         </SectionCard>
 
-        {/* REVIEWS THEY LEFT */}
-        <SectionCard id="reviews-left" title="Reviews they left" subtitle="All reviews this client has left (across any professional).">
-          {clientLeftReviews.length === 0 ? (
-            <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
-              This client hasn&apos;t left any reviews yet.
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {clientLeftReviews.map((rev: any) => {
-                const proName = rev?.professional?.businessName || rev?.professional?.user?.email || 'Professional'
-                return (
-                  <div key={rev.id} className="rounded-card border border-white/10 bg-bgPrimary p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-[13px] font-black text-textPrimary">{rev.headline || 'Review'}</div>
-                        <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                          Rating: <span className="font-black text-textPrimary">{rev.rating}</span>/5 • For{' '}
-                          <span className="font-black text-textPrimary">{proName}</span>
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-[11px] font-semibold text-textSecondary">{formatDate(rev.createdAt)}</div>
-                    </div>
-
-                    {rev.body ? <div className="mt-2 text-[13px] font-semibold text-textSecondary">{rev.body}</div> : null}
-                  </div>
-                )
-              })}
-            </div>
-          )}
+        <SectionCard
+          id="reviews-left"
+          title="Reviews they left"
+          subtitle="All reviews this client has left (across any professional)."
+        >
+          <ClientLeftReviewsList reviews={clientLeftReviews} />
         </SectionCard>
 
-        {/* PRO FEEDBACK ABOUT CLIENT */}
-        <SectionCard id="pro-feedback" title="Pro feedback" subtitle="Notes from professionals who serviced this client in the past (shared with pros).">
-          {proFeedback.length === 0 ? (
-            <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
-              No pro feedback recorded yet.
-            </div>
-          ) : (
-            <div className="grid gap-3">
-              {proFeedback.map((n: any) => {
-                const proName = n?.professional?.businessName || n?.professional?.user?.email || 'Professional'
-                return (
-                  <div key={n.id} className="rounded-card border border-white/10 bg-bgPrimary p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-[13px] font-black text-textPrimary">{n.title || 'Feedback'}</div>
-                        <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-                          By <span className="font-black text-textPrimary">{proName}</span>
-                        </div>
-                      </div>
-                      <div className="shrink-0 text-[11px] font-semibold text-textSecondary">{formatDate(n.createdAt)}</div>
-                    </div>
-
-                    <div className="mt-2 whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">{n.body}</div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
+        <SectionCard
+          id="pro-feedback"
+          title="Pro feedback"
+          subtitle="Notes from professionals who serviced this client in the past (shared with pros)."
+        >
+          <ProFeedbackList feedback={proFeedback} />
         </SectionCard>
       </div>
     </main>

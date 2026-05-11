@@ -7,6 +7,7 @@ import {
   useRef,
   type Dispatch,
   type DragEvent,
+  type MutableRefObject,
   type RefObject,
   type SetStateAction,
 } from 'react'
@@ -78,11 +79,11 @@ function eventEntityType(event: CalendarEvent): EntityType {
   return isBlockedEvent(event) ? 'block' : 'booking'
 }
 
-function eventApiId(event: CalendarEvent) {
+function eventApiId(event: CalendarEvent): string | null {
   return isBlockedEvent(event) ? extractBlockId(event) : event.id
 }
 
-function rawEventDurationMinutes(event: CalendarEvent) {
+function rawEventDurationMinutes(event: CalendarEvent): number {
   if (
     typeof event.durationMinutes === 'number' &&
     Number.isFinite(event.durationMinutes) &&
@@ -98,8 +99,9 @@ function normalizeDurationMinutes(args: {
   rawDurationMinutes: number
   stepMinutes: number
   maxDurationMinutes?: number
-}) {
+}): number {
   const stepMinutes = normalizeStepMinutes(args.stepMinutes)
+
   const roundedDuration = roundDurationMinutes(
     args.rawDurationMinutes,
     stepMinutes,
@@ -115,7 +117,7 @@ function normalizeDurationMinutes(args: {
 function eventDurationMinutes(args: {
   event: CalendarEvent
   stepMinutes: number
-}) {
+}): number {
   return normalizeDurationMinutes({
     rawDurationMinutes: rawEventDurationMinutes(args.event),
     stepMinutes: args.stepMinutes,
@@ -140,7 +142,7 @@ function safeSchedulingContext(args: {
   event: CalendarEvent
   resolveEventSchedulingContext: (event: CalendarEvent) => EventSchedulingContext
   fallbackStepMinutes: number
-}) {
+}): EventSchedulingContext {
   const context = args.resolveEventSchedulingContext(args.event)
 
   return {
@@ -157,11 +159,12 @@ function startMinutesFromPointer(args: {
   grabOffsetMinutes: number
   stepMinutes: number
   durationMinutes: number
-}) {
+}): number {
   const rawMinutes =
     (args.clientY - args.columnTop) / PX_PER_MINUTE - args.grabOffsetMinutes
 
   const snappedMinutes = snapMinutes(rawMinutes, args.stepMinutes)
+
   const maxStartMinutes = Math.max(
     0,
     TOTAL_MINUTES_IN_DAY - args.durationMinutes,
@@ -175,10 +178,11 @@ function resizeDurationFromPointer(args: {
   columnTop: number
   startMinutes: number
   stepMinutes: number
-}) {
+}): number {
   const rawEndMinutes = (args.clientY - args.columnTop) / PX_PER_MINUTE
   const snappedEndMinutes = snapMinutes(rawEndMinutes, args.stepMinutes)
   const rawDuration = snappedEndMinutes - args.startMinutes
+
   const maxDurationByDay = Math.max(
     args.stepMinutes,
     TOTAL_MINUTES_IN_DAY - args.startMinutes,
@@ -191,7 +195,7 @@ function resizeDurationFromPointer(args: {
   })
 }
 
-function clearTimer(timerRef: React.MutableRefObject<number | null>) {
+function clearTimer(timerRef: MutableRefObject<number | null>): void {
   if (timerRef.current === null) return
 
   window.clearTimeout(timerRef.current)
@@ -218,6 +222,11 @@ export function useDragDrop(deps: DragDropDeps) {
   const suppressClickRef = useRef(false)
   const suppressClickTimerRef = useRef<number | null>(null)
 
+  const resizeMoveHandlerRef = useRef<((event: MouseEvent) => void) | null>(
+    null,
+  )
+  const resizeEndHandlerRef = useRef<(() => void) | null>(null)
+
   const suppressClickBriefly = useCallback(() => {
     suppressClickRef.current = true
     clearTimer(suppressClickTimerRef)
@@ -234,6 +243,19 @@ export function useDragDrop(deps: DragDropDeps) {
     dragOriginalEventRef.current = null
     dragGrabOffsetMinutesRef.current = 0
     dragEntityTypeRef.current = 'booking'
+  }, [])
+
+  const removeResizeListeners = useCallback(() => {
+    const moveHandler = resizeMoveHandlerRef.current
+    const endHandler = resizeEndHandlerRef.current
+
+    if (moveHandler) {
+      window.removeEventListener('mousemove', moveHandler)
+    }
+
+    if (endHandler) {
+      window.removeEventListener('mouseup', endHandler)
+    }
   }, [])
 
   const handleResizeMove = useCallback(
@@ -276,8 +298,7 @@ export function useDragDrop(deps: DragDropDeps) {
     const state = resizingRef.current
     resizingRef.current = null
 
-    window.removeEventListener('mousemove', handleResizeMove)
-    window.removeEventListener('mouseup', handleResizeEnd)
+    removeResizeListeners()
 
     if (!state) return
 
@@ -329,19 +350,24 @@ export function useDragDrop(deps: DragDropDeps) {
     })
   }, [
     eventsRefRef,
-    handleResizeMove,
     openConfirmRef,
+    removeResizeListeners,
     setEventsRef,
     suppressClickBriefly,
   ])
 
   useEffect(() => {
+    resizeMoveHandlerRef.current = handleResizeMove
+    resizeEndHandlerRef.current = handleResizeEnd
+  }, [handleResizeEnd, handleResizeMove])
+
+  useEffect(() => {
     return () => {
       clearTimer(suppressClickTimerRef)
-      window.removeEventListener('mousemove', handleResizeMove)
-      window.removeEventListener('mouseup', handleResizeEnd)
+      removeResizeListeners()
+      resizingRef.current = null
     }
-  }, [handleResizeEnd, handleResizeMove])
+  }, [removeResizeListeners])
 
   const onDragStart = useCallback(
     (event: CalendarEvent, dragEvent: DragEvent<HTMLDivElement>) => {
@@ -404,6 +430,7 @@ export function useDragDrop(deps: DragDropDeps) {
       const apiId = dragApiIdRef.current
       const entityType = dragEntityTypeRef.current
       const originalEvent = dragOriginalEventRef.current
+      const grabOffsetMinutes = dragGrabOffsetMinutesRef.current
 
       clearDragState()
 
@@ -426,7 +453,7 @@ export function useDragDrop(deps: DragDropDeps) {
       const nextStartMinutes = startMinutesFromPointer({
         clientY,
         columnTop,
-        grabOffsetMinutes: dragGrabOffsetMinutesRef.current,
+        grabOffsetMinutes,
         stepMinutes: context.stepMinutes,
         durationMinutes,
       })
@@ -513,8 +540,7 @@ export function useDragDrop(deps: DragDropDeps) {
         originalEvent,
       }
 
-      window.removeEventListener('mousemove', handleResizeMove)
-      window.removeEventListener('mouseup', handleResizeEnd)
+      removeResizeListeners()
 
       window.addEventListener('mousemove', handleResizeMove)
       window.addEventListener('mouseup', handleResizeEnd)
@@ -524,6 +550,7 @@ export function useDragDrop(deps: DragDropDeps) {
       eventsRefRef,
       handleResizeEnd,
       handleResizeMove,
+      removeResizeListeners,
       resolveEventSchedulingContextRef,
       suppressClickBriefly,
     ],

@@ -5,9 +5,9 @@ import { createHash } from 'node:crypto'
 import { ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { buildSummaryCacheKey } from '@/lib/availability/data/cache'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
+import { buildSummaryCacheKey } from '@/lib/availability/data/cache'
 import { loadAvailabilityOfferingContext } from '@/lib/availability/data/offeringContext'
 import {
   loadOtherProsNearbyCached,
@@ -28,8 +28,6 @@ import {
   getScheduleConfigVersion,
   getScheduleVersion,
 } from '@/lib/booking/cacheVersion'
-import { withVersionedCache } from '@/lib/cache/versionedCache'
-import { prismaRead } from '@/lib/prisma'
 import {
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
@@ -41,15 +39,16 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
+import { withVersionedCache } from '@/lib/cache/versionedCache'
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
+import { prismaRead } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
 const MAX_LEAD_MINUTES = 30 * 24 * 60
 const OCCUPANCY_WINDOW_PADDING_MINUTES =
   MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
-
 const TTL_BOOTSTRAP_SECONDS = 120
 
 type TimerMap = Record<string, number>
@@ -92,6 +91,7 @@ function recordMeasuredSection(
 ): void {
   const now = performance.now()
   const safeDuration = Math.max(0, durationMs)
+
   timers[`${name}:start`] = now - safeDuration
   timers[`${name}:end`] = now
 }
@@ -226,6 +226,7 @@ function bookingJsonFail(
   extra?: Record<string, unknown>,
 ) {
   const fail = getBookingFailPayload(code, overrides)
+
   return jsonFail(fail.httpStatus, fail.userMessage, {
     ...fail.extra,
     ...(extra ?? {}),
@@ -237,18 +238,18 @@ function toInt(value: string | null, fallback: number): number {
   return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback
 }
 
-function pickString(x: unknown): string | null {
-  return typeof x === 'string' && x.trim() ? x.trim() : null
+function pickString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function pickNumber(x: unknown): number | null {
-  return typeof x === 'number' && Number.isFinite(x) ? x : null
+function pickNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function pickStringArray(x: unknown): string[] | null {
-  if (!Array.isArray(x)) return null
-  if (!x.every((value) => typeof value === 'string')) return null
-  return x.slice()
+function pickStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  if (!value.every((item) => typeof item === 'string')) return null
+  return value.slice()
 }
 
 function resolveDebugClientAddressId(args: {
@@ -277,7 +278,7 @@ function buildAvailabilityVersion(args: {
   viewerLat?: number | null
   viewerLng?: number | null
   radiusMiles?: number | null
-}) {
+}): string {
   const raw = JSON.stringify({
     v: 1,
     scope: 'BOOTSTRAP',
@@ -310,11 +311,11 @@ function buildBootstrapRequestPayload(args: {
   }
 }
 
-function pickSeededDay(x: unknown): SummarySeededDay | null {
-  if (!isRecord(x)) return null
+function pickSeededDay(value: unknown): SummarySeededDay | null {
+  if (!isRecord(value)) return null
 
-  const date = pickString(x.date)
-  const slots = pickStringArray(x.slots)
+  const date = pickString(value.date)
+  const slots = pickStringArray(value.slots)
 
   if (!date || !slots) return null
 
@@ -324,12 +325,12 @@ function pickSeededDay(x: unknown): SummarySeededDay | null {
   }
 }
 
-function pickAvailableDays(x: unknown): SummaryAvailableDay[] {
-  if (!Array.isArray(x)) return []
+function pickAvailableDays(value: unknown): SummaryAvailableDay[] {
+  if (!Array.isArray(value)) return []
 
   const normalized: SummaryAvailableDay[] = []
 
-  for (const row of x) {
+  for (const row of value) {
     if (!isRecord(row)) continue
 
     const date = pickString(row.date)
@@ -380,6 +381,7 @@ function deriveSelectedDayFromCachedBootstrap(args: {
   todayDate: string
 }): SummarySeededDay | null {
   const selectedDay = pickSeededDay(args.cached.selectedDay)
+
   if (
     selectedDay &&
     selectedDay.slots.length > 0 &&
@@ -389,6 +391,7 @@ function deriveSelectedDayFromCachedBootstrap(args: {
   }
 
   const legacyInitialSelectedDay = pickSeededDay(args.cached.initialSelectedDay)
+
   if (
     legacyInitialSelectedDay &&
     legacyInitialSelectedDay.slots.length > 0 &&
@@ -400,6 +403,7 @@ function deriveSelectedDayFromCachedBootstrap(args: {
   }
 
   const firstDaySlots = pickStringArray(args.cached.firstDaySlots)
+
   if (firstDaySlots && firstDaySlots.length > 0) {
     const todayDay = args.availableDays.find(
       (day) => day.date === args.todayDate,
@@ -513,7 +517,7 @@ export async function GET(req: Request) {
       return bookingJsonFail(baseContext.code)
     }
 
-    let {
+    const {
       locationId,
       effectiveLocationType,
       timeZone,
@@ -523,7 +527,7 @@ export async function GET(req: Request) {
       defaultLead,
       locationBufferMinutes,
       maxAdvanceDays,
-      durationMinutes,
+      durationMinutes: baseDurationMinutes,
       placementLat,
       placementLng,
       proBusinessName,
@@ -587,17 +591,13 @@ export async function GET(req: Request) {
       ? ymdToString(summaryWindow.nextStartYMD)
       : null
 
-    // Resolve add-on duration up-front so it participates in the cache key
-    // (via `addOnIds` in `buildSummaryCacheKey`) and the cached payload always
-    // carries the final durationMinutes. Cost is one extra Prisma round-trip
-    // when addOns are non-empty; the empty path returns immediately.
     markTimer(timers, 'addons:start')
     const addOnResult = await resolveRequestedDurationMinutes({
       professionalId,
       offeringId: offeringDbId,
       addOnIds,
       locationType: effectiveLocationType,
-      baseDurationMinutes: durationMinutes,
+      baseDurationMinutes,
     })
 
     if (!addOnResult.ok) {
@@ -606,7 +606,7 @@ export async function GET(req: Request) {
       })
     }
 
-    durationMinutes = addOnResult.durationMinutes
+    const durationMinutes = addOnResult.durationMinutes
     markTimer(timers, 'addons:end')
 
     const summaryKeyExtra = debug
@@ -658,6 +658,7 @@ export async function GET(req: Request) {
 
       const busyPromise = (async () => {
         markTimer(timers, 'busy:start')
+
         const result = await loadBusyIntervals({
           professionalId,
           locationId,
@@ -670,6 +671,7 @@ export async function GET(req: Request) {
           cache: { enabled: !debug },
           client: prismaRead,
         })
+
         markTimer(timers, 'busy:end')
         return result
       })()
@@ -797,16 +799,16 @@ export async function GET(req: Request) {
         radiusMiles,
       })
 
-      // mediaId stays null in the cached payload — it's per-request and gets
-      // applied after the cache returns. Same for selectedDay refresh below
-      // when today's date moves between cache write and read.
       return {
         ok: true,
         mode: 'BOOTSTRAP' as const,
         availabilityVersion,
         generatedAt,
         request,
+
+        // Per-request value gets applied after cache read.
         mediaId: null as string | null,
+
         serviceId,
         professionalId,
 
@@ -868,38 +870,27 @@ export async function GET(req: Request) {
       }
     }
 
-    let cachedPayload
-    if (summaryKeyExtra) {
-      // Cache trade-off (replica lag + version bumps):
-      //   primary write commits → bumpScheduleConfigVersion runs → next request
-      //   reads new version → cache miss → loader uses prismaRead which can be
-      //   1–5s behind primary → stale snapshot caches under the new v{N} key →
-      //   served until TTL expires. The 120s TTL is the staleness backstop.
-      //   Don't lower it without first ensuring replica lag stays well below.
-      const result = await withVersionedCache(
-        {
-          scope: 'availability:bootstrap',
-          scopeId: professionalId,
-          version: scheduleConfigVersion,
-          extra: summaryKeyExtra,
-        },
-        computeBootstrapPayload,
-        TTL_BOOTSTRAP_SECONDS,
-      )
-      cachedPayload = result.value
+    const cachedPayload = summaryKeyExtra
+      ? await withVersionedCache(
+          {
+            scope: 'availability:bootstrap',
+            scopeId: professionalId,
+            version: scheduleConfigVersion,
+            extra: summaryKeyExtra,
+          },
+          computeBootstrapPayload,
+          TTL_BOOTSTRAP_SECONDS,
+        ).then((result) => {
+          if (result.cacheHit) {
+            markInstantSection(timers, 'busy')
+            markInstantSection(timers, 'otherpros')
+            markInstantSection(timers, 'slots')
+          }
 
-      if (result.cacheHit) {
-        markInstantSection(timers, 'busy')
-        markInstantSection(timers, 'otherpros')
-        markInstantSection(timers, 'slots')
-      }
-    } else {
-      cachedPayload = await computeBootstrapPayload()
-    }
+          return result.value
+        })
+      : await computeBootstrapPayload()
 
-    // Per-request refresh: mediaId reflects the current request, and selectedDay
-    // is re-derived against today's date in case the cached entry crossed a
-    // day boundary.
     const refreshedAvailableDays = pickAvailableDays(cachedPayload.availableDays)
     const refreshedSelectedDay = deriveSelectedDayFromCachedBootstrap({
       cached: cachedPayload as unknown as Record<string, unknown>,
@@ -918,6 +909,7 @@ export async function GET(req: Request) {
     return withServerTiming(jsonOk(finalPayload), timers)
   } catch (err: unknown) {
     console.error('GET /api/availability/bootstrap error', err)
+
     return bookingJsonFail('INTERNAL_ERROR', {
       message:
         err instanceof Error ? err.message : 'Failed to load availability.',

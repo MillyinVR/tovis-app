@@ -1,4 +1,6 @@
 // app/api/pro/clients/search/route.ts
+import { Prisma } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
@@ -13,21 +15,52 @@ function digitsOnly(s: string) {
   return (s || '').replace(/[^\d]/g, '')
 }
 
+const SELECT_CLIENT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  phone: true,
+  user: { select: { email: true } },
+} satisfies Prisma.ClientProfileSelect
+
+type SearchClientRow = Prisma.ClientProfileGetPayload<{
+  select: typeof SELECT_CLIENT
+}>
+
+function mapOut(c: SearchClientRow) {
+  const id = String(c.id)
+
+  return {
+    id,
+    fullName:
+      `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() ||
+      c.user?.email ||
+      'Client',
+    canViewClient: true,
+    email: c.user?.email ?? null,
+    phone: c.phone ?? null,
+  }
+}
+
 export async function GET(req: Request) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
+
     const professionalId = auth.professionalId
 
     const url = new URL(req.url)
     const qRaw = norm(url.searchParams.get('q') || '')
     const q = qRaw.slice(0, 80)
 
-    if (!q) return jsonOk({ recentClients: [], otherClients: [], query: '' }, 200)
+    if (!q) {
+      return jsonOk({ recentClients: [], otherClients: [], query: '' }, 200)
+    }
 
-    // ✅ Single policy: visible client ids for this pro
+    // Single policy: visible client ids for this pro.
     const visibleClientIdSet = await getVisibleClientIdSetForPro(professionalId)
     const visibleClientIds = Array.from(visibleClientIdSet)
+
     if (!visibleClientIds.length) {
       return jsonOk({ query: q, recentClients: [], otherClients: [] }, 200)
     }
@@ -35,36 +68,32 @@ export async function GET(req: Request) {
     const qDigits = digitsOnly(q)
     const looksLikePhone = qDigits.length >= 3
 
-    const phoneOr: any[] = []
+    const phoneOr: Prisma.ClientProfileWhereInput[] = []
+
     if (looksLikePhone) {
       phoneOr.push({ phone: { contains: qDigits } })
-      if (q !== qDigits) phoneOr.push({ phone: { contains: q } })
+
+      if (q !== qDigits) {
+        phoneOr.push({ phone: { contains: q } })
+      }
     }
 
     const whereMatch = {
       AND: [
-        // ✅ Scope FIRST (no enumeration)
+        // Scope FIRST. No enumeration.
         { id: { in: visibleClientIds } },
         {
           OR: [
-            { firstName: { contains: q, mode: 'insensitive' as const } },
-            { lastName: { contains: q, mode: 'insensitive' as const } },
+            { firstName: { contains: q, mode: 'insensitive' } },
+            { lastName: { contains: q, mode: 'insensitive' } },
             ...phoneOr,
-            { user: { email: { contains: q, mode: 'insensitive' as const } } },
+            { user: { email: { contains: q, mode: 'insensitive' } } },
           ],
         },
       ],
-    }
+    } satisfies Prisma.ClientProfileWhereInput
 
-    const selectClient = {
-      id: true,
-      firstName: true,
-      lastName: true,
-      phone: true,
-      user: { select: { email: true } },
-    } as const
-
-    // ✅ Recent clients for THIS pro (still useful for sorting)
+    // Recent clients for THIS pro, still useful for sorting.
     const recentBookings = await prisma.booking.findMany({
       where: { professionalId },
       select: { clientId: true, scheduledFor: true },
@@ -74,49 +103,45 @@ export async function GET(req: Request) {
 
     const seen = new Set<string>()
     const recentClientIds: string[] = []
-    for (const b of recentBookings) {
-      const cid = String(b.clientId)
-      // ✅ only include if visible
-      if (!visibleClientIdSet.has(cid)) continue
 
-      if (!seen.has(cid)) {
-        seen.add(cid)
-        recentClientIds.push(cid)
+    for (const booking of recentBookings) {
+      const clientId = String(booking.clientId)
+
+      if (!visibleClientIdSet.has(clientId)) continue
+
+      if (!seen.has(clientId)) {
+        seen.add(clientId)
+        recentClientIds.push(clientId)
       }
+
       if (recentClientIds.length >= 75) break
     }
 
-    // ✅ Query only within visible set
     const recentClients = recentClientIds.length
       ? await prisma.clientProfile.findMany({
-          where: { id: { in: recentClientIds }, ...whereMatch },
-          select: selectClient,
+          where: {
+            AND: [
+              whereMatch,
+              { id: { in: recentClientIds } },
+            ],
+          },
+          select: SELECT_CLIENT,
           take: 12,
         })
       : []
 
     const otherClients = await prisma.clientProfile.findMany({
       where: {
-        ...whereMatch,
-        ...(recentClientIds.length ? { id: { notIn: recentClientIds } } : {}),
+        AND: [
+          whereMatch,
+          ...(recentClientIds.length
+            ? [{ id: { notIn: recentClientIds } }]
+            : []),
+        ],
       },
-      select: selectClient,
+      select: SELECT_CLIENT,
       take: 12,
     })
-
-    const mapOut = (c: any) => {
-      const id = String(c.id)
-      // Since queries are scoped, this should always be true
-      const canViewClient = true
-
-      return {
-        id,
-        fullName: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || c.user?.email || 'Client',
-        canViewClient,
-        email: c.user?.email ?? null,
-        phone: c.phone ?? null,
-      }
-    }
 
     return jsonOk(
       {
@@ -126,8 +151,8 @@ export async function GET(req: Request) {
       },
       200,
     )
-  } catch (e) {
-    console.error('GET /api/pro/clients/search error:', e)
+  } catch (error: unknown) {
+    console.error('GET /api/pro/clients/search error:', error)
     return jsonFail(500, 'Failed to search clients.')
   }
 }

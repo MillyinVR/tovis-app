@@ -1,7 +1,9 @@
 // app/(main)/booking/AvailabilityDrawer/types.ts
 
+export type EmptyObject = Record<string, never>
+
 export type ApiOk<T extends object> = { ok: true } & T
-export type ApiFail<T extends object = {}> = { ok: false; error: string } & T
+export type ApiFail<T extends object = EmptyObject> = { ok: false; error: string } & T
 
 export type BookingSource = 'REQUESTED' | 'DISCOVERY' | 'AFTERCARE'
 

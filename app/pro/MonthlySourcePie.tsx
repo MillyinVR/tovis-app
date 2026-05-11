@@ -4,43 +4,49 @@
 
 type Slice = { label: string; value: number }
 
+const COLORS = ['#60a5fa', '#34d399', '#a78bfa', '#f87171', '#fbbf24'] as const
+
 function clamp(n: number) {
   return Number.isFinite(n) ? Math.max(0, n) : 0
 }
 
 export default function MonthlySourcePie({ data }: { data: Slice[] }) {
-  const total = data.reduce((s, d) => s + clamp(d.value), 0)
+  const normalizedData = data.map((d) => ({
+    label: d.label,
+    value: clamp(d.value),
+  }))
+
+  const total = normalizedData.reduce((sum, d) => sum + d.value, 0)
 
   if (!total) {
     return <div style={{ fontSize: 13, color: '#6b7280' }}>No data yet.</div>
   }
 
-  // build conic-gradient stops
-  let acc = 0
-  const stops = data.map((d, i) => {
-    const v = clamp(d.value)
-    const start = (acc / total) * 360
-    acc += v
-    const end = (acc / total) * 360
-    // no custom colors requested, so we’ll use a simple rotating palette
-    const colors = ['#60a5fa', '#34d399', '#a78bfa', '#f87171', '#fbbf24']
-    return `${colors[i % colors.length]} ${start}deg ${end}deg`
-  })
+  const slices = normalizedData.map((d, index) => {
+    const previousTotal = normalizedData
+      .slice(0, index)
+      .reduce((sum, row) => sum + row.value, 0)
 
-  // compute label positions (approx) and show number in slice
-  acc = 0
-  const labels = data.map((d) => {
-    const v = clamp(d.value)
-    const start = acc
-    const mid = start + v / 2
-    acc += v
+    const startValue = previousTotal
+    const endValue = previousTotal + d.value
+    const midValue = startValue + d.value / 2
 
-    const angle = (mid / total) * Math.PI * 2 - Math.PI / 2
-    const r = 70 // radius for label placement
-    const x = 90 + r * Math.cos(angle)
-    const y = 90 + r * Math.sin(angle)
+    const startDeg = (startValue / total) * 360
+    const endDeg = (endValue / total) * 360
 
-    return { x, y, label: d.label, value: v }
+    const angle = (midValue / total) * Math.PI * 2 - Math.PI / 2
+    const radius = 70
+    const x = 90 + radius * Math.cos(angle)
+    const y = 90 + radius * Math.sin(angle)
+
+    return {
+      label: d.label,
+      value: d.value,
+      color: COLORS[index % COLORS.length],
+      stop: `${COLORS[index % COLORS.length]} ${startDeg}deg ${endDeg}deg`,
+      x,
+      y,
+    }
   })
 
   return (
@@ -51,37 +57,36 @@ export default function MonthlySourcePie({ data }: { data: Slice[] }) {
             width: 180,
             height: 180,
             borderRadius: '50%',
-            background: `conic-gradient(${stops.join(',')})`,
+            background: `conic-gradient(${slices.map((s) => s.stop).join(',')})`,
             border: '1px solid #eee',
           }}
         />
 
-        {/* Labels inside slices */}
         <svg width="180" height="180" style={{ position: 'absolute', inset: 0 }}>
-          {labels.map((l) =>
-            l.value ? (
-              <g key={l.label}>
+          {slices.map((slice) =>
+            slice.value ? (
+              <g key={slice.label}>
                 <text
-                  x={l.x}
-                  y={l.y}
+                  x={slice.x}
+                  y={slice.y}
                   textAnchor="middle"
                   dominantBaseline="middle"
                   fontSize="12"
                   fontWeight="900"
                   fill="#111"
                 >
-                  {l.value}
+                  {slice.value}
                 </text>
                 <text
-                  x={l.x}
-                  y={l.y + 14}
+                  x={slice.x}
+                  y={slice.y + 14}
                   textAnchor="middle"
                   dominantBaseline="middle"
                   fontSize="10"
                   fontWeight="800"
                   fill="#111"
                 >
-                  {l.label}
+                  {slice.label}
                 </text>
               </g>
             ) : null,
@@ -89,11 +94,20 @@ export default function MonthlySourcePie({ data }: { data: Slice[] }) {
         </svg>
       </div>
 
-      {/* Legend (compact) */}
-      <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 12, color: '#6b7280', justifyContent: 'center' }}>
-        {data.map((d) => (
+      <div
+        style={{
+          marginTop: 10,
+          display: 'flex',
+          gap: 10,
+          flexWrap: 'wrap',
+          fontSize: 12,
+          color: '#6b7280',
+          justifyContent: 'center',
+        }}
+      >
+        {normalizedData.map((d) => (
           <span key={d.label}>
-            <b style={{ color: '#111' }}>{d.label}</b>: {clamp(d.value)}
+            <b style={{ color: '#111' }}>{d.label}</b>: {d.value}
           </span>
         ))}
       </div>

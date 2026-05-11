@@ -1,45 +1,112 @@
 // app/t/[cardId]/page.tsx
 import { redirect } from 'next/navigation'
+import { NfcCardType, Prisma } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
-function safeNextUrl(v: string | null): string | null {
-  if (!v) return null
-  const s = v.trim()
-  if (!s) return null
-  if (!s.startsWith('/')) return null
-  if (s.startsWith('//')) return null
-  return s
+function safeNextUrl(value: string | null): string | null {
+  if (!value) return null
+
+  const normalized = value.trim()
+
+  if (!normalized) return null
+  if (!normalized.startsWith('/')) return null
+  if (normalized.startsWith('//')) return null
+
+  return normalized
 }
 
 type IntentType = 'CLAIM_CARD' | 'BOOK_PRO' | 'SALON_WHITE_LABEL'
 
-function isUnclaimed(card: { claimedAt: Date | null; type: any }) {
-  return !card.claimedAt || card.type === 'UNASSIGNED'
+type TapCard = {
+  id: string
+  type: NfcCardType
+  isActive: boolean
+  claimedAt: Date | null
+  professionalId: string | null
+  salonSlug: string | null
 }
 
-async function proBookingNextUrl(professionalId: string) {
+type DerivedTapIntent = {
+  intentType: IntentType
+  payloadJson: Prisma.InputJsonObject
+  nextUrl: string
+}
+
+function isUnclaimed(card: Pick<TapCard, 'claimedAt' | 'type'>): boolean {
+  return !card.claimedAt || card.type === NfcCardType.UNASSIGNED
+}
+
+async function proBookingNextUrl(professionalId: string): Promise<string> {
   const pro = await prisma.professionalProfile.findUnique({
-    where: { id: professionalId },
-    select: { id: true, handleNormalized: true, isPremium: true },
+    where: {
+      id: professionalId,
+    },
+    select: {
+      id: true,
+      handleNormalized: true,
+      isPremium: true,
+    },
   })
 
   if (!pro) return '/nfc/invalid'
 
-  if (pro.isPremium && pro.handleNormalized) return `/p/${pro.handleNormalized}`
-  return `/professionals/${pro.id}` // free + ugly + perfect
+  if (pro.isPremium && pro.handleNormalized) {
+    return `/p/${pro.handleNormalized}`
+  }
+
+  return `/professionals/${pro.id}`
+}
+
+async function buildDerivedTapIntent(card: TapCard): Promise<DerivedTapIntent> {
+  if (isUnclaimed(card)) {
+    return {
+      intentType: 'CLAIM_CARD',
+      payloadJson: {},
+      nextUrl: '/signup',
+    }
+  }
+
+  if (card.type === NfcCardType.PRO_BOOKING && card.professionalId) {
+    return {
+      intentType: 'BOOK_PRO',
+      payloadJson: {
+        professionalId: card.professionalId,
+      },
+      nextUrl: await proBookingNextUrl(card.professionalId),
+    }
+  }
+
+  if (card.type === NfcCardType.SALON_WHITE_LABEL && card.salonSlug) {
+    return {
+      intentType: 'SALON_WHITE_LABEL',
+      payloadJson: {
+        salonSlug: card.salonSlug,
+      },
+      nextUrl: `/signup?salon=${encodeURIComponent(card.salonSlug)}`,
+    }
+  }
+
+  return {
+    intentType: 'CLAIM_CARD',
+    payloadJson: {},
+    nextUrl: '/signup',
+  }
 }
 
 export default async function TapPage(props: {
   params: Promise<{ cardId: string }>
-  searchParams?: Promise<Record<string, string>>
+  searchParams?: Promise<Record<string, string | undefined>>
 }) {
   const { cardId } = await props.params
-  const sp = (await props.searchParams) ?? {}
-  const nextOverride = safeNextUrl(sp.next ?? null)
+  const searchParams = (await props.searchParams) ?? {}
+  const nextOverride = safeNextUrl(searchParams.next ?? null)
 
   const card = await prisma.nfcCard.findUnique({
-    where: { id: cardId },
+    where: {
+      id: cardId,
+    },
     select: {
       id: true,
       type: true,
@@ -50,51 +117,40 @@ export default async function TapPage(props: {
     },
   })
 
-  if (!card || !card.isActive) redirect('/nfc/invalid')
+  if (!card || !card.isActive) {
+    redirect('/nfc/invalid')
+  }
 
   const user = await getCurrentUser().catch(() => null)
 
-  let derived: { intentType: IntentType; payloadJson: any; nextUrl: string }
-
-  // 1) Unclaimed: go claim
-  if (isUnclaimed(card)) {
-    derived = { intentType: 'CLAIM_CARD', payloadJson: {}, nextUrl: '/signup' }
-  } else if (card.type === 'PRO_BOOKING' && card.professionalId) {
-    const nextUrl = await proBookingNextUrl(card.professionalId)
-    derived = {
-      intentType: 'BOOK_PRO',
-      payloadJson: { professionalId: card.professionalId },
-      nextUrl,
-    }
-  } else if (card.type === 'SALON_WHITE_LABEL' && card.salonSlug) {
-    derived = {
-      intentType: 'SALON_WHITE_LABEL',
-      payloadJson: { salonSlug: card.salonSlug },
-      nextUrl: `/signup?salon=${encodeURIComponent(card.salonSlug)}`,
-    }
-  } else {
-    derived = { intentType: 'CLAIM_CARD', payloadJson: {}, nextUrl: '/signup' }
-  }
-
+  const derived = await buildDerivedTapIntent(card)
   const nextUrl = nextOverride ?? derived.nextUrl
 
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 30) // 30 min
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 30)
+
   const intent = await prisma.tapIntent.create({
     data: {
       cardId: card.id,
       userId: user?.id ?? null,
       intentType: derived.intentType,
-      payloadJson: { ...derived.payloadJson, nextUrl },
+      payloadJson: {
+        ...derived.payloadJson,
+        nextUrl,
+      },
       expiresAt,
     },
-    select: { id: true },
+    select: {
+      id: true,
+    },
   })
 
-  // If not logged in, always go through signup/login so we can claim/credit cleanly
-  if (!user) redirect(`/signup?ti=${encodeURIComponent(intent.id)}`)
+  if (!user || isUnclaimed(card)) {
+    redirect(`/signup?ti=${encodeURIComponent(intent.id)}`)
+  }
 
-  // Logged in but card unclaimed? still go claim
-  if (isUnclaimed(card)) redirect(`/signup?ti=${encodeURIComponent(intent.id)}`)
-
-  redirect(`${nextUrl}${nextUrl.includes('?') ? '&' : '?'}ti=${encodeURIComponent(intent.id)}`)
+  redirect(
+    `${nextUrl}${nextUrl.includes('?') ? '&' : '?'}ti=${encodeURIComponent(
+      intent.id,
+    )}`,
+  )
 }

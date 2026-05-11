@@ -527,7 +527,28 @@ export function ManagementModal(props: ManagementModalProps) {
     copy: copyOverride,
   } = props
 
-  const [confirmDenyId, setConfirmDenyId] = useState<string | null>(null)
+  const [confirmDenyState, setConfirmDenyState] = useState<{
+    id: string | null
+    activeKey: ManagementKey
+    open: boolean
+  }>({
+    id: null,
+    activeKey,
+    open,
+  })
+
+  const confirmDenyId =
+    confirmDenyState.activeKey === activeKey && confirmDenyState.open === open
+      ? confirmDenyState.id
+      : null
+
+  const setConfirmDenyId = (id: string | null): void => {
+    setConfirmDenyState({
+      id,
+      activeKey,
+      open,
+    })
+  }
 
   const copy = useMemo(() => resolveCopy(copyOverride), [copyOverride])
   const tabs = useMemo(() => managementTabs(copy), [copy])
@@ -544,10 +565,6 @@ export function ManagementModal(props: ManagementModalProps) {
 
   useEffect(() => closeOnEscape({ open, onClose }), [open, onClose])
   useEffect(() => lockBodyScroll(open), [open])
-
-  useEffect(() => {
-    setConfirmDenyId(null)
-  }, [activeKey, open])
 
   if (!open) return null
 

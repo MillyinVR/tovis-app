@@ -44,7 +44,7 @@ import { safeJson } from './utils/safeJson'
 import { dateTimeLocalToUtcIso } from '@/lib/bookingDateTimeClient'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 
-const FALLBACK_TZ: 'UTC' = 'UTC'
+const FALLBACK_TZ = 'UTC' as const
 const MOBILE_ADDRESS_REQUIRED_MESSAGE =
   'Select a saved service address before viewing mobile availability.'
 
@@ -576,7 +576,7 @@ export default function AvailabilityDrawer(props: {
   const router = useRouter()
   const debug = useDebugFlag()
 
-  const [viewerTz, setViewerTz] = useState<string>(FALLBACK_TZ)
+  const viewerTz = useMemo(() => getViewerTimeZoneClient(), [])
   const [locationType, setLocationType] = useState<ServiceLocationType | null>(
     null,
   )
@@ -592,20 +592,17 @@ export default function AvailabilityDrawer(props: {
   const otherProsRef = useRef<HTMLDivElement | null>(null)
   const holdStatusRef = useRef<HTMLDivElement | null>(null)
   const selectedHoldIdRef = useRef<string | null>(null)
+
+  const setSelectedHold = useCallback((next: SelectedHold | null) => {
+    selectedHoldIdRef.current = next?.holdId ?? null
+    setSelected(next)
+  }, [])
   const pendingDaySwitchMetricKeyRef = useRef<string | null>(null)
 
   const drawerOpenedTrackedRef = useRef(false)
   const summaryLoadedTrackedRef = useRef(false)
   const lastDaySlotsTrackedKeyRef = useRef<string | null>(null)
   const openedOnceRef = useRef(false)
-
-  useEffect(() => {
-    setViewerTz(getViewerTimeZoneClient())
-  }, [])
-
-  useEffect(() => {
-    selectedHoldIdRef.current = selected?.holdId ?? null
-  }, [selected?.holdId])
 
   useEffect(() => {
     if (!open) return
@@ -619,10 +616,12 @@ export default function AvailabilityDrawer(props: {
     })
   }, [open, selected?.holdId])
 
-  const discoveryIds = useMemo(
-    () => getDiscoveryContextIds(context),
-    [context.mediaId, context.lookPostId],
-  )
+  const discoveryIds = useMemo(() => {
+    return {
+      mediaId: asTrimmedString(context.mediaId),
+      lookPostId: asTrimmedString(context.lookPostId),
+    }
+  }, [context.mediaId, context.lookPostId])
 
   const requestedMobileAddressGate = locationType === 'MOBILE'
 
@@ -661,7 +660,11 @@ export default function AvailabilityDrawer(props: {
 
   const summary: AvailabilityBootstrapOk | null = data
   const primary = summary?.primaryPro ?? null
-  const others = summary?.otherPros ?? []
+
+  const others = useMemo(() => {
+    return summary?.otherPros ?? []
+  }, [summary?.otherPros])
+
   const days = summary?.availableDays ?? EMPTY_DAYS
   const offering: AvailabilityOffering = summary?.offering ?? FALLBACK_OFFERING
 
@@ -846,19 +849,19 @@ export default function AvailabilityDrawer(props: {
 
   const hardResetUi = useCallback(
     async (args?: { deleteHold?: boolean }) => {
-      const holdId = selectedHoldIdRef.current ?? selected?.holdId ?? null
+      const holdId = selectedHoldIdRef.current
 
       if (args?.deleteHold && holdId) {
         void deleteHoldById(holdId).catch(() => {})
       }
 
-      setSelected(null)
+      setSelectedHold(null)
       setHoldUntil(null)
       setHolding(false)
       setError(null)
       setHoldError(null)
     },
-    [selected?.holdId, setError],
+    [setSelectedHold, setError],
   )
 
   const retryDaySlots = useCallback(() => {
@@ -867,7 +870,7 @@ export default function AvailabilityDrawer(props: {
   }, [setError])
 
   const refreshAfterAvailabilityConflict = useCallback(() => {
-    setSelected(null)
+    setSelectedHold(null)
     setHoldUntil(null)
     setOtherProsRequested(false)
 
@@ -883,6 +886,7 @@ export default function AvailabilityDrawer(props: {
     setSlotRetryKey((key) => key + 1)
     refresh()
   }, [
+    setSelectedHold,
     selectedDayYMD,
     activeLocationType,
     selectedClientAddressId,
@@ -1261,10 +1265,10 @@ export default function AvailabilityDrawer(props: {
     if (!holdExpired) return
 
     setHoldUntil(null)
-    setSelected(null)
+    setSelectedHold(null)
     setHoldError('That hold expired. Please pick a new slot.')
     refreshAfterAvailabilityConflict()
-  }, [holdExpired, refreshAfterAvailabilityConflict])
+  }, [holdExpired, setSelectedHold, refreshAfterAvailabilityConflict])
 
   useEffect(() => {
     if (!open) return
@@ -1410,7 +1414,7 @@ export default function AvailabilityDrawer(props: {
       await deleteHoldById(existingHoldId).catch(() => {})
     }
 
-    setSelected(null)
+    setSelectedHold(null)
     setHoldUntil(null)
 
     startAvailabilityMetric({
@@ -1500,7 +1504,7 @@ export default function AvailabilityDrawer(props: {
         clientAddressId: selectedClientAddressId,
       })
 
-      setSelected({
+      setSelectedHold({
         proId,
         offeringId: effectiveOfferingId,
         slotISO: parsed.scheduledForISO,

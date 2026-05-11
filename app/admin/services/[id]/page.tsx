@@ -1,9 +1,12 @@
 // app/admin/services/[id]/page.tsx
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { notFound } from 'next/navigation'
-import { prisma } from '@/lib/prisma'
 import { AdminPermissionRole, ProfessionType } from '@prisma/client'
+
 import AdminGuard from '../../_components/AdminGuard'
+import { prisma } from '@/lib/prisma'
 import { moneyToString } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
@@ -11,28 +14,42 @@ export const dynamic = 'force-dynamic'
 type Params = { id: string }
 type Props = { params: Params | Promise<Params> }
 
-function formatUsd(v: any) {
-  const s = moneyToString(v)
-  if (!s) return '—'
-  const n = Number(s)
-  if (!Number.isFinite(n)) return `$${s}`
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(n)
+type ChipTone = 'neutral' | 'gold' | 'danger' | 'success'
+type BadgeTone = 'neutral' | 'gold'
+
+function formatUsd(value: Parameters<typeof moneyToString>[0]): string {
+  const money = moneyToString(value)
+
+  if (!money) return '—'
+
+  const numeric = Number(money)
+  if (!Number.isFinite(numeric)) return `$${money}`
+
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: 'USD',
+  }).format(numeric)
 }
 
 function Chip({
   children,
   tone = 'neutral',
 }: {
-  children: React.ReactNode
-  tone?: 'neutral' | 'gold' | 'danger' | 'success'
+  children: ReactNode
+  tone?: ChipTone
 }) {
-  const base = 'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-extrabold'
-  const tones: Record<typeof tone, string> = {
+  const base =
+    'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-extrabold'
+
+  const tones: Record<ChipTone, string> = {
     neutral: 'border-surfaceGlass/10 bg-bgPrimary/25 text-textPrimary',
     gold: 'border-accentPrimary/25 bg-accentPrimary/10 text-textPrimary',
-    success: 'border-[rgb(var(--tone-success))/0.25] bg-[rgb(var(--tone-success))/0.10] text-textPrimary',
-    danger: 'border-[rgb(var(--tone-danger))/0.25] bg-[rgb(var(--tone-danger))/0.10] text-textPrimary',
+    success:
+      'border-[rgb(var(--tone-success))/0.25] bg-[rgb(var(--tone-success))/0.10] text-textPrimary',
+    danger:
+      'border-[rgb(var(--tone-danger))/0.25] bg-[rgb(var(--tone-danger))/0.10] text-textPrimary',
   }
+
   return <span className={`${base} ${tones[tone]}`}>{children}</span>
 }
 
@@ -40,14 +57,17 @@ function Badge({
   children,
   tone = 'neutral',
 }: {
-  children: React.ReactNode
-  tone?: 'neutral' | 'gold'
+  children: ReactNode
+  tone?: BadgeTone
 }) {
-  const base = 'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold'
-  const tones: Record<typeof tone, string> = {
+  const base =
+    'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-extrabold'
+
+  const tones: Record<BadgeTone, string> = {
     neutral: 'border-surfaceGlass/10 bg-bgSecondary text-textPrimary',
     gold: 'border-accentPrimary/25 bg-accentPrimary/10 text-textPrimary',
   }
+
   return <span className={`${base} ${tones[tone]}`}>{children}</span>
 }
 
@@ -59,8 +79,8 @@ function CardShell({
 }: {
   title: string
   subtitle?: string
-  right?: React.ReactNode
-  children: React.ReactNode
+  right?: ReactNode
+  children: ReactNode
 }) {
   return (
     <section className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
@@ -69,18 +89,20 @@ function CardShell({
           <div className="text-sm font-extrabold text-textPrimary">{title}</div>
           {subtitle ? <div className="text-xs text-textSecondary">{subtitle}</div> : null}
         </div>
+
         {right ? <div className="flex items-center gap-2">{right}</div> : null}
       </div>
+
       <div className="mt-3">{children}</div>
     </section>
   )
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
+function FieldLabel({ children }: { children: ReactNode }) {
   return <div className="text-xs font-extrabold text-textSecondary">{children}</div>
 }
 
-function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
       {...props}
@@ -94,7 +116,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
   )
 }
 
-function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
+function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
       {...props}
@@ -107,7 +129,7 @@ function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   )
 }
 
-function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
       {...props}
@@ -125,8 +147,12 @@ function Button({
   children,
   variant = 'primary',
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' }) {
-  const base = 'inline-flex items-center justify-center rounded-xl px-3 py-2 text-xs font-extrabold transition-colors'
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'primary' | 'ghost'
+}) {
+  const base =
+    'inline-flex items-center justify-center rounded-xl px-3 py-2 text-xs font-extrabold transition-colors'
+
   const styles =
     variant === 'primary'
       ? 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
@@ -159,6 +185,7 @@ function ToggleRow({
         defaultChecked={checked}
         className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
       />
+
       <span className="font-bold text-textSecondary">{label}</span>
     </label>
   )
@@ -175,7 +202,8 @@ function EmptyState({ title, body }: { title: string; body: string }) {
 
 export default async function AdminServiceDetailPage({ params }: Props) {
   const { id } = await Promise.resolve(params)
-  const serviceId = typeof id === 'string' ? id.trim() : ''
+  const serviceId = id.trim()
+
   if (!serviceId) notFound()
 
   const service = await prisma.service.findUnique({
@@ -190,13 +218,20 @@ export default async function AdminServiceDetailPage({ params }: Props) {
       allowMobile: true,
       isActive: true,
       categoryId: true,
-
-      // ✅ NEW
       isAddOnEligible: true,
       addOnGroup: true,
-
-      permissions: { select: { id: true, professionType: true, stateCode: true } },
-      category: { select: { name: true } },
+      permissions: {
+        select: {
+          id: true,
+          professionType: true,
+          stateCode: true,
+        },
+      },
+      category: {
+        select: {
+          name: true,
+        },
+      },
     },
   })
 
@@ -204,22 +239,39 @@ export default async function AdminServiceDetailPage({ params }: Props) {
 
   const categories = await prisma.serviceCategory.findMany({
     orderBy: [{ parentId: 'asc' }, { name: 'asc' }],
-    select: { id: true, name: true, parentId: true },
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+    },
     take: 500,
   })
 
-  const checkedByProfession = new Set(service.permissions.map((p) => p.professionType))
+  const checkedByProfession = new Set(
+    service.permissions.map((permission) => permission.professionType),
+  )
+
   const allProfessions = Object.values(ProfessionType)
 
   const headerChips = (
     <>
-      <Chip tone={service.isActive ? 'success' : 'danger'}>{service.isActive ? 'Active' : 'Disabled'}</Chip>
+      <Chip tone={service.isActive ? 'success' : 'danger'}>
+        {service.isActive ? 'Active' : 'Disabled'}
+      </Chip>
+
       {service.allowMobile ? <Chip tone="gold">Mobile</Chip> : <Chip>Salon-only</Chip>}
-      <Chip>{service.defaultDurationMinutes}m</Chip>
+
+      <Chip>{service.defaultDurationMinutes ?? '—'}m</Chip>
       <Chip tone="gold">{formatUsd(service.minPrice)}</Chip>
       <Chip>{service.category?.name || '— Category'}</Chip>
-      {service.isAddOnEligible ? <Chip tone="gold">Add-on eligible</Chip> : <Chip>Not add-on</Chip>}
-      {service.addOnGroup ? <Chip tone="neutral">Group: {service.addOnGroup}</Chip> : null}
+
+      {service.isAddOnEligible ? (
+        <Chip tone="gold">Add-on eligible</Chip>
+      ) : (
+        <Chip>Not add-on</Chip>
+      )}
+
+      {service.addOnGroup ? <Chip>Group: {service.addOnGroup}</Chip> : null}
     </>
   )
 
@@ -230,12 +282,15 @@ export default async function AdminServiceDetailPage({ params }: Props) {
       scope={{ serviceId: service.id, categoryId: service.categoryId }}
     >
       <main className="grid gap-4">
-        {/* Header */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="grid gap-2">
             <h1 className="text-2xl font-extrabold text-textPrimary">{service.name}</h1>
+
             <div className="flex flex-wrap gap-2">{headerChips}</div>
-            {service.description ? <p className="max-w-3xl text-sm text-textSecondary">{service.description}</p> : null}
+
+            {service.description ? (
+              <p className="max-w-3xl text-sm text-textSecondary">{service.description}</p>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-2">
@@ -248,9 +303,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
           </div>
         </div>
 
-        {/* Layout: preview + edit */}
         <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-          {/* Preview */}
           <CardShell
             title="Default media"
             subtitle="Used as a fallback image when pros don’t upload one."
@@ -258,12 +311,17 @@ export default async function AdminServiceDetailPage({ params }: Props) {
           >
             {service.defaultImageUrl ? (
               <div className="grid gap-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={service.defaultImageUrl}
-                  alt={`${service.name} default`}
-                  className="aspect-square w-full rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 object-cover"
-                />
+                <div className="relative aspect-square w-full overflow-hidden rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20">
+                  <Image
+                    src={service.defaultImageUrl}
+                    alt={`${service.name} default`}
+                    fill
+                    unoptimized
+                    sizes="360px"
+                    className="object-cover"
+                  />
+                </div>
+
                 <div className="rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
                   <div className="text-xs font-extrabold text-textSecondary">URL</div>
                   <div className="mt-1 break-all text-xs text-textPrimary">{service.defaultImageUrl}</div>
@@ -277,7 +335,6 @@ export default async function AdminServiceDetailPage({ params }: Props) {
             )}
           </CardShell>
 
-          {/* Edit */}
           <CardShell title="Edit service" subtitle="Update name, category, pricing, add-on settings, and description.">
             <form action={`/api/admin/services/${encodeURIComponent(service.id)}`} method="post" className="grid gap-3">
               <input type="hidden" name="_method" value="PATCH" />
@@ -290,10 +347,10 @@ export default async function AdminServiceDetailPage({ params }: Props) {
               <label className="grid gap-2">
                 <FieldLabel>Category</FieldLabel>
                 <Select name="categoryId" defaultValue={service.categoryId} required>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.parentId ? '↳ ' : ''}
-                      {c.name}
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.parentId ? '↳ ' : ''}
+                      {category.name}
                     </option>
                   ))}
                 </Select>
@@ -307,7 +364,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
                     type="number"
                     min={5}
                     step={5}
-                    defaultValue={service.defaultDurationMinutes}
+                    defaultValue={service.defaultDurationMinutes ?? ''}
                     required
                   />
                 </label>
@@ -318,7 +375,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
                     name="minPrice"
                     type="text"
                     inputMode="decimal"
-                    defaultValue={moneyToString(service.minPrice) ?? String(service.minPrice)}
+                    defaultValue={moneyToString(service.minPrice) ?? ''}
                     required
                   />
                 </label>
@@ -327,7 +384,11 @@ export default async function AdminServiceDetailPage({ params }: Props) {
               <div className="grid gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3">
                 <div className="text-xs font-extrabold text-textSecondary">Add-on settings</div>
 
-                <ToggleRow name="isAddOnEligible" checked={service.isAddOnEligible} label="Add-on eligible" />
+                <ToggleRow
+                  name="isAddOnEligible"
+                  checked={service.isAddOnEligible}
+                  label="Add-on eligible"
+                />
 
                 <label className="grid gap-2">
                   <FieldLabel>Add-on group (optional)</FieldLabel>
@@ -339,8 +400,7 @@ export default async function AdminServiceDetailPage({ params }: Props) {
                 </label>
 
                 <div className="text-[11px] text-textSecondary">
-                  This controls whether the service can be used as an add-on for other offerings. Group is just UI
-                  grouping.
+                  This controls whether the service can be used as an add-on for other offerings. Group is just UI grouping.
                 </div>
               </div>
 
@@ -351,7 +411,11 @@ export default async function AdminServiceDetailPage({ params }: Props) {
 
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-4">
-                  <ToggleRow name="allowMobile" checked={service.allowMobile} label="Allow mobile" />
+                  <ToggleRow
+                    name="allowMobile"
+                    checked={service.allowMobile}
+                    label="Allow mobile"
+                  />
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -360,18 +424,20 @@ export default async function AdminServiceDetailPage({ params }: Props) {
               </div>
 
               <div className="rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3 text-xs text-textSecondary">
-                Tip: if you ever add “defaultImageUrl” editing, make it a separate guarded input so nobody pastes a cursed
-                URL and blames you.
+                Tip: if you ever add “defaultImageUrl” editing, make it a separate guarded input so nobody pastes a cursed URL and blames you.
               </div>
             </form>
           </CardShell>
         </div>
 
-        {/* Permissions */}
         <CardShell
           title="Permissions"
           subtitle="Choose which professions can offer this service. Optional: limit to a state (2-letter code). Leaving blank = all states."
-          right={<Badge tone="gold">{service.permissions.length ? `${service.permissions.length} rules` : '0 rules'}</Badge>}
+          right={
+            <Badge tone="gold">
+              {service.permissions.length ? `${service.permissions.length} rules` : '0 rules'}
+            </Badge>
+          }
         >
           <form
             action={`/api/admin/services/${encodeURIComponent(service.id)}/permissions`}
@@ -390,16 +456,17 @@ export default async function AdminServiceDetailPage({ params }: Props) {
               </div>
 
               <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {allProfessions.map((pt) => (
-                  <label key={pt} className="flex items-center gap-2 text-sm text-textPrimary">
+                {allProfessions.map((professionType) => (
+                  <label key={professionType} className="flex items-center gap-2 text-sm text-textPrimary">
                     <input
                       type="checkbox"
                       name="professionType"
-                      value={pt}
-                      defaultChecked={checkedByProfession.has(pt)}
+                      value={professionType}
+                      defaultChecked={checkedByProfession.has(professionType)}
                       className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
                     />
-                    <span className="font-bold text-textSecondary">{pt}</span>
+
+                    <span className="font-bold text-textSecondary">{professionType}</span>
                   </label>
                 ))}
               </div>
@@ -418,16 +485,17 @@ export default async function AdminServiceDetailPage({ params }: Props) {
 
             {service.permissions.length ? (
               <div className="mt-2 grid gap-2">
-                {service.permissions.map((p) => (
+                {service.permissions.map((permission) => (
                   <div
-                    key={p.id}
+                    key={permission.id}
                     className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-surfaceGlass/10 bg-bgPrimary/20 p-3"
                   >
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone="gold">{p.professionType}</Badge>
-                      <Badge>{p.stateCode ? p.stateCode : 'All states'}</Badge>
+                      <Badge tone="gold">{permission.professionType}</Badge>
+                      <Badge>{permission.stateCode ? permission.stateCode : 'All states'}</Badge>
                     </div>
-                    <div className="text-xs text-textSecondary">Rule ID: {p.id}</div>
+
+                    <div className="text-xs text-textSecondary">Rule ID: {permission.id}</div>
                   </div>
                 ))}
               </div>

@@ -34,7 +34,7 @@ import {
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-const FALLBACK_TIME_ZONE: 'UTC' = 'UTC'
+const FALLBACK_TIME_ZONE = 'UTC' as const
 
 const FINALIZE_OFFERING_SELECT = {
   id: true,

@@ -1,61 +1,88 @@
 // app/nfc/invalid/page.tsx
 import { redirect } from 'next/navigation'
+import { NfcCardType, Prisma } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 
-function safeNextUrl(v: string | null): string | null {
-  if (!v) return null
-  const s = v.trim()
-  if (!s) return null
-  if (!s.startsWith('/')) return null
-  if (s.startsWith('//')) return null
-  return s
+function safeNextUrl(value: string | null): string | null {
+  if (!value) return null
+
+  const normalized = value.trim()
+
+  if (!normalized) return null
+  if (!normalized.startsWith('/')) return null
+  if (normalized.startsWith('//')) return null
+
+  return normalized
 }
 
-type IntentType = 'SIGNUP_CLIENT' | 'SIGNUP_PRO' | 'BOOK_PRO' | 'SALON_WHITE_LABEL'
+type IntentType =
+  | 'SIGNUP_CLIENT'
+  | 'SIGNUP_PRO'
+  | 'BOOK_PRO'
+  | 'SALON_WHITE_LABEL'
 
-function buildIntentFromCard(card: { type: any; professionalId: string | null; salonSlug: string | null }) {
-  // Decide what the tap “means”
-  // Adjust these rules if you want different behavior
-  if (card.type === 'PRO_BOOKING' && card.professionalId) {
+type NfcCardIntentSource = {
+  type: NfcCardType
+  professionalId: string | null
+  salonSlug: string | null
+}
+
+type BuiltTapIntent = {
+  intentType: IntentType
+  payloadJson: Prisma.InputJsonObject
+  nextUrl: string
+}
+
+function buildIntentFromCard(card: NfcCardIntentSource): BuiltTapIntent {
+  if (card.type === NfcCardType.PRO_BOOKING && card.professionalId) {
     return {
-      intentType: 'BOOK_PRO' as IntentType,
-      payloadJson: { professionalId: card.professionalId },
+      intentType: 'BOOK_PRO',
+      payloadJson: {
+        professionalId: card.professionalId,
+      },
       nextUrl: `/professionals/${card.professionalId}`,
     }
   }
 
-  if (card.type === 'CLIENT_REFERRAL') {
+  if (card.type === NfcCardType.CLIENT_REFERRAL) {
     return {
-      intentType: 'SIGNUP_CLIENT' as IntentType,
+      intentType: 'SIGNUP_CLIENT',
       payloadJson: {},
-      nextUrl: `/signup?role=CLIENT`,
+      nextUrl: '/signup?role=CLIENT',
     }
   }
 
-  if (card.type === 'SALON_WHITE_LABEL' && card.salonSlug) {
+  if (card.type === NfcCardType.SALON_WHITE_LABEL && card.salonSlug) {
     return {
-      intentType: 'SALON_WHITE_LABEL' as IntentType,
-      payloadJson: { salonSlug: card.salonSlug },
+      intentType: 'SALON_WHITE_LABEL',
+      payloadJson: {
+        salonSlug: card.salonSlug,
+      },
       nextUrl: `/signup?salon=${encodeURIComponent(card.salonSlug)}`,
     }
   }
 
-  // fallback
   return {
-    intentType: 'SIGNUP_CLIENT' as IntentType,
+    intentType: 'SIGNUP_CLIENT',
     payloadJson: {},
     nextUrl: '/signup?role=CLIENT',
   }
 }
 
-export default async function TapPage(props: { params: Promise<{ cardId: string }>; searchParams?: Promise<Record<string, string>> }) {
+export default async function TapPage(props: {
+  params: Promise<{ cardId: string }>
+  searchParams?: Promise<Record<string, string | undefined>>
+}) {
   const { cardId } = await props.params
-  const sp = (await props.searchParams) ?? {}
-  const nextOverride = safeNextUrl(sp.next ?? null)
+  const searchParams = (await props.searchParams) ?? {}
+  const nextOverride = safeNextUrl(searchParams.next ?? null)
 
   const card = await prisma.nfcCard.findUnique({
-    where: { id: cardId },
+    where: {
+      id: cardId,
+    },
     select: {
       id: true,
       type: true,
@@ -76,25 +103,31 @@ export default async function TapPage(props: { params: Promise<{ cardId: string 
   const derived = buildIntentFromCard(card)
   const nextUrl = nextOverride ?? derived.nextUrl
 
-  // create short-lived TapIntent
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 30) // 30 min
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 30)
+
   const intent = await prisma.tapIntent.create({
     data: {
       cardId: card.id,
       userId: user?.id ?? null,
       intentType: derived.intentType,
-      payloadJson: { ...derived.payloadJson, nextUrl },
+      payloadJson: {
+        ...derived.payloadJson,
+        nextUrl,
+      },
       expiresAt,
     },
-    select: { id: true },
+    select: {
+      id: true,
+    },
   })
 
-  // Logged in? We can send them straight to the destination and consume TI later too.
-  // But simplest: always route through signup/login with ti, so consumption is consistent.
   if (!user) {
     redirect(`/signup?ti=${encodeURIComponent(intent.id)}`)
   }
 
-  // user exists: send to destination, still include ti so we can credit/claim if needed
-  redirect(`${nextUrl}${nextUrl.includes('?') ? '&' : '?'}ti=${encodeURIComponent(intent.id)}`)
+  redirect(
+    `${nextUrl}${nextUrl.includes('?') ? '&' : '?'}ti=${encodeURIComponent(
+      intent.id,
+    )}`,
+  )
 }

@@ -361,108 +361,29 @@ function OfferingCard(props: {
 
   const fileRef = useRef<HTMLInputElement | null>(null)
 
-  const displayName = enforceCanonicalServiceNames ? o.serviceName : o.title || o.serviceName
-  const imgSrc = pickImage(o)
+  const displayName = enforceCanonicalServiceNames
+    ? o.serviceName
+    : o.title || o.serviceName
 
+  const imgSrc = pickImage(o)
   const { upstreamOk } = upstreamFlags(o)
 
-  // Local editor state
-  const [description, setDescription] = useState(o.description ?? '')
-  const [offersInSalon, setOffersInSalon] = useState(Boolean(o.offersInSalon))
-  const [offersMobile, setOffersMobile] = useState(Boolean(o.offersMobile))
-  const [salonPrice, setSalonPrice] = useState(o.salonPriceStartingAt ?? '')
-  const [salonDuration, setSalonDuration] = useState(o.salonDurationMinutes ? String(o.salonDurationMinutes) : '')
-  const [mobilePrice, setMobilePrice] = useState(o.mobilePriceStartingAt ?? '')
-  const [mobileDuration, setMobileDuration] = useState(o.mobileDurationMinutes ? String(o.mobileDurationMinutes) : '')
-
-  const [addonsOpen, setAddonsOpen] = useState(false)
-
-  useEffect(() => {
-    if (!isOpen) return
-    setDescription(o.description ?? '')
-    setOffersInSalon(Boolean(o.offersInSalon))
-    setOffersMobile(Boolean(o.offersMobile))
-    setSalonPrice(o.salonPriceStartingAt ?? '')
-    setSalonDuration(o.salonDurationMinutes ? String(o.salonDurationMinutes) : '')
-    setMobilePrice(o.mobilePriceStartingAt ?? '')
-    setMobileDuration(o.mobileDurationMinutes ? String(o.mobileDurationMinutes) : '')
-    setAddonsOpen(false)
-  }, [isOpen, o])
-
-  // ✅ Option 1: lock edits when upstream disabled, still allow Remove.
   const disabledForEdit = busy || uploadBusy || !upstreamOk
   const disabledForRemove = busy || uploadBusy
 
   function summaryLine() {
     const parts: string[] = []
+
     if (o.offersInSalon && o.salonPriceStartingAt && o.salonDurationMinutes) {
       parts.push(`Salon: $${o.salonPriceStartingAt} • ${o.salonDurationMinutes}m`)
     }
+
     if (o.offersMobile && o.mobilePriceStartingAt && o.mobileDurationMinutes) {
       parts.push(`Mobile: $${o.mobilePriceStartingAt} • ${o.mobileDurationMinutes}m`)
     }
+
     return parts.length ? parts.join('  ·  ') : 'No pricing set'
   }
-
-  function validateAndBuildPatch():
-    | { ok: true; patch: OfferingPatch }
-    | { ok: false; error: string } {
-    if (!offersInSalon && !offersMobile) {
-      return { ok: false, error: 'Enable at least Salon or Mobile.' }
-    }
-
-    const minCents = moneyToCentsInt(o.minPrice) ?? 0
-
-    let salonPriceNorm: string | null = null
-    let salonDurInt: number | null = null
-    if (offersInSalon) {
-      salonPriceNorm = normalizeMoney2(salonPrice)
-      if (!salonPriceNorm) return { ok: false, error: 'Salon price must be like 50 or 49.99.' }
-
-      const salonCents = moneyToCentsInt(salonPriceNorm)
-      if (salonCents == null || salonCents < minCents) {
-        return { ok: false, error: `Salon price must be at least $${normalizeMoney2(o.minPrice) ?? o.minPrice}.` }
-      }
-
-      salonDurInt = Math.trunc(Number(salonDuration))
-      if (!Number.isFinite(salonDurInt) || salonDurInt <= 0) {
-        return { ok: false, error: 'Salon duration must be a positive number of minutes.' }
-      }
-    }
-
-    let mobilePriceNorm: string | null = null
-    let mobileDurInt: number | null = null
-    if (offersMobile) {
-      mobilePriceNorm = normalizeMoney2(mobilePrice)
-      if (!mobilePriceNorm) return { ok: false, error: 'Mobile price must be like 50 or 49.99.' }
-
-      const mobileCents = moneyToCentsInt(mobilePriceNorm)
-      if (mobileCents == null || mobileCents < minCents) {
-        return { ok: false, error: `Mobile price must be at least $${normalizeMoney2(o.minPrice) ?? o.minPrice}.` }
-      }
-
-      mobileDurInt = Math.trunc(Number(mobileDuration))
-      if (!Number.isFinite(mobileDurInt) || mobileDurInt <= 0) {
-        return { ok: false, error: 'Mobile duration must be a positive number of minutes.' }
-      }
-    }
-
-    return {
-      ok: true,
-      patch: {
-        description: description.trim() || null,
-        offersInSalon,
-        offersMobile,
-        salonPriceStartingAt: offersInSalon ? salonPriceNorm : null,
-        salonDurationMinutes: offersInSalon ? salonDurInt : null,
-        mobilePriceStartingAt: offersMobile ? mobilePriceNorm : null,
-        mobileDurationMinutes: offersMobile ? mobileDurInt : null,
-      },
-    }
-  }
-
-  const inputBase =
-    'w-full rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
 
   const btnBase =
     'relative inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
@@ -489,7 +410,6 @@ function OfferingCard(props: {
         !upstreamOk && 'opacity-[0.92]',
       )}
     >
-      {/* gradient border + specular highlight */}
       <div
         className={cn(
           'pointer-events-none absolute inset-0',
@@ -500,10 +420,10 @@ function OfferingCard(props: {
           'after:opacity-70',
         )}
       />
+
       <div className="pointer-events-none absolute inset-0 ring-1 ring-white/10" />
 
       <div className="relative p-4">
-        {/* TOP */}
         <div className="flex items-start gap-3">
           <div
             className={cn(
@@ -512,6 +432,7 @@ function OfferingCard(props: {
             )}
           >
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(40px_40px_at_30%_20%,rgb(255_255_255/0.20),transparent_60%)]" />
+
             {imgSrc ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={imgSrc} alt="" className="h-full w-full object-cover" />
@@ -525,27 +446,44 @@ function OfferingCard(props: {
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate text-[13px] font-black text-textPrimary">{displayName}</div>
+                <div className="truncate text-[13px] font-black text-textPrimary">
+                  {displayName}
+                </div>
+
                 {o.categoryName ? (
-                  <div className="mt-0.5 text-[12px] font-black text-textSecondary">{o.categoryName}</div>
+                  <div className="mt-0.5 text-[12px] font-black text-textSecondary">
+                    {o.categoryName}
+                  </div>
                 ) : (
                   <div className="mt-0.5 text-[12px] text-textSecondary"> </div>
                 )}
               </div>
 
-              <button type="button" onClick={onToggle} disabled={busy || uploadBusy} className={cn(btnBase, btnSoft)}>
+              <button
+                type="button"
+                onClick={onToggle}
+                disabled={busy || uploadBusy}
+                className={cn(btnBase, btnSoft)}
+              >
                 {isOpen ? 'Close' : 'Edit'}
               </button>
             </div>
 
-            <div className="mt-2 text-[12px] text-textSecondary">{summaryLine()}</div>
+            <div className="mt-2 text-[12px] text-textSecondary">
+              {summaryLine()}
+            </div>
 
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {!upstreamOk ? <span className={chipWarn}>Unavailable</span> : null}
-              <span className={chip}>Min {normalizeMoney2(o.minPrice) ?? o.minPrice}</span>
+
+              <span className={chip}>
+                Min {normalizeMoney2(o.minPrice) ?? o.minPrice}
+              </span>
 
               {o.serviceIsAddOnEligible ? (
-                <span className={chip}>Add-on{o.serviceAddOnGroup ? ` • ${o.serviceAddOnGroup}` : ''}</span>
+                <span className={chip}>
+                  Add-on{o.serviceAddOnGroup ? ` • ${o.serviceAddOnGroup}` : ''}
+                </span>
               ) : null}
 
               <span className={chip}>Image • {imageLabel(o)}</span>
@@ -559,7 +497,6 @@ function OfferingCard(props: {
           </div>
         </div>
 
-        {/* ACTIONS */}
         <div className="mt-4 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-end">
           <button
             type="button"
@@ -578,12 +515,14 @@ function OfferingCard(props: {
                 accept="image/*"
                 className="hidden"
                 onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null
-                  if (!f) return
-                  onUpload(f)
+                  const file = e.target.files?.[0] ?? null
+                  if (!file) return
+
+                  onUpload(file)
                   e.currentTarget.value = ''
                 }}
               />
+
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
@@ -596,173 +535,354 @@ function OfferingCard(props: {
           ) : (
             <div className="col-span-1 sm:hidden" />
           )}
-
-          <button
-            type="button"
-            disabled={disabledForEdit}
-            onClick={() => setAddonsOpen((v) => !v)}
-            className={cn(btnBase, btnSoft, 'col-span-1 sm:col-auto')}
-          >
-            {addonsOpen ? 'Hide add-ons' : 'Manage add-ons'}
-          </button>
         </div>
 
-        {/* EXPAND */}
         {isOpen ? (
-          <form
-            className="mt-4 grid gap-4 border-t border-white/10 pt-4"
-            onSubmit={(e) => {
-              e.preventDefault()
-
-              if (disabledForEdit) {
-                if (!upstreamOk) setError('This service is unavailable. Remove it from your menu.')
-                return
-              }
-
-              const result = validateAndBuildPatch()
-              if (!result.ok) {
-                setError(result.error)
-                return
-              }
-
-              onSave(result.patch)
-            }}
-          >
-            {!upstreamOk ? (
-              <div className="rounded-card border border-toneWarn/25 bg-bgPrimary/40 p-3 text-[12px] text-textSecondary">
-                Editing is disabled because this service is unavailable in the library.
-              </div>
-            ) : null}
-
-            <label className="grid gap-2">
-              <div className="text-[12px] font-black text-textPrimary">Description (optional)</div>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                disabled={disabledForEdit}
-                rows={3}
-                className={inputBase}
-                placeholder="Short, clear, client-friendly."
-              />
-            </label>
-
-            <div className="flex flex-wrap items-center gap-4">
-              <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
-                <input
-                  type="checkbox"
-                  checked={offersInSalon}
-                  onChange={(e) => setOffersInSalon(e.target.checked)}
-                  disabled={disabledForEdit}
-                  className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
-                />
-                Offer in Salon
-              </label>
-
-              <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
-                <input
-                  type="checkbox"
-                  checked={offersMobile}
-                  onChange={(e) => setOffersMobile(e.target.checked)}
-                  disabled={disabledForEdit}
-                  className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
-                />
-                Offer Mobile
-              </label>
-            </div>
-
-            {addonsOpen ? (
-              <AddOnsManager
-                offeringId={o.id}
-                disabled={disabledForEdit}
-                onError={(msg) => setError(msg)}
-                onSuccess={(msg) => setSuccess(msg)}
-                onRefresh={() => refresh()}
-              />
-            ) : null}
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className={cn('rounded-card border border-white/10 bg-bgPrimary/40 p-3', !offersInSalon && 'opacity-70')}>
-                <div className="mb-2 text-[12px] font-black text-textPrimary">Salon</div>
-                <div className="grid gap-2">
-                  <label className="grid gap-1">
-                    <div className="text-[11px] font-black text-textSecondary">Starting at</div>
-                    <input
-                      value={salonPrice}
-                      onChange={(e) => setSalonPrice(e.target.value)}
-                      disabled={disabledForEdit || !offersInSalon}
-                      inputMode="decimal"
-                      className={inputBase}
-                      placeholder="e.g. 120 or 120.00"
-                    />
-                  </label>
-
-                  <label className="grid gap-1">
-                    <div className="text-[11px] font-black text-textSecondary">Minutes</div>
-                    <input
-                      value={salonDuration}
-                      onChange={(e) => setSalonDuration(e.target.value)}
-                      disabled={disabledForEdit || !offersInSalon}
-                      type="number"
-                      min={1}
-                      className={inputBase}
-                      placeholder="e.g. 90"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className={cn('rounded-card border border-white/10 bg-bgPrimary/40 p-3', !offersMobile && 'opacity-70')}>
-                <div className="mb-2 text-[12px] font-black text-textPrimary">Mobile</div>
-                <div className="grid gap-2">
-                  <label className="grid gap-1">
-                    <div className="text-[11px] font-black text-textSecondary">Starting at</div>
-                    <input
-                      value={mobilePrice}
-                      onChange={(e) => setMobilePrice(e.target.value)}
-                      disabled={disabledForEdit || !offersMobile}
-                      inputMode="decimal"
-                      className={inputBase}
-                      placeholder="e.g. 150 or 150.00"
-                    />
-                  </label>
-
-                  <label className="grid gap-1">
-                    <div className="text-[11px] font-black text-textSecondary">Minutes</div>
-                    <input
-                      value={mobileDuration}
-                      onChange={(e) => setMobileDuration(e.target.value)}
-                      disabled={disabledForEdit || !offersMobile}
-                      type="number"
-                      min={1}
-                      className={inputBase}
-                      placeholder="e.g. 90"
-                    />
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            {error ? <div className="text-[12px] text-toneDanger">{error}</div> : null}
-            {success ? <div className="text-[12px] text-toneSuccess">{success}</div> : null}
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={disabledForEdit}
-                className={cn(
-                  'rounded-card border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]',
-                  disabledForEdit
-                    ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                    : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]',
-                )}
-              >
-                {busy ? 'Saving…' : 'Save changes'}
-              </button>
-            </div>
-          </form>
+          <OfferingEditor
+            key={o.id}
+            offering={o}
+            busy={busy}
+            uploadBusy={uploadBusy}
+            upstreamOk={upstreamOk}
+            error={error}
+            success={success}
+            onSave={onSave}
+            setError={setError}
+            setSuccess={setSuccess}
+            refresh={refresh}
+          />
         ) : null}
       </div>
     </div>
+  )
+}
+
+function OfferingEditor(props: {
+  offering: Offering
+  busy: boolean
+  uploadBusy: boolean
+  upstreamOk: boolean
+  error: string | null
+  success: string | null
+  onSave: (patch: OfferingPatch) => void
+  setError: (msg: string) => void
+  setSuccess: (msg: string) => void
+  refresh: () => void
+}) {
+  const {
+    offering: o,
+    busy,
+    uploadBusy,
+    upstreamOk,
+    error,
+    success,
+    onSave,
+    setError,
+    setSuccess,
+    refresh,
+  } = props
+
+  const [description, setDescription] = useState(o.description ?? '')
+  const [offersInSalon, setOffersInSalon] = useState(Boolean(o.offersInSalon))
+  const [offersMobile, setOffersMobile] = useState(Boolean(o.offersMobile))
+  const [salonPrice, setSalonPrice] = useState(o.salonPriceStartingAt ?? '')
+  const [salonDuration, setSalonDuration] = useState(
+    o.salonDurationMinutes ? String(o.salonDurationMinutes) : '',
+  )
+  const [mobilePrice, setMobilePrice] = useState(o.mobilePriceStartingAt ?? '')
+  const [mobileDuration, setMobileDuration] = useState(
+    o.mobileDurationMinutes ? String(o.mobileDurationMinutes) : '',
+  )
+  const [addonsOpen, setAddonsOpen] = useState(false)
+
+  const disabledForEdit = busy || uploadBusy || !upstreamOk
+
+  function validateAndBuildPatch():
+    | { ok: true; patch: OfferingPatch }
+    | { ok: false; error: string } {
+    if (!offersInSalon && !offersMobile) {
+      return { ok: false, error: 'Enable at least Salon or Mobile.' }
+    }
+
+    const minCents = moneyToCentsInt(o.minPrice) ?? 0
+
+    let salonPriceNorm: string | null = null
+    let salonDurInt: number | null = null
+
+    if (offersInSalon) {
+      salonPriceNorm = normalizeMoney2(salonPrice)
+
+      if (!salonPriceNorm) {
+        return { ok: false, error: 'Salon price must be like 50 or 49.99.' }
+      }
+
+      const salonCents = moneyToCentsInt(salonPriceNorm)
+
+      if (salonCents == null || salonCents < minCents) {
+        return {
+          ok: false,
+          error: `Salon price must be at least $${normalizeMoney2(o.minPrice) ?? o.minPrice}.`,
+        }
+      }
+
+      salonDurInt = Math.trunc(Number(salonDuration))
+
+      if (!Number.isFinite(salonDurInt) || salonDurInt <= 0) {
+        return {
+          ok: false,
+          error: 'Salon duration must be a positive number of minutes.',
+        }
+      }
+    }
+
+    let mobilePriceNorm: string | null = null
+    let mobileDurInt: number | null = null
+
+    if (offersMobile) {
+      mobilePriceNorm = normalizeMoney2(mobilePrice)
+
+      if (!mobilePriceNorm) {
+        return { ok: false, error: 'Mobile price must be like 50 or 49.99.' }
+      }
+
+      const mobileCents = moneyToCentsInt(mobilePriceNorm)
+
+      if (mobileCents == null || mobileCents < minCents) {
+        return {
+          ok: false,
+          error: `Mobile price must be at least $${normalizeMoney2(o.minPrice) ?? o.minPrice}.`,
+        }
+      }
+
+      mobileDurInt = Math.trunc(Number(mobileDuration))
+
+      if (!Number.isFinite(mobileDurInt) || mobileDurInt <= 0) {
+        return {
+          ok: false,
+          error: 'Mobile duration must be a positive number of minutes.',
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      patch: {
+        description: description.trim() || null,
+        offersInSalon,
+        offersMobile,
+        salonPriceStartingAt: offersInSalon ? salonPriceNorm : null,
+        salonDurationMinutes: offersInSalon ? salonDurInt : null,
+        mobilePriceStartingAt: offersMobile ? mobilePriceNorm : null,
+        mobileDurationMinutes: offersMobile ? mobileDurInt : null,
+      },
+    }
+  }
+
+  const inputBase =
+    'w-full rounded-xl border border-white/10 bg-bgPrimary/70 px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary/70 focus:outline-none focus:ring-2 focus:ring-accentPrimary/40'
+
+  const btnBase =
+    'relative inline-flex items-center justify-center rounded-full px-3 py-2 text-[12px] font-black transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60'
+
+  const btnSoft =
+    'border border-white/10 bg-bgPrimary/60 text-textPrimary hover:border-white/20 hover:bg-bgPrimary/80 shadow-[0_10px_24px_rgb(0_0_0/0.22)]'
+
+  return (
+    <form
+      className="mt-4 grid gap-4 border-t border-white/10 pt-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+
+        if (disabledForEdit) {
+          if (!upstreamOk) {
+            setError('This service is unavailable. Remove it from your menu.')
+          }
+
+          return
+        }
+
+        const result = validateAndBuildPatch()
+
+        if (!result.ok) {
+          setError(result.error)
+          return
+        }
+
+        onSave(result.patch)
+      }}
+    >
+      {!upstreamOk ? (
+        <div className="rounded-card border border-toneWarn/25 bg-bgPrimary/40 p-3 text-[12px] text-textSecondary">
+          Editing is disabled because this service is unavailable in the library.
+        </div>
+      ) : null}
+
+      <label className="grid gap-2">
+        <div className="text-[12px] font-black text-textPrimary">
+          Description (optional)
+        </div>
+
+        <textarea
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          disabled={disabledForEdit}
+          rows={3}
+          className={inputBase}
+          placeholder="Short, clear, client-friendly."
+        />
+      </label>
+
+      <div className="flex flex-wrap items-center gap-4">
+        <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
+          <input
+            type="checkbox"
+            checked={offersInSalon}
+            onChange={(e) => setOffersInSalon(e.target.checked)}
+            disabled={disabledForEdit}
+            className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+          />
+          Offer in Salon
+        </label>
+
+        <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
+          <input
+            type="checkbox"
+            checked={offersMobile}
+            onChange={(e) => setOffersMobile(e.target.checked)}
+            disabled={disabledForEdit}
+            className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+          />
+          Offer Mobile
+        </label>
+
+        <button
+          type="button"
+          disabled={disabledForEdit}
+          onClick={() => setAddonsOpen((value) => !value)}
+          className={cn(btnBase, btnSoft)}
+        >
+          {addonsOpen ? 'Hide add-ons' : 'Manage add-ons'}
+        </button>
+      </div>
+
+      {addonsOpen ? (
+        <AddOnsManager
+          offeringId={o.id}
+          disabled={disabledForEdit}
+          onError={(msg) => setError(msg)}
+          onSuccess={(msg) => setSuccess(msg)}
+          onRefresh={() => refresh()}
+        />
+      ) : null}
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <div
+          className={cn(
+            'rounded-card border border-white/10 bg-bgPrimary/40 p-3',
+            !offersInSalon && 'opacity-70',
+          )}
+        >
+          <div className="mb-2 text-[12px] font-black text-textPrimary">
+            Salon
+          </div>
+
+          <div className="grid gap-2">
+            <label className="grid gap-1">
+              <div className="text-[11px] font-black text-textSecondary">
+                Starting at
+              </div>
+
+              <input
+                value={salonPrice}
+                onChange={(e) => setSalonPrice(e.target.value)}
+                disabled={disabledForEdit || !offersInSalon}
+                inputMode="decimal"
+                className={inputBase}
+                placeholder="e.g. 120 or 120.00"
+              />
+            </label>
+
+            <label className="grid gap-1">
+              <div className="text-[11px] font-black text-textSecondary">
+                Minutes
+              </div>
+
+              <input
+                value={salonDuration}
+                onChange={(e) => setSalonDuration(e.target.value)}
+                disabled={disabledForEdit || !offersInSalon}
+                type="number"
+                min={1}
+                className={inputBase}
+                placeholder="e.g. 90"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div
+          className={cn(
+            'rounded-card border border-white/10 bg-bgPrimary/40 p-3',
+            !offersMobile && 'opacity-70',
+          )}
+        >
+          <div className="mb-2 text-[12px] font-black text-textPrimary">
+            Mobile
+          </div>
+
+          <div className="grid gap-2">
+            <label className="grid gap-1">
+              <div className="text-[11px] font-black text-textSecondary">
+                Starting at
+              </div>
+
+              <input
+                value={mobilePrice}
+                onChange={(e) => setMobilePrice(e.target.value)}
+                disabled={disabledForEdit || !offersMobile}
+                inputMode="decimal"
+                className={inputBase}
+                placeholder="e.g. 150 or 150.00"
+              />
+            </label>
+
+            <label className="grid gap-1">
+              <div className="text-[11px] font-black text-textSecondary">
+                Minutes
+              </div>
+
+              <input
+                value={mobileDuration}
+                onChange={(e) => setMobileDuration(e.target.value)}
+                disabled={disabledForEdit || !offersMobile}
+                type="number"
+                min={1}
+                className={inputBase}
+                placeholder="e.g. 90"
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {error ? <div className="text-[12px] text-toneDanger">{error}</div> : null}
+      {success ? <div className="text-[12px] text-toneSuccess">{success}</div> : null}
+
+      <div className="flex justify-end">
+        <button
+          type="submit"
+          disabled={disabledForEdit}
+          className={cn(
+            'rounded-card border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]',
+            disabledForEdit
+              ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+              : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover shadow-[0_16px_40px_rgb(0_0_0/0.35)]',
+          )}
+        >
+          {busy ? 'Saving…' : 'Save changes'}
+        </button>
+      </div>
+    </form>
   )
 }
 

@@ -3,12 +3,22 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-function formatMmSs(ms: number) {
+const TICK_MS = 500
+const URGENT_THRESHOLD_MS = 2 * 60_000
+
+function formatMmSs(ms: number): string {
   const clamped = Math.max(0, ms)
-  const s = Math.floor(clamped / 1000)
-  const mm = String(Math.floor(s / 60)).padStart(2, '0')
-  const ss = String(s % 60).padStart(2, '0')
-  return `${mm}:${ss}`
+  const totalSeconds = Math.floor(clamped / 1000)
+  const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0')
+  const seconds = String(totalSeconds % 60).padStart(2, '0')
+
+  return `${minutes}:${seconds}`
+}
+
+function clearTick(intervalId: number | null): void {
+  if (intervalId !== null) {
+    window.clearInterval(intervalId)
+  }
 }
 
 export function useHoldTimer(holdUntil: number | null) {
@@ -16,43 +26,44 @@ export function useHoldTimer(holdUntil: number | null) {
   const tickRef = useRef<number | null>(null)
 
   useEffect(() => {
-    // stop ticking if no hold
+    clearTick(tickRef.current)
+    tickRef.current = null
+
     if (!holdUntil) {
-      if (tickRef.current) window.clearInterval(tickRef.current)
-      tickRef.current = null
-      return
+      return undefined
     }
 
-    // tick while active
-    setNowMs(Date.now())
-    if (tickRef.current) window.clearInterval(tickRef.current)
     tickRef.current = window.setInterval(() => {
       setNowMs(Date.now())
-    }, 500)
+    }, TICK_MS)
 
     return () => {
-      if (tickRef.current) window.clearInterval(tickRef.current)
+      clearTick(tickRef.current)
       tickRef.current = null
     }
   }, [holdUntil])
 
   const remainingMs = useMemo(() => {
     if (!holdUntil) return null
+
     return holdUntil - nowMs
   }, [holdUntil, nowMs])
 
   const label = useMemo(() => {
-    if (remainingMs == null) return null
+    if (remainingMs === null) return null
+
     return formatMmSs(remainingMs)
   }, [remainingMs])
 
   const urgent = useMemo(() => {
-    if (remainingMs == null) return false
-    return remainingMs <= 2 * 60_000 && remainingMs > 0
+    if (remainingMs === null) return false
+
+    return remainingMs <= URGENT_THRESHOLD_MS && remainingMs > 0
   }, [remainingMs])
 
   const expired = useMemo(() => {
-    if (remainingMs == null) return false
+    if (remainingMs === null) return false
+
     return remainingMs <= 0
   }, [remainingMs])
 

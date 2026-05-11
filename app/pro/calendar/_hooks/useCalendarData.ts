@@ -168,7 +168,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
         temporaryErrorTimeoutRef.current = null
       }, TEMPORARY_ERROR_MS)
     },
-    [cal.setError],
+    [cal],
   )
 
   const resolveBookingSchedulingContext = useCallback(
@@ -198,11 +198,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
         stepMinutes: resolvedStepMinutes,
       }
     },
-    [
-      cal.workingHoursMobile,
-      cal.workingHoursSalon,
-      loc.resolveLocationById,
-    ],
+    [cal, loc],
   )
 
   const resolveEventSchedulingContext = useCallback(
@@ -232,14 +228,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
         stepMinutes: loc.activeStepMinutes,
       }
     },
-    [
-      cal.timeZoneRef,
-      cal.workingHoursActive,
-      loc.activeLocationType,
-      loc.activeStepMinutes,
-      loc.resolveLocationTypeFromId,
-      resolveBookingSchedulingContext,
-    ],
+    [cal, loc, resolveBookingSchedulingContext],
   )
 
   const mgmt = useManagementPanel({
@@ -302,7 +291,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
 
   useEffect(() => {
     mgmt.setManagement(cal.management)
-  }, [cal.management, mgmt.setManagement])
+  }, [cal, mgmt])
 
   const [showHoursForm, setShowHoursForm] = useState(false)
 
@@ -346,17 +335,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
 
       void bookingModal.openBooking(id)
     },
-    [
-      blocks.blockCreateOpen,
-      blocks.editBlockOpen,
-      blocks.openEditBlockFromEvent,
-      bookingModal.openBooking,
-      cal.eventsRef,
-      confirm.confirmOpen,
-      confirm.pendingChange,
-      loc.setActiveLocationId,
-      mgmt.managementOpen,
-    ],
+    [blocks, bookingModal, cal, confirm, loc, mgmt],
   )
 
   const openCreateForClick = useCallback(

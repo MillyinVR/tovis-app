@@ -1,16 +1,29 @@
+// app/pro/clients/[id]/NewNoteForm.tsx
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { safeJson } from '@/lib/http'
-type Props = { clientId: string }
 
-function currentPathWithQuery() {
+type Props = {
+  clientId: string
+}
+
+type ApiErrorPayload = {
+  error?: unknown
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function currentPathWithQuery(): string {
   if (typeof window === 'undefined') return '/pro'
   return window.location.pathname + window.location.search + window.location.hash
 }
 
-function sanitizeFrom(from: string) {
+function sanitizeFrom(from: string): string {
   const trimmed = from.trim()
   if (!trimmed) return '/pro'
   if (!trimmed.startsWith('/')) return '/pro'
@@ -18,18 +31,35 @@ function sanitizeFrom(from: string) {
   return trimmed
 }
 
-function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
+function redirectToLogin(
+  router: ReturnType<typeof useRouter>,
+  reason?: string,
+): void {
   const from = sanitizeFrom(currentPathWithQuery())
   const qs = new URLSearchParams({ from })
-  if (reason) qs.set('reason', reason)
+
+  if (reason) {
+    qs.set('reason', reason)
+  }
+
   router.push(`/login?${qs.toString()}`)
 }
 
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
+function errorFromResponse(res: Response, data: unknown): string {
+  const payload: ApiErrorPayload = isRecord(data) ? data : {}
+
+  if (typeof payload.error === 'string' && payload.error.trim()) {
+    return payload.error.trim()
+  }
+
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
+
   return `Request failed (${res.status}).`
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 export default function NewNoteForm({ clientId }: Props) {
@@ -37,48 +67,52 @@ export default function NewNoteForm({ clientId }: Props) {
 
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    return () => abortRef.current?.abort()
+    return () => {
+      abortRef.current?.abort()
+    }
   }, [])
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+
+    if (loading) return
+
     setError(null)
 
-    const t = title.trim()
-    const b = body.trim()
+    const trimmedTitle = title.trim()
+    const trimmedBody = body.trim()
 
     if (!clientId) {
       setError('Missing client id.')
       return
     }
 
-    if (!b) {
+    if (!trimmedBody) {
       setError('Note body is required.')
       return
     }
 
-    if (loading) return
-
     abortRef.current?.abort()
+
     const controller = new AbortController()
     abortRef.current = controller
 
     setLoading(true)
+
     try {
-      const res = await fetch(`/api/pro/clients/${clientId}/notes`, {
+      const res = await fetch(`/api/pro/clients/${encodeURIComponent(clientId)}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          title: t || null,
-          body: b,
+          title: trimmedTitle || null,
+          body: trimmedBody,
         }),
       })
 
@@ -87,7 +121,7 @@ export default function NewNoteForm({ clientId }: Props) {
         return
       }
 
-      const data = await safeJson(res)
+      const data: unknown = await safeJson(res)
 
       if (!res.ok) {
         setError(errorFromResponse(res, data))
@@ -97,12 +131,16 @@ export default function NewNoteForm({ clientId }: Props) {
       setTitle('')
       setBody('')
       router.refresh()
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
+    } catch (err: unknown) {
+      if (isAbortError(err)) return
+
       console.error(err)
       setError('Network error.')
     } finally {
-      if (abortRef.current === controller) abortRef.current = null
+      if (abortRef.current === controller) {
+        abortRef.current = null
+      }
+
       setLoading(false)
     }
   }
@@ -123,15 +161,21 @@ export default function NewNoteForm({ clientId }: Props) {
       <div>
         <label
           htmlFor="note-title"
-          style={{ display: 'block', fontSize: 12, fontWeight: 500, marginBottom: 4 }}
+          style={{
+            display: 'block',
+            fontSize: 12,
+            fontWeight: 500,
+            marginBottom: 4,
+          }}
         >
           Title (optional)
         </label>
+
         <input
           id="note-title"
           value={title}
           disabled={loading}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(event) => setTitle(event.target.value)}
           placeholder="Ex: First visit, tricky blonde, very talkative"
           style={{
             width: '100%',
@@ -148,15 +192,21 @@ export default function NewNoteForm({ clientId }: Props) {
       <div>
         <label
           htmlFor="note-body"
-          style={{ display: 'block', fontSize: 12, fontWeight: 500, marginBottom: 4 }}
+          style={{
+            display: 'block',
+            fontSize: 12,
+            fontWeight: 500,
+            marginBottom: 4,
+          }}
         >
           Note *
         </label>
+
         <textarea
           id="note-body"
           value={body}
           disabled={loading}
-          onChange={(e) => setBody(e.target.value)}
+          onChange={(event) => setBody(event.target.value)}
           rows={3}
           placeholder="Ex: Prefers cooler tones, sensitive to strong fragrances, always books Saturday mornings."
           style={{
@@ -172,7 +222,7 @@ export default function NewNoteForm({ clientId }: Props) {
         />
       </div>
 
-      {error && <div style={{ fontSize: 12, color: 'red' }}>{error}</div>}
+      {error ? <div style={{ fontSize: 12, color: 'red' }}>{error}</div> : null}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button

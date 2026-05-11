@@ -1,14 +1,25 @@
+// app/pro/clients/NewClientForm.tsx
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { safeJson } from '@/lib/http'
-function currentPathWithQuery() {
+
+type ApiErrorPayload = {
+  error?: unknown
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function currentPathWithQuery(): string {
   if (typeof window === 'undefined') return '/pro'
   return window.location.pathname + window.location.search + window.location.hash
 }
 
-function sanitizeFrom(from: string) {
+function sanitizeFrom(from: string): string {
   const trimmed = from.trim()
   if (!trimmed) return '/pro'
   if (!trimmed.startsWith('/')) return '/pro'
@@ -16,19 +27,35 @@ function sanitizeFrom(from: string) {
   return trimmed
 }
 
-function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
+function redirectToLogin(
+  router: ReturnType<typeof useRouter>,
+  reason?: string,
+): void {
   const from = sanitizeFrom(currentPathWithQuery())
   const qs = new URLSearchParams({ from })
-  if (reason) qs.set('reason', reason)
+
+  if (reason) {
+    qs.set('reason', reason)
+  }
+
   router.push(`/login?${qs.toString()}`)
 }
 
+function errorFromResponse(res: Response, data: unknown): string {
+  const payload: ApiErrorPayload = isRecord(data) ? data : {}
 
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
+  if (typeof payload.error === 'string' && payload.error.trim()) {
+    return payload.error.trim()
+  }
+
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
+
   return `Request failed (${res.status}).`
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 export default function NewClientForm() {
@@ -46,41 +73,46 @@ export default function NewClientForm() {
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    return () => abortRef.current?.abort()
+    return () => {
+      abortRef.current?.abort()
+    }
   }, [])
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+
+    if (loading) return
+
     setError(null)
     setSuccess(false)
 
-    const fn = firstName.trim()
-    const ln = lastName.trim()
-    const em = email.trim()
-    const ph = phone.trim()
+    const trimmedFirstName = firstName.trim()
+    const trimmedLastName = lastName.trim()
+    const trimmedEmail = email.trim()
+    const trimmedPhone = phone.trim()
 
-    if (!fn || !ln || !em) {
+    if (!trimmedFirstName || !trimmedLastName || !trimmedEmail) {
       setError('First name, last name, and email are required.')
       return
     }
 
-    if (loading) return
-
     abortRef.current?.abort()
+
     const controller = new AbortController()
     abortRef.current = controller
 
     setLoading(true)
+
     try {
       const res = await fetch('/api/pro/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          firstName: fn,
-          lastName: ln,
-          email: em,
-          phone: ph || null,
+          firstName: trimmedFirstName,
+          lastName: trimmedLastName,
+          email: trimmedEmail,
+          phone: trimmedPhone || null,
         }),
       })
 
@@ -89,7 +121,7 @@ export default function NewClientForm() {
         return
       }
 
-      const data = await safeJson(res)
+      const data: unknown = await safeJson(res)
 
       if (!res.ok) {
         setError(errorFromResponse(res, data))
@@ -103,12 +135,16 @@ export default function NewClientForm() {
       setPhone('')
 
       router.refresh()
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
+    } catch (err: unknown) {
+      if (isAbortError(err)) return
+
       console.error(err)
       setError('Network error while creating client.')
     } finally {
-      if (abortRef.current === controller) abortRef.current = null
+      if (abortRef.current === controller) {
+        abortRef.current = null
+      }
+
       setLoading(false)
     }
   }
@@ -129,15 +165,21 @@ export default function NewClientForm() {
         <div>
           <label
             htmlFor="firstName"
-            style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}
+            style={{
+              display: 'block',
+              fontSize: 13,
+              fontWeight: 500,
+              marginBottom: 4,
+            }}
           >
             First name *
           </label>
+
           <input
             id="firstName"
             value={firstName}
             disabled={loading}
-            onChange={(e) => setFirstName(e.target.value)}
+            onChange={(event) => setFirstName(event.target.value)}
             style={{
               width: '100%',
               borderRadius: 8,
@@ -153,15 +195,21 @@ export default function NewClientForm() {
         <div>
           <label
             htmlFor="lastName"
-            style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}
+            style={{
+              display: 'block',
+              fontSize: 13,
+              fontWeight: 500,
+              marginBottom: 4,
+            }}
           >
             Last name *
           </label>
+
           <input
             id="lastName"
             value={lastName}
             disabled={loading}
-            onChange={(e) => setLastName(e.target.value)}
+            onChange={(event) => setLastName(event.target.value)}
             style={{
               width: '100%',
               borderRadius: 8,
@@ -178,16 +226,22 @@ export default function NewClientForm() {
       <div>
         <label
           htmlFor="email"
-          style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}
+          style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 500,
+            marginBottom: 4,
+          }}
         >
           Email *
         </label>
+
         <input
           id="email"
           type="email"
           value={email}
           disabled={loading}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(event) => setEmail(event.target.value)}
           placeholder="client@email.com"
           style={{
             width: '100%',
@@ -204,15 +258,21 @@ export default function NewClientForm() {
       <div>
         <label
           htmlFor="phone"
-          style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 4 }}
+          style={{
+            display: 'block',
+            fontSize: 13,
+            fontWeight: 500,
+            marginBottom: 4,
+          }}
         >
           Phone (optional)
         </label>
+
         <input
           id="phone"
           value={phone}
           disabled={loading}
-          onChange={(e) => setPhone(e.target.value)}
+          onChange={(event) => setPhone(event.target.value)}
           placeholder="For reminders later"
           style={{
             width: '100%',
@@ -226,8 +286,11 @@ export default function NewClientForm() {
         />
       </div>
 
-      {error && <div style={{ fontSize: 12, color: 'red' }}>{error}</div>}
-      {success && <div style={{ fontSize: 12, color: '#2e7d32' }}>Client added.</div>}
+      {error ? <div style={{ fontSize: 12, color: 'red' }}>{error}</div> : null}
+
+      {success ? (
+        <div style={{ fontSize: 12, color: '#2e7d32' }}>Client added.</div>
+      ) : null}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button

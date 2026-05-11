@@ -5,9 +5,9 @@ import { createHash } from 'node:crypto'
 import { ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { buildDayCacheKey } from '@/lib/availability/data/cache'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
+import { buildDayCacheKey } from '@/lib/availability/data/cache'
 import { loadAvailabilityOfferingContext } from '@/lib/availability/data/offeringContext'
 import {
   computeDayBoundsUtc,
@@ -23,8 +23,6 @@ import {
   getScheduleConfigVersion,
   getScheduleVersion,
 } from '@/lib/booking/cacheVersion'
-import { withVersionedCache } from '@/lib/cache/versionedCache'
-import { prismaRead } from '@/lib/prisma'
 import {
   MAX_BUFFER_MINUTES,
   MAX_SLOT_DURATION_MINUTES,
@@ -36,6 +34,8 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
+import { withVersionedCache } from '@/lib/cache/versionedCache'
+import { prismaRead } from '@/lib/prisma'
 import { clampInt } from '@/lib/pick'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
@@ -44,7 +44,6 @@ export const dynamic = 'force-dynamic'
 const MAX_LEAD_MINUTES = 30 * 24 * 60
 const OCCUPANCY_WINDOW_PADDING_MINUTES =
   MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
-
 const TTL_DAY_SECONDS = 120
 
 type AvailabilityRequestBasePayload = {
@@ -71,6 +70,7 @@ function bookingJsonFail(
   extra?: Record<string, unknown>,
 ) {
   const fail = getBookingFailPayload(code, overrides)
+
   return jsonFail(fail.httpStatus, fail.userMessage, {
     ...fail.extra,
     ...(extra ?? {}),
@@ -103,7 +103,7 @@ function buildAvailabilityVersion(args: {
   scheduleVersion: string | number
   scheduleConfigVersion: string | number
   date: string
-}) {
+}): string {
   const raw = JSON.stringify({
     v: 1,
     scope: 'DAY',
@@ -222,7 +222,7 @@ export async function GET(req: Request) {
       return bookingJsonFail(baseContext.code)
     }
 
-    let {
+    const {
       locationId,
       effectiveLocationType,
       timeZone,
@@ -232,7 +232,7 @@ export async function GET(req: Request) {
       defaultLead,
       locationBufferMinutes,
       maxAdvanceDays,
-      durationMinutes,
+      durationMinutes: baseDurationMinutes,
       offeringDbId,
       offeringPayload,
     } = baseContext.value
@@ -277,7 +277,7 @@ export async function GET(req: Request) {
       offeringId: offeringDbId,
       addOnIds,
       locationType: effectiveLocationType,
-      baseDurationMinutes: durationMinutes,
+      baseDurationMinutes,
     })
 
     if (!addOnResult.ok) {
@@ -286,7 +286,7 @@ export async function GET(req: Request) {
       })
     }
 
-    durationMinutes = addOnResult.durationMinutes
+    const durationMinutes = addOnResult.durationMinutes
 
     const request = buildDayRequestPayload({
       professionalId,
@@ -440,6 +440,7 @@ export async function GET(req: Request) {
           availabilityVersion,
           generatedAt,
           request,
+
           professionalId,
           serviceId,
           locationType: effectiveLocationType,
@@ -465,28 +466,20 @@ export async function GET(req: Request) {
       }
     }
 
-    let loaderResult: DayLoaderResult
-    if (dayKeyExtra) {
-      // Cache trade-off (replica lag + version bumps): write commits on
-      // primary → bumpScheduleConfigVersion runs → next request reads new
-      // version → cache miss → loader uses prismaRead which can be 1–5s
-      // behind primary → stale snapshot caches under the new v{N} key →
-      // served until 120s TTL backstops. Don't lower the TTL without
-      // verifying replica lag is well under it.
-      const cached = await withVersionedCache(
-        {
-          scope: 'availability:day',
-          scopeId: professionalId,
-          version: scheduleConfigVersion,
-          extra: dayKeyExtra,
-        },
-        computeDayPayload,
-        TTL_DAY_SECONDS,
-      )
-      loaderResult = cached.value
-    } else {
-      loaderResult = await computeDayPayload()
-    }
+    const loaderResult: DayLoaderResult = dayKeyExtra
+      ? (
+          await withVersionedCache(
+            {
+              scope: 'availability:day',
+              scopeId: professionalId,
+              version: scheduleConfigVersion,
+              extra: dayKeyExtra,
+            },
+            computeDayPayload,
+            TTL_DAY_SECONDS,
+          )
+        ).value
+      : await computeDayPayload()
 
     if (loaderResult.kind === 'fail') {
       return bookingJsonFail(loaderResult.code, undefined, {
@@ -504,6 +497,7 @@ export async function GET(req: Request) {
     return jsonOk(loaderResult.payload)
   } catch (err: unknown) {
     console.error('GET /api/availability/day error', err)
+
     return bookingJsonFail('INTERNAL_ERROR', {
       message:
         err instanceof Error ? err.message : 'Failed to load availability.',

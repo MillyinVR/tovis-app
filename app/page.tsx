@@ -79,7 +79,7 @@ export default function Home() {
               href="/signup/pro"
               className="inline-flex items-center justify-center rounded-full border border-textPrimary/25 px-7 py-3 text-[13px] font-bold text-textPrimary/80 transition hover:border-textPrimary/40 hover:bg-textPrimary/6 active:scale-[0.98]"
             >
-              I'm a professional
+              I&apos;m a professional
             </Link>
           </div>
 

@@ -33,21 +33,48 @@ type SavedPrefs = {
   notes: string
 }
 
+type WaitlistFormState = {
+  preferenceType: WaitlistPreferenceType
+  specificDate: string
+  timeOfDay: WaitlistTimeOfDay | null
+  notes: string
+}
+
+type WaitlistStatus = {
+  ok: boolean
+  message: string | null
+}
+
+type QuickPickKind = 'TONIGHT' | 'TOMORROW' | 'WEEKEND'
+
 const PREFS_KEY = 'tovis:waitlist:prefs:v2'
+
+const DEFAULT_FORM_STATE: WaitlistFormState = {
+  preferenceType: 'ANY_TIME',
+  specificDate: '',
+  timeOfDay: null,
+  notes: '',
+}
 
 function pickApiError(raw: unknown): string | null {
   if (!isRecord(raw)) return null
   return asTrimmedString(getRecordProp(raw, 'error'))
 }
 
-function parseNullableStringProp(obj: Record<string, unknown>, key: string): string | null | undefined {
+function parseNullableStringProp(
+  obj: Record<string, unknown>,
+  key: string,
+): string | null | undefined {
   const raw = getRecordProp(obj, key)
   if (raw === null) return null
   if (raw === undefined) return undefined
   return asTrimmedString(raw)
 }
 
-function parseNullableNumberProp(obj: Record<string, unknown>, key: string): number | null | undefined {
+function parseNullableNumberProp(
+  obj: Record<string, unknown>,
+  key: string,
+): number | null | undefined {
   const raw = getRecordProp(obj, key)
   if (raw === null) return null
   if (raw === undefined) return undefined
@@ -55,16 +82,28 @@ function parseNullableNumberProp(obj: Record<string, unknown>, key: string): num
 }
 
 function parsePreferenceType(value: string | null): WaitlistPreferenceType | null {
-  if (value === 'ANY_TIME' || value === 'TIME_OF_DAY' || value === 'SPECIFIC_DATE') return value
+  if (
+    value === 'ANY_TIME' ||
+    value === 'TIME_OF_DAY' ||
+    value === 'SPECIFIC_DATE'
+  ) {
+    return value
+  }
+
   return null
 }
 
 function parseTimeOfDay(value: string | null): WaitlistTimeOfDay | null {
-  if (value === 'MORNING' || value === 'AFTERNOON' || value === 'EVENING') return value
+  if (value === 'MORNING' || value === 'AFTERNOON' || value === 'EVENING') {
+    return value
+  }
+
   return null
 }
 
-function parseWaitlistOk(raw: unknown): { ok: true; entry: WaitlistEntryDTO } | null {
+function parseWaitlistOk(
+  raw: unknown,
+): { ok: true; entry: WaitlistEntryDTO } | null {
   if (!isRecord(raw) || getRecordProp(raw, 'ok') !== true) return null
 
   const entry = getRecordProp(raw, 'entry')
@@ -77,14 +116,26 @@ function parseWaitlistOk(raw: unknown): { ok: true; entry: WaitlistEntryDTO } | 
 
   const mediaId = parseNullableStringProp(entry, 'mediaId')
   const notes = parseNullableStringProp(entry, 'notes')
-  const preferenceType = parsePreferenceType(asTrimmedString(getRecordProp(entry, 'preferenceType')))
+  const preferenceType = parsePreferenceType(
+    asTrimmedString(getRecordProp(entry, 'preferenceType')),
+  )
   const specificDate = parseNullableStringProp(entry, 'specificDate')
-  const timeOfDay = parseTimeOfDay(parseNullableStringProp(entry, 'timeOfDay') ?? null)
+  const timeOfDay = parseTimeOfDay(
+    parseNullableStringProp(entry, 'timeOfDay') ?? null,
+  )
   const windowStartMin = parseNullableNumberProp(entry, 'windowStartMin')
   const windowEndMin = parseNullableNumberProp(entry, 'windowEndMin')
 
-  if (!id || !status || !professionalId || !serviceId || !preferenceType) return null
-  if (mediaId === undefined || notes === undefined || windowStartMin === undefined || windowEndMin === undefined) {
+  if (!id || !status || !professionalId || !serviceId || !preferenceType) {
+    return null
+  }
+
+  if (
+    mediaId === undefined ||
+    notes === undefined ||
+    windowStartMin === undefined ||
+    windowEndMin === undefined
+  ) {
     return null
   }
 
@@ -108,6 +159,7 @@ function parseWaitlistOk(raw: unknown): { ok: true; entry: WaitlistEntryDTO } | 
 
 function nowPartsInTz(timeZone: string) {
   const d = new Date()
+
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
@@ -118,7 +170,11 @@ function nowPartsInTz(timeZone: string) {
   const year = parts.find((p) => p.type === 'year')?.value
   const month = parts.find((p) => p.type === 'month')?.value
   const day = parts.find((p) => p.type === 'day')?.value
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
+
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+  })
     .format(d)
     .toLowerCase()
 
@@ -132,7 +188,11 @@ function nowPartsInTz(timeZone: string) {
   }
 }
 
-function ymdToString(ymd: { year: number; month: number; day: number }): string {
+function ymdToString(ymd: {
+  year: number
+  month: number
+  day: number
+}): string {
   const month = String(ymd.month).padStart(2, '0')
   const day = String(ymd.day).padStart(2, '0')
   return `${ymd.year}-${month}-${day}`
@@ -142,7 +202,10 @@ function addDaysYmd(
   ymd: { year: number; month: number; day: number },
   daysToAdd: number,
 ): { year: number; month: number; day: number } {
-  const d = new Date(Date.UTC(ymd.year, ymd.month - 1, ymd.day + daysToAdd, 12, 0, 0, 0))
+  const d = new Date(
+    Date.UTC(ymd.year, ymd.month - 1, ymd.day + daysToAdd, 12, 0, 0, 0),
+  )
+
   return {
     year: d.getUTCFullYear(),
     month: d.getUTCMonth() + 1,
@@ -161,9 +224,9 @@ function weekdayIndex(shortLower: string): number {
 }
 
 function computeQuickPick(
-  kind: 'TONIGHT' | 'TOMORROW' | 'WEEKEND',
+  kind: QuickPickKind,
   appointmentTz: string,
-): { preferenceType: WaitlistPreferenceType; specificDate: string; timeOfDay: WaitlistTimeOfDay | null } | null {
+): Pick<WaitlistFormState, 'preferenceType' | 'specificDate' | 'timeOfDay'> | null {
   const now = nowPartsInTz(appointmentTz)
   if (!now) return null
 
@@ -177,6 +240,7 @@ function computeQuickPick(
 
   if (kind === 'TOMORROW') {
     const date = addDaysYmd(now, 1)
+
     return {
       preferenceType: 'SPECIFIC_DATE',
       specificDate: ymdToString(date),
@@ -196,7 +260,9 @@ function computeQuickPick(
   }
 }
 
-function loadPrefs(): SavedPrefs | null {
+function readPrefsFromStorage(): SavedPrefs | null {
+  if (typeof window === 'undefined') return null
+
   try {
     const raw = window.localStorage.getItem(PREFS_KEY)
     if (!raw) return null
@@ -204,9 +270,18 @@ function loadPrefs(): SavedPrefs | null {
     const parsed: unknown = JSON.parse(raw)
     if (!isRecord(parsed)) return null
 
-    const preferenceType = parsePreferenceType(asTrimmedString(getRecordProp(parsed, 'preferenceType'))) ?? 'ANY_TIME'
-    const specificDate = asTrimmedString(getRecordProp(parsed, 'specificDate')) ?? ''
-    const timeOfDay = parseTimeOfDay(asTrimmedString(getRecordProp(parsed, 'timeOfDay')))
+    const preferenceType =
+      parsePreferenceType(
+        asTrimmedString(getRecordProp(parsed, 'preferenceType')),
+      ) ?? 'ANY_TIME'
+
+    const specificDate =
+      asTrimmedString(getRecordProp(parsed, 'specificDate')) ?? ''
+
+    const timeOfDay = parseTimeOfDay(
+      asTrimmedString(getRecordProp(parsed, 'timeOfDay')),
+    )
+
     const notes = asTrimmedString(getRecordProp(parsed, 'notes')) ?? ''
 
     return {
@@ -220,12 +295,25 @@ function loadPrefs(): SavedPrefs | null {
   }
 }
 
-function savePrefs(prefs: SavedPrefs) {
+function initialFormState(): WaitlistFormState {
+  return readPrefsFromStorage() ?? DEFAULT_FORM_STATE
+}
+
+function savePrefs(prefs: SavedPrefs): void {
+  if (typeof window === 'undefined') return
+
   try {
     window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
   } catch {
-    // ignore
+    // Best-effort preference persistence only.
   }
+}
+
+function timeOfDayLabel(timeOfDay: WaitlistTimeOfDay | null): string {
+  if (timeOfDay === 'MORNING') return 'Morning'
+  if (timeOfDay === 'AFTERNOON') return 'Afternoon'
+  if (timeOfDay === 'EVENING') return 'Evening'
+  return 'Any time'
 }
 
 export default function WaitlistPanel({
@@ -244,112 +332,104 @@ export default function WaitlistPanel({
   const router = useRouter()
 
   const [open, setOpen] = React.useState(false)
-  const [preferenceType, setPreferenceType] = React.useState<WaitlistPreferenceType>('ANY_TIME')
-  const [specificDate, setSpecificDate] = React.useState('')
-  const [timeOfDay, setTimeOfDay] = React.useState<WaitlistTimeOfDay | null>(null)
-  const [notes, setNotes] = React.useState('')
-
+  const [form, setForm] = React.useState<WaitlistFormState>(initialFormState)
   const [posting, setPosting] = React.useState(false)
-  const [msg, setMsg] = React.useState<string | null>(null)
-  const [ok, setOk] = React.useState(false)
-
-  React.useEffect(() => {
-    if (!canWaitlist) return
-    const prefs = loadPrefs()
-    if (!prefs) return
-    setPreferenceType(prefs.preferenceType)
-    setSpecificDate(prefs.specificDate)
-    setTimeOfDay(prefs.timeOfDay)
-    setNotes(prefs.notes)
-  }, [canWaitlist])
-
-  React.useEffect(() => {
-    if (!canWaitlist) return
-    savePrefs({
-      preferenceType,
-      specificDate,
-      timeOfDay,
-      notes,
-    })
-  }, [canWaitlist, preferenceType, specificDate, timeOfDay, notes])
-
-  if (!canWaitlist) return null
+  const [status, setStatus] = React.useState<WaitlistStatus>({
+    ok: false,
+    message: null,
+  })
 
   const professionalId = (context.professionalId || '').trim() || null
   const serviceId = (effectiveServiceId || '').trim() || null
 
-  function openForm() {
-    setMsg(null)
-    setOk(false)
+  const helperText = noPrimarySlots
+    ? 'No matching openings right now. Waitlist requests help the pro know you want in.'
+    : 'Join the waitlist if none of the visible times work for you.'
+
+  function updateForm(patch: Partial<WaitlistFormState>): void {
+    setForm((current) => {
+      const next = { ...current, ...patch }
+
+      savePrefs({
+        preferenceType: next.preferenceType,
+        specificDate: next.specificDate,
+        timeOfDay: next.timeOfDay,
+        notes: next.notes,
+      })
+
+      return next
+    })
+  }
+
+  function setMessage(ok: boolean, message: string | null): void {
+    setStatus({ ok, message })
+  }
+
+  function openForm(): void {
+    setMessage(false, null)
     setOpen(true)
   }
 
-  function closeForm() {
+  function closeForm(): void {
     if (posting) return
     setOpen(false)
-    setMsg(null)
-    setOk(false)
+    setMessage(false, null)
   }
 
-  function resetFieldsButKeepPrefs() {
-    setMsg(null)
-    setOk(false)
-  }
-
-  function applyQuickPick(kind: 'TONIGHT' | 'TOMORROW' | 'WEEKEND') {
+  function applyQuickPick(kind: QuickPickKind): void {
     const next = computeQuickPick(kind, appointmentTz)
     if (!next) return
 
-    setPreferenceType(next.preferenceType)
-    setSpecificDate(next.specificDate)
-    setTimeOfDay(next.timeOfDay)
-    setMsg(null)
-    setOk(false)
+    updateForm(next)
+    setMessage(false, null)
   }
 
-  async function submit() {
+  async function submit(): Promise<void> {
     if (!professionalId) {
-      setOk(false)
-      setMsg('Missing professional. Please close and try again.')
+      setMessage(false, 'Missing professional. Please close and try again.')
       return
     }
 
     if (!serviceId) {
-      setOk(false)
-      setMsg("This look is missing a service link, so a waitlist request can't be created yet.")
+      setMessage(
+        false,
+        "This look is missing a service link, so a waitlist request can't be created yet.",
+      )
       return
     }
 
     if (posting) return
 
-    if (preferenceType === 'SPECIFIC_DATE' && !specificDate) {
-      setOk(false)
-      setMsg('Please choose a date.')
+    if (form.preferenceType === 'SPECIFIC_DATE' && !form.specificDate) {
+      setMessage(false, 'Please choose a date.')
       return
     }
 
-    if (preferenceType === 'TIME_OF_DAY' && !timeOfDay) {
-      setOk(false)
-      setMsg('Please choose a time of day.')
+    if (form.preferenceType === 'TIME_OF_DAY' && !form.timeOfDay) {
+      setMessage(false, 'Please choose a time of day.')
       return
     }
 
     setPosting(true)
-    setMsg(null)
-    setOk(false)
+    setMessage(false, null)
 
     try {
       const res = await fetch('/api/waitlist', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
         body: JSON.stringify({
           professionalId,
           serviceId,
           mediaId: context.mediaId ?? null,
-          notes: notes.trim() || null,
-          preferenceType,
-          specificDate: preferenceType === 'SPECIFIC_DATE' ? specificDate : null,
-          timeOfDay: preferenceType === 'TIME_OF_DAY' ? timeOfDay : null,
+          notes: form.notes.trim() || null,
+          preferenceType: form.preferenceType,
+          specificDate:
+            form.preferenceType === 'SPECIFIC_DATE' ? form.specificDate : null,
+          timeOfDay:
+            form.preferenceType === 'TIME_OF_DAY' ? form.timeOfDay : null,
           windowStartMin: null,
           windowEndMin: null,
         }),
@@ -364,47 +444,39 @@ export default function WaitlistPanel({
 
       if (!res.ok) {
         if (res.status === 409) {
-          throw new Error(pickApiError(raw) ?? 'You already have an active waitlist request for this pro/service.')
+          throw new Error(
+            pickApiError(raw) ??
+              'You already have an active waitlist request for this pro/service.',
+          )
         }
+
         throw new Error(pickApiError(raw) ?? `Waitlist failed (${res.status}).`)
       }
 
       const parsed = parseWaitlistOk(raw)
       if (!parsed) throw new Error('Waitlist failed (unexpected response).')
 
-      setOk(true)
-      setMsg("You're on the waitlist. We'll notify you if something opens up.")
-      resetFieldsButKeepPrefs()
+      setMessage(true, "You're on the waitlist. We'll notify you if something opens up.")
       setOpen(false)
     } catch (e: unknown) {
-      setOk(false)
-      setMsg(e instanceof Error ? e.message : 'Failed to join waitlist.')
+      setMessage(false, e instanceof Error ? e.message : 'Failed to join waitlist.')
     } finally {
       setPosting(false)
     }
   }
 
-  const timeOfDayLabel =
-    timeOfDay === 'MORNING'
-      ? 'Morning'
-      : timeOfDay === 'AFTERNOON'
-        ? 'Afternoon'
-        : timeOfDay === 'EVENING'
-          ? 'Evening'
-          : 'Any time'
+  if (!canWaitlist) return null
 
   return (
-    <div style={{ marginBottom: 16 }}>
-      {msg ? (
+    <div className="mb-4">
+      {status.message ? (
         <div
-          style={{
-            marginBottom: 10,
-            fontSize: 13,
-            fontWeight: 600,
-            color: ok ? '#4caf50' : '#FF3D4E',
-          }}
+          className={[
+            'mb-2 text-[13px] font-semibold',
+            status.ok ? 'text-toneSuccess' : 'text-toneDanger',
+          ].join(' ')}
         >
-          {msg}
+          {status.message}
         </div>
       ) : null}
 
@@ -412,164 +484,178 @@ export default function WaitlistPanel({
         <button
           type="button"
           onClick={openForm}
-          style={{
-            width: '100%',
-            height: 44,
-            borderRadius: 999,
-            border: '1px solid rgba(244,239,231,0.1)',
-            background: 'rgba(244,239,231,0.05)',
-            fontSize: 13,
-            fontWeight: 700,
-            color: 'rgba(244,239,231,0.55)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 7,
-          }}
+          className={[
+            'flex h-11 w-full items-center justify-center gap-2 rounded-full',
+            'border border-white/10 bg-white/5',
+            'text-[13px] font-bold text-textSecondary',
+            'transition hover:bg-white/10 hover:text-textPrimary',
+          ].join(' ')}
         >
-          <span style={{ fontSize: 10, color: '#E05A28', lineHeight: 1 }}>✦</span>
+          <span className="text-[10px] leading-none text-accentPrimary">✦</span>
           Nothing works? Join the waitlist
         </button>
       ) : (
-        <div
-          style={{
-            borderRadius: 16,
-            border: '1px solid rgba(244,239,231,0.12)',
-            background: 'rgba(244,239,231,0.05)',
-            padding: 16,
-          }}
-        >
-        <div className="grid gap-3">
-          <div className="grid gap-2">
-            <div className="text-[12px] font-black text-textPrimary">Quick picks</div>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => applyQuickPick('TONIGHT')}
-                disabled={posting}
-                className="h-10 rounded-full border border-white/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
-              >
-                Tonight
-              </button>
-              <button
-                type="button"
-                onClick={() => applyQuickPick('TOMORROW')}
-                disabled={posting}
-                className="h-10 rounded-full border border-white/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
-              >
-                Tomorrow
-              </button>
-              <button
-                type="button"
-                onClick={() => applyQuickPick('WEEKEND')}
-                disabled={posting}
-                className="h-10 rounded-full border border-white/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
-              >
-                This weekend
-              </button>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="grid gap-3">
+            <div className="grid gap-2">
+              <div className="text-[12px] font-black text-textPrimary">
+                Quick picks
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyQuickPick('TONIGHT')}
+                  disabled={posting}
+                  className="h-10 rounded-full border border-white/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
+                >
+                  Tonight
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => applyQuickPick('TOMORROW')}
+                  disabled={posting}
+                  className="h-10 rounded-full border border-white/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
+                >
+                  Tomorrow
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => applyQuickPick('WEEKEND')}
+                  disabled={posting}
+                  className="h-10 rounded-full border border-white/10 bg-bgPrimary/35 text-[12px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
+                >
+                  This weekend
+                </button>
+              </div>
+
+              <div className="text-[11px] font-semibold text-textSecondary">
+                Quick picks use{' '}
+                <span className="font-black text-textPrimary">
+                  {appointmentTz}
+                </span>
+                .
+              </div>
+
+              <div className="text-[11px] font-semibold text-textSecondary">
+                {helperText}
+              </div>
             </div>
-            <div className="text-[11px] font-semibold text-textSecondary">
-              Quick picks use <span className="font-black text-textPrimary">{appointmentTz}</span>.
-            </div>
-          </div>
 
-          <label className="text-[12px] font-black text-textPrimary">
-            Preference type
-            <select
-              value={preferenceType}
-              onChange={(e) => {
-                const value = parsePreferenceType(e.target.value)
-                if (!value) return
-                setPreferenceType(value)
-
-                if (value !== 'SPECIFIC_DATE') setSpecificDate('')
-                if (value !== 'TIME_OF_DAY') setTimeOfDay(null)
-              }}
-              disabled={posting}
-              className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
-            >
-              <option value="ANY_TIME">Any time</option>
-              <option value="TIME_OF_DAY">Time of day</option>
-              <option value="SPECIFIC_DATE">Specific day</option>
-            </select>
-          </label>
-
-          {preferenceType === 'TIME_OF_DAY' ? (
             <label className="text-[12px] font-black text-textPrimary">
-              Time of day
+              Preference type
               <select
-                value={timeOfDay ?? ''}
+                value={form.preferenceType}
                 onChange={(e) => {
-                  const value = parseTimeOfDay(e.target.value)
-                  setTimeOfDay(value)
+                  const value = parsePreferenceType(e.target.value)
+                  if (!value) return
+
+                  updateForm({
+                    preferenceType: value,
+                    specificDate:
+                      value === 'SPECIFIC_DATE' ? form.specificDate : '',
+                    timeOfDay: value === 'TIME_OF_DAY' ? form.timeOfDay : null,
+                  })
+
+                  setMessage(false, null)
                 }}
                 disabled={posting}
                 className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
               >
-                <option value="">Choose one</option>
-                <option value="MORNING">Morning</option>
-                <option value="AFTERNOON">Afternoon</option>
-                <option value="EVENING">Evening</option>
+                <option value="ANY_TIME">Any time</option>
+                <option value="TIME_OF_DAY">Time of day</option>
+                <option value="SPECIFIC_DATE">Specific day</option>
               </select>
+            </label>
+
+            {form.preferenceType === 'TIME_OF_DAY' ? (
+              <label className="text-[12px] font-black text-textPrimary">
+                Time of day
+                <select
+                  value={form.timeOfDay ?? ''}
+                  onChange={(e) => {
+                    updateForm({ timeOfDay: parseTimeOfDay(e.target.value) })
+                    setMessage(false, null)
+                  }}
+                  disabled={posting}
+                  className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
+                >
+                  <option value="">Choose one</option>
+                  <option value="MORNING">Morning</option>
+                  <option value="AFTERNOON">Afternoon</option>
+                  <option value="EVENING">Evening</option>
+                </select>
+
+                <div className="mt-1 text-[11px] font-semibold text-textSecondary">
+                  Current preference:{' '}
+                  <span className="font-black text-textPrimary">
+                    {timeOfDayLabel(form.timeOfDay)}
+                  </span>
+                </div>
+              </label>
+            ) : null}
+
+            {form.preferenceType === 'SPECIFIC_DATE' ? (
+              <label className="text-[12px] font-black text-textPrimary">
+                Preferred day
+                <input
+                  type="date"
+                  value={form.specificDate}
+                  onChange={(e) => {
+                    updateForm({ specificDate: e.target.value })
+                    setMessage(false, null)
+                  }}
+                  disabled={posting}
+                  className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
+                />
+              </label>
+            ) : null}
+
+            <label className="text-[12px] font-black text-textPrimary">
+              Notes optional
+              <input
+                value={form.notes}
+                onChange={(e) => {
+                  updateForm({ notes: e.target.value })
+                  setMessage(false, null)
+                }}
+                disabled={posting}
+                placeholder="Ex: after work, weekends, short appointments preferred"
+                className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none placeholder:text-textSecondary/70 disabled:opacity-70"
+              />
+
               <div className="mt-1 text-[11px] font-semibold text-textSecondary">
-                Current preference: <span className="font-black text-textPrimary">{timeOfDayLabel}</span>
+                We&apos;ll remember your waitlist preference on this device.
               </div>
             </label>
-          ) : null}
 
-          {preferenceType === 'SPECIFIC_DATE' ? (
-            <label className="text-[12px] font-black text-textPrimary">
-              Preferred day
-              <input
-                type="date"
-                value={specificDate}
-                onChange={(e) => setSpecificDate(e.target.value)}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => void submit()}
                 disabled={posting}
-                className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none disabled:opacity-70"
-              />
-            </label>
-          ) : null}
+                className={[
+                  'h-11 rounded-full border border-white/10 text-[13px] font-black transition',
+                  posting
+                    ? 'cursor-not-allowed bg-bgPrimary/20 text-textPrimary/70'
+                    : 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+                ].join(' ')}
+              >
+                {posting ? 'Joining…' : 'Confirm'}
+              </button>
 
-          <label className="text-[12px] font-black text-textPrimary">
-            Notes (optional)
-            <input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              disabled={posting}
-              placeholder="Ex: after work, weekends, short appointments preferred"
-              className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none placeholder:text-textSecondary/70 disabled:opacity-70"
-            />
-            <div className="mt-1 text-[11px] font-semibold text-textSecondary">
-              We'll remember your waitlist preference on this device.
+              <button
+                type="button"
+                onClick={closeForm}
+                disabled={posting}
+                className="h-11 rounded-full border border-white/10 bg-bgPrimary/35 text-[13px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
+              >
+                Cancel
+              </button>
             </div>
-          </label>
-
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={submit}
-              disabled={posting}
-              className={[
-                'h-11 rounded-full border border-white/10 text-[13px] font-black transition',
-                posting
-                  ? 'bg-bgPrimary/20 text-textPrimary/70 cursor-not-allowed'
-                  : 'bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
-              ].join(' ')}
-            >
-              {posting ? 'Joining…' : 'Confirm'}
-            </button>
-
-            <button
-              type="button"
-              onClick={closeForm}
-              disabled={posting}
-              className="h-11 rounded-full border border-white/10 bg-bgPrimary/35 text-[13px] font-black text-textPrimary hover:bg-white/10 disabled:opacity-70"
-            >
-              Cancel
-            </button>
           </div>
-        </div>
         </div>
       )}
     </div>

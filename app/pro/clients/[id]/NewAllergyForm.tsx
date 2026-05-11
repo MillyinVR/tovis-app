@@ -1,12 +1,33 @@
+// app/pro/clients/[id]/NewAllergyForm.tsx
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { safeJson } from '@/lib/http'
+
 type Props = { clientId: string }
 
 const SEVERITIES = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL'] as const
 type Severity = (typeof SEVERITIES)[number]
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function getErrorMessage(data: unknown): string | null {
+  if (!isRecord(data)) return null
+
+  const error = data.error
+  if (typeof error !== 'string') return null
+
+  const trimmed = error.trim()
+  return trimmed ? trimmed : null
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
 
 function currentPathWithQuery() {
   if (typeof window === 'undefined') return '/pro'
@@ -28,12 +49,18 @@ function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) 
   router.push(`/login?${qs.toString()}`)
 }
 
+function errorFromResponse(res: Response, data: unknown) {
+  const apiError = getErrorMessage(data)
+  if (apiError) return apiError
 
-function errorFromResponse(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
   if (res.status === 401) return 'Please log in to continue.'
   if (res.status === 403) return 'You don’t have access to do that.'
+
   return `Request failed (${res.status}).`
+}
+
+function isSeverity(value: string): value is Severity {
+  return SEVERITIES.includes(value as Severity)
 }
 
 export default function NewAllergyForm({ clientId }: Props) {
@@ -52,7 +79,7 @@ export default function NewAllergyForm({ clientId }: Props) {
     return () => abortRef.current?.abort()
   }, [])
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
 
@@ -72,12 +99,14 @@ export default function NewAllergyForm({ clientId }: Props) {
     if (loading) return
 
     abortRef.current?.abort()
+
     const controller = new AbortController()
     abortRef.current = controller
 
     setLoading(true)
+
     try {
-      const res = await fetch(`/api/pro/clients/${clientId}/allergies`, {
+      const res = await fetch(`/api/pro/clients/${encodeURIComponent(clientId)}/allergies`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -104,8 +133,9 @@ export default function NewAllergyForm({ clientId }: Props) {
       setDescription('')
       setSeverity('MODERATE')
       router.refresh()
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
+    } catch (err: unknown) {
+      if (isAbortError(err)) return
+
       console.error(err)
       setError('Network error.')
     } finally {
@@ -134,6 +164,7 @@ export default function NewAllergyForm({ clientId }: Props) {
         >
           Allergy / sensitivity *
         </label>
+
         <input
           id="allergy-label"
           value={label}
@@ -159,6 +190,7 @@ export default function NewAllergyForm({ clientId }: Props) {
         >
           Description (optional)
         </label>
+
         <textarea
           id="allergy-description"
           value={description}
@@ -186,11 +218,15 @@ export default function NewAllergyForm({ clientId }: Props) {
         >
           Severity
         </label>
+
         <select
           id="severity"
           value={severity}
           disabled={loading}
-          onChange={(e) => setSeverity(e.target.value as Severity)}
+          onChange={(e) => {
+            const next = e.target.value
+            if (isSeverity(next)) setSeverity(next)
+          }}
           style={{
             width: '100%',
             borderRadius: 8,
@@ -209,7 +245,7 @@ export default function NewAllergyForm({ clientId }: Props) {
         </select>
       </div>
 
-      {error && <div style={{ fontSize: 12, color: 'red' }}>{error}</div>}
+      {error ? <div style={{ fontSize: 12, color: 'red' }}>{error}</div> : null}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button

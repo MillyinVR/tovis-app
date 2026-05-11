@@ -2,31 +2,44 @@
 'use client'
 
 import React, { useEffect, useMemo, useState } from 'react'
+import Image from 'next/image'
 import { cn } from '@/lib/utils'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 type Fit = 'cover' | 'contain'
 
-function isHttpUrl(v: unknown): v is string {
-  return typeof v === 'string' && (v.startsWith('https://') || v.startsWith('http://'))
+type MediaUrlResponse = {
+  url?: unknown
+  error?: unknown
 }
 
 type Props = {
-  // ✅ Preferred: already-renderable http(s) url (public or signed)
   src?: string | null
-
-  // ✅ Optional: if src is missing or not http(s), we can resolve using this
   mediaId?: string | null
-
   mediaType: MediaType
   alt?: string
   fit?: Fit
   className?: string
-  videoProps?: React.VideoHTMLAttributes<HTMLVideoElement> & Record<string, any>
-  imgProps?: React.ImgHTMLAttributes<HTMLImageElement> & Record<string, any>
-
-  // Optional UX
+  videoProps?: React.VideoHTMLAttributes<HTMLVideoElement> & Record<string, unknown>
+  imgProps?: React.ImgHTMLAttributes<HTMLImageElement> & Record<string, unknown>
   showPlaceholder?: boolean
+}
+
+function isHttpUrl(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    (value.startsWith('https://') || value.startsWith('http://'))
+  )
+}
+
+function readApiError(data: MediaUrlResponse | null, fallback: string): string {
+  const rawError = data?.error
+
+  if (typeof rawError === 'string' && rawError.trim()) {
+    return rawError.trim()
+  }
+
+  return fallback
 }
 
 export default function MediaFill(props: Props) {
@@ -43,64 +56,74 @@ export default function MediaFill(props: Props) {
   } = props
 
   const objectClass = fit === 'contain' ? 'object-contain' : 'object-cover'
+  const directUrl = useMemo(() => (isHttpUrl(src) ? src : null), [src])
 
-  const initialUrl = useMemo(() => (isHttpUrl(src) ? src : null), [src])
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(initialUrl)
+  const [resolvedMediaId, setResolvedMediaId] = useState<string | null>(null)
+  const [resolvedMediaUrl, setResolvedMediaUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // If caller hands us a valid URL, use it immediately.
   useEffect(() => {
-    if (initialUrl) {
-      setResolvedUrl(initialUrl)
-      setError(null)
-      return
-    }
-    setResolvedUrl(null)
-  }, [initialUrl])
+    if (directUrl) return
 
-  // If src isn't usable, try resolving by mediaId (single source of truth).
-  useEffect(() => {
-    if (initialUrl) return
-    const id = (mediaId || '').trim()
+    const id = (mediaId ?? '').trim()
     if (!id) return
 
     let cancelled = false
 
-    ;(async () => {
+    async function resolveMediaUrl(): Promise<void> {
       try {
-        setError(null)
-
         const qs = new URLSearchParams({ id })
-        const res = await fetch(`/api/media/url?${qs.toString()}`, { method: 'GET', cache: 'no-store' })
-        const data = (await res.json().catch(() => null)) as any
+        const res = await fetch(`/api/media/url?${qs.toString()}`, {
+          method: 'GET',
+          cache: 'no-store',
+        })
+
+        const data = (await res.json().catch(() => null)) as MediaUrlResponse | null
 
         if (cancelled) return
+
         if (!res.ok) {
-          const msg = typeof data?.error === 'string' && data.error.trim() ? data.error.trim() : `Failed (${res.status})`
-          setError(msg)
-          setResolvedUrl(null)
+          setError(readApiError(data, `Failed (${res.status})`))
+          setResolvedMediaId(id)
+          setResolvedMediaUrl(null)
           return
         }
 
         const url = data?.url
         if (!isHttpUrl(url)) {
           setError('Resolved URL was not a valid http(s) URL.')
-          setResolvedUrl(null)
+          setResolvedMediaId(id)
+          setResolvedMediaUrl(null)
           return
         }
 
-        setResolvedUrl(url)
-      } catch (e) {
+        setError(null)
+        setResolvedMediaId(id)
+        setResolvedMediaUrl(url)
+      } catch {
         if (cancelled) return
+
         setError('Failed to load media.')
-        setResolvedUrl(null)
+        setResolvedMediaId(id)
+        setResolvedMediaUrl(null)
       }
-    })()
+    }
+
+    void resolveMediaUrl()
 
     return () => {
       cancelled = true
     }
-  }, [initialUrl, mediaId])
+  }, [directUrl, mediaId])
+
+  const requestedMediaId = (mediaId ?? '').trim()
+  const resolvedUrl =
+    directUrl ??
+    (requestedMediaId && resolvedMediaId === requestedMediaId
+      ? resolvedMediaUrl
+      : null)
+
+  const isLoading = Boolean(!directUrl && requestedMediaId && resolvedMediaId !== requestedMediaId)
 
   if (!resolvedUrl) {
     if (!showPlaceholder) return null
@@ -112,9 +135,9 @@ export default function MediaFill(props: Props) {
           'bg-bgPrimary/20 text-[12px] font-black text-textSecondary',
           className,
         )}
-        title={error || 'Missing media'}
+        title={error ?? 'Missing media'}
       >
-        {error ? 'Media unavailable' : 'Loading…'}
+        {error ? 'Media unavailable' : isLoading ? 'Loading…' : 'Missing media'}
       </div>
     )
   }
@@ -131,16 +154,28 @@ export default function MediaFill(props: Props) {
     )
   }
 
-  // eslint-disable-next-line @next/next/no-img-element
+   const {
+    src: _ignoredImgSrc,
+    alt: _ignoredImgAlt,
+    className: _ignoredImgClassName,
+    width: _ignoredImgWidth,
+    height: _ignoredImgHeight,
+    sizes: _ignoredImgSizes,
+    loading: _ignoredImgLoading,
+    decoding: _ignoredImgDecoding,
+    ...safeImgProps
+  } = imgProps ?? {}
+
   return (
-    <img
+    <Image
       src={resolvedUrl}
-      alt={alt || 'Media'}
+      alt={alt ?? 'Media'}
+      fill
+      sizes="100vw"
       draggable={false}
-      loading="lazy"
-      decoding="async"
-      className={cn('block h-full w-full', objectClass, className)}
-      {...imgProps}
+      className={cn(objectClass, className)}
+      unoptimized
+      {...safeImgProps}
     />
   )
 }

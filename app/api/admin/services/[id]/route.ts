@@ -1,112 +1,189 @@
 // app/api/admin/services/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { AdminPermissionRole, Prisma } from '@prisma/client'
+
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
-import { AdminPermissionRole } from '@prisma/client'
-import { hasAdminPermission } from '@/lib/adminPermissions'
-import { pickInt, pickMethod, pickString, pickBool } from '@/app/api/_utils/pick'
-import { parseMoney } from '@/lib/money'
 import { safeUrl } from '@/app/api/_utils/media'
+import { pickBool, pickInt, pickMethod, pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { hasAdminPermission } from '@/lib/adminPermissions'
+import { parseMoney } from '@/lib/money'
+import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
 type Params = { id: string }
 type Ctx = { params: Params | Promise<Params> }
 
+type ServiceForPatch = {
+  id: string
+  categoryId: string
+}
+
+type HttpStatusError = Error & {
+  status?: number
+}
+
 async function getParams(ctx: Ctx): Promise<Params> {
   return await Promise.resolve(ctx.params)
 }
 
-function trimId(v: unknown): string {
-  return typeof v === 'string' ? v.trim() : ''
+function trimId(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
 }
 
-/**
- * Checkbox / bool normalization that works with:
- * - <input type="checkbox"> => "on"
- * - explicit strings => "true" / "false"
- * - numbers => "1" / "0"
- */
-function parseBoolish(v: unknown): boolean | null {
-  if (typeof v === 'boolean') return v
-  const s = typeof v === 'string' ? v.trim().toLowerCase() : ''
-  if (!s) return null
-  if (s === 'true' || s === '1' || s === 'on' || s === 'yes') return true
-  if (s === 'false' || s === '0' || s === 'off' || s === 'no') return false
+function parseBoolish(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value
+
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  if (!text) return null
+
+  if (text === 'true' || text === '1' || text === 'on' || text === 'yes') {
+    return true
+  }
+
+  if (text === 'false' || text === '0' || text === 'off' || text === 'no') {
+    return false
+  }
+
   return null
 }
 
-function isPositiveInt(n: unknown): n is number {
-  return typeof n === 'number' && Number.isFinite(n) && Math.trunc(n) === n && n > 0
+function isPositiveInt(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    Math.trunc(value) === value &&
+    value > 0
+  )
 }
 
-async function getServiceOr404(serviceId: string) {
+function toStatusError(error: unknown): HttpStatusError | null {
+  if (!(error instanceof Error)) return null
+
+  const maybeStatus = (error as { status?: unknown }).status
+
+  if (typeof maybeStatus === 'number') {
+    return Object.assign(error, { status: maybeStatus })
+  }
+
+  return error
+}
+
+function forbiddenError(): HttpStatusError {
+  return Object.assign(new Error('Forbidden'), { status: 403 })
+}
+
+function statusFromUnknown(error: unknown): number {
+  const typed = toStatusError(error)
+  return typeof typed?.status === 'number' ? typed.status : 500
+}
+
+async function getServiceOr404(serviceId: string): Promise<ServiceForPatch | null> {
   return await prisma.service.findUnique({
     where: { id: serviceId },
-    select: { id: true, categoryId: true },
+    select: {
+      id: true,
+      categoryId: true,
+    },
   })
 }
 
-async function assertAdminScopeOrThrow(args: { adminUserId: string; serviceId: string; categoryId: string }) {
+async function assertAdminScopeOrThrow(args: {
+  adminUserId: string
+  serviceId: string
+  categoryId: string
+}): Promise<void> {
   const ok = await hasAdminPermission({
     adminUserId: args.adminUserId,
     allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
-    scope: { serviceId: args.serviceId, categoryId: args.categoryId },
+    scope: {
+      serviceId: args.serviceId,
+      categoryId: args.categoryId,
+    },
   })
-  if (!ok) throw Object.assign(new Error('Forbidden'), { status: 403 })
+
+  if (!ok) throw forbiddenError()
 }
 
-async function assertAdminCategoryScopeOrThrow(args: { adminUserId: string; categoryId: string }) {
+async function assertAdminCategoryScopeOrThrow(args: {
+  adminUserId: string
+  categoryId: string
+}): Promise<void> {
   const ok = await hasAdminPermission({
     adminUserId: args.adminUserId,
     allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
-    scope: { categoryId: args.categoryId },
+    scope: {
+      categoryId: args.categoryId,
+    },
   })
-  if (!ok) throw Object.assign(new Error('Forbidden'), { status: 403 })
+
+  if (!ok) throw forbiddenError()
 }
 
-function wantsRedirect(req: NextRequest) {
-  // If it’s an HTML form, we usually want redirects.
-  const accept = req.headers.get('accept') || ''
-  const ct = req.headers.get('content-type') || ''
-  const isForm = ct.includes('multipart/form-data') || ct.includes('application/x-www-form-urlencoded')
+function wantsRedirect(req: NextRequest): boolean {
+  const accept = req.headers.get('accept') ?? ''
+  const contentType = req.headers.get('content-type') ?? ''
+  const isForm =
+    contentType.includes('multipart/form-data') ||
+    contentType.includes('application/x-www-form-urlencoded')
+
   return req.method === 'POST' && isForm && accept.includes('text/html')
 }
 
-function formHasAny(form: FormData, keys: string[]) {
-  for (const k of keys) if (form.has(k)) return true
-  return false
+function formHasAny(form: FormData, keys: readonly string[]): boolean {
+  return keys.some((key) => form.has(key))
 }
 
-async function handleUpdate(req: NextRequest, ctx: Ctx) {
+function redirectToService(req: NextRequest, serviceId: string): Response {
+  return NextResponse.redirect(
+    new URL(`/admin/services/${encodeURIComponent(serviceId)}`, req.url),
+    { status: 303 },
+  )
+}
+
+async function handleUpdate(req: NextRequest, ctx: Ctx): Promise<Response> {
   const auth = await requireUser({ roles: ['ADMIN'] })
   if (!auth.ok) return auth.res
-  const user = auth.user
 
   const { id } = await getParams(ctx)
   const serviceId = trimId(id)
+
   if (!serviceId) return jsonFail(400, 'Missing id')
 
-  const svc = await getServiceOr404(serviceId)
-  if (!svc) return jsonFail(404, 'Service not found')
+  const service = await getServiceOr404(serviceId)
+  if (!service) return jsonFail(404, 'Service not found')
 
-  await assertAdminScopeOrThrow({ adminUserId: user.id, serviceId: svc.id, categoryId: svc.categoryId })
+  await assertAdminScopeOrThrow({
+    adminUserId: auth.user.id,
+    serviceId: service.id,
+    categoryId: service.categoryId,
+  })
 
-  // Support:
-  // - HTML form POST with _method=PATCH
-  // - real PATCH with FormData body
   if (req.method === 'POST') {
     const form = await req.formData()
     const method = (pickMethod(form.get('_method')) ?? '').toUpperCase()
+
     if (method !== 'PATCH') return jsonFail(400, 'Unsupported')
-    return await patchFromForm({ req, svc, adminUserId: user.id, form })
+
+    return await patchFromForm({
+      req,
+      service,
+      adminUserId: auth.user.id,
+      form,
+    })
   }
 
   if (req.method === 'PATCH') {
     const form = await req.formData().catch(() => null)
     if (!form) return jsonFail(400, 'Invalid form body')
-    return await patchFromForm({ req, svc, adminUserId: user.id, form })
+
+    return await patchFromForm({
+      req,
+      service,
+      adminUserId: auth.user.id,
+      form,
+    })
   }
 
   return jsonFail(400, 'Unsupported')
@@ -114,21 +191,17 @@ async function handleUpdate(req: NextRequest, ctx: Ctx) {
 
 type PatchArgs = {
   req: NextRequest
-  svc: { id: string; categoryId: string }
+  service: ServiceForPatch
   adminUserId: string
   form: FormData
 }
 
-async function patchFromForm(args: PatchArgs) {
-  const { req, svc, adminUserId, form } = args
+async function patchFromForm(args: PatchArgs): Promise<Response> {
+  const { req, service, adminUserId, form } = args
 
-  // ----------------------------
-  // 1) Toggle-only: isActive only
-  // ----------------------------
   const isActivePresent = form.has('isActive')
   const isActiveParsed = parseBoolish(pickString(form.get('isActive')))
 
-  // Any field other than isActive means “not toggle-only”
   const hasAnyNonToggleField = formHasAny(form, [
     'name',
     'categoryId',
@@ -143,7 +216,7 @@ async function patchFromForm(args: PatchArgs) {
 
   if (isActivePresent && isActiveParsed !== null && !hasAnyNonToggleField) {
     await prisma.service.update({
-      where: { id: svc.id },
+      where: { id: service.id },
       data: { isActive: isActiveParsed },
     })
 
@@ -151,8 +224,8 @@ async function patchFromForm(args: PatchArgs) {
       .create({
         data: {
           adminUserId,
-          serviceId: svc.id,
-          categoryId: svc.categoryId,
+          serviceId: service.id,
+          categoryId: service.categoryId,
           action: 'SERVICE_TOGGLED',
           note: `isActive=${isActiveParsed}`,
         },
@@ -160,43 +233,46 @@ async function patchFromForm(args: PatchArgs) {
       .catch(() => null)
 
     if (wantsRedirect(req)) {
-      return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(svc.id)}`, req.url), { status: 303 })
+      return redirectToService(req, service.id)
     }
+
     return jsonOk({}, 200)
   }
 
-  // ----------------------------
-  // 2) Partial update: update only fields that are PRESENT
-  // ----------------------------
-  const update: Record<string, any> = {}
+  const update: Prisma.ServiceUpdateInput = {}
 
-  // name
   if (form.has('name')) {
     const name = (pickString(form.get('name')) ?? '').trim()
     if (!name) return jsonFail(400, 'Missing name')
+
     update.name = name
   }
 
-  // categoryId
   let nextCategoryId: string | null = null
+
   if (form.has('categoryId')) {
     const categoryId = (pickString(form.get('categoryId')) ?? '').trim()
     if (!categoryId) return jsonFail(400, 'Missing categoryId')
+
     nextCategoryId = categoryId
-    update.categoryId = categoryId
+    update.category = {
+      connect: { id: categoryId },
+    }
   }
 
-  // defaultDurationMinutes
   if (form.has('defaultDurationMinutes')) {
-    const v = pickInt(form.get('defaultDurationMinutes'))
-    if (!isPositiveInt(v)) return jsonFail(400, 'Invalid defaultDurationMinutes')
-    update.defaultDurationMinutes = v
+    const defaultDurationMinutes = pickInt(form.get('defaultDurationMinutes'))
+    if (!isPositiveInt(defaultDurationMinutes)) {
+      return jsonFail(400, 'Invalid defaultDurationMinutes')
+    }
+
+    update.defaultDurationMinutes = defaultDurationMinutes
   }
 
-  // minPrice
   if (form.has('minPrice')) {
     const minPriceRaw = (pickString(form.get('minPrice')) ?? '').trim()
     if (!minPriceRaw) return jsonFail(400, 'Missing minPrice')
+
     try {
       update.minPrice = parseMoney(minPriceRaw)
     } catch {
@@ -204,105 +280,118 @@ async function patchFromForm(args: PatchArgs) {
     }
   }
 
-  // description (allow clear)
   if (form.has('description')) {
-    const descriptionRaw = (pickString(form.get('description')) ?? '').trim()
-    update.description = descriptionRaw ? descriptionRaw : null
+    const description = (pickString(form.get('description')) ?? '').trim()
+    update.description = description || null
   }
 
-  // allowMobile (checkbox-friendly) — only if present
   if (form.has('allowMobile')) {
-    const allowMobile =
-      pickBool(form.get('allowMobile')) ?? (parseBoolish(pickString(form.get('allowMobile'))) ?? false)
-    update.allowMobile = allowMobile
+    update.allowMobile =
+      pickBool(form.get('allowMobile')) ??
+      parseBoolish(pickString(form.get('allowMobile'))) ??
+      false
   }
 
-  // isAddOnEligible — only if present
   if (form.has('isAddOnEligible')) {
-    const isAddOnEligible =
-      pickBool(form.get('isAddOnEligible')) ?? (parseBoolish(pickString(form.get('isAddOnEligible'))) ?? false)
-    update.isAddOnEligible = isAddOnEligible
+    update.isAddOnEligible =
+      pickBool(form.get('isAddOnEligible')) ??
+      parseBoolish(pickString(form.get('isAddOnEligible'))) ??
+      false
   }
 
-  // addOnGroup (allow clear) — only if present
   if (form.has('addOnGroup')) {
-    const addOnGroupRaw = (pickString(form.get('addOnGroup')) ?? '').trim()
-    update.addOnGroup = addOnGroupRaw ? addOnGroupRaw : null
+    const addOnGroup = (pickString(form.get('addOnGroup')) ?? '').trim()
+    update.addOnGroup = addOnGroup || null
   }
 
-  // isActive can be part of partial updates too (only if present + parseable)
   if (form.has('isActive')) {
-    const isActive = pickBool(form.get('isActive')) ?? (parseBoolish(pickString(form.get('isActive'))) ?? null)
-    if (isActive !== null) update.isActive = isActive
+    const isActive =
+      pickBool(form.get('isActive')) ??
+      parseBoolish(pickString(form.get('isActive')))
+
+    if (isActive !== null) {
+      update.isActive = isActive
+    }
   }
 
-  // defaultImageUrl (allow clear)
   if (form.has('defaultImageUrl')) {
     const raw = (pickString(form.get('defaultImageUrl')) ?? '').trim()
 
-    if (raw === '') {
+    if (!raw) {
       update.defaultImageUrl = null
     } else {
       const cleaned = safeUrl(raw)
       if (!cleaned) return jsonFail(400, 'Invalid defaultImageUrl')
+
       update.defaultImageUrl = cleaned
     }
   }
 
-  // No valid fields?
   if (Object.keys(update).length === 0) {
     return jsonFail(400, 'No valid fields to update')
   }
 
-  // If category is changing, permission-check destination category too.
-  const destCategoryId = nextCategoryId
-  if (destCategoryId && destCategoryId !== svc.categoryId) {
-    await assertAdminCategoryScopeOrThrow({ adminUserId, categoryId: destCategoryId })
+  if (nextCategoryId && nextCategoryId !== service.categoryId) {
+    await assertAdminCategoryScopeOrThrow({
+      adminUserId,
+      categoryId: nextCategoryId,
+    })
   }
 
   await prisma.service.update({
-    where: { id: svc.id },
+    where: { id: service.id },
     data: update,
   })
+
+  const changedKeys = Object.keys(update)
+  const note =
+    typeof update.name === 'string'
+      ? update.name
+      : changedKeys.length === 1 && changedKeys.includes('defaultImageUrl')
+        ? 'defaultImageUrl'
+        : '(partial update)'
 
   await prisma.adminActionLog
     .create({
       data: {
         adminUserId,
-        serviceId: svc.id,
-        categoryId: destCategoryId ?? svc.categoryId,
+        serviceId: service.id,
+        categoryId: nextCategoryId ?? service.categoryId,
         action: 'SERVICE_UPDATED',
-        note:
-          update.name ??
-          (Object.keys(update).length === 1 && update.defaultImageUrl !== undefined ? 'defaultImageUrl' : '(partial update)'),
+        note,
       },
     })
     .catch(() => null)
 
   if (wantsRedirect(req)) {
-    return NextResponse.redirect(new URL(`/admin/services/${encodeURIComponent(svc.id)}`, req.url), { status: 303 })
+    return redirectToService(req, service.id)
   }
+
   return jsonOk({}, 200)
 }
 
-export async function POST(req: NextRequest, ctx: Ctx) {
+export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
   try {
     return await handleUpdate(req, ctx)
-  } catch (e: any) {
-    const status = typeof e?.status === 'number' ? e.status : 500
+  } catch (error: unknown) {
+    const status = statusFromUnknown(error)
+
     if (status === 403) return jsonFail(403, 'Forbidden')
-    console.error('POST /api/admin/services/[id] error', e)
+
+    console.error('POST /api/admin/services/[id] error', error)
     return jsonFail(500, 'Internal server error')
   }
 }
 
-export async function PATCH(req: NextRequest, ctx: Ctx) {
+export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
   try {
     return await handleUpdate(req, ctx)
-  } catch (e: any) {
-    const status = typeof e?.status === 'number' ? e.status : 500
+  } catch (error: unknown) {
+    const status = statusFromUnknown(error)
+
     if (status === 403) return jsonFail(403, 'Forbidden')
-    console.error('PATCH /api/admin/services/[id] error', e)
+
+    console.error('PATCH /api/admin/services/[id] error', error)
     return jsonFail(500, 'Internal server error')
   }
 }

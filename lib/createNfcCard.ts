@@ -1,9 +1,11 @@
 // lib/createNfcCard.ts
+import { NfcCardType, Prisma } from '@prisma/client'
+
 import { prisma } from '@/lib/prisma'
 import { generateShortCode } from '@/lib/nfcShortCode'
 
 type CreateNfcCardArgs = {
-  type: any
+  type: NfcCardType
   isActive: boolean
   salonSlug: string | null
 }
@@ -26,12 +28,24 @@ export async function createNfcCard(args: CreateNfcCardArgs) {
           professionalId: null,
           shortCode,
         },
-        select: { id: true, type: true, isActive: true, shortCode: true, createdAt: true },
+        select: {
+          id: true,
+          type: true,
+          isActive: true,
+          shortCode: true,
+          createdAt: true,
+        },
       })
-    } catch (e: any) {
+    } catch (error: unknown) {
       // Prisma unique constraint error code is P2002
-      if (e?.code === 'P2002') continue
-      throw e
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        continue
+      }
+
+      throw error
     }
   }
 

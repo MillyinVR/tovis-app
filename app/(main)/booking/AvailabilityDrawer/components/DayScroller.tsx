@@ -1,7 +1,7 @@
 // app/(main)/booking/AvailabilityDrawer/components/DayScroller.tsx
 'use client'
 
-import { memo, useCallback, useRef, type UIEvent } from 'react'
+import { memo, useCallback, useEffect, useRef, type UIEvent } from 'react'
 
 import { shouldPrefetchForScrollPosition } from '../utils/availabilityWindow'
 
@@ -24,7 +24,11 @@ type DayButtonProps = {
   onSelectDay: (ymd: string) => void
 }
 
-const DayButton = memo(function DayButton({ day, active, onSelectDay }: DayButtonProps) {
+const DayButton = memo(function DayButton({
+  day,
+  active,
+  onSelectDay,
+}: DayButtonProps) {
   return (
     <button
       type="button"
@@ -55,6 +59,7 @@ const DayButton = memo(function DayButton({ day, active, onSelectDay }: DayButto
       >
         {day.labelTop}
       </div>
+
       <div
         style={{
           marginTop: 4,
@@ -70,13 +75,23 @@ const DayButton = memo(function DayButton({ day, active, onSelectDay }: DayButto
   )
 })
 
-export default function DayScroller({ days, selectedYMD, onSelect, onNearEnd }: DayScrollerProps) {
+export default function DayScroller({
+  days,
+  selectedYMD,
+  onSelect,
+  onNearEnd,
+}: DayScrollerProps) {
   const nearEndTriggeredRef = useRef(false)
   const onSelectRef = useRef(onSelect)
   const onNearEndRef = useRef(onNearEnd)
 
-  onSelectRef.current = onSelect
-  onNearEndRef.current = onNearEnd
+  useEffect(() => {
+    onSelectRef.current = onSelect
+  }, [onSelect])
+
+  useEffect(() => {
+    onNearEndRef.current = onNearEnd
+  }, [onNearEnd])
 
   const handleScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     const nextOnNearEnd = onNearEndRef.current
@@ -89,15 +104,15 @@ export default function DayScroller({ days, selectedYMD, onSelect, onNearEnd }: 
       scrollWidth: el.scrollWidth,
     })
 
-    if (isNearEnd) {
-      if (!nearEndTriggeredRef.current) {
-        nearEndTriggeredRef.current = true
-        nextOnNearEnd()
-      }
+    if (!isNearEnd) {
+      nearEndTriggeredRef.current = false
       return
     }
 
-    nearEndTriggeredRef.current = false
+    if (nearEndTriggeredRef.current) return
+
+    nearEndTriggeredRef.current = true
+    nextOnNearEnd()
   }, [])
 
   const handleSelectDay = useCallback((ymd: string) => {

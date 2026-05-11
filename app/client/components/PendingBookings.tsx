@@ -2,22 +2,45 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import type { ReactNode } from 'react'
+
 import type { BookingLike } from './_helpers'
 import { prettyWhen, bookingLocationLabel, statusUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
 import CardLink from './CardLink'
 import { safeJson } from '@/lib/http'
 
-function errorFrom(res: Response, data: any) {
-  if (typeof data?.error === 'string') return data.error
+type SafeJsonResponse = {
+  error?: unknown
+}
+
+type PendingBookingLike = BookingLike & {
+  hasPendingConsultationApproval?: boolean | null
+  consultation?: {
+    consultationPrice?: string | null
+  } | null
+}
+
+function errorFrom(res: Response, data: unknown): string {
+  const parsed = data as SafeJsonResponse | null
+
+  if (typeof parsed?.error === 'string') return parsed.error
   if (res.status === 401) return 'Please log in again.'
   if (res.status === 403) return 'You don’t have access to do that.'
+
   return `Request failed (${res.status}).`
 }
 
-function Pill({ children }: { children: React.ReactNode }) {
+function errorMessageFromUnknown(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  return 'Something went wrong.'
+}
+
+function Pill({ children }: { children: ReactNode }) {
   return (
     <span className="inline-flex items-center rounded-full border border-white/10 bg-surfaceGlass px-2 py-1 text-[11px] font-black text-textPrimary">
       {children}
@@ -27,17 +50,20 @@ function Pill({ children }: { children: React.ReactNode }) {
 
 function statusLabel(statusRaw: unknown) {
   const s = statusUpper(statusRaw)
+
   if (s === 'PENDING') return 'Requested'
   if (s === 'ACCEPTED') return 'Confirmed'
+
   return s || 'Pending'
 }
 
-function formatMoneyMaybe(v: string) {
-  const s = (v || '').trim()
-  if (!s) return ''
-  return s.startsWith('$') ? s : `$${s}`
-}
+function formatMoneyMaybe(value: string | null | undefined): string {
+  const normalized = value?.trim() ?? ''
 
+  if (!normalized) return ''
+
+  return normalized.startsWith('$') ? normalized : `$${normalized}`
+}
 
 export default function PendingBookings({
   items,
@@ -46,27 +72,55 @@ export default function PendingBookings({
   items: BookingLike[]
   onChanged?: () => void
 }) {
-  const list = items ?? []
+  const list = useMemo<PendingBookingLike[]>(() => items, [items])
+
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const actionRequired = useMemo(() => list.filter((b) => Boolean(b?.hasPendingConsultationApproval)), [list])
-  const regularPending = useMemo(() => list.filter((b) => !b?.hasPendingConsultationApproval), [list])
+  const actionRequired = useMemo(
+    () =>
+      list.filter((booking) =>
+        Boolean(booking.hasPendingConsultationApproval),
+      ),
+    [list],
+  )
 
-  async function decide(bookingId: string, action: 'approve' | 'reject') {
+  const regularPending = useMemo(
+    () =>
+      list.filter(
+        (booking) => !booking.hasPendingConsultationApproval,
+      ),
+    [list],
+  )
+
+  async function decide(
+    bookingId: string,
+    action: 'approve' | 'reject',
+  ): Promise<void> {
     if (!bookingId || busyId) return
+
     setError(null)
     setBusyId(bookingId)
 
     try {
-      const res = await fetch(`/api/client/bookings/${encodeURIComponent(bookingId)}/consultation/${action}`, {
-        method: 'POST',
-      })
+      const res = await fetch(
+        `/api/client/bookings/${encodeURIComponent(
+          bookingId,
+        )}/consultation/${action}`,
+        {
+          method: 'POST',
+        },
+      )
+
       const data = await safeJson(res)
-      if (!res.ok) throw new Error(errorFrom(res, data))
+
+      if (!res.ok) {
+        throw new Error(errorFrom(res, data))
+      }
+
       onChanged?.()
-    } catch (e: any) {
-      setError(e?.message || 'Something went wrong.')
+    } catch (caughtError: unknown) {
+      setError(errorMessageFromUnknown(caughtError))
     } finally {
       setBusyId(null)
     }
@@ -84,40 +138,68 @@ export default function PendingBookings({
 
       {actionRequired.length ? (
         <div className="grid gap-3">
-          <div className="text-xs font-black text-textSecondary">Action required</div>
+          <div className="text-xs font-black text-textSecondary">
+            Action required
+          </div>
 
-          {actionRequired.map((b) => {
-            const svc = b?.display?.title || b?.display?.baseName || 'Appointment'
-            const when = prettyWhen(b?.scheduledFor, b?.timeZone)
-            const loc = bookingLocationLabel(b)
+          {actionRequired.map((booking) => {
+            const svc =
+              booking.display?.title ||
+              booking.display?.baseName ||
+              'Appointment'
 
-            const proId = b?.professional?.id || null
-            const proLabel = b?.professional?.businessName || 'Professional'
+            const when = prettyWhen(booking.scheduledFor, booking.timeZone)
+            const loc = bookingLocationLabel(booking)
 
-            const price = b?.consultation?.consultationPrice ?? null
-            const isBusy = busyId === b.id
+            const proId = booking.professional?.id || null
+            const proLabel =
+              booking.professional?.businessName || 'Professional'
+
+            const price = booking.consultation?.consultationPrice ?? null
+            const formattedPrice = formatMoneyMaybe(price)
+            const isBusy = busyId === booking.id
 
             return (
-              <div key={b.id} className="rounded-card border border-white/10 bg-bgPrimary p-3">
+              <div
+                key={booking.id}
+                className="rounded-card border border-white/10 bg-bgPrimary p-3"
+              >
                 <div className="flex items-baseline justify-between gap-3">
-                  <div className="text-sm font-black text-textPrimary">{svc}</div>
-                  <div className="text-xs font-semibold text-textSecondary">{when}</div>
+                  <div className="text-sm font-black text-textPrimary">
+                    {svc}
+                  </div>
+                  <div className="text-xs font-semibold text-textSecondary">
+                    {when}
+                  </div>
                 </div>
 
                 <div className="mt-1 text-sm text-textPrimary">
-                  <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-                    <ProProfileLink proId={proId} label={proLabel} className="font-black" />
+                  <span
+                    onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                  >
+                    <ProProfileLink
+                      proId={proId}
+                      label={proLabel}
+                      className="font-black"
+                    />
                   </span>
-                  {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
+                  {loc ? (
+                    <span className="text-textSecondary"> · {loc}</span>
+                  ) : null}
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <Pill>Action required</Pill>
                   <Pill>Approve consultation</Pill>
-                  {price ? <Pill>Proposed: {formatMoneyMaybe(price)}</Pill> : null}
+                  {formattedPrice ? (
+                    <Pill>Proposed: {formattedPrice}</Pill>
+                  ) : null}
 
                   <Link
-                    href={`/client/bookings/${encodeURIComponent(b.id)}?step=consult`}
+                    href={`/client/bookings/${encodeURIComponent(
+                      booking.id,
+                    )}?step=consult`}
                     className="ml-auto inline-flex items-center justify-center rounded-full border border-white/10 bg-accentPrimary px-3 py-2 text-xs font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
                   >
                     Review
@@ -127,7 +209,9 @@ export default function PendingBookings({
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={() => decide(b.id, 'approve')}
+                    onClick={() => {
+                      void decide(booking.id, 'approve')
+                    }}
                     disabled={isBusy}
                     className={[
                       'rounded-full px-4 py-2 text-xs font-black transition',
@@ -141,7 +225,9 @@ export default function PendingBookings({
 
                   <button
                     type="button"
-                    onClick={() => decide(b.id, 'reject')}
+                    onClick={() => {
+                      void decide(booking.id, 'reject')
+                    }}
                     disabled={isBusy}
                     className={[
                       'rounded-full px-4 py-2 text-xs font-black transition',
@@ -159,40 +245,59 @@ export default function PendingBookings({
         </div>
       ) : null}
 
-      {/* ✅ Regular pending cards: no outer <Link> anymore (so ProProfileLink is safe) */}
-      {regularPending.map((b) => {
-        const href = `/client/bookings/${encodeURIComponent(b.id)}`
-        const svc = b?.display?.title || b?.display?.baseName || 'Appointment'
-        const when = prettyWhen(b?.scheduledFor, b?.timeZone)
-        const loc = bookingLocationLabel(b)
+      {regularPending.map((booking) => {
+        const href = `/client/bookings/${encodeURIComponent(booking.id)}`
+        const svc =
+          booking.display?.title ||
+          booking.display?.baseName ||
+          'Appointment'
 
-        const proId = b?.professional?.id || null
-        const proLabel = b?.professional?.businessName || 'Professional'
+        const when = prettyWhen(booking.scheduledFor, booking.timeZone)
+        const loc = bookingLocationLabel(booking)
+
+        const proId = booking.professional?.id || null
+        const proLabel =
+          booking.professional?.businessName || 'Professional'
 
         return (
-          <CardLink key={b.id} href={href}>
+          <CardLink key={booking.id} href={href}>
             <div className="cursor-pointer rounded-card border border-white/10 bg-bgPrimary p-3 text-textPrimary">
               <div className="flex items-baseline justify-between gap-3">
                 <div className="text-sm font-black">{svc}</div>
-                <div className="text-xs font-semibold text-textSecondary">{when}</div>
+                <div className="text-xs font-semibold text-textSecondary">
+                  {when}
+                </div>
               </div>
 
               <div className="mt-1 text-sm">
-                <span onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>
-                  <ProProfileLink proId={proId} label={proLabel} className="font-black" />
+                <span
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
+                >
+                  <ProProfileLink
+                    proId={proId}
+                    label={proLabel}
+                    className="font-black"
+                  />
                 </span>
-                {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
+                {loc ? (
+                  <span className="text-textSecondary"> · {loc}</span>
+                ) : null}
               </div>
 
               <div className="mt-3">
-                <Pill>{statusLabel(b?.status)}</Pill>
+                <Pill>{statusLabel(booking.status)}</Pill>
               </div>
             </div>
           </CardLink>
         )
       })}
 
-      {list.length === 0 ? <div className="text-sm font-medium text-textSecondary">No pending items.</div> : null}
+      {list.length === 0 ? (
+        <div className="text-sm font-medium text-textSecondary">
+          No pending items.
+        </div>
+      ) : null}
     </div>
   )
 }

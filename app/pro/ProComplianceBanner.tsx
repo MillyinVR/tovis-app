@@ -13,108 +13,180 @@ type SummaryOk = {
   expiresInDays: number | null
 }
 
-type Summary = SummaryOk | { ok: false; error?: string }
+function isSummaryOk(value: unknown): value is SummaryOk {
+  if (!value || typeof value !== 'object') return false
 
-function safeString(v: unknown) {
-  return typeof v === 'string' ? v : ''
+  const record = value as Record<string, unknown>
+
+  if (record.ok !== true) return false
+  if (typeof record.professionalId !== 'string') return false
+
+  const kind = record.kind
+  const expiresInDays = record.expiresInDays
+
+  const validKind =
+    kind === null ||
+    kind === 'MISSING_DOC' ||
+    kind === 'PENDING_REVIEW' ||
+    kind === 'EXPIRING_SOON' ||
+    kind === 'EXPIRED'
+
+  const validExpiresInDays =
+    expiresInDays === null ||
+    (typeof expiresInDays === 'number' && Number.isFinite(expiresInDays))
+
+  return validKind && validExpiresInDays
 }
 
-function isSummaryOk(x: unknown): x is SummaryOk {
-  if (!x || typeof x !== 'object') return false
-  const r = x as Record<string, unknown>
-  if (r.ok !== true) return false
-  return typeof r.professionalId === 'string'
+function setBannerPx(px: number): void {
+  document.documentElement.style.setProperty(
+    '--pro-banner-h',
+    `${Math.max(0, Math.round(px))}px`,
+  )
 }
 
-function setBannerPx(px: number) {
-  if (typeof document === 'undefined') return
-  document.documentElement.style.setProperty('--pro-banner-h', `${Math.max(0, Math.round(px))}px`)
+function readDismissed(dismissKey: string | null): boolean {
+  if (!dismissKey) return false
+  if (typeof window === 'undefined') return false
+
+  try {
+    return window.localStorage.getItem(dismissKey) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeDismissed(dismissKey: string | null): void {
+  if (!dismissKey) return
+
+  try {
+    window.localStorage.setItem(dismissKey, '1')
+  } catch {
+    // Best-effort browser storage only.
+  }
+}
+
+function messageForKind(args: {
+  kind: BannerKind
+  expiresInDays: number | null
+}): string {
+  const { kind, expiresInDays } = args
+
+  if (kind === 'MISSING_DOC') {
+    return 'Finish verification: upload your license photo to get approved and appear in the marketplace.'
+  }
+
+  if (kind === 'PENDING_REVIEW') {
+    return 'Verification is in review. You can keep setting up services + calendar while we check it.'
+  }
+
+  if (kind === 'EXPIRED') {
+    return 'Your license looks expired. Upload an updated license to stay active.'
+  }
+
+  return `Your license expires soon (${expiresInDays ?? '?'} day${
+    expiresInDays === 1 ? '' : 's'
+  }). Upload an updated license.`
+}
+
+function toneForKind(kind: BannerKind): string {
+  if (kind === 'EXPIRED' || kind === 'MISSING_DOC') {
+    return 'border-toneDanger/35 bg-bgSecondary/98'
+  }
+
+  if (kind === 'EXPIRING_SOON') {
+    return 'border-toneWarn/35 bg-bgSecondary/98'
+  }
+
+  return 'border-white/10 bg-bgSecondary/98'
 }
 
 export default function ProComplianceBanner() {
   const ref = useRef<HTMLDivElement | null>(null)
-  const [summary, setSummary] = useState<SummaryOk | null>(null)
-  const [dismissed, setDismissed] = useState(false)
 
-  const dismissKey = useMemo(() => {
-    if (!summary?.professionalId || !summary.kind) return null
-    return `tovis:pro:complianceBanner:v1:${summary.professionalId}:${summary.kind}`
-  }, [summary])
+  const [summary, setSummary] = useState<SummaryOk | null>(null)
+
+  /**
+   * Local UI-only dismissals.
+   * This avoids the forbidden “read localStorage then setState in an effect”
+   * pattern. We derive the persisted dismissal during render, and only store
+   * user clicks here.
+   */
+  const [dismissedKeys, setDismissedKeys] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  )
 
   useEffect(() => {
     let cancelled = false
 
-    async function load() {
+    async function loadSummary(): Promise<void> {
       try {
-        const res = await fetch('/api/pro/compliance/summary', { cache: 'no-store' })
+        const res = await fetch('/api/pro/compliance/summary', {
+          cache: 'no-store',
+        })
+
         const data: unknown = await res.json().catch(() => null)
+
         if (cancelled) return
-        if (!res.ok || !isSummaryOk(data)) return
+        if (!res.ok) return
+        if (!isSummaryOk(data)) return
+
         setSummary(data)
       } catch {
-        // ignore
+        // Quiet by design. This banner should never break the pro UI.
       }
     }
 
-    load()
+    void loadSummary()
+
     return () => {
       cancelled = true
     }
   }, [])
 
-  useEffect(() => {
-    if (!dismissKey) return
-    try {
-      setDismissed(localStorage.getItem(dismissKey) === '1')
-    } catch {
-      setDismissed(false)
-    }
-  }, [dismissKey])
+  const dismissKey = useMemo(() => {
+    if (!summary?.professionalId || !summary.kind) return null
 
-  // Measure + reserve space (only when visible)
+    return `tovis:pro:complianceBanner:v1:${summary.professionalId}:${summary.kind}`
+  }, [summary?.kind, summary?.professionalId])
+
+  const persistedDismissed = readDismissed(dismissKey)
+  const locallyDismissed = dismissKey ? dismissedKeys.has(dismissKey) : false
+
+  const kind = summary?.kind ?? null
+  const visible = Boolean(kind) && !persistedDismissed && !locallyDismissed
+
   useEffect(() => {
     const el = ref.current
-    const visible = Boolean(summary?.kind) && !dismissed
+
     if (!visible || !el) {
       setBannerPx(0)
       return
     }
 
-    const update = () => setBannerPx(el.getBoundingClientRect().height)
+    const update = () => {
+      setBannerPx(el.getBoundingClientRect().height)
+    }
 
     update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
+
+    const resizeObserver = new ResizeObserver(update)
+    resizeObserver.observe(el)
+
     return () => {
-      ro.disconnect()
-      // if we unmount while visible, clear the var
+      resizeObserver.disconnect()
       setBannerPx(0)
     }
-  }, [summary?.kind, dismissed])
+  }, [visible])
 
-  const kind = summary?.kind ?? null
-  const visible = Boolean(kind) && !dismissed
+  if (!visible || !kind) return null
 
-  if (!visible) return null
+  const msg = messageForKind({
+    kind,
+    expiresInDays: summary?.expiresInDays ?? null,
+  })
 
-  const days = summary?.expiresInDays
-  const msg =
-    kind === 'MISSING_DOC'
-      ? 'Finish verification: upload your license photo to get approved and appear in the marketplace.'
-      : kind === 'PENDING_REVIEW'
-        ? 'Verification is in review. You can keep setting up services + calendar while we check it.'
-        : kind === 'EXPIRED'
-          ? 'Your license looks expired. Upload an updated license to stay active.'
-          : `Your license expires soon (${days ?? '?'} day${days === 1 ? '' : 's'}). Upload an updated license.`
-
-  const tone =
-  kind === 'EXPIRED' || kind === 'MISSING_DOC'
-    ? 'border-toneDanger/35 bg-bgSecondary/98'
-    : kind === 'EXPIRING_SOON'
-      ? 'border-toneWarn/35 bg-bgSecondary/98'
-      : 'border-white/10 bg-bgSecondary/98'
-
-  
+  const tone = toneForKind(kind)
 
   return (
     <div
@@ -140,14 +212,16 @@ export default function ProComplianceBanner() {
           <button
             type="button"
             onClick={() => {
+              writeDismissed(dismissKey)
+
               if (dismissKey) {
-                try {
-                  localStorage.setItem(dismissKey, '1')
-                } catch {
-                  // ignore
-                }
+                setDismissedKeys((current) => {
+                  const next = new Set(current)
+                  next.add(dismissKey)
+                  return next
+                })
               }
-              setDismissed(true)
+
               setBannerPx(0)
             }}
             className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-white/20"

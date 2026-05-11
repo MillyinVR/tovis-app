@@ -2736,7 +2736,7 @@ async function buildBookingCheckoutRollupUpdate(args: {
     booking.subtotalSnapshot ??
     zeroMoney()
 
-    const productSubtotal =
+  const productSubtotal =
     args.nextProductSubtotal ??
     computeProductSubtotalFromSales(
       booking.productSales.map((sale) => ({
@@ -2749,6 +2749,8 @@ async function buildBookingCheckoutRollupUpdate(args: {
   const taxAmount = args.nextTaxAmount ?? decimalOrZero(booking.taxAmount)
   const discountAmount =
     args.nextDiscountAmount ?? decimalOrZero(booking.discountAmount)
+
+  const subtotalSnapshot = serviceSubtotal.add(productSubtotal)
 
   const totalAmount = computeCheckoutTotal({
     serviceSubtotal,
@@ -9549,23 +9551,42 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
     } satisfies Prisma.BookingSelect,
   })
 
-    if (
-    shouldCompleteBooking &&
-    (booking.status !== BookingStatus.COMPLETED ||
-      booking.sessionStep !== SessionStep.DONE ||
-      !booking.finishedAt)
-  ) {
-    await args.tx.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: BookingStatus.COMPLETED,
-        sessionStep: SessionStep.DONE,
-        finishedAt: booking.finishedAt ?? args.now,
-      },
-      select: { id: true } satisfies Prisma.BookingSelect,
-    })
-  }
+  if (
+  shouldCompleteBooking &&
+  (booking.status !== BookingStatus.COMPLETED ||
+    booking.sessionStep !== SessionStep.DONE ||
+    !booking.finishedAt)
+) {
+  recordStepTransition({
+    from: booking.sessionStep ?? SessionStep.NONE,
+    to: SessionStep.DONE,
+    actor: 'PRO',
+    route: 'lib/booking/writeBoundary.ts:updateBookingCheckout#complete',
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+  })
 
+  recordStatusTransition({
+    from: booking.status,
+    to: BookingStatus.COMPLETED,
+    actor: 'PRO',
+    route: 'lib/booking/writeBoundary.ts:updateBookingCheckout#complete',
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+  })
+
+  await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      status: BookingStatus.COMPLETED,
+      sessionStep: SessionStep.DONE,
+      finishedAt: booking.finishedAt ?? args.now,
+    },
+    select: { id: true } satisfies Prisma.BookingSelect,
+  })
+}
+
+  
 await createCheckoutAuditLogs({
   tx: args.tx,
   bookingId: booking.id,
@@ -9843,22 +9864,40 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
     afterMediaCount,
   })
 
-  if (
-    shouldCompleteBooking &&
-    (booking.status !== BookingStatus.COMPLETED ||
-      booking.sessionStep !== SessionStep.DONE ||
-      !booking.finishedAt)
-  ) {
-    await args.tx.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: BookingStatus.COMPLETED,
-        sessionStep: SessionStep.DONE,
-        finishedAt: booking.finishedAt ?? args.now,
-      },
-      select: { id: true } satisfies Prisma.BookingSelect,
-    })
-  }
+if (
+  shouldCompleteBooking &&
+  (booking.status !== BookingStatus.COMPLETED ||
+    booking.sessionStep !== SessionStep.DONE ||
+    !booking.finishedAt)
+) {
+  recordStepTransition({
+    from: booking.sessionStep ?? SessionStep.NONE,
+    to: SessionStep.DONE,
+    actor: 'CLIENT',
+    route: 'lib/booking/writeBoundary.ts:updateClientBookingCheckout#complete',
+    bookingId: booking.id,
+    professionalId: booking.professionalId,
+  })
+
+  recordStatusTransition({
+    from: booking.status,
+    to: BookingStatus.COMPLETED,
+    actor: 'CLIENT',
+    route: 'lib/booking/writeBoundary.ts:updateClientBookingCheckout#complete',
+    bookingId: booking.id,
+    professionalId: booking.professionalId,
+  })
+
+  await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      status: BookingStatus.COMPLETED,
+      sessionStep: SessionStep.DONE,
+      finishedAt: booking.finishedAt ?? args.now,
+    },
+    select: { id: true } satisfies Prisma.BookingSelect,
+  })
+}
 
   await createCheckoutAuditLogs({
   tx: args.tx,
@@ -11664,6 +11703,24 @@ async function performLockedApplyStripePaymentSucceeded(args: {
       booking.sessionStep !== SessionStep.DONE ||
       !booking.finishedAt)
   ) {
+    recordStepTransition({
+      from: booking.sessionStep ?? SessionStep.NONE,
+      to: SessionStep.DONE,
+      actor: 'SYSTEM',
+      route: 'lib/booking/writeBoundary.ts:applyStripePaymentSucceeded#complete',
+      bookingId: booking.id,
+      professionalId: booking.professionalId,
+    })
+
+    recordStatusTransition({
+      from: booking.status,
+      to: BookingStatus.COMPLETED,
+      actor: 'SYSTEM',
+      route: 'lib/booking/writeBoundary.ts:applyStripePaymentSucceeded#complete',
+      bookingId: booking.id,
+      professionalId: booking.professionalId,
+    })
+
     await args.tx.booking.update({
       where: { id: booking.id },
       data: {
@@ -11673,6 +11730,7 @@ async function performLockedApplyStripePaymentSucceeded(args: {
       },
       select: { id: true } satisfies Prisma.BookingSelect,
     })
+
     bookingCompleted = true
   }
 

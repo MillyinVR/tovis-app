@@ -2,7 +2,7 @@
 'use client'
 
 import { createPortal } from 'react-dom'
-import { useLayoutEffect, useMemo, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react'
 import { usePathname } from 'next/navigation'
 
 import ProSessionFooter from '@/app/_components/ProSessionFooter/ProSessionFooter'
@@ -12,15 +12,23 @@ import GuestSessionFooter from '@/app/_components/GuestSessionFooter/GuestSessio
 
 export type AppRole = 'PRO' | 'CLIENT' | 'ADMIN' | 'GUEST'
 
-type Props = { role: AppRole; messagesBadge?: string | null }
-
-const MOUNT_ID = 'tovis-footer-mount'
-
-function setFooterSpace(px: number) {
-  document.documentElement.style.setProperty('--app-footer-space', `${px}px`)
+type Props = {
+  role: AppRole
+  messagesBadge?: string | null
 }
 
-function startsWithSegment(pathname: string, base: string) {
+const MOUNT_ID = 'tovis-footer-mount'
+const FOOTER_SPACE_VAR = '--app-footer-space'
+
+function setFooterSpace(px: number): void {
+  document.documentElement.style.setProperty(FOOTER_SPACE_VAR, `${px}px`)
+}
+
+function clearFooterSpace(): void {
+  document.documentElement.style.setProperty(FOOTER_SPACE_VAR, '0px')
+}
+
+function startsWithSegment(pathname: string, base: string): boolean {
   return pathname === base || pathname.startsWith(`${base}/`)
 }
 
@@ -32,65 +40,99 @@ function inferFooterFromPath(pathname: string | null): AppRole | null {
   return null
 }
 
-export default function FooterShell({ role, messagesBadge }: Props) {
+function getFooterMountSnapshot(): HTMLElement | null {
+  if (typeof document === 'undefined') return null
+  return document.getElementById(MOUNT_ID)
+}
+
+function getFooterMountServerSnapshot(): HTMLElement | null {
+  return null
+}
+
+function subscribeToFooterMount(onStoreChange: () => void): () => void {
+  if (typeof document === 'undefined') return () => undefined
+
+  let rafId: number | null = window.requestAnimationFrame(onStoreChange)
+
+  const observer = new MutationObserver(() => {
+    onStoreChange()
+  })
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  })
+
+  return () => {
+    observer.disconnect()
+
+    if (rafId !== null) {
+      window.cancelAnimationFrame(rafId)
+      rafId = null
+    }
+  }
+}
+
+function useFooterMount(): HTMLElement | null {
+  return useSyncExternalStore(
+    subscribeToFooterMount,
+    getFooterMountSnapshot,
+    getFooterMountServerSnapshot,
+  )
+}
+
+export default function FooterShell({ role, messagesBadge = null }: Props) {
   const pathname = usePathname()
+  const mountEl = useFooterMount()
 
   const effectiveRole: AppRole = useMemo(() => {
     const fromPath = inferFooterFromPath(pathname ?? null)
-    // Never show privileged footer UI to a guest just because they’re on /pro/*.
+
+    // Never show privileged footer UI to a guest just because they are on /pro/*.
     if (role === 'GUEST') return 'GUEST'
+
     return fromPath ?? role
   }, [pathname, role])
 
-  const [mountEl, setMountEl] = useState<HTMLElement | null>(null)
-
-  // Acquire mount. Retry once via rAF (covers rare HMR/hydration timing).
-  useLayoutEffect(() => {
-    const el = document.getElementById(MOUNT_ID)
-    if (el) {
-      setMountEl(el)
+  const updateFooterSpace = useCallback(() => {
+    if (!mountEl) {
+      clearFooterSpace()
       return
     }
 
-    const raf = window.requestAnimationFrame(() => {
-      setMountEl(document.getElementById(MOUNT_ID))
-    })
+    const height = Math.ceil(mountEl.getBoundingClientRect().height)
+    setFooterSpace(Number.isFinite(height) ? height : 0)
+  }, [mountEl])
 
-    return () => window.cancelAnimationFrame(raf)
-  }, [])
-
-  // Measure mount height and keep CSS var synced.
-  // Keep deps length stable (mountEl, effectiveRole, messagesBadge).
   useLayoutEffect(() => {
-    if (!mountEl) return
-
-    const update = () => {
-      const h = Math.ceil(mountEl.getBoundingClientRect().height)
-      setFooterSpace(Number.isFinite(h) ? h : 0)
+    if (!mountEl) {
+      clearFooterSpace()
+      return
     }
 
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(mountEl)
+    updateFooterSpace()
+
+    const observer = new ResizeObserver(updateFooterSpace)
+    observer.observe(mountEl)
 
     return () => {
-      ro.disconnect()
-      setFooterSpace(0) // don’t leave padding stuck if unmounted in dev/HMR
+      observer.disconnect()
+      clearFooterSpace()
     }
-  }, [mountEl, effectiveRole, messagesBadge])
+  }, [mountEl, updateFooterSpace, effectiveRole, messagesBadge])
 
   if (!mountEl) return null
 
-  const node =
+  const footerNode =
     effectiveRole === 'PRO' ? (
-      <ProSessionFooter messagesBadge={messagesBadge ?? null} />
+      <ProSessionFooter messagesBadge={messagesBadge} />
     ) : effectiveRole === 'CLIENT' ? (
-      <ClientSessionFooter messagesBadge={messagesBadge ?? null} />
+      <ClientSessionFooter messagesBadge={messagesBadge} />
     ) : effectiveRole === 'ADMIN' ? (
       <AdminSessionFooter />
     ) : (
       <GuestSessionFooter />
     )
 
-  return createPortal(node, mountEl)
+  return createPortal(footerNode, mountEl)
 }

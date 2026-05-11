@@ -1,18 +1,40 @@
 // app/client/components/PastBookings.tsx
 'use client'
 
+import type { ReactNode } from 'react'
 import type { BookingLike } from './_helpers'
 import { prettyWhen, bookingLocationLabel, statusUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
 import CardLink from './CardLink'
 import { cn } from '@/lib/utils'
 
+type PastBookingDisplay = {
+  coverUrl?: string | null
+  imageUrl?: string | null
+}
+
+type PastBookingService = {
+  imageUrl?: string | null
+}
+
+type PastBookingExtras = BookingLike & {
+  display?: BookingLike['display'] & PastBookingDisplay
+  service?: PastBookingService | null
+  serviceDefaultImageUrl?: string | null
+  hasUnreadAftercare?: boolean | null
+  hasAftercare?: boolean | null
+  aftercareId?: string | null
+  aftercareSummaryId?: string | null
+}
+
 function statusLabel(statusRaw: unknown) {
   const s = statusUpper(statusRaw)
+
   if (s === 'COMPLETED') return 'Reservation completed'
   if (s === 'CANCELLED') return 'Reservation cancelled'
   if (s === 'ACCEPTED') return 'Reservation confirmed'
   if (s === 'PENDING') return 'Reservation requested'
+
   return s ? `Reservation ${s.toLowerCase()}` : 'Reservation'
 }
 
@@ -20,7 +42,7 @@ function SoftPill({
   children,
   tone = 'neutral',
 }: {
-  children: React.ReactNode
+  children: ReactNode
   tone?: 'neutral' | 'accent' | 'success'
 }) {
   const cls =
@@ -34,7 +56,7 @@ function SoftPill({
     <span
       className={cn(
         'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black backdrop-blur',
-        cls
+        cls,
       )}
     >
       {children}
@@ -50,53 +72,56 @@ function ActionPill({ label }: { label: string }) {
   )
 }
 
-/**
- * Best-effort cover image:
- * - Prefer booking.display.coverUrl if you have it
- * - else fallback to booking.display.imageUrl / service image field if present
- * - else null (we show a luxe gradient block)
- *
- * If your DTO uses different names, swap here only.
- */
-function bookingCoverUrl(b: BookingLike): string | null {
-  const anyB = b as any
-  const url =
-    anyB?.display?.coverUrl ||
-    anyB?.display?.imageUrl ||
-    anyB?.service?.imageUrl ||
-    anyB?.serviceDefaultImageUrl ||
-    null
+function normalizeOptionalUrl(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
 
-  return typeof url === 'string' && url.trim() ? url.trim() : null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function bookingCoverUrl(booking: PastBookingExtras): string | null {
+  return (
+    normalizeOptionalUrl(booking.display?.coverUrl) ??
+    normalizeOptionalUrl(booking.display?.imageUrl) ??
+    normalizeOptionalUrl(booking.service?.imageUrl) ??
+    normalizeOptionalUrl(booking.serviceDefaultImageUrl)
+  )
 }
 
 export default function PastBookings({ items }: { items: BookingLike[] }) {
-  const list = items ?? []
+  const list: PastBookingExtras[] = items
 
   return (
     <div className="grid gap-3">
       <div className="text-sm font-black text-textPrimary">Past</div>
 
-      {list.map((b) => {
-        const svc = b?.display?.title || b?.display?.baseName || 'Appointment'
-        const proLabel = b?.professional?.businessName || 'Professional'
-        const proId = b?.professional?.id || null
+      {list.map((booking) => {
+        const svc =
+          booking.display?.title || booking.display?.baseName || 'Appointment'
 
-        const when = prettyWhen(b?.scheduledFor, b?.timeZone)
-        const loc = bookingLocationLabel(b)
+        const proLabel = booking.professional?.businessName || 'Professional'
+        const proId = booking.professional?.id || null
 
-        const hasUnreadAftercare = Boolean((b as any)?.hasUnreadAftercare)
-        const hasAnyAftercare = Boolean((b as any)?.hasAftercare || (b as any)?.aftercareId || (b as any)?.aftercareSummaryId)
+        const when = prettyWhen(booking.scheduledFor, booking.timeZone)
+        const loc = bookingLocationLabel(booking)
 
-        const cover = bookingCoverUrl(b)
+        const hasUnreadAftercare = Boolean(booking.hasUnreadAftercare)
+        const hasAnyAftercare = Boolean(
+          booking.hasAftercare ||
+            booking.aftercareId ||
+            booking.aftercareSummaryId,
+        )
 
-        const href = `/client/bookings/${encodeURIComponent(b.id)}`
-        const aftercareHref = `/client/aftercare/${encodeURIComponent(b.id)}`
+        const cover = bookingCoverUrl(booking)
+
+        const href = `/client/bookings/${encodeURIComponent(booking.id)}`
+        const aftercareHref = `/client/aftercare/${encodeURIComponent(
+          booking.id,
+        )}`
 
         return (
-          <CardLink key={b.id} href={href} className="block no-underline">
+          <CardLink key={booking.id} href={href} className="block no-underline">
             <div className="overflow-hidden rounded-card border border-white/10 bg-bgSecondary">
-              {/* Cover */}
               <div className="relative">
                 {cover ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -110,20 +135,22 @@ export default function PastBookings({ items }: { items: BookingLike[] }) {
                   <div className="h-28 w-full bg-bgPrimary" />
                 )}
 
-                {/* soft overlay for text legibility */}
                 <div className="absolute inset-0 bg-gradient-to-t from-bgPrimary/85 via-bgPrimary/35 to-transparent" />
 
                 <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="truncate text-[14px] font-black text-textPrimary">{svc}</div>
-                    <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">{when}</div>
+                    <div className="truncate text-[14px] font-black text-textPrimary">
+                      {svc}
+                    </div>
+                    <div className="mt-0.5 text-[12px] font-semibold text-textSecondary">
+                      {when}
+                    </div>
                   </div>
 
-                  {/* Aftercare CTA (only if exists/unread) */}
                   {hasAnyAftercare ? (
                     <span
-                      onClick={(e) => e.stopPropagation()}
-                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(event) => event.stopPropagation()}
+                      onMouseDown={(event) => event.stopPropagation()}
                     >
                       <a
                         href={aftercareHref}
@@ -131,7 +158,9 @@ export default function PastBookings({ items }: { items: BookingLike[] }) {
                         style={{ textDecoration: 'none' }}
                       >
                         <span className="whitespace-nowrap">
-                          {hasUnreadAftercare ? 'New care plan' : 'View care plan'}
+                          {hasUnreadAftercare
+                            ? 'New care plan'
+                            : 'View care plan'}
                         </span>
                         <span className="text-textSecondary">→</span>
                       </a>
@@ -140,24 +169,31 @@ export default function PastBookings({ items }: { items: BookingLike[] }) {
                 </div>
               </div>
 
-              {/* Body */}
               <div className="p-3">
                 <div className="text-[13px] text-textPrimary">
                   <span
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
                   >
-                    <ProProfileLink proId={proId} label={proLabel} className="font-black" />
+                    <ProProfileLink
+                      proId={proId}
+                      label={proLabel}
+                      className="font-black"
+                    />
                   </span>
-                  {loc ? <span className="text-textSecondary"> · {loc}</span> : null}
+                  {loc ? (
+                    <span className="text-textSecondary"> · {loc}</span>
+                  ) : null}
                 </div>
 
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <SoftPill>{statusLabel(b?.status)}</SoftPill>
+                  <SoftPill>{statusLabel(booking.status)}</SoftPill>
 
                   {hasAnyAftercare ? (
                     <SoftPill tone={hasUnreadAftercare ? 'accent' : 'neutral'}>
-                      {hasUnreadAftercare ? 'Unread aftercare' : 'Aftercare available'}
+                      {hasUnreadAftercare
+                        ? 'Unread aftercare'
+                        : 'Aftercare available'}
                     </SoftPill>
                   ) : null}
 

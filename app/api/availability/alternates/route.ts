@@ -226,7 +226,7 @@ async function computeAlternateForDay(args: {
     }
   }
 
-  let {
+  const {
     locationId,
     effectiveLocationType,
     timeZone,
@@ -235,9 +235,10 @@ async function computeAlternateForDay(args: {
     defaultLead,
     locationBufferMinutes,
     maxAdvanceDays,
-    durationMinutes,
     offeringDbId,
   } = baseContext.value
+
+  let { durationMinutes } = baseContext.value
 
   const addOnResult = await resolveRequestedDurationMinutes({
     professionalId: args.pro.id,
@@ -403,7 +404,7 @@ export async function GET(req: Request) {
       return bookingJsonFail(primaryContext.code)
     }
 
-    let {
+    const {
       locationId,
       effectiveLocationType,
       timeZone,
@@ -411,11 +412,12 @@ export async function GET(req: Request) {
       defaultLead,
       locationBufferMinutes,
       maxAdvanceDays,
-      durationMinutes,
       placementLat,
       placementLng,
       offeringDbId,
     } = primaryContext.value
+
+    let { durationMinutes } = primaryContext.value
 
     const resolvedClientAddressId = resolveDebugClientAddressId({
       locationType: effectiveLocationType,

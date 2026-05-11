@@ -178,19 +178,21 @@ function useNowSnapshot(args: {
   enabled: boolean
 }): NowSnapshot {
   const { timeZone, enabled } = args
-  const [tick, setTick] = useState(0)
+  const [now, setNow] = useState(() => new Date())
 
   useEffect(() => {
     if (!enabled) return
 
-    const refresh = () => setTick((currentTick) => currentTick + 1)
-
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') refresh()
+      if (document.visibilityState === 'visible') {
+        setNow(new Date())
+      }
     }
 
     const intervalId = window.setInterval(() => {
-      if (document.visibilityState !== 'hidden') refresh()
+      if (document.visibilityState !== 'hidden') {
+        setNow(new Date())
+      }
     }, NOW_REFRESH_INTERVAL_MS)
 
     document.addEventListener('visibilitychange', refreshWhenVisible)
@@ -199,16 +201,14 @@ function useNowSnapshot(args: {
       window.clearInterval(intervalId)
       document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
-  }, [enabled, timeZone])
+  }, [enabled])
 
   return useMemo(() => {
-    const now = new Date()
-
     return {
       todayYmd: ymdInTimeZone(now, timeZone),
       nowMinutes: minutesSinceMidnightInTimeZone(now, timeZone),
     }
-  }, [timeZone, tick])
+  }, [now, timeZone])
 }
 
 function useInitialTimelineScroll(args: {
@@ -268,7 +268,7 @@ export function DayWeekGrid(props: DayWeekGridProps) {
 
   const timeZone = resolvedTimeZone.value
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const header = useMeasuredElementHeight()
+  const { ref: headerRef, height: headerHeight } = useMeasuredElementHeight()
 
   const { todayYmd, nowMinutes } = useNowSnapshot({
     timeZone,
@@ -333,7 +333,7 @@ export function DayWeekGrid(props: DayWeekGridProps) {
         >
           <div className="brand-pro-calendar-timeline-content-layer">
             <div
-              ref={header.ref}
+              ref={headerRef}
               className="brand-pro-calendar-timeline-header"
               data-calendar-header="timeline"
             >
@@ -391,7 +391,7 @@ export function DayWeekGrid(props: DayWeekGridProps) {
             aria-hidden="true"
           >
             <NowLineOverlay
-              topPx={nowTopPx + header.height}
+              topPx={nowTopPx + headerHeight}
               show={showNowLine}
               nowLabel={formatNowLabel(nowMinutes)}
             />
