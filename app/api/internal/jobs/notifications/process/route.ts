@@ -109,16 +109,23 @@ function buildProviderRegistry(): DeliveryProviderRegistry {
     requireEnv('TWILIO_ACCOUNT_SID'),
     requireEnv('TWILIO_AUTH_TOKEN'),
   )
+  console.log('TWILIO_FROM_NUMBER loaded?', {
+  exists: Boolean(process.env.TWILIO_FROM_NUMBER),
+  length: process.env.TWILIO_FROM_NUMBER?.length ?? 0,
+  startsWithPlus: process.env.TWILIO_FROM_NUMBER?.startsWith('+') ?? false,
+})
   const twilioFromNumber = requireEnv('TWILIO_FROM_NUMBER')
 
   const smsProvider = createSmsDeliveryProvider({
+    fromNumber: twilioFromNumber,
     client: {
       messages: {
         async create(params) {
           const message = await twilioClient.messages.create({
-            from: twilioFromNumber,
+            from: params.from,
             to: params.to,
             body: params.body,
+            statusCallback: params.statusCallback,
           })
 
           return {
