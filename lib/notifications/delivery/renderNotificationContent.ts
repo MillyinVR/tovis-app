@@ -94,6 +94,50 @@ function sanitizeInternalHref(value: unknown): string {
   return href
 }
 
+function readAppOrigin(): string {
+  const raw =
+    process.env.APP_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    ''
+
+  if (!raw) {
+    throw new Error(
+      'renderNotificationContent: missing APP_URL or NEXT_PUBLIC_APP_URL',
+    )
+  }
+
+  let url: URL
+
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error(
+      'renderNotificationContent: APP_URL/NEXT_PUBLIC_APP_URL must be a valid absolute URL',
+    )
+  }
+
+  if (!url.protocol || !url.hostname) {
+    throw new Error(
+      'renderNotificationContent: app URL must include protocol and hostname',
+    )
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(
+      'renderNotificationContent: app URL must use http or https',
+    )
+  }
+
+  return url.origin
+}
+
+function buildExternalAppHref(value: unknown): string {
+  const href = sanitizeInternalHref(value)
+  if (!href) return ''
+
+  return `${readAppOrigin()}${href}`
+}
+
 function clip(value: string, max: number): string {
   return value.length <= max ? value : value.slice(0, max)
 }
@@ -185,7 +229,7 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
     sms(dispatch) {
       const title = normalizeText(dispatch.title)
       const body = normalizeText(dispatch.body)
-      const href = sanitizeInternalHref(dispatch.href)
+      const href = buildExternalAppHref(dispatch.href)
 
       return {
         channel: NotificationChannel.SMS,
@@ -196,7 +240,7 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
     email(dispatch) {
       const title = normalizeText(dispatch.title)
       const body = normalizeText(dispatch.body)
-      const href = sanitizeInternalHref(dispatch.href)
+      const href = buildExternalAppHref(dispatch.href)
 
       return {
         channel: NotificationChannel.EMAIL,

@@ -216,13 +216,13 @@ describe('app/api/internal/jobs/notifications/process/route', () => {
     expect(mocks.twilioCtor).toHaveBeenCalledWith('twilio-sid', 'twilio-token')
 
     expect(mocks.createSmsDeliveryProvider).toHaveBeenCalledWith({
+      fromNumber: '+15550000000',
       client: {
         messages: {
           create: expect.any(Function),
         },
       },
     })
-
     expect(mocks.createEmailDeliveryProvider).toHaveBeenCalledWith({
       apiToken: 'postmark-token',
       fromEmail: 'support@tovis.app',

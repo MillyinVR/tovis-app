@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   NotificationChannel,
   NotificationDeliveryStatus,
@@ -171,10 +171,30 @@ function makeProviders() {
 }
 
 describe('lib/notifications/delivery/processDueDeliveries', () => {
+  const originalAppUrl = process.env.APP_URL
+  const originalNextPublicAppUrl = process.env.NEXT_PUBLIC_APP_URL
+
   beforeEach(() => {
+    process.env.APP_URL = 'https://tovis.test'
+    process.env.NEXT_PUBLIC_APP_URL = 'https://tovis.test'
+
     mockClaimDeliveries.mockReset()
     mockCompleteDeliveryAttempt.mockReset()
     mockCompleteDeliveryAttempt.mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    if (originalAppUrl === undefined) {
+      delete process.env.APP_URL
+    } else {
+      process.env.APP_URL = originalAppUrl
+    }
+
+    if (originalNextPublicAppUrl === undefined) {
+      delete process.env.NEXT_PUBLIC_APP_URL
+    } else {
+      process.env.NEXT_PUBLIC_APP_URL = originalNextPublicAppUrl
+    }
   })
 
   it('processes a successful in-app delivery', async () => {

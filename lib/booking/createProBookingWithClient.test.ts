@@ -3,6 +3,9 @@ import {
   BookingStatus,
   ClientClaimStatus,
   ContactMethod,
+  NotificationChannel,
+  NotificationEventKey,
+  NotificationRecipientKind,
   Prisma,
   ProClientInviteStatus,
   ServiceLocationType,
@@ -15,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   clientProfileFindUnique: vi.fn(),
   createClientClaimInviteDelivery: vi.fn(),
   checkProReadiness: vi.fn(),
+  enqueueDispatch: vi.fn(),
 }))
 
 vi.mock('@/lib/booking/resolveProBookingClient', () => ({
@@ -37,6 +41,10 @@ vi.mock('@/lib/pro/readiness/proReadiness', () => ({
   checkProReadiness: mocks.checkProReadiness,
 }))
 
+vi.mock('@/lib/notifications/dispatch/enqueueDispatch', () => ({
+  enqueueDispatch: mocks.enqueueDispatch,
+}))
+
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     clientProfile: {
@@ -48,6 +56,16 @@ vi.mock('@/lib/prisma', () => ({
 import { createProBookingWithClient } from './createProBookingWithClient'
 
 const scheduledFor = new Date('2026-03-11T19:30:00.000Z')
+
+const expectedClientProfileSelect = {
+  id: true,
+  userId: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phone: true,
+  claimStatus: true,
+} satisfies Prisma.ClientProfileSelect
 
 function makeResolvedClient(overrides?: {
   clientId?: string
@@ -108,6 +126,7 @@ function makeBookingResult(overrides?: {
 
 function makeInviteClientSnapshot(overrides?: {
   id?: string
+  userId?: string | null
   firstName?: string
   lastName?: string
   email?: string | null
@@ -116,6 +135,7 @@ function makeInviteClientSnapshot(overrides?: {
 }) {
   return {
     id: overrides?.id ?? 'client_1',
+    userId: overrides?.userId !== undefined ? overrides.userId : null,
     firstName: overrides?.firstName ?? 'Tori',
     lastName: overrides?.lastName ?? 'Morales',
     email:
@@ -123,6 +143,18 @@ function makeInviteClientSnapshot(overrides?: {
     phone: overrides?.phone !== undefined ? overrides.phone : null,
     claimStatus: overrides?.claimStatus ?? ClientClaimStatus.UNCLAIMED,
   }
+}
+
+function mockClientProfileSnapshotTwice(
+  snapshot: ReturnType<typeof makeInviteClientSnapshot>,
+) {
+  mocks.clientProfileFindUnique
+    .mockResolvedValueOnce(snapshot)
+    .mockResolvedValueOnce(snapshot)
+}
+
+function mockClientProfileNullTwice() {
+  mocks.clientProfileFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(null)
 }
 
 function makeInviteResult(overrides?: {
@@ -166,6 +198,44 @@ function makeInviteDeliveryResult() {
   }
 }
 
+function expectBookingConfirmedDispatch(args: {
+  professionalId: string
+  bookingId?: string
+  clientId: string
+  userId?: string | null
+  email?: string | null
+  phone?: string | null
+}) {
+  const bookingId = args.bookingId ?? 'booking_1'
+
+  expect(mocks.enqueueDispatch).toHaveBeenCalledWith({
+    key: NotificationEventKey.BOOKING_CONFIRMED,
+    sourceKey: `PRO_BOOKING_CONFIRMED:${bookingId}:CLIENT`,
+    recipient: expect.objectContaining({
+      kind: NotificationRecipientKind.CLIENT,
+      clientId: args.clientId,
+      userId: args.userId ?? null,
+      inAppTargetId: args.userId ? args.clientId : null,
+      email: args.email ?? null,
+      phone: args.phone ?? null,
+    }),
+    title: 'Booking confirmed',
+    body: 'Your appointment has been booked.',
+    href: `/client/bookings/${bookingId}`,
+    payload: {
+      source: 'proCreatedBooking',
+      bookingId,
+      professionalId: args.professionalId,
+      clientId: args.clientId,
+    },
+    requestedChannels: [
+      NotificationChannel.IN_APP,
+      NotificationChannel.EMAIL,
+      NotificationChannel.SMS,
+    ],
+  })
+}
+
 describe('createProBookingWithClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -183,6 +253,14 @@ describe('createProBookingWithClient', () => {
     mocks.createClientClaimInviteDelivery.mockResolvedValue(
       makeInviteDeliveryResult(),
     )
+    mocks.enqueueDispatch.mockResolvedValue({
+      created: true,
+      selectedChannels: [],
+      evaluations: [],
+      dispatch: {
+        id: 'booking_confirmed_dispatch_1',
+      },
+    })
   })
 
   it('blocks unready professionals before resolving clients or creating side effects', async () => {
@@ -223,6 +301,7 @@ describe('createProBookingWithClient', () => {
     expect(mocks.checkProReadiness).toHaveBeenCalledWith('pro_1')
     expect(mocks.resolveProBookingClient).not.toHaveBeenCalled()
     expect(mocks.createProBooking).not.toHaveBeenCalled()
+    expect(mocks.enqueueDispatch).not.toHaveBeenCalled()
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(mocks.clientProfileFindUnique).not.toHaveBeenCalled()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
@@ -268,6 +347,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.createProBooking).not.toHaveBeenCalled()
+    expect(mocks.enqueueDispatch).not.toHaveBeenCalled()
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(mocks.clientProfileFindUnique).not.toHaveBeenCalled()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
@@ -346,7 +426,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_resolved_1',
         firstName: 'New',
@@ -399,6 +479,13 @@ describe('createProBookingWithClient', () => {
       idempotencyKey: null,
     })
 
+    expectBookingConfirmedDispatch({
+      professionalId: 'pro_1',
+      clientId: 'client_resolved_1',
+      email: 'newclient@example.com',
+      phone: null,
+    })
+
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
       professionalId: 'pro_1',
       clientId: 'client_resolved_1',
@@ -438,7 +525,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_existing_1',
         firstName: 'Existing',
@@ -466,16 +553,21 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expect(mocks.clientProfileFindUnique).toHaveBeenCalledWith({
+    expect(mocks.clientProfileFindUnique).toHaveBeenCalledTimes(2)
+    expect(mocks.clientProfileFindUnique).toHaveBeenNthCalledWith(1, {
       where: { id: 'client_existing_1' },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        phone: true,
-        claimStatus: true,
-      },
+      select: expectedClientProfileSelect,
+    })
+    expect(mocks.clientProfileFindUnique).toHaveBeenNthCalledWith(2, {
+      where: { id: 'client_existing_1' },
+      select: expectedClientProfileSelect,
+    })
+
+    expectBookingConfirmedDispatch({
+      professionalId: 'pro_1',
+      clientId: 'client_existing_1',
+      email: 'existing-unclaimed@example.com',
+      phone: null,
     })
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
@@ -527,6 +619,18 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
+    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+      makeInviteClientSnapshot({
+        id: 'client_claimed_1',
+        userId: 'user_claimed_1',
+        firstName: 'Claimed',
+        lastName: 'Client',
+        email: 'claimed@example.com',
+        phone: null,
+        claimStatus: ClientClaimStatus.CLAIMED,
+      }),
+    )
+
     const result = await createProBookingWithClient({
       professionalId: 'pro_1',
       actorUserId: 'user_1',
@@ -548,7 +652,15 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expect(mocks.clientProfileFindUnique).not.toHaveBeenCalled()
+    expect(mocks.clientProfileFindUnique).toHaveBeenCalledTimes(1)
+    expectBookingConfirmedDispatch({
+      professionalId: 'pro_1',
+      clientId: 'client_claimed_1',
+      userId: 'user_claimed_1',
+      email: 'claimed@example.com',
+      phone: null,
+    })
+
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
@@ -573,7 +685,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_unclaimed_1',
         firstName: 'New',
@@ -603,6 +715,13 @@ describe('createProBookingWithClient', () => {
       allowOutsideWorkingHours: false,
       allowShortNotice: false,
       allowFarFuture: false,
+    })
+
+    expectBookingConfirmedDispatch({
+      professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
+      email: 'newclient@example.com',
+      phone: null,
     })
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
@@ -654,7 +773,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_unclaimed_1',
         firstName: 'Phone',
@@ -684,6 +803,13 @@ describe('createProBookingWithClient', () => {
       allowOutsideWorkingHours: false,
       allowShortNotice: false,
       allowFarFuture: false,
+    })
+
+    expectBookingConfirmedDispatch({
+      professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
+      email: null,
+      phone: '+16195551234',
     })
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
@@ -721,7 +847,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_unclaimed_1',
         firstName: 'Both',
@@ -752,6 +878,13 @@ describe('createProBookingWithClient', () => {
       allowOutsideWorkingHours: false,
       allowShortNotice: false,
       allowFarFuture: false,
+    })
+
+    expectBookingConfirmedDispatch({
+      professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
+      email: 'both@example.com',
+      phone: '+16195551234',
     })
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
@@ -789,7 +922,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_unclaimed_1',
         firstName: '   ',
@@ -819,6 +952,12 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
+    expectBookingConfirmedDispatch({
+      professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
+      email: 'noname@example.com',
+      phone: null,
+    })
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
@@ -843,7 +982,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_unclaimed_1',
         firstName: 'No',
@@ -874,6 +1013,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
+    expect(mocks.enqueueDispatch).not.toHaveBeenCalled()
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
@@ -898,7 +1038,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_unclaimed_1',
         firstName: 'New',
@@ -937,6 +1077,12 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
+    expectBookingConfirmedDispatch({
+      professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
+      email: 'newclient@example.com',
+      phone: null,
+    })
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
@@ -960,7 +1106,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_unclaimed_1',
         firstName: 'New',
@@ -999,6 +1145,12 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
+    expectBookingConfirmedDispatch({
+      professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
+      email: 'newclient@example.com',
+      phone: null,
+    })
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
@@ -1022,7 +1174,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(null)
+    mockClientProfileNullTwice()
 
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
@@ -1051,8 +1203,19 @@ describe('createProBookingWithClient', () => {
       })
 
       expect(mocks.createProBooking).toHaveBeenCalledTimes(1)
+      expect(mocks.enqueueDispatch).not.toHaveBeenCalled()
       expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
       expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'createProBookingWithClient booking confirmation client lookup failed',
+        {
+          professionalId: 'pro_1',
+          bookingId: 'booking_1',
+          clientId: 'client_unclaimed_1',
+        },
+      )
+
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'createProBookingWithClient invite client lookup failed',
         {
@@ -1077,6 +1240,83 @@ describe('createProBookingWithClient', () => {
     }
   })
 
+  it('still succeeds when booking confirmation enqueue throws and continues to invite creation', async () => {
+    mocks.resolveProBookingClient.mockResolvedValueOnce(
+      makeResolvedClient({
+        clientId: 'client_unclaimed_1',
+        clientUserId: null,
+        clientEmail: 'newclient@example.com',
+        clientClaimStatus: ClientClaimStatus.UNCLAIMED,
+      }),
+    )
+
+    mockClientProfileSnapshotTwice(
+      makeInviteClientSnapshot({
+        id: 'client_unclaimed_1',
+        firstName: 'New',
+        lastName: 'Client',
+        email: 'newclient@example.com',
+        phone: null,
+        claimStatus: ClientClaimStatus.UNCLAIMED,
+      }),
+    )
+
+    mocks.enqueueDispatch.mockRejectedValueOnce(
+      new Error('booking confirmation dispatch failed'),
+    )
+
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    try {
+      const result = await createProBookingWithClient({
+        professionalId: 'pro_1',
+        actorUserId: 'user_1',
+        overrideReason: null,
+        client: {
+          firstName: 'New',
+          lastName: 'Client',
+          email: 'newclient@example.com',
+        },
+        offeringId: 'offering_1',
+        locationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        scheduledFor,
+        internalNotes: null,
+        requestedBufferMinutes: null,
+        requestedTotalDurationMinutes: null,
+        allowOutsideWorkingHours: false,
+        allowShortNotice: false,
+        allowFarFuture: false,
+      })
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'createProBookingWithClient booking confirmation delivery enqueue failed',
+        expect.objectContaining({
+          professionalId: 'pro_1',
+          bookingId: 'booking_1',
+          clientId: 'client_unclaimed_1',
+          error: expect.any(Error),
+        }),
+      )
+      expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
+      expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledTimes(1)
+      expect(result.ok).toBe(true)
+
+      if (!result.ok) {
+        throw new Error(result.error)
+      }
+
+      expect(result.invite).toEqual({
+        id: 'invite_1',
+        token: 'token_1',
+      })
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
+  })
+
   it('still succeeds when invite creation throws and returns invite as null', async () => {
     mocks.resolveProBookingClient.mockResolvedValueOnce(
       makeResolvedClient({
@@ -1087,7 +1327,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_unclaimed_1',
         firstName: 'New',
@@ -1129,6 +1369,12 @@ describe('createProBookingWithClient', () => {
       })
 
       expect(mocks.createProBooking).toHaveBeenCalledTimes(1)
+      expectBookingConfirmedDispatch({
+        professionalId: 'pro_1',
+        clientId: 'client_unclaimed_1',
+        email: 'newclient@example.com',
+        phone: null,
+      })
       expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
       expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
       expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -1166,7 +1412,7 @@ describe('createProBookingWithClient', () => {
       }),
     )
 
-    mocks.clientProfileFindUnique.mockResolvedValueOnce(
+    mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
         id: 'client_unclaimed_1',
         firstName: 'New',
@@ -1207,6 +1453,12 @@ describe('createProBookingWithClient', () => {
         allowFarFuture: false,
       })
 
+      expectBookingConfirmedDispatch({
+        professionalId: 'pro_1',
+        clientId: 'client_unclaimed_1',
+        email: 'newclient@example.com',
+        phone: null,
+      })
       expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
       expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledTimes(1)
       expect(consoleErrorSpy).toHaveBeenCalledWith(

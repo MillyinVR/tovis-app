@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { NotificationChannel, NotificationEventKey } from '@prisma/client'
 
 import { NOTIFICATION_EVENT_DEFINITIONS } from '../eventKeys'
@@ -22,6 +22,28 @@ function makeDispatch(
 }
 
 describe('lib/notifications/delivery/renderNotificationContent', () => {
+  const originalAppUrl = process.env.APP_URL
+  const originalNextPublicAppUrl = process.env.NEXT_PUBLIC_APP_URL
+
+  beforeEach(() => {
+    process.env.APP_URL = 'https://tovis.test'
+    process.env.NEXT_PUBLIC_APP_URL = 'https://tovis.test'
+  })
+
+  afterEach(() => {
+    if (originalAppUrl === undefined) {
+      delete process.env.APP_URL
+    } else {
+      process.env.APP_URL = originalAppUrl
+    }
+
+    if (originalNextPublicAppUrl === undefined) {
+      delete process.env.NEXT_PUBLIC_APP_URL
+    } else {
+      process.env.NEXT_PUBLIC_APP_URL = originalNextPublicAppUrl
+    }
+  })
+
   it('renders in-app content from dispatch values', () => {
     const result = renderNotificationContent({
       channel: NotificationChannel.IN_APP,
@@ -40,7 +62,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     })
   })
 
-  it('renders branded SMS content with internal href appended', () => {
+  it('renders branded SMS content with absolute app href appended', () => {
     const result = renderNotificationContent({
       channel: NotificationChannel.SMS,
       templateKey: 'booking_confirmed',
@@ -55,11 +77,11 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
 
     expect(result.templateKey).toBe('booking_confirmed')
     expect(result.text).toBe(
-      'TOVIS: Appointment confirmed Your appointment has been confirmed. /client/bookings/booking_1',
+      'TOVIS: Appointment confirmed Your appointment has been confirmed. https://tovis.test/client/bookings/booking_1',
     )
   })
 
-  it('renders branded email content with CTA text and html', () => {
+  it('renders branded email content with CTA text and html using absolute app href', () => {
     const result = renderNotificationContent({
       channel: NotificationChannel.EMAIL,
       templateKey: 'aftercare_ready',
@@ -82,16 +104,16 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     expect(result.text).toContain('Aftercare ready')
     expect(result.text).toContain('Your aftercare plan is ready.')
     expect(result.text).toContain(
-      'View aftercare: /client/bookings/booking_1?step=aftercare',
+      'View aftercare: https://tovis.test/client/bookings/booking_1?step=aftercare',
     )
     expect(result.html).toContain('<h1>Aftercare ready</h1>')
     expect(result.html).toContain('<p>Your aftercare plan is ready.</p>')
     expect(result.html).toContain(
-      '<a href="/client/bookings/booking_1?step=aftercare">View aftercare</a>',
+      '<a href="https://tovis.test/client/bookings/booking_1?step=aftercare">View aftercare</a>',
     )
   })
 
-  it('renders viral request approved email content with the viral CTA label', () => {
+  it('renders viral request approved email content with the viral CTA label and absolute app href', () => {
     const result = renderNotificationContent({
       channel: NotificationChannel.EMAIL,
       templateKey: 'viral_request_approved',
@@ -112,9 +134,11 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     expect(result.templateKey).toBe('viral_request_approved')
     expect(result.subject).toBe('TOVIS: New viral request in your category')
     expect(result.text).toContain('New viral request in your category')
-    expect(result.text).toContain('"Wolf Cut" was approved and matches your services.')
     expect(result.text).toContain(
-      'View request: /admin/viral-requests/request_1',
+      '"Wolf Cut" was approved and matches your services.',
+    )
+    expect(result.text).toContain(
+      'View request: https://tovis.test/admin/viral-requests/request_1',
     )
     expect(result.html).toContain(
       '<h1>New viral request in your category</h1>',
@@ -123,7 +147,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
       '<p>&quot;Wolf Cut&quot; was approved and matches your services.</p>',
     )
     expect(result.html).toContain(
-      '<a href="/admin/viral-requests/request_1">View request</a>',
+      '<a href="https://tovis.test/admin/viral-requests/request_1">View request</a>',
     )
   })
 
