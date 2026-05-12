@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 import { useBrand } from '@/lib/brand/BrandProvider'
-
+import { PRO_PUBLIC_PROFILE_PATH } from '@/lib/routes'
 type NotificationSummaryResponse = {
   hasUnread: boolean
   count: number
@@ -34,7 +34,7 @@ const PRO_HEADER_ROUTE_TITLES: ProHeaderRouteTitle[] = [
   { path: '/pro/notifications', title: 'Notifications' },
   { path: '/pro/clients', title: 'Clients' },
   { path: '/pro/profile', title: 'Profile' },
-  { path: '/pro/public-profile', title: 'Public Profile' },
+  { path: PRO_PUBLIC_PROFILE_PATH, title: 'Public Profile' },
   { path: '/pro/media', title: 'Media' },
 ]
 

@@ -1,6 +1,7 @@
-// app/pro/profile/page.tsx
 import { redirect } from 'next/navigation'
 
-export default async function ProProfilePage() {
-  redirect('/pro/public-profile')
+import { PRO_PUBLIC_PROFILE_PATH } from '@/lib/routes'
+
+export default function ProProfilePage() {
+  redirect(PRO_PUBLIC_PROFILE_PATH)
 }
