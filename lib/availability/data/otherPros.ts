@@ -21,6 +21,7 @@ import {
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
+import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 
 type AvailabilityDbClient = Prisma.TransactionClient | typeof prisma
 
@@ -132,6 +133,9 @@ export async function loadOtherProsNearby(
       type: { in: allowedTypes },
       timeZone: { not: null },
       workingHours: { not: Prisma.JsonNull },
+      professional: {
+        verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
+      },
       lat: {
         not: null,
         gte: toDecimal(bounds.minLat),
