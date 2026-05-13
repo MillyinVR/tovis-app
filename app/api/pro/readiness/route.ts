@@ -1,7 +1,7 @@
 // app/api/pro/readiness/route.ts
 
-import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { loadProReadiness } from '@/lib/pro-readiness'
+import { jsonOk, requirePro } from '@/app/api/_utils'
+import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
 
 export async function GET() {
   const auth = await requirePro()
@@ -10,11 +10,7 @@ export async function GET() {
     return auth.res
   }
 
-  const readiness = await loadProReadiness(auth.professionalId)
-
-  if (!readiness) {
-    return jsonFail(404, 'Professional profile was not found.')
-  }
+  const readiness = await checkProReadiness(auth.professionalId)
 
   return jsonOk(
     {
