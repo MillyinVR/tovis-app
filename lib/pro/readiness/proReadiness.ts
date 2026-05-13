@@ -8,6 +8,7 @@
 import {
   Prisma,
   ProfessionalLocationType,
+  StripeAccountStatus,
   VerificationStatus,
 } from '@prisma/client'
 
@@ -25,8 +26,10 @@ export type ProReadinessBlocker =
   | 'MOBILE_MISSING_BASE_CONFIG'
   | 'LOCATION_MISSING_TIMEZONE'
   | 'LOCATION_MISSING_WORKING_HOURS'
+  | 'LOCATION_MISSING_GEO'
   | 'OFFERING_MISSING_SALON_PRICE_OR_DURATION'
   | 'OFFERING_MISSING_MOBILE_PRICE_OR_DURATION'
+  | 'STRIPE_NOT_READY'
   | 'VERIFICATION_NOT_APPROVED'
 
 export type ProReadiness =
@@ -40,11 +43,22 @@ const proReadinessSelect = {
   mobileRadiusMiles: true,
   mobileBasePostalCode: true,
   verificationStatus: true,
+  paymentSettings: {
+    select: {
+      acceptStripeCard: true,
+      stripeAccountStatus: true,
+      stripeChargesEnabled: true,
+      stripePayoutsEnabled: true,
+      stripeDetailsSubmitted: true,
+    },
+  },
   locations: {
     select: {
       id: true,
       type: true,
       formattedAddress: true,
+      lat: true,
+      lng: true,
       timeZone: true,
       workingHours: true,
       isBookable: true,
@@ -113,6 +127,19 @@ function isSalonLikeLocation(type: ProfessionalLocationType): boolean {
   )
 }
 
+function hasReadyStripeConnect(
+  paymentSettings: ProReadinessRecord['paymentSettings'],
+): boolean {
+  if (!paymentSettings?.acceptStripeCard) return true
+
+  return (
+    paymentSettings.stripeAccountStatus === StripeAccountStatus.ENABLED &&
+    paymentSettings.stripeChargesEnabled &&
+    paymentSettings.stripePayoutsEnabled &&
+    paymentSettings.stripeDetailsSubmitted
+  )
+}
+
 function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
   const blockers: ProReadinessBlocker[] = []
 
@@ -167,6 +194,14 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
     isSalonLikeLocation(location.type),
   )
 
+  const anyMissingGeo = bookableLocations.some(
+    (location) => location.lat == null || location.lng == null,
+  )
+
+  if (anyMissingGeo) {
+    blockers.push('LOCATION_MISSING_GEO')
+  }
+
   const anySalonMissingAddress = bookableSalonLocations.some(
     (location) => !location.formattedAddress,
   )
@@ -188,17 +223,18 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
     }
   }
 
-  const readyLocationIds = bookableLocations
-    .filter((location) => {
-      const hasTimezone =
-        Boolean(location.timeZone) && isValidIanaTimeZone(location.timeZone)
-      const hasWorkingHours = isValidWorkingHours(location.workingHours)
-      const hasSalonAddress =
-        !isSalonLikeLocation(location.type) || Boolean(location.formattedAddress)
+const readyLocationIds = bookableLocations
+  .filter((location) => {
+    const hasTimezone =
+      Boolean(location.timeZone) && isValidIanaTimeZone(location.timeZone)
+    const hasWorkingHours = isValidWorkingHours(location.workingHours)
+    const hasGeo = location.lat != null && location.lng != null
+    const hasSalonAddress =
+      !isSalonLikeLocation(location.type) || Boolean(location.formattedAddress)
 
-      return hasTimezone && hasWorkingHours && hasSalonAddress
-    })
-    .map((location) => location.id)
+    return hasTimezone && hasWorkingHours && hasGeo && hasSalonAddress
+  })
+  .map((location) => location.id)
 
   if (readyLocationIds.length === 0 && bookableLocations.length > 0) {
     blockers.push('NO_BOOKABLE_LOCATION')
@@ -217,6 +253,11 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
   const mobileLocation = readyBookableLocations.find(
     (location) => location.type === ProfessionalLocationType.MOBILE_BASE,
   )
+
+  // ── Payment readiness ─────────────────────────────────────────────────────
+  if (!hasReadyStripeConnect(pro.paymentSettings)) {
+    blockers.push('STRIPE_NOT_READY')
+  }
 
   // ── Offering price/duration checks per mode ───────────────────────────────
   if (activeOfferings.length > 0) {

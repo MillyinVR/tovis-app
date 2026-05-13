@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   Prisma,
   ProfessionalLocationType,
+  StripeAccountStatus,
   VerificationStatus,
 } from '@prisma/client'
 
@@ -26,6 +27,8 @@ function makeLocation(
     id: 'loc_1',
     type: ProfessionalLocationType.SALON,
     formattedAddress: '123 Main St, San Diego, CA',
+    lat: new Prisma.Decimal('32.715736'),
+    lng: new Prisma.Decimal('-117.161087'),
     timeZone: 'America/Los_Angeles',
     workingHours: validWorkingHours,
     isBookable: true,
@@ -54,6 +57,13 @@ function makePro(overrides: Partial<ReadinessInput> = {}): ReadinessInput {
     mobileRadiusMiles: null,
     mobileBasePostalCode: null,
     verificationStatus: VerificationStatus.APPROVED,
+    paymentSettings: {
+      acceptStripeCard: false,
+      stripeAccountStatus: StripeAccountStatus.NOT_STARTED,
+      stripeChargesEnabled: false,
+      stripePayoutsEnabled: false,
+      stripeDetailsSubmitted: false,
+    },
     locations: [makeLocation()],
     offerings: [makeOffering()],
     ...overrides,
@@ -230,6 +240,63 @@ describe('evaluateProReadiness', () => {
     expect(result).toEqual({
       ok: false,
       blockers: ['OFFERING_MISSING_SALON_PRICE_OR_DURATION'],
+    })
+  })
+
+  it('blocks bookable locations missing geo coordinates', () => {
+    const result = evaluateProReadiness(
+      makePro({
+        locations: [
+          makeLocation({
+            lat: null,
+            lng: null,
+          }),
+        ],
+      }),
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      blockers: ['LOCATION_MISSING_GEO', 'NO_BOOKABLE_LOCATION'],
+    })
+  })
+
+  it('blocks Stripe card payments when Stripe Connect is not ready', () => {
+    const result = evaluateProReadiness(
+      makePro({
+        paymentSettings: {
+          acceptStripeCard: true,
+          stripeAccountStatus: StripeAccountStatus.ONBOARDING_STARTED,
+          stripeChargesEnabled: false,
+          stripePayoutsEnabled: false,
+          stripeDetailsSubmitted: false,
+        },
+      }),
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      blockers: ['STRIPE_NOT_READY'],
+    })
+  })
+
+  it('allows Stripe card payments when Stripe Connect is ready', () => {
+    const result = evaluateProReadiness(
+      makePro({
+        paymentSettings: {
+          acceptStripeCard: true,
+          stripeAccountStatus: StripeAccountStatus.ENABLED,
+          stripeChargesEnabled: true,
+          stripePayoutsEnabled: true,
+          stripeDetailsSubmitted: true,
+        },
+      }),
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_1'],
     })
   })
 
