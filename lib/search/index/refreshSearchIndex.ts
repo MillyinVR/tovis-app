@@ -26,6 +26,7 @@ import {
 
 import { prisma } from '@/lib/prisma'
 import { summarizeDiscoveryOfferingsForProfessional } from '@/lib/discovery/nearby'
+import { checkProReadinessWithDb } from '@/lib/pro/readiness/proReadiness'
 
 export type RefreshSource =
   | 'location.create'
@@ -36,6 +37,7 @@ export type RefreshSource =
   | 'offering.update'
   | 'offering.delete'
   | 'verification.status'
+  | 'schedule.publish'
   | 'backfill'
   | 'manual'
 
@@ -355,6 +357,16 @@ export async function refreshLocation(
       return
     }
 
+    const readiness = await checkProReadinessWithDb({
+      db: client,
+      professionalId: location.professional.id,
+    })
+
+    if (!readiness.ok || !readiness.readyLocationIds.includes(location.id)) {
+      await client.professionalSearchIndex.deleteMany({ where: { locationId } })
+      return
+    }
+
     const rollups = await loadProRollups(location.professional.id, client)
 
     await upsertIndexRow(
@@ -431,9 +443,33 @@ export async function refreshProfessional(
       return
     }
 
+    const readiness = await checkProReadinessWithDb({
+      db: client,
+      professionalId,
+    })
+
+    if (!readiness.ok) {
+      await client.professionalSearchIndex.deleteMany({
+        where: { professionalId },
+      })
+      return
+    }
+
+    const readyLocationIdSet = new Set(readiness.readyLocationIds)
+    const readyLocations = locations.filter((location) =>
+      readyLocationIdSet.has(location.id),
+    )
+
+    if (readyLocations.length === 0) {
+      await client.professionalSearchIndex.deleteMany({
+        where: { professionalId },
+      })
+      return
+    }
+
     const rollups = await loadProRollups(professionalId, client)
 
-    const currentLocationIds = locations.map((location) => location.id)
+    const currentLocationIds = readyLocations.map((location) => location.id)
 
     // Drop any stale rows (locations that lost isBookable, lost lat/lng,
     // or were deleted) before re-upserting current ones. Prevents the
@@ -445,7 +481,7 @@ export async function refreshProfessional(
       },
     })
 
-    for (const location of locations) {
+    for (const location of readyLocations) {
       const lat = toFiniteNumber(location.lat)
       const lng = toFiniteNumber(location.lng)
       if (lat == null || lng == null) continue

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   reviewGroupBy: vi.fn(),
   indexDeleteMany: vi.fn(),
   executeRaw: vi.fn(),
+  checkProReadinessWithDb: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -28,6 +29,10 @@ vi.mock('@/lib/prisma', () => ({
     },
     $executeRaw: mocks.executeRaw,
   },
+}))
+
+vi.mock('@/lib/pro/readiness/proReadiness', () => ({
+  checkProReadinessWithDb: mocks.checkProReadinessWithDb,
 }))
 
 import {
@@ -102,8 +107,15 @@ beforeEach(() => {
   for (const mock of Object.values(mocks)) {
     mock.mockReset()
   }
+
   mocks.executeRaw.mockResolvedValue(1)
   mocks.indexDeleteMany.mockResolvedValue({ count: 0 })
+
+  mocks.checkProReadinessWithDb.mockResolvedValue({
+    ok: true,
+    liveModes: ['SALON'],
+    readyLocationIds: ['loc_a', 'loc_b'],
+  })
 })
 
 describe('refreshLocation', () => {
@@ -191,20 +203,24 @@ describe('refreshLocation', () => {
     expect(mocks.executeRaw).not.toHaveBeenCalled()
   })
 
-  it('keeps a row for a pending-verification pro (read-side filter is applied at query time)', async () => {
+  it('deletes the index row when readiness says the pro is not ready', async () => {
     mocks.locationFindUnique.mockResolvedValue({
       ...baseLocation,
       professional: { ...proSnapshot, verificationStatus: 'PENDING' },
     })
-    mocks.offeringFindMany.mockResolvedValue([])
-    mocks.reviewGroupBy.mockResolvedValue([])
+
+    mocks.checkProReadinessWithDb.mockResolvedValueOnce({
+      ok: false,
+      blockers: ['VERIFICATION_NOT_APPROVED'],
+    })
 
     await refreshLocation('loc_a', 'location.create')
 
-    expect(mocks.indexDeleteMany).not.toHaveBeenCalled()
-    expect(mocks.executeRaw).toHaveBeenCalledTimes(1)
-    const [, ...values] = mocks.executeRaw.mock.calls[0] as [unknown, ...unknown[]]
-    expect(values).toContain('PENDING')
+    expect(mocks.indexDeleteMany).toHaveBeenCalledWith({
+      where: { locationId: 'loc_a' },
+    })
+    expect(mocks.executeRaw).not.toHaveBeenCalled()
+    expect(mocks.offeringFindMany).not.toHaveBeenCalled()
   })
 
   it('writes empty array rollups when the pro has no active offerings or reviews', async () => {
@@ -236,6 +252,62 @@ describe('refreshLocation', () => {
 })
 
 describe('refreshProfessional', () => {
+
+  it('only upserts locations included in readiness.readyLocationIds', async () => {
+    mocks.locationFindMany.mockResolvedValue([
+      baseLocation,
+      {
+        ...baseLocation,
+        id: 'loc_b',
+        isPrimary: false,
+        type: 'MOBILE_BASE',
+      },
+    ])
+
+    mocks.checkProReadinessWithDb.mockResolvedValueOnce({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_a'],
+    })
+
+    mocks.offeringFindMany.mockResolvedValue(defaultOfferings())
+    mocks.reviewGroupBy.mockResolvedValue(defaultRatings())
+
+    await refreshProfessional('pro_a', 'offering.update')
+
+    expect(mocks.indexDeleteMany).toHaveBeenCalledWith({
+      where: {
+        professionalId: 'pro_a',
+        locationId: { notIn: ['loc_a'] },
+      },
+    })
+
+    expect(mocks.executeRaw).toHaveBeenCalledTimes(1)
+
+    const [, ...values] = mocks.executeRaw.mock.calls[0] as [unknown, ...unknown[]]
+    expect(values).toContain('loc_a')
+    expect(values).not.toContain('loc_b')
+  })
+
+  it('purges all index rows when readiness says the pro is not ready', async () => {
+    mocks.locationFindMany.mockResolvedValue([baseLocation])
+
+    mocks.checkProReadinessWithDb.mockResolvedValueOnce({
+      ok: false,
+      blockers: ['NO_ACTIVE_OFFERING'],
+    })
+
+    await refreshProfessional('pro_a', 'offering.update')
+
+    expect(mocks.indexDeleteMany).toHaveBeenCalledWith({
+      where: { professionalId: 'pro_a' },
+    })
+
+    expect(mocks.executeRaw).not.toHaveBeenCalled()
+    expect(mocks.offeringFindMany).not.toHaveBeenCalled()
+    expect(mocks.reviewGroupBy).not.toHaveBeenCalled()
+  })
+
   it('purges every index row for the pro when no qualifying locations remain', async () => {
     mocks.locationFindMany.mockResolvedValue([])
 
