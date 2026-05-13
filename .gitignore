@@ -54,3 +54,6 @@ next-env.d.ts
 *.log
 logs/
 server.log
+
+playwright-report/
+test-results/
