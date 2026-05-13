@@ -5,7 +5,6 @@ import { Prisma, ProfessionalLocationType } from '@prisma/client'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { pickBool, pickNumber, pickString } from '@/lib/pick'
-import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { isRecord, type UnknownRecord, hasOwn } from '@/lib/guards'
 import {
   normalizeWorkingHours,
@@ -17,6 +16,7 @@ import {
   refreshLocation,
 } from '@/lib/search/index/refreshSearchIndex'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
+import { evaluatePublishableLocation } from '@/lib/pro/readiness/proReadiness'
 
 export const dynamic = 'force-dynamic'
 
@@ -200,14 +200,21 @@ export async function PATCH(req: NextRequest, ctx: Params) {
         : normalizeWorkingHours(existing.workingHours)
 
     if (nextIsBookable) {
-      if (!nextTimeZone || !isValidIanaTimeZone(nextTimeZone)) {
-        return jsonFail(400, 'Bookable locations must have a valid IANA timeZone.')
-      }
+      const publishable = evaluatePublishableLocation({
+        id: existing.id,
+        type: existing.type,
+        formattedAddress: nextFormattedAddress,
+        timeZone: nextTimeZone,
+        workingHours: nextWorkingHours,
+      })
 
-      if (!nextWorkingHours) {
+      if (!publishable.ok) {
         return jsonFail(
           400,
-          'Bookable locations must have valid workingHours with mon..sun, valid HH:MM times, and end after start.',
+          'Bookable locations must have valid timezone, working hours, and address requirements.',
+          {
+            blockers: publishable.blockers,
+          },
         )
       }
 

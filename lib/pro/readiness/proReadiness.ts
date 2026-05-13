@@ -36,6 +36,18 @@ export type ProReadiness =
   | { ok: true; liveModes: LiveBookingMode[]; readyLocationIds: string[] }
   | { ok: false; blockers: ProReadinessBlocker[] }
 
+export type PublishableLocationBlocker =
+  | 'LOCATION_MISSING_TIMEZONE'
+  | 'LOCATION_MISSING_WORKING_HOURS'
+  | 'SALON_MISSING_ADDRESS'
+
+export type PublishableLocationReadiness =
+  | { ok: true; locationId: string }
+  | {
+      ok: false
+      locationId: string
+      blockers: PublishableLocationBlocker[]
+    }
 // ─── Internal data ────────────────────────────────────────────────────────────
 
 const proReadinessSelect = {
@@ -125,6 +137,40 @@ function isSalonLikeLocation(type: ProfessionalLocationType): boolean {
     type === ProfessionalLocationType.SALON ||
     type === ProfessionalLocationType.SUITE
   )
+}
+
+export function evaluatePublishableLocation(
+  location: Pick<
+    ProReadinessRecord['locations'][number],
+    'id' | 'type' | 'formattedAddress' | 'timeZone' | 'workingHours'
+  >,
+): PublishableLocationReadiness {
+  const blockers: PublishableLocationBlocker[] = []
+
+  if (!location.timeZone || !isValidIanaTimeZone(location.timeZone)) {
+    blockers.push('LOCATION_MISSING_TIMEZONE')
+  }
+
+  if (!isValidWorkingHours(location.workingHours)) {
+    blockers.push('LOCATION_MISSING_WORKING_HOURS')
+  }
+
+  if (isSalonLikeLocation(location.type) && !location.formattedAddress) {
+    blockers.push('SALON_MISSING_ADDRESS')
+  }
+
+  if (blockers.length > 0) {
+    return {
+      ok: false,
+      locationId: location.id,
+      blockers,
+    }
+  }
+
+  return {
+    ok: true,
+    locationId: location.id,
+  }
 }
 
 function hasReadyStripeConnect(
