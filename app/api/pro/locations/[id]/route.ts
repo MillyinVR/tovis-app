@@ -93,6 +93,17 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     if (hasOwn(body, 'isBookable')) {
       const b = pickBool(body.isBookable)
       if (b === null) return jsonFail(400, 'isBookable must be boolean')
+
+      if (existing.isBookable === false && b === true) {
+        return jsonFail(
+          409,
+          'Use the schedule publish endpoint to make a location bookable.',
+          {
+            code: 'USE_SCHEDULE_PUBLISH',
+          },
+        )
+      }
+
       requestedBookable = b
       data.isBookable = b
     }
