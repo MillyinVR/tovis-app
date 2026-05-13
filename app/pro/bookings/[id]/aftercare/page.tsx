@@ -279,7 +279,10 @@ function Header({
           tone={isFinalized ? 'success' : hasDraft ? 'pending' : 'danger'}
         />
 
-        <StatusPill label="CLIENT-FACING" tone="pending" />
+        <StatusPill
+          label={isFinalized ? 'CLIENT ACCESS LIVE' : 'CLIENT ACCESS LOCKED'}
+          tone={isFinalized ? 'success' : 'pending'}
+        />
       </div>
     </header>
   )
@@ -314,8 +317,9 @@ function SummaryCard({
       </div>
 
       <div className="brand-pro-session-card-body">
-        Do either first, then complete the session from the session hub once
-        after photos and finalized aftercare are both ready.
+        Do either first. Once after photos, finalized aftercare, payment,
+        checkout, and consultation are all complete, closeout will finalize the
+        booking.
       </div>
 
       <div className="brand-pro-session-check-row">

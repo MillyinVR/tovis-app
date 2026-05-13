@@ -210,98 +210,98 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     })
   })
 
-it('uploads BEFORE media during CONSULTATION_PENDING_CLIENT without advancing the session step', async () => {
-  mocks.txBookingFindUnique.mockResolvedValueOnce(
-    makeBooking({
-      sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
-    }),
-  )
+  it('uploads BEFORE media during CONSULTATION_PENDING_CLIENT without advancing the session step', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeBooking({
+        sessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
+      }),
+    )
 
-  const created = makeCreatedMedia({
-    phase: MediaPhase.BEFORE,
-    caption: 'Before photo',
-  })
-
-  mocks.txMediaAssetCreate.mockResolvedValueOnce(created)
-
-  const result = await uploadProBookingMedia(
-    makeUploadArgs({
+    const created = makeCreatedMedia({
       phase: MediaPhase.BEFORE,
-    }),
-  )
-
-  expect(mocks.txMediaAssetCreate).toHaveBeenCalledWith({
-    data: {
-      bookingId: 'booking_1',
-      professionalId: 'pro_1',
-      uploadedByUserId: 'user_1',
-      uploadedByRole: Role.PRO,
-      storageBucket: 'booking-media',
-      storagePath: 'bookings/booking_1/before.jpg',
-      thumbBucket: null,
-      thumbPath: null,
-      url: null,
-      thumbUrl: null,
       caption: 'Before photo',
-      phase: MediaPhase.BEFORE,
-      mediaType: MediaType.IMAGE,
-      visibility: MediaVisibility.PRO_CLIENT,
-      reviewId: null,
-      reviewLocked: false,
-      isEligibleForLooks: false,
-      isFeaturedInPortfolio: false,
-    },
-    select: expect.objectContaining({
-      id: true,
-      mediaType: true,
-      visibility: true,
-      phase: true,
-      caption: true,
-      createdAt: true,
-      reviewId: true,
-      isEligibleForLooks: true,
-      isFeaturedInPortfolio: true,
-      storageBucket: true,
-      storagePath: true,
-      thumbBucket: true,
-      thumbPath: true,
-      url: true,
-      thumbUrl: true,
-    }),
-  })
+    })
 
-  expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+    mocks.txMediaAssetCreate.mockResolvedValueOnce(created)
 
-  expect(result).toEqual({
-    created,
-    advancedTo: null,
-    meta: {
-      mutated: true,
-      noOp: false,
-    },
-  })
-})
-
-it('rejects BEFORE media before the session has reached consultation', async () => {
-  mocks.txBookingFindUnique.mockResolvedValueOnce(
-    makeBooking({
-      sessionStep: SessionStep.NONE,
-    }),
-  )
-
-  await expect(
-    uploadProBookingMedia(
+    const result = await uploadProBookingMedia(
       makeUploadArgs({
         phase: MediaPhase.BEFORE,
       }),
-    ),
-  ).rejects.toMatchObject({
-    code: 'STEP_MISMATCH',
+    )
+
+    expect(mocks.txMediaAssetCreate).toHaveBeenCalledWith({
+      data: {
+        bookingId: 'booking_1',
+        professionalId: 'pro_1',
+        uploadedByUserId: 'user_1',
+        uploadedByRole: Role.PRO,
+        storageBucket: 'booking-media',
+        storagePath: 'bookings/booking_1/before.jpg',
+        thumbBucket: null,
+        thumbPath: null,
+        url: null,
+        thumbUrl: null,
+        caption: 'Before photo',
+        phase: MediaPhase.BEFORE,
+        mediaType: MediaType.IMAGE,
+        visibility: MediaVisibility.PRO_CLIENT,
+        reviewId: null,
+        reviewLocked: false,
+        isEligibleForLooks: false,
+        isFeaturedInPortfolio: false,
+      },
+      select: expect.objectContaining({
+        id: true,
+        mediaType: true,
+        visibility: true,
+        phase: true,
+        caption: true,
+        createdAt: true,
+        reviewId: true,
+        isEligibleForLooks: true,
+        isFeaturedInPortfolio: true,
+        storageBucket: true,
+        storagePath: true,
+        thumbBucket: true,
+        thumbPath: true,
+        url: true,
+        thumbUrl: true,
+      }),
+    })
+
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      created,
+      advancedTo: null,
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
   })
 
-  expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
-  expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
-})
+  it('rejects BEFORE media before the session has reached consultation', async () => {
+    mocks.txBookingFindUnique.mockResolvedValueOnce(
+      makeBooking({
+        sessionStep: SessionStep.NONE,
+      }),
+    )
+
+    await expect(
+      uploadProBookingMedia(
+        makeUploadArgs({
+          phase: MediaPhase.BEFORE,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: 'STEP_MISMATCH',
+    })
+
+    expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
+    expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
+  })
 
   it('uploads AFTER media during AFTER_PHOTOS without advancing the session step', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(

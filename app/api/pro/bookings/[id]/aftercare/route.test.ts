@@ -3,6 +3,7 @@ import {
   AftercareRebookMode,
   BookingStatus,
   ContactMethod,
+  SessionStep,
 } from '@prisma/client'
 
 const IDEMPOTENCY_ROUTE = 'POST /api/pro/bookings/[id]/aftercare'
@@ -257,6 +258,12 @@ function makeUpsertResult(overrides?: {
   rebookWindowEnd?: Date | null
   sentToClientAt?: Date | null
   bookingFinished?: boolean
+  completionBlockers?: string[]
+  booking?: {
+    status: BookingStatus
+    sessionStep: SessionStep
+    finishedAt: Date | null
+  } | null
 }) {
   return {
     aftercare: {
@@ -286,12 +293,15 @@ function makeUpsertResult(overrides?: {
     clientNotified: true,
     timeZoneUsed: 'America/Los_Angeles',
     bookingFinished: overrides?.bookingFinished ?? true,
-    completionBlockers: [],
-    booking: {
-      status: BookingStatus.COMPLETED,
-      sessionStep: 'DONE',
-      finishedAt: new Date('2026-04-12T20:00:00.000Z'),
-    },
+    completionBlockers: overrides?.completionBlockers ?? [],
+    booking:
+      overrides && 'booking' in overrides
+        ? overrides.booking
+        : {
+            status: BookingStatus.COMPLETED,
+            sessionStep: SessionStep.DONE,
+            finishedAt: new Date('2026-04-12T20:00:00.000Z'),
+          },
     meta: {
       mutated: true,
       noOp: false,
@@ -446,6 +456,12 @@ function makeExpectedPostResponse(overrides?: {
   }
   clientTimeZoneReceived?: string | null
   bookingFinished?: boolean
+  completionBlockers?: string[]
+  booking?: {
+    status: BookingStatus
+    sessionStep: SessionStep
+    finishedAt: string | null
+  } | null
   redirectTo?: string | null
   meta?: {
     mutated: boolean
@@ -494,12 +510,15 @@ function makeExpectedPostResponse(overrides?: {
         ? overrides.clientTimeZoneReceived
         : 'America/Los_Angeles',
     bookingFinished,
-    completionBlockers: [],
-    booking: {
-      status: BookingStatus.COMPLETED,
-      sessionStep: 'DONE',
-      finishedAt: '2026-04-12T20:00:00.000Z',
-    },
+    completionBlockers: overrides?.completionBlockers ?? [],
+    booking:
+      overrides && 'booking' in overrides
+        ? overrides.booking
+        : {
+            status: BookingStatus.COMPLETED,
+            sessionStep: SessionStep.DONE,
+            finishedAt: '2026-04-12T20:00:00.000Z',
+          },
     redirectTo:
       overrides && 'redirectTo' in overrides
         ? overrides.redirectTo
@@ -1051,6 +1070,110 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     })
 
     const responseBody = makeExpectedPostResponse()
+
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody,
+    })
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      ...responseBody,
+    })
+  })
+
+  it('POST returns bookingFinished false with completion blockers when aftercare sends but closeout is blocked', async () => {
+    mocks.upsertBookingAftercare.mockResolvedValueOnce(
+      makeUpsertResult({
+        bookingFinished: false,
+        completionBlockers: [
+          'AFTER_PHOTOS_REQUIRED',
+          'PAYMENT_NOT_COLLECTED',
+          'CHECKOUT_NOT_PAID_OR_WAIVED',
+        ],
+        booking: {
+          status: BookingStatus.IN_PROGRESS,
+          sessionStep: SessionStep.AFTER_PHOTOS,
+          finishedAt: new Date('2026-04-12T20:00:00.000Z'),
+        },
+      }),
+    )
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_blocked_closeout_1',
+        headers: {
+          'x-request-id': 'req_blocked_closeout_1',
+        },
+        body: makeValidPostBody(),
+      }),
+      makeCtx(),
+    )
+
+    const responseBody = makeExpectedPostResponse({
+      bookingFinished: false,
+      completionBlockers: [
+        'AFTER_PHOTOS_REQUIRED',
+        'PAYMENT_NOT_COLLECTED',
+        'CHECKOUT_NOT_PAID_OR_WAIVED',
+      ],
+      booking: {
+        status: BookingStatus.IN_PROGRESS,
+        sessionStep: SessionStep.AFTER_PHOTOS,
+        finishedAt: '2026-04-12T20:00:00.000Z',
+      },
+      redirectTo: null,
+    })
+
+    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody,
+    })
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      ...responseBody,
+    })
+  })
+
+  it('POST returns bookingFinished true with completed booking and calendar redirect when closeout completes', async () => {
+    mocks.upsertBookingAftercare.mockResolvedValueOnce(
+      makeUpsertResult({
+        bookingFinished: true,
+        completionBlockers: [],
+        booking: {
+          status: BookingStatus.COMPLETED,
+          sessionStep: SessionStep.DONE,
+          finishedAt: new Date('2026-04-12T20:00:00.000Z'),
+        },
+      }),
+    )
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_completed_closeout_1',
+        headers: {
+          'x-request-id': 'req_completed_closeout_1',
+        },
+        body: makeValidPostBody(),
+      }),
+      makeCtx(),
+    )
+
+    const responseBody = makeExpectedPostResponse({
+      bookingFinished: true,
+      completionBlockers: [],
+      booking: {
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: '2026-04-12T20:00:00.000Z',
+      },
+      redirectTo: '/pro/calendar',
+    })
 
     expect(mocks.completeIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',

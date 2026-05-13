@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import {
+  BookingCheckoutStatus,
   BookingServiceItemType,
   BookingStatus,
   ConsultationApprovalStatus,
@@ -1208,7 +1209,9 @@ function WrapUpView({
   hasAftercareDraft,
   hasFinalizedAftercare,
   aftercareLastEditedAt,
-  completeSession,
+  hasPaymentCollected,
+  hasCheckoutClosed,
+  hasConsultationApproved,
 }: {
   bookingId: string
   serviceName: string
@@ -1218,14 +1221,25 @@ function WrapUpView({
   hasAftercareDraft: boolean
   hasFinalizedAftercare: boolean
   aftercareLastEditedAt: Date | null
-  completeSession: ServerAction
+  hasPaymentCollected: boolean
+  hasCheckoutClosed: boolean
+  hasConsultationApproved: boolean
 }) {
-  const canComplete = hasAfterPhoto && hasFinalizedAftercare
+  const canComplete =
+    hasAfterPhoto &&
+    hasFinalizedAftercare &&
+    hasPaymentCollected &&
+    hasCheckoutClosed &&
+    hasConsultationApproved
   const aftercareStatus = hasFinalizedAftercare
     ? 'finalized + sent'
     : hasAftercareDraft
       ? 'draft saved'
       : 'missing'
+
+  const paymentStatus = hasPaymentCollected ? 'collected' : 'not collected'
+  const checkoutStatus = hasCheckoutClosed ? 'paid or waived' : 'not closed'
+  const consultationStatus = hasConsultationApproved ? 'approved' : 'not approved'
 
   return (
     <PageShell>
@@ -1288,6 +1302,66 @@ function WrapUpView({
               tone={hasFinalizedAftercare ? 'success' : 'pending'}
             />
           </div>
+
+          <div className="brand-pro-session-check-row">
+            <div className="brand-pro-session-check-icon">
+              {hasPaymentCollected ? <CheckIcon /> : <PlusIcon size={14} />}
+            </div>
+
+            <div className="brand-pro-session-check-main">
+              <div className="brand-pro-session-check-title">
+                Payment collected
+              </div>
+              <div className="brand-pro-session-check-sub">
+                {paymentStatus}
+              </div>
+            </div>
+
+            <Pill
+              label={hasPaymentCollected ? 'DONE' : 'TODO'}
+              tone={hasPaymentCollected ? 'success' : 'pending'}
+            />
+          </div>
+
+          <div className="brand-pro-session-check-row">
+            <div className="brand-pro-session-check-icon">
+              {hasCheckoutClosed ? <CheckIcon /> : <PlusIcon size={14} />}
+            </div>
+
+            <div className="brand-pro-session-check-main">
+              <div className="brand-pro-session-check-title">
+                Checkout paid or waived
+              </div>
+              <div className="brand-pro-session-check-sub">
+                {checkoutStatus}
+              </div>
+            </div>
+
+            <Pill
+              label={hasCheckoutClosed ? 'DONE' : 'TODO'}
+              tone={hasCheckoutClosed ? 'success' : 'pending'}
+            />
+          </div>
+
+          <div className="brand-pro-session-check-row">
+            <div className="brand-pro-session-check-icon">
+              {hasConsultationApproved ? <CheckIcon /> : <PlusIcon size={14} />}
+            </div>
+
+            <div className="brand-pro-session-check-main">
+              <div className="brand-pro-session-check-title">
+                Consultation approved
+              </div>
+              <div className="brand-pro-session-check-sub">
+                {consultationStatus}
+              </div>
+            </div>
+
+            <Pill
+              label={hasConsultationApproved ? 'DONE' : 'TODO'}
+              tone={hasConsultationApproved ? 'success' : 'pending'}
+            />
+          </div>
         </Card>
 
         <div className="mt-3 brand-pro-session-photo-grid">
@@ -1322,14 +1396,16 @@ function WrapUpView({
           </ActionLink>
         </div>
 
-        <form action={completeSession}>
-          <ActionButton disabled={!canComplete}>
-            Complete session <ArrowRightIcon size={13} />
-          </ActionButton>
-        </form>
+        <div className="mt-3">
+          <ActionLink href={aftercareHref(bookingId)} full>
+            Finish closeout <ArrowRightIcon size={13} />
+          </ActionLink>
+        </div>
 
         <div className="brand-pro-session-help-text pb-4">
-          Requires finalized aftercare and at least one after photo.
+          {canComplete
+            ? 'All closeout requirements are ready. Finish closeout from aftercare.'
+            : 'Requires approved consultation, after photos, finalized aftercare, collected payment, and paid or waived checkout.'}
         </div>
       </div>
     </PageShell>
@@ -1499,6 +1575,8 @@ export default async function ProBookingSessionPage(props: PageProps) {
       totalDurationMinutes: true,
       subtotalSnapshot: true,
       totalAmount: true,
+      checkoutStatus: true,
+      paymentCollectedAt: true,
       consultationNotes: true,
 
       service: {
@@ -1650,7 +1728,11 @@ export default async function ProBookingSessionPage(props: PageProps) {
   const hasAfterPhoto = afterCount > 0
   const hasAftercareDraft = Boolean(aftercare?.id)
   const hasFinalizedAftercare = Boolean(aftercare?.sentToClientAt)
-
+  const hasPaymentCollected = Boolean(booking.paymentCollectedAt)
+  const hasCheckoutClosed =
+    booking.checkoutStatus === BookingCheckoutStatus.PAID ||
+    booking.checkoutStatus === BookingCheckoutStatus.WAIVED
+  const hasConsultationApproved = isConsultationApproved(approvalStatus)
   const effectiveStep = resolveEffectiveSessionStep({
     bookingStatus,
     rawStep,
@@ -1696,55 +1778,6 @@ export default async function ProBookingSessionPage(props: PageProps) {
     bookingId,
     ConsultationDecision.REJECTED,
   )
-
-  async function completeSession() {
-    'use server'
-
-    const currentUser = await getCurrentUser().catch(() => null)
-    const currentProfessionalId =
-      currentUser?.role === 'PRO'
-        ? currentUser.professionalProfile?.id ?? null
-        : null
-
-    if (!currentProfessionalId) {
-      redirect(loginHref(bookingId))
-    }
-
-    const freshBooking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: {
-        id: true,
-        professionalId: true,
-        status: true,
-        finishedAt: true,
-      },
-    })
-
-    if (!freshBooking) notFound()
-    if (freshBooking.professionalId !== currentProfessionalId) redirect('/pro')
-
-    if (isTerminalBooking(freshBooking.status, freshBooking.finishedAt)) {
-      redirect(sessionHubHref(bookingId))
-    }
-
-    const done = await transitionSessionStep({
-      bookingId,
-      professionalId: currentProfessionalId,
-      nextStep: SessionStep.DONE,
-    })
-
-    if (done.ok) {
-      redirect(aftercareHref(bookingId))
-    }
-
-    await transitionSessionStep({
-      bookingId,
-      professionalId: currentProfessionalId,
-      nextStep: SessionStep.AFTER_PHOTOS,
-    }).catch(() => null)
-
-    redirect(sessionHubHref(bookingId))
-  }
 
   if (terminal) {
     return (
@@ -1862,7 +1895,9 @@ export default async function ProBookingSessionPage(props: PageProps) {
         hasAftercareDraft={hasAftercareDraft}
         hasFinalizedAftercare={hasFinalizedAftercare}
         aftercareLastEditedAt={aftercare?.lastEditedAt ?? null}
-        completeSession={completeSession}
+        hasPaymentCollected={hasPaymentCollected}
+        hasCheckoutClosed={hasCheckoutClosed}
+        hasConsultationApproved={hasConsultationApproved}
       />
     )
   }

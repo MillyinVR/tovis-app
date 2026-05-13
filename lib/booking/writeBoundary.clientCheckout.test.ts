@@ -21,6 +21,10 @@ const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
   withLockedClientOwnedBookingTransaction: vi.fn(),
 
+  recordStatusTransition: vi.fn(),
+  recordStepTransition: vi.fn(),
+  registerLifecycleDriftSink: vi.fn(),
+
   txBookingFindUnique: vi.fn(),
   txBookingUpdate: vi.fn(),
   txMediaAssetCount: vi.fn(),
@@ -40,6 +44,12 @@ vi.mock('@/lib/booking/scheduleTransaction', () => ({
   withLockedProfessionalTransaction: mocks.withLockedProfessionalTransaction,
   withLockedClientOwnedBookingTransaction:
     mocks.withLockedClientOwnedBookingTransaction,
+}))
+
+vi.mock('@/lib/booking/lifecycleContract', () => ({
+  recordStatusTransition: mocks.recordStatusTransition,
+  recordStepTransition: mocks.recordStepTransition,
+  registerLifecycleDriftSink: mocks.registerLifecycleDriftSink,
 }))
 
 import { updateClientBookingCheckout } from './writeBoundary'
@@ -88,26 +98,58 @@ function makeClientCheckoutBooking(
     professionalId: overrides?.professionalId ?? 'pro_1',
     status: overrides?.status ?? BookingStatus.ACCEPTED,
     sessionStep: overrides?.sessionStep ?? SessionStep.AFTER_PHOTOS,
-    finishedAt: overrides?.finishedAt ?? FINISHED_AT,
+    finishedAt:
+      overrides && 'finishedAt' in overrides
+        ? overrides.finishedAt
+        : FINISHED_AT,
     subtotalSnapshot:
-      overrides?.subtotalSnapshot ?? new Prisma.Decimal(100),
+      overrides && 'subtotalSnapshot' in overrides
+        ? overrides.subtotalSnapshot
+        : new Prisma.Decimal(100),
     serviceSubtotalSnapshot:
-      overrides?.serviceSubtotalSnapshot ?? new Prisma.Decimal(100),
+      overrides && 'serviceSubtotalSnapshot' in overrides
+        ? overrides.serviceSubtotalSnapshot
+        : new Prisma.Decimal(100),
     productSubtotalSnapshot:
-      overrides?.productSubtotalSnapshot ?? new Prisma.Decimal(20),
-    tipAmount: overrides?.tipAmount ?? new Prisma.Decimal(0),
-    taxAmount: overrides?.taxAmount ?? new Prisma.Decimal(0),
-    discountAmount: overrides?.discountAmount ?? new Prisma.Decimal(0),
-    totalAmount: overrides?.totalAmount ?? new Prisma.Decimal(120),
+      overrides && 'productSubtotalSnapshot' in overrides
+        ? overrides.productSubtotalSnapshot
+        : new Prisma.Decimal(20),
+    tipAmount:
+      overrides && 'tipAmount' in overrides
+        ? overrides.tipAmount
+        : new Prisma.Decimal(0),
+    taxAmount:
+      overrides && 'taxAmount' in overrides
+        ? overrides.taxAmount
+        : new Prisma.Decimal(0),
+    discountAmount:
+      overrides && 'discountAmount' in overrides
+        ? overrides.discountAmount
+        : new Prisma.Decimal(0),
+    totalAmount:
+      overrides && 'totalAmount' in overrides
+        ? overrides.totalAmount
+        : new Prisma.Decimal(120),
     checkoutStatus: overrides?.checkoutStatus ?? BookingCheckoutStatus.READY,
-    selectedPaymentMethod: overrides?.selectedPaymentMethod ?? null,
-    paymentAuthorizedAt: overrides?.paymentAuthorizedAt ?? null,
-    paymentCollectedAt: overrides?.paymentCollectedAt ?? null,
+    selectedPaymentMethod:
+      overrides && 'selectedPaymentMethod' in overrides
+        ? overrides.selectedPaymentMethod
+        : null,
+    paymentAuthorizedAt:
+      overrides && 'paymentAuthorizedAt' in overrides
+        ? overrides.paymentAuthorizedAt
+        : null,
+    paymentCollectedAt:
+      overrides && 'paymentCollectedAt' in overrides
+        ? overrides.paymentCollectedAt
+        : null,
     aftercareSummary:
-      overrides?.aftercareSummary ?? {
-        id: 'aftercare_1',
-        sentToClientAt: AFTERCARE_SENT_AT,
-      },
+      overrides && 'aftercareSummary' in overrides
+        ? overrides.aftercareSummary
+        : {
+            id: 'aftercare_1',
+            sentToClientAt: AFTERCARE_SENT_AT,
+          },
     productSales: overrides?.productSales ?? [
       {
         unitPrice: new Prisma.Decimal(10),
@@ -300,6 +342,24 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
       select: { id: true },
     })
 
+    expect(mocks.recordStepTransition).toHaveBeenCalledWith({
+      from: SessionStep.AFTER_PHOTOS,
+      to: SessionStep.DONE,
+      actor: 'SYSTEM',
+      route: 'lib/booking/writeBoundary.ts:updateClientBookingCheckout#complete',
+      bookingId: 'booking_1',
+      professionalId: 'pro_1',
+    })
+
+    expect(mocks.recordStatusTransition).toHaveBeenCalledWith({
+      from: BookingStatus.ACCEPTED,
+      to: BookingStatus.COMPLETED,
+      actor: 'SYSTEM',
+      route: 'lib/booking/writeBoundary.ts:updateClientBookingCheckout#complete',
+      bookingId: 'booking_1',
+      professionalId: 'pro_1',
+    })
+
     expect(result).toEqual({
       booking: {
         id: 'booking_1',
@@ -374,6 +434,9 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
       status: BookingStatus.COMPLETED,
       sessionStep: SessionStep.DONE,
     })
+
+    expect(mocks.recordStepTransition).not.toHaveBeenCalled()
+    expect(mocks.recordStatusTransition).not.toHaveBeenCalled()
   })
 
   it('rejects checkout updates before aftercare is finalized', async () => {

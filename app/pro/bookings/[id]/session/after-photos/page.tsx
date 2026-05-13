@@ -415,13 +415,13 @@ export default async function ProAfterPhotosPage(props: PageProps) {
     redirect(aftercareHref(bookingId))
   }
 
-  const allowedHere =
-    step === SessionStep.AFTER_PHOTOS || step === SessionStep.FINISH_REVIEW
-
-  if (!allowedHere) {
+  if (step === SessionStep.FINISH_REVIEW) {
     redirect(sessionHubHref(bookingId))
   }
 
+  if (step !== SessionStep.AFTER_PHOTOS) {
+    redirect(sessionHubHref(bookingId))
+  }
   const [items, afterCount] = await Promise.all([
     fetchAfterMedia(bookingId),
     prisma.mediaAsset.count({

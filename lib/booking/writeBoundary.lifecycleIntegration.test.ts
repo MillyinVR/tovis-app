@@ -1,5 +1,5 @@
 // lib/booking/writeBoundary.lifecycleIntegration.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AftercareRebookMode,
   BookingCheckoutStatus,
@@ -18,6 +18,7 @@ const FINISHED_AT = new Date('2026-04-12T18:00:00.000Z')
 const AFTERCARE_SENT_AT = new Date('2026-04-12T18:05:00.000Z')
 const PAYMENT_COLLECTED_AT = new Date('2026-04-12T18:10:00.000Z')
 const REBOOKED_FOR = new Date('2030-05-01T18:00:00.000Z')
+const ORIGINAL_LIFECYCLE_STRICT_MODE = process.env.LIFECYCLE_STRICT_MODE
 
 const mocks = vi.hoisted(() => ({
   prismaTransaction: vi.fn(),
@@ -141,7 +142,7 @@ function makeTransitionBooking(overrides?: {
   return {
     id: 'booking_1',
     professionalId: 'pro_1',
-    status: BookingStatus.ACCEPTED,
+    status: BookingStatus.IN_PROGRESS,
     startedAt: overrides?.startedAt ?? STARTED_AT,
     finishedAt: null,
     sessionStep: overrides?.sessionStep ?? SessionStep.BEFORE_PHOTOS,
@@ -160,7 +161,7 @@ function makeMediaBooking(overrides?: {
   return {
     id: 'booking_1',
     professionalId: 'pro_1',
-    status: overrides?.status ?? BookingStatus.ACCEPTED,
+    status: overrides?.status ?? BookingStatus.IN_PROGRESS,
     startedAt: STARTED_AT,
     finishedAt: overrides?.finishedAt ?? null,
     sessionStep: overrides?.sessionStep ?? SessionStep.BEFORE_PHOTOS,
@@ -222,7 +223,7 @@ function makeFinishableBooking(
   return {
     id: 'booking_1',
     professionalId: 'pro_1',
-    status: overrides?.status ?? BookingStatus.ACCEPTED,
+    status: overrides?.status ?? BookingStatus.IN_PROGRESS,
     startedAt: overrides?.startedAt ?? STARTED_AT,
     finishedAt: overrides?.finishedAt ?? null,
     sessionStep: overrides?.sessionStep ?? SessionStep.SERVICE_IN_PROGRESS,
@@ -249,8 +250,7 @@ function makeClientCheckoutBooking(overrides?: {
     id: 'booking_1',
     clientId: 'client_1',
     professionalId: 'pro_1',
-    status: overrides?.status ?? BookingStatus.ACCEPTED,
-    sessionStep: overrides?.sessionStep ?? SessionStep.AFTER_PHOTOS,
+    status: overrides?.status ?? BookingStatus.IN_PROGRESS,    sessionStep: overrides?.sessionStep ?? SessionStep.AFTER_PHOTOS,
     finishedAt: overrides?.finishedAt ?? FINISHED_AT,
     subtotalSnapshot: new Prisma.Decimal(100),
     serviceSubtotalSnapshot: new Prisma.Decimal(100),
@@ -285,7 +285,7 @@ function makeAftercareCloseoutBookingWithoutAfterPhotos() {
     id: 'booking_1',
     clientId: 'client_1',
     professionalId: 'pro_1',
-    status: BookingStatus.ACCEPTED,
+    status: BookingStatus.IN_PROGRESS,
     sessionStep: SessionStep.AFTER_PHOTOS,
     finishedAt: FINISHED_AT,
     scheduledFor: TEST_NOW,
@@ -500,11 +500,22 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
     })
   })
 
+afterEach(() => {
+  vi.useRealTimers()
+
+  if (ORIGINAL_LIFECYCLE_STRICT_MODE === undefined) {
+    delete process.env.LIFECYCLE_STRICT_MODE
+    return
+  }
+
+  process.env.LIFECYCLE_STRICT_MODE = ORIGINAL_LIFECYCLE_STRICT_MODE
+})
+
   it('connects session start, media gates, finish review, checkout completion, review eligibility, and client rebook', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(makeStartableBooking())
     mocks.txBookingUpdate.mockResolvedValueOnce({
       id: 'booking_1',
-      status: BookingStatus.ACCEPTED,
+      status: BookingStatus.IN_PROGRESS,
       startedAt: TEST_NOW,
       finishedAt: null,
       sessionStep: SessionStep.CONSULTATION,
@@ -613,7 +624,7 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
     mocks.txMediaAssetCount.mockResolvedValueOnce(0)
     mocks.txBookingUpdate.mockResolvedValueOnce({
       id: 'booking_1',
-      status: BookingStatus.ACCEPTED,
+      status: BookingStatus.IN_PROGRESS,
       startedAt: STARTED_AT,
       finishedAt: null,
       sessionStep: SessionStep.FINISH_REVIEW,
@@ -629,7 +640,7 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
     ).resolves.toMatchObject({
       booking: {
         id: 'booking_1',
-        status: BookingStatus.ACCEPTED,
+        status: BookingStatus.IN_PROGRESS,
         startedAt: STARTED_AT,
         finishedAt: null,
         sessionStep: SessionStep.FINISH_REVIEW,
@@ -641,11 +652,12 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
       },
     })
     const checkoutWithoutAfterPhotos = makeClientCheckoutBooking({
-        sessionStep: SessionStep.AFTER_PHOTOS,
-        finishedAt: FINISHED_AT,
-        selectedPaymentMethod: PaymentMethod.CASH,
-        checkoutStatus: BookingCheckoutStatus.READY,
-        })
+      status: BookingStatus.IN_PROGRESS,
+      sessionStep: SessionStep.AFTER_PHOTOS,
+      finishedAt: FINISHED_AT,
+      selectedPaymentMethod: PaymentMethod.CASH,
+      checkoutStatus: BookingCheckoutStatus.READY,
+    })
 
         mocks.txBookingFindUnique
         .mockResolvedValueOnce(checkoutWithoutAfterPhotos)
@@ -737,6 +749,7 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
     mocks.txBookingFindUnique
       .mockResolvedValueOnce(
         makeClientCheckoutBooking({
+          status: BookingStatus.IN_PROGRESS,
           finishedAt: FINISHED_AT,
           selectedPaymentMethod: PaymentMethod.CASH,
           checkoutStatus: BookingCheckoutStatus.READY,

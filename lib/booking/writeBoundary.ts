@@ -9873,7 +9873,7 @@ if (
   recordStepTransition({
     from: booking.sessionStep ?? SessionStep.NONE,
     to: SessionStep.DONE,
-    actor: 'CLIENT',
+    actor: 'SYSTEM',
     route: 'lib/booking/writeBoundary.ts:updateClientBookingCheckout#complete',
     bookingId: booking.id,
     professionalId: booking.professionalId,
@@ -9882,7 +9882,7 @@ if (
   recordStatusTransition({
     from: booking.status,
     to: BookingStatus.COMPLETED,
-    actor: 'CLIENT',
+    actor: 'SYSTEM',
     route: 'lib/booking/writeBoundary.ts:updateClientBookingCheckout#complete',
     bookingId: booking.id,
     professionalId: booking.professionalId,

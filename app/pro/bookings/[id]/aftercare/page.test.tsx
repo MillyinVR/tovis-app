@@ -5,7 +5,6 @@ import { BookingStatus, SessionStep } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
   bookingFindUnique: vi.fn(),
-  professionalProfileFindUnique: vi.fn(),
 
   getCurrentUser: vi.fn(),
   resolveApptTimeZone: vi.fn(),
@@ -15,9 +14,6 @@ const mocks = vi.hoisted(() => ({
 
   redirect: vi.fn(),
   notFound: vi.fn(),
-
-  pickString: vi.fn(),
-  isRecord: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -49,9 +45,6 @@ vi.mock('@/lib/prisma', () => ({
     booking: {
       findUnique: mocks.bookingFindUnique,
     },
-    professionalProfile: {
-      findUnique: mocks.professionalProfileFindUnique,
-    },
   },
 }))
 
@@ -69,14 +62,6 @@ vi.mock('@/lib/supabaseAdmin', () => ({
       from: mocks.storageFrom,
     },
   },
-}))
-
-vi.mock('@/lib/guards', () => ({
-  isRecord: mocks.isRecord,
-}))
-
-vi.mock('@/lib/pick', () => ({
-  pickString: mocks.pickString,
 }))
 
 vi.mock('./AftercareForm', () => ({
@@ -162,6 +147,7 @@ function makeCurrentUser() {
     role: 'PRO',
     professionalProfile: {
       id: 'pro_1',
+      timeZone: 'America/Los_Angeles',
     },
   }
 }
@@ -180,11 +166,15 @@ function makeBooking(overrides?: {
     professionalId: overrides?.professionalId ?? 'pro_1',
     status: overrides?.status ?? BookingStatus.ACCEPTED,
     startedAt:
-        overrides && 'startedAt' in overrides
-            ? (overrides.startedAt ?? null)
-            : new Date('2026-04-12T18:00:00.000Z'),
-    finishedAt: overrides?.finishedAt ?? null,
-    sessionStep: overrides?.sessionStep ?? SessionStep.AFTER_PHOTOS,
+      overrides && 'startedAt' in overrides
+        ? overrides.startedAt
+        : new Date('2026-04-12T18:00:00.000Z'),
+    finishedAt:
+      overrides && 'finishedAt' in overrides ? overrides.finishedAt : null,
+    sessionStep:
+      overrides && 'sessionStep' in overrides
+        ? overrides.sessionStep
+        : SessionStep.AFTER_PHOTOS,
     locationTimeZone: 'America/Los_Angeles',
 
     service: {
@@ -257,12 +247,8 @@ function makeBooking(overrides?: {
 
 async function renderPage(args?: {
   booking?: ReturnType<typeof makeBooking>
-  professionalTimeZone?: string | null
 }) {
   mocks.bookingFindUnique.mockResolvedValueOnce(args?.booking ?? makeBooking())
-  mocks.professionalProfileFindUnique.mockResolvedValueOnce({
-    timeZone: args?.professionalTimeZone ?? 'America/Los_Angeles',
-  })
 
   return ProAftercarePage({
     params: Promise.resolve({ id: 'booking_1' }),
@@ -296,17 +282,6 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     mocks.storageFrom.mockReturnValue({
       createSignedUrl: mocks.storageCreateSignedUrl,
     })
-
-    mocks.pickString.mockImplementation((value: unknown) => {
-      if (typeof value !== 'string') return null
-      const trimmed = value.trim()
-      return trimmed.length > 0 ? trimmed : null
-    })
-
-    mocks.isRecord.mockImplementation(
-      (value: unknown) =>
-        typeof value === 'object' && value !== null && !Array.isArray(value),
-    )
   })
 
   it('redirects to login when pro user is missing', async () => {
@@ -381,7 +356,7 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     })
   })
 
-  it('renders draft aftercare state with client access summary and normalized form props', async () => {
+  it('renders draft aftercare state with locked client access and normalized form props', async () => {
     const page = await renderPage({
       booking: makeBooking({
         aftercareSummary: {
@@ -426,10 +401,14 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     expect(markup).toContain('Client access')
     expect(markup).toContain('Draft only')
     expect(markup).toContain('DRAFT SAVED')
-    expect(markup).toContain('CLIENT-FACING')
+    expect(markup).toContain('CLIENT ACCESS LOCKED')
+    expect(markup).toContain(
+      'Do either first. Once after photos, finalized aftercare, payment, checkout, and consultation are all complete, closeout will finalize the booking.',
+    )
     expect(markup).toContain(
       'The aftercare draft exists, but client access is not live until you send/finalize it.',
     )
+
     expect(markup).toContain('data-testid="aftercare-form"')
     expect(markup).toContain('data-booking-id="booking_1"')
     expect(markup).toContain('data-time-zone="America/Los_Angeles"')
@@ -448,7 +427,7 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     expect(markup).not.toContain('public_')
   })
 
-  it('renders finalized aftercare state and signs fallback media URLs', async () => {
+  it('renders finalized aftercare state with live client access and signs fallback media URLs', async () => {
     const page = await renderPage({
       booking: makeBooking({
         aftercareSummary: {
@@ -486,10 +465,12 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
       'Client-facing aftercare access is available through the secure aftercare link flow.',
     )
     expect(markup).toContain('FINALIZED')
-    expect(markup).toContain('CLIENT-FACING')
+    expect(markup).toContain('CLIENT ACCESS LIVE')
     expect(markup).toContain('SENT')
     expect(markup).toContain('VERSION')
-    expect(markup).toContain('data-existing-rebook-mode="BOOKED_NEXT_APPOINTMENT"')
+    expect(markup).toContain(
+      'data-existing-rebook-mode="BOOKED_NEXT_APPOINTMENT"',
+    )
     expect(markup).toContain(
       'data-existing-rebooked-for="2026-05-01T18:00:00.000Z"',
     )
@@ -497,7 +478,7 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     expect(markup).toContain('data-existing-is-finalized="true"')
   })
 
-  it('renders not-started access state when aftercare does not exist yet', async () => {
+  it('renders not-started access state with locked client access when aftercare does not exist yet', async () => {
     const page = await renderPage({
       booking: makeBooking({
         aftercareSummary: null,
@@ -511,7 +492,10 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     expect(markup).toContain('Client access')
     expect(markup).toContain('Not ready')
     expect(markup).toContain('NOT STARTED')
-    expect(markup).toContain('CLIENT-FACING')
+    expect(markup).toContain('CLIENT ACCESS LOCKED')
+    expect(markup).toContain(
+      'Do either first. Once after photos, finalized aftercare, payment, checkout, and consultation are all complete, closeout will finalize the booking.',
+    )
     expect(markup).toContain(
       'No client-facing aftercare access exists yet.',
     )

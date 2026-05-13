@@ -1,6 +1,7 @@
 import React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  BookingCheckoutStatus,
   BookingStatus,
   ConsultationApprovalStatus,
   MediaPhase,
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 
   transitionSessionStep: vi.fn(),
   recordInPersonConsultationDecision: vi.fn(),
+  confirmBookingFinalReview: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
@@ -81,6 +83,7 @@ vi.mock('../ConsultationForm', () => ({
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
+  confirmBookingFinalReview: mocks.confirmBookingFinalReview,
   transitionSessionStep: mocks.transitionSessionStep,
   recordInPersonConsultationDecision: mocks.recordInPersonConsultationDecision,
 }))
@@ -112,11 +115,13 @@ function makeCurrentUser() {
   }
 }
 
-function makeBooking(overrides?: {
-  status?: BookingStatus
-  sessionStep?: SessionStep | null
-  finishedAt?: Date | null
-  consultationStatus?: ConsultationApprovalStatus | null
+  function makeBooking(overrides?: {
+    status?: BookingStatus
+    sessionStep?: SessionStep | null
+    finishedAt?: Date | null
+    checkoutStatus?: BookingCheckoutStatus
+    paymentCollectedAt?: Date | null
+    consultationStatus?: ConsultationApprovalStatus | null
   proof?: {
     id: string
     decision: 'APPROVED' | 'REJECTED'
@@ -140,6 +145,8 @@ function makeBooking(overrides?: {
     startedAt: null,
     finishedAt: overrides?.finishedAt ?? null,
     sessionStep: overrides?.sessionStep ?? SessionStep.CONSULTATION_PENDING_CLIENT,
+    checkoutStatus: overrides?.checkoutStatus ?? BookingCheckoutStatus.NOT_READY,
+    paymentCollectedAt: overrides?.paymentCollectedAt ?? null,
 
     service: {
       name: 'Haircut',
@@ -261,6 +268,22 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
         id: 'booking_1',
         sessionStep: SessionStep.CONSULTATION,
         startedAt: null,
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
+
+    mocks.confirmBookingFinalReview.mockResolvedValue({
+      booking: {
+        id: 'booking_1',
+        status: BookingStatus.IN_PROGRESS,
+        sessionStep: SessionStep.AFTER_PHOTOS,
+        serviceId: 'svc_1',
+        offeringId: 'off_1',
+        subtotalSnapshot: '125.00',
+        totalDurationMinutes: 75,
       },
       meta: {
         mutated: true,
@@ -420,6 +443,80 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
     expect(hasText(page, 'Remote secure link')).toBe(true)
     expect(hasText(page, 'ConsultationForm')).toBe(true)
     expect(hasText(page, 'Proceed to before photos')).toBe(false)
+  })
+
+  it('shows wrap-up closeout checklist without direct complete-session action', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        status: BookingStatus.IN_PROGRESS,
+        sessionStep: SessionStep.AFTER_PHOTOS,
+        checkoutStatus: BookingCheckoutStatus.READY,
+        paymentCollectedAt: null,
+        consultationStatus: ConsultationApprovalStatus.APPROVED,
+      }),
+      beforeCount: 1,
+      afterCount: 1,
+      aftercare: {
+        id: 'aftercare_1',
+        publicToken: 'public_1',
+        draftSavedAt: new Date('2026-04-12T20:10:00.000Z'),
+        sentToClientAt: new Date('2026-04-12T20:15:00.000Z'),
+        lastEditedAt: new Date('2026-04-12T20:15:00.000Z'),
+        version: 2,
+      },
+    })
+
+    expect(hasText(page, 'Wrap-up checklist')).toBe(true)
+    expect(hasText(page, 'After photos')).toBe(true)
+    expect(hasText(page, 'Aftercare sent to client')).toBe(true)
+    expect(hasText(page, 'Payment collected')).toBe(true)
+    expect(hasText(page, 'Checkout paid or waived')).toBe(true)
+    expect(hasText(page, 'Consultation approved')).toBe(true)
+
+    expect(hasText(page, 'Finish closeout')).toBe(true)
+    expect(hasText(page, 'Complete session')).toBe(false)
+
+    expect(
+      hasText(
+        page,
+        'Requires approved consultation, after photos, finalized aftercare, collected payment, and paid or waived checkout.',
+      ),
+    ).toBe(true)
+
+    expect(mocks.transitionSessionStep).not.toHaveBeenCalled()
+  })
+
+  it('shows closeout ready message when every backend closeout criterion is met', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        status: BookingStatus.IN_PROGRESS,
+        sessionStep: SessionStep.AFTER_PHOTOS,
+        checkoutStatus: BookingCheckoutStatus.PAID,
+        paymentCollectedAt: new Date('2026-04-12T20:20:00.000Z'),
+        consultationStatus: ConsultationApprovalStatus.APPROVED,
+      }),
+      beforeCount: 1,
+      afterCount: 1,
+      aftercare: {
+        id: 'aftercare_1',
+        publicToken: 'public_1',
+        draftSavedAt: new Date('2026-04-12T20:10:00.000Z'),
+        sentToClientAt: new Date('2026-04-12T20:15:00.000Z'),
+        lastEditedAt: new Date('2026-04-12T20:15:00.000Z'),
+        version: 2,
+      },
+    })
+
+    expect(hasText(page, 'Finish closeout')).toBe(true)
+    expect(
+      hasText(
+        page,
+        'All closeout requirements are ready. Finish closeout from aftercare.',
+      ),
+    ).toBe(true)
+
+    expect(hasText(page, 'Complete session')).toBe(false)
+    expect(mocks.transitionSessionStep).not.toHaveBeenCalled()
   })
 
   it('shows completed booking state and aftercare link', async () => {

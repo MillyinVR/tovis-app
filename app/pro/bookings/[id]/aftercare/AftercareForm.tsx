@@ -14,6 +14,7 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
+import { getCloseoutBlockerDisplays } from '@/lib/booking/closeoutBlockers'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 type MediaVisibility = 'PUBLIC' | 'PRO_CLIENT'
@@ -705,8 +706,6 @@ export default function AftercareForm({
         entityId: bookingId,
         action: sendToClient ? 'send' : 'draft',
       })
-
-      
       const res = await fetch(
         `/api/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`,
         {
@@ -744,11 +743,9 @@ export default function AftercareForm({
       const clientNotified = r?.clientNotified === true
       const bookingFinished = r?.bookingFinished === true
 
-      const completionBlockers = Array.isArray(r?.completionBlockers)
-        ? r.completionBlockers.filter(
-            (item): item is string => typeof item === 'string' && item.trim().length > 0,
-          )
-        : []
+      const completionBlockers = getCloseoutBlockerDisplays(
+        Array.isArray(r?.completionBlockers) ? r.completionBlockers : [],
+      )
 
       const redirectTo =
         typeof r?.redirectTo === 'string' &&
@@ -790,12 +787,22 @@ export default function AftercareForm({
     }
 
     if (sendToClient) {
+      if (completionBlockers.length > 0) {
+        setSuccess(
+          [
+            'Aftercare sent. Booking is not complete yet.',
+            ...completionBlockers.map(
+              (blocker) => `${blocker.label}: ${blocker.description}`,
+            ),
+          ].join(' '),
+        )
+        return
+      }
+
       setSuccess(
-        completionBlockers.length > 0
-          ? `Aftercare sent. Booking is not complete yet: ${completionBlockers.join(', ')}.`
-          : clientNotified
-            ? 'Aftercare sent to client.'
-            : 'Aftercare saved and marked sent, but client delivery was not queued.',
+        clientNotified
+          ? 'Aftercare sent to client.'
+          : 'Aftercare saved and marked sent, but client delivery was not queued.',
       )
       return
     }

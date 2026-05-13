@@ -1,8 +1,12 @@
 // app/pro/bookings/page.tsx
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { BookingServiceItemType, Prisma } from '@prisma/client'
-import type { BookingStatus } from '@prisma/client'
+import {
+  BookingServiceItemType,
+  BookingStatus,
+  Prisma,
+  SessionStep,
+} from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from './BookingActions'
@@ -20,14 +24,21 @@ import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 
 export const dynamic = 'force-dynamic'
 
-type StatusFilter = 'ALL' | 'PENDING' | 'ACCEPTED' | 'COMPLETED' | 'CANCELLED'
+type StatusFilter =
+  | 'ALL'
+  | 'PENDING'
+  | 'ACCEPTED'
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
+  | 'CANCELLED'
 type SearchParams = Record<string, string | string[] | undefined>
 
 const BOOKING_STATUS = {
-  PENDING: 'PENDING',
-  ACCEPTED: 'ACCEPTED',
-  COMPLETED: 'COMPLETED',
-  CANCELLED: 'CANCELLED',
+  PENDING: BookingStatus.PENDING,
+  ACCEPTED: BookingStatus.ACCEPTED,
+  IN_PROGRESS: BookingStatus.IN_PROGRESS,
+  COMPLETED: BookingStatus.COMPLETED,
+  CANCELLED: BookingStatus.CANCELLED,
 } as const satisfies Record<Exclude<StatusFilter, 'ALL'>, BookingStatus>
 
 const bookingSelect = {
@@ -88,23 +99,27 @@ function normalizeStatusFilter(raw: unknown): StatusFilter {
   if (
     s === 'PENDING' ||
     s === 'ACCEPTED' ||
+    s === 'IN_PROGRESS' ||
     s === 'COMPLETED' ||
     s === 'CANCELLED'
   ) {
     return s
   }
+
   return 'ALL'
 }
 
 function formatStatus(status: string) {
   switch (status) {
-    case 'PENDING':
+    case BookingStatus.PENDING:
       return 'Pending'
-    case 'ACCEPTED':
+    case BookingStatus.ACCEPTED:
       return 'Accepted'
-    case 'COMPLETED':
+    case BookingStatus.IN_PROGRESS:
+      return 'In progress'
+    case BookingStatus.COMPLETED:
       return 'Completed'
-    case 'CANCELLED':
+    case BookingStatus.CANCELLED:
       return 'Cancelled'
     default:
       return status
@@ -128,15 +143,17 @@ function formatMoneyOrNull(v: Prisma.Decimal | null | undefined): string | null 
 function StatusPill({ status }: { status: string }) {
   const s = String(status || '')
   const tone =
-    s === 'PENDING'
+    s === BookingStatus.PENDING
       ? 'border-white/10 bg-bgPrimary text-textPrimary'
-      : s === 'ACCEPTED'
+      : s === BookingStatus.ACCEPTED
         ? 'border-accentPrimary/30 bg-bgPrimary text-textPrimary'
-        : s === 'COMPLETED'
-          ? 'border-toneSuccess/30 bg-bgPrimary text-toneSuccess'
-          : s === 'CANCELLED'
-            ? 'border-toneDanger/30 bg-bgPrimary text-toneDanger'
-            : 'border-white/10 bg-bgPrimary text-textSecondary'
+        : s === BookingStatus.IN_PROGRESS
+          ? 'border-accentPrimary/50 bg-bgPrimary text-accentPrimary'
+          : s === BookingStatus.COMPLETED
+            ? 'border-toneSuccess/30 bg-bgPrimary text-toneSuccess'
+            : s === BookingStatus.CANCELLED
+              ? 'border-toneDanger/30 bg-bgPrimary text-toneDanger'
+              : 'border-white/10 bg-bgPrimary text-textSecondary'
 
   return (
     <span
@@ -155,6 +172,7 @@ function FilterPills({ active }: { active: StatusFilter }) {
     { key: 'ALL', label: 'All' },
     { key: 'PENDING', label: 'Pending' },
     { key: 'ACCEPTED', label: 'Accepted' },
+    { key: 'IN_PROGRESS', label: 'Active' },
     { key: 'COMPLETED', label: 'Completed' },
     { key: 'CANCELLED', label: 'Cancelled' },
   ]
@@ -405,16 +423,34 @@ function Section({
                       {dur ? ` • ${dur} min` : ''}
                     </div>
 
+                      {booking.status === BookingStatus.IN_PROGRESS ? (
+                        <div className="mt-1 text-[11px] font-bold text-accentPrimary">
+                          Session step:{' '}
+                          {String(booking.sessionStep ?? SessionStep.NONE).replaceAll('_', ' ')}
+                        </div>
+                      ) : null}
+
                     <div className="mt-2">
                       <PriceBlock booking={booking} />
                     </div>
 
-                    <Link
-                      href={`/pro/bookings/${encodeURIComponent(booking.id)}`}
-                      className="mt-3 inline-block text-[11px] font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
-                    >
-                      Details &amp; aftercare
-                    </Link>
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <Link
+                        href={`/pro/bookings/${encodeURIComponent(booking.id)}`}
+                        className="inline-block text-[11px] font-black text-textPrimary underline decoration-white/20 underline-offset-2 hover:decoration-white/40"
+                      >
+                        Details &amp; aftercare
+                      </Link>
+
+                      {booking.status === BookingStatus.IN_PROGRESS ? (
+                        <Link
+                          href={`/pro/bookings/${encodeURIComponent(booking.id)}/session`}
+                          className="inline-block text-[11px] font-black text-accentPrimary underline decoration-accentPrimary/30 underline-offset-2 hover:decoration-accentPrimary/60"
+                        >
+                          Resume session
+                        </Link>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="flex shrink-0 flex-col items-start gap-2 md:items-end">
@@ -472,6 +508,7 @@ export default async function ProBookingsPage(props: {
       professionalId: proId,
       OR: [
         { status: BOOKING_STATUS.PENDING },
+        { status: BOOKING_STATUS.IN_PROGRESS },
         { startedAt: { not: null }, finishedAt: null },
         { status: BOOKING_STATUS.ACCEPTED, scheduledFor: { gte: now } },
       ],
@@ -551,7 +588,7 @@ export default async function ProBookingsPage(props: {
           <div>
             <h1 className="text-[22px] font-black text-textPrimary">Bookings</h1>
             <div className="mt-1 text-[12px] text-textSecondary">
-              Today, upcoming, past, and cancelled.
+              Today, upcoming, active, past, and cancelled.
               {showTz ? (
                 <span className="text-textSecondary/70"> ({showTz})</span>
               ) : null}
