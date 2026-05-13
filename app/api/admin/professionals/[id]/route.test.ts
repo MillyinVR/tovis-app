@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => {
 
   const requireUser = vi.fn()
   const requireAdminPermission = vi.fn()
+  const refreshProfessional = vi.fn()
 
   const professionalProfile = {
     findUnique: vi.fn(),
@@ -64,6 +65,7 @@ const mocks = vi.hoisted(() => {
     jsonFail,
     requireUser,
     requireAdminPermission,
+    refreshProfessional,
     professionalProfile,
     professionalLocation,
     adminActionLog,
@@ -88,26 +90,32 @@ vi.mock('@/app/api/_utils/auth/requireAdminPermission', () => ({
   requireAdminPermission: mocks.requireAdminPermission,
 }))
 
+vi.mock('@/lib/search/index/refreshSearchIndex', () => ({
+  refreshProfessional: mocks.refreshProfessional,
+}))
+
 import { PATCH } from './route'
 
 type RouteCtx = {
   params: { id: string } | Promise<{ id: string }>
 }
 
+type MockTransactionClient = {
+  professionalProfile: typeof mocks.professionalProfile
+  professionalLocation: typeof mocks.professionalLocation
+}
+
 function makeRequest(
   body: unknown,
   contentType = 'application/json',
 ): NextRequest {
-  return new NextRequest(
-    'http://localhost/api/admin/professionals/pro_1',
-    {
-      method: 'PATCH',
-      headers: {
-        'content-type': contentType,
-      },
-      body: JSON.stringify(body),
+  return new NextRequest('http://localhost/api/admin/professionals/pro_1', {
+    method: 'PATCH',
+    headers: {
+      'content-type': contentType,
     },
-  )
+    body: JSON.stringify(body),
+  })
 }
 
 function makeCtx(id = 'pro_1'): RouteCtx {
@@ -123,6 +131,8 @@ async function readJson<T>(res: Response): Promise<T> {
 describe('app/api/admin/professionals/[id]/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    mocks.refreshProfessional.mockResolvedValue(undefined)
 
     mocks.requireUser.mockResolvedValue({
       ok: true,
@@ -154,17 +164,14 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
       id: 'log_1',
     })
 
+    const transactionClient: MockTransactionClient = {
+      professionalProfile: mocks.professionalProfile,
+      professionalLocation: mocks.professionalLocation,
+    }
+
     mocks.prisma.$transaction.mockImplementation(
-      async (
-        fn: (tx: {
-          professionalProfile: typeof mocks.professionalProfile
-          professionalLocation: typeof mocks.professionalLocation
-        }) => Promise<unknown>,
-      ) =>
-        fn({
-          professionalProfile: mocks.professionalProfile,
-          professionalLocation: mocks.professionalLocation,
-        }),
+      async (fn: (tx: MockTransactionClient) => Promise<unknown>) =>
+        fn(transactionClient),
     )
   })
 
@@ -186,6 +193,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     expect(mocks.requireAdminPermission).not.toHaveBeenCalled()
     expect(mocks.professionalProfile.findUnique).not.toHaveBeenCalled()
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.refreshProfessional).not.toHaveBeenCalled()
   })
 
   it('returns 400 when professional id is missing', async () => {
@@ -205,6 +213,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     expect(mocks.requireAdminPermission).not.toHaveBeenCalled()
     expect(mocks.professionalProfile.findUnique).not.toHaveBeenCalled()
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.refreshProfessional).not.toHaveBeenCalled()
   })
 
   it('passes through failed admin permission unchanged', async () => {
@@ -233,6 +242,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     expect(result.status).toBe(403)
     expect(mocks.professionalProfile.findUnique).not.toHaveBeenCalled()
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.refreshProfessional).not.toHaveBeenCalled()
   })
 
   it('returns 415 for non-json content type', async () => {
@@ -251,6 +261,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
 
     expect(mocks.professionalProfile.findUnique).not.toHaveBeenCalled()
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.refreshProfessional).not.toHaveBeenCalled()
   })
 
   it('returns 400 for invalid verificationStatus', async () => {
@@ -270,6 +281,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
 
     expect(mocks.professionalProfile.findUnique).not.toHaveBeenCalled()
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.refreshProfessional).not.toHaveBeenCalled()
   })
 
   it('returns 400 when nothing is provided to update', async () => {
@@ -285,6 +297,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
 
     expect(mocks.professionalProfile.findUnique).not.toHaveBeenCalled()
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.refreshProfessional).not.toHaveBeenCalled()
   })
 
   it('returns 404 when the professional does not exist', async () => {
@@ -309,9 +322,10 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     })
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.refreshProfessional).not.toHaveBeenCalled()
   })
 
-  it('approves the professional and flips locations to bookable', async () => {
+  it('approves the professional, flips locations to bookable, and refreshes search index', async () => {
     mocks.professionalProfile.update.mockResolvedValue({
       id: 'pro_1',
       verificationStatus: VerificationStatus.APPROVED,
@@ -362,6 +376,15 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
       data: { isBookable: true },
     })
 
+    expect(mocks.refreshProfessional).toHaveBeenCalledWith(
+      'pro_1',
+      'verification.status',
+      expect.objectContaining({
+        professionalProfile: mocks.professionalProfile,
+        professionalLocation: mocks.professionalLocation,
+      }),
+    )
+
     expect(mocks.adminActionLog.create).toHaveBeenCalledWith({
       data: {
         adminUserId: 'admin_1',
@@ -381,7 +404,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     })
   })
 
-  it('updates only licenseVerified without flipping locations', async () => {
+  it('updates only licenseVerified without flipping locations or refreshing search index', async () => {
     mocks.professionalProfile.update.mockResolvedValue({
       id: 'pro_1',
       verificationStatus: VerificationStatus.PENDING,
@@ -419,6 +442,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     })
 
     expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
+    expect(mocks.refreshProfessional).not.toHaveBeenCalled()
 
     expect(mocks.adminActionLog.create).toHaveBeenCalledWith({
       data: {
@@ -439,7 +463,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     })
   })
 
-  it('updates a non-approved status without flipping locations', async () => {
+  it('updates a non-approved status without flipping locations, but refreshes search index', async () => {
     mocks.professionalProfile.update.mockResolvedValue({
       id: 'pro_1',
       verificationStatus: VerificationStatus.REJECTED,
@@ -477,6 +501,15 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     })
 
     expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
+
+    expect(mocks.refreshProfessional).toHaveBeenCalledWith(
+      'pro_1',
+      'verification.status',
+      expect.objectContaining({
+        professionalProfile: mocks.professionalProfile,
+        professionalLocation: mocks.professionalLocation,
+      }),
+    )
 
     expect(mocks.adminActionLog.create).toHaveBeenCalledWith({
       data: {
@@ -525,6 +558,14 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
       where: { professionalId: 'pro_1' },
       data: { isBookable: true },
     })
+    expect(mocks.refreshProfessional).toHaveBeenCalledWith(
+      'pro_1',
+      'verification.status',
+      expect.objectContaining({
+        professionalProfile: mocks.professionalProfile,
+        professionalLocation: mocks.professionalLocation,
+      }),
+    )
   })
 
   it('returns 500 when the transaction throws', async () => {
@@ -548,6 +589,8 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
       ok: false,
       error: 'db exploded',
     })
+
+    expect(mocks.refreshProfessional).not.toHaveBeenCalled()
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       'PATCH /api/admin/professionals/[id] error',
