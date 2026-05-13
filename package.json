@@ -59,7 +59,8 @@
     "react-leaflet": "^5.0.0",
     "stripe": "^22.1.0",
     "tailwind-merge": "^3.4.0",
-    "twilio": "^5.12.0"
+    "twilio": "^5.12.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.51.1",
