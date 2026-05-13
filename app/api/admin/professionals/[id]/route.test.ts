@@ -325,7 +325,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     expect(mocks.refreshProfessional).not.toHaveBeenCalled()
   })
 
-  it('approves the professional, flips locations to bookable, and refreshes search index', async () => {
+  it('approves the professional and refreshes the search index without flipping locations', async () => {
     mocks.professionalProfile.update.mockResolvedValue({
       id: 'pro_1',
       verificationStatus: VerificationStatus.APPROVED,
@@ -371,10 +371,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
       },
     })
 
-    expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
-      where: { professionalId: 'pro_1' },
-      data: { isBookable: true },
-    })
+    expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
 
     expect(mocks.refreshProfessional).toHaveBeenCalledWith(
       'pro_1',
@@ -554,10 +551,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     expect(body.ok).toBe(true)
 
     expect(mocks.professionalProfile.update).toHaveBeenCalled()
-    expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
-      where: { professionalId: 'pro_1' },
-      data: { isBookable: true },
-    })
+    expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
     expect(mocks.refreshProfessional).toHaveBeenCalledWith(
       'pro_1',
       'verification.status',

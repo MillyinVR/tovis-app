@@ -99,13 +99,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         select: { id: true, verificationStatus: true, licenseVerified: true },
       })
 
-      if (status === VerificationStatus.APPROVED) {
-        await tx.professionalLocation.updateMany({
-          where: { professionalId },
-          data: { isBookable: true },
-        })
-      }
-
       // P2.4b — refresh ProfessionalSearchIndex for this pro when their
       // verification status changes. Skipped when only `licenseVerified`
       // changes (that field is not denormalized into the index). Passes
