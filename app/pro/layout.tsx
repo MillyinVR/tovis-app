@@ -7,6 +7,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import '@/lib/brand/proOverview.css'
 import ProHeader from './ProHeader'
 import ProComplianceBanner from './ProComplianceBanner'
+import ProReadinessBanner from './ProReadinessBanner'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,10 +54,9 @@ export default async function ProRootLayout({
     <div className="min-h-dvh bg-bgPrimary text-textPrimary">
       <ProHeader />
       <ProComplianceBanner />
+      <ProReadinessBanner />
 
-      <main className="brand-pro-layout-main">
-        {children}
-      </main>
+      <main className="brand-pro-layout-main">{children}</main>
 
       {modal}
     </div>
