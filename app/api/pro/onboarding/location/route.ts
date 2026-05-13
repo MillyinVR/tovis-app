@@ -55,7 +55,9 @@ function normalizeMode(v: unknown): OnboardingLocationMode | null {
 }
 
 function pickInt(v: unknown): number | null {
-  if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v)
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    return Math.trunc(v)
+  }
 
   if (typeof v === 'string' && v.trim()) {
     const n = Number(v)
@@ -71,6 +73,7 @@ function pickBool(v: unknown): boolean | null {
 
 function normalizeAdvanceNoticeMinutes(v: unknown): number {
   const parsed = pickInt(v)
+
   if (parsed == null) return 15
 
   return Math.max(0, Math.min(parsed, 30 * 24 * 60))
@@ -86,7 +89,7 @@ function componentMap(addressComponents: unknown): Record<string, string> {
 
     const typesRaw = item.types
     const types = Array.isArray(typesRaw)
-      ? typesRaw.filter((t): t is string => typeof t === 'string')
+      ? typesRaw.filter((type): type is string => typeof type === 'string')
       : []
 
     const longName = typeof item.long_name === 'string' ? item.long_name : ''
@@ -207,13 +210,16 @@ async function googleTimeZone(lat: number, lng: number): Promise<string> {
 
   if (status !== 'OK') {
     throw new Error(
-      String(data.errorMessage ?? data.error_message ?? `Google status: ${status}`),
+      String(
+        data.errorMessage ?? data.error_message ?? `Google status: ${status}`,
+      ),
     )
   }
 
   const timeZone = typeof data.timeZoneId === 'string' ? data.timeZoneId : null
 
   if (!timeZone) throw new Error('No timeZoneId returned.')
+
   if (!isValidIanaTimeZone(timeZone)) {
     throw new Error('Returned timeZoneId is not a valid IANA timezone.')
   }
@@ -275,7 +281,7 @@ function kmToMilesInt(km: number): number {
   return Math.max(1, Math.min(200, Math.round(km * 0.621371)))
 }
 
-async function syncLocationSideEffects(args: {
+async function syncDraftLocationSideEffects(args: {
   professionalId: string
   locationId: string
 }): Promise<void> {
@@ -285,12 +291,15 @@ async function syncLocationSideEffects(args: {
 
 export async function POST(req: Request) {
   try {
-    const gate = await requirePro()
-    if (!gate.ok) return gate.res
+    const auth = await requirePro()
 
-    const professionalId = gate.professionalId
+    if (!auth.ok) {
+      return auth.res
+    }
 
-    const raw = await req.json().catch(() => ({}))
+    const professionalId = auth.professionalId
+
+    const raw: unknown = await req.json().catch(() => ({}))
     const body = isRecord(raw) ? raw : {}
 
     const mode = normalizeMode(body.mode)
@@ -336,8 +345,13 @@ export async function POST(req: Request) {
       const created = await prisma.$transaction(async (tx) => {
         if (makePrimary) {
           await tx.professionalLocation.updateMany({
-            where: { professionalId, isPrimary: true },
-            data: { isPrimary: false },
+            where: {
+              professionalId,
+              isPrimary: true,
+            },
+            data: {
+              isPrimary: false,
+            },
           })
         }
 
@@ -377,24 +391,30 @@ export async function POST(req: Request) {
         })
 
         await tx.professionalProfile.update({
-          where: { id: professionalId },
+          where: {
+            id: professionalId,
+          },
           data: {
             timeZone,
             mobileBasePostalCode: null,
             mobileRadiusMiles: null,
           },
-          select: { id: true },
+          select: {
+            id: true,
+          },
         })
 
         return createdLocation
       })
 
-      await syncLocationSideEffects({
+      await syncDraftLocationSideEffects({
         professionalId,
         locationId: created.id,
       })
 
-      return jsonOk({ location: created })
+      return jsonOk({
+        location: created,
+      })
     }
 
     const postalCode = pickString(body.postalCode)
@@ -419,7 +439,9 @@ export async function POST(req: Request) {
       return jsonFail(
         400,
         'Invalid radius. Provide radiusMiles (1-200) or radiusKm (1-400).',
-        { code: 'INVALID_RADIUS' },
+        {
+          code: 'INVALID_RADIUS',
+        },
       )
     }
 
@@ -437,8 +459,13 @@ export async function POST(req: Request) {
     const created = await prisma.$transaction(async (tx) => {
       if (makePrimary) {
         await tx.professionalLocation.updateMany({
-          where: { professionalId, isPrimary: true },
-          data: { isPrimary: false },
+          where: {
+            professionalId,
+            isPrimary: true,
+          },
+          data: {
+            isPrimary: false,
+          },
         })
       }
 
@@ -476,28 +503,34 @@ export async function POST(req: Request) {
       })
 
       await tx.professionalProfile.update({
-        where: { id: professionalId },
+        where: {
+          id: professionalId,
+        },
         data: {
           mobileBasePostalCode: geo.postalCode || postalCode,
           mobileRadiusMiles: radiusMiles,
           timeZone,
         },
-        select: { id: true },
+        select: {
+          id: true,
+        },
       })
 
       return createdLocation
     })
 
-    await syncLocationSideEffects({
+    await syncDraftLocationSideEffects({
       professionalId,
       locationId: created.id,
     })
 
-    return jsonOk({ location: created })
-  } catch (e: unknown) {
-    console.error('POST /api/pro/onboarding/location error', e)
+    return jsonOk({
+      location: created,
+    })
+  } catch (error: unknown) {
+    console.error('POST /api/pro/onboarding/location error', error)
 
-    const message = e instanceof Error ? e.message : 'Internal error'
+    const message = error instanceof Error ? error.message : 'Internal error'
 
     return jsonFail(500, message, {
       code: 'INTERNAL',

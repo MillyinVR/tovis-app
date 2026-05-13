@@ -305,7 +305,7 @@ describe('POST /api/pro/onboarding/location', () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 
-  it('creates a draft salon location, updates profile timezone, bumps version, and refreshes index', async () => {
+  it('creates a draft salon location, updates profile timezone, and syncs schedule/search side effects', async () => {
     mocks.safeJson
       .mockResolvedValueOnce(googlePlacePayload())
       .mockResolvedValueOnce(googleTimeZonePayload())
