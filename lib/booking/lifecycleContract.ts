@@ -254,17 +254,19 @@ export function isLegalStatusTransition(
 // ─── Drift telemetry ──────────────────────────────────────────────────────────
 
 /**
- * Strict mode toggle. When `LIFECYCLE_STRICT_MODE=true` (or `1`), drift recorders
- * throw on contract violations instead of just logging telemetry.
+ * Strict mode toggle. Drift recorders throw on contract violations by default.
  *
- * Default OFF: drift is captured but does not change runtime behavior. This lets
- * us roll out contract enforcement safely — observe first, enforce later.
+ * Set `LIFECYCLE_STRICT_MODE=false` (or `0`, `no`, `off`) to temporarily fall
+ * back to telemetry-only mode during an incident.
  */
 export function isLifecycleStrictMode(): boolean {
   const raw = process.env.LIFECYCLE_STRICT_MODE
-  if (typeof raw !== 'string') return false
+  if (typeof raw !== 'string') return true
   const v = raw.trim().toLowerCase()
-  return v === '1' || v === 'true' || v === 'yes'
+  if (v === '' || v === '0' || v === 'false' || v === 'no' || v === 'off') {
+    return false
+  }
+  return true
 }
 
 export type LifecycleDriftKind =

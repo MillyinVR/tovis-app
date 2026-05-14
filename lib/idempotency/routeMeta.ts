@@ -22,6 +22,7 @@ export const IDEMPOTENCY_ROUTES = {
   PRO_BOOKING_FINAL_REVIEW: 'POST /api/pro/bookings/[id]/final-review',
   CLIENT_CHECKOUT_PRODUCTS: 'POST /api/client/bookings/[id]/checkout/products',
   PRO_BOOKING_REBOOK: 'POST /api/pro/bookings/[id]/rebook',
+  PRO_BOOKING_CANCEL: 'PATCH /api/pro/bookings/[id]/cancel',
 } as const
 
 export type IdempotencyRoute =

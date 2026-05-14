@@ -16,23 +16,32 @@ import { fetchDiscoverCategories } from './_lib/discoverCategoryApi'
 import type { DiscoverViewMode } from './_lib/discoverViewTypes'
 import type { DiscoverCategoryOption } from '@/lib/discovery/categoryTypes'
 
+type ApiLocationPreview = {
+  id: string
+  formattedAddress: string | null
+  city: string | null
+  state: string | null
+  timeZone: string | null
+  placeId: string | null
+  lat: number | null
+  lng: number | null
+  isPrimary: boolean
+}
+
 type ApiPro = {
   id: string
   businessName: string | null
+  handle: string | null
   professionType: string | null
   avatarUrl: string | null
   locationLabel: string | null
   distanceMiles: number | null
-  primaryLocation: null | {
-    id: string
-    formattedAddress: string | null
-    city: string | null
-    state: string | null
-    timeZone: string | null
-    lat: number | null
-    lng: number | null
-    placeId: string | null
-  }
+  ratingAvg: number | null
+  ratingCount: number
+  minPrice: number | null
+  supportsMobile: boolean
+  closestLocation: ApiLocationPreview | null
+  primaryLocation: ApiLocationPreview | null
 }
 
 type Coords = { lat: number; lng: number }
@@ -83,7 +92,7 @@ function isBounds(value: unknown): value is Bounds {
   )
 }
 
-function isPrimaryLocation(value: unknown): value is ApiPro['primaryLocation'] {
+function isLocationPreview(value: unknown): value is ApiLocationPreview | null {
   if (value === null) return true
   if (!isRecord(value)) return false
 
@@ -93,9 +102,10 @@ function isPrimaryLocation(value: unknown): value is ApiPro['primaryLocation'] {
     isNullableString(value.city) &&
     isNullableString(value.state) &&
     isNullableString(value.timeZone) &&
+    isNullableString(value.placeId) &&
     isNullableNumber(value.lat) &&
     isNullableNumber(value.lng) &&
-    isNullableString(value.placeId)
+    typeof value.isPrimary === 'boolean'
   )
 }
 
@@ -105,11 +115,17 @@ function isApiPro(value: unknown): value is ApiPro {
   return (
     typeof value.id === 'string' &&
     isNullableString(value.businessName) &&
+    isNullableString(value.handle) &&
     isNullableString(value.professionType) &&
     isNullableString(value.avatarUrl) &&
     isNullableString(value.locationLabel) &&
     isNullableNumber(value.distanceMiles) &&
-    isPrimaryLocation(value.primaryLocation)
+    isNullableNumber(value.ratingAvg) &&
+    typeof value.ratingCount === 'number' &&
+    isNullableNumber(value.minPrice) &&
+    typeof value.supportsMobile === 'boolean' &&
+    isLocationPreview(value.closestLocation) &&
+    isLocationPreview(value.primaryLocation)
   )
 }
 
@@ -325,6 +341,10 @@ function sortPros(list: ApiPro[], mode: SortMode): ApiPro[] {
   return sorted
 }
 
+function preferredProLocation(pro: ApiPro): ApiLocationPreview | null {
+  return pro.closestLocation ?? pro.primaryLocation
+}
+
 export default function SearchMapClient() {
   const [q, setQ] = useState('')
   const [radiusMiles, setRadiusMiles] = useState(15)
@@ -381,8 +401,9 @@ export default function SearchMapClient() {
     const nextPins: Pin[] = []
 
     for (const pro of pros) {
-      const lat = pro.primaryLocation?.lat ?? null
-      const lng = pro.primaryLocation?.lng ?? null
+      const location = preferredProLocation(pro)
+      const lat = location?.lat ?? null
+      const lng = location?.lng ?? null
 
       if (lat == null || lng == null) continue
 
@@ -413,7 +434,6 @@ export default function SearchMapClient() {
     try {
       const qs = new URLSearchParams()
 
-      qs.set('tab', 'PROS')
       qs.set('radiusMiles', String(radiusMilesRef.current))
 
       if (args.query) qs.set('q', args.query)
@@ -424,7 +444,7 @@ export default function SearchMapClient() {
         qs.set('lng', String(args.origin.lng))
       }
 
-      const res = await fetch(`/api/search?${qs.toString()}`, {
+      const res = await fetch(`/api/search/pros?${qs.toString()}`, {
         cache: 'no-store',
         signal: controller.signal,
       })
@@ -438,12 +458,15 @@ export default function SearchMapClient() {
         throw new Error(message)
       }
 
-      const rawPros = isArray(body.pros) ? body.pros : []
+      const rawPros = isArray(body.items) ? body.items : []
       const nextPros = rawPros.filter(isApiPro)
 
       setPros(nextPros)
 
-      const firstPinnedPro = nextPros.find((pro) => pro.primaryLocation?.lat != null && pro.primaryLocation?.lng != null)
+      const firstPinnedPro = nextPros.find((pro) => {
+        const location = preferredProLocation(pro)
+        return location?.lat != null && location.lng != null
+      })
       setActiveProId((prev) => (prev && nextPros.some((pro) => pro.id === prev) ? prev : firstPinnedPro?.id ?? null))
     } catch (error: unknown) {
       if (error instanceof DOMException && error.name === 'AbortError') return
@@ -895,7 +918,7 @@ export default function SearchMapClient() {
   const activeNavHref = useMemo(() => {
     if (!activePro) return null
 
-    const location = activePro.primaryLocation
+    const location = preferredProLocation(activePro)
 
     return directionsHrefFromLocation({
       lat: location?.lat ?? null,
@@ -909,7 +932,7 @@ export default function SearchMapClient() {
   const activeOpenHref = useMemo(() => {
     if (!activePro) return null
 
-    const location = activePro.primaryLocation
+    const location = preferredProLocation(activePro)
 
     return mapsHrefFromLocation({
       lat: location?.lat ?? null,
@@ -932,8 +955,9 @@ export default function SearchMapClient() {
   const handleSelectList = useCallback((pro: ApiPro) => {
     setActiveProId(pro.id)
 
-    const lat = pro.primaryLocation?.lat ?? null
-    const lng = pro.primaryLocation?.lng ?? null
+    const location = preferredProLocation(pro)
+    const lat = location?.lat ?? null
+    const lng = location?.lng ?? null
 
     if (lat != null && lng != null) {
       setFocus({ lat, lng })
@@ -1338,7 +1362,8 @@ export default function SearchMapClient() {
                     <div className="grid gap-2">
                       {displayPros.slice(0, 30).map((pro) => {
                         const active = pro.id === activeProId
-                        const hasPin = pro.primaryLocation?.lat != null && pro.primaryLocation?.lng != null
+                        const location = preferredProLocation(pro)
+                        const hasPin = location?.lat != null && location?.lng != null
 
                         return (
                           <button
