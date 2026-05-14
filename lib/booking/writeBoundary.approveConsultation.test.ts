@@ -96,6 +96,7 @@ vi.mock('@/lib/notifications/appointmentReminders', () => ({
 }))
 
 vi.mock('@/lib/consultation/clientActionTokens', () => ({
+  CONSULTATION_ACTION_TOKEN_EXPIRY_MS: 24 * 60 * 60 * 1000,
   consumeConsultationActionToken: mocks.consumeConsultationActionToken,
   revokeConsultationActionTokensForBooking:
     mocks.revokeConsultationActionTokensForBooking,

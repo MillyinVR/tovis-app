@@ -425,7 +425,7 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
     mocks.txQueryRaw.mockResolvedValue([])
   })
 
-    it('sends aftercare but does not complete the booking when AFTER photos are missing', async () => {
+  it('sends aftercare but does not complete the booking when AFTER photos are missing', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(
       makeAftercareCloseoutBookingWithoutAfterPhotos(),
     )
@@ -447,6 +447,7 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
     const result = await upsertBookingAftercare({
       bookingId: 'booking_1',
       professionalId: 'pro_1',
+      actorUserId: 'user_1',
       notes: 'Use gentle cleanser tonight.',
       rebookMode: AftercareRebookMode.NONE,
       rebookedFor: null,

@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AftercareRebookMode,
   BookingStatus,
-  ContactMethod,
   Role,
   SessionStep,
 } from '@prisma/client'
@@ -24,7 +23,6 @@ const mocks = vi.hoisted(() => ({
 
   bookingFindUnique: vi.fn(),
   upsertBookingAftercare: vi.fn(),
-  createAftercareAccessDelivery: vi.fn(),
 
   beginRouteIdempotency: vi.fn(),
   completeRouteIdempotency: vi.fn(),
@@ -71,10 +69,6 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   upsertBookingAftercare: mocks.upsertBookingAftercare,
-}))
-
-vi.mock('@/lib/clientActions/createAftercareAccessDelivery', () => ({
-  createAftercareAccessDelivery: mocks.createAftercareAccessDelivery,
 }))
 
 vi.mock('@/lib/idempotency', () => ({
@@ -234,68 +228,22 @@ function makeGetBooking(overrides?: {
   }
 }
 
-function makeAftercareDeliveryBooking(overrides?: {
-  professionalId?: string
-  clientId?: string
-  clientTimeZoneAtBooking?: string | null
-  locationTimeZone?: string | null
-  email?: string | null
-  phone?: string | null
-  preferredContactMethod?: ContactMethod | null
-  userId?: string | null
-  userEmail?: string | null
-  userPhone?: string | null
-}) {
+function makeAftercareAccessDeliverySummary(overrides?: {
+  attempted?: boolean
+  queued?: boolean
+  href?: string | null
+}): {
+  attempted: boolean
+  queued: boolean
+  href: string | null
+} {
   return {
-    id: 'booking_1',
-    professionalId: overrides?.professionalId ?? 'pro_1',
-    clientId: overrides?.clientId ?? 'client_1',
-    locationTimeZone: overrides?.locationTimeZone ?? 'America/Los_Angeles',
-    clientTimeZoneAtBooking:
-      overrides?.clientTimeZoneAtBooking ?? 'America/Los_Angeles',
-    client: {
-      id: overrides?.clientId ?? 'client_1',
-      userId: overrides?.userId ?? null,
-      email:
-        overrides && 'email' in overrides
-          ? overrides.email
-          : 'client@example.com',
-      phone: overrides?.phone ?? null,
-      preferredContactMethod: overrides?.preferredContactMethod ?? null,
-      user: {
-        email: overrides?.userEmail ?? null,
-        phone: overrides?.userPhone ?? null,
-      },
-    },
-  }
-}
-
-function makeAftercareAccessDeliveryResult() {
-  return {
-    plan: {
-      idempotency: {
-        baseKey: 'aftercare_base_1',
-        sendKey: 'aftercare_send_1',
-      },
-    },
-    token: {
-      id: 'token_1',
-      rawToken: 'raw_aftercare_token_1',
-      expiresAt: new Date('2026-04-20T20:00:00.000Z'),
-    },
-    link: {
-      target: 'AFTERCARE',
-      href: '/client/rebook/raw_aftercare_token_1',
-      tokenIncluded: true,
-    },
-    dispatch: {
-      created: true,
-      selectedChannels: [],
-      evaluations: [],
-      dispatch: {
-        id: 'dispatch_1',
-      },
-    },
+    attempted: overrides?.attempted ?? true,
+    queued: overrides?.queued ?? true,
+    href:
+      overrides && 'href' in overrides
+        ? overrides.href ?? null
+        : '/client/rebook/raw_aftercare_token_1',
   }
 }
 
@@ -305,6 +253,12 @@ function makeUpsertResult(overrides?: {
   rebookWindowStart?: Date | null
   rebookWindowEnd?: Date | null
   sentToClientAt?: Date | null
+  aftercareAccessDelivery?: {
+    attempted: boolean
+    queued: boolean
+    href: string | null
+  }
+  clientNotified?: boolean
   bookingFinished?: boolean
   completionBlockers?: string[]
   booking?: {
@@ -312,17 +266,41 @@ function makeUpsertResult(overrides?: {
     sessionStep: SessionStep
     finishedAt: Date | null
   } | null
+  meta?: {
+    mutated: boolean
+    noOp: boolean
+  }
 }) {
+  const rebookMode =
+    overrides?.rebookMode ?? AftercareRebookMode.RECOMMENDED_WINDOW
+
+  const isNone = rebookMode === AftercareRebookMode.NONE
+
   return {
     aftercare: {
       id: 'aftercare_1',
-      rebookMode:
-        overrides?.rebookMode ?? AftercareRebookMode.RECOMMENDED_WINDOW,
-      rebookedFor: overrides?.rebookedFor ?? null,
+      publicAccess: {
+        accessMode: 'NONE',
+        hasPublicAccess: false,
+        clientAftercareHref: null,
+      },
+      rebookMode,
+      rebookedFor:
+        overrides && 'rebookedFor' in overrides
+          ? overrides.rebookedFor
+          : null,
       rebookWindowStart:
-        overrides?.rebookWindowStart ?? new Date('2026-05-01T18:00:00.000Z'),
+        overrides && 'rebookWindowStart' in overrides
+          ? overrides.rebookWindowStart
+          : isNone
+            ? null
+            : new Date('2026-05-01T18:00:00.000Z'),
       rebookWindowEnd:
-        overrides?.rebookWindowEnd ?? new Date('2026-05-15T18:00:00.000Z'),
+        overrides && 'rebookWindowEnd' in overrides
+          ? overrides.rebookWindowEnd
+          : isNone
+            ? null
+            : new Date('2026-05-15T18:00:00.000Z'),
       draftSavedAt: new Date('2026-04-12T20:05:00.000Z'),
       sentToClientAt:
         overrides && 'sentToClientAt' in overrides
@@ -332,7 +310,9 @@ function makeUpsertResult(overrides?: {
       version: 4,
     },
     remindersTouched: 1,
-    clientNotified: true,
+    clientNotified: overrides?.clientNotified ?? true,
+    aftercareAccessDelivery:
+      overrides?.aftercareAccessDelivery ?? makeAftercareAccessDeliverySummary(),
     timeZoneUsed: 'America/Los_Angeles',
     bookingFinished: overrides?.bookingFinished ?? true,
     completionBlockers: overrides?.completionBlockers ?? [],
@@ -344,10 +324,11 @@ function makeUpsertResult(overrides?: {
             sessionStep: SessionStep.DONE,
             finishedAt: new Date('2026-04-12T20:00:00.000Z'),
           },
-    meta: {
-      mutated: true,
-      noOp: false,
-    },
+    meta:
+      overrides?.meta ?? {
+        mutated: true,
+        noOp: false,
+      },
   }
 }
 
@@ -414,7 +395,8 @@ function makeExpectedIdempotencyRequestBody(overrides?: {
     bookingId: 'booking_1',
     professionalId: 'pro_1',
     actorUserId: 'user_1',
-    notes: overrides && 'notes' in overrides ? overrides.notes : 'Use cool water.',
+    notes:
+      overrides && 'notes' in overrides ? overrides.notes : 'Use cool water.',
     sendToClient:
       overrides && 'sendToClient' in overrides ? overrides.sendToClient : true,
     recommendedProducts:
@@ -460,12 +442,17 @@ function makeExpectedIdempotencyRequestBody(overrides?: {
 }
 
 function makeExpectedPostResponse(overrides?: {
+  rebookMode?: AftercareRebookMode
+  rebookedFor?: string | null
+  rebookWindowStart?: string | null
+  rebookWindowEnd?: string | null
   sentToClientAt?: string | null
   aftercareAccessDelivery?: {
     attempted: boolean
     queued: boolean
     href: string | null
   }
+  clientNotified?: boolean
   clientTimeZoneReceived?: string | null
   bookingFinished?: boolean
   completionBlockers?: string[]
@@ -493,10 +480,18 @@ function makeExpectedPostResponse(overrides?: {
   return {
     aftercare: {
       id: 'aftercare_1',
-      rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
-      rebookedFor: null,
-      rebookWindowStart: '2026-05-01T18:00:00.000Z',
-      rebookWindowEnd: '2026-05-15T18:00:00.000Z',
+      rebookMode:
+        overrides?.rebookMode ?? AftercareRebookMode.RECOMMENDED_WINDOW,
+      rebookedFor:
+        overrides && 'rebookedFor' in overrides ? overrides.rebookedFor : null,
+      rebookWindowStart:
+        overrides && 'rebookWindowStart' in overrides
+          ? overrides.rebookWindowStart
+          : '2026-05-01T18:00:00.000Z',
+      rebookWindowEnd:
+        overrides && 'rebookWindowEnd' in overrides
+          ? overrides.rebookWindowEnd
+          : '2026-05-15T18:00:00.000Z',
       draftSavedAt: '2026-04-12T20:05:00.000Z',
       sentToClientAt,
       lastEditedAt: '2026-04-12T20:08:00.000Z',
@@ -515,13 +510,9 @@ function makeExpectedPostResponse(overrides?: {
           },
     },
     remindersTouched: 1,
-    clientNotified: true,
+    clientNotified: overrides?.clientNotified ?? true,
     aftercareAccessDelivery:
-      overrides?.aftercareAccessDelivery ?? {
-        attempted: true,
-        queued: true,
-        href: '/client/rebook/raw_aftercare_token_1',
-      },
+      overrides?.aftercareAccessDelivery ?? makeAftercareAccessDeliverySummary(),
     timeZoneUsed: 'America/Los_Angeles',
     clientTimeZoneReceived:
       overrides && 'clientTimeZoneReceived' in overrides
@@ -621,25 +612,13 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       },
     )
 
-    mocks.bookingFindUnique.mockImplementation(
-      async (args?: { select?: Record<string, unknown> }) => {
-        if (args?.select && 'client' in args.select) {
-          return makeAftercareDeliveryBooking()
-        }
-
-        return makeGetBooking()
-      },
-    )
+    mocks.bookingFindUnique.mockResolvedValue(makeGetBooking())
 
     expectIdempotencyStarted()
 
     mocks.completeRouteIdempotency.mockResolvedValue(undefined)
     mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
-
     mocks.upsertBookingAftercare.mockResolvedValue(makeUpsertResult())
-    mocks.createAftercareAccessDelivery.mockResolvedValue(
-      makeAftercareAccessDeliveryResult(),
-    )
   })
 
   it('GET returns auth response when requirePro fails', async () => {
@@ -732,7 +711,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     })
   })
 
-  it('GET returns normalized aftercare payload with secure public access contract', async () => {
+  it('GET returns normalized aftercare payload with secure-link public access after send', async () => {
     const result = await GET(new Request('http://localhost/test'), makeCtx())
 
     expect(mocks.bookingFindUnique).toHaveBeenCalledWith({
@@ -975,7 +954,8 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       code: 'IDEMPOTENCY_KEY_REQUIRED',
     })
 
-  expectIdempotencyHandled(handledResponse)
+    expectIdempotencyHandled(handledResponse)
+
     const result = await POST(
       makeRequest({
         body: makeValidPostBody(),
@@ -984,9 +964,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     )
 
     expect(result).toBe(handledResponse)
-
     expectRouteIdempotencyStartedWith(makeExpectedIdempotencyRequestBody())
-
     expect(mocks.upsertBookingAftercare).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
@@ -1019,7 +997,8 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
         'This idempotency key was already used with a different request body.',
       code: 'IDEMPOTENCY_KEY_CONFLICT',
     })
-expectIdempotencyHandled(handledResponse)
+
+    expectIdempotencyHandled(handledResponse)
 
     const result = await POST(
       makeIdempotentRequest({
@@ -1033,7 +1012,7 @@ expectIdempotencyHandled(handledResponse)
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('POST replays completed idempotency response without upsert or delivery', async () => {
+  it('POST replays completed idempotency response without upsert', async () => {
     const replayBody = makeExpectedPostResponse()
     const handledResponse = makeJsonResponse(200, {
       ok: true,
@@ -1051,11 +1030,10 @@ expectIdempotencyHandled(handledResponse)
 
     expect(result).toBe(handledResponse)
     expect(mocks.upsertBookingAftercare).not.toHaveBeenCalled()
-    expect(mocks.createAftercareAccessDelivery).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('POST calls upsertBookingAftercare with normalized values, queues delivery, and completes idempotency', async () => {
+  it('POST calls upsertBookingAftercare with normalized values and completes idempotency', async () => {
     expectIdempotencyStarted('idem_1')
 
     const result = await POST(
@@ -1074,6 +1052,7 @@ expectIdempotencyHandled(handledResponse)
     expect(mocks.upsertBookingAftercare).toHaveBeenCalledWith({
       bookingId: 'booking_1',
       professionalId: 'pro_1',
+      actorUserId: 'user_1',
       notes: 'Use cool water.',
       rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
       rebookedFor: null,
@@ -1088,20 +1067,6 @@ expectIdempotencyHandled(handledResponse)
       version: 2,
       requestId: 'req_1',
       idempotencyKey: 'idem_1',
-    })
-
-    expect(mocks.createAftercareAccessDelivery).toHaveBeenCalledWith({
-      professionalId: 'pro_1',
-      clientId: 'client_1',
-      bookingId: 'booking_1',
-      aftercareId: 'aftercare_1',
-      aftercareVersion: 4,
-      issuedByUserId: 'user_1',
-      recipientUserId: null,
-      recipientEmail: 'client@example.com',
-      recipientPhone: null,
-      preferredContactMethod: ContactMethod.EMAIL,
-      recipientTimeZone: 'America/Los_Angeles',
     })
 
     const responseBody = makeExpectedPostResponse()
@@ -1128,7 +1093,7 @@ expectIdempotencyHandled(handledResponse)
         completionBlockers: [
           'AFTER_PHOTOS_REQUIRED',
           'PAYMENT_NOT_COLLECTED',
-          'CHECKOUT_NOT_PAID_OR_WAIVED',
+          'CHECKOUT_NOT_COMPLETE',
         ],
         booking: {
           status: BookingStatus.IN_PROGRESS,
@@ -1154,7 +1119,7 @@ expectIdempotencyHandled(handledResponse)
       completionBlockers: [
         'AFTER_PHOTOS_REQUIRED',
         'PAYMENT_NOT_COLLECTED',
-        'CHECKOUT_NOT_PAID_OR_WAIVED',
+        'CHECKOUT_NOT_COMPLETE',
       ],
       booking: {
         status: BookingStatus.IN_PROGRESS,
@@ -1227,8 +1192,25 @@ expectIdempotencyHandled(handledResponse)
     })
   })
 
-  it('POST does not attempt aftercare access delivery when sendToClient is false and completes idempotency', async () => {
+  it('POST returns draft response when sendToClient is false', async () => {
     expectIdempotencyStarted('idem_draft_1')
+
+    mocks.upsertBookingAftercare.mockResolvedValueOnce(
+      makeUpsertResult({
+        sentToClientAt: null,
+        rebookMode: AftercareRebookMode.NONE,
+        rebookWindowStart: null,
+        rebookWindowEnd: null,
+        aftercareAccessDelivery: makeAftercareAccessDeliverySummary({
+          attempted: false,
+          queued: false,
+          href: null,
+        }),
+        clientNotified: false,
+        bookingFinished: false,
+        booking: null,
+      }),
+    )
 
     const idempotencyBody = makeExpectedIdempotencyRequestBody({
       notes: null,
@@ -1257,15 +1239,22 @@ expectIdempotencyHandled(handledResponse)
     )
 
     expectRouteIdempotencyStartedWith(idempotencyBody)
-    expect(mocks.createAftercareAccessDelivery).not.toHaveBeenCalled()
 
     const responseBody = makeExpectedPostResponse({
+      rebookMode: AftercareRebookMode.NONE,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      sentToClientAt: null,
       aftercareAccessDelivery: {
         attempted: false,
         queued: false,
         href: null,
       },
+      clientNotified: false,
       clientTimeZoneReceived: null,
+      bookingFinished: false,
+      booking: null,
+      redirectTo: null,
     })
 
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
@@ -1281,12 +1270,23 @@ expectIdempotencyHandled(handledResponse)
     })
   })
 
-  it('POST does not attempt aftercare access delivery when aftercare was not actually sent', async () => {
+  it('POST returns access delivery summary from write boundary when aftercare was not actually sent', async () => {
     expectIdempotencyStarted('idem_not_sent_1')
 
     mocks.upsertBookingAftercare.mockResolvedValueOnce(
       makeUpsertResult({
         sentToClientAt: null,
+        rebookMode: AftercareRebookMode.NONE,
+        rebookWindowStart: null,
+        rebookWindowEnd: null,
+        aftercareAccessDelivery: makeAftercareAccessDeliverySummary({
+          attempted: false,
+          queued: false,
+          href: null,
+        }),
+        clientNotified: false,
+        bookingFinished: false,
+        booking: null,
       }),
     )
 
@@ -1301,16 +1301,21 @@ expectIdempotencyHandled(handledResponse)
       makeCtx(),
     )
 
-    expect(mocks.createAftercareAccessDelivery).not.toHaveBeenCalled()
-
     const responseBody = makeExpectedPostResponse({
+      rebookMode: AftercareRebookMode.NONE,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
       sentToClientAt: null,
       aftercareAccessDelivery: {
         attempted: false,
         queued: false,
         href: null,
       },
+      clientNotified: false,
       clientTimeZoneReceived: null,
+      bookingFinished: false,
+      booking: null,
+      redirectTo: null,
     })
 
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
@@ -1329,6 +1334,23 @@ expectIdempotencyHandled(handledResponse)
   it('POST returns null clientTimeZoneReceived when the submitted time zone is invalid', async () => {
     expectIdempotencyStarted('idem_bad_timezone_1')
 
+    mocks.upsertBookingAftercare.mockResolvedValueOnce(
+      makeUpsertResult({
+        rebookMode: AftercareRebookMode.NONE,
+        rebookWindowStart: null,
+        rebookWindowEnd: null,
+        sentToClientAt: null,
+        aftercareAccessDelivery: makeAftercareAccessDeliverySummary({
+          attempted: false,
+          queued: false,
+          href: null,
+        }),
+        clientNotified: false,
+        bookingFinished: false,
+        booking: null,
+      }),
+    )
+
     const result = await POST(
       makeIdempotentRequest({
         key: 'idem_bad_timezone_1',
@@ -1343,6 +1365,7 @@ expectIdempotencyHandled(handledResponse)
     expect(mocks.upsertBookingAftercare).toHaveBeenCalledWith({
       bookingId: 'booking_1',
       professionalId: 'pro_1',
+      actorUserId: 'user_1',
       notes: null,
       rebookMode: AftercareRebookMode.NONE,
       rebookedFor: null,
@@ -1359,15 +1382,21 @@ expectIdempotencyHandled(handledResponse)
       idempotencyKey: 'idem_bad_timezone_1',
     })
 
-    expect(mocks.createAftercareAccessDelivery).not.toHaveBeenCalled()
-
     const responseBody = makeExpectedPostResponse({
+      rebookMode: AftercareRebookMode.NONE,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      sentToClientAt: null,
       aftercareAccessDelivery: {
         attempted: false,
         queued: false,
         href: null,
       },
+      clientNotified: false,
       clientTimeZoneReceived: null,
+      bookingFinished: false,
+      booking: null,
+      redirectTo: null,
     })
 
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({

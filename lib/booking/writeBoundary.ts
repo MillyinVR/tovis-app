@@ -6,8 +6,6 @@ import {
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
-  ClientActionTokenKind,
-  ClientClaimStatus,
   ClientAddressKind,
   ConsultationApprovalProofMethod,
   ConsultationApprovalStatus,
@@ -69,6 +67,7 @@ import {
   sanitizeTimeZone,
 } from '@/lib/timeZone'
 import { clampInt } from '@/lib/pick'
+import { createAftercareAccessDelivery } from '@/lib/clientActions/createAftercareAccessDelivery'
 import {
   normalizeAddress,
   resolveHeldSalonAddressText,
@@ -102,7 +101,6 @@ import {
   type AppointmentSchedulingContext,
   type TimeZoneTruthSource,
 } from '@/lib/booking/timeZoneTruth'
-import crypto from 'node:crypto'
 import { buildBookingOverrideAuditRows } from '@/lib/booking/overrideAudit'
 import { assertCanUseBookingOverride } from '@/lib/booking/overrideAuthorization'
 import {
@@ -142,6 +140,12 @@ type AftercarePublicAccessSummary = {
   accessMode: 'SECURE_LINK' | 'NONE'
   hasPublicAccess: boolean
   clientAftercareHref: string | null
+}
+
+type AftercareAccessDeliverySummary = {
+  attempted: boolean
+  queued: boolean
+  href: string | null
 }
 
 type CancelActor =
@@ -608,6 +612,7 @@ type PerformLockedCreateRebookedBookingArgs = {
 type UpsertBookingAftercareArgs = {
   bookingId: string
   professionalId: string
+  actorUserId: string
   notes: string | null
   rebookMode: AftercareRebookMode
   rebookedFor: Date | null
@@ -853,6 +858,7 @@ type UpsertBookingAftercareResult = {
   }
   remindersTouched: number
   clientNotified: boolean
+  aftercareAccessDelivery: AftercareAccessDeliverySummary
   bookingFinished: boolean
   /** Populated when sendToClient=true but booking could not be completed. */
   completionBlockers: string[]
@@ -1346,10 +1352,22 @@ const AFTERCARE_UPSERT_BOOKING_SELECT = {
       name: true,
     },
   },
+  clientTimeZoneAtBooking: true,
   client: {
     select: {
+      id: true,
+      userId: true,
+      email: true,
+      phone: true,
+      preferredContactMethod: true,
       firstName: true,
       lastName: true,
+      user: {
+        select: {
+          email: true,
+          phone: true,
+        },
+      },
     },
   },
   aftercareSummary: {
@@ -1910,18 +1928,6 @@ function normalizeReason(reason?: string | null): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function hasAnyRequestedBookingOverride(args: {
-  allowShortNotice: boolean
-  allowFarFuture: boolean
-  allowOutsideWorkingHours: boolean
-}): boolean {
-  return (
-    args.allowShortNotice ||
-    args.allowFarFuture ||
-    args.allowOutsideWorkingHours
-  )
-}
-
 function assertExplicitOverrideReasonIfNeeded(args: {
   allowShortNotice: boolean
   allowFarFuture: boolean
@@ -1950,13 +1956,6 @@ function isWithinStartWindow(scheduledFor: Date, now: Date): boolean {
   const t = now.getTime()
   return t >= start && t <= end
 }
-// Legacy compatibility only:
-// AftercareSummary.publicToken still exists because the current schema requires
-// it on first-time aftercare summary creation. Do not expose it or use it to
-// build client-facing links.
-function newPublicToken(): string {
-  return crypto.randomBytes(16).toString('hex')
-}
 
 function buildAftercarePublicAccess(): AftercarePublicAccessSummary {
   return {
@@ -1981,6 +1980,130 @@ function makeAftercareReminderDedupeKey(
 
 function makeAftercareClientNotifDedupeKey(bookingId: string): string {
   return `client_aftercare:${bookingId}`
+}
+
+function pickFirstNonEmpty(
+  ...values: Array<string | null | undefined>
+): string | null {
+  for (const value of values) {
+    const normalized = normalizeReason(value)
+    if (normalized) return normalized
+  }
+  return null
+}
+
+function inferPreferredContactMethod(args: {
+  email: string | null
+  phone: string | null
+  existingPreference: ContactMethod | null | undefined
+}): ContactMethod | null {
+  if (args.existingPreference) return args.existingPreference
+  if (args.email && !args.phone) return ContactMethod.EMAIL
+  if (args.phone && !args.email) return ContactMethod.SMS
+  return null
+}
+
+function resolveAftercareRecipientTimeZone(
+  booking: AftercareUpsertBookingRecord,
+): string | null {
+  const clientTimeZoneAtBooking = normalizeReason(booking.clientTimeZoneAtBooking)
+  if (clientTimeZoneAtBooking && isValidIanaTimeZone(clientTimeZoneAtBooking)) {
+    return clientTimeZoneAtBooking
+  }
+
+  const locationTimeZone = normalizeReason(booking.locationTimeZone)
+  if (locationTimeZone && isValidIanaTimeZone(locationTimeZone)) {
+    return locationTimeZone
+  }
+
+  return null
+}
+
+async function maybeCreateAftercareAccessDeliveryInBoundary(args: {
+  booking: AftercareUpsertBookingRecord
+  aftercareId: string
+  aftercareVersion: number
+  actorUserId: string
+  shouldAttempt: boolean
+}): Promise<AftercareAccessDeliverySummary> {
+  if (!args.shouldAttempt) {
+    return {
+      attempted: false,
+      queued: false,
+      href: null,
+    }
+  }
+
+  const recipientEmail = pickFirstNonEmpty(
+    args.booking.client.email,
+    args.booking.client.user?.email ?? null,
+  )
+
+  const recipientPhone = pickFirstNonEmpty(
+    args.booking.client.phone,
+    args.booking.client.user?.phone ?? null,
+  )
+
+  if (!recipientEmail && !recipientPhone) {
+    console.error(
+      'writeBoundary upsertBookingAftercare delivery skipped: no client destination',
+      {
+        bookingId: args.booking.id,
+        professionalId: args.booking.professionalId,
+        aftercareId: args.aftercareId,
+        clientId: args.booking.clientId,
+      },
+    )
+
+    return {
+      attempted: true,
+      queued: false,
+      href: null,
+    }
+  }
+
+  try {
+    const delivery = await createAftercareAccessDelivery({
+      professionalId: args.booking.professionalId,
+      clientId: args.booking.clientId,
+      bookingId: args.booking.id,
+      aftercareId: args.aftercareId,
+      aftercareVersion: args.aftercareVersion,
+      issuedByUserId: args.actorUserId,
+      recipientUserId: args.booking.client.userId ?? null,
+      recipientEmail,
+      recipientPhone,
+      preferredContactMethod: inferPreferredContactMethod({
+        email: recipientEmail,
+        phone: recipientPhone,
+        existingPreference: args.booking.client.preferredContactMethod,
+      }),
+      recipientTimeZone: resolveAftercareRecipientTimeZone(args.booking),
+    })
+
+    return {
+      attempted: true,
+      queued: true,
+      href: delivery.link.href,
+    }
+  } catch (error: unknown) {
+    console.error(
+      'writeBoundary upsertBookingAftercare access delivery enqueue failed',
+      {
+        bookingId: args.booking.id,
+        professionalId: args.booking.professionalId,
+        aftercareId: args.aftercareId,
+        clientId: args.booking.clientId,
+        error,
+      },
+    )
+
+    return {
+      attempted: true,
+      queued: false,
+      href: null,
+    }
+  }
 }
 
 function getConsultationApprovalAuditAction(
@@ -8800,8 +8923,10 @@ if (args.notifyClient) {
 
 async function performLockedUpsertBookingAftercare(args: {
   tx: Prisma.TransactionClient
+  now: Date
   bookingId: string
   professionalId: string
+  actorUserId: string
   notes: string | null
   rebookMode: AftercareRebookMode
   rebookedFor: Date | null
@@ -8817,6 +8942,7 @@ async function performLockedUpsertBookingAftercare(args: {
   requestId?: string | null
   idempotencyKey?: string | null
 }): Promise<UpsertBookingAftercareResult> {
+  const now = args.now
   const booking: AftercareUpsertBookingRecord | null =
     await args.tx.booking.findUnique({
       where: { id: args.bookingId },
@@ -8858,7 +8984,8 @@ async function performLockedUpsertBookingAftercare(args: {
   })
 
   const existingAftercare = booking.aftercareSummary
-
+  const shouldQueueAftercareAccessDelivery =
+    args.sendToClient && !existingAftercare?.sentToClientAt
     const incomingVersion =
     typeof args.version === 'number' && Number.isFinite(args.version)
       ? Math.trunc(args.version)
@@ -8929,6 +9056,11 @@ if (
     },
     remindersTouched: 0,
     clientNotified: false,
+    aftercareAccessDelivery: {
+      attempted: false,
+      queued: false,
+      href: null,
+    },
     bookingFinished: false,
     completionBlockers: [],
     booking:
@@ -8943,10 +9075,6 @@ if (
     meta: buildMeta(false),
   }
 }
-
-
-
-  const now = new Date()
   const nextVersion = (booking.aftercareSummary?.version ?? 0) + 1
 
   const aftercare = await args.tx.aftercareSummary.upsert({
@@ -8990,6 +9118,15 @@ if (
       version: true,
     },
   })
+
+  const aftercareAccessDelivery =
+    await maybeCreateAftercareAccessDeliveryInBoundary({
+      booking,
+      aftercareId: aftercare.id,
+      aftercareVersion: aftercare.version,
+      actorUserId: args.actorUserId,
+      shouldAttempt: shouldQueueAftercareAccessDelivery,
+    })
 
   await args.tx.productRecommendation.deleteMany({
     where: { aftercareSummaryId: aftercare.id },
@@ -9333,22 +9470,22 @@ return {
     lastEditedAt: aftercare.lastEditedAt,
     version: aftercare.version,
   },
-    remindersTouched,
-    clientNotified,
+  remindersTouched,
+  clientNotified,
+  aftercareAccessDelivery,
+  bookingFinished,
+  completionBlockers: buildCompletionBlockers({
+    sendToClient: args.sendToClient,
     bookingFinished,
-    completionBlockers: buildCompletionBlockers({
-      sendToClient: args.sendToClient,
-      bookingFinished,
-      checkoutStatus: booking.checkoutStatus,
-      paymentCollectedAt: booking.paymentCollectedAt,
-      afterMediaCount,
-    }),
-    booking: bookingNow,
-    timeZoneUsed,
-    meta: buildMeta(true),
-  }
+    checkoutStatus: booking.checkoutStatus,
+    paymentCollectedAt: booking.paymentCollectedAt,
+    afterMediaCount,
+  }),
+  booking: bookingNow,
+  timeZoneUsed,
+  meta: buildMeta(true),
 }
-
+}
 async function performLockedUpdateBookingCheckout(args: {
   tx: Prisma.TransactionClient
   now: Date
@@ -10632,14 +10769,17 @@ export async function upsertBookingAftercare(
 ): Promise<UpsertBookingAftercareResult> {
   assertNonEmptyBookingId(args.bookingId)
   assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
 
   return withLockedProfessionalTransaction(
     args.professionalId,
-    async ({ tx }) =>
-        performLockedUpsertBookingAftercare({
+    async ({ tx, now }) =>
+      performLockedUpsertBookingAftercare({
         tx,
+        now,
         bookingId: args.bookingId,
         professionalId: args.professionalId,
+        actorUserId: args.actorUserId,
         notes: args.notes,
         rebookMode: args.rebookMode,
         rebookedFor: args.rebookedFor,
