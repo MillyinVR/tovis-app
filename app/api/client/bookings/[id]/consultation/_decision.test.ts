@@ -1,4 +1,3 @@
-// app/api/client/bookings/[id]/consultation/_decision.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingCloseoutAuditAction,
@@ -8,31 +7,134 @@ import {
   Role,
 } from '@prisma/client'
 
-const IDEMPOTENCY_ROUTE = 'POST /api/client/bookings/[id]/consultation'
+const IDEMPOTENCY_ROUTE =
+  'POST /api/client/bookings/[id]/consultation/decision'
+
+const OPERATION = 'POST /api/client/bookings/[id]/consultation'
+
+const approvedAt = new Date('2026-04-12T18:00:00.000Z')
+const rejectedAt = new Date('2026-04-12T18:30:00.000Z')
+
+type MockConsultationApproval = {
+  id: string
+  status: ConsultationApprovalStatus
+  approvedAt: Date | null
+  rejectedAt: Date | null
+  proposedServicesJson: Prisma.InputJsonValue
+  proposedTotal: Prisma.Decimal | null
+  notes: string | null
+  bookingId: string
+  clientId: string
+  proId: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+function makeConsultationApproval(
+  overrides?: Partial<MockConsultationApproval>,
+): MockConsultationApproval {
+  return {
+    id: 'approval_1',
+    status: ConsultationApprovalStatus.PENDING,
+    approvedAt: null,
+    rejectedAt: null,
+    proposedServicesJson: {
+      currency: 'USD',
+      items: [],
+    },
+    proposedTotal: new Prisma.Decimal('125.00'),
+    notes: 'Please review.',
+    bookingId: 'booking_1',
+    clientId: 'client_1',
+    proId: 'pro_1',
+    createdAt: new Date('2026-04-12T17:00:00.000Z'),
+    updatedAt: new Date('2026-04-12T17:30:00.000Z'),
+    ...overrides,
+  }
+}
+
+const pendingApproval = makeConsultationApproval()
+
+const approvedApproval = makeConsultationApproval({
+  status: ConsultationApprovalStatus.APPROVED,
+  approvedAt,
+  rejectedAt: null,
+  updatedAt: approvedAt,
+})
+
+const rejectedApproval = makeConsultationApproval({
+  status: ConsultationApprovalStatus.REJECTED,
+  approvedAt: null,
+  rejectedAt,
+  updatedAt: rejectedAt,
+})
+
+const approvedResponseBody = {
+  action: 'APPROVE',
+  approval: {
+    ...approvedApproval,
+    approvedAt: '2026-04-12T18:00:00.000Z',
+    rejectedAt: null,
+    createdAt: '2026-04-12T17:00:00.000Z',
+    updatedAt: '2026-04-12T18:00:00.000Z',
+    proposedTotal: '125',
+  },
+  bookingId: 'booking_1',
+}
+
+const rejectedResponseBody = {
+  action: 'REJECT',
+  approval: {
+    ...rejectedApproval,
+    approvedAt: null,
+    rejectedAt: '2026-04-12T18:30:00.000Z',
+    createdAt: '2026-04-12T17:00:00.000Z',
+    updatedAt: '2026-04-12T18:30:00.000Z',
+    proposedTotal: '125',
+  },
+  bookingId: 'booking_1',
+}
 
 const mocks = vi.hoisted(() => ({
+  requireClient: vi.fn(),
+  jsonFail: vi.fn(),
+  jsonOk: vi.fn(),
+  pickString: vi.fn(),
+  enforceRateLimit: vi.fn(),
+  rateLimitIdentity: vi.fn(),
+
   bookingFindUnique: vi.fn(),
   prismaTransaction: vi.fn(),
 
   txConsultationApprovalFindUnique: vi.fn(),
   txConsultationApprovalUpdateMany: vi.fn(),
 
-  jsonFail: vi.fn(),
-  jsonOk: vi.fn(),
-  pickString: vi.fn(),
-  requireClient: vi.fn(),
-  enforceRateLimit: vi.fn(),
-  rateLimitIdentity: vi.fn(),
-
   approveConsultationAndMaterializeBooking: vi.fn(),
   createBookingCloseoutAuditLog: vi.fn(),
   createProNotification: vi.fn(),
 
-  beginIdempotency: vi.fn(),
-  completeIdempotency: vi.fn(),
-  failIdempotency: vi.fn(),
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
 
   captureBookingException: vi.fn(),
+}))
+
+vi.mock('@/app/api/_utils', () => ({
+  requireClient: mocks.requireClient,
+  jsonFail: mocks.jsonFail,
+  jsonOk: mocks.jsonOk,
+  pickString: mocks.pickString,
+  enforceRateLimit: mocks.enforceRateLimit,
+  rateLimitIdentity: mocks.rateLimitIdentity,
+}))
+
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -42,15 +144,6 @@ vi.mock('@/lib/prisma', () => ({
     },
     $transaction: mocks.prismaTransaction,
   },
-}))
-
-vi.mock('@/app/api/_utils', () => ({
-  jsonFail: mocks.jsonFail,
-  jsonOk: mocks.jsonOk,
-  pickString: mocks.pickString,
-  requireClient: mocks.requireClient,
-  enforceRateLimit: mocks.enforceRateLimit,
-  rateLimitIdentity: mocks.rateLimitIdentity,
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
@@ -67,12 +160,9 @@ vi.mock('@/lib/notifications/proNotifications', () => ({
 }))
 
 vi.mock('@/lib/idempotency', () => ({
-  beginIdempotency: mocks.beginIdempotency,
-  completeIdempotency: mocks.completeIdempotency,
-  failIdempotency: mocks.failIdempotency,
   IDEMPOTENCY_ROUTES: {
     CLIENT_CONSULTATION_DECISION:
-      'POST /api/client/bookings/[id]/consultation',
+      'POST /api/client/bookings/[id]/consultation/decision',
   },
 }))
 
@@ -82,112 +172,51 @@ vi.mock('@/lib/observability/bookingEvents', () => ({
 
 import { handleConsultationDecision } from './_decision'
 
-const tx = {
-  consultationApproval: {
-    findUnique: mocks.txConsultationApprovalFindUnique,
-    updateMany: mocks.txConsultationApprovalUpdateMany,
-  },
-}
-
-function makeJsonResponse(status: number, payload: unknown): Response {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: {
-      'content-type': 'application/json',
-    },
-  })
-}
-
 function makeCtx(id = 'booking_1') {
   return {
     params: Promise.resolve({ id }),
   }
 }
 
-function makePendingApproval(overrides?: {
-  id?: string
-  status?: ConsultationApprovalStatus
-  approvedAt?: Date | null
-  rejectedAt?: Date | null
-  proposedTotal?: Prisma.Decimal | null
-}) {
-  return {
-    id: overrides?.id ?? 'approval_1',
-    status: overrides?.status ?? ConsultationApprovalStatus.PENDING,
-    approvedAt:
-      overrides && 'approvedAt' in overrides ? overrides.approvedAt : null,
-    rejectedAt:
-      overrides && 'rejectedAt' in overrides ? overrides.rejectedAt : null,
-    proposedServicesJson: [
-      {
-        serviceId: 'service_1',
-        name: 'Haircut',
-      },
-    ],
-    proposedTotal:
-      overrides && 'proposedTotal' in overrides
-        ? overrides.proposedTotal
-        : new Prisma.Decimal('125.00'),
-    notes: 'Client consultation proposal notes.',
-    bookingId: 'booking_1',
-    clientId: 'client_1',
-    proId: 'pro_1',
-    createdAt: new Date('2026-04-12T17:00:00.000Z'),
-    updatedAt: new Date('2026-04-12T17:15:00.000Z'),
-  }
-}
-
 function makeBooking(overrides?: {
+  id?: string
   clientId?: string
   professionalId?: string
-  approval?: ReturnType<typeof makePendingApproval> | null
+  consultationApproval?: MockConsultationApproval | null
 }) {
   return {
-    id: 'booking_1',
+    id: overrides?.id ?? 'booking_1',
     clientId: overrides?.clientId ?? 'client_1',
     professionalId: overrides?.professionalId ?? 'pro_1',
     consultationApproval:
-      overrides && 'approval' in overrides
-        ? overrides.approval
-        : makePendingApproval(),
+      overrides && 'consultationApproval' in overrides
+        ? overrides.consultationApproval
+        : pendingApproval,
   }
 }
 
-function expectedApprovalJson(
-  approval: ReturnType<typeof makePendingApproval>,
-) {
-  return {
-    id: approval.id,
-    status: approval.status,
-    approvedAt: approval.approvedAt?.toISOString() ?? null,
-    rejectedAt: approval.rejectedAt?.toISOString() ?? null,
-    proposedServicesJson: approval.proposedServicesJson,
-    proposedTotal: approval.proposedTotal?.toString() ?? null,
-    notes: approval.notes,
-    bookingId: approval.bookingId,
-    clientId: approval.clientId,
-    proId: approval.proId,
-    createdAt: approval.createdAt.toISOString(),
-    updatedAt: approval.updatedAt.toISOString(),
+function normalizeForJson(value: unknown): unknown {
+  if (value instanceof Date) return value.toISOString()
+  if (value instanceof Prisma.Decimal) return value.toString()
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeForJson(item))
   }
+
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+
+    for (const key of Object.keys(value).sort()) {
+      out[key] = normalizeForJson((value as Record<string, unknown>)[key])
+    }
+
+    return out
+  }
+
+  return value
 }
 
-function expectedDecisionBody(args?: {
-  action?: 'APPROVE' | 'REJECT'
-  approval?: ReturnType<typeof makePendingApproval>
-  alreadyDecided?: boolean
-}) {
-  const approval = args?.approval ?? makePendingApproval()
-
-  return {
-    bookingId: 'booking_1',
-    action: args?.action ?? 'APPROVE',
-    ...(args?.alreadyDecided ? { alreadyDecided: true } : {}),
-    approval: expectedApprovalJson(approval),
-  }
-}
-
-function expectedIdempotencyRequestBody(action: 'APPROVE' | 'REJECT') {
+function makeExpectedIdempotencyRequestBody(action: 'APPROVE' | 'REJECT') {
   return {
     bookingId: 'booking_1',
     clientId: 'client_1',
@@ -198,32 +227,59 @@ function expectedIdempotencyRequestBody(action: 'APPROVE' | 'REJECT') {
   }
 }
 
+function expectRouteIdempotencyStartedWith(
+  action: 'APPROVE' | 'REJECT',
+): void {
+  expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+    request: expect.any(Request),
+    actor: {
+      actorUserId: 'user_1',
+      actorRole: Role.CLIENT,
+    },
+    route: IDEMPOTENCY_ROUTE,
+    requestLabel: 'client consultation decision',
+    requestBody: makeExpectedIdempotencyRequestBody(action),
+    messages: {
+      missingKey: 'Missing idempotency key.',
+      inProgress:
+        'A matching consultation decision request is already in progress.',
+      conflict:
+        'This idempotency key was already used with a different request body.',
+    },
+  })
+}
+
+function expectIdempotencyHandled(response: unknown): void {
+  mocks.beginRouteIdempotency.mockReset()
+  mocks.isRouteIdempotencyHandled.mockReset()
+
+  mocks.beginRouteIdempotency.mockResolvedValueOnce({
+    kind: 'handled',
+    response,
+  })
+
+  mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+}
+
+function expectIdempotencyStarted(
+  key = 'idem_client_consultation_1',
+): void {
+  mocks.beginRouteIdempotency.mockReset()
+  mocks.isRouteIdempotencyHandled.mockReset()
+
+  mocks.beginRouteIdempotency.mockResolvedValueOnce({
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: key,
+    requestHash: 'hash_1',
+  })
+
+  mocks.isRouteIdempotencyHandled.mockReturnValue(false)
+}
+
 describe('handleConsultationDecision', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-
-    mocks.jsonFail.mockImplementation(
-      (status: number, error: string, extra?: Record<string, unknown>) =>
-        makeJsonResponse(status, {
-          ok: false,
-          error,
-          ...(extra ?? {}),
-        }),
-    )
-
-    mocks.jsonOk.mockImplementation(
-      (data: Record<string, unknown>, status = 200) =>
-        makeJsonResponse(status, {
-          ok: true,
-          ...(data ?? {}),
-        }),
-    )
-
-    mocks.pickString.mockImplementation((value: unknown) => {
-      if (typeof value !== 'string') return null
-      const trimmed = value.trim()
-      return trimmed.length > 0 ? trimmed : null
-    })
 
     mocks.requireClient.mockResolvedValue({
       ok: true,
@@ -233,332 +289,398 @@ describe('handleConsultationDecision', () => {
       },
     })
 
-    mocks.rateLimitIdentity.mockResolvedValue('user:user_1')
-    mocks.enforceRateLimit.mockResolvedValue(null)
+    mocks.jsonFail.mockImplementation(
+      (status: number, error: string, extra?: Record<string, unknown>) => ({
+        ok: false,
+        status,
+        error,
+        ...(extra ?? {}),
+      }),
+    )
+
+    mocks.jsonOk.mockImplementation((data: unknown, status = 200) => ({
+      ok: true,
+      status,
+      data,
+    }))
+
+    mocks.pickString.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return null
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    })
 
     mocks.bookingFindUnique.mockResolvedValue(makeBooking())
 
     mocks.prismaTransaction.mockImplementation(
-      async (run: (db: typeof tx) => Promise<unknown>) => run(tx),
+      async (
+        callback: (tx: {
+          consultationApproval: {
+            findUnique: typeof mocks.txConsultationApprovalFindUnique
+            updateMany: typeof mocks.txConsultationApprovalUpdateMany
+          }
+        }) => Promise<unknown>,
+      ) =>
+        callback({
+          consultationApproval: {
+            findUnique: mocks.txConsultationApprovalFindUnique,
+            updateMany: mocks.txConsultationApprovalUpdateMany,
+          },
+        }),
     )
 
-    mocks.beginIdempotency.mockImplementation(
-      async (args: { key: string | null }) => {
-        const key = args.key?.trim()
+    mocks.txConsultationApprovalFindUnique
+      .mockResolvedValueOnce(pendingApproval)
+      .mockResolvedValueOnce(rejectedApproval)
 
-        if (!key) {
-          return { kind: 'missing_key' }
-        }
+    mocks.txConsultationApprovalUpdateMany.mockResolvedValue({
+      count: 1,
+    })
 
-        return {
-          kind: 'started',
-          idempotencyRecordId: 'idem_record_1',
-          requestHash: 'hash_1',
-        }
-      },
-    )
-
-    mocks.completeIdempotency.mockResolvedValue(undefined)
-    mocks.failIdempotency.mockResolvedValue(undefined)
+    mocks.approveConsultationAndMaterializeBooking.mockResolvedValue({
+      approval: approvedApproval,
+    })
 
     mocks.createBookingCloseoutAuditLog.mockResolvedValue(undefined)
     mocks.createProNotification.mockResolvedValue(undefined)
 
-    mocks.approveConsultationAndMaterializeBooking.mockResolvedValue({
-      approval: makePendingApproval({
-        status: ConsultationApprovalStatus.APPROVED,
-        approvedAt: new Date('2026-04-12T18:00:00.000Z'),
-      }),
+    mocks.enforceRateLimit.mockResolvedValue(null)
+    mocks.rateLimitIdentity.mockResolvedValue({
+      kind: 'user',
+      id: 'user_1',
     })
+
+    expectIdempotencyStarted()
+
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
+  })
+
+  it('returns 400 for invalid action before auth', async () => {
+    const result = await handleConsultationDecision(
+      'BANANA' as 'APPROVE',
+      makeCtx(),
+      {
+        idempotencyKey: 'idem_invalid_1',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 400,
+      error: 'Invalid consultation decision action.',
+    })
+
+    expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.bookingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('returns auth response when requireClient fails', async () => {
-    const authRes = makeJsonResponse(401, {
+    const authRes = {
       ok: false,
+      status: 401,
       error: 'Unauthorized',
-    })
+    }
 
     mocks.requireClient.mockResolvedValueOnce({
       ok: false,
       res: authRes,
     })
 
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
-      idempotencyKey: 'idem_1',
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+      idempotencyKey: 'idem_auth_1',
     })
 
-    expect(response).toBe(authRes)
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
-    expect(mocks.approveConsultationAndMaterializeBooking).not.toHaveBeenCalled()
+    expect(result).toBe(authRes)
+    expect(mocks.bookingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns 400 for invalid action before idempotency starts', async () => {
-    const response = await handleConsultationDecision(
-      'BANANA' as 'APPROVE',
-      makeCtx(),
-      {
-        idempotencyKey: 'idem_1',
-      },
-    )
-
-    expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({
-      ok: false,
-      error: 'Invalid consultation decision action.',
+  it('returns 400 when booking id is missing', async () => {
+    const result = await handleConsultationDecision('APPROVE', makeCtx('   '), {
+      idempotencyKey: 'idem_missing_booking_1',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
-  })
-
-  it('returns 400 when booking id is missing before idempotency starts', async () => {
-    const response = await handleConsultationDecision('APPROVE', makeCtx('  '), {
-      idempotencyKey: 'idem_1',
-    })
-
-    expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({
+    expect(result).toEqual({
       ok: false,
+      status: 400,
       error: 'Missing booking id.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.bookingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns 404 when booking is not found before idempotency starts', async () => {
+  it('returns 404 when booking is not found', async () => {
     mocks.bookingFindUnique.mockResolvedValueOnce(null)
 
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
-      idempotencyKey: 'idem_1',
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+      idempotencyKey: 'idem_not_found_1',
     })
 
-    expect(response.status).toBe(404)
-    await expect(response.json()).resolves.toEqual({
+    expect(mocks.bookingFindUnique).toHaveBeenCalledWith({
+      where: { id: 'booking_1' },
+      select: expect.any(Object),
+    })
+
+    expect(result).toEqual({
       ok: false,
+      status: 404,
       error: 'Booking not found.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns 403 when booking belongs to another client before idempotency starts', async () => {
+  it('returns 403 when booking belongs to a different client', async () => {
     mocks.bookingFindUnique.mockResolvedValueOnce(
       makeBooking({
         clientId: 'client_other',
       }),
     )
 
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
-      idempotencyKey: 'idem_1',
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+      idempotencyKey: 'idem_forbidden_1',
     })
 
-    expect(response.status).toBe(403)
-    await expect(response.json()).resolves.toEqual({
+    expect(result).toEqual({
       ok: false,
+      status: 403,
       error: 'Forbidden.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns 409 when no consultation approval exists before idempotency starts', async () => {
+  it('returns 409 when no consultation proposal exists', async () => {
     mocks.bookingFindUnique.mockResolvedValueOnce(
       makeBooking({
-        approval: null,
+        consultationApproval: null,
       }),
     )
 
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
-      idempotencyKey: 'idem_1',
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+      idempotencyKey: 'idem_no_proposal_1',
     })
 
-    expect(response.status).toBe(409)
-    await expect(response.json()).resolves.toEqual({
+    expect(result).toEqual({
       ok: false,
+      status: 409,
       error: 'No consultation proposal found for this booking yet.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns missing idempotency key for valid pending consultation decision without key', async () => {
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
+  it('returns handled idempotency response for missing idempotency key', async () => {
+    const handledResponse = {
+      ok: false,
+      status: 400,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    }
+
+    mocks.beginRouteIdempotency.mockReset()
+    mocks.isRouteIdempotencyHandled.mockReset()
+
+    expectIdempotencyHandled(handledResponse)
+
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
       requestId: 'req_1',
     })
 
-    expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({
-      ok: false,
-      error: 'Missing idempotency key.',
-      code: 'IDEMPOTENCY_KEY_REQUIRED',
-    })
-
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: Role.CLIENT,
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: null,
-      requestBody: expectedIdempotencyRequestBody('APPROVE'),
-    })
+    expect(result).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith('APPROVE')
 
     expect(mocks.approveConsultationAndMaterializeBooking).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns in-progress when matching idempotency request is already active', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'in_progress',
-    })
-
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
-      idempotencyKey: 'idem_active_1',
-    })
-
-    expect(response.status).toBe(409)
-    await expect(response.json()).resolves.toEqual({
+  it('returns handled in-progress idempotency response', async () => {
+    const handledResponse = {
       ok: false,
+      status: 409,
       error: 'A matching consultation decision request is already in progress.',
       code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    }
+
+    mocks.beginRouteIdempotency.mockReset()
+    mocks.isRouteIdempotencyHandled.mockReset()
+
+    expectIdempotencyHandled(handledResponse)
+
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+      idempotencyKey: 'idem_in_progress_1',
     })
+
+    expect(result).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith('APPROVE')
 
     expect(mocks.approveConsultationAndMaterializeBooking).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns conflict when idempotency key is reused with different body', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'conflict',
-    })
-
-    const response = await handleConsultationDecision('REJECT', makeCtx(), {
-      idempotencyKey: 'idem_conflict_1',
-    })
-
-    expect(response.status).toBe(409)
-    await expect(response.json()).resolves.toEqual({
+  it('returns handled conflict idempotency response', async () => {
+    const handledResponse = {
       ok: false,
+      status: 409,
       error:
         'This idempotency key was already used with a different request body.',
       code: 'IDEMPOTENCY_KEY_CONFLICT',
+    }
+
+    mocks.beginRouteIdempotency.mockReset()
+    mocks.isRouteIdempotencyHandled.mockReset()
+
+    expectIdempotencyHandled(handledResponse)
+
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+      idempotencyKey: 'idem_conflict_1',
     })
 
-    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(result).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith('APPROVE')
+
+    expect(mocks.approveConsultationAndMaterializeBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('replays completed idempotency response without writing again', async () => {
-    const replayBody = expectedDecisionBody({
-      action: 'APPROVE',
-      approval: makePendingApproval({
-        status: ConsultationApprovalStatus.APPROVED,
-        approvedAt: new Date('2026-04-12T18:00:00.000Z'),
-      }),
-    })
+  it('replays completed idempotency response without mutating again', async () => {
+    const handledResponse = {
+      ok: true,
+      status: 200,
+      data: approvedResponseBody,
+    }
 
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'replay',
-      responseStatus: 200,
-      responseBody: replayBody,
-    })
+    mocks.beginRouteIdempotency.mockReset()
+    mocks.isRouteIdempotencyHandled.mockReset()
 
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
+    expectIdempotencyHandled(handledResponse)
+
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
       idempotencyKey: 'idem_replay_1',
     })
 
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      ...replayBody,
-    })
+    expect(result).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith('APPROVE')
 
     expect(mocks.approveConsultationAndMaterializeBooking).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('marks idempotency failed and returns rate-limit response when limiter blocks', async () => {
-    const rateLimitResponse = makeJsonResponse(429, {
+  it('fails started idempotency and returns rate-limit response when limiter blocks', async () => {
+    expectIdempotencyStarted('idem_rate_limited_1')
+
+    const rateLimitResponse = {
       ok: false,
+      status: 429,
       error: 'Too many requests.',
-    })
+    }
 
     mocks.enforceRateLimit.mockResolvedValueOnce(rateLimitResponse)
 
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
-      idempotencyKey: 'idem_limited_1',
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+      idempotencyKey: 'idem_rate_limited_1',
     })
 
-    expect(response).toBe(rateLimitResponse)
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'consultation:decision',
+      identity: {
+        kind: 'user',
+        id: 'user_1',
+      },
+      keySuffix: 'booking:booking_1',
     })
+
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: OPERATION,
+    })
+
+    expect(result).toBe(rateLimitResponse)
+
     expect(mocks.approveConsultationAndMaterializeBooking).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('completes idempotency for already-decided approval without writing again', async () => {
-    const approvedApproval = makePendingApproval({
-      status: ConsultationApprovalStatus.APPROVED,
-      approvedAt: new Date('2026-04-12T18:00:00.000Z'),
-    })
+  it('continues when rate limiter throws', async () => {
+    expectIdempotencyStarted('idem_limiter_error_1')
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    mocks.enforceRateLimit.mockRejectedValueOnce(new Error('limiter down'))
+
+    try {
+      const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+        requestId: 'req_limiter_error_1',
+        idempotencyKey: 'idem_limiter_error_1',
+      })
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        'Rate limit skipped (limiter error):',
+        expect.any(Error),
+      )
+
+      expect(result).toEqual({
+        ok: true,
+        status: 200,
+        data: approvedResponseBody,
+      })
+
+      expect(mocks.approveConsultationAndMaterializeBooking).toHaveBeenCalled()
+      expect(mocks.completeRouteIdempotency).toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('returns alreadyDecided when approval is not pending before mutation', async () => {
+    expectIdempotencyStarted('idem_already_approved_1')
 
     mocks.bookingFindUnique.mockResolvedValueOnce(
       makeBooking({
-        approval: approvedApproval,
+        consultationApproval: approvedApproval,
       }),
     )
 
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
-      idempotencyKey: 'idem_already_1',
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+      idempotencyKey: 'idem_already_approved_1',
     })
 
-    const responseBody = expectedDecisionBody({
+    const responseBody = normalizeForJson({
+      bookingId: 'booking_1',
       action: 'APPROVE',
-      approval: approvedApproval,
       alreadyDecided: true,
+      approval: approvedApproval,
     })
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody,
     })
 
-    expect(mocks.approveConsultationAndMaterializeBooking).not.toHaveBeenCalled()
-    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
-
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
+    expect(result).toEqual({
       ok: true,
-      ...responseBody,
+      status: 200,
+      data: responseBody,
     })
+
+    expect(mocks.approveConsultationAndMaterializeBooking).not.toHaveBeenCalled()
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
   })
 
-  it('approves consultation, completes idempotency, and notifies pro', async () => {
-    const approvedApproval = makePendingApproval({
-      status: ConsultationApprovalStatus.APPROVED,
-      approvedAt: new Date('2026-04-12T18:00:00.000Z'),
-    })
+  it('approves consultation, completes idempotency, notifies pro, and returns approval', async () => {
+    expectIdempotencyStarted('idem_approve_1')
 
-    mocks.approveConsultationAndMaterializeBooking.mockResolvedValueOnce({
-      approval: approvedApproval,
-    })
-
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
+    const result = await handleConsultationDecision('APPROVE', makeCtx(), {
       requestId: 'req_approve_1',
       idempotencyKey: 'idem_approve_1',
     })
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: Role.CLIENT,
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_approve_1',
-      requestBody: expectedIdempotencyRequestBody('APPROVE'),
-    })
+    expectRouteIdempotencyStartedWith('APPROVE')
 
     expect(mocks.approveConsultationAndMaterializeBooking).toHaveBeenCalledWith({
       bookingId: 'booking_1',
@@ -568,15 +690,10 @@ describe('handleConsultationDecision', () => {
       idempotencyKey: 'idem_approve_1',
     })
 
-    const responseBody = expectedDecisionBody({
-      action: 'APPROVE',
-      approval: approvedApproval,
-    })
-
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
-      responseBody,
+      responseBody: approvedResponseBody,
     })
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
@@ -587,7 +704,7 @@ describe('handleConsultationDecision', () => {
       href: '/pro/bookings/booking_1?step=consult',
       actorUserId: 'user_1',
       bookingId: 'booking_1',
-      dedupeKey: `PRO_NOTIF:${NotificationEventKey.CONSULTATION_APPROVED}:booking_1`,
+      dedupeKey: 'PRO_NOTIF:CONSULTATION_APPROVED:booking_1',
       data: {
         bookingId: 'booking_1',
         action: 'APPROVE',
@@ -595,38 +712,28 @@ describe('handleConsultationDecision', () => {
       },
     })
 
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
+    expect(result).toEqual({
       ok: true,
-      ...responseBody,
+      status: 200,
+      data: approvedResponseBody,
     })
   })
 
-  it('rejects consultation, writes audit, completes idempotency, and notifies pro', async () => {
-    const currentApproval = makePendingApproval()
-    const rejectedApproval = makePendingApproval({
-      status: ConsultationApprovalStatus.REJECTED,
-      rejectedAt: new Date('2026-04-12T18:30:00.000Z'),
-    })
+  it('rejects consultation in a transaction, writes audit log, completes idempotency, notifies pro, and returns approval', async () => {
+    expectIdempotencyStarted('idem_reject_1')
 
-    mocks.txConsultationApprovalFindUnique
-      .mockResolvedValueOnce(currentApproval)
-      .mockResolvedValueOnce(rejectedApproval)
-    mocks.txConsultationApprovalUpdateMany.mockResolvedValueOnce({ count: 1 })
-
-    const response = await handleConsultationDecision('REJECT', makeCtx(), {
+    const result = await handleConsultationDecision('REJECT', makeCtx(), {
       requestId: 'req_reject_1',
       idempotencyKey: 'idem_reject_1',
     })
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: Role.CLIENT,
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_reject_1',
-      requestBody: expectedIdempotencyRequestBody('REJECT'),
+    expectRouteIdempotencyStartedWith('REJECT')
+
+    expect(mocks.prismaTransaction).toHaveBeenCalledTimes(1)
+
+    expect(mocks.txConsultationApprovalFindUnique).toHaveBeenNthCalledWith(1, {
+      where: { bookingId: 'booking_1' },
+      select: expect.any(Object),
     })
 
     expect(mocks.txConsultationApprovalUpdateMany).toHaveBeenCalledWith({
@@ -643,8 +750,13 @@ describe('handleConsultationDecision', () => {
       },
     })
 
+    expect(mocks.txConsultationApprovalFindUnique).toHaveBeenNthCalledWith(2, {
+      where: { bookingId: 'booking_1' },
+      select: expect.any(Object),
+    })
+
     expect(mocks.createBookingCloseoutAuditLog).toHaveBeenCalledWith({
-      tx,
+      tx: expect.any(Object),
       bookingId: 'booking_1',
       professionalId: 'pro_1',
       action: BookingCloseoutAuditAction.CONSULTATION_REJECTED,
@@ -658,7 +770,7 @@ describe('handleConsultationDecision', () => {
           approvedAt: null,
           rejectedAt: null,
           proposedTotal: '125.00',
-          notes: 'Client consultation proposal notes.',
+          notes: 'Please review.',
           clientId: 'client_1',
           proId: 'pro_1',
         },
@@ -669,22 +781,17 @@ describe('handleConsultationDecision', () => {
           approvedAt: null,
           rejectedAt: '2026-04-12T18:30:00.000Z',
           proposedTotal: '125.00',
-          notes: 'Client consultation proposal notes.',
+          notes: 'Please review.',
           clientId: 'client_1',
           proId: 'pro_1',
         },
       },
     })
 
-    const responseBody = expectedDecisionBody({
-      action: 'REJECT',
-      approval: rejectedApproval,
-    })
-
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
-      responseBody,
+      responseBody: rejectedResponseBody,
     })
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
@@ -695,7 +802,7 @@ describe('handleConsultationDecision', () => {
       href: '/pro/bookings/booking_1?step=consult',
       actorUserId: 'user_1',
       bookingId: 'booking_1',
-      dedupeKey: `PRO_NOTIF:${NotificationEventKey.CONSULTATION_REJECTED}:booking_1`,
+      dedupeKey: 'PRO_NOTIF:CONSULTATION_REJECTED:booking_1',
       data: {
         bookingId: 'booking_1',
         action: 'REJECT',
@@ -703,95 +810,192 @@ describe('handleConsultationDecision', () => {
       },
     })
 
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
+    expect(result).toEqual({
       ok: true,
-      ...responseBody,
+      status: 200,
+      data: rejectedResponseBody,
     })
   })
 
-  it('completes idempotency as already-decided when rejection transaction sees non-pending approval', async () => {
-    const approvedApproval = makePendingApproval({
-      status: ConsultationApprovalStatus.APPROVED,
-      approvedAt: new Date('2026-04-12T18:00:00.000Z'),
-    })
+  it('returns alreadyDecided when rejection transaction sees non-pending approval', async () => {
+    expectIdempotencyStarted('idem_reject_race_1')
 
+    mocks.txConsultationApprovalFindUnique.mockReset()
     mocks.txConsultationApprovalFindUnique.mockResolvedValueOnce(
-      approvedApproval,
+      rejectedApproval,
     )
 
-    const response = await handleConsultationDecision('REJECT', makeCtx(), {
+    const result = await handleConsultationDecision('REJECT', makeCtx(), {
       idempotencyKey: 'idem_reject_race_1',
     })
 
-    const responseBody = expectedDecisionBody({
+    const responseBody = normalizeForJson({
+      bookingId: 'booking_1',
       action: 'REJECT',
-      approval: approvedApproval,
       alreadyDecided: true,
+      approval: rejectedApproval,
     })
 
     expect(mocks.txConsultationApprovalUpdateMany).not.toHaveBeenCalled()
     expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
     expect(mocks.createProNotification).not.toHaveBeenCalled()
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody,
     })
 
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
+    expect(result).toEqual({
       ok: true,
-      ...responseBody,
+      status: 200,
+      data: responseBody,
     })
   })
 
-  it('returns 500 and marks idempotency failed when approve write throws', async () => {
-    mocks.approveConsultationAndMaterializeBooking.mockRejectedValueOnce(
-      new Error('approve boom'),
+  it('returns alreadyDecided when rejection update loses the pending race', async () => {
+    expectIdempotencyStarted('idem_reject_update_race_1')
+
+    mocks.txConsultationApprovalFindUnique.mockReset()
+    mocks.txConsultationApprovalFindUnique
+      .mockResolvedValueOnce(pendingApproval)
+      .mockResolvedValueOnce(rejectedApproval)
+
+    mocks.txConsultationApprovalUpdateMany.mockResolvedValueOnce({
+      count: 0,
+    })
+
+    const result = await handleConsultationDecision('REJECT', makeCtx(), {
+      idempotencyKey: 'idem_reject_update_race_1',
+    })
+
+    const responseBody = normalizeForJson({
+      bookingId: 'booking_1',
+      action: 'REJECT',
+      alreadyDecided: true,
+      approval: rejectedApproval,
+    })
+
+    expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
+
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody,
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: responseBody,
+    })
+  })
+
+  it('does not fail decision when pro notification throws', async () => {
+    expectIdempotencyStarted('idem_notif_fail_1')
+
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    mocks.createProNotification.mockRejectedValueOnce(
+      new Error('notification failed'),
     )
 
-    const response = await handleConsultationDecision('APPROVE', makeCtx(), {
-      idempotencyKey: 'idem_approve_boom_1',
-    })
+    try {
+      const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+        idempotencyKey: 'idem_notif_fail_1',
+      })
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
-    })
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Pro notification failed (consultation decision):',
+        expect.any(Error),
+      )
 
-    expect(mocks.captureBookingException).toHaveBeenCalledWith({
-      error: expect.any(Error),
-      route: 'POST /api/client/bookings/[id]/consultation',
-    })
+      expect(result).toEqual({
+        ok: true,
+        status: 200,
+        data: approvedResponseBody,
+      })
 
-    expect(response.status).toBe(500)
-    await expect(response.json()).resolves.toEqual({
-      ok: false,
-      error: 'Internal server error',
-    })
+      expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_1',
+        responseStatus: 200,
+        responseBody: approvedResponseBody,
+      })
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 
-  it('returns 500 and marks idempotency failed when reject transaction throws', async () => {
-    mocks.prismaTransaction.mockRejectedValueOnce(new Error('reject boom'))
+  it('marks idempotency failed and returns 500 when approval write throws', async () => {
+    expectIdempotencyStarted('idem_boom_approve_1')
 
-    const response = await handleConsultationDecision('REJECT', makeCtx(), {
-      idempotencyKey: 'idem_reject_boom_1',
-    })
+    mocks.approveConsultationAndMaterializeBooking.mockRejectedValueOnce(
+      new Error('boom'),
+    )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
-    })
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
 
-    expect(mocks.captureBookingException).toHaveBeenCalledWith({
-      error: expect.any(Error),
-      route: 'POST /api/client/bookings/[id]/consultation',
-    })
+    try {
+      const result = await handleConsultationDecision('APPROVE', makeCtx(), {
+        idempotencyKey: 'idem_boom_approve_1',
+      })
 
-    expect(response.status).toBe(500)
-    await expect(response.json()).resolves.toEqual({
-      ok: false,
-      error: 'Internal server error',
-    })
+      expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_1',
+        operation: OPERATION,
+      })
+
+      expect(mocks.captureBookingException).toHaveBeenCalledWith({
+        error: expect.any(Error),
+        route: OPERATION,
+      })
+
+      expect(result).toEqual({
+        ok: false,
+        status: 500,
+        error: 'Internal server error',
+      })
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
+  })
+
+  it('marks idempotency failed and returns 500 when rejection transaction throws', async () => {
+    expectIdempotencyStarted('idem_boom_reject_1')
+
+    mocks.prismaTransaction.mockRejectedValueOnce(new Error('boom'))
+
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    try {
+      const result = await handleConsultationDecision('REJECT', makeCtx(), {
+        idempotencyKey: 'idem_boom_reject_1',
+      })
+
+      expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_1',
+        operation: OPERATION,
+      })
+
+      expect(mocks.captureBookingException).toHaveBeenCalledWith({
+        error: expect.any(Error),
+        route: OPERATION,
+      })
+
+      expect(result).toEqual({
+        ok: false,
+        status: 500,
+        error: 'Internal server error',
+      })
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 })

@@ -21,14 +21,16 @@ import {
 } from '@/lib/consultation/clientActionTokens'
 import { ClientActionTokenKind, Prisma, Role } from '@prisma/client'
 import {
-  beginIdempotency,
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
+import {
   buildPublicConsultationTokenActorKey,
-  completeIdempotency,
-  failIdempotency,
   IDEMPOTENCY_ROUTES,
 } from '@/lib/idempotency'
-import { captureBookingException } from '@/lib/observability/bookingEvents'
-
 export const dynamic = 'force-dynamic'
 
 type Ctx = {
@@ -298,7 +300,10 @@ async function failStartedIdempotency(
 ): Promise<void> {
   if (!idempotencyRecordId) return
 
-  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+  await failStartedRouteIdempotency({
+    idempotencyRecordId,
+    operation: 'POST /api/public/consultation/[token]/decision',
+  }).catch((failError) => {
     console.error(
       'POST /api/public/consultation/[token]/decision idempotency failure update error:',
       failError,
@@ -348,34 +353,30 @@ export async function POST(req: Request, ctx: Ctx) {
       return invalidTokenFail()
     }
 
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: req,
       actor: {
         actorUserId: null,
         actorKey: buildPublicConsultationTokenActorKey(tokenRecord.id),
         actorRole: Role.CLIENT,
       },
       route: IDEMPOTENCY_ROUTES.CONSULTATION_PUBLIC_DECISION,
-      key: idempotencyKey,
+      requestLabel: 'public consultation decision',
       requestBody: {
         clientActionTokenId: tokenRecord.id,
         action,
       },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress:
+          'A matching consultation decision request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
@@ -394,7 +395,7 @@ export async function POST(req: Request, ctx: Ctx) {
         result,
       })
 
-      await completeIdempotency({
+      await completeRouteIdempotency({
         idempotencyRecordId,
         responseStatus: 200,
         responseBody,
@@ -416,7 +417,7 @@ export async function POST(req: Request, ctx: Ctx) {
       result,
     })
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 200,
       responseBody,

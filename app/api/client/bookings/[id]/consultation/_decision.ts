@@ -2,13 +2,19 @@
 
 import { prisma } from '@/lib/prisma'
 import {
+  enforceRateLimit,
   jsonFail,
   jsonOk,
   pickString,
-  requireClient,
-  enforceRateLimit,
   rateLimitIdentity,
+  requireClient,
 } from '@/app/api/_utils'
+import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
 import { approveConsultationAndMaterializeBooking } from '@/lib/booking/writeBoundary'
 import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 import { createProNotification } from '@/lib/notifications/proNotifications'
@@ -19,12 +25,7 @@ import {
   Prisma,
   Role,
 } from '@prisma/client'
-import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export type ConsultationDecisionAction = 'APPROVE' | 'REJECT'
@@ -43,6 +44,8 @@ type NestedInputJsonValue = Prisma.InputJsonValue | null
 type JsonObjectPayload = {
   [key: string]: NestedInputJsonValue
 }
+
+const OPERATION = 'POST /api/client/bookings/[id]/consultation'
 
 const CONSULTATION_APPROVAL_SELECT = {
   id: true,
@@ -146,35 +149,9 @@ async function createConsultationDecisionNotification(args: {
         step: 'consult',
       },
     })
-  } catch (e) {
+  } catch (e: unknown) {
     console.error('Pro notification failed (consultation decision):', e)
   }
-}
-
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching consultation decision request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
-  )
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
 }
 
 function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
@@ -256,7 +233,10 @@ async function failStartedIdempotency(
 ): Promise<void> {
   if (!idempotencyRecordId) return
 
-  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+  await failStartedRouteIdempotency({
+    idempotencyRecordId,
+    operation: OPERATION,
+  }).catch((failError: unknown) => {
     console.error(
       'POST /api/client/bookings/[id]/consultation idempotency failure update error:',
       failError,
@@ -271,7 +251,7 @@ async function failStartedIdempotency(
  * - begin durable idempotency before approve/reject writes
  * - APPROVE: materialize approved proposal into canonical Booking state
  * - REJECT: preserve ConsultationApproval as rejected history only
- * - notify pro (best effort)
+ * - notify pro best-effort
  * - return updated approval snapshot
  */
 export async function handleConsultationDecision(
@@ -315,37 +295,47 @@ export async function handleConsultationDecision(
       )
     }
 
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const requestBody = {
+      bookingId,
+      clientId,
+      actorUserId: user.id,
+      professionalId: booking.professionalId,
+      approvalId: approval.id,
+      action,
+    }
+
+const idempotencyRequest = new Request(
+  'http://localhost/api/client/bookings/consultation/decision',
+  {
+    method: 'POST',
+    headers: idempotencyKey
+      ? {
+          'idempotency-key': idempotencyKey,
+        }
+      : undefined,
+  },
+)
+
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: idempotencyRequest,
       actor: {
         actorUserId: user.id,
         actorRole: Role.CLIENT,
       },
       route: IDEMPOTENCY_ROUTES.CLIENT_CONSULTATION_DECISION,
-      key: idempotencyKey,
-      requestBody: {
-        bookingId,
-        clientId,
-        actorUserId: user.id,
-        professionalId: booking.professionalId,
-        approvalId: approval.id,
-        action,
+      requestLabel: 'client consultation decision',
+      requestBody,
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress:
+          'A matching consultation decision request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
       },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     const startedIdempotencyRecordId = idempotency.idempotencyRecordId
@@ -364,7 +354,7 @@ export async function handleConsultationDecision(
 
         return rl
       }
-    } catch (e) {
+    } catch (e: unknown) {
       console.warn('Rate limit skipped (limiter error):', e)
     }
 
@@ -376,11 +366,11 @@ export async function handleConsultationDecision(
         approval,
       })
 
-  await completeIdempotency({
-      idempotencyRecordId: startedIdempotencyRecordId,
-      responseStatus: 200,
-      responseBody,
-    })
+      await completeRouteIdempotency({
+        idempotencyRecordId: startedIdempotencyRecordId,
+        responseStatus: 200,
+        responseBody,
+      })
 
       return jsonOk(responseBody, 200)
     }
@@ -400,7 +390,7 @@ export async function handleConsultationDecision(
         approval: result.approval,
       })
 
-      await completeIdempotency({
+      await completeRouteIdempotency({
         idempotencyRecordId: startedIdempotencyRecordId,
         responseStatus: 200,
         responseBody,
@@ -511,11 +501,11 @@ export async function handleConsultationDecision(
         approval: rejectResult.approval,
       })
 
-    await completeIdempotency({
-      idempotencyRecordId: startedIdempotencyRecordId,
-      responseStatus: 200,
-      responseBody,
-    })
+      await completeRouteIdempotency({
+        idempotencyRecordId: startedIdempotencyRecordId,
+        responseStatus: 200,
+        responseBody,
+      })
 
       return jsonOk(responseBody, 200)
     }
@@ -526,7 +516,7 @@ export async function handleConsultationDecision(
       approval: rejectResult.approval,
     })
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId: startedIdempotencyRecordId,
       responseStatus: 200,
       responseBody,
@@ -548,7 +538,7 @@ export async function handleConsultationDecision(
     console.error('handleConsultationDecision error', e)
     captureBookingException({
       error: e,
-      route: 'POST /api/client/bookings/[id]/consultation',
+      route: OPERATION,
     })
 
     return jsonFail(500, 'Internal server error')

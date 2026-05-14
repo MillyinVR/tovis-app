@@ -18,11 +18,12 @@ import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
 import { createAftercareAccessDelivery } from '@/lib/clientActions/createAftercareAccessDelivery'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -507,31 +508,6 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching aftercare request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
-  )
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
-}
 
 function toIsoOrNull(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
@@ -955,19 +931,6 @@ async function maybeQueueAftercareAccessDelivery(args: {
   }
 }
 
-async function failStartedIdempotency(
-  idempotencyRecordId: string | null,
-): Promise<void> {
-  if (!idempotencyRecordId) return
-
-  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-    console.error(
-      'POST /api/pro/bookings/[id]/aftercare idempotency failure update error:',
-      failError,
-    )
-  })
-}
-
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
@@ -1054,35 +1017,30 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const requestMeta = readRequestMeta(req)
 
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: req,
       actor: {
         actorUserId,
         actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTES.BOOKING_AFTERCARE_SEND,
-      key: requestMeta.idempotencyKey,
+      requestLabel: 'aftercare',
       requestBody: buildIdempotencyRequestBody({
         bookingId,
         professionalId,
         actorUserId,
         parsedBody: parsedBody.value,
       }),
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching aftercare request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
@@ -1103,7 +1061,7 @@ export async function POST(req: Request, ctx: Ctx) {
       sendToClient: parsedBody.value.sendToClient,
       version: parsedBody.value.version,
       requestId: requestMeta.requestId,
-      idempotencyKey: requestMeta.idempotencyKey,
+      idempotencyKey: idempotency.idempotencyKey,
     })
 
     const aftercareAccessDelivery = await maybeQueueAftercareAccessDelivery({
@@ -1123,7 +1081,7 @@ export async function POST(req: Request, ctx: Ctx) {
       aftercareAccessDelivery,
     })
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 200,
       responseBody,
@@ -1131,9 +1089,10 @@ export async function POST(req: Request, ctx: Ctx) {
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failStartedIdempotency(idempotencyRecordId)
-    }
+    await failStartedRouteIdempotency({
+      idempotencyRecordId,
+      operation: 'POST /api/pro/bookings/[id]/aftercare',
+    })
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {

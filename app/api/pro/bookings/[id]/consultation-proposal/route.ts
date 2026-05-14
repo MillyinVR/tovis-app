@@ -26,11 +26,12 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
@@ -40,6 +41,8 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 const NOTES_MAX = 2000
 const LINE_ITEM_NOTES_MAX = 1000
 const MAX_LINE_ITEMS = 100
+
+const OPERATION = 'POST /api/pro/bookings/[id]/consultation-proposal'
 
 type NestedInputJsonValue = Prisma.InputJsonValue | null
 
@@ -139,32 +142,6 @@ function bookingJsonFail(
 ) {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching consultation proposal request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
-  )
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
 }
 
 function parseMoneyToCents(v: unknown): number | null {
@@ -358,12 +335,11 @@ function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
     return value.map((item) => normalizeNestedJsonValue(item))
   }
 
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
+  if (isRecord(value)) {
     const out: JsonObjectPayload = {}
 
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
+    for (const key of Object.keys(value).sort()) {
+      out[key] = normalizeNestedJsonValue(value[key])
     }
 
     return out
@@ -377,17 +353,16 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
     return {}
   }
 
-  if (typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return {
       value: normalizeNestedJsonValue(value),
     }
   }
 
-  const input = value as Record<string, unknown>
   const out: JsonObjectPayload = {}
 
-  for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
+  for (const key of Object.keys(value).sort()) {
+    out[key] = normalizeNestedJsonValue(value[key])
   }
 
   return out
@@ -574,6 +549,22 @@ async function maybeQueueConsultationActionDelivery(args: {
   }
 }
 
+async function failStartedIdempotency(
+  idempotencyRecordId: string | null,
+): Promise<void> {
+  if (!idempotencyRecordId) return
+
+  await failStartedRouteIdempotency({
+    idempotencyRecordId,
+    operation: OPERATION,
+  }).catch((failError) => {
+    console.error(
+      'POST /api/pro/bookings/[id]/consultation-proposal idempotency failure update error:',
+      failError,
+    )
+  })
+}
+
 export async function POST(req: Request, ctx: Ctx) {
   let idempotencyRecordId: string | null = null
 
@@ -598,7 +589,7 @@ export async function POST(req: Request, ctx: Ctx) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
-    const { requestId, idempotencyKey } = readRequestMeta(req)
+    const requestMeta = readRequestMeta(req)
 
     const body: unknown = await req.json().catch(() => null)
     if (!isRecord(body)) {
@@ -634,13 +625,14 @@ export async function POST(req: Request, ctx: Ctx) {
     const notes = notesRaw ? notesRaw.slice(0, NOTES_MAX) : null
     const proposedTotal = centsToDecimalDollars(proposedCents)
 
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: req,
       actor: {
         actorUserId,
         actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTES.CONSULTATION_PROPOSAL_SEND,
-      key: idempotencyKey,
+      requestLabel: 'consultation proposal',
       requestBody: {
         professionalId,
         actorUserId,
@@ -650,25 +642,22 @@ export async function POST(req: Request, ctx: Ctx) {
         proposedCents,
         notes,
       },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress:
+          'A matching consultation proposal request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
+
+    const idempotencyKey = idempotency.idempotencyKey
 
     const txResult: TxResult = await prisma.$transaction(async (tx) => {
       const booking = await tx.booking.findUnique({
@@ -950,7 +939,7 @@ export async function POST(req: Request, ctx: Ctx) {
           action: BookingCloseoutAuditAction.CONSULTATION_PROPOSAL_SENT,
           route:
             'app/api/pro/bookings/[id]/consultation-proposal/route.ts',
-          requestId,
+          requestId: requestMeta.requestId,
           idempotencyKey,
           oldValue: oldProposalState,
           newValue: newProposalState,
@@ -976,7 +965,7 @@ export async function POST(req: Request, ctx: Ctx) {
     })
 
     if (!txResult.ok) {
-      await failIdempotency({ idempotencyRecordId })
+      await failStartedIdempotency(idempotencyRecordId)
       idempotencyRecordId = null
 
       return jsonFail(
@@ -1002,7 +991,7 @@ export async function POST(req: Request, ctx: Ctx) {
       meta: txResult.meta,
     })
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 200,
       responseBody,
@@ -1011,12 +1000,7 @@ export async function POST(req: Request, ctx: Ctx) {
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {
     if (idempotencyRecordId) {
-      await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-        console.error(
-          'POST /api/pro/bookings/[id]/consultation-proposal idempotency failure update error:',
-          failError,
-        )
-      })
+      await failStartedIdempotency(idempotencyRecordId)
     }
 
     if (isBookingError(error)) {
@@ -1032,7 +1016,7 @@ export async function POST(req: Request, ctx: Ctx) {
     )
     captureBookingException({
       error,
-      route: 'POST /api/pro/bookings/[id]/consultation-proposal',
+      route: OPERATION,
     })
 
     return jsonFail(500, 'Internal server error')

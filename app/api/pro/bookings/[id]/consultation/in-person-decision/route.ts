@@ -15,11 +15,12 @@ import {
 import { recordInPersonConsultationDecision } from '@/lib/booking/writeBoundary'
 import { ConsultationDecision, Prisma, Role } from '@prisma/client'
 import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
@@ -33,7 +34,6 @@ type InPersonDecisionRequestBody = {
 
 type RequestMeta = {
   requestId: string | null
-  idempotencyKey: string | null
   userAgent: string | null
 }
 
@@ -62,31 +62,6 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching in-person consultation decision request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
-  )
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
-}
 
 function parseDecisionAction(value: unknown): ConsultationDecision | null {
   const normalized = upper(value)
@@ -121,7 +96,6 @@ function readRequestMeta(req: Request): RequestMeta {
 
   return {
     requestId,
-    idempotencyKey,
     userAgent,
   }
 }
@@ -239,7 +213,11 @@ async function failStartedIdempotency(
 ): Promise<void> {
   if (!idempotencyRecordId) return
 
-  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
+  await failStartedRouteIdempotency({
+    idempotencyRecordId,
+    operation:
+      'POST /api/pro/bookings/[id]/consultation/in-person-decision',
+  }).catch((failError) => {
     console.error(
       'POST /api/pro/bookings/[id]/consultation/in-person-decision idempotency failure update error:',
       failError,
@@ -279,40 +257,37 @@ export async function POST(req: Request, ctx: Ctx) {
       return jsonFail(400, 'Invalid action. Use APPROVED or REJECTED.')
     }
 
-    const { requestId, idempotencyKey, userAgent } = readRequestMeta(req)
+    const { requestId, userAgent } = readRequestMeta(req)
 
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: req,
       actor: {
         actorUserId: recordedByUserId,
         actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTES.CONSULTATION_IN_PERSON_DECISION,
-      key: idempotencyKey,
+      requestLabel: 'in-person consultation decision',
       requestBody: {
         professionalId,
         recordedByUserId,
         bookingId,
         decision,
       },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress:
+          'A matching in-person consultation decision request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
+    const idempotencyKey = idempotency.idempotencyKey
 
     const result = await recordInPersonConsultationDecision({
       bookingId,
@@ -330,7 +305,7 @@ export async function POST(req: Request, ctx: Ctx) {
       result,
     })
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 200,
       responseBody,
