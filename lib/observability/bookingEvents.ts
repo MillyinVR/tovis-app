@@ -65,9 +65,8 @@ export function captureBookingException(
  * Captures a lifecycle contract drift event in Sentry as a structured warning.
  *
  * "Drift" means a SessionStep or BookingStatus transition was performed that
- * the lifecycle contract does not permit. Today we report it; under
- * `LIFECYCLE_STRICT_MODE=true` the contract throws upstream and this sink is
- * still called for visibility.
+ * the lifecycle contract does not permit. Strict mode now throws upstream by
+ * default, but this sink is still called before the throw for visibility.
  */
 export function captureLifecycleDrift(event: LifecycleDriftEvent): void {
   Sentry.withScope((scope) => {

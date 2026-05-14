@@ -64,10 +64,10 @@ describe('lib/booking/lifecycleContract strict mode', () => {
     restoreLifecycleStrictModeEnv()
   })
 
-  it('defaults strict mode off when LIFECYCLE_STRICT_MODE is not set', () => {
+  it('defaults strict mode on when LIFECYCLE_STRICT_MODE is not set', () => {
     setLifecycleStrictMode(undefined)
 
-    expect(isLifecycleStrictMode()).toBe(false)
+    expect(isLifecycleStrictMode()).toBe(true)
   })
 
   it.each([
@@ -76,6 +76,7 @@ describe('lib/booking/lifecycleContract strict mode', () => {
     ['TRUE'],
     ['yes'],
     [' YES '],
+    ['enabled'],
   ])('treats LIFECYCLE_STRICT_MODE=%s as enabled', (value) => {
     setLifecycleStrictMode(value)
 
@@ -86,8 +87,8 @@ describe('lib/booking/lifecycleContract strict mode', () => {
     ['0'],
     ['false'],
     ['no'],
+    ['off'],
     [''],
-    ['enabled'],
   ])('treats LIFECYCLE_STRICT_MODE=%s as disabled', (value) => {
     setLifecycleStrictMode(value)
 
@@ -95,7 +96,7 @@ describe('lib/booking/lifecycleContract strict mode', () => {
   })
 
   it('records drift but does not throw for unauthorized status actor when strict mode is off', () => {
-    setLifecycleStrictMode(undefined)
+    setLifecycleStrictMode('false')
 
     const events = captureDriftEvents()
 
