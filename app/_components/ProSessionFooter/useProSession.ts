@@ -13,7 +13,11 @@ import type {
 import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
 
-type CenterState = { label: string; action: UiSessionCenterAction; href: string | null }
+type CenterState = {
+  label: string
+  action: UiSessionCenterAction
+  href: string | null
+}
 
 export const FORCE_EVENT = 'tovis:pro-session:force'
 
@@ -23,7 +27,11 @@ const SOFT_THROTTLE_MS = 10_000
 const FETCH_TIMEOUT_MS = 8_000
 const VISIBILITY_DEBOUNCE_MS = 200
 
-const DEFAULT_CENTER: CenterState = { label: 'Start', action: 'NONE', href: null }
+const DEFAULT_CENTER: CenterState = {
+  label: 'Start',
+  action: 'NONE',
+  href: null,
+}
 
 function getString(x: unknown): string | null {
   return typeof x === 'string' ? x : null
@@ -40,12 +48,12 @@ function getBoolProp(obj: unknown, key: string): boolean | null {
   return typeof v === 'boolean' ? v : null
 }
 
-function currentPathWithQuery() {
+function currentPathWithQuery(): string {
   if (typeof window === 'undefined') return '/'
   return window.location.pathname + window.location.search + window.location.hash
 }
 
-function sanitizeFrom(from: string) {
+function sanitizeFrom(from: string): string {
   const trimmed = from.trim()
   if (!trimmed) return '/'
   if (!trimmed.startsWith('/')) return '/'
@@ -54,19 +62,26 @@ function sanitizeFrom(from: string) {
 }
 
 function isSafeInternalHref(href: unknown): href is string {
-  return typeof href === 'string' && href.startsWith('/') && !href.startsWith('//')
+  return (
+    typeof href === 'string' &&
+    href.startsWith('/') &&
+    !href.startsWith('//')
+  )
 }
 
-function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string) {
+function redirectToLogin(router: ReturnType<typeof useRouter>, reason?: string): void {
   const from = sanitizeFrom(currentPathWithQuery())
   const qs = new URLSearchParams({ from })
+
   if (reason) qs.set('reason', reason)
+
   router.push(`/login?${qs.toString()}`)
 }
 
-function errorFromResponse(res: Response, data: unknown) {
+function errorFromResponse(res: Response, data: unknown): string {
   const e = getStringProp(data, 'error')
   if (e) return e
+
   const m = getStringProp(data, 'message')
   if (m) return m
 
@@ -74,40 +89,48 @@ function errorFromResponse(res: Response, data: unknown) {
   if (res.status === 403) return 'You don’t have access to do that.'
   if (res.status === 404) return 'Not found.'
   if (res.status === 409) return 'That action isn’t allowed right now.'
+
   return `Request failed (${res.status}).`
 }
 
 function normalizeMode(v: unknown): UiSessionMode {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+
   if (s === 'UPCOMING') return 'UPCOMING'
   if (s === 'UPCOMING_PICKER') return 'UPCOMING_PICKER'
   if (s === 'ACTIVE') return 'ACTIVE'
+
   return 'IDLE'
 }
 
 function normalizeAction(v: unknown): UiSessionCenterAction {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''
+
   if (s === 'START') return 'START'
   if (s === 'NAVIGATE') return 'NAVIGATE'
   if (s === 'CAPTURE_BEFORE') return 'CAPTURE_BEFORE'
   if (s === 'CAPTURE_AFTER') return 'CAPTURE_AFTER'
   if (s === 'FINISH') return 'FINISH'
   if (s === 'PICK_BOOKING') return 'PICK_BOOKING'
+
   return 'NONE'
 }
 
 function normalizeStepKey(v: unknown): StepKey | null {
   const s = typeof v === 'string' ? v.trim().toLowerCase() : ''
+
   if (s === 'consult') return 'consult'
   if (s === 'session') return 'session'
   if (s === 'aftercare') return 'aftercare'
+
   return null
 }
 
 function parseBooking(v: unknown): SessionBooking | null {
   if (!isRecord(v)) return null
+
   const id = getString(v.id)
-  if (!id || !id.trim()) return null
+  if (!id?.trim()) return null
 
   const serviceName = getString(v.serviceName) ?? undefined
   const clientName = getString(v.clientName) ?? undefined
@@ -125,41 +148,43 @@ function parseBooking(v: unknown): SessionBooking | null {
 
 function parseBookingList(v: unknown): SessionBooking[] {
   if (!Array.isArray(v)) return []
-  return v.map(parseBooking).filter((item): item is SessionBooking => Boolean(item))
+
+  return v
+    .map(parseBooking)
+    .filter((item): item is SessionBooking => Boolean(item))
 }
 
 function parseCenter(v: unknown): CenterState {
   if (!isRecord(v)) return DEFAULT_CENTER
 
   const labelRaw = getString(v.label)
-  const label = labelRaw && labelRaw.trim() ? labelRaw.trim() : 'Start'
-
+  const label = labelRaw?.trim() || 'Start'
   const action = normalizeAction(v.action)
-
-  const hrefRaw = v.href
-  const href = isSafeInternalHref(hrefRaw) ? hrefRaw : null
+  const href = isSafeInternalHref(v.href) ? v.href : null
 
   return { label, action, href }
 }
 
-type LoadOpts = { silent?: boolean; force?: boolean }
+type LoadOpts = {
+  silent?: boolean
+  force?: boolean
+}
 
-function bookingRoot(bookingId: string) {
+function bookingRoot(bookingId: string): string {
   return `/pro/bookings/${encodeURIComponent(bookingId)}`
 }
 
-function bookingSessionHub(bookingId: string) {
+function bookingSessionHub(bookingId: string): string {
   return `${bookingRoot(bookingId)}/session`
 }
 
 /**
  * Center can be clicked if:
- * - not busy, AND
- * - action is not NONE, AND
- * - requirements are met for that action
+ * - not busy
+ * - action is not NONE
+ * - requirements are present for that action
  *
- * NOTE: we intentionally do NOT gate by `mode`.
- * The server is the canonical source of truth.
+ * Server response remains the canonical source of truth.
  */
 function canClickCenter(args: {
   actionLoading: 'start' | 'nav' | null
@@ -167,16 +192,25 @@ function canClickCenter(args: {
   href: string | null
   bookingId: string | null
   eligibleCount: number
-}) {
+}): boolean {
   const { actionLoading, action, href, bookingId, eligibleCount } = args
+
   if (actionLoading) return false
   if (action === 'NONE') return false
 
-  if (action === 'START' || action === 'FINISH') return Boolean(bookingId)
+  if (action === 'START' || action === 'FINISH') {
+    return Boolean(bookingId)
+  }
 
-  if (action === 'PICK_BOOKING') return eligibleCount > 1
+  if (action === 'PICK_BOOKING') {
+    return eligibleCount > 1
+  }
 
-  if (action === 'NAVIGATE' || action === 'CAPTURE_BEFORE' || action === 'CAPTURE_AFTER') {
+  if (
+    action === 'NAVIGATE' ||
+    action === 'CAPTURE_BEFORE' ||
+    action === 'CAPTURE_AFTER'
+  ) {
     return Boolean(href || bookingId)
   }
 
@@ -192,11 +226,13 @@ function buildProSessionIdempotencyKey(args: {
   bookingId: string
   action: 'START' | 'FINISH'
 }): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `pro-session-${args.action.toLowerCase()}-${args.bookingId}-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}`
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+
+  return `pro-session-${args.action.toLowerCase()}-${args.bookingId}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}`
 }
 
 export function useProSession() {
@@ -211,7 +247,9 @@ export function useProSession() {
   const [pickerOpen, setPickerOpen] = useState(false)
 
   const [loading, setLoading] = useState(false)
-  const [actionLoading, setActionLoading] = useState<'start' | 'nav' | null>(null)
+  const [actionLoading, setActionLoading] = useState<'start' | 'nav' | null>(
+    null,
+  )
   const [error, setError] = useState<string | null>(null)
 
   // Concurrency + freshness
@@ -223,7 +261,11 @@ export function useProSession() {
   // Scheduling
   const pollTimerRef = useRef<number | null>(null)
   const visTimerRef = useRef<number | null>(null)
+
+  // Initialized from first render so the pathname effect does not immediately
+  // fire a duplicate forced session load on mount.
   const didInitRef = useRef(false)
+  const lastPathnameRef = useRef<string | null>(pathname ?? null)
 
   const bookingId = booking?.id ? String(booking.id) : null
 
@@ -235,7 +277,13 @@ export function useProSession() {
       bookingId,
       eligibleCount: eligibleBookings.length,
     })
-  }, [actionLoading, center.action, center.href, bookingId, eligibleBookings.length])
+  }, [
+    actionLoading,
+    center.action,
+    center.href,
+    bookingId,
+    eligibleBookings.length,
+  ])
 
   const applyIdle = useCallback((opts?: LoadOpts, res?: Response, data?: unknown) => {
     setMode('IDLE')
@@ -244,11 +292,15 @@ export function useProSession() {
     setTargetStep(null)
     setCenter(DEFAULT_CENTER)
     setPickerOpen(false)
-    if (!opts?.silent && res) setError(errorFromResponse(res, data))
+
+    if (!opts?.silent && res) {
+      setError(errorFromResponse(res, data))
+    }
   }, [])
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current == null) return
+
     window.clearTimeout(pollTimerRef.current)
     pollTimerRef.current = null
   }, [])
@@ -256,9 +308,12 @@ export function useProSession() {
   const scheduleNextPoll = useCallback(
     (loadSessionFn: (opts?: LoadOpts) => Promise<ProSessionPayload | null>) => {
       stopPolling()
+
       const jitter = Math.floor(Math.random() * 1500)
+
       pollTimerRef.current = window.setTimeout(() => {
         if (document.visibilityState !== 'visible') return
+
         void loadSessionFn({ silent: true })
         scheduleNextPoll(loadSessionFn)
       }, POLL_MS + jitter)
@@ -290,7 +345,9 @@ export function useProSession() {
         setError(null)
       }
 
-      const timeoutId = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+      const timeoutId = window.setTimeout(() => {
+        controller.abort()
+      }, FETCH_TIMEOUT_MS)
 
       try {
         const res = await fetch('/api/pro/session', {
@@ -306,14 +363,15 @@ export function useProSession() {
             redirectedRef.current = true
             redirectToLogin(router, 'pro-session')
           }
+
           return null
         }
 
         redirectedRef.current = false
 
         const data = await safeJson(res)
-
         const ok = getBoolProp(data, 'ok') === true
+
         if (!res.ok || !ok) {
           applyIdle(opts, res, data)
           return null
@@ -321,8 +379,12 @@ export function useProSession() {
 
         const nextMode = normalizeMode(isRecord(data) ? data.mode : null)
         const nextBooking = parseBooking(isRecord(data) ? data.booking : null)
-        const nextEligibleBookings = parseBookingList(isRecord(data) ? data.eligibleBookings : null)
-        const nextTarget = normalizeStepKey(isRecord(data) ? data.targetStep : null)
+        const nextEligibleBookings = parseBookingList(
+          isRecord(data) ? data.eligibleBookings : null,
+        )
+        const nextTarget = normalizeStepKey(
+          isRecord(data) ? data.targetStep : null,
+        )
         const nextCenter = parseCenter(isRecord(data) ? data.center : null)
 
         setMode(nextMode)
@@ -335,25 +397,36 @@ export function useProSession() {
           setPickerOpen(false)
         }
 
-        const payload: ProSessionPayload = {
+        return {
           ok: true,
           mode: nextMode,
           booking: nextBooking,
-          eligibleBookings: nextEligibleBookings.length > 0 ? nextEligibleBookings : null,
+          eligibleBookings:
+            nextEligibleBookings.length > 0 ? nextEligibleBookings : null,
           targetStep: nextTarget,
           center: nextCenter,
         }
-
-        return payload
       } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === 'AbortError') return null
-        if (!opts?.silent) setError('Network error loading session.')
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return null
+        }
+
+        if (!opts?.silent) {
+          setError('Network error loading session.')
+        }
+
         return null
       } finally {
         window.clearTimeout(timeoutId)
+
         if (reqIdRef.current === myReqId) {
-          if (inFlightRef.current === controller) inFlightRef.current = null
-          if (!opts?.silent) setLoading(false)
+          if (inFlightRef.current === controller) {
+            inFlightRef.current = null
+          }
+
+          if (!opts?.silent) {
+            setLoading(false)
+          }
         }
       }
     },
@@ -364,28 +437,41 @@ export function useProSession() {
     didInitRef.current = true
 
     const onVisibility = () => {
-      if (visTimerRef.current) window.clearTimeout(visTimerRef.current)
+      if (visTimerRef.current) {
+        window.clearTimeout(visTimerRef.current)
+      }
+
       visTimerRef.current = window.setTimeout(() => {
         if (document.visibilityState === 'visible') {
           void loadSession({ silent: true, force: true })
           scheduleNextPoll(loadSession)
-        } else {
-          stopPolling()
+          return
         }
+
+        stopPolling()
       }, VISIBILITY_DEBOUNCE_MS)
     }
 
     void loadSession({ silent: false, force: true })
-    if (document.visibilityState === 'visible') scheduleNextPoll(loadSession)
+
+    if (document.visibilityState === 'visible') {
+      scheduleNextPoll(loadSession)
+    }
 
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('focus', onVisibility)
 
     return () => {
       stopPolling()
-      if (visTimerRef.current) window.clearTimeout(visTimerRef.current)
+
+      if (visTimerRef.current) {
+        window.clearTimeout(visTimerRef.current)
+        visTimerRef.current = null
+      }
+
       document.removeEventListener('visibilitychange', onVisibility)
       window.removeEventListener('focus', onVisibility)
+
       inFlightRef.current?.abort()
       inFlightRef.current = null
     }
@@ -393,13 +479,25 @@ export function useProSession() {
 
   useEffect(() => {
     if (!didInitRef.current) return
+
+    const nextPathname = pathname ?? null
+
+    if (lastPathnameRef.current === nextPathname) return
+
+    lastPathnameRef.current = nextPathname
     void loadSession({ silent: true, force: true })
   }, [pathname, loadSession])
 
   useEffect(() => {
-    const onForce = () => void loadSession({ silent: true, force: true })
+    const onForce = () => {
+      void loadSession({ silent: true, force: true })
+    }
+
     window.addEventListener(FORCE_EVENT, onForce)
-    return () => window.removeEventListener(FORCE_EVENT, onForce)
+
+    return () => {
+      window.removeEventListener(FORCE_EVENT, onForce)
+    }
   }, [loadSession])
 
   const startSelectedBooking = useCallback(
@@ -428,12 +526,14 @@ export function useProSession() {
             },
           },
         )
+
         if (res.status === 401) {
           redirectToLogin(router, 'pro-start')
           return
         }
 
         const data = await safeJson(res)
+
         if (!res.ok) {
           setError(errorFromResponse(res, data))
           await loadSession({ silent: true, force: true })
@@ -447,8 +547,12 @@ export function useProSession() {
         const freshHref = fresh?.center?.href ?? null
 
         const target = nextHref ?? freshHref ?? fallbackHub
-        if (target === currentPathWithQuery()) router.refresh()
-        else router.push(target)
+
+        if (target === currentPathWithQuery()) {
+          router.refresh()
+        } else {
+          router.push(target)
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Something went wrong.'
         setError(msg)
@@ -461,6 +565,7 @@ export function useProSession() {
 
   const handleCenterClick = useCallback(async () => {
     if (centerDisabled) return
+
     setError(null)
 
     const fallbackHub = bookingId ? bookingSessionHub(bookingId) : '/pro/bookings'
@@ -473,6 +578,7 @@ export function useProSession() {
 
       if (center.action === 'START') {
         if (!bookingId) return
+
         setActionLoading('start')
 
         const idempotencyKey = buildProSessionIdempotencyKey({
@@ -490,9 +596,14 @@ export function useProSession() {
             },
           },
         )
-        if (res.status === 401) return redirectToLogin(router, 'pro-start')
+
+        if (res.status === 401) {
+          redirectToLogin(router, 'pro-start')
+          return
+        }
 
         const data = await safeJson(res)
+
         if (!res.ok) {
           setError(errorFromResponse(res, data))
           await loadSession({ silent: true, force: true })
@@ -504,13 +615,19 @@ export function useProSession() {
         const freshHref = fresh?.center?.href ?? null
 
         const target = nextHref ?? freshHref ?? fallbackHub
-        if (target === currentPathWithQuery()) router.refresh()
-        else router.push(target)
+
+        if (target === currentPathWithQuery()) {
+          router.refresh()
+        } else {
+          router.push(target)
+        }
+
         return
       }
 
       if (center.action === 'FINISH') {
         if (!bookingId) return
+
         setActionLoading('nav')
 
         const idempotencyKey = buildProSessionIdempotencyKey({
@@ -528,9 +645,14 @@ export function useProSession() {
             },
           },
         )
-        if (res.status === 401) return redirectToLogin(router, 'pro-finish')
+
+        if (res.status === 401) {
+          redirectToLogin(router, 'pro-finish')
+          return
+        }
 
         const data = await safeJson(res)
+
         if (!res.ok) {
           setError(errorFromResponse(res, data))
           await loadSession({ silent: true, force: true })
@@ -542,8 +664,13 @@ export function useProSession() {
         const freshHref = fresh?.center?.href ?? null
 
         const target = nextHref ?? freshHref ?? fallbackHub
-        if (target === currentPathWithQuery()) router.refresh()
-        else router.push(target)
+
+        if (target === currentPathWithQuery()) {
+          router.refresh()
+        } else {
+          router.push(target)
+        }
+
         return
       }
 
@@ -553,9 +680,17 @@ export function useProSession() {
         center.action === 'CAPTURE_AFTER'
       ) {
         setActionLoading('nav')
-        const target = isSafeInternalHref(center.href) ? center.href : fallbackHub
-        if (target === currentPathWithQuery()) router.refresh()
-        else router.push(target)
+
+        const target = isSafeInternalHref(center.href)
+          ? center.href
+          : fallbackHub
+
+        if (target === currentPathWithQuery()) {
+          router.refresh()
+        } else {
+          router.push(target)
+        }
+
         return
       }
 
@@ -566,11 +701,19 @@ export function useProSession() {
     } finally {
       setActionLoading(null)
     }
-  }, [bookingId, center.action, center.href, centerDisabled, loadSession, router])
+  }, [
+    bookingId,
+    center.action,
+    center.href,
+    centerDisabled,
+    loadSession,
+    router,
+  ])
 
   const displayLabel = useMemo(() => {
     if (actionLoading === 'start') return 'Starting…'
     if (actionLoading === 'nav') return 'Opening…'
+
     return center.label
   }, [actionLoading, center.label])
 
