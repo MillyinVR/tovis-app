@@ -1,3 +1,5 @@
+// app/api/client/bookings/[id]/checkout/stripe-session/route.ts
+
 import type { NextRequest } from 'next/server'
 import {
   PaymentMethod,
@@ -8,6 +10,12 @@ import {
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
+import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
@@ -16,16 +24,14 @@ import {
   prepareClientStripeCheckoutSession,
   recordStripeCheckoutSessionAttached,
 } from '@/lib/booking/writeBoundary'
-import { getStripe } from '@/lib/stripe/server'
-import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { getStripe } from '@/lib/stripe/server'
 
 export const dynamic = 'force-dynamic'
+
+const ROUTE_OPERATION =
+  'POST /api/client/bookings/[id]/checkout/stripe-session'
 
 type JsonValue =
   | string
@@ -39,7 +45,7 @@ type JsonObjectPayload = {
   [key: string]: JsonValue
 }
 
-type ParsedBody =
+type ParsedTipAmount =
   | { ok: true; tipAmount: string | null | undefined }
   | { ok: false; error: string }
 
@@ -49,14 +55,6 @@ function trimmedString(value: unknown): string | null {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function readIdempotencyKey(req: NextRequest): string | null {
-  return (
-    trimmedString(req.headers.get('idempotency-key')) ??
-    trimmedString(req.headers.get('x-idempotency-key')) ??
-    null
-  )
 }
 
 function normalizeBaseUrl(value: string): string {
@@ -95,7 +93,7 @@ function buildAftercareCheckoutReturnUrl(
   return url.toString()
 }
 
-function parseTipAmount(value: unknown): ParsedBody {
+function parseTipAmount(value: unknown): ParsedTipAmount {
   if (value === undefined) return { ok: true, tipAmount: undefined }
   if (value === null) return { ok: true, tipAmount: null }
 
@@ -103,6 +101,7 @@ function parseTipAmount(value: unknown): ParsedBody {
     if (!Number.isFinite(value) || value < 0) {
       return { ok: false, error: 'tipAmount must be a non-negative number.' }
     }
+
     return { ok: true, tipAmount: value.toFixed(2) }
   }
 
@@ -114,6 +113,7 @@ function parseTipAmount(value: unknown): ParsedBody {
     if (!Number.isFinite(parsed) || parsed < 0) {
       return { ok: false, error: 'tipAmount must be a non-negative amount.' }
     }
+
     return { ok: true, tipAmount: parsed.toFixed(2) }
   }
 
@@ -152,38 +152,12 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching Stripe checkout request is already in progress.',
-    { code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS' },
-  )
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    { code: 'IDEMPOTENCY_KEY_CONFLICT' },
-  )
-}
-
-async function failStartedIdempotency(
+async function failStripeSessionIdempotency(
   idempotencyRecordId: string | null,
 ): Promise<void> {
-  if (!idempotencyRecordId) return
-
-  await failIdempotency({ idempotencyRecordId }).catch((error) => {
-    console.error(
-      'POST /api/client/bookings/[id]/checkout/stripe-session idempotency failure update error:',
-      error,
-    )
+  await failStartedRouteIdempotency({
+    idempotencyRecordId,
+    operation: ROUTE_OPERATION,
   })
 }
 
@@ -193,6 +167,10 @@ function getSessionPaymentIntentId(
   if (!paymentIntent) return null
   if (typeof paymentIntent === 'string') return paymentIntent
   return typeof paymentIntent.id === 'string' ? paymentIntent.id : null
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
 }
 
 export async function POST(
@@ -205,7 +183,15 @@ export async function POST(
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const actorUserId = auth.user.id
+    const actorUserId = trimmedString(auth.user?.id)
+
+    if (!actorUserId) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'Authenticated actor user id is required.',
+        userMessage: 'You are not allowed to create Stripe checkout.',
+      })
+    }
+
     const { id } = await props.params
     const bookingId = trimmedString(id)
 
@@ -214,43 +200,38 @@ export async function POST(
     }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
-    const body: Record<string, unknown> = isObject(rawBody) ? rawBody : {}
+    const body = isObject(rawBody) ? rawBody : {}
+
     const parsedTip = parseTipAmount(body.tipAmount)
     if (!parsedTip.ok) {
       return jsonFail(400, parsedTip.error)
     }
 
-    const idempotencyKey = readIdempotencyKey(req)
-
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: req,
       actor: {
         actorUserId,
         actorRole: Role.CLIENT,
       },
       route: IDEMPOTENCY_ROUTES.CLIENT_CHECKOUT_STRIPE_SESSION,
-      key: idempotencyKey,
+      requestLabel: 'client Stripe checkout session',
       requestBody: buildIdempotencyRequestBody({
         bookingId,
         clientId: auth.clientId,
         actorUserId,
         tipAmount: parsedTip.tipAmount,
       }),
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress:
+          'A matching Stripe checkout request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
@@ -260,18 +241,15 @@ export async function POST(
       clientId: auth.clientId,
       tipAmount: parsedTip.tipAmount,
       requestId: null,
-      idempotencyKey,
+      idempotencyKey: idempotency.idempotencyKey,
     })
 
     const stripe = getStripe()
 
-    // Stripe-side idempotency key — defense-in-depth in case our ledger is
-    // bypassed for any reason. Same client key + same booking always maps to
-    // the same Stripe session.
-    const stripeApiIdempotencyKey =
-      idempotencyKey != null
-        ? buildStripeApiIdempotencyKey({ bookingId, idempotencyKey })
-        : undefined
+    const stripeApiIdempotencyKey = buildStripeApiIdempotencyKey({
+      bookingId,
+      idempotencyKey: idempotency.idempotencyKey,
+    })
 
     const session = await stripe.checkout.sessions.create(
       {
@@ -314,9 +292,7 @@ export async function POST(
           },
         },
       },
-      stripeApiIdempotencyKey
-        ? { idempotencyKey: stripeApiIdempotencyKey }
-        : undefined,
+      { idempotencyKey: stripeApiIdempotencyKey },
     )
 
     const stripePaymentIntentId = getSessionPaymentIntentId(
@@ -342,7 +318,7 @@ export async function POST(
           ? session.currency
           : prepared.stripe.currency,
       requestId: null,
-      idempotencyKey,
+      idempotencyKey: idempotency.idempotencyKey,
     })
 
     const responseBody: JsonObjectPayload = {
@@ -353,7 +329,8 @@ export async function POST(
         paymentProvider: attached.booking.paymentProvider,
         stripeCheckoutSessionId: attached.booking.stripeCheckoutSessionId,
         stripePaymentIntentId: attached.booking.stripePaymentIntentId,
-        stripeCheckoutSessionStatus: attached.booking.stripeCheckoutSessionStatus,
+        stripeCheckoutSessionStatus:
+          attached.booking.stripeCheckoutSessionStatus,
         stripePaymentStatus: attached.booking.stripePaymentStatus,
         stripeAmountTotal: attached.booking.stripeAmountTotal,
         stripeCurrency: attached.booking.stripeCurrency,
@@ -362,11 +339,11 @@ export async function POST(
       },
       stripeCheckout: {
         sessionId: session.id,
-        url: session.url,
+        url: nullableString(session.url),
       },
     }
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 200,
       responseBody,
@@ -374,9 +351,7 @@ export async function POST(
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failStartedIdempotency(idempotencyRecordId)
-    }
+    await failStripeSessionIdempotency(idempotencyRecordId)
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -398,14 +373,11 @@ export async function POST(
       })
     }
 
-    console.error(
-      'POST /api/client/bookings/[id]/checkout/stripe-session error',
-      error,
-    )
+    console.error(`${ROUTE_OPERATION} error`, error)
 
     captureBookingException({
       error,
-      route: 'POST /api/client/bookings/[id]/checkout/stripe-session',
+      route: ROUTE_OPERATION,
     })
 
     return jsonFail(500, 'Failed to create Stripe checkout session.', {

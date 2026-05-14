@@ -6,9 +6,11 @@ import {
   BookingCheckoutStatus,
   PaymentMethod,
   Prisma,
+  Role,
 } from '@prisma/client'
 
 const IDEMPOTENCY_ROUTE = 'POST /api/client/bookings/[id]/checkout'
+const ROUTE_OPERATION = 'POST /api/client/bookings/[id]/checkout'
 
 const paidAt = new Date('2026-03-25T16:00:00.000Z')
 
@@ -16,6 +18,11 @@ const mocks = vi.hoisted(() => ({
   requireClient: vi.fn(),
   jsonOk: vi.fn(),
   jsonFail: vi.fn(),
+
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
 
   getBookingFailPayload: vi.fn(),
   isBookingError: vi.fn(),
@@ -25,10 +32,6 @@ const mocks = vi.hoisted(() => ({
   prismaBookingFindUnique: vi.fn(),
   prismaProfessionalPaymentSettingsFindUnique: vi.fn(),
 
-  beginIdempotency: vi.fn(),
-  completeIdempotency: vi.fn(),
-  failIdempotency: vi.fn(),
-
   captureBookingException: vi.fn(),
 }))
 
@@ -36,6 +39,13 @@ vi.mock('@/app/api/_utils', () => ({
   requireClient: mocks.requireClient,
   jsonOk: mocks.jsonOk,
   jsonFail: mocks.jsonFail,
+}))
+
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
 }))
 
 vi.mock('@/lib/booking/errors', () => ({
@@ -59,9 +69,6 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/idempotency', () => ({
-  beginIdempotency: mocks.beginIdempotency,
-  completeIdempotency: mocks.completeIdempotency,
-  failIdempotency: mocks.failIdempotency,
   IDEMPOTENCY_ROUTES: {
     CLIENT_CHECKOUT_CONFIRM: 'POST /api/client/bookings/[id]/checkout',
   },
@@ -113,6 +120,24 @@ function makeIdempotentRequest(
 function makeCtx(id = 'booking_1') {
   return {
     params: Promise.resolve({ id }),
+  }
+}
+
+function hasStringCode(value: unknown): value is { code: string } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'code' in value &&
+    typeof value.code === 'string'
+  )
+}
+
+function makeStartedIdempotency() {
+  return {
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: 'idem_checkout_1',
+    requestHash: 'hash_1',
   }
 }
 
@@ -222,7 +247,8 @@ function expectedIdempotencyBody(overrides?: {
     clientId: 'client_1',
     actorUserId: 'user_1',
     tipAmountProvided: overrides?.tipAmountProvided ?? true,
-    tipAmount: overrides && 'tipAmount' in overrides ? overrides.tipAmount : '15.00',
+    tipAmount:
+      overrides && 'tipAmount' in overrides ? overrides.tipAmount : '15.00',
     selectedPaymentMethodProvided:
       overrides?.selectedPaymentMethodProvided ?? true,
     selectedPaymentMethod:
@@ -231,6 +257,35 @@ function expectedIdempotencyBody(overrides?: {
         : PaymentMethod.CASH,
     confirmPayment: overrides?.confirmPayment ?? true,
   }
+}
+
+function expectRouteIdempotencyStartedWith(
+  requestBody = expectedIdempotencyBody(),
+): void {
+  expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+    request: expect.any(NextRequest),
+    actor: {
+      actorUserId: 'user_1',
+      actorRole: Role.CLIENT,
+    },
+    route: IDEMPOTENCY_ROUTE,
+    requestLabel: 'client checkout',
+    requestBody,
+    messages: {
+      missingKey: 'Missing idempotency key.',
+      inProgress: 'A matching checkout request is already in progress.',
+      conflict:
+        'This idempotency key was already used with a different request body.',
+    },
+  })
+}
+
+function mockHandledIdempotency(response: Response): void {
+  mocks.beginRouteIdempotency.mockResolvedValueOnce({
+    kind: 'handled',
+    response,
+  })
+  mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
 }
 
 describe('POST /api/client/bookings/[id]/checkout', () => {
@@ -260,12 +315,8 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       },
     })
 
-    mocks.isBookingError.mockImplementation(
-      (error: unknown) =>
-        typeof error === 'object' &&
-        error !== null &&
-        'code' in error &&
-        typeof (error as { code?: unknown }).code === 'string',
+    mocks.isBookingError.mockImplementation((error: unknown) =>
+      hasStringCode(error),
     )
 
     mocks.getBookingFailPayload.mockImplementation(
@@ -301,24 +352,10 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       },
     )
 
-    mocks.beginIdempotency.mockImplementation(
-      async (args: { key: string | null }) => {
-        const key = args.key?.trim()
-
-        if (!key) {
-          return { kind: 'missing_key' }
-        }
-
-        return {
-          kind: 'started',
-          idempotencyRecordId: 'idem_record_1',
-          requestHash: 'hash_1',
-        }
-      },
-    )
-
-    mocks.completeIdempotency.mockResolvedValue(undefined)
-    mocks.failIdempotency.mockResolvedValue(undefined)
+    mocks.beginRouteIdempotency.mockResolvedValue(makeStartedIdempotency())
+    mocks.isRouteIdempotencyHandled.mockReturnValue(false)
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
 
     mocks.prismaBookingFindUnique.mockResolvedValue({
       id: 'booking_1',
@@ -353,7 +390,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       error: 'Unauthorized',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
   })
 
@@ -366,7 +403,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       code: 'BOOKING_ID_REQUIRED',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
   })
 
@@ -385,11 +422,21 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
         'selectedPaymentMethod must be one of: cash, card on file, tap to pay, Venmo, Zelle, Apple Cash, Stripe card.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
   })
 
-  it('returns missing idempotency key for a valid checkout request without idempotency header', async () => {
+  it('returns handled missing-key idempotency response without loading booking or updating checkout', async () => {
+    const handledResponse = makeJsonResponse(
+      {
+        error: 'Missing idempotency key.',
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+      },
+      400,
+    )
+
+    mockHandledIdempotency(handledResponse)
+
     const response = await POST(
       makeRequest({
         tipAmount: '15.00',
@@ -399,31 +446,24 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({
-      error: 'Missing idempotency key.',
-      code: 'IDEMPOTENCY_KEY_REQUIRED',
-    })
+    expect(response).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith()
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: 'CLIENT',
+    expect(mocks.prismaBookingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns handled in-progress idempotency response without loading booking or updating checkout', async () => {
+    const handledResponse = makeJsonResponse(
+      {
+        error: 'A matching checkout request is already in progress.',
+        code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
       },
-      route: IDEMPOTENCY_ROUTE,
-      key: null,
-      requestBody: expectedIdempotencyBody(),
-    })
+      409,
+    )
 
-    expect(mocks.prismaBookingFindUnique).not.toHaveBeenCalled()
-    expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
-  })
-
-  it('returns in-progress when the idempotency ledger has an active matching request', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'in_progress',
-    })
+    mockHandledIdempotency(handledResponse)
 
     const response = await POST(
       makeIdempotentRequest({
@@ -434,21 +474,25 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(response.status).toBe(409)
-    await expect(response.json()).resolves.toEqual({
-      error: 'A matching checkout request is already in progress.',
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    })
+    expect(response).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith()
 
     expect(mocks.prismaBookingFindUnique).not.toHaveBeenCalled()
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns conflict when idempotency key was reused with a different body', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'conflict',
-    })
+  it('returns handled conflict idempotency response without loading booking or updating checkout', async () => {
+    const handledResponse = makeJsonResponse(
+      {
+        error:
+          'This idempotency key was already used with a different request body.',
+        code: 'IDEMPOTENCY_KEY_CONFLICT',
+      },
+      409,
+    )
+
+    mockHandledIdempotency(handledResponse)
 
     const response = await POST(
       makeIdempotentRequest({
@@ -459,26 +503,19 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(response.status).toBe(409)
-    await expect(response.json()).resolves.toEqual({
-      error:
-        'This idempotency key was already used with a different request body.',
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    })
+    expect(response).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith()
 
     expect(mocks.prismaBookingFindUnique).not.toHaveBeenCalled()
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('replays completed idempotency response without loading booking or updating checkout', async () => {
+  it('replays handled idempotency response without loading booking or updating checkout', async () => {
     const replayBody = expectedPaidResponseBody()
+    const handledResponse = makeJsonResponse(replayBody, 200)
 
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'replay',
-      responseStatus: 200,
-      responseBody: replayBody,
-    })
+    mockHandledIdempotency(handledResponse)
 
     const response = await POST(
       makeIdempotentRequest({
@@ -489,12 +526,12 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual(replayBody)
+    expect(response).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith()
 
     expect(mocks.prismaBookingFindUnique).not.toHaveBeenCalled()
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('returns 404 when booking does not exist and marks idempotency failed', async () => {
@@ -512,8 +549,9 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(response.status).toBe(404)
@@ -543,23 +581,18 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: 'CLIENT',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_missing_method_1',
-      requestBody: expectedIdempotencyBody({
+    expectRouteIdempotencyStartedWith(
+      expectedIdempotencyBody({
         tipAmount: '10.00',
         selectedPaymentMethodProvided: false,
         selectedPaymentMethod: null,
         confirmPayment: true,
       }),
-    })
+    )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(response.status).toBe(400)
@@ -583,23 +616,18 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: 'CLIENT',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_stripe_manual_confirm_1',
-      requestBody: expectedIdempotencyBody({
+    expectRouteIdempotencyStartedWith(
+      expectedIdempotencyBody({
         tipAmount: '15.00',
         selectedPaymentMethodProvided: true,
         selectedPaymentMethod: PaymentMethod.STRIPE_CARD,
         confirmPayment: true,
       }),
-    })
+    )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(response.status).toBe(400)
@@ -609,7 +637,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
     })
 
     expect(mocks.updateClientBookingCheckout).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('allows selecting STRIPE_CARD without marking payment collected', async () => {
@@ -641,7 +669,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
 
     const responseBody = expectedStripeSelectionResponseBody()
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody,
@@ -675,8 +703,9 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(response.status).toBe(400)
@@ -705,8 +734,9 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(response.status).toBe(400)
@@ -742,8 +772,9 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(response.status).toBe(400)
@@ -767,15 +798,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: 'CLIENT',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_checkout_success_1',
-      requestBody: expectedIdempotencyBody(),
-    })
+    expectRouteIdempotencyStartedWith()
 
     expect(mocks.updateClientBookingCheckout).toHaveBeenCalledWith({
       bookingId: 'booking_1',
@@ -789,7 +812,7 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
 
     const responseBody = expectedPaidResponseBody()
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody,
@@ -817,20 +840,14 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: 'CLIENT',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_existing_method_1',
-      requestBody: expectedIdempotencyBody({
+    expectRouteIdempotencyStartedWith(
+      expectedIdempotencyBody({
         tipAmount: '5.00',
         selectedPaymentMethodProvided: false,
         selectedPaymentMethod: null,
         confirmPayment: true,
       }),
-    })
+    )
 
     expect(mocks.updateClientBookingCheckout).toHaveBeenCalledWith({
       bookingId: 'booking_1',
@@ -864,8 +881,9 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(mocks.getBookingFailPayload).toHaveBeenCalledWith('FORBIDDEN', {
@@ -895,13 +913,14 @@ describe('POST /api/client/bookings/[id]/checkout', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(mocks.captureBookingException).toHaveBeenCalledWith({
       error: expect.any(Error),
-      route: 'POST /api/client/bookings/[id]/checkout',
+      route: ROUTE_OPERATION,
     })
 
     expect(response.status).toBe(500)

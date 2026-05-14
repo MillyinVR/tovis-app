@@ -886,6 +886,8 @@ type UpdateProBookingArgs = {
   hasBuffer: boolean
   hasDuration: boolean
   hasServiceItems: boolean
+  requestId?: string | null
+  idempotencyKey?: string | null
 }
 
 type UpdateProBookingResult = {
@@ -3183,6 +3185,8 @@ async function createBookingOverrideAuditLogs(args: {
   maxDaysAhead: number
   workingHours: unknown
   timeZone: string
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<void> {
   if (args.appliedOverrides.length === 0) return
 
@@ -8214,6 +8218,8 @@ async function performLockedUpdateProBooking(args: {
   hasServiceItems: boolean
   actorUserId: string
   overrideReason: string | null
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<UpdateProBookingResult> {
     assertNonEmptyUserId(args.actorUserId)
 
@@ -8721,6 +8727,8 @@ if (args.notifyClient) {
     maxDaysAhead: Math.max(1, Number(location.maxDaysAhead ?? 1)),
     workingHours: location.workingHours,
     timeZone: appointmentTimeZone,
+    requestId: args.requestId ?? null,
+    idempotencyKey: args.idempotencyKey ?? null,
   })
 }
 
@@ -10970,6 +10978,8 @@ export async function updateProBooking(
         hasServiceItems: args.hasServiceItems,
         actorUserId: args.actorUserId,
         overrideReason: args.overrideReason,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }

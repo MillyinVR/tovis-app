@@ -10,37 +10,40 @@ import {
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
+import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { updateClientBookingCheckout } from '@/lib/booking/writeBoundary'
-import { prisma } from '@/lib/prisma'
-import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
+
+const ROUTE_OPERATION = 'POST /api/client/bookings/[id]/checkout'
+
+type ParsedCheckoutBody = {
+  tipAmount?: string | null
+  selectedPaymentMethod?: PaymentMethod
+  confirmPayment: boolean
+}
 
 type ParsedBodyResult =
   | {
       ok: true
-      tipAmount?: string | null
-      selectedPaymentMethod?: PaymentMethod
-      confirmPayment: boolean
+      value: ParsedCheckoutBody
     }
   | {
       ok: false
       error: string
     }
-
-type RequestMeta = {
-  idempotencyKey: string | null
-}
 
 type NestedInputJsonValue = Prisma.InputJsonValue | null
 
@@ -94,9 +97,9 @@ function normalizePaymentMethodInput(value: unknown): PaymentMethod | undefined 
   }
 }
 
-function parseTipAmount(value: unknown):
-  | { ok: true; value?: string | null }
-  | { ok: false; error: string } {
+function parseTipAmount(
+  value: unknown,
+): { ok: true; value?: string | null } | { ok: false; error: string } {
   if (value === undefined) {
     return { ok: true, value: undefined }
   }
@@ -135,7 +138,8 @@ function parseBody(body: Record<string, unknown>): ParsedBodyResult {
   const parsedTip = parseTipAmount(body.tipAmount)
   if (!parsedTip.ok) return parsedTip
 
-  let selectedPaymentMethod: PaymentMethod | undefined = undefined
+  let selectedPaymentMethod: PaymentMethod | undefined
+
   if (body.selectedPaymentMethod !== undefined) {
     selectedPaymentMethod = normalizePaymentMethodInput(
       body.selectedPaymentMethod,
@@ -152,23 +156,25 @@ function parseBody(body: Record<string, unknown>): ParsedBodyResult {
 
   return {
     ok: true,
-    tipAmount: parsedTip.value,
-    selectedPaymentMethod,
-    confirmPayment: parseBoolean(body.confirmPayment),
+    value: {
+      tipAmount: parsedTip.value,
+      selectedPaymentMethod,
+      confirmPayment: parseBoolean(body.confirmPayment),
+    },
   }
 }
 
 function buildAcceptedPaymentMethods(
   settings:
-        | {
-            acceptCash: boolean
-            acceptCardOnFile: boolean
-            acceptTapToPay: boolean
-            acceptVenmo: boolean
-            acceptZelle: boolean
-            acceptAppleCash: boolean
-            acceptStripeCard: boolean
-          }
+    | {
+        acceptCash: boolean
+        acceptCardOnFile: boolean
+        acceptTapToPay: boolean
+        acceptVenmo: boolean
+        acceptZelle: boolean
+        acceptAppleCash: boolean
+        acceptStripeCard: boolean
+      }
     | null,
 ): Set<PaymentMethod> {
   const out = new Set<PaymentMethod>()
@@ -182,6 +188,7 @@ function buildAcceptedPaymentMethods(
   if (settings.acceptZelle) out.add(PaymentMethod.ZELLE)
   if (settings.acceptAppleCash) out.add(PaymentMethod.APPLE_CASH)
   if (settings.acceptStripeCard) out.add(PaymentMethod.STRIPE_CARD)
+
   return out
 }
 
@@ -191,44 +198,9 @@ function bookingJsonFail(
     message?: string
     userMessage?: string
   },
-) {
+): Response {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching checkout request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
-  )
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
-}
-
-function readRequestMeta(req: NextRequest): RequestMeta {
-  const idempotencyKey =
-    trimmedString(req.headers.get('idempotency-key')) ??
-    trimmedString(req.headers.get('x-idempotency-key')) ??
-    null
-
-  return { idempotencyKey }
 }
 
 function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
@@ -256,12 +228,11 @@ function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
     return value.map((item) => normalizeNestedJsonValue(item))
   }
 
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
+  if (isObject(value)) {
     const out: JsonObjectPayload = {}
 
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
+    for (const key of Object.keys(value).sort()) {
+      out[key] = normalizeNestedJsonValue(value[key])
     }
 
     return out
@@ -275,17 +246,16 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
     return {}
   }
 
-  if (typeof value !== 'object' || Array.isArray(value)) {
+  if (!isObject(value)) {
     return {
       value: normalizeNestedJsonValue(value),
     }
   }
 
-  const input = value as Record<string, unknown>
   const out: JsonObjectPayload = {}
 
-  for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
+  for (const key of Object.keys(value).sort()) {
+    out[key] = normalizeNestedJsonValue(value[key])
   }
 
   return out
@@ -295,7 +265,7 @@ function buildIdempotencyRequestBody(args: {
   bookingId: string
   clientId: string
   actorUserId: string
-  parsed: Extract<ParsedBodyResult, { ok: true }>
+  parsed: ParsedCheckoutBody
 }): JsonObjectPayload {
   return normalizeJsonObjectPayload({
     bookingId: args.bookingId,
@@ -331,22 +301,19 @@ function buildCheckoutResponseBody(args: {
       totalAmount: booking.totalAmount?.toString() ?? null,
       paymentAuthorizedAt:
         booking.paymentAuthorizedAt?.toISOString() ?? null,
-      paymentCollectedAt: booking.paymentCollectedAt?.toISOString() ?? null,
+      paymentCollectedAt:
+        booking.paymentCollectedAt?.toISOString() ?? null,
     },
     meta: args.result.meta,
   })
 }
 
-async function failStartedIdempotency(
+async function failCheckoutIdempotency(
   idempotencyRecordId: string | null,
 ): Promise<void> {
-  if (!idempotencyRecordId) return
-
-  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-    console.error(
-      'POST /api/client/bookings/[id]/checkout idempotency failure update error:',
-      failError,
-    )
+  await failStartedRouteIdempotency({
+    idempotencyRecordId,
+    operation: ROUTE_OPERATION,
   })
 }
 
@@ -377,44 +344,37 @@ export async function POST(
     }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
-    const body: Record<string, unknown> = isObject(rawBody) ? rawBody : {}
+    const body = isObject(rawBody) ? rawBody : {}
 
     const parsed = parseBody(body)
     if (!parsed.ok) {
       return jsonFail(400, parsed.error)
     }
 
-    const requestMeta = readRequestMeta(req)
-
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: req,
       actor: {
         actorUserId,
         actorRole: Role.CLIENT,
       },
       route: IDEMPOTENCY_ROUTES.CLIENT_CHECKOUT_CONFIRM,
-      key: requestMeta.idempotencyKey,
+      requestLabel: 'client checkout',
       requestBody: buildIdempotencyRequestBody({
         bookingId,
         clientId: auth.clientId,
         actorUserId,
-        parsed,
+        parsed: parsed.value,
       }),
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching checkout request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
@@ -429,8 +389,9 @@ export async function POST(
     })
 
     if (!booking) {
-      await failStartedIdempotency(idempotencyRecordId)
+      await failCheckoutIdempotency(idempotencyRecordId)
       idempotencyRecordId = null
+
       return bookingJsonFail('BOOKING_NOT_FOUND')
     }
 
@@ -451,10 +412,10 @@ export async function POST(
     const acceptedMethods = buildAcceptedPaymentMethods(paymentSettings)
 
     if (
-      parsed.selectedPaymentMethod &&
-      !acceptedMethods.has(parsed.selectedPaymentMethod)
+      parsed.value.selectedPaymentMethod &&
+      !acceptedMethods.has(parsed.value.selectedPaymentMethod)
     ) {
-      await failStartedIdempotency(idempotencyRecordId)
+      await failCheckoutIdempotency(idempotencyRecordId)
       idempotencyRecordId = null
 
       return jsonFail(
@@ -464,11 +425,11 @@ export async function POST(
     }
 
     const effectivePaymentMethod =
-      parsed.selectedPaymentMethod ?? booking.selectedPaymentMethod ?? null
+      parsed.value.selectedPaymentMethod ?? booking.selectedPaymentMethod ?? null
 
-    if (parsed.confirmPayment) {
+    if (parsed.value.confirmPayment) {
       if (!effectivePaymentMethod) {
-        await failStartedIdempotency(idempotencyRecordId)
+        await failCheckoutIdempotency(idempotencyRecordId)
         idempotencyRecordId = null
 
         return jsonFail(
@@ -478,7 +439,7 @@ export async function POST(
       }
 
       if (effectivePaymentMethod === PaymentMethod.STRIPE_CARD) {
-        await failStartedIdempotency(idempotencyRecordId)
+        await failCheckoutIdempotency(idempotencyRecordId)
         idempotencyRecordId = null
 
         return jsonFail(
@@ -489,8 +450,9 @@ export async function POST(
           },
         )
       }
+
       if (!acceptedMethods.has(effectivePaymentMethod)) {
-        await failStartedIdempotency(idempotencyRecordId)
+        await failCheckoutIdempotency(idempotencyRecordId)
         idempotencyRecordId = null
 
         return jsonFail(
@@ -502,11 +464,11 @@ export async function POST(
 
     if (
       paymentSettings?.tipsEnabled === false &&
-      parsed.tipAmount !== undefined &&
-      parsed.tipAmount !== null &&
-      Number(parsed.tipAmount) > 0
+      parsed.value.tipAmount !== undefined &&
+      parsed.value.tipAmount !== null &&
+      Number(parsed.value.tipAmount) > 0
     ) {
-      await failStartedIdempotency(idempotencyRecordId)
+      await failCheckoutIdempotency(idempotencyRecordId)
       idempotencyRecordId = null
 
       return jsonFail(400, 'Tips are not enabled for this provider.')
@@ -515,18 +477,18 @@ export async function POST(
     const result = await updateClientBookingCheckout({
       bookingId,
       clientId: auth.clientId,
-      tipAmount: parsed.tipAmount,
-      selectedPaymentMethod: parsed.selectedPaymentMethod,
-      checkoutStatus: parsed.confirmPayment
+      tipAmount: parsed.value.tipAmount,
+      selectedPaymentMethod: parsed.value.selectedPaymentMethod,
+      checkoutStatus: parsed.value.confirmPayment
         ? BookingCheckoutStatus.PAID
         : undefined,
-      markPaymentAuthorized: parsed.confirmPayment,
-      markPaymentCollected: parsed.confirmPayment,
+      markPaymentAuthorized: parsed.value.confirmPayment,
+      markPaymentCollected: parsed.value.confirmPayment,
     })
 
     const responseBody = buildCheckoutResponseBody({ result })
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 200,
       responseBody,
@@ -534,9 +496,7 @@ export async function POST(
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failStartedIdempotency(idempotencyRecordId)
-    }
+    await failCheckoutIdempotency(idempotencyRecordId)
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -545,10 +505,10 @@ export async function POST(
       })
     }
 
-    console.error('POST /api/client/bookings/[id]/checkout error', error)
+    console.error(`${ROUTE_OPERATION} error`, error)
     captureBookingException({
       error,
-      route: 'POST /api/client/bookings/[id]/checkout',
+      route: ROUTE_OPERATION,
     })
 
     return jsonFail(500, 'Internal server error.')

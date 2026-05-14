@@ -1,23 +1,27 @@
 // app/api/client/bookings/[id]/checkout/products/route.ts
+
 import type { NextRequest } from 'next/server'
 import { Prisma, Role } from '@prisma/client'
 
-import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
+import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
 import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { upsertClientBookingCheckoutProducts } from '@/lib/booking/writeBoundary'
-import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
+
+const ROUTE_OPERATION = 'POST /api/client/bookings/[id]/checkout/products'
 
 type SelectedCheckoutProductInput = {
   recommendationId: string
@@ -28,11 +32,6 @@ type SelectedCheckoutProductInput = {
 type ParsedItemsResult =
   | { ok: true; value: SelectedCheckoutProductInput[] }
   | { ok: false; error: string }
-
-type RequestMeta = {
-  requestId: string | null
-  idempotencyKey: string | null
-}
 
 type NestedInputJsonValue = Prisma.InputJsonValue | null
 
@@ -145,56 +144,17 @@ function bookingJsonFail(
     message?: string
     userMessage?: string
   },
-) {
+): Response {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching checkout products request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
+function readRequestId(req: Request): string | null {
+  return (
+    trimmedString(req.headers.get('x-request-id')) ??
+    trimmedString(req.headers.get('request-id')) ??
+    null
   )
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
-}
-
-function readHeaderValue(req: Request, name: string): string | null {
-  return pickString(req.headers.get(name))
-}
-
-function readRequestMeta(
-  req: Request,
-  body: Record<string, unknown>,
-): RequestMeta {
-  return {
-    requestId:
-      readHeaderValue(req, 'x-request-id') ??
-      readHeaderValue(req, 'request-id') ??
-      null,
-    idempotencyKey:
-      readHeaderValue(req, 'idempotency-key') ??
-      readHeaderValue(req, 'x-idempotency-key') ??
-      pickString(body.idempotencyKey) ??
-      null,
-  }
 }
 
 function normalizeItemsForIdempotency(
@@ -232,12 +192,11 @@ function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
     return value.map((item) => normalizeNestedJsonValue(item))
   }
 
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
+  if (isObject(value)) {
     const out: JsonObjectPayload = {}
 
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
+    for (const key of Object.keys(value).sort()) {
+      out[key] = normalizeNestedJsonValue(value[key])
     }
 
     return out
@@ -251,20 +210,33 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
     return {}
   }
 
-  if (typeof value !== 'object' || Array.isArray(value)) {
+  if (!isObject(value)) {
     return {
       value: normalizeNestedJsonValue(value),
     }
   }
 
-  const input = value as Record<string, unknown>
   const out: JsonObjectPayload = {}
 
-  for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
+  for (const key of Object.keys(value).sort()) {
+    out[key] = normalizeNestedJsonValue(value[key])
   }
 
   return out
+}
+
+function buildIdempotencyRequestBody(args: {
+  actorUserId: string
+  clientId: string
+  bookingId: string
+  items: SelectedCheckoutProductInput[]
+}): JsonObjectPayload {
+  return normalizeJsonObjectPayload({
+    actorUserId: args.actorUserId,
+    clientId: args.clientId,
+    bookingId: args.bookingId,
+    items: normalizeItemsForIdempotency(args.items),
+  })
 }
 
 function buildCheckoutProductsResponseBody(args: {
@@ -299,16 +271,12 @@ function buildCheckoutProductsResponseBody(args: {
   })
 }
 
-async function failStartedIdempotency(
+async function failCheckoutProductsIdempotency(
   idempotencyRecordId: string | null,
 ): Promise<void> {
-  if (!idempotencyRecordId) return
-
-  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-    console.error(
-      'POST /api/client/bookings/[id]/checkout/products idempotency failure update error:',
-      failError,
-    )
+  await failStartedRouteIdempotency({
+    idempotencyRecordId,
+    operation: ROUTE_OPERATION,
   })
 }
 
@@ -322,7 +290,7 @@ export async function POST(
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const actorUserId = pickString(auth.user?.id)
+    const actorUserId = trimmedString(auth.user?.id)
 
     if (!actorUserId) {
       return bookingJsonFail('FORBIDDEN', {
@@ -335,76 +303,67 @@ export async function POST(
     const bookingId = trimmedString(id)
 
     if (!bookingId) {
-      return jsonFail(400, 'Missing booking id.')
+      return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
-    const body: Record<string, unknown> = isObject(rawBody) ? rawBody : {}
+    const body = isObject(rawBody) ? rawBody : {}
 
     const parsedItems = parseItems(body.items)
     if (!parsedItems.ok) {
       return jsonFail(400, parsedItems.error)
     }
 
-    const { requestId, idempotencyKey } = readRequestMeta(req, body)
+    const requestId = readRequestId(req)
 
-    const idempotencyItems = normalizeItemsForIdempotency(parsedItems.value)
-
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: req,
       actor: {
         actorUserId,
         actorRole: Role.CLIENT,
       },
       route: IDEMPOTENCY_ROUTES.CLIENT_CHECKOUT_PRODUCTS,
-      key: idempotencyKey,
-      requestBody: {
+      requestLabel: 'client checkout products',
+      requestBody: buildIdempotencyRequestBody({
         actorUserId,
         clientId: auth.clientId,
         bookingId,
-        items: idempotencyItems,
+        items: parsedItems.value,
+      }),
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress:
+          'A matching checkout products request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
       },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
-    }
-
-    const startedIdempotencyRecordId = idempotency.idempotencyRecordId
-    idempotencyRecordId = startedIdempotencyRecordId
+    idempotencyRecordId = idempotency.idempotencyRecordId
 
     const result = await upsertClientBookingCheckoutProducts({
       bookingId,
       clientId: auth.clientId,
       items: parsedItems.value,
       requestId,
-      idempotencyKey,
+      idempotencyKey: idempotency.idempotencyKey,
     })
 
     const responseBody = buildCheckoutProductsResponseBody({ result })
 
-    await completeIdempotency({
-      idempotencyRecordId: startedIdempotencyRecordId,
+    await completeRouteIdempotency({
+      idempotencyRecordId,
       responseStatus: 200,
       responseBody,
     })
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failStartedIdempotency(idempotencyRecordId)
-    }
+    await failCheckoutProductsIdempotency(idempotencyRecordId)
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -413,13 +372,11 @@ export async function POST(
       })
     }
 
-    console.error(
-      'POST /api/client/bookings/[id]/checkout/products error',
-      error,
-    )
+    console.error(`${ROUTE_OPERATION} error`, error)
+
     captureBookingException({
       error,
-      route: 'POST /api/client/bookings/[id]/checkout/products',
+      route: ROUTE_OPERATION,
     })
 
     return jsonFail(500, 'Internal server error.')

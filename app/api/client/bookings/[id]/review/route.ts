@@ -1,6 +1,6 @@
 // app/api/client/bookings/[id]/review/route.ts
+
 import { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
 import {
   BookingCloseoutAuditAction,
   MediaType,
@@ -10,28 +10,37 @@ import {
   Prisma,
   Role,
 } from '@prisma/client'
+
 import {
-  requireClient,
-  pickString,
   jsonFail,
   jsonOk,
-  safeUrl,
+  pickString,
+  requireClient,
   resolveStoragePointers,
+  safeUrl,
 } from '@/app/api/_utils'
+import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
+import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
+import {
+  getBookingFailPayload,
+  type BookingErrorCode,
+} from '@/lib/booking/errors'
+import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundary'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { parseIdArray, parseRating1to5 } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
-import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundary'
-import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 import { createProNotification } from '@/lib/notifications/proNotifications'
-import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
+
+const ROUTE_OPERATION = 'POST /api/client/bookings/[id]/review'
 
 const MAX_ATTACH_APPT_MEDIA = 6
 const MAX_CLIENT_IMAGES = 6
@@ -57,11 +66,6 @@ type ResolvedClientMediaItem = {
   thumbPath: string | null
   url: string | null
   thumbUrl: string | null
-}
-
-type RequestMeta = {
-  requestId: string | null
-  idempotencyKey: string | null
 }
 
 type NestedInputJsonValue = Prisma.InputJsonValue | null
@@ -101,50 +105,11 @@ function isMediaType(value: unknown): value is MediaType {
   return value === MediaType.IMAGE || value === MediaType.VIDEO
 }
 
-function readHeaderValue(req: Request, name: string): string | null {
-  return pickString(req.headers.get(name))
-}
-
-function readRequestMeta(
-  req: Request,
-  body: Record<string, unknown>,
-): RequestMeta {
-  return {
-    requestId:
-      readHeaderValue(req, 'x-request-id') ??
-      readHeaderValue(req, 'request-id') ??
-      null,
-    idempotencyKey:
-      readHeaderValue(req, 'idempotency-key') ??
-      readHeaderValue(req, 'x-idempotency-key') ??
-      pickString(body.idempotencyKey) ??
-      null,
-  }
-}
-
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching review request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
-  )
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
+function readRequestId(req: Request): string | null {
+  return (
+    pickString(req.headers.get('x-request-id')) ??
+    pickString(req.headers.get('request-id')) ??
+    null
   )
 }
 
@@ -277,12 +242,11 @@ function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
     return value.map((item) => normalizeNestedJsonValue(item))
   }
 
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
+  if (isRecord(value)) {
     const out: JsonObjectPayload = {}
 
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
+    for (const key of Object.keys(value).sort()) {
+      out[key] = normalizeNestedJsonValue(value[key])
     }
 
     return out
@@ -296,17 +260,16 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
     return {}
   }
 
-  if (typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return {
       value: normalizeNestedJsonValue(value),
     }
   }
 
-  const input = value as Record<string, unknown>
   const out: JsonObjectPayload = {}
 
-  for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
+  for (const key of Object.keys(value).sort()) {
+    out[key] = normalizeNestedJsonValue(value[key])
   }
 
   return out
@@ -325,25 +288,72 @@ async function renderReviewMediaUrls(
       }
     }),
   )
+
   return { ...review, mediaAssets }
 }
 
-function buildReviewResponseBody(review: ReviewTransactionResult['review']) {
+function buildReviewResponseBody(
+  review: ReviewTransactionResult['review'],
+): JsonObjectPayload {
   return normalizeJsonObjectPayload({
     review,
   })
 }
 
-async function failStartedIdempotency(
+function bookingJsonFail(
+  code: BookingErrorCode,
+  overrides?: {
+    message?: string
+    userMessage?: string
+  },
+): Response {
+  const fail = getBookingFailPayload(code, overrides)
+  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
+}
+
+function buildIdempotencyRequestBody(args: {
+  bookingId: string
+  clientId: string
+  actorUserId: string
+  rating: number
+  headline: string | null
+  reviewBody: string | null
+  attachedMediaIds: string[]
+  resolvedClientMedia: ResolvedClientMediaItem[]
+}): JsonObjectPayload {
+  return normalizeJsonObjectPayload({
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    actorUserId: args.actorUserId,
+    rating: args.rating,
+    headline: args.headline,
+    body: args.reviewBody,
+    attachedMediaIds: [...args.attachedMediaIds].sort(),
+    clientMedia: args.resolvedClientMedia.map((item) => ({
+      mediaType: item.mediaType,
+      storageBucket: item.storageBucket,
+      storagePath: item.storagePath,
+      thumbBucket: item.thumbBucket,
+      thumbPath: item.thumbPath,
+      caption: item.caption,
+    })),
+  })
+}
+
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (!isRecord(error)) return ''
+
+  const message = error.message
+  return typeof message === 'string' ? message : ''
+}
+
+async function failReviewIdempotency(
   idempotencyRecordId: string | null,
 ): Promise<void> {
-  if (!idempotencyRecordId) return
-
-  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-    console.error(
-      'POST /api/client/bookings/[id]/review idempotency failure update error:',
-      failError,
-    )
+  await failStartedRouteIdempotency({
+    idempotencyRecordId,
+    operation: ROUTE_OPERATION,
   })
 }
 
@@ -358,15 +368,24 @@ export async function POST(
     if (!auth.ok) return auth.res
 
     const { user, clientId } = auth
+    const actorUserId = pickString(user.id)
+
+    if (!actorUserId) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'Authenticated actor user id is required.',
+        userMessage: 'You are not allowed to create a review.',
+      })
+    }
 
     const { id: rawId } = await ctx.params
     const bookingId = pickString(rawId)
-    if (!bookingId) return jsonFail(400, 'Missing booking id.')
+
+    if (!bookingId) {
+      return bookingJsonFail('BOOKING_ID_REQUIRED')
+    }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
     const body = isRecord(rawBody) ? rawBody : {}
-
-    const requestMeta = readRequestMeta(req, body)
 
     const rating = parseRating1to5(body.rating)
     if (!rating) {
@@ -386,13 +405,8 @@ export async function POST(
     const capError = enforceClientMediaCaps(clientMediaItems)
     if (capError) return jsonFail(400, capError)
 
-    const eligibility = await assertClientBookingReviewEligibility({
-      bookingId,
-      clientId,
-    })
-
-    const resolvedClientMedia: ResolvedClientMediaItem[] = clientMediaItems.map(
-      (item) => {
+    const resolvedClientMedia: ResolvedClientMediaItem[] =
+      clientMediaItems.map((item) => {
         const pointers = resolveStoragePointers({
           url: item.url,
           thumbUrl: item.thumbUrl ?? null,
@@ -416,45 +430,46 @@ export async function POST(
           url: null,
           thumbUrl: null,
         }
-      },
-    )
+      })
 
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: req,
       actor: {
-        actorUserId: user.id,
+        actorUserId,
         actorRole: Role.CLIENT,
       },
       route: IDEMPOTENCY_ROUTES.CLIENT_REVIEW_CREATE,
-      key: requestMeta.idempotencyKey,
-      requestBody: {
-        bookingId: eligibility.booking.id,
+      requestLabel: 'client review',
+      requestBody: buildIdempotencyRequestBody({
+        bookingId,
         clientId,
-        actorUserId: user.id,
+        actorUserId,
         rating,
         headline: headline || null,
-        body: reviewBody || null,
+        reviewBody: reviewBody || null,
         attachedMediaIds,
-        clientMedia: resolvedClientMedia,
+        resolvedClientMedia,
+      }),
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching review request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
       },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
+
+    const requestId = readRequestId(req)
+
+    const eligibility = await assertClientBookingReviewEligibility({
+      bookingId,
+      clientId,
+    })
 
     const reviewResult: ReviewTransactionResult = await prisma.$transaction(
       async (tx) => {
@@ -462,7 +477,7 @@ export async function POST(
           where: {
             bookingId: eligibility.booking.id,
             clientId,
-            idempotencyKey: requestMeta.idempotencyKey,
+            idempotencyKey: idempotency.idempotencyKey,
           },
           select: { id: true },
         })
@@ -542,8 +557,8 @@ export async function POST(
             rating,
             headline: headline || null,
             body: reviewBody || null,
-            idempotencyKey: requestMeta.idempotencyKey,
-            requestId: requestMeta.requestId,
+            idempotencyKey: idempotency.idempotencyKey,
+            requestId,
           },
           select: { id: true },
         })
@@ -571,7 +586,7 @@ export async function POST(
               reviewId: review.id,
               mediaType: item.mediaType,
               visibility: REVIEW_MEDIA_VISIBILITY,
-              uploadedByUserId: user.id,
+              uploadedByUserId: actorUserId,
               uploadedByRole: Role.CLIENT,
               isFeaturedInPortfolio: false,
               isEligibleForLooks: false,
@@ -591,11 +606,11 @@ export async function POST(
           tx,
           bookingId: eligibility.booking.id,
           professionalId: eligibility.booking.professionalId,
-          actorUserId: user.id,
+          actorUserId,
           action: BookingCloseoutAuditAction.REVIEW_CREATED,
           route: 'app/api/client/bookings/[id]/review/route.ts:POST',
-          requestId: requestMeta.requestId,
-          idempotencyKey: requestMeta.idempotencyKey,
+          requestId,
+          idempotencyKey: idempotency.idempotencyKey,
           oldValue: null,
           newValue: {
             reviewId: review.id,
@@ -640,7 +655,7 @@ export async function POST(
     )
 
     if (!reviewResult.review) {
-      await failStartedIdempotency(idempotencyRecordId)
+      await failReviewIdempotency(idempotencyRecordId)
       idempotencyRecordId = null
 
       return jsonFail(500, 'Internal server error.')
@@ -650,7 +665,7 @@ export async function POST(
     const renderedReview = await renderReviewMediaUrls(reviewResult.review)
     const responseBody = buildReviewResponseBody(renderedReview)
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus,
       responseBody,
@@ -662,7 +677,7 @@ export async function POST(
           professionalId: eligibility.booking.professionalId,
           bookingId: eligibility.booking.id,
           reviewId: reviewResult.review.id,
-          actorUserId: user.id,
+          actorUserId,
           rating,
           headline: headline || null,
           attachedAppointmentMediaCount: attachedMediaIds.length,
@@ -678,14 +693,9 @@ export async function POST(
 
     return jsonOk(responseBody, responseStatus)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failStartedIdempotency(idempotencyRecordId)
-    }
+    await failReviewIdempotency(idempotencyRecordId)
 
-    const message =
-      error && typeof error === 'object' && 'message' in error
-        ? String((error as { message?: unknown }).message || '')
-        : ''
+    const message = extractErrorMessage(error)
 
     if (message === 'ATTACH_INVALID') {
       return jsonFail(
@@ -708,7 +718,7 @@ export async function POST(
     console.error('POST /api/client/bookings/[id]/review error', error)
     captureBookingException({
       error,
-      route: 'POST /api/client/bookings/[id]/review',
+      route: ROUTE_OPERATION,
     })
 
     return jsonFail(500, 'Internal server error.')

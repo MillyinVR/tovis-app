@@ -1,6 +1,7 @@
 // app/api/client/bookings/[id]/review/route.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { NextRequest } from 'next/server'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingCloseoutAuditAction,
   MediaType,
@@ -11,6 +12,8 @@ import {
 } from '@prisma/client'
 
 const IDEMPOTENCY_ROUTE = 'POST /api/client/bookings/[id]/review'
+const ROUTE_OPERATION = 'POST /api/client/bookings/[id]/review'
+
 const mockRenderMediaUrls = vi.hoisted(() => vi.fn())
 
 const mocks = vi.hoisted(() => ({
@@ -31,6 +34,11 @@ const mocks = vi.hoisted(() => ({
   safeUrl: vi.fn(),
   resolveStoragePointers: vi.fn(),
 
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
+
   parseIdArray: vi.fn(),
   parseRating1to5: vi.fn(),
 
@@ -38,10 +46,6 @@ const mocks = vi.hoisted(() => ({
 
   createBookingCloseoutAuditLog: vi.fn(),
   createProNotification: vi.fn(),
-
-  beginIdempotency: vi.fn(),
-  completeIdempotency: vi.fn(),
-  failIdempotency: vi.fn(),
 
   captureBookingException: vi.fn(),
 }))
@@ -59,6 +63,13 @@ vi.mock('@/app/api/_utils', () => ({
   jsonOk: mocks.jsonOk,
   safeUrl: mocks.safeUrl,
   resolveStoragePointers: mocks.resolveStoragePointers,
+}))
+
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
 }))
 
 vi.mock('@/lib/media', () => ({
@@ -80,9 +91,6 @@ vi.mock('@/lib/notifications/proNotifications', () => ({
 }))
 
 vi.mock('@/lib/idempotency', () => ({
-  beginIdempotency: mocks.beginIdempotency,
-  completeIdempotency: mocks.completeIdempotency,
-  failIdempotency: mocks.failIdempotency,
   IDEMPOTENCY_ROUTES: {
     CLIENT_REVIEW_CREATE: 'POST /api/client/bookings/[id]/review',
   },
@@ -111,7 +119,7 @@ const tx = {
   },
 }
 
-function makeJsonResponse(status: number, payload: unknown) {
+function makeJsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
     status,
     headers: { 'content-type': 'application/json' },
@@ -289,22 +297,25 @@ function expectedResolvedClientMedia() {
       storagePath: 'client/review-1.png',
       thumbBucket: 'reviews-thumbs',
       thumbPath: 'client/review-1-thumb.png',
-      url: null,
-      thumbUrl: null,
     },
   ]
 }
 
-function expectedIdempotencyRequestBody() {
+function expectedIdempotencyRequestBody(overrides?: {
+  attachedMediaIds?: string[]
+  clientMedia?: ReturnType<typeof expectedResolvedClientMedia>
+  headline?: string | null
+  body?: string | null
+}) {
   return {
     bookingId: 'booking_1',
     clientId: 'client_1',
     actorUserId: 'user_1',
     rating: 5,
-    headline: 'Great service',
-    body: 'Loved it',
-    attachedMediaIds: ['media_pro_1'],
-    clientMedia: expectedResolvedClientMedia(),
+    headline: overrides && 'headline' in overrides ? overrides.headline : 'Great service',
+    body: overrides && 'body' in overrides ? overrides.body : 'Loved it',
+    attachedMediaIds: overrides?.attachedMediaIds ?? ['media_pro_1'],
+    clientMedia: overrides?.clientMedia ?? expectedResolvedClientMedia(),
   }
 }
 
@@ -314,10 +325,47 @@ function expectedResponseBody() {
   }
 }
 
+function makeStartedIdempotency(key = 'idem_review_1') {
+  return {
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: key,
+    requestHash: 'hash_1',
+  }
+}
+
+function mockHandledIdempotency(response: Response): void {
+  mocks.beginRouteIdempotency.mockResolvedValueOnce({
+    kind: 'handled',
+    response,
+  })
+  mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+}
+
+function expectRouteIdempotencyStartedWith(
+  requestBody = expectedIdempotencyRequestBody(),
+): void {
+  expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+    request: expect.any(NextRequest),
+    actor: {
+      actorUserId: 'user_1',
+      actorRole: Role.CLIENT,
+    },
+    route: IDEMPOTENCY_ROUTE,
+    requestLabel: 'client review',
+    requestBody,
+    messages: {
+      missingKey: 'Missing idempotency key.',
+      inProgress: 'A matching review request is already in progress.',
+      conflict:
+        'This idempotency key was already used with a different request body.',
+    },
+  })
+}
+
 describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
   beforeEach(() => {
     vi.resetAllMocks()
-
     mockRenderMediaUrls.mockReset()
 
     mockRenderMediaUrls.mockImplementation(
@@ -367,9 +415,17 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
         }),
     )
 
-    mocks.jsonOk.mockImplementation((data: unknown, status = 200) =>
-      makeJsonResponse(status, { ok: true, ...((data as object) ?? {}) }),
-    )
+    mocks.jsonOk.mockImplementation((data: unknown, status = 200) => {
+      const payload =
+        typeof data === 'object' && data !== null && !Array.isArray(data)
+          ? data
+          : { value: data }
+
+      return makeJsonResponse(status, {
+        ok: true,
+        ...payload,
+      })
+    })
 
     mocks.safeUrl.mockImplementation((value: unknown) => {
       if (typeof value !== 'string') return null
@@ -390,6 +446,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
         thumbPath?: string | null
       }) => {
         if (!storageBucket || !storagePath) return null
+
         return {
           storageBucket,
           storagePath,
@@ -401,6 +458,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
 
     mocks.parseIdArray.mockImplementation((value: unknown, limit: number) => {
       if (!Array.isArray(value)) return []
+
       return value
         .filter((item): item is string => typeof item === 'string')
         .map((item) => item.trim())
@@ -424,24 +482,11 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       makeEligibility(),
     )
 
-    mocks.beginIdempotency.mockImplementation(
-      async (args: { key: string | null }) => {
-        const key = args.key?.trim()
+    mocks.beginRouteIdempotency.mockResolvedValue(makeStartedIdempotency())
+    mocks.isRouteIdempotencyHandled.mockReturnValue(false)
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
 
-        if (!key) {
-          return { kind: 'missing_key' }
-        }
-
-        return {
-          kind: 'started',
-          idempotencyRecordId: 'idem_record_1',
-          requestHash: 'hash_1',
-        }
-      },
-    )
-
-    mocks.completeIdempotency.mockResolvedValue(undefined)
-    mocks.failIdempotency.mockResolvedValue(undefined)
     mocks.createProNotification.mockResolvedValue(undefined)
   })
 
@@ -459,7 +504,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
     const res = await POST(makeRequest({ rating: 5 }), makeCtx())
 
     expect(res).toBe(authRes)
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
@@ -471,9 +516,13 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
     expect(json).toEqual({
       ok: false,
       error: 'Missing booking id.',
+      code: 'BOOKING_ID_REQUIRED',
+      message: 'Booking id is required.',
+      retryable: false,
+      uiAction: 'NONE',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
@@ -488,7 +537,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
     })
 
     expect(mocks.assertClientBookingReviewEligibility).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
@@ -515,7 +564,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
         'Media must include storageBucket/storagePath (or a Supabase Storage URL we can parse).',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
     expect(mocks.txReviewCreate).not.toHaveBeenCalled()
     expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
@@ -543,102 +592,38 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       error: 'You can upload up to 6 images + 1 video (7 total).',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
     expect(mocks.txReviewCreate).not.toHaveBeenCalled()
   })
 
-  it('returns missing idempotency key for valid review request without idempotency header/body key', async () => {
-    const res = await POST(makeRequest(makeValidBody()), makeCtx())
-    const json = await res.json()
-
-    expect(res.status).toBe(400)
-    expect(json).toEqual({
+  it('returns handled missing-key idempotency response without eligibility or transaction work', async () => {
+    const handledResponse = makeJsonResponse(400, {
       ok: false,
       error: 'Missing idempotency key.',
       code: 'IDEMPOTENCY_KEY_REQUIRED',
     })
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: Role.CLIENT,
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: null,
-      requestBody: expectedIdempotencyRequestBody(),
-    })
+    mockHandledIdempotency(handledResponse)
 
+    const res = await POST(makeRequest(makeValidBody()), makeCtx())
+
+    expect(res).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith()
+
+    expect(mocks.assertClientBookingReviewEligibility).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('accepts body idempotencyKey fallback when header is absent', async () => {
-    const fullReview = makeFullReview()
-
-    mocks.txReviewFindFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-    mocks.txMediaAssetFindMany.mockResolvedValueOnce([{ id: 'media_pro_1' }])
-    mocks.txReviewCreate.mockResolvedValueOnce({ id: 'review_1' })
-    mocks.txMediaAssetUpdateMany.mockResolvedValueOnce({ count: 1 })
-    mocks.txMediaAssetCreateMany.mockResolvedValueOnce({ count: 1 })
-    mocks.txReviewFindUnique.mockResolvedValueOnce(fullReview)
-
-    const res = await POST(
-      makeRequest(
-        makeValidBody({
-          idempotencyKey: 'idem_from_body_1',
-        }),
-        {
-          'x-request-id': 'req_review_1',
-        },
-      ),
-      makeCtx(),
-    )
-
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: Role.CLIENT,
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_from_body_1',
-      requestBody: expectedIdempotencyRequestBody(),
-    })
-
-    expect(res.status).toBe(201)
-  })
-
-  it('returns in-progress when idempotency ledger has an active matching request', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'in_progress',
-    })
-
-    const res = await POST(
-      makeIdempotentRequest({
-        body: makeValidBody(),
-      }),
-      makeCtx(),
-    )
-    const json = await res.json()
-
-    expect(res.status).toBe(409)
-    expect(json).toEqual({
+  it('returns handled in-progress idempotency response without eligibility or transaction work', async () => {
+    const handledResponse = makeJsonResponse(409, {
       ok: false,
       error: 'A matching review request is already in progress.',
       code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
     })
 
-    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
-    expect(mocks.txReviewCreate).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
-  })
-
-  it('returns conflict when idempotency key was reused with a different body', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'conflict',
-    })
+    mockHandledIdempotency(handledResponse)
 
     const res = await POST(
       makeIdempotentRequest({
@@ -646,27 +631,24 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       }),
       makeCtx(),
     )
-    const json = await res.json()
 
-    expect(res.status).toBe(409)
-    expect(json).toEqual({
+    expect(res).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith()
+
+    expect(mocks.assertClientBookingReviewEligibility).not.toHaveBeenCalled()
+    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns handled conflict idempotency response without eligibility or transaction work', async () => {
+    const handledResponse = makeJsonResponse(409, {
       ok: false,
       error:
         'This idempotency key was already used with a different request body.',
       code: 'IDEMPOTENCY_KEY_CONFLICT',
     })
 
-    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
-    expect(mocks.txReviewCreate).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
-  })
-
-  it('replays completed idempotency response without creating or auditing again', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'replay',
-      responseStatus: 201,
-      responseBody: expectedResponseBody(),
-    })
+    mockHandledIdempotency(handledResponse)
 
     const res = await POST(
       makeIdempotentRequest({
@@ -674,24 +656,46 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       }),
       makeCtx(),
     )
-    const json = await res.json()
 
-    expect(res.status).toBe(201)
-    expect(json).toEqual({
+    expect(res).toBe(handledResponse)
+    expectRouteIdempotencyStartedWith()
+
+    expect(mocks.assertClientBookingReviewEligibility).not.toHaveBeenCalled()
+    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('replays handled idempotency response without creating or auditing again', async () => {
+    const handledResponse = makeJsonResponse(201, {
       ok: true,
       ...expectedResponseBody(),
     })
 
+    mockHandledIdempotency(handledResponse)
+
+    const res = await POST(
+      makeIdempotentRequest({
+        body: makeValidBody(),
+      }),
+      makeCtx(),
+    )
+
+    expect(res).toBe(handledResponse)
+    expect(mocks.assertClientBookingReviewEligibility).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
     expect(mocks.txReviewCreate).not.toHaveBeenCalled()
     expect(mocks.txMediaAssetUpdateMany).not.toHaveBeenCalled()
     expect(mocks.txMediaAssetCreateMany).not.toHaveBeenCalled()
     expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
     expect(mocks.createProNotification).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('creates a review, attaches pro media, creates client media, writes closeout audit, notifies pro, and completes idempotency', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_review_1'),
+    )
+
     const fullReview = makeFullReview()
 
     mocks.txReviewFindFirst
@@ -726,19 +730,11 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       }),
     )
 
+    expectRouteIdempotencyStartedWith()
+
     expect(mocks.assertClientBookingReviewEligibility).toHaveBeenCalledWith({
       bookingId: 'booking_1',
       clientId: 'client_1',
-    })
-
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: Role.CLIENT,
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_review_1',
-      requestBody: expectedIdempotencyRequestBody(),
     })
 
     expect(mocks.txReviewCreate).toHaveBeenCalledWith({
@@ -826,7 +822,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       },
     })
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 201,
       responseBody: expectedResponseBody(),
@@ -861,6 +857,10 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
   })
 
   it('returns the existing review inside transaction, completes idempotency as 200, and does not create or audit again', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_review_replay'),
+    )
+
     const existingReview = makeReview({
       id: 'review_existing_1',
       mediaAssets: [],
@@ -927,7 +927,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
     expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
     expect(mocks.createProNotification).not.toHaveBeenCalled()
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: {
@@ -945,6 +945,10 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
   })
 
   it('returns 409 when a review already exists without an idempotent replay match and marks idempotency failed', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_new_but_duplicate'),
+    )
+
     mocks.txReviewFindFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ id: 'review_dupe_1' })
@@ -968,8 +972,9 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       error: 'Review already exists for this booking.',
     })
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(mocks.txReviewCreate).not.toHaveBeenCalled()
@@ -977,6 +982,10 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
   })
 
   it('returns 400 when attached appointment media is invalid or unavailable and marks idempotency failed', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_attach_invalid_1'),
+    )
+
     mocks.txReviewFindFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
@@ -1003,8 +1012,9 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
         'One or more selected appointment media items are not available to attach.',
     })
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(mocks.txReviewCreate).not.toHaveBeenCalled()
@@ -1012,6 +1022,10 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
   })
 
   it('returns 500 and marks idempotency failed when transaction returns null review', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_null_review_1'),
+    )
+
     mocks.txReviewFindFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
@@ -1035,14 +1049,19 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       error: 'Internal server error.',
     })
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('logs notification failure but still returns success after completing idempotency', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_notify_fail_1'),
+    )
+
     const fullReview = makeFullReview()
 
     mocks.txReviewFindFirst
@@ -1075,7 +1094,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
         ...expectedResponseBody(),
       })
 
-      expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+      expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
         idempotencyRecordId: 'idem_record_1',
         responseStatus: 201,
         responseBody: expectedResponseBody(),
@@ -1091,6 +1110,10 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
   })
 
   it('returns 500 for unexpected errors, captures exception, and marks idempotency failed', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_boom_1'),
+    )
+
     mocks.prismaTransaction.mockRejectedValueOnce(new Error('boom'))
 
     const req = makeIdempotentRequest({
@@ -1110,13 +1133,14 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       error: 'Internal server error.',
     })
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(mocks.captureBookingException).toHaveBeenCalledWith({
       error: expect.any(Error),
-      route: 'POST /api/client/bookings/[id]/review',
+      route: ROUTE_OPERATION,
     })
   })
 })

@@ -1,8 +1,12 @@
+// app/api/pro/bookings/[id]/route.test.ts
+
+import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BookingStatus, ServiceLocationType } from '@prisma/client'
+import { BookingStatus, Role, ServiceLocationType } from '@prisma/client'
 import { bookingError } from '@/lib/booking/errors'
 
 const IDEMPOTENCY_ROUTE = 'PATCH /api/pro/bookings/[id]'
+const ROUTE_OPERATION = 'PATCH /api/pro/bookings/[id]'
 
 const defaultPatchResponse = {
   booking: {
@@ -63,9 +67,12 @@ const mocks = vi.hoisted(() => ({
 
   updateProBooking: vi.fn(),
 
-  beginIdempotency: vi.fn(),
-  completeIdempotency: vi.fn(),
-  failIdempotency: vi.fn(),
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
+
+  captureBookingException: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -78,17 +85,64 @@ vi.mock('@/app/api/_utils', () => ({
   pickString: mocks.pickString,
 }))
 
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
+}))
+
 vi.mock('@/lib/booking/writeBoundary', () => ({
   updateProBooking: mocks.updateProBooking,
 }))
 
 vi.mock('@/lib/idempotency', () => ({
-  beginIdempotency: mocks.beginIdempotency,
-  completeIdempotency: mocks.completeIdempotency,
-  failIdempotency: mocks.failIdempotency,
   IDEMPOTENCY_ROUTES: {
     PRO_BOOKING_UPDATE: 'PATCH /api/pro/bookings/[id]',
   },
+}))
+
+vi.mock('@/lib/observability/bookingEvents', () => ({
+  captureBookingException: mocks.captureBookingException,
+}))
+
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    booking: {
+      findFirst: vi.fn(),
+    },
+  },
+}))
+
+vi.mock('@/lib/timeZone', () => ({
+  isValidIanaTimeZone: vi.fn(() => true),
+  sanitizeTimeZone: vi.fn((value: string) => value),
+}))
+
+vi.mock('@/lib/booking/timeZoneTruth', () => ({
+  resolveAppointmentSchedulingContext: vi.fn(),
+}))
+
+vi.mock('@/lib/money', () => ({
+  moneyToFixed2String: vi.fn((value: unknown) => String(value)),
+}))
+
+vi.mock('@/lib/booking/conflicts', () => ({
+  addMinutes: vi.fn((date: Date, minutes: number) => {
+    const next = new Date(date)
+    next.setMinutes(next.getMinutes() + minutes)
+    return next
+  }),
+  normalizeToMinute: vi.fn((date: Date) => date),
+}))
+
+vi.mock('@/lib/booking/serviceItems', () => ({
+  sumDecimal: vi.fn(() => '50.00'),
+}))
+
+vi.mock('@/lib/booking/snapshots', () => ({
+  decimalToNullableNumber: vi.fn(() => null),
+  pickFormattedAddressFromSnapshot: vi.fn(() => null),
 }))
 
 import { PATCH } from './route'
@@ -97,7 +151,7 @@ function makeRequest(
   body: unknown,
   headers?: Record<string, string>,
 ): Request {
-  return new Request('http://localhost/api/pro/bookings/booking_1', {
+  return new NextRequest('http://localhost/api/pro/bookings/booking_1', {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -110,9 +164,11 @@ function makeRequest(
 function makeIdempotentRequest(
   body: unknown,
   key = 'idem_pro_booking_update_1',
+  headers?: Record<string, string>,
 ): Request {
   return makeRequest(body, {
     'idempotency-key': key,
+    ...(headers ?? {}),
   })
 }
 
@@ -120,6 +176,36 @@ function makeCtx(id = 'booking_1') {
   return {
     params: Promise.resolve({ id }),
   }
+}
+
+function makeStartedIdempotency(key = 'idem_pro_booking_update_1') {
+  return {
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: key,
+    requestHash: 'hash_1',
+  }
+}
+
+function mockHandledIdempotency(response: Response | Record<string, unknown>) {
+  const handledResponse =
+    response instanceof Response
+      ? response
+      : new Response(JSON.stringify(response), {
+          status:
+            typeof response.status === 'number' ? response.status : 200,
+          headers: {
+            'content-type': 'application/json',
+          },
+        })
+
+  mocks.beginRouteIdempotency.mockResolvedValueOnce({
+    kind: 'handled',
+    response: handledResponse,
+  })
+  mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+
+  return handledResponse
 }
 
 function expectedBaseUpdateArgs(overrides?: Record<string, unknown>) {
@@ -140,11 +226,15 @@ function expectedBaseUpdateArgs(overrides?: Record<string, unknown>) {
     hasBuffer: false,
     hasDuration: false,
     hasServiceItems: false,
+    requestId: null,
+    idempotencyKey: 'idem_pro_booking_update_1',
     ...(overrides ?? {}),
   }
 }
 
-function expectedBaseIdempotencyRequestBody(overrides?: Record<string, unknown>) {
+function expectedBaseIdempotencyRequestBody(
+  overrides?: Record<string, unknown>,
+) {
   return {
     professionalId: 'pro_123',
     actorUserId: 'user_123',
@@ -164,6 +254,27 @@ function expectedBaseIdempotencyRequestBody(overrides?: Record<string, unknown>)
     overrideReason: null,
     ...(overrides ?? {}),
   }
+}
+
+function expectRouteIdempotencyStartedWith(
+  requestBody = expectedBaseIdempotencyRequestBody(),
+): void {
+  expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+    request: expect.any(Request),
+    actor: {
+      actorUserId: 'user_123',
+      actorRole: Role.PRO,
+    },
+    route: IDEMPOTENCY_ROUTE,
+    requestLabel: 'pro booking update',
+    requestBody,
+    messages: {
+      missingKey: 'Missing idempotency key.',
+      inProgress: 'A matching booking update is already in progress.',
+      conflict:
+        'This idempotency key was already used with a different request body.',
+    },
+  })
 }
 
 describe('PATCH /api/pro/bookings/[id]', () => {
@@ -217,24 +328,12 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       return Number.isFinite(d.getTime()) ? d : null
     })
 
-    mocks.beginIdempotency.mockImplementation(
-      async (args: { key: string | null }) => {
-        const key = args.key?.trim()
-
-        if (!key) {
-          return { kind: 'missing_key' }
-        }
-
-        return {
-          kind: 'started',
-          idempotencyRecordId: 'idem_record_1',
-          requestHash: 'hash_1',
-        }
-      },
+    mocks.beginRouteIdempotency.mockResolvedValue(
+      makeStartedIdempotency(),
     )
-
-    mocks.completeIdempotency.mockResolvedValue(undefined)
-    mocks.failIdempotency.mockResolvedValue(undefined)
+    mocks.isRouteIdempotencyHandled.mockReturnValue(false)
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
     mocks.updateProBooking.mockResolvedValue(defaultPatchResponse)
   })
 
@@ -249,7 +348,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
     const result = await PATCH(makeRequest({}), makeCtx())
 
     expect(result).toBe(authRes)
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
   })
 
@@ -266,7 +365,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -293,7 +392,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -320,7 +419,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -347,7 +446,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
   })
 
@@ -367,7 +466,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -394,7 +493,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -421,7 +520,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -440,7 +539,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       makeCtx(),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
@@ -476,7 +575,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -487,7 +586,16 @@ describe('PATCH /api/pro/bookings/[id]', () => {
     )
   })
 
-  it('returns missing idempotency key for a valid PATCH request without idempotency header', async () => {
+  it('returns handled missing-key idempotency response for a valid PATCH request without idempotency header', async () => {
+    const handledResponse = {
+      ok: false,
+      status: 400,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    }
+
+    const response = mockHandledIdempotency(handledResponse)
+
     const result = await PATCH(
       makeRequest({
         notifyClient: true,
@@ -495,56 +603,26 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       makeCtx(),
     )
 
-    expect(result).toEqual({
-      ok: false,
-      status: 400,
-      error: 'Missing idempotency key.',
-      code: 'IDEMPOTENCY_KEY_REQUIRED',
-    })
-
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_123',
-        actorRole: 'PRO',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: null,
-      requestBody: expectedBaseIdempotencyRequestBody({
+    expect(result).toBe(response)
+    expectRouteIdempotencyStartedWith(
+      expectedBaseIdempotencyRequestBody({
         notifyClient: true,
       }),
-    })
-
-    expect(mocks.updateProBooking).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
-  })
-
-  it('returns in-progress when idempotency ledger has an active matching PATCH', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'in_progress',
-    })
-
-    const result = await PATCH(
-      makeIdempotentRequest({
-        notifyClient: true,
-      }),
-      makeCtx(),
     )
 
-    expect(result).toEqual({
+    expect(mocks.updateProBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns handled in-progress idempotency response without updating booking', async () => {
+    const handledResponse = {
       ok: false,
       status: 409,
       error: 'A matching booking update is already in progress.',
       code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    })
+    }
 
-    expect(mocks.updateProBooking).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
-  })
-
-  it('returns conflict when idempotency key was reused with a different PATCH body', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'conflict',
-    })
+    const response = mockHandledIdempotency(handledResponse)
 
     const result = await PATCH(
       makeIdempotentRequest({
@@ -553,23 +631,21 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       makeCtx(),
     )
 
-    expect(result).toEqual({
+    expect(result).toBe(response)
+    expect(mocks.updateProBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns handled conflict idempotency response without updating booking', async () => {
+    const handledResponse = {
       ok: false,
       status: 409,
-      error: 'This idempotency key was already used with a different request body.',
+      error:
+        'This idempotency key was already used with a different request body.',
       code: 'IDEMPOTENCY_KEY_CONFLICT',
-    })
+    }
 
-    expect(mocks.updateProBooking).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
-  })
-
-  it('replays completed idempotency response without updating booking again', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'replay',
-      responseStatus: 200,
-      responseBody: defaultPatchResponse,
-    })
+    const response = mockHandledIdempotency(handledResponse)
 
     const result = await PATCH(
       makeIdempotentRequest({
@@ -578,17 +654,37 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       makeCtx(),
     )
 
-    expect(result).toEqual({
+    expect(result).toBe(response)
+    expect(mocks.updateProBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('replays handled idempotency response without updating booking again', async () => {
+    const handledResponse = {
       ok: true,
       status: 200,
       data: defaultPatchResponse,
-    })
+    }
 
+    const response = mockHandledIdempotency(handledResponse)
+
+    const result = await PATCH(
+      makeIdempotentRequest({
+        notifyClient: true,
+      }),
+      makeCtx(),
+    )
+
+    expect(result).toBe(response)
     expect(mocks.updateProBooking).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('passes missing overrideReason through to updateProBooking and maps FORBIDDEN from the boundary', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_missing_override_reason_1'),
+    )
+
     mocks.updateProBooking.mockRejectedValueOnce(
       bookingError('FORBIDDEN', {
         message: 'Override reason is required when using booking rule overrides.',
@@ -611,11 +707,13 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       expectedBaseUpdateArgs({
         allowShortNotice: true,
         nextStart: new Date('2026-03-17T13:30:00.000Z'),
+        idempotencyKey: 'idem_missing_override_reason_1',
       }),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
@@ -636,6 +734,10 @@ describe('PATCH /api/pro/bookings/[id]', () => {
   })
 
   it('maps override permission denial from the boundary on PATCH and marks idempotency failed', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_permission_denied_1'),
+    )
+
     mocks.updateProBooking.mockRejectedValueOnce(
       bookingError('FORBIDDEN', {
         message:
@@ -661,11 +763,13 @@ describe('PATCH /api/pro/bookings/[id]', () => {
         overrideReason: 'Approved operational exception',
         allowShortNotice: true,
         nextStart: new Date('2026-03-17T13:30:00.000Z'),
+        idempotencyKey: 'idem_permission_denied_1',
       }),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
@@ -698,17 +802,11 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       makeCtx(),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_123',
-        actorRole: 'PRO',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_noop_patch_1',
-      requestBody: expectedBaseIdempotencyRequestBody({
+    expectRouteIdempotencyStartedWith(
+      expectedBaseIdempotencyRequestBody({
         notifyClient: true,
       }),
-    })
+    )
 
     expect(mocks.updateProBooking).toHaveBeenCalledWith(
       expectedBaseUpdateArgs({
@@ -716,7 +814,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       }),
     )
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: defaultPatchResponse,
@@ -732,6 +830,10 @@ describe('PATCH /api/pro/bookings/[id]', () => {
   })
 
   it('updates a booking successfully when an authorized override is used', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_authorized_override_1'),
+    )
+
     mocks.updateProBooking.mockResolvedValueOnce(updatedPatchResponse)
 
     const result = await PATCH(
@@ -751,10 +853,11 @@ describe('PATCH /api/pro/bookings/[id]', () => {
         overrideReason: 'Approved operational exception',
         allowShortNotice: true,
         nextStart: new Date('2026-03-17T13:30:00.000Z'),
+        idempotencyKey: 'idem_authorized_override_1',
       }),
     )
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: updatedPatchResponse,
@@ -770,6 +873,10 @@ describe('PATCH /api/pro/bookings/[id]', () => {
   })
 
   it('calls updateProBooking with parsed payload', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_parsed_payload_1'),
+    )
+
     mocks.updateProBooking.mockResolvedValueOnce(updatedPatchResponse)
 
     const result = await PATCH(
@@ -790,14 +897,8 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       makeCtx(),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_123',
-        actorRole: 'PRO',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_parsed_payload_1',
-      requestBody: expectedBaseIdempotencyRequestBody({
+    expectRouteIdempotencyStartedWith(
+      expectedBaseIdempotencyRequestBody({
         nextStatus: BookingStatus.ACCEPTED,
         notifyClient: true,
         allowOutsideWorkingHours: true,
@@ -809,7 +910,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
         hasDuration: true,
         overrideReason: 'approved by manager',
       }),
-    })
+    )
 
     expect(mocks.updateProBooking).toHaveBeenCalledWith(
       expectedBaseUpdateArgs({
@@ -823,6 +924,7 @@ describe('PATCH /api/pro/bookings/[id]', () => {
         nextDuration: 60,
         hasBuffer: true,
         hasDuration: true,
+        idempotencyKey: 'idem_parsed_payload_1',
       }),
     )
 
@@ -834,6 +936,10 @@ describe('PATCH /api/pro/bookings/[id]', () => {
   })
 
   it('parses serviceItems and forwards them to updateProBooking', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_service_items_1'),
+    )
+
     await PATCH(
       makeIdempotentRequest(
         {
@@ -868,9 +974,8 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       },
     ]
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith(
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
       expect.objectContaining({
-        key: 'idem_service_items_1',
         requestBody: expect.objectContaining({
           parsedRequestedItems,
           hasServiceItems: true,
@@ -882,11 +987,16 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       expect.objectContaining({
         parsedRequestedItems,
         hasServiceItems: true,
+        idempotencyKey: 'idem_service_items_1',
       }),
     )
   })
 
   it('maps booking errors to jsonFail and marks idempotency failed', async () => {
+    mocks.beginRouteIdempotency.mockResolvedValueOnce(
+      makeStartedIdempotency('idem_time_blocked_1'),
+    )
+
     mocks.updateProBooking.mockRejectedValueOnce(
       bookingError('TIME_BLOCKED', {
         message: 'Requested time is blocked.',
@@ -904,8 +1014,9 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: ROUTE_OPERATION,
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(

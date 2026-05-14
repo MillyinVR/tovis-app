@@ -1,4 +1,5 @@
 // app/api/pro/bookings/[id]/route.ts
+
 import { prisma } from '@/lib/prisma'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import {
@@ -10,6 +11,12 @@ import {
   pickString,
   requirePro,
 } from '@/app/api/_utils'
+import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
 import {
   BookingServiceItemType,
   BookingStatus,
@@ -37,14 +44,11 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { updateProBooking } from '@/lib/booking/writeBoundary'
-import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 
 export const dynamic = 'force-dynamic'
+
+const PATCH_ROUTE_OPERATION = 'PATCH /api/pro/bookings/[id]'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
@@ -52,12 +56,8 @@ type RequestedStatus =
   | typeof BookingStatus.ACCEPTED
   | typeof BookingStatus.CANCELLED
 
-type PatchBookingMeta = {
-  requestId: string | null
-  idempotencyKey: string | null
-}
-
 type NestedInputJsonValue = Prisma.InputJsonValue | null
+
 type JsonObjectPayload = {
   [key: string]: NestedInputJsonValue
 }
@@ -77,45 +77,17 @@ function bookingJsonFail(
     message?: string
     userMessage?: string
   },
-) {
+): Response {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(409, 'A matching booking update is already in progress.', {
-    code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-  })
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
-}
-
-function readPatchBookingMeta(request: Request): PatchBookingMeta {
-  const requestId =
+function readRequestId(request: Request): string | null {
+  return (
     pickString(request.headers.get('x-request-id')) ??
     pickString(request.headers.get('request-id')) ??
     null
-
-  const idempotencyKey =
-    pickString(request.headers.get('idempotency-key')) ??
-    pickString(request.headers.get('x-idempotency-key')) ??
-    null
-
-  return { requestId, idempotencyKey }
+  )
 }
 
 function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
@@ -143,12 +115,11 @@ function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
     return value.map((item) => normalizeNestedJsonValue(item))
   }
 
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
-    const out: Record<string, NestedInputJsonValue> = {}
+  if (isRecord(value)) {
+    const out: JsonObjectPayload = {}
 
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
+    for (const key of Object.keys(value).sort()) {
+      out[key] = normalizeNestedJsonValue(value[key])
     }
 
     return out
@@ -232,6 +203,53 @@ async function resolveBookingSchedulingContext(args: {
       result.context.appointmentTimeZone,
     ),
   }
+}
+
+function buildProBookingUpdateIdempotencyBody(args: {
+  professionalId: string
+  actorUserId: string
+  bookingId: string
+  nextStatus: RequestedStatus | null
+  notifyClient: boolean
+  allowOutsideWorkingHours: boolean
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  nextStart: Date | null
+  nextBuffer: number | null
+  nextDuration: number | null
+  parsedRequestedItems: RequestedServiceItemInput[] | null
+  hasBuffer: boolean
+  hasDuration: boolean
+  hasServiceItems: boolean
+  overrideReason: string | null
+}): JsonObjectPayload {
+  return normalizeJsonObjectPayload({
+    professionalId: args.professionalId,
+    actorUserId: args.actorUserId,
+    bookingId: args.bookingId,
+    nextStatus: args.nextStatus,
+    notifyClient: args.notifyClient,
+    allowOutsideWorkingHours: args.allowOutsideWorkingHours,
+    allowShortNotice: args.allowShortNotice,
+    allowFarFuture: args.allowFarFuture,
+    nextStart: args.nextStart ? args.nextStart.toISOString() : null,
+    nextBuffer: args.nextBuffer,
+    nextDuration: args.nextDuration,
+    parsedRequestedItems: args.parsedRequestedItems,
+    hasBuffer: args.hasBuffer,
+    hasDuration: args.hasDuration,
+    hasServiceItems: args.hasServiceItems,
+    overrideReason: args.overrideReason,
+  })
+}
+
+async function failProBookingUpdateIdempotency(
+  idempotencyRecordId: string | null,
+): Promise<void> {
+  await failStartedRouteIdempotency({
+    idempotencyRecordId,
+    operation: PATCH_ROUTE_OPERATION,
+  })
 }
 
 /* ---------------------------------------------
@@ -421,21 +439,20 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
-    const actorUserId = auth.user.id
-    const { requestId, idempotencyKey } = readPatchBookingMeta(req)
+    const actorUserId = pickString(auth.user.id)
+
+    if (!actorUserId) {
+      return bookingJsonFail('FORBIDDEN', {
+        message: 'Authenticated actor user id is required.',
+        userMessage: 'You are not allowed to update this booking.',
+      })
+    }
 
     const params = await Promise.resolve(ctx.params)
     const bookingId = pickString(params?.id)
 
     if (!bookingId) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
-    }
-
-    if (!actorUserId || !actorUserId.trim()) {
-      return bookingJsonFail('FORBIDDEN', {
-        message: 'Authenticated actor user id is required.',
-        userMessage: 'You are not allowed to update this booking.',
-      })
     }
 
     const rawBody: unknown = await req.json().catch(() => ({}))
@@ -556,17 +573,21 @@ export async function PATCH(req: Request, ctx: Ctx) {
           userMessage: error.userMessage,
         })
       }
+
       throw error
     }
 
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const requestId = readRequestId(req)
+
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: req,
       actor: {
         actorUserId,
         actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTES.PRO_BOOKING_UPDATE,
-      key: idempotencyKey,
-      requestBody: {
+      requestLabel: 'pro booking update',
+      requestBody: buildProBookingUpdateIdempotencyBody({
         professionalId,
         actorUserId,
         bookingId,
@@ -575,7 +596,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         allowOutsideWorkingHours: allowOutsideWorkingHours === true,
         allowShortNotice: allowShortNotice === true,
         allowFarFuture: allowFarFuture === true,
-        nextStart: nextStart ? nextStart.toISOString() : null,
+        nextStart,
         nextBuffer,
         nextDuration,
         parsedRequestedItems,
@@ -583,23 +604,17 @@ export async function PATCH(req: Request, ctx: Ctx) {
         hasDuration,
         hasServiceItems,
         overrideReason,
+      }),
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching booking update is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
       },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
@@ -621,26 +636,21 @@ export async function PATCH(req: Request, ctx: Ctx) {
       hasBuffer,
       hasDuration,
       hasServiceItems,
+      requestId,
+      idempotencyKey: idempotency.idempotencyKey,
     })
 
-const responseBody = normalizeJsonObjectPayload(result)
+    const responseBody = normalizeJsonObjectPayload(result)
 
-await completeIdempotency({
-  idempotencyRecordId,
-  responseStatus: 200,
-  responseBody,
-})
+    await completeRouteIdempotency({
+      idempotencyRecordId,
+      responseStatus: 200,
+      responseBody,
+    })
 
-return jsonOk(responseBody, 200)
+    return jsonOk(responseBody, 200)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-        console.error(
-          'PATCH /api/pro/bookings/[id] idempotency failure update error:',
-          failError,
-        )
-      })
-    }
+    await failProBookingUpdateIdempotency(idempotencyRecordId)
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -650,7 +660,7 @@ return jsonOk(responseBody, 200)
     }
 
     console.error('PATCH /api/pro/bookings/[id] error:', error)
-    captureBookingException({ error, route: 'PATCH /api/pro/bookings/[id]' })
+    captureBookingException({ error, route: PATCH_ROUTE_OPERATION })
     return bookingJsonFail('INTERNAL_ERROR', {
       message:
         error instanceof Error ? error.message : 'Failed to update booking.',
