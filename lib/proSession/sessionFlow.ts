@@ -383,7 +383,7 @@ export function getSessionCenterState({
   hasBeforeMedia,
   hasAfterMedia,
 }: GetSessionCenterStateArgs): ProSessionCenterState {
-  if (mode === 'IDLE' || !bookingId) {
+  if (mode === 'IDLE') {
     return {
       label: 'Start',
       action: 'NONE',
@@ -395,6 +395,14 @@ export function getSessionCenterState({
     return {
       label: 'Choose booking',
       action: 'PICK_BOOKING',
+      href: null,
+    }
+  }
+
+  if (!bookingId) {
+    return {
+      label: 'Start',
+      action: 'NONE',
       href: null,
     }
   }
