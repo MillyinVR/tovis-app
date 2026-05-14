@@ -1,5 +1,7 @@
+// app/api/pro/bookings/[id]/session/finish/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BookingStatus, SessionStep } from '@prisma/client'
+import { BookingStatus, Role, SessionStep } from '@prisma/client'
 import { bookingError } from '@/lib/booking/errors'
 
 const IDEMPOTENCY_ROUTE = 'POST /api/pro/bookings/[id]/session/finish'
@@ -76,9 +78,10 @@ const mocks = vi.hoisted(() => ({
 
   finishBookingSession: vi.fn(),
 
-  beginIdempotency: vi.fn(),
-  completeIdempotency: vi.fn(),
-  failIdempotency: vi.fn(),
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -88,14 +91,18 @@ vi.mock('@/app/api/_utils', () => ({
   pickString: mocks.pickString,
 }))
 
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
+}))
+
 vi.mock('@/lib/booking/writeBoundary', () => ({
   finishBookingSession: mocks.finishBookingSession,
 }))
 
 vi.mock('@/lib/idempotency', () => ({
-  beginIdempotency: mocks.beginIdempotency,
-  completeIdempotency: mocks.completeIdempotency,
-  failIdempotency: mocks.failIdempotency,
   IDEMPOTENCY_ROUTES: {
     BOOKING_FINISH_SESSION: 'POST /api/pro/bookings/[id]/session/finish',
   },
@@ -126,6 +133,17 @@ function makeCtx(id = 'booking_1') {
   return {
     params: Promise.resolve({ id }),
   }
+}
+
+function expectIdempotencyStarted(key = 'idem_finish_booking_1'): void {
+  mocks.beginRouteIdempotency.mockResolvedValue({
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: key,
+    requestHash: 'hash_1',
+  })
+
+  mocks.isRouteIdempotencyHandled.mockReturnValue(false)
 }
 
 describe('POST /api/pro/bookings/[id]/session/finish', () => {
@@ -160,24 +178,10 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       typeof value === 'string' && value.trim() ? value.trim() : null,
     )
 
-    mocks.beginIdempotency.mockImplementation(
-      async (args: { key: string | null }) => {
-        const key = args.key?.trim()
+    expectIdempotencyStarted()
 
-        if (!key) {
-          return { kind: 'missing_key' }
-        }
-
-        return {
-          kind: 'started',
-          idempotencyRecordId: 'idem_record_1',
-          requestHash: 'hash_1',
-        }
-      },
-    )
-
-    mocks.completeIdempotency.mockResolvedValue(undefined)
-    mocks.failIdempotency.mockResolvedValue(undefined)
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
 
     mocks.finishBookingSession.mockResolvedValue({
       booking: {
@@ -206,7 +210,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     const result = await POST(makeRequest(), makeCtx())
 
     expect(result).toBe(authRes)
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.finishBookingSession).not.toHaveBeenCalled()
   })
 
@@ -221,7 +225,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.finishBookingSession).not.toHaveBeenCalled()
     expect(result).toEqual(
       expect.objectContaining({
@@ -232,106 +236,140 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     )
   })
 
-  it('returns missing idempotency key for valid finish request without idempotency header', async () => {
-    const result = await POST(makeRequest(), makeCtx())
-
-    expect(result).toEqual({
+  it('returns handled idempotency response for missing idempotency key', async () => {
+    const handledResponse = {
       ok: false,
       status: 400,
       error: 'Missing idempotency key.',
       code: 'IDEMPOTENCY_KEY_REQUIRED',
-    })
+    }
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+    mocks.isRouteIdempotencyHandled.mockReturnValue(true)
+
+    const result = await POST(makeRequest(), makeCtx())
+
+    expect(result).toBe(handledResponse)
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+      request: expect.any(Request),
       actor: {
         actorUserId: 'user_123',
-        actorRole: 'PRO',
+        actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTE,
-      key: null,
+      requestLabel: 'booking finish',
       requestBody: {
         professionalId: 'pro_123',
         actorUserId: 'user_123',
         bookingId: 'booking_1',
       },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress:
+          'A matching booking finish request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
     expect(mocks.finishBookingSession).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns in-progress when idempotency ledger has an active matching request', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'in_progress',
-    })
-
-    const result = await POST(makeIdempotentRequest(), makeCtx())
-
-    expect(result).toEqual({
+  it('returns handled in-progress idempotency response', async () => {
+    const handledResponse = {
       ok: false,
       status: 409,
       error: 'A matching booking finish request is already in progress.',
       code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    })
+    }
 
-    expect(mocks.finishBookingSession).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
-  })
-
-  it('returns conflict when idempotency key was reused with a different body', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'conflict',
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
     })
+    mocks.isRouteIdempotencyHandled.mockReturnValue(true)
 
     const result = await POST(makeIdempotentRequest(), makeCtx())
 
-    expect(result).toEqual({
+    expect(result).toBe(handledResponse)
+    expect(mocks.finishBookingSession).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns handled conflict idempotency response', async () => {
+    const handledResponse = {
       ok: false,
       status: 409,
-      error: 'This idempotency key was already used with a different request body.',
+      error:
+        'This idempotency key was already used with a different request body.',
       code: 'IDEMPOTENCY_KEY_CONFLICT',
-    })
+    }
 
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+    mocks.isRouteIdempotencyHandled.mockReturnValue(true)
+
+    const result = await POST(makeIdempotentRequest(), makeCtx())
+
+    expect(result).toBe(handledResponse)
     expect(mocks.finishBookingSession).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('replays completed idempotency response without finishing again', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'replay',
-      responseStatus: 200,
-      responseBody: defaultFinishResponse,
-    })
-
-    const result = await POST(makeIdempotentRequest(), makeCtx())
-
-    expect(result).toEqual({
+    const handledResponse = {
       ok: true,
       status: 200,
       data: defaultFinishResponse,
-    })
+    }
 
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+    mocks.isRouteIdempotencyHandled.mockReturnValue(true)
+
+    const result = await POST(makeIdempotentRequest(), makeCtx())
+
+    expect(result).toBe(handledResponse)
     expect(mocks.finishBookingSession).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('finishes the booking session, completes idempotency, and returns session hub href', async () => {
+    expectIdempotencyStarted('idem_finish_success_1')
+
     const result = await POST(
       makeIdempotentRequest('idem_finish_success_1'),
       makeCtx(),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+      request: expect.any(Request),
       actor: {
         actorUserId: 'user_123',
-        actorRole: 'PRO',
+        actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTE,
-      key: 'idem_finish_success_1',
+      requestLabel: 'booking finish',
       requestBody: {
         professionalId: 'pro_123',
         actorUserId: 'user_123',
         bookingId: 'booking_1',
+      },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress:
+          'A matching booking finish request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
       },
     })
 
@@ -342,7 +380,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       idempotencyKey: 'idem_finish_success_1',
     })
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: defaultFinishResponse,
@@ -358,6 +396,8 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
   })
 
   it('passes request id header through to finishBookingSession', async () => {
+    expectIdempotencyStarted('idem_finish_with_request_id_1')
+
     await POST(
       makeRequest({
         'idempotency-key': 'idem_finish_with_request_id_1',
@@ -375,6 +415,8 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
   })
 
   it('routes AFTER_PHOTOS with zero after photos to after photos upload', async () => {
+    expectIdempotencyStarted('idem_finish_after_photos_empty_1')
+
     mocks.finishBookingSession.mockResolvedValueOnce({
       booking: {
         id: 'booking_1',
@@ -395,7 +437,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       makeCtx(),
     )
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: afterPhotosResponse,
@@ -409,6 +451,8 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
   })
 
   it('routes AFTER_PHOTOS with existing after photos to aftercare', async () => {
+    expectIdempotencyStarted('idem_finish_after_photos_ready_1')
+
     mocks.finishBookingSession.mockResolvedValueOnce({
       booking: {
         id: 'booking_1',
@@ -429,7 +473,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       makeCtx(),
     )
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: aftercareReadyResponse,
@@ -443,6 +487,8 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
   })
 
   it('routes DONE to aftercare', async () => {
+    expectIdempotencyStarted('idem_finish_done_1')
+
     mocks.finishBookingSession.mockResolvedValueOnce({
       booking: {
         id: 'booking_1',
@@ -463,7 +509,7 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       makeCtx(),
     )
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: doneResponse,
@@ -489,8 +535,9 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/session/finish',
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
@@ -519,8 +566,9 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/session/finish',
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')

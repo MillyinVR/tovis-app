@@ -1,18 +1,21 @@
 // app/api/pro/bookings/[id]/start/route.ts
-import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+
 import { Prisma, Role } from '@prisma/client'
+
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
 import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { startBookingSession } from '@/lib/booking/writeBoundary'
-import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +23,6 @@ type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type RequestMeta = {
   requestId: string | null
-  idempotencyKey: string | null
 }
 
 type NestedInputJsonValue = Prisma.InputJsonValue | null
@@ -28,6 +30,8 @@ type NestedInputJsonValue = Prisma.InputJsonValue | null
 type JsonObjectPayload = {
   [key: string]: NestedInputJsonValue
 }
+
+type StartSessionResponseBody = JsonObjectPayload
 
 function bookingBase(bookingId: string): string {
   return `/pro/bookings/${encodeURIComponent(bookingId)}`
@@ -43,45 +47,18 @@ function bookingJsonFail(
     message?: string
     userMessage?: string
   },
-) {
+): Response {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(409, 'A matching booking start request is already in progress.', {
-    code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-  })
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
-}
-
 function readRequestMeta(request: Request): RequestMeta {
-  const requestId =
-    pickString(request.headers.get('x-request-id')) ??
-    pickString(request.headers.get('request-id')) ??
-    null
-
-  const idempotencyKey =
-    pickString(request.headers.get('idempotency-key')) ??
-    pickString(request.headers.get('x-idempotency-key')) ??
-    null
-
-  return { requestId, idempotencyKey }
+  return {
+    requestId:
+      pickString(request.headers.get('x-request-id')) ??
+      pickString(request.headers.get('request-id')) ??
+      null,
+  }
 }
 
 function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
@@ -144,12 +121,37 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
   return out
 }
 
+function buildStartSessionIdempotencyBody(args: {
+  professionalId: string
+  actorUserId: string
+  bookingId: string
+}): JsonObjectPayload {
+  return {
+    professionalId: args.professionalId,
+    actorUserId: args.actorUserId,
+    bookingId: args.bookingId,
+  }
+}
+
+function buildStartSessionResponseBody(
+  result: Awaited<ReturnType<typeof startBookingSession>>,
+): StartSessionResponseBody {
+  return normalizeJsonObjectPayload({
+    booking: result.booking,
+    nextHref: sessionHubHref(result.booking.id),
+    meta: result.meta,
+  })
+}
+
 export async function POST(request: Request, ctx: Ctx) {
   let idempotencyRecordId: string | null = null
 
   try {
     const auth = await requirePro()
-    if (!auth.ok) return auth.res
+
+    if (!auth.ok) {
+      return auth.res
+    }
 
     const professionalId = auth.professionalId
     const actorUserId = auth.user.id
@@ -168,36 +170,32 @@ export async function POST(request: Request, ctx: Ctx) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
-    const { requestId, idempotencyKey } = readRequestMeta(request)
+    const { requestId } = readRequestMeta(request)
 
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<StartSessionResponseBody>({
+      request,
       actor: {
         actorUserId,
         actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTES.BOOKING_START_SESSION,
-      key: idempotencyKey,
-      requestBody: {
+      requestLabel: 'booking start',
+      requestBody: buildStartSessionIdempotencyBody({
         professionalId,
         actorUserId,
         bookingId,
+      }),
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress:
+          'A matching booking start request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
       },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
@@ -206,16 +204,12 @@ export async function POST(request: Request, ctx: Ctx) {
       bookingId,
       professionalId,
       requestId,
-      idempotencyKey,
+      idempotencyKey: idempotency.idempotencyKey,
     })
 
-    const responseBody = normalizeJsonObjectPayload({
-      booking: result.booking,
-      nextHref: sessionHubHref(result.booking.id),
-      meta: result.meta,
-    })
+    const responseBody = buildStartSessionResponseBody(result)
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 200,
       responseBody,
@@ -223,14 +217,10 @@ export async function POST(request: Request, ctx: Ctx) {
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-        console.error(
-          'POST /api/pro/bookings/[id]/start idempotency failure update error:',
-          failError,
-        )
-      })
-    }
+    await failStartedRouteIdempotency({
+      idempotencyRecordId,
+      operation: 'POST /api/pro/bookings/[id]/start',
+    })
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -240,6 +230,7 @@ export async function POST(request: Request, ctx: Ctx) {
     }
 
     console.error('POST /api/pro/bookings/[id]/start error', error)
+
     return jsonFail(500, 'Internal server error')
   }
 }

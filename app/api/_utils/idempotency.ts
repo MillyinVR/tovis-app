@@ -208,9 +208,11 @@ export async function failStartedRouteIdempotency(
 ): Promise<void> {
   if (!args.idempotencyRecordId) return
 
-  await failIdempotency({
-    idempotencyRecordId: args.idempotencyRecordId,
-  }).catch((error: unknown) => {
+  try {
+    await failIdempotency({
+      idempotencyRecordId: args.idempotencyRecordId,
+    })
+  } catch (error: unknown) {
     console.error(`${args.operation} idempotency failure update error:`, error)
-  })
+  }
 }

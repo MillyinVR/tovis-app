@@ -1,3 +1,4 @@
+// app/api/bookings/finalize/route.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AftercareRebookMode,
@@ -5,14 +6,14 @@ import {
   BookingStatus,
   NotificationEventKey,
   Prisma,
+  Role,
   ServiceLocationType,
 } from '@prisma/client'
+
 import { BookingError, getBookingErrorDescriptor } from '@/lib/booking/errors'
 
 const HOLD_START = new Date('2026-03-11T19:30:00.000Z')
 const NOW = new Date('2026-03-11T19:00:00.000Z')
-
-const IDEMPOTENCY_ROUTE = 'POST /api/bookings/finalize'
 
 const mocks = vi.hoisted(() => ({
   requireClient: vi.fn(),
@@ -23,14 +24,18 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
 
   professionalServiceOfferingFindUnique: vi.fn(),
-  resolveAftercareAccessByToken: vi.fn(),
+
+  resolveAftercareAccessTokenForMutation: vi.fn(),
+  markAftercareAccessTokenUsed: vi.fn(),
 
   finalizeBookingFromHold: vi.fn(),
   createProNotification: vi.fn(),
+  captureBookingException: vi.fn(),
 
-  beginIdempotency: vi.fn(),
-  completeIdempotency: vi.fn(),
-  failIdempotency: vi.fn(),
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -46,6 +51,13 @@ vi.mock('@/app/api/_utils/responses', () => ({
   jsonOk: mocks.jsonOk,
 }))
 
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
+}))
+
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     professionalServiceOffering: {
@@ -56,6 +68,10 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/notifications/proNotifications', () => ({
   createProNotification: mocks.createProNotification,
+}))
+
+vi.mock('@/lib/observability/bookingEvents', () => ({
+  captureBookingException: mocks.captureBookingException,
 }))
 
 vi.mock('@/lib/booking/locationContext', () => ({
@@ -72,19 +88,19 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
   finalizeBookingFromHold: mocks.finalizeBookingFromHold,
 }))
 
-vi.mock('@/lib/aftercare/unclaimedAftercareAccess', () => ({
-  resolveAftercareAccessByToken: mocks.resolveAftercareAccessByToken,
+vi.mock('@/lib/aftercare/aftercareAccessTokens', () => ({
+  resolveAftercareAccessTokenForMutation:
+    mocks.resolveAftercareAccessTokenForMutation,
+  markAftercareAccessTokenUsed: mocks.markAftercareAccessTokenUsed,
 }))
 
 vi.mock('@/lib/idempotency', () => ({
-  beginIdempotency: mocks.beginIdempotency,
-  completeIdempotency: mocks.completeIdempotency,
-  failIdempotency: mocks.failIdempotency,
   IDEMPOTENCY_ROUTES: {
     BOOKING_FINALIZE: 'POST /api/bookings/finalize',
   },
 }))
 
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { POST } from './route'
 
 function makeJsonResponse(status: number, payload: unknown): Response {
@@ -119,6 +135,19 @@ function makeIdempotentRequest(
   })
 }
 
+function expectIdempotencyStarted(key = 'idem_finalize_1'): void {
+  mocks.beginRouteIdempotency.mockResolvedValue({
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: key,
+    requestHash: 'hash_1',
+  })
+
+  mocks.isRouteIdempotencyHandled.mockImplementation(
+    (result: { kind: string }) => result.kind === 'handled',
+  )
+}
+
 const offering = {
   id: 'offering_1',
   isActive: true,
@@ -145,6 +174,7 @@ function makeResolvedAftercareAccess(overrides?: {
 }) {
   return {
     accessSource: 'clientActionToken' as const,
+    idempotencyActorKey: 'aftercare-token:token_row_1',
     token: {
       id: 'token_row_1',
       expiresAt: new Date('2026-03-20T19:00:00.000Z'),
@@ -161,7 +191,6 @@ function makeResolvedAftercareAccess(overrides?: {
       rebookedFor: new Date('2026-04-01T19:00:00.000Z'),
       rebookWindowStart: null,
       rebookWindowEnd: null,
-      publicToken: 'legacy_public_token_should_not_drive_contract',
       draftSavedAt: new Date('2026-03-11T18:00:00.000Z'),
       sentToClientAt: new Date('2026-03-11T18:30:00.000Z'),
       lastEditedAt: new Date('2026-03-11T18:15:00.000Z'),
@@ -222,6 +251,10 @@ describe('POST /api/bookings/finalize', () => {
     vi.setSystemTime(NOW)
     vi.clearAllMocks()
 
+    mocks.beginRouteIdempotency.mockReset()
+    mocks.completeRouteIdempotency.mockReset()
+    mocks.failStartedRouteIdempotency.mockReset()
+    mocks.isRouteIdempotencyHandled.mockReset()
     mocks.requireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
@@ -247,9 +280,18 @@ describe('POST /api/bookings/finalize', () => {
 
     mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
 
-    mocks.resolveAftercareAccessByToken.mockResolvedValue(
+    mocks.resolveAftercareAccessTokenForMutation.mockResolvedValue(
       makeResolvedAftercareAccess(),
     )
+
+    mocks.markAftercareAccessTokenUsed.mockResolvedValue({
+      id: 'token_row_1',
+      expiresAt: new Date('2026-03-20T19:00:00.000Z'),
+      firstUsedAt: NOW,
+      lastUsedAt: NOW,
+      useCount: 1,
+      singleUse: false,
+    })
 
     mocks.finalizeBookingFromHold.mockResolvedValue({
       booking: {
@@ -266,28 +308,17 @@ describe('POST /api/bookings/finalize', () => {
 
     mocks.createProNotification.mockResolvedValue(undefined)
 
-    mocks.beginIdempotency.mockImplementation(
-      async (args: { key: string | null }) => {
-        const key = args.key?.trim()
-        if (!key) return { kind: 'missing_key' }
+    expectIdempotencyStarted()
 
-        return {
-          kind: 'started',
-          idempotencyRecordId: 'idem_record_1',
-          requestHash: 'hash_1',
-        }
-      },
-    )
-
-    mocks.completeIdempotency.mockResolvedValue(undefined)
-    mocks.failIdempotency.mockResolvedValue(undefined)
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
     vi.useRealTimers()
   })
 
-  it('returns LOCATION_TYPE_REQUIRED when locationType is missing', async () => {
+  it('returns LOCATION_TYPE_REQUIRED when locationType is missing before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('LOCATION_TYPE_REQUIRED')
 
     const result = await POST(
@@ -302,10 +333,10 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.requireClient).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns OFFERING_ID_REQUIRED when offeringId is missing', async () => {
+  it('returns OFFERING_ID_REQUIRED when offeringId is missing before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('OFFERING_ID_REQUIRED')
 
     const result = await POST(
@@ -320,10 +351,10 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.requireClient).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns HOLD_ID_REQUIRED when holdId is missing', async () => {
+  it('returns HOLD_ID_REQUIRED when holdId is missing before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('HOLD_ID_REQUIRED')
 
     const result = await POST(
@@ -338,10 +369,10 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.requireClient).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns ADDONS_INVALID when addOnIds contains duplicates', async () => {
+  it('returns ADDONS_INVALID when addOnIds contains duplicates before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('ADDONS_INVALID')
 
     const result = await POST(
@@ -358,10 +389,10 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.requireClient).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns MISSING_MEDIA_ID when source is discovery without lookPostId or mediaId', async () => {
+  it('returns MISSING_MEDIA_ID when source is discovery without lookPostId or mediaId before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('MISSING_MEDIA_ID')
 
     const result = await POST(
@@ -381,10 +412,10 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
     expect(mocks.requireClient).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns OFFERING_NOT_FOUND when offering is missing', async () => {
+  it('returns OFFERING_NOT_FOUND when offering is missing before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('OFFERING_NOT_FOUND')
     mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce(null)
 
@@ -400,11 +431,11 @@ describe('POST /api/bookings/finalize', () => {
     expectBookingFailPayload(await result.json(), 'OFFERING_NOT_FOUND')
 
     expect(mocks.requireClient).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
-  it('returns OFFERING_NOT_FOUND when offering is inactive', async () => {
+  it('returns OFFERING_NOT_FOUND when offering is inactive before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('OFFERING_NOT_FOUND')
     mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce({
       ...offering,
@@ -423,11 +454,11 @@ describe('POST /api/bookings/finalize', () => {
     expectBookingFailPayload(await result.json(), 'OFFERING_NOT_FOUND')
 
     expect(mocks.requireClient).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
-  it('returns auth response when auth fails for non-aftercare finalize', async () => {
+  it('returns auth response before idempotency starts when auth fails for non-aftercare finalize', async () => {
     const authRes = makeJsonResponse(401, {
       ok: false,
       error: 'Unauthorized',
@@ -453,11 +484,21 @@ describe('POST /api/bookings/finalize', () => {
     })
     expect(mocks.requireClient).toHaveBeenCalledTimes(1)
     expect(result).toBe(authRes)
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
-  it('returns missing idempotency key for authenticated finalize without idempotency header', async () => {
+  it('returns handled idempotency response for authenticated finalize without calling boundary', async () => {
+    const handledResponse = makeJsonResponse(400, {
+      ok: false,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    })
+
+  mocks.beginRouteIdempotency.mockResolvedValueOnce({
+    kind: 'handled',
+    response: handledResponse,
+  })
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
@@ -467,20 +508,36 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'Missing idempotency key.',
-      code: 'IDEMPOTENCY_KEY_REQUIRED',
-    })
+    expect(result).toBe(handledResponse)
+    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+  })
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+  it('starts idempotency for authenticated requested finalize', async () => {
+    expectIdempotencyStarted('idem_requested_1')
+
+    await POST(
+      makeIdempotentRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+          source: 'REQUESTED',
+        },
+        'idem_requested_1',
+      ),
+    )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+      request: expect.any(Request),
       actor: {
         actorUserId: 'user_1',
-        actorRole: 'CLIENT',
+        actorRole: Role.CLIENT,
       },
-      route: IDEMPOTENCY_ROUTE,
-      key: null,
+      route: IDEMPOTENCY_ROUTES.BOOKING_FINALIZE,
+      requestLabel: 'booking finalize',
       requestBody: {
         clientId: 'client_1',
         offeringId: 'offering_1',
@@ -494,62 +551,20 @@ describe('POST /api/bookings/finalize', () => {
         aftercareToken: null,
         rebookOfBookingId: null,
       },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching booking request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
-    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
   })
 
-  it('returns in-progress when idempotency ledger has an active matching request', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'in_progress',
-    })
-
-    const result = await POST(
-      makeIdempotentRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-      }),
-    )
-
-    expect(result.status).toBe(409)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'A matching booking request is already in progress.',
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    })
-
-    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
-  })
-
-  it('returns conflict when idempotency key was reused with a different body', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'conflict',
-    })
-
-    const result = await POST(
-      makeIdempotentRequest({
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        locationType: 'SALON',
-      }),
-    )
-
-    expect(result.status).toBe(409)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'This idempotency key was already used with a different request body.',
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    })
-
-    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
-  })
-
-  it('replays a completed idempotency response without finalizing or notifying again', async () => {
+  it('returns handled replay response without finalizing, notifying, or marking token used', async () => {
     const replayBody = {
+      ok: true,
       booking: {
         id: 'booking_replayed',
         status: BookingStatus.PENDING,
@@ -562,12 +577,13 @@ describe('POST /api/bookings/finalize', () => {
       },
     }
 
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'replay',
-      responseStatus: 201,
-      responseBody: replayBody,
-    })
+    const handledResponse = makeJsonResponse(201, replayBody)
 
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+    
     const result = await POST(
       makeIdempotentRequest({
         offeringId: 'offering_1',
@@ -577,17 +593,17 @@ describe('POST /api/bookings/finalize', () => {
     )
 
     expect(result.status).toBe(201)
-    await expect(result.json()).resolves.toEqual({
-      ok: true,
-      ...replayBody,
-    })
+    await expect(result.json()).resolves.toEqual(replayBody)
 
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
     expect(mocks.createProNotification).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
   })
 
   it('allows discovery finalize when lookPostId is provided without mediaId', async () => {
+    expectIdempotencyStarted('idem_discovery_1')
+
     const result = await POST(
       makeIdempotentRequest(
         {
@@ -605,27 +621,28 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.requireClient).toHaveBeenCalledTimes(1)
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: 'CLIENT',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_discovery_1',
-      requestBody: {
-        clientId: 'client_1',
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        openingId: null,
-        addOnIds: [],
-        locationType: ServiceLocationType.SALON,
-        source: BookingSource.DISCOVERY,
-        mediaId: null,
-        lookPostId: 'look_123',
-        aftercareToken: null,
-        rebookOfBookingId: null,
-      },
-    })
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: {
+          actorUserId: 'user_1',
+          actorRole: Role.CLIENT,
+        },
+        route: IDEMPOTENCY_ROUTES.BOOKING_FINALIZE,
+        requestBody: expect.objectContaining({
+          clientId: 'client_1',
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          openingId: null,
+          addOnIds: [],
+          locationType: ServiceLocationType.SALON,
+          source: BookingSource.DISCOVERY,
+          mediaId: null,
+          lookPostId: 'look_123',
+          aftercareToken: null,
+          rebookOfBookingId: null,
+        }),
+      }),
+    )
 
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
       clientId: 'client_1',
@@ -670,10 +687,11 @@ describe('POST /api/bookings/finalize', () => {
       },
     })
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 201,
       responseBody: {
+        ok: true,
         booking: {
           id: 'booking_1',
           status: BookingStatus.PENDING,
@@ -702,7 +720,7 @@ describe('POST /api/bookings/finalize', () => {
     })
   })
 
-  it('returns AFTERCARE_TOKEN_MISSING when source is aftercare without token', async () => {
+  it('returns AFTERCARE_TOKEN_MISSING when source is aftercare without token before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('AFTERCARE_TOKEN_MISSING')
 
     const result = await POST(
@@ -718,14 +736,15 @@ describe('POST /api/bookings/finalize', () => {
     expectBookingFailPayload(await result.json(), 'AFTERCARE_TOKEN_MISSING')
 
     expect(mocks.requireClient).not.toHaveBeenCalled()
-    expect(mocks.resolveAftercareAccessByToken).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.resolveAftercareAccessTokenForMutation).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
   })
 
   it('treats aftercareToken as authoritative even when source claims REQUESTED', async () => {
     await POST(
-      makeRequest({
+      makeIdempotentRequest({
         offeringId: 'offering_1',
         holdId: 'hold_1',
         locationType: 'SALON',
@@ -735,24 +754,44 @@ describe('POST /api/bookings/finalize', () => {
     )
 
     expect(mocks.requireClient).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
-    expect(mocks.resolveAftercareAccessByToken).toHaveBeenCalledWith({
+    expect(mocks.resolveAftercareAccessTokenForMutation).toHaveBeenCalledWith({
       rawToken: 'token_1',
     })
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: {
+          actorKey: 'aftercare-token:token_row_1',
+          actorRole: Role.CLIENT,
+        },
+        route: IDEMPOTENCY_ROUTES.BOOKING_FINALIZE,
+        requestBody: expect.objectContaining({
+          clientId: 'client_1',
+          source: BookingSource.AFTERCARE,
+          aftercareToken: 'token_1',
+          rebookOfBookingId: 'booking_old',
+        }),
+      }),
+    )
 
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
       expect.objectContaining({
         clientId: 'client_1',
         source: BookingSource.AFTERCARE,
         rebookOfBookingId: 'booking_old',
+        idempotencyKey: 'idem_finalize_1',
       }),
     )
+
+    expect(mocks.markAftercareAccessTokenUsed).toHaveBeenCalledWith({
+      tokenId: 'token_row_1',
+    })
   })
 
-  it('returns AFTERCARE_NOT_COMPLETED when aftercare booking is not completed', async () => {
+  it('returns AFTERCARE_NOT_COMPLETED when aftercare booking is not completed before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('AFTERCARE_NOT_COMPLETED')
 
-    mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
+    mocks.resolveAftercareAccessTokenForMutation.mockResolvedValueOnce(
       makeResolvedAftercareAccess({
         status: BookingStatus.PENDING,
       }),
@@ -768,18 +807,20 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(mocks.resolveAftercareAccessByToken).toHaveBeenCalledWith({
+    expect(mocks.resolveAftercareAccessTokenForMutation).toHaveBeenCalledWith({
       rawToken: 'token_1',
     })
 
     expect(result.status).toBe(descriptor.httpStatus)
     expectBookingFailPayload(await result.json(), 'AFTERCARE_NOT_COMPLETED')
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
   })
 
-  it('returns AFTERCARE_OFFERING_MISMATCH when aftercare booking does not match offering', async () => {
+  it('returns AFTERCARE_OFFERING_MISMATCH when aftercare booking does not match offering before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('AFTERCARE_OFFERING_MISMATCH')
 
-    mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
+    mocks.resolveAftercareAccessTokenForMutation.mockResolvedValueOnce(
       makeResolvedAftercareAccess({
         professionalId: 'pro_other',
         serviceId: 'service_other',
@@ -802,17 +843,19 @@ describe('POST /api/bookings/finalize', () => {
       await result.json(),
       'AFTERCARE_OFFERING_MISMATCH',
     )
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
   })
 
   it('calls finalizeBookingFromHold with token-resolved client ownership for aftercare', async () => {
-    mocks.resolveAftercareAccessByToken.mockResolvedValueOnce(
+    mocks.resolveAftercareAccessTokenForMutation.mockResolvedValueOnce(
       makeResolvedAftercareAccess({
         clientId: 'client_from_token',
       }),
     )
 
     await POST(
-      makeRequest({
+      makeIdempotentRequest({
         offeringId: 'offering_1',
         holdId: 'hold_1',
         openingId: 'opening_1',
@@ -825,7 +868,20 @@ describe('POST /api/bookings/finalize', () => {
     )
 
     expect(mocks.requireClient).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: {
+          actorKey: 'aftercare-token:token_row_1',
+          actorRole: Role.CLIENT,
+        },
+        requestBody: expect.objectContaining({
+          clientId: 'client_from_token',
+          source: BookingSource.AFTERCARE,
+          rebookOfBookingId: 'booking_old',
+        }),
+      }),
+    )
 
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
       clientId: 'client_from_token',
@@ -850,13 +906,17 @@ describe('POST /api/bookings/finalize', () => {
       },
       fallbackTimeZone: 'UTC',
       requestId: null,
-      idempotencyKey: null,
+      idempotencyKey: 'idem_finalize_1',
+    })
+
+    expect(mocks.markAftercareAccessTokenUsed).toHaveBeenCalledWith({
+      tokenId: 'token_row_1',
     })
   })
 
   it('uses original booking id as fallback rebookOfBookingId for aftercare', async () => {
     await POST(
-      makeRequest({
+      makeIdempotentRequest({
         offeringId: 'offering_1',
         holdId: 'hold_1',
         locationType: 'SALON',
@@ -865,7 +925,6 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
       expect.objectContaining({
         clientId: 'client_1',
@@ -873,9 +932,15 @@ describe('POST /api/bookings/finalize', () => {
         rebookOfBookingId: 'booking_old',
       }),
     )
+
+    expect(mocks.markAftercareAccessTokenUsed).toHaveBeenCalledWith({
+      tokenId: 'token_row_1',
+    })
   })
 
   it('creates the booking through the boundary, completes idempotency, and notifies the pro for standard requested flow', async () => {
+    expectIdempotencyStarted('idem_requested_1')
+
     const result = await POST(
       makeIdempotentRequest(
         {
@@ -889,28 +954,6 @@ describe('POST /api/bookings/finalize', () => {
     )
 
     expect(mocks.requireClient).toHaveBeenCalledTimes(1)
-
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: 'CLIENT',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_requested_1',
-      requestBody: {
-        clientId: 'client_1',
-        offeringId: 'offering_1',
-        holdId: 'hold_1',
-        openingId: null,
-        addOnIds: [],
-        locationType: ServiceLocationType.SALON,
-        source: BookingSource.REQUESTED,
-        mediaId: null,
-        lookPostId: null,
-        aftercareToken: null,
-        rebookOfBookingId: null,
-      },
-    })
 
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
       clientId: 'client_1',
@@ -955,10 +998,11 @@ describe('POST /api/bookings/finalize', () => {
       },
     })
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 201,
       responseBody: {
+        ok: true,
         booking: {
           id: 'booking_1',
           status: BookingStatus.PENDING,
@@ -971,6 +1015,8 @@ describe('POST /api/bookings/finalize', () => {
         },
       },
     })
+
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
 
     expect(result.status).toBe(201)
     await expect(result.json()).resolves.toEqual({
@@ -990,7 +1036,7 @@ describe('POST /api/bookings/finalize', () => {
 
   it('creates pro notification with null actorUserId for aftercare finalize', async () => {
     await POST(
-      makeRequest({
+      makeIdempotentRequest({
         offeringId: 'offering_1',
         holdId: 'hold_1',
         locationType: 'SALON',
@@ -998,8 +1044,6 @@ describe('POST /api/bookings/finalize', () => {
         aftercareToken: 'token_1',
       }),
     )
-
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
       professionalId: 'pro_123',
@@ -1017,9 +1061,15 @@ describe('POST /api/bookings/finalize', () => {
         locationType: ServiceLocationType.SALON,
       },
     })
+
+    expect(mocks.markAftercareAccessTokenUsed).toHaveBeenCalledWith({
+      tokenId: 'token_row_1',
+    })
   })
 
   it('uses booking confirmed event when booking is auto-confirmed', async () => {
+    expectIdempotencyStarted('idem_auto_accept_1')
+
     mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce({
       ...offering,
       professional: {
@@ -1069,10 +1119,11 @@ describe('POST /api/bookings/finalize', () => {
       },
     })
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 201,
       responseBody: {
+        ok: true,
         booking: {
           id: 'booking_1',
           status: BookingStatus.ACCEPTED,
@@ -1085,12 +1136,14 @@ describe('POST /api/bookings/finalize', () => {
         },
       },
     })
+
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
   })
 
-  it('maps BookingError from resolveAftercareAccessByToken using the aftercare-specific code', async () => {
+  it('maps BookingError from resolveAftercareAccessTokenForMutation before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('AFTERCARE_TOKEN_INVALID')
 
-    mocks.resolveAftercareAccessByToken.mockRejectedValueOnce(
+    mocks.resolveAftercareAccessTokenForMutation.mockRejectedValueOnce(
       new BookingError('AFTERCARE_TOKEN_INVALID', {
         message: 'Aftercare access token was not found.',
         userMessage: 'That aftercare link is invalid or expired.',
@@ -1113,11 +1166,15 @@ describe('POST /api/bookings/finalize', () => {
       message: 'Aftercare access token was not found.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
-    expect(mocks.failIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: null,
+      operation: 'POST /api/bookings/finalize',
+    })
   })
 
-  it('maps BookingError from finalizeBookingFromHold and marks idempotency failed', async () => {
+  it('maps BookingError from finalizeBookingFromHold and marks idempotency failed without marking token used', async () => {
     const descriptor = getBookingErrorDescriptor('TIME_HELD')
 
     mocks.finalizeBookingFromHold.mockRejectedValueOnce(
@@ -1138,13 +1195,16 @@ describe('POST /api/bookings/finalize', () => {
     expect(result.status).toBe(descriptor.httpStatus)
     expectBookingFailPayload(await result.json(), 'TIME_HELD')
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/bookings/finalize',
     })
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
   })
 
-  it('returns internal error for unexpected failures and marks idempotency failed', async () => {
+  it('returns internal error for unexpected failures and marks idempotency failed without marking token used', async () => {
     mocks.finalizeBookingFromHold.mockRejectedValueOnce(new Error('boom'))
 
     const result = await POST(
@@ -1168,9 +1228,53 @@ describe('POST /api/bookings/finalize', () => {
       message: 'boom',
     })
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/bookings/finalize',
     })
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+    expect(mocks.captureBookingException).toHaveBeenCalledWith({
+      error: expect.any(Error),
+      route: 'POST /api/bookings/finalize',
+    })
+  })
+
+  it('marks idempotency failed when aftercare token usage update fails after finalize success', async () => {
+    mocks.markAftercareAccessTokenUsed.mockRejectedValueOnce(
+      new BookingError('AFTERCARE_TOKEN_INVALID', {
+        message: 'Token usage failed.',
+        userMessage: 'That aftercare link is invalid or expired.',
+      }),
+    )
+
+    const result = await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'AFTERCARE',
+        aftercareToken: 'token_1',
+      }),
+    )
+
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).toHaveBeenCalledWith({
+      tokenId: 'token_row_1',
+    })
+
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/bookings/finalize',
+    })
+
+    expect(result.status).toBe(400)
+    expectBookingFailPayload(await result.json(), 'AFTERCARE_TOKEN_INVALID', {
+      error: 'That aftercare link is invalid or expired.',
+      message: 'Token usage failed.',
+    })
   })
 })

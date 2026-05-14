@@ -522,15 +522,17 @@ describe('POST /api/client/bookings', () => {
     )
   })
 
-  it('returns a deprecated endpoint response', async () => {
+  it('returns a deprecated endpoint response with the hold-to-finalize flow hint', async () => {
     const response = await POST(makeRequest({}))
 
     expect(response.status).toBe(410)
+
     await expect(response.json()).resolves.toEqual({
       ok: false,
       error: 'This endpoint has been deprecated.',
       code: 'DEPRECATED_ENDPOINT',
       hint: {
+        deprecatedEndpoint: 'POST /api/client/bookings',
         correctFlow: {
           createHold: 'POST /api/holds',
           finalizeBooking: 'POST /api/bookings/finalize',
@@ -545,6 +547,7 @@ describe('POST /api/client/bookings', () => {
       {
         code: 'DEPRECATED_ENDPOINT',
         hint: {
+          deprecatedEndpoint: 'POST /api/client/bookings',
           correctFlow: {
             createHold: 'POST /api/holds',
             finalizeBooking: 'POST /api/bookings/finalize',

@@ -1,7 +1,5 @@
 // app/api/bookings/finalize/route.ts
 
-import { prisma } from '@/lib/prisma'
-import { captureBookingException } from '@/lib/observability/bookingEvents'
 import {
   BookingSource,
   BookingStatus,
@@ -10,29 +8,38 @@ import {
   Role,
   type ServiceLocationType,
 } from '@prisma/client'
+
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
+import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
-import { createProNotification } from '@/lib/notifications/proNotifications'
-import { isRecord } from '@/lib/guards'
-import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
-import { normalizeLocationType } from '@/lib/booking/locationContext'
+import {
+  markAftercareAccessTokenUsed,
+  resolveAftercareAccessTokenForMutation,
+} from '@/lib/aftercare/aftercareAccessTokens'
 import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { normalizeLocationType } from '@/lib/booking/locationContext'
+import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
-import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
-import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+import { isRecord } from '@/lib/guards'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { createProNotification } from '@/lib/notifications/proNotifications'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
+
+const CLIENT_ROLE: Role = 'CLIENT'
 
 const FALLBACK_TIME_ZONE = 'UTC' as const
 
@@ -101,10 +108,21 @@ type ValidatedFinalizeBody = {
 type FinalizeOwnershipContext = {
   clientId: string
   actorUserId: string | null
+  idempotencyActor:
+    | {
+        kind: 'authenticated-client'
+        actorUserId: string
+      }
+    | {
+        kind: 'aftercare-token'
+        actorKey: string
+        tokenId: string
+      }
   rebookOfBookingId: string | null
 }
 
 type FinalizeSuccessBody = {
+  ok: true
   booking: {
     id: string
     status: BookingStatus
@@ -123,7 +141,7 @@ function bookingJsonFail(
     message?: string
     userMessage?: string
   },
-) {
+): Response {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
@@ -133,28 +151,6 @@ function discoveryContextMissingFail(): Response {
     userMessage: 'Discovery bookings require a look post id or media id.',
     message: 'Discovery bookings require a lookPostId or mediaId.',
   })
-}
-
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(409, 'A matching booking request is already in progress.', {
-    code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-  })
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
 }
 
 function pickStringArray(value: unknown): string[] {
@@ -198,6 +194,7 @@ function normalizeSourceFromRequest(args: {
   if (raw === 'UNKNOWN') return BookingSource.REQUESTED
 
   if (hasDiscoveryReference(args)) return BookingSource.DISCOVERY
+
   return BookingSource.REQUESTED
 }
 
@@ -326,7 +323,7 @@ async function createFinalizeProNotification(args: {
   bookingStatus: BookingStatus
   source: BookingSource
   locationType: ServiceLocationType
-}) {
+}): Promise<void> {
   const meta = getFinalizeProNotificationMeta(args.bookingStatus)
 
   await createProNotification({
@@ -370,11 +367,12 @@ async function resolveFinalizeOwnershipContext(args: {
 }): Promise<FinalizeOwnershipContext | Response> {
   if (args.source === BookingSource.AFTERCARE) {
     const aftercareToken = args.aftercareToken
+
     if (!aftercareToken) {
       return bookingJsonFail('AFTERCARE_TOKEN_MISSING')
     }
 
-    const resolved = await resolveAftercareAccessByToken({
+    const resolved = await resolveAftercareAccessTokenForMutation({
       rawToken: aftercareToken,
     })
 
@@ -396,6 +394,11 @@ async function resolveFinalizeOwnershipContext(args: {
     return {
       clientId: original.clientId,
       actorUserId: null,
+      idempotencyActor: {
+        kind: 'aftercare-token',
+        actorKey: resolved.idempotencyActorKey,
+        tokenId: resolved.token.id,
+      },
       rebookOfBookingId:
         args.requestedRebookOfBookingId === original.id
           ? args.requestedRebookOfBookingId
@@ -404,6 +407,7 @@ async function resolveFinalizeOwnershipContext(args: {
   }
 
   const auth = await requireClient()
+
   if (!auth.ok) {
     return auth.res
   }
@@ -411,25 +415,40 @@ async function resolveFinalizeOwnershipContext(args: {
   return {
     clientId: auth.clientId,
     actorUserId: auth.user.id,
+    idempotencyActor: {
+      kind: 'authenticated-client',
+      actorUserId: auth.user.id,
+    },
     rebookOfBookingId: null,
   }
 }
 
-function readFinalizeMeta(request: Request): {
-  requestId: string | null
-  idempotencyKey: string | null
-} {
-  const requestId =
+function readRequestId(request: Request): string | null {
+  return (
     pickString(request.headers.get('x-request-id')) ??
     pickString(request.headers.get('request-id')) ??
     null
+  )
+}
 
-  const idempotencyKey =
-    pickString(request.headers.get('idempotency-key')) ??
-    pickString(request.headers.get('x-idempotency-key')) ??
-    null
-
-  return { requestId, idempotencyKey }
+function buildFinalizeIdempotencyRequestBody(args: {
+  clientId: string
+  body: ValidatedFinalizeBody
+  rebookOfBookingId: string | null
+}): Prisma.InputJsonObject {
+  return {
+    clientId: args.clientId,
+    offeringId: args.body.offeringId,
+    holdId: args.body.holdId,
+    openingId: args.body.openingId,
+    addOnIds: args.body.addOnIds,
+    locationType: args.body.locationType,
+    source: args.body.source,
+    mediaId: args.body.mediaId,
+    lookPostId: args.body.lookPostId,
+    aftercareToken: args.body.aftercareToken,
+    rebookOfBookingId: args.rebookOfBookingId,
+  }
 }
 
 function buildFinalizeSuccessBody(args: {
@@ -445,6 +464,7 @@ function buildFinalizeSuccessBody(args: {
   }
 }): FinalizeSuccessBody {
   return {
+    ok: true,
     booking: {
       id: args.booking.id,
       status: args.booking.status,
@@ -455,25 +475,63 @@ function buildFinalizeSuccessBody(args: {
   }
 }
 
+function buildIdempotencyActor(
+  context: FinalizeOwnershipContext,
+):
+  | {
+      actorUserId: string
+      actorRole: Role
+    }
+  | {
+      actorKey: string
+      actorRole: Role
+    } {
+  if (context.idempotencyActor.kind === 'authenticated-client') {
+    return {
+      actorUserId: context.idempotencyActor.actorUserId,
+      actorRole: CLIENT_ROLE,
+    }
+  }
+
+  return {
+    actorKey: context.idempotencyActor.actorKey,
+    actorRole: CLIENT_ROLE,
+  }
+}
+
+function getAftercareTokenId(
+  context: FinalizeOwnershipContext,
+): string | null {
+  if (context.idempotencyActor.kind !== 'aftercare-token') {
+    return null
+  }
+
+  return context.idempotencyActor.tokenId
+}
+
 export async function POST(request: Request) {
   let idempotencyRecordId: string | null = null
 
   try {
-    const { requestId, idempotencyKey } = readFinalizeMeta(request)
+    const requestId = readRequestId(request)
 
     const rawBody: unknown = await request.json().catch(() => ({}))
     const parsedBody = parseFinalizeBody(rawBody)
 
     const validated = validateParsedFinalizeBody(parsedBody)
+
     if (!validated.ok) {
       return validated.response
     }
+
     const body = validated.body
 
     const offeringOrFail = await getOfferingOrFail(body.offeringId)
+
     if (offeringOrFail instanceof Response) {
       return offeringOrFail
     }
+
     const offering = offeringOrFail
 
     const autoAccept = Boolean(offering.professional?.autoAcceptBookings)
@@ -485,72 +543,57 @@ export async function POST(request: Request) {
       requestedRebookOfBookingId: body.requestedRebookOfBookingId,
       offering,
     })
+
     if (ownershipOrFail instanceof Response) {
       return ownershipOrFail
     }
 
-    if (ownershipOrFail.actorUserId) {
-      const idempotency = await beginIdempotency<FinalizeSuccessBody>({
-        actor: {
-          actorUserId: ownershipOrFail.actorUserId,
-          actorRole: Role.CLIENT,
-        },
-        route: IDEMPOTENCY_ROUTES.BOOKING_FINALIZE,
-        key: idempotencyKey,
-        requestBody: {
-          clientId: ownershipOrFail.clientId,
-          offeringId: body.offeringId,
-          holdId: body.holdId,
-          openingId: body.openingId,
-          addOnIds: body.addOnIds,
-          locationType: body.locationType,
-          source: body.source,
-          mediaId: body.mediaId,
-          lookPostId: body.lookPostId,
-          aftercareToken: body.aftercareToken,
-          rebookOfBookingId: ownershipOrFail.rebookOfBookingId,
-        },
-      })
+    const ownership = ownershipOrFail
 
-      if (idempotency.kind === 'missing_key') {
-        return idempotencyMissingKeyFail()
-      }
+    const idempotency = await beginRouteIdempotency<FinalizeSuccessBody>({
+      request,
+      actor: buildIdempotencyActor(ownership),
+      route: IDEMPOTENCY_ROUTES.BOOKING_FINALIZE,
+      requestLabel: 'booking finalize',
+      requestBody: buildFinalizeIdempotencyRequestBody({
+        clientId: ownership.clientId,
+        body,
+        rebookOfBookingId: ownership.rebookOfBookingId,
+      }),
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching booking request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
+    })
 
-      if (idempotency.kind === 'in_progress') {
-        return idempotencyInProgressFail()
-      }
-
-      if (idempotency.kind === 'conflict') {
-        return idempotencyConflictFail()
-      }
-
-      if (idempotency.kind === 'replay') {
-        return jsonOk(idempotency.responseBody, idempotency.responseStatus)
-      }
-
-      idempotencyRecordId = idempotency.idempotencyRecordId
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
+    idempotencyRecordId = idempotency.idempotencyRecordId
+
     const result = await finalizeBookingFromHold({
-      clientId: ownershipOrFail.clientId,
+      clientId: ownership.clientId,
       holdId: body.holdId,
       openingId: body.openingId,
       addOnIds: body.addOnIds,
       locationType: body.locationType,
       source: body.source,
       initialStatus,
-      rebookOfBookingId: ownershipOrFail.rebookOfBookingId,
+      rebookOfBookingId: ownership.rebookOfBookingId,
       offering: toFinalizeOffering(offering),
       fallbackTimeZone: FALLBACK_TIME_ZONE,
       requestId,
-      idempotencyKey,
+      idempotencyKey: idempotency.idempotencyKey,
     })
 
     try {
       await createFinalizeProNotification({
         professionalId: result.booking.professionalId,
         bookingId: result.booking.id,
-        actorUserId: ownershipOrFail.actorUserId,
+        actorUserId: ownership.actorUserId,
         bookingStatus: result.booking.status,
         source: body.source,
         locationType: body.locationType,
@@ -567,24 +610,26 @@ export async function POST(request: Request) {
       meta: result.meta,
     })
 
-    if (idempotencyRecordId) {
-      await completeIdempotency({
-        idempotencyRecordId,
-        responseStatus: 201,
-        responseBody,
+    const aftercareTokenId = getAftercareTokenId(ownership)
+
+    if (aftercareTokenId) {
+      await markAftercareAccessTokenUsed({
+        tokenId: aftercareTokenId,
       })
     }
 
+    await completeRouteIdempotency({
+      idempotencyRecordId,
+      responseStatus: 201,
+      responseBody,
+    })
+
     return jsonOk(responseBody, 201)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-        console.error(
-          'POST /api/bookings/finalize idempotency failure update error:',
-          failError,
-        )
-      })
-    }
+    await failStartedRouteIdempotency({
+      idempotencyRecordId,
+      operation: 'POST /api/bookings/finalize',
+    })
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -594,7 +639,12 @@ export async function POST(request: Request) {
     }
 
     console.error('POST /api/bookings/finalize error:', error)
-    captureBookingException({ error, route: 'POST /api/bookings/finalize' })
+
+    captureBookingException({
+      error,
+      route: 'POST /api/bookings/finalize',
+    })
+
     return bookingJsonFail('INTERNAL_ERROR', {
       message: error instanceof Error ? error.message : 'Internal server error',
       userMessage: 'Internal server error',

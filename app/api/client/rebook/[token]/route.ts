@@ -1,26 +1,33 @@
 // app/api/client/rebook/[token]/route.ts
+
+import { AftercareRebookMode, Role } from '@prisma/client'
+
 import {
   pickIsoDate,
   pickString,
   jsonFail,
   jsonOk,
 } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
+import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
+import {
+  markAftercareAccessTokenUsed,
+  resolveAftercareAccessTokenForMutation,
+  resolveAftercareAccessTokenForRead,
+  type ResolvedAftercareAccessToken,
+} from '@/lib/aftercare/aftercareAccessTokens'
 import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { createClientRebookedBookingFromAftercare } from '@/lib/booking/writeBoundary'
-import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
-import { AftercareRebookMode, Prisma, Role } from '@prisma/client'
-import {
-  beginIdempotency,
-  buildPublicAftercareTokenActorKey,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+import { isRecord } from '@/lib/guards'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
@@ -32,13 +39,38 @@ type Ctx = {
 
 type RequestMeta = {
   requestId: string | null
-  idempotencyKey: string | null
 }
 
-type NestedInputJsonValue = Prisma.InputJsonValue | null
+type SecureLinkAccess = {
+  accessMode: 'SECURE_LINK'
+  hasPublicAccess: true
+  clientAftercareHref: string
+}
 
-type JsonObjectPayload = {
-  [key: string]: NestedInputJsonValue
+type RebookResponseBody = {
+  ok: true
+  booking: {
+    id: string
+    status: string
+    scheduledFor: string
+  }
+  aftercare: {
+    id: string
+    rebookMode: string
+    rebookedFor: string | null
+  }
+  meta: {
+    mutated: boolean
+    noOp: boolean
+  }
+}
+
+type RebookIdempotencyRequestBody = {
+  aftercareTokenId: string
+  aftercareId: string
+  sourceBookingId: string
+  clientId: string
+  scheduledFor: string
 }
 
 function bookingJsonFail(
@@ -47,35 +79,9 @@ function bookingJsonFail(
     message?: string
     userMessage?: string
   },
-) {
+): Response {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching rebook request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
-  )
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
 }
 
 async function getRouteToken(ctx: Ctx): Promise<string | null> {
@@ -93,10 +99,6 @@ function readRequestMeta(req: Request): RequestMeta {
       readHeaderValue(req, 'x-request-id') ??
       readHeaderValue(req, 'request-id') ??
       null,
-    idempotencyKey:
-      readHeaderValue(req, 'idempotency-key') ??
-      readHeaderValue(req, 'x-idempotency-key') ??
-      null,
   }
 }
 
@@ -106,12 +108,6 @@ function toIso(value: Date): string {
 
 function toNullableIso(value: Date | null): string | null {
   return value ? value.toISOString() : null
-}
-
-type SecureLinkAccess = {
-  accessMode: 'SECURE_LINK'
-  hasPublicAccess: true
-  clientAftercareHref: string
 }
 
 function buildSecureLinkAccess(rawToken: string): SecureLinkAccess {
@@ -124,7 +120,7 @@ function buildSecureLinkAccess(rawToken: string): SecureLinkAccess {
 
 function toGetResponse(args: {
   rawToken: string
-  resolved: Awaited<ReturnType<typeof resolveAftercareAccessByToken>>
+  resolved: ResolvedAftercareAccessToken
 }) {
   const { rawToken, resolved } = args
 
@@ -189,7 +185,7 @@ function validateFutureScheduledFor(
 
 function validateRecommendedWindow(args: {
   scheduledFor: Date
-  resolved: Awaited<ReturnType<typeof resolveAftercareAccessByToken>>
+  resolved: ResolvedAftercareAccessToken
 }): Response | null {
   const { scheduledFor, resolved } = args
 
@@ -219,68 +215,11 @@ function validateRecommendedWindow(args: {
   return null
 }
 
-function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toString()
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeNestedJsonValue(item))
-  }
-
-  if (isRecord(value)) {
-    const out: JsonObjectPayload = {}
-
-    for (const key of Object.keys(value).sort()) {
-      out[key] = normalizeNestedJsonValue(value[key])
-    }
-
-    return out
-  }
-
-  return String(value)
-}
-
-function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
-  if (value === null || value === undefined) {
-    return {}
-  }
-
-  if (!isRecord(value)) {
-    return {
-      value: normalizeNestedJsonValue(value),
-    }
-  }
-
-  const out: JsonObjectPayload = {}
-
-  for (const key of Object.keys(value).sort()) {
-    out[key] = normalizeNestedJsonValue(value[key])
-  }
-
-  return out
-}
-
 function buildRebookResponseBody(args: {
   result: Awaited<ReturnType<typeof createClientRebookedBookingFromAftercare>>
-}): JsonObjectPayload {
-  return normalizeJsonObjectPayload({
+}): RebookResponseBody {
+  return {
+    ok: true,
     booking: {
       id: args.result.booking.id,
       status: args.result.booking.status,
@@ -291,8 +230,11 @@ function buildRebookResponseBody(args: {
       rebookMode: args.result.aftercare.rebookMode,
       rebookedFor: toNullableIso(args.result.aftercare.rebookedFor),
     },
-    meta: args.result.meta,
-  })
+    meta: {
+      mutated: args.result.meta.mutated,
+      noOp: args.result.meta.noOp,
+    },
+  }
 }
 
 function buildRebookIdempotencyRequestBody(args: {
@@ -301,27 +243,14 @@ function buildRebookIdempotencyRequestBody(args: {
   sourceBookingId: string
   clientId: string
   scheduledFor: Date
-}): JsonObjectPayload {
-  return normalizeJsonObjectPayload({
+}): RebookIdempotencyRequestBody {
+  return {
     aftercareTokenId: args.aftercareTokenId,
     aftercareId: args.aftercareId,
     sourceBookingId: args.sourceBookingId,
     clientId: args.clientId,
-    scheduledFor: args.scheduledFor,
-  })
-}
-
-async function failStartedIdempotency(
-  idempotencyRecordId: string | null,
-): Promise<void> {
-  if (!idempotencyRecordId) return
-
-  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-    console.error(
-      'POST /api/client/rebook/[token] idempotency failure update error:',
-      failError,
-    )
-  })
+    scheduledFor: args.scheduledFor.toISOString(),
+  }
 }
 
 export async function GET(_req: Request, ctx: Ctx) {
@@ -335,7 +264,7 @@ export async function GET(_req: Request, ctx: Ctx) {
       })
     }
 
-    const resolved = await resolveAftercareAccessByToken({
+    const resolved = await resolveAftercareAccessTokenForRead({
       rawToken,
     })
 
@@ -355,6 +284,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     }
 
     console.error('GET /api/client/rebook/[token] error:', error)
+
     captureBookingException({
       error,
       route: 'GET /api/client/rebook/[token]',
@@ -391,7 +321,7 @@ export async function POST(req: Request, ctx: Ctx) {
       return invalidFutureTime
     }
 
-    const resolved = await resolveAftercareAccessByToken({
+    const resolved = await resolveAftercareAccessTokenForMutation({
       rawToken,
     })
 
@@ -404,16 +334,16 @@ export async function POST(req: Request, ctx: Ctx) {
       return outsideWindow
     }
 
-    const { requestId, idempotencyKey } = readRequestMeta(req)
+    const { requestId } = readRequestMeta(req)
 
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<RebookResponseBody>({
+      request: req,
       actor: {
-        actorUserId: null,
-        actorKey: buildPublicAftercareTokenActorKey(resolved.token.id),
+        actorKey: resolved.idempotencyActorKey,
         actorRole: Role.CLIENT,
       },
       route: IDEMPOTENCY_ROUTES.CLIENT_AFTERCARE_REBOOK,
-      key: idempotencyKey,
+      requestLabel: 'aftercare rebook',
       requestBody: buildRebookIdempotencyRequestBody({
         aftercareTokenId: resolved.token.id,
         aftercareId: resolved.aftercare.id,
@@ -421,22 +351,16 @@ export async function POST(req: Request, ctx: Ctx) {
         clientId: resolved.booking.clientId,
         scheduledFor,
       }),
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching rebook request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
@@ -447,12 +371,16 @@ export async function POST(req: Request, ctx: Ctx) {
       clientId: resolved.booking.clientId,
       scheduledFor,
       requestId,
-      idempotencyKey,
+      idempotencyKey: idempotency.idempotencyKey,
     })
 
     const responseBody = buildRebookResponseBody({ result })
 
-    await completeIdempotency({
+    await markAftercareAccessTokenUsed({
+      tokenId: resolved.token.id,
+    })
+
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 201,
       responseBody,
@@ -460,9 +388,10 @@ export async function POST(req: Request, ctx: Ctx) {
 
     return jsonOk(responseBody, 201)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failStartedIdempotency(idempotencyRecordId)
-    }
+    await failStartedRouteIdempotency({
+      idempotencyRecordId,
+      operation: 'POST /api/client/rebook/[token]',
+    })
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -472,6 +401,7 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     console.error('POST /api/client/rebook/[token] error:', error)
+
     captureBookingException({
       error,
       route: 'POST /api/client/rebook/[token]',

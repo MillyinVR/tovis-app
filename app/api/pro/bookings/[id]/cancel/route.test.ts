@@ -1,6 +1,6 @@
 // app/api/pro/bookings/[id]/cancel/route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BookingStatus, SessionStep } from '@prisma/client'
+import { BookingStatus, Role, SessionStep } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
   requirePro: vi.fn(),
@@ -9,15 +9,24 @@ const mocks = vi.hoisted(() => ({
   cancelBooking: vi.fn(),
   getBookingFailPayload: vi.fn(),
   isBookingError: vi.fn(),
-  beginIdempotency: vi.fn(),
-  completeIdempotency: vi.fn(),
-  failIdempotency: vi.fn(),
+
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
   requirePro: mocks.requirePro,
   jsonFail: mocks.jsonFail,
   jsonOk: mocks.jsonOk,
+}))
+
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
@@ -30,19 +39,19 @@ vi.mock('@/lib/booking/errors', () => ({
 }))
 
 vi.mock('@/lib/idempotency', () => ({
-  beginIdempotency: mocks.beginIdempotency,
-  completeIdempotency: mocks.completeIdempotency,
-  failIdempotency: mocks.failIdempotency,
   IDEMPOTENCY_ROUTES: {
     PRO_BOOKING_CANCEL: 'PATCH /api/pro/bookings/[id]/cancel',
   },
 }))
 
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { PATCH } from './route'
+
+type TestCtx = { params: Promise<{ id: string }> }
 
 const IDEMPOTENCY_ROUTE = 'PATCH /api/pro/bookings/[id]/cancel'
 
-function makeCtx(id: string): { params: Promise<{ id: string }> } {
+function makeCtx(id: string): TestCtx {
   return {
     params: Promise.resolve({ id }),
   }
@@ -55,6 +64,7 @@ function makeRequest(
   },
 ): Request {
   const headers = new Headers({ 'Content-Type': 'application/json' })
+
   if (opts?.idempotencyKey !== null) {
     headers.set('idempotency-key', opts?.idempotencyKey ?? 'idem_cancel_1')
   }
@@ -64,6 +74,17 @@ function makeRequest(
     headers,
     body: body === undefined ? '{}' : JSON.stringify(body),
   })
+}
+
+function expectIdempotencyStarted(key = 'idem_cancel_1'): void {
+  mocks.beginRouteIdempotency.mockResolvedValue({
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: key,
+    requestHash: 'hash_1',
+  })
+
+  mocks.isRouteIdempotencyHandled.mockReturnValue(false)
 }
 
 describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
@@ -113,12 +134,9 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
     )
 
     mocks.isBookingError.mockReturnValue(false)
-    mocks.beginIdempotency.mockResolvedValue({
-      kind: 'started',
-      idempotencyRecordId: 'idem_record_1',
-    })
-    mocks.completeIdempotency.mockResolvedValue(undefined)
-    mocks.failIdempotency.mockResolvedValue(undefined)
+
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
 
     mocks.cancelBooking.mockResolvedValue({
       booking: {
@@ -131,6 +149,8 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
         noOp: false,
       },
     })
+
+    expectIdempotencyStarted()
   })
 
   it('returns auth response when requirePro fails', async () => {
@@ -145,7 +165,44 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
 
     expect(result).toBe(authRes)
     expect(mocks.cancelBooking).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns FORBIDDEN when actor user id is missing', async () => {
+    mocks.requirePro.mockResolvedValueOnce({
+      ok: true,
+      userId: '',
+      professionalId: 'pro_1',
+    })
+
+    const result = await PATCH(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.getBookingFailPayload).toHaveBeenCalledWith('FORBIDDEN', {
+      message: 'Authenticated actor user id is required.',
+      userMessage: 'You are not allowed to cancel this booking.',
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      403,
+      'You are not allowed to cancel this booking.',
+      {
+        code: 'FORBIDDEN',
+        message: 'Authenticated actor user id is required.',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: 403,
+      error: 'You are not allowed to cancel this booking.',
+      code: 'FORBIDDEN',
+      message: 'Authenticated actor user id is required.',
+    })
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('returns BOOKING_ID_REQUIRED when booking id is missing after trim', async () => {
@@ -154,6 +211,7 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
     expect(mocks.getBookingFailPayload).toHaveBeenCalledWith(
       'BOOKING_ID_REQUIRED',
     )
+
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       400,
       'BOOKING_ID_REQUIRED',
@@ -168,45 +226,63 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
     })
 
     expect(mocks.cancelBooking).not.toHaveBeenCalled()
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns missing idempotency key before cancelling', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({ kind: 'missing_key' })
+  it('returns handled idempotency response before cancelling', async () => {
+    const handledResponse = {
+      ok: false,
+      status: 400,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    }
+
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
 
     const result = await PATCH(
       makeRequest({ reason: 'Running behind' }, { idempotencyKey: null }),
       makeCtx('booking_1'),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+    expect(result).toBe(handledResponse)
+    expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('starts idempotency with pro actor, route, request body, and messages', async () => {
+    await PATCH(
+      makeRequest({ reason: 'Running behind' }),
+      makeCtx('booking_1'),
+    )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+      request: expect.any(Request),
       actor: {
         actorUserId: 'user_1',
-        actorRole: 'PRO',
+        actorRole: Role.PRO,
       },
-      route: IDEMPOTENCY_ROUTE,
-      key: null,
+      route: IDEMPOTENCY_ROUTES.PRO_BOOKING_CANCEL,
+      requestLabel: 'pro booking cancellation',
       requestBody: {
         bookingId: 'booking_1',
         professionalId: 'pro_1',
         actorUserId: 'user_1',
         reason: 'Running behind',
       },
-    })
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      400,
-      'Missing idempotency key.',
-      {
-        code: 'IDEMPOTENCY_KEY_REQUIRED',
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching cancel request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
       },
-    )
-    expect(result).toEqual({
-      ok: false,
-      status: 400,
-      error: 'Missing idempotency key.',
-      code: 'IDEMPOTENCY_KEY_REQUIRED',
     })
-    expect(mocks.cancelBooking).not.toHaveBeenCalled()
   })
 
   it('calls cancelBooking with pro actor, notifyClient=true, allowed statuses, and provided reason', async () => {
@@ -226,22 +302,7 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
       allowedStatuses: [BookingStatus.PENDING, BookingStatus.ACCEPTED],
     })
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: 'PRO',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_cancel_1',
-      requestBody: {
-        bookingId: 'booking_1',
-        professionalId: 'pro_1',
-        actorUserId: 'user_1',
-        reason: 'Running behind',
-      },
-    })
-
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: {
@@ -346,80 +407,85 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
     })
   })
 
-  it('returns conflict when idempotency key was reused with a different body', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({ kind: 'conflict' })
-
-    const result = await PATCH(makeRequest(), makeCtx('booking_1'))
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      409,
-      'This idempotency key was already used with a different request body.',
-      {
-        code: 'IDEMPOTENCY_KEY_CONFLICT',
-      },
-    )
-    expect(result).toEqual({
+  it('does not call cancelBooking when idempotency helper handles conflict', async () => {
+    const handledResponse = {
       ok: false,
       status: 409,
       error: 'This idempotency key was already used with a different request body.',
       code: 'IDEMPOTENCY_KEY_CONFLICT',
-    })
-    expect(mocks.cancelBooking).not.toHaveBeenCalled()
-  })
+    }
 
-  it('returns in-progress when a matching cancel request is already active', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({ kind: 'in_progress' })
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
 
     const result = await PATCH(makeRequest(), makeCtx('booking_1'))
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      409,
-      'A matching cancel request is already in progress.',
-      {
-        code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-      },
-    )
-    expect(result).toEqual({
+    expect(result).toBe(handledResponse)
+    expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('does not call cancelBooking when idempotency helper handles in-progress request', async () => {
+    const handledResponse = {
       ok: false,
       status: 409,
       error: 'A matching cancel request is already in progress.',
       code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    })
-    expect(mocks.cancelBooking).not.toHaveBeenCalled()
-  })
-
-  it('replays a completed idempotency response without cancelling again', async () => {
-    const replayBody = {
-      booking: {
-        id: 'booking_1',
-        status: BookingStatus.CANCELLED,
-        sessionStep: SessionStep.NONE,
-      },
-      meta: {
-        mutated: true,
-        noOp: false,
-      },
     }
 
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'replay',
-      responseStatus: 200,
-      responseBody: replayBody,
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
     })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
 
     const result = await PATCH(makeRequest(), makeCtx('booking_1'))
 
-    expect(mocks.jsonOk).toHaveBeenCalledWith(replayBody, 200)
-    expect(result).toEqual({
-      ok: true,
-      status: 200,
-      data: replayBody,
-    })
+    expect(result).toBe(handledResponse)
     expect(mocks.cancelBooking).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('maps BookingError through getBookingFailPayload', async () => {
+  it('does not call cancelBooking when idempotency helper handles replay', async () => {
+    const replayResponse = {
+      ok: true,
+      status: 200,
+      data: {
+        booking: {
+          id: 'booking_1',
+          status: BookingStatus.CANCELLED,
+          sessionStep: SessionStep.NONE,
+        },
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
+      },
+    }
+
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: replayResponse,
+    })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+
+    const result = await PATCH(makeRequest(), makeCtx('booking_1'))
+
+    expect(result).toBe(replayResponse)
+    expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('maps BookingError through getBookingFailPayload and marks idempotency failed', async () => {
     const bookingError = {
       name: 'BookingError',
       code: 'FORBIDDEN',
@@ -439,6 +505,11 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
     })
 
     const result = await PATCH(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: IDEMPOTENCY_ROUTE,
+    })
 
     expect(mocks.getBookingFailPayload).toHaveBeenCalledWith('FORBIDDEN', {
       message: 'Booking status REJECTED cannot be cancelled in this flow.',
@@ -461,24 +532,32 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
       code: 'FORBIDDEN',
       message: 'Booking status REJECTED cannot be cancelled in this flow.',
     })
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
-    })
   })
 
-  it('returns 500 for unknown errors', async () => {
+  it('returns 500 for unknown errors and marks idempotency failed', async () => {
     mocks.cancelBooking.mockRejectedValueOnce(new Error('boom'))
 
     const result = await PATCH(makeRequest(), makeCtx('booking_1'))
 
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: IDEMPOTENCY_ROUTE,
+    })
+
     expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
+
     expect(result).toEqual({
       ok: false,
       status: 500,
       error: 'Internal server error',
     })
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
-    })
+  })
+
+  it('does not mark idempotency failed when error happens before ledger starts', async () => {
+    await PATCH(makeRequest(), makeCtx(''))
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 })

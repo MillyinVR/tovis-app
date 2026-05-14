@@ -13,6 +13,12 @@ import {
   pickString,
   requirePro,
 } from '@/app/api/_utils'
+import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
@@ -21,12 +27,7 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { createRebookedBookingFromCompletedBooking } from '@/lib/booking/writeBoundary'
-import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-} from '@/lib/idempotency'
-import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency/routeMeta'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -50,7 +51,6 @@ type AftercareRebookRecord = Prisma.AftercareSummaryGetPayload<{
   select: typeof AFTERCARE_REBOOK_SELECT
 }>
 
-
 function isMode(value: unknown): value is RebookMode {
   return value === 'BOOK' || value === 'RECOMMEND_WINDOW' || value === 'CLEAR'
 }
@@ -61,36 +61,17 @@ function bookingJsonFail(
     message?: string
     userMessage?: string
   },
-) {
+): Response {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
-function readRequestMeta(req: Request): {
-  requestId: string | null
-  idempotencyKey: string | null
-} {
-  const requestId =
+function readRequestId(req: Request): string | null {
+  return (
     pickString(req.headers.get('x-request-id')) ??
     pickString(req.headers.get('request-id')) ??
     null
-
-  const idempotencyKey =
-    pickString(req.headers.get('idempotency-key')) ??
-    pickString(req.headers.get('x-idempotency-key')) ??
-    null
-
-  return { requestId, idempotencyKey }
-}
-
-function replayJson(body: RebookResponseBody, status: number) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'Cache-Control': 'no-store',
-      'Content-Type': 'application/json',
-    },
-  })
+  )
 }
 
 function toNullableIso(value: Date | null): string | null {
@@ -171,7 +152,10 @@ export async function POST(req: Request, ctx: Ctx) {
 
   try {
     const auth = await requirePro()
-    if (!auth.ok) return auth.res
+
+    if (!auth.ok) {
+      return auth.res
+    }
 
     const professionalId = auth.professionalId
     const params = await Promise.resolve(ctx.params)
@@ -215,15 +199,16 @@ export async function POST(req: Request, ctx: Ctx) {
       return jsonFail(400, 'windowEnd must be after windowStart.')
     }
 
-    const { requestId, idempotencyKey } = readRequestMeta(req)
+    const requestId = readRequestId(req)
 
-    const idempotency = await beginIdempotency<RebookResponseBody>({
+    const idempotency = await beginRouteIdempotency<RebookResponseBody>({
+      request: req,
       actor: {
         actorUserId: auth.userId,
         actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTES.PRO_BOOKING_REBOOK,
-      key: idempotencyKey,
+      requestLabel: 'pro booking rebook',
       requestBody: buildIdempotencyRequestBody({
         bookingId,
         professionalId,
@@ -232,25 +217,16 @@ export async function POST(req: Request, ctx: Ctx) {
         windowStart,
         windowEnd,
       }),
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request.',
+      },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return jsonFail(400, 'Missing idempotency key.')
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return jsonFail(
-        409,
-        'This idempotency key was already used with a different request.',
-      )
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return jsonFail(409, 'A matching request is already in progress.')
-    }
-
-    if (idempotency.kind === 'replay') {
-      return replayJson(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
@@ -293,7 +269,7 @@ export async function POST(req: Request, ctx: Ctx) {
         ...data,
       } satisfies RebookResponseBody
 
-      await completeIdempotency({
+      await completeRouteIdempotency({
         idempotencyRecordId,
         responseStatus: 200,
         responseBody,
@@ -321,7 +297,7 @@ export async function POST(req: Request, ctx: Ctx) {
         ...data,
       } satisfies RebookResponseBody
 
-      await completeIdempotency({
+      await completeRouteIdempotency({
         idempotencyRecordId,
         responseStatus: 200,
         responseBody,
@@ -344,7 +320,7 @@ export async function POST(req: Request, ctx: Ctx) {
       professionalId,
       scheduledFor: bookedFor,
       requestId,
-      idempotencyKey,
+      idempotencyKey: idempotency.idempotencyKey,
     })
 
     const data = {
@@ -358,7 +334,7 @@ export async function POST(req: Request, ctx: Ctx) {
       ...data,
     } satisfies RebookResponseBody
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 201,
       responseBody,
@@ -366,14 +342,10 @@ export async function POST(req: Request, ctx: Ctx) {
 
     return jsonOk(data, 201)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-        console.error(
-          'POST /api/pro/bookings/[id]/rebook idempotency fail error',
-          failError,
-        )
-      })
-    }
+    await failStartedRouteIdempotency({
+      idempotencyRecordId,
+      operation: 'POST /api/pro/bookings/[id]/rebook',
+    })
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -383,6 +355,7 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     console.error('POST /api/pro/bookings/[id]/rebook error', error)
+
     return jsonFail(500, 'Internal server error')
   }
 }

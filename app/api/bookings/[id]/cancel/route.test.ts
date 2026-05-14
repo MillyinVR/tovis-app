@@ -1,5 +1,8 @@
+// app/api/bookings/[id]/cancel/route.test.ts
+
+import { BookingStatus, Role, SessionStep } from '@prisma/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { Role, SessionStep, BookingStatus } from '@prisma/client'
+
 import { BookingError, getBookingErrorDescriptor } from '@/lib/booking/errors'
 
 const mocks = vi.hoisted(() => ({
@@ -10,6 +13,11 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
   cancelBooking: vi.fn(),
+
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/responses', () => ({
@@ -25,16 +33,44 @@ vi.mock('@/app/api/_utils/auth/requireUser', () => ({
   requireUser: mocks.requireUser,
 }))
 
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
+}))
+
 vi.mock('@/lib/booking/writeBoundary', () => ({
   cancelBooking: mocks.cancelBooking,
 }))
 
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { POST } from './route'
 
-function makeCtx(id: string): { params: Promise<{ id: string }> } {
+type TestCtx = { params: Promise<{ id: string }> }
+
+function makeCtx(id: string): TestCtx {
   return {
     params: Promise.resolve({ id }),
   }
+}
+
+function makeRequest(headers?: HeadersInit): Request {
+  return new Request('http://localhost/api/bookings/booking_1/cancel', {
+    method: 'POST',
+    headers,
+  })
+}
+
+function setStartedIdempotencyDefault(): void {
+  mocks.beginRouteIdempotency.mockResolvedValue({
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: 'idem_key_1',
+    requestHash: 'hash_1',
+  })
+
+  mocks.isRouteIdempotencyHandled.mockReturnValue(false)
 }
 
 describe('app/api/bookings/[id]/cancel/route.ts', () => {
@@ -59,6 +95,7 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
     mocks.requireUser.mockResolvedValue({
       ok: true,
       user: {
+        id: 'user_1',
         role: Role.CLIENT,
         clientProfile: { id: 'client_1' },
         professionalProfile: null,
@@ -76,6 +113,11 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
         noOp: false,
       },
     })
+
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
+
+    setStartedIdempotencyDefault()
   })
 
   it('returns auth response when auth fails', async () => {
@@ -86,18 +128,16 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       res: authRes,
     })
 
-    const result = await POST(
-      new Request('http://localhost/api/bookings/booking_1/cancel', {
-        method: 'POST',
-      }),
-      makeCtx('booking_1'),
-    )
+    const result = await POST(makeRequest(), makeCtx('booking_1'))
 
     expect(result).toBe(authRes)
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns BOOKING_ID_REQUIRED when booking id is missing', async () => {
+  it('returns BOOKING_ID_REQUIRED when booking id is missing before starting idempotency', async () => {
     const descriptor = getBookingErrorDescriptor('BOOKING_ID_REQUIRED')
 
     const result = await POST(
@@ -128,16 +168,155 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       message: descriptor.message,
     })
 
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('calls cancelBooking with a client actor for client users', async () => {
-    const result = await POST(
-      new Request('http://localhost/api/bookings/booking_1/cancel', {
-        method: 'POST',
+  it('returns FORBIDDEN when a client user is missing a client profile', async () => {
+    const descriptor = getBookingErrorDescriptor('FORBIDDEN')
+
+    mocks.requireUser.mockResolvedValueOnce({
+      ok: true,
+      user: {
+        id: 'user_without_profile',
+        role: Role.CLIENT,
+        clientProfile: null,
+        professionalProfile: null,
+      },
+    })
+
+    const result = await POST(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      descriptor.httpStatus,
+      'You are not allowed to cancel this booking.',
+      {
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: 'Authenticated user is missing the required booking profile.',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: descriptor.httpStatus,
+      error: 'You are not allowed to cancel this booking.',
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: 'Authenticated user is missing the required booking profile.',
+    })
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns FORBIDDEN when a pro user is missing a professional profile', async () => {
+    const descriptor = getBookingErrorDescriptor('FORBIDDEN')
+
+    mocks.requireUser.mockResolvedValueOnce({
+      ok: true,
+      user: {
+        id: 'pro_without_profile',
+        role: Role.PRO,
+        clientProfile: null,
+        professionalProfile: null,
+      },
+    })
+
+    const result = await POST(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      descriptor.httpStatus,
+      'You are not allowed to cancel this booking.',
+      {
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: 'Authenticated user is missing the required booking profile.',
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: descriptor.httpStatus,
+      error: 'You are not allowed to cancel this booking.',
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: 'Authenticated user is missing the required booking profile.',
+    })
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns a handled idempotency response without calling cancelBooking', async () => {
+    const handledResponse = {
+      ok: false,
+      status: 400,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    }
+
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+
+    const result = await POST(makeRequest(), makeCtx('booking_1'))
+
+    expect(result).toBe(handledResponse)
+    expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('starts idempotency with client actor details', async () => {
+    await POST(
+      makeRequest({
+        'idempotency-key': 'idem_key_1',
       }),
       makeCtx('booking_1'),
     )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+      request: expect.any(Request),
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: Role.CLIENT,
+      },
+      route: IDEMPOTENCY_ROUTES.BOOKING_CANCEL,
+      requestLabel: 'booking cancellation',
+      requestBody: {
+        bookingId: 'booking_1',
+        actorUserId: 'user_1',
+        actorRole: Role.CLIENT,
+        clientId: 'client_1',
+        professionalId: null,
+        cancelActorKind: 'client',
+      },
+      messages: {
+        missingKey: 'Missing idempotency key for booking cancellation.',
+        inProgress:
+          'A matching booking cancellation request is already in progress.',
+        conflict:
+          'This idempotency key was already used with different cancellation details.',
+      },
+    })
+  })
+
+  it('calls cancelBooking with a client actor for client users', async () => {
+    const result = await POST(makeRequest(), makeCtx('booking_1'))
 
     expect(mocks.requireUser).toHaveBeenCalledWith({
       roles: [Role.CLIENT, Role.PRO, Role.ADMIN],
@@ -151,8 +330,24 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       },
     })
 
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody: {
+        ok: true,
+        id: 'booking_1',
+        status: BookingStatus.CANCELLED,
+        sessionStep: SessionStep.NONE,
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
+      },
+    })
+
     expect(mocks.jsonOk).toHaveBeenCalledWith(
       {
+        ok: true,
         id: 'booking_1',
         status: BookingStatus.CANCELLED,
         sessionStep: SessionStep.NONE,
@@ -168,6 +363,7 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       ok: true,
       status: 200,
       data: {
+        ok: true,
         id: 'booking_1',
         status: BookingStatus.CANCELLED,
         sessionStep: SessionStep.NONE,
@@ -183,17 +379,29 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
     mocks.requireUser.mockResolvedValueOnce({
       ok: true,
       user: {
+        id: 'user_2',
         role: Role.PRO,
         clientProfile: null,
         professionalProfile: { id: 'pro_1' },
       },
     })
 
-    await POST(
-      new Request('http://localhost/api/bookings/booking_1/cancel', {
-        method: 'POST',
+    await POST(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: {
+          actorUserId: 'user_2',
+          actorRole: Role.PRO,
+        },
+        requestBody: expect.objectContaining({
+          actorUserId: 'user_2',
+          actorRole: Role.PRO,
+          clientId: null,
+          professionalId: 'pro_1',
+          cancelActorKind: 'pro',
+        }),
       }),
-      makeCtx('booking_1'),
     )
 
     expect(mocks.cancelBooking).toHaveBeenCalledWith({
@@ -209,17 +417,29 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
     mocks.requireUser.mockResolvedValueOnce({
       ok: true,
       user: {
+        id: 'user_admin',
         role: Role.ADMIN,
         clientProfile: null,
         professionalProfile: null,
       },
     })
 
-    await POST(
-      new Request('http://localhost/api/bookings/booking_1/cancel', {
-        method: 'POST',
+    await POST(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: {
+          actorUserId: 'user_admin',
+          actorRole: Role.ADMIN,
+        },
+        requestBody: expect.objectContaining({
+          actorUserId: 'user_admin',
+          actorRole: Role.ADMIN,
+          clientId: null,
+          professionalId: null,
+          cancelActorKind: 'admin',
+        }),
       }),
-      makeCtx('booking_1'),
     )
 
     expect(mocks.cancelBooking).toHaveBeenCalledWith({
@@ -231,17 +451,17 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
     })
   })
 
-  it('maps BookingError from cancelBooking', async () => {
+  it('fails idempotency and maps BookingError from cancelBooking', async () => {
     const descriptor = getBookingErrorDescriptor('FORBIDDEN')
 
     mocks.cancelBooking.mockRejectedValueOnce(new BookingError('FORBIDDEN'))
 
-    const result = await POST(
-      new Request('http://localhost/api/bookings/booking_1/cancel', {
-        method: 'POST',
-      }),
-      makeCtx('booking_1'),
-    )
+    const result = await POST(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/bookings/[id]/cancel',
+    })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       descriptor.httpStatus,
@@ -265,15 +485,15 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
     })
   })
 
-  it('returns 500 when cancelBooking throws a non-booking error', async () => {
+  it('fails idempotency and returns 500 when cancelBooking throws a non-booking error', async () => {
     mocks.cancelBooking.mockRejectedValueOnce(new Error('boom'))
 
-    const result = await POST(
-      new Request('http://localhost/api/bookings/booking_1/cancel', {
-        method: 'POST',
-      }),
-      makeCtx('booking_1'),
-    )
+    const result = await POST(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/bookings/[id]/cancel',
+    })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       500,
@@ -285,5 +505,24 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       status: 500,
       error: 'Failed to cancel booking.',
     })
+  })
+
+  it('does not fail idempotency when an error happens before the ledger starts', async () => {
+    const descriptor = getBookingErrorDescriptor('BOOKING_ID_REQUIRED')
+
+    await POST(makeRequest(), makeCtx(''))
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      descriptor.httpStatus,
+      descriptor.userMessage,
+      {
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
+      },
+    )
+
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 })

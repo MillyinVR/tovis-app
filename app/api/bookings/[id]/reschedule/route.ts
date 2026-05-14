@@ -1,10 +1,15 @@
 // app/api/bookings/[id]/reschedule/route.ts
-import { ServiceLocationType } from '@prisma/client'
+import { Role, type Prisma } from '@prisma/client'
+
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
+import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
-import { DEFAULT_TIME_ZONE } from '@/lib/timeZone'
-import { isRecord } from '@/lib/guards'
 import {
   getBookingFailPayload,
   isBookingError,
@@ -12,10 +17,15 @@ import {
 } from '@/lib/booking/errors'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { rescheduleBookingFromHold } from '@/lib/booking/writeBoundary'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { isRecord } from '@/lib/guards'
+import { DEFAULT_TIME_ZONE } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
+
+type RescheduleResponseBody = Prisma.InputJsonObject
 
 function bookingJsonFail(
   code: BookingErrorCode,
@@ -28,7 +38,41 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
+function buildRescheduleIdempotencyBody(args: {
+  bookingId: string
+  clientId: string
+  holdId: string
+  requestedLocationType: string | null
+}): Prisma.InputJsonObject {
+  return {
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    holdId: args.holdId,
+    requestedLocationType: args.requestedLocationType,
+  }
+}
+
+function toRescheduleResponseBody(
+  result: Awaited<ReturnType<typeof rescheduleBookingFromHold>>,
+): RescheduleResponseBody {
+  return {
+    ok: true,
+    booking: {
+      id: result.booking.id,
+      status: result.booking.status,
+      scheduledFor: result.booking.scheduledFor.toISOString(),
+      locationType: result.booking.locationType,
+      bufferMinutes: result.booking.bufferMinutes,
+      totalDurationMinutes: result.booking.totalDurationMinutes,
+      locationTimeZone: result.booking.locationTimeZone,
+    },
+    meta: result.meta,
+  }
+}
+
 export async function POST(req: Request, { params }: Ctx) {
+  let idempotencyRecordId: string | null = null
+
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
@@ -37,6 +81,7 @@ export async function POST(req: Request, { params }: Ctx) {
 
     const resolvedParams = await Promise.resolve(params)
     const bookingId = pickString(resolvedParams.id)
+
     if (!bookingId) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
@@ -45,6 +90,7 @@ export async function POST(req: Request, { params }: Ctx) {
     const body = isRecord(rawBody) ? rawBody : {}
 
     const holdId = pickString(body.holdId)
+
     if (!holdId) {
       return bookingJsonFail('HOLD_ID_REQUIRED')
     }
@@ -53,6 +99,7 @@ export async function POST(req: Request, { params }: Ctx) {
       body,
       'locationType',
     )
+
     const requestedLocationType = hasLocationType
       ? normalizeLocationType(body.locationType)
       : null
@@ -60,6 +107,35 @@ export async function POST(req: Request, { params }: Ctx) {
     if (hasLocationType && requestedLocationType == null) {
       return bookingJsonFail('INVALID_LOCATION_TYPE')
     }
+
+    const idempotency = await beginRouteIdempotency<RescheduleResponseBody>({
+      request: req,
+      actor: {
+        actorKey: `client:${clientId}`,
+        actorRole: Role.CLIENT,
+      },
+      route: IDEMPOTENCY_ROUTES.BOOKING_RESCHEDULE,
+      requestLabel: 'booking reschedule',
+      requestBody: buildRescheduleIdempotencyBody({
+        bookingId,
+        clientId,
+        holdId,
+        requestedLocationType,
+      }),
+      messages: {
+        missingKey: 'Missing idempotency key for booking reschedule.',
+        inProgress:
+          'A matching booking reschedule request is already in progress.',
+        conflict:
+          'This idempotency key was already used with different reschedule details.',
+      },
+    })
+
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
+    }
+
+    idempotencyRecordId = idempotency.idempotencyRecordId
 
     const result = await rescheduleBookingFromHold({
       bookingId,
@@ -69,22 +145,21 @@ export async function POST(req: Request, { params }: Ctx) {
       fallbackTimeZone: DEFAULT_TIME_ZONE,
     })
 
-    return jsonOk(
-      {
-        booking: {
-          id: result.booking.id,
-          status: result.booking.status,
-          scheduledFor: result.booking.scheduledFor.toISOString(),
-          locationType: result.booking.locationType,
-          bufferMinutes: result.booking.bufferMinutes,
-          totalDurationMinutes: result.booking.totalDurationMinutes,
-          locationTimeZone: result.booking.locationTimeZone,
-        },
-        meta: result.meta,
-      },
-      200,
-    )
+    const responseBody = toRescheduleResponseBody(result)
+
+    await completeRouteIdempotency({
+      idempotencyRecordId,
+      responseStatus: 200,
+      responseBody,
+    })
+
+    return jsonOk(responseBody, 200)
   } catch (error: unknown) {
+    await failStartedRouteIdempotency({
+      idempotencyRecordId,
+      operation: 'POST /api/bookings/[id]/reschedule',
+    })
+
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
@@ -93,6 +168,7 @@ export async function POST(req: Request, { params }: Ctx) {
     }
 
     console.error('POST /api/bookings/[id]/reschedule error', error)
+
     return bookingJsonFail('INTERNAL_ERROR', {
       message:
         error instanceof Error ? error.message : 'Failed to reschedule booking.',

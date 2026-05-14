@@ -1,23 +1,26 @@
 // app/api/pro/bookings/[id]/media/route.ts
-import { prisma } from '@/lib/prisma'
-import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+
 import { MediaPhase, MediaType, Prisma, Role } from '@prisma/client'
-import { BUCKETS } from '@/lib/storageBuckets'
-import { renderMediaUrls } from '@/lib/media/renderUrls'
-import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import {
+  beginRouteIdempotency,
+  completeRouteIdempotency,
+  failStartedRouteIdempotency,
+  isRouteIdempotencyHandled,
+} from '@/app/api/_utils/idempotency'
 import {
   getBookingFailPayload,
   isBookingError,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { uploadProBookingMedia } from '@/lib/booking/writeBoundary'
-import {
-  beginIdempotency,
-  completeIdempotency,
-  failIdempotency,
-  IDEMPOTENCY_ROUTES,
-} from '@/lib/idempotency'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { prisma } from '@/lib/prisma'
+import { BUCKETS } from '@/lib/storageBuckets'
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,7 +35,6 @@ const SIGNED_URL_TTL_SECONDS = 60 * 10
 
 type RequestMeta = {
   requestId: string | null
-  idempotencyKey: string | null
 }
 
 type NestedInputJsonValue = Prisma.InputJsonValue | null
@@ -52,87 +54,66 @@ function bookingJsonFail(
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
-function idempotencyMissingKeyFail(): Response {
-  return jsonFail(400, 'Missing idempotency key.', {
-    code: 'IDEMPOTENCY_KEY_REQUIRED',
-  })
-}
-
-function idempotencyInProgressFail(): Response {
-  return jsonFail(
-    409,
-    'A matching media upload request is already in progress.',
-    {
-      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
-    },
-  )
-}
-
-function idempotencyConflictFail(): Response {
-  return jsonFail(
-    409,
-    'This idempotency key was already used with a different request body.',
-    {
-      code: 'IDEMPOTENCY_KEY_CONFLICT',
-    },
-  )
-}
-
 function readRequestMeta(request: Request): RequestMeta {
   const requestId =
     pickString(request.headers.get('x-request-id')) ??
     pickString(request.headers.get('request-id')) ??
     null
 
-  const idempotencyKey =
-    pickString(request.headers.get('idempotency-key')) ??
-    pickString(request.headers.get('x-idempotency-key')) ??
-    null
-
-  return { requestId, idempotencyKey }
+  return { requestId }
 }
 
-function upper(v: unknown): string {
-  return typeof v === 'string' ? v.trim().toUpperCase() : ''
+function upper(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toUpperCase() : ''
 }
 
-function parsePhase(v: unknown): MediaPhase | null {
-  const s = upper(v)
-  if (s === 'BEFORE') return MediaPhase.BEFORE
-  if (s === 'AFTER') return MediaPhase.AFTER
-  if (s === 'OTHER') return MediaPhase.OTHER
+function parsePhase(value: unknown): MediaPhase | null {
+  const normalized = upper(value)
+
+  if (normalized === 'BEFORE') return MediaPhase.BEFORE
+  if (normalized === 'AFTER') return MediaPhase.AFTER
+  if (normalized === 'OTHER') return MediaPhase.OTHER
+
   return null
 }
 
-function parseMediaType(v: unknown): MediaType | null {
-  const s = upper(v)
-  if (s === 'IMAGE') return MediaType.IMAGE
-  if (s === 'VIDEO') return MediaType.VIDEO
+function parseMediaType(value: unknown): MediaType | null {
+  const normalized = upper(value)
+
+  if (normalized === 'IMAGE') return MediaType.IMAGE
+  if (normalized === 'VIDEO') return MediaType.VIDEO
+
   return null
 }
 
 function safeBucket(raw: unknown): (typeof BUCKETS)[keyof typeof BUCKETS] | null {
-  const s = pickString(raw)
-  if (!s) return null
-  if (s.length > BUCKET_MAX) return null
-  if (s === BUCKETS.mediaPrivate) return BUCKETS.mediaPrivate
-  if (s === BUCKETS.mediaPublic) return BUCKETS.mediaPublic
+  const value = pickString(raw)
+
+  if (!value) return null
+  if (value.length > BUCKET_MAX) return null
+  if (value === BUCKETS.mediaPrivate) return BUCKETS.mediaPrivate
+  if (value === BUCKETS.mediaPublic) return BUCKETS.mediaPublic
+
   return null
 }
 
 function safeStoragePath(raw: unknown): string | null {
-  const s = pickString(raw)
-  if (!s) return null
-  if (s.length > PATH_MAX) return null
-  if (s.startsWith('/')) return null
-  if (s.includes('..')) return null
-  return s
+  const value = pickString(raw)
+
+  if (!value) return null
+  if (value.length > PATH_MAX) return null
+  if (value.startsWith('/')) return null
+  if (value.includes('..')) return null
+
+  return value
 }
 
 function safeCaption(raw: unknown): string | null {
-  const s = pickString(raw)
-  if (!s) return null
-  return s.slice(0, CAPTION_MAX)
+  const value = pickString(raw)
+
+  if (!value) return null
+
+  return value.slice(0, CAPTION_MAX)
 }
 
 const BOOKING_MEDIA_PHASE_PATH_SEGMENTS: Record<MediaPhase, string> = {
@@ -178,13 +159,13 @@ function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
 
   if (typeof value === 'object') {
     const input = value as Record<string, unknown>
-    const out: JsonObjectPayload = {}
+    const output: JsonObjectPayload = {}
 
     for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
+      output[key] = normalizeNestedJsonValue(input[key])
     }
 
-    return out
+    return output
   }
 
   return String(value)
@@ -202,19 +183,15 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
   }
 
   const input = value as Record<string, unknown>
-  const out: JsonObjectPayload = {}
+  const output: JsonObjectPayload = {}
 
   for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
+    output[key] = normalizeNestedJsonValue(input[key])
   }
 
-  return out
+  return output
 }
 
-/**
- * Verify object exists before writing DB row.
- * For private bucket: createSignedUrl then HEAD/GET it.
- */
 async function objectExistsViaSignedUrl(
   bucket: string,
   path: string,
@@ -227,40 +204,30 @@ async function objectExistsViaSignedUrl(
 
     if (error) return false
 
-    const signed = data?.signedUrl
-    if (!signed) return false
+    const signedUrl = data?.signedUrl
+    if (!signedUrl) return false
 
-    const head = await fetch(signed, { method: 'HEAD' }).catch(() => null)
+    const head = await fetch(signedUrl, { method: 'HEAD' }).catch(() => null)
+
     if (head?.ok) return true
     if (head && (head.status === 403 || head.status === 404)) return false
 
-    const get = await fetch(signed, { method: 'GET' }).catch(() => null)
+    const get = await fetch(signedUrl, { method: 'GET' }).catch(() => null)
     return Boolean(get?.ok)
   } catch {
     return false
   }
 }
 
-async function failStartedIdempotency(
-  idempotencyRecordId: string | null,
-): Promise<void> {
-  if (!idempotencyRecordId) return
-
-  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-    console.error(
-      'POST /api/pro/bookings/[id]/media idempotency failure update error:',
-      failError,
-    )
-  })
-}
-
 export async function GET(req: Request, ctx: Ctx) {
   try {
     const auth = await requirePro()
-    if (!auth.ok) return auth.res
+
+    if (!auth.ok) {
+      return auth.res
+    }
 
     const professionalId = auth.professionalId
-
     const params = await Promise.resolve(ctx.params)
     const bookingId = pickString(params.id)
 
@@ -270,22 +237,33 @@ export async function GET(req: Request, ctx: Ctx) {
 
     const booking = await prisma.booking.findUnique({
       where: { id: bookingId },
-      select: { id: true, professionalId: true },
+      select: {
+        id: true,
+        professionalId: true,
+      },
     })
 
-    if (!booking) return jsonFail(404, 'Booking not found.')
-    if (booking.professionalId !== professionalId) return jsonFail(403, 'Forbidden.')
+    if (!booking) {
+      return jsonFail(404, 'Booking not found.')
+    }
 
-    const urlObj = new URL(req.url)
-    const phaseParam = urlObj.searchParams.get('phase')
-    const phase = phaseParam == null ? null : parsePhase(phaseParam)
+    if (booking.professionalId !== professionalId) {
+      return jsonFail(403, 'Forbidden.')
+    }
 
-    if (phaseParam != null && !phase) {
+    const url = new URL(req.url)
+    const phaseParam = url.searchParams.get('phase')
+    const phase = phaseParam === null ? null : parsePhase(phaseParam)
+
+    if (phaseParam !== null && !phase) {
       return jsonFail(400, 'Invalid phase query param.')
     }
 
     const where: { bookingId: string; phase?: MediaPhase } = { bookingId }
-    if (phase) where.phase = phase
+
+    if (phase) {
+      where.phase = phase
+    }
 
     const rows = await prisma.mediaAsset.findMany({
       where,
@@ -310,18 +288,18 @@ export async function GET(req: Request, ctx: Ctx) {
     })
 
     const items = await Promise.all(
-      rows.map(async (m) => {
+      rows.map(async (media) => {
         const { renderUrl, renderThumbUrl } = await renderMediaUrls({
-          storageBucket: m.storageBucket,
-          storagePath: m.storagePath,
-          thumbBucket: m.thumbBucket,
-          thumbPath: m.thumbPath,
-          url: m.url,
-          thumbUrl: m.thumbUrl,
+          storageBucket: media.storageBucket,
+          storagePath: media.storagePath,
+          thumbBucket: media.thumbBucket,
+          thumbPath: media.thumbPath,
+          url: media.url,
+          thumbUrl: media.thumbUrl,
         })
 
         return {
-          ...m,
+          ...media,
           renderUrl,
           renderThumbUrl,
           url: renderUrl,
@@ -333,6 +311,7 @@ export async function GET(req: Request, ctx: Ctx) {
     return jsonOk({ items }, 200)
   } catch (error: unknown) {
     console.error('GET /api/pro/bookings/[id]/media error', error)
+
     captureBookingException({
       error,
       route: 'GET /api/pro/bookings/[id]/media',
@@ -347,7 +326,10 @@ export async function POST(req: Request, ctx: Ctx) {
 
   try {
     const auth = await requirePro()
-    if (!auth.ok) return auth.res
+
+    if (!auth.ok) {
+      return auth.res
+    }
 
     const professionalId = auth.professionalId
     const actorUserId = auth.user.id
@@ -384,24 +366,33 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     const thumbBucket =
-      body.thumbBucket == null || body.thumbBucket === ''
+      body.thumbBucket === null || body.thumbBucket === undefined || body.thumbBucket === ''
         ? null
         : safeBucket(body.thumbBucket)
 
     const thumbPath =
-      body.thumbPath == null || body.thumbPath === ''
+      body.thumbPath === null || body.thumbPath === undefined || body.thumbPath === ''
         ? null
         : safeStoragePath(body.thumbPath)
 
     if ((thumbBucket && !thumbPath) || (!thumbBucket && thumbPath)) {
-      return jsonFail(400, 'thumbBucket and thumbPath must be provided together.')
+      return jsonFail(
+        400,
+        'thumbBucket and thumbPath must be provided together.',
+      )
     }
 
     const phase = parsePhase(body.phase)
-    if (!phase) return jsonFail(400, 'Invalid phase.')
+
+    if (!phase) {
+      return jsonFail(400, 'Invalid phase.')
+    }
 
     const mediaType = parseMediaType(body.mediaType)
-    if (!mediaType) return jsonFail(400, 'Invalid mediaType.')
+
+    if (!mediaType) {
+      return jsonFail(400, 'Invalid mediaType.')
+    }
 
     const caption = safeCaption(body.caption)
 
@@ -430,15 +421,16 @@ export async function POST(req: Request, ctx: Ctx) {
       return jsonFail(400, `Session thumb must upload to ${SESSION_BUCKET}.`)
     }
 
-    const { idempotencyKey } = readRequestMeta(req)
+    const { requestId } = readRequestMeta(req)
 
-    const idempotency = await beginIdempotency<JsonObjectPayload>({
+    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
+      request: req,
       actor: {
         actorUserId,
         actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTES.BOOKING_MEDIA_CREATE,
-      key: idempotencyKey,
+      requestLabel: 'media upload',
       requestBody: {
         professionalId,
         actorUserId,
@@ -451,29 +443,28 @@ export async function POST(req: Request, ctx: Ctx) {
         phase,
         mediaType,
       },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching media upload request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
-    if (idempotency.kind === 'missing_key') {
-      return idempotencyMissingKeyFail()
-    }
-
-    if (idempotency.kind === 'in_progress') {
-      return idempotencyInProgressFail()
-    }
-
-    if (idempotency.kind === 'conflict') {
-      return idempotencyConflictFail()
-    }
-
-    if (idempotency.kind === 'replay') {
-      return jsonOk(idempotency.responseBody, idempotency.responseStatus)
+    if (isRouteIdempotencyHandled(idempotency)) {
+      return idempotency.response
     }
 
     idempotencyRecordId = idempotency.idempotencyRecordId
 
     const mainExists = await objectExistsViaSignedUrl(storageBucket, storagePath)
+
     if (!mainExists) {
-      await failStartedIdempotency(idempotencyRecordId)
+      await failStartedRouteIdempotency({
+        idempotencyRecordId,
+        operation: 'POST /api/pro/bookings/[id]/media',
+      })
+
       idempotencyRecordId = null
 
       return jsonFail(400, 'Uploaded file not found in storage.')
@@ -481,8 +472,13 @@ export async function POST(req: Request, ctx: Ctx) {
 
     if (thumbBucket && thumbPath) {
       const thumbExists = await objectExistsViaSignedUrl(thumbBucket, thumbPath)
+
       if (!thumbExists) {
-        await failStartedIdempotency(idempotencyRecordId)
+        await failStartedRouteIdempotency({
+          idempotencyRecordId,
+          operation: 'POST /api/pro/bookings/[id]/media',
+        })
+
         idempotencyRecordId = null
 
         return jsonFail(400, 'Uploaded thumb not found in storage.')
@@ -522,7 +518,7 @@ export async function POST(req: Request, ctx: Ctx) {
       advancedTo: result.advancedTo,
     })
 
-    await completeIdempotency({
+    await completeRouteIdempotency({
       idempotencyRecordId,
       responseStatus: 200,
       responseBody,
@@ -530,9 +526,10 @@ export async function POST(req: Request, ctx: Ctx) {
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {
-    if (idempotencyRecordId) {
-      await failStartedIdempotency(idempotencyRecordId)
-    }
+    await failStartedRouteIdempotency({
+      idempotencyRecordId,
+      operation: 'POST /api/pro/bookings/[id]/media',
+    })
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -542,6 +539,7 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     console.error('POST /api/pro/bookings/[id]/media error', error)
+
     captureBookingException({
       error,
       route: 'POST /api/pro/bookings/[id]/media',

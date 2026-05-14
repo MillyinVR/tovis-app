@@ -70,9 +70,10 @@ const mocks = vi.hoisted(() => ({
 
   uploadProBookingMedia: vi.fn(),
 
-  beginIdempotency: vi.fn(),
-  completeIdempotency: vi.fn(),
-  failIdempotency: vi.fn(),
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
 
   captureBookingException: vi.fn(),
 }))
@@ -107,10 +108,14 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
   uploadProBookingMedia: mocks.uploadProBookingMedia,
 }))
 
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
+}))
+
 vi.mock('@/lib/idempotency', () => ({
-  beginIdempotency: mocks.beginIdempotency,
-  completeIdempotency: mocks.completeIdempotency,
-  failIdempotency: mocks.failIdempotency,
   IDEMPOTENCY_ROUTES: {
     BOOKING_MEDIA_CREATE: 'POST /api/pro/bookings/[id]/media',
   },
@@ -121,6 +126,17 @@ vi.mock('@/lib/observability/bookingEvents', () => ({
 }))
 
 import { GET, POST } from './route'
+
+function expectIdempotencyStarted(key = 'idem_media_create_1'): void {
+  mocks.beginRouteIdempotency.mockResolvedValue({
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: key,
+    requestHash: 'hash_1',
+  })
+
+  mocks.isRouteIdempotencyHandled.mockReturnValue(false)
+}
 
 function makeJsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
@@ -241,24 +257,10 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: null,
     })
 
-    mocks.beginIdempotency.mockImplementation(
-      async (args: { key: string | null }) => {
-        const key = args.key?.trim()
+    expectIdempotencyStarted()
 
-        if (!key) {
-          return { kind: 'missing_key' }
-        }
-
-        return {
-          kind: 'started',
-          idempotencyRecordId: 'idem_record_1',
-          requestHash: 'hash_1',
-        }
-      },
-    )
-
-    mocks.completeIdempotency.mockResolvedValue(undefined)
-    mocks.failIdempotency.mockResolvedValue(undefined)
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
 
     mocks.uploadProBookingMedia.mockResolvedValue({
       created: mediaItemFromUpload,
@@ -379,7 +381,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     const result = await POST(makePostRequest(), makeCtx())
 
     expect(result).toBe(authRes)
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
@@ -394,7 +396,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       }),
     )
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
@@ -415,7 +417,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: 'Missing storageBucket/storagePath.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
@@ -437,7 +439,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: 'thumbBucket and thumbPath must be provided together.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
@@ -474,7 +476,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: 'Invalid mediaType.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
@@ -495,7 +497,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: 'storagePath must be under bookings/<bookingId>/<phase>/.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
@@ -517,7 +519,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: 'storagePath must be under bookings/<bookingId>/<phase>/.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
@@ -539,27 +541,36 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: 'thumbPath must be under bookings/<bookingId>/<phase>/.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
   it('POST returns missing idempotency key for valid media request without idempotency header', async () => {
-    const result = await POST(makePostRequest(), makeCtx())
-
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
+    const handledResponse = makeJsonResponse(400, {
       ok: false,
       error: 'Missing idempotency key.',
       code: 'IDEMPOTENCY_KEY_REQUIRED',
     })
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+
+    const result = await POST(makePostRequest(), makeCtx())
+
+    expect(result).toBe(handledResponse)
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+      request: expect.any(Request),
       actor: {
         actorUserId: 'user_1',
         actorRole: 'PRO',
       },
       route: IDEMPOTENCY_ROUTE,
-      key: null,
+      requestLabel: 'media upload',
       requestBody: {
         professionalId: 'pro_1',
         actorUserId: 'user_1',
@@ -572,6 +583,12 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
         phase: MediaPhase.BEFORE,
         mediaType: MediaType.IMAGE,
       },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching media upload request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
     })
 
     expect(globalThis.fetch).not.toHaveBeenCalled()
@@ -579,61 +596,69 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
   })
 
   it('POST returns in-progress when idempotency ledger has an active matching request', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'in_progress',
-    })
-
-    const result = await POST(makeIdempotentPostRequest(), makeCtx())
-
-    expect(result.status).toBe(409)
-    await expect(result.json()).resolves.toEqual({
+    const handledResponse = makeJsonResponse(409, {
       ok: false,
       error: 'A matching media upload request is already in progress.',
       code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
     })
 
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+
+    const result = await POST(makeIdempotentPostRequest(), makeCtx())
+
+    expect(result).toBe(handledResponse)
     expect(globalThis.fetch).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
   it('POST returns conflict when idempotency key was reused with a different body', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'conflict',
-    })
-
-    const result = await POST(makeIdempotentPostRequest(), makeCtx())
-
-    expect(result.status).toBe(409)
-    await expect(result.json()).resolves.toEqual({
+    const handledResponse = makeJsonResponse(409, {
       ok: false,
       error:
         'This idempotency key was already used with a different request body.',
       code: 'IDEMPOTENCY_KEY_CONFLICT',
     })
 
-    expect(globalThis.fetch).not.toHaveBeenCalled()
-    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
-  })
-
-  it('POST replays completed idempotency response without storage check or media write', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'replay',
-      responseStatus: 200,
-      responseBody: expectedPostResponseBody,
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
     })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
 
     const result = await POST(makeIdempotentPostRequest(), makeCtx())
 
-    expect(result.status).toBe(200)
-    await expect(result.json()).resolves.toEqual({
-      ok: true,
-      ...expectedPostResponseBody,
-    })
-
+    expect(result).toBe(handledResponse)
     expect(globalThis.fetch).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
   })
+
+
+    it('POST replays completed idempotency response without storage check or media write', async () => {
+      const handledResponse = makeJsonResponse(200, {
+        ok: true,
+        ...expectedPostResponseBody,
+      })
+
+      mocks.beginRouteIdempotency.mockResolvedValueOnce({
+        kind: 'handled',
+        response: handledResponse,
+      })
+
+      mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+
+      const result = await POST(makeIdempotentPostRequest(), makeCtx())
+
+      expect(result).toBe(handledResponse)
+      expect(globalThis.fetch).not.toHaveBeenCalled()
+      expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
+      expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    })
 
   it('POST marks idempotency failed when main uploaded file is missing', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(
@@ -653,11 +678,12 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: 'Uploaded file not found in storage.',
     })
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/media',
     })
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('POST marks idempotency failed when uploaded thumb is missing', async () => {
@@ -678,11 +704,12 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: 'Uploaded thumb not found in storage.',
     })
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/media',
     })
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
-    expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('POST uploads media, renders urls, completes idempotency, and returns item', async () => {
@@ -693,26 +720,33 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       makeCtx(),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
-      actor: {
-        actorUserId: 'user_1',
-        actorRole: 'PRO',
-      },
-      route: IDEMPOTENCY_ROUTE,
-      key: 'idem_media_success_1',
-      requestBody: {
-        professionalId: 'pro_1',
-        actorUserId: 'user_1',
-        bookingId: 'booking_1',
-        storageBucket: BUCKETS.mediaPrivate,
-        storagePath: 'bookings/booking_1/before/main.jpg',
-        thumbBucket: BUCKETS.mediaPrivate,
-        thumbPath: 'bookings/booking_1/before/thumb.jpg',
-        caption: 'Before photo',
-        phase: MediaPhase.BEFORE,
-        mediaType: MediaType.IMAGE,
-      },
-    })
+  expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+    request: expect.any(Request),
+    actor: {
+      actorUserId: 'user_1',
+      actorRole: 'PRO',
+    },
+    route: IDEMPOTENCY_ROUTE,
+    requestLabel: 'media upload',
+    requestBody: {
+      professionalId: 'pro_1',
+      actorUserId: 'user_1',
+      bookingId: 'booking_1',
+      storageBucket: BUCKETS.mediaPrivate,
+      storagePath: 'bookings/booking_1/before/main.jpg',
+      thumbBucket: BUCKETS.mediaPrivate,
+      thumbPath: 'bookings/booking_1/before/thumb.jpg',
+      caption: 'Before photo',
+      phase: MediaPhase.BEFORE,
+      mediaType: MediaType.IMAGE,
+    },
+    messages: {
+      missingKey: 'Missing idempotency key.',
+      inProgress: 'A matching media upload request is already in progress.',
+      conflict:
+        'This idempotency key was already used with a different request body.',
+    },
+  })
 
     expect(mocks.createSignedUrl).toHaveBeenCalledTimes(2)
     expect(globalThis.fetch).toHaveBeenCalledTimes(2)
@@ -739,7 +773,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       thumbUrl: null,
     })
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: expectedPostResponseBody,
@@ -767,8 +801,9 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/media',
     })
 
     expect(result.status).toBe(404)
@@ -791,8 +826,9 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       makeCtx(),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/media',
     })
 
     expect(mocks.captureBookingException).toHaveBeenCalledWith({

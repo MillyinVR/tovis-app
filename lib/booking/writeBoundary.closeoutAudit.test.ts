@@ -538,6 +538,8 @@ describe('lib/booking/writeBoundary closeout audit behavior', () => {
 
   it('writes checkout and payment audit rows when client checkout confirms payment', async () => {
     const booking = makeClientCheckoutBooking({
+      status: BookingStatus.IN_PROGRESS,
+      sessionStep: SessionStep.AFTER_PHOTOS,
       finishedAt: null,
       selectedPaymentMethod: PaymentMethod.CASH,
       checkoutStatus: BookingCheckoutStatus.READY,
@@ -570,7 +572,7 @@ describe('lib/booking/writeBoundary closeout audit behavior', () => {
         id: 'booking_1',
       })
 
-      mocks.txMediaAssetCount.mockResolvedValueOnce(1)
+    mocks.txMediaAssetCount.mockResolvedValueOnce(1)
 
     const result = await updateClientBookingCheckout({
       bookingId: 'booking_1',

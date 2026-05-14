@@ -1,41 +1,28 @@
 // app/api/bookings/[id]/reschedule/route.test.ts
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingStatus,
-  Prisma,
+  Role,
   ServiceLocationType,
 } from '@prisma/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { BookingError, getBookingErrorDescriptor } from '@/lib/booking/errors'
 
 const mocks = vi.hoisted(() => ({
   requireClient: vi.fn(),
-  pickString: vi.fn(),
+  pickString: vi.fn((value: unknown) =>
+    typeof value === 'string' && value.trim() ? value.trim() : null,
+  ),
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
 
-  clampInt: vi.fn(),
-
   normalizeLocationType: vi.fn(),
-  resolveValidatedBookingContext: vi.fn(),
+  rescheduleBookingFromHold: vi.fn(),
 
-  buildAddressSnapshot: vi.fn(),
-  decimalToNumber: vi.fn(),
-
-  validateHoldForClientMutation: vi.fn(),
-  resolveHeldSalonAddressText: vi.fn(),
-  evaluateRescheduleDecision: vi.fn(),
-
-  withLockedClientOwnedBookingTransaction: vi.fn(),
-
-  txBookingFindUnique: vi.fn(),
-  txProfessionalServiceOfferingFindUnique: vi.fn(),
-  txBookingHoldFindUnique: vi.fn(),
-  txBookingUpdate: vi.fn(),
-  txBookingHoldDelete: vi.fn(),
-
-  createProNotification: vi.fn(),
-  upsertClientNotification: vi.fn(),
-  scheduleClientNotification: vi.fn(),
-  cancelScheduledClientNotificationsForBooking: vi.fn(),
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -51,141 +38,66 @@ vi.mock('@/app/api/_utils/responses', () => ({
   jsonOk: mocks.jsonOk,
 }))
 
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
+}))
+
 vi.mock('@/lib/timeZone', () => ({
   DEFAULT_TIME_ZONE: 'UTC',
 }))
 
-vi.mock('@/lib/pick', () => ({
-  clampInt: mocks.clampInt,
-}))
-
 vi.mock('@/lib/booking/locationContext', () => ({
   normalizeLocationType: mocks.normalizeLocationType,
-  resolveValidatedBookingContext: mocks.resolveValidatedBookingContext,
 }))
 
-vi.mock('@/lib/booking/snapshots', () => ({
-  buildAddressSnapshot: mocks.buildAddressSnapshot,
-  decimalToNumber: mocks.decimalToNumber,
+vi.mock('@/lib/booking/writeBoundary', () => ({
+  rescheduleBookingFromHold: mocks.rescheduleBookingFromHold,
 }))
 
-vi.mock('@/lib/booking/policies/holdRules', () => ({
-  validateHoldForClientMutation: mocks.validateHoldForClientMutation,
-  resolveHeldSalonAddressText: mocks.resolveHeldSalonAddressText,
-}))
-
-vi.mock('@/lib/booking/policies/reschedulePolicy', () => ({
-  evaluateRescheduleDecision: mocks.evaluateRescheduleDecision,
-}))
-
-vi.mock('@/lib/booking/scheduleTransaction', () => ({
-  withLockedClientOwnedBookingTransaction:
-    mocks.withLockedClientOwnedBookingTransaction,
-}))
-
-vi.mock('@/lib/notifications/proNotifications', () => ({
-  createProNotification: mocks.createProNotification,
-}))
-
-vi.mock('@/lib/notifications/clientNotifications', () => ({
-  upsertClientNotification: mocks.upsertClientNotification,
-  scheduleClientNotification: mocks.scheduleClientNotification,
-  cancelScheduledClientNotificationsForBooking:
-    mocks.cancelScheduledClientNotificationsForBooking,
-}))
-
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { POST } from './route'
 
-const tx = {
-  booking: {
-    findUnique: mocks.txBookingFindUnique,
-    update: mocks.txBookingUpdate,
-  },
-  professionalServiceOffering: {
-    findUnique: mocks.txProfessionalServiceOfferingFindUnique,
-  },
-  bookingHold: {
-    findUnique: mocks.txBookingHoldFindUnique,
-    delete: mocks.txBookingHoldDelete,
-  },
-}
+type TestCtx = { params: Promise<{ id: string }> }
 
-function makeRequest(body: unknown): Request {
-  return new Request('http://localhost/api/bookings/booking_1/reschedule', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-}
-
-function makeCtx(id = 'booking_1') {
+function makeCtx(id = 'booking_1'): TestCtx {
   return {
     params: Promise.resolve({ id }),
   }
 }
 
-const NOW = new Date('2026-03-11T19:00:00.000Z')
-const HOLD_START = new Date('2026-03-11T19:30:00.000Z')
-
-const existingBooking = {
-  id: 'booking_1',
-  status: BookingStatus.ACCEPTED,
-  clientId: 'client_1',
-  professionalId: 'pro_123',
-  offeringId: 'offering_1',
-  startedAt: null,
-  finishedAt: null,
-  totalDurationMinutes: 60,
-  bufferMinutes: 15,
+function makeRequest(body: unknown, headers?: HeadersInit): Request {
+  return new Request('http://localhost/api/bookings/booking_1/reschedule', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  })
 }
 
-const bookingOffering = {
-  id: 'offering_1',
-  offersInSalon: true,
-  offersMobile: true,
-  salonPriceStartingAt: new Prisma.Decimal('100.00'),
-  salonDurationMinutes: 60,
-  mobilePriceStartingAt: new Prisma.Decimal('120.00'),
-  mobileDurationMinutes: 75,
-  professional: {
-    timeZone: 'America/Los_Angeles',
-  },
-}
+function expectIdempotencyStarted(key = 'idem_key_1'): void {
+  mocks.beginRouteIdempotency.mockResolvedValue({
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: key,
+    requestHash: 'hash_1',
+  })
 
-const hold = {
-  id: 'hold_1',
-  clientId: 'client_1',
-  professionalId: 'pro_123',
-  offeringId: 'offering_1',
-  scheduledFor: HOLD_START,
-  expiresAt: new Date('2026-03-11T19:45:00.000Z'),
-  locationType: ServiceLocationType.SALON,
-  locationId: 'loc_1',
-  locationTimeZone: 'America/Los_Angeles',
-  locationAddressSnapshot: { formattedAddress: '123 Salon St' },
-  locationLatSnapshot: 34.05,
-  locationLngSnapshot: -118.25,
-  clientAddressId: null,
-  clientAddressSnapshot: null,
-  clientAddressLatSnapshot: null,
-  clientAddressLngSnapshot: null,
+  mocks.isRouteIdempotencyHandled.mockReturnValue(false)
 }
 
 describe('POST /api/bookings/[id]/reschedule', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
-    vi.setSystemTime(NOW)
-
     vi.clearAllMocks()
 
     mocks.requireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
     })
-
-    mocks.pickString.mockImplementation((value: unknown) =>
-      typeof value === 'string' && value.trim() ? value.trim() : null,
-    )
 
     mocks.jsonFail.mockImplementation(
       (status: number, error: string, extra?: unknown) => ({
@@ -202,196 +114,323 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       data,
     }))
 
-    mocks.clampInt.mockImplementation(
-      (value: unknown, min: number, max: number) => {
-        const parsed = Number(value)
-        const n = Number.isFinite(parsed) ? Math.trunc(parsed) : min
-        return Math.max(min, Math.min(max, n))
-      },
-    )
-
     mocks.normalizeLocationType.mockImplementation((value: unknown) => {
-      if (value === 'SALON') return ServiceLocationType.SALON
-      if (value === 'MOBILE') return ServiceLocationType.MOBILE
+      if (value === ServiceLocationType.SALON) return ServiceLocationType.SALON
+      if (value === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
       return null
     })
 
-    mocks.resolveValidatedBookingContext.mockResolvedValue({
-      ok: true,
-      durationMinutes: 60,
-      priceStartingAt: new Prisma.Decimal('100.00'),
-      context: {
-        locationId: 'loc_1',
-        timeZone: 'America/Los_Angeles',
-        workingHours: {
-          wed: { enabled: true, start: '09:00', end: '18:00' },
-        },
-        stepMinutes: 15,
-        advanceNoticeMinutes: 0,
-        maxDaysAhead: 30,
-        bufferMinutes: 15,
-        formattedAddress: '123 Salon St',
-        lat: 34.05,
-        lng: -118.25,
-      },
-    })
-
-    mocks.buildAddressSnapshot.mockImplementation((formattedAddress: string) => ({
-      formattedAddress,
-    }))
-
-    mocks.decimalToNumber.mockImplementation((value: unknown) => {
-      if (typeof value === 'number' && Number.isFinite(value)) return value
-      if (value instanceof Prisma.Decimal) return Number(value.toString())
-      return null
-    })
-
-    mocks.validateHoldForClientMutation.mockResolvedValue({
-      ok: true,
-      value: {
-        holdId: 'hold_1',
-        locationId: 'loc_1',
+    mocks.rescheduleBookingFromHold.mockResolvedValue({
+      booking: {
+        id: 'booking_1',
+        status: BookingStatus.ACCEPTED,
+        scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
         locationType: ServiceLocationType.SALON,
+        bufferMinutes: 15,
+        totalDurationMinutes: 60,
         locationTimeZone: 'America/Los_Angeles',
-        holdClientAddressId: null,
-        holdClientServiceAddressText: null,
-        holdSalonAddressTextFromSnapshot: '123 Salon St',
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
       },
     })
 
-    mocks.resolveHeldSalonAddressText.mockReturnValue({
-      ok: true,
-      value: '123 Salon St',
-    })
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
 
-    mocks.evaluateRescheduleDecision.mockResolvedValue({
-      ok: true,
-      value: {
-        requestedEnd: new Date('2026-03-11T20:45:00.000Z'),
-      },
-    })
-
-    mocks.txBookingFindUnique.mockResolvedValue(existingBooking)
-    mocks.txProfessionalServiceOfferingFindUnique.mockResolvedValue(bookingOffering)
-    mocks.txBookingHoldFindUnique.mockResolvedValue(hold)
-
-    mocks.txBookingUpdate.mockResolvedValue({
-      id: 'booking_1',
-      status: BookingStatus.ACCEPTED,
-      scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-      locationType: ServiceLocationType.SALON,
-      bufferMinutes: 15,
-      totalDurationMinutes: 60,
-      locationTimeZone: 'America/Los_Angeles',
-    })
-
-    mocks.txBookingHoldDelete.mockResolvedValue({ id: 'hold_1' })
-
-    mocks.withLockedClientOwnedBookingTransaction.mockImplementation(
-      async ({
-        run,
-      }: {
-        bookingId: string
-        clientId: string
-        run: (args: { tx: typeof tx; now: Date }) => Promise<unknown>
-      }) =>
-        run({
-          tx,
-          now: NOW,
-        }),
-    )
-
-    mocks.createProNotification.mockResolvedValue(undefined)
-    mocks.upsertClientNotification.mockResolvedValue({ id: 'client_notif_1' })
-    mocks.scheduleClientNotification.mockResolvedValue({ id: 'scheduled_1' })
-    mocks.cancelScheduledClientNotificationsForBooking.mockResolvedValue({
-      count: 0,
-    })
+    expectIdempotencyStarted()
   })
 
-  afterEach(() => {
-    vi.useRealTimers()
-  })
+  it('returns auth response when auth fails', async () => {
+    const authRes = { ok: false, status: 401, error: 'Unauthorized' }
 
-  it('uses the locked client-owned booking transaction before reschedule decision and booking update', async () => {
+    mocks.requireClient.mockResolvedValueOnce({
+      ok: false,
+      res: authRes,
+    })
+
     const result = await POST(
       makeRequest({
         holdId: 'hold_1',
-        locationType: 'SALON',
+        locationType: ServiceLocationType.SALON,
       }),
       makeCtx(),
     )
 
-    expect(mocks.withLockedClientOwnedBookingTransaction).toHaveBeenCalledWith({
-      bookingId: 'booking_1',
-      clientId: 'client_1',
-      run: expect.any(Function),
-    })
+    expect(result).toBe(authRes)
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.rescheduleBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
 
-    expect(mocks.validateHoldForClientMutation).toHaveBeenCalledWith({
-      tx,
-      hold,
-      clientId: 'client_1',
-      now: NOW,
-      expectedProfessionalId: 'pro_123',
-      expectedOfferingId: 'offering_1',
-      expectedLocationType: ServiceLocationType.SALON,
-    })
+  it('returns BOOKING_ID_REQUIRED before starting idempotency when booking id is missing', async () => {
+    const descriptor = getBookingErrorDescriptor('BOOKING_ID_REQUIRED')
 
-    expect(mocks.resolveHeldSalonAddressText).toHaveBeenCalledWith({
-      holdLocationType: ServiceLocationType.SALON,
-      holdLocationAddressSnapshot: hold.locationAddressSnapshot,
-      fallbackFormattedAddress: '123 Salon St',
-    })
+    const result = await POST(
+      makeRequest({
+        holdId: 'hold_1',
+      }),
+      makeCtx(''),
+    )
 
-    expect(mocks.evaluateRescheduleDecision).toHaveBeenCalledWith({
-      tx,
-      now: NOW,
-      professionalId: 'pro_123',
-      bookingId: 'booking_1',
-      holdId: 'hold_1',
-      requestedStart: new Date('2026-03-11T19:30:00.000Z'),
-      durationMinutes: 60,
-      bufferMinutes: 15,
-      locationId: 'loc_1',
-      workingHours: {
-        wed: { enabled: true, start: '09:00', end: '18:00' },
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      descriptor.httpStatus,
+      descriptor.userMessage,
+      {
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
       },
-      timeZone: 'America/Los_Angeles',
-      stepMinutes: 15,
-      advanceNoticeMinutes: 0,
-      maxDaysAhead: 30,
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
+    })
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.rescheduleBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns HOLD_ID_REQUIRED before starting idempotency when holdId is missing', async () => {
+    const descriptor = getBookingErrorDescriptor('HOLD_ID_REQUIRED')
+
+    const result = await POST(
+      makeRequest({
+        locationType: ServiceLocationType.SALON,
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      descriptor.httpStatus,
+      descriptor.userMessage,
+      {
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
+    })
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.rescheduleBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns INVALID_LOCATION_TYPE before starting idempotency when locationType is invalid', async () => {
+    const descriptor = getBookingErrorDescriptor('INVALID_LOCATION_TYPE')
+
+    mocks.normalizeLocationType.mockReturnValueOnce(null)
+
+    const result = await POST(
+      makeRequest({
+        holdId: 'hold_1',
+        locationType: 'BOAT_SALON',
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      descriptor.httpStatus,
+      descriptor.userMessage,
+      {
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
+      },
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
+    })
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.rescheduleBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns a handled idempotency response without calling rescheduleBookingFromHold', async () => {
+    const handledResponse = {
+      ok: false,
+      status: 400,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    }
+
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+
+    const result = await POST(
+      makeRequest({
+        holdId: 'hold_1',
+        locationType: ServiceLocationType.SALON,
+      }),
+      makeCtx(),
+    )
+
+    expect(result).toBe(handledResponse)
+    expect(mocks.rescheduleBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('starts idempotency with client, booking, hold, and location details', async () => {
+    await POST(
+      makeRequest(
+        {
+          holdId: 'hold_1',
+          locationType: ServiceLocationType.SALON,
+        },
+        {
+          'idempotency-key': 'idem_key_1',
+        },
+      ),
+      makeCtx(),
+    )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+      request: expect.any(Request),
+      actor: {
+        actorKey: 'client:client_1',
+        actorRole: Role.CLIENT,
+      },
+      route: IDEMPOTENCY_ROUTES.BOOKING_RESCHEDULE,
+      requestLabel: 'booking reschedule',
+      requestBody: {
+        bookingId: 'booking_1',
+        clientId: 'client_1',
+        holdId: 'hold_1',
+        requestedLocationType: ServiceLocationType.SALON,
+      },
+      messages: {
+        missingKey: 'Missing idempotency key for booking reschedule.',
+        inProgress:
+          'A matching booking reschedule request is already in progress.',
+        conflict:
+          'This idempotency key was already used with different reschedule details.',
+      },
+    })
+  })
+
+  it('starts idempotency with null requestedLocationType when locationType is omitted', async () => {
+    await POST(
+      makeRequest({
+        holdId: 'hold_1',
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.normalizeLocationType).not.toHaveBeenCalled()
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: {
+          bookingId: 'booking_1',
+          clientId: 'client_1',
+          holdId: 'hold_1',
+          requestedLocationType: null,
+        },
+      }),
+    )
+  })
+
+  it('calls rescheduleBookingFromHold after idempotency starts', async () => {
+    const result = await POST(
+      makeRequest({
+        holdId: 'hold_1',
+        locationType: ServiceLocationType.SALON,
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.rescheduleBookingFromHold).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      clientId: 'client_1',
+      holdId: 'hold_1',
+      requestedLocationType: ServiceLocationType.SALON,
       fallbackTimeZone: 'UTC',
     })
 
-    expect(mocks.txBookingUpdate).toHaveBeenCalledWith({
-      where: { id: 'booking_1' },
-      data: expect.objectContaining({
-        scheduledFor: new Date('2026-03-11T19:30:00.000Z'),
-        locationType: ServiceLocationType.SALON,
-        bufferMinutes: 15,
-        locationId: 'loc_1',
-        locationTimeZone: 'America/Los_Angeles',
-      }),
-      select: {
-        id: true,
-        status: true,
-        scheduledFor: true,
-        locationType: true,
-        bufferMinutes: true,
-        totalDurationMinutes: true,
-        locationTimeZone: true,
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody: {
+        ok: true,
+        booking: {
+          id: 'booking_1',
+          status: BookingStatus.ACCEPTED,
+          scheduledFor: '2026-03-11T19:30:00.000Z',
+          locationType: ServiceLocationType.SALON,
+          bufferMinutes: 15,
+          totalDurationMinutes: 60,
+          locationTimeZone: 'America/Los_Angeles',
+        },
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
       },
     })
 
-    expect(mocks.txBookingHoldDelete).toHaveBeenCalledWith({
-      where: { id: 'hold_1' },
-    })
+    expect(mocks.jsonOk).toHaveBeenCalledWith(
+      {
+        ok: true,
+        booking: {
+          id: 'booking_1',
+          status: BookingStatus.ACCEPTED,
+          scheduledFor: '2026-03-11T19:30:00.000Z',
+          locationType: ServiceLocationType.SALON,
+          bufferMinutes: 15,
+          totalDurationMinutes: 60,
+          locationTimeZone: 'America/Los_Angeles',
+        },
+        meta: {
+          mutated: true,
+          noOp: false,
+        },
+      },
+      200,
+    )
 
     expect(result).toEqual({
       ok: true,
       status: 200,
       data: {
+        ok: true,
         booking: {
           id: 'booking_1',
           status: BookingStatus.ACCEPTED,
@@ -409,13 +448,12 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     })
   })
 
-  it('returns HOLD_EXPIRED when the hold is expired', async () => {
-    mocks.validateHoldForClientMutation.mockResolvedValueOnce({
-      ok: false,
-      code: 'HOLD_EXPIRED',
-      message: 'Hold expired.',
-      userMessage: 'That hold expired. Please pick a new slot.',
-    })
+  it('fails idempotency and maps BookingError from rescheduleBookingFromHold', async () => {
+    const descriptor = getBookingErrorDescriptor('TIME_BOOKED')
+
+    mocks.rescheduleBookingFromHold.mockRejectedValueOnce(
+      new BookingError('TIME_BOOKED'),
+    )
 
     const result = await POST(
       makeRequest({
@@ -424,26 +462,37 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       makeCtx(),
     )
 
-    expect(mocks.evaluateRescheduleDecision).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/bookings/[id]/reschedule',
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      descriptor.httpStatus,
+      descriptor.userMessage,
+      {
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
+      },
+    )
 
     expect(result).toEqual({
       ok: false,
-      status: 409,
-      error: 'That hold expired. Please pick a new slot.',
-      code: 'HOLD_EXPIRED',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'Hold expired.',
+      status: descriptor.httpStatus,
+      error: descriptor.userMessage,
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: descriptor.message,
     })
   })
 
-  it('returns STEP_MISMATCH when the held time is off step', async () => {
-    mocks.evaluateRescheduleDecision.mockResolvedValueOnce({
-      ok: false,
-      code: 'STEP_MISMATCH',
-      message: 'Start time must be on a 15-minute boundary.',
-      userMessage: 'Start time must be on a 15-minute boundary.',
-    })
+  it('fails idempotency and returns INTERNAL_ERROR for non-booking errors', async () => {
+    const descriptor = getBookingErrorDescriptor('INTERNAL_ERROR')
+
+    mocks.rescheduleBookingFromHold.mockRejectedValueOnce(new Error('boom'))
 
     const result = await POST(
       makeRequest({
@@ -452,112 +501,54 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       makeCtx(),
     )
 
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/bookings/[id]/reschedule',
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      descriptor.httpStatus,
+      'Failed to reschedule booking.',
+      {
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: 'boom',
+      },
+    )
+
     expect(result).toEqual({
       ok: false,
-      status: 400,
-      error: 'Start time must be on a 15-minute boundary.',
-      code: 'STEP_MISMATCH',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'Start time must be on a 15-minute boundary.',
+      status: descriptor.httpStatus,
+      error: 'Failed to reschedule booking.',
+      code: descriptor.code,
+      retryable: descriptor.retryable,
+      uiAction: descriptor.uiAction,
+      message: 'boom',
     })
   })
 
-  it('returns OUTSIDE_WORKING_HOURS when outside working hours', async () => {
-    mocks.evaluateRescheduleDecision.mockResolvedValueOnce({
-      ok: false,
-      code: 'OUTSIDE_WORKING_HOURS',
-      message: 'That time is outside working hours.',
-      userMessage: 'That time is outside working hours.',
-    })
+  it('does not fail idempotency when an error happens before the ledger starts', async () => {
+    const descriptor = getBookingErrorDescriptor('HOLD_ID_REQUIRED')
 
-    const result = await POST(
+    await POST(
       makeRequest({
-        holdId: 'hold_1',
+        locationType: ServiceLocationType.SALON,
       }),
       makeCtx(),
     )
 
-    expect(result).toEqual({
-      ok: false,
-      status: 400,
-      error: 'That time is outside working hours.',
-      code: 'OUTSIDE_WORKING_HOURS',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'That time is outside working hours.',
-    })
-  })
-
-  it('returns TIME_BLOCKED when the time is blocked', async () => {
-    mocks.evaluateRescheduleDecision.mockResolvedValueOnce({
-      ok: false,
-      code: 'TIME_BLOCKED',
-    })
-
-    const result = await POST(
-      makeRequest({
-        holdId: 'hold_1',
-      }),
-      makeCtx(),
+    expect(mocks.jsonFail).toHaveBeenCalledWith(
+      descriptor.httpStatus,
+      descriptor.userMessage,
+      {
+        code: descriptor.code,
+        retryable: descriptor.retryable,
+        uiAction: descriptor.uiAction,
+        message: descriptor.message,
+      },
     )
 
-    expect(result).toEqual({
-      ok: false,
-      status: 409,
-      error: 'That time is blocked. Please choose another slot.',
-      code: 'TIME_BLOCKED',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'Requested time is blocked.',
-    })
-  })
-
-  it('returns TIME_BOOKED when the time is no longer available because another booking exists', async () => {
-    mocks.evaluateRescheduleDecision.mockResolvedValueOnce({
-      ok: false,
-      code: 'TIME_BOOKED',
-    })
-
-    const result = await POST(
-      makeRequest({
-        holdId: 'hold_1',
-      }),
-      makeCtx(),
-    )
-
-    expect(result).toEqual({
-      ok: false,
-      status: 409,
-      error: 'That time was just taken. Please choose another slot.',
-      code: 'TIME_BOOKED',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'Requested time already has a booking.',
-    })
-  })
-
-  it('returns TIME_HELD when the time is currently held', async () => {
-    mocks.evaluateRescheduleDecision.mockResolvedValueOnce({
-      ok: false,
-      code: 'TIME_HELD',
-    })
-
-    const result = await POST(
-      makeRequest({
-        holdId: 'hold_1',
-      }),
-      makeCtx(),
-    )
-
-    expect(result).toEqual({
-      ok: false,
-      status: 409,
-      error: 'Someone is already holding that time. Please try another slot.',
-      code: 'TIME_HELD',
-      retryable: true,
-      uiAction: 'PICK_NEW_SLOT',
-      message: 'Requested time is currently held.',
-    })
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 })

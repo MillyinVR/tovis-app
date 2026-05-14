@@ -11,9 +11,10 @@ const mocks = vi.hoisted(() => ({
   pickIsoDate: vi.fn(),
   pickString: vi.fn(),
 
-  beginIdempotency: vi.fn(),
-  completeIdempotency: vi.fn(),
-  failIdempotency: vi.fn(),
+  beginRouteIdempotency: vi.fn(),
+  completeRouteIdempotency: vi.fn(),
+  failStartedRouteIdempotency: vi.fn(),
+  isRouteIdempotencyHandled: vi.fn(),
 
   isRecord: vi.fn(),
 
@@ -32,6 +33,13 @@ vi.mock('@/app/api/_utils', () => ({
   pickIsoDate: mocks.pickIsoDate,
   pickString: mocks.pickString,
   requirePro: mocks.requirePro,
+}))
+
+vi.mock('@/app/api/_utils/idempotency', () => ({
+  beginRouteIdempotency: mocks.beginRouteIdempotency,
+  completeRouteIdempotency: mocks.completeRouteIdempotency,
+  failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
+  isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
 }))
 
 vi.mock('@/lib/guards', () => ({
@@ -60,17 +68,12 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 }))
 
 vi.mock('@/lib/idempotency', () => ({
-  beginIdempotency: mocks.beginIdempotency,
-  completeIdempotency: mocks.completeIdempotency,
-  failIdempotency: mocks.failIdempotency,
-}))
-
-vi.mock('@/lib/idempotency/routeMeta', () => ({
   IDEMPOTENCY_ROUTES: {
     PRO_BOOKING_REBOOK: 'POST /api/pro/bookings/[id]/rebook',
   },
 }))
 
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { POST } from './route'
 
 function makeRequest(
@@ -134,6 +137,17 @@ function makeAftercareState(overrides?: {
   }
 }
 
+function expectIdempotencyStarted(key = 'idem_rebook_1'): void {
+  mocks.beginRouteIdempotency.mockResolvedValue({
+    kind: 'started',
+    idempotencyRecordId: 'idem_record_1',
+    idempotencyKey: key,
+    requestHash: 'hash_1',
+  })
+
+  mocks.isRouteIdempotencyHandled.mockReturnValue(false)
+}
+
 describe('POST /api/pro/bookings/[id]/rebook', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -174,14 +188,10 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       return Number.isNaN(parsed.getTime()) ? null : parsed
     })
 
-    mocks.beginIdempotency.mockResolvedValue({
-      kind: 'started',
-      idempotencyRecordId: 'idem_record_1',
-      requestHash: 'hash_1',
-    })
+    expectIdempotencyStarted()
 
-    mocks.completeIdempotency.mockResolvedValue(undefined)
-    mocks.failIdempotency.mockResolvedValue(undefined)
+    mocks.completeRouteIdempotency.mockResolvedValue(undefined)
+    mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
 
     mocks.isRecord.mockImplementation(
       (value: unknown) =>
@@ -239,7 +249,7 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
     )
 
     expect(result).toBe(authRes)
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
     expect(mocks.aftercareSummaryUpsert).not.toHaveBeenCalled()
     expect(
@@ -257,7 +267,7 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       error: 'Missing booking id.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
   })
 
@@ -282,7 +292,7 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       error: 'scheduledFor is required (ISO string) for BOOK mode.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
     expect(
       mocks.createRebookedBookingFromCompletedBooking,
@@ -312,7 +322,7 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
         'windowStart and windowEnd are required ISO strings for RECOMMEND_WINDOW.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.aftercareSummaryUpsert).not.toHaveBeenCalled()
   })
 
@@ -339,25 +349,38 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       error: 'windowEnd must be after windowStart.',
     })
 
-    expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.aftercareSummaryUpsert).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when idempotency key is missing before mutating', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({ kind: 'missing_key' })
+  it('returns handled idempotency response when idempotency key is missing before mutating', async () => {
+    const handledResponse = {
+      ok: false,
+      status: 400,
+      error: 'Missing idempotency key.',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    }
+
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
 
     const result = await POST(
       makeRequest({ mode: 'CLEAR' }, { idempotencyKey: null }),
       makeCtx('booking_1'),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+      request: expect.any(Request),
       actor: {
         actorUserId: 'user_1',
         actorRole: Role.PRO,
       },
-      route: 'POST /api/pro/bookings/[id]/rebook',
-      key: null,
+      route: IDEMPOTENCY_ROUTES.PRO_BOOKING_REBOOK,
+      requestLabel: 'pro booking rebook',
       requestBody: {
         bookingId: 'booking_1',
         professionalId: 'pro_1',
@@ -366,18 +389,15 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
         windowStart: null,
         windowEnd: null,
       },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request.',
+      },
     })
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      400,
-      'Missing idempotency key.',
-    )
-    expect(result).toEqual({
-      ok: false,
-      status: 400,
-      error: 'Missing idempotency key.',
-    })
-
+    expect(result).toBe(handledResponse)
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
     expect(mocks.aftercareSummaryUpsert).not.toHaveBeenCalled()
     expect(
@@ -385,49 +405,55 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
     ).not.toHaveBeenCalled()
   })
 
-  it('returns 409 when idempotency key is reused with a different request', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({ kind: 'conflict' })
-
-    const result = await POST(makeRequest({ mode: 'CLEAR' }), makeCtx())
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      409,
-      'This idempotency key was already used with a different request.',
-    )
-    expect(result).toEqual({
+  it('returns handled idempotency response when idempotency key is reused with a different request', async () => {
+    const handledResponse = {
       ok: false,
       status: 409,
       error: 'This idempotency key was already used with a different request.',
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    }
+
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
     })
 
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+
+    const result = await POST(makeRequest({ mode: 'CLEAR' }), makeCtx())
+
+    expect(result).toBe(handledResponse)
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
     expect(mocks.aftercareSummaryUpsert).not.toHaveBeenCalled()
   })
 
-  it('returns 409 when matching idempotent request is already in progress', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({ kind: 'in_progress' })
-
-    const result = await POST(makeRequest({ mode: 'CLEAR' }), makeCtx())
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      409,
-      'A matching request is already in progress.',
-    )
-    expect(result).toEqual({
+  it('returns handled idempotency response when matching request is already in progress', async () => {
+    const handledResponse = {
       ok: false,
       status: 409,
       error: 'A matching request is already in progress.',
+      code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
+    }
+
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
     })
 
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+
+    const result = await POST(makeRequest({ mode: 'CLEAR' }), makeCtx())
+
+    expect(result).toBe(handledResponse)
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
     expect(mocks.aftercareSummaryUpsert).not.toHaveBeenCalled()
   })
 
   it('replays a completed idempotency response without mutating', async () => {
-    mocks.beginIdempotency.mockResolvedValueOnce({
-      kind: 'replay',
-      responseStatus: 201,
-      responseBody: {
+    const handledResponse = {
+      ok: true,
+      status: 201,
+      data: {
         ok: true,
         mode: 'BOOK',
         nextBookingId: 'booking_2',
@@ -437,7 +463,14 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
           rebookedFor: SCHEDULED_FOR.toISOString(),
         },
       },
+    }
+
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
     })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
 
     const result = await POST(
       makeRequest({
@@ -447,24 +480,7 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       makeCtx(),
     )
 
-    expect(result).toBeInstanceOf(Response)
-
-    if (!(result instanceof Response)) {
-      throw new Error('Expected replay result to be a Response.')
-    }
-
-    expect(result.status).toBe(201)
-    await expect(result.json()).resolves.toEqual({
-      ok: true,
-      mode: 'BOOK',
-      nextBookingId: 'booking_2',
-      aftercare: {
-        id: 'aftercare_1',
-        rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-        rebookedFor: SCHEDULED_FOR.toISOString(),
-      },
-    })
-
+    expect(result).toBe(handledResponse)
     expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
     expect(mocks.aftercareSummaryUpsert).not.toHaveBeenCalled()
     expect(
@@ -480,13 +496,14 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       makeCtx('booking_1'),
     )
 
-    expect(mocks.beginIdempotency).toHaveBeenCalledWith({
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+      request: expect.any(Request),
       actor: {
         actorUserId: 'user_1',
         actorRole: Role.PRO,
       },
-      route: 'POST /api/pro/bookings/[id]/rebook',
-      key: 'idem_rebook_1',
+      route: IDEMPOTENCY_ROUTES.PRO_BOOKING_REBOOK,
+      requestLabel: 'pro booking rebook',
       requestBody: {
         bookingId: 'booking_1',
         professionalId: 'pro_1',
@@ -494,6 +511,12 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
         scheduledFor: null,
         windowStart: null,
         windowEnd: null,
+      },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request.',
       },
     })
 
@@ -579,7 +602,7 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       select: expect.any(Object),
     })
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: {
@@ -663,7 +686,7 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       select: expect.any(Object),
     })
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 200,
       responseBody: {
@@ -701,10 +724,10 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
     })
   })
 
-  it('creates a rebooked booking in BOOK mode and completes idempotency', async () => {
-    mocks.pickIsoDate.mockReturnValueOnce(SCHEDULED_FOR)
+it('creates a rebooked booking in BOOK mode and completes idempotency', async () => {
+  mocks.pickIsoDate.mockReturnValueOnce(SCHEDULED_FOR)
 
-    const result = await POST(
+  const result = await POST(
       makeRequest({
         mode: 'BOOK',
         scheduledFor: SCHEDULED_FOR.toISOString(),
@@ -722,7 +745,7 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       idempotencyKey: 'idem_rebook_1',
     })
 
-    expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 201,
       responseBody: {
@@ -778,8 +801,9 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       makeCtx('booking_1'),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/rebook',
     })
 
     expect(mocks.getBookingFailPayload).toHaveBeenCalledWith('FORBIDDEN', {
@@ -804,8 +828,9 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
       makeCtx('booking_1'),
     )
 
-    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/rebook',
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')

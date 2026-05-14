@@ -1,6 +1,5 @@
 // app/api/_utils/idempotency.test.ts
 import { Role } from '@prisma/client'
-import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -9,12 +8,18 @@ const mocks = vi.hoisted(() => ({
   failIdempotency: vi.fn(),
 }))
 
-vi.mock('@/lib/idempotency', () => ({
-  beginIdempotency: mocks.beginIdempotency,
-  completeIdempotency: mocks.completeIdempotency,
-  failIdempotency: mocks.failIdempotency,
-}))
+vi.mock('@/lib/idempotency', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/idempotency')>()
 
+  return {
+    ...actual,
+    beginIdempotency: mocks.beginIdempotency,
+    completeIdempotency: mocks.completeIdempotency,
+    failIdempotency: mocks.failIdempotency,
+  }
+})
+
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import {
   beginRouteIdempotency,
   completeRouteIdempotency,
@@ -54,6 +59,13 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
 describe('app/api/_utils/idempotency', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    mocks.beginIdempotency.mockReset()
+    mocks.completeIdempotency.mockReset()
+    mocks.failIdempotency.mockReset()
+
+    mocks.completeIdempotency.mockResolvedValue(undefined)
+    mocks.failIdempotency.mockResolvedValue(undefined)
   })
 
   describe('readIdempotencyKey', () => {
@@ -449,10 +461,10 @@ describe('app/api/_utils/idempotency', () => {
         }),
       ).resolves.toBeUndefined()
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-    `${TEST_OPERATION} idempotency failure update error:`,
-    expect.any(Error),
-    )
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        `${TEST_OPERATION} idempotency failure update error:`,
+        expect.any(Error),
+      )
 
       consoleErrorSpy.mockRestore()
     })
