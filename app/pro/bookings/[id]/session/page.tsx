@@ -42,6 +42,7 @@ import {
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
 import { moneyToFixed2String, type MoneyInput } from '@/lib/money'
+import { buildProSessionCloseoutChecklist } from '@/lib/proSession/closeoutChecklist'
 
 export const dynamic = 'force-dynamic'
 
@@ -1225,21 +1226,27 @@ function WrapUpView({
   hasCheckoutClosed: boolean
   hasConsultationApproved: boolean
 }) {
-  const canComplete =
-    hasAfterPhoto &&
-    hasFinalizedAftercare &&
-    hasPaymentCollected &&
-    hasCheckoutClosed &&
-    hasConsultationApproved
-  const aftercareStatus = hasFinalizedAftercare
-    ? 'finalized + sent'
-    : hasAftercareDraft
-      ? 'draft saved'
-      : 'missing'
+  const checklist = buildProSessionCloseoutChecklist({
+    afterCount,
+    hasAfterPhoto,
+    hasAftercareDraft,
+    hasFinalizedAftercare,
+    hasPaymentCollected,
+    hasCheckoutClosed,
+    hasConsultationApproved,
+  })
 
-  const paymentStatus = hasPaymentCollected ? 'collected' : 'not collected'
-  const checkoutStatus = hasCheckoutClosed ? 'paid or waived' : 'not closed'
-  const consultationStatus = hasConsultationApproved ? 'approved' : 'not approved'
+  const afterPhotosItem = checklist.items.find(
+    (item) => item.key === 'afterPhotos',
+  )
+  const aftercareItem = checklist.items.find(
+    (item) => item.key === 'aftercare',
+  )
+  const paymentItem = checklist.items.find((item) => item.key === 'payment')
+  const checkoutItem = checklist.items.find((item) => item.key === 'checkout')
+  const consultationItem = checklist.items.find(
+    (item) => item.key === 'consultation',
+  )
 
   return (
     <PageShell>
@@ -1270,7 +1277,7 @@ function WrapUpView({
                 After photos
               </div>
               <div className="brand-pro-session-check-sub">
-                {hasAfterPhoto ? `${afterCount} photos captured` : 'Missing'}
+                {afterPhotosItem?.subtitle ?? 'Missing'}
               </div>
             </div>
 
@@ -1290,7 +1297,7 @@ function WrapUpView({
                 Aftercare sent to client
               </div>
               <div className="brand-pro-session-check-sub">
-                {aftercareStatus}
+                {aftercareItem?.subtitle ?? 'missing'}
                 {aftercareLastEditedAt && !hasFinalizedAftercare
                   ? ` · last edited ${formatDateTime(aftercareLastEditedAt)}`
                   : ''}
@@ -1313,7 +1320,7 @@ function WrapUpView({
                 Payment collected
               </div>
               <div className="brand-pro-session-check-sub">
-                {paymentStatus}
+                {paymentItem?.subtitle ?? 'not collected'}
               </div>
             </div>
 
@@ -1333,7 +1340,7 @@ function WrapUpView({
                 Checkout paid or waived
               </div>
               <div className="brand-pro-session-check-sub">
-                {checkoutStatus}
+                {checkoutItem?.subtitle ?? 'not closed'}
               </div>
             </div>
 
@@ -1353,7 +1360,7 @@ function WrapUpView({
                 Consultation approved
               </div>
               <div className="brand-pro-session-check-sub">
-                {consultationStatus}
+                {consultationItem?.subtitle ?? 'not approved'}
               </div>
             </div>
 
@@ -1403,9 +1410,7 @@ function WrapUpView({
         </div>
 
         <div className="brand-pro-session-help-text pb-4">
-          {canComplete
-            ? 'All closeout requirements are ready. Finish closeout from aftercare.'
-            : 'Requires approved consultation, after photos, finalized aftercare, collected payment, and paid or waived checkout.'}
+          {checklist.helpText}
         </div>
       </div>
     </PageShell>

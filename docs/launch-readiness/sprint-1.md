@@ -63,3 +63,15 @@ Complete
 
 ```bash
 pnpm typecheck
+pnpm test
+pnpm exec playwright test tests/e2e/booking-lifecycle-smoke.spec.ts
+
+# Sprint 1 Closeout Summary
+
+Sprint 1 is complete.
+
+This sprint hardened booking closeout correctness across backend lifecycle rules, Pro session UI, aftercare completion, media lifecycle gates, Pro booking visibility, and smoke E2E coverage.
+
+The main product correction was replacing direct completion behavior with the canonical “Finish closeout” flow. The Pro session UI no longer directly submits `SessionStep.DONE`; completion now depends on backend-owned closeout requirements: approved consultation, after photos, finalized aftercare, collected payment, and paid/waived checkout.
+
+The test gate passes, including lifecycle strict mode, write boundary integration, Pro session UI, aftercare closeout, media lifecycle, Pro booking list behavior, and the booking lifecycle smoke E2E skeleton.

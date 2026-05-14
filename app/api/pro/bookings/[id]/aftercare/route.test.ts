@@ -1459,6 +1459,113 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     })
   })
 
+  it('POST completes booking when aftercare sends and closeout requirements are satisfied', async () => {
+    expectIdempotencyStarted('idem_closeout_success_1')
+
+    mocks.upsertBookingAftercare.mockResolvedValueOnce(
+      makeUpsertResult({
+        bookingFinished: true,
+        completionBlockers: [],
+        booking: {
+          status: BookingStatus.COMPLETED,
+          sessionStep: SessionStep.DONE,
+          finishedAt: new Date('2026-04-12T20:00:00.000Z'),
+        },
+      }),
+    )
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: 'idem_closeout_success_1',
+        headers: {
+          'x-request-id': 'req_closeout_success_1',
+        },
+        body: makeValidPostBody(),
+      }),
+      makeCtx(),
+    )
+
+    const responseBody = makeExpectedPostResponse({
+      bookingFinished: true,
+      completionBlockers: [],
+      booking: {
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: '2026-04-12T20:00:00.000Z',
+      },
+      redirectTo: '/pro/calendar',
+    })
+
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody,
+    })
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      ...responseBody,
+    })
+  })
+
+  it.each([
+    ['AFTER_PHOTOS_REQUIRED'],
+    ['AFTERCARE_REQUIRED'],
+    ['AFTERCARE_NOT_SENT'],
+    ['PAYMENT_NOT_COLLECTED'],
+    ['CHECKOUT_NOT_COMPLETE'],
+    ['CONSULTATION_NOT_APPROVED'],
+  ])('POST keeps booking incomplete when closeout blocker exists: %s', async (blocker) => {
+    expectIdempotencyStarted(`idem_blocker_${blocker}`)
+
+    mocks.upsertBookingAftercare.mockResolvedValueOnce(
+      makeUpsertResult({
+        bookingFinished: false,
+        completionBlockers: [blocker],
+        booking: {
+          status: BookingStatus.IN_PROGRESS,
+          sessionStep: SessionStep.AFTER_PHOTOS,
+          finishedAt: null,
+        },
+      }),
+    )
+
+    const result = await POST(
+      makeIdempotentRequest({
+        key: `idem_blocker_${blocker}`,
+        headers: {
+          'x-request-id': `req_blocker_${blocker}`,
+        },
+        body: makeValidPostBody(),
+      }),
+      makeCtx(),
+    )
+
+    const responseBody = makeExpectedPostResponse({
+      bookingFinished: false,
+      completionBlockers: [blocker],
+      booking: {
+        status: BookingStatus.IN_PROGRESS,
+        sessionStep: SessionStep.AFTER_PHOTOS,
+        finishedAt: null,
+      },
+      redirectTo: null,
+    })
+
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 200,
+      responseBody,
+    })
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      ...responseBody,
+    })
+  })
+
   it('POST returns 500 for unexpected errors and marks idempotency failed', async () => {
     expectIdempotencyStarted('idem_boom_1')
 
