@@ -5132,7 +5132,6 @@ async function performLockedConfirmBookingFinalReview(args: {
     where: { bookingId: booking.id },
     create: {
       bookingId: booking.id,
-      publicToken: newPublicToken(),
       notes: booking.aftercareSummary?.notes ?? null,
       rebookMode,
       rebookedFor,
@@ -8118,7 +8117,6 @@ assertCanCreateRebookFromSourceBooking({
     where: { bookingId: source.id },
     create: {
       bookingId: source.id,
-      publicToken: newPublicToken(),
       rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
       rebookedFor: requestedStart,
       rebookWindowStart: null,
@@ -8947,7 +8945,6 @@ if (
     where: { bookingId: booking.id },
     create: {
       bookingId: booking.id,
-      publicToken: newPublicToken(),
       notes: args.notes,
       rebookMode: args.rebookMode,
       rebookedFor: args.rebookedFor,

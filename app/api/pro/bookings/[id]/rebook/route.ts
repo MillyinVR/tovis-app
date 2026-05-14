@@ -1,5 +1,4 @@
 // app/api/pro/bookings/[id]/rebook/route.ts
-import { randomUUID } from 'node:crypto'
 import {
   AftercareRebookMode,
   BookingStatus,
@@ -51,12 +50,6 @@ type AftercareRebookRecord = Prisma.AftercareSummaryGetPayload<{
   select: typeof AFTERCARE_REBOOK_SELECT
 }>
 
-// Storage compatibility only. Client access is issued through ClientActionToken,
-// not AftercareSummary.publicToken. Remove this once the schema migration makes
-// publicToken nullable, defaulted, or drops it.
-function createLegacyAftercareStorageToken(): string {
-  return randomUUID()
-}
 
 function isMode(value: unknown): value is RebookMode {
   return value === 'BOOK' || value === 'RECOMMEND_WINDOW' || value === 'CLEAR'
@@ -158,7 +151,6 @@ async function upsertAftercareRebookState(args: {
     where: { bookingId: args.bookingId },
     create: {
       bookingId: args.bookingId,
-      publicToken: createLegacyAftercareStorageToken(),
       rebookMode: args.mode,
       rebookWindowStart: args.windowStart ?? null,
       rebookWindowEnd: args.windowEnd ?? null,

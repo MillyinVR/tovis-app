@@ -2242,7 +2242,7 @@ model AftercareSummary {
   bookingId String  @unique
   booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
-  publicToken String @unique
+  publicToken String? @unique
 
   notes String?
 

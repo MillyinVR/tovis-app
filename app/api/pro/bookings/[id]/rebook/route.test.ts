@@ -563,14 +563,13 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
 
     expect(mocks.aftercareSummaryUpsert).toHaveBeenCalledWith({
       where: { bookingId: 'booking_1' },
-      create: expect.objectContaining({
+      create: {
         bookingId: 'booking_1',
         rebookMode: AftercareRebookMode.NONE,
         rebookWindowStart: null,
         rebookWindowEnd: null,
         rebookedFor: null,
-        publicToken: expect.any(String),
-      }),
+      },
       update: {
         rebookMode: AftercareRebookMode.NONE,
         rebookWindowStart: null,
@@ -648,14 +647,13 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
 
     expect(mocks.aftercareSummaryUpsert).toHaveBeenCalledWith({
       where: { bookingId: 'booking_1' },
-      create: expect.objectContaining({
+      create: {
         bookingId: 'booking_1',
         rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
         rebookWindowStart: windowStart,
         rebookWindowEnd: windowEnd,
         rebookedFor: null,
-        publicToken: expect.any(String),
-      }),
+      },
       update: {
         rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
         rebookWindowStart: windowStart,
