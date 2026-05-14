@@ -411,7 +411,7 @@ export function getSessionCenterState({
 
   const step = sessionStep ?? SessionStep.NONE
 
-  if (step === SessionStep.NONE) {
+  if (step === SessionStep.NONE || step === SessionStep.CONSULTATION) {
     return {
       label: 'Consult',
       action: 'NAVIGATE',
@@ -419,36 +419,25 @@ export function getSessionCenterState({
     }
   }
 
-  if (step === SessionStep.DONE) {
+  if (step === SessionStep.CONSULTATION_PENDING_CLIENT) {
     return {
-      label: 'Aftercare',
+      label: 'Waiting',
       action: 'NAVIGATE',
-      href: routes.aftercare,
-    }
-  }
-
-  if (
-    step === SessionStep.CONSULTATION ||
-    step === SessionStep.CONSULTATION_PENDING_CLIENT
-  ) {
-    return {
-      label: 'Camera',
-      action: 'CAPTURE_BEFORE',
-      href: routes.beforePhotos,
+      href: routes.sessionHub,
     }
   }
 
   if (step === SessionStep.BEFORE_PHOTOS) {
     if (!hasBeforeMedia) {
       return {
-        label: 'Camera',
+        label: 'Before photos',
         action: 'CAPTURE_BEFORE',
         href: routes.beforePhotos,
       }
     }
 
     return {
-      label: 'Continue',
+      label: 'Start service',
       action: 'NAVIGATE',
       href: routes.sessionHub,
     }
@@ -456,7 +445,7 @@ export function getSessionCenterState({
 
   if (step === SessionStep.SERVICE_IN_PROGRESS) {
     return {
-      label: 'Finish',
+      label: 'Finish service',
       action: 'FINISH',
       href: null,
     }
@@ -464,21 +453,29 @@ export function getSessionCenterState({
 
   if (step === SessionStep.FINISH_REVIEW) {
     return {
-      label: 'Continue',
+      label: 'Create aftercare',
       action: 'NAVIGATE',
-      href: routes.sessionHub,
+      href: routes.aftercare,
     }
   }
 
   if (step === SessionStep.AFTER_PHOTOS) {
     if (!hasAfterMedia) {
       return {
-        label: 'Camera',
+        label: 'After photos',
         action: 'CAPTURE_AFTER',
         href: routes.afterPhotos,
       }
     }
 
+    return {
+      label: 'Send aftercare',
+      action: 'NAVIGATE',
+      href: routes.aftercare,
+    }
+  }
+
+  if (step === SessionStep.DONE) {
     return {
       label: 'Aftercare',
       action: 'NAVIGATE',
