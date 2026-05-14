@@ -147,7 +147,6 @@ function makeGetBooking(overrides?: {
             rebookedFor: null,
             rebookWindowStart: new Date('2026-05-01T18:00:00.000Z'),
             rebookWindowEnd: new Date('2026-05-15T18:00:00.000Z'),
-            publicToken: 'public_1',
             draftSavedAt: new Date('2026-04-12T20:05:00.000Z'),
             sentToClientAt: new Date('2026-04-12T20:10:00.000Z'),
             lastEditedAt: new Date('2026-04-12T20:08:00.000Z'),
@@ -247,11 +246,6 @@ function makeAftercareAccessDeliveryResult() {
 }
 
 function makeUpsertResult(overrides?: {
-  publicAccess?: {
-    accessMode: 'SECURE_LINK' | 'NONE'
-    hasPublicAccess: boolean
-    clientAftercareHref: string | null
-  }
   rebookMode?: AftercareRebookMode
   rebookedFor?: Date | null
   rebookWindowStart?: Date | null
@@ -268,12 +262,6 @@ function makeUpsertResult(overrides?: {
   return {
     aftercare: {
       id: 'aftercare_1',
-      publicAccess:
-        overrides?.publicAccess ?? {
-          accessMode: 'SECURE_LINK',
-          hasPublicAccess: true,
-          clientAftercareHref: '/client/rebook/public_1',
-        },
       rebookMode:
         overrides?.rebookMode ?? AftercareRebookMode.RECOMMENDED_WINDOW,
       rebookedFor: overrides?.rebookedFor ?? null,
@@ -490,11 +478,17 @@ function makeExpectedPostResponse(overrides?: {
       lastEditedAt: '2026-04-12T20:08:00.000Z',
       version: 4,
       isFinalized: Boolean(sentToClientAt),
-      publicAccess: {
-        accessMode: 'SECURE_LINK',
-        hasPublicAccess: true,
-        clientAftercareHref: '/client/rebook/public_1',
-      },
+      publicAccess: sentToClientAt
+        ? {
+            accessMode: 'SECURE_LINK',
+            hasPublicAccess: true,
+            clientAftercareHref: null,
+          }
+        : {
+            accessMode: 'NONE',
+            hasPublicAccess: false,
+            clientAftercareHref: null,
+          },
     },
     remindersTouched: 1,
     clientNotified: true,
@@ -762,7 +756,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
           publicAccess: {
             accessMode: 'SECURE_LINK',
             hasPublicAccess: true,
-            clientAftercareHref: '/client/rebook/public_1',
+            clientAftercareHref: null,
           },
           recommendedProducts: [
             {
@@ -787,6 +781,60 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
               product: null,
             },
           ],
+        },
+      },
+    })
+  })
+
+  it('GET returns no public access when aftercare has not been sent', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce(
+      makeGetBooking({
+        aftercareSummary: {
+          id: 'aftercare_1',
+          notes: 'Draft notes.',
+          rebookMode: AftercareRebookMode.NONE,
+          rebookedFor: null,
+          rebookWindowStart: null,
+          rebookWindowEnd: null,
+          draftSavedAt: new Date('2026-04-12T20:05:00.000Z'),
+          sentToClientAt: null,
+          lastEditedAt: new Date('2026-04-12T20:08:00.000Z'),
+          version: 2,
+          recommendedProducts: [],
+        },
+      }),
+    )
+
+    const result = await GET(new Request('http://localhost/test'), makeCtx())
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      booking: {
+        id: 'booking_1',
+        status: BookingStatus.COMPLETED,
+        sessionStep: 'AFTER_PHOTOS',
+        scheduledFor: '2026-04-12T18:00:00.000Z',
+        finishedAt: '2026-04-12T20:00:00.000Z',
+        locationTimeZone: 'America/Los_Angeles',
+        aftercareSummary: {
+          id: 'aftercare_1',
+          notes: 'Draft notes.',
+          rebookMode: AftercareRebookMode.NONE,
+          rebookedFor: null,
+          rebookWindowStart: null,
+          rebookWindowEnd: null,
+          draftSavedAt: '2026-04-12T20:05:00.000Z',
+          sentToClientAt: null,
+          lastEditedAt: '2026-04-12T20:08:00.000Z',
+          version: 2,
+          isFinalized: false,
+          publicAccess: {
+            accessMode: 'NONE',
+            hasPublicAccess: false,
+            clientAftercareHref: null,
+          },
+          recommendedProducts: [],
         },
       },
     })

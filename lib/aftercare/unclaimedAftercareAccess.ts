@@ -1,3 +1,5 @@
+// lib/aftercare/unclaimedAftercareAccess.ts
+
 import {
   ClientActionTokenKind,
   Prisma,
@@ -43,7 +45,6 @@ function assertRawTokenPresent(rawToken: string): string {
 const AFTERCARE_ACCESS_AFTERCARE_SELECT = {
   id: true,
   bookingId: true,
-  publicToken: true,
   notes: true,
   rebookMode: true,
   rebookedFor: true,
@@ -135,7 +136,6 @@ export type ResolveAftercareAccessByTokenResult = {
   aftercare: {
     id: string
     bookingId: string
-    publicToken: string
     notes: string | null
     rebookMode: AftercareAccessAftercareRecord['rebookMode']
     rebookedFor: Date | null
@@ -365,7 +365,6 @@ function toResolvedAccessResult(args: {
     aftercare: {
       id: aftercare.id,
       bookingId: aftercare.bookingId,
-      publicToken: aftercare.publicToken,
       notes: aftercare.notes,
       rebookMode: aftercare.rebookMode,
       rebookedFor: aftercare.rebookedFor,

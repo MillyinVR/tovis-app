@@ -1587,30 +1587,25 @@ export default async function ClientBookingPage(props: {
                 </ClientAftercareCard>
               ) : null}
 
-              {aftercare && (rebookInfo.label || showRebookCTA) ? (
-                <section id="rebook" className="brand-client-aftercare-rebook">
-                  <ClientAftercareSectionTitle
-                    title={COPY.bookings.aftercare.rebookHeader}
-                    subtitle={
-                      rebookInfo.label
-                        ? `${rebookInfo.label} · ${appointmentTimeZone}`
-                        : COPY.bookings.aftercare.noRebookRecommendation
-                    }
-                  />
+            {aftercare && (rebookInfo.label || showRebookCTA) ? (
+              <section id="rebook" className="brand-client-aftercare-rebook">
+                <ClientAftercareSectionTitle
+                  title={COPY.bookings.aftercare.rebookHeader}
+                  subtitle={
+                    rebookInfo.label
+                      ? `${rebookInfo.label} · ${appointmentTimeZone}`
+                      : COPY.bookings.aftercare.noRebookRecommendation
+                  }
+                />
 
-                    {showRebookCTA && aftercare.publicToken ? (
-                      <a
-                        href={`/client/rebook/${encodeURIComponent(aftercare.publicToken)}`}
-                        className="brand-pro-session-button brand-focus mt-3"
-                        data-full="true"
-                      >
-                        {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
-                          ? COPY.bookings.aftercare.rebookCtaViewDetails
-                          : COPY.bookings.aftercare.rebookCtaNow}
-                      </a>
-                    ) : null}
-                </section>
-              ) : null}
+                {showRebookCTA ? (
+                  <div className="brand-pro-session-card-body mt-3">
+                    Use the secure aftercare link sent to you to rebook from this aftercare
+                    plan.
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
             </section>
           ) : null}
 

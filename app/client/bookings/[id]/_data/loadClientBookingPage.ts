@@ -141,7 +141,6 @@ const bookingPageBookingSelect = {
 const aftercareSummarySelect = {
   id: true,
   notes: true,
-  publicToken: true,
   rebookMode: true,
   rebookedFor: true,
   rebookWindowStart: true,

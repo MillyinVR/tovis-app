@@ -189,7 +189,6 @@ async function renderPage(args?: {
   afterCount?: number
   aftercare?: {
     id: string
-    publicToken: string
     draftSavedAt: Date | null
     sentToClientAt: Date | null
     lastEditedAt: Date | null
@@ -458,7 +457,6 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
       afterCount: 1,
       aftercare: {
         id: 'aftercare_1',
-        publicToken: 'public_1',
         draftSavedAt: new Date('2026-04-12T20:10:00.000Z'),
         sentToClientAt: new Date('2026-04-12T20:15:00.000Z'),
         lastEditedAt: new Date('2026-04-12T20:15:00.000Z'),
@@ -499,7 +497,6 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
       afterCount: 1,
       aftercare: {
         id: 'aftercare_1',
-        publicToken: 'public_1',
         draftSavedAt: new Date('2026-04-12T20:10:00.000Z'),
         sentToClientAt: new Date('2026-04-12T20:15:00.000Z'),
         lastEditedAt: new Date('2026-04-12T20:15:00.000Z'),
@@ -529,7 +526,6 @@ describe('app/pro/bookings/[id]/session/page.tsx', () => {
       }),
       aftercare: {
         id: 'aftercare_1',
-        publicToken: 'public_1',
         draftSavedAt: new Date('2026-04-12T20:10:00.000Z'),
         sentToClientAt: new Date('2026-04-12T20:15:00.000Z'),
         lastEditedAt: new Date('2026-04-12T20:15:00.000Z'),

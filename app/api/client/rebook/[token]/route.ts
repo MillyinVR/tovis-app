@@ -1,5 +1,4 @@
 // app/api/client/rebook/[token]/route.ts
-import { NextRequest } from 'next/server'
 import {
   pickIsoDate,
   pickString,
@@ -109,9 +108,15 @@ function toNullableIso(value: Date | null): string | null {
   return value ? value.toISOString() : null
 }
 
-function buildSecureLinkAccess(rawToken: string) {
+type SecureLinkAccess = {
+  accessMode: 'SECURE_LINK'
+  hasPublicAccess: true
+  clientAftercareHref: string
+}
+
+function buildSecureLinkAccess(rawToken: string): SecureLinkAccess {
   return {
-    accessMode: 'SECURE_LINK' as const,
+    accessMode: 'SECURE_LINK',
     hasPublicAccess: true,
     clientAftercareHref: `/client/rebook/${encodeURIComponent(rawToken)}`,
   }
@@ -239,12 +244,11 @@ function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
     return value.map((item) => normalizeNestedJsonValue(item))
   }
 
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
+  if (isRecord(value)) {
     const out: JsonObjectPayload = {}
 
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
+    for (const key of Object.keys(value).sort()) {
+      out[key] = normalizeNestedJsonValue(value[key])
     }
 
     return out
@@ -258,17 +262,16 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
     return {}
   }
 
-  if (typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return {
       value: normalizeNestedJsonValue(value),
     }
   }
 
-  const input = value as Record<string, unknown>
   const out: JsonObjectPayload = {}
 
-  for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
+  for (const key of Object.keys(value).sort()) {
+    out[key] = normalizeNestedJsonValue(value[key])
   }
 
   return out
@@ -292,6 +295,22 @@ function buildRebookResponseBody(args: {
   })
 }
 
+function buildRebookIdempotencyRequestBody(args: {
+  aftercareTokenId: string
+  aftercareId: string
+  sourceBookingId: string
+  clientId: string
+  scheduledFor: Date
+}): JsonObjectPayload {
+  return normalizeJsonObjectPayload({
+    aftercareTokenId: args.aftercareTokenId,
+    aftercareId: args.aftercareId,
+    sourceBookingId: args.sourceBookingId,
+    clientId: args.clientId,
+    scheduledFor: args.scheduledFor,
+  })
+}
+
 async function failStartedIdempotency(
   idempotencyRecordId: string | null,
 ): Promise<void> {
@@ -305,7 +324,7 @@ async function failStartedIdempotency(
   })
 }
 
-export async function GET(_req: NextRequest, ctx: Ctx) {
+export async function GET(_req: Request, ctx: Ctx) {
   try {
     const rawToken = await getRouteToken(ctx)
 
@@ -345,7 +364,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   }
 }
 
-export async function POST(req: NextRequest, ctx: Ctx) {
+export async function POST(req: Request, ctx: Ctx) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -395,13 +414,13 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       },
       route: IDEMPOTENCY_ROUTES.CLIENT_AFTERCARE_REBOOK,
       key: idempotencyKey,
-      requestBody: {
+      requestBody: buildRebookIdempotencyRequestBody({
         aftercareTokenId: resolved.token.id,
         aftercareId: resolved.aftercare.id,
         sourceBookingId: resolved.booking.id,
         clientId: resolved.booking.clientId,
         scheduledFor,
-      },
+      }),
     })
 
     if (idempotency.kind === 'missing_key') {

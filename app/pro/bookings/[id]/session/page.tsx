@@ -1715,7 +1715,6 @@ export default async function ProBookingSessionPage(props: PageProps) {
       },
       select: {
         id: true,
-        publicToken: true,
         draftSavedAt: true,
         sentToClientAt: true,
         lastEditedAt: true,

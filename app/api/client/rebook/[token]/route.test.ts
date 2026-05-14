@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NextRequest } from 'next/server'
 import { AftercareRebookMode } from '@prisma/client'
 
 const TEST_NOW = new Date('2026-04-12T18:00:00.000Z')
@@ -87,7 +86,7 @@ function makeRequest(args?: {
   method?: 'GET' | 'POST'
   body?: unknown
   headers?: Record<string, string>
-}): NextRequest {
+}): Request {
   return new Request('http://localhost/api/client/rebook/token_1', {
     method: args?.method ?? 'POST',
     headers: {
@@ -98,14 +97,14 @@ function makeRequest(args?: {
       args?.method === 'GET'
         ? undefined
         : JSON.stringify(args?.body ?? {}),
-  }) as unknown as NextRequest
+  })
 }
 
 function makeIdempotentRequest(args?: {
   body?: unknown
   key?: string
   headers?: Record<string, string>
-}): NextRequest {
+}): Request {
   return makeRequest({
     body: args?.body,
     headers: {
@@ -126,7 +125,7 @@ function makeResolvedAftercareAccess(overrides?: {
   subtotalSnapshot?: string
 }) {
   return {
-    accessSource: 'clientActionToken' as const,
+    accessSource: 'clientActionToken',
     token: {
       id: 'token_row_1',
       expiresAt: new Date('2026-04-20T18:00:00.000Z'),
@@ -140,7 +139,6 @@ function makeResolvedAftercareAccess(overrides?: {
     aftercare: {
       id: 'aftercare_1',
       bookingId: 'booking_1',
-      publicToken: 'legacy_public_token_should_not_drive_response',
       notes: 'Use a sulfate-free shampoo.',
       rebookMode:
         overrides?.rebookMode ?? AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
@@ -226,7 +224,7 @@ function expectedIdempotencyRequestBody() {
     aftercareId: 'aftercare_1',
     sourceBookingId: 'booking_1',
     clientId: 'client_1',
-    scheduledFor: new Date('2026-04-25T18:00:00.000Z'),
+    scheduledFor: '2026-04-25T18:00:00.000Z',
   }
 }
 

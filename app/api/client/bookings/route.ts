@@ -333,7 +333,11 @@ export async function POST(_req: NextRequest) {
   return jsonFail(410, 'This endpoint has been deprecated.', {
     code: 'DEPRECATED_ENDPOINT',
     hint: {
-      correctEndpoint: 'POST /api/bookings',
+      correctFlow: {
+        createHold: 'POST /api/holds',
+        finalizeBooking: 'POST /api/bookings/finalize',
+      },
+      message: 'Create a booking hold first, then finalize the hold.',
     },
   })
 }

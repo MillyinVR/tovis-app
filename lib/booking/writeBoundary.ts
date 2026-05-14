@@ -1353,7 +1353,6 @@ const AFTERCARE_UPSERT_BOOKING_SELECT = {
   aftercareSummary: {
     select: {
       id: true,
-      publicToken: true,
       notes: true,
       rebookMode: true,
       rebookedFor: true,
@@ -1949,37 +1948,19 @@ function isWithinStartWindow(scheduledFor: Date, now: Date): boolean {
   const t = now.getTime()
   return t >= start && t <= end
 }
-
 // Legacy compatibility only:
-// AftercareSummary.publicToken still exists for already-issued links and for
-// first-time aftercare summary creation. Service-layer return values should
-// expose publicAccess instead of the raw token.
+// AftercareSummary.publicToken still exists because the current schema requires
+// it on first-time aftercare summary creation. Do not expose it or use it to
+// build client-facing links.
 function newPublicToken(): string {
   return crypto.randomBytes(16).toString('hex')
 }
 
-function buildClientAftercareHref(
-  publicToken: string | null | undefined,
-): string | null {
-  const token =
-    typeof publicToken === 'string' && publicToken.trim().length > 0
-      ? publicToken.trim()
-      : null
-
-  return token
-    ? `/client/rebook/${encodeURIComponent(token)}`
-    : null
-}
-
-function buildAftercarePublicAccess(
-  publicToken: string | null | undefined,
-): AftercarePublicAccessSummary {
-  const clientAftercareHref = buildClientAftercareHref(publicToken)
-
+function buildAftercarePublicAccess(): AftercarePublicAccessSummary {
   return {
-    accessMode: clientAftercareHref ? 'SECURE_LINK' : 'NONE',
-    hasPublicAccess: Boolean(clientAftercareHref),
-    clientAftercareHref,
+    accessMode: 'NONE',
+    hasPublicAccess: false,
+    clientAftercareHref: null,
   }
 }
 
@@ -8930,7 +8911,7 @@ if (
   return {
     aftercare: {
       id: existingAftercare.id,
-      publicAccess: buildAftercarePublicAccess(existingAftercare.publicToken),
+      publicAccess: buildAftercarePublicAccess(),
       rebookMode: existingAftercare.rebookMode,
       rebookedFor: existingAftercare.rebookedFor,
       rebookWindowStart: existingAftercare.rebookWindowStart,
@@ -8994,7 +8975,6 @@ if (
     },
     select: {
       id: true,
-      publicToken: true,
       rebookMode: true,
       rebookedFor: true,
       rebookWindowStart: true,
@@ -9338,7 +9318,7 @@ if (!areAuditValuesEqual(oldAftercareState, newAftercareState)) {
 return {
   aftercare: {
     id: aftercare.id,
-    publicAccess: buildAftercarePublicAccess(aftercare.publicToken),
+    publicAccess: buildAftercarePublicAccess(),
     rebookMode: aftercare.rebookMode,
     rebookedFor: aftercare.rebookedFor,
     rebookWindowStart: aftercare.rebookWindowStart,

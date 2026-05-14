@@ -1,6 +1,11 @@
 // app/api/pro/bookings/[id]/rebook/route.ts
-import crypto from 'node:crypto'
-import { AftercareRebookMode, BookingStatus, Prisma, Role } from '@prisma/client'
+import { randomUUID } from 'node:crypto'
+import {
+  AftercareRebookMode,
+  BookingStatus,
+  Prisma,
+  Role,
+} from '@prisma/client'
 
 import {
   jsonFail,
@@ -46,8 +51,11 @@ type AftercareRebookRecord = Prisma.AftercareSummaryGetPayload<{
   select: typeof AFTERCARE_REBOOK_SELECT
 }>
 
-function createAftercarePublicToken(): string {
-  return crypto.randomUUID()
+// Storage compatibility only. Client access is issued through ClientActionToken,
+// not AftercareSummary.publicToken. Remove this once the schema migration makes
+// publicToken nullable, defaulted, or drops it.
+function createLegacyAftercareStorageToken(): string {
+  return randomUUID()
 }
 
 function isMode(value: unknown): value is RebookMode {
@@ -92,22 +100,18 @@ function replayJson(body: RebookResponseBody, status: number) {
   })
 }
 
+function toNullableIso(value: Date | null): string | null {
+  return value ? value.toISOString() : null
+}
+
 function toAftercareResponse(aftercare: AftercareRebookRecord) {
   return {
     id: aftercare.id,
     rebookMode: aftercare.rebookMode,
-    rebookWindowStart: aftercare.rebookWindowStart
-      ? aftercare.rebookWindowStart.toISOString()
-      : null,
-    rebookWindowEnd: aftercare.rebookWindowEnd
-      ? aftercare.rebookWindowEnd.toISOString()
-      : null,
-    rebookedFor: aftercare.rebookedFor
-      ? aftercare.rebookedFor.toISOString()
-      : null,
-    sentToClientAt: aftercare.sentToClientAt
-      ? aftercare.sentToClientAt.toISOString()
-      : null,
+    rebookWindowStart: toNullableIso(aftercare.rebookWindowStart),
+    rebookWindowEnd: toNullableIso(aftercare.rebookWindowEnd),
+    rebookedFor: toNullableIso(aftercare.rebookedFor),
+    sentToClientAt: toNullableIso(aftercare.sentToClientAt),
     version: aftercare.version,
     isFinalized: Boolean(aftercare.sentToClientAt),
   }
@@ -121,9 +125,7 @@ function toRebookedAftercareResponse(aftercare: {
   return {
     id: aftercare.id,
     rebookMode: aftercare.rebookMode,
-    rebookedFor: aftercare.rebookedFor
-      ? aftercare.rebookedFor.toISOString()
-      : null,
+    rebookedFor: toNullableIso(aftercare.rebookedFor),
   }
 }
 
@@ -139,9 +141,9 @@ function buildIdempotencyRequestBody(args: {
     bookingId: args.bookingId,
     professionalId: args.professionalId,
     mode: args.mode,
-    scheduledFor: args.scheduledFor ? args.scheduledFor.toISOString() : null,
-    windowStart: args.windowStart ? args.windowStart.toISOString() : null,
-    windowEnd: args.windowEnd ? args.windowEnd.toISOString() : null,
+    scheduledFor: toNullableIso(args.scheduledFor),
+    windowStart: toNullableIso(args.windowStart),
+    windowEnd: toNullableIso(args.windowEnd),
   }
 }
 
@@ -156,7 +158,7 @@ async function upsertAftercareRebookState(args: {
     where: { bookingId: args.bookingId },
     create: {
       bookingId: args.bookingId,
-      publicToken: createAftercarePublicToken(),
+      publicToken: createLegacyAftercareStorageToken(),
       rebookMode: args.mode,
       rebookWindowStart: args.windowStart ?? null,
       rebookWindowEnd: args.windowEnd ?? null,

@@ -124,7 +124,6 @@ export const clientHomeAftercareSelect =
   Prisma.validator<Prisma.AftercareSummarySelect>()({
     id: true,
     notes: true,
-    publicToken: true,
     rebookMode: true,
     rebookedFor: true,
     rebookWindowStart: true,

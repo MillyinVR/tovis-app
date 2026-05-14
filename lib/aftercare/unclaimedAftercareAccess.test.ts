@@ -33,7 +33,6 @@ function makeAftercareSummary(
   return {
     id: 'aftercare_1',
     bookingId: 'booking_1',
-    publicToken: 'legacy_public_token_1',
     notes: 'Drink water. Avoid heat for 24 hours.',
     rebookMode: 'REQUEST',
     rebookedFor: null,
@@ -245,7 +244,7 @@ describe('resolveAftercareAccessByToken', () => {
     })
   })
 
-  it('resolves token-backed access and consumes a single-use token exactly once', async () => {
+  it('resolves token-backed access without exposing legacy publicToken and consumes a single-use token exactly once', async () => {
     mocks.prisma.clientActionToken.findUnique
       .mockResolvedValueOnce(makeAftercareAccessToken())
       .mockResolvedValueOnce(makeTokenUsage())
@@ -288,7 +287,6 @@ describe('resolveAftercareAccessByToken', () => {
       aftercare: {
         id: 'aftercare_1',
         bookingId: 'booking_1',
-        publicToken: 'legacy_public_token_1',
         notes: 'Drink water. Avoid heat for 24 hours.',
         rebookMode: 'REQUEST',
         rebookedFor: null,

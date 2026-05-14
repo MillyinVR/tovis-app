@@ -35,7 +35,7 @@ type PublicAccess =
   | {
       accessMode: 'SECURE_LINK'
       hasPublicAccess: true
-      clientAftercareHref: string
+      clientAftercareHref: null
     }
   | {
       accessMode: 'NONE'
@@ -137,7 +137,6 @@ const GET_BOOKING_SELECT = {
       rebookedFor: true,
       rebookWindowStart: true,
       rebookWindowEnd: true,
-      publicToken: true,
       draftSavedAt: true,
       sentToClientAt: true,
       lastEditedAt: true,
@@ -538,20 +537,10 @@ function toIsoOrNull(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
 }
 
-function buildClientAftercareHref(
-  tokenValue: string | null | undefined,
-): string | null {
-  const token = trimmedString(tokenValue)
-  if (!token) return null
-  return `/client/rebook/${encodeURIComponent(token)}`
-}
-
-function buildPublicAccess(
-  tokenValue: string | null | undefined,
+function buildPublicAccessState(
+  sentToClientAt: Date | null | undefined,
 ): PublicAccess {
-  const clientAftercareHref = buildClientAftercareHref(tokenValue)
-
-  if (!clientAftercareHref) {
+  if (!sentToClientAt) {
     return {
       accessMode: 'NONE',
       hasPublicAccess: false,
@@ -562,7 +551,7 @@ function buildPublicAccess(
   return {
     accessMode: 'SECURE_LINK',
     hasPublicAccess: true,
-    clientAftercareHref,
+    clientAftercareHref: null,
   }
 }
 
@@ -599,7 +588,7 @@ function mapAftercareSummaryForGet(
     lastEditedAt: toIsoOrNull(aftercare.lastEditedAt),
     version: aftercare.version,
     isFinalized: Boolean(aftercare.sentToClientAt),
-    publicAccess: buildPublicAccess(aftercare.publicToken),
+    publicAccess: buildPublicAccessState(aftercare.sentToClientAt),
     recommendedProducts: aftercare.recommendedProducts.map(
       mapRecommendedProduct,
     ),
@@ -653,12 +642,11 @@ function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
     return value.map((item) => normalizeNestedJsonValue(item))
   }
 
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
+  if (isRecord(value)) {
     const out: JsonObjectPayload = {}
 
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
+    for (const key of Object.keys(value).sort()) {
+      out[key] = normalizeNestedJsonValue(value[key])
     }
 
     return out
@@ -672,17 +660,16 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
     return {}
   }
 
-  if (typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return {
       value: normalizeNestedJsonValue(value),
     }
   }
 
-  const input = value as Record<string, unknown>
   const out: JsonObjectPayload = {}
 
-  for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
+  for (const key of Object.keys(value).sort()) {
+    out[key] = normalizeNestedJsonValue(value[key])
   }
 
   return out
@@ -801,7 +788,7 @@ function buildAftercareResponseBody(args: {
       lastEditedAt: toIsoOrNull(args.result.aftercare.lastEditedAt),
       version: args.result.aftercare.version,
       isFinalized: Boolean(args.result.aftercare.sentToClientAt),
-      publicAccess: args.result.aftercare.publicAccess,
+      publicAccess: buildPublicAccessState(args.result.aftercare.sentToClientAt),
     },
     remindersTouched: args.result.remindersTouched,
     clientNotified: args.result.clientNotified,
