@@ -19,15 +19,16 @@ export type ResolveAftercareAccessByTokenResult = Omit<
 >
 
 /**
- * Legacy compatibility resolver for public aftercare/rebook surfaces.
+ * Read resolver for public aftercare/rebook pages.
  *
- * New mutation routes should prefer:
+ * This resolves a ClientActionToken-backed AFTERCARE_ACCESS token and marks
+ * read usage for the existing public aftercare page behavior.
+ *
+ * Mutation routes should prefer:
  * - resolveAftercareAccessTokenForMutation()
  * - markAftercareAccessTokenUsed()
  *
- * This wrapper intentionally preserves the old behavior: resolving the token
- * also marks it used. Keep this only for non-idempotent legacy read surfaces
- * until those call sites are migrated.
+ * Do not use AftercareSummary.publicToken for active aftercare access.
  */
 export async function resolveAftercareAccessByToken(
   args: ResolveAftercareAccessByTokenArgs,

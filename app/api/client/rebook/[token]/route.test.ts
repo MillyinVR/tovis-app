@@ -408,62 +408,66 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
 
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      accessSource: 'clientActionToken',
-      token: {
-        id: 'token_row_1',
-        expiresAt: '2026-04-20T18:00:00.000Z',
-        firstUsedAt: '2026-04-12T17:55:00.000Z',
-        lastUsedAt: '2026-04-12T17:58:00.000Z',
-        useCount: 2,
-        singleUse: true,
-      },
-      aftercare: {
-        id: 'aftercare_1',
-        bookingId: 'booking_1',
-        notes: 'Use a sulfate-free shampoo.',
-        rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-        rebookedFor: '2026-05-01T18:00:00.000Z',
-        rebookWindowStart: '2026-04-20T18:00:00.000Z',
-        rebookWindowEnd: '2026-04-30T18:00:00.000Z',
-        draftSavedAt: '2026-04-12T17:00:00.000Z',
-        sentToClientAt: '2026-04-12T17:30:00.000Z',
-        lastEditedAt: '2026-04-12T17:15:00.000Z',
-        version: 2,
-        isFinalized: true,
-        publicAccess: {
-          accessMode: 'SECURE_LINK',
-          hasPublicAccess: true,
-          clientAftercareHref: '/client/rebook/token_from_route',
-        },
-      },
-      booking: {
-        id: 'booking_1',
-        clientId: 'client_1',
-        professionalId: 'pro_1',
-        serviceId: 'service_1',
-        offeringId: 'offering_1',
-        status: 'COMPLETED',
-        scheduledFor: '2026-04-10T18:00:00.000Z',
-        locationType: 'SALON',
-        locationId: 'location_1',
-        totalDurationMinutes: 75,
-        subtotalSnapshot: '125.00',
-        service: {
-          id: 'service_1',
-          name: 'Haircut',
-        },
-        professional: {
-          id: 'pro_1',
-          businessName: 'TOVIS Studio',
-          timeZone: 'America/Los_Angeles',
-          location: null,
-        },
-      },
-    })
-  })
 
+    const body = await response.json()
+
+    expect(JSON.stringify(body)).not.toContain('publicToken')
+
+    expect(body).toEqual({
+        ok: true,
+        accessSource: 'clientActionToken',
+        token: {
+          id: 'token_row_1',
+          expiresAt: '2026-04-20T18:00:00.000Z',
+          firstUsedAt: '2026-04-12T17:55:00.000Z',
+          lastUsedAt: '2026-04-12T17:58:00.000Z',
+          useCount: 2,
+          singleUse: true,
+        },
+        aftercare: {
+          id: 'aftercare_1',
+          bookingId: 'booking_1',
+          notes: 'Use a sulfate-free shampoo.',
+          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+          rebookedFor: '2026-05-01T18:00:00.000Z',
+          rebookWindowStart: '2026-04-20T18:00:00.000Z',
+          rebookWindowEnd: '2026-04-30T18:00:00.000Z',
+          draftSavedAt: '2026-04-12T17:00:00.000Z',
+          sentToClientAt: '2026-04-12T17:30:00.000Z',
+          lastEditedAt: '2026-04-12T17:15:00.000Z',
+          version: 2,
+          isFinalized: true,
+          publicAccess: {
+            accessMode: 'SECURE_LINK',
+            hasPublicAccess: true,
+            clientAftercareHref: '/client/rebook/token_from_route',
+          },
+        },
+        booking: {
+          id: 'booking_1',
+          clientId: 'client_1',
+          professionalId: 'pro_1',
+          serviceId: 'service_1',
+          offeringId: 'offering_1',
+          status: 'COMPLETED',
+          scheduledFor: '2026-04-10T18:00:00.000Z',
+          locationType: 'SALON',
+          locationId: 'location_1',
+          totalDurationMinutes: 75,
+          subtotalSnapshot: '125.00',
+          service: {
+            id: 'service_1',
+            name: 'Haircut',
+          },
+          professional: {
+            id: 'pro_1',
+            businessName: 'TOVIS Studio',
+            timeZone: 'America/Los_Angeles',
+            location: null,
+          },
+        },
+      })
+    })
   it('POST maps missing route token through bookingJsonFail', async () => {
     const response = await POST(
       makeRequest({
@@ -597,6 +601,146 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
   })
 
+  it.each([
+    [
+      'missing idempotency key',
+      {
+        status: 400,
+        body: {
+          ok: false,
+          error: 'Missing idempotency key.',
+          code: 'IDEMPOTENCY_KEY_REQUIRED',
+        },
+      },
+    ],
+    [
+      'in-progress idempotency request',
+      {
+        status: 409,
+        body: {
+          ok: false,
+          error: 'A matching rebook request is already in progress.',
+          code: 'IDEMPOTENCY_IN_PROGRESS',
+        },
+      },
+    ],
+    [
+      'idempotency conflict',
+      {
+        status: 409,
+        body: {
+          ok: false,
+          error:
+            'This idempotency key was already used with a different request body.',
+          code: 'IDEMPOTENCY_CONFLICT',
+        },
+      },
+    ],
+  ])(
+    'POST returns handled idempotency response for %s without side effects',
+    async (_label, handled) => {
+      const handledResponse = makeJsonResponse(handled.status, handled.body)
+
+      mocks.beginRouteIdempotency.mockResolvedValueOnce({
+        kind: 'handled',
+        response: handledResponse,
+      })
+
+      const response = await POST(
+        makeRequest({
+          body: { scheduledFor: '2026-04-25T18:00:00.000Z' },
+        }),
+        makeCtx('token_1'),
+      )
+
+      expect(response).toBe(handledResponse)
+      await expect(response.clone().json()).resolves.toEqual(handled.body)
+
+      expect(
+        mocks.createClientRebookedBookingFromAftercare,
+      ).not.toHaveBeenCalled()
+      expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+      expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+    },
+  )
+
+  it('POST replays a completed idempotent response without creating another booking or marking token used', async () => {
+    const replayBody = expectedRebookResponseBody()
+    const replayResponse = makeJsonResponse(201, replayBody)
+
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: replayResponse,
+    })
+
+    const response = await POST(
+      makeIdempotentRequest({
+        key: 'idem_replay_1',
+        body: { scheduledFor: '2026-04-25T18:00:00.000Z' },
+      }),
+      makeCtx('token_1'),
+    )
+
+    expect(response).toBe(replayResponse)
+    await expect(response.clone().json()).resolves.toEqual(replayBody)
+
+    expect(
+      mocks.createClientRebookedBookingFromAftercare,
+    ).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+  })
+
+  it('POST stops before idempotency when mutation token resolution fails', async () => {
+    const bookingError = {
+      code: 'AFTERCARE_TOKEN_INVALID',
+      message: 'Aftercare access token was revoked.',
+      userMessage: 'That aftercare link is invalid or expired.',
+    }
+
+    mocks.resolveAftercareAccessTokenForMutation.mockRejectedValueOnce(
+      bookingError,
+    )
+    mocks.isBookingError.mockReturnValueOnce(true)
+    mocks.getBookingFailPayload.mockReturnValueOnce({
+      httpStatus: 400,
+      userMessage: 'That aftercare link is invalid or expired.',
+      extra: {
+        code: 'AFTERCARE_TOKEN_INVALID',
+        message: 'Aftercare access token was revoked.',
+      },
+    })
+
+    const response = await POST(
+      makeIdempotentRequest({
+        key: 'idem_revoked_token_1',
+        body: { scheduledFor: '2026-04-25T18:00:00.000Z' },
+      }),
+      makeCtx('revoked_token'),
+    )
+
+    expect(mocks.resolveAftercareAccessTokenForMutation).toHaveBeenCalledWith({
+      rawToken: 'revoked_token',
+    })
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(
+      mocks.createClientRebookedBookingFromAftercare,
+    ).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: null,
+      operation: 'POST /api/client/rebook/[token]',
+    })
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: 'That aftercare link is invalid or expired.',
+      code: 'AFTERCARE_TOKEN_INVALID',
+      message: 'Aftercare access token was revoked.',
+    })
+  })
   it('POST starts idempotency with token actor and normalized request body', async () => {
     await POST(
       makeIdempotentRequest({

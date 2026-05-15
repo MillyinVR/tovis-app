@@ -1,9 +1,12 @@
+// lib/clients/clientClaim.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientClaimStatus,
   ContactMethod,
   ProClientInviteStatus,
 } from '@prisma/client'
+
+const TEST_NOW = new Date('2026-04-12T12:00:00.000Z')
 
 const mocks = vi.hoisted(() => {
   const tx = {
@@ -95,8 +98,7 @@ function makeActingClient(overrides?: {
   return {
     id: overrides?.id ?? 'client_1',
     userId: overrides?.userId !== undefined ? overrides.userId : null,
-    claimStatus:
-      overrides?.claimStatus ?? ClientClaimStatus.UNCLAIMED,
+    claimStatus: overrides?.claimStatus ?? ClientClaimStatus.UNCLAIMED,
     claimedAt:
       overrides?.claimedAt !== undefined ? overrides.claimedAt : null,
     preferredContactMethod:
@@ -110,7 +112,7 @@ describe('acceptClientClaimFromLink', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-12T12:00:00.000Z'))
+    vi.setSystemTime(TEST_NOW)
 
     mocks.prisma.$transaction.mockImplementation(
       async (callback: (tx: typeof mocks.tx) => Promise<unknown>) =>
@@ -167,16 +169,17 @@ describe('acceptClientClaimFromLink', () => {
     mocks.getClientClaimLinkByToken.mockResolvedValueOnce(null)
 
     const result = await acceptClientClaimFromLink({
-      token: 'token_1',
+      token: ' token_1 ',
       actingUserId: 'user_1',
       actingClientId: 'client_1',
     })
 
-    expect(result).toEqual({ kind: 'not_found' })
+    expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(1)
     expect(mocks.getClientClaimLinkByToken).toHaveBeenCalledWith({
       token: 'token_1',
       tx: mocks.tx,
     })
+    expect(result).toEqual({ kind: 'not_found' })
   })
 
   it('returns not_found when link exists but linked client identity is missing', async () => {
@@ -191,6 +194,9 @@ describe('acceptClientClaimFromLink', () => {
     })
 
     expect(result).toEqual({ kind: 'not_found' })
+    expect(mocks.tx.clientProfile.findUnique).not.toHaveBeenCalled()
+    expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
   it('returns revoked when link status is REVOKED', async () => {
@@ -208,6 +214,8 @@ describe('acceptClientClaimFromLink', () => {
 
     expect(result).toEqual({ kind: 'revoked' })
     expect(mocks.tx.clientProfile.findUnique).not.toHaveBeenCalled()
+    expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
   it('returns revoked when revokedAt is already set even if status is still PENDING', async () => {
@@ -225,6 +233,9 @@ describe('acceptClientClaimFromLink', () => {
     })
 
     expect(result).toEqual({ kind: 'revoked' })
+    expect(mocks.tx.clientProfile.findUnique).not.toHaveBeenCalled()
+    expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
   it('returns client_not_found when acting client profile does not exist', async () => {
@@ -237,6 +248,8 @@ describe('acceptClientClaimFromLink', () => {
     })
 
     expect(result).toEqual({ kind: 'client_not_found' })
+    expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
   it('returns client_mismatch when link belongs to a different unclaimed client identity', async () => {
@@ -284,6 +297,7 @@ describe('acceptClientClaimFromLink', () => {
 
     expect(result).toEqual({ kind: 'already_claimed' })
     expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
   it('returns already_claimed when linked client identity is already claimed', async () => {
@@ -307,6 +321,7 @@ describe('acceptClientClaimFromLink', () => {
 
     expect(result).toEqual({ kind: 'already_claimed' })
     expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
   it('returns already_claimed when linked client has a different linked user already', async () => {
@@ -330,6 +345,7 @@ describe('acceptClientClaimFromLink', () => {
 
     expect(result).toEqual({ kind: 'already_claimed' })
     expect(mocks.tx.clientProfile.updateMany).not.toHaveBeenCalled()
+    expect(mocks.markClientClaimLinkAcceptedAudit).not.toHaveBeenCalled()
   })
 
   it('claims the client identity successfully and writes preferredContactMethod when acting client does not have one', async () => {
@@ -370,7 +386,7 @@ describe('acceptClientClaimFromLink', () => {
       },
       data: {
         claimStatus: ClientClaimStatus.CLAIMED,
-        claimedAt: new Date('2026-04-12T12:00:00.000Z'),
+        claimedAt: TEST_NOW,
         preferredContactMethod: ContactMethod.EMAIL,
       },
     })
@@ -378,7 +394,7 @@ describe('acceptClientClaimFromLink', () => {
     expect(mocks.markClientClaimLinkAcceptedAudit).toHaveBeenCalledWith({
       inviteId: 'invite_1',
       actingUserId: 'user_1',
-      acceptedAt: new Date('2026-04-12T12:00:00.000Z'),
+      acceptedAt: TEST_NOW,
       tx: mocks.tx,
     })
 
@@ -386,6 +402,8 @@ describe('acceptClientClaimFromLink', () => {
       kind: 'ok',
       bookingId: 'booking_1',
     })
+
+    expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(1)
   })
 
   it('claims successfully without overwriting an existing preferredContactMethod', async () => {
@@ -415,7 +433,44 @@ describe('acceptClientClaimFromLink', () => {
       },
       data: {
         claimStatus: ClientClaimStatus.CLAIMED,
-        claimedAt: new Date('2026-04-12T12:00:00.000Z'),
+        claimedAt: TEST_NOW,
+      },
+    })
+
+    expect(result).toEqual({
+      kind: 'ok',
+      bookingId: 'booking_1',
+    })
+  })
+
+  it('claims successfully without writing preferredContactMethod when invite has none', async () => {
+    mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
+      makeInvite({
+        preferredContactMethod: null,
+      }),
+    )
+
+    mocks.tx.clientProfile.findUnique.mockResolvedValueOnce(
+      makeActingClient({
+        id: 'client_1',
+        preferredContactMethod: null,
+      }),
+    )
+
+    const result = await acceptClientClaimFromLink({
+      token: 'token_1',
+      actingUserId: 'user_1',
+      actingClientId: 'client_1',
+    })
+
+    expect(mocks.tx.clientProfile.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'client_1',
+        claimStatus: ClientClaimStatus.UNCLAIMED,
+      },
+      data: {
+        claimStatus: ClientClaimStatus.CLAIMED,
+        claimedAt: TEST_NOW,
       },
     })
 
@@ -426,9 +481,11 @@ describe('acceptClientClaimFromLink', () => {
   })
 
   it('preserves an existing invite acceptedAt timestamp when writing acceptance audit', async () => {
+    const acceptedAt = new Date('2026-04-12T11:00:00.000Z')
+
     mocks.getClientClaimLinkByToken.mockResolvedValueOnce(
       makeInvite({
-        acceptedAt: new Date('2026-04-12T11:00:00.000Z'),
+        acceptedAt,
       }),
     )
 
@@ -441,7 +498,7 @@ describe('acceptClientClaimFromLink', () => {
     expect(mocks.markClientClaimLinkAcceptedAudit).toHaveBeenCalledWith({
       inviteId: 'invite_1',
       actingUserId: 'user_1',
-      acceptedAt: new Date('2026-04-12T11:00:00.000Z'),
+      acceptedAt,
       tx: mocks.tx,
     })
   })

@@ -1,3 +1,4 @@
+// lib/clients/clientClaimLinks.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientClaimStatus,
@@ -148,6 +149,86 @@ describe('upsertClientClaimLink', () => {
         invitedEmail: 'tori@example.com',
         invitedPhone: null,
         preferredContactMethod: ContactMethod.EMAIL,
+        status: ProClientInviteStatus.PENDING,
+      },
+      select: expect.any(Object),
+    })
+
+    expect(result).toEqual(createdLink)
+  })
+
+  it('allows a phone-only invite when preferredContactMethod is omitted', async () => {
+    const createdLink = makeLink({
+      invitedEmail: null,
+      invitedPhone: '+16195551234',
+      preferredContactMethod: null,
+    })
+
+    mocks.prisma.proClientInvite.create.mockResolvedValueOnce(createdLink)
+
+    const result = await upsertClientClaimLink({
+      professionalId: 'pro_1',
+      clientId: 'client_1',
+      bookingId: 'booking_1',
+      invitedName: 'Tori Morales',
+      invitedEmail: null,
+      invitedPhone: ' +16195551234 ',
+    })
+
+    expect(mocks.prisma.proClientInvite.findUnique).toHaveBeenCalledWith({
+      where: { bookingId: 'booking_1' },
+      select: expect.any(Object),
+    })
+
+    expect(mocks.prisma.proClientInvite.create).toHaveBeenCalledWith({
+      data: {
+        professionalId: 'pro_1',
+        clientId: 'client_1',
+        bookingId: 'booking_1',
+        invitedName: 'Tori Morales',
+        invitedEmail: null,
+        invitedPhone: '+16195551234',
+        preferredContactMethod: null,
+        status: ProClientInviteStatus.PENDING,
+      },
+      select: expect.any(Object),
+    })
+
+    expect(result).toEqual(createdLink)
+  })
+
+  it('allows an email-only invite when preferredContactMethod is omitted', async () => {
+    const createdLink = makeLink({
+      invitedEmail: 'tori@example.com',
+      invitedPhone: null,
+      preferredContactMethod: null,
+    })
+
+    mocks.prisma.proClientInvite.create.mockResolvedValueOnce(createdLink)
+
+    const result = await upsertClientClaimLink({
+      professionalId: 'pro_1',
+      clientId: 'client_1',
+      bookingId: 'booking_1',
+      invitedName: 'Tori Morales',
+      invitedEmail: ' tori@example.com ',
+      invitedPhone: null,
+    })
+
+    expect(mocks.prisma.proClientInvite.findUnique).toHaveBeenCalledWith({
+      where: { bookingId: 'booking_1' },
+      select: expect.any(Object),
+    })
+
+    expect(mocks.prisma.proClientInvite.create).toHaveBeenCalledWith({
+      data: {
+        professionalId: 'pro_1',
+        clientId: 'client_1',
+        bookingId: 'booking_1',
+        invitedName: 'Tori Morales',
+        invitedEmail: 'tori@example.com',
+        invitedPhone: null,
+        preferredContactMethod: null,
         status: ProClientInviteStatus.PENDING,
       },
       select: expect.any(Object),
@@ -474,6 +555,17 @@ describe('getClientClaimLinkByToken', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.prisma.proClientInvite.findUnique.mockResolvedValue(makeLink())
+  })
+
+  it('uses the current raw invite token lookup until the claim-token migration lands', async () => {
+    await getClientClaimLinkByToken({
+      token: ' token_1 ',
+    })
+
+    expect(mocks.prisma.proClientInvite.findUnique).toHaveBeenCalledWith({
+      where: { token: 'token_1' },
+      select: expect.any(Object),
+    })
   })
 
   it('loads a link by token', async () => {

@@ -1,5 +1,10 @@
 // lib/aftercare/unclaimedAftercareAccess.test.ts
-import { AftercareRebookMode, BookingStatus, Prisma, ServiceLocationType } from '@prisma/client'
+import {
+  AftercareRebookMode,
+  BookingStatus,
+  Prisma,
+  ServiceLocationType,
+} from '@prisma/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
@@ -92,7 +97,7 @@ describe('resolveAftercareAccessByToken', () => {
     mocks.markAftercareAccessTokenUsed.mockResolvedValue(makeUsedToken())
   })
 
-  it('resolves through the shared read helper, marks token used, and returns legacy shape without idempotencyActorKey', async () => {
+  it('resolves through the shared read helper, marks token used, and omits idempotencyActorKey for read surfaces', async () => {
     const result = await resolveAftercareAccessByToken({
       rawToken: ' token_1 ',
     })
@@ -158,6 +163,24 @@ describe('resolveAftercareAccessByToken', () => {
     expect('idempotencyActorKey' in result).toBe(false)
   })
 
+  it('forwards tx to read resolution and token usage helpers', async () => {
+    const tx = { __brand: 'tx' } as unknown as Prisma.TransactionClient
+
+    await resolveAftercareAccessByToken({
+      rawToken: 'token_with_tx',
+      tx,
+    })
+
+    expect(mocks.resolveAftercareAccessTokenForRead).toHaveBeenCalledWith({
+      rawToken: 'token_with_tx',
+      tx,
+    })
+
+    expect(mocks.markAftercareAccessTokenUsed).toHaveBeenCalledWith({
+      tokenId: 'token_row_1',
+      tx,
+    })
+  })
 
   it('does not mark token used when read resolution fails', async () => {
     const error = Object.assign(new Error('missing token'), {

@@ -1,3 +1,4 @@
+// app/claim/[token]/page.test.tsx
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -77,6 +78,44 @@ function makeNotFoundError(): Error {
   return new Error('NOT_FOUND')
 }
 
+function makeBooking(clientId = 'client_1') {
+  return {
+    id: 'booking_1',
+    clientId,
+    scheduledFor: new Date('2026-04-13T18:00:00.000Z'),
+    locationTimeZone: 'America/Los_Angeles',
+    service: {
+      name: 'Silk Press',
+    },
+    professional: {
+      id: 'pro_1',
+      businessName: 'TOVIS Studio',
+      location: 'San Diego',
+      timeZone: 'America/Los_Angeles',
+      user: {
+        email: 'pro@example.com',
+      },
+    },
+    location: {
+      name: 'Downtown Studio',
+      formattedAddress: '123 Main St, San Diego, CA',
+      city: 'San Diego',
+      state: 'CA',
+      timeZone: 'America/Los_Angeles',
+    },
+  }
+}
+
+function makeClient(args?: {
+  id?: string
+  claimStatus?: ClientClaimStatus
+}) {
+  return {
+    id: args?.id ?? 'client_1',
+    claimStatus: args?.claimStatus ?? ClientClaimStatus.UNCLAIMED,
+  }
+}
+
 function makeInvite(overrides?: {
   token?: string
   clientId?: string
@@ -86,6 +125,8 @@ function makeInvite(overrides?: {
   status?: ProClientInviteStatus
   revokedAt?: Date | null
   clientClaimStatus?: ClientClaimStatus
+  client?: ReturnType<typeof makeClient> | null
+  booking?: ReturnType<typeof makeBooking> | null
 }) {
   const token = overrides?.token ?? 'tok_1'
   const clientId = overrides?.clientId ?? 'client_1'
@@ -113,36 +154,47 @@ function makeInvite(overrides?: {
     acceptedAt: null,
     revokedAt:
       overrides && 'revokedAt' in overrides ? overrides.revokedAt : null,
-    client: {
-      id: clientId,
-      claimStatus:
-        overrides?.clientClaimStatus ?? ClientClaimStatus.UNCLAIMED,
+    client:
+      overrides && 'client' in overrides
+        ? overrides.client
+        : makeClient({
+            id: clientId,
+            claimStatus:
+              overrides?.clientClaimStatus ?? ClientClaimStatus.UNCLAIMED,
+          }),
+    booking:
+      overrides && 'booking' in overrides
+        ? overrides.booking
+        : makeBooking(clientId),
+  }
+}
+
+function makeClientUser(args?: {
+  id?: string
+  clientId?: string
+  sessionKind?: 'ACTIVE' | 'LIMITED'
+  isFullyVerified?: boolean
+}) {
+  return {
+    id: args?.id ?? 'user_1',
+    role: 'CLIENT',
+    clientProfile: {
+      id: args?.clientId ?? 'client_1',
     },
-    booking: {
-      id: 'booking_1',
-      clientId,
-      scheduledFor: new Date('2026-04-13T18:00:00.000Z'),
-      locationTimeZone: 'America/Los_Angeles',
-      service: {
-        name: 'Silk Press',
-      },
-      professional: {
-        id: 'pro_1',
-        businessName: 'TOVIS Studio',
-        location: 'San Diego',
-        timeZone: 'America/Los_Angeles',
-        user: {
-          email: 'pro@example.com',
-        },
-      },
-      location: {
-        name: 'Downtown Studio',
-        formattedAddress: '123 Main St, San Diego, CA',
-        city: 'San Diego',
-        state: 'CA',
-        timeZone: 'America/Los_Angeles',
-      },
+    sessionKind: args?.sessionKind ?? 'ACTIVE',
+    isFullyVerified: args?.isFullyVerified ?? true,
+  }
+}
+
+function makeProUser() {
+  return {
+    id: 'user_pro_1',
+    role: 'PRO',
+    professionalProfile: {
+      id: 'pro_1',
     },
+    sessionKind: 'ACTIVE',
+    isFullyVerified: true,
   }
 }
 
@@ -194,8 +246,39 @@ describe('app/claim/[token]/page.tsx', () => {
     )
   })
 
+  it('calls notFound when route token is blank', async () => {
+    await expect(renderPage({ token: '   ' })).rejects.toThrow('NOT_FOUND')
+
+    expect(mocks.notFound).toHaveBeenCalledTimes(1)
+    expect(mocks.inviteFindUnique).not.toHaveBeenCalled()
+  })
+
   it('calls notFound when the invite does not exist', async () => {
     mocks.inviteFindUnique.mockResolvedValueOnce(null)
+
+    await expect(renderPage()).rejects.toThrow('NOT_FOUND')
+
+    expect(mocks.notFound).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls notFound when invite is missing client relation', async () => {
+    mocks.inviteFindUnique.mockResolvedValueOnce(
+      makeInvite({
+        client: null,
+      }),
+    )
+
+    await expect(renderPage()).rejects.toThrow('NOT_FOUND')
+
+    expect(mocks.notFound).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls notFound when invite is missing booking relation', async () => {
+    mocks.inviteFindUnique.mockResolvedValueOnce(
+      makeInvite({
+        booking: null,
+      }),
+    )
 
     await expect(renderPage()).rejects.toThrow('NOT_FOUND')
 
@@ -239,13 +322,13 @@ describe('app/claim/[token]/page.tsx', () => {
   })
 
   it('renders verify flow for the matching client when the account still needs verification', async () => {
-    mocks.getCurrentUser.mockResolvedValueOnce({
-      id: 'user_1',
-      role: 'CLIENT',
-      clientProfile: { id: 'client_1' },
-      sessionKind: 'LIMITED',
-      isFullyVerified: false,
-    })
+    mocks.getCurrentUser.mockResolvedValueOnce(
+      makeClientUser({
+        clientId: 'client_1',
+        sessionKind: 'LIMITED',
+        isFullyVerified: false,
+      }),
+    )
 
     const html = await renderPage()
 
@@ -257,32 +340,27 @@ describe('app/claim/[token]/page.tsx', () => {
   })
 
   it('renders mismatch state for a different signed-in client account', async () => {
-    mocks.getCurrentUser.mockResolvedValueOnce({
-      id: 'user_2',
-      role: 'CLIENT',
-      clientProfile: { id: 'client_other' },
-      sessionKind: 'ACTIVE',
-      isFullyVerified: true,
-    })
+    mocks.getCurrentUser.mockResolvedValueOnce(
+      makeClientUser({
+        id: 'user_2',
+        clientId: 'client_other',
+      }),
+    )
 
     const html = await renderPage()
 
-    expect(html).toContain(
-      'You are signed into a different client account',
-    )
+    expect(html).toContain('You are signed into a different client account')
     expect(html).toContain('/login?from=%2Fclaim%2Ftok_1')
     expect(html).toContain('/signup?from=%2Fclaim%2Ftok_1')
     expect(mocks.redirect).not.toHaveBeenCalled()
   })
 
   it('renders already-claimed state and shows booking link for the matching client', async () => {
-    mocks.getCurrentUser.mockResolvedValueOnce({
-      id: 'user_1',
-      role: 'CLIENT',
-      clientProfile: { id: 'client_1' },
-      sessionKind: 'ACTIVE',
-      isFullyVerified: true,
-    })
+    mocks.getCurrentUser.mockResolvedValueOnce(
+      makeClientUser({
+        clientId: 'client_1',
+      }),
+    )
 
     mocks.inviteFindUnique.mockResolvedValueOnce(
       makeInvite({
@@ -294,6 +372,54 @@ describe('app/claim/[token]/page.tsx', () => {
 
     expect(html).toContain('This client history is already claimed')
     expect(html).toContain('/client/bookings/booking_1')
+    expect(mocks.redirect).not.toHaveBeenCalled()
+  })
+
+  it('renders ready claim action for a matching verified client', async () => {
+    mocks.getCurrentUser.mockResolvedValueOnce(
+      makeClientUser({
+        clientId: 'client_1',
+      }),
+    )
+
+    const html = await renderPage()
+
+    expect(html).toContain('Ready to claim')
+    expect(html).toContain('Claim this history')
+    expect(html).toContain(
+      'This will attach this history to your client identity.',
+    )
+    expect(mocks.redirect).not.toHaveBeenCalled()
+  })
+
+  it('renders conflict state from query params', async () => {
+    mocks.getCurrentUser.mockResolvedValueOnce(
+      makeClientUser({
+        clientId: 'client_1',
+      }),
+    )
+
+    const html = await renderPage({
+      searchParams: {
+        state: 'conflict',
+      },
+    })
+
+    expect(html).toContain('We could not finish the claim')
+    expect(html).toContain(
+      'Nothing was deleted. Please try again. If this keeps happening, support should inspect the client identity and invite audit state.',
+    )
+    expect(mocks.redirect).not.toHaveBeenCalled()
+  })
+
+  it('renders client-account requirement for a signed-in non-client user', async () => {
+    mocks.getCurrentUser.mockResolvedValueOnce(makeProUser())
+
+    const html = await renderPage()
+
+    expect(html).toContain('This link must be claimed from a client account.')
+    expect(html).toContain('Continue as client')
+    expect(html).toContain('Create a client account')
     expect(mocks.redirect).not.toHaveBeenCalled()
   })
 })
