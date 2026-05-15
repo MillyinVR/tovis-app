@@ -18,7 +18,7 @@ import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClien
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
-import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
+import { checkProReadinessForEntryPoint } from '@/lib/pro/readiness/proReadiness'
 
 type NewClientInput = {
   firstName?: unknown
@@ -342,7 +342,10 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
 export async function createProBookingWithClient(
   args: CreateProBookingWithClientArgs,
 ): Promise<CreateProBookingWithClientResult> {
-  const readiness = await checkProReadiness(args.professionalId)
+  const readiness = await checkProReadinessForEntryPoint({
+    professionalId: args.professionalId,
+    entryPoint: 'PRO_CREATED',
+  })
 
   if (!readiness.ok) {
     return {
@@ -389,11 +392,11 @@ export async function createProBookingWithClient(
     idempotencyKey: args.idempotencyKey ?? null,
   })
 
-await tryEnqueueBookingConfirmedDelivery({
-  professionalId: args.professionalId,
-  bookingId: bookingResult.booking.id,
-  clientId: resolvedClient.clientId,
-})
+  await tryEnqueueBookingConfirmedDelivery({
+    professionalId: args.professionalId,
+    bookingId: bookingResult.booking.id,
+    clientId: resolvedClient.clientId,
+  })
 
   let inviteCandidate: CreatedInviteDeliveryCandidate | null = null
 

@@ -78,8 +78,10 @@ vi.mock('@/lib/booking/locationContext', () => ({
   normalizeLocationType: (value: unknown) => {
     const normalized =
       typeof value === 'string' ? value.trim().toUpperCase() : ''
+
     if (normalized === 'SALON') return ServiceLocationType.SALON
     if (normalized === 'MOBILE') return ServiceLocationType.MOBILE
+
     return null
   },
 }))
@@ -163,6 +165,76 @@ const offering = {
     autoAcceptBookings: false,
     timeZone: 'America/Los_Angeles',
   },
+}
+
+const finalizeOffering = {
+  id: 'offering_1',
+  professionalId: 'pro_123',
+  serviceId: 'service_1',
+  offersInSalon: true,
+  offersMobile: true,
+  salonPriceStartingAt: new Prisma.Decimal('100'),
+  salonDurationMinutes: 60,
+  mobilePriceStartingAt: new Prisma.Decimal('120'),
+  mobileDurationMinutes: 75,
+  professionalTimeZone: 'America/Los_Angeles',
+}
+
+function makeExpectedFinalizeArgs(
+  overrides: Partial<{
+    clientId: string
+    holdId: string
+    openingId: string | null
+    addOnIds: string[]
+    locationType: ServiceLocationType
+    source: BookingSource
+    initialStatus: BookingStatus
+    rebookOfBookingId: string | null
+    fallbackTimeZone: string
+    requestId: string | null
+    idempotencyKey: string | null
+  }> = {},
+) {
+  return {
+    clientId: overrides.clientId ?? 'client_1',
+    bookingEntryPoint: 'BROAD_DISCOVERY',
+    holdId: overrides.holdId ?? 'hold_1',
+    openingId: overrides.openingId ?? null,
+    addOnIds: overrides.addOnIds ?? [],
+    locationType: overrides.locationType ?? ServiceLocationType.SALON,
+    source: overrides.source ?? BookingSource.REQUESTED,
+    initialStatus: overrides.initialStatus ?? BookingStatus.PENDING,
+    rebookOfBookingId: overrides.rebookOfBookingId ?? null,
+    offering: finalizeOffering,
+    fallbackTimeZone: overrides.fallbackTimeZone ?? 'UTC',
+    requestId: overrides.requestId ?? null,
+    idempotencyKey: overrides.idempotencyKey ?? 'idem_finalize_1',
+  }
+}
+
+function makeSuccessResponseBody(
+  overrides: Partial<{
+    id: string
+    status: BookingStatus
+    scheduledFor: string
+    professionalId: string
+    mutated: boolean
+    noOp: boolean
+  }> = {},
+) {
+  return {
+    ok: true,
+    booking: {
+      id: overrides.id ?? 'booking_1',
+      status: overrides.status ?? BookingStatus.PENDING,
+      scheduledFor: overrides.scheduledFor ?? HOLD_START.toISOString(),
+      professionalId: overrides.professionalId ?? 'pro_123',
+    },
+    meta: {
+      mutated: overrides.mutated ?? true,
+      noOp: overrides.noOp ?? false,
+    },
+  }
 }
 
 function makeResolvedAftercareAccess(overrides?: {
@@ -255,6 +327,7 @@ describe('POST /api/bookings/finalize', () => {
     mocks.completeRouteIdempotency.mockReset()
     mocks.failStartedRouteIdempotency.mockReset()
     mocks.isRouteIdempotencyHandled.mockReset()
+
     mocks.requireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
@@ -495,10 +568,11 @@ describe('POST /api/bookings/finalize', () => {
       code: 'IDEMPOTENCY_KEY_REQUIRED',
     })
 
-  mocks.beginRouteIdempotency.mockResolvedValueOnce({
-    kind: 'handled',
-    response: handledResponse,
-  })
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+
     const result = await POST(
       makeRequest({
         offeringId: 'offering_1',
@@ -563,19 +637,9 @@ describe('POST /api/bookings/finalize', () => {
   })
 
   it('returns handled replay response without finalizing, notifying, or marking token used', async () => {
-    const replayBody = {
-      ok: true,
-      booking: {
-        id: 'booking_replayed',
-        status: BookingStatus.PENDING,
-        scheduledFor: HOLD_START.toISOString(),
-        professionalId: 'pro_123',
-      },
-      meta: {
-        mutated: true,
-        noOp: false,
-      },
-    }
+    const replayBody = makeSuccessResponseBody({
+      id: 'booking_replayed',
+    })
 
     const handledResponse = makeJsonResponse(201, replayBody)
 
@@ -583,7 +647,7 @@ describe('POST /api/bookings/finalize', () => {
       kind: 'handled',
       response: handledResponse,
     })
-    
+
     const result = await POST(
       makeIdempotentRequest({
         offeringId: 'offering_1',
@@ -618,7 +682,6 @@ describe('POST /api/bookings/finalize', () => {
     )
 
     expect(result.status).toBe(201)
-
     expect(mocks.requireClient).toHaveBeenCalledTimes(1)
 
     expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
@@ -644,31 +707,12 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
-      clientId: 'client_1',
-      holdId: 'hold_1',
-      openingId: null,
-      addOnIds: [],
-      locationType: ServiceLocationType.SALON,
-      source: BookingSource.DISCOVERY,
-      initialStatus: BookingStatus.PENDING,
-      rebookOfBookingId: null,
-      offering: {
-        id: 'offering_1',
-        professionalId: 'pro_123',
-        serviceId: 'service_1',
-        offersInSalon: true,
-        offersMobile: true,
-        salonPriceStartingAt: new Prisma.Decimal('100'),
-        salonDurationMinutes: 60,
-        mobilePriceStartingAt: new Prisma.Decimal('120'),
-        mobileDurationMinutes: 75,
-        professionalTimeZone: 'America/Los_Angeles',
-      },
-      fallbackTimeZone: 'UTC',
-      requestId: null,
-      idempotencyKey: 'idem_discovery_1',
-    })
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      makeExpectedFinalizeArgs({
+        source: BookingSource.DISCOVERY,
+        idempotencyKey: 'idem_discovery_1',
+      }),
+    )
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
       professionalId: 'pro_123',
@@ -690,34 +734,10 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 201,
-      responseBody: {
-        ok: true,
-        booking: {
-          id: 'booking_1',
-          status: BookingStatus.PENDING,
-          scheduledFor: HOLD_START.toISOString(),
-          professionalId: 'pro_123',
-        },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
+      responseBody: makeSuccessResponseBody(),
     })
 
-    await expect(result.json()).resolves.toEqual({
-      ok: true,
-      booking: {
-        id: 'booking_1',
-        status: BookingStatus.PENDING,
-        scheduledFor: HOLD_START.toISOString(),
-        professionalId: 'pro_123',
-      },
-      meta: {
-        mutated: true,
-        noOp: false,
-      },
-    })
+    await expect(result.json()).resolves.toEqual(makeSuccessResponseBody())
   })
 
   it('returns AFTERCARE_TOKEN_MISSING when source is aftercare without token before idempotency starts', async () => {
@@ -777,6 +797,7 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
       expect.objectContaining({
         clientId: 'client_1',
+        bookingEntryPoint: 'BROAD_DISCOVERY',
         source: BookingSource.AFTERCARE,
         rebookOfBookingId: 'booking_old',
         idempotencyKey: 'idem_finalize_1',
@@ -883,31 +904,15 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
 
-    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
-      clientId: 'client_from_token',
-      holdId: 'hold_1',
-      openingId: 'opening_1',
-      addOnIds: ['addon_1', 'addon_2'],
-      locationType: ServiceLocationType.SALON,
-      source: BookingSource.AFTERCARE,
-      initialStatus: BookingStatus.PENDING,
-      rebookOfBookingId: 'booking_old',
-      offering: {
-        id: 'offering_1',
-        professionalId: 'pro_123',
-        serviceId: 'service_1',
-        offersInSalon: true,
-        offersMobile: true,
-        salonPriceStartingAt: new Prisma.Decimal('100'),
-        salonDurationMinutes: 60,
-        mobilePriceStartingAt: new Prisma.Decimal('120'),
-        mobileDurationMinutes: 75,
-        professionalTimeZone: 'America/Los_Angeles',
-      },
-      fallbackTimeZone: 'UTC',
-      requestId: null,
-      idempotencyKey: 'idem_finalize_1',
-    })
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      makeExpectedFinalizeArgs({
+        clientId: 'client_from_token',
+        openingId: 'opening_1',
+        addOnIds: ['addon_1', 'addon_2'],
+        source: BookingSource.AFTERCARE,
+        rebookOfBookingId: 'booking_old',
+      }),
+    )
 
     expect(mocks.markAftercareAccessTokenUsed).toHaveBeenCalledWith({
       tokenId: 'token_row_1',
@@ -928,6 +933,7 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
       expect.objectContaining({
         clientId: 'client_1',
+        bookingEntryPoint: 'BROAD_DISCOVERY',
         source: BookingSource.AFTERCARE,
         rebookOfBookingId: 'booking_old',
       }),
@@ -955,31 +961,12 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.requireClient).toHaveBeenCalledTimes(1)
 
-    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith({
-      clientId: 'client_1',
-      holdId: 'hold_1',
-      openingId: null,
-      addOnIds: [],
-      locationType: ServiceLocationType.SALON,
-      source: BookingSource.REQUESTED,
-      initialStatus: BookingStatus.PENDING,
-      rebookOfBookingId: null,
-      offering: {
-        id: 'offering_1',
-        professionalId: 'pro_123',
-        serviceId: 'service_1',
-        offersInSalon: true,
-        offersMobile: true,
-        salonPriceStartingAt: new Prisma.Decimal('100'),
-        salonDurationMinutes: 60,
-        mobilePriceStartingAt: new Prisma.Decimal('120'),
-        mobileDurationMinutes: 75,
-        professionalTimeZone: 'America/Los_Angeles',
-      },
-      fallbackTimeZone: 'UTC',
-      requestId: null,
-      idempotencyKey: 'idem_requested_1',
-    })
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      makeExpectedFinalizeArgs({
+        source: BookingSource.REQUESTED,
+        idempotencyKey: 'idem_requested_1',
+      }),
+    )
 
     expect(mocks.createProNotification).toHaveBeenCalledWith({
       professionalId: 'pro_123',
@@ -1001,37 +988,13 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 201,
-      responseBody: {
-        ok: true,
-        booking: {
-          id: 'booking_1',
-          status: BookingStatus.PENDING,
-          scheduledFor: HOLD_START.toISOString(),
-          professionalId: 'pro_123',
-        },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
+      responseBody: makeSuccessResponseBody(),
     })
 
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
 
     expect(result.status).toBe(201)
-    await expect(result.json()).resolves.toEqual({
-      ok: true,
-      booking: {
-        id: 'booking_1',
-        status: BookingStatus.PENDING,
-        scheduledFor: HOLD_START.toISOString(),
-        professionalId: 'pro_123',
-      },
-      meta: {
-        mutated: true,
-        noOp: false,
-      },
-    })
+    await expect(result.json()).resolves.toEqual(makeSuccessResponseBody())
   })
 
   it('creates pro notification with null actorUserId for aftercare finalize', async () => {
@@ -1122,19 +1085,9 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       responseStatus: 201,
-      responseBody: {
-        ok: true,
-        booking: {
-          id: 'booking_1',
-          status: BookingStatus.ACCEPTED,
-          scheduledFor: HOLD_START.toISOString(),
-          professionalId: 'pro_123',
-        },
-        meta: {
-          mutated: true,
-          noOp: false,
-        },
-      },
+      responseBody: makeSuccessResponseBody({
+        status: BookingStatus.ACCEPTED,
+      }),
     })
 
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()

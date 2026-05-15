@@ -185,6 +185,7 @@ describe('POST /api/holds', () => {
 
     expect(mocks.createHold).toHaveBeenCalledWith({
       clientId: 'client_1',
+      bookingEntryPoint: 'BROAD_DISCOVERY',
       offering: {
         id: 'offering_1',
         professionalId: 'pro_123',

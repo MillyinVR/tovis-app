@@ -576,6 +576,7 @@ export async function POST(request: Request) {
 
     const result = await finalizeBookingFromHold({
       clientId: ownership.clientId,
+      bookingEntryPoint: 'BROAD_DISCOVERY',
       holdId: body.holdId,
       openingId: body.openingId,
       addOnIds: body.addOnIds,

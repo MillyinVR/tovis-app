@@ -19,6 +19,15 @@ import { isValidIanaTimeZone } from '@/lib/timeZone'
 
 export type LiveBookingMode = 'SALON' | 'MOBILE'
 
+export type ProBookingEntryPoint =
+  | 'BROAD_DISCOVERY'
+  | 'SPECIFIC_SEARCH'
+  | 'DIRECT_PROFILE'
+  | 'NFC_CARD'
+  | 'SHORT_CODE'
+  | 'QR_CODE'
+  | 'PRO_CREATED'
+
 export type ProReadinessBlocker =
   | 'NO_ACTIVE_OFFERING'
   | 'NO_BOOKABLE_LOCATION'
@@ -31,6 +40,7 @@ export type ProReadinessBlocker =
   | 'OFFERING_MISSING_MOBILE_PRICE_OR_DURATION'
   | 'STRIPE_NOT_READY'
   | 'VERIFICATION_NOT_APPROVED'
+  | 'VERIFICATION_NOT_BROADLY_DISCOVERABLE'
 
 export type ProReadiness =
   | { ok: true; liveModes: LiveBookingMode[]; readyLocationIds: string[] }
@@ -48,6 +58,7 @@ export type PublishableLocationReadiness =
       locationId: string
       blockers: PublishableLocationBlocker[]
     }
+
 // ─── Internal data ────────────────────────────────────────────────────────────
 
 const proReadinessSelect = {
@@ -98,24 +109,40 @@ type WorkingDay = {
   end?: string
 }
 
-type WorkingHoursShape = Record<string, WorkingDay>
-
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
 
-function isValidWorkingHours(raw: unknown): boolean {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
 
-  const workingHours = raw as WorkingHoursShape
+function isWorkingDay(value: unknown): value is WorkingDay {
+  if (!isRecord(value)) return false
+
+  const enabled = value.enabled
+  const start = value.start
+  const end = value.end
+
+  return (
+    (enabled === undefined || typeof enabled === 'boolean') &&
+    (start === undefined || typeof start === 'string') &&
+    (end === undefined || typeof end === 'string')
+  )
+}
+
+function isValidWorkingHours(raw: unknown): boolean {
+  if (!isRecord(raw)) return false
 
   for (const day of DAY_KEYS) {
-    if (!(day in workingHours)) return false
+    if (!(day in raw)) return false
   }
 
   return DAY_KEYS.some((day) => {
-    const value = workingHours[day]
+    const value = raw[day]
+
+    if (!isWorkingDay(value)) return false
 
     return (
-      value?.enabled === true &&
+      value.enabled === true &&
       typeof value.start === 'string' &&
       typeof value.end === 'string' &&
       value.start.trim().length > 0 &&
@@ -139,31 +166,57 @@ function isSalonLikeLocation(type: ProfessionalLocationType): boolean {
   )
 }
 
+function isBlockedVerificationStatus(status: VerificationStatus): boolean {
+  return (
+    status === VerificationStatus.REJECTED ||
+    status === VerificationStatus.NEEDS_INFO
+  )
+}
+
+function isBroadlyDiscoverableVerificationStatus(
+  status: VerificationStatus,
+): boolean {
+  return status === VerificationStatus.APPROVED
+}
+
+function requiresBroadDiscoveryApproval(
+  entryPoint: ProBookingEntryPoint,
+): boolean {
+  return entryPoint === 'BROAD_DISCOVERY'
+}
+
+function addBlocker(
+  blockers: Set<ProReadinessBlocker>,
+  blocker: ProReadinessBlocker,
+): void {
+  blockers.add(blocker)
+}
+
 export function evaluatePublishableLocation(
   location: Pick<
     ProReadinessRecord['locations'][number],
     'id' | 'type' | 'formattedAddress' | 'timeZone' | 'workingHours'
   >,
 ): PublishableLocationReadiness {
-  const blockers: PublishableLocationBlocker[] = []
+  const blockers = new Set<PublishableLocationBlocker>()
 
   if (!location.timeZone || !isValidIanaTimeZone(location.timeZone)) {
-    blockers.push('LOCATION_MISSING_TIMEZONE')
+    blockers.add('LOCATION_MISSING_TIMEZONE')
   }
 
   if (!isValidWorkingHours(location.workingHours)) {
-    blockers.push('LOCATION_MISSING_WORKING_HOURS')
+    blockers.add('LOCATION_MISSING_WORKING_HOURS')
   }
 
   if (isSalonLikeLocation(location.type) && !location.formattedAddress) {
-    blockers.push('SALON_MISSING_ADDRESS')
+    blockers.add('SALON_MISSING_ADDRESS')
   }
 
-  if (blockers.length > 0) {
+  if (blockers.size > 0) {
     return {
       ok: false,
       locationId: location.id,
-      blockers,
+      blockers: [...blockers],
     }
   }
 
@@ -186,24 +239,33 @@ function hasReadyStripeConnect(
   )
 }
 
-function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
-  const blockers: ProReadinessBlocker[] = []
+function evaluateProReadinessForEntryPoint(args: {
+  pro: ProReadinessRecord
+  entryPoint: ProBookingEntryPoint
+}): ProReadiness {
+  const { pro, entryPoint } = args
+  const blockers = new Set<ProReadinessBlocker>()
 
   // ── Verification ──────────────────────────────────────────────────────────
-  // PENDING/manual-review style states are intentionally allowed for booking
-  // readiness. REJECTED and NEEDS_INFO require action and block readiness.
+  // REJECTED and NEEDS_INFO block every booking entry point.
+  // PENDING/manual-review style states are allowed for intentional booking
+  // paths, but not for broad discovery.
+  if (isBlockedVerificationStatus(pro.verificationStatus)) {
+    addBlocker(blockers, 'VERIFICATION_NOT_APPROVED')
+  }
+
   if (
-    pro.verificationStatus === VerificationStatus.REJECTED ||
-    pro.verificationStatus === VerificationStatus.NEEDS_INFO
+    requiresBroadDiscoveryApproval(entryPoint) &&
+    !isBroadlyDiscoverableVerificationStatus(pro.verificationStatus)
   ) {
-    blockers.push('VERIFICATION_NOT_APPROVED')
+    addBlocker(blockers, 'VERIFICATION_NOT_BROADLY_DISCOVERABLE')
   }
 
   // ── Offerings ─────────────────────────────────────────────────────────────
   const activeOfferings = pro.offerings ?? []
 
   if (activeOfferings.length === 0) {
-    blockers.push('NO_ACTIVE_OFFERING')
+    addBlocker(blockers, 'NO_ACTIVE_OFFERING')
   }
 
   // ── Locations ─────────────────────────────────────────────────────────────
@@ -216,7 +278,7 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
   )
 
   if (bookableLocations.length === 0) {
-    blockers.push('NO_BOOKABLE_LOCATION')
+    addBlocker(blockers, 'NO_BOOKABLE_LOCATION')
   }
 
   const anyMissingTimezone = bookableLocations.some(
@@ -225,7 +287,7 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
   )
 
   if (anyMissingTimezone) {
-    blockers.push('LOCATION_MISSING_TIMEZONE')
+    addBlocker(blockers, 'LOCATION_MISSING_TIMEZONE')
   }
 
   const anyMissingWorkingHours = bookableLocations.some(
@@ -233,7 +295,7 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
   )
 
   if (anyMissingWorkingHours) {
-    blockers.push('LOCATION_MISSING_WORKING_HOURS')
+    addBlocker(blockers, 'LOCATION_MISSING_WORKING_HOURS')
   }
 
   const bookableSalonLocations = bookableLocations.filter((location) =>
@@ -245,7 +307,7 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
   )
 
   if (anyMissingGeo) {
-    blockers.push('LOCATION_MISSING_GEO')
+    addBlocker(blockers, 'LOCATION_MISSING_GEO')
   }
 
   const anySalonMissingAddress = bookableSalonLocations.some(
@@ -253,7 +315,7 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
   )
 
   if (anySalonMissingAddress) {
-    blockers.push('SALON_MISSING_ADDRESS')
+    addBlocker(blockers, 'SALON_MISSING_ADDRESS')
   }
 
   const bookableMobileLocation = bookableLocations.find(
@@ -265,25 +327,26 @@ function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
       Boolean(pro.mobileBasePostalCode) && Boolean(pro.mobileRadiusMiles)
 
     if (!hasMobileBase) {
-      blockers.push('MOBILE_MISSING_BASE_CONFIG')
+      addBlocker(blockers, 'MOBILE_MISSING_BASE_CONFIG')
     }
   }
 
-const readyLocationIds = bookableLocations
-  .filter((location) => {
-    const hasTimezone =
-      Boolean(location.timeZone) && isValidIanaTimeZone(location.timeZone)
-    const hasWorkingHours = isValidWorkingHours(location.workingHours)
-    const hasGeo = location.lat != null && location.lng != null
-    const hasSalonAddress =
-      !isSalonLikeLocation(location.type) || Boolean(location.formattedAddress)
+  const readyLocationIds = bookableLocations
+    .filter((location) => {
+      const hasTimezone =
+        Boolean(location.timeZone) && isValidIanaTimeZone(location.timeZone)
+      const hasWorkingHours = isValidWorkingHours(location.workingHours)
+      const hasGeo = location.lat != null && location.lng != null
+      const hasSalonAddress =
+        !isSalonLikeLocation(location.type) ||
+        Boolean(location.formattedAddress)
 
-    return hasTimezone && hasWorkingHours && hasGeo && hasSalonAddress
-  })
-  .map((location) => location.id)
+      return hasTimezone && hasWorkingHours && hasGeo && hasSalonAddress
+    })
+    .map((location) => location.id)
 
   if (readyLocationIds.length === 0 && bookableLocations.length > 0) {
-    blockers.push('NO_BOOKABLE_LOCATION')
+    addBlocker(blockers, 'NO_BOOKABLE_LOCATION')
   }
 
   const readyLocationIdSet = new Set(readyLocationIds)
@@ -302,7 +365,7 @@ const readyLocationIds = bookableLocations
 
   // ── Payment readiness ─────────────────────────────────────────────────────
   if (!hasReadyStripeConnect(pro.paymentSettings)) {
-    blockers.push('STRIPE_NOT_READY')
+    addBlocker(blockers, 'STRIPE_NOT_READY')
   }
 
   // ── Offering price/duration checks per mode ───────────────────────────────
@@ -320,7 +383,7 @@ const readyLocationIds = bookableLocations
         )
 
       if (missingSalon) {
-        blockers.push('OFFERING_MISSING_SALON_PRICE_OR_DURATION')
+        addBlocker(blockers, 'OFFERING_MISSING_SALON_PRICE_OR_DURATION')
       }
     }
 
@@ -334,15 +397,13 @@ const readyLocationIds = bookableLocations
         )
 
       if (missingMobile) {
-        blockers.push('OFFERING_MISSING_MOBILE_PRICE_OR_DURATION')
+        addBlocker(blockers, 'OFFERING_MISSING_MOBILE_PRICE_OR_DURATION')
       }
     }
   }
 
-  const uniqueBlockers = [...new Set(blockers)]
-
-  if (uniqueBlockers.length > 0) {
-    return { ok: false, blockers: uniqueBlockers }
+  if (blockers.size > 0) {
+    return { ok: false, blockers: [...blockers] }
   }
 
   // ── Determine live modes ──────────────────────────────────────────────────
@@ -372,6 +433,13 @@ const readyLocationIds = bookableLocations
   return { ok: true, liveModes, readyLocationIds }
 }
 
+function evaluateProReadiness(pro: ProReadinessRecord): ProReadiness {
+  return evaluateProReadinessForEntryPoint({
+    pro,
+    entryPoint: 'SPECIFIC_SEARCH',
+  })
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function checkProReadinessWithDb(args: {
@@ -390,6 +458,26 @@ export async function checkProReadinessWithDb(args: {
   return evaluateProReadiness(pro)
 }
 
+export async function checkProReadinessForEntryPointWithDb(args: {
+  db: ProReadinessDb
+  professionalId: string
+  entryPoint: ProBookingEntryPoint
+}): Promise<ProReadiness> {
+  const pro = await args.db.professionalProfile.findUnique({
+    where: { id: args.professionalId },
+    select: proReadinessSelect,
+  })
+
+  if (!pro) {
+    return { ok: false, blockers: ['NO_BOOKABLE_LOCATION'] }
+  }
+
+  return evaluateProReadinessForEntryPoint({
+    pro,
+    entryPoint: args.entryPoint,
+  })
+}
+
 export async function checkProReadiness(
   professionalId: string,
 ): Promise<ProReadiness> {
@@ -399,4 +487,19 @@ export async function checkProReadiness(
   })
 }
 
-export { evaluateProReadiness, proReadinessSelect }
+export async function checkProReadinessForEntryPoint(args: {
+  professionalId: string
+  entryPoint: ProBookingEntryPoint
+}): Promise<ProReadiness> {
+  return checkProReadinessForEntryPointWithDb({
+    db: prisma,
+    professionalId: args.professionalId,
+    entryPoint: args.entryPoint,
+  })
+}
+
+export {
+  evaluateProReadiness,
+  evaluateProReadinessForEntryPoint,
+  proReadinessSelect,
+}

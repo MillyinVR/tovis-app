@@ -32,7 +32,7 @@ const MOBILE_CLIENT_OUT_OF_RADIUS_LNG = -118.2437
 
 const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
-  checkProReadinessWithDb: vi.fn(),
+  checkProReadinessForEntryPointWithDb: vi.fn(),
 
   resolveValidatedBookingContext: vi.fn(),
   evaluateHoldCreationDecision: vi.fn(),
@@ -57,7 +57,8 @@ vi.mock('@/lib/booking/scheduleTransaction', () => ({
 }))
 
 vi.mock('@/lib/pro/readiness/proReadiness', () => ({
-  checkProReadinessWithDb: mocks.checkProReadinessWithDb,
+  checkProReadinessForEntryPointWithDb:
+    mocks.checkProReadinessForEntryPointWithDb,
 }))
 
 vi.mock('@/lib/booking/locationContext', async () => {
@@ -234,6 +235,7 @@ function arrangeMobileContext() {
 function makeCreateHoldArgs() {
   return {
     clientId: CLIENT_ID,
+    bookingEntryPoint: 'BROAD_DISCOVERY' as const,
     offering: makeMobileOffering(),
     requestedStart: REQUESTED_START,
     requestedLocationId: LOCATION_ID,
@@ -245,6 +247,7 @@ function makeCreateHoldArgs() {
 function makeFinalizeArgs() {
   return {
     clientId: CLIENT_ID,
+    bookingEntryPoint: 'BROAD_DISCOVERY' as const,
     holdId: HOLD_ID,
     openingId: null,
     addOnIds: [],
@@ -272,7 +275,7 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
       ) => run({ tx, now: TEST_NOW }),
     )
 
-    mocks.checkProReadinessWithDb.mockResolvedValue({
+    mocks.checkProReadinessForEntryPointWithDb.mockResolvedValue({
       ok: true,
       liveModes: ['MOBILE'],
       readyLocationIds: [LOCATION_ID],

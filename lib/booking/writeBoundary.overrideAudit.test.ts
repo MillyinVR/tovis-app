@@ -31,7 +31,7 @@ const MOBILE_CLIENT_OUT_OF_RADIUS_LNG = -118.2437
 
 const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
-  checkProReadinessWithDb: vi.fn(),
+  checkProReadinessForEntryPointWithDb: vi.fn(),
   txProfessionalProfileFindUnique: vi.fn(),
 
   buildBookingOverrideAuditRows: vi.fn(),
@@ -62,7 +62,8 @@ vi.mock('@/lib/booking/scheduleTransaction', () => ({
 }))
 
 vi.mock('@/lib/pro/readiness/proReadiness', () => ({
-  checkProReadinessWithDb: mocks.checkProReadinessWithDb,
+  checkProReadinessForEntryPointWithDb:
+    mocks.checkProReadinessForEntryPointWithDb,
 }))
 
 vi.mock('@/lib/booking/overrideAudit', () => ({
@@ -291,7 +292,7 @@ function arrangeMobileProBookingScenario(args: {
   locationLng?: number | null
   mobileRadiusMiles?: number | null
 } = {}) {
-  mocks.checkProReadinessWithDb.mockResolvedValueOnce({
+  mocks.checkProReadinessForEntryPointWithDb.mockResolvedValueOnce({
     ok: true,
     liveModes: ['MOBILE'],
     readyLocationIds: [MOBILE_LOCATION_ID],
@@ -335,7 +336,7 @@ describe('lib/booking/writeBoundary override audit', () => {
     vi.useFakeTimers()
     vi.setSystemTime(TEST_NOW)
 
-    mocks.checkProReadinessWithDb.mockResolvedValue({
+    mocks.checkProReadinessForEntryPointWithDb.mockResolvedValue({
       ok: true,
       liveModes: ['SALON'],
       readyLocationIds: ['loc_1'],
@@ -440,7 +441,7 @@ describe('lib/booking/writeBoundary override audit', () => {
   })
 
   it('blocks pro-created bookings when the professional is not booking-ready', async () => {
-    mocks.checkProReadinessWithDb.mockResolvedValueOnce({
+    mocks.checkProReadinessForEntryPointWithDb.mockResolvedValueOnce({
       ok: false,
       blockers: ['NO_BOOKABLE_LOCATION'],
     })
@@ -467,9 +468,10 @@ describe('lib/booking/writeBoundary override audit', () => {
       code: 'PRO_NOT_READY',
     })
 
-    expect(mocks.checkProReadinessWithDb).toHaveBeenCalledWith({
+    expect(mocks.checkProReadinessForEntryPointWithDb).toHaveBeenCalledWith({
       db: tx,
       professionalId: PROFESSIONAL_ID,
+      entryPoint: 'PRO_CREATED',
     })
 
     expect(mocks.txClientProfileFindUnique).not.toHaveBeenCalled()

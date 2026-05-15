@@ -1,6 +1,7 @@
+```md
 # Phase 3 Baseline - Side Effect Reliability
 
-Branch: audit/phase-3-side-effect-reliability
+Branch: audit/phase-3-side-effect-reliability  
 Based on Phase 2 commit: e0329cf
 
 ## Scope
@@ -11,16 +12,16 @@ Phase 3 stayed limited to booking-related side effect reliability.
 
 The repo already has durable notification infrastructure:
 
-- NotificationDispatch
-- NotificationDelivery
-- NotificationDeliveryEvent
-- ScheduledClientNotification
+- `NotificationDispatch`
+- `NotificationDelivery`
+- `NotificationDeliveryEvent`
+- `ScheduledClientNotification`
 - idempotent dispatch source keys
 - delivery retry/final failure states
 - delivery processor route
 - scheduled client reminder job route
 
-Phase 3 did not add a new outbox table because the existing dispatch/delivery foundation already provides durable delivery rows, per-channel delivery state, and retry/failure accounting.
+Phase 3 did not add a new outbox table because the existing dispatch/delivery foundation already provides durable delivery rows, per-channel delivery state, retry/failure accounting, and scheduled client notification processing.
 
 ## Implemented
 
@@ -29,6 +30,8 @@ Phase 3 did not add a new outbox table because the existing dispatch/delivery fo
 - Preserved `lastError` for observability.
 - Kept API attempt summary behavior reporting failed attempts.
 - Left `processedAt` and `cancelledAt` untouched on retryable failures.
+- Verified booking-related notification and delivery paths with targeted tests.
+- Verified the full repo test suite after readiness/booking write-boundary updates.
 
 ## Why
 
@@ -41,40 +44,9 @@ The client reminder job only loads rows where:
 
 Before Phase 3, a transient reminder processing error set `failedAt`, which permanently removed the row from future processing. Phase 3 makes those failures retryable by default while still recording `lastError`.
 
+That gives the reminder job the behavior we actually want: fail loudly enough to debug, but do not silently exile the reminder row forever because one provider sneezed. Tiny mercy. Huge difference.
+
 ## Targeted test command
 
+```bash
 pnpm vitest run app/api/internal/jobs/client-reminders/route.test.ts lib/clientActions/orchestrateClientActionDelivery.test.ts lib/notifications/appointmentReminders.test.ts lib/notifications/clientNotifications.test.ts lib/notifications/proNotifications.test.ts lib/notifications/proNotificationQueries.test.ts lib/notifications/dispatch/enqueueDispatch.test.ts lib/notifications/delivery/completeDeliveryAttempt.test.ts lib/notifications/delivery/renderNotificationContent.test.ts lib/notifications/delivery/sendEmail.test.ts lib/notifications/delivery/sendSms.test.ts lib/notifications/webhooks/applyDeliveryWebhookUpdate.test.ts
-
-Result:
-
-PASS - 12 test files passed, 123 tests passed.
-
-## Typecheck
-
-Command:
-
-pnpm typecheck
-
-Result:
-
-FAIL - existing Phase 0 Looks/feed viewerSaved errors remain.
-
-Observed errors:
-
-- app/(main)/looks/_components/LooksFeed.test.tsx: viewerSaved may be undefined.
-- lib/looks/mappers.test.ts: viewerSaved missing in mapper test inputs.
-
-No new side-effect or reminder job type errors were observed.
-
-Expected baseline:
-
-Phase 0 documented existing Looks/feed viewerSaved type errors. Those are out of scope for Phase 3 unless new side-effect or reminder job errors appear.
-
-## Phase 3 completion criteria
-
-- Existing durable notification dispatch infrastructure confirmed.
-- Existing side-effect baseline tests pass.
-- Scheduled reminder processing failures remain retryable.
-- Reminder job records `lastError` for failed attempts.
-- Failed attempts do not permanently remove rows from future processing.
-- Targeted Phase 3 tests pass.

@@ -263,6 +263,7 @@ export async function POST(req: NextRequest) {
 
     const result = await createHold({
       clientId: auth.clientId,
+      bookingEntryPoint: 'BROAD_DISCOVERY',
       offering: toCreateHoldOffering(offering),
       requestedStart: parsed.requestedStart,
       requestedLocationId: parsed.requestedLocationId,

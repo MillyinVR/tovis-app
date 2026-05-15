@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   upsertClientClaimLink: vi.fn(),
   clientProfileFindUnique: vi.fn(),
   createClientClaimInviteDelivery: vi.fn(),
-  checkProReadiness: vi.fn(),
+  checkProReadinessForEntryPoint: vi.fn(),
   enqueueDispatch: vi.fn(),
 }))
 
@@ -38,7 +38,7 @@ vi.mock('@/lib/clientActions/createClientClaimInviteDelivery', () => ({
 }))
 
 vi.mock('@/lib/pro/readiness/proReadiness', () => ({
-  checkProReadiness: mocks.checkProReadiness,
+  checkProReadinessForEntryPoint: mocks.checkProReadinessForEntryPoint,
 }))
 
 vi.mock('@/lib/notifications/dispatch/enqueueDispatch', () => ({
@@ -240,7 +240,7 @@ describe('createProBookingWithClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
-    mocks.checkProReadiness.mockResolvedValue({
+    mocks.checkProReadinessForEntryPoint.mockResolvedValue({
       ok: true,
       liveModes: ['SALON'],
       readyLocationIds: ['loc_1'],
@@ -264,7 +264,7 @@ describe('createProBookingWithClient', () => {
   })
 
   it('blocks unready professionals before resolving clients or creating side effects', async () => {
-    mocks.checkProReadiness.mockResolvedValueOnce({
+    mocks.checkProReadinessForEntryPoint.mockResolvedValueOnce({
       ok: false,
       blockers: ['NO_BOOKABLE_LOCATION'],
     })
@@ -298,13 +298,48 @@ describe('createProBookingWithClient', () => {
       code: 'PRO_NOT_READY',
     })
 
-    expect(mocks.checkProReadiness).toHaveBeenCalledWith('pro_1')
+    expect(mocks.checkProReadinessForEntryPoint).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      entryPoint: 'PRO_CREATED',
+    })
     expect(mocks.resolveProBookingClient).not.toHaveBeenCalled()
     expect(mocks.createProBooking).not.toHaveBeenCalled()
     expect(mocks.enqueueDispatch).not.toHaveBeenCalled()
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(mocks.clientProfileFindUnique).not.toHaveBeenCalled()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+  })
+
+  it('checks readiness using the PRO_CREATED entry point before creating side effects', async () => {
+    await createProBookingWithClient({
+      professionalId: 'pro_1',
+      actorUserId: 'user_1',
+      overrideReason: null,
+      client: {
+        firstName: 'Tori',
+        lastName: 'Morales',
+        email: 'tori@example.com',
+        phone: '+16195551234',
+      },
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+    })
+
+    expect(mocks.checkProReadinessForEntryPoint).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      entryPoint: 'PRO_CREATED',
+    })
+
+    expect(mocks.resolveProBookingClient).toHaveBeenCalledTimes(1)
+    expect(mocks.createProBooking).toHaveBeenCalledTimes(1)
   })
 
   it('passes through resolveProBookingClient failures unchanged', async () => {

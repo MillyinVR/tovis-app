@@ -125,7 +125,10 @@ import {
   recordStatusTransition,
   recordStepTransition,
 } from '@/lib/booking/lifecycleContract'
-import { checkProReadinessWithDb } from '@/lib/pro/readiness/proReadiness'
+import {
+  checkProReadinessForEntryPointWithDb,
+  type ProBookingEntryPoint,
+} from '@/lib/pro/readiness/proReadiness'
 // Side-effect import: registers the Sentry sink for lifecycle drift events.
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
@@ -290,6 +293,7 @@ type ReleaseHoldResult = {
 
 type CreateHoldArgs = {
   clientId: string
+  bookingEntryPoint: ProBookingEntryPoint
   offering: {
     id: string
     professionalId: string
@@ -344,6 +348,7 @@ type RescheduleBookingFromHoldResult = {
 
 type FinalizeBookingFromHoldArgs = {
   clientId: string
+  bookingEntryPoint: ProBookingEntryPoint
   holdId: string
   openingId: string | null
   addOnIds: string[]
@@ -3193,10 +3198,12 @@ function mapSchedulingReadinessFailure(
 async function assertProfessionalIsBookingReady(args: {
   tx: Prisma.TransactionClient
   professionalId: string
+  bookingEntryPoint: ProBookingEntryPoint
 }): Promise<void> {
-  const readiness = await checkProReadinessWithDb({
+  const readiness = await checkProReadinessForEntryPointWithDb({
     db: args.tx,
     professionalId: args.professionalId,
+    entryPoint: args.bookingEntryPoint,
   })
 
   if (readiness.ok) return
@@ -5898,6 +5905,7 @@ async function performLockedCreateHold(args: {
   tx: Prisma.TransactionClient
   now: Date
   clientId: string
+  bookingEntryPoint: ProBookingEntryPoint
   offering: CreateHoldArgs['offering']
   requestedStart: Date
   requestedLocationId: string | null
@@ -5908,6 +5916,7 @@ async function performLockedCreateHold(args: {
     tx,
     now,
     clientId,
+    bookingEntryPoint,
     offering,
     requestedStart,
     requestedLocationId,
@@ -5918,6 +5927,7 @@ async function performLockedCreateHold(args: {
   await assertProfessionalIsBookingReady({
     tx,
     professionalId: offering.professionalId,
+    bookingEntryPoint,
   })
 
   const startedAtMs = Date.now()
@@ -7020,6 +7030,7 @@ async function performLockedFinalizeBookingFromHold(args: {
   tx: Prisma.TransactionClient
   now: Date
   clientId: string
+  bookingEntryPoint: ProBookingEntryPoint
   holdId: string
   openingId: string | null
   addOnIds: string[]
@@ -7059,6 +7070,7 @@ async function performLockedFinalizeBookingFromHold(args: {
   await assertProfessionalIsBookingReady({
     tx: args.tx,
     professionalId: args.offering.professionalId,
+    bookingEntryPoint: args.bookingEntryPoint,
   })
 
   const hold = await args.tx.bookingHold.findUnique({
@@ -7572,6 +7584,7 @@ async function performLockedCreateProBooking(args: {
   await assertProfessionalIsBookingReady({
     tx: args.tx,
     professionalId: args.professionalId,
+    bookingEntryPoint: 'PRO_CREATED',
   })
 
   const normalizedOverrideReason = assertExplicitOverrideReasonIfNeeded({
@@ -10869,6 +10882,7 @@ export async function createHold(
         tx,
         now,
         clientId: args.clientId,
+        bookingEntryPoint: args.bookingEntryPoint,
         offering: args.offering,
         requestedStart: args.requestedStart,
         requestedLocationId: args.requestedLocationId,
@@ -11083,6 +11097,7 @@ export async function finalizeBookingFromHold(
         tx,
         now,
         clientId: args.clientId,
+        bookingEntryPoint: args.bookingEntryPoint,
         holdId: args.holdId,
         openingId: args.openingId,
         addOnIds: args.addOnIds,

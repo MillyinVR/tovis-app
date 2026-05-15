@@ -5,10 +5,23 @@ import {
   StripeAccountStatus,
   VerificationStatus,
 } from '@prisma/client'
-
-import { evaluateProReadiness } from './proReadiness'
+import {
+  evaluateProReadiness,
+  evaluateProReadinessForEntryPoint,
+  type ProBookingEntryPoint,
+} from './proReadiness'
 
 type ReadinessInput = Parameters<typeof evaluateProReadiness>[0]
+
+const bookingEntryPoints: ProBookingEntryPoint[] = [
+  'BROAD_DISCOVERY',
+  'SPECIFIC_SEARCH',
+  'DIRECT_PROFILE',
+  'NFC_CARD',
+  'SHORT_CODE',
+  'QR_CODE',
+  'PRO_CREATED',
+]
 
 const validWorkingHours = {
   mon: { enabled: true, start: '09:00', end: '17:00' },
@@ -71,6 +84,201 @@ function makePro(overrides: Partial<ReadinessInput> = {}): ReadinessInput {
 }
 
 describe('evaluateProReadiness', () => {
+  it('blocks pending/manual-review pros from broad discovery even when otherwise ready', () => {
+    const result = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        verificationStatus: VerificationStatus.PENDING_MANUAL_REVIEW,
+      }),
+      entryPoint: 'BROAD_DISCOVERY',
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      blockers: ['VERIFICATION_NOT_BROADLY_DISCOVERABLE'],
+    })
+  })
+
+  it('allows pending/manual-review pros through specific search when otherwise ready', () => {
+    const result = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        verificationStatus: VerificationStatus.PENDING_MANUAL_REVIEW,
+      }),
+      entryPoint: 'SPECIFIC_SEARCH',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_1'],
+    })
+  })
+
+  it('allows pending/manual-review pros through direct access when otherwise ready', () => {
+    const result = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        verificationStatus: VerificationStatus.PENDING_MANUAL_REVIEW,
+      }),
+      entryPoint: 'DIRECT_PROFILE',
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_1'],
+    })
+  })
+
+  it('allows pending/manual-review pros through NFC and short-code booking paths when otherwise ready', () => {
+    const nfcResult = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        verificationStatus: VerificationStatus.PENDING_MANUAL_REVIEW,
+      }),
+      entryPoint: 'NFC_CARD',
+    })
+
+    expect(nfcResult).toEqual({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_1'],
+    })
+
+    const shortCodeResult = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        verificationStatus: VerificationStatus.PENDING_MANUAL_REVIEW,
+      }),
+      entryPoint: 'SHORT_CODE',
+    })
+
+    expect(shortCodeResult).toEqual({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_1'],
+    })
+  })
+
+  it('allows pending/manual-review pros through QR and pro-created booking paths when otherwise ready', () => {
+    const qrResult = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        verificationStatus: VerificationStatus.PENDING_MANUAL_REVIEW,
+      }),
+      entryPoint: 'QR_CODE',
+    })
+
+    expect(qrResult).toEqual({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_1'],
+    })
+
+    const proCreatedResult = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        verificationStatus: VerificationStatus.PENDING_MANUAL_REVIEW,
+      }),
+      entryPoint: 'PRO_CREATED',
+    })
+
+    expect(proCreatedResult).toEqual({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_1'],
+    })
+  })
+
+  it('blocks rejected pros from every booking entry point', () => {
+    for (const entryPoint of bookingEntryPoints) {
+
+      const result = evaluateProReadinessForEntryPoint({
+        pro: makePro({
+          verificationStatus: VerificationStatus.REJECTED,
+        }),
+        entryPoint,
+      })
+
+      const expectedBlockers =
+        entryPoint === 'BROAD_DISCOVERY'
+          ? [
+              'VERIFICATION_NOT_APPROVED',
+              'VERIFICATION_NOT_BROADLY_DISCOVERABLE',
+            ]
+          : ['VERIFICATION_NOT_APPROVED']
+
+      expect(result).toEqual({
+        ok: false,
+        blockers: expectedBlockers,
+      })
+    }
+  })
+
+  it('blocks needs-info pros from every booking entry point', () => {
+    for (const entryPoint of bookingEntryPoints) {
+      const result = evaluateProReadinessForEntryPoint({
+        pro: makePro({
+          verificationStatus: VerificationStatus.NEEDS_INFO,
+        }),
+        entryPoint,
+      })
+
+      const expectedBlockers =
+        entryPoint === 'BROAD_DISCOVERY'
+          ? [
+              'VERIFICATION_NOT_APPROVED',
+              'VERIFICATION_NOT_BROADLY_DISCOVERABLE',
+            ]
+          : ['VERIFICATION_NOT_APPROVED']
+
+      expect(result).toEqual({
+        ok: false,
+        blockers: expectedBlockers,
+      })
+    }
+  })
+
+  it('requires payment readiness for every booking entry point when Stripe card payments are accepted', () => {
+    for (const entryPoint of bookingEntryPoints) {
+      const result = evaluateProReadinessForEntryPoint({
+        pro: makePro({
+          paymentSettings: {
+            acceptStripeCard: true,
+            stripeAccountStatus: StripeAccountStatus.ONBOARDING_STARTED,
+            stripeChargesEnabled: false,
+            stripePayoutsEnabled: false,
+            stripeDetailsSubmitted: false,
+          },
+        }),
+        entryPoint,
+      })
+
+      expect(result).toEqual({
+        ok: false,
+        blockers: ['STRIPE_NOT_READY'],
+      })
+    }
+  })
+
+  it('combines broad-discovery verification and payment blockers when both apply', () => {
+    const result = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        verificationStatus: VerificationStatus.PENDING_MANUAL_REVIEW,
+        paymentSettings: {
+          acceptStripeCard: true,
+          stripeAccountStatus: StripeAccountStatus.ONBOARDING_STARTED,
+          stripeChargesEnabled: false,
+          stripePayoutsEnabled: false,
+          stripeDetailsSubmitted: false,
+        },
+      }),
+      entryPoint: 'BROAD_DISCOVERY',
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      blockers: [
+        'VERIFICATION_NOT_BROADLY_DISCOVERABLE',
+        'STRIPE_NOT_READY',
+      ],
+    })
+  })
+
   it('marks an approved pro with one active offering and one ready bookable salon location as ready', () => {
     const result = evaluateProReadiness(makePro())
 

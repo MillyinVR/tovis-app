@@ -11,7 +11,7 @@ const REQUESTED_START = new Date('2026-03-20T18:00:00.000Z')
 
 const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
-  checkProReadinessWithDb: vi.fn(),
+  checkProReadinessForEntryPointWithDb: vi.fn(),
 }))
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
@@ -19,7 +19,8 @@ vi.mock('@/lib/booking/scheduleTransaction', () => ({
 }))
 
 vi.mock('@/lib/pro/readiness/proReadiness', () => ({
-  checkProReadinessWithDb: mocks.checkProReadinessWithDb,
+  checkProReadinessForEntryPointWithDb:
+    mocks.checkProReadinessForEntryPointWithDb,
 }))
 
 import {
@@ -71,7 +72,7 @@ describe('lib/booking/writeBoundary readiness gates', () => {
       ) => run({ tx, now: TEST_NOW }),
     )
 
-    mocks.checkProReadinessWithDb.mockResolvedValue({
+    mocks.checkProReadinessForEntryPointWithDb.mockResolvedValue({
       ok: true,
       liveModes: ['SALON'],
       readyLocationIds: ['loc_1'],
@@ -79,7 +80,7 @@ describe('lib/booking/writeBoundary readiness gates', () => {
   })
 
   it('blocks hold creation when the professional is not booking-ready', async () => {
-    mocks.checkProReadinessWithDb.mockResolvedValueOnce({
+    mocks.checkProReadinessForEntryPointWithDb.mockResolvedValueOnce({
       ok: false,
       blockers: ['NO_BOOKABLE_LOCATION'],
     })
@@ -87,6 +88,7 @@ describe('lib/booking/writeBoundary readiness gates', () => {
     await expect(
       createHold({
         clientId: 'client_1',
+        bookingEntryPoint: 'BROAD_DISCOVERY',
         offering: makeHoldOffering(),
         requestedStart: REQUESTED_START,
         requestedLocationId: 'loc_1',
@@ -97,14 +99,15 @@ describe('lib/booking/writeBoundary readiness gates', () => {
       code: 'PRO_NOT_READY',
     })
 
-    expect(mocks.checkProReadinessWithDb).toHaveBeenCalledWith({
+    expect(mocks.checkProReadinessForEntryPointWithDb).toHaveBeenCalledWith({
       db: tx,
       professionalId: 'pro_1',
+      entryPoint: 'BROAD_DISCOVERY',
     })
   })
 
   it('blocks booking finalization when the professional is not booking-ready', async () => {
-    mocks.checkProReadinessWithDb.mockResolvedValueOnce({
+    mocks.checkProReadinessForEntryPointWithDb.mockResolvedValueOnce({
       ok: false,
       blockers: ['NO_BOOKABLE_LOCATION'],
     })
@@ -112,6 +115,7 @@ describe('lib/booking/writeBoundary readiness gates', () => {
     await expect(
       finalizeBookingFromHold({
         clientId: 'client_1',
+        bookingEntryPoint: 'BROAD_DISCOVERY',
         holdId: 'hold_1',
         openingId: null,
         addOnIds: [],
@@ -128,9 +132,10 @@ describe('lib/booking/writeBoundary readiness gates', () => {
       code: 'PRO_NOT_READY',
     })
 
-    expect(mocks.checkProReadinessWithDb).toHaveBeenCalledWith({
+    expect(mocks.checkProReadinessForEntryPointWithDb).toHaveBeenCalledWith({
       db: tx,
       professionalId: 'pro_1',
+      entryPoint: 'BROAD_DISCOVERY',
     })
   })
 })
