@@ -1,7 +1,9 @@
+// app/api/auth/email/send/route.ts
+
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { enforceVerificationSendThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import {
-  enforceEmailVerificationLimits,
   getAppUrlFromRequest,
   issueAndSendEmailVerification,
 } from '@/lib/auth/emailVerification'
@@ -85,14 +87,13 @@ export async function POST(request: Request) {
       })
     }
 
-    const limit = await enforceEmailVerificationLimits(auth.user.id)
-    if (!limit.ok) {
-      const res = jsonFail(429, 'Too many requests. Try again shortly.', {
-        code: 'RATE_LIMITED',
-        retryAfterSeconds: limit.retryAfterSeconds,
-      })
-      res.headers.set('Retry-After', String(limit.retryAfterSeconds))
-      return res
+    const throttle = await enforceVerificationSendThrottle({
+      userId: auth.user.id,
+      phone: null,
+    })
+
+    if (!throttle.ok) {
+      return throttle.response
     }
 
     const body = ((await request.json().catch(() => ({}))) ??

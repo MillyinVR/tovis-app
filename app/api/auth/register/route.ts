@@ -810,16 +810,34 @@ export async function POST(request: Request) {
       })
     }
 
-    const identity = await rateLimitIdentity()
+  const identity = await rateLimitIdentity()
 
-    const registerBucket = captcha.failOpen
-      ? 'auth:register'
-      : 'auth:register:verified'
+  const registerBucket = captcha.failOpen
+    ? 'auth:register'
+    : 'auth:register:verified'
 
-    const registerRateLimitRes = await enforceRateLimit({
-      bucket: registerBucket,
-      identity,
-    })
+  const registerRateLimitRes = await enforceRateLimit({
+    bucket: registerBucket,
+    identity,
+  })
+
+  if (registerRateLimitRes) return registerRateLimitRes
+
+  const phoneIdentity = phoneRateLimitIdentity(phone)
+
+  const smsPhoneHourRes = await enforceRateLimit({
+    bucket: 'auth:sms-phone-hour',
+    identity: phoneIdentity,
+  })
+
+  if (smsPhoneHourRes) return smsPhoneHourRes
+
+  const smsPhoneDayRes = await enforceRateLimit({
+    bucket: 'auth:sms-phone-day',
+    identity: phoneIdentity,
+  })
+
+  if (smsPhoneDayRes) return smsPhoneDayRes
 
     if (registerRateLimitRes) return registerRateLimitRes
 
@@ -992,20 +1010,6 @@ export async function POST(request: Request) {
         })
       }
     }
-
-    const phoneIdentity = phoneRateLimitIdentity(phone)
-
-    const smsPhoneHourRes = await enforceRateLimit({
-      bucket: 'auth:sms-phone-hour',
-      identity: phoneIdentity,
-    })
-    if (smsPhoneHourRes) return smsPhoneHourRes
-
-    const smsPhoneDayRes = await enforceRateLimit({
-      bucket: 'auth:sms-phone-day',
-      identity: phoneIdentity,
-    })
-    if (smsPhoneDayRes) return smsPhoneDayRes
 
     const passwordHash = await hashPassword(password)
 

@@ -1,11 +1,7 @@
 // app/api/auth/phone/send/route.ts
 
-import {
-  enforceRateLimit,
-  jsonFail,
-  jsonOk,
-  phoneRateLimitIdentity,
-} from '@/app/api/_utils'
+import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { enforceVerificationSendThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
@@ -72,21 +68,14 @@ export async function POST(_request: Request) {
     const normalizedPhone = smsCountry.phone
     phoneForLog = normalizedPhone
 
-    const phoneIdentity = phoneRateLimitIdentity(normalizedPhone)
-
-    const smsPhoneHourRes = await enforceRateLimit({
-      bucket: 'auth:sms-phone-hour',
-      identity: phoneIdentity,
+    const throttle = await enforceVerificationSendThrottle({
+      userId,
+      phone: normalizedPhone,
     })
 
-    if (smsPhoneHourRes) return smsPhoneHourRes
-
-    const smsPhoneDayRes = await enforceRateLimit({
-      bucket: 'auth:sms-phone-day',
-      identity: phoneIdentity,
-    })
-
-    if (smsPhoneDayRes) return smsPhoneDayRes
+    if (!throttle.ok) {
+      return throttle.response
+    }
 
     const result = await startTwilioVerifyPhoneVerification({
       to: normalizedPhone,
@@ -110,9 +99,13 @@ export async function POST(_request: Request) {
       const status =
         result.code === 'TWILIO_VERIFY_NOT_CONFIGURED' ? 503 : 502
 
-      return jsonFail(status, 'Could not send verification code. Please try again.', {
-        code: result.code,
-      })
+      return jsonFail(
+        status,
+        'Could not send verification code. Please try again.',
+        {
+          code: result.code,
+        },
+      )
     }
 
     logAuthEvent({

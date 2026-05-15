@@ -156,6 +156,17 @@ describe('app/api/auth/password-reset/confirm/route', () => {
 
     expect(result).toBe(rateLimitRes)
     expect(result.status).toBe(429)
+
+    expect(mockValidatePassword).not.toHaveBeenCalled()
+    expect(mockParsePasswordResetToken).not.toHaveBeenCalled()
+    expect(mockPrisma.passwordResetToken.findUnique).not.toHaveBeenCalled()
+    expect(mockSha256Hex).not.toHaveBeenCalled()
+    expect(mockTimingSafeEqualHex).not.toHaveBeenCalled()
+    expect(mockHashPassword).not.toHaveBeenCalled()
+    expect(mockPrisma.passwordResetToken.updateMany).not.toHaveBeenCalled()
+    expect(mockPrisma.user.update).not.toHaveBeenCalled()
+    expect(mockPrisma.passwordResetToken.update).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 

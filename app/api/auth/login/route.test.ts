@@ -258,6 +258,11 @@ describe('app/api/auth/login/route', () => {
     })
     expect(result).toBe(rateLimitRes)
     expect(result.status).toBe(429)
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
+    expect(mockVerifyPassword).not.toHaveBeenCalled()
+    expect(mockPrisma.$queryRaw).not.toHaveBeenCalled()
+    expect(mockPrisma.user.update).not.toHaveBeenCalled()
+    expect(mockConsumeTapIntent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
@@ -468,69 +473,69 @@ describe('app/api/auth/login/route', () => {
   })
 
   it('uses bcrypt verification work in both failure branches and returns the same failure response', async () => {
-  mockVerifyPassword.mockResolvedValue(false)
+    mockVerifyPassword.mockResolvedValue(false)
 
-  // non-existent email -> must use dummy hash
-  mockPrisma.user.findUnique.mockResolvedValueOnce(null)
+    // non-existent email -> must use dummy hash
+    mockPrisma.user.findUnique.mockResolvedValueOnce(null)
 
-  const missingUserResult = await POST(
-    makeRequest({
-      email: 'missing@example.com',
-      password: 'Secret123!',
-    }),
-  )
-  const missingUserBody = await missingUserResult.json()
+    const missingUserResult = await POST(
+      makeRequest({
+        email: 'missing@example.com',
+        password: 'Secret123!',
+      }),
+    )
+    const missingUserBody = await missingUserResult.json()
 
-  expect(mockVerifyPassword).toHaveBeenNthCalledWith(
-    1,
-    'Secret123!',
-    'dummy_hash',
-  )
+    expect(mockVerifyPassword).toHaveBeenNthCalledWith(
+      1,
+      'Secret123!',
+      'dummy_hash',
+    )
 
-  expect(missingUserResult.status).toBe(401)
-  expect(missingUserBody).toEqual({
-    ok: false,
-    error: 'Invalid credentials',
-    code: 'INVALID_CREDENTIALS',
+    expect(missingUserResult.status).toBe(401)
+    expect(missingUserBody).toEqual({
+      ok: false,
+      error: 'Invalid credentials',
+      code: 'INVALID_CREDENTIALS',
+    })
+
+    // existing email + wrong password -> must use stored hash
+    mockPrisma.user.findUnique.mockResolvedValueOnce(
+      makeUser({
+        loginAttempts: 3,
+      }),
+    )
+    mockPrisma.$queryRaw.mockResolvedValueOnce([
+      {
+        loginAttempts: 4,
+        lockedUntil: null,
+      },
+    ])
+
+    const wrongPasswordResult = await POST(
+      makeRequest({
+        email: 'user@example.com',
+        password: 'WrongPassword',
+      }),
+    )
+    const wrongPasswordBody = await wrongPasswordResult.json()
+
+    expect(mockVerifyPassword).toHaveBeenNthCalledWith(
+      2,
+      'WrongPassword',
+      'stored_hash',
+    )
+
+    expect(wrongPasswordResult.status).toBe(401)
+    expect(wrongPasswordBody).toEqual({
+      ok: false,
+      error: 'Invalid credentials',
+      code: 'INVALID_CREDENTIALS',
+    })
+
+    expect(wrongPasswordResult.status).toBe(missingUserResult.status)
+    expect(wrongPasswordBody).toEqual(missingUserBody)
   })
-
-  // existing email + wrong password -> must use stored hash
-  mockPrisma.user.findUnique.mockResolvedValueOnce(
-    makeUser({
-      loginAttempts: 3,
-    }),
-  )
-  mockPrisma.$queryRaw.mockResolvedValueOnce([
-    {
-      loginAttempts: 4,
-      lockedUntil: null,
-    },
-  ])
-
-  const wrongPasswordResult = await POST(
-    makeRequest({
-      email: 'user@example.com',
-      password: 'WrongPassword',
-    }),
-  )
-  const wrongPasswordBody = await wrongPasswordResult.json()
-
-  expect(mockVerifyPassword).toHaveBeenNthCalledWith(
-    2,
-    'WrongPassword',
-    'stored_hash',
-  )
-
-  expect(wrongPasswordResult.status).toBe(401)
-  expect(wrongPasswordBody).toEqual({
-    ok: false,
-    error: 'Invalid credentials',
-    code: 'INVALID_CREDENTIALS',
-  })
-
-  expect(wrongPasswordResult.status).toBe(missingUserResult.status)
-  expect(wrongPasswordBody).toEqual(missingUserBody)
-})
 
   it('returns 403 when expectedRole does not match the user role and still clears lock state', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(

@@ -202,6 +202,9 @@ describe('app/api/auth/phone/verify/route', () => {
     expect(mockCheckTwilioVerifyPhoneCode).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+
+    expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
+    expect(mockCheckTwilioVerifyPhoneCode).not.toHaveBeenCalled()
   })
 
   it('returns 400 when code format is invalid', async () => {
@@ -223,6 +226,9 @@ describe('app/api/auth/phone/verify/route', () => {
     expect(mockCheckTwilioVerifyPhoneCode).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+
+    expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
+    expect(mockCheckTwilioVerifyPhoneCode).not.toHaveBeenCalled()
   })
 
   it('returns alreadyVerified state when phone is already verified', async () => {

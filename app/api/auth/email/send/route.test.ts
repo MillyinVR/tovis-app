@@ -1,8 +1,10 @@
+// app/api/auth/email/send/route.test.ts
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
 const mockRequireUser = vi.hoisted(() => vi.fn())
-const mockEnforceEmailVerificationLimits = vi.hoisted(() => vi.fn())
+const mockEnforceVerificationSendThrottle = vi.hoisted(() => vi.fn())
 const mockGetAppUrlFromRequest = vi.hoisted(() => vi.fn())
 const mockIssueAndSendEmailVerification = vi.hoisted(() => vi.fn())
 const mockLogAuthEvent = vi.hoisted(() => vi.fn())
@@ -12,8 +14,11 @@ vi.mock('@/app/api/_utils/auth/requireUser', () => ({
   requireUser: mockRequireUser,
 }))
 
+vi.mock('@/app/api/_utils/auth/verificationThrottle', () => ({
+  enforceVerificationSendThrottle: mockEnforceVerificationSendThrottle,
+}))
+
 vi.mock('@/lib/auth/emailVerification', () => ({
-  enforceEmailVerificationLimits: mockEnforceEmailVerificationLimits,
   getAppUrlFromRequest: mockGetAppUrlFromRequest,
   issueAndSendEmailVerification: mockIssueAndSendEmailVerification,
 }))
@@ -82,14 +87,33 @@ function makeRequest(body?: unknown) {
   })
 }
 
+function makeThrottleResponse() {
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      error: 'Too many requests. Please slow down.',
+      code: 'RATE_LIMITED',
+    }),
+    {
+      status: 429,
+      headers: {
+        'Content-Type': 'application/json',
+        'Retry-After': '60',
+      },
+    },
+  )
+}
+
 describe('app/api/auth/email/send/route', () => {
   beforeEach(() => {
     mockRequireUser.mockReset()
-    mockEnforceEmailVerificationLimits.mockReset()
+    mockEnforceVerificationSendThrottle.mockReset()
     mockGetAppUrlFromRequest.mockReset()
     mockIssueAndSendEmailVerification.mockReset()
     mockLogAuthEvent.mockReset()
     mockCaptureAuthException.mockReset()
+
+    mockEnforceVerificationSendThrottle.mockResolvedValue({ ok: true })
   })
 
   afterEach(() => {
@@ -111,6 +135,7 @@ describe('app/api/auth/email/send/route', () => {
     })
     expect(result).toBe(res)
     expect(result.status).toBe(401)
+    expect(mockEnforceVerificationSendThrottle).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -136,7 +161,7 @@ describe('app/api/auth/email/send/route', () => {
       isFullyVerified: false,
     })
 
-    expect(mockEnforceEmailVerificationLimits).not.toHaveBeenCalled()
+    expect(mockEnforceVerificationSendThrottle).not.toHaveBeenCalled()
     expect(mockIssueAndSendEmailVerification).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
@@ -160,7 +185,7 @@ describe('app/api/auth/email/send/route', () => {
       code: 'EMAIL_REQUIRED',
     })
 
-    expect(mockEnforceEmailVerificationLimits).not.toHaveBeenCalled()
+    expect(mockEnforceVerificationSendThrottle).not.toHaveBeenCalled()
     expect(mockIssueAndSendEmailVerification).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
@@ -183,7 +208,7 @@ describe('app/api/auth/email/send/route', () => {
       code: 'APP_URL_MISSING',
     })
 
-    expect(mockEnforceEmailVerificationLimits).not.toHaveBeenCalled()
+    expect(mockEnforceVerificationSendThrottle).not.toHaveBeenCalled()
     expect(mockIssueAndSendEmailVerification).not.toHaveBeenCalled()
 
     expect(mockLogAuthEvent).toHaveBeenCalledWith({
@@ -197,28 +222,30 @@ describe('app/api/auth/email/send/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns 429 and Retry-After when resend is rate limited', async () => {
+  it('returns the shared verification-send throttle response unchanged when resend is rate limited', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
     })
     mockGetAppUrlFromRequest.mockReturnValue('http://localhost:3000')
-    mockEnforceEmailVerificationLimits.mockResolvedValue({
+
+    const throttleResponse = makeThrottleResponse()
+
+    mockEnforceVerificationSendThrottle.mockResolvedValue({
       ok: false,
-      retryAfterSeconds: 60,
+      response: throttleResponse,
     })
 
     const result = await POST(makeRequest())
-    const body = await result.json()
 
+    expect(mockEnforceVerificationSendThrottle).toHaveBeenCalledWith({
+      userId: 'user_1',
+      phone: null,
+    })
+
+    expect(result).toBe(throttleResponse)
     expect(result.status).toBe(429)
     expect(result.headers.get('Retry-After')).toBe('60')
-    expect(body).toEqual({
-      ok: false,
-      error: 'Too many requests. Try again shortly.',
-      code: 'RATE_LIMITED',
-      retryAfterSeconds: 60,
-    })
 
     expect(mockIssueAndSendEmailVerification).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
@@ -233,10 +260,6 @@ describe('app/api/auth/email/send/route', () => {
       }),
     })
     mockGetAppUrlFromRequest.mockReturnValue('http://localhost:3000')
-    mockEnforceEmailVerificationLimits.mockResolvedValue({
-      ok: true,
-      retryAfterSeconds: 0,
-    })
     mockIssueAndSendEmailVerification.mockResolvedValue({
       id: 'evt_1',
       expiresAt: new Date('2026-04-09T09:00:00.000Z'),
@@ -255,7 +278,11 @@ describe('app/api/auth/email/send/route', () => {
       nextUrl: null,
     })
 
-    expect(mockEnforceEmailVerificationLimits).toHaveBeenCalledWith('user_1')
+    expect(mockEnforceVerificationSendThrottle).toHaveBeenCalledWith({
+      userId: 'user_1',
+      phone: null,
+    })
+
     expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith({
       userId: 'user_1',
       email: 'user@example.com',
@@ -276,10 +303,6 @@ describe('app/api/auth/email/send/route', () => {
       }),
     })
     mockGetAppUrlFromRequest.mockReturnValue('http://localhost:3000')
-    mockEnforceEmailVerificationLimits.mockResolvedValue({
-      ok: true,
-      retryAfterSeconds: 0,
-    })
     mockIssueAndSendEmailVerification.mockResolvedValue({
       id: 'evt_2',
       expiresAt: new Date('2026-04-09T09:00:00.000Z'),
@@ -304,6 +327,11 @@ describe('app/api/auth/email/send/route', () => {
       nextUrl: '/claim/tok_1',
     })
 
+    expect(mockEnforceVerificationSendThrottle).toHaveBeenCalledWith({
+      userId: 'user_1',
+      phone: null,
+    })
+
     expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith({
       userId: 'user_1',
       email: 'user@example.com',
@@ -322,10 +350,6 @@ describe('app/api/auth/email/send/route', () => {
       user: makeUser(),
     })
     mockGetAppUrlFromRequest.mockReturnValue('http://localhost:3000')
-    mockEnforceEmailVerificationLimits.mockResolvedValue({
-      ok: true,
-      retryAfterSeconds: 0,
-    })
     mockIssueAndSendEmailVerification.mockRejectedValue(
       new Error('Missing env var: POSTMARK_SERVER_TOKEN'),
     )
@@ -338,6 +362,11 @@ describe('app/api/auth/email/send/route', () => {
       ok: false,
       error: 'Email provider is not configured.',
       code: 'EMAIL_NOT_CONFIGURED',
+    })
+
+    expect(mockEnforceVerificationSendThrottle).toHaveBeenCalledWith({
+      userId: 'user_1',
+      phone: null,
     })
 
     expect(mockCaptureAuthException).toHaveBeenCalledWith({
@@ -357,10 +386,6 @@ describe('app/api/auth/email/send/route', () => {
       user: makeUser(),
     })
     mockGetAppUrlFromRequest.mockReturnValue('http://localhost:3000')
-    mockEnforceEmailVerificationLimits.mockResolvedValue({
-      ok: true,
-      retryAfterSeconds: 0,
-    })
     mockIssueAndSendEmailVerification.mockRejectedValue(
       new Error('Postmark timeout'),
     )
@@ -373,6 +398,11 @@ describe('app/api/auth/email/send/route', () => {
       ok: false,
       error: 'Could not send verification email.',
       code: 'EMAIL_SEND_FAILED',
+    })
+
+    expect(mockEnforceVerificationSendThrottle).toHaveBeenCalledWith({
+      userId: 'user_1',
+      phone: null,
     })
 
     expect(mockCaptureAuthException).toHaveBeenCalledWith({

@@ -4,8 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
 const mockRequireUser = vi.hoisted(() => vi.fn())
-const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
-const mockPhoneRateLimitIdentity = vi.hoisted(() => vi.fn())
+const mockEnforceVerificationSendThrottle = vi.hoisted(() => vi.fn())
 const mockIsRuntimeFlagEnabled = vi.hoisted(() => vi.fn())
 const mockValidateSmsDestinationCountry = vi.hoisted(() => vi.fn())
 const mockStartTwilioVerifyPhoneVerification = vi.hoisted(() => vi.fn())
@@ -17,17 +16,9 @@ vi.mock('@/app/api/_utils/auth/requireUser', () => ({
   requireUser: mockRequireUser,
 }))
 
-vi.mock('@/app/api/_utils', async () => {
-  const actual = await vi.importActual<typeof import('@/app/api/_utils')>(
-    '@/app/api/_utils',
-  )
-
-  return {
-    ...actual,
-    enforceRateLimit: mockEnforceRateLimit,
-    phoneRateLimitIdentity: mockPhoneRateLimitIdentity,
-  }
-})
+vi.mock('@/app/api/_utils/auth/verificationThrottle', () => ({
+  enforceVerificationSendThrottle: mockEnforceVerificationSendThrottle,
+}))
 
 vi.mock('@/lib/runtimeFlags', () => ({
   isRuntimeFlagEnabled: mockIsRuntimeFlagEnabled,
@@ -107,8 +98,7 @@ function makeRequest() {
 describe('app/api/auth/phone/send/route', () => {
   beforeEach(() => {
     mockRequireUser.mockReset()
-    mockEnforceRateLimit.mockReset()
-    mockPhoneRateLimitIdentity.mockReset()
+    mockEnforceVerificationSendThrottle.mockReset()
     mockIsRuntimeFlagEnabled.mockReset()
     mockValidateSmsDestinationCountry.mockReset()
     mockStartTwilioVerifyPhoneVerification.mockReset()
@@ -116,11 +106,7 @@ describe('app/api/auth/phone/send/route', () => {
     mockCaptureAuthException.mockReset()
 
     mockIsRuntimeFlagEnabled.mockResolvedValue(false)
-    mockPhoneRateLimitIdentity.mockImplementation((phone: string) => ({
-      kind: 'phone',
-      id: phone,
-    }))
-    mockEnforceRateLimit.mockResolvedValue(null)
+    mockEnforceVerificationSendThrottle.mockResolvedValue({ ok: true })
     mockValidateSmsDestinationCountry.mockReturnValue({
       ok: true,
       phone: '+15551234567',
@@ -152,6 +138,7 @@ describe('app/api/auth/phone/send/route', () => {
     })
     expect(result).toBe(res)
     expect(result.status).toBe(401)
+    expect(mockEnforceVerificationSendThrottle).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
@@ -179,6 +166,7 @@ describe('app/api/auth/phone/send/route', () => {
 
     expect(mockIsRuntimeFlagEnabled).not.toHaveBeenCalled()
     expect(mockValidateSmsDestinationCountry).not.toHaveBeenCalled()
+    expect(mockEnforceVerificationSendThrottle).not.toHaveBeenCalled()
     expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -203,6 +191,7 @@ describe('app/api/auth/phone/send/route', () => {
 
     expect(mockIsRuntimeFlagEnabled).not.toHaveBeenCalled()
     expect(mockValidateSmsDestinationCountry).not.toHaveBeenCalled()
+    expect(mockEnforceVerificationSendThrottle).not.toHaveBeenCalled()
     expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -229,7 +218,7 @@ describe('app/api/auth/phone/send/route', () => {
 
     expect(mockIsRuntimeFlagEnabled).toHaveBeenCalledWith('sms_disabled')
     expect(mockValidateSmsDestinationCountry).not.toHaveBeenCalled()
-    expect(mockEnforceRateLimit).not.toHaveBeenCalled()
+    expect(mockEnforceVerificationSendThrottle).not.toHaveBeenCalled()
     expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
@@ -264,12 +253,12 @@ describe('app/api/auth/phone/send/route', () => {
     expect(mockValidateSmsDestinationCountry).toHaveBeenCalledWith(
       '+442079460123',
     )
-    expect(mockEnforceRateLimit).not.toHaveBeenCalled()
+    expect(mockEnforceVerificationSendThrottle).not.toHaveBeenCalled()
     expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('returns the shared per-phone quota response unchanged when hourly SMS quota blocks resend', async () => {
+  it('returns the shared verification-send throttle response unchanged when throttle blocks resend', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser(),
@@ -277,9 +266,10 @@ describe('app/api/auth/phone/send/route', () => {
 
     const quotaRes = new Response(null, { status: 429 })
 
-    mockEnforceRateLimit
-      .mockResolvedValueOnce(quotaRes)
-      .mockResolvedValueOnce(null)
+    mockEnforceVerificationSendThrottle.mockResolvedValue({
+      ok: false,
+      response: quotaRes,
+    })
 
     const result = await POST(makeRequest())
 
@@ -287,44 +277,10 @@ describe('app/api/auth/phone/send/route', () => {
     expect(mockValidateSmsDestinationCountry).toHaveBeenCalledWith(
       '+15551234567',
     )
-    expect(mockPhoneRateLimitIdentity).toHaveBeenCalledWith('+15551234567')
-    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
-      bucket: 'auth:sms-phone-hour',
-      identity: { kind: 'phone', id: '+15551234567' },
-    })
 
-    expect(result).toBe(quotaRes)
-    expect(result.status).toBe(429)
-    expect(mockStartTwilioVerifyPhoneVerification).not.toHaveBeenCalled()
-    expect(mockCaptureAuthException).not.toHaveBeenCalled()
-  })
-
-  it('returns the shared per-phone quota response unchanged when daily SMS quota blocks resend', async () => {
-    mockRequireUser.mockResolvedValue({
-      ok: true,
-      user: makeUser(),
-    })
-
-    const quotaRes = new Response(null, { status: 429 })
-
-    mockEnforceRateLimit
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(quotaRes)
-
-    const result = await POST(makeRequest())
-
-    expect(mockIsRuntimeFlagEnabled).toHaveBeenCalledWith('sms_disabled')
-    expect(mockValidateSmsDestinationCountry).toHaveBeenCalledWith(
-      '+15551234567',
-    )
-    expect(mockPhoneRateLimitIdentity).toHaveBeenCalledWith('+15551234567')
-    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
-      bucket: 'auth:sms-phone-hour',
-      identity: { kind: 'phone', id: '+15551234567' },
-    })
-    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(2, {
-      bucket: 'auth:sms-phone-day',
-      identity: { kind: 'phone', id: '+15551234567' },
+    expect(mockEnforceVerificationSendThrottle).toHaveBeenCalledWith({
+      userId: 'user_1',
+      phone: '+15551234567',
     })
 
     expect(result).toBe(quotaRes)
@@ -359,15 +315,12 @@ describe('app/api/auth/phone/send/route', () => {
     expect(mockValidateSmsDestinationCountry).toHaveBeenCalledWith(
       '+15551234567',
     )
-    expect(mockPhoneRateLimitIdentity).toHaveBeenCalledWith('+15551234567')
-    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
-      bucket: 'auth:sms-phone-hour',
-      identity: { kind: 'phone', id: '+15551234567' },
+
+    expect(mockEnforceVerificationSendThrottle).toHaveBeenCalledWith({
+      userId: 'user_1',
+      phone: '+15551234567',
     })
-    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(2, {
-      bucket: 'auth:sms-phone-day',
-      identity: { kind: 'phone', id: '+15551234567' },
-    })
+
     expect(mockStartTwilioVerifyPhoneVerification).toHaveBeenCalledWith({
       to: '+15551234567',
     })
@@ -411,6 +364,11 @@ describe('app/api/auth/phone/send/route', () => {
       code: 'TWILIO_VERIFY_NOT_CONFIGURED',
     })
 
+    expect(mockEnforceVerificationSendThrottle).toHaveBeenCalledWith({
+      userId: 'user_1',
+      phone: '+15551234567',
+    })
+
     expect(mockStartTwilioVerifyPhoneVerification).toHaveBeenCalledWith({
       to: '+15551234567',
     })
@@ -452,6 +410,11 @@ describe('app/api/auth/phone/send/route', () => {
       ok: false,
       error: 'Could not send verification code. Please try again.',
       code: 'TWILIO_VERIFY_SEND_FAILED',
+    })
+
+    expect(mockEnforceVerificationSendThrottle).toHaveBeenCalledWith({
+      userId: 'user_1',
+      phone: '+15551234567',
     })
 
     expect(mockStartTwilioVerifyPhoneVerification).toHaveBeenCalledWith({

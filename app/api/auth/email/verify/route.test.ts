@@ -152,6 +152,7 @@ describe('app/api/auth/email/verify/route', () => {
     expect(mockPrisma.emailVerificationToken.findUnique).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+    expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
   })
 
   it('returns 400 when token is missing', async () => {
@@ -171,6 +172,7 @@ describe('app/api/auth/email/verify/route', () => {
     expect(mockPrisma.emailVerificationToken.findUnique).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+    expect(mockEnforceVerificationVerifyThrottle).not.toHaveBeenCalled()
   })
 
   it('returns 429 when verify throttling blocks the request', async () => {
@@ -200,7 +202,17 @@ describe('app/api/auth/email/verify/route', () => {
       subjectKey: 'evt_1',
     })
     expect(result).toBe(throttleResponse)
+    expect(result.status).toBe(429)
+
     expect(mockPrisma.emailVerificationToken.findUnique).not.toHaveBeenCalled()
+    expect(mockSha256Hex).not.toHaveBeenCalled()
+    expect(mockTimingSafeEqualHex).not.toHaveBeenCalled()
+    expect(mockPrisma.emailVerificationToken.update).not.toHaveBeenCalled()
+    expect(mockPrisma.emailVerificationToken.updateMany).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+    expect(mockCreateVerificationToken).not.toHaveBeenCalled()
+    expect(mockGetCurrentUser).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })

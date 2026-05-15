@@ -761,6 +761,39 @@ describe('app/api/auth/register/route', () => {
     },
   )
 
+    it('returns the shared daily per-phone quota response unchanged when SMS daily quota blocks signup', async () => {
+    const quotaRes = new Response(null, { status: 429 })
+
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(quotaRes)
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+
+    expect(mockPhoneRateLimitIdentity).toHaveBeenCalledWith('+15551234567')
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'auth:register:verified',
+      identity: { kind: 'ip', id: '198.51.100.10' },
+    })
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(2, {
+      bucket: 'auth:sms-phone-hour',
+      identity: { kind: 'phone', id: '+15551234567' },
+    })
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(3, {
+      bucket: 'auth:sms-phone-day',
+      identity: { kind: 'phone', id: '+15551234567' },
+    })
+
+    expect(result).toBe(quotaRes)
+    expect(result.status).toBe(429)
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockPrisma.professionalProfile.findFirst).not.toHaveBeenCalled()
+  })
+  
   it('allows a non-reserved pro handle when otherwise valid', async () => {
     const tx = {
       user: {

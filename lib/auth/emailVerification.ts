@@ -7,8 +7,6 @@ import { logAuthEvent } from '@/lib/observability/authEvents'
 const POSTMARK_SEND_URL = 'https://api.postmarkapp.com/email'
 
 export const EMAIL_VERIFICATION_EXPIRY_MS = 1000 * 60 * 60 * 24 // 24 hours
-export const EMAIL_VERIFICATION_COOLDOWN_SECONDS = 60
-export const EMAIL_VERIFICATION_HOURLY_CAP = 5
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -103,49 +101,6 @@ export function buildVerifyEmailUrl(args: {
   )
 
   return url.toString()
-}
-
-export async function enforceEmailVerificationLimits(
-  userId: string,
-  tx?: Prisma.TransactionClient,
-) {
-  const db = getDb(tx)
-  const now = Date.now()
-  const oneMinuteAgo = new Date(
-    now - EMAIL_VERIFICATION_COOLDOWN_SECONDS * 1000,
-  )
-  const oneHourAgo = new Date(now - 60 * 60 * 1000)
-
-  const recent = await db.emailVerificationToken.findFirst({
-    where: {
-      userId,
-      purpose: AuthVerificationPurpose.EMAIL_VERIFY,
-      createdAt: { gte: oneMinuteAgo },
-    },
-    select: { id: true },
-    orderBy: { createdAt: 'desc' },
-  })
-
-  if (recent) {
-    return {
-      ok: false as const,
-      retryAfterSeconds: EMAIL_VERIFICATION_COOLDOWN_SECONDS,
-    }
-  }
-
-  const hourlyCount = await db.emailVerificationToken.count({
-    where: {
-      userId,
-      purpose: AuthVerificationPurpose.EMAIL_VERIFY,
-      createdAt: { gte: oneHourAgo },
-    },
-  })
-
-  if (hourlyCount >= EMAIL_VERIFICATION_HOURLY_CAP) {
-    return { ok: false as const, retryAfterSeconds: 60 * 10 }
-  }
-
-  return { ok: true as const, retryAfterSeconds: 0 }
 }
 
 export async function createEmailVerificationToken(args: {

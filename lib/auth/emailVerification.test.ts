@@ -2,8 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockPrisma = vi.hoisted(() => ({
   emailVerificationToken: {
-    findFirst: vi.fn(),
-    count: vi.fn(),
     updateMany: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
@@ -24,12 +22,10 @@ vi.mock('@/lib/observability/authEvents', () => ({
 import {
   buildVerifyEmailUrl,
   createEmailVerificationToken,
-  enforceEmailVerificationLimits,
   getAppUrlFromRequest,
   issueAndSendEmailVerification,
   markEmailVerificationTokenUsed,
   sendVerificationEmail,
-  EMAIL_VERIFICATION_COOLDOWN_SECONDS,
 } from './emailVerification'
 
 const ORIGINAL_ENV = { ...process.env }
@@ -50,8 +46,6 @@ describe('lib/auth/emailVerification', () => {
 
     vi.stubGlobal('fetch', mockFetch)
 
-    mockPrisma.emailVerificationToken.findFirst.mockResolvedValue(null)
-    mockPrisma.emailVerificationToken.count.mockResolvedValue(0)
     mockPrisma.emailVerificationToken.updateMany.mockResolvedValue({ count: 0 })
     mockPrisma.emailVerificationToken.create.mockResolvedValue({
       id: 'evt_1',
@@ -122,33 +116,6 @@ describe('lib/auth/emailVerification', () => {
     expect(url).toBe(
       'https://app.tovis.app/verify-email?verificationId=evt_123&token=token_abc&intent=complete-signup',
     )
-  })
-
-  it('returns cooldown limits when a recent verification token already exists', async () => {
-    mockPrisma.emailVerificationToken.findFirst.mockResolvedValue({
-      id: 'evt_recent',
-    })
-
-    const result = await enforceEmailVerificationLimits('user_1')
-
-    expect(result).toEqual({
-      ok: false,
-      retryAfterSeconds: EMAIL_VERIFICATION_COOLDOWN_SECONDS,
-    })
-
-    expect(mockPrisma.emailVerificationToken.count).not.toHaveBeenCalled()
-  })
-
-  it('returns hourly-cap limits when too many tokens were issued recently', async () => {
-    mockPrisma.emailVerificationToken.findFirst.mockResolvedValue(null)
-    mockPrisma.emailVerificationToken.count.mockResolvedValue(5)
-
-    const result = await enforceEmailVerificationLimits('user_1')
-
-    expect(result).toEqual({
-      ok: false,
-      retryAfterSeconds: 600,
-    })
   })
 
   it('creates a fresh token and invalidates prior unused email verification tokens', async () => {

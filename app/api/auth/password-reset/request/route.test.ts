@@ -119,6 +119,12 @@ describe('app/api/auth/password-reset/request/route', () => {
 
     expect(result).toBe(rateLimitRes)
     expect(result.status).toBe(429)
+
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
+    expect(mockGetPasswordResetAppUrlFromRequest).not.toHaveBeenCalled()
+    expect(mockGetPasswordResetRequestIp).not.toHaveBeenCalled()
+    expect(mockIssueAndSendPasswordReset).not.toHaveBeenCalled()
+
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
