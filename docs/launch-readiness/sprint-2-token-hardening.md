@@ -2,19 +2,21 @@
 
 ## Status
 
-In progress
+Complete
 
 ## Goal
 
-Harden public/token-based flows so active aftercare and claim access cannot regress to unsafe legacy behavior.
+Harden public/token-based flows so active aftercare, rebook, claim-link, and NFC/tap-code paths cannot regress to unsafe legacy behavior.
 
-Sprint 2 focuses on:
+Sprint 2 focused on:
 
 - aftercare secure-link access
 - client rebook idempotency
 - aftercare `publicToken` deprecation guardrails
 - client claim-link behavior
 - claim-page state handling
+- NFC tap intent behavior
+- short-code redirect behavior
 - documenting remaining raw-token migration risk
 
 ## Files changed
@@ -31,6 +33,11 @@ Sprint 2 focuses on:
 - `lib/clients/clientClaimLinks.test.ts`
 - `lib/clients/clientClaim.test.ts`
 - `app/claim/[token]/page.test.tsx`
+
+### NFC / tap-code hardening
+
+- `app/t/[cardId]/page.test.tsx`
+- `app/c/[code]/page.test.tsx`
 
 ## Acceptance criteria
 
@@ -51,6 +58,14 @@ Sprint 2 focuses on:
 - [x] Claim mutation prevents wrong-client claim.
 - [x] Claim mutation handles revoked, already-claimed, missing-client, mismatch, conflict, and race states.
 - [x] Claim page renders/redirects correctly for missing, revoked, already-claimed, mismatch, unverified, non-client, ready, and conflict states.
+- [x] NFC tap page rejects missing/inactive cards.
+- [x] NFC tap page creates tap intents with 30-minute expiry.
+- [x] NFC tap page stores `userId` when a user is present.
+- [x] NFC tap page derives claim, Pro booking, and salon white-label intents.
+- [x] NFC tap page rejects unsafe external/protocol-relative `next` overrides.
+- [x] NFC short-code page normalizes codes before lookup.
+- [x] NFC short-code page rejects missing/inactive cards.
+- [x] NFC short-code page redirects active cards to `/t/[cardId]`.
 
 ## Known remaining risk
 
@@ -85,6 +100,19 @@ Future hardening:
 
 - migrate claim links to hashed token storage or a `ClientActionToken`-style model
 - avoid raw token lookup in long-term production design
+- consider expiry/rotation if claim links are long-lived
+
+### NFC card IDs and short codes
+
+NFC tap and short-code behavior is now covered by page tests.
+
+Future hardening:
+
+- confirm card IDs are non-enumerable
+- confirm short codes are high entropy or rate-limited
+- add rate limiting around `/c/[code]` and `/t/[cardId]`
+- consider audit events for tap intent creation
+- review whether safe local `next` overrides should be restricted to an allowlist
 
 ## Test commands
 
@@ -95,7 +123,9 @@ pnpm test -- \
   app/api/client/rebook/[token]/route.test.ts \
   lib/clients/clientClaimLinks.test.ts \
   lib/clients/clientClaim.test.ts \
-  app/claim/[token]/page.test.tsx
+  app/claim/[token]/page.test.tsx \
+  app/t/[cardId]/page.test.tsx \
+  app/c/[code]/page.test.tsx
 
 pnpm typecheck
 pnpm test
