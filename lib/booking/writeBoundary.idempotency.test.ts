@@ -142,7 +142,7 @@ function makeClientCheckoutBooking(
     sessionStep: overrides?.sessionStep ?? SessionStep.AFTER_PHOTOS,
     finishedAt: overrides?.finishedAt ?? FINISHED_AT,
     subtotalSnapshot:
-      overrides?.subtotalSnapshot ?? new Prisma.Decimal(100),
+      overrides?.subtotalSnapshot ?? new Prisma.Decimal(120),
     serviceSubtotalSnapshot:
       overrides?.serviceSubtotalSnapshot ?? new Prisma.Decimal(100),
     productSubtotalSnapshot:
@@ -498,7 +498,7 @@ describe('lib/booking/writeBoundary idempotency', () => {
         selectedPaymentMethod: PaymentMethod.CASH,
         serviceSubtotalSnapshot: new Prisma.Decimal(100),
         productSubtotalSnapshot: new Prisma.Decimal(20),
-        subtotalSnapshot: new Prisma.Decimal(100),
+        subtotalSnapshot: new Prisma.Decimal(120),
         tipAmount: new Prisma.Decimal(15),
         taxAmount: new Prisma.Decimal(0),
         discountAmount: new Prisma.Decimal(0),

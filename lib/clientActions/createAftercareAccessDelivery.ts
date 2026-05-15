@@ -6,7 +6,6 @@ import {
   Prisma,
 } from '@prisma/client'
 
-import { prisma } from '@/lib/prisma'
 import {
   generateClientActionToken,
   hashClientActionToken,
@@ -23,9 +22,9 @@ import type {
   ClientActionResendMode,
 } from './types'
 
-type DbClient = Prisma.TransactionClient | typeof prisma
-
 export type CreateAftercareAccessDeliveryArgs = {
+  tx: Prisma.TransactionClient
+
   professionalId: string
   clientId: string
   bookingId: string
@@ -42,8 +41,6 @@ export type CreateAftercareAccessDeliveryArgs = {
 
   resendMode?: ClientActionResendMode
   expiresAtOverride?: Date | null
-
-  tx?: Prisma.TransactionClient
 }
 
 export type CreateAftercareAccessDeliveryResult = {
@@ -53,14 +50,11 @@ export type CreateAftercareAccessDeliveryResult = {
   dispatch: Awaited<ReturnType<typeof enqueueClientActionDispatch>>
 }
 
-function getDb(tx?: Prisma.TransactionClient): DbClient {
-  return tx ?? prisma
-}
-
 function normalizeOptionalString(
   value: string | null | undefined,
 ): string | null {
   if (typeof value !== 'string') return null
+
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
 }
@@ -76,6 +70,7 @@ function toNullableJsonCreateInput(
 ): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
   if (value === undefined) return undefined
   if (value === null) return Prisma.JsonNull
+
   return value
 }
 
@@ -90,7 +85,11 @@ function buildAftercareBody(): string {
 function buildAftercareMetadata(
   args: Pick<
     CreateAftercareAccessDeliveryArgs,
-    'professionalId' | 'clientId' | 'bookingId' | 'aftercareId' | 'aftercareVersion'
+    | 'professionalId'
+    | 'clientId'
+    | 'bookingId'
+    | 'aftercareId'
+    | 'aftercareVersion'
   >,
   plan: ClientActionOrchestrationPlan,
 ): Prisma.InputJsonObject {
@@ -159,7 +158,7 @@ function buildOrchestrationPlan(
 }
 
 async function revokeOutstandingAftercareTokens(args: {
-  db: DbClient
+  tx: Prisma.TransactionClient
   plan: ClientActionOrchestrationPlan
   bookingId: string
   aftercareId: string
@@ -168,7 +167,7 @@ async function revokeOutstandingAftercareTokens(args: {
     return
   }
 
-  await args.db.clientActionToken.updateMany({
+  await args.tx.clientActionToken.updateMany({
     where: {
       kind: ClientActionTokenKind.AFTERCARE_ACCESS,
       bookingId: args.bookingId,
@@ -185,7 +184,7 @@ async function revokeOutstandingAftercareTokens(args: {
 }
 
 async function issueAftercareAccessToken(args: {
-  db: DbClient
+  tx: Prisma.TransactionClient
   plan: ClientActionOrchestrationPlan
   bookingId: string
   aftercareId: string
@@ -208,7 +207,7 @@ async function issueAftercareAccessToken(args: {
   const rawToken = generateClientActionToken()
   const tokenHash = hashClientActionToken(rawToken)
 
-  const created = await args.db.clientActionToken.create({
+  const created = await args.tx.clientActionToken.create({
     data: {
       kind: ClientActionTokenKind.AFTERCARE_ACCESS,
       tokenHash,
@@ -245,19 +244,18 @@ async function issueAftercareAccessToken(args: {
 export async function createAftercareAccessDelivery(
   args: CreateAftercareAccessDeliveryArgs,
 ): Promise<CreateAftercareAccessDeliveryResult> {
-  const db = getDb(args.tx)
   const plan = buildOrchestrationPlan(args)
   const metadata = buildAftercareMetadata(args, plan)
 
   await revokeOutstandingAftercareTokens({
-    db,
+    tx: args.tx,
     plan,
     bookingId: args.bookingId,
     aftercareId: args.aftercareId,
   })
 
   const token = await issueAftercareAccessToken({
-    db,
+    tx: args.tx,
     plan,
     bookingId: args.bookingId,
     aftercareId: args.aftercareId,

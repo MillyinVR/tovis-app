@@ -105,7 +105,7 @@ function makeClientCheckoutBooking(
     subtotalSnapshot:
       overrides && 'subtotalSnapshot' in overrides
         ? overrides.subtotalSnapshot
-        : new Prisma.Decimal(100),
+        : new Prisma.Decimal(120),
     serviceSubtotalSnapshot:
       overrides && 'serviceSubtotalSnapshot' in overrides
         ? overrides.serviceSubtotalSnapshot
@@ -204,7 +204,7 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
       selectedPaymentMethod: PaymentMethod.CASH,
       serviceSubtotalSnapshot: new Prisma.Decimal(100),
       productSubtotalSnapshot: new Prisma.Decimal(20),
-      subtotalSnapshot: new Prisma.Decimal(100),
+      subtotalSnapshot: new Prisma.Decimal(120),
       tipAmount: new Prisma.Decimal(15),
       taxAmount: new Prisma.Decimal(0),
       discountAmount: new Prisma.Decimal(0),
@@ -236,7 +236,7 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
 
     expect(updateArgs.data.serviceSubtotalSnapshot.toString()).toBe('100')
     expect(updateArgs.data.productSubtotalSnapshot.toString()).toBe('20')
-    expect(updateArgs.data.subtotalSnapshot.toString()).toBe('100')
+    expect(updateArgs.data.subtotalSnapshot.toString()).toBe('120')
     expect(updateArgs.data.tipAmount.toString()).toBe('15')
     expect(updateArgs.data.taxAmount.toString()).toBe('0')
     expect(updateArgs.data.discountAmount.toString()).toBe('0')
@@ -252,7 +252,7 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
         selectedPaymentMethod: PaymentMethod.CASH,
         serviceSubtotalSnapshot: new Prisma.Decimal(100),
         productSubtotalSnapshot: new Prisma.Decimal(20),
-        subtotalSnapshot: new Prisma.Decimal(100),
+        subtotalSnapshot: new Prisma.Decimal(120),
         tipAmount: new Prisma.Decimal(15),
         taxAmount: new Prisma.Decimal(0),
         discountAmount: new Prisma.Decimal(0),
@@ -288,7 +288,7 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
         selectedPaymentMethod: PaymentMethod.ZELLE,
         serviceSubtotalSnapshot: new Prisma.Decimal(100),
         productSubtotalSnapshot: new Prisma.Decimal(20),
-        subtotalSnapshot: new Prisma.Decimal(100),
+        subtotalSnapshot: new Prisma.Decimal(120),
         tipAmount: new Prisma.Decimal(10),
         taxAmount: new Prisma.Decimal(0),
         discountAmount: new Prisma.Decimal(0),
@@ -367,7 +367,7 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
         selectedPaymentMethod: PaymentMethod.ZELLE,
         serviceSubtotalSnapshot: new Prisma.Decimal(100),
         productSubtotalSnapshot: new Prisma.Decimal(20),
-        subtotalSnapshot: new Prisma.Decimal(100),
+        subtotalSnapshot: new Prisma.Decimal(120),
         tipAmount: new Prisma.Decimal(10),
         taxAmount: new Prisma.Decimal(0),
         discountAmount: new Prisma.Decimal(0),
@@ -402,7 +402,7 @@ describe('lib/booking/writeBoundary updateClientBookingCheckout', () => {
       selectedPaymentMethod: PaymentMethod.ZELLE,
       serviceSubtotalSnapshot: new Prisma.Decimal(100),
       productSubtotalSnapshot: new Prisma.Decimal(20),
-      subtotalSnapshot: new Prisma.Decimal(100),
+      subtotalSnapshot: new Prisma.Decimal(120),
       tipAmount: new Prisma.Decimal(10),
       taxAmount: new Prisma.Decimal(0),
       discountAmount: new Prisma.Decimal(0),

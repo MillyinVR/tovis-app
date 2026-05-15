@@ -1829,6 +1829,20 @@ function buildCheckoutAuditSnapshot(args: {
   }
 }
 
+  function throwAftercareDeliveryFailed(overrides?: {
+    message?: string
+    userMessage?: string
+  }): never {
+    throw bookingError('AFTERCARE_DELIVERY_FAILED', {
+      message:
+        overrides?.message ??
+        'Aftercare access delivery could not be queued.',
+      userMessage:
+        overrides?.userMessage ??
+        'We could not send aftercare to the client. Please try again.',
+    })
+  }
+
 async function createCheckoutAuditLogs(args: {
   tx: Prisma.TransactionClient
   bookingId: string
@@ -2027,6 +2041,7 @@ function resolveAftercareRecipientTimeZone(
 }
 
 async function maybeCreateAftercareAccessDeliveryInBoundary(args: {
+  tx: Prisma.TransactionClient
   booking: AftercareUpsertBookingRecord
   aftercareId: string
   aftercareVersion: number
@@ -2053,7 +2068,7 @@ async function maybeCreateAftercareAccessDeliveryInBoundary(args: {
 
   if (!recipientEmail && !recipientPhone) {
     console.error(
-      'writeBoundary upsertBookingAftercare delivery skipped: no client destination',
+      'writeBoundary upsertBookingAftercare delivery failed: no client destination',
       {
         bookingId: args.booking.id,
         professionalId: args.booking.professionalId,
@@ -2062,15 +2077,17 @@ async function maybeCreateAftercareAccessDeliveryInBoundary(args: {
       },
     )
 
-    return {
-      attempted: true,
-      queued: false,
-      href: null,
-    }
+    return throwAftercareDeliveryFailed({
+      message:
+        'Aftercare access delivery could not be queued because the client has no email or phone.',
+      userMessage:
+        'This client needs an email or phone number before aftercare can be sent.',
+    })
   }
 
   try {
     const delivery = await createAftercareAccessDelivery({
+      tx: args.tx,
       professionalId: args.booking.professionalId,
       clientId: args.booking.clientId,
       bookingId: args.booking.id,
@@ -2105,11 +2122,7 @@ async function maybeCreateAftercareAccessDeliveryInBoundary(args: {
       },
     )
 
-    return {
-      attempted: true,
-      queued: false,
-      href: null,
-    }
+    return throwAftercareDeliveryFailed()
   }
 }
 
@@ -2876,7 +2889,7 @@ async function buildBookingCheckoutRollupUpdate(args: {
   const discountAmount =
     args.nextDiscountAmount ?? decimalOrZero(booking.discountAmount)
 
-  const subtotalSnapshot = serviceSubtotal.add(productSubtotal)
+  const subtotal = serviceSubtotal.add(productSubtotal)
 
   const totalAmount = computeCheckoutTotal({
     serviceSubtotal,
@@ -2889,7 +2902,7 @@ async function buildBookingCheckoutRollupUpdate(args: {
   return {
     serviceSubtotalSnapshot: serviceSubtotal,
     productSubtotalSnapshot: productSubtotal,
-    subtotalSnapshot: serviceSubtotal,
+    subtotalSnapshot: subtotal,
     tipAmount,
     taxAmount,
     discountAmount,
@@ -9006,6 +9019,38 @@ async function performLockedUpsertBookingAftercare(args: {
   requestId?: string | null
   idempotencyKey?: string | null
 }): Promise<UpsertBookingAftercareResult> {
+
+  assertValidRecommendedProducts(args.recommendedProducts)
+
+  const internalProductIds = Array.from(
+    new Set(
+      args.recommendedProducts
+        .map((product) => product.productId)
+        .filter(
+          (value): value is string =>
+            typeof value === 'string' && value.trim().length > 0,
+        ),
+    ),
+  )
+
+  if (internalProductIds.length > 0) {
+    const validProducts = await args.tx.product.findMany({
+      where: {
+        id: { in: internalProductIds },
+        isActive: true,
+      },
+      select: { id: true },
+      take: internalProductIds.length,
+    })
+
+    if (validProducts.length !== internalProductIds.length) {
+      throw bookingError('FORBIDDEN', {
+        message: 'One or more recommended products are invalid.',
+        userMessage: 'One or more selected products are no longer available.',
+      })
+    }
+  }
+
   const now = args.now
   const booking: AftercareUpsertBookingRecord | null =
     await args.tx.booking.findUnique({
@@ -9150,8 +9195,13 @@ if (
       rebookedFor: args.rebookedFor,
       rebookWindowStart: args.rebookWindowStart,
       rebookWindowEnd: args.rebookWindowEnd,
-      draftSavedAt: args.sendToClient ? null : now,
-      sentToClientAt: args.sendToClient ? now : null,
+
+      // Important:
+      // Do not mark sent here. Sending is only true after the access delivery
+      // has been created successfully below.
+      draftSavedAt: now,
+      sentToClientAt: null,
+
       lastEditedAt: now,
       version: 1,
     },
@@ -9161,12 +9211,14 @@ if (
       rebookedFor: args.rebookedFor,
       rebookWindowStart: args.rebookWindowStart,
       rebookWindowEnd: args.rebookWindowEnd,
+
+      // Important:
+      // Preserve existing sent state, but do not create a new sent state yet.
       draftSavedAt: args.sendToClient
         ? booking.aftercareSummary?.draftSavedAt ?? now
         : now,
-      sentToClientAt: args.sendToClient
-        ? booking.aftercareSummary?.sentToClientAt ?? now
-        : booking.aftercareSummary?.sentToClientAt ?? null,
+      sentToClientAt: booking.aftercareSummary?.sentToClientAt ?? null,
+
       lastEditedAt: now,
       version: nextVersion,
     },
@@ -9183,70 +9235,44 @@ if (
     },
   })
 
-  const aftercareAccessDelivery =
-    await maybeCreateAftercareAccessDeliveryInBoundary({
-      booking,
-      aftercareId: aftercare.id,
-      aftercareVersion: aftercare.version,
-      actorUserId: args.actorUserId,
-      shouldAttempt: shouldQueueAftercareAccessDelivery,
-    })
+const aftercareAccessDelivery =
+  await maybeCreateAftercareAccessDeliveryInBoundary({
+    tx: args.tx,
+    booking,
+    aftercareId: aftercare.id,
+    aftercareVersion: aftercare.version,
+    actorUserId: args.actorUserId,
+    shouldAttempt: shouldQueueAftercareAccessDelivery,
+  })
+
+const aftercareSentAt =
+  args.sendToClient && !aftercare.sentToClientAt ? now : aftercare.sentToClientAt
+
+const finalizedAftercare =
+  args.sendToClient && !aftercare.sentToClientAt
+    ? await args.tx.aftercareSummary.update({
+        where: { id: aftercare.id },
+        data: {
+          sentToClientAt: aftercareSentAt,
+          draftSavedAt: null,
+        },
+        select: {
+          id: true,
+          rebookMode: true,
+          rebookedFor: true,
+          rebookWindowStart: true,
+          rebookWindowEnd: true,
+          draftSavedAt: true,
+          sentToClientAt: true,
+          lastEditedAt: true,
+          version: true,
+        },
+      })
+    : aftercare
 
   await args.tx.productRecommendation.deleteMany({
     where: { aftercareSummaryId: aftercare.id },
   })
-
-  for (const product of args.recommendedProducts) {
-    const hasInternal = typeof product.productId === 'string' && product.productId.trim().length > 0
-    const hasExternalName =
-      typeof product.externalName === 'string' && product.externalName.trim().length > 0
-    const hasExternalUrl =
-      typeof product.externalUrl === 'string' && product.externalUrl.trim().length > 0
-
-    if (hasInternal && (hasExternalName || hasExternalUrl)) {
-      throw bookingError('FORBIDDEN', {
-        message:
-          'Recommended product cannot contain both productId and external link fields.',
-        userMessage:
-          'Pick either an internal product or an external link for each recommendation.',
-      })
-    }
-
-    if (!hasInternal && (!hasExternalName || !hasExternalUrl)) {
-      throw bookingError('FORBIDDEN', {
-        message:
-          'External recommended products require both externalName and externalUrl.',
-        userMessage:
-          'External recommendations need both a name and a link.',
-      })
-    }
-  }
-
-    const internalProductIds = Array.from(
-    new Set(
-      args.recommendedProducts
-        .map((product) => product.productId)
-        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
-    ),
-  )
-
-  if (internalProductIds.length > 0) {
-  const validProducts = await args.tx.product.findMany({
-    where: {
-      id: { in: internalProductIds },
-      isActive: true,
-    },
-    select: { id: true },
-    take: internalProductIds.length,
-  })
-
-  if (validProducts.length !== internalProductIds.length) {
-    throw bookingError('FORBIDDEN', {
-      message: 'One or more recommended products are invalid.',
-      userMessage: 'One or more selected products are no longer available.',
-    })
-  }
-}
 
   if (args.recommendedProducts.length > 0) {
     await args.tx.productRecommendation.createMany({
@@ -9274,7 +9300,7 @@ await createUpdateClientNotification({
   tx: args.tx,
   clientId: booking.clientId,
   bookingId: booking.id,
-  aftercareId: aftercare.id,
+  aftercareId: finalizedAftercare.id,
   eventKey: NotificationEventKey.AFTERCARE_READY,
   title: notifTitle,
   body: bodyPreview,
@@ -9282,7 +9308,7 @@ await createUpdateClientNotification({
   href: `/client/bookings/${booking.id}?step=aftercare`,
   data: {
     bookingId: booking.id,
-    aftercareId: aftercare.id,
+    aftercareId: finalizedAftercare.id,
     notificationReason: 'AFTERCARE_SENT',
   },
 })
@@ -9419,7 +9445,7 @@ await createUpdateClientNotification({
   if (args.sendToClient) {
     const shouldCompleteBooking = canCompleteBookingCloseout({
       bookingStatus: booking.status,
-      aftercareSentAt: aftercare.sentToClientAt,
+      aftercareSentAt: finalizedAftercare.sentToClientAt,
       checkoutStatus: booking.checkoutStatus,
       paymentCollectedAt: booking.paymentCollectedAt,
       afterMediaCount,
@@ -9487,13 +9513,13 @@ const oldAftercareState = {
 
 const newAftercareState = {
   notes: normalizeReason(args.notes),
-  rebookMode: aftercare.rebookMode,
-  rebookedFor: normalizeDateCmp(aftercare.rebookedFor),
-  rebookWindowStart: normalizeDateCmp(aftercare.rebookWindowStart),
-  rebookWindowEnd: normalizeDateCmp(aftercare.rebookWindowEnd),
-  draftSavedAt: normalizeDateCmp(aftercare.draftSavedAt),
-  sentToClientAt: normalizeDateCmp(aftercare.sentToClientAt),
-  version: aftercare.version,
+  rebookMode: finalizedAftercare.rebookMode,
+  rebookedFor: normalizeDateCmp(finalizedAftercare.rebookedFor),
+  rebookWindowStart: normalizeDateCmp(finalizedAftercare.rebookWindowStart),
+  rebookWindowEnd: normalizeDateCmp(finalizedAftercare.rebookWindowEnd),
+  draftSavedAt: normalizeDateCmp(finalizedAftercare.draftSavedAt),
+  sentToClientAt: normalizeDateCmp(finalizedAftercare.sentToClientAt),
+  version: finalizedAftercare.version,
   recommendedProducts: normalizeRecommendedProductsForComparison(
     args.recommendedProducts,
   ),
@@ -9523,16 +9549,16 @@ if (!areAuditValuesEqual(oldAftercareState, newAftercareState)) {
 
 return {
   aftercare: {
-    id: aftercare.id,
+    id: finalizedAftercare.id,
     publicAccess: buildAftercarePublicAccess(),
-    rebookMode: aftercare.rebookMode,
-    rebookedFor: aftercare.rebookedFor,
-    rebookWindowStart: aftercare.rebookWindowStart,
-    rebookWindowEnd: aftercare.rebookWindowEnd,
-    draftSavedAt: aftercare.draftSavedAt,
-    sentToClientAt: aftercare.sentToClientAt,
-    lastEditedAt: aftercare.lastEditedAt,
-    version: aftercare.version,
+    rebookMode: finalizedAftercare.rebookMode,
+    rebookedFor: finalizedAftercare.rebookedFor,
+    rebookWindowStart: finalizedAftercare.rebookWindowStart,
+    rebookWindowEnd: finalizedAftercare.rebookWindowEnd,
+    draftSavedAt: finalizedAftercare.draftSavedAt,
+    sentToClientAt: finalizedAftercare.sentToClientAt,
+    lastEditedAt: finalizedAftercare.lastEditedAt,
+    version: finalizedAftercare.version,
   },
   remindersTouched,
   clientNotified,

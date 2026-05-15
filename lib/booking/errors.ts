@@ -63,6 +63,7 @@ export type BookingErrorCode =
   | "AFTERCARE_NOT_COMPLETED"
   | "AFTERCARE_CLIENT_MISMATCH"
   | "AFTERCARE_OFFERING_MISMATCH"
+  | "AFTERCARE_DELIVERY_FAILED"
   | "STALE_VERSION"
   | "INTERNAL_ERROR";
 
@@ -555,6 +556,13 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     uiAction: "NONE",
     message: "Aftercare token does not match the requested offering.",
     userMessage: "That aftercare link does not match this service.",
+  },
+  AFTERCARE_DELIVERY_FAILED: {
+    httpStatus: 409,
+    retryable: true,
+    uiAction: "NONE",
+    message: "Aftercare access delivery could not be queued.",
+    userMessage: "We could not send aftercare to the client. Please try again.",
   },
   STALE_VERSION: {
     httpStatus: 409,

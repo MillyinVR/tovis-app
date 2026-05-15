@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
   withLockedClientOwnedBookingTransaction: vi.fn(),
 
+  createAftercareAccessDelivery: vi.fn(),
+
   txBookingFindUnique: vi.fn(),
   txBookingUpdate: vi.fn(),
   txBookingFindFirst: vi.fn(),
@@ -65,6 +67,10 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/notifications/clientNotifications', () => ({
   upsertClientNotification: mocks.upsertClientNotification,
+}))
+
+vi.mock('@/lib/clientActions/createAftercareAccessDelivery', () => ({
+  createAftercareAccessDelivery: mocks.createAftercareAccessDelivery,
 }))
 
 vi.mock('@/lib/booking/scheduleTransaction', () => ({
@@ -252,7 +258,7 @@ function makeClientCheckoutBooking(overrides?: {
     professionalId: 'pro_1',
     status: overrides?.status ?? BookingStatus.IN_PROGRESS,    sessionStep: overrides?.sessionStep ?? SessionStep.AFTER_PHOTOS,
     finishedAt: overrides?.finishedAt ?? FINISHED_AT,
-    subtotalSnapshot: new Prisma.Decimal(100),
+    subtotalSnapshot: new Prisma.Decimal(120),
     serviceSubtotalSnapshot: new Prisma.Decimal(100),
     productSubtotalSnapshot: new Prisma.Decimal(20),
     tipAmount: new Prisma.Decimal(0),
@@ -297,8 +303,17 @@ function makeAftercareCloseoutBookingWithoutAfterPhotos() {
       timeZone: 'America/Los_Angeles',
     },
     client: {
+      id: 'client_1',
+      userId: 'user_client_1',
+      email: 'client@example.com',
+      phone: null,
+      preferredContactMethod: null,
       firstName: 'Client',
       lastName: 'One',
+      user: {
+        email: 'client@example.com',
+        phone: null,
+      },
     },
     service: {
       name: 'Haircut',
@@ -420,6 +435,12 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
     )
 
     mocks.upsertClientNotification.mockResolvedValue(undefined)
+
+    mocks.createAftercareAccessDelivery.mockResolvedValue({
+      link: {
+        href: '/client/bookings/booking_1?step=aftercare',
+      },
+    })
     mocks.txProfessionalProfileUpdate.mockResolvedValue({ id: 'pro_1' })
     mocks.txExecuteRaw.mockResolvedValue(1)
     mocks.txQueryRaw.mockResolvedValue([])
@@ -670,7 +691,7 @@ afterEach(() => {
         selectedPaymentMethod: PaymentMethod.CASH,
         serviceSubtotalSnapshot: new Prisma.Decimal(100),
         productSubtotalSnapshot: new Prisma.Decimal(20),
-        subtotalSnapshot: new Prisma.Decimal(100),
+        subtotalSnapshot: new Prisma.Decimal(120),
         tipAmount: new Prisma.Decimal(0),
         taxAmount: new Prisma.Decimal(0),
         discountAmount: new Prisma.Decimal(0),
