@@ -496,6 +496,8 @@ export async function POST(req: Request, ctx: Ctx) {
       caption,
       phase,
       mediaType,
+      requestId,
+      idempotencyKey: req.headers.get('idempotency-key'),
     })
 
     const { renderUrl, renderThumbUrl } = await renderMediaUrls({

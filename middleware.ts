@@ -40,10 +40,15 @@ function hostToHostname(hostHeader: string | null): string | null {
 }
 
 function getSubdomain(host: string, root: string): string | null {
-  if (!host.endsWith(root)) return null
-  const left = host.slice(0, host.length - root.length)
-  const sub = left.replace(/\.$/, '')
+  if (!host || !root) return null
+  if (host === root) return null
+  if (!host.endsWith(`.${root}`)) return null
+
+  const sub = host.slice(0, -(root.length + 1)).trim()
+
   if (!sub || sub === 'www') return null
+  if (sub.includes('/')) return null
+
   return sub
 }
 
@@ -146,11 +151,14 @@ export async function middleware(req: NextRequest) {
   const host = hostToHostname(req.headers.get('host')) ?? ''
   const sub = getSubdomain(host, 'tovis.me')
 
-  // Vanity domains: *.tovis.me -> internally serve /p/{subdomain}
+  // Vanity domains: *.tovis.me -> internally serve /p/{subdomain}.
   // This does NOT change the URL in the browser; it just routes internally.
-  if (sub) {
+  // Do not rewrite API or static asset requests; those should keep normal app routing.
+  if (sub && !pathname.startsWith('/api/') && !isStaticAssetPath(pathname)) {
     const url = req.nextUrl.clone()
-    url.pathname = `/p/${sub}${req.nextUrl.pathname === '/' ? '' : req.nextUrl.pathname}`
+    url.pathname = `/p/${sub}${
+      pathname === '/' ? '' : pathname
+    }`
 
     const res = NextResponse.rewrite(url, {
       request: { headers: requestHeaders },

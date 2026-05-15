@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
 const mockVerifyMiddlewareToken = vi.hoisted(() => vi.fn())
@@ -209,6 +209,75 @@ describe('middleware', () => {
     expect(res.headers.get('x-middleware-rewrite')).toContain(
       '/p/tori/services',
     )
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('does not rewrite API routes on vanity domains', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://tori.tovis.me/api/pro/profile', {
+      headers: {
+        host: 'tori.tovis.me',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    const res = await middleware(req)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('location')).toBeNull()
+    expect(res.headers.get('x-middleware-rewrite')).toBeNull()
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('does not treat similar root domains as vanity subdomains', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://notovis.me/services', {
+      headers: {
+        host: 'notovis.me',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    const res = await middleware(req)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('location')).toBeNull()
+    expect(res.headers.get('x-middleware-rewrite')).toBeNull()
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('does not rewrite the root vanity domain', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://tovis.me/services', {
+      headers: {
+        host: 'tovis.me',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    const res = await middleware(req)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('location')).toBeNull()
+    expect(res.headers.get('x-middleware-rewrite')).toBeNull()
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
   })
 

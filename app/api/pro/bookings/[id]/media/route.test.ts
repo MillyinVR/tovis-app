@@ -12,7 +12,7 @@ const mediaItemFromUpload = {
   id: 'media_1',
   bookingId: 'booking_1',
   mediaType: MediaType.IMAGE,
-  visibility: 'PRIVATE',
+  visibility: 'PRO_CLIENT',
   phase: MediaPhase.BEFORE,
   caption: 'Before photo',
   createdAt,
@@ -667,7 +667,10 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
 
     const result = await POST(
       makeIdempotentPostRequest({
-        key: 'idem_missing_main_1',
+        key: 'idem_media_success_1',
+        headers: {
+          'x-request-id': 'req_media_success_1',
+        },
       }),
       makeCtx(),
     )
@@ -716,6 +719,9 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     const result = await POST(
       makeIdempotentPostRequest({
         key: 'idem_media_success_1',
+        headers: {
+          'x-request-id': 'req_media_success_1',
+        },
       }),
       makeCtx(),
     )
@@ -762,6 +768,8 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       caption: 'Before photo',
       phase: MediaPhase.BEFORE,
       mediaType: MediaType.IMAGE,
+      requestId: 'req_media_success_1',
+      idempotencyKey: 'idem_media_success_1',
     })
 
     expect(mocks.renderMediaUrls).toHaveBeenLastCalledWith({
