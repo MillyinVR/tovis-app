@@ -17,6 +17,23 @@ const ALLOWED_VERIFICATION_API_PATHS = new Set([
   '/api/auth/logout',
 ])
 
+const STATE_CHANGING_METHODS = new Set([
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+])
+
+const ORIGIN_CHECK_EXEMPT_PATH_PREFIXES = [
+  '/api/health',
+  '/api/webhooks',
+  '/api/internal/jobs',
+] as const
+
+const ORIGIN_CHECK_EXEMPT_PATHS = new Set([
+  '/api/auth/logout',
+])
+
 function normalizePathname(pathname: string): string {
   if (!pathname) return '/'
   if (pathname === '/') return '/'
@@ -115,6 +132,117 @@ function withRequestId(res: NextResponse, requestId: string): NextResponse {
   return res
 }
 
+function normalizeOrigin(origin: string): string | null {
+  try {
+    const url = new URL(origin)
+    return url.origin.toLowerCase().replace(/\/+$/, '')
+  } catch {
+    return null
+  }
+}
+
+function parseAllowedOrigins(): ReadonlySet<string> {
+  const configuredOrigins = [
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.APP_URL,
+    process.env.ALLOWED_APP_ORIGINS,
+  ]
+    .flatMap((value) => value?.split(',') ?? [])
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+
+  const normalizedOrigins = configuredOrigins
+    .map((origin) => normalizeOrigin(origin))
+    .filter((origin): origin is string => origin !== null)
+
+  return new Set(normalizedOrigins)
+}
+
+function isSameSiteOrigin(req: NextRequest, origin: string): boolean {
+  const normalizedOrigin = normalizeOrigin(origin)
+  if (normalizedOrigin === null) return false
+
+  const requestOrigin = resolveAppOrigin(req).toLowerCase()
+  if (normalizedOrigin === requestOrigin) return true
+
+  const allowedOrigins = parseAllowedOrigins()
+  if (allowedOrigins.has(normalizedOrigin)) return true
+
+  const originHost = hostToHostname(new URL(normalizedOrigin).host)
+  const requestHost = hostToHostname(
+    req.headers.get('x-forwarded-host') ?? req.headers.get('host'),
+  )
+
+  if (!originHost || !requestHost) return false
+
+  if (originHost === requestHost) return true
+
+  const rootDomain = process.env.APP_ROOT_DOMAIN?.trim() || 'tovis.me'
+  const originSubdomain = getSubdomain(originHost, rootDomain)
+  const requestSubdomain = getSubdomain(requestHost, rootDomain)
+
+  if (originHost === rootDomain && requestHost.endsWith(`.${rootDomain}`)) {
+    return true
+  }
+
+  if (requestHost === rootDomain && originHost.endsWith(`.${rootDomain}`)) {
+    return true
+  }
+
+  return originSubdomain !== null && requestSubdomain !== null
+}
+
+function shouldCheckOrigin(req: NextRequest, pathname: string): boolean {
+  if (!STATE_CHANGING_METHODS.has(req.method.toUpperCase())) {
+    return false
+  }
+
+  if (isStaticAssetPath(pathname)) {
+    return false
+  }
+
+  if (ORIGIN_CHECK_EXEMPT_PATHS.has(pathname)) {
+    return false
+  }
+
+  if (
+    ORIGIN_CHECK_EXEMPT_PATH_PREFIXES.some((prefix) =>
+      pathname.startsWith(prefix),
+    )
+  ) {
+    return false
+  }
+
+  return true
+}
+
+function getRequestOriginOrReferer(req: NextRequest): string | null {
+  const origin = req.headers.get('origin')?.trim()
+  if (origin) return origin
+
+  const referer = req.headers.get('referer')?.trim()
+  if (!referer) return null
+
+  try {
+    return new URL(referer).origin
+  } catch {
+    return null
+  }
+}
+
+function originCheckFail(requestId: string): NextResponse {
+  const res = NextResponse.json(
+    {
+      ok: false,
+      error: 'Invalid request origin.',
+      code: 'INVALID_ORIGIN',
+    },
+    { status: 403 },
+  )
+
+  return withRequestId(res, requestId)
+}
+
 export async function middleware(req: NextRequest) {
   const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID()
 
@@ -122,6 +250,14 @@ export async function middleware(req: NextRequest) {
   requestHeaders.set('x-request-id', requestId)
 
   const pathname = normalizePathname(req.nextUrl.pathname)
+
+  if (shouldCheckOrigin(req, pathname)) {
+    const originOrReferer = getRequestOriginOrReferer(req)
+
+    if (!originOrReferer || !isSameSiteOrigin(req, originOrReferer)) {
+      return originCheckFail(requestId)
+    }
+  }
 
   const rawToken = req.cookies.get('tovis_token')?.value ?? null
   const tokenPayload = await verifyMiddlewareToken(rawToken)
@@ -156,9 +292,7 @@ export async function middleware(req: NextRequest) {
   // Do not rewrite API or static asset requests; those should keep normal app routing.
   if (sub && !pathname.startsWith('/api/') && !isStaticAssetPath(pathname)) {
     const url = req.nextUrl.clone()
-    url.pathname = `/p/${sub}${
-      pathname === '/' ? '' : pathname
-    }`
+    url.pathname = `/p/${sub}${pathname === '/' ? '' : pathname}`
 
     const res = NextResponse.rewrite(url, {
       request: { headers: requestHeaders },

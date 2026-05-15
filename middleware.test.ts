@@ -294,4 +294,224 @@ describe('middleware', () => {
     expect(res.headers.get('x-middleware-rewrite')).toBeNull()
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
   })
+    it('allows same-origin state-changing requests', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://app.tovis.app/api/client/settings', {
+      headers: {
+        origin: 'https://app.tovis.app',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    Object.defineProperty(req, 'method', {
+      value: 'POST',
+    })
+
+    const res = await middleware(req)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('location')).toBeNull()
+    expect(res.headers.get('x-middleware-rewrite')).toBeNull()
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('allows state-changing requests with an allowed configured origin', async () => {
+    process.env.ALLOWED_APP_ORIGINS = 'https://admin.tovis.app'
+
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'ADMIN',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://app.tovis.app/api/admin/services', {
+      headers: {
+        origin: 'https://admin.tovis.app',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    Object.defineProperty(req, 'method', {
+      value: 'PATCH',
+    })
+
+    const res = await middleware(req)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+
+    delete process.env.ALLOWED_APP_ORIGINS
+  })
+
+  it('allows same-site vanity subdomain state-changing requests', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'PRO',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://tori.tovis.me/api/pro/profile', {
+      headers: {
+        host: 'tori.tovis.me',
+        origin: 'https://app.tovis.app',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    Object.defineProperty(req, 'method', {
+      value: 'POST',
+    })
+
+    const res = await middleware(req)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('location')).toBeNull()
+    expect(res.headers.get('x-middleware-rewrite')).toBeNull()
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('rejects state-changing requests with a foreign origin', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://app.tovis.app/api/client/settings', {
+      headers: {
+        origin: 'https://evil.example',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    Object.defineProperty(req, 'method', {
+      value: 'POST',
+    })
+
+    const res = await middleware(req)
+    const body = await res.json()
+
+    expect(res.status).toBe(403)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid request origin.',
+      code: 'INVALID_ORIGIN',
+    })
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('rejects state-changing requests with no origin or referer', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://app.tovis.app/api/client/settings', {
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    Object.defineProperty(req, 'method', {
+      value: 'POST',
+    })
+
+    const res = await middleware(req)
+    const body = await res.json()
+
+    expect(res.status).toBe(403)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid request origin.',
+      code: 'INVALID_ORIGIN',
+    })
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('allows state-changing webhook requests without origin checks', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue(null)
+
+    const req = makeRequest('https://app.tovis.app/api/webhooks/stripe')
+
+    Object.defineProperty(req, 'method', {
+      value: 'POST',
+    })
+
+    const res = await middleware(req)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('location')).toBeNull()
+    expect(res.headers.get('x-middleware-rewrite')).toBeNull()
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('allows health requests without origin checks', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue(null)
+
+    const req = makeRequest('https://app.tovis.app/api/health/ready')
+
+    Object.defineProperty(req, 'method', {
+      value: 'POST',
+    })
+
+    const res = await middleware(req)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('uses referer origin when origin header is missing', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://app.tovis.app/api/client/settings', {
+      headers: {
+        referer: 'https://app.tovis.app/client/settings',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    Object.defineProperty(req, 'method', {
+      value: 'DELETE',
+    })
+
+    const res = await middleware(req)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
+
+  it('does not origin-check GET requests', async () => {
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('https://app.tovis.app/api/client/settings', {
+      headers: {
+        origin: 'https://evil.example',
+      },
+      cookie: 'tovis_token=test_active_token',
+    })
+
+    const res = await middleware(req)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get('x-request-id')).toBe('req_test_123')
+  })
 })
