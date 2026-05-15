@@ -1,27 +1,27 @@
 // app/api/_utils/rateLimit.ts
+
+import type { NextResponse } from 'next/server'
+
 import { jsonFail } from './responses'
-import { rateLimitRedis } from '@/lib/rateLimitRedis'
-import { getTrustedClientIpFromNextHeaders } from '@/lib/trustedClientIp'
-import { logAuthEvent } from '@/lib/observability/authEvents'
+
 import {
-  RATE_LIMITS,
-  type RateLimitBucket,
-  type RateLimitConfig,
-} from '@/lib/rateLimit/policies'
+  enforceRateLimit as enforceRateLimitDecision,
+  getRateLimitHeaders,
+  type BlockedRateLimitDecision,
+} from '@/lib/rateLimit/enforce'
+import { type RateLimitBucket } from '@/lib/rateLimit/policies'
+import { logAuthEvent } from '@/lib/observability/authEvents'
+import { getTrustedClientIpFromNextHeaders } from '@/lib/trustedClientIp'
 
-type LocalBucketState = {
-  tokens: number
-  lastRefillMs: number
-}
-
-const localTokenBuckets = new Map<string, LocalBucketState>()
-
-const REDIS_CIRCUIT_OPEN_MS = 30_000
-let redisCircuitOpenUntilMs = 0
+export type RateLimitIdentity =
+  | { kind: 'user'; id: string }
+  | { kind: 'ip'; id: string }
+  | { kind: 'phone'; id: string }
+  | { kind: 'token'; id: string }
 
 let hasLoggedNullRateLimitIdentity = false
 
-function logNullRateLimitIdentityOnce() {
+function logNullRateLimitIdentityOnce(): void {
   if (hasLoggedNullRateLimitIdentity) return
   hasLoggedNullRateLimitIdentity = true
 
@@ -39,149 +39,54 @@ function logNullRateLimitIdentityOnce() {
   })
 }
 
-function isRedisCircuitOpen(nowMs = Date.now()): boolean {
-  return nowMs < redisCircuitOpenUntilMs
-}
+function normalizeIdentityPart(value: string): string {
+  const normalized = value.trim()
 
-function openRedisCircuit(nowMs = Date.now()) {
-  redisCircuitOpenUntilMs = Math.max(
-    redisCircuitOpenUntilMs,
-    nowMs + REDIS_CIRCUIT_OPEN_MS,
-  )
-}
-
-function consumeLocalTokenBucket(args: {
-  key: string
-  limit: number
-  windowSeconds: number
-  nowMs?: number
-}): {
-  allowed: boolean
-  remaining: number
-  resetMs: number
-} {
-  const { key, limit, windowSeconds } = args
-  const nowMs = args.nowMs ?? Date.now()
-
-  const refillRatePerMs = limit / (windowSeconds * 1000)
-  const existing = localTokenBuckets.get(key)
-
-  let tokens = limit
-  let lastRefillMs = nowMs
-
-  if (existing) {
-    const elapsedMs = Math.max(0, nowMs - existing.lastRefillMs)
-    tokens = Math.min(limit, existing.tokens + elapsedMs * refillRatePerMs)
-    lastRefillMs = nowMs
+  if (!normalized) {
+    throw new Error('Rate limit identity value must be non-empty.')
   }
 
-  if (tokens >= 1) {
-    const nextTokens = tokens - 1
-    localTokenBuckets.set(key, {
-      tokens: nextTokens,
-      lastRefillMs,
-    })
-
-    return {
-      allowed: true,
-      remaining: Math.max(0, Math.floor(nextTokens)),
-      resetMs: nowMs,
-    }
-  }
-
-  const msUntilNextToken =
-    refillRatePerMs > 0
-      ? Math.ceil((1 - tokens) / refillRatePerMs)
-      : windowSeconds * 1000
-
-  localTokenBuckets.set(key, {
-    tokens,
-    lastRefillMs,
-  })
-
-  return {
-    allowed: false,
-    remaining: 0,
-    resetMs: nowMs + Math.max(1, msUntilNextToken),
-  }
+  return normalized
 }
 
-function buildRateLimitResponse(args: {
-  limit: number
-  remaining: number
-  resetMs: number
-}) {
-  const retryAfterSec = Math.max(
-    1,
-    Math.ceil((args.resetMs - Date.now()) / 1000),
-  )
+function buildIdentityKey(
+  identity: RateLimitIdentity,
+  keySuffix?: string,
+): string {
+  const base = `${identity.kind}:${normalizeIdentityPart(identity.id)}`
 
+  if (!keySuffix?.trim()) {
+    return base
+  }
+
+  return `${base}:${keySuffix.trim()}`
+}
+
+function buildRateLimitResponse(decision: BlockedRateLimitDecision) {
   return jsonFail(
     429,
     'Too many requests. Please slow down.',
     {
       code: 'RATE_LIMITED',
       details: {
-        limit: args.limit,
-        remaining: args.remaining,
-        reset: args.resetMs,
+        bucket: decision.bucket,
+        limit: decision.limit,
+        remaining: decision.remaining,
+        reset: decision.resetAt.getTime(),
+        retryAfterSeconds: decision.retryAfterSeconds,
+        source: decision.source,
+        reason: decision.reason,
       },
     },
     {
       headers: {
-        'X-RateLimit-Limit': String(args.limit),
-        'X-RateLimit-Remaining': String(args.remaining),
-        'X-RateLimit-Reset': String(args.resetMs),
-        'Retry-After': String(retryAfterSec),
+        ...getRateLimitHeaders(decision),
+        'X-RateLimit-Limit': String(decision.limit),
+        'X-RateLimit-Remaining': String(decision.remaining),
+        'X-RateLimit-Reset': String(decision.resetAt.getTime()),
       },
     },
   )
-}
-
-export type RateLimitIdentity =
-  | { kind: 'user'; id: string }
-  | { kind: 'ip'; id: string }
-  | { kind: 'phone'; id: string }
-  | { kind: 'token'; id: string }
-
-export function phoneRateLimitIdentity(phone: string): RateLimitIdentity {
-  const normalized = phone.trim()
-  if (!normalized) {
-    throw new Error('phoneRateLimitIdentity requires a non-empty phone value.')
-  }
-
-  return { kind: 'phone', id: normalized }
-}
-
-/**
- * Identity for rate limiting by an opaque token-prefix. Used to cap
- * brute-force attempts against a single (partial) leaked token across
- * many IPs.
- */
-export function tokenRateLimitIdentity(tokenPrefix: string): RateLimitIdentity {
-  const normalized = tokenPrefix.trim()
-  if (!normalized) {
-    throw new Error('tokenRateLimitIdentity requires a non-empty token prefix.')
-  }
-
-  return { kind: 'token', id: normalized }
-}
-
-export async function rateLimitIdentity(
-  userId?: string | null,
-): Promise<RateLimitIdentity | null> {
-  const u = typeof userId === 'string' ? userId.trim() : ''
-  if (u) return { kind: 'user', id: u }
-
-  const ip = await getTrustedClientIpFromNextHeaders()
-  if (ip) return { kind: 'ip', id: ip }
-
-  if (process.env.NODE_ENV === 'production') {
-    logNullRateLimitIdentityOnce()
-    return { kind: 'ip', id: 'unknown' }
-  }
-
-  return null
 }
 
 function buildIdentityEventFields(identity: RateLimitIdentity): {
@@ -203,7 +108,6 @@ function buildIdentityEventFields(identity: RateLimitIdentity): {
     }
   }
 
-  // 'ip' and 'token' kinds — log identity kind/id without leaking PII.
   return {
     meta: {
       identityKind: identity.kind,
@@ -212,14 +116,15 @@ function buildIdentityEventFields(identity: RateLimitIdentity): {
   }
 }
 
-function logRateLimitDegraded(args: {
-  event: 'auth.rate_limit.local_only_degraded' | 'auth.rate_limit.redis_skipped'
+function logRateLimitDecision(args: {
   bucket: RateLimitBucket
-  config: RateLimitConfig
   identity: RateLimitIdentity
   keySuffix?: string
-  circuitOpened?: boolean
-}) {
+  source: 'fail-open' | 'memory'
+  event:
+    | 'auth.rate_limit.local_only_degraded'
+    | 'auth.rate_limit.redis_skipped'
+}): void {
   const identityFields = buildIdentityEventFields(args.identity)
 
   logAuthEvent({
@@ -231,97 +136,83 @@ function logRateLimitDegraded(args: {
     phone: identityFields.phone,
     meta: {
       bucket: args.bucket,
-      mode: args.config.mode,
       keySuffix: args.keySuffix ?? null,
-      circuitOpened: args.circuitOpened ?? false,
+      source: args.source,
       ...identityFields.meta,
     },
   })
+}
+
+export function phoneRateLimitIdentity(phone: string): RateLimitIdentity {
+  return {
+    kind: 'phone',
+    id: normalizeIdentityPart(phone),
+  }
+}
+
+/**
+ * Identity for rate limiting by an opaque token-prefix. Used to cap
+ * brute-force attempts against a single partial leaked token across many IPs.
+ */
+export function tokenRateLimitIdentity(tokenPrefix: string): RateLimitIdentity {
+  return {
+    kind: 'token',
+    id: normalizeIdentityPart(tokenPrefix),
+  }
+}
+
+export async function rateLimitIdentity(
+  userId?: string | null,
+): Promise<RateLimitIdentity | null> {
+  const normalizedUserId = typeof userId === 'string' ? userId.trim() : ''
+
+  if (normalizedUserId) {
+    return { kind: 'user', id: normalizedUserId }
+  }
+
+  const ip = await getTrustedClientIpFromNextHeaders()
+
+  if (ip) {
+    return { kind: 'ip', id: ip }
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    logNullRateLimitIdentityOnce()
+    return { kind: 'ip', id: 'unknown' }
+  }
+
+  return null
 }
 
 export async function enforceRateLimit(args: {
   bucket: RateLimitBucket
   identity: RateLimitIdentity | null
   keySuffix?: string
-}) {
+}): Promise<NextResponse | null> {
   const { bucket, identity, keySuffix } = args
-  if (!identity) return null
 
-  const cfg = RATE_LIMITS[bucket]
-  const key = `${cfg.prefix}:${identity.kind}:${identity.id}${
-    keySuffix ? `:${keySuffix}` : ''
-  }`
-
-  if (cfg.mode === 'auth-critical') {
-    const local = consumeLocalTokenBucket({
-      key,
-      limit: cfg.limit,
-      windowSeconds: cfg.windowSeconds,
-    })
-
-    if (!local.allowed) {
-      return buildRateLimitResponse({
-        limit: cfg.limit,
-        remaining: local.remaining,
-        resetMs: local.resetMs,
-      })
-    }
-
-    if (isRedisCircuitOpen()) {
-      return null
-    }
-
-    try {
-      const result = await rateLimitRedis({
-        key,
-        limit: cfg.limit,
-        windowSeconds: cfg.windowSeconds,
-      })
-
-      if (result.success) return null
-
-      return buildRateLimitResponse({
-        limit: result.limit,
-        remaining: result.remaining,
-        resetMs: result.resetMs,
-      })
-    } catch {
-      openRedisCircuit()
-      logRateLimitDegraded({
-        event: 'auth.rate_limit.local_only_degraded',
-        bucket,
-        config: cfg,
-        identity,
-        keySuffix,
-        circuitOpened: true,
-      })
-      return null
-    }
-  }
-
-  try {
-    const result = await rateLimitRedis({
-      key,
-      limit: cfg.limit,
-      windowSeconds: cfg.windowSeconds,
-    })
-
-    if (result.success) return null
-
-    return buildRateLimitResponse({
-      limit: result.limit,
-      remaining: result.remaining,
-      resetMs: result.resetMs,
-    })
-  } catch {
-    logRateLimitDegraded({
-      event: 'auth.rate_limit.redis_skipped',
-      bucket,
-      config: cfg,
-      identity,
-      keySuffix,
-      circuitOpened: false,
-    })
+  if (identity === null) {
     return null
   }
+
+  const decision = await enforceRateLimitDecision({
+    bucket,
+    key: buildIdentityKey(identity, keySuffix),
+  })
+
+  if (decision.allowed) {
+    if (decision.source === 'fail-open') {
+      logRateLimitDecision({
+        event: 'auth.rate_limit.redis_skipped',
+        bucket,
+        identity,
+        keySuffix,
+        source: 'fail-open',
+      })
+    }
+
+    return null
+  }
+
+  return buildRateLimitResponse(decision)
 }

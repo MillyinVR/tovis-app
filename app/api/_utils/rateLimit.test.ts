@@ -1,11 +1,15 @@
+// app/api/_utils/rateLimit.test.ts
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mockRateLimitRedis = vi.hoisted(() => vi.fn())
+const mockEnforceRateLimitDecision = vi.hoisted(() => vi.fn())
+const mockGetRateLimitHeaders = vi.hoisted(() => vi.fn())
 const mockGetTrustedClientIpFromNextHeaders = vi.hoisted(() => vi.fn())
 const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 
-vi.mock('@/lib/rateLimitRedis', () => ({
-  rateLimitRedis: mockRateLimitRedis,
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mockEnforceRateLimitDecision,
+  getRateLimitHeaders: mockGetRateLimitHeaders,
 }))
 
 vi.mock('@/lib/trustedClientIp', () => ({
@@ -53,12 +57,51 @@ function setNodeEnv(value: 'development' | 'production' | 'test') {
   }
 }
 
+function allowedDecision(overrides?: Record<string, unknown>) {
+  return {
+    allowed: true,
+    bucket: 'auth:register',
+    key: 'ip:198.51.100.10',
+    limit: 5,
+    remaining: 4,
+    resetAt: new Date(1_700_000_060_000),
+    retryAfterSeconds: 60,
+    source: 'redis',
+    ...(overrides ?? {}),
+  }
+}
+
+function blockedDecision(overrides?: Record<string, unknown>) {
+  return {
+    allowed: false,
+    bucket: 'auth:register',
+    key: 'ip:198.51.100.11',
+    limit: 5,
+    remaining: 0,
+    resetAt: new Date(1_700_000_030_000),
+    retryAfterSeconds: 30,
+    source: 'redis',
+    reason: 'rate_limited',
+    ...(overrides ?? {}),
+  }
+}
+
 describe('app/api/_utils/rateLimit', () => {
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV }
-    mockRateLimitRedis.mockReset()
+
+    mockEnforceRateLimitDecision.mockReset()
+    mockGetRateLimitHeaders.mockReset()
     mockGetTrustedClientIpFromNextHeaders.mockReset()
     mockLogAuthEvent.mockReset()
+
+    mockEnforceRateLimitDecision.mockResolvedValue(allowedDecision())
+    mockGetRateLimitHeaders.mockReturnValue({
+      'RateLimit-Limit': '5',
+      'RateLimit-Remaining': '0',
+      'RateLimit-Reset': '1700000030',
+      'Retry-After': '30',
+    })
   })
 
   afterEach(() => {
@@ -111,12 +154,6 @@ describe('app/api/_utils/rateLimit', () => {
   it('uses the shared unknown IP fallback bucket in production when trusted client IP resolves to null', async () => {
     setNodeEnv('production')
     mockGetTrustedClientIpFromNextHeaders.mockResolvedValue(null)
-    mockRateLimitRedis.mockResolvedValue({
-      success: true,
-      limit: 5,
-      remaining: 4,
-      resetMs: 1_700_000_060_000,
-    })
 
     const { enforceRateLimit, rateLimitIdentity } = await loadSubject()
 
@@ -146,10 +183,9 @@ describe('app/api/_utils/rateLimit', () => {
     })
 
     expect(result).toBeNull()
-    expect(mockRateLimitRedis).toHaveBeenCalledWith({
-      key: 'rl:auth:register:ip:unknown',
-      limit: 5,
-      windowSeconds: 60 * 60,
+    expect(mockEnforceRateLimitDecision).toHaveBeenCalledWith({
+      bucket: 'auth:register',
+      key: 'ip:unknown',
     })
   })
 
@@ -163,15 +199,41 @@ describe('app/api/_utils/rateLimit', () => {
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
   })
 
-  it('returns null when Redis allows the request', async () => {
-    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+  it('throws when building a blank phone identity', async () => {
+    const { phoneRateLimitIdentity } = await loadSubject()
 
-    mockRateLimitRedis.mockResolvedValue({
-      success: true,
-      limit: 5,
-      remaining: 4,
-      resetMs: 1_700_000_060_000,
+    expect(() => phoneRateLimitIdentity('   ')).toThrow(
+      'Rate limit identity value must be non-empty.',
+    )
+  })
+
+  it('builds a token identity for public token brute-force quotas', async () => {
+    const { tokenRateLimitIdentity } = await loadSubject()
+
+    expect(tokenRateLimitIdentity('abc123')).toEqual({
+      kind: 'token',
+      id: 'abc123',
     })
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+  })
+
+  it('throws when building a blank token identity', async () => {
+    const { tokenRateLimitIdentity } = await loadSubject()
+
+    expect(() => tokenRateLimitIdentity('   ')).toThrow(
+      'Rate limit identity value must be non-empty.',
+    )
+  })
+
+  it('returns null when the canonical limiter allows the request', async () => {
+    mockEnforceRateLimitDecision.mockResolvedValue(
+      allowedDecision({
+        bucket: 'auth:register',
+        key: 'ip:198.51.100.10',
+        limit: 5,
+        remaining: 4,
+      }),
+    )
 
     const { enforceRateLimit } = await loadSubject()
 
@@ -181,53 +243,49 @@ describe('app/api/_utils/rateLimit', () => {
     })
 
     expect(result).toBeNull()
-    expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
-    expect(mockRateLimitRedis).toHaveBeenCalledWith({
-      key: 'rl:auth:register:ip:198.51.100.10',
-      limit: 5,
-      windowSeconds: 60 * 60,
+    expect(mockEnforceRateLimitDecision).toHaveBeenCalledTimes(1)
+    expect(mockEnforceRateLimitDecision).toHaveBeenCalledWith({
+      bucket: 'auth:register',
+      key: 'ip:198.51.100.10',
     })
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
-
-    nowSpy.mockRestore()
   })
 
-    it('uses a 20-per-hour limit for verified register traffic', async () => {
-    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
-
-    mockRateLimitRedis.mockResolvedValue({
-      success: true,
-      limit: 20,
-      remaining: 19,
-      resetMs: 1_700_003_600_000,
-    })
-
+  it('passes keySuffix through to the canonical limiter key', async () => {
     const { enforceRateLimit } = await loadSubject()
 
     const result = await enforceRateLimit({
-      bucket: 'auth:register:verified',
-      identity: { kind: 'ip', id: '198.51.100.10' },
+      bucket: 'auth:phone:verify',
+      identity: { kind: 'phone', id: '+15551234567' },
+      keySuffix: 'code-check',
     })
 
     expect(result).toBeNull()
-    expect(mockRateLimitRedis).toHaveBeenCalledWith({
-      key: 'rl:auth:register:verified:ip:198.51.100.10',
-      limit: 20,
-      windowSeconds: 60 * 60,
+    expect(mockEnforceRateLimitDecision).toHaveBeenCalledWith({
+      bucket: 'auth:phone:verify',
+      key: 'phone:+15551234567:code-check',
     })
-    expect(mockLogAuthEvent).not.toHaveBeenCalled()
-
-    nowSpy.mockRestore()
   })
 
-  it('returns a 429 response with rate-limit headers when Redis rejects the request', async () => {
-    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+  it('returns a 429 response with rate-limit headers when the canonical limiter rejects the request', async () => {
+    mockEnforceRateLimitDecision.mockResolvedValue(
+      blockedDecision({
+        bucket: 'auth:register',
+        key: 'ip:198.51.100.11',
+        limit: 5,
+        remaining: 0,
+        resetAt: new Date(1_700_000_030_000),
+        retryAfterSeconds: 30,
+        source: 'redis',
+        reason: 'rate_limited',
+      }),
+    )
 
-    mockRateLimitRedis.mockResolvedValue({
-      success: false,
-      limit: 5,
-      remaining: 0,
-      resetMs: 1_700_000_030_000,
+    mockGetRateLimitHeaders.mockReturnValue({
+      'RateLimit-Limit': '5',
+      'RateLimit-Remaining': '0',
+      'RateLimit-Reset': '1700000030',
+      'Retry-After': '30',
     })
 
     const { enforceRateLimit } = await loadSubject()
@@ -239,10 +297,13 @@ describe('app/api/_utils/rateLimit', () => {
 
     expect(res).toBeInstanceOf(Response)
     expect(res?.status).toBe(429)
+    expect(res?.headers.get('RateLimit-Limit')).toBe('5')
+    expect(res?.headers.get('RateLimit-Remaining')).toBe('0')
+    expect(res?.headers.get('RateLimit-Reset')).toBe('1700000030')
+    expect(res?.headers.get('Retry-After')).toBe('30')
     expect(res?.headers.get('X-RateLimit-Limit')).toBe('5')
     expect(res?.headers.get('X-RateLimit-Remaining')).toBe('0')
     expect(res?.headers.get('X-RateLimit-Reset')).toBe('1700000030000')
-    expect(res?.headers.get('Retry-After')).toBe('30')
 
     const body = await res!.json()
     expect(body).toEqual({
@@ -250,212 +311,35 @@ describe('app/api/_utils/rateLimit', () => {
       error: 'Too many requests. Please slow down.',
       code: 'RATE_LIMITED',
       details: {
+        bucket: 'auth:register',
         limit: 5,
         remaining: 0,
         reset: 1_700_000_030_000,
+        retryAfterSeconds: 30,
+        source: 'redis',
+        reason: 'rate_limited',
       },
     })
 
-    expect(mockLogAuthEvent).not.toHaveBeenCalled()
-
-    nowSpy.mockRestore()
-  })
-
-  it('degrades auth-critical buckets to bounded local limits when Redis fails and logs the circuit-open event', async () => {
-    mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
-
-    const { enforceRateLimit } = await loadSubject()
-
-    const identity = { kind: 'ip', id: '198.51.100.12' } as const
-
-    for (let i = 0; i < 5; i += 1) {
-      const result = await enforceRateLimit({
+    expect(mockGetRateLimitHeaders).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowed: false,
         bucket: 'auth:register',
-        identity,
-      })
-      expect(result).toBeNull()
-    }
-
-    const blocked = await enforceRateLimit({
-      bucket: 'auth:register',
-      identity,
-    })
-
-    expect(blocked).toBeInstanceOf(Response)
-    expect(blocked?.status).toBe(429)
-
-    const body = await blocked!.json()
-    expect(body.ok).toBe(false)
-    expect(body.code).toBe('RATE_LIMITED')
-
-    expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
-    expect(mockLogAuthEvent).toHaveBeenCalledTimes(1)
-    expect(mockLogAuthEvent).toHaveBeenCalledWith({
-      level: 'warn',
-      event: 'auth.rate_limit.local_only_degraded',
-      route: 'auth.rateLimit',
-      provider: 'redis',
-      meta: {
-        bucket: 'auth:register',
-        mode: 'auth-critical',
-        keySuffix: null,
-        circuitOpened: true,
-        identityKind: 'ip',
-        identityId: '198.51.100.12',
-      },
-    })
-  })
-
-    it('allows 20 verified register requests and blocks the 21st when Redis is unavailable', async () => {
-    mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
-
-    const { enforceRateLimit } = await loadSubject()
-
-    const identity = { kind: 'ip', id: '198.51.100.20' } as const
-
-    for (let i = 0; i < 20; i += 1) {
-      const result = await enforceRateLimit({
-        bucket: 'auth:register:verified',
-        identity,
-      })
-      expect(result).toBeNull()
-    }
-
-    const blocked = await enforceRateLimit({
-      bucket: 'auth:register:verified',
-      identity,
-    })
-
-    expect(blocked).toBeInstanceOf(Response)
-    expect(blocked?.status).toBe(429)
-
-    const body = await blocked!.json()
-    expect(body).toMatchObject({
-      ok: false,
-      code: 'RATE_LIMITED',
-      details: {
-        limit: 20,
-      },
-    })
-
-    expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
-    expect(mockLogAuthEvent).toHaveBeenCalledTimes(1)
-    expect(mockLogAuthEvent).toHaveBeenCalledWith({
-      level: 'warn',
-      event: 'auth.rate_limit.local_only_degraded',
-      route: 'auth.rateLimit',
-      provider: 'redis',
-      meta: {
-        bucket: 'auth:register:verified',
-        mode: 'auth-critical',
-        keySuffix: null,
-        circuitOpened: true,
-        identityKind: 'ip',
-        identityId: '198.51.100.20',
-      },
-    })
-  })
-  
-  it('uses separate keys for phone-based SMS quota buckets', async () => {
-    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
-
-    mockRateLimitRedis.mockResolvedValue({
-      success: true,
-      limit: 5,
-      remaining: 4,
-      resetMs: 1_700_000_060_000,
-    })
-
-    const { enforceRateLimit, phoneRateLimitIdentity } = await loadSubject()
-
-    const result = await enforceRateLimit({
-      bucket: 'auth:sms-phone-hour',
-      identity: phoneRateLimitIdentity('+15551234567'),
-    })
-
-    expect(result).toBeNull()
-    expect(mockRateLimitRedis).toHaveBeenCalledWith({
-      key: 'rl:auth:sms:phone:hour:phone:+15551234567',
-      limit: 5,
-      windowSeconds: 60 * 60,
-    })
+      }),
+    )
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
-
-    nowSpy.mockRestore()
   })
 
-    it('allows 5 SMS requests in the hourly bucket and blocks the 6th when Redis is unavailable', async () => {
-    mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
-
-    const { enforceRateLimit, phoneRateLimitIdentity } = await loadSubject()
-    const identity = phoneRateLimitIdentity('+15551234567')
-
-    for (let i = 0; i < 5; i += 1) {
-      const result = await enforceRateLimit({
-        bucket: 'auth:sms-phone-hour',
-        identity,
-      })
-      expect(result).toBeNull()
-    }
-
-    const blocked = await enforceRateLimit({
-      bucket: 'auth:sms-phone-hour',
-      identity,
-    })
-
-    expect(blocked).toBeInstanceOf(Response)
-    expect(blocked?.status).toBe(429)
-
-    const body = await blocked!.json()
-    expect(body).toMatchObject({
-      ok: false,
-      code: 'RATE_LIMITED',
-      details: {
-        limit: 5,
-      },
-    })
-
-    expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
-    expect(mockLogAuthEvent).toHaveBeenCalledTimes(1)
-  })
-
-    it('allows 6 SMS requests in the daily bucket and blocks the 7th when Redis is unavailable', async () => {
-    mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
-
-    const { enforceRateLimit, phoneRateLimitIdentity } = await loadSubject()
-    const identity = phoneRateLimitIdentity('+15551234567')
-
-    for (let i = 0; i < 6; i += 1) {
-      const result = await enforceRateLimit({
-        bucket: 'auth:sms-phone-day',
-        identity,
-      })
-      expect(result).toBeNull()
-    }
-
-    const blocked = await enforceRateLimit({
-      bucket: 'auth:sms-phone-day',
-      identity,
-    })
-
-    expect(blocked).toBeInstanceOf(Response)
-    expect(blocked?.status).toBe(429)
-
-    const body = await blocked!.json()
-    expect(body).toMatchObject({
-      ok: false,
-      code: 'RATE_LIMITED',
-      details: {
-        limit: 6,
-      },
-    })
-
-    expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
-    expect(mockLogAuthEvent).toHaveBeenCalledTimes(1)
-  })
-  
-  it('skips non-auth-critical Redis rate limits when Redis fails and logs a structured warning', async () => {
-    mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
+  it('logs a structured warning when redis-only buckets fail open', async () => {
+    mockEnforceRateLimitDecision.mockResolvedValue(
+      allowedDecision({
+        bucket: 'looks:like',
+        key: 'user:user_77',
+        limit: 60,
+        remaining: 60,
+        source: 'fail-open',
+      }),
+    )
 
     const { enforceRateLimit } = await loadSubject()
 
@@ -465,11 +349,9 @@ describe('app/api/_utils/rateLimit', () => {
     })
 
     expect(result).toBeNull()
-    expect(mockRateLimitRedis).toHaveBeenCalledTimes(1)
-    expect(mockRateLimitRedis).toHaveBeenCalledWith({
-      key: 'rl:looks:like:user:user_77',
-      limit: 60,
-      windowSeconds: 60,
+    expect(mockEnforceRateLimitDecision).toHaveBeenCalledWith({
+      bucket: 'looks:like',
+      key: 'user:user_77',
     })
 
     expect(mockLogAuthEvent).toHaveBeenCalledWith({
@@ -481,11 +363,44 @@ describe('app/api/_utils/rateLimit', () => {
       phone: undefined,
       meta: {
         bucket: 'looks:like',
-        mode: 'redis-only',
         keySuffix: null,
-        circuitOpened: false,
+        source: 'fail-open',
         identityKind: 'user',
       },
     })
+  })
+
+  it('does not log on allowed memory fallback decisions to avoid noisy degraded logs', async () => {
+    mockEnforceRateLimitDecision.mockResolvedValue(
+      allowedDecision({
+        bucket: 'auth:register',
+        key: 'ip:198.51.100.12',
+        limit: 5,
+        remaining: 4,
+        source: 'memory',
+      }),
+    )
+
+    const { enforceRateLimit } = await loadSubject()
+
+    const result = await enforceRateLimit({
+      bucket: 'auth:register',
+      identity: { kind: 'ip', id: '198.51.100.12' },
+    })
+
+    expect(result).toBeNull()
+    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+  })
+
+  it('returns null without calling the canonical limiter when identity is null', async () => {
+    const { enforceRateLimit } = await loadSubject()
+
+    const result = await enforceRateLimit({
+      bucket: 'auth:register',
+      identity: null,
+    })
+
+    expect(result).toBeNull()
+    expect(mockEnforceRateLimitDecision).not.toHaveBeenCalled()
   })
 })

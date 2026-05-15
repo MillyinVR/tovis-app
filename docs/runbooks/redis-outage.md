@@ -213,7 +213,8 @@ Look for changes involving:
 ```text
 lib/redis.ts
 lib/runtimeFlags.ts
-lib/rateLimitRedis.ts
+lib/rateLimit/enforce.ts
+app/api/_utils/rateLimit.ts
 lib/rateLimit/*
 lib/cache/*
 lib/health/redis.ts

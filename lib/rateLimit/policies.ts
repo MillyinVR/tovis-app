@@ -2,11 +2,16 @@
 
 export type RateLimitBucket =
   | 'holds:create'
+  | 'bookings:finalize'
+  | 'bookings:cancel'
   | 'bookings:reschedule'
   | 'looks:like'
   | 'looks:comment'
   | 'consultation:decision'
   | 'consultation:decision:token'
+  | 'client:rebook:token'
+  | 'pro:bookings:write'
+  | 'pro:media:write'
   | 'pro:offerings:write'
   | 'pro:locations:write'
   | 'pro:working-hours:write'
@@ -18,6 +23,9 @@ export type RateLimitBucket =
   | 'auth:register:verified'
   | 'auth:password-reset-request'
   | 'auth:password-reset-confirm'
+  | 'auth:phone:verify'
+  | 'auth:email:send'
+  | 'auth:email:verify'
   | 'auth:sms-phone-hour'
   | 'auth:sms-phone-day'
 
@@ -35,6 +43,18 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 12,
     windowSeconds: 60,
     prefix: 'rl:holds:create',
+    mode: 'redis-only',
+  },
+  'bookings:finalize': {
+    limit: 12,
+    windowSeconds: 60,
+    prefix: 'rl:bookings:finalize',
+    mode: 'redis-only',
+  },
+  'bookings:cancel': {
+    limit: 8,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:bookings:cancel',
     mode: 'redis-only',
   },
   'bookings:reschedule': {
@@ -65,6 +85,24 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 12,
     windowSeconds: 5 * 60,
     prefix: 'rl:consultation:decision:token',
+    mode: 'redis-only',
+  },
+  'client:rebook:token': {
+    limit: 10,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:client:rebook:token',
+    mode: 'redis-only',
+  },
+  'pro:bookings:write': {
+    limit: 30,
+    windowSeconds: 60,
+    prefix: 'rl:pro:bookings:write',
+    mode: 'redis-only',
+  },
+  'pro:media:write': {
+    limit: 30,
+    windowSeconds: 60,
+    prefix: 'rl:pro:media:write',
     mode: 'redis-only',
   },
   'pro:offerings:write': {
@@ -133,6 +171,24 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 10,
     windowSeconds: 15 * 60,
     prefix: 'rl:auth:pw-reset-confirm',
+    mode: 'auth-critical',
+  },
+  'auth:phone:verify': {
+    limit: 10,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:phone:verify',
+    mode: 'auth-critical',
+  },
+  'auth:email:send': {
+    limit: 5,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:email:send',
+    mode: 'auth-critical',
+  },
+  'auth:email:verify': {
+    limit: 10,
+    windowSeconds: 15 * 60,
+    prefix: 'rl:auth:email:verify',
     mode: 'auth-critical',
   },
   'auth:sms-phone-hour': {

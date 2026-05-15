@@ -1,63 +1,96 @@
 // app/api/_utils/auth/verificationThrottle.ts
-import { jsonFail } from '@/app/api/_utils'
-import { rateLimitRedis } from '@/lib/rateLimitRedis'
+import {
+  enforceRateLimit,
+  phoneRateLimitIdentity,
+  rateLimitIdentity,
+  tokenRateLimitIdentity,
+} from '@/app/api/_utils/rateLimit'
 import { getTrustedClientIpFromRequest } from '@/lib/trustedClientIp'
-import { logAuthEvent } from '@/lib/observability/authEvents'
 
-const VERIFY_LIMIT = 10
-const VERIFY_WINDOW_SECONDS = 10 * 60
+type VerificationThrottleResult =
+  | {
+      ok: true
+    }
+  | {
+      ok: false
+      response: Response
+    }
 
-export type VerificationThrottleScope = 'phone-verify' | 'email-verify'
+export type VerificationVerifyThrottleScope = 'phone-verify' | 'email-verify'
+function verificationVerifyBucketForScope(
+  scope: VerificationVerifyThrottleScope,
+): 'auth:phone:verify' | 'auth:email:verify' {
+  return scope === 'phone-verify' ? 'auth:phone:verify' : 'auth:email:verify'
+}
 
 export async function enforceVerificationVerifyThrottle(args: {
   request: Request
-  scope: VerificationThrottleScope
+  scope: VerificationVerifyThrottleScope
   subjectKey: string
-}) {
-  const ip = getTrustedClientIpFromRequest(args.request) ?? 'unknown'
-  const key = `auth:verify:${args.scope}:${args.subjectKey}:ip:${ip}`
+}): Promise<Response | null> {
+  const subjectKey = args.subjectKey.trim()
 
-  try {
-    const result = await rateLimitRedis({
-      key,
-      limit: VERIFY_LIMIT,
-      windowSeconds: VERIFY_WINDOW_SECONDS,
-    })
-
-    if (result.success) return null
-
-    const retryAfterSeconds = Math.max(
-      1,
-      Math.ceil((result.resetMs - Date.now()) / 1000),
+  if (!subjectKey) {
+    throw new Error(
+      'enforceVerificationVerifyThrottle requires a non-empty subjectKey.',
     )
-
-    return jsonFail(
-      429,
-      'Too many verification attempts. Please wait and try again.',
-      {
-        code: 'RATE_LIMITED',
-        retryAfterSeconds,
-      },
-      {
-        headers: {
-          'Retry-After': String(retryAfterSeconds),
-          'X-RateLimit-Limit': String(result.limit),
-          'X-RateLimit-Remaining': String(result.remaining),
-          'X-RateLimit-Reset': String(result.resetMs),
-        },
-      },
-    )
-  } catch (error) {
-    logAuthEvent({
-      level: 'warn',
-      event: 'auth.verification_throttle.degraded',
-      route: 'auth.verificationThrottle',
-      provider: 'redis',
-      verificationId: args.subjectKey,
-      meta: {
-        scope: args.scope,
-      },
-    })
-    return null
   }
+
+  const ip = getTrustedClientIpFromRequest(args.request) ?? 'unknown'
+
+  return enforceRateLimit({
+    bucket: verificationVerifyBucketForScope(args.scope),
+    identity: tokenRateLimitIdentity(`${args.scope}:${subjectKey}:ip:${ip}`),
+  })
+}
+
+export async function enforceVerificationSendThrottle(args: {
+  userId?: string | null
+  phone?: string | null
+}): Promise<VerificationThrottleResult> {
+  const identity = await rateLimitIdentity(args.userId)
+
+  const ipLimited = await enforceRateLimit({
+    bucket: 'auth:email:send',
+    identity,
+  })
+
+  if (ipLimited) {
+    return {
+      ok: false,
+      response: ipLimited,
+    }
+  }
+
+  const phone = args.phone?.trim()
+
+  if (!phone) {
+    return { ok: true }
+  }
+
+  const phoneLimited = await enforceRateLimit({
+    bucket: 'auth:sms-phone-hour',
+    identity: phoneRateLimitIdentity(phone),
+  })
+
+  if (phoneLimited) {
+    return {
+      ok: false,
+      response: phoneLimited,
+    }
+  }
+
+  const phoneDailyLimited = await enforceRateLimit({
+    bucket: 'auth:sms-phone-day',
+    identity: phoneRateLimitIdentity(phone),
+  })
+
+  if (phoneDailyLimited) {
+    return {
+      ok: false,
+      response: phoneDailyLimited,
+    }
+  }
+
+  return { ok: true }
 }

@@ -1,160 +1,323 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+// app/api/_utils/auth/verificationThrottle.test.ts
 
-const mockRateLimitRedis = vi.hoisted(() => vi.fn())
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
+const mockPhoneRateLimitIdentity = vi.hoisted(() => vi.fn())
+const mockRateLimitIdentity = vi.hoisted(() => vi.fn())
+const mockTokenRateLimitIdentity = vi.hoisted(() => vi.fn())
 const mockGetTrustedClientIpFromRequest = vi.hoisted(() => vi.fn())
-const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 
-vi.mock('@/lib/rateLimitRedis', () => ({
-  rateLimitRedis: mockRateLimitRedis,
+vi.mock('@/app/api/_utils/rateLimit', () => ({
+  enforceRateLimit: mockEnforceRateLimit,
+  phoneRateLimitIdentity: mockPhoneRateLimitIdentity,
+  rateLimitIdentity: mockRateLimitIdentity,
+  tokenRateLimitIdentity: mockTokenRateLimitIdentity,
 }))
 
 vi.mock('@/lib/trustedClientIp', () => ({
   getTrustedClientIpFromRequest: mockGetTrustedClientIpFromRequest,
 }))
 
-vi.mock('@/lib/observability/authEvents', () => ({
-  logAuthEvent: mockLogAuthEvent,
-}))
+import {
+  enforceVerificationSendThrottle,
+  enforceVerificationVerifyThrottle,
+} from './verificationThrottle'
 
-vi.mock('@/app/api/_utils', () => ({
-  jsonFail: (
-    status: number,
-    error: string,
-    extra?: Record<string, unknown>,
-    init?: { headers?: Record<string, string> },
-  ) => {
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        error,
-        ...(extra ?? {}),
-      }),
-      {
-        status,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(init?.headers ?? {}),
-        },
+function makeRateLimitResponse() {
+  return new Response(
+    JSON.stringify({
+      ok: false,
+      error: 'Too many requests. Please slow down.',
+      code: 'RATE_LIMITED',
+    }),
+    {
+      status: 429,
+      headers: {
+        'Content-Type': 'application/json',
+        'Retry-After': '45',
       },
-    )
-  },
-}))
+    },
+  )
+}
 
-import { enforceVerificationVerifyThrottle } from './verificationThrottle'
-
-function makeRequest() {
-  return new Request('http://localhost/api/auth/phone/verify', {
+function makeRequest(path: string, ip = '198.51.100.10') {
+  return new Request(`http://localhost${path}`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      'x-forwarded-for': '198.51.100.10',
+      'x-forwarded-for': ip,
     },
-    body: JSON.stringify({ code: '123456' }),
   })
 }
 
 describe('app/api/_utils/auth/verificationThrottle', () => {
   beforeEach(() => {
-    mockRateLimitRedis.mockReset()
+    mockEnforceRateLimit.mockReset()
+    mockPhoneRateLimitIdentity.mockReset()
+    mockRateLimitIdentity.mockReset()
+    mockTokenRateLimitIdentity.mockReset()
     mockGetTrustedClientIpFromRequest.mockReset()
-    mockLogAuthEvent.mockReset()
+
+    mockEnforceRateLimit.mockResolvedValue(null)
+
+    mockRateLimitIdentity.mockResolvedValue({
+      kind: 'ip',
+      id: '198.51.100.10',
+    })
+
+    mockPhoneRateLimitIdentity.mockImplementation((phone: string) => ({
+      kind: 'phone',
+      id: phone,
+    }))
+
+    mockTokenRateLimitIdentity.mockImplementation((tokenPrefix: string) => ({
+      kind: 'token',
+      id: tokenPrefix,
+    }))
 
     mockGetTrustedClientIpFromRequest.mockReturnValue('198.51.100.10')
   })
 
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('returns null when Redis allows the verification attempt', async () => {
-    mockRateLimitRedis.mockResolvedValue({
-      success: true,
-      limit: 10,
-      remaining: 9,
-      resetMs: Date.now() + 60_000,
+  it('returns ok when all verification send limits allow the request', async () => {
+    const result = await enforceVerificationSendThrottle({
+      userId: 'user_1',
+      phone: '+15551234567',
     })
 
+    expect(result).toEqual({ ok: true })
+
+    expect(mockRateLimitIdentity).toHaveBeenCalledWith('user_1')
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'auth:email:send',
+      identity: {
+        kind: 'ip',
+        id: '198.51.100.10',
+      },
+    })
+
+    expect(mockPhoneRateLimitIdentity).toHaveBeenCalledWith('+15551234567')
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(2, {
+      bucket: 'auth:sms-phone-hour',
+      identity: {
+        kind: 'phone',
+        id: '+15551234567',
+      },
+    })
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(3, {
+      bucket: 'auth:sms-phone-day',
+      identity: {
+        kind: 'phone',
+        id: '+15551234567',
+      },
+    })
+  })
+
+  it('returns blocked response when the identity-level send limit blocks', async () => {
+    const blockedResponse = makeRateLimitResponse()
+
+    mockEnforceRateLimit.mockResolvedValueOnce(blockedResponse)
+
+    const result = await enforceVerificationSendThrottle({
+      userId: 'user_1',
+      phone: '+15551234567',
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      response: blockedResponse,
+    })
+
+    expect(mockEnforceRateLimit).toHaveBeenCalledTimes(1)
+    expect(mockPhoneRateLimitIdentity).not.toHaveBeenCalled()
+  })
+
+  it('returns blocked response when the hourly phone SMS limit blocks', async () => {
+    const blockedResponse = makeRateLimitResponse()
+
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(blockedResponse)
+
+    const result = await enforceVerificationSendThrottle({
+      userId: 'user_1',
+      phone: '+15551234567',
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      response: blockedResponse,
+    })
+
+    expect(mockEnforceRateLimit).toHaveBeenCalledTimes(2)
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(2, {
+      bucket: 'auth:sms-phone-hour',
+      identity: {
+        kind: 'phone',
+        id: '+15551234567',
+      },
+    })
+  })
+
+  it('returns blocked response when the daily phone SMS limit blocks', async () => {
+    const blockedResponse = makeRateLimitResponse()
+
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(blockedResponse)
+
+    const result = await enforceVerificationSendThrottle({
+      userId: 'user_1',
+      phone: '+15551234567',
+    })
+
+    expect(result).toEqual({
+      ok: false,
+      response: blockedResponse,
+    })
+
+    expect(mockEnforceRateLimit).toHaveBeenCalledTimes(3)
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(3, {
+      bucket: 'auth:sms-phone-day',
+      identity: {
+        kind: 'phone',
+        id: '+15551234567',
+      },
+    })
+  })
+
+  it('skips phone SMS buckets when no phone is provided', async () => {
+    const result = await enforceVerificationSendThrottle({
+      userId: 'user_1',
+      phone: null,
+    })
+
+    expect(result).toEqual({ ok: true })
+
+    expect(mockEnforceRateLimit).toHaveBeenCalledTimes(1)
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'auth:email:send',
+      identity: {
+        kind: 'ip',
+        id: '198.51.100.10',
+      },
+    })
+
+    expect(mockPhoneRateLimitIdentity).not.toHaveBeenCalled()
+  })
+
+  it('trims phone before building phone rate-limit identity', async () => {
+    const result = await enforceVerificationSendThrottle({
+      userId: 'user_1',
+      phone: '  +15551234567  ',
+    })
+
+    expect(result).toEqual({ ok: true })
+
+    expect(mockPhoneRateLimitIdentity).toHaveBeenCalledWith('+15551234567')
+  })
+
+  it('returns null when the phone verification attempt limiter allows the request', async () => {
     const result = await enforceVerificationVerifyThrottle({
-      request: makeRequest(),
+      request: makeRequest('/api/auth/phone/verify'),
       scope: 'phone-verify',
       subjectKey: 'user_1',
     })
+
+    expect(result).toBeNull()
 
     expect(mockGetTrustedClientIpFromRequest).toHaveBeenCalledWith(
       expect.any(Request),
     )
 
-    expect(mockRateLimitRedis).toHaveBeenCalledWith({
-      key: 'auth:verify:phone-verify:user_1:ip:198.51.100.10',
-      limit: 10,
-      windowSeconds: 600,
-    })
+    expect(mockTokenRateLimitIdentity).toHaveBeenCalledWith(
+      'phone-verify:user_1:ip:198.51.100.10',
+    )
 
-    expect(result).toBeNull()
-    expect(mockLogAuthEvent).not.toHaveBeenCalled()
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'auth:phone:verify',
+      identity: {
+        kind: 'token',
+        id: 'phone-verify:user_1:ip:198.51.100.10',
+      },
+    })
   })
 
-  it('returns 429 with Retry-After and rate-limit headers when Redis blocks the attempt', async () => {
-    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
-
-    mockGetTrustedClientIpFromRequest.mockReturnValue(null)
-    mockRateLimitRedis.mockResolvedValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      resetMs: 1_700_000_045_000,
-    })
+  it('returns null when the email verification attempt limiter allows the request', async () => {
+    mockGetTrustedClientIpFromRequest.mockReturnValue('198.51.100.20')
 
     const result = await enforceVerificationVerifyThrottle({
-      request: makeRequest(),
+      request: makeRequest('/api/auth/email/verify', '198.51.100.20'),
       scope: 'email-verify',
       subjectKey: 'evt_1',
     })
 
-    expect(mockRateLimitRedis).toHaveBeenCalledWith({
-      key: 'auth:verify:email-verify:evt_1:ip:unknown',
-      limit: 10,
-      windowSeconds: 600,
+    expect(result).toBeNull()
+
+    expect(mockTokenRateLimitIdentity).toHaveBeenCalledWith(
+      'email-verify:evt_1:ip:198.51.100.20',
+    )
+
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'auth:email:verify',
+      identity: {
+        kind: 'token',
+        id: 'email-verify:evt_1:ip:198.51.100.20',
+      },
     })
-
-    expect(result).toBeInstanceOf(Response)
-    expect(result?.status).toBe(429)
-    expect(result?.headers.get('Retry-After')).toBe('45')
-    expect(result?.headers.get('X-RateLimit-Limit')).toBe('10')
-    expect(result?.headers.get('X-RateLimit-Remaining')).toBe('0')
-    expect(result?.headers.get('X-RateLimit-Reset')).toBe('1700000045000')
-
-    const body = await result?.json()
-    expect(body).toEqual({
-      ok: false,
-      error: 'Too many verification attempts. Please wait and try again.',
-      code: 'RATE_LIMITED',
-      retryAfterSeconds: 45,
-    })
-
-    expect(mockLogAuthEvent).not.toHaveBeenCalled()
   })
 
-  it('fails open and logs a structured warning when Redis throws', async () => {
-    mockRateLimitRedis.mockRejectedValue(new Error('redis down'))
+  it('uses unknown IP when verification request has no trusted IP', async () => {
+    mockGetTrustedClientIpFromRequest.mockReturnValue(null)
 
     const result = await enforceVerificationVerifyThrottle({
-      request: makeRequest(),
+      request: makeRequest('/api/auth/phone/verify'),
       scope: 'phone-verify',
       subjectKey: 'user_1',
     })
 
     expect(result).toBeNull()
 
-    expect(mockLogAuthEvent).toHaveBeenCalledWith({
-      level: 'warn',
-      event: 'auth.verification_throttle.degraded',
-      route: 'auth.verificationThrottle',
-      provider: 'redis',
-      verificationId: 'user_1',
-      meta: {
-        scope: 'phone-verify',
+    expect(mockTokenRateLimitIdentity).toHaveBeenCalledWith(
+      'phone-verify:user_1:ip:unknown',
+    )
+
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'auth:phone:verify',
+      identity: {
+        kind: 'token',
+        id: 'phone-verify:user_1:ip:unknown',
       },
     })
+  })
+
+  it('returns the canonical blocked response when verification attempt limiter blocks', async () => {
+    const blockedResponse = makeRateLimitResponse()
+    mockEnforceRateLimit.mockResolvedValue(blockedResponse)
+
+    const result = await enforceVerificationVerifyThrottle({
+      request: makeRequest('/api/auth/phone/verify'),
+      scope: 'phone-verify',
+      subjectKey: 'user_1',
+    })
+
+    expect(result).toBe(blockedResponse)
+  })
+
+  it('throws when verification subjectKey is blank', async () => {
+    await expect(
+      enforceVerificationVerifyThrottle({
+        request: makeRequest('/api/auth/phone/verify'),
+        scope: 'phone-verify',
+        subjectKey: '   ',
+      }),
+    ).rejects.toThrow(
+      'enforceVerificationVerifyThrottle requires a non-empty subjectKey.',
+    )
+
+    expect(mockEnforceRateLimit).not.toHaveBeenCalled()
   })
 })
