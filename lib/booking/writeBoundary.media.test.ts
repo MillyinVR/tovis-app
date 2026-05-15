@@ -1,6 +1,7 @@
 // lib/booking/writeBoundary.media.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  BookingCloseoutAuditAction,
   BookingStatus,
   MediaPhase,
   MediaType,
@@ -55,13 +56,15 @@ const tx = {
   },
 }
 
-function makeBooking(overrides?: Partial<{
-  professionalId: string
-  status: BookingStatus
-  startedAt: Date | null
-  finishedAt: Date | null
-  sessionStep: SessionStep | null
-}>) {
+function makeBooking(
+  overrides?: Partial<{
+    professionalId: string
+    status: BookingStatus
+    startedAt: Date | null
+    finishedAt: Date | null
+    sessionStep: SessionStep | null
+  }>,
+) {
   return {
     id: 'booking_1',
     professionalId: overrides?.professionalId ?? 'pro_1',
@@ -72,14 +75,17 @@ function makeBooking(overrides?: Partial<{
   }
 }
 
-function makeCreatedMedia(overrides?: Partial<{
-  id: string
-  mediaType: MediaType
-  visibility: MediaVisibility
-  phase: MediaPhase
-  caption: string | null
-  createdAt: Date
-}>) {
+function makeCreatedMedia(
+  overrides?: Partial<{
+    id: string
+    mediaType: MediaType
+    visibility: MediaVisibility
+    phase: MediaPhase
+    caption: string | null
+    createdAt: Date
+    storagePath: string
+  }>,
+) {
   return {
     id: overrides?.id ?? 'media_1',
     mediaType: overrides?.mediaType ?? MediaType.IMAGE,
@@ -91,7 +97,7 @@ function makeCreatedMedia(overrides?: Partial<{
     isEligibleForLooks: false,
     isFeaturedInPortfolio: false,
     storageBucket: 'booking-media',
-    storagePath: 'bookings/booking_1/before.jpg',
+    storagePath: overrides?.storagePath ?? 'bookings/booking_1/before.jpg',
     thumbBucket: null,
     thumbPath: null,
     url: null,
@@ -99,7 +105,9 @@ function makeCreatedMedia(overrides?: Partial<{
   }
 }
 
-function makeUploadArgs(overrides?: Partial<Parameters<typeof uploadProBookingMedia>[0]>) {
+function makeUploadArgs(
+  overrides?: Partial<Parameters<typeof uploadProBookingMedia>[0]>,
+) {
   return {
     bookingId: 'booking_1',
     professionalId: 'pro_1',
@@ -111,8 +119,97 @@ function makeUploadArgs(overrides?: Partial<Parameters<typeof uploadProBookingMe
     caption: 'Before photo',
     phase: MediaPhase.BEFORE,
     mediaType: MediaType.IMAGE,
+    requestId: 'request_1',
+    idempotencyKey: 'idem_1',
     ...(overrides ?? {}),
   }
+}
+
+function expectMediaCreateCalledWith(args: {
+  storagePath: string
+  caption: string | null
+  phase: MediaPhase
+  mediaType?: MediaType
+}) {
+  expect(mocks.txMediaAssetCreate).toHaveBeenCalledWith({
+    data: {
+      bookingId: 'booking_1',
+      professionalId: 'pro_1',
+      uploadedByUserId: 'user_1',
+      uploadedByRole: Role.PRO,
+      storageBucket: 'booking-media',
+      storagePath: args.storagePath,
+      thumbBucket: null,
+      thumbPath: null,
+      url: null,
+      thumbUrl: null,
+      caption: args.caption,
+      phase: args.phase,
+      mediaType: args.mediaType ?? MediaType.IMAGE,
+      visibility: MediaVisibility.PRO_CLIENT,
+      reviewId: null,
+      reviewLocked: false,
+      isEligibleForLooks: false,
+      isFeaturedInPortfolio: false,
+    },
+    select: expect.objectContaining({
+      id: true,
+      mediaType: true,
+      visibility: true,
+      phase: true,
+      caption: true,
+      createdAt: true,
+      reviewId: true,
+      isEligibleForLooks: true,
+      isFeaturedInPortfolio: true,
+      storageBucket: true,
+      storagePath: true,
+      thumbBucket: true,
+      thumbPath: true,
+      url: true,
+      thumbUrl: true,
+    }),
+  })
+}
+
+function expectMediaUploadAuditCalledWith(args: {
+  action: BookingCloseoutAuditAction
+  mediaId: string
+  phase: MediaPhase
+  caption: string | null
+  storagePath: string
+  previousSessionStep: SessionStep
+}) {
+  expect(mocks.createBookingCloseoutAuditLog).toHaveBeenCalledTimes(1)
+  expect(mocks.createBookingCloseoutAuditLog).toHaveBeenCalledWith({
+    tx,
+    bookingId: 'booking_1',
+    professionalId: 'pro_1',
+    action: args.action,
+    route: 'lib/booking/writeBoundary.ts:uploadProBookingMedia',
+    requestId: 'request_1',
+    idempotencyKey: 'idem_1',
+    oldValue: {
+      mediaAssetId: null,
+    },
+    newValue: {
+      mediaAssetId: args.mediaId,
+      phase: args.phase,
+      mediaType: MediaType.IMAGE,
+      visibility: MediaVisibility.PRO_CLIENT,
+      caption: args.caption,
+      storageBucket: 'booking-media',
+      storagePath: args.storagePath,
+      thumbBucket: null,
+      thumbPath: null,
+      uploadedByUserId: 'user_1',
+      uploadedByRole: Role.PRO,
+    },
+    metadata: {
+      trigger: 'pro_booking_media_upload',
+      previousSessionStep: args.previousSessionStep,
+    },
+  })
 }
 
 describe('lib/booking/writeBoundary media lifecycle invariants', () => {
@@ -147,6 +244,7 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     const created = makeCreatedMedia({
       phase: MediaPhase.BEFORE,
       caption: 'Before photo',
+      storagePath: 'bookings/booking_1/before.jpg',
     })
 
     mocks.txMediaAssetCreate.mockResolvedValueOnce(created)
@@ -158,44 +256,19 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
       expect.any(Function),
     )
 
-    expect(mocks.txMediaAssetCreate).toHaveBeenCalledWith({
-      data: {
-        bookingId: 'booking_1',
-        professionalId: 'pro_1',
-        uploadedByUserId: 'user_1',
-        uploadedByRole: Role.PRO,
-        storageBucket: 'booking-media',
-        storagePath: 'bookings/booking_1/before.jpg',
-        thumbBucket: null,
-        thumbPath: null,
-        url: null,
-        thumbUrl: null,
-        caption: 'Before photo',
-        phase: MediaPhase.BEFORE,
-        mediaType: MediaType.IMAGE,
-        visibility: MediaVisibility.PRO_CLIENT,
-        reviewId: null,
-        reviewLocked: false,
-        isEligibleForLooks: false,
-        isFeaturedInPortfolio: false,
-      },
-      select: expect.objectContaining({
-        id: true,
-        mediaType: true,
-        visibility: true,
-        phase: true,
-        caption: true,
-        createdAt: true,
-        reviewId: true,
-        isEligibleForLooks: true,
-        isFeaturedInPortfolio: true,
-        storageBucket: true,
-        storagePath: true,
-        thumbBucket: true,
-        thumbPath: true,
-        url: true,
-        thumbUrl: true,
-      }),
+    expectMediaCreateCalledWith({
+      storagePath: 'bookings/booking_1/before.jpg',
+      caption: 'Before photo',
+      phase: MediaPhase.BEFORE,
+    })
+
+    expectMediaUploadAuditCalledWith({
+      action: BookingCloseoutAuditAction.BEFORE_PHOTO_UPLOADED,
+      mediaId: created.id,
+      phase: MediaPhase.BEFORE,
+      caption: 'Before photo',
+      storagePath: 'bookings/booking_1/before.jpg',
+      previousSessionStep: SessionStep.BEFORE_PHOTOS,
     })
 
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
@@ -220,6 +293,7 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     const created = makeCreatedMedia({
       phase: MediaPhase.BEFORE,
       caption: 'Before photo',
+      storagePath: 'bookings/booking_1/before.jpg',
     })
 
     mocks.txMediaAssetCreate.mockResolvedValueOnce(created)
@@ -230,44 +304,19 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
       }),
     )
 
-    expect(mocks.txMediaAssetCreate).toHaveBeenCalledWith({
-      data: {
-        bookingId: 'booking_1',
-        professionalId: 'pro_1',
-        uploadedByUserId: 'user_1',
-        uploadedByRole: Role.PRO,
-        storageBucket: 'booking-media',
-        storagePath: 'bookings/booking_1/before.jpg',
-        thumbBucket: null,
-        thumbPath: null,
-        url: null,
-        thumbUrl: null,
-        caption: 'Before photo',
-        phase: MediaPhase.BEFORE,
-        mediaType: MediaType.IMAGE,
-        visibility: MediaVisibility.PRO_CLIENT,
-        reviewId: null,
-        reviewLocked: false,
-        isEligibleForLooks: false,
-        isFeaturedInPortfolio: false,
-      },
-      select: expect.objectContaining({
-        id: true,
-        mediaType: true,
-        visibility: true,
-        phase: true,
-        caption: true,
-        createdAt: true,
-        reviewId: true,
-        isEligibleForLooks: true,
-        isFeaturedInPortfolio: true,
-        storageBucket: true,
-        storagePath: true,
-        thumbBucket: true,
-        thumbPath: true,
-        url: true,
-        thumbUrl: true,
-      }),
+    expectMediaCreateCalledWith({
+      storagePath: 'bookings/booking_1/before.jpg',
+      caption: 'Before photo',
+      phase: MediaPhase.BEFORE,
+    })
+
+    expectMediaUploadAuditCalledWith({
+      action: BookingCloseoutAuditAction.BEFORE_PHOTO_UPLOADED,
+      mediaId: created.id,
+      phase: MediaPhase.BEFORE,
+      caption: 'Before photo',
+      storagePath: 'bookings/booking_1/before.jpg',
+      previousSessionStep: SessionStep.CONSULTATION_PENDING_CLIENT,
     })
 
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
@@ -300,6 +349,7 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     })
 
     expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
+    expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
   })
 
@@ -314,6 +364,7 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
       id: 'media_after_1',
       phase: MediaPhase.AFTER,
       caption: 'After photo',
+      storagePath: 'bookings/booking_1/after.jpg',
     })
 
     mocks.txMediaAssetCreate.mockResolvedValueOnce(created)
@@ -326,44 +377,19 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
       }),
     )
 
-    expect(mocks.txMediaAssetCreate).toHaveBeenCalledWith({
-      data: {
-        bookingId: 'booking_1',
-        professionalId: 'pro_1',
-        uploadedByUserId: 'user_1',
-        uploadedByRole: Role.PRO,
-        storageBucket: 'booking-media',
-        storagePath: 'bookings/booking_1/after.jpg',
-        thumbBucket: null,
-        thumbPath: null,
-        url: null,
-        thumbUrl: null,
-        caption: 'After photo',
-        phase: MediaPhase.AFTER,
-        mediaType: MediaType.IMAGE,
-        visibility: MediaVisibility.PRO_CLIENT,
-        reviewId: null,
-        reviewLocked: false,
-        isEligibleForLooks: false,
-        isFeaturedInPortfolio: false,
-      },
-      select: expect.objectContaining({
-        id: true,
-        mediaType: true,
-        visibility: true,
-        phase: true,
-        caption: true,
-        createdAt: true,
-        reviewId: true,
-        isEligibleForLooks: true,
-        isFeaturedInPortfolio: true,
-        storageBucket: true,
-        storagePath: true,
-        thumbBucket: true,
-        thumbPath: true,
-        url: true,
-        thumbUrl: true,
-      }),
+    expectMediaCreateCalledWith({
+      storagePath: 'bookings/booking_1/after.jpg',
+      caption: 'After photo',
+      phase: MediaPhase.AFTER,
+    })
+
+    expectMediaUploadAuditCalledWith({
+      action: BookingCloseoutAuditAction.AFTER_PHOTO_UPLOADED,
+      mediaId: created.id,
+      phase: MediaPhase.AFTER,
+      caption: 'After photo',
+      storagePath: 'bookings/booking_1/after.jpg',
+      previousSessionStep: SessionStep.AFTER_PHOTOS,
     })
 
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
@@ -398,6 +424,7 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     })
 
     expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
+    expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
   })
 
@@ -422,6 +449,7 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     })
 
     expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
+    expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
   })
 
@@ -445,6 +473,7 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     })
 
     expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
+    expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
     expect(mocks.txBookingUpdate).not.toHaveBeenCalled()
   })
 })

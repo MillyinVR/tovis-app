@@ -1,0 +1,14 @@
+-- This migration name exists in the shared development database migration
+-- history, but the corresponding local migration directory was missing.
+--
+-- The related code commit was:
+-- fcf9f75 Remove legacy aftercare publicToken writes
+--
+-- That commit changed application behavior and included:
+-- prisma/migrations/20260513210500_make_aftercare_public_token_nullable
+--
+-- The current schema still intentionally keeps AftercareSummary.publicToken
+-- as a nullable legacy field, so this migration is a no-op used only to
+-- restore local migration history continuity with the shared database.
+
+-- no-op

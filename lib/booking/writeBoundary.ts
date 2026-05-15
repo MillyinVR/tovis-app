@@ -721,6 +721,8 @@ type UploadProBookingMediaArgs = {
   caption: string | null
   phase: MediaPhase
   mediaType: MediaType
+  requestId?: string | null
+  idempotencyKey?: string | null
 }
 
 type UploadProBookingMediaResult = {
@@ -2455,6 +2457,19 @@ function isAllowedSessionTransition(
   }
 
   return false
+}
+function getBookingMediaUploadAuditAction(
+  phase: MediaPhase,
+): BookingCloseoutAuditAction | null {
+  if (phase === MediaPhase.BEFORE) {
+    return BookingCloseoutAuditAction.BEFORE_PHOTO_UPLOADED
+  }
+
+  if (phase === MediaPhase.AFTER) {
+    return BookingCloseoutAuditAction.AFTER_PHOTO_UPLOADED
+  }
+
+  return null
 }
 
 function canUploadBookingMediaPhase(
@@ -5756,6 +5771,8 @@ async function performLockedUploadProBookingMedia(args: {
   caption: string | null
   phase: MediaPhase
   mediaType: MediaType
+  requestId?: string | null
+  idempotencyKey?: string | null
 }): Promise<UploadProBookingMediaResult> {
   const booking: BookingMediaUploadRecord | null = await args.tx.booking.findUnique({
     where: { id: args.bookingId },
@@ -5834,6 +5851,40 @@ async function performLockedUploadProBookingMedia(args: {
     },
     select: BOOKING_MEDIA_ASSET_SELECT,
   })
+
+  const auditAction = getBookingMediaUploadAuditAction(args.phase)
+
+  if (auditAction) {
+    await createBookingCloseoutAuditLog({
+      tx: args.tx,
+      bookingId: booking.id,
+      professionalId: args.professionalId,
+      action: auditAction,
+      route: 'lib/booking/writeBoundary.ts:uploadProBookingMedia',
+      requestId: args.requestId,
+      idempotencyKey: args.idempotencyKey,
+      oldValue: {
+        mediaAssetId: null,
+      },
+      newValue: {
+        mediaAssetId: created.id,
+        phase: created.phase,
+        mediaType: created.mediaType,
+        visibility: created.visibility,
+        caption: created.caption,
+        storageBucket: created.storageBucket,
+        storagePath: created.storagePath,
+        thumbBucket: created.thumbBucket,
+        thumbPath: created.thumbPath,
+        uploadedByUserId: args.uploadedByUserId,
+        uploadedByRole: Role.PRO,
+      },
+      metadata: {
+        trigger: 'pro_booking_media_upload',
+        previousSessionStep: booking.sessionStep ?? SessionStep.NONE,
+      },
+    })
+  }
 
   const advancedTo: SessionStep | null = null
 
@@ -10760,6 +10811,8 @@ export async function uploadProBookingMedia(
         caption: args.caption,
         phase: args.phase,
         mediaType: args.mediaType,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
       }),
   )
 }
