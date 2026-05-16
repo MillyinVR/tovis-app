@@ -471,6 +471,22 @@ type UpdateBookingCheckoutArgs = {
   idempotencyKey?: string | null
 }
 
+type MarkProBookingCheckoutPaidArgs = {
+  bookingId: string
+  professionalId: string
+  actorUserId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+type WaiveProBookingCheckoutArgs = {
+  bookingId: string
+  professionalId: string
+  actorUserId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
 type UpdateClientBookingCheckoutArgs = {
   bookingId: string
   clientId: string
@@ -781,6 +797,19 @@ type UpdateBookingCheckoutResult = {
     paymentCollectedAt: Date | null
   }
   meta: MutationMeta
+}
+
+type ProCheckoutCloseoutResult = {
+  booking: {
+    id: string
+    status: BookingStatus
+    sessionStep: SessionStep
+    checkoutStatus: BookingCheckoutStatus
+    paymentCollectedAt: Date | null
+  }
+  meta: MutationMeta & {
+    completedBooking: boolean
+  }
 }
 
 type ClientCheckoutProductSelectionInput = {
@@ -1443,6 +1472,35 @@ const BOOKING_CHECKOUT_SELECT = {
 
 type BookingCheckoutRecord = Prisma.BookingGetPayload<{
   select: typeof BOOKING_CHECKOUT_SELECT
+}>
+
+const PRO_CHECKOUT_CLOSEOUT_SELECT = {
+  id: true,
+  professionalId: true,
+  status: true,
+  sessionStep: true,
+  finishedAt: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  subtotalSnapshot: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  totalAmount: true,
+  paymentAuthorizedAt: true,
+  paymentCollectedAt: true,
+  aftercareSummary: {
+    select: {
+      id: true,
+      sentToClientAt: true,
+    },
+  },
+} satisfies Prisma.BookingSelect
+
+type ProCheckoutCloseoutRecord = Prisma.BookingGetPayload<{
+  select: typeof PRO_CHECKOUT_CLOSEOUT_SELECT
 }>
 
 const CLIENT_BOOKING_CHECKOUT_SELECT = {
@@ -9841,6 +9899,259 @@ await createCheckoutAuditLogs({
   }
 }
 
+async function performLockedUpdateProCheckoutCloseout(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  bookingId: string
+  professionalId: string
+  actorUserId: string
+  checkoutStatus: BookingCheckoutStatus
+  paymentCollectedAt: Date
+  route: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}): Promise<ProCheckoutCloseoutResult> {
+  assertNonEmptyUserId(args.actorUserId)
+
+  if (
+    args.checkoutStatus !== BookingCheckoutStatus.PAID &&
+    args.checkoutStatus !== BookingCheckoutStatus.WAIVED
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Pro checkout closeout only supports PAID or WAIVED.',
+      userMessage: 'Checkout can only be marked paid or waived here.',
+    })
+  }
+
+  const booking: ProCheckoutCloseoutRecord | null =
+    await args.tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: PRO_CHECKOUT_CLOSEOUT_SELECT,
+    })
+
+  if (!booking) {
+    throw bookingError('BOOKING_NOT_FOUND')
+  }
+
+  if (booking.professionalId !== args.professionalId) {
+    throw bookingError('FORBIDDEN')
+  }
+
+  if (booking.status === BookingStatus.CANCELLED) {
+    throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+  }
+
+  if (
+    booking.status === BookingStatus.COMPLETED &&
+    booking.sessionStep === SessionStep.DONE &&
+    booking.finishedAt &&
+    booking.checkoutStatus === args.checkoutStatus &&
+    booking.paymentCollectedAt
+  ) {
+    return {
+      booking: {
+        id: booking.id,
+        status: booking.status,
+        sessionStep: booking.sessionStep ?? SessionStep.NONE,
+        checkoutStatus: booking.checkoutStatus,
+        paymentCollectedAt: booking.paymentCollectedAt,
+      },
+      meta: {
+        ...buildMeta(false),
+        completedBooking: false,
+      },
+    }
+  }
+
+  if (
+    booking.checkoutStatus === args.checkoutStatus &&
+    booking.paymentCollectedAt
+  ) {
+    return {
+      booking: {
+        id: booking.id,
+        status: booking.status,
+        sessionStep: booking.sessionStep ?? SessionStep.NONE,
+        checkoutStatus: booking.checkoutStatus,
+        paymentCollectedAt: booking.paymentCollectedAt,
+      },
+      meta: {
+        ...buildMeta(false),
+        completedBooking: false,
+      },
+    }
+  }
+
+  if (
+    booking.checkoutStatus === BookingCheckoutStatus.PAID &&
+    args.checkoutStatus === BookingCheckoutStatus.WAIVED
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Paid checkout cannot be waived.',
+      userMessage: 'This checkout is already paid and cannot be waived.',
+    })
+  }
+
+  if (
+    booking.checkoutStatus === BookingCheckoutStatus.WAIVED &&
+    args.checkoutStatus === BookingCheckoutStatus.PAID
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Waived checkout cannot be marked paid.',
+      userMessage: 'This checkout is already waived and cannot be marked paid.',
+    })
+  }
+
+  if (booking.status === BookingStatus.COMPLETED || booking.finishedAt) {
+    throw bookingError('BOOKING_CANNOT_EDIT_COMPLETED', {
+      message: 'Completed bookings cannot have checkout changed.',
+      userMessage: 'This booking is already completed.',
+    })
+  }
+
+  const oldCheckoutState = buildCheckoutAuditSnapshot({
+    checkoutStatus: booking.checkoutStatus,
+    selectedPaymentMethod: booking.selectedPaymentMethod,
+    serviceSubtotalSnapshot: booking.serviceSubtotalSnapshot,
+    productSubtotalSnapshot: booking.productSubtotalSnapshot,
+    subtotalSnapshot: booking.subtotalSnapshot,
+    tipAmount: booking.tipAmount,
+    taxAmount: booking.taxAmount,
+    discountAmount: booking.discountAmount,
+    totalAmount: booking.totalAmount,
+    paymentAuthorizedAt: booking.paymentAuthorizedAt,
+    paymentCollectedAt: booking.paymentCollectedAt,
+  })
+
+  const nextPaymentCollectedAt =
+    booking.paymentCollectedAt ?? args.paymentCollectedAt
+
+  const nextPaymentAuthorizedAt =
+    booking.paymentAuthorizedAt ?? args.paymentCollectedAt
+
+  const updated = await args.tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      checkoutStatus: args.checkoutStatus,
+      paymentAuthorizedAt: nextPaymentAuthorizedAt,
+      paymentCollectedAt: nextPaymentCollectedAt,
+    },
+    select: PRO_CHECKOUT_CLOSEOUT_SELECT,
+  })
+
+  const closeoutCandidate = isPaymentAndAftercareCloseoutCandidate({
+    bookingStatus: booking.status,
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: updated.checkoutStatus,
+    paymentCollectedAt: updated.paymentCollectedAt,
+  })
+
+  const afterMediaCount = closeoutCandidate
+    ? await countProAfterMediaForBooking({
+        tx: args.tx,
+        bookingId: booking.id,
+      })
+    : 0
+
+  const shouldCompleteBooking = canCompleteBookingCloseout({
+    bookingStatus: booking.status,
+    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: updated.checkoutStatus,
+    paymentCollectedAt: updated.paymentCollectedAt,
+    afterMediaCount,
+  })
+
+  let finalBooking = {
+    id: updated.id,
+    status: updated.status,
+    sessionStep: updated.sessionStep ?? SessionStep.NONE,
+    checkoutStatus: updated.checkoutStatus,
+    paymentCollectedAt: updated.paymentCollectedAt,
+  }
+
+  let completedBooking = false
+
+  if (
+    shouldCompleteBooking &&
+    (booking.sessionStep !== SessionStep.DONE || !booking.finishedAt)
+  ) {
+    recordStepTransition({
+      from: booking.sessionStep ?? SessionStep.NONE,
+      to: SessionStep.DONE,
+      actor: 'PRO',
+      route: `${args.route}#complete`,
+      bookingId: booking.id,
+      professionalId: args.professionalId,
+    })
+
+    recordStatusTransition({
+      from: booking.status,
+      to: BookingStatus.COMPLETED,
+      actor: 'PRO',
+      route: `${args.route}#complete`,
+      bookingId: booking.id,
+      professionalId: args.professionalId,
+    })
+
+    const completed = await args.tx.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: BookingStatus.COMPLETED,
+        sessionStep: SessionStep.DONE,
+        finishedAt: booking.finishedAt ?? args.now,
+      },
+      select: {
+        id: true,
+        status: true,
+        sessionStep: true,
+        checkoutStatus: true,
+        paymentCollectedAt: true,
+      } satisfies Prisma.BookingSelect,
+    })
+
+    finalBooking = {
+      id: completed.id,
+      status: completed.status,
+      sessionStep: completed.sessionStep ?? SessionStep.NONE,
+      checkoutStatus: completed.checkoutStatus,
+      paymentCollectedAt: completed.paymentCollectedAt,
+    }
+
+    completedBooking = true
+  }
+
+  await createCheckoutAuditLogs({
+    tx: args.tx,
+    bookingId: booking.id,
+    professionalId: args.professionalId,
+    route: args.route,
+    requestId: args.requestId,
+    idempotencyKey: args.idempotencyKey,
+    oldState: oldCheckoutState,
+    newState: buildCheckoutAuditSnapshot({
+      checkoutStatus: updated.checkoutStatus,
+      selectedPaymentMethod: updated.selectedPaymentMethod,
+      serviceSubtotalSnapshot: updated.serviceSubtotalSnapshot,
+      productSubtotalSnapshot: updated.productSubtotalSnapshot,
+      subtotalSnapshot: updated.subtotalSnapshot,
+      tipAmount: updated.tipAmount,
+      taxAmount: updated.taxAmount,
+      discountAmount: updated.discountAmount,
+      totalAmount: updated.totalAmount,
+      paymentAuthorizedAt: updated.paymentAuthorizedAt,
+      paymentCollectedAt: updated.paymentCollectedAt,
+    }),
+  })
+
+  return {
+    booking: finalBooking,
+    meta: {
+      ...buildMeta(true),
+      completedBooking,
+    },
+  }
+}
+
 function assertCanCreateRebookFromSourceBooking(args: {
   source: RebookSourceBookingRecord
   clientId?: string | null
@@ -10985,6 +11296,56 @@ export async function updateBookingCheckout(
         checkoutStatus: args.checkoutStatus,
         markPaymentAuthorized: args.markPaymentAuthorized,
         markPaymentCollected: args.markPaymentCollected,
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      }),
+  )
+}
+
+export async function markProBookingCheckoutPaid(
+  args: MarkProBookingCheckoutPaidArgs,
+): Promise<ProCheckoutCloseoutResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) =>
+      performLockedUpdateProCheckoutCloseout({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        actorUserId: args.actorUserId,
+        checkoutStatus: BookingCheckoutStatus.PAID,
+        paymentCollectedAt: now,
+        route: 'lib/booking/writeBoundary.ts:markProBookingCheckoutPaid',
+        requestId: args.requestId ?? null,
+        idempotencyKey: args.idempotencyKey ?? null,
+      }),
+  )
+}
+
+export async function waiveProBookingCheckout(
+  args: WaiveProBookingCheckoutArgs,
+): Promise<ProCheckoutCloseoutResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyProfessionalId(args.professionalId)
+  assertNonEmptyUserId(args.actorUserId)
+
+  return withLockedProfessionalTransaction(
+    args.professionalId,
+    async ({ tx, now }) =>
+      performLockedUpdateProCheckoutCloseout({
+        tx,
+        now,
+        bookingId: args.bookingId,
+        professionalId: args.professionalId,
+        actorUserId: args.actorUserId,
+        checkoutStatus: BookingCheckoutStatus.WAIVED,
+        paymentCollectedAt: now,
+        route: 'lib/booking/writeBoundary.ts:waiveProBookingCheckout',
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),
