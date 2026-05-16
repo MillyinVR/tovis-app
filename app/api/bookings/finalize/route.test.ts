@@ -180,9 +180,23 @@ const finalizeOffering = {
   professionalTimeZone: 'America/Los_Angeles',
 }
 
+function expectedBookingEntryPointForSource(
+  source: BookingSource,
+): 'BROAD_DISCOVERY' | 'DIRECT_PROFILE' {
+  switch (source) {
+    case BookingSource.DISCOVERY:
+      return 'BROAD_DISCOVERY'
+
+    case BookingSource.REQUESTED:
+    case BookingSource.AFTERCARE:
+      return 'DIRECT_PROFILE'
+  }
+}
+
 function makeExpectedFinalizeArgs(
   overrides: Partial<{
     clientId: string
+    bookingEntryPoint: 'BROAD_DISCOVERY' | 'DIRECT_PROFILE'
     holdId: string
     openingId: string | null
     addOnIds: string[]
@@ -195,14 +209,17 @@ function makeExpectedFinalizeArgs(
     idempotencyKey: string | null
   }> = {},
 ) {
+  const source = overrides.source ?? BookingSource.REQUESTED
+
   return {
     clientId: overrides.clientId ?? 'client_1',
-    bookingEntryPoint: 'BROAD_DISCOVERY',
+    bookingEntryPoint:
+      overrides.bookingEntryPoint ?? expectedBookingEntryPointForSource(source),
     holdId: overrides.holdId ?? 'hold_1',
     openingId: overrides.openingId ?? null,
     addOnIds: overrides.addOnIds ?? [],
     locationType: overrides.locationType ?? ServiceLocationType.SALON,
-    source: overrides.source ?? BookingSource.REQUESTED,
+    source,
     initialStatus: overrides.initialStatus ?? BookingStatus.PENDING,
     rebookOfBookingId: overrides.rebookOfBookingId ?? null,
     offering: finalizeOffering,
@@ -797,7 +814,7 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
       expect.objectContaining({
         clientId: 'client_1',
-        bookingEntryPoint: 'BROAD_DISCOVERY',
+        bookingEntryPoint: 'DIRECT_PROFILE',
         source: BookingSource.AFTERCARE,
         rebookOfBookingId: 'booking_old',
         idempotencyKey: 'idem_finalize_1',
@@ -933,7 +950,7 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
       expect.objectContaining({
         clientId: 'client_1',
-        bookingEntryPoint: 'BROAD_DISCOVERY',
+        bookingEntryPoint: 'DIRECT_PROFILE',
         source: BookingSource.AFTERCARE,
         rebookOfBookingId: 'booking_old',
       }),

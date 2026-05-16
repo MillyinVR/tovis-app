@@ -35,6 +35,7 @@ import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
+import { bookingEntryPointFromBookingSource } from '@/lib/pro/readiness/bookingEntryPoint'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -576,7 +577,7 @@ export async function POST(request: Request) {
 
     const result = await finalizeBookingFromHold({
       clientId: ownership.clientId,
-      bookingEntryPoint: 'BROAD_DISCOVERY',
+      bookingEntryPoint: bookingEntryPointFromBookingSource(body.source),
       holdId: body.holdId,
       openingId: body.openingId,
       addOnIds: body.addOnIds,
