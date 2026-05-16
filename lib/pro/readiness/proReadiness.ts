@@ -26,6 +26,8 @@ export type ProBookingEntryPoint =
   | 'NFC_CARD'
   | 'SHORT_CODE'
   | 'QR_CODE'
+  | 'AFTERCARE_REBOOK'
+  | 'SALON_WHITE_LABEL'
   | 'PRO_CREATED'
 
 export type ProReadinessBlocker =

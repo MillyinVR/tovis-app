@@ -1,10 +1,13 @@
 // app/pro/layout.tsx
 
 import type { ReactNode } from 'react'
+import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import '@/lib/brand/proOverview.css'
+import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
+import { getProOnboardingRedirectHref } from '@/lib/pro/readiness/onboardingGate'
 import ProHeader from './ProHeader'
 import ProComplianceBanner from './ProComplianceBanner'
 import ProReadinessBanner from './ProReadinessBanner'
@@ -23,6 +26,16 @@ function loginHref(
 
 function verifyHref(next: string): string {
   return `/verify-phone?next=${encodeURIComponent(next)}`
+}
+
+function currentProPathFromHeaders(h: Headers): string {
+  return (
+    h.get('x-pathname') ??
+    h.get('x-current-path') ??
+    h.get('next-url') ??
+    h.get('x-invoke-path') ??
+    '/pro'
+  )
 }
 
 export default async function ProRootLayout({
@@ -48,6 +61,19 @@ export default async function ProRootLayout({
 
   if (user.sessionKind !== 'ACTIVE' || !user.isFullyVerified) {
     redirect(verifyHref(PRO_HOME))
+  }
+
+  const requestHeaders = await headers()
+  const pathname = currentProPathFromHeaders(requestHeaders)
+
+  const readiness = await checkProReadiness(user.professionalProfile.id)
+  const onboardingRedirectHref = getProOnboardingRedirectHref({
+    pathname,
+    readiness,
+  })
+
+  if (onboardingRedirectHref) {
+    redirect(onboardingRedirectHref)
   }
 
   return (
