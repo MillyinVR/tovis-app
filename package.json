@@ -29,6 +29,7 @@
     "check:booking-boundary": "node tools/check-booking-write-boundary.mjs",
     "check:media-render-boundary": "node tools/check-media-render-boundary.mjs",
     "check:consultation-canonical": "node tools/check-consultation-canonical.mjs",
+    "check:lifecycle-field-writes": "node tools/check-lifecycle-field-writes.mjs",
     "seed:booking-overrides": "tsx prisma/seeds/bookingOverridePermissions.ts",
     "lookup:booking-override-ids": "tsx prisma/seeds/lookupBookingOverrideIds.ts",
     "jobs:looks-social:run-local": "node scripts/run-looks-social-jobs.mjs",
