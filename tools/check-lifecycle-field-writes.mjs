@@ -40,6 +40,7 @@ const SKIP_DIRS = new Set([
   '.git',
   '.next',
   '.turbo',
+  '.claude',
   'coverage',
   'dist',
   'build',
@@ -64,6 +65,7 @@ const LIFECYCLE_FIELDS = [
 const ALLOWED_FILE_PATTERNS = [
   /^lib\/booking\/writeBoundary\.ts$/,
   /^lib\/booking\/holdCleanup\.ts$/,
+  /^prisma\/test-data\/resetLastMinuteTestData\.cjs$/,
 
   // Static-analysis tools often contain Prisma write patterns as strings,
   // regexes, allowlists, or examples. They are not runtime mutation paths.
