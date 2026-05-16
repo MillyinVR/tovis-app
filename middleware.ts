@@ -245,11 +245,11 @@ function originCheckFail(requestId: string): NextResponse {
 
 export async function middleware(req: NextRequest) {
   const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID()
+  const pathname = normalizePathname(req.nextUrl.pathname)
 
   const requestHeaders = new Headers(req.headers)
   requestHeaders.set('x-request-id', requestId)
-
-  const pathname = normalizePathname(req.nextUrl.pathname)
+  requestHeaders.set('x-pathname', pathname)
 
   if (shouldCheckOrigin(req, pathname)) {
     const originOrReferer = getRequestOriginOrReferer(req)
