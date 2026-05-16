@@ -11761,16 +11761,21 @@ export async function recordStripeCheckoutSessionAttached(
 // Stripe webhook entry points — single internal boundary
 // ---------------------------------------------------------------------------
 
+type StripeWebhookDb = Prisma.TransactionClient | typeof prisma
+
 async function findBookingForStripeWebhook(args: {
+  db?: StripeWebhookDb
   bookingIdHint?: string | null
   stripePaymentIntentId?: string | null
   stripeCheckoutSessionId?: string | null
 }): Promise<{ id: string; professionalId: string } | null> {
+  const db = args.db ?? prisma
+
   const trimmedHint =
     typeof args.bookingIdHint === 'string' ? args.bookingIdHint.trim() : ''
 
   if (trimmedHint) {
-    const byHint = await prisma.booking.findUnique({
+    const byHint = await db.booking.findUnique({
       where: { id: trimmedHint },
       select: { id: true, professionalId: true },
     })
@@ -11783,7 +11788,7 @@ async function findBookingForStripeWebhook(args: {
       : ''
 
   if (trimmedPaymentIntentId) {
-    const byPaymentIntent = await prisma.booking.findFirst({
+    const byPaymentIntent = await db.booking.findFirst({
       where: { stripePaymentIntentId: trimmedPaymentIntentId },
       select: { id: true, professionalId: true },
     })
@@ -11796,7 +11801,7 @@ async function findBookingForStripeWebhook(args: {
       : ''
 
   if (trimmedSessionId) {
-    const bySession = await prisma.booking.findFirst({
+    const bySession = await db.booking.findFirst({
       where: { stripeCheckoutSessionId: trimmedSessionId },
       select: { id: true, professionalId: true },
     })
@@ -12105,6 +12110,132 @@ async function performLockedApplyStripeCheckoutSessionStatus(args: {
     meta: buildMeta(true),
   }
 }
+
+export async function applyStripePaymentSucceededInTransaction(
+  tx: Prisma.TransactionClient,
+  args: ApplyStripePaymentSucceededArgs,
+): Promise<ApplyStripePaymentResult | null> {
+  const stripePaymentIntentId = args.stripePaymentIntentId.trim()
+  const stripeEventId = args.stripeEventId.trim()
+
+  if (!stripePaymentIntentId || !stripeEventId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe payment intent id and event id are required.',
+    })
+  }
+
+  const booking = await findBookingForStripeWebhook({
+    db: tx,
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripePaymentIntentId,
+  })
+
+  if (!booking) return null
+
+  await lockProfessionalSchedule(tx, booking.professionalId)
+
+  const lockedBooking = await findBookingForStripeWebhook({
+    db: tx,
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripePaymentIntentId,
+  })
+
+  if (!lockedBooking) return null
+
+  return performLockedApplyStripePaymentSucceeded({
+    tx,
+    now: args.occurredAt ?? new Date(),
+    bookingId: lockedBooking.id,
+    stripePaymentIntentId,
+    stripeEventId,
+    amountReceivedCents: args.amountReceivedCents,
+    currency: args.currency,
+  })
+}
+
+export async function applyStripePaymentFailedInTransaction(
+  tx: Prisma.TransactionClient,
+  args: ApplyStripePaymentFailedArgs,
+): Promise<ApplyStripePaymentResult | null> {
+  const stripePaymentIntentId = args.stripePaymentIntentId.trim()
+  const stripeEventId = args.stripeEventId.trim()
+
+  if (!stripePaymentIntentId || !stripeEventId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe payment intent id and event id are required.',
+    })
+  }
+
+  const booking = await findBookingForStripeWebhook({
+    db: tx,
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripePaymentIntentId,
+  })
+
+  if (!booking) return null
+
+  await lockProfessionalSchedule(tx, booking.professionalId)
+
+  const lockedBooking = await findBookingForStripeWebhook({
+    db: tx,
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripePaymentIntentId,
+  })
+
+  if (!lockedBooking) return null
+
+  return performLockedApplyStripePaymentFailed({
+    tx,
+    bookingId: lockedBooking.id,
+    stripePaymentIntentId,
+    stripeEventId,
+  })
+}
+
+export async function applyStripeCheckoutSessionStatusInTransaction(
+  tx: Prisma.TransactionClient,
+  args: ApplyStripeCheckoutSessionStatusArgs,
+): Promise<ApplyStripePaymentResult | null> {
+  const stripeCheckoutSessionId = args.stripeCheckoutSessionId.trim()
+
+  if (!stripeCheckoutSessionId) {
+    throw bookingError('FORBIDDEN', {
+      message: 'Stripe checkout session id is required.',
+    })
+  }
+
+  const booking = await findBookingForStripeWebhook({
+    db: tx,
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripeCheckoutSessionId,
+    stripePaymentIntentId: args.stripePaymentIntentId,
+  })
+
+  if (!booking) return null
+
+  await lockProfessionalSchedule(tx, booking.professionalId)
+
+  const lockedBooking = await findBookingForStripeWebhook({
+    db: tx,
+    bookingIdHint: args.bookingIdHint ?? null,
+    stripeCheckoutSessionId,
+    stripePaymentIntentId: args.stripePaymentIntentId,
+  })
+
+  if (!lockedBooking) return null
+
+  return performLockedApplyStripeCheckoutSessionStatus({
+    tx,
+    bookingId: lockedBooking.id,
+    stripeCheckoutSessionId,
+    stripePaymentIntentId: args.stripePaymentIntentId,
+    stripeAmountSubtotal: args.stripeAmountSubtotal,
+    stripeAmountTotal: args.stripeAmountTotal,
+    stripeCurrency: args.stripeCurrency,
+    status: args.status,
+  })
+}
+
 
 export async function applyStripePaymentSucceeded(
   args: ApplyStripePaymentSucceededArgs,

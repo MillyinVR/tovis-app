@@ -1,7 +1,11 @@
 // app/api/webhooks/stripe/route.test.ts
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { StripeAccountStatus, StripeCheckoutSessionStatus } from '@prisma/client'
+import {
+  Prisma,
+  StripeAccountStatus,
+  StripeCheckoutSessionStatus,
+} from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
@@ -11,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   getStripeWebhookSecret: vi.fn(),
   constructEvent: vi.fn(),
 
+  prismaTransaction: vi.fn(),
+
   stripeWebhookEventCreate: vi.fn(),
   stripeWebhookEventFindUnique: vi.fn(),
   stripeWebhookEventUpdate: vi.fn(),
@@ -18,9 +24,9 @@ const mocks = vi.hoisted(() => ({
   professionalPaymentSettingsFindUnique: vi.fn(),
   professionalPaymentSettingsUpdate: vi.fn(),
 
-  applyStripePaymentSucceeded: vi.fn(),
-  applyStripePaymentFailed: vi.fn(),
-  applyStripeCheckoutSessionStatus: vi.fn(),
+  applyStripePaymentSucceededInTransaction: vi.fn(),
+  applyStripePaymentFailedInTransaction: vi.fn(),
+  applyStripeCheckoutSessionStatusInTransaction: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -35,6 +41,7 @@ vi.mock('@/lib/stripe/server', () => ({
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
+    $transaction: mocks.prismaTransaction,
     stripeWebhookEvent: {
       create: mocks.stripeWebhookEventCreate,
       findUnique: mocks.stripeWebhookEventFindUnique,
@@ -48,12 +55,37 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
-  applyStripePaymentSucceeded: mocks.applyStripePaymentSucceeded,
-  applyStripePaymentFailed: mocks.applyStripePaymentFailed,
-  applyStripeCheckoutSessionStatus: mocks.applyStripeCheckoutSessionStatus,
+  applyStripePaymentSucceededInTransaction:
+    mocks.applyStripePaymentSucceededInTransaction,
+  applyStripePaymentFailedInTransaction:
+    mocks.applyStripePaymentFailedInTransaction,
+  applyStripeCheckoutSessionStatusInTransaction:
+    mocks.applyStripeCheckoutSessionStatusInTransaction,
 }))
 
 import { POST } from './route'
+
+type MockTransactionClient = {
+  stripeWebhookEvent: {
+    update: typeof mocks.stripeWebhookEventUpdate
+  }
+  professionalPaymentSettings: {
+    findUnique: typeof mocks.professionalPaymentSettingsFindUnique
+    update: typeof mocks.professionalPaymentSettingsUpdate
+  }
+}
+
+function makeMockTx(): MockTransactionClient {
+  return {
+    stripeWebhookEvent: {
+      update: mocks.stripeWebhookEventUpdate,
+    },
+    professionalPaymentSettings: {
+      findUnique: mocks.professionalPaymentSettingsFindUnique,
+      update: mocks.professionalPaymentSettingsUpdate,
+    },
+  }
+}
 
 function makeJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -67,9 +99,11 @@ function makeWebhookRequest(args?: {
   signature?: string | null
 }): Request {
   const headers = new Headers()
+
   if (args?.signature !== null) {
     headers.set('stripe-signature', args?.signature ?? 'stripe_signature_1')
   }
+
   return new Request('http://localhost/api/webhooks/stripe', {
     method: 'POST',
     headers,
@@ -202,7 +236,9 @@ describe('POST /api/webhooks/stripe', () => {
       processedAt: null,
     })
 
-    mocks.stripeWebhookEventUpdate.mockResolvedValue({ id: 'webhook_event_1' })
+    mocks.stripeWebhookEventUpdate.mockResolvedValue({
+      id: 'webhook_event_1',
+    })
 
     mocks.professionalPaymentSettingsFindUnique.mockResolvedValue({
       professionalId: 'pro_1',
@@ -213,23 +249,30 @@ describe('POST /api/webhooks/stripe', () => {
       professionalId: 'pro_1',
     })
 
-    mocks.applyStripePaymentSucceeded.mockResolvedValue({
+    mocks.applyStripePaymentSucceededInTransaction.mockResolvedValue({
       bookingId: 'booking_1',
       bookingCompleted: false,
       meta: { mutated: true, noOp: false },
     })
 
-    mocks.applyStripePaymentFailed.mockResolvedValue({
+    mocks.applyStripePaymentFailedInTransaction.mockResolvedValue({
       bookingId: 'booking_1',
       bookingCompleted: false,
       meta: { mutated: true, noOp: false },
     })
 
-    mocks.applyStripeCheckoutSessionStatus.mockResolvedValue({
+    mocks.applyStripeCheckoutSessionStatusInTransaction.mockResolvedValue({
       bookingId: 'booking_1',
       bookingCompleted: false,
       meta: { mutated: true, noOp: false },
     })
+
+    mocks.prismaTransaction.mockImplementation(
+      async (
+        callback: (tx: MockTransactionClient) => Promise<unknown>,
+        _options?: unknown,
+      ) => callback(makeMockTx()),
+    )
   })
 
   it('rejects requests without a Stripe signature', async () => {
@@ -238,6 +281,7 @@ describe('POST /api/webhooks/stripe', () => {
     expect(response.status).toBe(400)
     expect(mocks.constructEvent).not.toHaveBeenCalled()
     expect(mocks.stripeWebhookEventCreate).not.toHaveBeenCalled()
+    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
   it('rejects invalid Stripe signatures', async () => {
@@ -249,6 +293,7 @@ describe('POST /api/webhooks/stripe', () => {
 
     expect(response.status).toBe(400)
     expect(mocks.stripeWebhookEventCreate).not.toHaveBeenCalled()
+    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
   it('returns success for duplicate already-processed events without reprocessing', async () => {
@@ -260,12 +305,42 @@ describe('POST /api/webhooks/stripe', () => {
     const response = await POST(makeWebhookRequest())
 
     expect(response.status).toBe(200)
-    expect(mocks.applyStripePaymentSucceeded).not.toHaveBeenCalled()
-    expect(mocks.applyStripePaymentFailed).not.toHaveBeenCalled()
-    expect(mocks.applyStripeCheckoutSessionStatus).not.toHaveBeenCalled()
+    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
+    expect(mocks.applyStripePaymentSucceededInTransaction).not.toHaveBeenCalled()
+    expect(mocks.applyStripePaymentFailedInTransaction).not.toHaveBeenCalled()
+    expect(
+      mocks.applyStripeCheckoutSessionStatusInTransaction,
+    ).not.toHaveBeenCalled()
   })
 
-  it('stores unhandled events and marks them processed', async () => {
+  it('falls back to findUnique on duplicate Stripe event insert and skips when already processed', async () => {
+    mocks.stripeWebhookEventCreate.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: ['stripeEventId'] },
+      }),
+    )
+
+    mocks.stripeWebhookEventFindUnique.mockResolvedValueOnce({
+      id: 'webhook_event_1',
+      processedAt: new Date('2026-05-05T10:00:00.000Z'),
+    })
+
+    const response = await POST(makeWebhookRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.stripeWebhookEventFindUnique).toHaveBeenCalledWith({
+      where: { stripeEventId: 'evt_test_1' },
+      select: {
+        id: true,
+        processedAt: true,
+      },
+    })
+    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
+  })
+
+  it('stores unhandled events and marks them processed inside the transaction', async () => {
     mocks.constructEvent.mockReturnValueOnce(
       makeStripeEvent({
         id: 'evt_unhandled_1',
@@ -276,6 +351,7 @@ describe('POST /api/webhooks/stripe', () => {
 
     const response = await POST(makeWebhookRequest())
 
+    expect(mocks.prismaTransaction).toHaveBeenCalledTimes(1)
     expect(mocks.stripeWebhookEventUpdate).toHaveBeenCalledWith({
       where: { stripeEventId: 'evt_unhandled_1' },
       data: {
@@ -295,7 +371,35 @@ describe('POST /api/webhooks/stripe', () => {
     })
   })
 
-  it('routes checkout.session.completed through applyStripeCheckoutSessionStatus', async () => {
+  it('processes payment_intent.succeeded and processed marker inside one transaction', async () => {
+    const response = await POST(makeWebhookRequest())
+
+    expect(mocks.prismaTransaction).toHaveBeenCalledTimes(1)
+
+    expect(mocks.applyStripePaymentSucceededInTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stripeWebhookEvent: expect.any(Object),
+        professionalPaymentSettings: expect.any(Object),
+      }),
+      expect.objectContaining({
+        stripeEventId: 'evt_test_1',
+        stripePaymentIntentId: 'pi_test_123',
+      }),
+    )
+
+    expect(mocks.stripeWebhookEventUpdate).toHaveBeenCalledWith({
+      where: { stripeEventId: 'evt_test_1' },
+      data: {
+        processedAt: expect.any(Date),
+        failedAt: null,
+        lastError: null,
+      },
+    })
+
+    expect(response.status).toBe(200)
+  })
+
+  it('routes checkout.session.completed through applyStripeCheckoutSessionStatusInTransaction', async () => {
     mocks.constructEvent.mockReturnValueOnce(
       makeStripeEvent({
         id: 'evt_checkout_completed_1',
@@ -306,7 +410,9 @@ describe('POST /api/webhooks/stripe', () => {
 
     const response = await POST(makeWebhookRequest())
 
-    expect(mocks.applyStripeCheckoutSessionStatus).toHaveBeenCalledWith({
+    expect(
+      mocks.applyStripeCheckoutSessionStatusInTransaction,
+    ).toHaveBeenCalledWith(expect.any(Object), {
       bookingIdHint: 'booking_1',
       stripeCheckoutSessionId: 'cs_test_123',
       stripePaymentIntentId: 'pi_test_123',
@@ -326,7 +432,7 @@ describe('POST /api/webhooks/stripe', () => {
     })
   })
 
-  it('routes checkout.session.expired through applyStripeCheckoutSessionStatus', async () => {
+  it('routes checkout.session.expired through applyStripeCheckoutSessionStatusInTransaction', async () => {
     mocks.constructEvent.mockReturnValueOnce(
       makeStripeEvent({
         id: 'evt_checkout_expired_1',
@@ -337,16 +443,20 @@ describe('POST /api/webhooks/stripe', () => {
 
     const response = await POST(makeWebhookRequest())
 
-    expect(mocks.applyStripeCheckoutSessionStatus).toHaveBeenCalledWith(
+    expect(
+      mocks.applyStripeCheckoutSessionStatusInTransaction,
+    ).toHaveBeenCalledWith(
+      expect.any(Object),
       expect.objectContaining({
         status: StripeCheckoutSessionStatus.EXPIRED,
         stripePaymentIntentId: null,
       }),
     )
+
     expect(response.status).toBe(200)
   })
 
-  it('routes payment_intent.succeeded through applyStripePaymentSucceeded with the event id', async () => {
+  it('routes payment_intent.succeeded through applyStripePaymentSucceededInTransaction with the event id', async () => {
     mocks.constructEvent.mockReturnValueOnce(
       makeStripeEvent({
         id: 'evt_payment_succeeded_1',
@@ -363,13 +473,16 @@ describe('POST /api/webhooks/stripe', () => {
 
     const response = await POST(makeWebhookRequest())
 
-    expect(mocks.applyStripePaymentSucceeded).toHaveBeenCalledWith({
-      bookingIdHint: 'booking_1',
-      stripePaymentIntentId: 'pi_success_123',
-      stripeEventId: 'evt_payment_succeeded_1',
-      amountReceivedCents: 13500,
-      currency: 'usd',
-    })
+    expect(mocks.applyStripePaymentSucceededInTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      {
+        bookingIdHint: 'booking_1',
+        stripePaymentIntentId: 'pi_success_123',
+        stripeEventId: 'evt_payment_succeeded_1',
+        amountReceivedCents: 13500,
+        currency: 'usd',
+      },
+    )
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
@@ -381,8 +494,8 @@ describe('POST /api/webhooks/stripe', () => {
     })
   })
 
-  it('reports the completed-booking variant when applyStripePaymentSucceeded auto-completes the booking', async () => {
-    mocks.applyStripePaymentSucceeded.mockResolvedValueOnce({
+  it('reports the completed-booking variant when applyStripePaymentSucceededInTransaction auto-completes the booking', async () => {
+    mocks.applyStripePaymentSucceededInTransaction.mockResolvedValueOnce({
       bookingId: 'booking_1',
       bookingCompleted: true,
       meta: { mutated: true, noOp: false },
@@ -399,8 +512,8 @@ describe('POST /api/webhooks/stripe', () => {
     })
   })
 
-  it('returns handled=false when applyStripePaymentSucceeded cannot find the booking', async () => {
-    mocks.applyStripePaymentSucceeded.mockResolvedValueOnce(null)
+  it('returns handled=false when applyStripePaymentSucceededInTransaction cannot find the booking', async () => {
+    mocks.applyStripePaymentSucceededInTransaction.mockResolvedValueOnce(null)
 
     const response = await POST(makeWebhookRequest())
 
@@ -414,7 +527,7 @@ describe('POST /api/webhooks/stripe', () => {
     })
   })
 
-  it('routes payment_intent.payment_failed through applyStripePaymentFailed', async () => {
+  it('routes payment_intent.payment_failed through applyStripePaymentFailedInTransaction', async () => {
     mocks.constructEvent.mockReturnValueOnce(
       makeStripeEvent({
         id: 'evt_payment_failed_1',
@@ -431,12 +544,15 @@ describe('POST /api/webhooks/stripe', () => {
 
     const response = await POST(makeWebhookRequest())
 
-    expect(mocks.applyStripePaymentFailed).toHaveBeenCalledWith({
-      bookingIdHint: 'booking_1',
-      stripePaymentIntentId: 'pi_failed_123',
-      stripeEventId: 'evt_payment_failed_1',
-    })
-    expect(mocks.applyStripePaymentSucceeded).not.toHaveBeenCalled()
+    expect(mocks.applyStripePaymentFailedInTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      {
+        bookingIdHint: 'booking_1',
+        stripePaymentIntentId: 'pi_failed_123',
+        stripeEventId: 'evt_payment_failed_1',
+      },
+    )
+    expect(mocks.applyStripePaymentSucceededInTransaction).not.toHaveBeenCalled()
 
     expect(response.status).toBe(200)
   })
@@ -456,6 +572,14 @@ describe('POST /api/webhooks/stripe', () => {
     )
 
     const response = await POST(makeWebhookRequest())
+
+    expect(mocks.professionalPaymentSettingsFindUnique).toHaveBeenCalledWith({
+      where: { stripeAccountId: 'acct_test_123' },
+      select: {
+        professionalId: true,
+        stripeOnboardingCompletedAt: true,
+      },
+    })
 
     expect(mocks.professionalPaymentSettingsUpdate).toHaveBeenCalledWith({
       where: { professionalId: 'pro_1' },
@@ -495,8 +619,37 @@ describe('POST /api/webhooks/stripe', () => {
     expect(response.status).toBe(200)
   })
 
-  it('marks webhook event failed and returns 500 when applyStripePaymentSucceeded throws', async () => {
-    mocks.applyStripePaymentSucceeded.mockRejectedValueOnce(new Error('db boom'))
+  it('returns handled=false when account.updated payment settings are not found', async () => {
+    mocks.constructEvent.mockReturnValueOnce(
+      makeStripeEvent({
+        id: 'evt_account_missing_settings_1',
+        type: 'account.updated',
+        object: makeStripeAccount({
+          id: 'acct_missing_123',
+        }),
+      }),
+    )
+
+    mocks.professionalPaymentSettingsFindUnique.mockResolvedValueOnce(null)
+
+    const response = await POST(makeWebhookRequest())
+
+    expect(response.status).toBe(200)
+    expect(mocks.professionalPaymentSettingsUpdate).not.toHaveBeenCalled()
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      stripeEventId: 'evt_account_missing_settings_1',
+      eventType: 'account.updated',
+      handled: false,
+      message: 'account.updated payment settings not found.',
+    })
+  })
+
+  it('marks webhook event failed and returns 500 when applyStripePaymentSucceededInTransaction throws', async () => {
+    mocks.applyStripePaymentSucceededInTransaction.mockRejectedValueOnce(
+      new Error('db boom'),
+    )
 
     const response = await POST(makeWebhookRequest())
 
@@ -513,6 +666,37 @@ describe('POST /api/webhooks/stripe', () => {
       error: 'Failed to process Stripe webhook.',
       code: 'STRIPE_WEBHOOK_PROCESSING_FAILED',
       message: 'db boom',
+    })
+  })
+
+  it('marks webhook event failed and returns 500 when processed marker update throws', async () => {
+    mocks.stripeWebhookEventUpdate.mockImplementationOnce(async (args) => {
+      if ('processedAt' in args.data) {
+        throw new Error('processed marker failed')
+      }
+
+      return { id: 'webhook_event_1' }
+    })
+
+    const response = await POST(makeWebhookRequest())
+
+    expect(mocks.applyStripePaymentSucceededInTransaction).toHaveBeenCalledTimes(
+      1,
+    )
+
+    expect(mocks.stripeWebhookEventUpdate).toHaveBeenLastCalledWith({
+      where: { stripeEventId: 'evt_test_1' },
+      data: {
+        failedAt: expect.any(Date),
+        lastError: 'processed marker failed',
+      },
+    })
+
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toEqual({
+      error: 'Failed to process Stripe webhook.',
+      code: 'STRIPE_WEBHOOK_PROCESSING_FAILED',
+      message: 'processed marker failed',
     })
   })
 })

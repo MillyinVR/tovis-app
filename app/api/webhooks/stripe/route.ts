@@ -9,9 +9,9 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
 import { getStripe, getStripeWebhookSecret } from '@/lib/stripe/server'
 import {
-  applyStripeCheckoutSessionStatus,
-  applyStripePaymentFailed,
-  applyStripePaymentSucceeded,
+  applyStripeCheckoutSessionStatusInTransaction,
+  applyStripePaymentFailedInTransaction,
+  applyStripePaymentSucceededInTransaction,
 } from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
@@ -73,19 +73,6 @@ function getSessionPaymentIntentId(
   return null
 }
 
-async function markEventProcessed(args: {
-  stripeEventId: string
-}): Promise<void> {
-  await prisma.stripeWebhookEvent.update({
-    where: { stripeEventId: args.stripeEventId },
-    data: {
-      processedAt: new Date(),
-      failedAt: null,
-      lastError: null,
-    },
-  })
-}
-
 async function markEventFailed(args: {
   stripeEventId: string
   error: unknown
@@ -101,10 +88,11 @@ async function markEventFailed(args: {
 }
 
 async function handleCheckoutSession(
+  tx: Prisma.TransactionClient,
   session: Stripe.Checkout.Session,
   status: StripeCheckoutSessionStatus,
   eventLabel: string,
-): Promise<StripeWebhookResult> {
+): Promise<StripeWebhookResult>{
   const bookingIdHint =
     getMetadataString(session.metadata, 'bookingId') ??
     (typeof session.client_reference_id === 'string'
@@ -119,7 +107,7 @@ async function handleCheckoutSession(
     }
   }
 
-  const result = await applyStripeCheckoutSessionStatus({
+  const result = await applyStripeCheckoutSessionStatusInTransaction(tx, {
     bookingIdHint,
     stripeCheckoutSessionId,
     stripePaymentIntentId: getSessionPaymentIntentId(session),
@@ -147,12 +135,13 @@ async function handleCheckoutSession(
 }
 
 async function handlePaymentIntentSucceeded(
+  tx: Prisma.TransactionClient,
   paymentIntent: Stripe.PaymentIntent,
   stripeEventId: string,
 ): Promise<StripeWebhookResult> {
   const bookingIdHint = getMetadataString(paymentIntent.metadata, 'bookingId')
 
-  const result = await applyStripePaymentSucceeded({
+  const result = await applyStripePaymentSucceededInTransaction(tx, {
     bookingIdHint,
     stripePaymentIntentId: paymentIntent.id,
     stripeEventId,
@@ -182,16 +171,17 @@ async function handlePaymentIntentSucceeded(
 }
 
 async function handlePaymentIntentFailed(
+  tx: Prisma.TransactionClient,
   paymentIntent: Stripe.PaymentIntent,
   stripeEventId: string,
-): Promise<StripeWebhookResult> {
+): Promise<StripeWebhookResult>{
   const bookingIdHint = getMetadataString(paymentIntent.metadata, 'bookingId')
 
-  const result = await applyStripePaymentFailed({
-    bookingIdHint,
-    stripePaymentIntentId: paymentIntent.id,
-    stripeEventId,
-  })
+    const result = await applyStripePaymentFailedInTransaction(tx, {
+      bookingIdHint,
+      stripePaymentIntentId: paymentIntent.id,
+      stripeEventId,
+    })
 
   if (!result) {
     return {
@@ -207,9 +197,10 @@ async function handlePaymentIntentFailed(
 }
 
 async function handleAccountUpdated(
+  tx: Prisma.TransactionClient,
   account: Stripe.Account,
-): Promise<StripeWebhookResult> {
-  const settings = await prisma.professionalPaymentSettings.findUnique({
+): Promise<StripeWebhookResult>{
+  const settings = await tx.professionalPaymentSettings.findUnique({
     where: { stripeAccountId: account.id },
     select: {
       professionalId: true,
@@ -239,7 +230,7 @@ async function handleAccountUpdated(
     currentlyDueCount: currentlyDue.length,
   })
 
-  await prisma.professionalPaymentSettings.update({
+  await tx.professionalPaymentSettings.update({
     where: { professionalId: settings.professionalId },
     data: {
       stripeAccountStatus,
@@ -264,11 +255,13 @@ async function handleAccountUpdated(
 }
 
 async function handleStripeEvent(
+  tx: Prisma.TransactionClient,
   event: Stripe.Event,
 ): Promise<StripeWebhookResult> {
   switch (event.type) {
     case 'checkout.session.completed':
       return handleCheckoutSession(
+        tx,
         event.data.object as Stripe.Checkout.Session,
         StripeCheckoutSessionStatus.COMPLETE,
         'checkout.session.completed',
@@ -276,6 +269,7 @@ async function handleStripeEvent(
 
     case 'checkout.session.expired':
       return handleCheckoutSession(
+        tx,
         event.data.object as Stripe.Checkout.Session,
         StripeCheckoutSessionStatus.EXPIRED,
         'checkout.session.expired',
@@ -283,18 +277,20 @@ async function handleStripeEvent(
 
     case 'payment_intent.succeeded':
       return handlePaymentIntentSucceeded(
+        tx,
         event.data.object as Stripe.PaymentIntent,
         event.id,
       )
 
     case 'payment_intent.payment_failed':
       return handlePaymentIntentFailed(
+        tx,
         event.data.object as Stripe.PaymentIntent,
         event.id,
       )
 
     case 'account.updated':
-      return handleAccountUpdated(event.data.object as Stripe.Account)
+      return handleAccountUpdated(tx, event.data.object as Stripe.Account)
 
     default:
       return {
@@ -377,9 +373,23 @@ export async function POST(req: Request) {
       )
     }
 
-    const result = await handleStripeEvent(event)
+const result = await prisma.$transaction(
+  async (tx) => {
+    const handledResult = await handleStripeEvent(tx, event)
 
-    await markEventProcessed({ stripeEventId: event.id })
+    await tx.stripeWebhookEvent.update({
+      where: { stripeEventId: event.id },
+      data: {
+        processedAt: new Date(),
+        failedAt: null,
+        lastError: null,
+      },
+    })
+
+    return handledResult
+  },
+  { timeout: 30_000, maxWait: 10_000 },
+)
 
     return jsonOk(
       {
