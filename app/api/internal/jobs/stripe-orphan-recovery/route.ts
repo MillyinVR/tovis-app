@@ -1,27 +1,39 @@
 // app/api/internal/jobs/stripe-orphan-recovery/route.ts
 //
 // Cron: */10 * * * * (every 10 minutes)
+//
 // Recovers bookings where Stripe collected payment but the
 // payment_intent.succeeded webhook never reached the write boundary
-// (lost webhook, transient outage, etc.).
+// because of a lost webhook, transient outage, deploy hiccup, or other gremlin nonsense.
 //
-// For each candidate booking — has stripeCheckoutSessionId, has no
-// paymentCollectedAt, isn't COMPLETED/CANCELLED, was created at least
-// MIN_AGE_MINUTES ago to give the normal webhook flow time to run —
-// we ask Stripe whether the session is actually paid. If yes, we
-// replay applyStripePaymentSucceeded with the synthetic event id
-// so the write boundary's existing idempotency guard either applies
-// the pending state or no-ops on a duplicate.
+// For each candidate booking:
+// - has a Stripe checkout session
+// - uses Stripe as the payment provider
+// - has not collected payment locally
+// - has not already recorded a succeeded Stripe payment
+// - is not COMPLETED or CANCELLED
+// - was created at least MIN_AGE_MINUTES ago, so normal webhook flow gets first shot
+// - was created no more than MAX_AGE_HOURS ago, so the sweep stays bounded
 //
-// Failures are logged per-booking; a single bad session never blocks
-// the rest of the sweep.
+// We ask Stripe whether the Checkout Session is actually paid.
+// If yes, we replay applyStripePaymentSucceeded with a synthetic event id.
+// The write boundary owns the actual mutation and idempotency rules.
+//
+// Failures are logged per booking; one bad Stripe session never blocks the rest
+// of the sweep.
+
+import type Stripe from 'stripe'
+import {
+  BookingStatus,
+  PaymentProvider,
+  StripePaymentStatus,
+} from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { applyStripePaymentSucceeded } from '@/lib/booking/writeBoundary'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
-import { BookingStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -29,6 +41,18 @@ export const runtime = 'nodejs'
 const MIN_AGE_MINUTES = 30
 const MAX_AGE_HOURS = 72
 const MAX_CANDIDATES_PER_RUN = 200
+
+type RecoveryOutcome = {
+  bookingId: string
+  stripeCheckoutSessionId: string
+  outcome:
+    | 'recovered'
+    | 'session_not_paid'
+    | 'session_missing_payment_intent'
+    | 'stripe_lookup_failed'
+    | 'apply_failed'
+    | 'no_op_or_already_recovered'
+}
 
 function readEnv(name: string): string | null {
   return process.env[name] ?? null
@@ -51,16 +75,36 @@ function isAuthorizedJobRequest(req: Request): boolean {
   return false
 }
 
-type RecoveryOutcome = {
-  bookingId: string
-  stripeCheckoutSessionId: string
-  outcome:
-    | 'recovered'
-    | 'session_not_paid'
-    | 'session_missing_payment_intent'
-    | 'stripe_lookup_failed'
-    | 'apply_failed'
-    | 'no_op_or_already_recovered'
+function getStripePaymentIntentId(
+  session: Stripe.Checkout.Session,
+): string | null {
+  if (typeof session.payment_intent === 'string') {
+    return session.payment_intent
+  }
+
+  if (
+    session.payment_intent &&
+    typeof session.payment_intent === 'object' &&
+    typeof session.payment_intent.id === 'string'
+  ) {
+    return session.payment_intent.id
+  }
+
+  return null
+}
+
+function getStripePaymentIntent(
+  session: Stripe.Checkout.Session,
+): Stripe.PaymentIntent | null {
+  if (
+    session.payment_intent &&
+    typeof session.payment_intent === 'object' &&
+    session.payment_intent.object === 'payment_intent'
+  ) {
+    return session.payment_intent
+  }
+
+  return null
 }
 
 async function recoverBooking(args: {
@@ -69,7 +113,8 @@ async function recoverBooking(args: {
 }): Promise<RecoveryOutcome> {
   const stripe = getStripe()
 
-  let session
+  let session: Stripe.Checkout.Session
+
   try {
     session = await stripe.checkout.sessions.retrieve(
       args.stripeCheckoutSessionId,
@@ -82,6 +127,7 @@ async function recoverBooking(args: {
       event: 'STRIPE_LOOKUP_FAILED',
       bookingId: args.bookingId,
     })
+
     return {
       bookingId: args.bookingId,
       stripeCheckoutSessionId: args.stripeCheckoutSessionId,
@@ -97,14 +143,8 @@ async function recoverBooking(args: {
     }
   }
 
-  const paymentIntent =
-    typeof session.payment_intent === 'string'
-      ? null
-      : (session.payment_intent ?? null)
-  const stripePaymentIntentId =
-    typeof session.payment_intent === 'string'
-      ? session.payment_intent
-      : (paymentIntent?.id ?? null)
+  const paymentIntent = getStripePaymentIntent(session)
+  const stripePaymentIntentId = getStripePaymentIntentId(session)
 
   if (!stripePaymentIntentId) {
     return {
@@ -115,21 +155,22 @@ async function recoverBooking(args: {
   }
 
   const amountReceivedCents =
-    paymentIntent && typeof paymentIntent.amount_received === 'number'
+    typeof paymentIntent?.amount_received === 'number'
       ? paymentIntent.amount_received
       : typeof session.amount_total === 'number'
         ? session.amount_total
         : null
+
   const currency =
-    paymentIntent && typeof paymentIntent.currency === 'string'
+    typeof paymentIntent?.currency === 'string'
       ? paymentIntent.currency
       : typeof session.currency === 'string'
         ? session.currency
         : null
 
-  // Synthetic event id keyed off the session lets the write-boundary's
-  // idempotency on `stripeLastEventId` no-op if the real webhook already
-  // applied the same state.
+  // Stable synthetic idempotency key for this recovery path.
+  // If this job retries the same paid session, the write boundary can no-op
+  // after the first successful recovery.
   const stripeEventId = `orphan_recovery:${args.stripeCheckoutSessionId}`
 
   try {
@@ -156,6 +197,7 @@ async function recoverBooking(args: {
       event: 'APPLY_PAYMENT_FAILED',
       bookingId: args.bookingId,
     })
+
     return {
       bookingId: args.bookingId,
       stripeCheckoutSessionId: args.stripeCheckoutSessionId,
@@ -164,26 +206,36 @@ async function recoverBooking(args: {
   }
 }
 
-async function runJob(req: Request) {
+async function runJob(req: Request): Promise<Response> {
   const secret = getJobSecret()
+
   if (!secret) {
     return jsonFail(
       500,
       'Missing INTERNAL_JOB_SECRET or CRON_SECRET configuration.',
+      {
+        code: 'STRIPE_ORPHAN_RECOVERY_SECRET_REQUIRED',
+      },
     )
   }
 
   if (!isAuthorizedJobRequest(req)) {
-    return jsonFail(401, 'Unauthorized')
+    return jsonFail(401, 'Unauthorized', {
+      code: 'UNAUTHORIZED',
+    })
   }
 
   const now = new Date()
   const minCreatedBefore = new Date(now.getTime() - MIN_AGE_MINUTES * 60_000)
-  const maxCreatedAfter = new Date(now.getTime() - MAX_AGE_HOURS * 3600_000)
+  const maxCreatedAfter = new Date(now.getTime() - MAX_AGE_HOURS * 3_600_000)
 
   const candidates = await prisma.booking.findMany({
     where: {
+      paymentProvider: PaymentProvider.STRIPE,
       stripeCheckoutSessionId: { not: null },
+      stripePaymentStatus: {
+        not: StripePaymentStatus.SUCCEEDED,
+      },
       paymentCollectedAt: null,
       status: {
         notIn: [BookingStatus.CANCELLED, BookingStatus.COMPLETED],
@@ -202,6 +254,7 @@ async function runJob(req: Request) {
   })
 
   const results: RecoveryOutcome[] = []
+
   for (const candidate of candidates) {
     if (!candidate.stripeCheckoutSessionId) continue
 
@@ -209,12 +262,13 @@ async function runJob(req: Request) {
       bookingId: candidate.id,
       stripeCheckoutSessionId: candidate.stripeCheckoutSessionId,
     })
+
     results.push(outcome)
   }
 
   const tally = results.reduce<Record<RecoveryOutcome['outcome'], number>>(
-    (acc, r) => {
-      acc[r.outcome] = (acc[r.outcome] ?? 0) + 1
+    (acc, result) => {
+      acc[result.outcome] = (acc[result.outcome] ?? 0) + 1
       return acc
     },
     {
@@ -227,17 +281,22 @@ async function runJob(req: Request) {
     },
   )
 
-  return jsonOk({
-    candidatesScanned: candidates.length,
-    tally,
-    ranAt: now.toISOString(),
-  })
+  return jsonOk(
+    {
+      ok: true,
+      candidatesScanned: candidates.length,
+      tally,
+      sample: results.slice(0, 20),
+      ranAt: now.toISOString(),
+    },
+    200,
+  )
 }
 
-export async function GET(req: Request) {
+export async function GET(req: Request): Promise<Response> {
   return runJob(req)
 }
 
-export async function POST(req: Request) {
+export async function POST(req: Request): Promise<Response> {
   return runJob(req)
 }
