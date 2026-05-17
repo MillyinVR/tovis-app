@@ -19,6 +19,7 @@ type BookingFindManyArgs = {
       in: BookingStatus[]
     }
     scheduledFor: {
+      gte: Date
       lt: Date
     }
     id?: {
@@ -41,6 +42,7 @@ type HoldFindManyArgs = {
       gt: Date
     }
     scheduledFor: {
+      gte: Date
       lt: Date
     }
     id?: {
@@ -266,9 +268,11 @@ describe('findSchedulingConflicts', () => {
           BookingStatus.PENDING,
           BookingStatus.ACCEPTED,
           BookingStatus.IN_PROGRESS,
+          BookingStatus.COMPLETED,
         ],
       },
       scheduledFor: {
+        gte: new Date('2026-06-01T02:00:00.000Z'),
         lt: requestedEnd,
       },
     })
@@ -279,6 +283,7 @@ describe('findSchedulingConflicts', () => {
         gt: now,
       },
       scheduledFor: {
+        gte: new Date('2026-06-01T02:00:00.000Z'),
         lt: requestedEnd,
       },
     })
@@ -309,6 +314,53 @@ describe('findSchedulingConflicts', () => {
     expect(result.bookings[0]?.id).toBe('booking_1')
     expect(result.holds).toHaveLength(0)
     expect(result.all.map((conflict) => conflict.id)).toEqual(['booking_1'])
+  })
+
+  it('treats completed bookings as scheduling conflicts to match availability occupancy rules', async () => {
+    const tx = makeTx({
+      bookings: [
+        {
+          id: 'booking_completed_1',
+          professionalId: 'pro_1',
+          scheduledFor: new Date('2026-06-01T17:30:00.000Z'),
+          totalDurationMinutes: 30,
+          bufferMinutes: 0,
+        },
+      ],
+    })
+
+    const result = await findSchedulingConflicts({
+      tx: asTransactionClient(tx),
+      professionalId: 'pro_1',
+      startsAt: requestedStart,
+      endsAt: requestedEnd,
+      now,
+    })
+
+    expect(tx.booking.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: {
+            in: [
+              BookingStatus.PENDING,
+              BookingStatus.ACCEPTED,
+              BookingStatus.IN_PROGRESS,
+              BookingStatus.COMPLETED,
+            ],
+          },
+        }),
+      }),
+    )
+
+    expect(result.bookings).toEqual([
+      {
+        kind: 'BOOKING',
+        id: 'booking_completed_1',
+        professionalId: 'pro_1',
+        startsAt: new Date('2026-06-01T17:30:00.000Z'),
+        endsAt: new Date('2026-06-01T18:00:00.000Z'),
+      },
+    ])
   })
 
   it('includes overlapping hold conflicts', async () => {

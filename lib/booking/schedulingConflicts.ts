@@ -3,7 +3,7 @@
 import { BookingStatus, type Prisma } from '@prisma/client'
 
 import type { SchedulingConflict } from './overlapPolicy'
-
+import { getConflictWindowStart } from '@/lib/booking/conflicts'
 export type PrismaTransactionClient = Prisma.TransactionClient
 
 export type SchedulingConflictWindow = {
@@ -47,6 +47,7 @@ const ACTIVE_BOOKING_STATUSES: readonly BookingStatus[] = [
   BookingStatus.PENDING,
   BookingStatus.ACCEPTED,
   BookingStatus.IN_PROGRESS,
+  BookingStatus.COMPLETED,
 ]
 
 export function calculateWindowEnd(args: {
@@ -137,9 +138,10 @@ export async function findSchedulingConflicts({
       status: {
         in: [...ACTIVE_BOOKING_STATUSES],
       },
-      scheduledFor: {
+        scheduledFor: {
+        gte: getConflictWindowStart(startsAt),
         lt: endsAt,
-      },
+        },
       ...(excludeBookingId
         ? {
             id: {
@@ -164,6 +166,7 @@ export async function findSchedulingConflicts({
         gt: now,
       },
       scheduledFor: {
+        gte: getConflictWindowStart(startsAt),
         lt: endsAt,
       },
       ...(excludeHoldId

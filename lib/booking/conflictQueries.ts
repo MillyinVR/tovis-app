@@ -274,7 +274,9 @@ function buildCalendarBlockWindowWhere(args: {
   }
 }
 
-function toConflictErrorCode(conflict: TimeRangeConflictCode): 'TIME_BLOCKED' | 'TIME_BOOKED' | 'TIME_HELD' {
+function toConflictErrorCode(
+  conflict: TimeRangeConflictCode,
+): 'TIME_BLOCKED' | 'TIME_BOOKED' | 'TIME_HELD' {
   switch (conflict) {
     case 'BLOCKED':
       return 'TIME_BLOCKED'
@@ -411,15 +413,15 @@ export async function hasHoldConflict(
 
   if (!holds.length) return false
 
-    return holds.some((hold) => {
-      const interval = holdRecordToBusyInterval({
-        hold,
-        defaultBufferMinutes,
-        fallbackDurationMinutes,
-      })
-
-      return overlaps(interval.start, interval.end, requestedStart, requestedEnd)
+  return holds.some((hold) => {
+    const interval = holdRecordToBusyInterval({
+      hold,
+      defaultBufferMinutes,
+      fallbackDurationMinutes,
     })
+
+    return overlaps(interval.start, interval.end, requestedStart, requestedEnd)
+  })
 }
 
 export async function assertNoCalendarBlockConflict(
@@ -545,12 +547,12 @@ export async function loadBusyIntervalsForWindow(
       bookingToBusyInterval(booking, fallbackDurationMinutes),
     ),
     ...holds.map((hold) =>
-        holdRecordToBusyInterval({
-          hold,
-          defaultBufferMinutes,
-          fallbackDurationMinutes,
-        }),
-      ),
+      holdRecordToBusyInterval({
+        hold,
+        defaultBufferMinutes,
+        fallbackDurationMinutes,
+      }),
+    ),
     ...blocks.map((block) => ({
       start: new Date(block.startsAt),
       end: new Date(block.endsAt),
