@@ -1,5 +1,6 @@
 // lib/booking/overlapPolicy.test.ts
 
+import { ServiceLocationType } from '@prisma/client'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -58,7 +59,11 @@ function makeAftercareSlot(
     aftercareSummaryId: 'aftercare_1',
     clientActionTokenId: 'token_1',
     professionalId: 'pro_1',
+    offeringId: 'offering_1',
+    locationId: 'location_1',
+    locationType: ServiceLocationType.SALON,
     startsAt,
+    endsAt,
     ...overrides,
   }
 }
@@ -79,7 +84,7 @@ describe('bookingStartsMatch', () => {
 })
 
 describe('aftercareSlotMatchesRequestedWindow', () => {
-  it('returns true when the requested start matches the pro-preselected aftercare slot', () => {
+  it('returns true when the requested window matches the pro-preselected aftercare slot', () => {
     expect(
       aftercareSlotMatchesRequestedWindow({
         requestedWindow,
@@ -94,6 +99,17 @@ describe('aftercareSlotMatchesRequestedWindow', () => {
         requestedWindow,
         slot: makeAftercareSlot({
           startsAt: new Date('2026-06-01T19:00:00.000Z'),
+        }),
+      }),
+    ).toBe(false)
+  })
+
+  it('returns false when the requested end differs from the aftercare slot', () => {
+    expect(
+      aftercareSlotMatchesRequestedWindow({
+        requestedWindow,
+        slot: makeAftercareSlot({
+          endsAt: new Date('2026-06-01T18:30:00.000Z'),
         }),
       }),
     ).toBe(false)
@@ -173,7 +189,7 @@ describe('decideBookingOverlapPermission', () => {
     })
   })
 
-  it('allows an aftercare rebook overlap when the pro-preselected start exactly matches', () => {
+  it('allows an aftercare rebook overlap when the pro-preselected window exactly matches', () => {
     const decision = decideBookingOverlapPermission({
       actor: clientActor,
       source: {
@@ -222,6 +238,28 @@ describe('decideBookingOverlapPermission', () => {
         clientActionTokenId: 'token_1',
         proPreselectedSlot: makeAftercareSlot({
           startsAt: new Date('2026-06-01T18:00:00.000Z'),
+        }),
+      },
+      requestedWindow,
+      conflicts: [conflict],
+    })
+
+    expect(decision.ok).toBe(false)
+
+    if (!decision.ok) {
+      expect(decision.code).toBe('AFTERCARE_PRESELECTED_SLOT_MISMATCH')
+    }
+  })
+
+  it('blocks an aftercare rebook overlap when the preselected slot has a different end', () => {
+    const decision = decideBookingOverlapPermission({
+      actor: clientActor,
+      source: {
+        kind: 'AFTERCARE_REBOOK',
+        aftercareSummaryId: 'aftercare_1',
+        clientActionTokenId: 'token_1',
+        proPreselectedSlot: makeAftercareSlot({
+          endsAt: new Date('2026-06-01T18:30:00.000Z'),
         }),
       },
       requestedWindow,

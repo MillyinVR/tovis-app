@@ -1,8 +1,8 @@
 // lib/booking/aftercarePreselectedSlot.test.ts
 
 import {
-  AftercareRebookMode,
   ClientActionTokenKind,
+  ServiceLocationType,
 } from '@prisma/client'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -14,21 +14,44 @@ import {
 
 const now = new Date('2026-06-01T16:00:00.000Z')
 const expiresAt = new Date('2026-06-01T17:00:00.000Z')
-const rebookedFor = new Date('2026-06-03T18:00:00.000Z')
+const startsAt = new Date('2026-06-03T18:00:00.000Z')
+const endsAt = new Date('2026-06-03T19:15:00.000Z')
+
+function makeRebookSlot(
+  overrides: Partial<
+    NonNullable<
+      NonNullable<AftercarePreselectedSlotTokenRow['aftercareSummary']>['rebookSlot']
+    >
+  > = {},
+) {
+  return {
+    id: 'aftercare_rebook_slot_1',
+    professionalId: 'pro_1',
+    offeringId: 'offering_1',
+    locationId: 'location_1',
+    locationType: ServiceLocationType.SALON,
+    startsAt,
+    endsAt,
+    ...overrides,
+  }
+}
+
+function makeAftercareSummary(
+  overrides: Partial<
+    NonNullable<AftercarePreselectedSlotTokenRow['aftercareSummary']>
+  > = {},
+): NonNullable<AftercarePreselectedSlotTokenRow['aftercareSummary']> {
+  return {
+    id: 'aftercare_1',
+    bookingId: 'booking_1',
+    rebookSlot: makeRebookSlot(),
+    ...overrides,
+  }
+}
 
 function makeTokenRow(
   overrides: Partial<AftercarePreselectedSlotTokenRow> = {},
 ): AftercarePreselectedSlotTokenRow {
-  const aftercareSummary =
-    overrides.aftercareSummary === undefined
-      ? {
-          id: 'aftercare_1',
-          bookingId: 'booking_1',
-          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-          rebookedFor,
-        }
-      : overrides.aftercareSummary
-
   return {
     id: 'token_1',
     kind: ClientActionTokenKind.AFTERCARE_ACCESS,
@@ -38,7 +61,10 @@ function makeTokenRow(
     professionalId: 'pro_1',
     expiresAt,
     revokedAt: null,
-    aftercareSummary,
+    aftercareSummary:
+      overrides.aftercareSummary === undefined
+        ? makeAftercareSummary()
+        : overrides.aftercareSummary,
     ...overrides,
   }
 }
@@ -74,7 +100,11 @@ describe('resolveAftercarePreselectedSlot', () => {
       aftercareSummaryId: 'aftercare_1',
       clientActionTokenId: 'token_1',
       professionalId: 'pro_1',
-      startsAt: rebookedFor,
+      offeringId: 'offering_1',
+      locationId: 'location_1',
+      locationType: ServiceLocationType.SALON,
+      startsAt,
+      endsAt,
     })
 
     expect(tx.clientActionToken.findUnique).toHaveBeenCalledWith({
@@ -94,8 +124,17 @@ describe('resolveAftercarePreselectedSlot', () => {
           select: {
             id: true,
             bookingId: true,
-            rebookMode: true,
-            rebookedFor: true,
+            rebookSlot: {
+              select: {
+                id: true,
+                professionalId: true,
+                offeringId: true,
+                locationId: true,
+                locationType: true,
+                startsAt: true,
+                endsAt: true,
+              },
+            },
           },
         },
       },
@@ -142,12 +181,9 @@ describe('resolveAftercarePreselectedSlot', () => {
     const tx = makeReader(
       makeTokenRow({
         bookingId: 'booking_2',
-        aftercareSummary: {
-          id: 'aftercare_1',
+        aftercareSummary: makeAftercareSummary({
           bookingId: 'booking_2',
-          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-          rebookedFor,
-        },
+        }),
       }),
     )
 
@@ -198,12 +234,9 @@ describe('resolveAftercarePreselectedSlot', () => {
     const tx = makeReader(
       makeTokenRow({
         aftercareSummaryId: 'aftercare_1',
-        aftercareSummary: {
+        aftercareSummary: makeAftercareSummary({
           id: 'aftercare_2',
-          bookingId: 'booking_1',
-          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-          rebookedFor,
-        },
+        }),
       }),
     )
 
@@ -213,57 +246,35 @@ describe('resolveAftercarePreselectedSlot', () => {
   it('returns null when the aftercare summary belongs to another booking', async () => {
     const tx = makeReader(
       makeTokenRow({
-        aftercareSummary: {
-          id: 'aftercare_1',
+        aftercareSummary: makeAftercareSummary({
           bookingId: 'booking_2',
-          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-          rebookedFor,
-        },
+        }),
       }),
     )
 
     await expect(resolveAftercarePreselectedSlot(makeArgs(tx))).resolves.toBeNull()
   })
 
-  it('returns null when the aftercare mode is NONE', async () => {
+  it('returns null when the aftercare summary has no rebook slot', async () => {
     const tx = makeReader(
       makeTokenRow({
-        aftercareSummary: {
-          id: 'aftercare_1',
-          bookingId: 'booking_1',
-          rebookMode: AftercareRebookMode.NONE,
-          rebookedFor,
-        },
+        aftercareSummary: makeAftercareSummary({
+          rebookSlot: null,
+        }),
       }),
     )
 
     await expect(resolveAftercarePreselectedSlot(makeArgs(tx))).resolves.toBeNull()
   })
 
-  it('returns null when the aftercare mode is RECOMMENDED_WINDOW', async () => {
+  it('returns null when the rebook slot belongs to another professional', async () => {
     const tx = makeReader(
       makeTokenRow({
-        aftercareSummary: {
-          id: 'aftercare_1',
-          bookingId: 'booking_1',
-          rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
-          rebookedFor,
-        },
-      }),
-    )
-
-    await expect(resolveAftercarePreselectedSlot(makeArgs(tx))).resolves.toBeNull()
-  })
-
-  it('returns null when BOOKED_NEXT_APPOINTMENT has no rebookedFor timestamp', async () => {
-    const tx = makeReader(
-      makeTokenRow({
-        aftercareSummary: {
-          id: 'aftercare_1',
-          bookingId: 'booking_1',
-          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-          rebookedFor: null,
-        },
+        aftercareSummary: makeAftercareSummary({
+          rebookSlot: makeRebookSlot({
+            professionalId: 'pro_2',
+          }),
+        }),
       }),
     )
 

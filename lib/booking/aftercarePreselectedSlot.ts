@@ -1,11 +1,19 @@
 // lib/booking/aftercarePreselectedSlot.ts
 
-import {
-  AftercareRebookMode,
-  ClientActionTokenKind,
-} from '@prisma/client'
+import { ClientActionTokenKind } from '@prisma/client'
+import type { ServiceLocationType } from '@prisma/client'
 
 import type { ProPreselectedAftercareSlot } from './overlapPolicy'
+
+export type AftercareRebookSlotRow = {
+  id: string
+  professionalId: string
+  offeringId: string | null
+  locationId: string
+  locationType: ServiceLocationType
+  startsAt: Date
+  endsAt: Date
+}
 
 export type AftercarePreselectedSlotTokenRow = {
   id: string
@@ -19,8 +27,7 @@ export type AftercarePreselectedSlotTokenRow = {
   aftercareSummary: {
     id: string
     bookingId: string
-    rebookMode: AftercareRebookMode
-    rebookedFor: Date | null
+    rebookSlot: AftercareRebookSlotRow | null
   } | null
 }
 
@@ -43,8 +50,17 @@ export type AftercarePreselectedSlotReader = {
           select: {
             id: true
             bookingId: true
-            rebookMode: true
-            rebookedFor: true
+            rebookSlot: {
+              select: {
+                id: true
+                professionalId: true
+                offeringId: true
+                locationId: true
+                locationType: true
+                startsAt: true
+                endsAt: true
+              }
+            }
           }
         }
       }
@@ -86,71 +102,48 @@ export async function resolveAftercarePreselectedSlot({
         select: {
           id: true,
           bookingId: true,
-          rebookMode: true,
-          rebookedFor: true,
+          rebookSlot: {
+            select: {
+              id: true,
+              professionalId: true,
+              offeringId: true,
+              locationId: true,
+              locationType: true,
+              startsAt: true,
+              endsAt: true,
+            },
+          },
         },
       },
     },
   })
 
-  if (!token) {
-    return null
-  }
-
-  if (token.kind !== ClientActionTokenKind.AFTERCARE_ACCESS) {
-    return null
-  }
-
-  if (token.clientId !== clientId) {
-    return null
-  }
-
-  if (token.professionalId !== professionalId) {
-    return null
-  }
-
-  if (token.bookingId !== bookingId) {
-    return null
-  }
-
-  if (!token.aftercareSummaryId) {
-    return null
-  }
-
-  if (token.revokedAt) {
-    return null
-  }
-
-  if (token.expiresAt.getTime() <= now.getTime()) {
-    return null
-  }
+  if (!token) return null
+  if (token.kind !== ClientActionTokenKind.AFTERCARE_ACCESS) return null
+  if (token.clientId !== clientId) return null
+  if (token.professionalId !== professionalId) return null
+  if (token.bookingId !== bookingId) return null
+  if (!token.aftercareSummaryId) return null
+  if (token.revokedAt) return null
+  if (token.expiresAt.getTime() <= now.getTime()) return null
 
   const aftercareSummary = token.aftercareSummary
+  if (!aftercareSummary) return null
+  if (aftercareSummary.id !== token.aftercareSummaryId) return null
+  if (aftercareSummary.bookingId !== bookingId) return null
 
-  if (!aftercareSummary) {
-    return null
-  }
-
-  if (aftercareSummary.id !== token.aftercareSummaryId) {
-    return null
-  }
-
-  if (aftercareSummary.bookingId !== bookingId) {
-    return null
-  }
-
-  if (aftercareSummary.rebookMode !== AftercareRebookMode.BOOKED_NEXT_APPOINTMENT) {
-    return null
-  }
-
-  if (!aftercareSummary.rebookedFor) {
-    return null
-  }
+  const slot = aftercareSummary.rebookSlot
+  if (!slot) return null
+  if (slot.professionalId !== professionalId) return null
 
   return {
     aftercareSummaryId: aftercareSummary.id,
     clientActionTokenId: token.id,
-    professionalId: token.professionalId,
-    startsAt: aftercareSummary.rebookedFor,
+    professionalId: slot.professionalId,
+    offeringId: slot.offeringId,
+    locationId: slot.locationId,
+    locationType: slot.locationType,
+    startsAt: slot.startsAt,
+    endsAt: slot.endsAt,
   }
 }

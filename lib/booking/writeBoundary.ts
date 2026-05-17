@@ -1284,6 +1284,17 @@ const REBOOK_SOURCE_BOOKING_SELECT = {
     select: {
       id: true,
       sentToClientAt: true,
+      rebookSlot: {
+        select: {
+          id: true,
+          professionalId: true,
+          offeringId: true,
+          locationId: true,
+          locationType: true,
+          startsAt: true,
+          endsAt: true,
+        },
+      },
     },
   },
 
@@ -8489,12 +8500,19 @@ assertCanCreateRebookFromSourceBooking({
             aftercareSummaryId: args.aftercareId,
             clientActionTokenId: '',
             proPreselectedSlot:
-              source.aftercareSummary?.id === args.aftercareId
+              source.aftercareSummary?.id === args.aftercareId &&
+              source.aftercareSummary.rebookSlot
                 ? {
                     aftercareSummaryId: args.aftercareId,
                     clientActionTokenId: '',
-                    professionalId: source.professionalId,
-                    startsAt: requestedStart,
+                    professionalId:
+                      source.aftercareSummary.rebookSlot.professionalId,
+                    offeringId: source.aftercareSummary.rebookSlot.offeringId,
+                    locationId: source.aftercareSummary.rebookSlot.locationId,
+                    locationType:
+                      source.aftercareSummary.rebookSlot.locationType,
+                    startsAt: source.aftercareSummary.rebookSlot.startsAt,
+                    endsAt: source.aftercareSummary.rebookSlot.endsAt,
                   }
                 : null,
           }

@@ -1,5 +1,7 @@
 // lib/booking/overlapPolicy.ts
 
+import type { ServiceLocationType } from '@prisma/client'
+
 export type BookingOverlapActor =
   | {
       kind: 'CLIENT'
@@ -36,17 +38,11 @@ export type ProPreselectedAftercareSlot = {
   aftercareSummaryId: string
   clientActionTokenId: string
   professionalId: string
-
-  /**
-   * Current schema source:
-   * AftercareSummary.rebookMode = BOOKED_NEXT_APPOINTMENT
-   * AftercareSummary.rebookedFor = startsAt
-   *
-   * The current schema does not store an explicit aftercare rebook end time.
-   * The booking write path should compute requestedWindow.endsAt from the
-   * service/offering duration and pass the requested window here.
-   */
+  offeringId: string | null
+  locationId: string
+  locationType: ServiceLocationType
   startsAt: Date
+  endsAt: Date
 }
 
 export type BookingOverlapSource =
@@ -122,13 +118,18 @@ export function bookingStartsMatch(left: Date, right: Date): boolean {
   return left.getTime() === right.getTime()
 }
 
+export function bookingEndsMatch(left: Date, right: Date): boolean {
+  return left.getTime() === right.getTime()
+}
+
 export function aftercareSlotMatchesRequestedWindow(args: {
   requestedWindow: BookingWindow
   slot: ProPreselectedAftercareSlot
 }): boolean {
   return (
     args.requestedWindow.professionalId === args.slot.professionalId &&
-    bookingStartsMatch(args.requestedWindow.startsAt, args.slot.startsAt)
+    bookingStartsMatch(args.requestedWindow.startsAt, args.slot.startsAt) &&
+    bookingEndsMatch(args.requestedWindow.endsAt, args.slot.endsAt)
   )
 }
 
