@@ -8,13 +8,11 @@ export const IDEMPOTENCY_ROUTES = {
   PRO_BOOKING_CANCEL: 'PATCH /api/pro/bookings/[id]/cancel',
   PRO_BOOKING_REBOOK: 'POST /api/pro/bookings/[id]/rebook',
   PRO_BOOKING_FINAL_REVIEW: 'POST /api/pro/bookings/[id]/final-review',
-
   PRO_BOOKING_CHECKOUT_MARK_PAID:
-  'POST /api/pro/bookings/[id]/checkout/mark-paid',
-
+    'POST /api/pro/bookings/[id]/checkout/mark-paid',
   PRO_BOOKING_CHECKOUT_WAIVE:
     'POST /api/pro/bookings/[id]/checkout/waive',
-    
+
   BOOKING_CANCEL: 'POST /api/bookings/[id]/cancel',
   BOOKING_RESCHEDULE: 'POST /api/bookings/[id]/reschedule',
 

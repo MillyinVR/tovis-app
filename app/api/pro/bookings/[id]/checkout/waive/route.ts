@@ -1,14 +1,16 @@
 // app/api/pro/bookings/[id]/checkout/waive/route.ts
 
-import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
-import { waiveProBookingCheckout } from '@/lib/booking/writeBoundary'
+import { Role } from '@prisma/client'
+
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import {
   beginRouteIdempotency,
   completeRouteIdempotency,
   failStartedRouteIdempotency,
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
-import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
+import { waiveProBookingCheckout } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 
 export const dynamic = 'force-dynamic'
@@ -52,6 +54,17 @@ function normalizeBookingId(raw: string | null | undefined): string | null {
   return value ? value : null
 }
 
+function parseWaiveReason(rawBody: unknown): string | null {
+  if (!rawBody || typeof rawBody !== 'object') {
+    return null
+  }
+
+  const value = 'reason' in rawBody ? rawBody.reason : null
+  const reason = pickString(value)
+
+  return reason ? reason.slice(0, 500) : null
+}
+
 function buildSuccessBody(result: {
   booking: {
     id: string
@@ -80,7 +93,9 @@ function buildSuccessBody(result: {
       paymentCollectedAt,
       status: String(result.booking.status),
       sessionStep:
-        result.booking.sessionStep == null ? null : String(result.booking.sessionStep),
+        result.booking.sessionStep == null
+          ? null
+          : String(result.booking.sessionStep),
     },
     meta: {
       mutated: result.meta.mutated,
@@ -107,11 +122,14 @@ export async function POST(request: Request, context: RouteParams) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
+    const rawBody = await request.json().catch(() => ({}))
+    const reason = parseWaiveReason(rawBody)
+
     const idempotency = await beginRouteIdempotency<WaiveCheckoutSuccessBody>({
       request,
       actor: {
         actorUserId: auth.user.id,
-        actorRole: 'PRO',
+        actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTES.PRO_BOOKING_CHECKOUT_WAIVE,
       requestLabel: 'pro booking checkout waive',
@@ -119,6 +137,7 @@ export async function POST(request: Request, context: RouteParams) {
         bookingId,
         professionalId: auth.professionalId,
         action: 'WAIVE',
+        reason,
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -135,12 +154,13 @@ export async function POST(request: Request, context: RouteParams) {
     idempotencyRecordId = idempotency.idempotencyRecordId
 
     const result = await waiveProBookingCheckout({
-        bookingId,
-        professionalId: auth.professionalId,
-        actorUserId: auth.user.id,
-        requestId: request.headers.get('x-request-id'),
-        idempotencyKey: idempotency.idempotencyKey,
-        })
+      bookingId,
+      professionalId: auth.professionalId,
+      actorUserId: auth.user.id,
+      requestId: pickString(request.headers.get('x-request-id')),
+      idempotencyKey: idempotency.idempotencyKey,
+      reason,
+    })
 
     const responseBody = buildSuccessBody(result)
 
@@ -168,11 +188,9 @@ export async function POST(request: Request, context: RouteParams) {
 
     const message = error instanceof Error ? error.message : 'Unknown error.'
 
-    return jsonFail(500, 'Internal server error', {
-      code: 'INTERNAL_ERROR',
-      retryable: false,
-      uiAction: 'CONTACT_SUPPORT',
+    return bookingJsonFail('INTERNAL_ERROR', {
       message,
+      userMessage: 'Internal server error',
     })
   }
 }

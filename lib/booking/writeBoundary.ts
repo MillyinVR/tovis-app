@@ -483,8 +483,9 @@ type WaiveProBookingCheckoutArgs = {
   bookingId: string
   professionalId: string
   actorUserId: string
-  requestId?: string | null
-  idempotencyKey?: string | null
+  requestId: string | null
+  idempotencyKey: string
+  reason?: string | null
 }
 
 type UpdateClientBookingCheckoutArgs = {

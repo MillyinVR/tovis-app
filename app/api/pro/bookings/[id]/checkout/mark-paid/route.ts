@@ -8,8 +8,9 @@ import {
   failStartedRouteIdempotency,
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
-import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -111,7 +112,7 @@ export async function POST(request: Request, context: RouteParams) {
       request,
       actor: {
         actorUserId: auth.user.id,
-        actorRole: 'PRO',
+        actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTES.PRO_BOOKING_CHECKOUT_MARK_PAID,
       requestLabel: 'pro booking checkout mark paid',
@@ -135,12 +136,12 @@ export async function POST(request: Request, context: RouteParams) {
     idempotencyRecordId = idempotency.idempotencyRecordId
 
     const result = await markProBookingCheckoutPaid({
-    bookingId,
-    professionalId: auth.professionalId,
-    actorUserId: auth.user.id,
-    requestId: request.headers.get('x-request-id'),
-    idempotencyKey: idempotency.idempotencyKey,
-    })
+      bookingId,
+      professionalId: auth.professionalId,
+      actorUserId: auth.user.id,
+      requestId: pickString(request.headers.get('x-request-id')),
+      idempotencyKey: idempotency.idempotencyKey,
+      })
 
     const responseBody = buildSuccessBody(result)
 
@@ -168,11 +169,9 @@ export async function POST(request: Request, context: RouteParams) {
 
     const message = error instanceof Error ? error.message : 'Unknown error.'
 
-    return jsonFail(500, 'Internal server error', {
-      code: 'INTERNAL_ERROR',
-      retryable: false,
-      uiAction: 'CONTACT_SUPPORT',
+    return bookingJsonFail('INTERNAL_ERROR', {
       message,
+      userMessage: 'Internal server error',
     })
   }
 }
