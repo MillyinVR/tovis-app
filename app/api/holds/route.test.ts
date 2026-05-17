@@ -100,6 +100,57 @@ const offering = {
   },
 }
 
+const createHoldOffering = {
+  id: 'offering_1',
+  professionalId: 'pro_123',
+  offersInSalon: true,
+  offersMobile: true,
+  salonDurationMinutes: 60,
+  mobileDurationMinutes: 75,
+  salonPriceStartingAt: new Prisma.Decimal('100.00'),
+  mobilePriceStartingAt: new Prisma.Decimal('120.00'),
+  professionalTimeZone: 'America/Los_Angeles',
+}
+
+function makeValidSalonBody(
+  overrides: Partial<{
+    offeringId: string
+    scheduledFor: string
+    locationType: string
+    locationId: string
+    entryPoint: string
+    bookingEntryPoint: string
+    source: string
+  }> = {},
+) {
+  return {
+    offeringId: overrides.offeringId ?? 'offering_1',
+    scheduledFor: overrides.scheduledFor ?? SLOT_START.toISOString(),
+    locationType: overrides.locationType ?? 'SALON',
+    locationId: overrides.locationId ?? 'loc_1',
+    ...(overrides.entryPoint !== undefined
+      ? { entryPoint: overrides.entryPoint }
+      : {}),
+    ...(overrides.bookingEntryPoint !== undefined
+      ? { bookingEntryPoint: overrides.bookingEntryPoint }
+      : {}),
+    ...(overrides.source !== undefined ? { source: overrides.source } : {}),
+  }
+}
+
+function expectCreateHoldEntryPoint(entryPoint: string): void {
+  expect(mocks.createHold).toHaveBeenCalledWith(
+    expect.objectContaining({
+      clientId: 'client_1',
+      bookingEntryPoint: entryPoint,
+      requestedStart: SLOT_START,
+      requestedLocationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      clientAddressId: null,
+    }),
+  )
+}
+
 describe('POST /api/holds', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -110,14 +161,19 @@ describe('POST /api/holds', () => {
     mocks.requireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
+      user: {
+        id: 'user_1',
+      },
     })
 
-    mocks.clientRateLimitKey.mockReturnValue('client:client_1|ip:unknown-ip')
+    mocks.clientRateLimitKey.mockReturnValue(
+      'user:user_1|client:client_1|ip:unknown-ip',
+    )
 
     mocks.enforceRateLimit.mockResolvedValue({
       allowed: true,
       bucket: 'holds:create',
-      key: 'client:client_1|ip:unknown-ip',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
       limit: 12,
       remaining: 11,
       resetAt: new Date('2026-03-17T13:00:00.000Z'),
@@ -182,24 +238,18 @@ describe('POST /api/holds', () => {
   })
 
   it('calls createHold with parsed values and returns hold payload', async () => {
-    const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-      }),
-    )
+    const response = await POST(makeRequest(makeValidSalonBody()))
     const json = await readJson(response)
 
     expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
       clientId: 'client_1',
+      userId: 'user_1',
       request: expect.any(Request),
     })
 
     expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
       bucket: 'holds:create',
-      key: 'client:client_1|ip:unknown-ip',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
     })
 
     expect(mocks.professionalServiceOfferingFindUnique).toHaveBeenCalledWith({
@@ -225,17 +275,7 @@ describe('POST /api/holds', () => {
     expect(mocks.createHold).toHaveBeenCalledWith({
       clientId: 'client_1',
       bookingEntryPoint: 'BROAD_DISCOVERY',
-      offering: {
-        id: 'offering_1',
-        professionalId: 'pro_123',
-        offersInSalon: true,
-        offersMobile: true,
-        salonDurationMinutes: 60,
-        mobileDurationMinutes: 75,
-        salonPriceStartingAt: new Prisma.Decimal('100.00'),
-        mobilePriceStartingAt: new Prisma.Decimal('120.00'),
-        professionalTimeZone: 'America/Los_Angeles',
-      },
+      offering: createHoldOffering,
       requestedStart: SLOT_START,
       requestedLocationId: 'loc_1',
       locationType: ServiceLocationType.SALON,
@@ -276,13 +316,7 @@ describe('POST /api/holds', () => {
       res: authRes,
     })
 
-    const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-      }),
-    )
+    const response = await POST(makeRequest(makeValidSalonBody()))
     const json = await readJson(response)
 
     expect(response).toBe(authRes)
@@ -304,7 +338,7 @@ describe('POST /api/holds', () => {
     const blockedDecision = {
       allowed: false,
       bucket: 'holds:create',
-      key: 'client:client_1|ip:unknown-ip',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
       limit: 12,
       remaining: 0,
       resetAt: new Date('2026-03-17T13:00:00.000Z'),
@@ -325,14 +359,7 @@ describe('POST /api/holds', () => {
     mocks.enforceRateLimit.mockResolvedValueOnce(blockedDecision)
     mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
 
-    const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-      }),
-    )
+    const response = await POST(makeRequest(makeValidSalonBody()))
 
     expect(response).toBe(limitedResponse)
     expect(response.status).toBe(429)
@@ -341,12 +368,13 @@ describe('POST /api/holds', () => {
 
     expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
       clientId: 'client_1',
+      userId: 'user_1',
       request: expect.any(Request),
     })
 
     expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
       bucket: 'holds:create',
-      key: 'client:client_1|ip:unknown-ip',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
     })
 
     expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(
@@ -359,152 +387,121 @@ describe('POST /api/holds', () => {
 
   it('passes SPECIFIC_SEARCH entry point to createHold when requested', async () => {
     const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-        entryPoint: 'SPECIFIC_SEARCH',
-      }),
+      makeRequest(
+        makeValidSalonBody({
+          entryPoint: 'SPECIFIC_SEARCH',
+        }),
+      ),
     )
 
     expect(response.status).toBe(201)
-
-    expect(mocks.createHold).toHaveBeenCalledWith(
-      expect.objectContaining({
-        clientId: 'client_1',
-        bookingEntryPoint: 'SPECIFIC_SEARCH',
-        requestedStart: SLOT_START,
-        requestedLocationId: 'loc_1',
-        locationType: ServiceLocationType.SALON,
-        clientAddressId: null,
-      }),
-    )
+    expectCreateHoldEntryPoint('SPECIFIC_SEARCH')
   })
 
   it('passes DIRECT_PROFILE entry point to createHold when requested', async () => {
     const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-        entryPoint: 'DIRECT_PROFILE',
-      }),
+      makeRequest(
+        makeValidSalonBody({
+          entryPoint: 'DIRECT_PROFILE',
+        }),
+      ),
     )
 
     expect(response.status).toBe(201)
-
-    expect(mocks.createHold).toHaveBeenCalledWith(
-      expect.objectContaining({
-        clientId: 'client_1',
-        bookingEntryPoint: 'DIRECT_PROFILE',
-        requestedStart: SLOT_START,
-        requestedLocationId: 'loc_1',
-        locationType: ServiceLocationType.SALON,
-        clientAddressId: null,
-      }),
-    )
+    expectCreateHoldEntryPoint('DIRECT_PROFILE')
   })
 
   it('accepts bookingEntryPoint alias for safe entry point hints', async () => {
     const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-        bookingEntryPoint: 'DIRECT_PROFILE',
-      }),
+      makeRequest(
+        makeValidSalonBody({
+          bookingEntryPoint: 'DIRECT_PROFILE',
+        }),
+      ),
     )
 
     expect(response.status).toBe(201)
+    expectCreateHoldEntryPoint('DIRECT_PROFILE')
+  })
 
-    expect(mocks.createHold).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bookingEntryPoint: 'DIRECT_PROFILE',
-      }),
+  it('accepts source alias for safe entry point hints', async () => {
+    const response = await POST(
+      makeRequest(
+        makeValidSalonBody({
+          source: 'SPECIFIC_SEARCH',
+        }),
+      ),
     )
+
+    expect(response.status).toBe(201)
+    expectCreateHoldEntryPoint('SPECIFIC_SEARCH')
+  })
+
+  it('prefers entryPoint over bookingEntryPoint and source aliases', async () => {
+    const response = await POST(
+      makeRequest(
+        makeValidSalonBody({
+          entryPoint: 'DIRECT_PROFILE',
+          bookingEntryPoint: 'SPECIFIC_SEARCH',
+          source: 'BROAD_DISCOVERY',
+        }),
+      ),
+    )
+
+    expect(response.status).toBe(201)
+    expectCreateHoldEntryPoint('DIRECT_PROFILE')
   })
 
   it('falls back to BROAD_DISCOVERY when entry point hint is invalid', async () => {
     const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-        entryPoint: 'TOTALLY_FAKE_SOURCE',
-      }),
+      makeRequest(
+        makeValidSalonBody({
+          entryPoint: 'TOTALLY_FAKE_SOURCE',
+        }),
+      ),
     )
 
     expect(response.status).toBe(201)
-
-    expect(mocks.createHold).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bookingEntryPoint: 'BROAD_DISCOVERY',
-      }),
-    )
+    expectCreateHoldEntryPoint('BROAD_DISCOVERY')
   })
 
   it('does not trust raw NFC_CARD entry point without server-validated NFC context', async () => {
     const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-        entryPoint: 'NFC_CARD',
-      }),
+      makeRequest(
+        makeValidSalonBody({
+          entryPoint: 'NFC_CARD',
+        }),
+      ),
     )
 
     expect(response.status).toBe(201)
-
-    expect(mocks.createHold).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bookingEntryPoint: 'BROAD_DISCOVERY',
-      }),
-    )
+    expectCreateHoldEntryPoint('BROAD_DISCOVERY')
   })
 
   it('does not trust raw AFTERCARE_REBOOK entry point without server-validated aftercare context', async () => {
     const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-        entryPoint: 'AFTERCARE_REBOOK',
-      }),
+      makeRequest(
+        makeValidSalonBody({
+          entryPoint: 'AFTERCARE_REBOOK',
+        }),
+      ),
     )
 
     expect(response.status).toBe(201)
-
-    expect(mocks.createHold).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bookingEntryPoint: 'BROAD_DISCOVERY',
-      }),
-    )
+    expectCreateHoldEntryPoint('BROAD_DISCOVERY')
   })
 
   it('does not trust raw PRO_CREATED entry point from the client hold route', async () => {
     const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-        entryPoint: 'PRO_CREATED',
-      }),
+      makeRequest(
+        makeValidSalonBody({
+          entryPoint: 'PRO_CREATED',
+        }),
+      ),
     )
 
     expect(response.status).toBe(201)
-
-    expect(mocks.createHold).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bookingEntryPoint: 'BROAD_DISCOVERY',
-      }),
-    )
+    expectCreateHoldEntryPoint('BROAD_DISCOVERY')
   })
 
   it('passes entry point through for valid mobile hold requests', async () => {
@@ -730,13 +727,7 @@ describe('POST /api/holds', () => {
       isActive: false,
     })
 
-    const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-      }),
-    )
+    const response = await POST(makeRequest(makeValidSalonBody()))
     const json = await readJson(response)
 
     expect(response.status).toBe(descriptor.httpStatus)
@@ -757,14 +748,7 @@ describe('POST /api/holds', () => {
 
     mocks.createHold.mockRejectedValueOnce(new BookingError('TIME_HELD'))
 
-    const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-      }),
-    )
+    const response = await POST(makeRequest(makeValidSalonBody()))
     const json = await readJson(response)
 
     expect(response.status).toBe(descriptor.httpStatus)
@@ -783,13 +767,7 @@ describe('POST /api/holds', () => {
 
     mocks.createHold.mockRejectedValueOnce(new Error('boom'))
 
-    const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-      }),
-    )
+    const response = await POST(makeRequest(makeValidSalonBody()))
     const json = await readJson(response)
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(

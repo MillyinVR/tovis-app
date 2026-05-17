@@ -5,12 +5,12 @@
 -- Buckets:
 -- - media-public: public renderable assets. Public reads are allowed.
 -- - media-private: private pro/client/verification media. No public reads, lists,
---   inserts, updates, or deletes. Access should happen through server/admin
---   signed URLs only.
+--   inserts, updates, or deletes through normal Storage API access.
 --
--- Important:
--- These policies protect normal Storage API access. Server-side service-role
--- operations and signed upload/read URLs are managed separately by Supabase.
+-- Access model:
+-- - App/server code uses the Supabase service role/admin client to create signed
+--   upload/read URLs after TOVIS app-level auth and ownership checks.
+-- - Normal anon/authenticated Storage API access is intentionally minimal.
 
 insert into storage.buckets (id, name, public)
 values
@@ -33,6 +33,12 @@ drop policy if exists "media-private no public insert" on storage.objects;
 drop policy if exists "media-private no public update" on storage.objects;
 drop policy if exists "media-private no public delete" on storage.objects;
 
+drop policy if exists "media-private no direct read" on storage.objects;
+drop policy if exists "media-private no direct insert" on storage.objects;
+drop policy if exists "media-private no direct update" on storage.objects;
+drop policy if exists "media-private no direct delete" on storage.objects;
+
+-- Allow anonymous/public reads only for public media.
 create policy "media-public public read"
 on storage.objects
 for select
@@ -41,44 +47,9 @@ using (
   bucket_id = 'media-public'
 );
 
--- Explicit deny policies for media-private.
--- RLS denies by default when no permissive policy matches, but these named
--- policies document the intended boundary in the database itself.
-create policy "media-private no public read"
-on storage.objects
-as restrictive
-for select
-to public
-using (
-  bucket_id <> 'media-private'
-);
-
-create policy "media-private no public insert"
-on storage.objects
-as restrictive
-for insert
-to public
-with check (
-  bucket_id <> 'media-private'
-);
-
-create policy "media-private no public update"
-on storage.objects
-as restrictive
-for update
-to public
-using (
-  bucket_id <> 'media-private'
-)
-with check (
-  bucket_id <> 'media-private'
-);
-
-create policy "media-private no public delete"
-on storage.objects
-as restrictive
-for delete
-to public
-using (
-  bucket_id <> 'media-private'
-);
+-- No insert/update/delete policies are created for media-public or media-private.
+-- Result:
+-- - direct public reads from media-public are allowed;
+-- - direct reads from media-private are denied because no allow policy matches;
+-- - direct writes/updates/deletes are denied because no allow policy exists;
+-- - server/service-role operations and signed URL flows remain app-controlled.

@@ -250,6 +250,7 @@ export async function POST(req: NextRequest) {
       bucket: 'holds:create',
       key: clientRateLimitKey({
         clientId: auth.clientId,
+        userId: auth.user.id,
         request: req,
       }),
     })
