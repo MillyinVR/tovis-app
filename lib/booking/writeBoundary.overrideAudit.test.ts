@@ -43,8 +43,10 @@ const mocks = vi.hoisted(() => ({
   txClientAddressFindFirst: vi.fn(),
   txProfessionalServiceOfferingFindFirst: vi.fn(),
   txBookingFindUnique: vi.fn(),
+  txBookingFindMany: vi.fn(),
   txBookingCreate: vi.fn(),
   txBookingServiceItemCreate: vi.fn(),
+  txBookingHoldFindMany: vi.fn(),
   txBookingOverrideAuditLogCreateMany: vi.fn(),
 
   resolveValidatedBookingContext: vi.fn(),
@@ -126,7 +128,11 @@ const tx = {
   },
   booking: {
     findUnique: mocks.txBookingFindUnique,
+    findMany: mocks.txBookingFindMany,
     create: mocks.txBookingCreate,
+  },
+  bookingHold: {
+    findMany: mocks.txBookingHoldFindMany,
   },
   bookingServiceItem: {
     create: mocks.txBookingServiceItemCreate,
@@ -380,6 +386,8 @@ describe('lib/booking/writeBoundary override audit', () => {
     })
 
     installReminderSyncBookingFindUniqueMock()
+    mocks.txBookingFindMany.mockResolvedValue([])
+    mocks.txBookingHoldFindMany.mockResolvedValue([])
 
     mocks.resolveValidatedBookingContext.mockResolvedValue({
       ok: true,

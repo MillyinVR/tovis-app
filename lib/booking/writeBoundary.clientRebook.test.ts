@@ -136,6 +136,7 @@ function makeArgs() {
     aftercareId: 'aftercare_1',
     bookingId: 'booking_1',
     clientId: 'client_1',
+    aftercareClientActionTokenId: 'aftercare_token_1',
     scheduledFor: REBOOKED_FOR,
     requestId: 'req_rebook_1',
     idempotencyKey: 'idem_rebook_1',
@@ -164,6 +165,22 @@ describe('lib/booking/writeBoundary createClientRebookedBookingFromAftercare lif
 
     mocks.txExecuteRaw.mockResolvedValue(1)
     mocks.txQueryRaw.mockResolvedValue([])
+  })
+
+  it('requires an aftercare client action token id', async () => {
+    await expect(
+      createClientRebookedBookingFromAftercare({
+        ...makeArgs(),
+        aftercareClientActionTokenId: '',
+      }),
+    ).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    })
+
+    expect(mocks.prismaTransaction).toHaveBeenCalledTimes(1)
+    expect(mocks.txBookingFindFirst).not.toHaveBeenCalled()
+    expect(mocks.txProfessionalProfileUpdate).not.toHaveBeenCalled()
+    expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
   })
 
   it('returns an existing rebook only when the source booking closeout is complete', async () => {

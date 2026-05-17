@@ -256,7 +256,8 @@ function makeClientCheckoutBooking(overrides?: {
     id: 'booking_1',
     clientId: 'client_1',
     professionalId: 'pro_1',
-    status: overrides?.status ?? BookingStatus.IN_PROGRESS,    sessionStep: overrides?.sessionStep ?? SessionStep.AFTER_PHOTOS,
+    status: overrides?.status ?? BookingStatus.IN_PROGRESS,
+    sessionStep: overrides?.sessionStep ?? SessionStep.AFTER_PHOTOS,
     finishedAt: overrides?.finishedAt ?? FINISHED_AT,
     subtotalSnapshot: new Prisma.Decimal(120),
     serviceSubtotalSnapshot: new Prisma.Decimal(100),
@@ -441,9 +442,21 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
         href: '/client/bookings/booking_1?step=aftercare',
       },
     })
+
     mocks.txProfessionalProfileUpdate.mockResolvedValue({ id: 'pro_1' })
     mocks.txExecuteRaw.mockResolvedValue(1)
     mocks.txQueryRaw.mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+
+    if (ORIGINAL_LIFECYCLE_STRICT_MODE === undefined) {
+      delete process.env.LIFECYCLE_STRICT_MODE
+      return
+    }
+
+    process.env.LIFECYCLE_STRICT_MODE = ORIGINAL_LIFECYCLE_STRICT_MODE
   })
 
   it('sends aftercare but does not complete the booking when AFTER photos are missing', async () => {
@@ -451,7 +464,9 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
       makeAftercareCloseoutBookingWithoutAfterPhotos(),
     )
 
-    mocks.txAftercareSummaryUpsert.mockResolvedValueOnce(makeSentAftercareResult())
+    mocks.txAftercareSummaryUpsert.mockResolvedValueOnce(
+      makeSentAftercareResult(),
+    )
 
     mocks.txProductRecommendationDeleteMany.mockResolvedValueOnce({
       count: 0,
@@ -521,17 +536,6 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
       },
     })
   })
-
-afterEach(() => {
-  vi.useRealTimers()
-
-  if (ORIGINAL_LIFECYCLE_STRICT_MODE === undefined) {
-    delete process.env.LIFECYCLE_STRICT_MODE
-    return
-  }
-
-  process.env.LIFECYCLE_STRICT_MODE = ORIGINAL_LIFECYCLE_STRICT_MODE
-})
 
   it('connects session start, media gates, finish review, checkout completion, review eligibility, and client rebook', async () => {
     mocks.txBookingFindUnique.mockResolvedValueOnce(makeStartableBooking())
@@ -673,6 +677,7 @@ afterEach(() => {
         noOp: false,
       },
     })
+
     const checkoutWithoutAfterPhotos = makeClientCheckoutBooking({
       status: BookingStatus.IN_PROGRESS,
       sessionStep: SessionStep.AFTER_PHOTOS,
@@ -681,58 +686,58 @@ afterEach(() => {
       checkoutStatus: BookingCheckoutStatus.READY,
     })
 
-        mocks.txBookingFindUnique
-        .mockResolvedValueOnce(checkoutWithoutAfterPhotos)
-        .mockResolvedValueOnce(checkoutWithoutAfterPhotos)
+    mocks.txBookingFindUnique
+      .mockResolvedValueOnce(checkoutWithoutAfterPhotos)
+      .mockResolvedValueOnce(checkoutWithoutAfterPhotos)
 
-        mocks.txBookingUpdate.mockResolvedValueOnce({
+    mocks.txBookingUpdate.mockResolvedValueOnce({
+      id: 'booking_1',
+      checkoutStatus: BookingCheckoutStatus.PAID,
+      selectedPaymentMethod: PaymentMethod.CASH,
+      serviceSubtotalSnapshot: new Prisma.Decimal(100),
+      productSubtotalSnapshot: new Prisma.Decimal(20),
+      subtotalSnapshot: new Prisma.Decimal(120),
+      tipAmount: new Prisma.Decimal(0),
+      taxAmount: new Prisma.Decimal(0),
+      discountAmount: new Prisma.Decimal(0),
+      totalAmount: new Prisma.Decimal(120),
+      paymentAuthorizedAt: TEST_NOW,
+      paymentCollectedAt: TEST_NOW,
+    })
+
+    mocks.txMediaAssetCount.mockResolvedValueOnce(0)
+
+    const updateCountBeforeCheckoutWithoutAfter =
+      mocks.txBookingUpdate.mock.calls.length
+
+    await expect(
+      updateClientBookingCheckout({
+        bookingId: 'booking_1',
+        clientId: 'client_1',
+        selectedPaymentMethod: PaymentMethod.CASH,
+        checkoutStatus: BookingCheckoutStatus.PAID,
+        markPaymentAuthorized: true,
+        markPaymentCollected: true,
+        requestId: 'req_checkout_without_after_1',
+        idempotencyKey: 'idem_checkout_without_after_1',
+      }),
+    ).resolves.toMatchObject({
+      booking: {
         id: 'booking_1',
         checkoutStatus: BookingCheckoutStatus.PAID,
         selectedPaymentMethod: PaymentMethod.CASH,
-        serviceSubtotalSnapshot: new Prisma.Decimal(100),
-        productSubtotalSnapshot: new Prisma.Decimal(20),
-        subtotalSnapshot: new Prisma.Decimal(120),
-        tipAmount: new Prisma.Decimal(0),
-        taxAmount: new Prisma.Decimal(0),
-        discountAmount: new Prisma.Decimal(0),
-        totalAmount: new Prisma.Decimal(120),
         paymentAuthorizedAt: TEST_NOW,
         paymentCollectedAt: TEST_NOW,
-        })
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
 
-        mocks.txMediaAssetCount.mockResolvedValueOnce(0)
-
-        const updateCountBeforeCheckoutWithoutAfter =
-        mocks.txBookingUpdate.mock.calls.length
-
-        await expect(
-        updateClientBookingCheckout({
-            bookingId: 'booking_1',
-            clientId: 'client_1',
-            selectedPaymentMethod: PaymentMethod.CASH,
-            checkoutStatus: BookingCheckoutStatus.PAID,
-            markPaymentAuthorized: true,
-            markPaymentCollected: true,
-            requestId: 'req_checkout_without_after_1',
-            idempotencyKey: 'idem_checkout_without_after_1',
-        }),
-        ).resolves.toMatchObject({
-        booking: {
-            id: 'booking_1',
-            checkoutStatus: BookingCheckoutStatus.PAID,
-            selectedPaymentMethod: PaymentMethod.CASH,
-            paymentAuthorizedAt: TEST_NOW,
-            paymentCollectedAt: TEST_NOW,
-        },
-        meta: {
-            mutated: true,
-            noOp: false,
-        },
-        })
-
-        expect(mocks.txBookingUpdate).toHaveBeenCalledTimes(
-        updateCountBeforeCheckoutWithoutAfter + 1,
-        )
+    expect(mocks.txBookingUpdate).toHaveBeenCalledTimes(
+      updateCountBeforeCheckoutWithoutAfter + 1,
+    )
 
     mocks.txBookingFindUnique.mockResolvedValueOnce(
       makeMediaBooking({
@@ -863,6 +868,7 @@ afterEach(() => {
         aftercareId: 'aftercare_1',
         bookingId: 'booking_1',
         clientId: 'client_1',
+        aftercareClientActionTokenId: 'token_row_1',
         scheduledFor: REBOOKED_FOR,
         requestId: 'req_rebook_1',
         idempotencyKey: 'idem_rebook_1',

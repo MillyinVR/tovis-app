@@ -384,6 +384,7 @@ export async function POST(req: Request, ctx: Ctx) {
       aftercareId: resolved.aftercare.id,
       bookingId: resolved.booking.id,
       clientId: resolved.booking.clientId,
+      aftercareClientActionTokenId: resolved.token.id,
       scheduledFor,
       requestId,
       idempotencyKey: idempotency.idempotencyKey,

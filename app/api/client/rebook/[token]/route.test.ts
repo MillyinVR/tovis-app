@@ -902,6 +902,7 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       aftercareId: 'aftercare_1',
       bookingId: 'booking_1',
       clientId: 'client_1',
+      aftercareClientActionTokenId: 'token_row_1',
       scheduledFor: new Date('2026-04-25T18:00:00.000Z'),
       requestId: 'req_1',
       idempotencyKey: 'idem_1',

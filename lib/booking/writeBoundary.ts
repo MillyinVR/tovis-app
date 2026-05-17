@@ -129,6 +129,14 @@ import {
   checkProReadinessForEntryPointWithDb,
   type ProBookingEntryPoint,
 } from '@/lib/pro/readiness/proReadiness'
+import {
+  decideBookingOverlapPermission,
+  type BookingOverlapActor,
+  type BookingOverlapSource,
+  type BookingWindow,
+} from '@/lib/booking/overlapPolicy'
+import { findSchedulingConflicts } from '@/lib/booking/schedulingConflicts'
+import { resolveAftercarePreselectedSlot } from '@/lib/booking/aftercarePreselectedSlot'
 // Side-effect import: registers the Sentry sink for lifecycle drift events.
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
@@ -350,6 +358,7 @@ type FinalizeBookingFromHoldArgs = {
   clientId: string
   bookingEntryPoint: ProBookingEntryPoint
   holdId: string
+  aftercareClientActionTokenId?: string | null
   openingId: string | null
   addOnIds: string[]
   locationType: ServiceLocationType
@@ -613,6 +622,7 @@ type CreateClientRebookedBookingFromAftercareArgs = {
   aftercareId: string
   bookingId: string
   clientId: string
+  aftercareClientActionTokenId: string
   scheduledFor: Date
   requestId?: string | null
   idempotencyKey?: string | null
@@ -1183,7 +1193,7 @@ const FINAL_REVIEW_BOOKING_SELECT = {
       sortOrder: true,
     },
   },
-    aftercareSummary: {
+  aftercareSummary: {
     select: {
       id: true,
       notes: true,
@@ -1699,13 +1709,13 @@ const CLIENT_REVIEW_ELIGIBILITY_BOOKING_SELECT = {
       sentToClientAt: true,
     },
   },
-reviews: {
-  select: {
-    id: true,
-    clientId: true,
+  reviews: {
+    select: {
+      id: true,
+      clientId: true,
+    },
+    take: 10,
   },
-  take: 10,
-},
 } satisfies Prisma.BookingSelect
 
 type ClientReviewEligibilityBookingRecord = Prisma.BookingGetPayload<{
@@ -3429,7 +3439,19 @@ async function createBookingOverrideAuditLogs(args: {
     data: rows,
   })
 }
-
+async function assertCanUseBookingOverrides(args: {
+  actorUserId: string
+  professionalId: string
+  appliedOverrides: ProSchedulingAppliedOverride[]
+}): Promise<void> {
+  for (const rule of args.appliedOverrides) {
+    await assertCanUseBookingOverride({
+      actorUserId: args.actorUserId,
+      professionalId: args.professionalId,
+      rule,
+    })
+  }
+}
 async function createUpdateClientNotification(args: {
   tx: Prisma.TransactionClient
   clientId: string
@@ -3520,7 +3542,33 @@ function logAndThrowUpdateStepMismatch(args: {
     userMessage: `Start time must be on a ${args.stepMinutes}-minute boundary.`,
   })
 }
-
+function logFinalizePolicyFailure(args: {
+  professionalId: string
+  locationId: string
+  locationType: ServiceLocationType
+  holdId: string
+  logHint: {
+    requestedStart: Date
+    requestedEnd: Date
+    conflictType: HoldConflictType
+    meta?: Record<string, unknown>
+  }
+}): void {
+  logBookingConflict({
+    action: 'BOOKING_FINALIZE',
+    professionalId: args.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.logHint.requestedStart,
+    requestedEnd: args.logHint.requestedEnd,
+    conflictType: args.logHint.conflictType,
+    holdId: args.holdId,
+    meta: {
+      route: 'lib/booking/writeBoundary.ts',
+      ...(args.logHint.meta ?? {}),
+    },
+  })
+}
 function logAndThrowUpdateWorkingHoursFailure(args: {
   professionalId: string
   locationId: string
@@ -4209,34 +4257,124 @@ function logHoldCreateTiming(args: {
   })
 }
 
-function logFinalizePolicyFailure(args: {
+function mapBookingOverlapBlockedCodeToBookingError(
+  code:
+    | 'CLIENT_OVERLAP_NOT_ALLOWED'
+    | 'AFTERCARE_PRESELECTED_SLOT_REQUIRED'
+    | 'AFTERCARE_PRESELECTED_SLOT_MISMATCH'
+    | 'INVALID_BOOKING_WINDOW',
+): BookingErrorCode {
+  switch (code) {
+    case 'CLIENT_OVERLAP_NOT_ALLOWED':
+      return 'TIME_BOOKED'
+    case 'AFTERCARE_PRESELECTED_SLOT_REQUIRED':
+      return 'TIME_BOOKED'
+    case 'AFTERCARE_PRESELECTED_SLOT_MISMATCH':
+      return 'TIME_BOOKED'
+    case 'INVALID_BOOKING_WINDOW':
+      return 'INVALID_SCHEDULED_FOR'
+  }
+}
+
+function logOverlapDecisionBlocked(args: {
+  action: 'BOOKING_CREATE' | 'BOOKING_FINALIZE'
   professionalId: string
   locationId: string
   locationType: ServiceLocationType
-  holdId: string
-  logHint: {
-    requestedStart: Date
-    requestedEnd: Date
-    conflictType: HoldConflictType
-    meta?: Record<string, unknown>
-  }
+  requestedStart: Date
+  requestedEnd: Date
+  offeringId: string | null
+  clientId: string
+  holdId?: string | null
+  code:
+    | 'CLIENT_OVERLAP_NOT_ALLOWED'
+    | 'AFTERCARE_PRESELECTED_SLOT_REQUIRED'
+    | 'AFTERCARE_PRESELECTED_SLOT_MISMATCH'
+    | 'INVALID_BOOKING_WINDOW'
+  conflictKinds: string[]
+  sourceKind: string
+  actorKind: string
 }): void {
   logBookingConflict({
-    action: 'BOOKING_FINALIZE',
+    action: args.action,
     professionalId: args.professionalId,
     locationId: args.locationId,
     locationType: args.locationType,
-    requestedStart: args.logHint.requestedStart,
-    requestedEnd: args.logHint.requestedEnd,
-    conflictType: args.logHint.conflictType,
-    holdId: args.holdId,
+    requestedStart: args.requestedStart,
+    requestedEnd: args.requestedEnd,
+    conflictType: 'BOOKING',
+    holdId: args.holdId ?? undefined,
     meta: {
       route: 'lib/booking/writeBoundary.ts',
-      ...(args.logHint.meta ?? {}),
+      offeringId: args.offeringId,
+      clientId: args.clientId,
+      overlapDecisionCode: args.code,
+      conflictKinds: args.conflictKinds,
+      sourceKind: args.sourceKind,
+      actorKind: args.actorKind,
     },
   })
 }
 
+async function enforceBookingOverlapPolicy(args: {
+  tx: Prisma.TransactionClient
+  actor: BookingOverlapActor
+  source: BookingOverlapSource
+  requestedWindow: BookingWindow
+  locationId: string
+  locationType: ServiceLocationType
+  offeringId: string | null
+  clientId: string
+  action: 'BOOKING_CREATE' | 'BOOKING_FINALIZE'
+  excludeHoldId?: string | null
+  excludeBookingId?: string | null
+  now: Date
+}): Promise<void> {
+  const conflicts = await findSchedulingConflicts({
+    tx: args.tx,
+    professionalId: args.requestedWindow.professionalId,
+    startsAt: args.requestedWindow.startsAt,
+    endsAt: args.requestedWindow.endsAt,
+    excludeHoldId: args.excludeHoldId ?? null,
+    excludeBookingId: args.excludeBookingId ?? null,
+    now: args.now,
+  })
+
+  const decision = decideBookingOverlapPermission({
+    actor: args.actor,
+    source: args.source,
+    requestedWindow: args.requestedWindow,
+    conflicts: conflicts.all,
+  })
+
+  if (decision.ok) {
+    return
+  }
+
+  logOverlapDecisionBlocked({
+    action: args.action,
+    professionalId: args.requestedWindow.professionalId,
+    locationId: args.locationId,
+    locationType: args.locationType,
+    requestedStart: args.requestedWindow.startsAt,
+    requestedEnd: args.requestedWindow.endsAt,
+    offeringId: args.offeringId,
+    clientId: args.clientId,
+    holdId: args.excludeHoldId ?? null,
+    code: decision.code,
+    conflictKinds: decision.conflicts.map((conflict) => conflict.kind),
+    sourceKind: args.source.kind,
+    actorKind: args.actor.kind,
+  })
+
+  throw bookingError(
+    mapBookingOverlapBlockedCodeToBookingError(decision.code),
+    {
+      message: decision.userMessage,
+      userMessage: decision.userMessage,
+    },
+  )
+}
 function logAndThrowStepMismatch(args: {
   professionalId: string
   locationId: string
@@ -7104,6 +7242,7 @@ async function performLockedFinalizeBookingFromHold(args: {
   clientId: string
   bookingEntryPoint: ProBookingEntryPoint
   holdId: string
+  aftercareClientActionTokenId?: string | null
   openingId: string | null
   addOnIds: string[]
   locationType: ServiceLocationType
@@ -7443,6 +7582,59 @@ async function performLockedFinalizeBookingFromHold(args: {
       userMessage: decision.userMessage,
     })
   }
+
+  const requestedEnd = decision.value.requestedEnd
+
+  const aftercarePreselectedSlot =
+    args.source === BookingSource.AFTERCARE &&
+    args.aftercareClientActionTokenId
+      ? await resolveAftercarePreselectedSlot({
+          tx: args.tx,
+          clientActionTokenId: args.aftercareClientActionTokenId,
+          clientId: args.clientId,
+          professionalId: args.offering.professionalId,
+          bookingId: args.rebookOfBookingId ?? '',
+          now: args.now,
+        })
+      : null
+
+  await enforceBookingOverlapPolicy({
+    tx: args.tx,
+    actor: {
+      kind: 'CLIENT',
+      userId: args.clientId,
+      clientId: args.clientId,
+    },
+    source:
+      args.source === BookingSource.AFTERCARE
+        ? {
+            kind: 'AFTERCARE_REBOOK',
+            aftercareSummaryId: aftercarePreselectedSlot?.aftercareSummaryId ?? '',
+            clientActionTokenId:
+              aftercarePreselectedSlot?.clientActionTokenId ??
+              args.aftercareClientActionTokenId ??
+              '',
+            proPreselectedSlot: aftercarePreselectedSlot,
+          }
+        : {
+            kind:
+              args.source === BookingSource.REQUESTED
+                ? 'DIRECT_PROFILE'
+                : 'BROAD_DISCOVERY',
+          },
+    requestedWindow: {
+      professionalId: args.offering.professionalId,
+      startsAt: requestedStart,
+      endsAt: requestedEnd,
+    },
+    locationId: locationContext.locationId,
+    locationType: validatedHold.value.locationType,
+    offeringId: args.offering.id,
+    clientId: args.clientId,
+    action: 'BOOKING_FINALIZE',
+    excludeHoldId: hold.id,
+    now: args.now,
+  })
 
   const salonLocationAddressSnapshotInput:
     | Prisma.InputJsonValue
@@ -7853,6 +8045,37 @@ async function performLockedCreateProBooking(args: {
     clientId: args.clientId,
   })
 
+  if (schedulingDecision.appliedOverrides.length > 0) {
+    await assertCanUseBookingOverrides({
+      actorUserId: args.actorUserId,
+      professionalId: args.professionalId,
+      appliedOverrides: schedulingDecision.appliedOverrides,
+    })
+  }
+
+  await enforceBookingOverlapPolicy({
+    tx: args.tx,
+    actor: {
+      kind: 'PRO',
+      userId: args.actorUserId,
+      professionalId: args.professionalId,
+    },
+    source: {
+      kind: 'PRO_CREATED',
+    },
+    requestedWindow: {
+      professionalId: args.professionalId,
+      startsAt: requestedStart,
+      endsAt: schedulingDecision.requestedEnd,
+    },
+    locationId: locationContext.locationId,
+    locationType: args.locationType,
+    offeringId: args.offeringId,
+    clientId: args.clientId,
+    action: 'BOOKING_CREATE',
+    now: args.now,
+  })
+
   const salonLocationAddressSnapshot:
     | Prisma.InputJsonValue
     | Prisma.NullableJsonNullValueInput =
@@ -7999,14 +8222,6 @@ if (
   schedulingDecision.appliedOverrides.length > 0 &&
   normalizedOverrideReason
 ) {
-  for (const rule of schedulingDecision.appliedOverrides) {
-    await assertCanUseBookingOverride({
-      actorUserId: args.actorUserId,
-      professionalId: args.professionalId,
-      rule,
-    })
-  }
-
   await createBookingOverrideAuditLogs({
     tx: args.tx,
     bookingId: booking.id,
@@ -8232,7 +8447,7 @@ assertCanCreateRebookFromSourceBooking({
     clientLng: decimalToNumber(source.clientAddressLngSnapshot),
   })
 
-  await enforceProCreateScheduling({
+  const schedulingDecision = await enforceProCreateScheduling({
     tx: args.tx,
     now: args.now,
     requestedStart,
@@ -8251,6 +8466,52 @@ assertCanCreateRebookFromSourceBooking({
     locationType: source.locationType,
     offeringId: primary.offeringId,
     clientId: source.clientId,
+  })
+
+  await enforceBookingOverlapPolicy({
+    tx: args.tx,
+    actor:
+      args.clientId
+        ? {
+            kind: 'CLIENT',
+            userId: args.clientId,
+            clientId: args.clientId,
+          }
+        : {
+            kind: 'PRO',
+            userId: args.professionalId,
+            professionalId: source.professionalId,
+          },
+    source:
+      args.clientId && args.aftercareId
+        ? {
+            kind: 'AFTERCARE_REBOOK',
+            aftercareSummaryId: args.aftercareId,
+            clientActionTokenId: '',
+            proPreselectedSlot:
+              source.aftercareSummary?.id === args.aftercareId
+                ? {
+                    aftercareSummaryId: args.aftercareId,
+                    clientActionTokenId: '',
+                    professionalId: source.professionalId,
+                    startsAt: requestedStart,
+                  }
+                : null,
+          }
+        : {
+            kind: 'PRO_CREATED',
+          },
+    requestedWindow: {
+      professionalId: source.professionalId,
+      startsAt: requestedStart,
+      endsAt: schedulingDecision.requestedEnd,
+    },
+    locationId: locationContext.locationId,
+    locationType: source.locationType,
+    offeringId: primary.offeringId,
+    clientId: source.clientId,
+    action: 'BOOKING_CREATE',
+    now: args.now,
   })
 
   const salonAddressSnapshot =
@@ -8878,6 +9139,14 @@ if (args.notifyClient) {
     timeZoneSource: appointmentTimeZoneSource,
   })
 
+  if (schedulingDecision.appliedOverrides.length > 0) {
+    await assertCanUseBookingOverrides({
+      actorUserId: args.actorUserId,
+      professionalId: existing.professionalId,
+      appliedOverrides: schedulingDecision.appliedOverrides,
+    })
+  }
+
   if (normalizedServiceItems) {
     await args.tx.bookingServiceItem.deleteMany({
       where: { bookingId: existing.id },
@@ -8960,14 +9229,6 @@ if (args.notifyClient) {
   schedulingDecision.appliedOverrides.length > 0 &&
   normalizedOverrideReason
 ) {
-  for (const rule of schedulingDecision.appliedOverrides) {
-    await assertCanUseBookingOverride({
-      actorUserId: args.actorUserId,
-      professionalId: existing.professionalId,
-      rule,
-    })
-  }
-
   await createBookingOverrideAuditLogs({
     tx: args.tx,
     bookingId: updated.id,
@@ -9081,6 +9342,12 @@ async function performLockedUpsertBookingAftercare(args: {
 
   assertValidRecommendedProducts(args.recommendedProducts)
 
+  assertValidFinalReviewRebookFields({
+    rebookMode: args.rebookMode,
+    rebookedFor: args.rebookedFor,
+    rebookWindowStart: args.rebookWindowStart,
+    rebookWindowEnd: args.rebookWindowEnd,
+  })
   const internalProductIds = Array.from(
     new Set(
       args.recommendedProducts
@@ -11487,6 +11754,7 @@ export async function finalizeBookingFromHold(
         clientId: args.clientId,
         bookingEntryPoint: args.bookingEntryPoint,
         holdId: args.holdId,
+        aftercareClientActionTokenId: args.aftercareClientActionTokenId ?? null,
         openingId: args.openingId,
         addOnIds: args.addOnIds,
         locationType: args.locationType,
@@ -11616,6 +11884,12 @@ export async function createClientRebookedBookingFromAftercare(
         select: AFTERCARE_REBOOK_LOCK_SELECT,
       })
 
+    if (!args.aftercareClientActionTokenId.trim()) {
+      throw bookingError('FORBIDDEN', {
+        message: 'Aftercare client action token id is required for client rebook.',
+        userMessage: 'That aftercare link is invalid or expired.',
+      })
+    }
     if (!aftercareRef || !aftercareRef.booking) {
       throw bookingError('BOOKING_NOT_FOUND')
     }

@@ -392,15 +392,20 @@ export async function createProBookingWithClient(
     idempotencyKey: args.idempotencyKey ?? null,
   })
 
-  await tryEnqueueBookingConfirmedDelivery({
-    professionalId: args.professionalId,
-    bookingId: bookingResult.booking.id,
-    clientId: resolvedClient.clientId,
-  })
+  const bookingWasCreated = bookingResult.meta.mutated
+
+  if (bookingWasCreated) {
+    await tryEnqueueBookingConfirmedDelivery({
+      professionalId: args.professionalId,
+      bookingId: bookingResult.booking.id,
+      clientId: resolvedClient.clientId,
+    })
+  }
 
   let inviteCandidate: CreatedInviteDeliveryCandidate | null = null
 
   if (
+    bookingWasCreated &&
     shouldAutoCreateInvite({
       resolvedClientClaimStatus: resolvedClient.clientClaimStatus,
     })
