@@ -3,6 +3,7 @@ import {
   AftercareRebookMode,
   Prisma,
   Role,
+  ServiceLocationType,
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
@@ -64,27 +65,38 @@ type ProductsParse =
   | { ok: true; value: NormalizedRecommendedProduct[] }
   | { ok: false; error: string }
 
+type NormalizedRebookSlot = {
+  offeringId: string | null
+  locationId: string
+  locationType: ServiceLocationType
+  startsAt: Date
+  endsAt: Date
+}
+
 type NormalizedRebook =
   | {
       mode: 'NONE'
-      rebookMode: AftercareRebookMode
+      rebookMode: typeof AftercareRebookMode.NONE
       rebookedFor: null
       rebookWindowStart: null
       rebookWindowEnd: null
+      rebookSlot: null
     }
   | {
       mode: 'BOOKED_NEXT_APPOINTMENT'
-      rebookMode: AftercareRebookMode
+      rebookMode: typeof AftercareRebookMode.BOOKED_NEXT_APPOINTMENT
       rebookedFor: Date
       rebookWindowStart: null
       rebookWindowEnd: null
+      rebookSlot: NormalizedRebookSlot
     }
   | {
       mode: 'RECOMMENDED_WINDOW'
-      rebookMode: AftercareRebookMode
+      rebookMode: typeof AftercareRebookMode.RECOMMENDED_WINDOW
       rebookedFor: null
       rebookWindowStart: Date
       rebookWindowEnd: Date
+      rebookSlot: null
     }
 
 type RequestMeta = {
@@ -138,6 +150,16 @@ const GET_BOOKING_SELECT = {
       sentToClientAt: true,
       lastEditedAt: true,
       version: true,
+      rebookSlot: {
+        select: {
+          id: true,
+          offeringId: true,
+          locationId: true,
+          locationType: true,
+          startsAt: true,
+          endsAt: true,
+        },
+      },
       recommendedProducts: {
         select: {
           id: true,
@@ -198,6 +220,90 @@ function parseOptionalISODate(value: unknown): Date | null | 'invalid' {
 
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime()) ? 'invalid' : parsed
+}
+
+function parseRequiredISODate(value: unknown): Date | 'invalid' {
+  if (typeof value !== 'string' || !value.trim()) return 'invalid'
+
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? 'invalid' : parsed
+}
+
+function parseServiceLocationType(value: unknown): ServiceLocationType | null {
+  const raw = trimmedString(value)?.toUpperCase()
+
+  if (raw === ServiceLocationType.SALON) {
+    return ServiceLocationType.SALON
+  }
+
+  if (raw === ServiceLocationType.MOBILE) {
+    return ServiceLocationType.MOBILE
+  }
+
+  return null
+}
+
+function normalizeRebookSlot(
+  input: unknown,
+): { ok: true; value: NormalizedRebookSlot } | { ok: false; error: string } {
+  if (!isRecord(input)) {
+    return {
+      ok: false,
+      error: 'BOOKED_NEXT_APPOINTMENT requires rebookSlot.',
+    }
+  }
+
+  const offeringId = trimmedString(input.offeringId)
+  const locationId = trimmedString(input.locationId)
+  const locationType = parseServiceLocationType(input.locationType)
+  const startsAt = parseRequiredISODate(input.startsAt)
+  const endsAt = parseRequiredISODate(input.endsAt)
+
+  if (!locationId) {
+    return {
+      ok: false,
+      error: 'rebookSlot.locationId is required.',
+    }
+  }
+
+  if (!locationType) {
+    return {
+      ok: false,
+      error: 'rebookSlot.locationType is invalid.',
+    }
+  }
+
+  if (startsAt === 'invalid') {
+    return {
+      ok: false,
+      error: 'rebookSlot.startsAt is invalid.',
+    }
+  }
+
+  if (endsAt === 'invalid') {
+    return {
+      ok: false,
+      error: 'rebookSlot.endsAt is invalid.',
+    }
+  }
+
+  if (endsAt.getTime() <= startsAt.getTime()) {
+    return {
+      ok: false,
+      error: 'rebookSlot.endsAt must be after rebookSlot.startsAt.',
+    }
+  }
+
+  return {
+    ok: true,
+    value: {
+      offeringId,
+      locationId,
+      locationType,
+      startsAt,
+      endsAt,
+    },
+  }
 }
 
 function parseOptionalVersion(value: unknown): number | null {
@@ -365,12 +471,14 @@ function normalizeRebookFields(args: {
   rebookedForParsed: Date | null | 'invalid'
   windowStartParsed: Date | null | 'invalid'
   windowEndParsed: Date | null | 'invalid'
+  rebookSlotInput: unknown
 }): { ok: true; value: NormalizedRebook } | { ok: false; error: string } {
   const {
     requestedMode,
     rebookedForParsed,
     windowStartParsed,
     windowEndParsed,
+    rebookSlotInput,
   } = args
 
   if (rebookedForParsed === 'invalid') {
@@ -401,6 +509,7 @@ function normalizeRebookFields(args: {
         rebookedFor: null,
         rebookWindowStart: null,
         rebookWindowEnd: null,
+        rebookSlot: null,
       },
     }
   }
@@ -421,6 +530,19 @@ function normalizeRebookFields(args: {
       }
     }
 
+    const rebookSlot = normalizeRebookSlot(rebookSlotInput)
+
+    if (!rebookSlot.ok) {
+      return rebookSlot
+    }
+
+    if (rebookSlot.value.startsAt.getTime() !== rebookedForParsed.getTime()) {
+      return {
+        ok: false,
+        error: 'rebookSlot.startsAt must match rebookedFor.',
+      }
+    }
+
     return {
       ok: true,
       value: {
@@ -429,6 +551,7 @@ function normalizeRebookFields(args: {
         rebookedFor: rebookedForParsed,
         rebookWindowStart: null,
         rebookWindowEnd: null,
+        rebookSlot: rebookSlot.value,
       },
     }
   }
@@ -463,6 +586,7 @@ function normalizeRebookFields(args: {
       rebookedFor: null,
       rebookWindowStart: windowStartParsed,
       rebookWindowEnd: windowEndParsed,
+      rebookSlot: null,
     },
   }
 }
@@ -529,6 +653,16 @@ function mapAftercareSummaryForGet(
     rebookedFor: toIsoOrNull(aftercare.rebookedFor),
     rebookWindowStart: toIsoOrNull(aftercare.rebookWindowStart),
     rebookWindowEnd: toIsoOrNull(aftercare.rebookWindowEnd),
+    rebookSlot: aftercare.rebookSlot
+      ? {
+          id: aftercare.rebookSlot.id,
+          offeringId: aftercare.rebookSlot.offeringId,
+          locationId: aftercare.rebookSlot.locationId,
+          locationType: aftercare.rebookSlot.locationType,
+          startsAt: aftercare.rebookSlot.startsAt.toISOString(),
+          endsAt: aftercare.rebookSlot.endsAt.toISOString(),
+        }
+      : null,
     draftSavedAt: toIsoOrNull(aftercare.draftSavedAt),
     sentToClientAt: toIsoOrNull(aftercare.sentToClientAt),
     lastEditedAt: toIsoOrNull(aftercare.lastEditedAt),
@@ -650,6 +784,7 @@ function parsePostBody(
     rebookedForParsed: parseOptionalISODate(rawBody.rebookedFor),
     windowStartParsed: parseOptionalISODate(rawBody.rebookWindowStart),
     windowEndParsed: parseOptionalISODate(rawBody.rebookWindowEnd),
+    rebookSlotInput: rawBody.rebookSlot,
   })
 
   if (!normalizedRebook.ok) {
@@ -708,6 +843,7 @@ function buildIdempotencyRequestBody(args: {
     rebookedFor: rebook.rebookedFor,
     rebookWindowStart: rebook.rebookWindowStart,
     rebookWindowEnd: rebook.rebookWindowEnd,
+    rebookSlot: rebook.rebookSlot,
     createRebookReminder: args.parsedBody.createRebookReminder,
     rebookReminderDaysBefore: args.parsedBody.rebookReminderDaysBefore,
     createProductReminder: args.parsedBody.createProductReminder,
@@ -728,6 +864,7 @@ function buildAftercareResponseBody(args: {
       rebookedFor: toIsoOrNull(args.result.aftercare.rebookedFor),
       rebookWindowStart: toIsoOrNull(args.result.aftercare.rebookWindowStart),
       rebookWindowEnd: toIsoOrNull(args.result.aftercare.rebookWindowEnd),
+      rebookSlot: args.parsedBody.normalizedRebook.rebookSlot,
       draftSavedAt: toIsoOrNull(args.result.aftercare.draftSavedAt),
       sentToClientAt: toIsoOrNull(args.result.aftercare.sentToClientAt),
       lastEditedAt: toIsoOrNull(args.result.aftercare.lastEditedAt),
@@ -890,6 +1027,7 @@ export async function POST(req: Request, ctx: Ctx) {
       rebookedFor: parsedBody.value.normalizedRebook.rebookedFor,
       rebookWindowStart: parsedBody.value.normalizedRebook.rebookWindowStart,
       rebookWindowEnd: parsedBody.value.normalizedRebook.rebookWindowEnd,
+      rebookSlot: parsedBody.value.normalizedRebook.rebookSlot,
       createRebookReminder: parsedBody.value.createRebookReminder,
       rebookReminderDaysBefore: parsedBody.value.rebookReminderDaysBefore,
       createProductReminder: parsedBody.value.createProductReminder,

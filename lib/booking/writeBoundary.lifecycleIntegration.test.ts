@@ -1,4 +1,5 @@
 // lib/booking/writeBoundary.lifecycleIntegration.test.ts
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AftercareRebookMode,
@@ -38,6 +39,9 @@ const mocks = vi.hoisted(() => ({
 
   txAftercareSummaryFindUnique: vi.fn(),
   txAftercareSummaryUpsert: vi.fn(),
+
+  txAftercareRebookSlotDeleteMany: vi.fn(),
+  txAftercareRebookSlotUpsert: vi.fn(),
 
   txProductRecommendationDeleteMany: vi.fn(),
   txProductRecommendationCreateMany: vi.fn(),
@@ -108,6 +112,10 @@ const tx = {
   aftercareSummary: {
     findUnique: mocks.txAftercareSummaryFindUnique,
     upsert: mocks.txAftercareSummaryUpsert,
+  },
+  aftercareRebookSlot: {
+    deleteMany: mocks.txAftercareRebookSlotDeleteMany,
+    upsert: mocks.txAftercareRebookSlotUpsert,
   },
   productRecommendation: {
     deleteMany: mocks.txProductRecommendationDeleteMany,
@@ -330,6 +338,7 @@ function makeSentAftercareResult() {
     rebookedFor: null,
     rebookWindowStart: null,
     rebookWindowEnd: null,
+    rebookSlot: null,
     draftSavedAt: null,
     sentToClientAt: TEST_NOW,
     lastEditedAt: TEST_NOW,
@@ -443,6 +452,11 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
       },
     })
 
+    mocks.txAftercareRebookSlotDeleteMany.mockResolvedValue({ count: 0 })
+    mocks.txAftercareRebookSlotUpsert.mockResolvedValue({
+      id: 'aftercare_rebook_slot_1',
+    })
+
     mocks.txProfessionalProfileUpdate.mockResolvedValue({ id: 'pro_1' })
     mocks.txExecuteRaw.mockResolvedValue(1)
     mocks.txQueryRaw.mockResolvedValue([])
@@ -489,6 +503,7 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
       rebookedFor: null,
       rebookWindowStart: null,
       rebookWindowEnd: null,
+      rebookSlot: null,
       createRebookReminder: false,
       rebookReminderDaysBefore: 7,
       createProductReminder: false,
@@ -498,6 +513,12 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
       version: null,
       requestId: 'req_aftercare_without_after_1',
       idempotencyKey: 'idem_aftercare_without_after_1',
+    })
+
+    expect(mocks.txAftercareRebookSlotDeleteMany).toHaveBeenCalledWith({
+      where: {
+        aftercareSummaryId: 'aftercare_1',
+      },
     })
 
     expect(mocks.txMediaAssetCount).toHaveBeenCalledWith({

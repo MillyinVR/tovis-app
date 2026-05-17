@@ -650,6 +650,13 @@ type UpsertBookingAftercareArgs = {
   rebookedFor: Date | null
   rebookWindowStart: Date | null
   rebookWindowEnd: Date | null
+  rebookSlot: {
+    offeringId: string | null
+    locationId: string
+    locationType: ServiceLocationType
+    startsAt: Date
+    endsAt: Date
+  } | null
   createRebookReminder: boolean
   rebookReminderDaysBefore: number
   createProductReminder: boolean
@@ -1440,6 +1447,16 @@ const AFTERCARE_UPSERT_BOOKING_SELECT = {
       sentToClientAt: true,
       lastEditedAt: true,
       version: true,
+            rebookSlot: {
+        select: {
+          id: true,
+          offeringId: true,
+          locationId: true,
+          locationType: true,
+          startsAt: true,
+          endsAt: true,
+        },
+      },
       recommendedProducts: {
         select: {
           productId: true,
@@ -1809,6 +1826,29 @@ function buildExistingFinalReviewItemsForComparison(
       sortOrder: item.sortOrder,
     }))
     .sort((a, b) => a.sortOrder - b.sortOrder)
+}
+
+function normalizeAftercareRebookSlotForComparison(
+  slot:
+    | {
+        offeringId: string | null
+        locationId: string
+        locationType: ServiceLocationType
+        startsAt: Date
+        endsAt: Date
+      }
+    | null
+    | undefined,
+) {
+  if (!slot) return null
+
+  return {
+    offeringId: slot.offeringId ?? null,
+    locationId: slot.locationId,
+    locationType: slot.locationType,
+    startsAt: normalizeDateCmp(slot.startsAt),
+    endsAt: normalizeDateCmp(slot.endsAt),
+  }
 }
 
 function normalizeRecommendedProductsForComparison(
@@ -9347,6 +9387,13 @@ async function performLockedUpsertBookingAftercare(args: {
   rebookedFor: Date | null
   rebookWindowStart: Date | null
   rebookWindowEnd: Date | null
+  rebookSlot: {
+    offeringId: string | null
+    locationId: string
+    locationType: ServiceLocationType
+    startsAt: Date
+    endsAt: Date
+  } | null
   createRebookReminder: boolean
   rebookReminderDaysBefore: number
   createProductReminder: boolean
@@ -9366,6 +9413,55 @@ async function performLockedUpsertBookingAftercare(args: {
     rebookWindowStart: args.rebookWindowStart,
     rebookWindowEnd: args.rebookWindowEnd,
   })
+
+  if (
+    args.rebookMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT &&
+    !args.rebookSlot
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message:
+        'BOOKED_NEXT_APPOINTMENT requires a trusted aftercare rebook slot.',
+      userMessage:
+        'Choose the exact next appointment slot before saving aftercare.',
+    })
+  }
+
+  if (
+    args.rebookMode !== AftercareRebookMode.BOOKED_NEXT_APPOINTMENT &&
+    args.rebookSlot
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message:
+        'Aftercare rebook slot is only allowed for BOOKED_NEXT_APPOINTMENT.',
+      userMessage:
+        'Use either an exact booked appointment slot or a recommended window, not both.',
+    })
+  }
+
+  if (
+    args.rebookSlot &&
+    args.rebookSlot.startsAt.getTime() !== args.rebookedFor?.getTime()
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message:
+        'Aftercare rebook slot startsAt must match rebookedFor.',
+      userMessage:
+        'The selected next appointment time does not match the saved rebook time.',
+    })
+  }
+
+  if (
+    args.rebookSlot &&
+    args.rebookSlot.endsAt.getTime() <= args.rebookSlot.startsAt.getTime()
+  ) {
+    throw bookingError('FORBIDDEN', {
+      message:
+        'Aftercare rebook slot endsAt must be after startsAt.',
+      userMessage:
+        'The selected next appointment slot has an invalid end time.',
+    })
+  }
+
   const internalProductIds = Array.from(
     new Set(
       args.recommendedProducts
@@ -9467,6 +9563,9 @@ const existingAftercareComparable = existingAftercare
       rebookedFor: normalizeDateCmp(existingAftercare.rebookedFor),
       rebookWindowStart: normalizeDateCmp(existingAftercare.rebookWindowStart),
       rebookWindowEnd: normalizeDateCmp(existingAftercare.rebookWindowEnd),
+      rebookSlot: normalizeAftercareRebookSlotForComparison(
+        existingAftercare.rebookSlot,
+      ),
       recommendedProducts: buildExistingRecommendedProductsForComparison(
         existingAftercare.recommendedProducts,
       ),
@@ -9480,6 +9579,7 @@ const incomingAftercareComparable = {
   rebookedFor: normalizeDateCmp(args.rebookedFor),
   rebookWindowStart: normalizeDateCmp(args.rebookWindowStart),
   rebookWindowEnd: normalizeDateCmp(args.rebookWindowEnd),
+  rebookSlot: normalizeAftercareRebookSlotForComparison(args.rebookSlot),
   recommendedProducts: normalizeRecommendedProductsForComparison(
     args.recommendedProducts,
   ),
@@ -9578,6 +9678,40 @@ if (
       version: true,
     },
   })
+
+  if (
+    args.rebookMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT &&
+    args.rebookSlot
+  ) {
+    await args.tx.aftercareRebookSlot.upsert({
+      where: {
+        aftercareSummaryId: aftercare.id,
+      },
+      create: {
+        aftercareSummaryId: aftercare.id,
+        professionalId: args.professionalId,
+        offeringId: args.rebookSlot.offeringId,
+        locationId: args.rebookSlot.locationId,
+        locationType: args.rebookSlot.locationType,
+        startsAt: args.rebookSlot.startsAt,
+        endsAt: args.rebookSlot.endsAt,
+      },
+      update: {
+        professionalId: args.professionalId,
+        offeringId: args.rebookSlot.offeringId,
+        locationId: args.rebookSlot.locationId,
+        locationType: args.rebookSlot.locationType,
+        startsAt: args.rebookSlot.startsAt,
+        endsAt: args.rebookSlot.endsAt,
+      },
+    })
+  } else {
+    await args.tx.aftercareRebookSlot.deleteMany({
+      where: {
+        aftercareSummaryId: aftercare.id,
+      },
+    })
+  }
 
 const aftercareAccessDelivery =
   await maybeCreateAftercareAccessDeliveryInBoundary({
@@ -9847,6 +9981,9 @@ const oldAftercareState = {
   rebookWindowEnd: normalizeDateCmp(
     booking.aftercareSummary?.rebookWindowEnd,
   ),
+  rebookSlot: normalizeAftercareRebookSlotForComparison(
+    booking.aftercareSummary?.rebookSlot,
+  ),
   draftSavedAt: normalizeDateCmp(booking.aftercareSummary?.draftSavedAt),
   sentToClientAt: normalizeDateCmp(booking.aftercareSummary?.sentToClientAt),
   version: booking.aftercareSummary?.version ?? 0,
@@ -9861,6 +9998,7 @@ const newAftercareState = {
   rebookedFor: normalizeDateCmp(finalizedAftercare.rebookedFor),
   rebookWindowStart: normalizeDateCmp(finalizedAftercare.rebookWindowStart),
   rebookWindowEnd: normalizeDateCmp(finalizedAftercare.rebookWindowEnd),
+  rebookSlot: normalizeAftercareRebookSlotForComparison(args.rebookSlot),
   draftSavedAt: normalizeDateCmp(finalizedAftercare.draftSavedAt),
   sentToClientAt: normalizeDateCmp(finalizedAftercare.sentToClientAt),
   version: finalizedAftercare.version,
@@ -11474,6 +11612,7 @@ export async function upsertBookingAftercare(
         rebookedFor: args.rebookedFor,
         rebookWindowStart: args.rebookWindowStart,
         rebookWindowEnd: args.rebookWindowEnd,
+        rebookSlot: args.rebookSlot,
         createRebookReminder: args.createRebookReminder,
         rebookReminderDaysBefore: args.rebookReminderDaysBefore,
         createProductReminder: args.createProductReminder,

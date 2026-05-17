@@ -20,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   txBookingFindUnique: vi.fn(),
   txAftercareSummaryUpsert: vi.fn(),
   txAftercareSummaryUpdate: vi.fn(),
+
+  txAftercareRebookSlotDeleteMany: vi.fn(),
+  txAftercareRebookSlotUpsert: vi.fn(),
+
   txProductRecommendationDeleteMany: vi.fn(),
   txProductRecommendationCreateMany: vi.fn(),
   txProductFindMany: vi.fn(),
@@ -71,6 +75,10 @@ const tx = {
   aftercareSummary: {
     upsert: mocks.txAftercareSummaryUpsert,
     update: mocks.txAftercareSummaryUpdate,
+  },
+  aftercareRebookSlot: {
+    deleteMany: mocks.txAftercareRebookSlotDeleteMany,
+    upsert: mocks.txAftercareRebookSlotUpsert,
   },
   productRecommendation: {
     deleteMany: mocks.txProductRecommendationDeleteMany,
@@ -173,6 +181,11 @@ describe('lib/booking/writeBoundary aftercare atomicity', () => {
     mocks.prismaTransaction.mockImplementation(
       async (run: (db: typeof tx) => Promise<unknown>) => run(tx),
     )
+
+    mocks.txAftercareRebookSlotDeleteMany.mockResolvedValue({ count: 0 })
+    mocks.txAftercareRebookSlotUpsert.mockResolvedValue({
+      id: 'aftercare_rebook_slot_1',
+    })
   })
 
   it('does not mark aftercare sent when access delivery cannot be queued', async () => {
@@ -196,6 +209,7 @@ describe('lib/booking/writeBoundary aftercare atomicity', () => {
         rebookedFor: null,
         rebookWindowStart: null,
         rebookWindowEnd: null,
+        rebookSlot: null,
         createRebookReminder: false,
         rebookReminderDaysBefore: 7,
         createProductReminder: false,
@@ -284,6 +298,7 @@ describe('lib/booking/writeBoundary aftercare atomicity', () => {
       rebookedFor: null,
       rebookWindowStart: null,
       rebookWindowEnd: null,
+      rebookSlot: null,
       createRebookReminder: false,
       rebookReminderDaysBefore: 7,
       createProductReminder: false,
@@ -313,6 +328,12 @@ describe('lib/booking/writeBoundary aftercare atomicity', () => {
         sentToClientAt: true,
         lastEditedAt: true,
         version: true,
+      },
+    })
+
+    expect(mocks.txAftercareRebookSlotDeleteMany).toHaveBeenCalledWith({
+      where: {
+        aftercareSummaryId: 'aftercare_1',
       },
     })
 

@@ -173,22 +173,24 @@ function expectIdempotencyHandled(response: Response): void {
 function expectRouteIdempotencyStartedWith(
   requestBody: Record<string, unknown>,
 ): void {
-  expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
-    request: expect.any(Request),
-    actor: {
-      actorUserId: 'user_1',
-      actorRole: Role.PRO,
-    },
-    route: IDEMPOTENCY_ROUTE,
-    requestLabel: 'aftercare',
-    requestBody,
-    messages: {
-      missingKey: 'Missing idempotency key.',
-      inProgress: 'A matching aftercare request is already in progress.',
-      conflict:
-        'This idempotency key was already used with a different request body.',
-    },
-  })
+  expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+    expect.objectContaining({
+      request: expect.anything(),
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: Role.PRO,
+      },
+      route: IDEMPOTENCY_ROUTE,
+      requestLabel: 'aftercare',
+      requestBody,
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching aftercare request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
+    }),
+  )
 }
 
 function makeGetBooking(overrides?: {
@@ -213,6 +215,7 @@ function makeGetBooking(overrides?: {
             rebookedFor: null,
             rebookWindowStart: new Date('2026-05-01T18:00:00.000Z'),
             rebookWindowEnd: new Date('2026-05-15T18:00:00.000Z'),
+            rebookSlot: null,
             draftSavedAt: new Date('2026-04-12T20:05:00.000Z'),
             sentToClientAt: new Date('2026-04-12T20:10:00.000Z'),
             lastEditedAt: new Date('2026-04-12T20:08:00.000Z'),
@@ -319,6 +322,8 @@ function makeUpsertResult(overrides?: {
           : isNone
             ? null
             : new Date('2026-05-15T18:00:00.000Z'),
+      rebookSlot:
+        overrides && 'rebookSlot' in overrides ? overrides.rebookSlot : null,
       draftSavedAt: new Date('2026-04-12T20:05:00.000Z'),
       sentToClientAt:
         overrides && 'sentToClientAt' in overrides
@@ -435,6 +440,8 @@ function makeExpectedIdempotencyRequestBody(overrides?: {
       overrides && 'rebookWindowEnd' in overrides
         ? overrides.rebookWindowEnd
         : '2026-05-15T18:00:00.000Z',
+    rebookSlot:
+      overrides && 'rebookSlot' in overrides ? overrides.rebookSlot : null,
     createRebookReminder:
       overrides && 'createRebookReminder' in overrides
         ? overrides.createRebookReminder
@@ -510,6 +517,8 @@ function makeExpectedPostResponse(overrides?: {
         overrides && 'rebookWindowEnd' in overrides
           ? overrides.rebookWindowEnd
           : '2026-05-15T18:00:00.000Z',
+      rebookSlot:
+        overrides && 'rebookSlot' in overrides ? overrides.rebookSlot : null,
       draftSavedAt: '2026-04-12T20:05:00.000Z',
       sentToClientAt,
       lastEditedAt: '2026-04-12T20:08:00.000Z',
@@ -770,6 +779,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
           rebookedFor: null,
           rebookWindowStart: '2026-05-01T18:00:00.000Z',
           rebookWindowEnd: '2026-05-15T18:00:00.000Z',
+          rebookSlot: null,
           draftSavedAt: '2026-04-12T20:05:00.000Z',
           sentToClientAt: '2026-04-12T20:10:00.000Z',
           lastEditedAt: '2026-04-12T20:08:00.000Z',
@@ -846,6 +856,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
           rebookedFor: null,
           rebookWindowStart: null,
           rebookWindowEnd: null,
+          rebookSlot: null,
           draftSavedAt: '2026-04-12T20:05:00.000Z',
           sentToClientAt: null,
           lastEditedAt: '2026-04-12T20:08:00.000Z',
@@ -857,7 +868,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
             clientAftercareHref: null,
           },
           recommendedProducts: [],
-        },
+        }
       },
     })
   })
@@ -1147,6 +1158,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       rebookedFor: null,
       rebookWindowStart: new Date('2026-05-01T18:00:00.000Z'),
       rebookWindowEnd: new Date('2026-05-15T18:00:00.000Z'),
+      rebookSlot: null,
       createRebookReminder: true,
       rebookReminderDaysBefore: 30,
       createProductReminder: true,
@@ -1460,6 +1472,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       rebookedFor: null,
       rebookWindowStart: null,
       rebookWindowEnd: null,
+      rebookSlot: null,
       createRebookReminder: false,
       rebookReminderDaysBefore: 2,
       createProductReminder: false,
