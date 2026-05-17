@@ -36,6 +36,11 @@ const mocks = vi.hoisted(() => ({
   completeRouteIdempotency: vi.fn(),
   failStartedRouteIdempotency: vi.fn(),
   isRouteIdempotencyHandled: vi.fn(),
+
+  enforceRateLimit: vi.fn(),
+  clientRateLimitKey: vi.fn(),
+  tokenActorRateLimitKey: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -100,6 +105,19 @@ vi.mock('@/lib/idempotency', () => ({
   IDEMPOTENCY_ROUTES: {
     BOOKING_FINALIZE: 'POST /api/bookings/finalize',
   },
+}))
+
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  clientRateLimitKey: mocks.clientRateLimitKey,
+  tokenActorRateLimitKey: mocks.tokenActorRateLimitKey,
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -350,6 +368,24 @@ describe('POST /api/bookings/finalize', () => {
       clientId: 'client_1',
       user: { id: 'user_1' },
     })
+
+        mocks.clientRateLimitKey.mockReturnValue(
+          'user:user_1|client:client_1|ip:unknown-ip',
+        )
+        mocks.tokenActorRateLimitKey.mockReturnValue(
+          'token:aftercare_actor_hash|ip:unknown-ip',
+        )
+
+        mocks.enforceRateLimit.mockResolvedValue({
+          allowed: true,
+          bucket: 'bookings:finalize',
+          key: 'user:user_1|client:client_1|ip:unknown-ip',
+          limit: 12,
+          remaining: 11,
+          resetAt: new Date('2026-03-11T19:05:00.000Z'),
+          retryAfterSeconds: 60,
+          source: 'redis',
+        })
 
     mocks.jsonFail.mockImplementation(
       (status: number, error: string, extra?: Record<string, unknown>) =>
@@ -614,6 +650,62 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
   })
 
+  it('returns rate-limit response before idempotency or finalize for authenticated finalize', async () => {
+    const blockedDecision = {
+      allowed: false,
+      bucket: 'bookings:finalize',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+      limit: 12,
+      remaining: 0,
+      resetAt: new Date('2026-03-11T19:05:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
+      reason: 'rate_limited',
+    } as const
+
+    const limitedResponse = makeJsonResponse(429, {
+      ok: false,
+      error: 'Too many requests. Please try again later.',
+      code: 'RATE_LIMITED',
+    })
+
+    mocks.enforceRateLimit.mockResolvedValueOnce(blockedDecision)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
+
+    const result = await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'REQUESTED',
+      }),
+    )
+
+    expect(result).toBe(limitedResponse)
+    expect(result.status).toBe(429)
+
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:finalize',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+    })
+
+    expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(
+      blockedDecision,
+    )
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+  })
+
   it('returns handled idempotency response for authenticated finalize without calling boundary', async () => {
     const handledResponse = makeJsonResponse(400, {
       ok: false,
@@ -656,6 +748,17 @@ describe('POST /api/bookings/finalize', () => {
         'idem_requested_1',
       ),
     )
+
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:finalize',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+    })
 
     expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
       request: expect.any(Request),
@@ -898,6 +1001,16 @@ describe('POST /api/bookings/finalize', () => {
       rawToken: 'token_1',
     })
 
+    expect(mocks.tokenActorRateLimitKey).toHaveBeenCalledWith({
+      actorKey: 'aftercare-token:token_row_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:finalize',
+      key: 'token:aftercare_actor_hash|ip:unknown-ip',
+    })
+
     expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
       expect.objectContaining({
         actor: {
@@ -989,6 +1102,67 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
   })
 
+  it('returns rate-limit response before idempotency or finalize for aftercare-token finalize', async () => {
+    const blockedDecision = {
+      allowed: false,
+      bucket: 'bookings:finalize',
+      key: 'token:aftercare_actor_hash|ip:unknown-ip',
+      limit: 12,
+      remaining: 0,
+      resetAt: new Date('2026-03-11T19:05:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
+      reason: 'rate_limited',
+    } as const
+
+    const limitedResponse = makeJsonResponse(429, {
+      ok: false,
+      error: 'Too many requests. Please try again later.',
+      code: 'RATE_LIMITED',
+    })
+
+    mocks.enforceRateLimit.mockResolvedValueOnce(blockedDecision)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
+
+    const result = await POST(
+      makeIdempotentRequest({
+        offeringId: 'offering_1',
+        holdId: 'hold_1',
+        locationType: 'SALON',
+        source: 'AFTERCARE',
+        aftercareToken: 'token_1',
+      }),
+    )
+
+    expect(result).toBe(limitedResponse)
+    expect(result.status).toBe(429)
+
+    expect(mocks.requireClient).not.toHaveBeenCalled()
+    expect(mocks.resolveAftercareAccessTokenForMutation).toHaveBeenCalledWith({
+      rawToken: 'token_1',
+    })
+
+    expect(mocks.tokenActorRateLimitKey).toHaveBeenCalledWith({
+      actorKey: 'aftercare-token:token_row_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:finalize',
+      key: 'token:aftercare_actor_hash|ip:unknown-ip',
+    })
+
+    expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(
+      blockedDecision,
+    )
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.finalizeBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.createProNotification).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+  })
+
   it('calls finalizeBookingFromHold with token-resolved client ownership for aftercare', async () => {
     mocks.resolveAftercareAccessTokenForMutation.mockResolvedValueOnce(
       makeResolvedAftercareAccess({
@@ -1017,12 +1191,12 @@ describe('POST /api/bookings/finalize', () => {
           actorKey: 'aftercare-token:token_row_1',
           actorRole: Role.CLIENT,
         },
-      requestBody: expect.objectContaining({
-        clientId: 'client_from_token',
-        source: BookingSource.AFTERCARE,
-        bookingEntryPoint: 'DIRECT_PROFILE',
-        rebookOfBookingId: 'booking_old',
-      }),
+        requestBody: expect.objectContaining({
+          clientId: 'client_from_token',
+          source: BookingSource.AFTERCARE,
+          bookingEntryPoint: 'DIRECT_PROFILE',
+          rebookOfBookingId: 'booking_old',
+        }),
       }),
     )
 

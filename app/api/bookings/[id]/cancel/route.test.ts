@@ -18,6 +18,11 @@ const mocks = vi.hoisted(() => ({
   completeRouteIdempotency: vi.fn(),
   failStartedRouteIdempotency: vi.fn(),
   isRouteIdempotencyHandled: vi.fn(),
+
+  enforceRateLimit: vi.fn(),
+  clientRateLimitKey: vi.fn(),
+  proRateLimitKey: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/responses', () => ({
@@ -42,6 +47,19 @@ vi.mock('@/app/api/_utils/idempotency', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   cancelBooking: mocks.cancelBooking,
+}))
+
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  clientRateLimitKey: mocks.clientRateLimitKey,
+  proRateLimitKey: mocks.proRateLimitKey,
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -102,6 +120,29 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       },
     })
 
+    mocks.clientRateLimitKey.mockImplementation(
+      (args: { clientId?: string | null; userId?: string | null }) =>
+        `user:${args.userId}|client:${args.clientId}|ip:unknown-ip`,
+    )
+
+    mocks.proRateLimitKey.mockImplementation(
+      (args: { professionalId?: string | null; userId?: string | null }) =>
+        args.professionalId
+          ? `user:${args.userId}|pro:${args.professionalId}|ip:unknown-ip`
+          : `user:${args.userId}|ip:unknown-ip`,
+    )
+
+    mocks.enforceRateLimit.mockResolvedValue({
+      allowed: true,
+      bucket: 'bookings:cancel',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+      limit: 8,
+      remaining: 7,
+      resetAt: new Date('2026-03-11T19:05:00.000Z'),
+      retryAfterSeconds: 300,
+      source: 'redis',
+    })
+
     mocks.cancelBooking.mockResolvedValue({
       booking: {
         id: 'booking_1',
@@ -131,6 +172,10 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
     const result = await POST(makeRequest(), makeCtx('booking_1'))
 
     expect(result).toBe(authRes)
+
+    expect(mocks.clientRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.proRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.cancelBooking).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
@@ -168,6 +213,9 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       message: descriptor.message,
     })
 
+    expect(mocks.clientRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.proRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.cancelBooking).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
@@ -210,6 +258,9 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       message: 'Authenticated user is missing the required booking profile.',
     })
 
+    expect(mocks.clientRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.proRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.cancelBooking).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
@@ -252,6 +303,62 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       message: 'Authenticated user is missing the required booking profile.',
     })
 
+    expect(mocks.clientRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.proRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.cancelBooking).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns rate-limit response before idempotency or cancelBooking for client cancel', async () => {
+    const blockedDecision = {
+      allowed: false,
+      bucket: 'bookings:cancel',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+      limit: 8,
+      remaining: 0,
+      resetAt: new Date('2026-03-11T19:05:00.000Z'),
+      retryAfterSeconds: 300,
+      source: 'redis',
+      reason: 'rate_limited',
+    } as const
+
+    const limitedResponse = {
+      ok: false,
+      status: 429,
+      error: 'Too many requests. Please try again later.',
+      code: 'RATE_LIMITED',
+    }
+
+    mocks.enforceRateLimit.mockResolvedValueOnce(blockedDecision)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
+
+    const result = await POST(
+      makeRequest({
+        'idempotency-key': 'idem_cancel_1',
+      }),
+      makeCtx('booking_1'),
+    )
+
+    expect(result).toBe(limitedResponse)
+
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:cancel',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+    })
+
+    expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(
+      blockedDecision,
+    )
+
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.cancelBooking).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
@@ -289,6 +396,17 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       makeCtx('booking_1'),
     )
 
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:cancel',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+    })
+
     expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
       request: expect.any(Request),
       actor: {
@@ -320,6 +438,17 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
 
     expect(mocks.requireUser).toHaveBeenCalledWith({
       roles: [Role.CLIENT, Role.PRO, Role.ADMIN],
+    })
+
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:cancel',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
     })
 
     expect(mocks.cancelBooking).toHaveBeenCalledWith({
@@ -388,6 +517,17 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
 
     await POST(makeRequest(), makeCtx('booking_1'))
 
+    expect(mocks.proRateLimitKey).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      userId: 'user_2',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:cancel',
+      key: 'user:user_2|pro:pro_1|ip:unknown-ip',
+    })
+
     expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
       expect.objectContaining({
         actor: {
@@ -425,6 +565,17 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
     })
 
     await POST(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.proRateLimitKey).toHaveBeenCalledWith({
+      professionalId: null,
+      userId: 'user_admin',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:cancel',
+      key: 'user:user_admin|ip:unknown-ip',
+    })
 
     expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
       expect.objectContaining({

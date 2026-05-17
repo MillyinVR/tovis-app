@@ -20,6 +20,9 @@ import { rescheduleBookingFromHold } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { isRecord } from '@/lib/guards'
 import { DEFAULT_TIME_ZONE } from '@/lib/timeZone'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { clientRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
 
@@ -106,6 +109,19 @@ export async function POST(req: Request, { params }: Ctx) {
 
     if (hasLocationType && requestedLocationType == null) {
       return bookingJsonFail('INVALID_LOCATION_TYPE')
+    }
+
+    const rateLimit = await enforceRateLimit({
+      bucket: 'bookings:reschedule',
+      key: clientRateLimitKey({
+        clientId,
+        userId: auth.user.id,
+        request: req,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      return rateLimitExceededResponse(rateLimit)
     }
 
     const idempotency = await beginRouteIdempotency<RescheduleResponseBody>({

@@ -23,6 +23,9 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { proRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -827,6 +830,19 @@ export async function POST(req: Request, ctx: Ctx) {
     const bookingId = await getBookingIdFromContext(ctx)
     if (!bookingId) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
+    }
+
+    const rateLimit = await enforceRateLimit({
+      bucket: 'pro:bookings:write',
+      key: proRateLimitKey({
+        professionalId,
+        userId: actorUserId,
+        request: req,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      return rateLimitExceededResponse(rateLimit)
     }
 
     const rawBody: unknown = await req.json().catch(() => null)

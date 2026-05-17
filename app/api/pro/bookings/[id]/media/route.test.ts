@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { MediaPhase, MediaType } from '@prisma/client'
+import { MediaPhase, MediaType, Role } from '@prisma/client'
+
 import { bookingError } from '@/lib/booking/errors'
 import { BUCKETS } from '@/lib/storageBuckets'
 
@@ -75,6 +76,10 @@ const mocks = vi.hoisted(() => ({
   failStartedRouteIdempotency: vi.fn(),
   isRouteIdempotencyHandled: vi.fn(),
 
+  enforceRateLimit: vi.fn(),
+  proRateLimitKey: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
+
   captureBookingException: vi.fn(),
 }))
 
@@ -121,6 +126,18 @@ vi.mock('@/lib/idempotency', () => ({
   },
 }))
 
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  proRateLimitKey: mocks.proRateLimitKey,
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
+}))
+
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
 }))
@@ -153,7 +170,9 @@ function makeCtx(id = 'booking_1') {
   }
 }
 
-function makeGetRequest(path = 'http://localhost/api/pro/bookings/booking_1/media') {
+function makeGetRequest(
+  path = 'http://localhost/api/pro/bookings/booking_1/media',
+): Request {
   return new Request(path, {
     method: 'GET',
   })
@@ -224,6 +243,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
 
     mocks.pickString.mockImplementation((value: unknown) => {
       if (typeof value !== 'string') return null
+
       const trimmed = value.trim()
       return trimmed.length > 0 ? trimmed : null
     })
@@ -257,6 +277,21 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: null,
     })
 
+    mocks.proRateLimitKey.mockReturnValue(
+      'user:user_1|pro:pro_1|ip:unknown-ip',
+    )
+
+    mocks.enforceRateLimit.mockResolvedValue({
+      allowed: true,
+      bucket: 'pro:media:write',
+      key: 'user:user_1|pro:pro_1|ip:unknown-ip',
+      limit: 30,
+      remaining: 29,
+      resetAt: new Date('2026-04-13T18:31:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
+    })
+
     expectIdempotencyStarted()
 
     mocks.completeRouteIdempotency.mockResolvedValue(undefined)
@@ -287,6 +322,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
 
     expect(result).toBe(authRes)
     expect(mocks.bookingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
   })
 
   it('GET returns BOOKING_ID_REQUIRED when booking id is missing', async () => {
@@ -301,6 +337,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     )
 
     expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
   })
 
   it('GET returns media items with rendered urls', async () => {
@@ -334,6 +371,8 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       thumbUrl: null,
     })
 
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
       ok: true,
@@ -365,6 +404,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     })
 
     expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
   })
 
   it('POST returns auth response when requirePro fails', async () => {
@@ -381,6 +421,31 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     const result = await POST(makePostRequest(), makeCtx())
 
     expect(result).toBe(authRes)
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
+  })
+
+  it('POST returns FORBIDDEN when actor user id is missing', async () => {
+    mocks.requirePro.mockResolvedValueOnce({
+      ok: true,
+      professionalId: 'pro_1',
+      user: {
+        id: '   ',
+      },
+    })
+
+    const result = await POST(makePostRequest(), makeCtx())
+
+    expect(result.status).toBe(403)
+    await expect(result.json()).resolves.toEqual(
+      expect.objectContaining({
+        ok: false,
+        code: 'FORBIDDEN',
+      }),
+    )
+
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
@@ -396,11 +461,58 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       }),
     )
 
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
-  it('POST validates required storage fields before idempotency', async () => {
+  it('POST returns rate-limit response before parsing body or starting idempotency', async () => {
+    const blockedDecision = {
+      allowed: false,
+      bucket: 'pro:media:write',
+      key: 'user:user_1|pro:pro_1|ip:unknown-ip',
+      limit: 30,
+      remaining: 0,
+      resetAt: new Date('2026-04-13T18:31:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
+      reason: 'rate_limited',
+    } as const
+
+    const limitedResponse = makeJsonResponse(429, {
+      ok: false,
+      error: 'Too many requests. Please try again later.',
+      code: 'RATE_LIMITED',
+    })
+
+    mocks.enforceRateLimit.mockResolvedValueOnce(blockedDecision)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
+
+    const result = await POST(makeIdempotentPostRequest(), makeCtx())
+
+    expect(result).toBe(limitedResponse)
+
+    expect(mocks.proRateLimitKey).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'pro:media:write',
+      key: 'user:user_1|pro:pro_1|ip:unknown-ip',
+    })
+
+    expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(
+      blockedDecision,
+    )
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+
+  it('POST validates required storage fields after rate limit but before idempotency', async () => {
     const result = await POST(
       makePostRequest({
         body: {
@@ -410,6 +522,11 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       }),
       makeCtx(),
     )
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'pro:media:write',
+      key: 'user:user_1|pro:pro_1|ip:unknown-ip',
+    })
 
     expect(result.status).toBe(400)
     await expect(result.json()).resolves.toEqual({
@@ -567,7 +684,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       request: expect.any(Request),
       actor: {
         actorUserId: 'user_1',
-        actorRole: 'PRO',
+        actorRole: Role.PRO,
       },
       route: IDEMPOTENCY_ROUTE,
       requestLabel: 'media upload',
@@ -638,27 +755,26 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
-
-    it('POST replays completed idempotency response without storage check or media write', async () => {
-      const handledResponse = makeJsonResponse(200, {
-        ok: true,
-        ...expectedPostResponseBody,
-      })
-
-      mocks.beginRouteIdempotency.mockResolvedValueOnce({
-        kind: 'handled',
-        response: handledResponse,
-      })
-
-      mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
-
-      const result = await POST(makeIdempotentPostRequest(), makeCtx())
-
-      expect(result).toBe(handledResponse)
-      expect(globalThis.fetch).not.toHaveBeenCalled()
-      expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
-      expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+  it('POST replays completed idempotency response without storage check or media write', async () => {
+    const handledResponse = makeJsonResponse(200, {
+      ok: true,
+      ...expectedPostResponseBody,
     })
+
+    mocks.beginRouteIdempotency.mockResolvedValueOnce({
+      kind: 'handled',
+      response: handledResponse,
+    })
+
+    mocks.isRouteIdempotencyHandled.mockReturnValueOnce(true)
+
+    const result = await POST(makeIdempotentPostRequest(), makeCtx())
+
+    expect(result).toBe(handledResponse)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+  })
 
   it('POST marks idempotency failed when main uploaded file is missing', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(
@@ -726,33 +842,44 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       makeCtx(),
     )
 
-  expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
-    request: expect.any(Request),
-    actor: {
-      actorUserId: 'user_1',
-      actorRole: 'PRO',
-    },
-    route: IDEMPOTENCY_ROUTE,
-    requestLabel: 'media upload',
-    requestBody: {
+    expect(mocks.proRateLimitKey).toHaveBeenCalledWith({
       professionalId: 'pro_1',
-      actorUserId: 'user_1',
-      bookingId: 'booking_1',
-      storageBucket: BUCKETS.mediaPrivate,
-      storagePath: 'bookings/booking_1/before/main.jpg',
-      thumbBucket: BUCKETS.mediaPrivate,
-      thumbPath: 'bookings/booking_1/before/thumb.jpg',
-      caption: 'Before photo',
-      phase: MediaPhase.BEFORE,
-      mediaType: MediaType.IMAGE,
-    },
-    messages: {
-      missingKey: 'Missing idempotency key.',
-      inProgress: 'A matching media upload request is already in progress.',
-      conflict:
-        'This idempotency key was already used with a different request body.',
-    },
-  })
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'pro:media:write',
+      key: 'user:user_1|pro:pro_1|ip:unknown-ip',
+    })
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
+      request: expect.any(Request),
+      actor: {
+        actorUserId: 'user_1',
+        actorRole: Role.PRO,
+      },
+      route: IDEMPOTENCY_ROUTE,
+      requestLabel: 'media upload',
+      requestBody: {
+        professionalId: 'pro_1',
+        actorUserId: 'user_1',
+        bookingId: 'booking_1',
+        storageBucket: BUCKETS.mediaPrivate,
+        storagePath: 'bookings/booking_1/before/main.jpg',
+        thumbBucket: BUCKETS.mediaPrivate,
+        thumbPath: 'bookings/booking_1/before/thumb.jpg',
+        caption: 'Before photo',
+        phase: MediaPhase.BEFORE,
+        mediaType: MediaType.IMAGE,
+      },
+      messages: {
+        missingKey: 'Missing idempotency key.',
+        inProgress: 'A matching media upload request is already in progress.',
+        conflict:
+          'This idempotency key was already used with a different request body.',
+      },
+    })
 
     expect(mocks.createSignedUrl).toHaveBeenCalledTimes(2)
     expect(globalThis.fetch).toHaveBeenCalledTimes(2)

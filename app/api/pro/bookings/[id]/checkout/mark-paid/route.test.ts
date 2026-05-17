@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
   isRouteIdempotencyHandled: vi.fn(),
 
   markProBookingCheckoutPaid: vi.fn(),
+
+  enforceRateLimit: vi.fn(),
+  proRateLimitKey: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -33,6 +37,18 @@ vi.mock('@/app/api/_utils/idempotency', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   markProBookingCheckoutPaid: mocks.markProBookingCheckoutPaid,
+}))
+
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  proRateLimitKey: mocks.proRateLimitKey,
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
 vi.mock('@/lib/idempotency', () => ({
@@ -175,6 +191,22 @@ describe('POST /api/pro/bookings/[id]/checkout/mark-paid', () => {
       typeof value === 'string' && value.trim() ? value.trim() : null,
     )
 
+    mocks.proRateLimitKey.mockImplementation(
+      (args: { professionalId?: string | null; userId?: string | null }) =>
+        `user:${args.userId}|pro:${args.professionalId}|ip:unknown-ip`,
+    )
+
+    mocks.enforceRateLimit.mockResolvedValue({
+      allowed: true,
+      bucket: 'pro:bookings:write',
+      key: 'user:user_pro_1|pro:pro_123|ip:unknown-ip',
+      limit: 30,
+      remaining: 29,
+      resetAt: new Date('2026-03-17T13:31:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
+    })
+
     expectIdempotencyStarted()
 
     mocks.markProBookingCheckoutPaid.mockResolvedValue(makeSuccessResult())
@@ -182,7 +214,7 @@ describe('POST /api/pro/bookings/[id]/checkout/mark-paid', () => {
     mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
   })
 
-  it('returns auth response when requirePro fails', async () => {
+  it('returns auth response when requirePro fails before rate limit or idempotency', async () => {
     const authRes = makeJsonResponse(401, {
       ok: false,
       error: 'Unauthorized',
@@ -196,11 +228,16 @@ describe('POST /api/pro/bookings/[id]/checkout/mark-paid', () => {
     const result = await POST(makeRequest(), makeContext())
 
     expect(result).toBe(authRes)
+
+    expect(mocks.proRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.markProBookingCheckoutPaid).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns BOOKING_ID_REQUIRED when booking id is blank', async () => {
+  it('returns BOOKING_ID_REQUIRED when booking id is blank before rate limit or idempotency', async () => {
     const descriptor = getBookingErrorDescriptor('BOOKING_ID_REQUIRED')
 
     const result = await POST(makeRequest(), makeContext('   '))
@@ -208,8 +245,64 @@ describe('POST /api/pro/bookings/[id]/checkout/mark-paid', () => {
     expect(result.status).toBe(descriptor.httpStatus)
     expectBookingFailPayload(await result.json(), 'BOOKING_ID_REQUIRED')
 
+    expect(mocks.proRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.markProBookingCheckoutPaid).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns rate-limit response before idempotency or mark-paid mutation', async () => {
+    const blockedDecision = {
+      allowed: false,
+      bucket: 'pro:bookings:write',
+      key: 'user:user_pro_1|pro:pro_123|ip:unknown-ip',
+      limit: 30,
+      remaining: 0,
+      resetAt: new Date('2026-03-17T13:31:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
+      reason: 'rate_limited',
+    } as const
+
+    const limitedResponse = makeJsonResponse(429, {
+      ok: false,
+      error: 'Too many requests. Please try again later.',
+      code: 'RATE_LIMITED',
+    })
+
+    mocks.enforceRateLimit.mockResolvedValueOnce(blockedDecision)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
+
+    const result = await POST(
+      makeRequest({
+        'idempotency-key': 'idem_mark_paid_1',
+      }),
+      makeContext(),
+    )
+
+    expect(result).toBe(limitedResponse)
+
+    expect(mocks.proRateLimitKey).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      userId: 'user_pro_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'pro:bookings:write',
+      key: 'user:user_pro_1|pro:pro_123|ip:unknown-ip',
+    })
+
+    expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(
+      blockedDecision,
+    )
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.markProBookingCheckoutPaid).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('returns handled idempotency response without calling boundary', async () => {
@@ -227,8 +320,21 @@ describe('POST /api/pro/bookings/[id]/checkout/mark-paid', () => {
     const result = await POST(makeRequest(), makeContext())
 
     expect(result).toBe(handledResponse)
+
+    expect(mocks.proRateLimitKey).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      userId: 'user_pro_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'pro:bookings:write',
+      key: 'user:user_pro_1|pro:pro_123|ip:unknown-ip',
+    })
+
     expect(mocks.markProBookingCheckoutPaid).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('marks checkout paid through the write boundary and completes idempotency', async () => {
@@ -239,6 +345,17 @@ describe('POST /api/pro/bookings/[id]/checkout/mark-paid', () => {
       }),
       makeContext(),
     )
+
+    expect(mocks.proRateLimitKey).toHaveBeenCalledWith({
+      professionalId: 'pro_123',
+      userId: 'user_pro_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'pro:bookings:write',
+      key: 'user:user_pro_1|pro:pro_123|ip:unknown-ip',
+    })
 
     expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
       request: expect.any(Request),
@@ -255,7 +372,8 @@ describe('POST /api/pro/bookings/[id]/checkout/mark-paid', () => {
       },
       messages: {
         missingKey: 'Missing idempotency key.',
-        inProgress: 'A matching checkout mark-paid request is already in progress.',
+        inProgress:
+          'A matching checkout mark-paid request is already in progress.',
         conflict:
           'This idempotency key was already used with a different checkout mark-paid request.',
       },

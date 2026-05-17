@@ -12,6 +12,9 @@ import {
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
 import { waiveProBookingCheckout } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { proRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
 
@@ -124,6 +127,19 @@ export async function POST(request: Request, context: RouteParams) {
 
     const rawBody = await request.json().catch(() => ({}))
     const reason = parseWaiveReason(rawBody)
+
+    const rateLimit = await enforceRateLimit({
+      bucket: 'pro:bookings:write',
+      key: proRateLimitKey({
+        professionalId: auth.professionalId,
+        userId: auth.user.id,
+        request,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      return rateLimitExceededResponse(rateLimit)
+    }
 
     const idempotency = await beginRouteIdempotency<WaiveCheckoutSuccessBody>({
       request,

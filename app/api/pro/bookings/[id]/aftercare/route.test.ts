@@ -1,3 +1,5 @@
+// app/api/pro/bookings/[id]/aftercare/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AftercareRebookMode,
@@ -30,6 +32,10 @@ const mocks = vi.hoisted(() => ({
   isRouteIdempotencyHandled: vi.fn(),
 
   captureBookingException: vi.fn(),
+
+  enforceRateLimit: vi.fn(),
+  proRateLimitKey: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -44,6 +50,18 @@ vi.mock('@/app/api/_utils/idempotency', () => ({
   completeRouteIdempotency: mocks.completeRouteIdempotency,
   failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
   isRouteIdempotencyHandled: mocks.isRouteIdempotencyHandled,
+}))
+
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  proRateLimitKey: mocks.proRateLimitKey,
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
 vi.mock('@/lib/guards', () => ({
@@ -612,6 +630,19 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       },
     )
 
+    mocks.proRateLimitKey.mockReturnValue('user:user_1|pro:pro_1|ip:unknown-ip')
+
+    mocks.enforceRateLimit.mockResolvedValue({
+      allowed: true,
+      bucket: 'pro:bookings:write',
+      key: 'user:user_1|pro:pro_1|ip:unknown-ip',
+      limit: 30,
+      remaining: 29,
+      resetAt: new Date('2026-04-13T18:31:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
+    })
+
     mocks.bookingFindUnique.mockResolvedValue(makeGetBooking())
 
     expectIdempotencyStarted()
@@ -639,7 +670,10 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
   })
 
   it('GET returns 400 when booking id is missing', async () => {
-    const result = await GET(new Request('http://localhost/test'), makeCtx('   '))
+    const result = await GET(
+      new Request('http://localhost/test'),
+      makeCtx('   '),
+    )
 
     expect(result.status).toBe(400)
     await expect(result.json()).resolves.toEqual({
@@ -842,6 +876,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     const result = await POST(makeRequest({ body: {} }), makeCtx())
 
     expect(result).toBe(authRes)
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.upsertBookingAftercare).not.toHaveBeenCalled()
   })
@@ -860,6 +895,60 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       error: 'Missing booking id.',
       code: 'BOOKING_ID_REQUIRED',
     })
+
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.upsertBookingAftercare).not.toHaveBeenCalled()
+  })
+
+  it('POST returns rate-limit response before parsing body or starting idempotency', async () => {
+    const blockedDecision = {
+      allowed: false,
+      bucket: 'pro:bookings:write',
+      key: 'user:user_1|pro:pro_1|ip:unknown-ip',
+      limit: 30,
+      remaining: 0,
+      resetAt: new Date('2026-04-13T18:31:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
+      reason: 'rate_limited',
+    } as const
+
+    const limitedResponse = makeJsonResponse(429, {
+      ok: false,
+      error: 'Too many requests. Please try again later.',
+      code: 'RATE_LIMITED',
+    })
+
+    mocks.enforceRateLimit.mockResolvedValueOnce(blockedDecision)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
+
+    const result = await POST(
+      makeRequest({
+        body: [],
+        headers: {
+          'idempotency-key': 'idem_aftercare_limited_1',
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(result).toBe(limitedResponse)
+
+    expect(mocks.proRateLimitKey).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'pro:bookings:write',
+      key: 'user:user_1|pro:pro_1|ip:unknown-ip',
+    })
+
+    expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(
+      blockedDecision,
+    )
 
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.upsertBookingAftercare).not.toHaveBeenCalled()
@@ -1516,11 +1605,35 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     ['PAYMENT_NOT_COLLECTED'],
     ['CHECKOUT_NOT_COMPLETE'],
     ['CONSULTATION_NOT_APPROVED'],
-  ])('POST keeps booking incomplete when closeout blocker exists: %s', async (blocker) => {
-    expectIdempotencyStarted(`idem_blocker_${blocker}`)
+  ])(
+    'POST keeps booking incomplete when closeout blocker exists: %s',
+    async (blocker) => {
+      expectIdempotencyStarted(`idem_blocker_${blocker}`)
 
-    mocks.upsertBookingAftercare.mockResolvedValueOnce(
-      makeUpsertResult({
+      mocks.upsertBookingAftercare.mockResolvedValueOnce(
+        makeUpsertResult({
+          bookingFinished: false,
+          completionBlockers: [blocker],
+          booking: {
+            status: BookingStatus.IN_PROGRESS,
+            sessionStep: SessionStep.AFTER_PHOTOS,
+            finishedAt: null,
+          },
+        }),
+      )
+
+      const result = await POST(
+        makeIdempotentRequest({
+          key: `idem_blocker_${blocker}`,
+          headers: {
+            'x-request-id': `req_blocker_${blocker}`,
+          },
+          body: makeValidPostBody(),
+        }),
+        makeCtx(),
+      )
+
+      const responseBody = makeExpectedPostResponse({
         bookingFinished: false,
         completionBlockers: [blocker],
         booking: {
@@ -1528,43 +1641,22 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
           sessionStep: SessionStep.AFTER_PHOTOS,
           finishedAt: null,
         },
-      }),
-    )
+        redirectTo: null,
+      })
 
-    const result = await POST(
-      makeIdempotentRequest({
-        key: `idem_blocker_${blocker}`,
-        headers: {
-          'x-request-id': `req_blocker_${blocker}`,
-        },
-        body: makeValidPostBody(),
-      }),
-      makeCtx(),
-    )
+      expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_1',
+        responseStatus: 200,
+        responseBody,
+      })
 
-    const responseBody = makeExpectedPostResponse({
-      bookingFinished: false,
-      completionBlockers: [blocker],
-      booking: {
-        status: BookingStatus.IN_PROGRESS,
-        sessionStep: SessionStep.AFTER_PHOTOS,
-        finishedAt: null,
-      },
-      redirectTo: null,
-    })
-
-    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
-      responseStatus: 200,
-      responseBody,
-    })
-
-    expect(result.status).toBe(200)
-    await expect(result.json()).resolves.toEqual({
-      ok: true,
-      ...responseBody,
-    })
-  })
+      expect(result.status).toBe(200)
+      await expect(result.json()).resolves.toEqual({
+        ok: true,
+        ...responseBody,
+      })
+    },
+  )
 
   it('POST returns 500 for unexpected errors and marks idempotency failed', async () => {
     expectIdempotencyStarted('idem_boom_1')

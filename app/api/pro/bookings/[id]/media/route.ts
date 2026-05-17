@@ -21,6 +21,9 @@ import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { proRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
 
@@ -348,6 +351,19 @@ export async function POST(req: Request, ctx: Ctx) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
+    const rateLimit = await enforceRateLimit({
+      bucket: 'pro:media:write',
+      key: proRateLimitKey({
+        professionalId,
+        userId: actorUserId,
+        request: req,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      return rateLimitExceededResponse(rateLimit)
+    }
+
     const body = (await req.json().catch(() => ({}))) as {
       storageBucket?: unknown
       storagePath?: unknown
@@ -364,9 +380,10 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!storageBucket || !storagePath) {
       return jsonFail(400, 'Missing storageBucket/storagePath.')
     }
-
     const thumbBucket =
-      body.thumbBucket === null || body.thumbBucket === undefined || body.thumbBucket === ''
+      body.thumbBucket === null ||
+      body.thumbBucket === undefined ||
+      body.thumbBucket === ''
         ? null
         : safeBucket(body.thumbBucket)
 

@@ -1,16 +1,20 @@
 // app/api/pro/bookings/[id]/checkout/mark-paid/route.ts
 
-import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
-import { markProBookingCheckoutPaid } from '@/lib/booking/writeBoundary'
+import { Role } from '@prisma/client'
+
+import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import {
   beginRouteIdempotency,
   completeRouteIdempotency,
   failStartedRouteIdempotency,
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
-import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
+import { markProBookingCheckoutPaid } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
-import { Role } from '@prisma/client'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { proRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
 
@@ -81,7 +85,9 @@ function buildSuccessBody(result: {
       paymentCollectedAt,
       status: String(result.booking.status),
       sessionStep:
-        result.booking.sessionStep == null ? null : String(result.booking.sessionStep),
+        result.booking.sessionStep == null
+          ? null
+          : String(result.booking.sessionStep),
     },
     meta: {
       mutated: result.meta.mutated,
@@ -108,6 +114,19 @@ export async function POST(request: Request, context: RouteParams) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
+    const rateLimit = await enforceRateLimit({
+      bucket: 'pro:bookings:write',
+      key: proRateLimitKey({
+        professionalId: auth.professionalId,
+        userId: auth.user.id,
+        request,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      return rateLimitExceededResponse(rateLimit)
+    }
+
     const idempotency = await beginRouteIdempotency<MarkPaidSuccessBody>({
       request,
       actor: {
@@ -123,7 +142,8 @@ export async function POST(request: Request, context: RouteParams) {
       },
       messages: {
         missingKey: 'Missing idempotency key.',
-        inProgress: 'A matching checkout mark-paid request is already in progress.',
+        inProgress:
+          'A matching checkout mark-paid request is already in progress.',
         conflict:
           'This idempotency key was already used with a different checkout mark-paid request.',
       },
@@ -141,7 +161,7 @@ export async function POST(request: Request, context: RouteParams) {
       actorUserId: auth.user.id,
       requestId: pickString(request.headers.get('x-request-id')),
       idempotencyKey: idempotency.idempotencyKey,
-      })
+    })
 
     const responseBody = buildSuccessBody(result)
 

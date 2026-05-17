@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => ({
   isRouteIdempotencyHandled: vi.fn(),
 
   captureBookingException: vi.fn(),
+
+  enforceRateLimit: vi.fn(),
+  tokenActorRateLimitKey: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -74,6 +78,18 @@ vi.mock('@/lib/idempotency', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
+}))
+
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  tokenActorRateLimitKey: mocks.tokenActorRateLimitKey,
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -344,6 +360,21 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       singleUse: false,
     })
 
+    mocks.tokenActorRateLimitKey.mockReturnValue(
+      'token:hashed_token_1|ip:unknown-ip',
+    )
+
+    mocks.enforceRateLimit.mockResolvedValue({
+      allowed: true,
+      bucket: 'client:rebook:token',
+      key: 'token:hashed_token_1|ip:unknown-ip',
+      limit: 10,
+      remaining: 9,
+      resetAt: new Date('2026-04-12T18:05:00.000Z'),
+      retryAfterSeconds: 300,
+      source: 'redis',
+    })
+
     setStartedIdempotencyDefault()
 
     mocks.isRouteIdempotencyHandled.mockImplementation(
@@ -414,60 +445,61 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
     expect(JSON.stringify(body)).not.toContain('publicToken')
 
     expect(body).toEqual({
-        ok: true,
-        accessSource: 'clientActionToken',
-        token: {
-          id: 'token_row_1',
-          expiresAt: '2026-04-20T18:00:00.000Z',
-          firstUsedAt: '2026-04-12T17:55:00.000Z',
-          lastUsedAt: '2026-04-12T17:58:00.000Z',
-          useCount: 2,
-          singleUse: true,
+      ok: true,
+      accessSource: 'clientActionToken',
+      token: {
+        id: 'token_row_1',
+        expiresAt: '2026-04-20T18:00:00.000Z',
+        firstUsedAt: '2026-04-12T17:55:00.000Z',
+        lastUsedAt: '2026-04-12T17:58:00.000Z',
+        useCount: 2,
+        singleUse: true,
+      },
+      aftercare: {
+        id: 'aftercare_1',
+        bookingId: 'booking_1',
+        notes: 'Use a sulfate-free shampoo.',
+        rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+        rebookedFor: '2026-05-01T18:00:00.000Z',
+        rebookWindowStart: '2026-04-20T18:00:00.000Z',
+        rebookWindowEnd: '2026-04-30T18:00:00.000Z',
+        draftSavedAt: '2026-04-12T17:00:00.000Z',
+        sentToClientAt: '2026-04-12T17:30:00.000Z',
+        lastEditedAt: '2026-04-12T17:15:00.000Z',
+        version: 2,
+        isFinalized: true,
+        publicAccess: {
+          accessMode: 'SECURE_LINK',
+          hasPublicAccess: true,
+          clientAftercareHref: '/client/rebook/token_from_route',
         },
-        aftercare: {
-          id: 'aftercare_1',
-          bookingId: 'booking_1',
-          notes: 'Use a sulfate-free shampoo.',
-          rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
-          rebookedFor: '2026-05-01T18:00:00.000Z',
-          rebookWindowStart: '2026-04-20T18:00:00.000Z',
-          rebookWindowEnd: '2026-04-30T18:00:00.000Z',
-          draftSavedAt: '2026-04-12T17:00:00.000Z',
-          sentToClientAt: '2026-04-12T17:30:00.000Z',
-          lastEditedAt: '2026-04-12T17:15:00.000Z',
-          version: 2,
-          isFinalized: true,
-          publicAccess: {
-            accessMode: 'SECURE_LINK',
-            hasPublicAccess: true,
-            clientAftercareHref: '/client/rebook/token_from_route',
-          },
+      },
+      booking: {
+        id: 'booking_1',
+        clientId: 'client_1',
+        professionalId: 'pro_1',
+        serviceId: 'service_1',
+        offeringId: 'offering_1',
+        status: 'COMPLETED',
+        scheduledFor: '2026-04-10T18:00:00.000Z',
+        locationType: 'SALON',
+        locationId: 'location_1',
+        totalDurationMinutes: 75,
+        subtotalSnapshot: '125.00',
+        service: {
+          id: 'service_1',
+          name: 'Haircut',
         },
-        booking: {
-          id: 'booking_1',
-          clientId: 'client_1',
-          professionalId: 'pro_1',
-          serviceId: 'service_1',
-          offeringId: 'offering_1',
-          status: 'COMPLETED',
-          scheduledFor: '2026-04-10T18:00:00.000Z',
-          locationType: 'SALON',
-          locationId: 'location_1',
-          totalDurationMinutes: 75,
-          subtotalSnapshot: '125.00',
-          service: {
-            id: 'service_1',
-            name: 'Haircut',
-          },
-          professional: {
-            id: 'pro_1',
-            businessName: 'TOVIS Studio',
-            timeZone: 'America/Los_Angeles',
-            location: null,
-          },
+        professional: {
+          id: 'pro_1',
+          businessName: 'TOVIS Studio',
+          timeZone: 'America/Los_Angeles',
+          location: null,
         },
-      })
+      },
     })
+  })
+
   it('POST maps missing route token through bookingJsonFail', async () => {
     const response = await POST(
       makeRequest({
@@ -514,6 +546,7 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       error: 'Missing or invalid scheduledFor.',
     })
 
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.resolveAftercareAccessTokenForMutation).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(
@@ -536,9 +569,65 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       error: 'Pick a future time.',
     })
 
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.resolveAftercareAccessTokenForMutation).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+  })
+
+  it('POST returns rate-limit response before token mutation lookup or idempotency', async () => {
+    const blockedDecision = {
+      allowed: false,
+      bucket: 'client:rebook:token',
+      key: 'token:hashed_token_1|ip:unknown-ip',
+      limit: 10,
+      remaining: 0,
+      resetAt: new Date('2026-04-12T18:05:00.000Z'),
+      retryAfterSeconds: 300,
+      source: 'redis',
+      reason: 'rate_limited',
+    } as const
+
+    const limitedResponse = makeJsonResponse(429, {
+      ok: false,
+      error: 'Too many requests. Please try again later.',
+      code: 'RATE_LIMITED',
+    })
+
+    mocks.enforceRateLimit.mockResolvedValueOnce(blockedDecision)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
+
+    const response = await POST(
+      makeIdempotentRequest({
+        key: 'idem_rate_limited_1',
+        body: { scheduledFor: '2026-04-25T18:00:00.000Z' },
+      }),
+      makeCtx('token_1'),
+    )
+
+    expect(response).toBe(limitedResponse)
+
+    expect(mocks.tokenActorRateLimitKey).toHaveBeenCalledWith({
+      actorKey: 'token_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'client:rebook:token',
+      key: 'token:hashed_token_1|ip:unknown-ip',
+    })
+
+    expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(
+      blockedDecision,
+    )
+
+    expect(mocks.resolveAftercareAccessTokenForMutation).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(
+      mocks.createClientRebookedBookingFromAftercare,
+    ).not.toHaveBeenCalled()
+    expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('POST returns 409 when requested time is outside the recommended window before idempotency starts', async () => {
@@ -556,6 +645,11 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       }),
       makeCtx('token_1'),
     )
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'client:rebook:token',
+      key: 'token:hashed_token_1|ip:unknown-ip',
+    })
 
     expect(mocks.resolveAftercareAccessTokenForMutation).toHaveBeenCalledWith({
       rawToken: 'token_1',
@@ -719,6 +813,16 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       makeCtx('revoked_token'),
     )
 
+    expect(mocks.tokenActorRateLimitKey).toHaveBeenCalledWith({
+      actorKey: 'revoked_token',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'client:rebook:token',
+      key: 'token:hashed_token_1|ip:unknown-ip',
+    })
+
     expect(mocks.resolveAftercareAccessTokenForMutation).toHaveBeenCalledWith({
       rawToken: 'revoked_token',
     })
@@ -741,6 +845,7 @@ describe('app/api/client/rebook/[token]/route.ts', () => {
       message: 'Aftercare access token was revoked.',
     })
   })
+
   it('POST starts idempotency with token actor and normalized request body', async () => {
     await POST(
       makeIdempotentRequest({

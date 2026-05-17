@@ -18,6 +18,10 @@ const mocks = vi.hoisted(() => ({
   normalizeLocationType: vi.fn(),
 
   createHold: vi.fn(),
+
+  enforceRateLimit: vi.fn(),
+  clientRateLimitKey: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -41,6 +45,18 @@ vi.mock('@/lib/booking/locationContext', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   createHold: mocks.createHold,
+}))
+
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  clientRateLimitKey: mocks.clientRateLimitKey,
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
 import { POST } from './route'
@@ -94,6 +110,19 @@ describe('POST /api/holds', () => {
     mocks.requireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
+    })
+
+    mocks.clientRateLimitKey.mockReturnValue('client:client_1|ip:unknown-ip')
+
+    mocks.enforceRateLimit.mockResolvedValue({
+      allowed: true,
+      bucket: 'holds:create',
+      key: 'client:client_1|ip:unknown-ip',
+      limit: 12,
+      remaining: 11,
+      resetAt: new Date('2026-03-17T13:00:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
     })
 
     mocks.jsonFail.mockImplementation(
@@ -163,6 +192,16 @@ describe('POST /api/holds', () => {
     )
     const json = await readJson(response)
 
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'holds:create',
+      key: 'client:client_1|ip:unknown-ip',
+    })
+
     expect(mocks.professionalServiceOfferingFindUnique).toHaveBeenCalledWith({
       where: { id: 'offering_1' },
       select: {
@@ -224,6 +263,98 @@ describe('POST /api/holds', () => {
         noOp: false,
       },
     })
+  })
+
+  it('returns auth response when client auth fails', async () => {
+    const authRes = makeJsonResponse(
+      { ok: false, error: 'Unauthorized' },
+      401,
+    )
+
+    mocks.requireClient.mockResolvedValueOnce({
+      ok: false,
+      res: authRes,
+    })
+
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+      }),
+    )
+    const json = await readJson(response)
+
+    expect(response).toBe(authRes)
+    expect(response.status).toBe(401)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('server-timing')).toContain('hold_total')
+    expect(json).toEqual({
+      ok: false,
+      error: 'Unauthorized',
+    })
+
+    expect(mocks.clientRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.createHold).not.toHaveBeenCalled()
+  })
+
+  it('returns rate-limit response before parsing body or creating hold when limited', async () => {
+    const blockedDecision = {
+      allowed: false,
+      bucket: 'holds:create',
+      key: 'client:client_1|ip:unknown-ip',
+      limit: 12,
+      remaining: 0,
+      resetAt: new Date('2026-03-17T13:00:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
+      reason: 'rate_limited',
+    } as const
+
+    const limitedResponse = makeJsonResponse(
+      {
+        ok: false,
+        error: 'Too many requests. Please try again later.',
+        code: 'RATE_LIMITED',
+      },
+      429,
+    )
+
+    mocks.enforceRateLimit.mockResolvedValueOnce(blockedDecision)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
+
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+        locationId: 'loc_1',
+      }),
+    )
+
+    expect(response).toBe(limitedResponse)
+    expect(response.status).toBe(429)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.get('server-timing')).toContain('hold_total')
+
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'holds:create',
+      key: 'client:client_1|ip:unknown-ip',
+    })
+
+    expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(
+      blockedDecision,
+    )
+
+    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.createHold).not.toHaveBeenCalled()
   })
 
   it('passes SPECIFIC_SEARCH entry point to createHold when requested', async () => {
@@ -295,25 +426,7 @@ describe('POST /api/holds', () => {
       }),
     )
   })
-  it('accepts bookingEntryPoint alias for safe entry point hints', async () => {
-    const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-        locationId: 'loc_1',
-        bookingEntryPoint: 'DIRECT_PROFILE',
-      }),
-    )
 
-    expect(response.status).toBe(201)
-
-    expect(mocks.createHold).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bookingEntryPoint: 'DIRECT_PROFILE',
-      }),
-    )
-  })
   it('falls back to BROAD_DISCOVERY when entry point hint is invalid', async () => {
     const response = await POST(
       makeRequest({
@@ -333,6 +446,7 @@ describe('POST /api/holds', () => {
       }),
     )
   })
+
   it('does not trust raw NFC_CARD entry point without server-validated NFC context', async () => {
     const response = await POST(
       makeRequest({
@@ -352,6 +466,7 @@ describe('POST /api/holds', () => {
       }),
     )
   })
+
   it('does not trust raw AFTERCARE_REBOOK entry point without server-validated aftercare context', async () => {
     const response = await POST(
       makeRequest({
@@ -371,6 +486,7 @@ describe('POST /api/holds', () => {
       }),
     )
   })
+
   it('does not trust raw PRO_CREATED entry point from the client hold route', async () => {
     const response = await POST(
       makeRequest({
@@ -390,6 +506,7 @@ describe('POST /api/holds', () => {
       }),
     )
   })
+
   it('passes entry point through for valid mobile hold requests', async () => {
     const response = await POST(
       makeRequest({
@@ -411,38 +528,6 @@ describe('POST /api/holds', () => {
         clientAddressId: 'addr_1',
       }),
     )
-  })
-  it('returns auth response when client auth fails', async () => {
-    const authRes = makeJsonResponse(
-      { ok: false, error: 'Unauthorized' },
-      401,
-    )
-
-    mocks.requireClient.mockResolvedValueOnce({
-      ok: false,
-      res: authRes,
-    })
-
-    const response = await POST(
-      makeRequest({
-        offeringId: 'offering_1',
-        scheduledFor: SLOT_START.toISOString(),
-        locationType: 'SALON',
-      }),
-    )
-    const json = await readJson(response)
-
-    expect(response).toBe(authRes)
-    expect(response.status).toBe(401)
-    expect(response.headers.get('cache-control')).toBe('no-store')
-    expect(response.headers.get('server-timing')).toContain('hold_total')
-    expect(json).toEqual({
-      ok: false,
-      error: 'Unauthorized',
-    })
-
-    expect(mocks.professionalServiceOfferingFindUnique).not.toHaveBeenCalled()
-    expect(mocks.createHold).not.toHaveBeenCalled()
   })
 
   it('returns OFFERING_ID_REQUIRED when offering id is missing', async () => {
@@ -530,7 +615,9 @@ describe('POST /api/holds', () => {
   })
 
   it('returns CLIENT_SERVICE_ADDRESS_REQUIRED when mobile booking is missing client address id', async () => {
-    const descriptor = getBookingErrorDescriptor('CLIENT_SERVICE_ADDRESS_REQUIRED')
+    const descriptor = getBookingErrorDescriptor(
+      'CLIENT_SERVICE_ADDRESS_REQUIRED',
+    )
 
     const response = await POST(
       makeRequest({

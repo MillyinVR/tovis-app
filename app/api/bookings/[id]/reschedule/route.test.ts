@@ -1,9 +1,5 @@
 // app/api/bookings/[id]/reschedule/route.test.ts
-import {
-  BookingStatus,
-  Role,
-  ServiceLocationType,
-} from '@prisma/client'
+import { BookingStatus, Role, ServiceLocationType } from '@prisma/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { BookingError, getBookingErrorDescriptor } from '@/lib/booking/errors'
@@ -23,6 +19,10 @@ const mocks = vi.hoisted(() => ({
   completeRouteIdempotency: vi.fn(),
   failStartedRouteIdempotency: vi.fn(),
   isRouteIdempotencyHandled: vi.fn(),
+
+  enforceRateLimit: vi.fn(),
+  clientRateLimitKey: vi.fn(),
+  rateLimitExceededResponse: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -55,6 +55,18 @@ vi.mock('@/lib/booking/locationContext', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   rescheduleBookingFromHold: mocks.rescheduleBookingFromHold,
+}))
+
+vi.mock('@/lib/rateLimit/enforce', () => ({
+  enforceRateLimit: mocks.enforceRateLimit,
+}))
+
+vi.mock('@/lib/rateLimit/identity', () => ({
+  clientRateLimitKey: mocks.clientRateLimitKey,
+}))
+
+vi.mock('@/lib/rateLimit/response', () => ({
+  rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -97,6 +109,9 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     mocks.requireClient.mockResolvedValue({
       ok: true,
       clientId: 'client_1',
+      user: {
+        id: 'user_1',
+      },
     })
 
     mocks.jsonFail.mockImplementation(
@@ -114,9 +129,30 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       data,
     }))
 
+    mocks.clientRateLimitKey.mockImplementation(
+      (args: { clientId?: string | null; userId?: string | null }) =>
+        args.userId
+          ? `user:${args.userId}|client:${args.clientId}|ip:unknown-ip`
+          : `client:${args.clientId}|ip:unknown-ip`,
+    )
+
+    mocks.enforceRateLimit.mockResolvedValue({
+      allowed: true,
+      bucket: 'bookings:reschedule',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+      limit: 8,
+      remaining: 7,
+      resetAt: new Date('2026-03-11T19:05:00.000Z'),
+      retryAfterSeconds: 300,
+      source: 'redis',
+    })
+
     mocks.normalizeLocationType.mockImplementation((value: unknown) => {
       if (value === ServiceLocationType.SALON) return ServiceLocationType.SALON
-      if (value === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
+      if (value === ServiceLocationType.MOBILE) {
+        return ServiceLocationType.MOBILE
+      }
+
       return null
     })
 
@@ -159,6 +195,9 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     )
 
     expect(result).toBe(authRes)
+
+    expect(mocks.clientRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.rescheduleBookingFromHold).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
@@ -196,6 +235,8 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       message: descriptor.message,
     })
 
+    expect(mocks.clientRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.rescheduleBookingFromHold).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
@@ -233,6 +274,8 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       message: descriptor.message,
     })
 
+    expect(mocks.clientRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.rescheduleBookingFromHold).not.toHaveBeenCalled()
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
@@ -272,6 +315,67 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       uiAction: descriptor.uiAction,
       message: descriptor.message,
     })
+
+    expect(mocks.clientRateLimitKey).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.rescheduleBookingFromHold).not.toHaveBeenCalled()
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+  })
+
+  it('returns rate-limit response before idempotency or reschedule mutation', async () => {
+    const blockedDecision = {
+      allowed: false,
+      bucket: 'bookings:reschedule',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+      limit: 8,
+      remaining: 0,
+      resetAt: new Date('2026-03-11T19:05:00.000Z'),
+      retryAfterSeconds: 300,
+      source: 'redis',
+      reason: 'rate_limited',
+    } as const
+
+    const limitedResponse = {
+      ok: false,
+      status: 429,
+      error: 'Too many requests. Please try again later.',
+      code: 'RATE_LIMITED',
+    }
+
+    mocks.enforceRateLimit.mockResolvedValueOnce(blockedDecision)
+    mocks.rateLimitExceededResponse.mockReturnValueOnce(limitedResponse)
+
+    const result = await POST(
+      makeRequest(
+        {
+          holdId: 'hold_1',
+          locationType: ServiceLocationType.SALON,
+        },
+        {
+          'idempotency-key': 'idem_reschedule_1',
+        },
+      ),
+      makeCtx(),
+    )
+
+    expect(result).toBe(limitedResponse)
+
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:reschedule',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+    })
+
+    expect(mocks.rateLimitExceededResponse).toHaveBeenCalledWith(
+      blockedDecision,
+    )
 
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.rescheduleBookingFromHold).not.toHaveBeenCalled()
@@ -322,6 +426,17 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       makeCtx(),
     )
 
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:reschedule',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+    })
+
     expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith({
       request: expect.any(Request),
       actor: {
@@ -356,6 +471,17 @@ describe('POST /api/bookings/[id]/reschedule', () => {
 
     expect(mocks.normalizeLocationType).not.toHaveBeenCalled()
 
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:reschedule',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+    })
+
     expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
       expect.objectContaining({
         requestBody: {
@@ -376,6 +502,17 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       }),
       makeCtx(),
     )
+
+    expect(mocks.clientRateLimitKey).toHaveBeenCalledWith({
+      clientId: 'client_1',
+      userId: 'user_1',
+      request: expect.any(Request),
+    })
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
+      bucket: 'bookings:reschedule',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+    })
 
     expect(mocks.rescheduleBookingFromHold).toHaveBeenCalledWith({
       bookingId: 'booking_1',

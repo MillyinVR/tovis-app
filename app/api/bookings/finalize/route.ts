@@ -31,6 +31,12 @@ import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
 import { isRecord } from '@/lib/guards'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import {
+  clientRateLimitKey,
+  tokenActorRateLimitKey,
+} from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
@@ -502,6 +508,24 @@ function buildIdempotencyActor(
   }
 }
 
+function buildFinalizeRateLimitKey(args: {
+  context: FinalizeOwnershipContext
+  request: Request
+}): string {
+  if (args.context.idempotencyActor.kind === 'aftercare-token') {
+    return tokenActorRateLimitKey({
+      actorKey: args.context.idempotencyActor.actorKey,
+      request: args.request,
+    })
+  }
+
+  return clientRateLimitKey({
+    clientId: args.context.clientId,
+    userId: args.context.idempotencyActor.actorUserId,
+    request: args.request,
+  })
+}
+
 function getAftercareTokenId(
   context: FinalizeOwnershipContext,
 ): string | null {
@@ -554,6 +578,18 @@ export async function POST(request: Request) {
     const ownership = ownershipOrFail
 
     const bookingEntryPoint = bookingEntryPointFromBookingSource(body.source)
+
+    const rateLimit = await enforceRateLimit({
+      bucket: 'bookings:finalize',
+      key: buildFinalizeRateLimitKey({
+        context: ownership,
+        request,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      return rateLimitExceededResponse(rateLimit)
+    }
 
     const idempotency = await beginRouteIdempotency<FinalizeSuccessBody>({
       request,

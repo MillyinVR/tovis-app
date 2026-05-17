@@ -29,6 +29,9 @@ import { createClientRebookedBookingFromAftercare } from '@/lib/booking/writeBou
 import { isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { tokenActorRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -319,6 +322,18 @@ export async function POST(req: Request, ctx: Ctx) {
 
     if (invalidFutureTime) {
       return invalidFutureTime
+    }
+
+    const rateLimit = await enforceRateLimit({
+      bucket: 'client:rebook:token',
+      key: tokenActorRateLimitKey({
+        actorKey: rawToken,
+        request: req,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      return rateLimitExceededResponse(rateLimit)
     }
 
     const resolved = await resolveAftercareAccessTokenForMutation({

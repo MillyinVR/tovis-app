@@ -17,6 +17,9 @@ import {
 } from '@/lib/booking/errors'
 import { cancelBooking } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { clientRateLimitKey, proRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,6 +88,34 @@ function toCancelActor(args: {
   return null
 }
 
+function buildCancelRateLimitKey(args: {
+  actor: CancelActor
+  userId: string
+  request: Request
+}): string {
+  if (args.actor.kind === 'client') {
+    return clientRateLimitKey({
+      clientId: args.actor.clientId,
+      userId: args.userId,
+      request: args.request,
+    })
+  }
+
+  if (args.actor.kind === 'pro') {
+    return proRateLimitKey({
+      professionalId: args.actor.professionalId,
+      userId: args.userId,
+      request: args.request,
+    })
+  }
+
+  return proRateLimitKey({
+    professionalId: args.actor.professionalId,
+    userId: args.userId,
+    request: args.request,
+  })
+}
+
 function buildCancelIdempotencyBody(args: {
   bookingId: string
   actorUserId: string
@@ -149,6 +180,19 @@ export async function POST(req: Request, ctx: Ctx) {
         message: 'Authenticated user is missing the required booking profile.',
         userMessage: 'You are not allowed to cancel this booking.',
       })
+    }
+
+    const rateLimit = await enforceRateLimit({
+      bucket: 'bookings:cancel',
+      key: buildCancelRateLimitKey({
+        actor,
+        userId: user.id,
+        request: req,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      return rateLimitExceededResponse(rateLimit)
     }
 
     const idempotency = await beginRouteIdempotency<CancelResponseBody>({

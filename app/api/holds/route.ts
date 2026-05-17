@@ -6,6 +6,9 @@ import { Prisma, ServiceLocationType } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
+import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { clientRateLimitKey } from '@/lib/rateLimit/identity'
+import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 import { normalizeToMinute } from '@/lib/booking/conflicts'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import {
@@ -241,6 +244,25 @@ export async function POST(req: NextRequest) {
       afterCreateHoldMs = afterAuthAndBodyMs
 
       return withServerTiming(auth.res, buildServerTimingMetrics())
+    }
+
+    const rateLimit = await enforceRateLimit({
+      bucket: 'holds:create',
+      key: clientRateLimitKey({
+        clientId: auth.clientId,
+        request: req,
+      }),
+    })
+
+    if (!rateLimit.allowed) {
+      afterAuthAndBodyMs = nowMs()
+      afterOfferingLookupMs = afterAuthAndBodyMs
+      afterCreateHoldMs = afterAuthAndBodyMs
+
+      return withServerTiming(
+        rateLimitExceededResponse(rateLimit),
+        buildServerTimingMetrics(),
+      )
     }
 
     let rawBody: unknown

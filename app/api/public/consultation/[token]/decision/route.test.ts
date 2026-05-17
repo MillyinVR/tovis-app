@@ -1,8 +1,9 @@
+// app/api/public/consultation/[token]/decision/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ClientActionTokenKind, Role } from '@prisma/client'
 
-const IDEMPOTENCY_ROUTE =
-  'POST /api/public/consultation/[token]/decision'
+const IDEMPOTENCY_ROUTE = 'POST /api/public/consultation/[token]/decision'
 const OPERATION = 'POST /api/public/consultation/[token]/decision'
 
 const approvedResponseBody = {
@@ -255,11 +256,11 @@ function mockRejectResult() {
   }
 }
 
-function expectIdempotencyStarted(): void {
+function expectIdempotencyStarted(key = 'idem_public_consultation_1'): void {
   mocks.beginRouteIdempotency.mockResolvedValueOnce({
     kind: 'started',
     idempotencyRecordId: 'idem_record_1',
-    idempotencyKey: 'idem_public_consultation_1',
+    idempotencyKey: key,
     requestHash: 'hash_1',
   })
 
@@ -408,7 +409,10 @@ describe('POST /api/public/consultation/[token]/decision', () => {
       error: 'Missing token.',
     })
 
+    expect(mocks.rateLimitIdentity).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.hashClientActionToken).not.toHaveBeenCalled()
+    expect(mocks.clientActionTokenFindUnique).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.approveConsultationByClientActionToken).not.toHaveBeenCalled()
     expect(mocks.rejectConsultationByClientActionToken).not.toHaveBeenCalled()
@@ -428,13 +432,16 @@ describe('POST /api/public/consultation/[token]/decision', () => {
       error: 'Invalid action.',
     })
 
+    expect(mocks.rateLimitIdentity).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
     expect(mocks.hashClientActionToken).not.toHaveBeenCalled()
+    expect(mocks.clientActionTokenFindUnique).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.approveConsultationByClientActionToken).not.toHaveBeenCalled()
     expect(mocks.rejectConsultationByClientActionToken).not.toHaveBeenCalled()
   })
 
-  it('returns 429 from the IP rate-limit guard before any DB lookup', async () => {
+  it('returns 429 from the IP rate-limit guard before token-prefix guard, DB lookup, idempotency, or mutation', async () => {
     const limitResponse = makeJsonResponse(429, {
       ok: false,
       error: 'Too many requests.',
@@ -450,17 +457,23 @@ describe('POST /api/public/consultation/[token]/decision', () => {
     )
 
     expect(response).toBe(limitResponse)
-    expect(mocks.enforceRateLimit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bucket: 'consultation:decision',
-      }),
-    )
+
+    expect(mocks.rateLimitIdentity).toHaveBeenCalledTimes(1)
+    expect(mocks.enforceRateLimit).toHaveBeenCalledTimes(1)
+    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'consultation:decision',
+      identity: { kind: 'ip', id: '1.2.3.4' },
+    })
+
+    expect(mocks.clientActionTokenRateLimitPrefix).not.toHaveBeenCalled()
+    expect(mocks.tokenRateLimitIdentity).not.toHaveBeenCalled()
     expect(mocks.clientActionTokenFindUnique).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.approveConsultationByClientActionToken).not.toHaveBeenCalled()
+    expect(mocks.rejectConsultationByClientActionToken).not.toHaveBeenCalled()
   })
 
-  it('returns 429 from the token-prefix rate-limit guard before any DB lookup', async () => {
+  it('returns 429 from the token-prefix rate-limit guard before DB lookup, idempotency, or mutation', async () => {
     const limitResponse = makeJsonResponse(429, {
       ok: false,
       error: 'Too many requests.',
@@ -478,15 +491,30 @@ describe('POST /api/public/consultation/[token]/decision', () => {
     )
 
     expect(response).toBe(limitResponse)
-    expect(mocks.tokenRateLimitIdentity).toHaveBeenCalledWith('hash_prefix_1')
-    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        bucket: 'consultation:decision:token',
-      }),
+
+    expect(mocks.rateLimitIdentity).toHaveBeenCalledTimes(1)
+    expect(mocks.clientActionTokenRateLimitPrefix).toHaveBeenCalledWith(
+      'token_1',
     )
+    expect(mocks.tokenRateLimitIdentity).toHaveBeenCalledWith('hash_prefix_1')
+
+    expect(mocks.enforceRateLimit).toHaveBeenCalledTimes(2)
+    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(1, {
+      bucket: 'consultation:decision',
+      identity: { kind: 'ip', id: '1.2.3.4' },
+    })
+    expect(mocks.enforceRateLimit).toHaveBeenNthCalledWith(2, {
+      bucket: 'consultation:decision:token',
+      identity: {
+        kind: 'token',
+        id: 'hash_prefix_1',
+      },
+    })
+
     expect(mocks.clientActionTokenFindUnique).not.toHaveBeenCalled()
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.approveConsultationByClientActionToken).not.toHaveBeenCalled()
+    expect(mocks.rejectConsultationByClientActionToken).not.toHaveBeenCalled()
   })
 
   it('returns invalid token when token hash lookup misses', async () => {
@@ -499,6 +527,9 @@ describe('POST /api/public/consultation/[token]/decision', () => {
       makeCtx('token_missing'),
     )
 
+    expect(mocks.clientActionTokenRateLimitPrefix).toHaveBeenCalledWith(
+      'token_missing',
+    )
     expect(mocks.hashClientActionToken).toHaveBeenCalledWith('token_missing')
     expect(mocks.clientActionTokenFindUnique).toHaveBeenCalledWith({
       where: { tokenHash: 'hashed_token_1' },
@@ -554,7 +585,7 @@ describe('POST /api/public/consultation/[token]/decision', () => {
       code: 'IDEMPOTENCY_KEY_REQUIRED',
     })
 
-  expectIdempotencyHandled(handledResponse)
+    expectIdempotencyHandled(handledResponse)
 
     const response = await POST(
       makeRequest({
@@ -582,7 +613,7 @@ describe('POST /api/public/consultation/[token]/decision', () => {
       code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS',
     })
 
-  expectIdempotencyHandled(handledResponse)
+    expectIdempotencyHandled(handledResponse)
 
     const response = await POST(
       makeIdempotentRequest({
@@ -605,7 +636,7 @@ describe('POST /api/public/consultation/[token]/decision', () => {
       code: 'IDEMPOTENCY_KEY_CONFLICT',
     })
 
-  expectIdempotencyHandled(handledResponse)
+    expectIdempotencyHandled(handledResponse)
 
     const response = await POST(
       makeIdempotentRequest({
@@ -626,7 +657,7 @@ describe('POST /api/public/consultation/[token]/decision', () => {
       ...approvedResponseBody,
     })
 
-  expectIdempotencyHandled(handledResponse)
+    expectIdempotencyHandled(handledResponse)
 
     const response = await POST(
       makeIdempotentRequest({
@@ -642,6 +673,8 @@ describe('POST /api/public/consultation/[token]/decision', () => {
   })
 
   it('forwards APPROVE requests, completes idempotency, and returns the result payload', async () => {
+    expectIdempotencyStarted('idem_approve_1')
+
     const response = await POST(
       makeIdempotentRequest({
         key: 'idem_approve_1',
@@ -698,6 +731,8 @@ describe('POST /api/public/consultation/[token]/decision', () => {
       kind: ClientActionTokenKind.CONSULTATION_ACTION,
     })
 
+    expectIdempotencyStarted('idem_reject_1')
+
     const response = await POST(
       makeIdempotentRequest({
         key: 'idem_reject_1',
@@ -740,6 +775,8 @@ describe('POST /api/public/consultation/[token]/decision', () => {
   })
 
   it('maps booking errors through bookingJsonFail and marks idempotency failed', async () => {
+    expectIdempotencyStarted('idem_booking_error_1')
+
     mocks.approveConsultationByClientActionToken.mockRejectedValueOnce({
       code: 'FORBIDDEN',
       message: 'Nope',
@@ -774,6 +811,8 @@ describe('POST /api/public/consultation/[token]/decision', () => {
   })
 
   it('returns 500 for unexpected errors, captures exception, and marks idempotency failed', async () => {
+    expectIdempotencyStarted('idem_boom_1')
+
     mocks.rejectConsultationByClientActionToken.mockRejectedValueOnce(
       new Error('boom'),
     )
