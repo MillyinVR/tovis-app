@@ -1204,6 +1204,7 @@ model ProfessionalProfile {
 
   searchIndexEntries ProfessionalSearchIndex[]
 
+  aftercareRebookSlots AftercareRebookSlot[]
   @@index([handleNormalized])
   @@index([verificationStatus])
 }
@@ -1402,6 +1403,8 @@ model ProfessionalLocation {
   lastMinuteOpenings LastMinuteOpening[]
 
   searchIndexEntry ProfessionalSearchIndex?
+
+  aftercareRebookSlots AftercareRebookSlot[]
 
   @@index([placeId])
   @@index([professionalId])
@@ -1651,6 +1654,8 @@ model ProfessionalServiceOffering {
   holds               BookingHold[]
 
   addOns OfferingAddOn[]
+
+  aftercareRebookSlots AftercareRebookSlot[]
 
   lastMinuteOpeningServices LastMinuteOpeningService[]
 
@@ -2252,6 +2257,7 @@ model AftercareSummary {
   rebookedFor       DateTime?
   rebookWindowStart DateTime?
   rebookWindowEnd   DateTime?
+  rebookSlot        AftercareRebookSlot?
 
   draftSavedAt   DateTime?
   sentToClientAt DateTime?
@@ -2265,7 +2271,33 @@ model AftercareSummary {
   @@index([sentToClientAt, createdAt])
   @@index([bookingId, sentToClientAt])
 }
+model AftercareRebookSlot {
+  id String @id @default(cuid())
 
+  aftercareSummaryId String @unique
+  aftercareSummary   AftercareSummary @relation(fields: [aftercareSummaryId], references: [id], onDelete: Cascade)
+
+  professionalId String
+  professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  offeringId String?
+  offering   ProfessionalServiceOffering? @relation(fields: [offeringId], references: [id], onDelete: SetNull)
+
+  locationId String
+  location   ProfessionalLocation @relation(fields: [locationId], references: [id], onDelete: Restrict)
+
+  locationType ServiceLocationType
+
+  startsAt DateTime
+  endsAt   DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([professionalId, startsAt])
+  @@index([locationId, startsAt])
+  @@index([offeringId])
+}
 model Product {
   id             String   @id @default(cuid())
   name           String
