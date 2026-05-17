@@ -505,6 +505,42 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
   })
 
+  it('allows discovery finalize when mediaId is provided without lookPostId', async () => {
+    expectIdempotencyStarted('idem_discovery_media_1')
+
+    await POST(
+      makeIdempotentRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+          source: 'DISCOVERY',
+          mediaId: 'media_123',
+        },
+        'idem_discovery_media_1',
+      ),
+    )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expect.objectContaining({
+          source: BookingSource.DISCOVERY,
+          bookingEntryPoint: 'BROAD_DISCOVERY',
+          mediaId: 'media_123',
+          lookPostId: null,
+        }),
+      }),
+    )
+
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      makeExpectedFinalizeArgs({
+        source: BookingSource.DISCOVERY,
+        bookingEntryPoint: 'BROAD_DISCOVERY',
+        idempotencyKey: 'idem_discovery_media_1',
+      }),
+    )
+  })
+
   it('returns OFFERING_NOT_FOUND when offering is missing before idempotency starts', async () => {
     const descriptor = getBookingErrorDescriptor('OFFERING_NOT_FOUND')
     mocks.professionalServiceOfferingFindUnique.mockResolvedValueOnce(null)
@@ -637,6 +673,7 @@ describe('POST /api/bookings/finalize', () => {
         addOnIds: [],
         locationType: ServiceLocationType.SALON,
         source: BookingSource.REQUESTED,
+        bookingEntryPoint: 'DIRECT_PROFILE',
         mediaId: null,
         lookPostId: null,
         aftercareToken: null,
@@ -653,6 +690,71 @@ describe('POST /api/bookings/finalize', () => {
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
   })
 
+  it('normalizes PROFILE source to requested direct-profile readiness', async () => {
+    expectIdempotencyStarted('idem_profile_1')
+
+    await POST(
+      makeIdempotentRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+          source: 'PROFILE',
+        },
+        'idem_profile_1',
+      ),
+    )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expect.objectContaining({
+          source: BookingSource.REQUESTED,
+          bookingEntryPoint: 'DIRECT_PROFILE',
+        }),
+      }),
+    )
+
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      makeExpectedFinalizeArgs({
+        source: BookingSource.REQUESTED,
+        bookingEntryPoint: 'DIRECT_PROFILE',
+        idempotencyKey: 'idem_profile_1',
+      }),
+    )
+  })
+
+  it('defaults unknown source without discovery reference to requested direct-profile readiness', async () => {
+    expectIdempotencyStarted('idem_unknown_1')
+
+    await POST(
+      makeIdempotentRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+          source: 'banana',
+        },
+        'idem_unknown_1',
+      ),
+    )
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: expect.objectContaining({
+          source: BookingSource.REQUESTED,
+          bookingEntryPoint: 'DIRECT_PROFILE',
+        }),
+      }),
+    )
+
+    expect(mocks.finalizeBookingFromHold).toHaveBeenCalledWith(
+      makeExpectedFinalizeArgs({
+        source: BookingSource.REQUESTED,
+        bookingEntryPoint: 'DIRECT_PROFILE',
+        idempotencyKey: 'idem_unknown_1',
+      }),
+    )
+  })
   it('returns handled replay response without finalizing, notifying, or marking token used', async () => {
     const replayBody = makeSuccessResponseBody({
       id: 'booking_replayed',
@@ -716,6 +818,7 @@ describe('POST /api/bookings/finalize', () => {
           addOnIds: [],
           locationType: ServiceLocationType.SALON,
           source: BookingSource.DISCOVERY,
+          bookingEntryPoint: 'BROAD_DISCOVERY',
           mediaId: null,
           lookPostId: 'look_123',
           aftercareToken: null,
@@ -805,6 +908,7 @@ describe('POST /api/bookings/finalize', () => {
         requestBody: expect.objectContaining({
           clientId: 'client_1',
           source: BookingSource.AFTERCARE,
+          bookingEntryPoint: 'DIRECT_PROFILE',
           aftercareToken: 'token_1',
           rebookOfBookingId: 'booking_old',
         }),
@@ -913,11 +1017,12 @@ describe('POST /api/bookings/finalize', () => {
           actorKey: 'aftercare-token:token_row_1',
           actorRole: Role.CLIENT,
         },
-        requestBody: expect.objectContaining({
-          clientId: 'client_from_token',
-          source: BookingSource.AFTERCARE,
-          rebookOfBookingId: 'booking_old',
-        }),
+      requestBody: expect.objectContaining({
+        clientId: 'client_from_token',
+        source: BookingSource.AFTERCARE,
+        bookingEntryPoint: 'DIRECT_PROFILE',
+        rebookOfBookingId: 'booking_old',
+      }),
       }),
     )
 

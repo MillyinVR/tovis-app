@@ -435,6 +435,7 @@ function readRequestId(request: Request): string | null {
 function buildFinalizeIdempotencyRequestBody(args: {
   clientId: string
   body: ValidatedFinalizeBody
+  bookingEntryPoint: ReturnType<typeof bookingEntryPointFromBookingSource>
   rebookOfBookingId: string | null
 }): Prisma.InputJsonObject {
   return {
@@ -445,6 +446,7 @@ function buildFinalizeIdempotencyRequestBody(args: {
     addOnIds: args.body.addOnIds,
     locationType: args.body.locationType,
     source: args.body.source,
+    bookingEntryPoint: args.bookingEntryPoint,
     mediaId: args.body.mediaId,
     lookPostId: args.body.lookPostId,
     aftercareToken: args.body.aftercareToken,
@@ -551,6 +553,8 @@ export async function POST(request: Request) {
 
     const ownership = ownershipOrFail
 
+    const bookingEntryPoint = bookingEntryPointFromBookingSource(body.source)
+
     const idempotency = await beginRouteIdempotency<FinalizeSuccessBody>({
       request,
       actor: buildIdempotencyActor(ownership),
@@ -559,6 +563,7 @@ export async function POST(request: Request) {
       requestBody: buildFinalizeIdempotencyRequestBody({
         clientId: ownership.clientId,
         body,
+        bookingEntryPoint,
         rebookOfBookingId: ownership.rebookOfBookingId,
       }),
       messages: {
@@ -577,7 +582,7 @@ export async function POST(request: Request) {
 
     const result = await finalizeBookingFromHold({
       clientId: ownership.clientId,
-      bookingEntryPoint: bookingEntryPointFromBookingSource(body.source),
+      bookingEntryPoint,
       holdId: body.holdId,
       openingId: body.openingId,
       addOnIds: body.addOnIds,

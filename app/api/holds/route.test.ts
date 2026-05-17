@@ -226,6 +226,192 @@ describe('POST /api/holds', () => {
     })
   })
 
+  it('passes SPECIFIC_SEARCH entry point to createHold when requested', async () => {
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+        locationId: 'loc_1',
+        entryPoint: 'SPECIFIC_SEARCH',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: 'client_1',
+        bookingEntryPoint: 'SPECIFIC_SEARCH',
+        requestedStart: SLOT_START,
+        requestedLocationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
+      }),
+    )
+  })
+
+  it('passes DIRECT_PROFILE entry point to createHold when requested', async () => {
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+        locationId: 'loc_1',
+        entryPoint: 'DIRECT_PROFILE',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: 'client_1',
+        bookingEntryPoint: 'DIRECT_PROFILE',
+        requestedStart: SLOT_START,
+        requestedLocationId: 'loc_1',
+        locationType: ServiceLocationType.SALON,
+        clientAddressId: null,
+      }),
+    )
+  })
+
+  it('accepts bookingEntryPoint alias for safe entry point hints', async () => {
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+        locationId: 'loc_1',
+        bookingEntryPoint: 'DIRECT_PROFILE',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingEntryPoint: 'DIRECT_PROFILE',
+      }),
+    )
+  })
+  it('accepts bookingEntryPoint alias for safe entry point hints', async () => {
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+        locationId: 'loc_1',
+        bookingEntryPoint: 'DIRECT_PROFILE',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingEntryPoint: 'DIRECT_PROFILE',
+      }),
+    )
+  })
+  it('falls back to BROAD_DISCOVERY when entry point hint is invalid', async () => {
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+        locationId: 'loc_1',
+        entryPoint: 'TOTALLY_FAKE_SOURCE',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingEntryPoint: 'BROAD_DISCOVERY',
+      }),
+    )
+  })
+  it('does not trust raw NFC_CARD entry point without server-validated NFC context', async () => {
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+        locationId: 'loc_1',
+        entryPoint: 'NFC_CARD',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingEntryPoint: 'BROAD_DISCOVERY',
+      }),
+    )
+  })
+  it('does not trust raw AFTERCARE_REBOOK entry point without server-validated aftercare context', async () => {
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+        locationId: 'loc_1',
+        entryPoint: 'AFTERCARE_REBOOK',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingEntryPoint: 'BROAD_DISCOVERY',
+      }),
+    )
+  })
+  it('does not trust raw PRO_CREATED entry point from the client hold route', async () => {
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'SALON',
+        locationId: 'loc_1',
+        entryPoint: 'PRO_CREATED',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingEntryPoint: 'BROAD_DISCOVERY',
+      }),
+    )
+  })
+  it('passes entry point through for valid mobile hold requests', async () => {
+    const response = await POST(
+      makeRequest({
+        offeringId: 'offering_1',
+        scheduledFor: SLOT_START.toISOString(),
+        locationType: 'MOBILE',
+        locationId: 'loc_1',
+        clientAddressId: 'addr_1',
+        entryPoint: 'DIRECT_PROFILE',
+      }),
+    )
+
+    expect(response.status).toBe(201)
+
+    expect(mocks.createHold).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingEntryPoint: 'DIRECT_PROFILE',
+        locationType: ServiceLocationType.MOBILE,
+        clientAddressId: 'addr_1',
+      }),
+    )
+  })
   it('returns auth response when client auth fails', async () => {
     const authRes = makeJsonResponse(
       { ok: false, error: 'Unauthorized' },

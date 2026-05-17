@@ -3,6 +3,7 @@ import { BookingSource } from '@prisma/client'
 
 import {
   bookingEntryPointFromBookingSource,
+  bookingEntryPointFromHoldContext,
   bookingEntryPointFromSource,
   parseBookingEntryPointSource,
 } from './bookingEntryPoint'
@@ -74,6 +75,160 @@ describe('bookingEntryPoint', () => {
     it('defaults missing source to broad discovery', () => {
       expect(bookingEntryPointFromSource(null)).toBe('BROAD_DISCOVERY')
       expect(bookingEntryPointFromSource(undefined)).toBe('BROAD_DISCOVERY')
+    })
+  })
+
+  describe('bookingEntryPointFromHoldContext', () => {
+    it('defaults to broad discovery when no context exists', () => {
+      expect(bookingEntryPointFromHoldContext({})).toBe('BROAD_DISCOVERY')
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: null,
+        }),
+      ).toBe('BROAD_DISCOVERY')
+    })
+
+    it('honors safe request-level entry point hints', () => {
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'BROAD_DISCOVERY',
+        }),
+      ).toBe('BROAD_DISCOVERY')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'SPECIFIC_SEARCH',
+        }),
+      ).toBe('SPECIFIC_SEARCH')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'DIRECT_PROFILE',
+        }),
+      ).toBe('DIRECT_PROFILE')
+    })
+
+    it('does not honor privileged request-level hints without validated context', () => {
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'NFC_CARD',
+        }),
+      ).toBe('BROAD_DISCOVERY')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'SHORT_CODE',
+        }),
+      ).toBe('BROAD_DISCOVERY')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'QR_CODE',
+        }),
+      ).toBe('BROAD_DISCOVERY')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'AFTERCARE_REBOOK',
+        }),
+      ).toBe('BROAD_DISCOVERY')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'SALON_WHITE_LABEL',
+        }),
+      ).toBe('BROAD_DISCOVERY')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'PRO_CREATED',
+        }),
+      ).toBe('BROAD_DISCOVERY')
+    })
+
+    it('uses server-validated context for privileged entry points', () => {
+      expect(
+        bookingEntryPointFromHoldContext({
+          hasNfcCard: true,
+        }),
+      ).toBe('NFC_CARD')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          hasShortCode: true,
+        }),
+      ).toBe('SHORT_CODE')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          hasQrCode: true,
+        }),
+      ).toBe('QR_CODE')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          hasAftercareToken: true,
+        }),
+      ).toBe('DIRECT_PROFILE')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          hasSalonWhiteLabelContext: true,
+        }),
+      ).toBe('DIRECT_PROFILE')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          hasProCreatedContext: true,
+        }),
+      ).toBe('PRO_CREATED')
+    })
+
+    it('uses direct profile context when the server has validated it', () => {
+      expect(
+        bookingEntryPointFromHoldContext({
+          hasDirectProfileContext: true,
+        }),
+      ).toBe('DIRECT_PROFILE')
+    })
+
+    it('prioritizes validated context over request-level hints', () => {
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'BROAD_DISCOVERY',
+          hasNfcCard: true,
+        }),
+      ).toBe('NFC_CARD')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'SPECIFIC_SEARCH',
+          hasAftercareToken: true,
+        }),
+      ).toBe('DIRECT_PROFILE')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'BROAD_DISCOVERY',
+          hasProCreatedContext: true,
+        }),
+      ).toBe('PRO_CREATED')
+    })
+
+    it('does not allow request hints to downgrade validated context', () => {
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'BROAD_DISCOVERY',
+          hasDirectProfileContext: true,
+        }),
+      ).toBe('DIRECT_PROFILE')
+
+      expect(
+        bookingEntryPointFromHoldContext({
+          requestedEntryPoint: 'BROAD_DISCOVERY',
+          hasSalonWhiteLabelContext: true,
+        }),
+      ).toBe('DIRECT_PROFILE')
     })
   })
 

@@ -1,3 +1,5 @@
+// app/api/holds/route.ts
+
 import { NextRequest } from 'next/server'
 import { Prisma, ServiceLocationType } from '@prisma/client'
 
@@ -12,6 +14,11 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { createHold } from '@/lib/booking/writeBoundary'
+import {
+  bookingEntryPointFromHoldContext,
+  parseBookingEntryPointSource,
+  type BookingEntryPointSource,
+} from '@/lib/pro/readiness/bookingEntryPoint'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,6 +49,7 @@ type ParsedHoldRequest = {
   clientAddressId: string | null
   locationType: ServiceLocationType
   requestedStart: Date
+  entryPointSource: BookingEntryPointSource | null
 }
 
 type HeaderCarrier = {
@@ -136,6 +144,16 @@ function withServerTiming<T extends Response | HeaderCarrier>(
   return response
 }
 
+function pickEntryPointSource(
+  rawBody: Record<string, unknown>,
+): BookingEntryPointSource | null {
+  return (
+    parseBookingEntryPointSource(rawBody.entryPoint) ??
+    parseBookingEntryPointSource(rawBody.bookingEntryPoint) ??
+    parseBookingEntryPointSource(rawBody.source)
+  )
+}
+
 function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
   if (!isRecord(rawBody)) {
     return jsonFail(400, 'Request body must be a JSON object.')
@@ -146,6 +164,7 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
   const clientAddressId = pickString(rawBody.clientAddressId)
   const locationType = normalizeLocationType(rawBody.locationType)
   const scheduledForRaw = pickString(rawBody.scheduledFor)
+  const entryPointSource = pickEntryPointSource(rawBody)
 
   if (!offeringId) {
     return bookingJsonFail('OFFERING_ID_REQUIRED')
@@ -183,6 +202,7 @@ function parseHoldCreateBody(rawBody: unknown): ParsedHoldRequest | Response {
     clientAddressId,
     locationType,
     requestedStart,
+    entryPointSource,
   }
 }
 
@@ -219,10 +239,12 @@ export async function POST(req: NextRequest) {
       afterAuthAndBodyMs = nowMs()
       afterOfferingLookupMs = afterAuthAndBodyMs
       afterCreateHoldMs = afterAuthAndBodyMs
+
       return withServerTiming(auth.res, buildServerTimingMetrics())
     }
 
     let rawBody: unknown
+
     try {
       rawBody = await req.json()
     } catch {
@@ -261,9 +283,22 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const bookingEntryPoint = bookingEntryPointFromHoldContext({
+      requestedEntryPoint: parsed.entryPointSource,
+
+      // Keep privileged sources false until this route validates the matching
+      // server-side context. This prevents clients from self-claiming NFC,
+      // short-code, QR, aftercare, or Pro-created privileges.
+      hasAftercareToken: false,
+      hasNfcCard: false,
+      hasShortCode: false,
+      hasQrCode: false,
+      hasDirectProfileContext: parsed.entryPointSource === 'DIRECT_PROFILE',
+    })
+
     const result = await createHold({
       clientId: auth.clientId,
-      bookingEntryPoint: 'BROAD_DISCOVERY',
+      bookingEntryPoint,
       offering: toCreateHoldOffering(offering),
       requestedStart: parsed.requestedStart,
       requestedLocationId: parsed.requestedLocationId,
