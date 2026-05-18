@@ -137,6 +137,7 @@ import {
 } from '@/lib/booking/overlapPolicy'
 import { findSchedulingConflicts } from '@/lib/booking/schedulingConflicts'
 import { resolveAftercarePreselectedSlot } from '@/lib/booking/aftercarePreselectedSlot'
+import { validateAftercareRebookSlotOwnership } from '@/lib/booking/aftercareRebookSlotOwnership'
 // Side-effect import: registers the Sentry sink for lifecycle drift events.
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
@@ -637,6 +638,7 @@ type PerformLockedCreateRebookedBookingArgs = {
   initialStatus: BookingStatus
   clientId?: string | null
   aftercareId?: string | null
+  aftercareClientActionTokenId?: string | null
   requestId?: string | null
   idempotencyKey?: string | null
 }
@@ -1447,7 +1449,7 @@ const AFTERCARE_UPSERT_BOOKING_SELECT = {
       sentToClientAt: true,
       lastEditedAt: true,
       version: true,
-            rebookSlot: {
+      rebookSlot: {
         select: {
           id: true,
           offeringId: true,
@@ -2408,6 +2410,88 @@ function isCloseoutPaymentAndAftercareComplete(args: {
     Boolean(args.paymentCollectedAt) &&
     isCheckoutCloseoutComplete(args.checkoutStatus)
   )
+}
+
+async function maybeCompleteBookingCloseout(args: {
+  tx: Prisma.TransactionClient
+  now: Date
+  booking: {
+    id: string
+    professionalId: string
+    status: BookingStatus
+    sessionStep: SessionStep | null
+    finishedAt: Date | null
+    aftercareSummary?: {
+      sentToClientAt: Date | null
+    } | null
+  }
+  checkoutStatus: BookingCheckoutStatus | null | undefined
+  paymentCollectedAt: Date | null | undefined
+  actor: 'PRO' | 'SYSTEM'
+  route: string
+}): Promise<boolean> {
+  const closeoutCandidate = isPaymentAndAftercareCloseoutCandidate({
+    bookingStatus: args.booking.status,
+    aftercareSentAt: args.booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: args.checkoutStatus,
+    paymentCollectedAt: args.paymentCollectedAt,
+  })
+
+  const afterMediaCount = closeoutCandidate
+    ? await countProAfterMediaForBooking({
+        tx: args.tx,
+        bookingId: args.booking.id,
+      })
+    : 0
+
+  const shouldCompleteBooking = canCompleteBookingCloseout({
+    bookingStatus: args.booking.status,
+    aftercareSentAt: args.booking.aftercareSummary?.sentToClientAt,
+    checkoutStatus: args.checkoutStatus,
+    paymentCollectedAt: args.paymentCollectedAt,
+    afterMediaCount,
+  })
+
+  if (
+    !shouldCompleteBooking ||
+    (
+      args.booking.status === BookingStatus.COMPLETED &&
+      args.booking.sessionStep === SessionStep.DONE &&
+      args.booking.finishedAt
+    )
+  ) {
+    return false
+  }
+
+  recordStepTransition({
+    from: args.booking.sessionStep ?? SessionStep.NONE,
+    to: SessionStep.DONE,
+    actor: args.actor,
+    route: `${args.route}#complete`,
+    bookingId: args.booking.id,
+    professionalId: args.booking.professionalId,
+  })
+
+  recordStatusTransition({
+    from: args.booking.status,
+    to: BookingStatus.COMPLETED,
+    actor: args.actor,
+    route: `${args.route}#complete`,
+    bookingId: args.booking.id,
+    professionalId: args.booking.professionalId,
+  })
+
+  await args.tx.booking.update({
+    where: { id: args.booking.id },
+    data: {
+      status: BookingStatus.COMPLETED,
+      sessionStep: SessionStep.DONE,
+      finishedAt: args.booking.finishedAt ?? args.now,
+    },
+    select: { id: true } satisfies Prisma.BookingSelect,
+  })
+
+  return true
 }
 
 async function countProAfterMediaForBooking(args: {
@@ -4307,6 +4391,66 @@ function logHoldCreateTiming(args: {
     ...(args.meta ?? {}),
   })
 }
+function mapAftercareRebookSlotOwnershipFailureToBookingError(
+  code:
+    | 'PROFESSIONAL_REQUIRED'
+    | 'LOCATION_REQUIRED'
+    | 'LOCATION_NOT_FOUND'
+    | 'LOCATION_NOT_BOOKABLE'
+    | 'LOCATION_TYPE_UNSUPPORTED'
+    | 'OFFERING_NOT_FOUND'
+    | 'OFFERING_INACTIVE'
+    | 'OFFERING_LOCATION_TYPE_UNSUPPORTED',
+): BookingErrorCode {
+  switch (code) {
+    case 'PROFESSIONAL_REQUIRED':
+      return 'FORBIDDEN'
+    case 'LOCATION_REQUIRED':
+      return 'LOCATION_ID_REQUIRED'
+    case 'LOCATION_NOT_FOUND':
+      return 'LOCATION_NOT_FOUND'
+    case 'LOCATION_NOT_BOOKABLE':
+      return 'BAD_LOCATION'
+    case 'LOCATION_TYPE_UNSUPPORTED':
+      return 'MODE_NOT_SUPPORTED'
+    case 'OFFERING_NOT_FOUND':
+      return 'OFFERING_NOT_FOUND'
+    case 'OFFERING_INACTIVE':
+      return 'OFFERING_NOT_FOUND'
+    case 'OFFERING_LOCATION_TYPE_UNSUPPORTED':
+      return 'MODE_NOT_SUPPORTED'
+  }
+}
+
+async function assertAftercareRebookSlotOwnership(args: {
+  tx: Prisma.TransactionClient
+  professionalId: string
+  rebookSlot: {
+    offeringId: string
+    locationId: string
+    locationType: ServiceLocationType
+  }
+}): Promise<void> {
+  const ownership = await validateAftercareRebookSlotOwnership({
+    db: args.tx,
+    slot: {
+      professionalId: args.professionalId,
+      offeringId: args.rebookSlot.offeringId,
+      locationId: args.rebookSlot.locationId,
+      locationType: args.rebookSlot.locationType,
+    },
+  })
+
+  if (ownership.ok) return
+
+  throw bookingError(
+    mapAftercareRebookSlotOwnershipFailureToBookingError(ownership.code),
+    {
+      message: ownership.code,
+      userMessage: ownership.userMessage,
+    },
+  )
+}
 
 function mapBookingOverlapBlockedCodeToBookingError(
   code:
@@ -4328,7 +4472,7 @@ function mapBookingOverlapBlockedCodeToBookingError(
 }
 
 function logOverlapDecisionBlocked(args: {
-  action: 'BOOKING_CREATE' | 'BOOKING_FINALIZE'
+  action: 'BOOKING_CREATE' | 'BOOKING_FINALIZE' | 'BOOKING_UPDATE'
   professionalId: string
   locationId: string
   locationType: ServiceLocationType
@@ -4376,7 +4520,7 @@ async function enforceBookingOverlapPolicy(args: {
   locationType: ServiceLocationType
   offeringId: string | null
   clientId: string
-  action: 'BOOKING_CREATE' | 'BOOKING_FINALIZE'
+  action: 'BOOKING_CREATE' | 'BOOKING_FINALIZE' | 'BOOKING_UPDATE'
   excludeHoldId?: string | null
   excludeBookingId?: string | null
   now: Date
@@ -6679,6 +6823,31 @@ async function performLockedRescheduleBookingFromHold(args: {
     })
   }
 
+await enforceBookingOverlapPolicy({
+  tx: args.tx,
+  actor: {
+    kind: 'CLIENT',
+    userId: args.clientId,
+    clientId: args.clientId,
+  },
+  source: {
+    kind: 'DIRECT_PROFILE',
+  },
+  requestedWindow: {
+    professionalId: booking.professionalId,
+    startsAt: newStart,
+    endsAt: decision.value.requestedEnd,
+  },
+  locationId: locationContext.locationId,
+  locationType: validatedHold.value.locationType,
+  offeringId: booking.offeringId,
+  clientId: args.clientId,
+  action: 'BOOKING_UPDATE',
+  excludeHoldId: hold.id,
+  excludeBookingId: booking.id,
+  now: args.now,
+})
+
   const salonLocationAddressSnapshotInput:
     | Prisma.InputJsonValue
     | Prisma.NullableJsonNullValueInput =
@@ -8318,6 +8487,9 @@ if (
 async function performLockedCreateRebookedBooking(
   args: PerformLockedCreateRebookedBookingArgs,
 ): Promise<CreateRebookedBookingFromCompletedBookingResult> {
+  const aftercareClientActionTokenId = normalizeReason(
+  args.aftercareClientActionTokenId,
+)
   const source: RebookSourceBookingRecord | null = await args.tx.booking.findFirst({
     where: {
       id: args.bookingId,
@@ -8538,7 +8710,7 @@ assertCanCreateRebookFromSourceBooking({
         ? {
             kind: 'AFTERCARE_REBOOK',
             aftercareSummaryId: args.aftercareId,
-            clientActionTokenId: '',
+            clientActionTokenId: aftercareClientActionTokenId ?? '',
             proPreselectedSlot:
               source.aftercareSummary?.id === args.aftercareId &&
               source.aftercareSummary.rebookSlot
@@ -9205,6 +9377,32 @@ if (args.notifyClient) {
     })
   }
 
+  if (occupancyChanged) {
+    await enforceBookingOverlapPolicy({
+      tx: args.tx,
+      actor: {
+        kind: 'PRO',
+        userId: args.actorUserId,
+        professionalId: existing.professionalId,
+      },
+      source: {
+        kind: 'PRO_CREATED',
+      },
+      requestedWindow: {
+        professionalId: existing.professionalId,
+        startsAt: finalStart,
+        endsAt: schedulingDecision.requestedEnd,
+      },
+      locationId: location.id,
+      locationType: existing.locationType,
+      offeringId: primaryOfferingId,
+      clientId: existing.clientId,
+      action: 'BOOKING_UPDATE',
+      excludeBookingId: existing.id,
+      now: args.now,
+    })
+  }
+
   if (normalizedServiceItems) {
     await args.tx.bookingServiceItem.deleteMany({
       where: { bookingId: existing.id },
@@ -9427,6 +9625,18 @@ async function performLockedUpsertBookingAftercare(args: {
   }
 
   if (
+    args.rebookMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT &&
+    !args.rebookSlot?.offeringId
+  ) {
+    throw bookingError('OFFERING_ID_REQUIRED', {
+      message:
+        'BOOKED_NEXT_APPOINTMENT aftercare rebook slots require an offeringId.',
+      userMessage:
+        'Choose the service for the next appointment before saving aftercare.',
+    })
+  }
+
+  if (
     args.rebookMode !== AftercareRebookMode.BOOKED_NEXT_APPOINTMENT &&
     args.rebookSlot
   ) {
@@ -9461,6 +9671,29 @@ async function performLockedUpsertBookingAftercare(args: {
         'The selected next appointment slot has an invalid end time.',
     })
   }
+
+if (args.rebookSlot) {
+  const rebookSlotOfferingId = args.rebookSlot.offeringId
+
+  if (!rebookSlotOfferingId) {
+    throw bookingError('OFFERING_ID_REQUIRED', {
+      message:
+        'BOOKED_NEXT_APPOINTMENT aftercare rebook slots require an offeringId.',
+      userMessage:
+        'Choose the service for the next appointment before saving aftercare.',
+    })
+  }
+
+  await assertAftercareRebookSlotOwnership({
+    tx: args.tx,
+    professionalId: args.professionalId,
+    rebookSlot: {
+      offeringId: rebookSlotOfferingId,
+      locationId: args.rebookSlot.locationId,
+      locationType: args.rebookSlot.locationType,
+    },
+  })
+}
 
   const internalProductIds = Array.from(
     new Set(
@@ -9679,39 +9912,53 @@ if (
     },
   })
 
-  if (
-    args.rebookMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT &&
-    args.rebookSlot
-  ) {
-    await args.tx.aftercareRebookSlot.upsert({
-      where: {
-        aftercareSummaryId: aftercare.id,
-      },
-      create: {
-        aftercareSummaryId: aftercare.id,
-        professionalId: args.professionalId,
-        offeringId: args.rebookSlot.offeringId,
-        locationId: args.rebookSlot.locationId,
-        locationType: args.rebookSlot.locationType,
-        startsAt: args.rebookSlot.startsAt,
-        endsAt: args.rebookSlot.endsAt,
-      },
-      update: {
-        professionalId: args.professionalId,
-        offeringId: args.rebookSlot.offeringId,
-        locationId: args.rebookSlot.locationId,
-        locationType: args.rebookSlot.locationType,
-        startsAt: args.rebookSlot.startsAt,
-        endsAt: args.rebookSlot.endsAt,
-      },
-    })
-  } else {
-    await args.tx.aftercareRebookSlot.deleteMany({
-      where: {
-        aftercareSummaryId: aftercare.id,
-      },
+const validRebookSlot =
+  args.rebookMode === AftercareRebookMode.BOOKED_NEXT_APPOINTMENT &&
+  args.rebookSlot
+    ? args.rebookSlot
+    : null
+
+if (validRebookSlot) {
+  const rebookSlotOfferingId = validRebookSlot.offeringId
+
+  if (!rebookSlotOfferingId) {
+    throw bookingError('OFFERING_ID_REQUIRED', {
+      message:
+        'BOOKED_NEXT_APPOINTMENT aftercare rebook slots require an offeringId.',
+      userMessage:
+        'Choose the service for the next appointment before saving aftercare.',
     })
   }
+
+  await args.tx.aftercareRebookSlot.upsert({
+    where: {
+      aftercareSummaryId: aftercare.id,
+    },
+    create: {
+      aftercareSummaryId: aftercare.id,
+      professionalId: args.professionalId,
+      offeringId: rebookSlotOfferingId,
+      locationId: validRebookSlot.locationId,
+      locationType: validRebookSlot.locationType,
+      startsAt: validRebookSlot.startsAt,
+      endsAt: validRebookSlot.endsAt,
+    },
+    update: {
+      professionalId: args.professionalId,
+      offeringId: rebookSlotOfferingId,
+      locationId: validRebookSlot.locationId,
+      locationType: validRebookSlot.locationType,
+      startsAt: validRebookSlot.startsAt,
+      endsAt: validRebookSlot.endsAt,
+    },
+  })
+} else {
+  await args.tx.aftercareRebookSlot.deleteMany({
+    where: {
+      aftercareSummaryId: aftercare.id,
+    },
+  })
+}
 
 const aftercareAccessDelivery =
   await maybeCreateAftercareAccessDeliveryInBoundary({
@@ -10176,32 +10423,6 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
   }
 }
 
-  const paymentCollectedAtForCloseout = shouldSetCollectedAt
-    ? booking.paymentCollectedAt ?? args.now
-    : booking.paymentCollectedAt
-
-  const closeoutCandidate = isPaymentAndAftercareCloseoutCandidate({
-    bookingStatus: booking.status,
-    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
-    checkoutStatus: nextCheckoutStatus,
-    paymentCollectedAt: paymentCollectedAtForCloseout,
-  })
-
-  const afterMediaCount = closeoutCandidate
-    ? await countProAfterMediaForBooking({
-        tx: args.tx,
-        bookingId: booking.id,
-      })
-    : 0
-
-  const shouldCompleteBooking = canCompleteBookingCloseout({
-    bookingStatus: booking.status,
-    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
-    checkoutStatus: nextCheckoutStatus,
-    paymentCollectedAt: paymentCollectedAtForCloseout,
-    afterMediaCount,
-  })
-
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
     data: {
@@ -10245,40 +10466,15 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
     } satisfies Prisma.BookingSelect,
   })
 
-  if (
-  shouldCompleteBooking &&
-  (booking.status !== BookingStatus.COMPLETED ||
-    booking.sessionStep !== SessionStep.DONE ||
-    !booking.finishedAt)
-) {
-  recordStepTransition({
-    from: booking.sessionStep ?? SessionStep.NONE,
-    to: SessionStep.DONE,
+  await maybeCompleteBookingCloseout({
+    tx: args.tx,
+    now: args.now,
+    booking,
+    checkoutStatus: updated.checkoutStatus,
+    paymentCollectedAt: updated.paymentCollectedAt,
     actor: 'PRO',
-    route: 'lib/booking/writeBoundary.ts:updateBookingCheckout#complete',
-    bookingId: booking.id,
-    professionalId: args.professionalId,
+    route: 'lib/booking/writeBoundary.ts:updateBookingCheckout',
   })
-
-  recordStatusTransition({
-    from: booking.status,
-    to: BookingStatus.COMPLETED,
-    actor: 'PRO',
-    route: 'lib/booking/writeBoundary.ts:updateBookingCheckout#complete',
-    bookingId: booking.id,
-    professionalId: args.professionalId,
-  })
-
-  await args.tx.booking.update({
-    where: { id: booking.id },
-    data: {
-      status: BookingStatus.COMPLETED,
-      sessionStep: SessionStep.DONE,
-      finishedAt: booking.finishedAt ?? args.now,
-    },
-    select: { id: true } satisfies Prisma.BookingSelect,
-  })
-}
 
   
 await createCheckoutAuditLogs({
@@ -10463,28 +10659,6 @@ async function performLockedUpdateProCheckoutCloseout(args: {
     select: PRO_CHECKOUT_CLOSEOUT_SELECT,
   })
 
-  const closeoutCandidate = isPaymentAndAftercareCloseoutCandidate({
-    bookingStatus: booking.status,
-    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
-    checkoutStatus: updated.checkoutStatus,
-    paymentCollectedAt: updated.paymentCollectedAt,
-  })
-
-  const afterMediaCount = closeoutCandidate
-    ? await countProAfterMediaForBooking({
-        tx: args.tx,
-        bookingId: booking.id,
-      })
-    : 0
-
-  const shouldCompleteBooking = canCompleteBookingCloseout({
-    bookingStatus: booking.status,
-    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
-    checkoutStatus: updated.checkoutStatus,
-    paymentCollectedAt: updated.paymentCollectedAt,
-    afterMediaCount,
-  })
-
   let finalBooking = {
     id: updated.id,
     status: updated.status,
@@ -10495,53 +10669,24 @@ async function performLockedUpdateProCheckoutCloseout(args: {
 
   let completedBooking = false
 
-  if (
-    shouldCompleteBooking &&
-    (booking.sessionStep !== SessionStep.DONE || !booking.finishedAt)
-  ) {
-    recordStepTransition({
-      from: booking.sessionStep ?? SessionStep.NONE,
-      to: SessionStep.DONE,
-      actor: 'PRO',
-      route: `${args.route}#complete`,
-      bookingId: booking.id,
-      professionalId: args.professionalId,
-    })
+  completedBooking = await maybeCompleteBookingCloseout({
+    tx: args.tx,
+    now: args.now,
+    booking,
+    checkoutStatus: updated.checkoutStatus,
+    paymentCollectedAt: updated.paymentCollectedAt,
+    actor: 'PRO',
+    route: args.route,
+  })
 
-    recordStatusTransition({
-      from: booking.status,
-      to: BookingStatus.COMPLETED,
-      actor: 'PRO',
-      route: `${args.route}#complete`,
-      bookingId: booking.id,
-      professionalId: args.professionalId,
-    })
-
-    const completed = await args.tx.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: BookingStatus.COMPLETED,
-        sessionStep: SessionStep.DONE,
-        finishedAt: booking.finishedAt ?? args.now,
-      },
-      select: {
-        id: true,
-        status: true,
-        sessionStep: true,
-        checkoutStatus: true,
-        paymentCollectedAt: true,
-      } satisfies Prisma.BookingSelect,
-    })
-
+  if (completedBooking) {
     finalBooking = {
-      id: completed.id,
-      status: completed.status,
-      sessionStep: completed.sessionStep ?? SessionStep.NONE,
-      checkoutStatus: completed.checkoutStatus,
-      paymentCollectedAt: completed.paymentCollectedAt,
+      id: updated.id,
+      status: BookingStatus.COMPLETED,
+      sessionStep: SessionStep.DONE,
+      checkoutStatus: updated.checkoutStatus,
+      paymentCollectedAt: updated.paymentCollectedAt,
     }
-
-    completedBooking = true
   }
 
   await createCheckoutAuditLogs({
@@ -10789,62 +10934,15 @@ if (areAuditValuesEqual(oldCheckoutState, nextCheckoutState)) {
     } satisfies Prisma.BookingSelect,
   })
 
-  const closeoutCandidate = isPaymentAndAftercareCloseoutCandidate({
-    bookingStatus: booking.status,
-    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
+  await maybeCompleteBookingCloseout({
+    tx: args.tx,
+    now: args.now,
+    booking,
     checkoutStatus: updated.checkoutStatus,
     paymentCollectedAt: updated.paymentCollectedAt,
-  })
-
-  const afterMediaCount = closeoutCandidate
-    ? await countProAfterMediaForBooking({
-        tx: args.tx,
-        bookingId: booking.id,
-      })
-    : 0
-
-  const shouldCompleteBooking = canCompleteBookingCloseout({
-    bookingStatus: booking.status,
-    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
-    checkoutStatus: updated.checkoutStatus,
-    paymentCollectedAt: updated.paymentCollectedAt,
-    afterMediaCount,
-  })
-
-if (
-  shouldCompleteBooking &&
-  (booking.status !== BookingStatus.COMPLETED ||
-    booking.sessionStep !== SessionStep.DONE ||
-    !booking.finishedAt)
-) {
-  recordStepTransition({
-    from: booking.sessionStep ?? SessionStep.NONE,
-    to: SessionStep.DONE,
     actor: 'SYSTEM',
-    route: 'lib/booking/writeBoundary.ts:updateClientBookingCheckout#complete',
-    bookingId: booking.id,
-    professionalId: booking.professionalId,
+    route: 'lib/booking/writeBoundary.ts:updateClientBookingCheckout',
   })
-
-  recordStatusTransition({
-    from: booking.status,
-    to: BookingStatus.COMPLETED,
-    actor: 'SYSTEM',
-    route: 'lib/booking/writeBoundary.ts:updateClientBookingCheckout#complete',
-    bookingId: booking.id,
-    professionalId: booking.professionalId,
-  })
-
-  await args.tx.booking.update({
-    where: { id: booking.id },
-    data: {
-      status: BookingStatus.COMPLETED,
-      sessionStep: SessionStep.DONE,
-      finishedAt: booking.finishedAt ?? args.now,
-    },
-    select: { id: true } satisfies Prisma.BookingSelect,
-  })
-}
 
   await createCheckoutAuditLogs({
   tx: args.tx,
@@ -12094,6 +12192,7 @@ export async function createClientRebookedBookingFromAftercare(
       initialStatus: BookingStatus.PENDING,
       clientId: args.clientId,
       aftercareId: args.aftercareId,
+      aftercareClientActionTokenId: args.aftercareClientActionTokenId,
       requestId: args.requestId ?? null,
       idempotencyKey: args.idempotencyKey ?? null,
     })
@@ -12692,64 +12791,19 @@ async function performLockedApplyStripePaymentSucceeded(args: {
     } satisfies Prisma.BookingSelect,
   })
 
-  const closeoutCandidate = isPaymentAndAftercareCloseoutCandidate({
-    bookingStatus: booking.status,
-    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
-    checkoutStatus: updated.checkoutStatus,
-    paymentCollectedAt: updated.paymentCollectedAt,
-  })
-
-  const afterMediaCount = closeoutCandidate
-    ? await countProAfterMediaForBooking({
-        tx: args.tx,
-        bookingId: booking.id,
-      })
-    : 0
-
-  const shouldCompleteBooking = canCompleteBookingCloseout({
-    bookingStatus: booking.status,
-    aftercareSentAt: booking.aftercareSummary?.sentToClientAt,
-    checkoutStatus: updated.checkoutStatus,
-    paymentCollectedAt: updated.paymentCollectedAt,
-    afterMediaCount,
-  })
-
   let bookingCompleted = booking.status === BookingStatus.COMPLETED
 
-  if (
-    shouldCompleteBooking &&
-    (booking.status !== BookingStatus.COMPLETED ||
-      booking.sessionStep !== SessionStep.DONE ||
-      !booking.finishedAt)
-  ) {
-    recordStepTransition({
-      from: booking.sessionStep ?? SessionStep.NONE,
-      to: SessionStep.DONE,
-      actor: 'SYSTEM',
-      route: 'lib/booking/writeBoundary.ts:applyStripePaymentSucceeded#complete',
-      bookingId: booking.id,
-      professionalId: booking.professionalId,
-    })
+  const completedNow = await maybeCompleteBookingCloseout({
+    tx: args.tx,
+    now: args.now,
+    booking,
+    checkoutStatus: updated.checkoutStatus,
+    paymentCollectedAt: updated.paymentCollectedAt,
+    actor: 'SYSTEM',
+    route: 'lib/booking/writeBoundary.ts:applyStripePaymentSucceeded',
+  })
 
-    recordStatusTransition({
-      from: booking.status,
-      to: BookingStatus.COMPLETED,
-      actor: 'SYSTEM',
-      route: 'lib/booking/writeBoundary.ts:applyStripePaymentSucceeded#complete',
-      bookingId: booking.id,
-      professionalId: booking.professionalId,
-    })
-
-    await args.tx.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: BookingStatus.COMPLETED,
-        sessionStep: SessionStep.DONE,
-        finishedAt: booking.finishedAt ?? args.now,
-      },
-      select: { id: true } satisfies Prisma.BookingSelect,
-    })
-
+  if (completedNow) {
     bookingCompleted = true
   }
 

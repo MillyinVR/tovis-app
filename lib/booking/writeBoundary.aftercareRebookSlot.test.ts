@@ -1,0 +1,516 @@
+// lib/booking/writeBoundary.aftercareRebookSlot.test.ts
+
+import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
+
+import {
+  AftercareRebookMode,
+  BookingCheckoutStatus,
+  BookingStatus,
+  ContactMethod,
+  ServiceLocationType,
+  SessionStep,
+} from '@prisma/client'
+
+import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
+import { prisma } from '@/lib/prisma'
+import { validateAftercareRebookSlotOwnership } from '@/lib/booking/aftercareRebookSlotOwnership'
+import { createAftercareAccessDelivery } from '@/lib/clientActions/createAftercareAccessDelivery'
+import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
+
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    $transaction: vi.fn(),
+  },
+}))
+
+vi.mock('@/lib/booking/scheduleLock', () => ({
+  lockProfessionalSchedule: vi.fn(),
+}))
+
+vi.mock('@/lib/booking/aftercareRebookSlotOwnership', () => ({
+  validateAftercareRebookSlotOwnership: vi.fn(),
+}))
+
+vi.mock('@/lib/clientActions/createAftercareAccessDelivery', () => ({
+  createAftercareAccessDelivery: vi.fn(),
+}))
+
+vi.mock('@/lib/notifications/clientNotifications', () => ({
+  upsertClientNotification: vi.fn(),
+}))
+
+vi.mock('@/lib/notifications/appointmentReminders', () => ({
+  cancelBookingAppointmentReminders: vi.fn(),
+  syncBookingAppointmentReminders: vi.fn(),
+}))
+
+vi.mock('@/lib/notifications/proNotifications', () => ({
+  createProNotification: vi.fn(),
+}))
+
+vi.mock('@/lib/booking/cacheVersion', () => ({
+  bumpScheduleConfigVersion: vi.fn(),
+  bumpScheduleVersion: vi.fn(),
+}))
+
+vi.mock('@/lib/booking/closeoutAudit', () => ({
+  areAuditValuesEqual: vi.fn(() => false),
+  createBookingCloseoutAuditLog: vi.fn(),
+}))
+
+vi.mock('@/lib/observability/bookingEvents', () => ({}))
+
+const mockedPrisma = prisma as unknown as {
+  $transaction: Mock
+}
+
+const mockedValidateAftercareRebookSlotOwnership =
+  validateAftercareRebookSlotOwnership as Mock
+
+const mockedCreateAftercareAccessDelivery =
+  createAftercareAccessDelivery as Mock
+
+const mockedUpsertClientNotification = upsertClientNotification as Mock
+type MockTx = {
+  booking: {
+    findUnique: Mock
+    update: Mock
+  }
+  aftercareSummary: {
+    upsert: Mock
+    update: Mock
+  }
+  aftercareRebookSlot: {
+    upsert: Mock
+    deleteMany: Mock
+  }
+  product: {
+    findMany: Mock
+  }
+  productRecommendation: {
+    deleteMany: Mock
+    createMany: Mock
+  }
+  reminder: {
+    upsert: Mock
+    deleteMany: Mock
+  }
+  mediaAsset: {
+    count: Mock
+  }
+}
+
+const bookingId = 'booking_1'
+const professionalId = 'pro_1'
+const actorUserId = 'user_1'
+const clientId = 'client_1'
+const aftercareId = 'aftercare_1'
+const offeringId = 'offering_1'
+const locationId = 'location_1'
+
+const now = new Date('2026-05-17T18:00:00.000Z')
+const rebookedFor = new Date('2026-06-01T17:00:00.000Z')
+const rebookEndsAt = new Date('2026-06-01T18:00:00.000Z')
+
+function makeBooking(overrides: Record<string, unknown> = {}) {
+  return {
+    id: bookingId,
+    clientId,
+    professionalId,
+    status: BookingStatus.IN_PROGRESS,
+    sessionStep: SessionStep.AFTER_PHOTOS,
+    scheduledFor: new Date('2026-05-01T17:00:00.000Z'),
+    finishedAt: null,
+    checkoutStatus: BookingCheckoutStatus.NOT_READY,
+    paymentCollectedAt: null,
+    locationTimeZone: 'America/Los_Angeles',
+    clientTimeZoneAtBooking: 'America/Los_Angeles',
+    service: {
+      name: 'Haircut',
+    },
+    client: {
+      id: clientId,
+      userId: 'client_user_1',
+      email: 'client@example.com',
+      phone: null,
+      preferredContactMethod: ContactMethod.EMAIL,
+      firstName: 'Client',
+      lastName: 'Person',
+      user: {
+        email: 'client-user@example.com',
+        phone: null,
+      },
+    },
+    aftercareSummary: {
+      id: aftercareId,
+      notes: 'Existing notes',
+      rebookMode: AftercareRebookMode.NONE,
+      rebookedFor: null,
+      rebookWindowStart: null,
+      rebookWindowEnd: null,
+      draftSavedAt: now,
+      sentToClientAt: null,
+      lastEditedAt: now,
+      version: 1,
+      rebookSlot: null,
+      recommendedProducts: [],
+    },
+    professional: {
+      timeZone: 'America/Los_Angeles',
+    },
+    ...overrides,
+  }
+}
+
+function makeTx(overrides: Partial<MockTx> = {}): MockTx {
+  const tx: MockTx = {
+    booking: {
+      findUnique: vi.fn().mockResolvedValue(makeBooking()),
+      update: vi.fn(),
+    },
+    aftercareSummary: {
+      upsert: vi.fn().mockResolvedValue({
+        id: aftercareId,
+        rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+        rebookedFor,
+        rebookWindowStart: null,
+        rebookWindowEnd: null,
+        draftSavedAt: now,
+        sentToClientAt: null,
+        lastEditedAt: now,
+        version: 2,
+      }),
+      update: vi.fn(),
+    },
+    aftercareRebookSlot: {
+      upsert: vi.fn().mockResolvedValue({
+        id: 'slot_1',
+      }),
+      deleteMany: vi.fn().mockResolvedValue({
+        count: 1,
+      }),
+    },
+    product: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    productRecommendation: {
+      deleteMany: vi.fn().mockResolvedValue({
+        count: 0,
+      }),
+      createMany: vi.fn().mockResolvedValue({
+        count: 0,
+      }),
+    },
+    reminder: {
+      upsert: vi.fn().mockResolvedValue({ id: 'reminder_1' }),
+      deleteMany: vi.fn().mockResolvedValue({
+        count: 0,
+      }),
+    },
+    mediaAsset: {
+      count: vi.fn().mockResolvedValue(0),
+    },
+    ...overrides,
+  }
+
+  return tx
+}
+
+function mockTransaction(tx: MockTx) {
+  mockedPrisma.$transaction.mockImplementation(async (callback: unknown) => {
+    if (typeof callback !== 'function') {
+      throw new Error('Expected prisma.$transaction callback.')
+    }
+
+    return callback(tx)
+  })
+}
+
+function makeValidArgs(
+  overrides: Partial<Parameters<typeof upsertBookingAftercare>[0]> = {},
+): Parameters<typeof upsertBookingAftercare>[0] {
+  return {
+    bookingId,
+    professionalId,
+    actorUserId,
+    notes: 'Aftercare notes',
+    rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+    rebookedFor,
+    rebookWindowStart: null,
+    rebookWindowEnd: null,
+    rebookSlot: {
+      offeringId,
+      locationId,
+      locationType: ServiceLocationType.SALON,
+      startsAt: rebookedFor,
+      endsAt: rebookEndsAt,
+    },
+    createRebookReminder: false,
+    rebookReminderDaysBefore: 7,
+    createProductReminder: false,
+    productReminderDaysAfter: 14,
+    recommendedProducts: [],
+    sendToClient: false,
+    version: 1,
+    requestId: 'req_1',
+    idempotencyKey: 'idem_1',
+    ...overrides,
+  }
+}
+
+async function expectBookingErrorCode(
+  promise: Promise<unknown>,
+  code: string,
+): Promise<void> {
+  await expect(promise).rejects.toMatchObject({
+    code,
+  })
+}
+
+describe('upsertBookingAftercare rebook slot handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+
+    mockedValidateAftercareRebookSlotOwnership.mockResolvedValue({
+      ok: true,
+    })
+
+    mockedCreateAftercareAccessDelivery.mockResolvedValue({
+      link: {
+        href: '/client/bookings/booking_1/aftercare',
+      },
+    } as Awaited<ReturnType<typeof createAftercareAccessDelivery>>)
+
+    mockedUpsertClientNotification.mockResolvedValue(undefined)
+  })
+
+  it('requires a rebookSlot when rebookMode is BOOKED_NEXT_APPOINTMENT', async () => {
+    const tx = makeTx()
+    mockTransaction(tx)
+
+    await expectBookingErrorCode(
+      upsertBookingAftercare(
+        makeValidArgs({
+          rebookSlot: null,
+        }),
+      ),
+      'FORBIDDEN',
+    )
+
+    expect(tx.aftercareRebookSlot.upsert).not.toHaveBeenCalled()
+    expect(tx.aftercareRebookSlot.deleteMany).not.toHaveBeenCalled()
+  })
+
+  it('requires rebookSlot.offeringId when rebookMode is BOOKED_NEXT_APPOINTMENT', async () => {
+    const tx = makeTx()
+    mockTransaction(tx)
+
+    await expectBookingErrorCode(
+      upsertBookingAftercare(
+        makeValidArgs({
+          rebookSlot: {
+            offeringId: null,
+            locationId,
+            locationType: ServiceLocationType.SALON,
+            startsAt: rebookedFor,
+            endsAt: rebookEndsAt,
+          },
+        }),
+      ),
+      'OFFERING_ID_REQUIRED',
+    )
+
+    expect(tx.aftercareRebookSlot.upsert).not.toHaveBeenCalled()
+    expect(tx.aftercareRebookSlot.deleteMany).not.toHaveBeenCalled()
+  })
+
+  it('rejects a rebookSlot when rebookMode is not BOOKED_NEXT_APPOINTMENT', async () => {
+    const tx = makeTx()
+    mockTransaction(tx)
+
+    await expectBookingErrorCode(
+      upsertBookingAftercare(
+        makeValidArgs({
+          rebookMode: AftercareRebookMode.NONE,
+          rebookedFor: null,
+          rebookSlot: {
+            offeringId,
+            locationId,
+            locationType: ServiceLocationType.SALON,
+            startsAt: rebookedFor,
+            endsAt: rebookEndsAt,
+          },
+        }),
+      ),
+      'FORBIDDEN',
+    )
+
+    expect(tx.aftercareRebookSlot.upsert).not.toHaveBeenCalled()
+    expect(tx.aftercareRebookSlot.deleteMany).not.toHaveBeenCalled()
+  })
+
+  it('requires rebookSlot.startsAt to match rebookedFor', async () => {
+    const tx = makeTx()
+    mockTransaction(tx)
+
+    await expectBookingErrorCode(
+      upsertBookingAftercare(
+        makeValidArgs({
+          rebookedFor,
+          rebookSlot: {
+            offeringId,
+            locationId,
+            locationType: ServiceLocationType.SALON,
+            startsAt: new Date('2026-06-01T17:15:00.000Z'),
+            endsAt: rebookEndsAt,
+          },
+        }),
+      ),
+      'FORBIDDEN',
+    )
+
+    expect(tx.aftercareRebookSlot.upsert).not.toHaveBeenCalled()
+  })
+
+  it('requires rebookSlot.endsAt to be after startsAt', async () => {
+    const tx = makeTx()
+    mockTransaction(tx)
+
+    await expectBookingErrorCode(
+      upsertBookingAftercare(
+        makeValidArgs({
+          rebookSlot: {
+            offeringId,
+            locationId,
+            locationType: ServiceLocationType.SALON,
+            startsAt: rebookedFor,
+            endsAt: rebookedFor,
+          },
+        }),
+      ),
+      'FORBIDDEN',
+    )
+
+    expect(tx.aftercareRebookSlot.upsert).not.toHaveBeenCalled()
+  })
+
+  it('validates slot ownership and upserts the aftercare rebook slot', async () => {
+    const tx = makeTx()
+    mockTransaction(tx)
+
+    await upsertBookingAftercare(makeValidArgs())
+
+    expect(mockedValidateAftercareRebookSlotOwnership).toHaveBeenCalledWith({
+      db: tx,
+      slot: {
+        professionalId,
+        offeringId,
+        locationId,
+        locationType: ServiceLocationType.SALON,
+      },
+    })
+
+    expect(tx.aftercareRebookSlot.upsert).toHaveBeenCalledWith({
+      where: {
+        aftercareSummaryId: aftercareId,
+      },
+      create: {
+        aftercareSummaryId: aftercareId,
+        professionalId,
+        offeringId,
+        locationId,
+        locationType: ServiceLocationType.SALON,
+        startsAt: rebookedFor,
+        endsAt: rebookEndsAt,
+      },
+      update: {
+        professionalId,
+        offeringId,
+        locationId,
+        locationType: ServiceLocationType.SALON,
+        startsAt: rebookedFor,
+        endsAt: rebookEndsAt,
+      },
+    })
+
+    expect(tx.aftercareRebookSlot.deleteMany).not.toHaveBeenCalled()
+  })
+
+  it('maps slot ownership validation failures to booking errors', async () => {
+    const tx = makeTx()
+    mockTransaction(tx)
+
+    mockedValidateAftercareRebookSlotOwnership.mockResolvedValue({
+      ok: false,
+      code: 'LOCATION_NOT_BOOKABLE',
+      userMessage: 'This location cannot be booked.',
+    })
+
+    await expectBookingErrorCode(upsertBookingAftercare(makeValidArgs()), 'BAD_LOCATION')
+
+    expect(tx.aftercareRebookSlot.upsert).not.toHaveBeenCalled()
+  })
+
+  it('deletes the existing rebook slot when rebookMode is no longer BOOKED_NEXT_APPOINTMENT', async () => {
+    const tx = makeTx({
+      booking: {
+        findUnique: vi.fn().mockResolvedValue(
+          makeBooking({
+            aftercareSummary: {
+              id: aftercareId,
+              notes: 'Existing notes',
+              rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+              rebookedFor,
+              rebookWindowStart: null,
+              rebookWindowEnd: null,
+              draftSavedAt: now,
+              sentToClientAt: null,
+              lastEditedAt: now,
+              version: 1,
+              rebookSlot: {
+                offeringId,
+                locationId,
+                locationType: ServiceLocationType.SALON,
+                startsAt: rebookedFor,
+                endsAt: rebookEndsAt,
+              },
+              recommendedProducts: [],
+            },
+          }),
+        ),
+        update: vi.fn(),
+      },
+      aftercareSummary: {
+        upsert: vi.fn().mockResolvedValue({
+          id: aftercareId,
+          rebookMode: AftercareRebookMode.NONE,
+          rebookedFor: null,
+          rebookWindowStart: null,
+          rebookWindowEnd: null,
+          draftSavedAt: now,
+          sentToClientAt: null,
+          lastEditedAt: now,
+          version: 2,
+        }),
+        update: vi.fn(),
+      },
+    })
+
+    mockTransaction(tx)
+
+    await upsertBookingAftercare(
+      makeValidArgs({
+        rebookMode: AftercareRebookMode.NONE,
+        rebookedFor: null,
+        rebookSlot: null,
+      }),
+    )
+
+    expect(tx.aftercareRebookSlot.upsert).not.toHaveBeenCalled()
+    expect(tx.aftercareRebookSlot.deleteMany).toHaveBeenCalledWith({
+      where: {
+        aftercareSummaryId: aftercareId,
+      },
+    })
+  })
+})
