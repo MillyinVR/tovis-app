@@ -193,6 +193,7 @@ import {
   createClientRebookedBookingFromAftercare,
   createHold,
   createProBooking,
+  createRebookedBookingFromCompletedBooking,
   finalizeBookingFromHold,
   rescheduleBookingFromHold,
   updateProBooking,
@@ -1340,6 +1341,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
     })
     expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_1')
   })
+
   it('passes aftercare client action token into overlap policy for client aftercare rebook creation', async () => {
     const existingConflict = {
       kind: 'BOOKING',
@@ -1431,6 +1433,94 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
         conflicts: [existingConflict],
       }),
     )
+
+    expect(mocks.txBookingCreate).toHaveBeenCalled()
+    expect(mocks.txBookingServiceItemCreate).toHaveBeenCalled()
+    expect(mocks.txAftercareSummaryUpsert).toHaveBeenCalled()
+    expect(mocks.syncBookingAppointmentReminders).toHaveBeenCalledWith({
+      tx,
+      bookingId: 'booking_rebook_1',
+    })
+    expect(mocks.bumpScheduleVersion).toHaveBeenCalledWith('pro_1')
+  })
+  
+  it('allows pro-created rebook from completed booking when overlap policy allows pro overlap', async () => {
+    const existingConflict = {
+      kind: 'BOOKING',
+      bookingId: 'existing_booking_2',
+      startsAt: REQUESTED_START,
+      endsAt: REQUESTED_END,
+    }
+
+    mocks.txBookingFindFirst
+      .mockResolvedValueOnce(makeCompletedSourceBookingForAftercareRebook())
+      .mockResolvedValueOnce(null)
+
+    mocks.findSchedulingConflicts.mockResolvedValueOnce({
+      all: [existingConflict],
+    })
+
+    mocks.decideBookingOverlapPermission.mockReturnValueOnce({
+      ok: true,
+    })
+
+    mocks.txBookingCreate.mockResolvedValueOnce({
+      id: 'booking_rebook_1',
+      status: BookingStatus.ACCEPTED,
+      scheduledFor: REQUESTED_START,
+    })
+
+    await expect(
+      createRebookedBookingFromCompletedBooking({
+        bookingId: 'booking_source_1',
+        professionalId: 'pro_1',
+        scheduledFor: REQUESTED_START,
+        requestId: 'req_pro_rebook_1',
+        idempotencyKey: 'idem_pro_rebook_1',
+      }),
+    ).resolves.toMatchObject({
+      booking: {
+        id: 'booking_rebook_1',
+        status: BookingStatus.ACCEPTED,
+        scheduledFor: REQUESTED_START,
+      },
+      aftercare: {
+        id: 'aftercare_1',
+        rebookMode: AftercareRebookMode.BOOKED_NEXT_APPOINTMENT,
+        rebookedFor: REQUESTED_START,
+      },
+      meta: {
+        mutated: true,
+        noOp: false,
+      },
+    })
+
+    expect(mocks.findSchedulingConflicts).toHaveBeenCalledWith({
+      tx,
+      professionalId: 'pro_1',
+      startsAt: REQUESTED_START,
+      endsAt: REQUESTED_END,
+      excludeHoldId: null,
+      excludeBookingId: null,
+      now: TEST_NOW,
+    })
+
+    expect(mocks.decideBookingOverlapPermission).toHaveBeenCalledWith({
+      actor: {
+        kind: 'PRO',
+        userId: 'pro_1',
+        professionalId: 'pro_1',
+      },
+      source: {
+        kind: 'PRO_CREATED',
+      },
+      requestedWindow: {
+        professionalId: 'pro_1',
+        startsAt: REQUESTED_START,
+        endsAt: REQUESTED_END,
+      },
+      conflicts: [existingConflict],
+    })
 
     expect(mocks.txBookingCreate).toHaveBeenCalled()
     expect(mocks.txBookingServiceItemCreate).toHaveBeenCalled()
