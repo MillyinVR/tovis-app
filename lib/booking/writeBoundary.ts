@@ -8716,7 +8716,7 @@ assertCanCreateRebookFromSourceBooking({
               source.aftercareSummary.rebookSlot
                 ? {
                     aftercareSummaryId: args.aftercareId,
-                    clientActionTokenId: '',
+                    clientActionTokenId: aftercareClientActionTokenId ?? '',
                     professionalId:
                       source.aftercareSummary.rebookSlot.professionalId,
                     offeringId: source.aftercareSummary.rebookSlot.offeringId,
