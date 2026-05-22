@@ -94,6 +94,29 @@ export async function teardownBookingFlow({
       },
     })
 
+    const aftercareSummaryIds = (
+      await prisma.aftercareSummary.findMany({
+        where: {
+          bookingId: { in: bookingIds },
+        },
+        select: { id: true },
+      })
+    ).map((row) => row.id)
+
+    if (aftercareSummaryIds.length > 0) {
+      await prisma.productRecommendation.deleteMany({
+        where: {
+          aftercareSummaryId: { in: aftercareSummaryIds },
+        },
+      })
+
+      await prisma.aftercareRebookSlot.deleteMany({
+        where: {
+          aftercareSummaryId: { in: aftercareSummaryIds },
+        },
+      })
+    }
+
     await prisma.aftercareSummary.deleteMany({
       where: {
         bookingId: { in: bookingIds },
