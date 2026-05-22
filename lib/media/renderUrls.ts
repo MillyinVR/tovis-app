@@ -1,9 +1,8 @@
-// lib/media/renderUrls.ts
 import 'server-only'
 
-import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
-import { BUCKETS } from '@/lib/storageBuckets'
 import { safeUrl } from '@/lib/media'
+import { BUCKETS } from '@/lib/storageBuckets'
+import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 
 const SIGNED_TTL_SECONDS = 60 * 10
 
@@ -53,6 +52,7 @@ async function signedUrl(
     .createSignedUrl(path, SIGNED_TTL_SECONDS)
 
   if (error) return null
+
   return safeUrl(data?.signedUrl)
 }
 
@@ -89,8 +89,16 @@ export async function renderMediaUrls(m: MediaPointers) {
         : publicUrl(thumbBucket, thumbPath)
       : null
 
+  const fallbackMain =
+    bucket && path && isPrivateBucket(bucket) ? null : safeUrl(m.url)
+
+  const fallbackThumb =
+    thumbBucket && thumbPath && isPrivateBucket(thumbBucket)
+      ? null
+      : safeUrl(m.thumbUrl)
+
   return {
-    renderUrl: main ?? safeUrl(m.url),
-    renderThumbUrl: thumb ?? safeUrl(m.thumbUrl),
+    renderUrl: main ?? fallbackMain,
+    renderThumbUrl: thumb ?? fallbackThumb,
   }
 }
