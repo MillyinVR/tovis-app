@@ -1,5 +1,5 @@
 import { AdminPermissionRole, Role } from '@prisma/client'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const document = {
   id: 'doc_1',
@@ -74,8 +74,13 @@ function makeGetRequest(id = 'doc_1'): Request {
 }
 
 describe('app/api/admin/verification-docs/open/route.ts', () => {
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>
+
   beforeEach(() => {
     vi.clearAllMocks()
+    consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
 
     mocks.requireUser.mockResolvedValue({
       ok: true,
@@ -131,6 +136,10 @@ describe('app/api/admin/verification-docs/open/route.ts', () => {
         })),
       },
     })
+  })
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore()
   })
 
   it('returns auth response when requireUser fails', async () => {
@@ -339,10 +348,11 @@ describe('app/api/admin/verification-docs/open/route.ts', () => {
     )
   })
 
-  it('returns 500 when Supabase signing fails', async () => {
+  it('returns generic 500 and logs structured metadata when Supabase signing fails', async () => {
     mocks.createSignedUrl.mockResolvedValueOnce({
       data: null,
       error: {
+        name: 'StorageError',
         message: 'storage unavailable',
       },
     })
@@ -352,8 +362,16 @@ describe('app/api/admin/verification-docs/open/route.ts', () => {
     expect(result.status).toBe(500)
     await expect(result.json()).resolves.toEqual({
       ok: false,
-      error: 'storage unavailable',
+      error: 'Failed to sign URL.',
     })
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'GET /api/admin/verification-docs/open sign error',
+      {
+        errorName: 'StorageError',
+        errorMessage: 'storage unavailable',
+      },
+    )
   })
 
   it('returns 500 when signed URL is missing', async () => {
@@ -371,7 +389,7 @@ describe('app/api/admin/verification-docs/open/route.ts', () => {
     })
   })
 
-  it('returns 500 and does not leak unexpected errors', async () => {
+  it('returns 500 and logs structured metadata without leaking unexpected errors to the response', async () => {
     mocks.verificationDocumentFindUnique.mockRejectedValueOnce(
       new Error('database exploded'),
     )
@@ -383,5 +401,13 @@ describe('app/api/admin/verification-docs/open/route.ts', () => {
       ok: false,
       error: 'Internal server error',
     })
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'GET /api/admin/verification-docs/open error',
+      {
+        errorName: 'Error',
+        errorMessage: 'database exploded',
+      },
+    )
   })
 })
