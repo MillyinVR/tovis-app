@@ -66,8 +66,8 @@ Expected result:
 | Anonymous direct update/delete in `media-private` | Denied | TODO | Add direct update/delete curl proof |
 | Anonymous direct read from `media-public` | Allowed | PASS | HTTP 200, body returned `public proof` |
 | Anonymous direct write to `media-public` | Denied unless signed upload URL is used | PASS | HTTP 400 with `statusCode: 403`, `new row violates row-level security policy` |
-| Pro booking session media upload uses `media-private` | Covered by route test | TODO | Add test path |
-| Booking session media path must stay under `bookings/<bookingId>/<phase>/` | Covered by route test | TODO | Add test path |
+| Pro booking session media upload uses `media-private` | Covered by route test | PASS | `app/api/pro/bookings/[id]/media/route.test.ts`; run `pnpm test -- 'app/api/pro/bookings/[id]/media/route.test.ts'` |
+| Booking session media path must stay under `bookings/<bookingId>/<phase>/` | Covered by route test | PASS | `app/api/pro/bookings/[id]/media/route.test.ts`; covers wrong booking id and wrong phase path rejection |
 | Verification docs must use `media-private` | Covered by route/manual check | TODO | Add test path |
 | Private media rendering happens through server-signed URL | Covered by route/helper test | TODO | Add test path |
 

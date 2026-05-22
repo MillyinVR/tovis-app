@@ -389,6 +389,25 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     })
   })
 
+  it('GET returns forbidden when booking belongs to another professional', async () => {
+  mocks.bookingFindUnique.mockResolvedValueOnce({
+    id: 'booking_1',
+    professionalId: 'other_pro',
+  })
+
+  const result = await GET(makeGetRequest(), makeCtx())
+
+  expect(result.status).toBe(403)
+  await expect(result.json()).resolves.toEqual({
+    ok: false,
+    error: 'Forbidden.',
+  })
+
+  expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+  expect(mocks.renderMediaUrls).not.toHaveBeenCalled()
+  expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+})
+
   it('GET rejects invalid phase query param', async () => {
     const result = await GET(
       makeGetRequest(
@@ -659,6 +678,52 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     })
 
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
+  })
+
+  it('POST rejects media-public bucket for booking session media before idempotency', async () => {
+    const result = await POST(
+      makePostRequest({
+        body: {
+          ...validBody,
+          storageBucket: BUCKETS.mediaPublic,
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: `Session media must upload to ${BUCKETS.mediaPrivate}.`,
+    })
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.createSignedUrl).not.toHaveBeenCalled()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
+  })
+
+  it('POST rejects media-public thumb bucket for booking session media before idempotency', async () => {
+    const result = await POST(
+      makePostRequest({
+        body: {
+          ...validBody,
+          thumbBucket: BUCKETS.mediaPublic,
+        },
+      }),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: `Session thumb must upload to ${BUCKETS.mediaPrivate}.`,
+    })
+
+    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.createSignedUrl).not.toHaveBeenCalled()
+    expect(globalThis.fetch).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
@@ -947,6 +1012,44 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
         ok: false,
         code: 'BOOKING_NOT_FOUND',
         error: 'Booking not found.',
+      }),
+    )
+  })
+
+  it('POST maps write-boundary forbidden ownership errors and marks idempotency failed', async () => {
+    mocks.uploadProBookingMedia.mockRejectedValueOnce(
+      bookingError('FORBIDDEN', {
+        message: 'Professional cannot upload media for this booking.',
+        userMessage: 'You are not allowed to upload media for this booking.',
+      }),
+    )
+
+    const result = await POST(
+      makeIdempotentPostRequest({
+        key: 'idem_media_wrong_pro_1',
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/media',
+    })
+
+    expect(mocks.uploadProBookingMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        professionalId: 'pro_1',
+        uploadedByUserId: 'user_1',
+      }),
+    )
+
+    expect(result.status).toBe(403)
+    await expect(result.json()).resolves.toEqual(
+      expect.objectContaining({
+        ok: false,
+        code: 'FORBIDDEN',
+        error: 'You are not allowed to upload media for this booking.',
       }),
     )
   })
