@@ -357,6 +357,14 @@ function parseViralRequestModerationBody(
   }
 }
 
+function buildAdminNotesAuditSuffix(adminNotes: string | undefined): string {
+  if (adminNotes === undefined) {
+    return 'adminNotesProvided=false'
+  }
+
+  return `adminNotesProvided=true adminNotesLength=${adminNotes.length}`
+}
+
 function buildAdminActionLogData(args: {
   adminUserId: string
   action: string
@@ -628,10 +636,9 @@ async function executeLookPostModeration(
     logData: buildAdminActionLogData({
       adminUserId,
       action: buildLookPostLogAction(request.action),
-      note:
-        request.adminNotes !== undefined
-          ? `lookPostId=${updated.id} note=${request.adminNotes}`
-          : `lookPostId=${updated.id}`,
+      note: `lookPostId=${updated.id} ${buildAdminNotesAuditSuffix(
+        request.adminNotes,
+      )}`,
       scope,
     }),
   }
@@ -713,10 +720,9 @@ async function executeLookCommentModeration(
     logData: buildAdminActionLogData({
       adminUserId,
       action: buildLookCommentLogAction(request.action),
-      note:
-        request.adminNotes !== undefined
-          ? `lookCommentId=${updated.id} lookPostId=${updated.lookPostId} note=${request.adminNotes}`
-          : `lookCommentId=${updated.id} lookPostId=${updated.lookPostId}`,
+      note: `lookCommentId=${updated.id} lookPostId=${
+        updated.lookPostId
+      } ${buildAdminNotesAuditSuffix(request.adminNotes)}`,
       scope,
     }),
   }
@@ -769,9 +775,9 @@ async function executeViralRequestModeration(
       logData: buildAdminActionLogData({
         adminUserId,
         action: buildViralRequestLogAction(request.action),
-        note: request.adminNotes
-          ? `requestId=${updated.id} note=${request.adminNotes}`
-          : `requestId=${updated.id}`,
+        note: `requestId=${updated.id} ${buildAdminNotesAuditSuffix(
+          request.adminNotes,
+        )}`,
         scope,
       }),
     }
@@ -788,9 +794,9 @@ async function executeViralRequestModeration(
     logData: buildAdminActionLogData({
       adminUserId,
       action: buildViralRequestLogAction(request.action),
-      note: request.adminNotes
-        ? `requestId=${updated.id} note=${request.adminNotes}`
-        : `requestId=${updated.id}`,
+      note: `requestId=${updated.id} ${buildAdminNotesAuditSuffix(
+        request.adminNotes,
+      )}`,
       scope,
     }),
   }
@@ -874,6 +880,23 @@ function toErrorResponse(error: unknown): Response {
   return jsonFail(500, message)
 }
 
+function getSafeErrorLog(error: unknown): {
+  errorName: string
+  errorMessage: string
+} {
+  if (error instanceof Error) {
+    return {
+      errorName: error.name,
+      errorMessage: error.message,
+    }
+  }
+
+  return {
+    errorName: 'UnknownError',
+    errorMessage: 'Unknown admin moderation route error.',
+  }
+}
+
 export async function handleAdminModerationRoute(
   req: Request,
   args: {
@@ -907,7 +930,7 @@ export async function handleAdminModerationRoute(
 
     return jsonOk(executed.response)
   } catch (error: unknown) {
-    console.error('admin moderation route error', error)
+    console.error('admin moderation route error', getSafeErrorLog(error))
     return toErrorResponse(error)
   }
 }
