@@ -39,6 +39,8 @@ const db = new PrismaClient({
   },
 })
 
+const BOOKING_OVERLAP_CONSTRAINT = 'Booking_no_active_professional_overlap'
+
 type TestClient = {
   userId: string
   clientId: string
@@ -65,6 +67,7 @@ function futureUtc(daysAhead: number, hour: number, minute = 0): Date {
   d.setUTCMilliseconds(0)
   d.setUTCDate(d.getUTCDate() + daysAhead)
   d.setUTCHours(hour, minute, 0, 0)
+
   return d
 }
 
@@ -92,8 +95,13 @@ async function cleanupAll(): Promise<void> {
   await db.bookingOverrideAuditLog.deleteMany({})
   await db.bookingCloseoutAuditLog.deleteMany({})
   await db.idempotencyKey.deleteMany({})
+
+  await db.bookingCheckoutProductItem.deleteMany({})
+  await db.productRecommendation.deleteMany({})
+  await db.aftercareRebookSlot.deleteMany({})
   await db.aftercareSummary.deleteMany({})
 
+  await db.productSale.deleteMany({})
   await db.bookingHold.deleteMany({})
   await db.bookingServiceItem.deleteMany({})
   await db.booking.deleteMany({})
@@ -101,6 +109,7 @@ async function cleanupAll(): Promise<void> {
   await db.professionalServiceOffering.deleteMany({})
   await db.clientAddress.deleteMany({})
   await db.mediaServiceTag.deleteMany({})
+  await db.mediaAsset.deleteMany({})
   await db.service.deleteMany({})
   await db.serviceCategory.deleteMany({})
   await db.professionalLocation.deleteMany({})
@@ -304,6 +313,120 @@ async function seedFixtures(): Promise<Fixtures> {
   }
 }
 
+function bookingData(args: {
+  clientId: string
+  professionalId: string
+  serviceId: string
+  offeringId: string
+  start: Date
+  locationId: string
+  locationType: ServiceLocationType
+  clientAddressId?: string | null
+  status?: BookingStatus
+  durationMinutes?: number
+  bufferMinutes?: number
+}): Prisma.BookingCreateInput {
+  const durationMinutes = args.durationMinutes ?? 60
+  const bufferMinutes = args.bufferMinutes ?? 15
+  const isMobile = args.locationType === ServiceLocationType.MOBILE
+
+  return {
+    client: {
+      connect: {
+        id: args.clientId,
+      },
+    },
+    professional: {
+      connect: {
+        id: args.professionalId,
+      },
+    },
+    service: {
+      connect: {
+        id: args.serviceId,
+      },
+    },
+    offering: {
+      connect: {
+        id: args.offeringId,
+      },
+    },
+    scheduledFor: args.start,
+    status: args.status ?? BookingStatus.ACCEPTED,
+    source: BookingSource.REQUESTED,
+    locationType: args.locationType,
+    location: {
+      connect: {
+        id: args.locationId,
+      },
+    },
+    locationTimeZone: 'America/Los_Angeles',
+    locationAddressSnapshot:
+      args.locationType === ServiceLocationType.SALON
+        ? { formattedAddress: '123 Salon St, San Diego, CA 92101' }
+        : { formattedAddress: '999 Mobile Base, San Diego, CA 92101' },
+    locationLatSnapshot: 32.7157,
+    locationLngSnapshot: -117.1611,
+    clientAddress: isMobile
+      ? {
+          connect: {
+            id: args.clientAddressId ?? '',
+          },
+        }
+      : undefined,
+    clientAddressSnapshot: isMobile
+      ? { formattedAddress: '1 Client Ave, San Diego, CA 92101' }
+      : Prisma.JsonNull,
+    clientAddressLatSnapshot: isMobile ? 32.7157 : null,
+    clientAddressLngSnapshot: isMobile ? -117.1611 : null,
+    subtotalSnapshot: new Prisma.Decimal('100.00'),
+    serviceSubtotalSnapshot: new Prisma.Decimal('100.00'),
+    totalAmount: new Prisma.Decimal('100.00'),
+    totalDurationMinutes: durationMinutes,
+    bufferMinutes,
+  }
+}
+
+async function createDirectBooking(args: {
+  clientId: string
+  start: Date
+  locationId: string
+  locationType: ServiceLocationType
+  clientAddressId?: string | null
+  professionalId?: string
+  serviceId?: string
+  offeringId?: string
+  status?: BookingStatus
+  durationMinutes?: number
+  bufferMinutes?: number
+}): Promise<string> {
+  if (!fixtures) throw new Error('Fixtures not initialized')
+
+  const fx = fixtures
+  const isMobile = args.locationType === ServiceLocationType.MOBILE
+
+  const booking = await db.booking.create({
+    data: bookingData({
+      clientId: args.clientId,
+      professionalId: args.professionalId ?? fx.professionalId,
+      serviceId: args.serviceId ?? fx.serviceId,
+      offeringId: args.offeringId ?? fx.offeringId,
+      start: args.start,
+      locationId: args.locationId,
+      locationType: args.locationType,
+      clientAddressId: isMobile
+        ? (args.clientAddressId ?? fx.clients[0].clientAddressId)
+        : null,
+      status: args.status,
+      durationMinutes: args.durationMinutes,
+      bufferMinutes: args.bufferMinutes,
+    }),
+    select: { id: true },
+  })
+
+  return booking.id
+}
+
 async function createLockedBooking(args: {
   clientId: string
   start: Date
@@ -343,41 +466,22 @@ async function createLockedBooking(args: {
     }
 
     const booking = await tx.booking.create({
-      data: {
+      data: bookingData({
         clientId: args.clientId,
         professionalId: fx.professionalId,
         serviceId: fx.serviceId,
         offeringId: fx.offeringId,
-        scheduledFor: args.start,
-        status: BookingStatus.ACCEPTED,
-        source: BookingSource.REQUESTED,
-        locationType: args.locationType,
+        start: args.start,
         locationId: args.locationId,
-        locationTimeZone: 'America/Los_Angeles',
-        locationAddressSnapshot:
-          args.locationType === ServiceLocationType.SALON
-            ? { formattedAddress: '123 Salon St, San Diego, CA 92101' }
-            : { formattedAddress: '999 Mobile Base, San Diego, CA 92101' },
-        locationLatSnapshot: 32.7157,
-        locationLngSnapshot: -117.1611,
+        locationType: args.locationType,
         clientAddressId:
           args.locationType === ServiceLocationType.MOBILE
             ? (args.clientAddressId ?? fx.clients[0].clientAddressId)
             : null,
-        clientAddressSnapshot:
-          args.locationType === ServiceLocationType.MOBILE
-            ? { formattedAddress: '1 Client Ave, San Diego, CA 92101' }
-            : Prisma.JsonNull,
-        clientAddressLatSnapshot:
-        args.locationType === ServiceLocationType.MOBILE ? 32.7157 : null,
-        clientAddressLngSnapshot:
-        args.locationType === ServiceLocationType.MOBILE ? -117.1611 : null,
-        subtotalSnapshot: new Prisma.Decimal('100.00'),
-        serviceSubtotalSnapshot: new Prisma.Decimal('100.00'),
-        totalAmount: new Prisma.Decimal('100.00'),
-        totalDurationMinutes: durationMinutes,
+        status: BookingStatus.ACCEPTED,
+        durationMinutes,
         bufferMinutes,
-      },
+      }),
       select: { id: true },
     })
 
@@ -449,9 +553,9 @@ async function createLockedHold(args: {
             ? { formattedAddress: '1 Client Ave, San Diego, CA 92101' }
             : Prisma.JsonNull,
         clientAddressLatSnapshot:
-        args.locationType === ServiceLocationType.MOBILE ? 32.7157 : null,
+          args.locationType === ServiceLocationType.MOBILE ? 32.7157 : null,
         clientAddressLngSnapshot:
-        args.locationType === ServiceLocationType.MOBILE ? -117.1611 : null,
+          args.locationType === ServiceLocationType.MOBILE ? -117.1611 : null,
         durationMinutesSnapshot: durationMinutes,
         bufferMinutesSnapshot: bufferMinutes,
         endsAtSnapshot: requestedEnd,
@@ -486,8 +590,8 @@ async function createExpiredHold(args: {
       locationAddressSnapshot: {
         formattedAddress: '123 Salon St, San Diego, CA 92101',
       },
-    locationLatSnapshot: 32.7157,
-    locationLngSnapshot: -117.1611,
+      locationLatSnapshot: 32.7157,
+      locationLngSnapshot: -117.1611,
       clientAddressId: null,
       clientAddressSnapshot: Prisma.JsonNull,
       clientAddressLatSnapshot: null,
@@ -521,7 +625,9 @@ function partitionSettled(results: readonly PromiseSettledResult<unknown>[]) {
   return { fulfilled, rejected }
 }
 
-function expectExactlyOneSuccess(results: readonly PromiseSettledResult<unknown>[]) {
+function expectExactlyOneSuccess(
+  results: readonly PromiseSettledResult<unknown>[],
+) {
   const { fulfilled, rejected } = partitionSettled(results)
 
   expect(fulfilled).toHaveLength(1)
@@ -538,6 +644,33 @@ function getRejectedText(result: PromiseRejectedResult): string {
   }
 
   return String(reason)
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error) {
+    return [
+      error.name,
+      error.message,
+      'cause' in error ? String(error.cause) : '',
+    ].join('\n')
+  }
+
+  return String(error)
+}
+
+async function expectDbBookingOverlapRejection(
+  action: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    await action()
+  } catch (error: unknown) {
+    expect(errorText(error)).toContain(BOOKING_OVERLAP_CONSTRAINT)
+    return
+  }
+
+  throw new Error(
+    `Expected database overlap constraint ${BOOKING_OVERLAP_CONSTRAINT} to reject the write.`,
+  )
 }
 
 beforeAll(async () => {
@@ -800,35 +933,35 @@ describe('booking overlap concurrency integration', () => {
     ).resolves.toBe(1)
   })
 
-    it('does not let an expired hold block a booking while cleanup races the booking write', async () => {
+  it('does not let an expired hold block a booking while cleanup races the booking write', async () => {
     if (!fixtures) throw new Error('Missing fixtures')
-    const fx = fixtures
 
+    const fx = fixtures
     const start = futureUtc(14, 18, 0)
     const now = new Date()
 
     const expiredHoldId = await createExpiredHold({
-        clientId: fx.clients[0].clientId,
-        start,
-        locationId: fx.salonLocationId,
-        locationType: ServiceLocationType.SALON,
+      clientId: fx.clients[0].clientId,
+      start,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
     })
 
     const results = await Promise.allSettled([
-        createLockedBooking({
+      createLockedBooking({
         clientId: fx.clients[1].clientId,
         start,
         locationId: fx.salonLocationId,
         locationType: ServiceLocationType.SALON,
         sleepSecondsAfterCheck: 0.25,
-        }),
-        db.$transaction((tx) =>
+      }),
+      db.$transaction((tx) =>
         deleteExpiredHoldsForProfessional({
-            tx,
-            professionalId: fx.professionalId,
-            now,
+          tx,
+          professionalId: fx.professionalId,
+          now,
         }),
-        ),
+      ),
     ])
 
     const { fulfilled, rejected } = partitionSettled(results)
@@ -837,15 +970,144 @@ describe('booking overlap concurrency integration', () => {
     expect(rejected).toHaveLength(0)
 
     await expect(
-        db.booking.count({
+      db.booking.count({
         where: { professionalId: fx.professionalId },
-        }),
+      }),
     ).resolves.toBe(1)
 
     await expect(
-        db.bookingHold.count({
+      db.bookingHold.count({
         where: { id: expiredHoldId },
-        }),
+      }),
     ).resolves.toBe(0)
+  })
+
+  it('database rejects direct overlapping active bookings for the same professional', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const fx = fixtures
+
+    const startA = futureUtc(15, 18, 0)
+    const startB = futureUtc(15, 18, 30)
+
+    await createDirectBooking({
+      clientId: fx.clients[0].clientId,
+      start: startA,
+      locationId: fx.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
     })
+
+    await expectDbBookingOverlapRejection(() =>
+      createDirectBooking({
+        clientId: fx.clients[1].clientId,
+        start: startB,
+        locationId: fx.salonLocationId,
+        locationType: ServiceLocationType.SALON,
+        status: BookingStatus.PENDING,
+        durationMinutes: 60,
+        bufferMinutes: 15,
+      }),
+    )
+
+    await expect(
+      db.booking.count({
+        where: {
+          professionalId: fx.professionalId,
+        },
+      }),
+    ).resolves.toBe(1)
+  })
+
+  it('database allows direct adjacent active bookings for the same professional', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const startA = futureUtc(16, 18, 0)
+    const startB = futureUtc(16, 19, 15)
+
+    await createDirectBooking({
+      clientId: fixtures.clients[0].clientId,
+      start: startA,
+      locationId: fixtures.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await createDirectBooking({
+      clientId: fixtures.clients[1].clientId,
+      start: startB,
+      locationId: fixtures.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.PENDING,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await expect(
+      db.booking.count({
+        where: {
+          professionalId: fixtures.professionalId,
+        },
+      }),
+    ).resolves.toBe(2)
+  })
+
+  it('database allows active booking to overlap completed and cancelled bookings', async () => {
+    if (!fixtures) throw new Error('Missing fixtures')
+
+    const completedStart = futureUtc(17, 18, 0)
+    const cancelledStart = futureUtc(17, 20, 0)
+
+    await createDirectBooking({
+      clientId: fixtures.clients[0].clientId,
+      start: completedStart,
+      locationId: fixtures.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.COMPLETED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await createDirectBooking({
+      clientId: fixtures.clients[1].clientId,
+      start: addMinutes(completedStart, 30),
+      locationId: fixtures.suiteLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.ACCEPTED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await createDirectBooking({
+      clientId: fixtures.clients[0].clientId,
+      start: cancelledStart,
+      locationId: fixtures.salonLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.CANCELLED,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await createDirectBooking({
+      clientId: fixtures.clients[1].clientId,
+      start: addMinutes(cancelledStart, 30),
+      locationId: fixtures.suiteLocationId,
+      locationType: ServiceLocationType.SALON,
+      status: BookingStatus.PENDING,
+      durationMinutes: 60,
+      bufferMinutes: 15,
+    })
+
+    await expect(
+      db.booking.count({
+        where: {
+          professionalId: fixtures.professionalId,
+        },
+      }),
+    ).resolves.toBe(4)
+  })
 })
