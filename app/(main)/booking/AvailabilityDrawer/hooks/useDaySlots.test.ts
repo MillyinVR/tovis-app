@@ -238,6 +238,74 @@ describe('useDaySlots', () => {
     expect(mocks.fetch).not.toHaveBeenCalled()
   })
 
+  it('uses cached day slots on normal rerender and refetches after cache invalidation', async () => {
+    mocks.fetch.mockResolvedValueOnce(
+      makeResponse(makeDayResponse([SLOT_DAY_2_A])),
+    )
+
+    const props = makeHookProps({
+      summary: makeSummary({
+        availableDays: [{ date: DAY_2, slotCount: 1 }],
+        selectedDay: null,
+      }),
+      selectedDayYMD: DAY_2,
+    })
+
+    const { result, rerender } = renderHook(
+      (nextProps: HookProps) => useDaySlots(nextProps),
+      {
+        initialProps: props,
+      },
+    )
+
+    await waitFor(() => {
+      expect(result.current.loadingPrimarySlots).toBe(false)
+      expect(result.current.primarySlots).toEqual([SLOT_DAY_2_A])
+    })
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+
+    rerender({
+      ...props,
+      selectedDayYMD: null,
+    })
+
+    rerender(props)
+
+    await waitFor(() => {
+      expect(result.current.loadingPrimarySlots).toBe(false)
+      expect(result.current.primarySlots).toEqual([SLOT_DAY_2_A])
+    })
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+
+    mocks.fetch.mockResolvedValueOnce(
+      makeResponse(makeDayResponse([SLOT_DAY_2_B])),
+    )
+
+    act(() => {
+      result.current.invalidateDaySlotCache({
+        selectedDayYMD: DAY_2,
+        locationType: 'SALON',
+        clientAddressId: null,
+      })
+    })
+
+    rerender({
+      ...props,
+      selectedDayYMD: null,
+    })
+
+    rerender(props)
+
+    await waitFor(() => {
+      expect(result.current.loadingPrimarySlots).toBe(false)
+      expect(result.current.primarySlots).toEqual([SLOT_DAY_2_B])
+    })
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+  })
+
   it('fetches day slots when bootstrap selectedDay is stale', async () => {
     mocks.fetch.mockResolvedValueOnce(
       makeResponse(

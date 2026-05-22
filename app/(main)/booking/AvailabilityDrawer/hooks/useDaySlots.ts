@@ -463,7 +463,7 @@ export function useDaySlots(args: {
           {
             ...selectedDayRequest,
             forceRefresh,
-            useCacheForRead: false,
+            useCacheForRead: !forceRefresh,
             signal: controller.signal,
           },
           daySlotCacheRef.current,

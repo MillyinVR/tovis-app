@@ -34,6 +34,7 @@ type SlotButtonProps = {
   proId: string
   offeringId: string | null
   slotISO: string
+  slotIndex: number
   appointmentTz: string
   isSelected: boolean
   disabled: boolean
@@ -73,8 +74,8 @@ function periodOfHour(hour: number): Period {
   return 'EVENING'
 }
 
-function slotChipTestId(slotISO: string): string {
-  return `availability-slot-${slotISO}`
+function slotChipTestId(slotIndex: number): string {
+  return `availability-slot-${slotIndex}`
 }
 
 function buildEmptyCopy(period: Period, hasAnySlots: boolean): string {
@@ -126,6 +127,7 @@ const SlotButton = memo(function SlotButton({
   proId,
   offeringId,
   slotISO,
+  slotIndex,
   appointmentTz,
   isSelected,
   disabled,
@@ -143,7 +145,7 @@ const SlotButton = memo(function SlotButton({
 
   return (
     <button
-      data-testid={slotChipTestId(slotISO)}
+      data-testid={slotChipTestId(slotIndex)}
       type="button"
       onClick={() => {
         if (disabled) return
@@ -245,7 +247,7 @@ function SlotChips({
 
       <div className="mt-3 flex flex-wrap gap-2" aria-live="polite">
         {visibleSlots.length > 0 ? (
-          visibleSlots.map((slotISO) => {
+          visibleSlots.map((slotISO, slotIndex) => {
             const isSelected =
               selected?.proId === pro.id && selected?.slotISO === slotISO
 
@@ -255,6 +257,7 @@ function SlotChips({
                 proId={pro.id}
                 offeringId={offeringId}
                 slotISO={slotISO}
+                slotIndex={slotIndex}
                 appointmentTz={appointmentTz}
                 isSelected={isSelected}
                 disabled={disableSlotSelection}

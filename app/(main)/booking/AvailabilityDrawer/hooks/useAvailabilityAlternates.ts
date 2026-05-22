@@ -114,7 +114,10 @@ export function useAvailabilityAlternates(args: {
     summary?.request.serviceId ?? fallbackServiceId ?? null
 
   const effectiveOfferingId =
-    summary?.request.offeringId ?? summary?.offering.id ?? context.offeringId ?? null
+    summary?.request.offeringId ??
+    summary?.offering.id ??
+    context.offeringId ??
+    null
 
   const effectiveLocationId = summary?.request.locationId ?? null
 
@@ -291,9 +294,7 @@ export function useAvailabilityAlternates(args: {
 
         setData(null)
         setOtherSlots({})
-        setAlternatesError(
-          error instanceof Error ? error.message : "Couldn't load alternate pros.",
-        )
+        setAlternatesError("Couldn't load alternate pros.")
       } finally {
         if (
           !controller.signal.aborted &&

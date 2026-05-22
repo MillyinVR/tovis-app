@@ -63,15 +63,13 @@ function buildDaySwitchMetricKey(dayYMD: string) {
   return `day-switch:${dayYMD}`
 }
 
-function buildHoldRequestMetricKey(args: {
-  offeringId: string
-  slotISO: string
-}) {
-  return `hold:${args.offeringId}:${args.slotISO}`
-}
+function buildClientMetricKey(prefix: string): string {
+  const random =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-function buildContinueMetricKey(holdId: string) {
-  return `continue:${holdId}`
+  return `${prefix}:${random}`
 }
 
 const DTF_KEY_PROPS: Array<keyof Intl.DateTimeFormatOptions> = [
@@ -151,13 +149,11 @@ type AvailabilityTelemetryPayload = {
   serviceId?: string | null
   offeringId?: string | null
   selectedDayYMD?: string | null
-  slotISO?: string | null
   locationType?: ServiceLocationType | null
   bookingSource?: BookingSource
   hasOtherPros?: boolean
   dayCount?: number
   slotCount?: number
-  availabilityVersion?: string | null
 }
 
 declare global {
@@ -1030,7 +1026,6 @@ export default function AvailabilityDrawer(props: {
       bookingSource,
       hasOtherPros,
       dayCount: days.length,
-      availabilityVersion: summary.availabilityVersion,
     })
   }, [
     open,
@@ -1069,7 +1064,6 @@ export default function AvailabilityDrawer(props: {
       locationType: activeLocationType,
       bookingSource,
       slotCount: primarySlots.length,
-      availabilityVersion: summary.availabilityVersion,
     })
 
     const daySwitchMetricKey = buildDaySwitchMetricKey(selectedDayYMD)
@@ -1392,10 +1386,7 @@ export default function AvailabilityDrawer(props: {
     const effectiveOfferingId = offeringId || resolvedOfferingId
     if (!effectiveOfferingId || holding) return
 
-    const holdMetricKey = buildHoldRequestMetricKey({
-      offeringId: effectiveOfferingId,
-      slotISO,
-    })
+    const holdMetricKey = buildClientMetricKey('hold')
 
     let holdMetricFinished = false
 
@@ -1425,7 +1416,6 @@ export default function AvailabilityDrawer(props: {
         serviceId: effectiveServiceId,
         offeringId: effectiveOfferingId,
         selectedDayYMD,
-        slotISO,
         locationType: activeLocationType,
         bookingSource,
       },
@@ -1436,7 +1426,6 @@ export default function AvailabilityDrawer(props: {
       serviceId: effectiveServiceId,
       offeringId: effectiveOfferingId,
       selectedDayYMD,
-      slotISO,
       locationType: activeLocationType,
       bookingSource,
     })
@@ -1468,7 +1457,6 @@ export default function AvailabilityDrawer(props: {
           serviceId: effectiveServiceId,
           offeringId: effectiveOfferingId,
           selectedDayYMD,
-          slotISO,
           locationType: activeLocationType,
           bookingSource,
           statusCode: res.status,
@@ -1522,7 +1510,6 @@ export default function AvailabilityDrawer(props: {
         serviceId: effectiveServiceId,
         offeringId: effectiveOfferingId,
         selectedDayYMD,
-        slotISO: parsed.scheduledForISO,
         locationType: parsed.locationType ?? activeLocationType,
         bookingSource,
       })
@@ -1540,7 +1527,6 @@ export default function AvailabilityDrawer(props: {
             serviceId: effectiveServiceId,
             offeringId: effectiveOfferingId,
             selectedDayYMD,
-            slotISO,
             locationType: activeLocationType,
             bookingSource,
             outcome: 'network_error',
@@ -1577,7 +1563,6 @@ export default function AvailabilityDrawer(props: {
       serviceId: effectiveServiceId,
       offeringId: selected.offeringId,
       selectedDayYMD,
-      slotISO: selected.slotISO,
       locationType: activeLocationType,
       bookingSource,
     })
@@ -1596,7 +1581,7 @@ export default function AvailabilityDrawer(props: {
       return
     }
 
-    const continueMetricKey = buildContinueMetricKey(payload.holdId)
+    const continueMetricKey = buildClientMetricKey('continue')
 
     startAvailabilityMetric({
       metric: 'continue_to_add_ons_ms',
@@ -1606,10 +1591,8 @@ export default function AvailabilityDrawer(props: {
         serviceId: effectiveServiceId,
         offeringId: payload.offeringId,
         selectedDayYMD,
-        slotISO: payload.slotISO,
         locationType: payload.locationType,
         bookingSource: payload.bookingSource,
-        holdId: payload.holdId,
       },
     })
 

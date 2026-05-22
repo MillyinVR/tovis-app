@@ -4,7 +4,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DrawerContext, ServiceLocationType } from '../types'
+import type {
+  AvailabilityBootstrapResponse,
+  DrawerContext,
+  ServiceLocationType,
+} from '../types'
 import { clearAvailabilitySummaryPrefetchCache } from '../utils/availabilityPrefetch'
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +45,8 @@ vi.mock('../contract', async () => {
   }
 })
 
+type BootstrapOk = Extract<AvailabilityBootstrapResponse, { ok: true }>
+
 type HookProps = {
   open: boolean
   context: DrawerContext
@@ -50,24 +56,15 @@ type HookProps = {
 }
 
 function makeSummary(
-  overrides?: Partial<Record<string, unknown>> & {
-    request?: Partial<{
-      professionalId: string
-      serviceId: string
-      offeringId: string | null
-      locationType: ServiceLocationType
-      locationId: string
-      clientAddressId: string | null
-      addOnIds: string[]
-      durationMinutes: number
-    }>
+  overrides?: Omit<Partial<BootstrapOk>, 'request'> & {
+    request?: Partial<BootstrapOk['request']>
   },
-) {
-  const request = {
+): BootstrapOk {
+  const request: BootstrapOk['request'] = {
     professionalId: 'pro_1',
     serviceId: 'service_1',
     offeringId: null,
-    locationType: 'SALON' as ServiceLocationType,
+    locationType: 'SALON',
     locationId: 'loc_1',
     clientAddressId: null,
     addOnIds: [],
@@ -75,61 +72,75 @@ function makeSummary(
     ...(overrides?.request ?? {}),
   }
 
-  return {
-  ok: true,
-  mode: 'BOOTSTRAP',
-  availabilityVersion: 'av_v1',
-  generatedAt: '2026-03-10T12:00:00.000Z',
-  mediaId: null,
-  serviceId: request.serviceId,
-  professionalId: request.professionalId,
-  serviceName: 'Haircut',
-  serviceCategoryName: 'Hair',
-  locationType: request.locationType,
-  locationId: request.locationId,
-  timeZone: 'America/Los_Angeles',
-  stepMinutes: 15,
-  leadTimeMinutes: 0,
-  locationBufferMinutes: 15,
-  adjacencyBufferMinutes: 15,
-  maxDaysAhead: 30,
-  durationMinutes: request.durationMinutes,
-  windowStartDate: '2026-03-11',
-  windowEndDate: '2026-03-12',
-  nextStartDate: null,
-  hasMoreDays: false,
-  selectedDay: {
-    date: '2026-03-11',
-    slots: ['2026-03-11T17:00:00.000Z'],
-  },
-  primaryPro: {
-    id: 'pro_1',
-    businessName: 'Test Pro',
-    avatarUrl: null,
-    location: 'Los Angeles',
-    offeringId: 'offering_1',
-    isCreator: true,
+  const summary: BootstrapOk = {
+    ok: true,
+    mode: 'BOOTSTRAP',
+    availabilityVersion: 'av_v1',
+    generatedAt: '2026-03-10T12:00:00.000Z',
+    mediaId: null,
+    serviceId: request.serviceId,
+    professionalId: request.professionalId,
+    serviceName: 'Haircut',
+    serviceCategoryName: 'Hair',
+    locationType: request.locationType,
+    locationId: request.locationId,
     timeZone: 'America/Los_Angeles',
-    locationId: 'loc_1',
-  },
-  availableDays: [
-    { date: '2026-03-11', slotCount: 4 },
-    { date: '2026-03-12', slotCount: 2 },
-  ],
-  otherPros: [],
-  waitlistSupported: true,
-  offering: {
-    id: 'offering_1',
-    offersInSalon: true,
-    offersMobile: true,
-    salonDurationMinutes: 60,
-    mobileDurationMinutes: 75,
-    salonPriceStartingAt: '100.00',
-    mobilePriceStartingAt: '120.00',
-  },
-  ...overrides,
-  request,
-}
+    stepMinutes: 15,
+    leadTimeMinutes: 0,
+    locationBufferMinutes: 15,
+    adjacencyBufferMinutes: 15,
+    maxDaysAhead: 30,
+    durationMinutes: request.durationMinutes,
+    windowStartDate: '2026-03-11',
+    windowEndDate: '2026-03-12',
+    nextStartDate: null,
+    hasMoreDays: false,
+    selectedDay: {
+      date: '2026-03-11',
+      slots: ['2026-03-11T17:00:00.000Z'],
+    },
+    primaryPro: {
+      id: 'pro_1',
+      businessName: 'Test Pro',
+      avatarUrl: null,
+      location: 'Los Angeles',
+      offeringId: 'offering_1',
+      isCreator: true,
+      timeZone: 'America/Los_Angeles',
+      locationId: request.locationId,
+    },
+    availableDays: [
+      { date: '2026-03-11', slotCount: 4 },
+      { date: '2026-03-12', slotCount: 2 },
+    ],
+    otherPros: [],
+    waitlistSupported: true,
+    offering: {
+      id: 'offering_1',
+      offersInSalon: true,
+      offersMobile: true,
+      salonDurationMinutes: 60,
+      mobileDurationMinutes: 75,
+      salonPriceStartingAt: '100.00',
+      mobilePriceStartingAt: '120.00',
+    },
+    ...(overrides ?? {}),
+    request,
+  }
+
+  return {
+    ...summary,
+    professionalId: request.professionalId,
+    serviceId: request.serviceId,
+    locationType: request.locationType,
+    locationId: request.locationId,
+    durationMinutes: request.durationMinutes,
+    primaryPro: {
+      ...summary.primaryPro,
+      locationId: request.locationId,
+      ...(overrides?.primaryPro ?? {}),
+    },
+  }
 }
 
 function makeContext(overrides?: Partial<DrawerContext>): DrawerContext {
@@ -186,7 +197,6 @@ async function flushMicrotasks(times = 3) {
 describe('useAvailability', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-
     clearAvailabilitySummaryPrefetchCache()
 
     mocks.useRouter.mockReturnValue({
@@ -652,5 +662,84 @@ describe('useAvailability', () => {
     )
     expect(result.current.error).toBe('Please log in to view availability.')
     expect(result.current.data).toBeNull()
+  })
+
+  it('loads more availability days and appends them to the current window', async () => {
+    const initialSummary = makeSummary({
+      hasMoreDays: true,
+      windowStartDate: '2026-03-11',
+      windowEndDate: '2026-03-12',
+      nextStartDate: '2026-03-13',
+      availableDays: [
+        { date: '2026-03-11', slotCount: 4 },
+        { date: '2026-03-12', slotCount: 2 },
+      ],
+    })
+
+    const nextSummary = makeSummary({
+      availabilityVersion: 'av_v2',
+      windowStartDate: '2026-03-13',
+      windowEndDate: '2026-03-14',
+      nextStartDate: null,
+      hasMoreDays: false,
+      selectedDay: null,
+      availableDays: [
+        { date: '2026-03-13', slotCount: 3 },
+        { date: '2026-03-14', slotCount: 1 },
+      ],
+    })
+
+    mocks.fetch
+      .mockResolvedValueOnce(makeResponse(initialSummary))
+      .mockResolvedValueOnce(makeResponse(nextSummary))
+
+    const { useAvailability } = await import('./useAvailability')
+
+    const { result } = renderHook(
+      (props: HookProps) =>
+        useAvailability(
+          props.open,
+          props.context,
+          props.locationType,
+          props.clientAddressId,
+          props.includeOtherPros,
+        ),
+      {
+        initialProps: makeHookProps({
+          includeOtherPros: false,
+        }),
+      },
+    )
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+
+    expect(result.current.data?.availableDays).toEqual([
+      { date: '2026-03-11', slotCount: 4 },
+      { date: '2026-03-12', slotCount: 2 },
+    ])
+    expect(result.current.hasMoreDays).toBe(true)
+
+    await act(async () => {
+      await result.current.loadMore()
+      await flushMicrotasks(5)
+    })
+
+    await waitFor(() => {
+      expect(result.current.loadingMore).toBe(false)
+    })
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(2)
+    expect(result.current.hasMoreDays).toBe(false)
+    expect(result.current.data?.windowStartDate).toBe('2026-03-11')
+    expect(result.current.data?.windowEndDate).toBe('2026-03-14')
+    expect(result.current.data?.nextStartDate).toBeNull()
+    expect(result.current.data?.availableDays).toEqual([
+      { date: '2026-03-11', slotCount: 4 },
+      { date: '2026-03-12', slotCount: 2 },
+      { date: '2026-03-13', slotCount: 3 },
+      { date: '2026-03-14', slotCount: 1 },
+    ])
   })
 })
