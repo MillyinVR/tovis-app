@@ -45,23 +45,32 @@ export async function GET(req: Request) {
     const hrefRaw = (doc.url ?? doc.imageUrl ?? '').trim()
     if (!hrefRaw) return jsonFail(404, 'Document has no URL.')
 
-    // ✅ Single parsing logic: handles supabase://... AND real storage URLs
     const ptr = parseSupabasePointer(hrefRaw)
-    if (ptr) {
-      const admin = getSupabaseAdmin()
-      const { data, error } = await admin.storage.from(ptr.bucket).createSignedUrl(ptr.path, 60 * 10) // 10 min
-      if (error) return jsonFail(500, error.message || 'Failed to sign URL.')
 
-      const signed = safeUrl((data as { signedUrl?: unknown } | null)?.signedUrl)
-      if (!signed) return jsonFail(500, 'Signed URL missing.')
-      return NextResponse.redirect(signed, 302)
+    if (!ptr) {
+      return jsonFail(400, 'Unsupported document URL format.')
     }
 
-    // ✅ Non-supabase URLs: only allow http(s)
-    const href = safeUrl(hrefRaw)
-    if (href) return NextResponse.redirect(href, 302)
+    if (ptr.bucket !== 'media-private') {
+      return jsonFail(400, 'Invalid document bucket.')
+    }
 
-    return jsonFail(400, 'Unsupported document URL format.')
+    const admin = getSupabaseAdmin()
+    const { data, error } = await admin.storage
+      .from(ptr.bucket)
+      .createSignedUrl(ptr.path, 60 * 10)
+
+    if (error) {
+      return jsonFail(500, error.message || 'Failed to sign URL.')
+    }
+
+    const signed = safeUrl((data as { signedUrl?: unknown } | null)?.signedUrl)
+
+    if (!signed) {
+      return jsonFail(500, 'Signed URL missing.')
+    }
+
+    return NextResponse.redirect(signed, 302)
   } catch (e) {
     console.error('GET /api/admin/verification-docs/open error', e)
     return jsonFail(500, 'Internal server error')

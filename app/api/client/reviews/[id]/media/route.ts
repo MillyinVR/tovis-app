@@ -1,15 +1,15 @@
 // app/api/client/reviews/[id]/media/route.ts
-import { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
+
 import { MediaType, MediaVisibility, Role } from '@prisma/client'
+import { NextRequest } from 'next/server'
 
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
-import { pickString } from '@/lib/pick'
-
-import { BUCKETS } from '@/lib/storageBuckets'
-import { safeUrl, resolveStoragePointers } from '@/lib/media'
+import { resolveStoragePointers, safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { pickString } from '@/lib/pick'
+import { prisma } from '@/lib/prisma'
+import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 
 export const dynamic = 'force-dynamic'
@@ -22,7 +22,9 @@ const PATH_MAX = 2048
 const BUCKET_MAX = 128
 const SIGNED_TTL_SECONDS = 60 * 10
 
-type AddReviewMediaBody = { media?: unknown }
+type AddReviewMediaBody = {
+  media?: unknown
+}
 
 type IncomingMediaItem = {
   url: string
@@ -34,12 +36,20 @@ type IncomingMediaItem = {
   thumbPath?: string | null
 }
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
+type ResolvedMediaItem = {
+  mediaType: MediaType
+  storageBucket: string
+  storagePath: string
+  thumbBucket: string | null
+  thumbPath: string | null
 }
 
-function isMediaType(x: unknown): x is MediaType {
-  return x === MediaType.IMAGE || x === MediaType.VIDEO
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function isMediaType(value: unknown): value is MediaType {
+  return value === MediaType.IMAGE || value === MediaType.VIDEO
 }
 
 function isPublicBucket(bucket: string): boolean {
@@ -51,25 +61,30 @@ function isPrivateBucket(bucket: string): boolean {
 }
 
 function safeBucket(raw: unknown): string | null {
-  const s = pickString(raw)
-  if (!s) return null
-  if (s.length > BUCKET_MAX) return null
-  if (s === BUCKETS.mediaPrivate) return BUCKETS.mediaPrivate
-  if (s === BUCKETS.mediaPublic) return BUCKETS.mediaPublic
+  const value = pickString(raw)
+
+  if (!value) return null
+  if (value.length > BUCKET_MAX) return null
+  if (value === BUCKETS.mediaPrivate) return BUCKETS.mediaPrivate
+  if (value === BUCKETS.mediaPublic) return BUCKETS.mediaPublic
+
   return null
 }
 
 function safeStoragePath(raw: unknown): string | null {
-  const s = pickString(raw)
-  if (!s) return null
-  if (s.length > PATH_MAX) return null
-  if (s.startsWith('/')) return null
-  if (s.includes('..')) return null
-  return s
+  const value = pickString(raw)
+
+  if (!value) return null
+  if (value.length > PATH_MAX) return null
+  if (value.startsWith('/')) return null
+  if (value.includes('..')) return null
+
+  return value
 }
 
 function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
   if (!Array.isArray(bodyMedia)) return []
+
   const out: IncomingMediaItem[] = []
 
   for (const raw of bodyMedia) {
@@ -79,12 +94,17 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
     if (!url) continue
 
     const thumbUrlRaw = raw.thumbUrl
-    const thumbUrl = thumbUrlRaw == null || thumbUrlRaw === '' ? null : safeUrl(thumbUrlRaw)
+    const thumbUrl =
+      thumbUrlRaw === null || thumbUrlRaw === undefined || thumbUrlRaw === ''
+        ? null
+        : safeUrl(thumbUrlRaw)
+
     if (thumbUrlRaw && !thumbUrl) continue
 
-    const mediaType = isMediaType(raw.mediaType) ? raw.mediaType : MediaType.IMAGE
+    const mediaType = isMediaType(raw.mediaType)
+      ? raw.mediaType
+      : MediaType.IMAGE
 
-    // NOTE: we accept these fields but we will re-derive + validate below
     out.push({
       url,
       thumbUrl,
@@ -99,28 +119,45 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
   return out
 }
 
-function enforceCaps(items: IncomingMediaItem[]) {
+function enforceCaps(items: IncomingMediaItem[]): string | null {
   if (items.length > MAX_TOTAL) {
     return `You can upload up to ${MAX_CLIENT_IMAGES} images + ${MAX_CLIENT_VIDEOS} video (${MAX_TOTAL} total).`
   }
 
   let images = 0
   let videos = 0
-  for (const m of items) {
-    if (m.mediaType === MediaType.VIDEO) videos++
-    else images++
+
+  for (const item of items) {
+    if (item.mediaType === MediaType.VIDEO) {
+      videos += 1
+    } else {
+      images += 1
+    }
   }
 
-  if (images > MAX_CLIENT_IMAGES) return `You can upload up to ${MAX_CLIENT_IMAGES} images.`
-  if (videos > MAX_CLIENT_VIDEOS) return `You can upload up to ${MAX_CLIENT_VIDEOS} video.`
+  if (images > MAX_CLIENT_IMAGES) {
+    return `You can upload up to ${MAX_CLIENT_IMAGES} images.`
+  }
+
+  if (videos > MAX_CLIENT_VIDEOS) {
+    return `You can upload up to ${MAX_CLIENT_VIDEOS} video.`
+  }
+
   return null
 }
 
-async function signObjectUrl(bucket: string, path: string): Promise<string | null> {
+async function signObjectUrl(
+  bucket: string,
+  path: string,
+): Promise<string | null> {
   try {
     const admin = getSupabaseAdmin()
-    const { data, error } = await admin.storage.from(bucket).createSignedUrl(path, SIGNED_TTL_SECONDS)
+    const { data, error } = await admin.storage
+      .from(bucket)
+      .createSignedUrl(path, SIGNED_TTL_SECONDS)
+
     if (error) return null
+
     return safeUrl(data?.signedUrl)
   } catch {
     return null
@@ -133,61 +170,142 @@ async function signObjectUrl(bucket: string, path: string): Promise<string | nul
  * For public objects: getPublicUrl + HEAD.
  */
 async function objectExists(bucket: string, path: string): Promise<boolean> {
-  // private -> signed url
   if (isPrivateBucket(bucket)) {
     const signed = await signObjectUrl(bucket, path)
+
     if (!signed) return false
+
     const head = await fetch(signed, { method: 'HEAD' }).catch(() => null)
+
     if (head?.ok) return true
     if (head && (head.status === 403 || head.status === 404)) return false
+
     const get = await fetch(signed, { method: 'GET' }).catch(() => null)
+
     return Boolean(get?.ok)
   }
 
-  // public -> public url
   if (isPublicBucket(bucket)) {
     const admin = getSupabaseAdmin()
     const { data } = admin.storage.from(bucket).getPublicUrl(path)
-    const u = safeUrl(data?.publicUrl)
-    if (!u) return false
-    const head = await fetch(u, { method: 'HEAD' }).catch(() => null)
+    const url = safeUrl(data?.publicUrl)
+
+    if (!url) return false
+
+    const head = await fetch(url, { method: 'HEAD' }).catch(() => null)
+
     if (head?.ok) return true
     if (head && (head.status === 403 || head.status === 404)) return false
-    const get = await fetch(u, { method: 'GET' }).catch(() => null)
+
+    const get = await fetch(url, { method: 'GET' }).catch(() => null)
+
     return Boolean(get?.ok)
   }
 
   return false
 }
 
-function errMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
+function resolveReviewMediaItem(item: IncomingMediaItem): ResolvedMediaItem {
+  const pointers = resolveStoragePointers({
+    url: item.url,
+    thumbUrl: item.thumbUrl ?? null,
+    storageBucket: item.storageBucket ?? null,
+    storagePath: item.storagePath ?? null,
+    thumbBucket: item.thumbBucket ?? null,
+    thumbPath: item.thumbPath ?? null,
+  })
+
+  if (!pointers) {
+    throw new Error(
+      'Media must include storageBucket/storagePath or a parsable Supabase URL.',
+    )
+  }
+
+  const storageBucket = safeBucket(pointers.storageBucket)
+  const storagePath = safeStoragePath(pointers.storagePath)
+  const thumbBucket = pointers.thumbBucket ? safeBucket(pointers.thumbBucket) : null
+  const thumbPath = pointers.thumbPath ? safeStoragePath(pointers.thumbPath) : null
+
+  if (!storageBucket || !storagePath) {
+    throw new Error('Invalid storageBucket/storagePath.')
+  }
+
+  if ((thumbBucket && !thumbPath) || (!thumbBucket && thumbPath)) {
+    throw new Error('thumbBucket and thumbPath must be provided together.')
+  }
+
+  if (storageBucket !== BUCKETS.mediaPublic) {
+    throw new Error(`Review media must upload to ${BUCKETS.mediaPublic}.`)
+  }
+
+  if (thumbBucket && thumbBucket !== BUCKETS.mediaPublic) {
+    throw new Error(`Review thumb must upload to ${BUCKETS.mediaPublic}.`)
+  }
+
+  return {
+    mediaType: item.mediaType,
+    storageBucket,
+    storagePath,
+    thumbBucket,
+    thumbPath,
+  }
 }
 
-export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+function errMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+export async function POST(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
   try {
     const auth = await requireClient()
+
     if (!auth.ok) return auth.res
+
     const { user, clientId } = auth
 
     const { id } = await context.params
     const reviewId = pickString(id)
-    if (!reviewId) return jsonFail(400, 'Missing review id.')
+
+    if (!reviewId) {
+      return jsonFail(400, 'Missing review id.')
+    }
 
     const body = (await req.json().catch(() => ({}))) as AddReviewMediaBody
     const incoming = parseMedia(body.media)
-    if (!incoming.length) return jsonFail(400, 'No valid media provided.')
+
+    if (!incoming.length) {
+      return jsonFail(400, 'No valid media provided.')
+    }
 
     const capError = enforceCaps(incoming)
-    if (capError) return jsonFail(400, capError)
+
+    if (capError) {
+      return jsonFail(400, capError)
+    }
 
     const review = await prisma.review.findUnique({
-      where: { id: reviewId },
-      select: { id: true, clientId: true, professionalId: true, bookingId: true },
+      where: {
+        id: reviewId,
+      },
+      select: {
+        id: true,
+        clientId: true,
+        professionalId: true,
+        bookingId: true,
+      },
     })
 
-    if (!review) return jsonFail(404, 'Review not found.')
-    if (review.clientId !== clientId) return jsonFail(403, 'Forbidden.')
+    if (!review) {
+      return jsonFail(404, 'Review not found.')
+    }
+
+    if (review.clientId !== clientId) {
+      return jsonFail(403, 'Forbidden.')
+    }
+
     if (!review.bookingId) {
       return jsonFail(
         409,
@@ -195,84 +313,72 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       )
     }
 
-    // include existing uploads in cap
     const existingCount = await prisma.mediaAsset.count({
-      where: { reviewId: review.id, uploadedByRole: Role.CLIENT },
+      where: {
+        reviewId: review.id,
+        uploadedByRole: Role.CLIENT,
+      },
     })
+
     if (existingCount + incoming.length > MAX_TOTAL) {
-      return jsonFail(400, `This review already has ${existingCount} upload(s). Max is ${MAX_TOTAL}.`)
+      return jsonFail(
+        400,
+        `This review already has ${existingCount} upload(s). Max is ${MAX_TOTAL}.`,
+      )
     }
 
-    // Resolve + validate pointers (Option A)
-    const resolved = incoming.map((m) => {
-      const ptrs = resolveStoragePointers({
-        url: m.url,
-        thumbUrl: m.thumbUrl ?? null,
-        storageBucket: m.storageBucket ?? null,
-        storagePath: m.storagePath ?? null,
-        thumbBucket: m.thumbBucket ?? null,
-        thumbPath: m.thumbPath ?? null,
-      })
-      if (!ptrs) throw new Error('Media must include storageBucket/storagePath (or a parsable Supabase URL).')
+    const resolved: ResolvedMediaItem[] = []
 
-      const storageBucket = safeBucket(ptrs.storageBucket)
-      const storagePath = safeStoragePath(ptrs.storagePath)
-      const thumbBucket = ptrs.thumbBucket ? safeBucket(ptrs.thumbBucket) : null
-      const thumbPath = ptrs.thumbPath ? safeStoragePath(ptrs.thumbPath) : null
-
-      if (!storageBucket || !storagePath) {
-        throw new Error('Invalid storageBucket/storagePath.')
-      }
-      if ((thumbBucket && !thumbPath) || (!thumbBucket && thumbPath)) {
-        throw new Error('thumbBucket and thumbPath must be provided together.')
-      }
-
-      return {
-        mediaType: m.mediaType,
-        storageBucket,
-        storagePath,
-        thumbBucket,
-        thumbPath,
-      }
-    })
-
-    // Verify objects exist before DB write (prevents broken media rows)
-    for (const m of resolved) {
-      const ok = await objectExists(m.storageBucket, m.storagePath)
-      if (!ok) return jsonFail(400, 'Uploaded file not found in storage.')
-      if (m.thumbBucket && m.thumbPath) {
-        const okThumb = await objectExists(m.thumbBucket, m.thumbPath)
-        if (!okThumb) return jsonFail(400, 'Uploaded thumb not found in storage.')
+    for (const item of incoming) {
+      try {
+        resolved.push(resolveReviewMediaItem(item))
+      } catch (error: unknown) {
+        return jsonFail(400, errMessage(error))
       }
     }
+
+    for (const media of resolved) {
+      const fileExists = await objectExists(
+        media.storageBucket,
+        media.storagePath,
+      )
+
+      if (!fileExists) {
+        return jsonFail(400, 'Uploaded file not found in storage.')
+      }
+
+      if (media.thumbBucket && media.thumbPath) {
+        const thumbExists = await objectExists(
+          media.thumbBucket,
+          media.thumbPath,
+        )
+
+        if (!thumbExists) {
+          return jsonFail(400, 'Uploaded thumb not found in storage.')
+        }
+      }
+    }
+
+    const bookingId = review.bookingId
 
     const created = await prisma.$transaction(async (tx) => {
       const rows = await Promise.all(
-        resolved.map((m) =>
+        resolved.map((media) =>
           tx.mediaAsset.create({
             data: {
               professionalId: review.professionalId,
-              bookingId: review.bookingId!,
+              bookingId,
               reviewId: review.id,
-
-              // ✅ Option A: canonical pointers
-              storageBucket: m.storageBucket,
-              storagePath: m.storagePath,
-              thumbBucket: m.thumbBucket,
-              thumbPath: m.thumbPath,
-
-              // ✅ Legacy convenience: only store url fields for PUBLIC bucket (optional)
+              storageBucket: media.storageBucket,
+              storagePath: media.storagePath,
+              thumbBucket: media.thumbBucket,
+              thumbPath: media.thumbPath,
               url: null,
               thumbUrl: null,
-
-              mediaType: m.mediaType,
-
-              // Review media is PUBLIC
+              mediaType: media.mediaType,
               visibility: MediaVisibility.PUBLIC,
-
               uploadedByUserId: user.id,
               uploadedByRole: Role.CLIENT,
-
               isFeaturedInPortfolio: false,
               isEligibleForLooks: false,
               reviewLocked: true,
@@ -294,30 +400,35 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       )
 
       const updated = await tx.review.findUnique({
-        where: { id: reviewId },
-        include: { mediaAssets: true },
+        where: {
+          id: reviewId,
+        },
+        include: {
+          mediaAssets: true,
+        },
       })
 
-      return { rows, updated }
+      return {
+        rows,
+        updated,
+      }
     })
 
-    // Response: return render-safe URLs (signed/public), without mutating DB
     const createdForUI = await Promise.all(
-      created.rows.map(async (m) => {
+      created.rows.map(async (media) => {
         const { renderUrl, renderThumbUrl } = await renderMediaUrls({
-          storageBucket: m.storageBucket,
-          storagePath: m.storagePath,
-          thumbBucket: m.thumbBucket,
-          thumbPath: m.thumbPath,
-          url: m.url,
-          thumbUrl: m.thumbUrl,
+          storageBucket: media.storageBucket,
+          storagePath: media.storagePath,
+          thumbBucket: media.thumbBucket,
+          thumbPath: media.thumbPath,
+          url: media.url,
+          thumbUrl: media.thumbUrl,
         })
 
         return {
-          ...m,
+          ...media,
           renderUrl,
           renderThumbUrl,
-          // optional: keep url/thumbUrl render-safe for UI convenience
           url: renderUrl,
           thumbUrl: renderThumbUrl,
         }
@@ -332,13 +443,18 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       },
       201,
     )
-  } catch (e: unknown) {
-    console.error('POST /api/client/reviews/[id]/media error', e)
-    const msg = errMessage(e)
+  } catch (error: unknown) {
+    console.error('POST /api/client/reviews/[id]/media error', error)
+
+    const message = errMessage(error)
     const safe =
-      msg.includes('Media') || msg.includes('storage') || msg.includes('thumb')
-        ? msg
+      message.includes('Media') ||
+      message.includes('storage') ||
+      message.includes('thumb') ||
+      message.includes('Review')
+        ? message
         : 'Internal server error'
+
     return jsonFail(500, safe)
   }
 }
