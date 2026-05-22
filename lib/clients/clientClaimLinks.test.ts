@@ -15,10 +15,19 @@ const mocks = vi.hoisted(() => ({
       updateMany: vi.fn(),
     },
   },
+  createProClientInviteToken: vi.fn(),
+  hashProClientInviteToken: vi.fn(),
+  normalizeProClientInviteToken: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
+}))
+
+vi.mock('@/lib/clients/proClientInviteTokens', () => ({
+  createProClientInviteToken: mocks.createProClientInviteToken,
+  hashProClientInviteToken: mocks.hashProClientInviteToken,
+  normalizeProClientInviteToken: mocks.normalizeProClientInviteToken,
 }))
 
 import {
@@ -30,7 +39,8 @@ import {
 
 function makeLink(overrides?: {
   id?: string
-  token?: string
+  token?: string | null
+  tokenHash?: string | null
   professionalId?: string
   clientId?: string
   bookingId?: string
@@ -56,7 +66,9 @@ function makeLink(overrides?: {
 }) {
   return {
     id: overrides?.id ?? 'invite_1',
-    token: overrides?.token ?? 'token_1',
+    token: overrides && 'token' in overrides ? overrides.token : null,
+    tokenHash:
+      overrides && 'tokenHash' in overrides ? overrides.tokenHash : 'hash:raw_token_1',
     professionalId: overrides?.professionalId ?? 'pro_1',
     clientId: overrides?.clientId ?? 'client_1',
     bookingId: overrides?.bookingId ?? 'booking_1',
@@ -102,14 +114,23 @@ function makeLink(overrides?: {
   }
 }
 
-describe('upsertClientClaimLink', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
+beforeEach(() => {
+  vi.clearAllMocks()
 
-    mocks.prisma.proClientInvite.findUnique.mockResolvedValue(null)
-    mocks.prisma.proClientInvite.create.mockResolvedValue(makeLink())
-    mocks.prisma.proClientInvite.update.mockResolvedValue(makeLink())
+  mocks.createProClientInviteToken.mockReturnValue('raw_token_1')
+  mocks.hashProClientInviteToken.mockImplementation(
+    (token: string) => `hash:${token.trim()}`,
+  )
+  mocks.normalizeProClientInviteToken.mockImplementation((value: unknown) => {
+    if (typeof value !== 'string') return null
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : null
   })
+
+  mocks.prisma.proClientInvite.findUnique.mockResolvedValue(null)
+  mocks.prisma.proClientInvite.create.mockResolvedValue(makeLink())
+  mocks.prisma.proClientInvite.update.mockResolvedValue(makeLink())
+})
 
   it('creates a new pending link when none exists for the booking', async () => {
     const createdLink = makeLink({
@@ -124,6 +145,16 @@ describe('upsertClientClaimLink', () => {
     })
 
     mocks.prisma.proClientInvite.create.mockResolvedValueOnce(createdLink)
+
+    mocks.createProClientInviteToken.mockReturnValue('raw_token_1')
+    mocks.hashProClientInviteToken.mockImplementation(
+      (token: string) => `hash:${token.trim()}`,
+    )
+    mocks.normalizeProClientInviteToken.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return null
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    })
 
     const result = await upsertClientClaimLink({
       professionalId: 'pro_1',
@@ -150,11 +181,16 @@ describe('upsertClientClaimLink', () => {
         invitedPhone: null,
         preferredContactMethod: ContactMethod.EMAIL,
         status: ProClientInviteStatus.PENDING,
+        token: null,
+        tokenHash: 'hash:raw_token_1',
       },
       select: expect.any(Object),
     })
 
-    expect(result).toEqual(createdLink)
+    expect(result).toEqual({
+      ...createdLink,
+      rawToken: 'raw_token_1',
+    })
   })
 
   it('allows a phone-only invite when preferredContactMethod is omitted', async () => {
@@ -165,6 +201,16 @@ describe('upsertClientClaimLink', () => {
     })
 
     mocks.prisma.proClientInvite.create.mockResolvedValueOnce(createdLink)
+
+    mocks.createProClientInviteToken.mockReturnValue('raw_token_1')
+    mocks.hashProClientInviteToken.mockImplementation(
+      (token: string) => `hash:${token.trim()}`,
+    )
+    mocks.normalizeProClientInviteToken.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return null
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    })
 
     const result = await upsertClientClaimLink({
       professionalId: 'pro_1',
@@ -190,11 +236,16 @@ describe('upsertClientClaimLink', () => {
         invitedPhone: '+16195551234',
         preferredContactMethod: null,
         status: ProClientInviteStatus.PENDING,
+        token: null,
+        tokenHash: 'hash:raw_token_1',
       },
       select: expect.any(Object),
     })
 
-    expect(result).toEqual(createdLink)
+    expect(result).toEqual({
+      ...createdLink,
+      rawToken: 'raw_token_1',
+    })
   })
 
   it('allows an email-only invite when preferredContactMethod is omitted', async () => {
@@ -205,6 +256,16 @@ describe('upsertClientClaimLink', () => {
     })
 
     mocks.prisma.proClientInvite.create.mockResolvedValueOnce(createdLink)
+
+    mocks.createProClientInviteToken.mockReturnValue('raw_token_1')
+    mocks.hashProClientInviteToken.mockImplementation(
+      (token: string) => `hash:${token.trim()}`,
+    )
+    mocks.normalizeProClientInviteToken.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return null
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    })
 
     const result = await upsertClientClaimLink({
       professionalId: 'pro_1',
@@ -230,11 +291,16 @@ describe('upsertClientClaimLink', () => {
         invitedPhone: null,
         preferredContactMethod: null,
         status: ProClientInviteStatus.PENDING,
+        token: null,
+        tokenHash: 'hash:raw_token_1',
       },
       select: expect.any(Object),
     })
 
-    expect(result).toEqual(createdLink)
+    expect(result).toEqual({
+      ...createdLink,
+      rawToken: 'raw_token_1',
+    })
   })
 
   it('returns a revoked existing link unchanged', async () => {
@@ -246,6 +312,16 @@ describe('upsertClientClaimLink', () => {
     })
 
     mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(revokedLink)
+
+    mocks.createProClientInviteToken.mockReturnValue('raw_token_1')
+    mocks.hashProClientInviteToken.mockImplementation(
+      (token: string) => `hash:${token.trim()}`,
+    )
+    mocks.normalizeProClientInviteToken.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return null
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    })
 
     const result = await upsertClientClaimLink({
       professionalId: 'pro_2',
@@ -259,12 +335,17 @@ describe('upsertClientClaimLink', () => {
 
     expect(mocks.prisma.proClientInvite.update).not.toHaveBeenCalled()
     expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
-    expect(result).toEqual(revokedLink)
+    expect(result).toEqual({
+      ...revokedLink,
+      rawToken: null,
+    })
   })
 
-  it('returns the existing pending link unchanged when nothing changed', async () => {
+  it('backfills tokenHash for an unchanged legacy pending link', async () => {
     const existingLink = makeLink({
       id: 'invite_existing_1',
+      token: 'legacy_token_1',
+      tokenHash: null,
       professionalId: 'pro_1',
       clientId: 'client_1',
       bookingId: 'booking_1',
@@ -276,7 +357,13 @@ describe('upsertClientClaimLink', () => {
       revokedAt: null,
     })
 
+    const updatedLink = makeLink({
+      ...existingLink,
+      tokenHash: 'hash:legacy_token_1',
+    })
+
     mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(existingLink)
+    mocks.prisma.proClientInvite.update.mockResolvedValueOnce(updatedLink)
 
     const result = await upsertClientClaimLink({
       professionalId: 'pro_1',
@@ -288,9 +375,20 @@ describe('upsertClientClaimLink', () => {
       preferredContactMethod: ContactMethod.EMAIL,
     })
 
-    expect(mocks.prisma.proClientInvite.update).not.toHaveBeenCalled()
+    expect(mocks.prisma.proClientInvite.update).toHaveBeenCalledWith({
+      where: { id: 'invite_existing_1' },
+      data: {
+        tokenHash: 'hash:legacy_token_1',
+      },
+      select: expect.any(Object),
+    })
+
     expect(mocks.prisma.proClientInvite.create).not.toHaveBeenCalled()
-    expect(result).toEqual(existingLink)
+
+    expect(result).toEqual({
+      ...updatedLink,
+      rawToken: 'legacy_token_1',
+    })
   })
 
   it('updates a pending link when fields changed', async () => {
@@ -323,6 +421,16 @@ describe('upsertClientClaimLink', () => {
     mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(existingLink)
     mocks.prisma.proClientInvite.update.mockResolvedValueOnce(updatedLink)
 
+    mocks.createProClientInviteToken.mockReturnValue('raw_token_1')
+    mocks.hashProClientInviteToken.mockImplementation(
+      (token: string) => `hash:${token.trim()}`,
+    )
+    mocks.normalizeProClientInviteToken.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return null
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    })
+
     const result = await upsertClientClaimLink({
       professionalId: 'pro_2',
       clientId: 'client_2',
@@ -346,7 +454,10 @@ describe('upsertClientClaimLink', () => {
       select: expect.any(Object),
     })
 
-    expect(result).toEqual(updatedLink)
+    expect(result).toEqual({
+  ...updatedLink,
+  rawToken: null,
+})
   })
 
   it('normalizes blank optional email to null when a phone channel still exists', async () => {
@@ -366,6 +477,16 @@ describe('upsertClientClaimLink', () => {
 
     mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(existingLink)
     mocks.prisma.proClientInvite.update.mockResolvedValueOnce(updatedLink)
+
+    mocks.createProClientInviteToken.mockReturnValue('raw_token_1')
+    mocks.hashProClientInviteToken.mockImplementation(
+      (token: string) => `hash:${token.trim()}`,
+    )
+    mocks.normalizeProClientInviteToken.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return null
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    })
 
     const result = await upsertClientClaimLink({
       professionalId: 'pro_1',
@@ -390,7 +511,10 @@ describe('upsertClientClaimLink', () => {
       select: expect.any(Object),
     })
 
-    expect(result).toEqual(updatedLink)
+    expect(result).toEqual({
+      ...updatedLink,
+      rawToken: null,
+    })
   })
 
   it('updates a pending link when only clientId changed', async () => {
@@ -421,6 +545,17 @@ describe('upsertClientClaimLink', () => {
     mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(existingLink)
     mocks.prisma.proClientInvite.update.mockResolvedValueOnce(updatedLink)
 
+
+    mocks.createProClientInviteToken.mockReturnValue('raw_token_1')
+    mocks.hashProClientInviteToken.mockImplementation(
+      (token: string) => `hash:${token.trim()}`,
+    )
+    mocks.normalizeProClientInviteToken.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return null
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    })
+
     const result = await upsertClientClaimLink({
       professionalId: 'pro_1',
       clientId: 'client_new',
@@ -444,7 +579,10 @@ describe('upsertClientClaimLink', () => {
       select: expect.any(Object),
     })
 
-    expect(result).toEqual(updatedLink)
+    expect(result).toEqual({
+      ...updatedLink,
+      rawToken: null,
+    })
   })
 
   it('throws when professionalId is blank after trimming', async () => {
@@ -549,36 +687,76 @@ describe('upsertClientClaimLink', () => {
       'clientClaimLinks: invitedPhone is required when preferredContactMethod is SMS.',
     )
   })
-})
 
 describe('getClientClaimLinkByToken', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.prisma.proClientInvite.findUnique.mockResolvedValue(makeLink())
+
+    mocks.hashProClientInviteToken.mockImplementation(
+      (token: string) => `hash:${token.trim()}`,
+    )
   })
 
-  it('uses the current raw invite token lookup until the claim-token migration lands', async () => {
-    await getClientClaimLinkByToken({
+  it('loads a link by tokenHash first', async () => {
+    const link = makeLink({
+      token: null,
+      tokenHash: 'hash:token_1',
+    })
+
+    mocks.prisma.proClientInvite.findUnique.mockResolvedValueOnce(link)
+
+    const result = await getClientClaimLinkByToken({
       token: ' token_1 ',
     })
 
+    expect(mocks.hashProClientInviteToken).toHaveBeenCalledWith('token_1')
+
+    expect(mocks.prisma.proClientInvite.findUnique).toHaveBeenCalledTimes(1)
     expect(mocks.prisma.proClientInvite.findUnique).toHaveBeenCalledWith({
-      where: { token: 'token_1' },
+      where: { tokenHash: 'hash:token_1' },
       select: expect.any(Object),
     })
+
+    expect(result).toEqual(link)
   })
 
-  it('loads a link by token', async () => {
+  it('falls back to legacy raw token lookup when tokenHash lookup misses', async () => {
+    const legacyLink = makeLink({
+      token: 'token_1',
+      tokenHash: null,
+    })
+
+    mocks.prisma.proClientInvite.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(legacyLink)
+
     const result = await getClientClaimLinkByToken({
       token: 'token_1',
     })
 
-    expect(mocks.prisma.proClientInvite.findUnique).toHaveBeenCalledWith({
+    expect(mocks.prisma.proClientInvite.findUnique).toHaveBeenNthCalledWith(1, {
+      where: { tokenHash: 'hash:token_1' },
+      select: expect.any(Object),
+    })
+
+    expect(mocks.prisma.proClientInvite.findUnique).toHaveBeenNthCalledWith(2, {
       where: { token: 'token_1' },
       select: expect.any(Object),
     })
 
-    expect(result).toEqual(makeLink())
+    expect(result).toEqual(legacyLink)
+  })
+
+  it('returns null when neither tokenHash nor legacy token lookup finds a link', async () => {
+    mocks.prisma.proClientInvite.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+
+    const result = await getClientClaimLinkByToken({
+      token: 'token_1',
+    })
+
+    expect(result).toBeNull()
   })
 
   it('throws when token is blank after trimming', async () => {
@@ -587,12 +765,14 @@ describe('getClientClaimLinkByToken', () => {
         token: '   ',
       }),
     ).rejects.toThrow('clientClaimLinks: token is required.')
+
+    expect(mocks.prisma.proClientInvite.findUnique).not.toHaveBeenCalled()
   })
 })
 
 describe('getClientClaimLinkPublicState', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    mocks.prisma.proClientInvite.findUnique.mockResolvedValue(null)
   })
 
   it('returns not_found when link does not exist', async () => {

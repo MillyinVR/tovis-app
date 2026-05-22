@@ -19,8 +19,9 @@ import {
  *
  * Important:
  * CLIENT_CLAIM_INVITE is a client-action type, but not a ClientActionTokenKind.
- * Claim invites currently use ProClientInvite.token, so token.kind remains null
- * even though the delivery side now maps to NotificationEventKey.CLIENT_CLAIM_INVITE.
+ * Claim invites use a claim-link token in the URL, but they do not create a
+ * ClientActionToken row. New ProClientInvite rows persist tokenHash only; the
+ * raw token exists only at creation/delivery time.
  */
 export const AFTERCARE_ACCESS_TOKEN_EXPIRY_MS =
   1000 * 60 * 60 * 24 * 7 // 7 days

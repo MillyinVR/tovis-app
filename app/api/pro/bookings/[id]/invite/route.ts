@@ -1,7 +1,4 @@
-import {
-  ContactMethod,
-  ProClientInviteStatus,
-} from '@prisma/client'
+import { ContactMethod, ProClientInviteStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
@@ -41,12 +38,25 @@ type BookingInviteContext = {
   } | null
 }
 
+type ClaimInviteForDelivery = {
+  id: string
+  rawToken: string | null
+  status: ProClientInviteStatus
+  acceptedAt: Date | null
+  revokedAt: Date | null
+  invitedName: string
+  invitedEmail: string | null
+  invitedPhone: string | null
+  preferredContactMethod: ContactMethod | null
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function asTrimmedString(value: unknown): string | null {
   if (typeof value !== 'string') return null
+
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
 }
@@ -120,11 +130,14 @@ function shouldAttemptInviteDelivery(invite: {
   status: ProClientInviteStatus
   acceptedAt: Date | null
   revokedAt: Date | null
-}): boolean {
+  rawToken: string | null
+}): invite is typeof invite & { rawToken: string } {
   return (
     invite.status === ProClientInviteStatus.PENDING &&
     invite.acceptedAt == null &&
-    invite.revokedAt == null
+    invite.revokedAt == null &&
+    typeof invite.rawToken === 'string' &&
+    invite.rawToken.trim().length > 0
   )
 }
 
@@ -132,17 +145,7 @@ async function maybeQueueInviteDelivery(args: {
   professionalId: string
   actorUserId: string | null
   booking: BookingInviteContext
-  invite: {
-    id: string
-    token: string
-    status: ProClientInviteStatus
-    acceptedAt: Date | null
-    revokedAt: Date | null
-    invitedName: string
-    invitedEmail: string | null
-    invitedPhone: string | null
-    preferredContactMethod: ContactMethod | null
-  }
+  invite: ClaimInviteForDelivery
 }): Promise<InviteDeliverySummary> {
   if (!shouldAttemptInviteDelivery(args.invite)) {
     return {
@@ -152,13 +155,15 @@ async function maybeQueueInviteDelivery(args: {
     }
   }
 
+  const rawToken = args.invite.rawToken
+
   try {
     const delivery = await createClientClaimInviteDelivery({
       professionalId: args.professionalId,
       clientId: args.booking.clientId,
       bookingId: args.booking.id,
       inviteId: args.invite.id,
-      rawToken: args.invite.token,
+      rawToken,
       invitedName: args.invite.invitedName,
       invitedEmail: args.invite.invitedEmail,
       invitedPhone: args.invite.invitedPhone,
@@ -255,7 +260,7 @@ export async function POST(request: Request, ctx: Ctx) {
       booking,
       invite: {
         id: invite.id,
-        token: invite.token,
+        rawToken: invite.rawToken,
         status: invite.status,
         acceptedAt: invite.acceptedAt,
         revokedAt: invite.revokedAt,
@@ -270,7 +275,12 @@ export async function POST(request: Request, ctx: Ctx) {
       {
         invite: {
           id: invite.id,
-          token: invite.token,
+
+          // Token is returned so the caller can display/share the claim link
+          // immediately. For new invites, this is the non-persisted raw token;
+          // ProClientInvite stores tokenHash instead.
+          token: invite.rawToken,
+
           status: invite.status,
           invitedName: invite.invitedName,
           invitedEmail: invite.invitedEmail,

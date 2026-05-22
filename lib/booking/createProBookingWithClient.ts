@@ -8,17 +8,19 @@ import {
   ProClientInviteStatus,
   ServiceLocationType,
 } from '@prisma/client'
-import { enqueueDispatch } from '@/lib/notifications/dispatch/enqueueDispatch'
-import {
-  resolveProBookingClient,
-  type ProBookingServiceAddressInput,
-} from '@/lib/booking/resolveProBookingClient'
+
 import { createProBooking } from '@/lib/booking/writeBoundary'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { isRecord } from '@/lib/guards'
+import { enqueueDispatch } from '@/lib/notifications/dispatch/enqueueDispatch'
 import { prisma } from '@/lib/prisma'
 import { checkProReadinessForEntryPoint } from '@/lib/pro/readiness/proReadiness'
+
+import {
+  resolveProBookingClient,
+  type ProBookingServiceAddressInput,
+} from '@/lib/booking/resolveProBookingClient'
 
 type NewClientInput = {
   firstName?: unknown
@@ -69,10 +71,12 @@ type CreateProBookingResult = Awaited<ReturnType<typeof createProBooking>>
 
 type CreatedInviteResult = {
   id: string
-  token: string
+  token: string | null
 }
 
-type CreatedInviteDeliveryCandidate = CreatedInviteResult & {
+type CreatedInviteDeliveryCandidate = {
+  id: string
+  rawToken: string
   invitedName: string
   invitedEmail: string | null
   invitedPhone: string | null
@@ -116,11 +120,13 @@ function normalizeServiceAddressInput(
 ): ProBookingServiceAddressInput | null {
   if (!value) return null
   if (!isRecord(value)) return null
+
   return value
 }
 
 function normalizeOptionalString(value: unknown): string | null {
   if (typeof value !== 'string') return null
+
   const normalized = value.trim()
   return normalized ? normalized : null
 }
@@ -147,6 +153,7 @@ function inferPreferredContactMethod(args: {
 }): ContactMethod | null {
   if (args.email && !args.phone) return ContactMethod.EMAIL
   if (args.phone && !args.email) return ContactMethod.SMS
+
   return null
 }
 
@@ -155,7 +162,10 @@ function toPublicInviteResult(
 ): CreatedInviteResult {
   return {
     id: invite.id,
-    token: invite.token,
+
+    // Returned only so caller can show/share the claim link immediately.
+    // New invite rows persist tokenHash, not this raw token.
+    token: invite.rawToken,
   }
 }
 
@@ -181,6 +191,7 @@ async function tryCreateInvite(args: {
       bookingId: args.bookingId,
       clientId: args.clientId,
     })
+
     return null
   }
 
@@ -214,14 +225,15 @@ async function tryCreateInvite(args: {
     if (
       createdInvite.status !== ProClientInviteStatus.PENDING ||
       createdInvite.acceptedAt != null ||
-      createdInvite.revokedAt != null
+      createdInvite.revokedAt != null ||
+      !createdInvite.rawToken
     ) {
       return null
     }
 
     return {
       id: createdInvite.id,
-      token: createdInvite.token,
+      rawToken: createdInvite.rawToken,
       invitedName,
       invitedEmail,
       invitedPhone,
@@ -234,6 +246,7 @@ async function tryCreateInvite(args: {
       clientId: args.clientId,
       error,
     })
+
     return null
   }
 }
@@ -252,7 +265,7 @@ async function tryEnqueueInviteDelivery(args: {
       clientId: args.clientId,
       bookingId: args.bookingId,
       inviteId: args.invite.id,
-      rawToken: args.invite.token,
+      rawToken: args.invite.rawToken,
       invitedName: args.invite.invitedName,
       invitedEmail: args.invite.invitedEmail,
       invitedPhone: args.invite.invitedPhone,
@@ -279,11 +292,15 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
   const clientSnapshot = await loadInviteClientSnapshot(args.clientId)
 
   if (!clientSnapshot) {
-    console.error('createProBookingWithClient booking confirmation client lookup failed', {
-      professionalId: args.professionalId,
-      bookingId: args.bookingId,
-      clientId: args.clientId,
-    })
+    console.error(
+      'createProBookingWithClient booking confirmation client lookup failed',
+      {
+        professionalId: args.professionalId,
+        bookingId: args.bookingId,
+        clientId: args.clientId,
+      },
+    )
+
     return
   }
 
@@ -330,12 +347,15 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
       ],
     })
   } catch (error: unknown) {
-    console.error('createProBookingWithClient booking confirmation delivery enqueue failed', {
-      professionalId: args.professionalId,
-      bookingId: args.bookingId,
-      clientId: args.clientId,
-      error,
-    })
+    console.error(
+      'createProBookingWithClient booking confirmation delivery enqueue failed',
+      {
+        professionalId: args.professionalId,
+        bookingId: args.bookingId,
+        clientId: args.clientId,
+        error,
+      },
+    )
   }
 }
 
@@ -355,6 +375,7 @@ export async function createProBookingWithClient(
       code: 'PRO_NOT_READY',
     }
   }
+
   const normalizedClient = normalizeClientInput(args.client)
   const normalizedServiceAddress = normalizeServiceAddressInput(
     args.serviceAddress,

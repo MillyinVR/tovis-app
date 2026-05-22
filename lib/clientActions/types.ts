@@ -74,12 +74,13 @@ export type ClientActionRecipientSnapshot = {
 }
 
 export type ClientActionTokenPolicy = {
-  /**
-   * Whether this action should issue a ClientActionToken at all.
-   * Claim invites currently use ProClientInvite.token, so this can be false/null.
-   */
-  required: boolean
-  kind: ClientActionTokenKind | null
+/**
+ * Whether this action should issue a ClientActionToken at all.
+ * Claim invites use a tokenized claim URL, but they do not create a
+ * ClientActionToken row. New ProClientInvite rows persist tokenHash only.
+ */
+required: boolean
+kind: ClientActionTokenKind | null
 
   /**
    * Security / lifecycle rules.
@@ -100,8 +101,8 @@ export type ClientActionDeliveryPolicy = {
 
   /**
    * Notification integration.
-   * Optional because claim invites do not yet appear to have a dedicated
-   * NotificationEventKey in the existing catalog.
+   * Nullable for action types that do not dispatch through the notification
+   * catalog. Claim invites now map to CLIENT_CLAIM_INVITE.
    */
   notificationEventKey: NotificationEventKey | null
   notificationRecipientKind: NotificationRecipientKind

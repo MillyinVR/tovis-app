@@ -24,7 +24,8 @@ import { GET } from './route'
 
 function makeLink(overrides?: {
   id?: string
-  token?: string
+  token?: string | null
+  tokenHash?: string | null
   professionalId?: string
   clientId?: string
   bookingId?: string
@@ -50,7 +51,11 @@ function makeLink(overrides?: {
 }) {
   return {
     id: overrides?.id ?? 'invite_1',
-    token: overrides?.token ?? 'token_1',
+    token: overrides?.token !== undefined ? overrides.token : null,
+    tokenHash:
+      overrides?.tokenHash !== undefined
+        ? overrides.tokenHash
+        : 'hashed_token_1',
     professionalId: overrides?.professionalId ?? 'pro_1',
     clientId: overrides?.clientId ?? 'client_1',
     bookingId: overrides?.bookingId ?? 'booking_1',

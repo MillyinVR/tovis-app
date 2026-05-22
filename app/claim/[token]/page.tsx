@@ -1,17 +1,17 @@
 // app/claim/[token]/page.tsx
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import {
-  ClientClaimStatus,
-  Prisma,
-  ProClientInviteStatus,
-} from '@prisma/client'
+import { ClientClaimStatus, ProClientInviteStatus } from '@prisma/client'
 
 import { acceptClientClaimFromLink } from '@/lib/clients/clientClaim'
-import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
+import {
+  getClientClaimLinkPublicState,
+  type ClientClaimLinkRow,
+} from '@/lib/clients/clientClaimLinks'
+import { normalizeProClientInviteToken } from '@/lib/clients/proClientInviteTokens'
 import { getCurrentUser } from '@/lib/currentUser'
+import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { pickString } from '@/lib/pick'
-import { prisma } from '@/lib/prisma'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 
@@ -31,65 +31,7 @@ type ClaimPageState =
   | 'client-mismatch'
   | 'conflict'
 
-const claimInviteSelect = Prisma.validator<Prisma.ProClientInviteSelect>()({
-  id: true,
-  token: true,
-  clientId: true,
-  professionalId: true,
-  bookingId: true,
-  invitedName: true,
-  invitedEmail: true,
-  invitedPhone: true,
-  preferredContactMethod: true,
-  status: true,
-  acceptedAt: true,
-  revokedAt: true,
-  client: {
-    select: {
-      id: true,
-      claimStatus: true,
-    },
-  },
-  booking: {
-    select: {
-      id: true,
-      clientId: true,
-      scheduledFor: true,
-      locationTimeZone: true,
-      service: {
-        select: {
-          name: true,
-        },
-      },
-      professional: {
-        select: {
-          id: true,
-          businessName: true,
-          location: true,
-          timeZone: true,
-          user: {
-            select: {
-              email: true,
-            },
-          },
-        },
-      },
-      location: {
-        select: {
-          name: true,
-          formattedAddress: true,
-          city: true,
-          state: true,
-          timeZone: true,
-        },
-      },
-    },
-  },
-})
-
-type ClaimInviteRecord = Prisma.ProClientInviteGetPayload<{
-  select: typeof claimInviteSelect
-}>
+type ClaimInviteRecord = ClientClaimLinkRow
 
 function claimHref(token: string): string {
   return `/claim/${encodeURIComponent(token)}`
@@ -142,12 +84,11 @@ function bookingHref(bookingId: string): string {
   return `/client/bookings/${encodeURIComponent(bookingId)}`
 }
 
-function pickSearchParam(
-  value: string | string[] | undefined,
-): string | null {
+function pickSearchParam(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) {
     return pickString(value[0] ?? null)
   }
+
   return pickString(value ?? null)
 }
 
@@ -161,6 +102,7 @@ function parsePageState(value: string | null): ClaimPageState | null {
   ) {
     return value
   }
+
   return null
 }
 
@@ -173,14 +115,12 @@ function isInviteRevoked(
   )
 }
 
-function isClientClaimed(
-  invite: Pick<ClaimInviteRecord, 'client'>,
-): boolean {
+function isClientClaimed(invite: Pick<ClaimInviteRecord, 'client'>): boolean {
   return invite.client?.claimStatus === ClientClaimStatus.CLAIMED
 }
 
 function buildLocationLabel(
-  booking: ClaimInviteRecord['booking'],
+  booking: NonNullable<ClaimInviteRecord['booking']>,
 ): string | null {
   const formattedAddress = booking.location?.formattedAddress?.trim()
   if (formattedAddress) return formattedAddress
@@ -192,6 +132,7 @@ function buildLocationLabel(
     .filter(Boolean)
     .join(', ')
     .trim()
+
   if (cityState) return cityState
 
   const professionalLocation = booking.professional?.location?.trim()
@@ -201,7 +142,7 @@ function buildLocationLabel(
 }
 
 function buildProfessionalLabel(
-  booking: ClaimInviteRecord['booking'],
+  booking: NonNullable<ClaimInviteRecord['booking']>,
 ): string {
   return (
     booking.professional?.businessName?.trim() ||
@@ -211,7 +152,7 @@ function buildProfessionalLabel(
 }
 
 function buildAppointmentLabel(
-  booking: ClaimInviteRecord['booking'],
+  booking: NonNullable<ClaimInviteRecord['booking']>,
 ): string | null {
   const timeZone = sanitizeTimeZone(
     booking.locationTimeZone ??
@@ -251,22 +192,32 @@ function StatusCard(props: {
 
 export default async function ClaimInvitePage(props: PageProps) {
   const resolvedParams = await Promise.resolve(props.params)
-  const rawToken = pickString(resolvedParams?.token)
-  if (!rawToken) notFound()
-  const token: string = rawToken
+  const normalizedToken = normalizeProClientInviteToken(resolvedParams?.token)
+
+  if (!normalizedToken) {
+    notFound()
+  }
+
+  const token: string = normalizedToken
 
   const resolvedSearchParams =
     (await Promise.resolve(props.searchParams).catch(() => undefined)) ?? {}
+
   const stateFromQuery = parsePageState(
     pickSearchParam(resolvedSearchParams.state),
   )
 
-  const invite = await prisma.proClientInvite.findUnique({
-    where: { token },
-    select: claimInviteSelect,
-  })
+  const inviteState = await getClientClaimLinkPublicState({ token })
 
-  if (!invite?.client || !invite.booking) notFound()
+  if (inviteState.kind === 'not_found') {
+    notFound()
+  }
+
+  const invite = inviteState.link
+
+  if (!invite.client || !invite.booking) {
+    notFound()
+  }
 
   const user = await getCurrentUser().catch(() => null)
 
@@ -279,10 +230,12 @@ export default async function ClaimInvitePage(props: PageProps) {
     Boolean(isMatchingClient) &&
     (user?.sessionKind !== 'ACTIVE' || !user?.isFullyVerified)
 
-  const revoked = isInviteRevoked(invite)
-  const alreadyClaimed = isClientClaimed(invite)
+  const revoked = inviteState.kind === 'revoked' || isInviteRevoked(invite)
+  const alreadyClaimed =
+    inviteState.kind === 'already_claimed' || isClientClaimed(invite)
 
   let pageState: ClaimPageState = 'ready'
+
   if (revoked) {
     pageState = 'revoked'
   } else if (alreadyClaimed) {
@@ -306,6 +259,7 @@ export default async function ClaimInvitePage(props: PageProps) {
     'use server'
 
     const freshUser = await getCurrentUser().catch(() => null)
+
     if (
       !freshUser ||
       freshUser.role !== 'CLIENT' ||

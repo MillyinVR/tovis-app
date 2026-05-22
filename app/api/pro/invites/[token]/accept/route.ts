@@ -1,14 +1,13 @@
+// app/api/pro/invites/[token]/accept/route.ts
+
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { acceptClientClaimFromLink } from '@/lib/clients/clientClaim'
+import { normalizeProClientInviteToken } from '@/lib/clients/proClientInviteTokens'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 type Ctx = { params: { token: string } | Promise<{ token: string }> }
-
-function asTrimmedString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
 
 export async function POST(_request: Request, ctx: Ctx) {
   try {
@@ -16,7 +15,7 @@ export async function POST(_request: Request, ctx: Ctx) {
     if (!auth.ok) return auth.res
 
     const params = await Promise.resolve(ctx.params)
-    const token = asTrimmedString(params?.token)
+    const token = normalizeProClientInviteToken(params?.token)
 
     if (!token) {
       return jsonFail(404, 'Invite not found.', { code: 'NOT_FOUND' })

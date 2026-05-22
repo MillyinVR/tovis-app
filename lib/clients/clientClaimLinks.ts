@@ -5,6 +5,11 @@ import {
   ProClientInviteStatus,
 } from '@prisma/client'
 
+import {
+  createProClientInviteToken,
+  hashProClientInviteToken,
+  normalizeProClientInviteToken,
+} from '@/lib/clients/proClientInviteTokens'
 import { prisma } from '@/lib/prisma'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -22,14 +27,17 @@ function getDb(tx?: Prisma.TransactionClient): DbClient {
 
 function normalizeRequiredString(value: string, fieldName: string): string {
   const normalized = value.trim()
+
   if (!normalized) {
     throw new Error(`clientClaimLinks: ${fieldName} is required.`)
   }
+
   return normalized
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
+
   const normalized = value.trim()
   return normalized ? normalized : null
 }
@@ -84,6 +92,7 @@ function isClientAlreadyClaimed(
 const clientClaimLinkSelect = Prisma.validator<Prisma.ProClientInviteSelect>()({
   id: true,
   token: true,
+  tokenHash: true,
   professionalId: true,
   clientId: true,
   bookingId: true,
@@ -108,11 +117,54 @@ const clientClaimLinkSelect = Prisma.validator<Prisma.ProClientInviteSelect>()({
       preferredContactMethod: true,
     },
   },
+  booking: {
+    select: {
+      id: true,
+      clientId: true,
+      scheduledFor: true,
+      locationTimeZone: true,
+      service: {
+        select: {
+          name: true,
+        },
+      },
+      professional: {
+        select: {
+          id: true,
+          businessName: true,
+          location: true,
+          timeZone: true,
+          user: {
+            select: {
+              email: true,
+            },
+          },
+        },
+      },
+      location: {
+        select: {
+          name: true,
+          formattedAddress: true,
+          city: true,
+          state: true,
+          timeZone: true,
+        },
+      },
+    },
+  },
 } satisfies Prisma.ProClientInviteSelect)
 
 export type ClientClaimLinkRow = Prisma.ProClientInviteGetPayload<{
   select: typeof clientClaimLinkSelect
 }>
+
+export type ClientClaimLinkWithRawToken = ClientClaimLinkRow & {
+  /**
+   * Raw token is only available immediately after creating/rotating an invite,
+   * or for legacy rows that still have ProClientInvite.token.
+   */
+  rawToken: string | null
+}
 
 export type UpsertClientClaimLinkArgs = {
   professionalId: string
@@ -143,9 +195,23 @@ export type MarkClientClaimLinkAcceptedAuditArgs = {
   tx: ClientClaimLinkAuditTx
 }
 
+function withRawToken(
+  invite: ClientClaimLinkRow,
+  rawToken: string | null,
+): ClientClaimLinkWithRawToken {
+  return {
+    ...invite,
+    rawToken,
+  }
+}
+
+function legacyRawTokenFromInvite(invite: ClientClaimLinkRow): string | null {
+  return normalizeProClientInviteToken(invite.token)
+}
+
 export async function upsertClientClaimLink(
   args: UpsertClientClaimLinkArgs,
-): Promise<ClientClaimLinkRow> {
+): Promise<ClientClaimLinkWithRawToken> {
   const db = getDb(args.tx)
 
   const professionalId = normalizeRequiredString(
@@ -171,7 +237,10 @@ export async function upsertClientClaimLink(
   })
 
   if (!existing) {
-    return db.proClientInvite.create({
+    const rawToken = createProClientInviteToken()
+    const tokenHash = hashProClientInviteToken(rawToken)
+
+    const created = await db.proClientInvite.create({
       data: {
         professionalId,
         clientId,
@@ -181,13 +250,22 @@ export async function upsertClientClaimLink(
         invitedPhone,
         preferredContactMethod,
         status: ProClientInviteStatus.PENDING,
+
+        /**
+         * New rows store only tokenHash. The raw token is returned to the caller
+         * once for delivery/link rendering and is not persisted.
+         */
+        token: null,
+        tokenHash,
       },
       select: clientClaimLinkSelect,
     })
+
+    return withRawToken(created, rawToken)
   }
 
   if (isLinkRevoked(existing)) {
-    return existing
+    return withRawToken(existing, null)
   }
 
   const needsUpdate =
@@ -198,32 +276,62 @@ export async function upsertClientClaimLink(
     existing.invitedPhone !== invitedPhone ||
     existing.preferredContactMethod !== preferredContactMethod
 
-  if (!needsUpdate) {
-    return existing
+  const needsTokenHashBackfill =
+    existing.tokenHash == null && legacyRawTokenFromInvite(existing) != null
+
+  if (!needsUpdate && !needsTokenHashBackfill) {
+    return withRawToken(existing, legacyRawTokenFromInvite(existing))
   }
 
-  return db.proClientInvite.update({
+  const legacyRawToken = legacyRawTokenFromInvite(existing)
+
+  const updated = await db.proClientInvite.update({
     where: { id: existing.id },
     data: {
-      professionalId,
-      clientId,
-      invitedName,
-      invitedEmail,
-      invitedPhone,
-      preferredContactMethod,
+      ...(needsUpdate
+        ? {
+            professionalId,
+            clientId,
+            invitedName,
+            invitedEmail,
+            invitedPhone,
+            preferredContactMethod,
+          }
+        : {}),
+      ...(needsTokenHashBackfill && legacyRawToken
+        ? {
+            tokenHash: hashProClientInviteToken(legacyRawToken),
+          }
+        : {}),
     },
     select: clientClaimLinkSelect,
   })
+
+  return withRawToken(updated, legacyRawToken)
 }
 
 export async function getClientClaimLinkByToken(
   args: GetClientClaimLinkByTokenArgs,
 ): Promise<ClientClaimLinkRow | null> {
   const db = getDb(args.tx)
-  const token = normalizeRequiredString(args.token, 'token')
+  const rawToken = normalizeRequiredString(args.token, 'token')
+  const tokenHash = hashProClientInviteToken(rawToken)
 
+  const byHash = await db.proClientInvite.findUnique({
+    where: { tokenHash },
+    select: clientClaimLinkSelect,
+  })
+
+  if (byHash) {
+    return byHash
+  }
+
+  /**
+   * Temporary legacy fallback for rows created before tokenHash existed.
+   * Remove this after raw token burn-in is complete and token column is dropped.
+   */
   return db.proClientInvite.findUnique({
-    where: { token },
+    where: { token: rawToken },
     select: clientClaimLinkSelect,
   })
 }

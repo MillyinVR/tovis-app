@@ -2213,7 +2213,11 @@ model ProClientInvite {
   invitedEmail String?
   invitedPhone String?
 
-  token String @unique @default(cuid())
+  /// @deprecated Raw invite token. Do not read/write in new code.
+  /// Kept temporarily for migration/backward compatibility only.
+  token String? @unique
+
+  tokenHash String? @unique @db.VarChar(128)
 
   status ProClientInviteStatus @default(PENDING)
 
@@ -2234,7 +2238,7 @@ model ProClientInvite {
 
   @@index([professionalId])
   @@index([clientId])
-  @@index([token])
+  @@index([tokenHash])
   @@index([status, createdAt])
   @@index([clientId, status, createdAt])
   @@index([acceptedByUserId])

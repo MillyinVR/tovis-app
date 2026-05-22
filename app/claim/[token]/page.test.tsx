@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientClaimStatus,
+  ContactMethod,
   ProClientInviteStatus,
 } from '@prisma/client'
 
@@ -12,10 +13,12 @@ const mocks = vi.hoisted(() => ({
   notFound: vi.fn(),
 
   acceptClientClaimFromLink: vi.fn(),
+  getClientClaimLinkPublicState: vi.fn(),
+  normalizeProClientInviteToken: vi.fn(),
+
   formatAppointmentWhen: vi.fn(),
   getCurrentUser: vi.fn(),
   pickString: vi.fn(),
-  inviteFindUnique: vi.fn(),
   sanitizeTimeZone: vi.fn(),
 }))
 
@@ -44,6 +47,14 @@ vi.mock('@/lib/clients/clientClaim', () => ({
   acceptClientClaimFromLink: mocks.acceptClientClaimFromLink,
 }))
 
+vi.mock('@/lib/clients/clientClaimLinks', () => ({
+  getClientClaimLinkPublicState: mocks.getClientClaimLinkPublicState,
+}))
+
+vi.mock('@/lib/clients/proClientInviteTokens', () => ({
+  normalizeProClientInviteToken: mocks.normalizeProClientInviteToken,
+}))
+
 vi.mock('@/lib/formatInTimeZone', () => ({
   formatAppointmentWhen: mocks.formatAppointmentWhen,
 }))
@@ -54,14 +65,6 @@ vi.mock('@/lib/currentUser', () => ({
 
 vi.mock('@/lib/pick', () => ({
   pickString: mocks.pickString,
-}))
-
-vi.mock('@/lib/prisma', () => ({
-  prisma: {
-    proClientInvite: {
-      findUnique: mocks.inviteFindUnique,
-    },
-  },
 }))
 
 vi.mock('@/lib/timeZone', () => ({
@@ -108,34 +111,49 @@ function makeBooking(clientId = 'client_1') {
 
 function makeClient(args?: {
   id?: string
+  userId?: string | null
   claimStatus?: ClientClaimStatus
+  claimedAt?: Date | null
+  preferredContactMethod?: ContactMethod | null
 }) {
   return {
     id: args?.id ?? 'client_1',
+    userId: args?.userId ?? null,
     claimStatus: args?.claimStatus ?? ClientClaimStatus.UNCLAIMED,
+    claimedAt: args?.claimedAt ?? null,
+    preferredContactMethod: args?.preferredContactMethod ?? null,
   }
 }
 
 function makeInvite(overrides?: {
-  token?: string
+  token?: string | null
+  tokenHash?: string | null
   clientId?: string
   invitedName?: string | null
   invitedEmail?: string | null
   invitedPhone?: string | null
+  preferredContactMethod?: ContactMethod | null
   status?: ProClientInviteStatus
+  acceptedAt?: Date | null
+  acceptedByUserId?: string | null
   revokedAt?: Date | null
+  revokedByUserId?: string | null
+  revokeReason?: string | null
   clientClaimStatus?: ClientClaimStatus
   client?: ReturnType<typeof makeClient> | null
   booking?: ReturnType<typeof makeBooking> | null
 }) {
-  const token = overrides?.token ?? 'tok_1'
+  const token = overrides && 'token' in overrides ? overrides.token : null
+  const tokenHash =
+    overrides && 'tokenHash' in overrides ? overrides.tokenHash : 'hash_tok_1'
   const clientId = overrides?.clientId ?? 'client_1'
 
   return {
     id: 'invite_1',
     token,
-    clientId,
+    tokenHash,
     professionalId: 'pro_1',
+    clientId,
     bookingId: 'booking_1',
     invitedName:
       overrides && 'invitedName' in overrides
@@ -149,11 +167,29 @@ function makeInvite(overrides?: {
       overrides && 'invitedPhone' in overrides
         ? overrides.invitedPhone
         : '+16195551234',
-    preferredContactMethod: null,
+    preferredContactMethod:
+      overrides && 'preferredContactMethod' in overrides
+        ? overrides.preferredContactMethod
+        : null,
     status: overrides?.status ?? ProClientInviteStatus.PENDING,
-    acceptedAt: null,
+    acceptedAt:
+      overrides && 'acceptedAt' in overrides ? overrides.acceptedAt : null,
+    acceptedByUserId:
+      overrides && 'acceptedByUserId' in overrides
+        ? overrides.acceptedByUserId
+        : null,
     revokedAt:
       overrides && 'revokedAt' in overrides ? overrides.revokedAt : null,
+    revokedByUserId:
+      overrides && 'revokedByUserId' in overrides
+        ? overrides.revokedByUserId
+        : null,
+    revokeReason:
+      overrides && 'revokeReason' in overrides
+        ? overrides.revokeReason
+        : null,
+    createdAt: new Date('2026-04-12T10:00:00.000Z'),
+    updatedAt: new Date('2026-04-12T10:00:00.000Z'),
     client:
       overrides && 'client' in overrides
         ? overrides.client
@@ -198,6 +234,16 @@ function makeProUser() {
   }
 }
 
+function mockInviteState(
+  kind: 'ready' | 'revoked' | 'already_claimed',
+  invite = makeInvite(),
+) {
+  mocks.getClientClaimLinkPublicState.mockResolvedValueOnce({
+    kind,
+    link: invite,
+  })
+}
+
 async function renderPage(args?: {
   token?: string
   searchParams?: Record<string, string | string[] | undefined>
@@ -229,6 +275,17 @@ describe('app/claim/[token]/page.tsx', () => {
       bookingId: 'booking_1',
     })
 
+    mocks.getClientClaimLinkPublicState.mockResolvedValue({
+      kind: 'ready',
+      link: makeInvite(),
+    })
+
+    mocks.normalizeProClientInviteToken.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return null
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    })
+
     mocks.formatAppointmentWhen.mockReturnValue('Apr 13, 2026 at 11:00 AM')
 
     mocks.getCurrentUser.mockResolvedValue(null)
@@ -239,8 +296,6 @@ describe('app/claim/[token]/page.tsx', () => {
       return trimmed.length > 0 ? trimmed : null
     })
 
-    mocks.inviteFindUnique.mockResolvedValue(makeInvite())
-
     mocks.sanitizeTimeZone.mockImplementation(
       (value: string | null | undefined, fallback: string) => value ?? fallback,
     )
@@ -250,19 +305,25 @@ describe('app/claim/[token]/page.tsx', () => {
     await expect(renderPage({ token: '   ' })).rejects.toThrow('NOT_FOUND')
 
     expect(mocks.notFound).toHaveBeenCalledTimes(1)
-    expect(mocks.inviteFindUnique).not.toHaveBeenCalled()
+    expect(mocks.getClientClaimLinkPublicState).not.toHaveBeenCalled()
   })
 
   it('calls notFound when the invite does not exist', async () => {
-    mocks.inviteFindUnique.mockResolvedValueOnce(null)
+    mocks.getClientClaimLinkPublicState.mockResolvedValueOnce({
+      kind: 'not_found',
+    })
 
     await expect(renderPage()).rejects.toThrow('NOT_FOUND')
 
+    expect(mocks.getClientClaimLinkPublicState).toHaveBeenCalledWith({
+      token: 'tok_1',
+    })
     expect(mocks.notFound).toHaveBeenCalledTimes(1)
   })
 
   it('calls notFound when invite is missing client relation', async () => {
-    mocks.inviteFindUnique.mockResolvedValueOnce(
+    mockInviteState(
+      'ready',
       makeInvite({
         client: null,
       }),
@@ -274,7 +335,8 @@ describe('app/claim/[token]/page.tsx', () => {
   })
 
   it('calls notFound when invite is missing booking relation', async () => {
-    mocks.inviteFindUnique.mockResolvedValueOnce(
+    mockInviteState(
+      'ready',
       makeInvite({
         booking: null,
       }),
@@ -307,7 +369,8 @@ describe('app/claim/[token]/page.tsx', () => {
   })
 
   it('renders revoked state without redirecting unauthenticated users', async () => {
-    mocks.inviteFindUnique.mockResolvedValueOnce(
+    mockInviteState(
+      'revoked',
       makeInvite({
         status: ProClientInviteStatus.REVOKED,
         revokedAt: new Date('2026-04-13T19:00:00.000Z'),
@@ -362,7 +425,8 @@ describe('app/claim/[token]/page.tsx', () => {
       }),
     )
 
-    mocks.inviteFindUnique.mockResolvedValueOnce(
+    mockInviteState(
+      'already_claimed',
       makeInvite({
         clientClaimStatus: ClientClaimStatus.CLAIMED,
       }),

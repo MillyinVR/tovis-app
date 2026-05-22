@@ -1,4 +1,4 @@
-import { ClientClaimStatus, Prisma } from '@prisma/client'
+import { ClientClaimStatus, Prisma, ProClientInviteStatus } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 
@@ -6,6 +6,7 @@ import {
   getClientClaimLinkByToken,
   markClientClaimLinkAcceptedAudit,
 } from './clientClaimLinks'
+import { normalizeProClientInviteToken } from './proClientInviteTokens'
 
 export type AcceptClientClaimFromLinkArgs = {
   token: string
@@ -36,10 +37,22 @@ type ActingClientRow = Prisma.ClientProfileGetPayload<{
 
 function normalizeRequiredString(value: string, fieldName: string): string {
   const normalized = value.trim()
+
   if (!normalized) {
     throw new Error(`clientClaim: ${fieldName} is required.`)
   }
+
   return normalized
+}
+
+function normalizeRequiredToken(value: string): string {
+  const token = normalizeProClientInviteToken(value)
+
+  if (!token) {
+    throw new Error('clientClaim: token is required.')
+  }
+
+  return token
 }
 
 function isClientAlreadyClaimed(client: {
@@ -62,7 +75,7 @@ function shouldSetPreferredContactMethod(args: {
 export async function acceptClientClaimFromLink(
   args: AcceptClientClaimFromLinkArgs,
 ): Promise<AcceptClientClaimFromLinkResult> {
-  const token = normalizeRequiredString(args.token, 'token')
+  const token = normalizeRequiredToken(args.token)
   const actingUserId = normalizeRequiredString(args.actingUserId, 'actingUserId')
   const actingClientId = normalizeRequiredString(
     args.actingClientId,
@@ -82,7 +95,7 @@ export async function acceptClientClaimFromLink(
     }
 
     if (
-      invite.status === 'REVOKED' ||
+      invite.status === ProClientInviteStatus.REVOKED ||
       invite.revokedAt != null
     ) {
       return { kind: 'revoked' }

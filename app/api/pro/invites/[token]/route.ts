@@ -1,19 +1,18 @@
+// app/api/pro/invites/[token]/route.ts
+
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getClientClaimLinkPublicState } from '@/lib/clients/clientClaimLinks'
+import { normalizeProClientInviteToken } from '@/lib/clients/proClientInviteTokens'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 type Ctx = { params: { token: string } | Promise<{ token: string }> }
 
-function asTrimmedString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
 export async function GET(_request: Request, ctx: Ctx) {
   try {
     const params = await Promise.resolve(ctx.params)
-    const token = asTrimmedString(params?.token)
+    const token = normalizeProClientInviteToken(params?.token)
 
     if (!token) {
       return jsonFail(404, 'Invite not found.', { code: 'NOT_FOUND' })

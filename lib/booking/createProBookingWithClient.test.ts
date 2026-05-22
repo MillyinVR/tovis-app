@@ -159,14 +159,15 @@ function mockClientProfileNullTwice() {
 
 function makeInviteResult(overrides?: {
   id?: string
-  token?: string
+  rawToken?: string | null
   status?: ProClientInviteStatus
   acceptedAt?: Date | null
   revokedAt?: Date | null
 }) {
   return {
     id: overrides?.id ?? 'invite_1',
-    token: overrides?.token ?? 'token_1',
+    rawToken:
+      overrides && 'rawToken' in overrides ? overrides.rawToken : 'token_1',
     status: overrides?.status ?? ProClientInviteStatus.PENDING,
     acceptedAt:
       overrides?.acceptedAt !== undefined ? overrides.acceptedAt : null,
@@ -1119,6 +1120,76 @@ describe('createProBookingWithClient', () => {
       phone: null,
     })
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      ok: true,
+      clientId: 'client_unclaimed_1',
+      clientUserId: null,
+      clientEmail: 'newclient@example.com',
+      clientClaimStatus: ClientClaimStatus.UNCLAIMED,
+      clientAddressId: null,
+      bookingResult: makeBookingResult(),
+      invite: null,
+    })
+  })
+
+  it('does not return invite payload or enqueue delivery when helper returns a pending invite without rawToken', async () => {
+    mocks.resolveProBookingClient.mockResolvedValueOnce(
+      makeResolvedClient({
+        clientId: 'client_unclaimed_1',
+        clientUserId: null,
+        clientEmail: 'newclient@example.com',
+        clientClaimStatus: ClientClaimStatus.UNCLAIMED,
+      }),
+    )
+
+    mockClientProfileSnapshotTwice(
+      makeInviteClientSnapshot({
+        id: 'client_unclaimed_1',
+        firstName: 'New',
+        lastName: 'Client',
+        email: 'newclient@example.com',
+        phone: null,
+        claimStatus: ClientClaimStatus.UNCLAIMED,
+      }),
+    )
+
+    mocks.upsertClientClaimLink.mockResolvedValueOnce(
+      makeInviteResult({
+        rawToken: null,
+      }),
+    )
+
+    const result = await createProBookingWithClient({
+      professionalId: 'pro_1',
+      actorUserId: 'user_1',
+      overrideReason: null,
+      client: {
+        firstName: 'New',
+        lastName: 'Client',
+        email: 'newclient@example.com',
+      },
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+    })
+
+    expectBookingConfirmedDispatch({
+      professionalId: 'pro_1',
+      clientId: 'client_unclaimed_1',
+      email: 'newclient@example.com',
+      phone: null,
+    })
+
+    expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+
     expect(result).toEqual({
       ok: true,
       clientId: 'client_unclaimed_1',

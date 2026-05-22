@@ -58,7 +58,7 @@ function makeBooking(overrides?: {
 
 function makeInvite(overrides?: {
   id?: string
-  token?: string
+  rawToken?: string | null
   status?: ProClientInviteStatus
   invitedName?: string
   invitedEmail?: string | null
@@ -69,7 +69,10 @@ function makeInvite(overrides?: {
 }) {
   return {
     id: overrides?.id ?? 'invite_1',
-    token: overrides?.token ?? 'token_1',
+    rawToken:
+      overrides && 'rawToken' in overrides
+        ? overrides.rawToken
+        : 'token_1',
     status: overrides?.status ?? ProClientInviteStatus.PENDING,
     invitedName: overrides?.invitedName ?? 'Tori Morales',
     invitedEmail:
@@ -554,6 +557,48 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
           id: 'invite_1',
           token: 'token_1',
           status: ProClientInviteStatus.ACCEPTED,
+          invitedName: 'Tori Morales',
+          invitedEmail: 'tori@example.com',
+          invitedPhone: null,
+          preferredContactMethod: ContactMethod.EMAIL,
+        },
+        inviteDelivery: {
+          attempted: false,
+          queued: false,
+          href: null,
+        },
+      },
+    })
+  })
+
+  it('does not attempt delivery when rawToken is missing', async () => {
+    mocks.upsertClientClaimLink.mockResolvedValueOnce(
+      makeInvite({
+        rawToken: null,
+        status: ProClientInviteStatus.PENDING,
+      }),
+    )
+
+    const result = await POST(
+      makeRequest({
+        name: 'Tori Morales',
+        email: 'tori@example.com',
+      }),
+      {
+        params: { id: 'booking_1' },
+      },
+    )
+
+    expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
+
+    expect(result).toEqual({
+      ok: true,
+      status: 200,
+      data: {
+        invite: {
+          id: 'invite_1',
+          token: null,
+          status: ProClientInviteStatus.PENDING,
           invitedName: 'Tori Morales',
           invitedEmail: 'tori@example.com',
           invitedPhone: null,

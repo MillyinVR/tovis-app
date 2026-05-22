@@ -58,6 +58,18 @@ describe('POST /api/pro/invites/[token]/accept', () => {
     })
   })
 
+  it('supports promise params', async () => {
+    await POST(makeRequest(), {
+      params: Promise.resolve({ token: 'token_1' }),
+    })
+
+    expect(mocks.acceptClientClaimFromLink).toHaveBeenCalledWith({
+      token: 'token_1',
+      actingUserId: 'user_1',
+      actingClientId: 'client_1',
+    })
+  })
+
   it('returns auth response when requireClient fails', async () => {
     const authRes = { ok: false, status: 401, error: 'Unauthorized' }
 
