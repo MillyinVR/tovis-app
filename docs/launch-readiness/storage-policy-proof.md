@@ -16,13 +16,14 @@ Prove that TOVIS media storage follows the intended access model:
 2. Private booking/session/review/verification media cannot be directly read, listed, written, updated, or deleted by anonymous or normal client-side callers.
 3. Private media is only accessible through app-controlled server routes that perform TOVIS auth/ownership checks and return short-lived signed URLs.
 4. App routes use the correct bucket for each media type.
+5. App routes do not create media records unless the authenticated user owns the relevant booking/review/profile surface.
 
 ## Buckets
 
 | Bucket | Purpose | Public read | Direct client write | Expected access model |
 |---|---|---:|---:|---|
-| `media-public` | Public profile, portfolio, service, viral-request media | Yes | No by default | Server route creates signed upload URL; public URL may render after DB write |
-| `media-private` | Booking/session/review/verification private media | No | No by default | Server route creates signed upload/read URLs after app auth checks |
+| `media-public` | Public profile, portfolio, service, review, viral-request media | Yes | No by default | Server route creates signed upload URL; public URL may render after DB write |
+| `media-private` | Booking/session/verification private media | No | No by default | Server route creates signed upload/read URLs after app auth checks |
 
 ## Migration summary
 
@@ -49,12 +50,13 @@ Expected result:
 | Surface | File | Current guard | Status |
 |---|---|---|---|
 | Pro upload init | `app/api/pro/uploads/route.ts` | Resolves upload bucket by kind: `media-public` or `media-private` | TODO: link test |
-| Pro booking session media | `app/api/pro/bookings/[id]/media/route.ts` | Requires `media-private`; requires path prefix `bookings/<bookingId>/<phase>/`; checks object exists before DB write | TODO: link test |
+| Pro booking session media | `app/api/pro/bookings/[id]/media/route.ts` | Requires `media-private`; requires path prefix `bookings/<bookingId>/<phase>/`; checks object exists before DB write | PASS: `app/api/pro/bookings/[id]/media/route.test.ts` |
 | Pro media posts | `app/api/pro/media/route.ts` | Public media must use `media-public`; private pro/client media must use `media-private` | TODO: link test |
-| Client review media | `app/api/client/reviews/[id]/media/route.ts` | Validates storage pointers and verifies object existence | TODO: link test |
-| Pro verification docs | `app/api/pro/verification-docs/route.ts` | Requires `supabase://media-private/...` | TODO: link test/manual check |
-| Admin verification open | `app/api/admin/verification-docs/open/route.ts` | Admin route parses storage pointer and creates signed read URL | TODO: link test/manual check |
-| URL rendering | `lib/media/renderUrls.ts` | Central render helper for storage-backed media URLs | TODO: link test |
+| Client review media create | `app/api/client/reviews/[id]/media/route.ts` | Requires owning client; requires `media-public`; validates storage pointers; verifies object existence before DB write | PASS: `app/api/client/reviews/[id]/media/route.test.ts` |
+| Client review media delete | `app/api/client/reviews/[id]/media/[mediaId]/route.ts` | Requires owning client, matching review, matching uploadedByUserId, and `uploadedByRole = CLIENT`; prevents deleting portfolio/Looks media | PASS: `app/api/client/reviews/[id]/media/[mediaId]/route.test.ts` |
+| Pro verification docs | `app/api/pro/verification-docs/route.ts` | Requires `supabase://media-private/...`; rejects public/raw URLs; creates pending document for authenticated Pro | PASS: `app/api/pro/verification-docs/route.test.ts` |
+| Admin verification open | `app/api/admin/verification-docs/open/route.ts` | Requires admin role and scoped admin permission; requires `media-private`; returns signed URL | PASS: `app/api/admin/verification-docs/open/route.test.ts` |
+| URL rendering | `lib/media/renderUrls.ts` | Public storage paths render public URLs; private storage paths render signed URLs and fail closed without raw fallback | PASS: `lib/media/renderUrls.test.ts` |
 
 ## Required proof cases
 
@@ -68,8 +70,12 @@ Expected result:
 | Anonymous direct write to `media-public` | Denied unless signed upload URL is used | PASS | HTTP 400 with `statusCode: 403`, `new row violates row-level security policy` |
 | Pro booking session media upload uses `media-private` | Covered by route test | PASS | `app/api/pro/bookings/[id]/media/route.test.ts`; run `pnpm test -- 'app/api/pro/bookings/[id]/media/route.test.ts'` |
 | Booking session media path must stay under `bookings/<bookingId>/<phase>/` | Covered by route test | PASS | `app/api/pro/bookings/[id]/media/route.test.ts`; covers wrong booking id and wrong phase path rejection |
-| Verification docs must use `media-private` | Covered by route/manual check | TODO | Add test path |
-| Private media rendering happens through server-signed URL | Covered by route/helper test | TODO | Add test path |
+| Client review media create requires owning client | Covered by route test | PASS | `app/api/client/reviews/[id]/media/route.test.ts`; wrong client returns 403 and creates no media |
+| Client review media uses `media-public` only | Covered by route test | PASS | `app/api/client/reviews/[id]/media/route.test.ts`; rejects `media-private` for review media/thumbs |
+| Client review media delete requires owner/uploader match | Covered by route test | PASS | `app/api/client/reviews/[id]/media/[mediaId]/route.test.ts`; rejects wrong client, wrong review, wrong uploader, and non-client upload roles |
+| Verification docs must use `media-private` | Covered by route test | PASS | `app/api/pro/verification-docs/route.test.ts`; rejects `media-public`, raw `https://...`, malformed `supabase://...`, and missing URL |
+| Admin verification open requires authorized admin and `media-private` | Covered by route test | PASS | `app/api/admin/verification-docs/open/route.test.ts`; requires admin role, scoped permission, `media-private`, and signed URL |
+| Private media rendering happens through server-signed URL | Covered by helper test | PASS | `lib/media/renderUrls.test.ts`; private storage pointers use signed URLs and do not fall back to raw URLs if signing fails |
 
 ---
 
