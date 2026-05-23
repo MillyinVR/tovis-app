@@ -89,8 +89,16 @@ vi.mock('@/lib/looks/publication/service', () => ({
     mocks.createOrUpdateProLookFromMediaAsset,
 }))
 
+vi.mock('@/lib/security/logging', () => ({
+  safeError: vi.fn((error: unknown) => ({
+    name: error instanceof Error ? error.name : 'NonErrorThrown',
+    message: error instanceof Error ? error.message : String(error),
+  })),
+}))
+
 import { POST } from './route'
 import { BUCKETS } from '@/lib/storageBuckets'
+import { safeError } from '@/lib/security/logging'
 
 type CreatedMediaServiceTestDto = {
   serviceId: string
@@ -486,28 +494,26 @@ describe('app/api/pro/media/route.ts', () => {
   })
 
   it('returns 400 when publishToLooks is true but isEligibleForLooks is false', async () => {
-  const res = await POST(
-    makeJsonRequest({
-      storageBucket: BUCKETS.mediaPrivate,
-      storagePath: 'pros/pro_1/media_1.jpg',
-      serviceIds: ['service_1'],
-      isEligibleForLooks: false,
-      publishToLooks: true,
-    }),
-  )
-  const body = await readJson(res)
+    const res = await POST(
+      makeJsonRequest({
+        storageBucket: BUCKETS.mediaPrivate,
+        storagePath: 'pros/pro_1/media_1.jpg',
+        serviceIds: ['service_1'],
+        isEligibleForLooks: false,
+        publishToLooks: true,
+      }),
+    )
+    const body = await readJson(res)
 
-  expect(res.status).toBe(400)
-  expect(body).toEqual({
-    ok: false,
-    error: 'publishToLooks requires isEligibleForLooks to be true.',
+    expect(res.status).toBe(400)
+    expect(body).toEqual({
+      ok: false,
+      error: 'publishToLooks requires isEligibleForLooks to be true.',
+    })
+
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.createOrUpdateProLookFromMediaAsset).not.toHaveBeenCalled()
   })
-
-  expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
-  expect(
-    mocks.createOrUpdateProLookFromMediaAsset,
-  ).not.toHaveBeenCalled()
-})
 
   it('returns 400 when Looks is enabled with multiple service tags but no primaryServiceId is provided', async () => {
     mocks.serviceFindMany.mockResolvedValue([
@@ -537,5 +543,44 @@ describe('app/api/pro/media/route.ts', () => {
     expect(
       mocks.createOrUpdateProLookFromMediaAsset,
     ).not.toHaveBeenCalled()
+  })
+  it('returns 500 and logs a safe error when media creation throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error(
+      'storage failed for https://example.com/private.jpg?token=secret',
+    )
+
+    mocks.mediaAssetCreate.mockRejectedValueOnce(thrown)
+
+    const res = await POST(
+      makeJsonRequest({
+        storageBucket: BUCKETS.mediaPublic,
+        storagePath: 'pros/pro_1/media_1.jpg',
+        publicUrl: 'https://cdn.example.com/media_1.jpg',
+        serviceIds: ['service_1'],
+        isFeaturedInPortfolio: true,
+      }),
+    )
+
+    const body = await readJson(res)
+
+    expect(res.status).toBe(500)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Internal server error',
+    })
+
+    expect(safeError).toHaveBeenCalledWith(thrown)
+    expect(consoleErrorSpy).toHaveBeenCalledWith('POST /api/pro/media error', {
+      error: {
+        name: 'Error',
+        message: 'storage failed for https://example.com/private.jpg?token=secret',
+      },
+    })
+
+    consoleErrorSpy.mockRestore()
   })
 })

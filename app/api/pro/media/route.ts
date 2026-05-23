@@ -14,6 +14,7 @@ import {
 } from '@prisma/client'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { createOrUpdateProLookFromMediaAsset } from '@/lib/looks/publication/service'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -359,8 +360,11 @@ export async function POST(req: Request) {
       },
       201,
     )
-  } catch (e) {
-    console.error('POST /api/pro/media error', e)
+  } catch (e: unknown) {
+    console.error('POST /api/pro/media error', {
+      error: safeError(e),
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }
