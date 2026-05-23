@@ -200,6 +200,15 @@ describe('app/api/webhooks/twilio/route.ts', () => {
       .spyOn(console, 'info')
       .mockImplementation(() => undefined)
 
+    const safeMeta = {
+      messageSid: 'SM_sms_1',
+      messageStatus: 'sent',
+      to: '[redacted]',
+      from: '[redacted]',
+    }
+
+    mocks.safeLogMeta.mockReturnValueOnce(safeMeta)
+
     const result = await POST(
       makePostRequest({
         body: new URLSearchParams({
@@ -218,12 +227,7 @@ describe('app/api/webhooks/twilio/route.ts', () => {
       from: '+15550002222',
     })
 
-    expect(infoSpy).toHaveBeenCalledWith('Twilio webhook received', {
-      messageSid: 'SM_sms_1',
-      messageStatus: 'sent',
-      to: '+15550001111',
-      from: '+15550002222',
-    })
+    expect(infoSpy).toHaveBeenCalledWith('Twilio webhook received', safeMeta)
 
     expect(result.status).toBe(200)
     await expect(result.json()).resolves.toEqual({
