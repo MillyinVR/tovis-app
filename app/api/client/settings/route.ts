@@ -5,6 +5,7 @@ import { ClientAddressKind } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
 import { decimalToNullableNumber } from '@/lib/booking/snapshots'
+import { buildClientProfileContactLookupData } from '@/lib/security/contactLookup'
 
 export const dynamic = 'force-dynamic'
 
@@ -234,7 +235,12 @@ export async function PATCH(req: Request) {
       data: {
         ...(firstName !== undefined ? { firstName } : {}),
         ...(lastName !== undefined ? { lastName } : {}),
-        ...(phone !== undefined ? { phone } : {}),
+        ...(phone !== undefined
+          ? {
+              phone,
+              ...buildClientProfileContactLookupData({ phone }),
+            }
+          : {}),
         ...(avatarUrl !== undefined ? { avatarUrl } : {}),
         ...(body.dateOfBirth !== undefined ? { dateOfBirth } : {}),
       },
