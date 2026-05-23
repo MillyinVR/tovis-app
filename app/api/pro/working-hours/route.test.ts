@@ -4,6 +4,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProfessionalLocationType } from '@prisma/client'
 import { defaultWorkingHours } from '@/lib/scheduling/workingHoursValidation'
 
+const ADDRESS_PRIVACY_WRITE_KEYS = [
+  'encryptedAddressJson',
+  'addressKeyVersion',
+  'postalCodePrefix',
+  'latApprox',
+  'lngApprox',
+  'formattedAddress',
+] as const
+
+function expectNoAddressPrivacyWrites(data: Record<string, unknown>) {
+  for (const key of ADDRESS_PRIVACY_WRITE_KEYS) {
+    expect(data).not.toHaveProperty(key)
+  }
+}
+
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn((data: unknown, status = 200) => {
     return new Response(JSON.stringify(data), {
@@ -142,6 +157,26 @@ describe('app/api/pro/working-hours/route.ts', () => {
         usedDefault: true,
         missingLocation: true,
       })
+
+      expect(mocks.prisma.professionalLocation.findFirst).toHaveBeenCalledWith({
+        where: {
+          professionalId: 'pro_123',
+          isBookable: true,
+          type: {
+            in: [
+              ProfessionalLocationType.SALON,
+              ProfessionalLocationType.SUITE,
+            ],
+          },
+        },
+        select: {
+          id: true,
+          type: true,
+          isPrimary: true,
+          workingHours: true,
+        },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      })
     })
 
     it('falls back to defaults when stored workingHours are invalid', async () => {
@@ -217,6 +252,23 @@ describe('app/api/pro/working-hours/route.ts', () => {
       expect(body.locationId).toBe('loc_2')
       expect(body.usedDefault).toBe(false)
       expect(body.missingLocation).toBe(false)
+
+      expect(mocks.prisma.professionalLocation.findFirst).toHaveBeenCalledWith({
+        where: {
+          professionalId: 'pro_123',
+          isBookable: true,
+          type: {
+            in: [ProfessionalLocationType.MOBILE_BASE],
+          },
+        },
+        select: {
+          id: true,
+          type: true,
+          isPrimary: true,
+          workingHours: true,
+        },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      })
     })
   })
 
@@ -232,6 +284,7 @@ describe('app/api/pro/working-hours/route.ts', () => {
 
       const body = await readJson<{ ok: false; error: string }>(res)
       expect(body.error).toBe('Missing or invalid locationType.')
+
       expect(mocks.rateLimitIdentity).toHaveBeenCalledWith('user_123')
       expect(mocks.enforceRateLimit).toHaveBeenCalledWith({
         bucket: 'pro:working-hours:write',
@@ -240,6 +293,7 @@ describe('app/api/pro/working-hours/route.ts', () => {
           id: 'user_123',
         },
       })
+
       expect(mocks.prisma.professionalLocation.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
@@ -267,6 +321,7 @@ describe('app/api/pro/working-hours/route.ts', () => {
 
       expect(res).toBe(limited)
       expect(res.status).toBe(429)
+
       expect(mocks.prisma.professionalLocation.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
@@ -287,6 +342,7 @@ describe('app/api/pro/working-hours/route.ts', () => {
 
       const body = await readJson<{ ok: false; error: string }>(res)
       expect(body.error).toBe('Invalid body.')
+
       expect(mocks.prisma.professionalLocation.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
@@ -306,6 +362,7 @@ describe('app/api/pro/working-hours/route.ts', () => {
       expect(body.error).toBe(
         'workingHours must contain mon..sun with { enabled, start, end } and valid HH:MM times. Overnight ranges are allowed.',
       )
+
       expect(mocks.prisma.professionalLocation.findMany).not.toHaveBeenCalled()
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
@@ -340,10 +397,11 @@ describe('app/api/pro/working-hours/route.ts', () => {
         orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
         take: 50,
       })
+
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
-    it('updates all matching bookable locations for the requested mode', async () => {
+    it('updates all matching bookable locations for the requested mode without rewriting address privacy fields', async () => {
       const txUpdateMany = vi.fn().mockResolvedValue({ count: 2 })
       const txFindMany = vi.fn().mockResolvedValue([
         {
@@ -426,9 +484,13 @@ describe('app/api/pro/working-hours/route.ts', () => {
           },
         },
         data: {
-          workingHours: workingHours,
+          workingHours,
         },
       })
+
+      const updateCall = txUpdateMany.mock.calls[0]?.[0]
+      expect(updateCall).toBeDefined()
+      expectNoAddressPrivacyWrites(updateCall.data)
 
       expect(txFindMany).toHaveBeenCalledWith({
         where: {
@@ -457,7 +519,6 @@ describe('app/api/pro/working-hours/route.ts', () => {
       )
 
       expect(body).toMatchObject({
-        ok: true,
         locationType: 'SALON',
         locationId: 'loc_salon_1',
         location: {
@@ -470,6 +531,93 @@ describe('app/api/pro/working-hours/route.ts', () => {
         updatedCount: 2,
         updatedLocationIds: ['loc_salon_1', 'loc_suite_1'],
       })
+    })
+
+    it('updates only matching mobile base locations for mobile mode without rewriting address privacy fields', async () => {
+      const txUpdateMany = vi.fn().mockResolvedValue({ count: 1 })
+      const txFindMany = vi.fn().mockResolvedValue([
+        {
+          id: 'loc_mobile_1',
+          type: ProfessionalLocationType.MOBILE_BASE,
+          isPrimary: true,
+        },
+      ])
+
+      mocks.prisma.professionalLocation.findMany.mockResolvedValue([
+        {
+          id: 'loc_mobile_1',
+          type: ProfessionalLocationType.MOBILE_BASE,
+          isPrimary: true,
+        },
+      ])
+
+      mocks.prisma.$transaction.mockImplementation(
+        async (
+          callback: (tx: {
+            professionalLocation: {
+              updateMany: typeof txUpdateMany
+              findMany: typeof txFindMany
+            }
+          }) => Promise<unknown>,
+        ) => {
+          return callback({
+            professionalLocation: {
+              updateMany: txUpdateMany,
+              findMany: txFindMany,
+            },
+          })
+        },
+      )
+
+      const workingHours = defaultWorkingHours()
+
+      const res = await POST(
+        makeRequest('POST', '/api/pro/working-hours?locationType=MOBILE', {
+          workingHours,
+        }),
+      )
+
+      expect(res.status).toBe(200)
+
+      expect(txUpdateMany).toHaveBeenCalledWith({
+        where: {
+          professionalId: 'pro_123',
+          isBookable: true,
+          type: {
+            in: [ProfessionalLocationType.MOBILE_BASE],
+          },
+        },
+        data: {
+          workingHours,
+        },
+      })
+
+      const updateCall = txUpdateMany.mock.calls[0]?.[0]
+      expect(updateCall).toBeDefined()
+      expectNoAddressPrivacyWrites(updateCall.data)
+
+      expect(txFindMany).toHaveBeenCalledWith({
+        where: {
+          professionalId: 'pro_123',
+          isBookable: true,
+          type: {
+            in: [ProfessionalLocationType.MOBILE_BASE],
+          },
+        },
+        select: {
+          id: true,
+          type: true,
+          isPrimary: true,
+        },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+        take: 50,
+      })
+
+      expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledWith('pro_123')
+      expect(mocks.refreshProfessional).toHaveBeenCalledWith(
+        'pro_123',
+        'workingHours.update',
+      )
     })
 
     it('returns 409 when updateMany affects zero rows inside the transaction', async () => {

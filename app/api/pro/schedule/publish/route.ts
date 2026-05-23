@@ -55,7 +55,6 @@ export async function POST() {
       }
 
       return jsonOk({
-        ok: true,
         liveModes: readiness.liveModes,
         locationsPublished: 0,
         scheduleConfigVersion: null,
@@ -132,7 +131,6 @@ export async function POST() {
     }
 
     return jsonOk({
-      ok: true,
       liveModes: readiness.liveModes,
       locationsPublished: result.locationsPublished,
       scheduleConfigVersion: result.scheduleConfigVersion,

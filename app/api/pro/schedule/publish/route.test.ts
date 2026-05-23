@@ -1,4 +1,21 @@
+// app/api/pro/schedule/publish/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const ADDRESS_PRIVACY_WRITE_KEYS = [
+  'encryptedAddressJson',
+  'addressKeyVersion',
+  'postalCodePrefix',
+  'latApprox',
+  'lngApprox',
+  'formattedAddress',
+] as const
+
+function expectNoAddressPrivacyWrites(data: Record<string, unknown>) {
+  for (const key of ADDRESS_PRIVACY_WRITE_KEYS) {
+    expect(data).not.toHaveProperty(key)
+  }
+}
 
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn((data: unknown, status = 200) => {
@@ -147,18 +164,13 @@ describe('POST /api/pro/schedule/publish', () => {
       scheduleConfigVersion: 42,
     })
 
+    const tx = {
+      professionalLocation: mocks.professionalLocation,
+      professionalProfile: mocks.professionalProfile,
+    }
+
     mocks.prisma.$transaction.mockImplementation(
-      async (
-        fn: (tx: {
-          professionalLocation: typeof mocks.professionalLocation
-          professionalProfile: typeof mocks.professionalProfile
-        }) => Promise<unknown>,
-      ) => {
-        return fn({
-          professionalLocation: mocks.professionalLocation,
-          professionalProfile: mocks.professionalProfile,
-        })
-      },
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
     )
 
     mocks.refreshLocation.mockResolvedValue(undefined)
@@ -285,7 +297,7 @@ describe('POST /api/pro/schedule/publish', () => {
     expect(mocks.checkProReadiness).not.toHaveBeenCalled()
   })
 
-  it('publishes only publishable draft locations, refreshes them, then returns ready state', async () => {
+  it('publishes only publishable draft locations without rewriting address privacy fields', async () => {
     const publishableResult = {
       ok: true,
       locationId: 'loc_salon',
@@ -337,6 +349,10 @@ describe('POST /api/pro/schedule/publish', () => {
         isBookable: true,
       },
     })
+
+    const updateCall = mocks.professionalLocation.updateMany.mock.calls[0]?.[0]
+    expect(updateCall).toBeDefined()
+    expectNoAddressPrivacyWrites(updateCall.data)
 
     expect(mocks.professionalProfile.update).toHaveBeenCalledWith({
       where: { id: 'pro_123' },
@@ -413,6 +429,10 @@ describe('POST /api/pro/schedule/publish', () => {
       },
     })
 
+    const updateCall = mocks.professionalLocation.updateMany.mock.calls[0]?.[0]
+    expect(updateCall).toBeDefined()
+    expectNoAddressPrivacyWrites(updateCall.data)
+
     expect(mocks.refreshLocation).toHaveBeenCalledWith(
       'loc_salon',
       'location.update',
@@ -480,6 +500,10 @@ describe('POST /api/pro/schedule/publish', () => {
         isBookable: true,
       },
     })
+
+    const updateCall = mocks.professionalLocation.updateMany.mock.calls[0]?.[0]
+    expect(updateCall).toBeDefined()
+    expectNoAddressPrivacyWrites(updateCall.data)
 
     expect(mocks.refreshLocation).toHaveBeenCalledTimes(2)
     expect(mocks.refreshLocation).toHaveBeenCalledWith(

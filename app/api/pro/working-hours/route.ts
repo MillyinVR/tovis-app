@@ -246,7 +246,6 @@ export async function POST(req: Request) {
 
     return jsonOk(
       {
-        ok: true,
         locationType: mode,
         locationId: representative?.id ?? null,
         location: representative
