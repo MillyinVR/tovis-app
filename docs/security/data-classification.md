@@ -164,15 +164,16 @@ Recommended phased roadmap:
 The following items should be completed or explicitly accepted before public launch:
 
 - [ ] Finalize data retention windows by data class.
-- [ ] Create `docs/security/user-data-export-delete.md`.
-- [ ] Create private media incident runbook.
-- [ ] Decide PII encryption roadmap and owners.
+- [x] Create `docs/security/user-data-export-delete.md`.
+- [x] Create private media incident runbook.
+- [x] Create PII encryption roadmap.
+- [ ] Assign PII encryption roadmap owners.
 - [ ] Add admin/support access audit policy.
-- [ ] Verify logs do not contain raw PII, tokens, signed URLs, notes, or secrets.
+- [ ] Verify logs do not contain raw PII, tokens, signed URLs, notes, or secrets. Auth observability has a sanitizer and tests; all log surfaces still need review.
 - [ ] Verify analytics events do not include raw PII or sensitive booking/media details.
 - [ ] Verify public profile/search indexing excludes private fields.
-- [ ] Verify token-based flows store hashes, not raw tokens, for new records.
-- [ ] Verify private media access uses signed URLs and storage policy-as-code.
+- [x] Verify primary token-based flows store hashes, not raw tokens, for new records.
+- [x] Verify private media access uses signed URLs and storage policy-as-code in repo proof.
 
 ## Review checklist for new data fields
 
