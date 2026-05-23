@@ -2,6 +2,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireClient, pickString, jsonFail, jsonOk } from '@/app/api/_utils'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,7 +25,7 @@ function parseRating(x: unknown): number | undefined | 'invalid' {
         : Number.NaN
 
   if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1 || n > 5) return 'invalid'
-  return n
+    return n
 }
 
 function normalizeText(
@@ -37,8 +38,10 @@ function normalizeText(
 
   const trimmed = value.trim()
   if (!trimmed) return { value: null }
-  if (trimmed.length > maxLen) return { invalid: `Must be <= ${maxLen} characters.` }
-  return { value: trimmed }
+if (trimmed.length > maxLen) {
+  return { invalid: `Must be <= ${maxLen} characters.` }
+}
+return { value: trimmed }
 }
 
 export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -93,7 +96,10 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
 
     return jsonOk({ review: updated })
   } catch (e: unknown) {
-    console.error('PATCH /api/client/reviews/[id] error', e)
+    console.error('PATCH /api/client/reviews/[id] error', {
+      error: safeError(e),
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }
@@ -131,7 +137,10 @@ export async function DELETE(_req: NextRequest, context: { params: Promise<{ id:
 
     return jsonOk({})
   } catch (e: unknown) {
-    console.error('DELETE /api/client/reviews/[id] error', e)
+    console.error('DELETE /api/client/reviews/[id] error', {
+      error: safeError(e),
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }

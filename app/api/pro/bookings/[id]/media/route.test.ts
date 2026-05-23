@@ -81,6 +81,11 @@ const mocks = vi.hoisted(() => ({
   rateLimitExceededResponse: vi.fn(),
 
   captureBookingException: vi.fn(),
+
+  safeError: vi.fn((error: unknown) => ({
+    name: error instanceof Error ? error.name : 'NonErrorThrown',
+    message: error instanceof Error ? error.message : String(error),
+  })),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -140,6 +145,10 @@ vi.mock('@/lib/rateLimit/response', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 import { GET, POST } from './route'
@@ -340,6 +349,59 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
   })
 
+  it('GET returns 404 when booking is not found', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce(null)
+
+    const result = await GET(makeGetRequest(), makeCtx())
+
+    expect(result.status).toBe(404)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Booking not found.',
+    })
+
+    expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+    expect(mocks.renderMediaUrls).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+  })
+
+  it('GET returns forbidden when booking belongs to another professional', async () => {
+    mocks.bookingFindUnique.mockResolvedValueOnce({
+      id: 'booking_1',
+      professionalId: 'other_pro',
+    })
+
+    const result = await GET(makeGetRequest(), makeCtx())
+
+    expect(result.status).toBe(403)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Forbidden.',
+    })
+
+    expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+    expect(mocks.renderMediaUrls).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+  })
+
+  it('GET rejects invalid phase query param', async () => {
+    const result = await GET(
+      makeGetRequest(
+        'http://localhost/api/pro/bookings/booking_1/media?phase=BANANA',
+      ),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Invalid phase query param.',
+    })
+
+    expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
+    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+  })
+
   it('GET returns media items with rendered urls', async () => {
     const result = await GET(
       makeGetRequest(
@@ -389,41 +451,44 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     })
   })
 
-  it('GET returns forbidden when booking belongs to another professional', async () => {
-  mocks.bookingFindUnique.mockResolvedValueOnce({
-    id: 'booking_1',
-    professionalId: 'other_pro',
-  })
+  it('GET returns internal error, logs safely, and captures exception for unexpected errors', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
 
-  const result = await GET(makeGetRequest(), makeCtx())
-
-  expect(result.status).toBe(403)
-  await expect(result.json()).resolves.toEqual({
-    ok: false,
-    error: 'Forbidden.',
-  })
-
-  expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
-  expect(mocks.renderMediaUrls).not.toHaveBeenCalled()
-  expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
-})
-
-  it('GET rejects invalid phase query param', async () => {
-    const result = await GET(
-      makeGetRequest(
-        'http://localhost/api/pro/bookings/booking_1/media?phase=BANANA',
-      ),
-      makeCtx(),
+    const thrown = new Error(
+      'db blew up for https://signed.example/file.jpg?token=secret',
     )
 
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'Invalid phase query param.',
+    mocks.bookingFindUnique.mockRejectedValueOnce(thrown)
+
+    const result = await GET(makeGetRequest(), makeCtx())
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'GET /api/pro/bookings/[id]/media error',
+      {
+        error: {
+          name: 'Error',
+          message:
+            'db blew up for https://signed.example/file.jpg?token=secret',
+        },
+      },
+    )
+
+    expect(mocks.captureBookingException).toHaveBeenCalledWith({
+      error: thrown,
+      route: 'GET /api/pro/bookings/[id]/media',
     })
 
-    expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
-    expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Internal server error',
+    })
+
+    consoleErrorSpy.mockRestore()
   })
 
   it('POST returns auth response when requirePro fails', async () => {
@@ -1054,8 +1119,16 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     )
   })
 
-  it('POST returns internal error, captures exception, and marks idempotency failed for unexpected errors', async () => {
-    mocks.uploadProBookingMedia.mockRejectedValueOnce(new Error('boom'))
+  it('POST returns internal error, logs safely, captures exception, and marks idempotency failed for unexpected errors', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error(
+      'boom for https://signed.example/file.jpg?token=secret',
+    )
+
+    mocks.uploadProBookingMedia.mockRejectedValueOnce(thrown)
 
     const result = await POST(
       makeIdempotentPostRequest({
@@ -1069,8 +1142,21 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       operation: 'POST /api/pro/bookings/[id]/media',
     })
 
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/pro/bookings/[id]/media error',
+      {
+        error: {
+          name: 'Error',
+          message:
+            'boom for https://signed.example/file.jpg?token=secret',
+        },
+      },
+    )
+
     expect(mocks.captureBookingException).toHaveBeenCalledWith({
-      error: expect.any(Error),
+      error: thrown,
       route: 'POST /api/pro/bookings/[id]/media',
     })
 
@@ -1079,5 +1165,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       ok: false,
       error: 'Internal server error',
     })
+
+    consoleErrorSpy.mockRestore()
   })
 })

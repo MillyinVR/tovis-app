@@ -5,6 +5,7 @@ import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { MediaVisibility } from '@prisma/client'
 import { resolveStoragePointers, safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,11 +13,6 @@ type Props = { params: Promise<{ id: string }> }
 
 function computeVisibility(isFeaturedInPortfolio: boolean, isEligibleForLooks: boolean): MediaVisibility {
   return isFeaturedInPortfolio || isEligibleForLooks ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
-}
-
-function errorMessage(e: unknown) {
-  if (e instanceof Error && e.message) return e.message
-  return 'Internal server error'
 }
 
 async function loadOwnedMedia(mediaId: string, professionalId: string) {
@@ -137,12 +133,14 @@ export async function POST(_req: NextRequest, props: Props) {
       },
       200,
     )
-  } catch (e) {
-    console.error('POST /api/pro/media/[id]/portfolio error', e)
-    return jsonFail(500, errorMessage(e))
+  } catch (e: unknown) {
+    console.error('POST /api/pro/media/[id]/portfolio error', {
+      error: safeError(e),
+    })
+
+    return jsonFail(500, 'Internal server error')
   }
 }
-
 export async function DELETE(_req: NextRequest, props: Props) {
   try {
     const auth = await requirePro()
@@ -192,8 +190,11 @@ export async function DELETE(_req: NextRequest, props: Props) {
       },
       200,
     )
-  } catch (e) {
-    console.error('DELETE /api/pro/media/[id]/portfolio error', e)
-    return jsonFail(500, errorMessage(e))
+  } catch (e: unknown) {
+    console.error('DELETE /api/pro/media/[id]/portfolio error', {
+      error: safeError(e),
+    })
+
+    return jsonFail(500, 'Internal server error')
   }
 }

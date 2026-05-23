@@ -19,6 +19,7 @@ import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
+import { safeError } from '@/lib/security/logging'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
@@ -89,7 +90,9 @@ function parseMediaType(value: unknown): MediaType | null {
   return null
 }
 
-function safeBucket(raw: unknown): (typeof BUCKETS)[keyof typeof BUCKETS] | null {
+function safeBucket(
+  raw: unknown,
+): (typeof BUCKETS)[keyof typeof BUCKETS] | null {
   const value = pickString(raw)
 
   if (!value) return null
@@ -313,7 +316,9 @@ export async function GET(req: Request, ctx: Ctx) {
 
     return jsonOk({ items }, 200)
   } catch (error: unknown) {
-    console.error('GET /api/pro/bookings/[id]/media error', error)
+    console.error('GET /api/pro/bookings/[id]/media error', {
+      error: safeError(error),
+    })
 
     captureBookingException({
       error,
@@ -380,6 +385,7 @@ export async function POST(req: Request, ctx: Ctx) {
     if (!storageBucket || !storagePath) {
       return jsonFail(400, 'Missing storageBucket/storagePath.')
     }
+
     const thumbBucket =
       body.thumbBucket === null ||
       body.thumbBucket === undefined ||
@@ -388,7 +394,9 @@ export async function POST(req: Request, ctx: Ctx) {
         : safeBucket(body.thumbBucket)
 
     const thumbPath =
-      body.thumbPath === null || body.thumbPath === undefined || body.thumbPath === ''
+      body.thumbPath === null ||
+      body.thumbPath === undefined ||
+      body.thumbPath === ''
         ? null
         : safeStoragePath(body.thumbPath)
 
@@ -557,7 +565,9 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    console.error('POST /api/pro/bookings/[id]/media error', error)
+    console.error('POST /api/pro/bookings/[id]/media error', {
+      error: safeError(error),
+    })
 
     captureBookingException({
       error,

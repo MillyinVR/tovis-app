@@ -1,3 +1,5 @@
+// app/api/client/reviews/[id]/media/[mediaId]/route.test.ts
+
 import { Role } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -25,6 +27,11 @@ const mocks = vi.hoisted(() => ({
   reviewFindUnique: vi.fn(),
   mediaAssetFindUnique: vi.fn(),
   mediaAssetDelete: vi.fn(),
+
+  safeError: vi.fn((error: unknown) => ({
+    name: error instanceof Error ? error.name : 'NonErrorThrown',
+    message: error instanceof Error ? error.message : String(error),
+  })),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -44,6 +51,10 @@ vi.mock('@/lib/prisma', () => ({
       delete: mocks.mediaAssetDelete,
     },
   },
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 import { DELETE } from './route'
@@ -347,8 +358,16 @@ describe('app/api/client/reviews/[id]/media/[mediaId]/route.ts', () => {
     })
   })
 
-  it('returns 500 and does not leak unexpected errors', async () => {
-    mocks.mediaAssetFindUnique.mockRejectedValueOnce(new Error('db exploded'))
+  it('returns 500, logs a safe error, and does not leak unexpected errors', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error(
+      'db exploded for https://example.com/private.jpg?token=secret',
+    )
+
+    mocks.mediaAssetFindUnique.mockRejectedValueOnce(thrown)
 
     const result = await DELETE(makeDeleteRequest(), makeCtx())
 
@@ -358,6 +377,20 @@ describe('app/api/client/reviews/[id]/media/[mediaId]/route.ts', () => {
       error: 'Internal server error',
     })
 
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'DELETE /api/client/reviews/[id]/media/[mediaId] error',
+      {
+        error: {
+          name: 'Error',
+          message:
+            'db exploded for https://example.com/private.jpg?token=secret',
+        },
+      },
+    )
+
     expect(mocks.mediaAssetDelete).not.toHaveBeenCalled()
+
+    consoleErrorSpy.mockRestore()
   })
 })

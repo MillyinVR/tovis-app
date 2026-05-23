@@ -11,6 +11,7 @@ import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -444,7 +445,9 @@ export async function POST(
       201,
     )
   } catch (error: unknown) {
-    console.error('POST /api/client/reviews/[id]/media error', error)
+    console.error('POST /api/client/reviews/[id]/media error', {
+      error: safeError(error),
+    })
 
     const message = errMessage(error)
     const safe =

@@ -1,3 +1,5 @@
+// app/api/client/reviews/[id]/media/route.test.ts
+
 import { MediaType, MediaVisibility, Role } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -71,6 +73,11 @@ const mocks = vi.hoisted(() => ({
   getSupabaseAdmin: vi.fn(),
   getPublicUrl: vi.fn(),
   createSignedUrl: vi.fn(),
+
+  safeError: vi.fn((error: unknown) => ({
+    name: error instanceof Error ? error.name : 'NonErrorThrown',
+    message: error instanceof Error ? error.message : String(error),
+  })),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -109,6 +116,10 @@ vi.mock('@/lib/media/renderUrls', () => ({
 
 vi.mock('@/lib/supabaseAdmin', () => ({
   getSupabaseAdmin: mocks.getSupabaseAdmin,
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 import { POST } from './route'
@@ -665,15 +676,49 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
           thumbUrl: renderedUrls.renderThumbUrl,
         },
       ],
-        review: {
+      review: {
         ...review,
         mediaAssets: [
-            {
+          {
             ...createdMedia,
             createdAt: createdAtIso,
-            },
+          },
         ],
-        },
+      },
     })
+  })
+
+  it('returns 500 and logs a safe error when media creation throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error(
+      'db failed for https://example.com/private.jpg?token=secret',
+    )
+
+    mocks.txMediaAssetCreate.mockRejectedValueOnce(thrown)
+
+    const result = await POST(makePostRequest(makeValidBody()), makeCtx())
+
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Internal server error',
+    })
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/client/reviews/[id]/media error',
+      {
+        error: {
+          name: 'Error',
+          message:
+            'db failed for https://example.com/private.jpg?token=secret',
+        },
+      },
+    )
+
+    consoleErrorSpy.mockRestore()
   })
 })

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { MediaVisibility } from '@prisma/client'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { pickBool, pickString } from '@/lib/pick'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -130,8 +131,11 @@ export async function PATCH(req: Request, ctx: Ctx) {
     })
 
     return jsonOk({ media: updated }, 200)
-  } catch (e) {
-    console.error('PATCH /api/pro/media/[id] error', e)
+  } catch (e: unknown) {
+    console.error('PATCH /api/pro/media/[id] error', {
+      error: safeError(e),
+    })
+
     return jsonFail(500, 'Failed to update media.')
   }
 }
@@ -155,8 +159,11 @@ export async function DELETE(_req: Request, ctx: Ctx) {
 
     await prisma.mediaAsset.delete({ where: { id: mediaId } })
     return jsonOk({}, 200)
-  } catch (e) {
-    console.error('DELETE /api/pro/media/[id] error', e)
+  } catch (e: unknown) {
+    console.error('DELETE /api/pro/media/[id] error', {
+      error: safeError(e),
+    })
+
     return jsonFail(500, 'Failed to delete media.')
   }
 }
