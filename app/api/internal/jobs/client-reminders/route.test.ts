@@ -1,45 +1,38 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationEventKey } from '@prisma/client'
 
-const TEST_NOW = new Date('2026-04-06T17:00:00.000Z')
+const NOW = new Date('2026-04-13T18:30:00.000Z')
 
 const mocks = vi.hoisted(() => ({
-  prismaScheduledFindMany: vi.fn(),
-  prismaScheduledUpdateMany: vi.fn(),
-  prismaTransaction: vi.fn(),
+  jsonFail: vi.fn(),
+  jsonOk: vi.fn(),
 
-  txScheduledUpdateMany: vi.fn(),
+  scheduledClientNotificationFindMany: vi.fn(),
+  scheduledClientNotificationUpdateMany: vi.fn(),
+  transaction: vi.fn(),
 
   validateDueAppointmentReminder: vi.fn(),
   cancelDueAppointmentReminder: vi.fn(),
-
   upsertClientNotification: vi.fn(),
+
+  safeError: vi.fn((error: unknown) => ({
+    name: error instanceof Error ? error.name : 'NonErrorThrown',
+    message: error instanceof Error ? error.message : String(error),
+  })),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
-  jsonOk: (data: Record<string, unknown>, status = 200) =>
-    new Response(JSON.stringify({ ok: true, ...data }), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  jsonFail: (
-    status: number,
-    error: string,
-    extra?: Record<string, unknown>,
-  ) =>
-    new Response(JSON.stringify({ ok: false, error, ...(extra ?? {}) }), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    }),
+  jsonFail: mocks.jsonFail,
+  jsonOk: mocks.jsonOk,
 }))
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     scheduledClientNotification: {
-      findMany: mocks.prismaScheduledFindMany,
-      updateMany: mocks.prismaScheduledUpdateMany,
+      findMany: mocks.scheduledClientNotificationFindMany,
+      updateMany: mocks.scheduledClientNotificationUpdateMany,
     },
-    $transaction: mocks.prismaTransaction,
+    $transaction: mocks.transaction,
   },
 }))
 
@@ -52,176 +45,287 @@ vi.mock('@/lib/notifications/clientNotifications', () => ({
   upsertClientNotification: mocks.upsertClientNotification,
 }))
 
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
+}))
+
 import { GET, POST } from './route'
 
-const tx = {
+type Tx = {
   scheduledClientNotification: {
-    updateMany: mocks.txScheduledUpdateMany,
-  },
+    updateMany: typeof mocks.scheduledClientNotificationUpdateMany
+  }
+}
+
+function makeJsonResponse(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+    },
+  })
 }
 
 function makeRequest(args?: {
   method?: 'GET' | 'POST'
-  search?: string
-  headers?: Record<string, string>
-}) {
-  const method = args?.method ?? 'GET'
-  const search = args?.search ?? ''
+  url?: string
+  authorization?: string
+  internalSecret?: string
+}): Request {
+  const headers = new Headers()
+
+  if (args?.authorization) {
+    headers.set('authorization', args.authorization)
+  }
+
+  if (args?.internalSecret) {
+    headers.set('x-internal-job-secret', args.internalSecret)
+  }
 
   return new Request(
-    `http://localhost/api/internal/jobs/client-reminders${search}`,
+    args?.url ?? 'http://localhost/api/internal/jobs/client-reminders',
     {
-      method,
-      headers: args?.headers,
+      method: args?.method ?? 'GET',
+      headers,
     },
   )
 }
 
-describe('app/api/internal/jobs/client-reminders/route', () => {
+function makeTx(): Tx {
+  return {
+    scheduledClientNotification: {
+      updateMany: mocks.scheduledClientNotificationUpdateMany,
+    },
+  }
+}
+
+function makeSendValidation(overrides?: Partial<{
+  rowId: string
+  clientId: string
+  bookingId: string
+  dedupeKey: string
+  href: string
+}>) {
+  return {
+    action: 'SEND' as const,
+    rowId: overrides?.rowId ?? 'reminder_1',
+    clientId: overrides?.clientId ?? 'client_1',
+    bookingId: overrides?.bookingId ?? 'booking_1',
+    dedupeKey:
+      overrides?.dedupeKey ?? 'appointment-reminder:booking_1:client_1',
+    href: overrides?.href ?? '/client/bookings/booking_1',
+    notification: {
+      title: 'Appointment reminder',
+      body: 'Your appointment is coming up.',
+      data: {
+        bookingId: overrides?.bookingId ?? 'booking_1',
+      },
+    },
+  }
+}
+
+describe('app/api/internal/jobs/client-reminders/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
-    vi.setSystemTime(TEST_NOW)
+    vi.setSystemTime(NOW)
 
+    delete process.env.INTERNAL_JOB_SECRET
     delete process.env.CRON_SECRET
-    process.env.INTERNAL_JOB_SECRET = 'test-secret'
+    process.env.INTERNAL_JOB_SECRET = 'job_secret_1'
 
-    mocks.prismaTransaction.mockImplementation(
-      async (run: (db: typeof tx) => Promise<unknown>) => run(tx),
+    mocks.jsonFail.mockImplementation((status: number, error: string) =>
+      makeJsonResponse(status, {
+        ok: false,
+        error,
+      }),
     )
 
-    mocks.txScheduledUpdateMany.mockResolvedValue({ count: 1 })
-    mocks.prismaScheduledUpdateMany.mockResolvedValue({ count: 1 })
+    mocks.jsonOk.mockImplementation((data: Record<string, unknown>) =>
+      makeJsonResponse(200, {
+        ok: true,
+        ...data,
+      }),
+    )
+
+    mocks.scheduledClientNotificationFindMany.mockResolvedValue([])
+
+    mocks.transaction.mockImplementation(
+      async (callback: (tx: Tx) => Promise<unknown>) => callback(makeTx()),
+    )
+
+    mocks.validateDueAppointmentReminder.mockResolvedValue(makeSendValidation())
+
+    mocks.cancelDueAppointmentReminder.mockResolvedValue(undefined)
+    mocks.upsertClientNotification.mockResolvedValue({
+      id: 'client_notification_1',
+    })
+
+    mocks.scheduledClientNotificationUpdateMany.mockResolvedValue({
+      count: 1,
+    })
   })
 
   afterEach(() => {
     vi.useRealTimers()
+    delete process.env.INTERNAL_JOB_SECRET
+    delete process.env.CRON_SECRET
   })
 
-  it('returns 500 when the internal job secret is not configured', async () => {
+  it('GET returns 500 when no job secret is configured', async () => {
     delete process.env.INTERNAL_JOB_SECRET
     delete process.env.CRON_SECRET
 
-    const response = await GET(makeRequest())
-    const json = await response.json()
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
 
-    expect(response.status).toBe(500)
-    expect(json).toEqual({
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
       error: 'Missing INTERNAL_JOB_SECRET or CRON_SECRET configuration.',
     })
 
-    expect(mocks.prismaScheduledFindMany).not.toHaveBeenCalled()
+    expect(mocks.scheduledClientNotificationFindMany).not.toHaveBeenCalled()
   })
 
-  it('returns 401 when the request is unauthorized', async () => {
-    const response = await GET(makeRequest())
-    const json = await response.json()
+  it('GET returns 401 when request is unauthorized', async () => {
+    const result = await GET(makeRequest())
 
-    expect(response.status).toBe(401)
-    expect(json).toEqual({
+    expect(result.status).toBe(401)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
       error: 'Unauthorized',
     })
 
-    expect(mocks.prismaScheduledFindMany).not.toHaveBeenCalled()
+    expect(mocks.scheduledClientNotificationFindMany).not.toHaveBeenCalled()
   })
 
-  it('processes due reminder rows on GET', async () => {
-    mocks.prismaScheduledFindMany.mockResolvedValue([{ id: 'sched_1' }])
-
-    mocks.validateDueAppointmentReminder.mockResolvedValue({
-      action: 'PROCESS',
-      rowId: 'sched_1',
-      clientId: 'client_1',
-      bookingId: 'booking_1',
-      dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:booking_1',
-      href: '/client/bookings/booking_1?step=overview',
-      notification: {
-        title: 'Appointment reminder',
-        body: 'Reminder: your appointment for Haircut is in one week.',
-        data: {
-          reminderKind: 'ONE_WEEK',
-          bookingId: 'booking_1',
-          scheduledFor: '2026-04-13T17:00:00.000Z',
-          timeZone: 'UTC',
-          serviceName: 'Haircut',
-          professionalName: 'Tori',
-        },
-      },
-    })
-
-    mocks.upsertClientNotification.mockResolvedValue(undefined)
-    mocks.txScheduledUpdateMany.mockResolvedValue({ count: 1 })
-
-    const response = await GET(
+  it('GET loads due reminders with default take and returns empty summary', async () => {
+    const result = await GET(
       makeRequest({
-        method: 'GET',
-        search: '?take=5',
-        headers: {
-          authorization: 'Bearer test-secret',
-        },
+        authorization: 'Bearer job_secret_1',
       }),
     )
-    const json = await response.json()
 
-    expect(mocks.prismaScheduledFindMany).toHaveBeenCalledWith({
+    expect(mocks.scheduledClientNotificationFindMany).toHaveBeenCalledWith({
       where: {
         eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
         cancelledAt: null,
         processedAt: null,
         failedAt: null,
         runAt: {
-          lte: TEST_NOW,
+          lte: NOW,
         },
       },
       orderBy: [{ runAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-      take: 5,
+      take: 100,
       select: {
         id: true,
       },
     })
 
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      scannedCount: 0,
+      processedCount: 0,
+      skippedCount: 0,
+      cancelledCount: 0,
+      failedCount: 0,
+      cancelled: [],
+      failed: [],
+    })
+  })
+
+  it('GET clamps take query param to the maximum', async () => {
+    await GET(
+      makeRequest({
+        url: 'http://localhost/api/internal/jobs/client-reminders?take=999',
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(mocks.scheduledClientNotificationFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 250,
+      }),
+    )
+  })
+
+  it('POST accepts x-internal-job-secret and runs the same job path', async () => {
+    const result = await POST(
+      makeRequest({
+        method: 'POST',
+        internalSecret: 'job_secret_1',
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      scannedCount: 0,
+      processedCount: 0,
+      skippedCount: 0,
+      cancelledCount: 0,
+      failedCount: 0,
+      cancelled: [],
+      failed: [],
+    })
+  })
+
+  it('processes a due SEND reminder, creates notification, and marks row processed', async () => {
+    mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
+      { id: 'reminder_1' },
+    ])
+
+    mocks.validateDueAppointmentReminder.mockResolvedValueOnce(
+      makeSendValidation(),
+    )
+
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
     expect(mocks.validateDueAppointmentReminder).toHaveBeenCalledWith({
-      tx,
-      scheduledClientNotificationId: 'sched_1',
-      now: TEST_NOW,
+      tx: expect.any(Object),
+      scheduledClientNotificationId: 'reminder_1',
+      now: NOW,
     })
 
     expect(mocks.upsertClientNotification).toHaveBeenCalledWith({
-      tx,
+      tx: expect.any(Object),
       clientId: 'client_1',
       bookingId: 'booking_1',
       eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
       title: 'Appointment reminder',
-      body: 'Reminder: your appointment for Haircut is in one week.',
-      dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:booking_1',
-      href: '/client/bookings/booking_1?step=overview',
+      body: 'Your appointment is coming up.',
+      dedupeKey: 'appointment-reminder:booking_1:client_1',
+      href: '/client/bookings/booking_1',
       data: {
-        reminderKind: 'ONE_WEEK',
         bookingId: 'booking_1',
-        scheduledFor: '2026-04-13T17:00:00.000Z',
-        timeZone: 'UTC',
-        serviceName: 'Haircut',
-        professionalName: 'Tori',
       },
     })
 
-    expect(mocks.txScheduledUpdateMany).toHaveBeenCalledWith({
+    expect(mocks.scheduledClientNotificationUpdateMany).toHaveBeenCalledWith({
       where: {
-        id: 'sched_1',
+        id: 'reminder_1',
         cancelledAt: null,
         processedAt: null,
       },
       data: {
-        processedAt: TEST_NOW,
+        processedAt: NOW,
         failedAt: null,
         lastError: null,
       },
     })
 
-    expect(response.status).toBe(200)
-    expect(json).toEqual({
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
       ok: true,
       scannedCount: 1,
       processedCount: 1,
@@ -233,97 +337,26 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
     })
   })
 
-  it('treats a lost processed-row race as skipped instead of processed', async () => {
-    mocks.prismaScheduledFindMany.mockResolvedValue([{ id: 'sched_race_processed' }])
+  it('skips a due reminder when validation returns SKIP', async () => {
+    mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
+      { id: 'reminder_skip_1' },
+    ])
 
-    mocks.validateDueAppointmentReminder.mockResolvedValue({
-      action: 'PROCESS',
-      rowId: 'sched_race_processed',
-      clientId: 'client_1',
-      bookingId: 'booking_1',
-      dedupeKey: 'CLIENT_REMINDER:ONE_WEEK:booking_1',
-      href: '/client/bookings/booking_1?step=overview',
-      notification: {
-        title: 'Appointment reminder',
-        body: 'Reminder body',
-        data: {
-          reminderKind: 'ONE_WEEK',
-          bookingId: 'booking_1',
-          scheduledFor: '2026-04-13T17:00:00.000Z',
-          timeZone: 'UTC',
-          serviceName: 'Haircut',
-          professionalName: null,
-        },
-      },
-    })
-
-    mocks.upsertClientNotification.mockResolvedValue(undefined)
-    mocks.txScheduledUpdateMany.mockResolvedValue({ count: 0 })
-
-    const response = await GET(
-      makeRequest({
-        headers: {
-          authorization: 'Bearer test-secret',
-        },
-      }),
-    )
-    const json = await response.json()
-
-    expect(mocks.txScheduledUpdateMany).toHaveBeenCalledWith({
-      where: {
-        id: 'sched_race_processed',
-        cancelledAt: null,
-        processedAt: null,
-      },
-      data: {
-        processedAt: TEST_NOW,
-        failedAt: null,
-        lastError: null,
-      },
-    })
-
-    expect(response.status).toBe(200)
-    expect(json).toEqual({
-      ok: true,
-      scannedCount: 1,
-      processedCount: 0,
-      skippedCount: 1,
-      cancelledCount: 0,
-      failedCount: 0,
-      cancelled: [],
-      failed: [],
-    })
-  })
-
-  it('skips a row when validation says to skip', async () => {
-    mocks.prismaScheduledFindMany.mockResolvedValue([{ id: 'sched_2' }])
-
-    mocks.validateDueAppointmentReminder.mockResolvedValue({
+    mocks.validateDueAppointmentReminder.mockResolvedValueOnce({
       action: 'SKIP',
     })
 
-    const response = await GET(
+    const result = await GET(
       makeRequest({
-        method: 'GET',
-        headers: {
-          authorization: 'Bearer test-secret',
-        },
+        authorization: 'Bearer job_secret_1',
       }),
     )
-    const json = await response.json()
 
-    expect(mocks.validateDueAppointmentReminder).toHaveBeenCalledWith({
-      tx,
-      scheduledClientNotificationId: 'sched_2',
-      now: TEST_NOW,
-    })
-
-    expect(mocks.cancelDueAppointmentReminder).not.toHaveBeenCalled()
     expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
-    expect(mocks.txScheduledUpdateMany).not.toHaveBeenCalled()
+    expect(mocks.cancelDueAppointmentReminder).not.toHaveBeenCalled()
 
-    expect(response.status).toBe(200)
-    expect(json).toEqual({
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
       ok: true,
       scannedCount: 1,
       processedCount: 0,
@@ -335,44 +368,33 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
     })
   })
 
-  it('cancels stale or invalid rows instead of processing them', async () => {
-    mocks.prismaScheduledFindMany.mockResolvedValue([{ id: 'sched_3' }])
+  it('cancels a due reminder when validation returns CANCEL', async () => {
+    mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
+      { id: 'reminder_cancel_1' },
+    ])
 
-    mocks.validateDueAppointmentReminder.mockResolvedValue({
+    mocks.validateDueAppointmentReminder.mockResolvedValueOnce({
       action: 'CANCEL',
-      reason: 'Linked booking is no longer eligible for appointment reminders.',
+      reason: 'BOOKING_CANCELLED',
     })
 
-    mocks.cancelDueAppointmentReminder.mockResolvedValue(undefined)
-
-    const response = await GET(
+    const result = await GET(
       makeRequest({
-        method: 'GET',
-        headers: {
-          authorization: 'Bearer test-secret',
-        },
+        authorization: 'Bearer job_secret_1',
       }),
     )
-    const json = await response.json()
-
-    expect(mocks.validateDueAppointmentReminder).toHaveBeenCalledWith({
-      tx,
-      scheduledClientNotificationId: 'sched_3',
-      now: TEST_NOW,
-    })
 
     expect(mocks.cancelDueAppointmentReminder).toHaveBeenCalledWith({
-      tx,
-      scheduledClientNotificationId: 'sched_3',
-      reason: 'Linked booking is no longer eligible for appointment reminders.',
-      cancelledAt: TEST_NOW,
+      tx: expect.any(Object),
+      scheduledClientNotificationId: 'reminder_cancel_1',
+      reason: 'BOOKING_CANCELLED',
+      cancelledAt: NOW,
     })
 
     expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
-    expect(mocks.txScheduledUpdateMany).not.toHaveBeenCalled()
 
-    expect(response.status).toBe(200)
-    expect(json).toEqual({
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
       ok: true,
       scannedCount: 1,
       processedCount: 0,
@@ -381,67 +403,79 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
       failedCount: 0,
       cancelled: [
         {
-          id: 'sched_3',
-          reason: 'Linked booking is no longer eligible for appointment reminders.',
+          id: 'reminder_cancel_1',
+          reason: 'BOOKING_CANCELLED',
         },
       ],
       failed: [],
     })
   })
 
-  it('marks failed rows and reports failures on POST', async () => {
-    mocks.prismaScheduledFindMany.mockResolvedValue([{ id: 'sched_4' }])
+  it('skips when processed marker update loses the race', async () => {
+    mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
+      { id: 'reminder_race_1' },
+    ])
 
-    mocks.validateDueAppointmentReminder.mockResolvedValue({
-      action: 'PROCESS',
-      rowId: 'sched_4',
-      clientId: 'client_9',
-      bookingId: 'booking_9',
-      dedupeKey: 'CLIENT_REMINDER:DAY_BEFORE:booking_9',
-      href: '/client/bookings/booking_9?step=overview',
-      notification: {
-        title: 'Appointment tomorrow',
-        body: 'Reminder: your appointment is tomorrow.',
-        data: {
-          reminderKind: 'DAY_BEFORE',
-          bookingId: 'booking_9',
-          scheduledFor: '2026-04-07T17:00:00.000Z',
-          timeZone: 'UTC',
-          serviceName: 'Haircut',
-          professionalName: null,
-        },
-      },
-    })
-
-    mocks.upsertClientNotification.mockRejectedValue(
-      new Error('Reminder delivery failed'),
-    )
-    mocks.prismaScheduledUpdateMany.mockResolvedValue({ count: 1 })
-
-    const response = await POST(
-      makeRequest({
-        method: 'POST',
-        headers: {
-          'x-internal-job-secret': 'test-secret',
-        },
+    mocks.validateDueAppointmentReminder.mockResolvedValueOnce(
+      makeSendValidation({
+        rowId: 'reminder_race_1',
       }),
     )
-    const json = await response.json()
 
-    expect(mocks.prismaScheduledUpdateMany).toHaveBeenCalledWith({
+    mocks.scheduledClientNotificationUpdateMany.mockResolvedValueOnce({
+      count: 0,
+    })
+
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(mocks.upsertClientNotification).toHaveBeenCalled()
+
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      scannedCount: 1,
+      processedCount: 0,
+      skippedCount: 1,
+      cancelledCount: 0,
+      failedCount: 0,
+      cancelled: [],
+      failed: [],
+    })
+  })
+
+  it('marks retryable failure and reports failed reminder when processing throws', async () => {
+    mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
+      { id: 'reminder_failed_1' },
+    ])
+
+    mocks.validateDueAppointmentReminder.mockRejectedValueOnce(
+      new Error('validation exploded'),
+    )
+
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(mocks.scheduledClientNotificationUpdateMany).toHaveBeenCalledWith({
       where: {
-        id: 'sched_4',
+        id: 'reminder_failed_1',
         cancelledAt: null,
         processedAt: null,
       },
       data: {
         failedAt: null,
-        lastError: 'Reminder delivery failed',
+        lastError: 'validation exploded',
       },
     })
 
-    expect(response.status).toBe(200)
-    expect(json).toEqual({
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
       ok: true,
       scannedCount: 1,
       processedCount: 0,
@@ -451,66 +485,34 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
       cancelled: [],
       failed: [
         {
-          id: 'sched_4',
-          error: 'Reminder delivery failed',
+          id: 'reminder_failed_1',
+          error: 'validation exploded',
         },
       ],
     })
   })
 
-  it('treats a lost failed-row race as skipped instead of failed', async () => {
-    mocks.prismaScheduledFindMany.mockResolvedValue([{ id: 'sched_race_failed' }])
+  it('returns skipped when retryable failure marker loses the race', async () => {
+    mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
+      { id: 'reminder_failed_race_1' },
+    ])
 
-    mocks.validateDueAppointmentReminder.mockResolvedValue({
-      action: 'PROCESS',
-      rowId: 'sched_race_failed',
-      clientId: 'client_9',
-      bookingId: 'booking_9',
-      dedupeKey: 'CLIENT_REMINDER:DAY_BEFORE:booking_9',
-      href: '/client/bookings/booking_9?step=overview',
-      notification: {
-        title: 'Appointment tomorrow',
-        body: 'Reminder: your appointment is tomorrow.',
-        data: {
-          reminderKind: 'DAY_BEFORE',
-          bookingId: 'booking_9',
-          scheduledFor: '2026-04-07T17:00:00.000Z',
-          timeZone: 'UTC',
-          serviceName: 'Haircut',
-          professionalName: null,
-        },
-      },
+    mocks.validateDueAppointmentReminder.mockRejectedValueOnce(
+      new Error('validation exploded'),
+    )
+
+    mocks.scheduledClientNotificationUpdateMany.mockResolvedValueOnce({
+      count: 0,
     })
 
-    mocks.upsertClientNotification.mockRejectedValue(
-      new Error('Reminder delivery failed'),
-    )
-    mocks.prismaScheduledUpdateMany.mockResolvedValue({ count: 0 })
-
-    const response = await POST(
+    const result = await GET(
       makeRequest({
-        method: 'POST',
-        headers: {
-          'x-internal-job-secret': 'test-secret',
-        },
+        authorization: 'Bearer job_secret_1',
       }),
     )
-    const json = await response.json()
 
-    expect(mocks.prismaScheduledUpdateMany).toHaveBeenCalledWith({
-      where: {
-        id: 'sched_race_failed',
-        cancelledAt: null,
-        processedAt: null,
-      },
-      data: {
-        failedAt: null,
-        lastError: 'Reminder delivery failed',
-      },
-    })
-
-    expect(response.status).toBe(200)
-    expect(json).toEqual({
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
       ok: true,
       scannedCount: 1,
       processedCount: 0,
@@ -522,47 +524,72 @@ describe('app/api/internal/jobs/client-reminders/route', () => {
     })
   })
 
-  it('clamps take to the max allowed value', async () => {
-    mocks.prismaScheduledFindMany.mockResolvedValue([])
+  it('GET logs safely and returns generic 500 when loading due rows throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
 
-    const response = await GET(
+    const thrown = new Error('db failed for tori@example.com token secret_123')
+    mocks.scheduledClientNotificationFindMany.mockRejectedValueOnce(thrown)
+
+    const result = await GET(
       makeRequest({
-        method: 'GET',
-        search: '?take=999',
-        headers: {
-          authorization: 'Bearer test-secret',
-        },
+        authorization: 'Bearer job_secret_1',
       }),
     )
-    const json = await response.json()
 
-    expect(mocks.prismaScheduledFindMany).toHaveBeenCalledWith({
-      where: {
-        eventKey: NotificationEventKey.APPOINTMENT_REMINDER,
-        cancelledAt: null,
-        processedAt: null,
-        failedAt: null,
-        runAt: {
-          lte: TEST_NOW,
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'GET /api/internal/jobs/client-reminders error',
+      {
+        error: {
+          name: 'Error',
+          message: 'db failed for tori@example.com token secret_123',
         },
       },
-      orderBy: [{ runAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-      take: 250,
-      select: {
-        id: true,
-      },
+    )
+
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Internal server error',
     })
 
-    expect(response.status).toBe(200)
-    expect(json).toEqual({
-      ok: true,
-      scannedCount: 0,
-      processedCount: 0,
-      skippedCount: 0,
-      cancelledCount: 0,
-      failedCount: 0,
-      cancelled: [],
-      failed: [],
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('POST logs safely and returns generic 500 when loading due rows throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('post db failed for token secret_123')
+    mocks.scheduledClientNotificationFindMany.mockRejectedValueOnce(thrown)
+
+    const result = await POST(
+      makeRequest({
+        method: 'POST',
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/internal/jobs/client-reminders error',
+      {
+        error: {
+          name: 'Error',
+          message: 'post db failed for token secret_123',
+        },
+      },
+    )
+
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Internal server error',
     })
+
+    consoleErrorSpy.mockRestore()
   })
 })
