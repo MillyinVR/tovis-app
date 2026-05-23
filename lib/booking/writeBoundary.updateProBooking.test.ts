@@ -114,7 +114,6 @@ vi.mock('@/lib/booking/conflicts', () => ({
 }))
 
 vi.mock('@/lib/booking/snapshots', () => ({
-  buildAddressSnapshot: vi.fn(),
   decimalFromUnknown: (value: unknown) =>
     new Prisma.Decimal(value as string | number),
   decimalToNullableNumber: (value: unknown) =>

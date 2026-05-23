@@ -1,4 +1,5 @@
 // app/api/pro/onboarding/location/route.ts
+
 import { ProfessionalLocationType, type Prisma } from '@prisma/client'
 
 import {
@@ -13,6 +14,7 @@ import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 import { prisma } from '@/lib/prisma'
 import { refreshLocation } from '@/lib/search/index/refreshSearchIndex'
+import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
@@ -342,6 +344,19 @@ export async function POST(req: Request) {
           ? ProfessionalLocationType.SALON
           : ProfessionalLocationType.SUITE
 
+      const addressPrivacyData = buildAddressPrivacyWriteData({
+        formattedAddress: loc.formattedAddress,
+        addressLine1: null,
+        addressLine2: null,
+        city: loc.city,
+        state: loc.state,
+        postalCode: loc.postalCode,
+        countryCode: loc.countryCode,
+        placeId: loc.placeId,
+        lat: loc.lat,
+        lng: loc.lng,
+      })
+
       const created = await prisma.$transaction(async (tx) => {
         if (makePrimary) {
           await tx.professionalLocation.updateMany({
@@ -375,6 +390,8 @@ export async function POST(req: Request) {
 
             lat: loc.lat,
             lng: loc.lng,
+
+            ...addressPrivacyData,
 
             timeZone,
             advanceNoticeMinutes,
@@ -456,6 +473,21 @@ export async function POST(req: Request) {
     const timeZone = await googleTimeZone(geo.lat, geo.lng)
     const nameOverride = pickString(body.locationName)
 
+    const effectivePostalCode = geo.postalCode || postalCode
+
+    const addressPrivacyData = buildAddressPrivacyWriteData({
+      formattedAddress: null,
+      addressLine1: null,
+      addressLine2: null,
+      city: geo.city,
+      state: geo.state,
+      postalCode: effectivePostalCode,
+      countryCode: geo.countryCode,
+      placeId: null,
+      lat: geo.lat,
+      lng: geo.lng,
+    })
+
     const created = await prisma.$transaction(async (tx) => {
       if (makePrimary) {
         await tx.professionalLocation.updateMany({
@@ -482,11 +514,13 @@ export async function POST(req: Request) {
 
           city: geo.city,
           state: geo.state,
-          postalCode: geo.postalCode || postalCode,
+          postalCode: effectivePostalCode,
           countryCode: geo.countryCode,
 
           lat: geo.lat,
           lng: geo.lng,
+
+          ...addressPrivacyData,
 
           timeZone,
           advanceNoticeMinutes,
@@ -507,7 +541,7 @@ export async function POST(req: Request) {
           id: professionalId,
         },
         data: {
-          mobileBasePostalCode: geo.postalCode || postalCode,
+          mobileBasePostalCode: effectivePostalCode,
           mobileRadiusMiles: radiusMiles,
           timeZone,
         },

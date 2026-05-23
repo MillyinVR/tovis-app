@@ -2,10 +2,21 @@
 import { Prisma } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
 
+function pickString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+/**
+ * Legacy plaintext snapshot builder.
+ *
+ * Prefer encrypted address snapshot writes for new Booking / BookingHold writes.
+ * This stays only for old callers/tests that still intentionally build a tiny
+ * display snapshot.
+ */
 export function buildAddressSnapshot(
   formattedAddress: string | null | undefined,
 ): Prisma.InputJsonValue | undefined {
-  const value = typeof formattedAddress === 'string' ? formattedAddress.trim() : ''
+  const value = pickString(formattedAddress)
   if (!value) return undefined
 
   const snapshot: Prisma.InputJsonObject = {
@@ -18,8 +29,24 @@ export function buildAddressSnapshot(
 export function pickFormattedAddressFromSnapshot(snapshot: unknown): string | null {
   if (!isRecord(snapshot)) return null
 
-  const value = snapshot.formattedAddress
-  return typeof value === 'string' && value.trim() ? value.trim() : null
+  // Legacy shape:
+  // { formattedAddress: "123 Main St" }
+  const legacyValue = pickString(snapshot.formattedAddress)
+  if (legacyValue) return legacyValue
+
+  // Current encrypted-envelope/plaintext-dev shape from addressEncryption:
+  // {
+  //   v: 1,
+  //   algorithm: "...",
+  //   keyVersion: "...",
+  //   address: { formattedAddress: "123 Main St", ... }
+  // }
+  const address = snapshot.address
+  if (isRecord(address)) {
+    return pickString(address.formattedAddress)
+  }
+
+  return null
 }
 
 /**

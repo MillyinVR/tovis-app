@@ -1,22 +1,32 @@
 // app/api/pro/offerings/route.ts
+
 import { prisma } from '@/lib/prisma'
 import { Prisma, ProfessionalLocationType } from '@prisma/client'
-import { jsonFail, jsonOk, pickBool, pickInt, pickString } from '@/app/api/_utils'
+import {
+  jsonFail,
+  jsonOk,
+  pickBool,
+  pickInt,
+  pickString,
+} from '@/app/api/_utils'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { parseMoney, moneyToString } from '@/lib/money'
+import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 
 export const dynamic = 'force-dynamic'
 
 type JsonObject = Record<string, unknown>
 
 type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
+
 type WorkingHoursDay = {
   enabled: boolean
   start: string
   end: string
 }
+
 type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
 
 function isRecord(v: unknown): v is JsonObject {
@@ -27,25 +37,42 @@ function trimOrNull(v: unknown): string | null | undefined {
   if (v === undefined) return undefined
   if (v === null) return null
   if (typeof v !== 'string') return undefined
+
   const t = v.trim()
   return t ? t : null
 }
 
 function isPositiveInt(n: number | null): n is number {
-  return typeof n === 'number' && Number.isFinite(n) && Math.trunc(n) === n && n > 0
+  return (
+    typeof n === 'number' &&
+    Number.isFinite(n) &&
+    Math.trunc(n) === n &&
+    n > 0
+  )
 }
 
 function requirePositiveInt(v: unknown, fieldName: string) {
   const n = pickInt(v)
+
   if (!isPositiveInt(n)) {
     return { ok: false as const, error: `Invalid ${fieldName}.` }
   }
+
   return { ok: true as const, value: n }
 }
 
 function defaultWorkingHours(): WorkingHoursObj {
-  const weekday: WorkingHoursDay = { enabled: true, start: '09:00', end: '17:00' }
-  const weekend: WorkingHoursDay = { enabled: false, start: '09:00', end: '17:00' }
+  const weekday: WorkingHoursDay = {
+    enabled: true,
+    start: '09:00',
+    end: '17:00',
+  }
+
+  const weekend: WorkingHoursDay = {
+    enabled: false,
+    start: '09:00',
+    end: '17:00',
+  }
 
   return {
     mon: { ...weekday },
@@ -71,11 +98,19 @@ function mobileCapableTypes(): readonly ProfessionalLocationType[] {
   return [ProfessionalLocationType.MOBILE_BASE]
 }
 
-function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: 'Salon' | 'Mobile') {
+function parsePriceOrThrow(
+  raw: string,
+  minPrice: Prisma.Decimal,
+  label: 'Salon' | 'Mobile',
+) {
   const s = raw.trim()
-  if (!s) throw new Error(`Missing ${label} price.`)
+
+  if (!s) {
+    throw new Error(`Missing ${label} price.`)
+  }
 
   let dec: Prisma.Decimal
+
   try {
     dec = parseMoney(s)
   } catch {
@@ -83,7 +118,9 @@ function parsePriceOrThrow(raw: string, minPrice: Prisma.Decimal, label: 'Salon'
   }
 
   if (dec.lessThan(minPrice)) {
-    throw new Error(`${label} price must be at least $${moneyToString(minPrice) ?? '0.00'}`)
+    throw new Error(
+      `${label} price must be at least $${moneyToString(minPrice) ?? '0.00'}`,
+    )
   }
 
   return dec
@@ -106,10 +143,14 @@ function toDto(off: OfferingRow) {
     offersInSalon: Boolean(off.offersInSalon),
     offersMobile: Boolean(off.offersMobile),
 
-    salonPriceStartingAt: off.salonPriceStartingAt ? moneyToString(off.salonPriceStartingAt) : null,
+    salonPriceStartingAt: off.salonPriceStartingAt
+      ? moneyToString(off.salonPriceStartingAt)
+      : null,
     salonDurationMinutes: off.salonDurationMinutes ?? null,
 
-    mobilePriceStartingAt: off.mobilePriceStartingAt ? moneyToString(off.mobilePriceStartingAt) : null,
+    mobilePriceStartingAt: off.mobilePriceStartingAt
+      ? moneyToString(off.mobilePriceStartingAt)
+      : null,
     mobileDurationMinutes: off.mobileDurationMinutes ?? null,
 
     isActive: Boolean(off.isActive),
@@ -125,6 +166,21 @@ function toDto(off: OfferingRow) {
     serviceIsAddOnEligible: Boolean(off.service.isAddOnEligible),
     serviceAddOnGroup: off.service.addOnGroup ?? null,
   }
+}
+
+function emptyAddressPrivacyWriteData() {
+  return buildAddressPrivacyWriteData({
+    formattedAddress: null,
+    addressLine1: null,
+    addressLine2: null,
+    city: null,
+    state: null,
+    postalCode: null,
+    countryCode: null,
+    placeId: null,
+    lat: null,
+    lng: null,
+  })
 }
 
 async function ensureLocationsForOffering(args: {
@@ -152,8 +208,12 @@ async function ensureLocationsForOffering(args: {
   })
 
   const existingTypes = new Set(existing.map((location) => location.type))
-  const hasSalonCapableLocation = salonCapableTypes().some((type) => existingTypes.has(type))
-  const hasMobileCapableLocation = existingTypes.has(ProfessionalLocationType.MOBILE_BASE)
+  const hasSalonCapableLocation = salonCapableTypes().some((type) =>
+    existingTypes.has(type),
+  )
+  const hasMobileCapableLocation = existingTypes.has(
+    ProfessionalLocationType.MOBILE_BASE,
+  )
 
   let totalLocationCount = await tx.professionalLocation.count({
     where: { professionalId },
@@ -169,9 +229,11 @@ async function ensureLocationsForOffering(args: {
         isBookable: false,
         timeZone: null,
         workingHours: toInputJsonValue(defaultWorkingHours()),
+        ...emptyAddressPrivacyWriteData(),
       },
       select: { id: true },
     })
+
     totalLocationCount += 1
   }
 
@@ -185,6 +247,7 @@ async function ensureLocationsForOffering(args: {
         isBookable: false,
         timeZone: null,
         workingHours: toInputJsonValue(defaultWorkingHours()),
+        ...emptyAddressPrivacyWriteData(),
       },
       select: { id: true },
     })
@@ -194,11 +257,18 @@ async function ensureLocationsForOffering(args: {
 export async function GET() {
   try {
     const auth = await requirePro()
-    if (!auth.ok) return auth.res
+
+    if (!auth.ok) {
+      return auth.res
+    }
+
     const professionalId = auth.professionalId
 
     const offerings = await prisma.professionalServiceOffering.findMany({
-      where: { professionalId, isActive: true },
+      where: {
+        professionalId,
+        isActive: true,
+      },
       include: {
         service: {
           include: {
@@ -219,52 +289,97 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const auth = await requirePro()
-    if (!auth.ok) return auth.res
+
+    if (!auth.ok) {
+      return auth.res
+    }
+
     const professionalId = auth.professionalId
 
     const limited = await enforceRateLimit({
       bucket: 'pro:offerings:write',
       identity: await rateLimitIdentity(auth.userId),
     })
-    if (limited) return limited
+
+    if (limited) {
+      return limited
+    }
 
     const raw: unknown = await request.json().catch(() => null)
-    if (!isRecord(raw)) return jsonFail(400, 'Invalid JSON body.')
+
+    if (!isRecord(raw)) {
+      return jsonFail(400, 'Invalid JSON body.')
+    }
+
     const body = raw
 
     const serviceId = pickString(body.serviceId)
-    if (!serviceId) return jsonFail(400, 'Missing serviceId.')
 
-    const description = Object.prototype.hasOwnProperty.call(body, 'description')
+    if (!serviceId) {
+      return jsonFail(400, 'Missing serviceId.')
+    }
+
+    const description = Object.prototype.hasOwnProperty.call(
+      body,
+      'description',
+    )
       ? trimOrNull(body.description)
       : undefined
-    if (Object.prototype.hasOwnProperty.call(body, 'description') && description === undefined) {
+
+    if (
+      Object.prototype.hasOwnProperty.call(body, 'description') &&
+      description === undefined
+    ) {
       return jsonFail(400, 'description must be string or null.')
     }
 
-    const customImageUrl = Object.prototype.hasOwnProperty.call(body, 'customImageUrl')
+    const customImageUrl = Object.prototype.hasOwnProperty.call(
+      body,
+      'customImageUrl',
+    )
       ? trimOrNull(body.customImageUrl)
       : undefined
-    if (Object.prototype.hasOwnProperty.call(body, 'customImageUrl') && customImageUrl === undefined) {
+
+    if (
+      Object.prototype.hasOwnProperty.call(body, 'customImageUrl') &&
+      customImageUrl === undefined
+    ) {
       return jsonFail(400, 'customImageUrl must be string or null.')
     }
 
-    const offersInSalonIn = Object.prototype.hasOwnProperty.call(body, 'offersInSalon')
+    const offersInSalonIn = Object.prototype.hasOwnProperty.call(
+      body,
+      'offersInSalon',
+    )
       ? pickBool(body.offersInSalon)
       : null
-    const offersMobileIn = Object.prototype.hasOwnProperty.call(body, 'offersMobile')
+
+    const offersMobileIn = Object.prototype.hasOwnProperty.call(
+      body,
+      'offersMobile',
+    )
       ? pickBool(body.offersMobile)
       : null
 
-    if (Object.prototype.hasOwnProperty.call(body, 'offersInSalon') && offersInSalonIn === null) {
+    if (
+      Object.prototype.hasOwnProperty.call(body, 'offersInSalon') &&
+      offersInSalonIn === null
+    ) {
       return jsonFail(400, 'offersInSalon must be boolean.')
     }
-    if (Object.prototype.hasOwnProperty.call(body, 'offersMobile') && offersMobileIn === null) {
+
+    if (
+      Object.prototype.hasOwnProperty.call(body, 'offersMobile') &&
+      offersMobileIn === null
+    ) {
       return jsonFail(400, 'offersMobile must be boolean.')
     }
 
-    const offersInSalon = typeof offersInSalonIn === 'boolean' ? offersInSalonIn : true
-    const offersMobile = typeof offersMobileIn === 'boolean' ? offersMobileIn : false
+    const offersInSalon =
+      typeof offersInSalonIn === 'boolean' ? offersInSalonIn : true
+
+    const offersMobile =
+      typeof offersMobileIn === 'boolean' ? offersMobileIn : false
 
     if (!offersInSalon && !offersMobile) {
       return jsonFail(400, 'Enable at least Salon or Mobile.')
@@ -280,7 +395,12 @@ export async function POST(request: Request) {
         addOnGroup: true,
         defaultImageUrl: true,
         name: true,
-        category: { select: { isActive: true, name: true } },
+        category: {
+          select: {
+            isActive: true,
+            name: true,
+          },
+        },
       },
     })
 
@@ -292,14 +412,28 @@ export async function POST(request: Request) {
     let mobileDurationMinutes: number | null = null
 
     if (offersInSalon) {
-      const parsedSalonDuration = requirePositiveInt(body.salonDurationMinutes, 'salonDurationMinutes')
-      if (!parsedSalonDuration.ok) return jsonFail(400, parsedSalonDuration.error)
+      const parsedSalonDuration = requirePositiveInt(
+        body.salonDurationMinutes,
+        'salonDurationMinutes',
+      )
+
+      if (!parsedSalonDuration.ok) {
+        return jsonFail(400, parsedSalonDuration.error)
+      }
+
       salonDurationMinutes = parsedSalonDuration.value
     }
 
     if (offersMobile) {
-      const parsedMobileDuration = requirePositiveInt(body.mobileDurationMinutes, 'mobileDurationMinutes')
-      if (!parsedMobileDuration.ok) return jsonFail(400, parsedMobileDuration.error)
+      const parsedMobileDuration = requirePositiveInt(
+        body.mobileDurationMinutes,
+        'mobileDurationMinutes',
+      )
+
+      if (!parsedMobileDuration.ok) {
+        return jsonFail(400, parsedMobileDuration.error)
+      }
+
       mobileDurationMinutes = parsedMobileDuration.value
     }
 
@@ -307,22 +441,36 @@ export async function POST(request: Request) {
     let mobilePrice: Prisma.Decimal | null = null
 
     if (offersInSalon) {
-      const rawPrice = typeof body.salonPriceStartingAt === 'string' ? body.salonPriceStartingAt : ''
+      const rawPrice =
+        typeof body.salonPriceStartingAt === 'string'
+          ? body.salonPriceStartingAt
+          : ''
+
       try {
         salonPrice = parsePriceOrThrow(rawPrice, service.minPrice, 'Salon')
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Invalid salon price.'
-        return jsonFail(400, msg, { minPrice: moneyToString(service.minPrice) ?? '0.00' })
+
+        return jsonFail(400, msg, {
+          minPrice: moneyToString(service.minPrice) ?? '0.00',
+        })
       }
     }
 
     if (offersMobile) {
-      const rawPrice = typeof body.mobilePriceStartingAt === 'string' ? body.mobilePriceStartingAt : ''
+      const rawPrice =
+        typeof body.mobilePriceStartingAt === 'string'
+          ? body.mobilePriceStartingAt
+          : ''
+
       try {
         mobilePrice = parsePriceOrThrow(rawPrice, service.minPrice, 'Mobile')
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Invalid mobile price.'
-        return jsonFail(400, msg, { minPrice: moneyToString(service.minPrice) ?? '0.00' })
+
+        return jsonFail(400, msg, {
+          minPrice: moneyToString(service.minPrice) ?? '0.00',
+        })
       }
     }
 
@@ -366,9 +514,13 @@ export async function POST(request: Request) {
 
     return jsonOk({ offering: toDto(offering) }, 201)
   } catch (error: unknown) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
       return jsonFail(409, 'You already added this service to your menu.')
     }
+
     console.error('POST /api/pro/offerings error', error)
     return jsonFail(500, 'Internal server error')
   }

@@ -1,10 +1,8 @@
 // app/api/pro/locations/route.ts
-import { prisma } from '@/lib/prisma'
+
 import { Prisma, ProfessionalLocationType } from '@prisma/client'
-import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
-import { isValidIanaTimeZone } from '@/lib/timeZone'
-import { isRecord, type UnknownRecord, hasOwn } from '@/lib/guards'
 import {
   clampInt,
   pickEnum,
@@ -12,6 +10,13 @@ import {
   pickNumber,
   pickString,
 } from '@/app/api/_utils/pick'
+import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
+import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
+import { hasOwn, isRecord, type UnknownRecord } from '@/lib/guards'
+import { prisma } from '@/lib/prisma'
+import { refreshLocation } from '@/lib/search/index/refreshSearchIndex'
+import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import {
   defaultWorkingHours,
   normalizeWorkingHours,
@@ -19,124 +24,130 @@ import {
   toInputJsonValue,
   type WorkingHoursObj,
 } from '@/lib/scheduling/workingHoursValidation'
-import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
-import { refreshLocation } from '@/lib/search/index/refreshSearchIndex'
-import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
+import { isValidIanaTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
+const LOCATION_SELECT = {
+  id: true,
+  type: true,
+  name: true,
+  isPrimary: true,
+  isBookable: true,
+
+  formattedAddress: true,
+  addressLine1: true,
+  addressLine2: true,
+  city: true,
+  state: true,
+  postalCode: true,
+  countryCode: true,
+  placeId: true,
+
+  lat: true,
+  lng: true,
+
+  timeZone: true,
+  workingHours: true,
+
+  bufferMinutes: true,
+  stepMinutes: true,
+  advanceNoticeMinutes: true,
+  maxDaysAhead: true,
+
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ProfessionalLocationSelect
+
+type ProfessionalLocationRow = Prisma.ProfessionalLocationGetPayload<{
+  select: typeof LOCATION_SELECT
+}>
+
 function normalizeProfessionalLocationType(
-  v: unknown,
+  value: unknown,
 ): ProfessionalLocationType | null {
-  return pickEnum(v, Object.values(ProfessionalLocationType))
+  return pickEnum(value, Object.values(ProfessionalLocationType))
 }
 
-function requireAddressForType(t: ProfessionalLocationType) {
+function requireAddressForType(type: ProfessionalLocationType) {
   return (
-    t === ProfessionalLocationType.SALON ||
-    t === ProfessionalLocationType.SUITE
+    type === ProfessionalLocationType.SALON ||
+    type === ProfessionalLocationType.SUITE
   )
 }
 
-function decimalToNumber(v: unknown): number | null {
-  if (v == null) return null
-  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+function decimalToNumber(value: unknown): number | null {
+  if (value == null) return null
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
 
   if (
-    typeof v === 'object' &&
-    typeof (v as { toNumber?: unknown }).toNumber === 'function'
+    typeof value === 'object' &&
+    typeof (value as { toNumber?: unknown }).toNumber === 'function'
   ) {
-    const n = (v as { toNumber: () => number }).toNumber()
-    return Number.isFinite(n) ? n : null
+    const numberValue = (value as { toNumber: () => number }).toNumber()
+    return Number.isFinite(numberValue) ? numberValue : null
   }
 
   if (
-    typeof v === 'object' &&
-    typeof (v as { toString?: unknown }).toString === 'function'
+    typeof value === 'object' &&
+    typeof (value as { toString?: unknown }).toString === 'function'
   ) {
-    const n = Number((v as { toString: () => string }).toString())
-    return Number.isFinite(n) ? n : null
+    const numberValue = Number((value as { toString: () => string }).toString())
+    return Number.isFinite(numberValue) ? numberValue : null
   }
 
   return null
 }
 
-/* ----------------------------
-   GET
----------------------------- */
+function decimalOrNull(value: number | null | undefined) {
+  if (value == null) return null
+  return new Prisma.Decimal(String(value))
+}
+
+function mapLocation(location: ProfessionalLocationRow) {
+  return {
+    ...location,
+    lat: decimalToNumber(location.lat),
+    lng: decimalToNumber(location.lng),
+    workingHours: safeHoursFromDb(location.workingHours),
+    createdAt: location.createdAt.toISOString(),
+    updatedAt: location.updatedAt.toISOString(),
+  }
+}
 
 export async function GET() {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
-    const professionalId = auth.professionalId
 
     const locations = await prisma.professionalLocation.findMany({
-      where: { professionalId },
+      where: { professionalId: auth.professionalId },
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-      select: {
-        id: true,
-        type: true,
-        name: true,
-        isPrimary: true,
-        isBookable: true,
-
-        formattedAddress: true,
-        addressLine1: true,
-        addressLine2: true,
-        city: true,
-        state: true,
-        postalCode: true,
-        countryCode: true,
-        placeId: true,
-
-        lat: true,
-        lng: true,
-
-        timeZone: true,
-        workingHours: true,
-
-        bufferMinutes: true,
-        stepMinutes: true,
-        advanceNoticeMinutes: true,
-        maxDaysAhead: true,
-
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: LOCATION_SELECT,
       take: 100,
     })
 
     return jsonOk({
-      locations: locations.map((location) => ({
-        ...location,
-        lat: decimalToNumber(location.lat),
-        lng: decimalToNumber(location.lng),
-        workingHours: safeHoursFromDb(location.workingHours),
-        createdAt: location.createdAt.toISOString(),
-        updatedAt: location.updatedAt.toISOString(),
-      })),
+      locations: locations.map(mapLocation),
     })
-  } catch (e) {
-    console.error('GET /api/pro/locations error', e)
+  } catch (error) {
+    console.error('GET /api/pro/locations error', error)
     return jsonFail(500, 'Failed to load locations')
   }
 }
-
-/* ----------------------------
-   POST
----------------------------- */
 
 export async function POST(req: Request) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
+
     const professionalId = auth.professionalId
 
     const limited = await enforceRateLimit({
       bucket: 'pro:locations:write',
       identity: await rateLimitIdentity(auth.userId),
     })
+
     if (limited) return limited
 
     const raw: unknown = await req.json().catch(() => ({}))
@@ -150,11 +161,13 @@ export async function POST(req: Request) {
     const isBookable = hasOwn(body, 'isBookable')
       ? body.isBookable
       : undefined
+
     if (isBookable !== undefined && typeof isBookable !== 'boolean') {
       return jsonFail(400, 'isBookable must be boolean.')
     }
 
     const wantsPrimary = hasOwn(body, 'isPrimary') ? body.isPrimary : undefined
+
     if (wantsPrimary !== undefined && typeof wantsPrimary !== 'boolean') {
       return jsonFail(400, 'isPrimary must be boolean.')
     }
@@ -183,9 +196,11 @@ export async function POST(req: Request) {
       if (body.lat === null) {
         latRaw = null
       } else {
-        const n = pickNumber(body.lat)
-        if (n == null) return jsonFail(400, 'lat must be a number or null.')
-        latRaw = n
+        const numberValue = pickNumber(body.lat)
+        if (numberValue == null) {
+          return jsonFail(400, 'lat must be a number or null.')
+        }
+        latRaw = numberValue
       }
     }
 
@@ -194,9 +209,11 @@ export async function POST(req: Request) {
       if (body.lng === null) {
         lngRaw = null
       } else {
-        const n = pickNumber(body.lng)
-        if (n == null) return jsonFail(400, 'lng must be a number or null.')
-        lngRaw = n
+        const numberValue = pickNumber(body.lng)
+        if (numberValue == null) {
+          return jsonFail(400, 'lng must be a number or null.')
+        }
+        lngRaw = numberValue
       }
     }
 
@@ -221,14 +238,17 @@ export async function POST(req: Request) {
       : undefined
 
     let workingHours: WorkingHoursObj = defaultWorkingHours()
+
     if (hasOwn(body, 'workingHours')) {
       const normalized = normalizeWorkingHours(body.workingHours)
+
       if (!normalized) {
         return jsonFail(
           400,
           'workingHours must contain mon..sun with { enabled, start, end }, valid HH:MM times, and end after start.',
         )
       }
+
       workingHours = normalized
     }
 
@@ -249,15 +269,26 @@ export async function POST(req: Request) {
         return jsonFail(400, 'Bookable locations must include lat/lng.')
       }
 
-      if (requireAddressForType(type)) {
-        if (!placeId || !formattedAddress) {
-          return jsonFail(
-            400,
-            'Salon/Suite bookable locations require placeId and formattedAddress.',
-          )
-        }
+      if (requireAddressForType(type) && (!placeId || !formattedAddress)) {
+        return jsonFail(
+          400,
+          'Salon/Suite bookable locations require placeId and formattedAddress.',
+        )
       }
     }
+
+    const addressPrivacyData = buildAddressPrivacyWriteData({
+      formattedAddress,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      postalCode,
+      countryCode,
+      placeId,
+      lat: latRaw,
+      lng: lngRaw,
+    })
 
     const created = await prisma.$transaction(async (tx) => {
       const existingCount = await tx.professionalLocation.count({
@@ -292,8 +323,10 @@ export async function POST(req: Request) {
           countryCode,
           placeId,
 
-          lat: latRaw == null ? null : new Prisma.Decimal(String(latRaw)),
-          lng: lngRaw == null ? null : new Prisma.Decimal(String(lngRaw)),
+          lat: decimalOrNull(latRaw),
+          lng: decimalOrNull(lngRaw),
+
+          ...addressPrivacyData,
 
           timeZone: timeZone ?? null,
           workingHours: toInputJsonValue(workingHours),
@@ -305,31 +338,7 @@ export async function POST(req: Request) {
             : {}),
           ...(maxDaysAhead !== undefined ? { maxDaysAhead } : {}),
         },
-        select: {
-          id: true,
-          type: true,
-          name: true,
-          isPrimary: true,
-          isBookable: true,
-          formattedAddress: true,
-          addressLine1: true,
-          addressLine2: true,
-          city: true,
-          state: true,
-          postalCode: true,
-          countryCode: true,
-          placeId: true,
-          lat: true,
-          lng: true,
-          timeZone: true,
-          workingHours: true,
-          bufferMinutes: true,
-          stepMinutes: true,
-          advanceNoticeMinutes: true,
-          maxDaysAhead: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+        select: LOCATION_SELECT,
       })
     })
 
@@ -338,19 +347,12 @@ export async function POST(req: Request) {
 
     return jsonOk(
       {
-        location: {
-          ...created,
-          lat: decimalToNumber(created.lat),
-          lng: decimalToNumber(created.lng),
-          workingHours: safeHoursFromDb(created.workingHours),
-          createdAt: created.createdAt.toISOString(),
-          updatedAt: created.updatedAt.toISOString(),
-        },
+        location: mapLocation(created),
       },
       201,
     )
-  } catch (e) {
-    console.error('POST /api/pro/locations error', e)
+  } catch (error) {
+    console.error('POST /api/pro/locations error', error)
     return jsonFail(500, 'Failed to create location')
   }
 }

@@ -1,6 +1,7 @@
 // app/api/pro/onboarding/location/route.test.ts
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+
 import { ProfessionalLocationType } from '@prisma/client'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => {
   const jsonOk = vi.fn((data: unknown, status = 200) => {
@@ -39,6 +40,7 @@ const mocks = vi.hoisted(() => {
 
   const bumpScheduleConfigVersion = vi.fn()
   const refreshLocation = vi.fn()
+  const buildAddressPrivacyWriteData = vi.fn()
 
   const professionalLocation = {
     updateMany: vi.fn(),
@@ -64,6 +66,7 @@ const mocks = vi.hoisted(() => {
     safeJson,
     bumpScheduleConfigVersion,
     refreshLocation,
+    buildAddressPrivacyWriteData,
     professionalLocation,
     professionalProfile,
     prisma,
@@ -96,12 +99,36 @@ vi.mock('@/lib/search/index/refreshSearchIndex', () => ({
   refreshLocation: mocks.refreshLocation,
 }))
 
+vi.mock('@/lib/security/addressEncryption', () => ({
+  buildAddressPrivacyWriteData: mocks.buildAddressPrivacyWriteData,
+}))
+
 vi.mock('@/lib/timeZone', () => ({
   isValidIanaTimeZone: (value: unknown) =>
     typeof value === 'string' && value.includes('/'),
 }))
 
 import { POST } from './route'
+
+const addressPrivacyWriteData = {
+  encryptedAddressJson: {
+    v: 1,
+    algorithm: 'plaintext-json-expand-phase',
+    keyVersion: 'address-json-v1',
+    address: {
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      lat: '32.715736',
+      lng: '-117.161087',
+    },
+  },
+  addressKeyVersion: 'address-json-v1',
+  postalCodePrefix: '92101',
+  latApprox: '32.7157',
+  lngApprox: '-117.1611',
+}
 
 function makeRequest(body: unknown): Request {
   return new Request('http://localhost/api/pro/onboarding/location', {
@@ -223,6 +250,7 @@ describe('POST /api/pro/onboarding/location', () => {
     mocks.fetchWithTimeout.mockResolvedValue(googleOkResponse())
     mocks.bumpScheduleConfigVersion.mockResolvedValue(1)
     mocks.refreshLocation.mockResolvedValue(undefined)
+    mocks.buildAddressPrivacyWriteData.mockReturnValue(addressPrivacyWriteData)
 
     const tx = {
       professionalLocation: mocks.professionalLocation,
@@ -265,6 +293,7 @@ describe('POST /api/pro/onboarding/location', () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
     expect(mocks.refreshLocation).not.toHaveBeenCalled()
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
   })
 
   it('returns 400 when mode is missing or invalid', async () => {
@@ -284,6 +313,7 @@ describe('POST /api/pro/onboarding/location', () => {
     })
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
   })
 
   it('returns 400 when salon or suite mode is missing placeId', async () => {
@@ -303,9 +333,10 @@ describe('POST /api/pro/onboarding/location', () => {
     })
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
   })
 
-  it('creates a draft salon location, updates profile timezone, and syncs schedule/search side effects', async () => {
+  it('creates a draft salon location with address privacy fields, updates profile timezone, and syncs side effects', async () => {
     mocks.safeJson
       .mockResolvedValueOnce(googlePlacePayload())
       .mockResolvedValueOnce(googleTimeZonePayload())
@@ -331,6 +362,19 @@ describe('POST /api/pro/onboarding/location', () => {
 
     expect(result.status).toBe(200)
 
+    expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledWith({
+      formattedAddress: '123 Main St, San Diego, CA 92101',
+      addressLine1: null,
+      addressLine2: null,
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      placeId: 'place_123',
+      lat: 32.715736,
+      lng: -117.161087,
+    })
+
     expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
       where: { professionalId: 'pro_123', isPrimary: true },
       data: { isPrimary: false },
@@ -353,6 +397,8 @@ describe('POST /api/pro/onboarding/location', () => {
 
         lat: 32.715736,
         lng: -117.161087,
+
+        ...addressPrivacyWriteData,
 
         timeZone: 'America/Los_Angeles',
         advanceNoticeMinutes: 60,
@@ -427,9 +473,23 @@ describe('POST /api/pro/onboarding/location', () => {
         data: expect.objectContaining({
           type: ProfessionalLocationType.SUITE,
           isBookable: false,
+          ...addressPrivacyWriteData,
         }),
       }),
     )
+
+    expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledWith({
+      formattedAddress: '123 Main St, San Diego, CA 92101',
+      addressLine1: null,
+      addressLine2: null,
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      placeId: 'place_123',
+      lat: 32.715736,
+      lng: -117.161087,
+    })
 
     expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledWith('pro_123')
     expect(mocks.refreshLocation).toHaveBeenCalledWith(
@@ -458,6 +518,7 @@ describe('POST /api/pro/onboarding/location', () => {
         data: expect.objectContaining({
           isPrimary: false,
           isBookable: false,
+          ...addressPrivacyWriteData,
         }),
       }),
     )
@@ -499,6 +560,7 @@ describe('POST /api/pro/onboarding/location', () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
     expect(mocks.refreshLocation).not.toHaveBeenCalled()
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
   })
 
   it('returns 400 when mobile mode is missing postalCode', async () => {
@@ -518,6 +580,7 @@ describe('POST /api/pro/onboarding/location', () => {
     })
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
   })
 
   it('returns 400 when mobile radius is invalid', async () => {
@@ -543,9 +606,10 @@ describe('POST /api/pro/onboarding/location', () => {
     })
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
   })
 
-  it('creates a draft mobile base location, updates profile mobile config, bumps version, and refreshes index', async () => {
+  it('creates a draft mobile base location with address privacy fields, updates profile mobile config, bumps version, and refreshes index', async () => {
     mocks.safeJson
       .mockResolvedValueOnce(googlePostalPayload())
       .mockResolvedValueOnce(googleTimeZonePayload())
@@ -580,6 +644,19 @@ describe('POST /api/pro/onboarding/location', () => {
 
     expect(result.status).toBe(200)
 
+    expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledWith({
+      formattedAddress: null,
+      addressLine1: null,
+      addressLine2: null,
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      placeId: null,
+      lat: 32.715736,
+      lng: -117.161087,
+    })
+
     expect(mocks.professionalLocation.create).toHaveBeenCalledWith({
       data: {
         professionalId: 'pro_123',
@@ -595,6 +672,8 @@ describe('POST /api/pro/onboarding/location', () => {
 
         lat: 32.715736,
         lng: -117.161087,
+
+        ...addressPrivacyWriteData,
 
         timeZone: 'America/Los_Angeles',
         advanceNoticeMinutes: 30,
@@ -658,6 +737,19 @@ describe('POST /api/pro/onboarding/location', () => {
         }),
       }),
     )
+
+    expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledWith({
+      formattedAddress: null,
+      addressLine1: null,
+      addressLine2: null,
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      placeId: null,
+      lat: 32.715736,
+      lng: -117.161087,
+    })
   })
 
   it('returns 400 when postal geocode does not include coordinates', async () => {
@@ -697,6 +789,7 @@ describe('POST /api/pro/onboarding/location', () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
     expect(mocks.refreshLocation).not.toHaveBeenCalled()
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
   })
 
   it('returns 500 when Google throws', async () => {

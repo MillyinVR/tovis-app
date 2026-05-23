@@ -55,7 +55,6 @@ import {
   type SchedulingReadinessError,
 } from '@/lib/booking/locationContext'
 import {
-  buildAddressSnapshot,
   decimalFromUnknown,
   decimalToNullableNumber,
   decimalToNumber,
@@ -141,6 +140,10 @@ import { validateAftercareRebookSlotOwnership } from '@/lib/booking/aftercareReb
 // Side-effect import: registers the Sentry sink for lifecycle drift events.
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
+import {
+  ADDRESS_KEY_VERSION,
+  buildAddressPrivacyWriteData,
+} from '@/lib/security/addressEncryption'
 
 
 type MutationMeta = {
@@ -1133,12 +1136,15 @@ const RESCHEDULE_HOLD_SELECT = {
   locationId: true,
   locationTimeZone: true,
   locationAddressSnapshot: true,
+  locationAddressSnapshotKeyVersion: true,
   locationLatSnapshot: true,
   locationLngSnapshot: true,
   clientAddressId: true,
   clientAddressSnapshot: true,
+  clientAddressSnapshotKeyVersion: true,
   clientAddressLatSnapshot: true,
   clientAddressLngSnapshot: true,
+  addressSnapshotsEncryptedAt: true,
 } satisfies Prisma.BookingHoldSelect
 
 const FINALIZE_HOLD_SELECT = {
@@ -1152,12 +1158,15 @@ const FINALIZE_HOLD_SELECT = {
   locationId: true,
   locationTimeZone: true,
   locationAddressSnapshot: true,
+  locationAddressSnapshotKeyVersion: true,
   locationLatSnapshot: true,
   locationLngSnapshot: true,
   clientAddressId: true,
   clientAddressSnapshot: true,
+  clientAddressSnapshotKeyVersion: true,
   clientAddressLatSnapshot: true,
   clientAddressLngSnapshot: true,
+  addressSnapshotsEncryptedAt: true,
 } satisfies Prisma.BookingHoldSelect
 
 const FINISH_BOOKING_SELECT = {
@@ -1311,14 +1320,17 @@ const REBOOK_SOURCE_BOOKING_SELECT = {
   locationId: true,
   locationTimeZone: true,
   locationAddressSnapshot: true,
+  locationAddressSnapshotKeyVersion: true,
   locationLatSnapshot: true,
   locationLngSnapshot: true,
 
   clientAddressId: true,
   clientAddressSnapshot: true,
+  clientAddressSnapshotKeyVersion: true,
   clientAddressLatSnapshot: true,
   clientAddressLngSnapshot: true,
   clientTimeZoneAtBooking: true,
+  addressSnapshotsEncryptedAt: true,
 
   subtotalSnapshot: true,
   totalAmount: true,
@@ -3364,6 +3376,79 @@ function toNullableJsonCreateInput(
   if (value === undefined) return undefined
   if (value === null) return Prisma.JsonNull
   return toInputJsonValue(value)
+}
+
+type AddressSnapshotEncryptionInput = {
+  formattedAddress: string | null
+  lat: Prisma.Decimal | number | string | null | undefined
+  lng: Prisma.Decimal | number | string | null | undefined
+}
+
+function buildEncryptedAddressSnapshotData(
+  input: AddressSnapshotEncryptionInput,
+): {
+  snapshot: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
+  keyVersion: string | null
+  encryptedAt: Date | null
+  latSnapshot: number | null
+  lngSnapshot: number | null
+} {
+  const formattedAddress = normalizeAddress(input.formattedAddress)
+
+  if (!formattedAddress) {
+    return {
+      snapshot: Prisma.JsonNull,
+      keyVersion: null,
+      encryptedAt: null,
+      latSnapshot: decimalToNullableNumber(input.lat),
+      lngSnapshot: decimalToNullableNumber(input.lng),
+    }
+  }
+
+  const privacyData = buildAddressPrivacyWriteData({
+    formattedAddress,
+    addressLine1: null,
+    addressLine2: null,
+    city: null,
+    state: null,
+    postalCode: null,
+    countryCode: null,
+    placeId: null,
+    lat: input.lat ?? null,
+    lng: input.lng ?? null,
+  })
+
+  return {
+    snapshot: privacyData.encryptedAddressJson,
+    keyVersion: ADDRESS_KEY_VERSION,
+    encryptedAt: new Date(),
+    latSnapshot: decimalToNullableNumber(privacyData.latApprox),
+    lngSnapshot: decimalToNullableNumber(privacyData.lngApprox),
+  }
+}
+
+function reuseEncryptedAddressSnapshotData(
+  snapshot: Prisma.JsonValue | null | undefined,
+  keyVersion: string | null | undefined,
+  encryptedAt: Date | null | undefined,
+): {
+  snapshot: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
+  keyVersion: string | null
+  encryptedAt: Date | null
+} {
+  if (snapshot == null) {
+    return {
+      snapshot: Prisma.JsonNull,
+      keyVersion: null,
+      encryptedAt: null,
+    }
+  }
+
+  return {
+    snapshot: toNullableJsonCreateInput(snapshot) ?? Prisma.JsonNull,
+    keyVersion: keyVersion ?? ADDRESS_KEY_VERSION,
+    encryptedAt: encryptedAt ?? new Date(),
+  }
 }
 
 function mapSchedulingReadinessErrorToBookingCode(
@@ -6534,19 +6619,39 @@ afterHoldPolicyMs = Date.now()
   const requestedEnd = decision.value.requestedEnd
   const expiresAt = addMinutes(now, HOLD_MINUTES)
 
-  const locationAddressSnapshotInput:
-    | Prisma.InputJsonValue
-    | Prisma.NullableJsonNullValueInput =
-    locationType === ServiceLocationType.SALON && salonLocationAddress
-      ? buildAddressSnapshot(salonLocationAddress) ?? Prisma.JsonNull
-      : Prisma.JsonNull
+  const locationAddressSnapshotData =
+    locationType === ServiceLocationType.SALON
+      ? buildEncryptedAddressSnapshotData({
+          formattedAddress: salonLocationAddress,
+          lat: locationContext.lat,
+          lng: locationContext.lng,
+        })
+      : {
+          snapshot: Prisma.JsonNull,
+          keyVersion: null,
+          encryptedAt: null,
+          latSnapshot: locationContext.lat,
+          lngSnapshot: locationContext.lng,
+        }
 
-  const clientAddressSnapshotInput:
-    | Prisma.InputJsonValue
-    | Prisma.NullableJsonNullValueInput =
-    locationType === ServiceLocationType.MOBILE && clientServiceAddress
-      ? buildAddressSnapshot(clientServiceAddress) ?? Prisma.JsonNull
-      : Prisma.JsonNull
+  const clientAddressSnapshotData =
+    locationType === ServiceLocationType.MOBILE && selectedClientAddress
+      ? buildEncryptedAddressSnapshotData({
+          formattedAddress: clientServiceAddress,
+          lat: selectedClientAddress.lat,
+          lng: selectedClientAddress.lng,
+        })
+      : {
+          snapshot: Prisma.JsonNull,
+          keyVersion: null,
+          encryptedAt: null,
+          latSnapshot: null,
+          lngSnapshot: null,
+        }
+
+  const addressSnapshotsEncryptedAt =
+    locationAddressSnapshotData.encryptedAt ??
+    clientAddressSnapshotData.encryptedAt
 
   const holdCreateData = {
     offeringId: offering.id,
@@ -6561,23 +6666,20 @@ afterHoldPolicyMs = Date.now()
     locationId: locationContext.locationId,
     locationTimeZone: locationContext.timeZone,
 
-    locationAddressSnapshot: locationAddressSnapshotInput,
-    locationLatSnapshot: locationContext.lat,
-    locationLngSnapshot: locationContext.lng,
+    locationAddressSnapshot: locationAddressSnapshotData.snapshot,
+    locationAddressSnapshotKeyVersion: locationAddressSnapshotData.keyVersion,
+    locationLatSnapshot: locationAddressSnapshotData.latSnapshot,
+    locationLngSnapshot: locationAddressSnapshotData.lngSnapshot,
 
     clientAddressId:
       locationType === ServiceLocationType.MOBILE && selectedClientAddress
         ? selectedClientAddress.id
         : null,
-    clientAddressSnapshot: clientAddressSnapshotInput,
-    clientAddressLatSnapshot:
-      locationType === ServiceLocationType.MOBILE && selectedClientAddress
-        ? decimalToNumber(selectedClientAddress.lat)
-        : null,
-    clientAddressLngSnapshot:
-      locationType === ServiceLocationType.MOBILE && selectedClientAddress
-        ? decimalToNumber(selectedClientAddress.lng)
-        : null,
+    clientAddressSnapshot: clientAddressSnapshotData.snapshot,
+    clientAddressSnapshotKeyVersion: clientAddressSnapshotData.keyVersion,
+    clientAddressLatSnapshot: clientAddressSnapshotData.latSnapshot,
+    clientAddressLngSnapshot: clientAddressSnapshotData.lngSnapshot,
+    addressSnapshotsEncryptedAt,
   } satisfies Prisma.BookingHoldUncheckedCreateInput
 
   try {
@@ -6848,13 +6950,31 @@ await enforceBookingOverlapPolicy({
   now: args.now,
 })
 
-  const salonLocationAddressSnapshotInput:
-    | Prisma.InputJsonValue
-    | Prisma.NullableJsonNullValueInput =
-    validatedHold.value.locationType === ServiceLocationType.SALON &&
-    salonAddressResolution.value
-      ? buildAddressSnapshot(salonAddressResolution.value) ?? Prisma.JsonNull
-      : Prisma.JsonNull
+  const salonLocationAddressSnapshotData =
+    validatedHold.value.locationType === ServiceLocationType.SALON
+      ? reuseEncryptedAddressSnapshotData(
+          hold.locationAddressSnapshot,
+          hold.locationAddressSnapshotKeyVersion,
+          hold.addressSnapshotsEncryptedAt,
+        )
+      : {
+          snapshot: Prisma.JsonNull,
+          keyVersion: null,
+          encryptedAt: null,
+        }
+
+  const mobileClientAddressSnapshotData =
+    validatedHold.value.locationType === ServiceLocationType.MOBILE
+      ? reuseEncryptedAddressSnapshotData(
+          hold.clientAddressSnapshot,
+          hold.clientAddressSnapshotKeyVersion,
+          hold.addressSnapshotsEncryptedAt,
+        )
+      : {
+          snapshot: Prisma.JsonNull,
+          keyVersion: null,
+          encryptedAt: null,
+        }
 
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
@@ -6865,7 +6985,8 @@ await enforceBookingOverlapPolicy({
       locationId: locationContext.locationId,
       locationTimeZone: locationContext.timeZone,
 
-      locationAddressSnapshot: salonLocationAddressSnapshotInput,
+      locationAddressSnapshot: salonLocationAddressSnapshotData.snapshot,
+      locationAddressSnapshotKeyVersion: salonLocationAddressSnapshotData.keyVersion,
       locationLatSnapshot:
         decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
       locationLngSnapshot:
@@ -6875,10 +6996,8 @@ await enforceBookingOverlapPolicy({
         validatedHold.value.locationType === ServiceLocationType.MOBILE
           ? validatedHold.value.holdClientAddressId
           : null,
-      clientAddressSnapshot:
-        validatedHold.value.locationType === ServiceLocationType.MOBILE
-          ? toNullableJsonCreateInput(hold.clientAddressSnapshot)
-          : Prisma.JsonNull,
+      clientAddressSnapshot: mobileClientAddressSnapshotData.snapshot,
+      clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
       clientAddressLatSnapshot:
         validatedHold.value.locationType === ServiceLocationType.MOBILE
           ? decimalToNumber(hold.clientAddressLatSnapshot)
@@ -6887,6 +7006,9 @@ await enforceBookingOverlapPolicy({
         validatedHold.value.locationType === ServiceLocationType.MOBILE
           ? decimalToNumber(hold.clientAddressLngSnapshot)
           : null,
+      addressSnapshotsEncryptedAt:
+        salonLocationAddressSnapshotData.encryptedAt ??
+        mobileClientAddressSnapshotData.encryptedAt,
     },
     select: {
       id: true,
@@ -7856,13 +7978,31 @@ async function performLockedFinalizeBookingFromHold(args: {
     now: args.now,
   })
 
-  const salonLocationAddressSnapshotInput:
-    | Prisma.InputJsonValue
-    | Prisma.NullableJsonNullValueInput =
-    validatedHold.value.locationType === ServiceLocationType.SALON &&
-    salonAddressResolution.value
-      ? buildAddressSnapshot(salonAddressResolution.value) ?? Prisma.JsonNull
-      : Prisma.JsonNull
+  const salonLocationAddressSnapshotData =
+    validatedHold.value.locationType === ServiceLocationType.SALON
+      ? reuseEncryptedAddressSnapshotData(
+          hold.locationAddressSnapshot,
+          hold.locationAddressSnapshotKeyVersion,
+          hold.addressSnapshotsEncryptedAt,
+        )
+      : {
+          snapshot: Prisma.JsonNull,
+          keyVersion: null,
+          encryptedAt: null,
+        }
+
+  const mobileClientAddressSnapshotData =
+    validatedHold.value.locationType === ServiceLocationType.MOBILE
+      ? reuseEncryptedAddressSnapshotData(
+          hold.clientAddressSnapshot,
+          hold.clientAddressSnapshotKeyVersion,
+          hold.addressSnapshotsEncryptedAt,
+        )
+      : {
+          snapshot: Prisma.JsonNull,
+          keyVersion: null,
+          encryptedAt: null,
+        }
 
   let created: {
     id: string
@@ -7900,7 +8040,8 @@ async function performLockedFinalizeBookingFromHold(args: {
         locationId: locationContext.locationId,
         locationTimeZone: locationContext.timeZone,
 
-        locationAddressSnapshot: salonLocationAddressSnapshotInput,
+        locationAddressSnapshot: salonLocationAddressSnapshotData.snapshot,
+        locationAddressSnapshotKeyVersion: salonLocationAddressSnapshotData.keyVersion,
         locationLatSnapshot:
           decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
         locationLngSnapshot:
@@ -7910,10 +8051,8 @@ async function performLockedFinalizeBookingFromHold(args: {
           validatedHold.value.locationType === ServiceLocationType.MOBILE
             ? validatedHold.value.holdClientAddressId
             : null,
-        clientAddressSnapshot:
-          validatedHold.value.locationType === ServiceLocationType.MOBILE
-            ? toNullableJsonCreateInput(hold.clientAddressSnapshot)
-            : Prisma.JsonNull,
+        clientAddressSnapshot: mobileClientAddressSnapshotData.snapshot,
+        clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
         clientAddressLatSnapshot:
           validatedHold.value.locationType === ServiceLocationType.MOBILE
             ? decimalToNumber(hold.clientAddressLatSnapshot)
@@ -7922,6 +8061,9 @@ async function performLockedFinalizeBookingFromHold(args: {
           validatedHold.value.locationType === ServiceLocationType.MOBILE
             ? decimalToNumber(hold.clientAddressLngSnapshot)
             : null,
+        addressSnapshotsEncryptedAt:
+          salonLocationAddressSnapshotData.encryptedAt ??
+          mobileClientAddressSnapshotData.encryptedAt,
       },
       select: {
         id: true,
@@ -8296,32 +8438,39 @@ async function performLockedCreateProBooking(args: {
     now: args.now,
   })
 
-  const salonLocationAddressSnapshot:
-    | Prisma.InputJsonValue
-    | Prisma.NullableJsonNullValueInput =
-    args.locationType === ServiceLocationType.SALON && salonLocationAddress
-      ? buildAddressSnapshot(salonLocationAddress) ?? Prisma.JsonNull
-      : Prisma.JsonNull
+    const salonLocationAddressSnapshotData =
+      args.locationType === ServiceLocationType.SALON
+        ? buildEncryptedAddressSnapshotData({
+            formattedAddress: salonLocationAddress,
+            lat: locationContext.lat,
+            lng: locationContext.lng,
+          })
+        : {
+            snapshot: Prisma.JsonNull,
+            keyVersion: null,
+            encryptedAt: null,
+            latSnapshot: locationContext.lat ?? null,
+            lngSnapshot: locationContext.lng ?? null,
+          }
 
-  const clientAddressSnapshot:
-    | Prisma.InputJsonValue
-    | Prisma.NullableJsonNullValueInput =
-    args.locationType === ServiceLocationType.MOBILE && clientServiceAddress
-      ? buildAddressSnapshot(clientServiceAddress) ?? Prisma.JsonNull
-      : Prisma.JsonNull
+    const clientAddressSnapshotData =
+      args.locationType === ServiceLocationType.MOBILE && clientAddress
+        ? buildEncryptedAddressSnapshotData({
+            formattedAddress: clientServiceAddress,
+            lat: clientAddress.lat,
+            lng: clientAddress.lng,
+          })
+        : {
+            snapshot: Prisma.JsonNull,
+            keyVersion: null,
+            encryptedAt: null,
+            latSnapshot: null,
+            lngSnapshot: null,
+          }
 
-  const locationLatSnapshot = locationContext.lat ?? null
-  const locationLngSnapshot = locationContext.lng ?? null
-
-  const clientAddressLatSnapshot =
-    args.locationType === ServiceLocationType.MOBILE && clientAddress
-      ? decimalToNumber(clientAddress.lat)
-      : null
-
-  const clientAddressLngSnapshot =
-    args.locationType === ServiceLocationType.MOBILE && clientAddress
-      ? decimalToNumber(clientAddress.lng)
-      : null
+    const addressSnapshotsEncryptedAt =
+      salonLocationAddressSnapshotData.encryptedAt ??
+      clientAddressSnapshotData.encryptedAt
 
   let booking: {
     id: string
@@ -8346,17 +8495,20 @@ async function performLockedCreateProBooking(args: {
         locationId: locationContext.locationId,
         locationTimeZone: locationContext.timeZone,
 
-        locationAddressSnapshot: salonLocationAddressSnapshot,
-        locationLatSnapshot,
-        locationLngSnapshot,
+        locationAddressSnapshot: salonLocationAddressSnapshotData.snapshot,
+        locationAddressSnapshotKeyVersion: salonLocationAddressSnapshotData.keyVersion,
+        locationLatSnapshot: salonLocationAddressSnapshotData.latSnapshot,
+        locationLngSnapshot: salonLocationAddressSnapshotData.lngSnapshot,
 
         clientAddressId:
           args.locationType === ServiceLocationType.MOBILE && clientAddress
             ? clientAddress.id
             : null,
-        clientAddressSnapshot,
-        clientAddressLatSnapshot,
-        clientAddressLngSnapshot,
+          clientAddressSnapshot: clientAddressSnapshotData.snapshot,
+          clientAddressSnapshotKeyVersion: clientAddressSnapshotData.keyVersion,
+          clientAddressLatSnapshot: clientAddressSnapshotData.latSnapshot,
+          clientAddressLngSnapshot: clientAddressSnapshotData.lngSnapshot,
+          addressSnapshotsEncryptedAt,
 
         internalNotes: args.internalNotes ?? null,
         bufferMinutes,
@@ -8744,14 +8896,37 @@ assertCanCreateRebookFromSourceBooking({
     now: args.now,
   })
 
-  const salonAddressSnapshot =
+  const salonAddressSnapshotData =
     source.locationType === ServiceLocationType.SALON
       ? source.locationAddressSnapshot != null
-        ? toNullableJsonCreateInput(source.locationAddressSnapshot)
-        : locationContext.formattedAddress
-          ? buildAddressSnapshot(locationContext.formattedAddress) ?? Prisma.JsonNull
-          : Prisma.JsonNull
-      : Prisma.JsonNull
+        ? reuseEncryptedAddressSnapshotData(
+            source.locationAddressSnapshot,
+            source.locationAddressSnapshotKeyVersion,
+            source.addressSnapshotsEncryptedAt,
+          )
+        : buildEncryptedAddressSnapshotData({
+            formattedAddress: locationContext.formattedAddress,
+            lat: source.locationLatSnapshot ?? locationContext.lat,
+            lng: source.locationLngSnapshot ?? locationContext.lng,
+          })
+      : {
+          snapshot: Prisma.JsonNull,
+          keyVersion: null,
+          encryptedAt: null,
+        }
+
+  const mobileClientAddressSnapshotData =
+    source.locationType === ServiceLocationType.MOBILE
+      ? reuseEncryptedAddressSnapshotData(
+          source.clientAddressSnapshot,
+          source.clientAddressSnapshotKeyVersion,
+          source.addressSnapshotsEncryptedAt,
+        )
+      : {
+          snapshot: Prisma.JsonNull,
+          keyVersion: null,
+          encryptedAt: null,
+        }
 
   let createdBooking: {
     id: string
@@ -8777,7 +8952,8 @@ assertCanCreateRebookFromSourceBooking({
         locationId: locationContext.locationId,
         locationTimeZone: locationContext.timeZone,
 
-        locationAddressSnapshot: salonAddressSnapshot,
+        locationAddressSnapshot: salonAddressSnapshotData.snapshot,
+        locationAddressSnapshotKeyVersion: salonAddressSnapshotData.keyVersion,
         locationLatSnapshot:
           decimalToNumber(source.locationLatSnapshot) ?? locationContext.lat,
         locationLngSnapshot:
@@ -8787,10 +8963,8 @@ assertCanCreateRebookFromSourceBooking({
           source.locationType === ServiceLocationType.MOBILE
             ? source.clientAddressId
             : null,
-        clientAddressSnapshot:
-          source.locationType === ServiceLocationType.MOBILE
-            ? toNullableJsonCreateInput(source.clientAddressSnapshot)
-            : Prisma.JsonNull,
+        clientAddressSnapshot: mobileClientAddressSnapshotData.snapshot,
+        clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
         clientAddressLatSnapshot:
           source.locationType === ServiceLocationType.MOBILE
             ? decimalToNumber(source.clientAddressLatSnapshot)
@@ -8799,6 +8973,9 @@ assertCanCreateRebookFromSourceBooking({
           source.locationType === ServiceLocationType.MOBILE
             ? decimalToNumber(source.clientAddressLngSnapshot)
             : null,
+        addressSnapshotsEncryptedAt:
+          salonAddressSnapshotData.encryptedAt ??
+          mobileClientAddressSnapshotData.encryptedAt,
 
         clientTimeZoneAtBooking: source.clientTimeZoneAtBooking ?? undefined,
 

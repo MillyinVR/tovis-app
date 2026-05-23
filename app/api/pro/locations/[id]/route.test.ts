@@ -1,4 +1,5 @@
 // app/api/pro/locations/[id]/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { Prisma, ProfessionalLocationType } from '@prisma/client'
@@ -41,6 +42,7 @@ const mocks = vi.hoisted(() => {
   const refreshLocation = vi.fn()
   const deleteLocationFromIndex = vi.fn()
   const evaluatePublishableLocation = vi.fn()
+  const buildAddressPrivacyWriteData = vi.fn()
 
   const professionalLocation = {
     findFirst: vi.fn(),
@@ -63,6 +65,7 @@ const mocks = vi.hoisted(() => {
     refreshLocation,
     deleteLocationFromIndex,
     evaluatePublishableLocation,
+    buildAddressPrivacyWriteData,
     professionalLocation,
     prisma,
   }
@@ -99,6 +102,10 @@ vi.mock('@/lib/pro/readiness/proReadiness', () => ({
   evaluatePublishableLocation: mocks.evaluatePublishableLocation,
 }))
 
+vi.mock('@/lib/security/addressEncryption', () => ({
+  buildAddressPrivacyWriteData: mocks.buildAddressPrivacyWriteData,
+}))
+
 import { DELETE, PATCH } from './route'
 
 type RouteCtx = {
@@ -113,6 +120,30 @@ const validWorkingHours = {
   fri: { enabled: false, start: '09:00', end: '17:00' },
   sat: { enabled: false, start: '09:00', end: '17:00' },
   sun: { enabled: false, start: '09:00', end: '17:00' },
+}
+
+const addressPrivacyWriteData = {
+  encryptedAddressJson: {
+    v: 1,
+    algorithm: 'plaintext-json-expand-phase',
+    keyVersion: 'address-json-v1',
+    address: {
+      formattedAddress: '456 Market St, San Diego, CA',
+      addressLine1: '456 Market St',
+      addressLine2: 'Suite 9',
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      placeId: 'place_456',
+      lat: '32.7',
+      lng: '-117.1',
+    },
+  },
+  addressKeyVersion: 'address-json-v1',
+  postalCodePrefix: '92101',
+  latApprox: new Prisma.Decimal('32.7000'),
+  lngApprox: new Prisma.Decimal('-117.1000'),
 }
 
 function makePatchRequest(body: unknown): NextRequest {
@@ -150,6 +181,12 @@ function makeExistingLocation(
     timeZone: string | null
     placeId: string | null
     formattedAddress: string | null
+    addressLine1: string | null
+    addressLine2: string | null
+    city: string | null
+    state: string | null
+    postalCode: string | null
+    countryCode: string | null
     lat: Prisma.Decimal | null
     lng: Prisma.Decimal | null
     workingHours: unknown
@@ -163,6 +200,12 @@ function makeExistingLocation(
     timeZone: 'America/Los_Angeles',
     placeId: 'place_123',
     formattedAddress: '123 Main St, San Diego, CA',
+    addressLine1: '123 Main St',
+    addressLine2: null,
+    city: 'San Diego',
+    state: 'CA',
+    postalCode: '92101',
+    countryCode: 'US',
     lat: new Prisma.Decimal('32.715736'),
     lng: new Prisma.Decimal('-117.161087'),
     workingHours: validWorkingHours,
@@ -215,6 +258,8 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       locationId: 'loc_123',
     })
 
+    mocks.buildAddressPrivacyWriteData.mockReturnValue(addressPrivacyWriteData)
+
     const tx = {
       professionalLocation: mocks.professionalLocation,
     }
@@ -241,6 +286,7 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
       expect(mocks.professionalLocation.findFirst).not.toHaveBeenCalled()
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
     it('passes through rate limit response unchanged', async () => {
@@ -261,10 +307,14 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
 
       expect(mocks.professionalLocation.findFirst).not.toHaveBeenCalled()
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
     it('returns 400 when id is missing', async () => {
-      const result = await PATCH(makePatchRequest({ name: 'New Name' }), makeCtx('   '))
+      const result = await PATCH(
+        makePatchRequest({ name: 'New Name' }),
+        makeCtx('   '),
+      )
 
       const body = await readJson<{
         ok: false
@@ -279,6 +329,7 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
 
       expect(mocks.professionalLocation.findFirst).not.toHaveBeenCalled()
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
     it('returns 404 when location is not found', async () => {
@@ -307,6 +358,12 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
           timeZone: true,
           placeId: true,
           formattedAddress: true,
+          addressLine1: true,
+          addressLine2: true,
+          city: true,
+          state: true,
+          postalCode: true,
+          countryCode: true,
           lat: true,
           lng: true,
           workingHours: true,
@@ -314,6 +371,7 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       })
 
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
     it('rejects publishing a draft location through PATCH and points callers to schedule publish', async () => {
@@ -347,6 +405,7 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
       expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
       expect(mocks.refreshLocation).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
     it('returns 400 when isBookable is not boolean', async () => {
@@ -369,6 +428,7 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       })
 
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
     it('returns 400 when trying to unset the current primary location directly', async () => {
@@ -398,9 +458,10 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       })
 
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
-    it('updates a draft location without making it bookable, bumps version, and refreshes search index', async () => {
+    it('updates a draft location without address edits and does not rebuild privacy fields', async () => {
       mocks.professionalLocation.findFirst.mockResolvedValueOnce(
         makeExistingLocation({
           isBookable: false,
@@ -417,8 +478,6 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       const result = await PATCH(
         makePatchRequest({
           name: 'Updated Draft Location',
-          city: 'San Diego',
-          state: 'CA',
           isPrimary: false,
         }),
         makeCtx(),
@@ -437,12 +496,12 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
 
       expect(result.status).toBe(200)
 
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
+
       expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
         where: { id: 'loc_123', professionalId: 'pro_123' },
         data: {
           name: 'Updated Draft Location',
-          city: 'San Diego',
-          state: 'CA',
           isPrimary: false,
         },
       })
@@ -463,6 +522,85 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
           type: ProfessionalLocationType.SALON,
         },
       })
+    })
+
+    it('updates a draft location with address privacy write fields when address fields change', async () => {
+      mocks.professionalLocation.findFirst.mockResolvedValueOnce(
+        makeExistingLocation({
+          isBookable: false,
+          addressLine1: '123 Main St',
+          addressLine2: null,
+          city: 'San Diego',
+          state: 'CA',
+          postalCode: '92101',
+          countryCode: 'US',
+        }),
+      )
+
+      mocks.professionalLocation.findFirst.mockResolvedValueOnce(
+        makeUpdatedLocation({
+          isBookable: false,
+          isPrimary: false,
+        }),
+      )
+
+      const result = await PATCH(
+        makePatchRequest({
+          formattedAddress: '456 Market St, San Diego, CA',
+          addressLine1: '456 Market St',
+          addressLine2: 'Suite 9',
+          city: 'San Diego',
+          state: 'CA',
+          postalCode: '92101',
+          countryCode: 'US',
+          placeId: 'place_456',
+          lat: 32.7,
+          lng: -117.1,
+        }),
+        makeCtx(),
+      )
+
+      expect(result.status).toBe(200)
+
+      expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledWith({
+        formattedAddress: '456 Market St, San Diego, CA',
+        addressLine1: '456 Market St',
+        addressLine2: 'Suite 9',
+        city: 'San Diego',
+        state: 'CA',
+        postalCode: '92101',
+        countryCode: 'US',
+        placeId: 'place_456',
+        lat: 32.7,
+        lng: -117.1,
+      })
+
+      expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
+        where: { id: 'loc_123', professionalId: 'pro_123' },
+        data: {
+          placeId: 'place_456',
+          formattedAddress: '456 Market St, San Diego, CA',
+          addressLine1: '456 Market St',
+          addressLine2: 'Suite 9',
+          city: 'San Diego',
+          state: 'CA',
+          postalCode: '92101',
+          countryCode: 'US',
+          lat: new Prisma.Decimal('32.7'),
+          lng: new Prisma.Decimal('-117.1'),
+          encryptedAddressJson: addressPrivacyWriteData.encryptedAddressJson,
+          addressKeyVersion: 'address-json-v1',
+          postalCodePrefix: '92101',
+          latApprox: new Prisma.Decimal('32.7000'),
+          lngApprox: new Prisma.Decimal('-117.1000'),
+        },
+      })
+
+      expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledWith('pro_123')
+      expect(mocks.refreshLocation).toHaveBeenCalledWith(
+        'loc_123',
+        'location.update',
+      )
     })
 
     it('sets another location as primary by clearing the old primary first', async () => {
@@ -500,6 +638,8 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
           isPrimary: true,
         },
       })
+
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
     it('allows turning an existing bookable location off', async () => {
@@ -525,6 +665,7 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       expect(result.status).toBe(200)
 
       expect(mocks.evaluatePublishableLocation).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
 
       expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
         where: { id: 'loc_123', professionalId: 'pro_123' },
@@ -540,7 +681,7 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       )
     })
 
-    it('validates an already-bookable location before applying edits that keep it bookable', async () => {
+    it('validates an already-bookable location before applying address edits that keep it bookable', async () => {
       mocks.professionalLocation.findFirst.mockResolvedValueOnce(
         makeExistingLocation({
           isBookable: true,
@@ -574,6 +715,19 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
         workingHours: validWorkingHours,
       })
 
+      expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledWith({
+        formattedAddress: '456 Market St, San Diego, CA',
+        addressLine1: '123 Main St',
+        addressLine2: null,
+        city: 'San Diego',
+        state: 'CA',
+        postalCode: '92101',
+        countryCode: 'US',
+        placeId: 'place_456',
+        lat: 32.7,
+        lng: -117.1,
+      })
+
       expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
         where: { id: 'loc_123', professionalId: 'pro_123' },
         data: {
@@ -582,11 +736,16 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
           lat: new Prisma.Decimal('32.7'),
           lng: new Prisma.Decimal('-117.1'),
           timeZone: 'America/Los_Angeles',
+          encryptedAddressJson: addressPrivacyWriteData.encryptedAddressJson,
+          addressKeyVersion: 'address-json-v1',
+          postalCodePrefix: '92101',
+          latApprox: new Prisma.Decimal('32.7000'),
+          lngApprox: new Prisma.Decimal('-117.1000'),
         },
       })
     })
 
-    it('blocks edits that would make an existing bookable location fail publishability checks', async () => {
+    it('blocks edits that would make an existing bookable location fail publishability checks before privacy build', async () => {
       mocks.professionalLocation.findFirst.mockResolvedValueOnce(
         makeExistingLocation({
           isBookable: true,
@@ -623,9 +782,10 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
       expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
       expect(mocks.refreshLocation).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
-    it('blocks an existing bookable location when lat/lng would be missing', async () => {
+    it('blocks an existing bookable location when lat/lng would be missing before privacy build', async () => {
       mocks.professionalLocation.findFirst.mockResolvedValueOnce(
         makeExistingLocation({
           isBookable: true,
@@ -652,9 +812,10 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       })
 
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
-    it('blocks an existing bookable salon location when placeId is removed', async () => {
+    it('blocks an existing bookable salon location when placeId is removed before privacy build', async () => {
       mocks.professionalLocation.findFirst.mockResolvedValueOnce(
         makeExistingLocation({
           isBookable: true,
@@ -677,10 +838,12 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       expect(result.status).toBe(400)
       expect(body).toEqual({
         ok: false,
-        error: 'Salon/Suite bookable locations require placeId and formattedAddress.',
+        error:
+          'Salon/Suite bookable locations require placeId and formattedAddress.',
       })
 
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
     it('returns 400 when workingHours are invalid', async () => {
@@ -706,6 +869,7 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       })
 
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+      expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     })
 
     it('returns 404 when updateMany does not update exactly one row', async () => {
@@ -873,7 +1037,8 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       expect(result.status).toBe(409)
       expect(body).toEqual({
         ok: false,
-        error: 'This location is used by existing bookings and cannot be deleted.',
+        error:
+          'This location is used by existing bookings and cannot be deleted.',
       })
 
       expect(mocks.bumpScheduleConfigVersion).not.toHaveBeenCalled()
@@ -895,7 +1060,8 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       expect(result.status).toBe(409)
       expect(body).toEqual({
         ok: false,
-        error: 'This location is used by existing bookings and cannot be deleted.',
+        error:
+          'This location is used by existing bookings and cannot be deleted.',
       })
     })
 
