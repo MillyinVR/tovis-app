@@ -25,12 +25,12 @@ The following files should exist before Sprint 1 is considered complete:
 
 Sprint 1 is complete when:
 
-- [ ] All required documents exist.
+- [x] All required documents exist.
 - [ ] Each document has been reviewed by the engineering owner.
-- [ ] Data classes cover user, client, Pro, booking, consultation, media, aftercare, payment, verification, notification, token, log, and admin/support data.
-- [ ] Export/deletion process defines verification, retention exceptions, audit trail, and manual launch workflow.
-- [ ] Private media incident runbook defines containment, impact assessment, user notification, and post-incident review.
-- [ ] PII encryption roadmap defines what is hashed, what is encrypted, what is deferred, and how migrations should be phased.
+- [x] Data classes cover user, client, Pro, booking, consultation, media, aftercare, payment, verification, notification, token, log, and admin/support data.
+- [x] Export/deletion process defines verification, retention exceptions, audit trail, and manual launch workflow.
+- [x] Private media incident runbook defines containment, impact assessment, user notification, and post-incident review.
+- [x] PII encryption roadmap defines what is hashed, what is encrypted, what is deferred, and how migrations should be phased.
 - [ ] The launch gaps from each doc have been turned into tickets or explicitly accepted as launch risks.
 - [ ] A named owner is assigned for security/privacy follow-up.
 - [ ] A named owner is assigned for support/ops request handling.
@@ -42,17 +42,17 @@ Use this table during the sprint.
 
 | Check | Owner | Status | Evidence link / notes |
 |---|---|---:|---|
-| Required docs exist |  | TODO |  |
+| Required docs exist |  | DONE | `docs/security/data-classification.md`, `docs/security/user-data-export-delete.md`, `docs/runbooks/private-media-incident.md`, `docs/security/pii-encryption-roadmap.md` |
 | Data classification reviewed |  | TODO |  |
 | Export/delete process reviewed |  | TODO |  |
 | Private media incident runbook reviewed |  | TODO |  |
 | PII encryption roadmap reviewed |  | TODO |  |
-| Log redaction spot check completed |  | TODO |  |
+| Log redaction spot check completed |  | IN PROGRESS | Auth observability sanitizer covered by `lib/observability/authEvents.test.ts`; all log surfaces still need review. |
 | Analytics PII spot check completed |  | TODO |  |
-| Token hashing proof completed |  | TODO |  |
-| Storage private-media proof completed |  | TODO |  |
+| Token hashing proof completed |  | DONE | `lib/clients/clientClaimLinks.test.ts`, `prisma/migrations/20260522010000_hash_pro_client_invite_tokens/migration.sql`, ClientActionToken lookup tests. |
+| Storage private-media proof completed |  | DONE | `docs/launch-readiness/storage-policy-proof.md`, media authorization/render URL tests, admin verification-doc signed URL tests. |
 | Public search/profile privacy check completed |  | TODO |  |
-| Admin/support access policy reviewed |  | TODO |  |
+| Admin/support access policy reviewed |  | IN PROGRESS | Scoped admin permission checks exist for moderation and verification-doc open paths; policy review still needed. |
 | Launch risks converted to tickets |  | TODO |  |
 
 ## 1. Documentation existence check

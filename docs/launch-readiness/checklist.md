@@ -13,6 +13,7 @@ Use this file as the source of truth for launch readiness. Do not mark an item d
 | `DONE` | Implemented, tested/documented where appropriate, and committed. |
 | `BLOCKED` | Cannot move forward until a dependency/decision is resolved. |
 | `DEFERRED` | Intentionally postponed beyond launch-readiness scope. |
+| `[~]` | Partial evidence exists, but production-grade proof is still missing. |
 
 ---
 
@@ -21,21 +22,21 @@ Use this file as the source of truth for launch readiness. Do not mark an item d
 ```text
 Core product flow: mostly wired
 Launch readiness: in progress
-Current focus: Ops readiness / health checks / runbooks / dashboards
+Current focus: Production proof / realtime refresh / load + chaos / rollout
 ```
 
-## Launch blockers remaining
+## Launch blocker tracker
 
 ```text
 [ ] Full lifecycle regression suite
-[ ] Pro onboarding/readiness hard gate
-[ ] Global rate-limit enforcement
-[ ] Origin/Referer checks
+[x] Pro onboarding/readiness hard gate
+[x] High-risk booking/token/media/auth rate-limit enforcement
+[x] Origin/Referer checks
 [ ] Realtime/session refresh strategy
-[ ] Full 12-step E2E test
+[~] Full booking lifecycle E2E exists; staging/prod execution evidence still needed
 [ ] Load tests for booking/availability/media
 [ ] Chaos tests for Redis/provider outages
-[ ] Compliance/privacy plan
+[~] Compliance/privacy docs exist; owner review and encryption implementation still needed
 [ ] Rollout/go-no-go plan
 ```
 
@@ -68,14 +69,15 @@ app/pro/bookings/[id]/session/page.tsx
 lib/booking/writeBoundary.ts
 lib/booking/lifecycleContract.ts
 tests/e2e/booking-lifecycle-smoke.spec.ts
+tests/e2e/booking-lifecycle.spec.ts
 ```
 
 ## Acceptance criteria
 
 ```text
-[ ] Pro cannot trigger direct DONE transition from the UI.
-[ ] Pro sees blockers when aftercare/payment/checkout/after-photo requirements are missing.
-[ ] Booking completion only happens through backend closeout rules.
+[x] Pro cannot trigger direct DONE transition from the UI.
+[x] Pro sees blockers when aftercare/payment/checkout/after-photo requirements are missing.
+[x] Booking completion only happens through backend closeout rules.
 [ ] Every visible lifecycle action has a regression test.
 ```
 
@@ -99,9 +101,9 @@ Use secure action-token flows and make retryable mutations safe.
 [DONE] Add claim/NFC path tests and docs.
 [IN PROGRESS] Keep legacy AftercareSummary.publicToken only as deprecated schema field.
 [TODO] Create idempotency route map document.
-[TODO] Prove aftercare send atomicity.
-[TODO] Migrate raw ProClientInvite.token to tokenHash.
-[TODO] Prove cancel/reschedule idempotency in route tests.
+[DONE] Prove aftercare send atomicity.
+[DONE] Migrate raw ProClientInvite.token to tokenHash for new/primary lookup paths.
+[DONE] Prove cancel/reschedule idempotency in route tests.
 ```
 
 ## Key files
@@ -112,16 +114,20 @@ app/api/client/rebook/[token]/route.ts
 app/client/bookings/[id]/page.tsx
 app/api/pro/bookings/[id]/aftercare/route.ts
 prisma/schema.prisma
+lib/booking/writeBoundary.aftercareAtomicity.test.ts
+lib/clients/clientClaimLinks.test.ts
+app/api/bookings/[id]/cancel/route.test.ts
+app/api/bookings/[id]/reschedule/route.test.ts
 ```
 
 ## Acceptance criteria
 
 ```text
-[ ] New active aftercare links use ClientActionToken.
-[ ] Active client/pro payloads do not expose legacy publicToken.
-[ ] Rebook token flows are idempotent.
-[ ] Cancel/reschedule mutations are idempotent.
-[ ] Invite/claim tokens are hashed at rest.
+[x] New active aftercare links use ClientActionToken.
+[x] Active client/pro payloads do not expose legacy publicToken.
+[x] Rebook token flows are idempotent.
+[x] Cancel/reschedule mutations are idempotent.
+[x] Invite/claim tokens are hashed at rest for new/primary flows.
 ```
 
 ---
@@ -143,14 +149,14 @@ Harden storage, media, rate limits, and request trust boundaries.
 [DONE] Add central rate-limit policy definitions.
 [TODO] Add Supabase policy SQL tests.
 [TODO] Verify live Supabase bucket policies after deploy.
-[TODO] Add global route/middleware/wrapper rate-limit enforcement.
-[TODO] Add auth route rate limits.
-[TODO] Add SMS route rate limits.
-[TODO] Add SMS fail-closed behavior when Redis/rate limit backend is unavailable.
-[TODO] Add token route rate limits.
-[TODO] Add media route rate limits.
-[TODO] Add Origin/Referer checks for state-changing cookie-authenticated requests.
-[TODO] Add media upload audit write-path verification.
+[DONE] Add high-risk route/wrapper rate-limit enforcement.
+[DONE] Add auth route rate limits.
+[DONE] Add SMS route rate limits.
+[DONE] Add SMS fail-closed behavior when Redis/rate limit backend is unavailable.
+[DONE] Add token route rate limits.
+[DONE] Add media route rate limits.
+[DONE] Add Origin/Referer checks for state-changing cookie-authenticated requests.
+[DONE] Add before/after media upload audit write-path verification.
 [TODO] Add upload-token binding proof.
 [TODO] Add orphan media cleanup.
 [TODO] Add media scan/moderation flow or explicit deferral.
@@ -161,21 +167,23 @@ Harden storage, media, rate limits, and request trust boundaries.
 ```text
 supabase/migrations/20260514180000_storage_media_bucket_policies.sql
 lib/rateLimit/policies.ts
+lib/rateLimit/enforce.ts
 middleware.ts
 app/api/auth/*
 app/api/pro/uploads/route.ts
 app/api/pro/bookings/[id]/media/route.ts
+docs/launch-readiness/rate-limit-coverage.md
 ```
 
 ## Acceptance criteria
 
 ```text
-[ ] Private media cannot be anonymously listed/read.
-[ ] Storage policy is committed and deployable.
-[ ] Auth/SMS/token/media routes are rate limited.
-[ ] SMS abuse routes fail closed when required.
-[ ] State-changing cookie-auth routes validate Origin/Referer or documented CSRF strategy.
-[ ] Media upload/delete/replacement has audit trail.
+[x] Private media cannot be anonymously listed/read in repo policy proof.
+[x] Storage policy is committed and deployable.
+[x] Auth/SMS/token/media routes are rate limited.
+[x] SMS abuse routes fail closed when required.
+[x] State-changing cookie-auth routes validate Origin/Referer or documented CSRF strategy.
+[~] Media upload has audit trail; delete/replacement proof still pending.
 ```
 
 ---
@@ -278,18 +286,18 @@ docs/launch-readiness/dashboard-checklist.md
 ## Acceptance criteria
 
 ```text
-[ ] /api/health/live returns app liveness only.
-[ ] /api/health/ready checks all dependencies.
-[ ] Postgres failure makes readiness down.
-[ ] Redis failure makes readiness degraded.
-[ ] Storage failure makes readiness degraded.
-[ ] Stripe config/provider failure makes readiness degraded.
-[ ] Postmark config/provider failure makes readiness degraded.
-[ ] Twilio config/provider failure makes readiness degraded.
-[ ] Probe timeout does not crash endpoint.
-[ ] Tests cover ok/degraded/down behavior.
-[ ] Runbooks exist for each dependency.
-[ ] Dashboard checklist exists and maps alerts to runbooks.
+[x] /api/health/live returns app liveness only.
+[x] /api/health/ready checks all dependencies.
+[x] Postgres failure makes readiness down.
+[x] Redis failure makes readiness degraded.
+[x] Storage failure makes readiness degraded.
+[x] Stripe config/provider failure makes readiness degraded.
+[x] Postmark config/provider failure makes readiness degraded.
+[x] Twilio config/provider failure makes readiness degraded.
+[x] Probe timeout does not crash endpoint.
+[x] Tests cover ok/degraded/down behavior.
+[x] Runbooks exist for each dependency.
+[x] Dashboard checklist exists and maps alerts to runbooks.
 [ ] Production monitor is configured to hit /api/health/live.
 [ ] Production monitor is configured to hit /api/health/ready.
 ```
@@ -311,12 +319,12 @@ Harden token, claim, NFC, and short-code flows.
 [DONE] Add short-code redirect tests.
 [DONE] Add NFC trust-boundary doc.
 [DONE] Add claim-flow audit doc.
-[TODO] Migrate ProClientInvite token to tokenHash.
+[DONE] Migrate ProClientInvite token to tokenHash for new/primary lookup paths.
 [TODO] Add tap-code rate limiting.
-[TODO] Prove NFC cannot bypass Pro readiness gates.
-[TODO] Prove claim accept is idempotent.
-[TODO] Add wrong-user claim behavior tests.
-[TODO] Add expired/revoked claim behavior tests.
+[DONE] Prove NFC/short-code entry points are evaluated by Pro readiness policy.
+[IN PROGRESS] Prove claim accept is idempotent.
+[DONE] Add wrong-user/already-claimed claim behavior tests.
+[DONE] Add revoked claim behavior tests.
 ```
 
 ## Key files
@@ -332,12 +340,12 @@ prisma/schema.prisma
 ## Acceptance criteria
 
 ```text
-[ ] NFC/tap tokens are non-enumerable.
-[ ] Revoked/expired links fail safely.
-[ ] Wrong-user claim behavior is explicit.
-[ ] Claim accept is idempotent.
-[ ] NFC/tap flow cannot bypass readiness.
-[ ] Public/token routes are rate limited.
+[~] NFC/tap tokens are non-enumerable by design; rate-limit proof still pending.
+[~] Revoked links fail safely; explicit expired-state proof still pending.
+[x] Wrong-user/already-claimed claim behavior is explicit.
+[~] Claim accept handles already-claimed/revoked states; replay/idempotency proof still pending.
+[x] NFC/tap flow cannot bypass readiness policy evaluation.
+[x] Public/token routes are rate limited where listed in rate-limit coverage.
 ```
 
 ---
@@ -356,8 +364,9 @@ Prove the system survives traffic, retries, provider outages, and launch operati
 [DONE] Add lifecycle smoke test.
 [DONE] Add authVersion enforcement test.
 [DONE] Add booking concurrency integration test.
-[TODO] Add full 12-step E2E.
+[IN PROGRESS] Add full booking lifecycle E2E. API-assisted flow exists; signup/search/hold/finalize browser path still pending.
 [TODO] Add broad retry/idempotency suite.
+[IN PROGRESS] Add load-test scaffolding. Signup load test exists; booking/availability/media load tests still pending.
 [TODO] Add k6 booking finalize load test.
 [TODO] Add k6 availability load test.
 [TODO] Add k6 media upload load test.
@@ -375,7 +384,7 @@ Prove the system survives traffic, retries, provider outages, and launch operati
 ## Key files to add later
 
 ```text
-tests/e2e/full-booking-lifecycle.spec.ts
+tests/e2e/booking-lifecycle.spec.ts
 tests/load/booking-finalize-load-test.ts
 tests/load/availability-load-test.ts
 tests/load/media-upload-load-test.ts
@@ -390,7 +399,7 @@ docs/launch-readiness/go-no-go.md
 ## Acceptance criteria
 
 ```text
-[ ] Full happy path passes from Pro signup to booking completion.
+[~] Full happy path has API-assisted E2E coverage; Pro signup/search/hold/finalize browser path still pending.
 [ ] Retry suite proves no duplicate side effects.
 [ ] Load tests meet p95 targets.
 [ ] Chaos tests prove graceful degradation.
@@ -412,9 +421,9 @@ Prove hot data paths are indexed and booking overlap is impossible.
 ## Items
 
 ```text
-[TODO] Decide DB no-overlap constraint strategy.
-[TODO] Test overlapping appointment ranges, not just identical scheduledFor values.
-[TODO] Review hot query indexes.
+[DONE] Decide DB no-overlap constraint strategy.
+[DONE] Test overlapping appointment ranges, not just identical scheduledFor values.
+[IN PROGRESS] Review hot query indexes.
 [TODO] Review notification inbox indexes.
 [TODO] Review booking dashboard query plans.
 [TODO] Review availability query plans.
@@ -449,23 +458,24 @@ Document and reduce privacy/security risk before public launch.
 ## Items
 
 ```text
-[TODO] Add data classification doc.
-[TODO] Add PII encryption strategy.
-[TODO] Add retention policy.
-[TODO] Add data export/delete plan.
-[TODO] Add media deletion policy.
+[DONE] Add data classification doc.
+[DONE] Add PII encryption strategy.
+[IN PROGRESS] Add retention policy.
+[DONE] Add data export/delete plan.
+[DONE] Add media deletion policy.
 [TODO] Add secret rotation runbook.
-[TODO] Add admin access review process.
-[TODO] Add privacy incident response plan.
+[IN PROGRESS] Add admin access review process.
+[IN PROGRESS] Add privacy incident response plan.
 ```
 
-## Key docs to add later
+## Key docs
 
 ```text
 docs/security/data-classification.md
-docs/security/pii-encryption-strategy.md
+docs/security/pii-encryption-roadmap.md
+docs/security/user-data-export-delete.md
+docs/runbooks/private-media-incident.md
 docs/security/retention-policy.md
-docs/security/data-export-delete.md
 docs/security/secret-rotation.md
 docs/security/privacy-incident-response.md
 ```
@@ -513,21 +523,21 @@ limited geography/profession rollout
 Do not launch publicly until every item below is true:
 
 ```text
-[ ] Core booking/session flow passes full E2E.
+[~] Core booking/session flow has API-assisted E2E coverage; staging/prod execution evidence still needed.
 [ ] Health live/ready endpoints are deployed.
 [ ] Production monitors watch live and ready endpoints.
 [ ] Runbooks exist and are linked from alerts.
 [ ] Dashboard exists with critical panels.
 [ ] Storage RLS policies are deployed and verified.
-[ ] Global rate limits are enforced.
-[ ] Auth/SMS routes fail safely under abuse/backing-service failure.
-[ ] Pro readiness/onboarding gates are enforced.
+[x] High-risk route rate limits are enforced in code.
+[x] Auth/SMS routes fail safely under abuse/backing-service failure.
+[x] Pro readiness/onboarding gates are enforced in code.
 [ ] Realtime or polling strategy is implemented.
 [ ] Payment/Stripe webhook replay is proven idempotent.
 [ ] Full retry/idempotency suite passes.
 [ ] Load tests pass target thresholds.
 [ ] Chaos tests pass for Redis/provider outages.
-[ ] Privacy/compliance docs exist.
+[x] Privacy/compliance docs exist.
 [ ] Rollout and rollback plans exist.
 [ ] Support has launch scripts and escalation paths.
 [ ] Go/no-go review is complete.
@@ -560,9 +570,8 @@ Do not launch publicly until every item below is true:
 [TODO] Actual observability dashboard implementation
 [TODO] Alert configuration
 [TODO] Realtime/session refresh
-[TODO] Rate-limit enforcement
-[TODO] Pro readiness gate
-[TODO] Full E2E/load/chaos
-[TODO] Privacy/compliance docs
+[TODO] Production monitor wiring
+[TODO] Full browser E2E/load/chaos execution
+[TODO] Privacy/compliance owner review + encryption implementation
 [TODO] Rollout/go-no-go docs
 ```
