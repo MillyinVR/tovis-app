@@ -63,13 +63,37 @@ type ProfessionalLocationRow = Prisma.ProfessionalLocationGetPayload<{
   select: typeof LOCATION_SELECT
 }>
 
+type ParsedAddressInput = {
+  formattedAddress: string | null
+  addressLine1: string | null
+  addressLine2: string | null
+  city: string | null
+  state: string | null
+  postalCode: string | null
+  countryCode: string | null
+  placeId: string | null
+  latRaw: number | null | undefined
+  lngRaw: number | null | undefined
+}
+
+type ParsedScheduleInput = {
+  timeZone: string | null
+  workingHours: WorkingHoursObj
+  bufferMinutes: number | undefined
+  stepMinutes: number | undefined
+  advanceNoticeMinutes: number | undefined
+  maxDaysAhead: number | undefined
+}
+
 function normalizeProfessionalLocationType(
   value: unknown,
 ): ProfessionalLocationType | null {
   return pickEnum(value, Object.values(ProfessionalLocationType))
 }
 
-function requireAddressForType(type: ProfessionalLocationType) {
+function requiresAddressForBookableLocation(
+  type: ProfessionalLocationType,
+): boolean {
   return (
     type === ProfessionalLocationType.SALON ||
     type === ProfessionalLocationType.SUITE
@@ -78,28 +102,29 @@ function requireAddressForType(type: ProfessionalLocationType) {
 
 function decimalToNumber(value: unknown): number | null {
   if (value == null) return null
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null
 
-  if (
-    typeof value === 'object' &&
-    typeof (value as { toNumber?: unknown }).toNumber === 'function'
-  ) {
-    const numberValue = (value as { toNumber: () => number }).toNumber()
-    return Number.isFinite(numberValue) ? numberValue : null
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
   }
 
-  if (
-    typeof value === 'object' &&
-    typeof (value as { toString?: unknown }).toString === 'function'
-  ) {
-    const numberValue = Number((value as { toString: () => string }).toString())
-    return Number.isFinite(numberValue) ? numberValue : null
+  if (!isRecord(value)) return null
+
+  const maybeToNumber = value.toNumber
+  if (typeof maybeToNumber === 'function') {
+    const parsed = maybeToNumber.call(value)
+    return typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : null
+  }
+
+  const maybeToString = value.toString
+  if (typeof maybeToString === 'function') {
+    const parsed = Number(String(maybeToString.call(value)))
+    return Number.isFinite(parsed) ? parsed : null
   }
 
   return null
 }
 
-function decimalOrNull(value: number | null | undefined) {
+function decimalOrNull(value: number | null | undefined): Prisma.Decimal | null {
   if (value == null) return null
   return new Prisma.Decimal(String(value))
 }
@@ -113,6 +138,133 @@ function mapLocation(location: ProfessionalLocationRow) {
     createdAt: location.createdAt.toISOString(),
     updatedAt: location.updatedAt.toISOString(),
   }
+}
+
+function pickNullableString(
+  body: UnknownRecord,
+  key: string,
+): string | null {
+  return hasOwn(body, key) ? pickString(body[key]) : null
+}
+
+function parseNullableCoordinate(args: {
+  body: UnknownRecord
+  key: 'lat' | 'lng'
+}): { ok: true; value: number | null | undefined } | { ok: false; error: string } {
+  const { body, key } = args
+
+  if (!hasOwn(body, key)) {
+    return { ok: true, value: undefined }
+  }
+
+  if (body[key] === null) {
+    return { ok: true, value: null }
+  }
+
+  const numberValue = pickNumber(body[key])
+
+  if (numberValue == null) {
+    return { ok: false, error: `${key} must be a number or null.` }
+  }
+
+  return { ok: true, value: numberValue }
+}
+
+function parseAddressInput(
+  body: UnknownRecord,
+): ParsedAddressInput | { error: string } {
+  const lat = parseNullableCoordinate({ body, key: 'lat' })
+  if (!lat.ok) return { error: lat.error }
+
+  const lng = parseNullableCoordinate({ body, key: 'lng' })
+  if (!lng.ok) return { error: lng.error }
+
+  return {
+    formattedAddress: pickNullableString(body, 'formattedAddress'),
+    addressLine1: pickNullableString(body, 'addressLine1'),
+    addressLine2: pickNullableString(body, 'addressLine2'),
+    city: pickNullableString(body, 'city'),
+    state: pickNullableString(body, 'state'),
+    postalCode: pickNullableString(body, 'postalCode'),
+    countryCode: pickNullableString(body, 'countryCode'),
+    placeId: pickNullableString(body, 'placeId'),
+    latRaw: lat.value,
+    lngRaw: lng.value,
+  }
+}
+
+function parseScheduleInput(
+  body: UnknownRecord,
+): ParsedScheduleInput | { error: string } {
+  const timeZone = hasOwn(body, 'timeZone') ? pickString(body.timeZone) : null
+
+  const bufferMinutes = hasOwn(body, 'bufferMinutes')
+    ? clampInt(pickInt(body.bufferMinutes) ?? 0, 0, 180)
+    : undefined
+
+  const stepMinutes = hasOwn(body, 'stepMinutes')
+    ? clampInt(pickInt(body.stepMinutes) ?? 15, 5, 60)
+    : undefined
+
+  const advanceNoticeMinutes = hasOwn(body, 'advanceNoticeMinutes')
+    ? clampInt(pickInt(body.advanceNoticeMinutes) ?? 15, 0, 30 * 24 * 60)
+    : undefined
+
+  const maxDaysAhead = hasOwn(body, 'maxDaysAhead')
+    ? clampInt(pickInt(body.maxDaysAhead) ?? 365, 1, 3650)
+    : undefined
+
+  let workingHours: WorkingHoursObj = defaultWorkingHours()
+
+  if (hasOwn(body, 'workingHours')) {
+    const normalized = normalizeWorkingHours(body.workingHours)
+
+    if (!normalized) {
+      return {
+        error:
+          'workingHours must contain mon..sun with { enabled, start, end }, valid HH:MM times, and end after start.',
+      }
+    }
+
+    workingHours = normalized
+  }
+
+  return {
+    timeZone,
+    workingHours,
+    bufferMinutes,
+    stepMinutes,
+    advanceNoticeMinutes,
+    maxDaysAhead,
+  }
+}
+
+function validateBookableLocation(args: {
+  type: ProfessionalLocationType
+  timeZone: string | null
+  address: ParsedAddressInput
+}): string | null {
+  const { type, timeZone, address } = args
+
+  if (!timeZone || !isValidIanaTimeZone(timeZone)) {
+    return 'Bookable locations must have a valid IANA timeZone.'
+  }
+
+  const latNum = address.latRaw === undefined ? null : address.latRaw
+  const lngNum = address.lngRaw === undefined ? null : address.lngRaw
+
+  if (latNum == null || lngNum == null) {
+    return 'Bookable locations must include lat/lng.'
+  }
+
+  if (
+    requiresAddressForBookableLocation(type) &&
+    (!address.placeId || !address.formattedAddress)
+  ) {
+    return 'Salon/Suite bookable locations require placeId and formattedAddress.'
+  }
+
+  return null
 }
 
 export async function GET() {
@@ -172,122 +324,37 @@ export async function POST(req: Request) {
       return jsonFail(400, 'isPrimary must be boolean.')
     }
 
-    const formattedAddress = hasOwn(body, 'formattedAddress')
-      ? pickString(body.formattedAddress)
-      : null
-    const addressLine1 = hasOwn(body, 'addressLine1')
-      ? pickString(body.addressLine1)
-      : null
-    const addressLine2 = hasOwn(body, 'addressLine2')
-      ? pickString(body.addressLine2)
-      : null
-    const city = hasOwn(body, 'city') ? pickString(body.city) : null
-    const state = hasOwn(body, 'state') ? pickString(body.state) : null
-    const postalCode = hasOwn(body, 'postalCode')
-      ? pickString(body.postalCode)
-      : null
-    const countryCode = hasOwn(body, 'countryCode')
-      ? pickString(body.countryCode)
-      : null
-    const placeId = hasOwn(body, 'placeId') ? pickString(body.placeId) : null
+    const address = parseAddressInput(body)
+    if ('error' in address) return jsonFail(400, address.error)
 
-    let latRaw: number | null | undefined
-    if (hasOwn(body, 'lat')) {
-      if (body.lat === null) {
-        latRaw = null
-      } else {
-        const numberValue = pickNumber(body.lat)
-        if (numberValue == null) {
-          return jsonFail(400, 'lat must be a number or null.')
-        }
-        latRaw = numberValue
-      }
-    }
-
-    let lngRaw: number | null | undefined
-    if (hasOwn(body, 'lng')) {
-      if (body.lng === null) {
-        lngRaw = null
-      } else {
-        const numberValue = pickNumber(body.lng)
-        if (numberValue == null) {
-          return jsonFail(400, 'lng must be a number or null.')
-        }
-        lngRaw = numberValue
-      }
-    }
-
-    const timeZone = hasOwn(body, 'timeZone')
-      ? pickString(body.timeZone)
-      : null
-
-    const bufferMinutes = hasOwn(body, 'bufferMinutes')
-      ? clampInt(pickInt(body.bufferMinutes) ?? 0, 0, 180)
-      : undefined
-
-    const stepMinutes = hasOwn(body, 'stepMinutes')
-      ? clampInt(pickInt(body.stepMinutes) ?? 15, 5, 60)
-      : undefined
-
-    const advanceNoticeMinutes = hasOwn(body, 'advanceNoticeMinutes')
-      ? clampInt(pickInt(body.advanceNoticeMinutes) ?? 15, 0, 30 * 24 * 60)
-      : undefined
-
-    const maxDaysAhead = hasOwn(body, 'maxDaysAhead')
-      ? clampInt(pickInt(body.maxDaysAhead) ?? 365, 1, 3650)
-      : undefined
-
-    let workingHours: WorkingHoursObj = defaultWorkingHours()
-
-    if (hasOwn(body, 'workingHours')) {
-      const normalized = normalizeWorkingHours(body.workingHours)
-
-      if (!normalized) {
-        return jsonFail(
-          400,
-          'workingHours must contain mon..sun with { enabled, start, end }, valid HH:MM times, and end after start.',
-        )
-      }
-
-      workingHours = normalized
-    }
+    const schedule = parseScheduleInput(body)
+    if ('error' in schedule) return jsonFail(400, schedule.error)
 
     const willBookable = typeof isBookable === 'boolean' ? isBookable : false
 
     if (willBookable) {
-      if (!timeZone || !isValidIanaTimeZone(timeZone)) {
-        return jsonFail(
-          400,
-          'Bookable locations must have a valid IANA timeZone.',
-        )
-      }
+      const validationError = validateBookableLocation({
+        type,
+        timeZone: schedule.timeZone,
+        address,
+      })
 
-      const latNum = latRaw === undefined ? null : latRaw
-      const lngNum = lngRaw === undefined ? null : lngRaw
-
-      if (latNum == null || lngNum == null) {
-        return jsonFail(400, 'Bookable locations must include lat/lng.')
-      }
-
-      if (requireAddressForType(type) && (!placeId || !formattedAddress)) {
-        return jsonFail(
-          400,
-          'Salon/Suite bookable locations require placeId and formattedAddress.',
-        )
+      if (validationError) {
+        return jsonFail(400, validationError)
       }
     }
 
     const addressPrivacyData = buildAddressPrivacyWriteData({
-      formattedAddress,
-      addressLine1,
-      addressLine2,
-      city,
-      state,
-      postalCode,
-      countryCode,
-      placeId,
-      lat: latRaw,
-      lng: lngRaw,
+      formattedAddress: address.formattedAddress,
+      addressLine1: address.addressLine1,
+      addressLine2: address.addressLine2,
+      city: address.city,
+      state: address.state,
+      postalCode: address.postalCode,
+      countryCode: address.countryCode,
+      placeId: address.placeId,
+      lat: address.latRaw,
+      lng: address.lngRaw,
     })
 
     const created = await prisma.$transaction(async (tx) => {
@@ -314,29 +381,37 @@ export async function POST(req: Request) {
           isPrimary: willPrimary,
           isBookable: willBookable,
 
-          formattedAddress,
-          addressLine1,
-          addressLine2,
-          city,
-          state,
-          postalCode,
-          countryCode,
-          placeId,
+          // Keep legacy/public columns in sync for current read compatibility.
+          // The encrypted/search-safe fields below are the privacy boundary.
+          formattedAddress: address.formattedAddress,
+          addressLine1: address.addressLine1,
+          addressLine2: address.addressLine2,
+          city: address.city,
+          state: address.state,
+          postalCode: address.postalCode,
+          countryCode: address.countryCode,
+          placeId: address.placeId,
 
-          lat: decimalOrNull(latRaw),
-          lng: decimalOrNull(lngRaw),
+          lat: decimalOrNull(address.latRaw),
+          lng: decimalOrNull(address.lngRaw),
 
           ...addressPrivacyData,
 
-          timeZone: timeZone ?? null,
-          workingHours: toInputJsonValue(workingHours),
+          timeZone: schedule.timeZone ?? null,
+          workingHours: toInputJsonValue(schedule.workingHours),
 
-          ...(bufferMinutes !== undefined ? { bufferMinutes } : {}),
-          ...(stepMinutes !== undefined ? { stepMinutes } : {}),
-          ...(advanceNoticeMinutes !== undefined
-            ? { advanceNoticeMinutes }
+          ...(schedule.bufferMinutes !== undefined
+            ? { bufferMinutes: schedule.bufferMinutes }
             : {}),
-          ...(maxDaysAhead !== undefined ? { maxDaysAhead } : {}),
+          ...(schedule.stepMinutes !== undefined
+            ? { stepMinutes: schedule.stepMinutes }
+            : {}),
+          ...(schedule.advanceNoticeMinutes !== undefined
+            ? { advanceNoticeMinutes: schedule.advanceNoticeMinutes }
+            : {}),
+          ...(schedule.maxDaysAhead !== undefined
+            ? { maxDaysAhead: schedule.maxDaysAhead }
+            : {}),
         },
         select: LOCATION_SELECT,
       })

@@ -122,6 +122,22 @@ const addressPrivacyWriteData = {
   lngApprox: null,
 }
 
+const ADDRESS_PRIVACY_WRITE_KEYS = [
+  'encryptedAddressJson',
+  'addressKeyVersion',
+  'postalCodePrefix',
+  'latApprox',
+  'lngApprox',
+] as const
+
+function expectOnlyEmptyAddressPrivacyWriteData(data: Record<string, unknown>) {
+  for (const key of ADDRESS_PRIVACY_WRITE_KEYS) {
+    expect(data[key]).toEqual(
+      addressPrivacyWriteData[key as keyof typeof addressPrivacyWriteData],
+    )
+  }
+}
+
 function makeCtx(id = 'offering_1'): RouteCtx {
   return {
     params: Promise.resolve({ id }),
@@ -275,7 +291,6 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
 
     it('returns 400 when offering id is missing', async () => {
       const result = await GET(new Request('http://localhost'), makeCtx('   '))
-
       const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
@@ -291,7 +306,6 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
       mocks.professionalServiceOffering.findFirst.mockResolvedValueOnce(null)
 
       const result = await GET(new Request('http://localhost'), makeCtx())
-
       const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(404)
@@ -361,7 +375,10 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
         res: authRes,
       })
 
-      const result = await PATCH(makeRequest({ description: 'Updated' }), makeCtx())
+      const result = await PATCH(
+        makeRequest({ description: 'Updated' }),
+        makeCtx(),
+      )
 
       expect(result).toBe(authRes)
       expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
@@ -373,7 +390,10 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
 
       mocks.enforceRateLimit.mockResolvedValueOnce(limitedRes)
 
-      const result = await PATCH(makeRequest({ description: 'Updated' }), makeCtx())
+      const result = await PATCH(
+        makeRequest({ description: 'Updated' }),
+        makeCtx(),
+      )
 
       expect(result).toBe(limitedRes)
       expect(mocks.rateLimitIdentity).toHaveBeenCalledWith('user_123')
@@ -385,7 +405,10 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
     })
 
     it('returns 400 when offering id is missing', async () => {
-      const result = await PATCH(makeRequest({ description: 'Updated' }), makeCtx('   '))
+      const result = await PATCH(
+        makeRequest({ description: 'Updated' }),
+        makeCtx('   '),
+      )
 
       const body = await readJson<{ ok: false; error: string }>(result)
 
@@ -400,7 +423,6 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
 
     it('returns 400 for invalid JSON body shape', async () => {
       const result = await PATCH(makeRequest(['nope']), makeCtx())
-
       const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
@@ -415,7 +437,10 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
     it('returns 404 when offering is not found inside the transaction', async () => {
       mocks.professionalServiceOffering.findFirst.mockResolvedValueOnce(null)
 
-      const result = await PATCH(makeRequest({ description: 'Updated' }), makeCtx())
+      const result = await PATCH(
+        makeRequest({ description: 'Updated' }),
+        makeCtx(),
+      )
 
       const body = await readJson<{ ok: false; error: string }>(result)
 
@@ -751,6 +776,14 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
         select: { id: true },
       })
 
+      const createCall = mocks.professionalLocation.create.mock.calls[0]?.[0]
+      expect(createCall).toBeDefined()
+      expect(createCall.data).toMatchObject({
+        isBookable: false,
+        timeZone: null,
+      })
+      expectOnlyEmptyAddressPrivacyWriteData(createCall.data)
+
       expect(mocks.professionalServiceOffering.update).toHaveBeenCalledWith({
         where: { id: 'offering_1' },
         data: {
@@ -839,6 +872,35 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
         },
         select: { id: true },
       })
+
+      const createCall = mocks.professionalLocation.create.mock.calls[0]?.[0]
+      expect(createCall).toBeDefined()
+      expect(createCall.data).toMatchObject({
+        isBookable: false,
+        timeZone: null,
+      })
+      expectOnlyEmptyAddressPrivacyWriteData(createCall.data)
+
+      expect(mocks.professionalServiceOffering.update).toHaveBeenCalledWith({
+        where: { id: 'offering_1' },
+        data: {
+          offersMobile: true,
+          mobileDurationMinutes: 75,
+          mobilePriceStartingAt: expect.any(Prisma.Decimal),
+        },
+        include: {
+          service: {
+            include: {
+              category: true,
+            },
+          },
+        },
+      })
+
+      expect(mocks.refreshProfessional).toHaveBeenCalledWith(
+        'pro_123',
+        'offering.update',
+      )
     })
 
     it('does not create placeholder locations when compatible locations already exist', async () => {
@@ -926,19 +988,19 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
       expect(mocks.professionalServiceOffering.update).toHaveBeenCalledWith({
         where: { id: 'offering_1' },
         data: {
-            description: 'Updated description',
-            customImageUrl: 'https://example.com/custom.jpg',
-            salonDurationMinutes: 75,
-            salonPriceStartingAt: expect.any(Prisma.Decimal),
+          description: 'Updated description',
+          customImageUrl: 'https://example.com/custom.jpg',
+          salonDurationMinutes: 75,
+          salonPriceStartingAt: expect.any(Prisma.Decimal),
         },
         include: {
-            service: {
+          service: {
             include: {
-                category: true,
+              category: true,
             },
-            },
+          },
         },
-        })
+      })
 
       expect(mocks.refreshProfessional).toHaveBeenCalledWith(
         'pro_123',
@@ -977,7 +1039,10 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
 
       mocks.prisma.$transaction.mockRejectedValueOnce(new Error('db exploded'))
 
-      const result = await PATCH(makeRequest({ description: 'Updated' }), makeCtx())
+      const result = await PATCH(
+        makeRequest({ description: 'Updated' }),
+        makeCtx(),
+      )
 
       const body = await readJson<{ ok: false; error: string }>(result)
 
@@ -1025,7 +1090,6 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
 
     it('returns 400 when offering id is missing', async () => {
       const result = await DELETE(makeDeleteRequest(), makeCtx('   '))
-
       const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
@@ -1041,7 +1105,6 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
       mocks.professionalServiceOffering.findFirst.mockResolvedValueOnce(null)
 
       const result = await DELETE(makeDeleteRequest(), makeCtx())
-
       const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(404)
@@ -1065,7 +1128,6 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
       })
 
       const result = await DELETE(makeDeleteRequest(), makeCtx())
-
       const body = await readJson<{ ok: true }>(result)
 
       expect(result.status).toBe(200)
@@ -1100,7 +1162,6 @@ describe('app/api/pro/offerings/[id]/route.ts', () => {
       )
 
       const result = await DELETE(makeDeleteRequest(), makeCtx())
-
       const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(500)

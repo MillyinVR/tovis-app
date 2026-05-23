@@ -146,6 +146,20 @@ const addressPrivacyWriteData = {
   lngApprox: new Prisma.Decimal('-117.1000'),
 }
 
+const ADDRESS_PRIVACY_WRITE_KEYS = [
+  'encryptedAddressJson',
+  'addressKeyVersion',
+  'postalCodePrefix',
+  'latApprox',
+  'lngApprox',
+] as const
+
+function expectNoAddressPrivacyWrites(data: Record<string, unknown>) {
+  for (const key of ADDRESS_PRIVACY_WRITE_KEYS) {
+    expect(data).not.toHaveProperty(key)
+  }
+}
+
 function makePatchRequest(body: unknown): NextRequest {
   return new NextRequest('http://localhost/api/pro/locations/loc_123', {
     method: 'PATCH',
@@ -512,6 +526,18 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
         'location.update',
       )
 
+      expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
+        where: { id: 'loc_123', professionalId: 'pro_123' },
+        data: {
+          name: 'Updated Draft Location',
+          isPrimary: false,
+        },
+      })
+
+      const updateCall = mocks.professionalLocation.updateMany.mock.calls[0]?.[0]
+      expect(updateCall).toBeDefined()
+      expectNoAddressPrivacyWrites(updateCall.data)
+
       expect(body).toEqual({
         ok: true,
         location: {
@@ -673,6 +699,10 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
           isBookable: false,
         },
       })
+
+      const updateCall = mocks.professionalLocation.updateMany.mock.calls[0]?.[0]
+      expect(updateCall).toBeDefined()
+      expectNoAddressPrivacyWrites(updateCall.data)
 
       expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledWith('pro_123')
       expect(mocks.refreshLocation).toHaveBeenCalledWith(

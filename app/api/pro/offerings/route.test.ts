@@ -25,12 +25,13 @@ const mocks = vi.hoisted(() => {
           error,
           ...(extra ?? {}),
         }),
-      {
-        status,
-        headers: { 'content-type': 'application/json' },
-      },
-    )
-  })
+        {
+          status,
+          headers: { 'content-type': 'application/json' },
+        },
+      )
+    },
+  )
 
   const requirePro = vi.fn()
   const enforceRateLimit = vi.fn()
@@ -80,21 +81,10 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/app/api/_utils', () => ({
-  jsonFail: mocks.jsonFail,
   jsonOk: mocks.jsonOk,
+  jsonFail: mocks.jsonFail,
   pickBool: (value: unknown) => (typeof value === 'boolean' ? value : null),
-  pickInt: (value: unknown) => {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return Math.trunc(value)
-    }
-
-    if (typeof value === 'string' && value.trim()) {
-      const n = Number(value)
-      return Number.isFinite(n) ? Math.trunc(n) : null
-    }
-
-    return null
-  },
+  pickInt: (value: unknown) => (typeof value === 'number' ? value : null),
   pickString: (value: unknown) =>
     typeof value === 'string' && value.trim() ? value.trim() : null,
 }))
@@ -138,6 +128,22 @@ const addressPrivacyWriteData = {
   lngApprox: null,
 }
 
+const ADDRESS_PRIVACY_WRITE_KEYS = [
+  'encryptedAddressJson',
+  'addressKeyVersion',
+  'postalCodePrefix',
+  'latApprox',
+  'lngApprox',
+] as const
+
+function expectOnlyEmptyAddressPrivacyWriteData(data: Record<string, unknown>) {
+  for (const key of ADDRESS_PRIVACY_WRITE_KEYS) {
+    expect(data[key]).toEqual(
+      addressPrivacyWriteData[key as keyof typeof addressPrivacyWriteData],
+    )
+  }
+}
+
 function makeRequest(body: unknown): Request {
   return new Request('http://localhost/api/pro/offerings', {
     method: 'POST',
@@ -173,51 +179,60 @@ function makeService(overrides?: {
   }
 }
 
-function makeOffering(overrides?: {
-  id?: string
-  serviceId?: string
-  offersInSalon?: boolean
-  offersMobile?: boolean
-  salonPriceStartingAt?: Prisma.Decimal | null
-  salonDurationMinutes?: number | null
-  mobilePriceStartingAt?: Prisma.Decimal | null
-  mobileDurationMinutes?: number | null
-}) {
+function makeOffering(
+  overrides: Partial<{
+    id: string
+    professionalId: string
+    serviceId: string
+    description: string | null
+    customImageUrl: string | null
+    offersInSalon: boolean
+    offersMobile: boolean
+    salonPriceStartingAt: Prisma.Decimal | null
+    salonDurationMinutes: number | null
+    mobilePriceStartingAt: Prisma.Decimal | null
+    mobileDurationMinutes: number | null
+    isActive: boolean
+    serviceActive: boolean
+    categoryActive: boolean
+    minPrice: string
+  }> = {},
+) {
   return {
-    id: overrides?.id ?? 'offering_1',
-    professionalId: 'pro_123',
-    serviceId: overrides?.serviceId ?? 'service_1',
+    id: overrides.id ?? 'offering_1',
+    professionalId: overrides.professionalId ?? 'pro_123',
+    serviceId: overrides.serviceId ?? 'service_1',
     title: null,
-    description: 'Fresh cut',
-    customImageUrl: null,
-    offersInSalon: overrides?.offersInSalon ?? true,
-    offersMobile: overrides?.offersMobile ?? false,
+    description:
+      overrides.description !== undefined ? overrides.description : 'Fresh cut',
+    customImageUrl:
+      overrides.customImageUrl !== undefined ? overrides.customImageUrl : null,
+    offersInSalon: overrides.offersInSalon ?? true,
+    offersMobile: overrides.offersMobile ?? false,
     salonPriceStartingAt:
-      overrides?.salonPriceStartingAt !== undefined
+      overrides.salonPriceStartingAt !== undefined
         ? overrides.salonPriceStartingAt
         : new Prisma.Decimal('75.00'),
     salonDurationMinutes:
-      overrides?.salonDurationMinutes !== undefined
+      overrides.salonDurationMinutes !== undefined
         ? overrides.salonDurationMinutes
         : 60,
     mobilePriceStartingAt:
-      overrides?.mobilePriceStartingAt !== undefined
+      overrides.mobilePriceStartingAt !== undefined
         ? overrides.mobilePriceStartingAt
         : null,
     mobileDurationMinutes:
-      overrides?.mobileDurationMinutes !== undefined
+      overrides.mobileDurationMinutes !== undefined
         ? overrides.mobileDurationMinutes
         : null,
-    isActive: true,
+    isActive: overrides.isActive ?? true,
     createdAt: new Date('2026-05-22T12:00:00.000Z'),
     updatedAt: new Date('2026-05-22T12:00:00.000Z'),
-    service: {
-      ...makeService(),
-      category: {
-        isActive: true,
-        name: 'Hair',
-      },
-    },
+    service: makeService({
+      isActive: overrides.serviceActive,
+      categoryActive: overrides.categoryActive,
+      minPrice: overrides.minPrice,
+    }),
   }
 }
 
@@ -234,12 +249,15 @@ describe('app/api/pro/offerings/route.ts', () => {
     mocks.rateLimitIdentity.mockResolvedValue('user_123')
     mocks.enforceRateLimit.mockResolvedValue(null)
     mocks.refreshProfessional.mockResolvedValue(undefined)
+
     mocks.buildAddressPrivacyWriteData.mockReturnValue(addressPrivacyWriteData)
 
     mocks.service.findUnique.mockResolvedValue(makeService())
+
     mocks.professionalLocation.findMany.mockResolvedValue([])
     mocks.professionalLocation.count.mockResolvedValue(0)
     mocks.professionalLocation.create.mockResolvedValue({ id: 'loc_1' })
+
     mocks.professionalServiceOffering.findMany.mockResolvedValue([
       makeOffering(),
     ])
@@ -270,7 +288,17 @@ describe('app/api/pro/offerings/route.ts', () => {
       expect(mocks.professionalServiceOffering.findMany).not.toHaveBeenCalled()
     })
 
-    it('loads active offerings for the authenticated pro', async () => {
+    it('returns active offerings for the authenticated pro', async () => {
+      mocks.professionalServiceOffering.findMany.mockResolvedValueOnce([
+        makeOffering({
+          id: 'offering_1',
+          offersInSalon: true,
+          offersMobile: false,
+          salonPriceStartingAt: new Prisma.Decimal('75.00'),
+          salonDurationMinutes: 60,
+        }),
+      ])
+
       const result = await GET()
 
       const body = await readJson<{
@@ -278,9 +306,8 @@ describe('app/api/pro/offerings/route.ts', () => {
         offerings: Array<{
           id: string
           serviceId: string
-          salonPriceStartingAt: string | null
           serviceName: string
-          categoryName: string | null
+          salonPriceStartingAt: string | null
         }>
       }>(result)
 
@@ -301,15 +328,42 @@ describe('app/api/pro/offerings/route.ts', () => {
         orderBy: [{ createdAt: 'asc' }],
       })
 
-      expect(body.offerings).toEqual([
+      expect(body.offerings).toHaveLength(1)
+      expect(body.offerings[0]).toEqual(
         expect.objectContaining({
           id: 'offering_1',
           serviceId: 'service_1',
-          salonPriceStartingAt: '75',
           serviceName: 'Haircut',
-          categoryName: 'Hair',
+          salonPriceStartingAt: '75',
         }),
-      ])
+      )
+    })
+
+    it('returns 500 when GET throws unexpectedly', async () => {
+      const consoleErrorSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined)
+
+      mocks.professionalServiceOffering.findMany.mockRejectedValueOnce(
+        new Error('db exploded'),
+      )
+
+      const result = await GET()
+
+      const body = await readJson<{ ok: false; error: string }>(result)
+
+      expect(result.status).toBe(500)
+      expect(body).toEqual({
+        ok: false,
+        error: 'Internal server error',
+      })
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'GET /api/pro/offerings error',
+        expect.any(Error),
+      )
+
+      consoleErrorSpy.mockRestore()
     })
   })
 
@@ -322,11 +376,7 @@ describe('app/api/pro/offerings/route.ts', () => {
         res: authRes,
       })
 
-      const result = await POST(
-        makeRequest({
-          serviceId: 'service_1',
-        }),
-      )
+      const result = await POST(makeRequest({ serviceId: 'service_1' }))
 
       expect(result).toBe(authRes)
       expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
@@ -339,11 +389,7 @@ describe('app/api/pro/offerings/route.ts', () => {
 
       mocks.enforceRateLimit.mockResolvedValueOnce(limitedRes)
 
-      const result = await POST(
-        makeRequest({
-          serviceId: 'service_1',
-        }),
-      )
+      const result = await POST(makeRequest({ serviceId: 'service_1' }))
 
       expect(result).toBe(limitedRes)
       expect(mocks.rateLimitIdentity).toHaveBeenCalledWith('user_123')
@@ -352,15 +398,13 @@ describe('app/api/pro/offerings/route.ts', () => {
         identity: 'user_123',
       })
       expect(mocks.service.findUnique).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
-    it('returns 400 for an invalid JSON body shape', async () => {
+    it('returns 400 for invalid JSON body shape', async () => {
       const result = await POST(makeRequest(['nope']))
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
       expect(body).toEqual({
@@ -369,15 +413,18 @@ describe('app/api/pro/offerings/route.ts', () => {
       })
 
       expect(mocks.service.findUnique).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
     it('returns 400 when serviceId is missing', async () => {
-      const result = await POST(makeRequest({}))
+      const result = await POST(
+        makeRequest({
+          salonPriceStartingAt: '75',
+          salonDurationMinutes: 60,
+        }),
+      )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
       expect(body).toEqual({
@@ -386,6 +433,7 @@ describe('app/api/pro/offerings/route.ts', () => {
       })
 
       expect(mocks.service.findUnique).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
     it('returns 400 when description is not string or null', async () => {
@@ -396,10 +444,7 @@ describe('app/api/pro/offerings/route.ts', () => {
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
       expect(body).toEqual({
@@ -408,6 +453,7 @@ describe('app/api/pro/offerings/route.ts', () => {
       })
 
       expect(mocks.service.findUnique).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
     it('returns 400 when customImageUrl is not string or null', async () => {
@@ -418,10 +464,7 @@ describe('app/api/pro/offerings/route.ts', () => {
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
       expect(body).toEqual({
@@ -430,6 +473,7 @@ describe('app/api/pro/offerings/route.ts', () => {
       })
 
       expect(mocks.service.findUnique).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
     it('returns 400 when offersInSalon is not boolean', async () => {
@@ -440,10 +484,7 @@ describe('app/api/pro/offerings/route.ts', () => {
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
       expect(body).toEqual({
@@ -452,20 +493,18 @@ describe('app/api/pro/offerings/route.ts', () => {
       })
 
       expect(mocks.service.findUnique).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
     it('returns 400 when offersMobile is not boolean', async () => {
       const result = await POST(
         makeRequest({
           serviceId: 'service_1',
-          offersMobile: 'no',
+          offersMobile: 'yes',
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
       expect(body).toEqual({
@@ -474,6 +513,7 @@ describe('app/api/pro/offerings/route.ts', () => {
       })
 
       expect(mocks.service.findUnique).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
     it('returns 400 when both salon and mobile are disabled', async () => {
@@ -485,10 +525,7 @@ describe('app/api/pro/offerings/route.ts', () => {
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
       expect(body).toEqual({
@@ -497,23 +534,26 @@ describe('app/api/pro/offerings/route.ts', () => {
       })
 
       expect(mocks.service.findUnique).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
-    it('returns 400 when service is missing, inactive, or category inactive', async () => {
-      mocks.service.findUnique.mockResolvedValueOnce(null)
+    it('returns 400 when service is unavailable', async () => {
+      mocks.service.findUnique.mockResolvedValueOnce(
+        makeService({
+          isActive: false,
+        }),
+      )
 
       const result = await POST(
         makeRequest({
-          serviceId: 'missing_service',
+          serviceId: 'service_1',
+          offersInSalon: true,
           salonPriceStartingAt: '75',
           salonDurationMinutes: 60,
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
       expect(body).toEqual({
@@ -524,21 +564,17 @@ describe('app/api/pro/offerings/route.ts', () => {
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
-    it('returns 400 when required salon duration is invalid', async () => {
+    it('returns 400 when salon duration is invalid', async () => {
       const result = await POST(
         makeRequest({
           serviceId: 'service_1',
           offersInSalon: true,
-          offersMobile: false,
           salonPriceStartingAt: '75',
           salonDurationMinutes: 0,
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
       expect(body).toEqual({
@@ -549,21 +585,18 @@ describe('app/api/pro/offerings/route.ts', () => {
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
-    it('returns 400 when required mobile duration is invalid', async () => {
+    it('returns 400 when mobile duration is invalid', async () => {
       const result = await POST(
         makeRequest({
           serviceId: 'service_1',
           offersInSalon: false,
           offersMobile: true,
           mobilePriceStartingAt: '100',
-          mobileDurationMinutes: 0,
+          mobileDurationMinutes: null,
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(400)
       expect(body).toEqual({
@@ -574,12 +607,18 @@ describe('app/api/pro/offerings/route.ts', () => {
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
-    it('returns 400 when salon price is missing', async () => {
+    it('returns 400 when salon price is below service minimum', async () => {
+      mocks.service.findUnique.mockResolvedValueOnce(
+        makeService({
+          minPrice: '50.00',
+        }),
+      )
+
       const result = await POST(
         makeRequest({
           serviceId: 'service_1',
           offersInSalon: true,
-          offersMobile: false,
+          salonPriceStartingAt: '25.00',
           salonDurationMinutes: 60,
         }),
       )
@@ -593,52 +632,32 @@ describe('app/api/pro/offerings/route.ts', () => {
       expect(result.status).toBe(400)
       expect(body).toEqual({
         ok: false,
-        error: 'Missing Salon price.',
+        error: 'Salon price must be at least $50',
         minPrice: '50',
       })
 
       expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     })
 
-    it('returns 400 when mobile price is below service minimum', async () => {
-      const result = await POST(
-        makeRequest({
-          serviceId: 'service_1',
-          offersInSalon: false,
-          offersMobile: true,
-          mobilePriceStartingAt: '25.00',
-          mobileDurationMinutes: 60,
+    it('creates a salon offering and salon placeholder with empty address privacy fields', async () => {
+      mocks.professionalServiceOffering.create.mockResolvedValueOnce(
+        makeOffering({
+          offersInSalon: true,
+          offersMobile: false,
+          salonPriceStartingAt: new Prisma.Decimal('75.00'),
+          salonDurationMinutes: 60,
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-        minPrice: string
-      }>(result)
-
-      expect(result.status).toBe(400)
-      expect(body).toEqual({
-        ok: false,
-        error: 'Mobile price must be at least $50',
-        minPrice: '50',
-      })
-
-      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
-    })
-
-    it('creates salon placeholder location with empty address privacy fields when none exists', async () => {
-      mocks.professionalLocation.findMany.mockResolvedValueOnce([])
-      mocks.professionalLocation.count.mockResolvedValueOnce(0)
-
       const result = await POST(
         makeRequest({
           serviceId: 'service_1',
+          description: '  Fresh cut  ',
+          customImageUrl: null,
           offersInSalon: true,
           offersMobile: false,
           salonPriceStartingAt: '75',
           salonDurationMinutes: 60,
-          description: '  Fresh cut  ',
         }),
       )
 
@@ -646,6 +665,7 @@ describe('app/api/pro/offerings/route.ts', () => {
         ok: true
         offering: {
           id: string
+          description: string | null
           offersInSalon: boolean
           offersMobile: boolean
           salonPriceStartingAt: string | null
@@ -654,6 +674,43 @@ describe('app/api/pro/offerings/route.ts', () => {
       }>(result)
 
       expect(result.status).toBe(201)
+
+      expect(mocks.service.findUnique).toHaveBeenCalledWith({
+        where: { id: 'service_1' },
+        select: {
+          id: true,
+          isActive: true,
+          minPrice: true,
+          isAddOnEligible: true,
+          addOnGroup: true,
+          defaultImageUrl: true,
+          name: true,
+          category: {
+            select: {
+              isActive: true,
+              name: true,
+            },
+          },
+        },
+      })
+
+      expect(mocks.professionalLocation.findMany).toHaveBeenCalledWith({
+        where: {
+          professionalId: 'pro_123',
+          type: {
+            in: [
+              ProfessionalLocationType.SALON,
+              ProfessionalLocationType.SUITE,
+            ],
+          },
+        },
+        select: { type: true },
+        take: 50,
+      })
+
+      expect(mocks.professionalLocation.count).toHaveBeenCalledWith({
+        where: { professionalId: 'pro_123' },
+      })
 
       expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledWith({
         formattedAddress: null,
@@ -687,6 +744,12 @@ describe('app/api/pro/offerings/route.ts', () => {
         },
         select: { id: true },
       })
+
+      const createLocationCall = mocks.professionalLocation.create.mock
+        .calls[0]?.[0]
+
+      expect(createLocationCall).toBeDefined()
+      expectOnlyEmptyAddressPrivacyWriteData(createLocationCall.data)
 
       expect(mocks.professionalServiceOffering.create).toHaveBeenCalledWith({
         data: {
@@ -719,6 +782,7 @@ describe('app/api/pro/offerings/route.ts', () => {
       expect(body.offering).toEqual(
         expect.objectContaining({
           id: 'offering_1',
+          description: 'Fresh cut',
           offersInSalon: true,
           offersMobile: false,
           salonPriceStartingAt: '75',
@@ -727,12 +791,9 @@ describe('app/api/pro/offerings/route.ts', () => {
       )
     })
 
-    it('creates mobile placeholder location with empty address privacy fields when none exists', async () => {
-      mocks.professionalLocation.findMany.mockResolvedValueOnce([])
-      mocks.professionalLocation.count.mockResolvedValueOnce(0)
+    it('creates a mobile offering and mobile placeholder with empty address privacy fields', async () => {
       mocks.professionalServiceOffering.create.mockResolvedValueOnce(
         makeOffering({
-          id: 'offering_mobile',
           offersInSalon: false,
           offersMobile: true,
           salonPriceStartingAt: null,
@@ -752,30 +813,17 @@ describe('app/api/pro/offerings/route.ts', () => {
         }),
       )
 
-      const body = await readJson<{
-        ok: true
-        offering: {
-          id: string
-          offersInSalon: boolean
-          offersMobile: boolean
-          mobilePriceStartingAt: string | null
-          mobileDurationMinutes: number | null
-        }
-      }>(result)
-
       expect(result.status).toBe(201)
 
-      expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledWith({
-        formattedAddress: null,
-        addressLine1: null,
-        addressLine2: null,
-        city: null,
-        state: null,
-        postalCode: null,
-        countryCode: null,
-        placeId: null,
-        lat: null,
-        lng: null,
+      expect(mocks.professionalLocation.findMany).toHaveBeenCalledWith({
+        where: {
+          professionalId: 'pro_123',
+          type: {
+            in: [ProfessionalLocationType.MOBILE_BASE],
+          },
+        },
+        select: { type: true },
+        take: 50,
       })
 
       expect(mocks.professionalLocation.create).toHaveBeenCalledWith({
@@ -798,23 +846,39 @@ describe('app/api/pro/offerings/route.ts', () => {
         select: { id: true },
       })
 
-      expect(body.offering).toEqual(
-        expect.objectContaining({
-          id: 'offering_mobile',
+      const createLocationCall = mocks.professionalLocation.create.mock
+        .calls[0]?.[0]
+
+      expect(createLocationCall).toBeDefined()
+      expectOnlyEmptyAddressPrivacyWriteData(createLocationCall.data)
+
+      expect(mocks.professionalServiceOffering.create).toHaveBeenCalledWith({
+        data: {
+          professionalId: 'pro_123',
+          serviceId: 'service_1',
+          title: null,
+          description: null,
+          customImageUrl: null,
           offersInSalon: false,
           offersMobile: true,
-          mobilePriceStartingAt: '100',
+          salonPriceStartingAt: null,
+          salonDurationMinutes: null,
+          mobilePriceStartingAt: expect.any(Prisma.Decimal),
           mobileDurationMinutes: 75,
-        }),
-      )
+        },
+        include: {
+          service: {
+            include: {
+              category: true,
+            },
+          },
+        },
+      })
     })
 
-    it('creates both placeholder locations when salon and mobile are offered and neither exists', async () => {
-      mocks.professionalLocation.findMany.mockResolvedValueOnce([])
-      mocks.professionalLocation.count.mockResolvedValueOnce(0)
+    it('creates both salon and mobile placeholders when both modes are enabled and none exist', async () => {
       mocks.professionalServiceOffering.create.mockResolvedValueOnce(
         makeOffering({
-          id: 'offering_combo',
           offersInSalon: true,
           offersMobile: true,
           salonPriceStartingAt: new Prisma.Decimal('75.00'),
@@ -838,6 +902,8 @@ describe('app/api/pro/offerings/route.ts', () => {
 
       expect(result.status).toBe(201)
 
+      expect(mocks.professionalLocation.create).toHaveBeenCalledTimes(2)
+
       expect(mocks.professionalLocation.create).toHaveBeenNthCalledWith(1, {
         data: {
           professionalId: 'pro_123',
@@ -846,7 +912,13 @@ describe('app/api/pro/offerings/route.ts', () => {
           isPrimary: true,
           isBookable: false,
           timeZone: null,
-          workingHours: expect.any(Object),
+          workingHours: expect.objectContaining({
+            mon: {
+              enabled: true,
+              start: '09:00',
+              end: '17:00',
+            },
+          }),
           ...addressPrivacyWriteData,
         },
         select: { id: true },
@@ -860,13 +932,26 @@ describe('app/api/pro/offerings/route.ts', () => {
           isPrimary: false,
           isBookable: false,
           timeZone: null,
-          workingHours: expect.any(Object),
+          workingHours: expect.objectContaining({
+            mon: {
+              enabled: true,
+              start: '09:00',
+              end: '17:00',
+            },
+          }),
           ...addressPrivacyWriteData,
         },
         select: { id: true },
       })
 
-      expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledTimes(2)
+      const firstCreateCall = mocks.professionalLocation.create.mock.calls[0]?.[0]
+      const secondCreateCall = mocks.professionalLocation.create.mock.calls[1]?.[0]
+
+      expect(firstCreateCall).toBeDefined()
+      expect(secondCreateCall).toBeDefined()
+
+      expectOnlyEmptyAddressPrivacyWriteData(firstCreateCall.data)
+      expectOnlyEmptyAddressPrivacyWriteData(secondCreateCall.data)
     })
 
     it('does not create placeholder locations when compatible locations already exist', async () => {
@@ -874,6 +959,17 @@ describe('app/api/pro/offerings/route.ts', () => {
         { type: ProfessionalLocationType.SUITE },
         { type: ProfessionalLocationType.MOBILE_BASE },
       ])
+
+      mocks.professionalServiceOffering.create.mockResolvedValueOnce(
+        makeOffering({
+          offersInSalon: true,
+          offersMobile: true,
+          salonPriceStartingAt: new Prisma.Decimal('75.00'),
+          salonDurationMinutes: 60,
+          mobilePriceStartingAt: new Prisma.Decimal('100.00'),
+          mobileDurationMinutes: 75,
+        }),
+      )
 
       const result = await POST(
         makeRequest({
@@ -889,16 +985,12 @@ describe('app/api/pro/offerings/route.ts', () => {
 
       expect(result.status).toBe(201)
 
-      expect(mocks.professionalLocation.count).toHaveBeenCalledWith({
-        where: { professionalId: 'pro_123' },
-      })
-
       expect(mocks.professionalLocation.create).not.toHaveBeenCalled()
       expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
       expect(mocks.professionalServiceOffering.create).toHaveBeenCalled()
     })
 
-    it('returns 409 for duplicate offering unique constraint', async () => {
+    it('returns 409 when creating a duplicate offering', async () => {
       const duplicateError = new Prisma.PrismaClientKnownRequestError(
         'Unique constraint failed',
         {
@@ -913,16 +1005,12 @@ describe('app/api/pro/offerings/route.ts', () => {
         makeRequest({
           serviceId: 'service_1',
           offersInSalon: true,
-          offersMobile: false,
           salonPriceStartingAt: '75',
           salonDurationMinutes: 60,
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(409)
       expect(body).toEqual({
@@ -933,27 +1021,23 @@ describe('app/api/pro/offerings/route.ts', () => {
       expect(mocks.refreshProfessional).not.toHaveBeenCalled()
     })
 
-    it('returns 500 for unexpected POST errors', async () => {
+    it('returns 500 when POST throws unexpectedly', async () => {
       const consoleErrorSpy = vi
         .spyOn(console, 'error')
         .mockImplementation(() => undefined)
 
-      mocks.service.findUnique.mockRejectedValueOnce(new Error('db exploded'))
+      mocks.prisma.$transaction.mockRejectedValueOnce(new Error('db exploded'))
 
       const result = await POST(
         makeRequest({
           serviceId: 'service_1',
           offersInSalon: true,
-          offersMobile: false,
           salonPriceStartingAt: '75',
           salonDurationMinutes: 60,
         }),
       )
 
-      const body = await readJson<{
-        ok: false
-        error: string
-      }>(result)
+      const body = await readJson<{ ok: false; error: string }>(result)
 
       expect(result.status).toBe(500)
       expect(body).toEqual({
@@ -965,6 +1049,8 @@ describe('app/api/pro/offerings/route.ts', () => {
         'POST /api/pro/offerings error',
         expect.any(Error),
       )
+
+      expect(mocks.refreshProfessional).not.toHaveBeenCalled()
 
       consoleErrorSpy.mockRestore()
     })

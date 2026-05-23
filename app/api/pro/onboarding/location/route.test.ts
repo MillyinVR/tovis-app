@@ -130,6 +130,30 @@ const addressPrivacyWriteData = {
   lngApprox: '-117.1611',
 }
 
+const ADDRESS_PRIVACY_WRITE_KEYS = [
+  'encryptedAddressJson',
+  'addressKeyVersion',
+  'postalCodePrefix',
+  'latApprox',
+  'lngApprox',
+  'formattedAddress',
+  'addressLine1',
+  'addressLine2',
+  'city',
+  'state',
+  'postalCode',
+  'countryCode',
+  'placeId',
+  'lat',
+  'lng',
+] as const
+
+function expectNoAddressPrivacyWrites(data: Record<string, unknown>) {
+  for (const key of ADDRESS_PRIVACY_WRITE_KEYS) {
+    expect(data).not.toHaveProperty(key)
+  }
+}
+
 function makeRequest(body: unknown): Request {
   return new Request('http://localhost/api/pro/onboarding/location', {
     method: 'POST',
@@ -356,7 +380,11 @@ describe('POST /api/pro/onboarding/location', () => {
       ok: true
       location: {
         id: string
+        type: ProfessionalLocationType
+        timeZone: string
+        isPrimary: boolean
         isBookable: boolean
+        advanceNoticeMinutes: number
       }
     }>(result)
 
@@ -379,6 +407,11 @@ describe('POST /api/pro/onboarding/location', () => {
       where: { professionalId: 'pro_123', isPrimary: true },
       data: { isPrimary: false },
     })
+
+    const primaryClearCall =
+      mocks.professionalLocation.updateMany.mock.calls[0]?.[0]
+    expect(primaryClearCall).toBeDefined()
+    expectNoAddressPrivacyWrites(primaryClearCall.data)
 
     expect(mocks.professionalLocation.create).toHaveBeenCalledWith({
       data: {
@@ -467,6 +500,16 @@ describe('POST /api/pro/onboarding/location', () => {
     )
 
     expect(result.status).toBe(200)
+
+    expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
+      where: { professionalId: 'pro_123', isPrimary: true },
+      data: { isPrimary: false },
+    })
+
+    const primaryClearCall =
+      mocks.professionalLocation.updateMany.mock.calls[0]?.[0]
+    expect(primaryClearCall).toBeDefined()
+    expectNoAddressPrivacyWrites(primaryClearCall.data)
 
     expect(mocks.professionalLocation.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -638,7 +681,10 @@ describe('POST /api/pro/onboarding/location', () => {
       location: {
         id: string
         type: ProfessionalLocationType
+        timeZone: string
+        isPrimary: boolean
         isBookable: boolean
+        advanceNoticeMinutes: number
       }
     }>(result)
 
@@ -656,6 +702,16 @@ describe('POST /api/pro/onboarding/location', () => {
       lat: 32.715736,
       lng: -117.161087,
     })
+
+    expect(mocks.professionalLocation.updateMany).toHaveBeenCalledWith({
+      where: { professionalId: 'pro_123', isPrimary: true },
+      data: { isPrimary: false },
+    })
+
+    const primaryClearCall =
+      mocks.professionalLocation.updateMany.mock.calls[0]?.[0]
+    expect(primaryClearCall).toBeDefined()
+    expectNoAddressPrivacyWrites(primaryClearCall.data)
 
     expect(mocks.professionalLocation.create).toHaveBeenCalledWith({
       data: {

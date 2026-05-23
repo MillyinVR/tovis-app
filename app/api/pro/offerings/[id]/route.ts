@@ -8,22 +8,16 @@ import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { parseMoney, moneyToString } from '@/lib/money'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
+import {
+  defaultWorkingHours,
+  toInputJsonValue,
+} from '@/lib/scheduling/workingHoursValidation'
 
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type JsonObject = Record<string, unknown>
-
-type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
-
-type WorkingHoursDay = {
-  enabled: boolean
-  start: string
-  end: string
-}
-
-type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
 
 type OfferingRow = Prisma.ProfessionalServiceOfferingGetPayload<{
   include: { service: { include: { category: true } } }
@@ -83,26 +77,6 @@ function pickNullablePositiveInt(v: unknown): number | null | undefined {
   if (!isPositiveIntValue(v)) return undefined
 
   return v
-}
-
-function defaultWorkingHours(): Prisma.InputJsonObject {
-  const make = (enabled: boolean): WorkingHoursDay => ({
-    enabled,
-    start: '09:00',
-    end: '17:00',
-  })
-
-  const value: WorkingHoursObj = {
-    mon: make(true),
-    tue: make(true),
-    wed: make(true),
-    thu: make(true),
-    fri: make(true),
-    sat: make(false),
-    sun: make(false),
-  }
-
-  return value
 }
 
 function parsePriceOrThrow(
@@ -241,7 +215,7 @@ async function ensureLocationsForOffering(args: {
         isPrimary: totalLocationCount === 0,
         isBookable: false,
         timeZone: null,
-        workingHours: defaultWorkingHours(),
+        workingHours: toInputJsonValue(defaultWorkingHours()),
         ...emptyAddressPrivacyWriteData(),
       },
       select: { id: true },
@@ -259,7 +233,7 @@ async function ensureLocationsForOffering(args: {
         isPrimary: totalLocationCount === 0,
         isBookable: false,
         timeZone: null,
-        workingHours: defaultWorkingHours(),
+        workingHours: toInputJsonValue(defaultWorkingHours()),
         ...emptyAddressPrivacyWriteData(),
       },
       select: { id: true },

@@ -23,25 +23,8 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type Params = { params: Promise<{ id: string }> }
-
-type ExistingLocation = {
-  id: string
-  type: ProfessionalLocationType
-  isPrimary: boolean
-  isBookable: boolean
-  timeZone: string | null
-  placeId: string | null
-  formattedAddress: string | null
-  addressLine1: string | null
-  addressLine2: string | null
-  city: string | null
-  state: string | null
-  postalCode: string | null
-  countryCode: string | null
-  lat: Prisma.Decimal | null
-  lng: Prisma.Decimal | null
-  workingHours: unknown
+type Params = {
+  params: Promise<{ id: string }>
 }
 
 function requireAddressForType(type: ProfessionalLocationType) {
@@ -53,11 +36,6 @@ function requireAddressForType(type: ProfessionalLocationType) {
 
 async function readParams(ctx: Params) {
   return await ctx.params
-}
-
-function decimalToNumber(value: Prisma.Decimal | null): number | null {
-  if (value == null) return null
-  return value.toNumber()
 }
 
 function decimalOrNull(value: number | null | undefined) {
@@ -88,19 +66,27 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     const { id } = await readParams(ctx)
     const locationId = pickString(id)
 
-    if (!locationId) return jsonFail(400, 'Missing id')
+    if (!locationId) {
+      return jsonFail(400, 'Missing id')
+    }
 
     const raw: unknown = await req.json().catch(() => ({}))
     const body: UnknownRecord = isRecord(raw) ? raw : {}
 
     const existing = await prisma.professionalLocation.findFirst({
-      where: { id: locationId, professionalId },
+      where: {
+        id: locationId,
+        professionalId,
+      },
       select: {
         id: true,
         type: true,
         isPrimary: true,
         isBookable: true,
+
         timeZone: true,
+        workingHours: true,
+
         placeId: true,
         formattedAddress: true,
         addressLine1: true,
@@ -109,13 +95,15 @@ export async function PATCH(req: NextRequest, ctx: Params) {
         state: true,
         postalCode: true,
         countryCode: true,
+
         lat: true,
         lng: true,
-        workingHours: true,
       },
     })
 
-    if (!existing) return jsonFail(404, 'Location not found')
+    if (!existing) {
+      return jsonFail(404, 'Location not found')
+    }
 
     const data: Prisma.ProfessionalLocationUpdateManyMutationInput = {}
 
@@ -124,9 +112,13 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     }
 
     let requestedPrimary: boolean | null = null
+
     if (hasOwn(body, 'isPrimary')) {
       const parsedPrimary = pickBool(body.isPrimary)
-      if (parsedPrimary === null) return jsonFail(400, 'isPrimary must be boolean')
+
+      if (parsedPrimary === null) {
+        return jsonFail(400, 'isPrimary must be boolean')
+      }
 
       requestedPrimary = parsedPrimary
 
@@ -141,13 +133,15 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     }
 
     let requestedBookable: boolean | undefined
+
     if (hasOwn(body, 'isBookable')) {
       const parsedBookable = pickBool(body.isBookable)
+
       if (parsedBookable === null) {
         return jsonFail(400, 'isBookable must be boolean')
       }
 
-      if (existing.isBookable === false && parsedBookable === true) {
+      if (!existing.isBookable && parsedBookable) {
         return jsonFail(
           409,
           'Use the schedule publish endpoint to make a location bookable.',
@@ -164,7 +158,9 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     const placeIdIn = hasOwn(body, 'placeId')
       ? pickString(body.placeId)
       : undefined
-    if (placeIdIn !== undefined) data.placeId = placeIdIn
+    if (placeIdIn !== undefined) {
+      data.placeId = placeIdIn
+    }
 
     const formattedAddressIn = hasOwn(body, 'formattedAddress')
       ? pickString(body.formattedAddress)
@@ -176,38 +172,54 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     const addressLine1In = hasOwn(body, 'addressLine1')
       ? pickString(body.addressLine1)
       : undefined
-    if (addressLine1In !== undefined) data.addressLine1 = addressLine1In
+    if (addressLine1In !== undefined) {
+      data.addressLine1 = addressLine1In
+    }
 
     const addressLine2In = hasOwn(body, 'addressLine2')
       ? pickString(body.addressLine2)
       : undefined
-    if (addressLine2In !== undefined) data.addressLine2 = addressLine2In
+    if (addressLine2In !== undefined) {
+      data.addressLine2 = addressLine2In
+    }
 
     const cityIn = hasOwn(body, 'city') ? pickString(body.city) : undefined
-    if (cityIn !== undefined) data.city = cityIn
+    if (cityIn !== undefined) {
+      data.city = cityIn
+    }
 
     const stateIn = hasOwn(body, 'state') ? pickString(body.state) : undefined
-    if (stateIn !== undefined) data.state = stateIn
+    if (stateIn !== undefined) {
+      data.state = stateIn
+    }
 
     const postalCodeIn = hasOwn(body, 'postalCode')
       ? pickString(body.postalCode)
       : undefined
-    if (postalCodeIn !== undefined) data.postalCode = postalCodeIn
+    if (postalCodeIn !== undefined) {
+      data.postalCode = postalCodeIn
+    }
 
     const countryCodeIn = hasOwn(body, 'countryCode')
       ? pickString(body.countryCode)
       : undefined
-    if (countryCodeIn !== undefined) data.countryCode = countryCodeIn
+    if (countryCodeIn !== undefined) {
+      data.countryCode = countryCodeIn
+    }
 
     let latIn: Prisma.Decimal | null | undefined
     let latNumberIn: number | null | undefined
+
     if (hasOwn(body, 'lat')) {
       if (body.lat === null) {
         latIn = null
         latNumberIn = null
       } else {
         const parsedLat = pickNumber(body.lat)
-        if (parsedLat == null) return jsonFail(400, 'lat must be a number or null')
+
+        if (parsedLat == null) {
+          return jsonFail(400, 'lat must be a number or null')
+        }
 
         latNumberIn = parsedLat
         latIn = decimalOrNull(parsedLat)
@@ -218,13 +230,17 @@ export async function PATCH(req: NextRequest, ctx: Params) {
 
     let lngIn: Prisma.Decimal | null | undefined
     let lngNumberIn: number | null | undefined
+
     if (hasOwn(body, 'lng')) {
       if (body.lng === null) {
         lngIn = null
         lngNumberIn = null
       } else {
         const parsedLng = pickNumber(body.lng)
-        if (parsedLng == null) return jsonFail(400, 'lng must be a number or null')
+
+        if (parsedLng == null) {
+          return jsonFail(400, 'lng must be a number or null')
+        }
 
         lngNumberIn = parsedLng
         lngIn = decimalOrNull(parsedLng)
@@ -279,8 +295,10 @@ export async function PATCH(req: NextRequest, ctx: Params) {
 
     const nextCity = cityIn !== undefined ? cityIn : existing.city ?? null
     const nextState = stateIn !== undefined ? stateIn : existing.state ?? null
+
     const nextPostalCode =
       postalCodeIn !== undefined ? postalCodeIn : existing.postalCode ?? null
+
     const nextCountryCode =
       countryCodeIn !== undefined ? countryCodeIn : existing.countryCode ?? null
 
@@ -325,13 +343,14 @@ export async function PATCH(req: NextRequest, ctx: Params) {
         return jsonFail(400, 'Bookable locations must include lat/lng.')
       }
 
-      if (requireAddressForType(existing.type)) {
-        if (!nextPlaceId || !nextFormattedAddress) {
-          return jsonFail(
-            400,
-            'Salon/Suite bookable locations require placeId and formattedAddress.',
-          )
-        }
+      if (
+        requireAddressForType(existing.type) &&
+        (!nextPlaceId || !nextFormattedAddress)
+      ) {
+        return jsonFail(
+          400,
+          'Salon/Suite bookable locations require placeId and formattedAddress.',
+        )
       }
     }
 
@@ -368,20 +387,33 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     const result = await prisma.$transaction(async (tx) => {
       if (requestedPrimary === true) {
         await tx.professionalLocation.updateMany({
-          where: { professionalId, isPrimary: true },
-          data: { isPrimary: false },
+          where: {
+            professionalId,
+            isPrimary: true,
+          },
+          data: {
+            isPrimary: false,
+          },
         })
       }
 
       const updated = await tx.professionalLocation.updateMany({
-        where: { id: locationId, professionalId },
+        where: {
+          id: locationId,
+          professionalId,
+        },
         data,
       })
 
-      if (updated.count !== 1) return null
+      if (updated.count !== 1) {
+        return null
+      }
 
-      return await tx.professionalLocation.findFirst({
-        where: { id: locationId, professionalId },
+      return tx.professionalLocation.findFirst({
+        where: {
+          id: locationId,
+          professionalId,
+        },
         select: {
           id: true,
           isPrimary: true,
@@ -392,15 +424,22 @@ export async function PATCH(req: NextRequest, ctx: Params) {
       })
     })
 
-    if (!result) return jsonFail(404, 'Location not found')
+    if (!result) {
+      return jsonFail(404, 'Location not found')
+    }
 
     await bumpScheduleConfigVersion(professionalId)
     await refreshLocation(locationId, 'location.update')
 
-    return jsonOk({ location: result })
+    return jsonOk({
+      location: result,
+    })
   } catch (error) {
     console.error('PATCH /api/pro/locations/[id] error', error)
-    const msg = error instanceof Error ? error.message : 'Failed to update location'
+
+    const msg =
+      error instanceof Error ? error.message : 'Failed to update location'
+
     return jsonFail(500, msg)
   }
 }
@@ -421,14 +460,21 @@ export async function DELETE(_req: NextRequest, ctx: Params) {
     const { id } = await readParams(ctx)
     const locationId = pickString(id)
 
-    if (!locationId) return jsonFail(400, 'Missing id')
+    if (!locationId) {
+      return jsonFail(400, 'Missing id')
+    }
 
     try {
       const deleted = await prisma.professionalLocation.deleteMany({
-        where: { id: locationId, professionalId },
+        where: {
+          id: locationId,
+          professionalId,
+        },
       })
 
-      if (deleted.count !== 1) return jsonFail(404, 'Location not found')
+      if (deleted.count !== 1) {
+        return jsonFail(404, 'Location not found')
+      }
 
       await bumpScheduleConfigVersion(professionalId)
       await deleteLocationFromIndex(locationId)
@@ -462,7 +508,10 @@ export async function DELETE(_req: NextRequest, ctx: Params) {
     }
   } catch (error) {
     console.error('DELETE /api/pro/locations/[id] error', error)
-    const msg = error instanceof Error ? error.message : 'Failed to delete location'
+
+    const msg =
+      error instanceof Error ? error.message : 'Failed to delete location'
+
     return jsonFail(500, msg)
   }
 }
