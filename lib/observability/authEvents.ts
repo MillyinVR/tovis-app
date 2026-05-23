@@ -1,7 +1,13 @@
 // lib/observability/authEvents.ts
 
-import crypto from 'crypto'
 import * as Sentry from '@sentry/nextjs'
+
+import {
+  emailLookupHash,
+  phoneLookupHash,
+  sha256Hex,
+} from '@/lib/security/crypto/hashLookup'
+import { redactionLabels } from '@/lib/security/redaction'
 
 export type AuthEventLevel = 'info' | 'warn' | 'error'
 
@@ -25,14 +31,17 @@ type CaptureAuthExceptionInput = Omit<AuthEventInput, 'level' | 'message'> & {
 
 const MAX_STRING_LENGTH = 500
 const MAX_META_DEPTH = 3
+const SHORT_HASH_LENGTH = 12
 
-const REDACTED = '[redacted]'
+const REDACTED = redactionLabels.redacted
 
-function shortHash(value: string | null | undefined): string | null {
+function shortenHash(hash: string | null): string | null {
+  return hash ? hash.slice(0, SHORT_HASH_LENGTH) : null
+}
+
+function stringLookupHash(value: string | null | undefined): string | null {
   const normalized = value?.trim()
-  if (!normalized) return null
-
-  return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 12)
+  return normalized ? sha256Hex(normalized) : null
 }
 
 function normalizeEmailForHash(value: string | null | undefined): string | null {
@@ -202,10 +211,10 @@ export function logAuthEvent(input: AuthEventInput): void {
     route: input.route,
     provider: input.provider ?? null,
     code: safeCode,
-    userIdHash: shortHash(input.userId),
-    emailHash: shortHash(normalizeEmailForHash(input.email)),
-    phoneHash: shortHash(input.phone),
-    verificationIdHash: shortHash(input.verificationId),
+    userIdHash: shortenHash(stringLookupHash(input.userId)),
+    emailHash: shortenHash(emailLookupHash(input.email)),
+    phoneHash: shortenHash(phoneLookupHash(input.phone)),
+    verificationIdHash: shortenHash(stringLookupHash(input.verificationId)),
     message: sanitizeErrorMessage(input.message),
     ...sanitizeMeta(input.meta),
   })
@@ -229,10 +238,10 @@ export function captureAuthException(input: CaptureAuthExceptionInput): void {
     if (safeCode) scope.setTag('auth.code', safeCode)
 
     scope.setContext('auth', {
-      userIdHash: shortHash(input.userId),
-      emailHash: shortHash(normalizeEmailForHash(input.email)),
-      phoneHash: shortHash(input.phone),
-      verificationIdHash: shortHash(input.verificationId),
+    userIdHash: shortenHash(stringLookupHash(input.userId)),
+    emailHash: shortenHash(emailLookupHash(input.email)),
+    phoneHash: shortenHash(phoneLookupHash(input.phone)),
+    verificationIdHash: shortenHash(stringLookupHash(input.verificationId)),
       errorName: err.name,
       errorMessage: sanitizeErrorMessage(err.message),
       ...sanitizedMeta,

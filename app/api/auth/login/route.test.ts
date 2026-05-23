@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
+import { emailLookupHash } from '@/lib/security/crypto/hashLookup'
 
 const mockVerifyPassword = vi.hoisted(() => vi.fn())
 const mockCreateActiveToken = vi.hoisted(() => vi.fn())
@@ -195,6 +196,26 @@ function makeUser(args?: {
   }
 }
 
+function mockUserFindUniqueByWhere(user: ReturnType<typeof makeUser> | null) {
+  mockPrisma.user.findUnique.mockImplementation(
+    async (args: { where?: Record<string, unknown> }) => {
+      const where = args.where ?? {}
+
+      if (!user) return null
+
+      if (where.emailHash && where.emailHash === emailLookupHash(user.email)) {
+        return user
+      }
+
+      if (where.email && where.email === user.email) {
+        return user
+      }
+
+      return null
+    },
+  )
+}
+
 const clearedUserSelect = {
   id: true,
   email: true,
@@ -314,7 +335,7 @@ describe('app/api/auth/login/route', () => {
   })
 
   it('increments loginAttempts and returns 401 before the lock threshold', async () => {
-    mockPrisma.user.findUnique.mockResolvedValue(
+    mockUserFindUniqueByWhere(
       makeUser({
         loginAttempts: 3,
       }),
@@ -476,8 +497,7 @@ describe('app/api/auth/login/route', () => {
     mockVerifyPassword.mockResolvedValue(false)
 
     // non-existent email -> must use dummy hash
-    mockPrisma.user.findUnique.mockResolvedValueOnce(null)
-
+    mockPrisma.user.findUnique.mockResolvedValue(null)
     const missingUserResult = await POST(
       makeRequest({
         email: 'missing@example.com',
@@ -500,7 +520,7 @@ describe('app/api/auth/login/route', () => {
     })
 
     // existing email + wrong password -> must use stored hash
-    mockPrisma.user.findUnique.mockResolvedValueOnce(
+    mockUserFindUniqueByWhere(
       makeUser({
         loginAttempts: 3,
       }),
@@ -625,6 +645,99 @@ describe('app/api/auth/login/route', () => {
       select: clearedUserSelect,
     })
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('looks up users by emailHash before falling back to legacy email', async () => {
+    const user = makeUser({
+      loginAttempts: 0,
+    })
+
+    mockUserFindUniqueByWhere(user)
+    mockVerifyPassword.mockResolvedValue(true)
+    mockPrisma.user.update.mockResolvedValue({
+      id: 'user_1',
+      email: 'user@example.com',
+      role: Role.CLIENT,
+      authVersion: 1,
+      phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
+      emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
+    })
+
+    const result = await POST(
+      makeRequest({
+        email: ' User@Example.COM ',
+        password: 'Secret123!',
+      }),
+    )
+
+    expect(result.status).toBe(200)
+
+    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          emailHash: emailLookupHash('user@example.com'),
+        },
+      }),
+    )
+
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          email: 'user@example.com',
+        },
+      }),
+    )
+  })
+
+  it('falls back to legacy email lookup when emailHash lookup misses', async () => {
+    const user = makeUser({
+      loginAttempts: 0,
+    })
+
+    mockPrisma.user.findUnique.mockImplementation(
+      async (args: { where?: Record<string, unknown> }) => {
+        if (args.where?.emailHash) return null
+        if (args.where?.email === 'user@example.com') return user
+        return null
+      },
+    )
+
+    mockVerifyPassword.mockResolvedValue(true)
+    mockPrisma.user.update.mockResolvedValue({
+      id: 'user_1',
+      email: 'user@example.com',
+      role: Role.CLIENT,
+      authVersion: 1,
+      phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
+      emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
+    })
+
+    const result = await POST(
+      makeRequest({
+        email: 'user@example.com',
+        password: 'Secret123!',
+      }),
+    )
+
+    expect(result.status).toBe(200)
+
+    expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: {
+          emailHash: emailLookupHash('user@example.com'),
+        },
+      }),
+    )
+
+    expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: {
+          email: 'user@example.com',
+        },
+      }),
+    )
   })
 
   it('issues a verification token when the user is not fully verified', async () => {

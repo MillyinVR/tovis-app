@@ -16,10 +16,16 @@ import {
   logAuthEvent,
   captureAuthException,
 } from '@/lib/observability/authEvents'
+import { emailLookupHash } from '@/lib/security/crypto/hashLookup'
 
 export const dynamic = 'force-dynamic'
 
 type Body = { email?: unknown }
+
+const PASSWORD_RESET_USER_SELECT = {
+  id: true,
+  email: true,
+} as const
 
 export async function POST(req: Request) {
   let emailForLog: string | null = null
@@ -40,10 +46,25 @@ export async function POST(req: Request) {
     // Always return OK (no enumeration)
     if (!email) return jsonOk({ ok: true }, 200)
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-      select: { id: true, email: true },
-    })
+    const emailHash = emailLookupHash(email)
+
+    const userByHash = emailHash
+      ? await prisma.user.findUnique({
+          where: { emailHash },
+          select: PASSWORD_RESET_USER_SELECT,
+        })
+      : null
+
+    /**
+     * Temporary legacy fallback for rows created before emailHash existed
+     * or local/dev databases that have not been fully backfilled yet.
+     */
+    const user =
+      userByHash ??
+      (await prisma.user.findUnique({
+        where: { email },
+        select: PASSWORD_RESET_USER_SELECT,
+      }))
 
     // Still return OK even if not found
     if (!user) return jsonOk({ ok: true }, 200)

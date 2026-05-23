@@ -1,6 +1,13 @@
+// lib/clients/upsertProClient.ts 
+
 import { ClientClaimStatus, Prisma, Role } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import {
+  emailLookupHash,
+  phoneLookupHash,
+} from '@/lib/security/crypto/hashLookup'
+import { buildClientProfileContactLookupData } from '@/lib/security/contactLookup'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -45,13 +52,17 @@ const CLIENT_PROFILE_IDENTITY_SELECT = {
   firstName: true,
   lastName: true,
   email: true,
+  emailHash: true,
   phone: true,
+  phoneHash: true,
   user: {
     select: {
       id: true,
       role: true,
       email: true,
+      emailHash: true,
       phone: true,
+      phoneHash: true,
     },
   },
 } satisfies Prisma.ClientProfileSelect
@@ -64,7 +75,9 @@ const USER_IDENTITY_SELECT = {
   id: true,
   role: true,
   email: true,
+  emailHash: true,
   phone: true,
+  phoneHash: true,
   clientProfile: {
     select: CLIENT_PROFILE_IDENTITY_SELECT,
   },
@@ -84,31 +97,53 @@ async function findMatchedClientProfile(args: {
   email: string | null
   phone: string | null
 }): Promise<FindMatchedClientProfileResult> {
-  const [emailMatch, phoneMatch] = await Promise.all([
-    args.email
-      ? args.db.clientProfile.findUnique({
-          where: { email: args.email },
-          select: CLIENT_PROFILE_IDENTITY_SELECT,
-        })
-      : Promise.resolve(null),
-    args.phone
-      ? args.db.clientProfile.findUnique({
-          where: { phone: args.phone },
-          select: CLIENT_PROFILE_IDENTITY_SELECT,
-        })
-      : Promise.resolve(null),
-  ])
+  const emailHash = emailLookupHash(args.email)
+  const phoneHash = phoneLookupHash(args.phone)
 
-  if (emailMatch && phoneMatch && emailMatch.id !== phoneMatch.id) {
+  const [emailMatch, legacyEmailMatch, phoneMatch, legacyPhoneMatch] =
+    await Promise.all([
+      emailHash
+        ? args.db.clientProfile.findUnique({
+            where: { emailHash },
+            select: CLIENT_PROFILE_IDENTITY_SELECT,
+          })
+        : Promise.resolve(null),
+      args.email
+        ? args.db.clientProfile.findUnique({
+            where: { email: args.email },
+            select: CLIENT_PROFILE_IDENTITY_SELECT,
+          })
+        : Promise.resolve(null),
+      phoneHash
+        ? args.db.clientProfile.findUnique({
+            where: { phoneHash },
+            select: CLIENT_PROFILE_IDENTITY_SELECT,
+          })
+        : Promise.resolve(null),
+      args.phone
+        ? args.db.clientProfile.findUnique({
+            where: { phone: args.phone },
+            select: CLIENT_PROFILE_IDENTITY_SELECT,
+          })
+        : Promise.resolve(null),
+    ])
+
+  const matches = [
+    emailMatch,
+    legacyEmailMatch,
+    phoneMatch,
+    legacyPhoneMatch,
+  ].filter((profile): profile is ClientProfileIdentityRecord => profile !== null)
+
+  const uniqueProfileIds = new Set(matches.map((profile) => profile.id))
+
+  if (uniqueProfileIds.size > 1) {
     return { kind: 'conflict' }
   }
 
-  if (emailMatch) {
-    return { kind: 'profile', profile: emailMatch }
-  }
-
-  if (phoneMatch) {
-    return { kind: 'profile', profile: phoneMatch }
+  const profile = matches[0]
+  if (profile) {
+    return { kind: 'profile', profile }
   }
 
   return { kind: 'none' }
@@ -125,8 +160,23 @@ async function findMatchedClientUser(args: {
   email: string | null
   phone: string | null
 }): Promise<FindMatchedClientUserResult> {
+  const emailHash = emailLookupHash(args.email)
+  const phoneHash = phoneLookupHash(args.phone)
+
   const orConditions: Prisma.UserWhereInput[] = []
 
+  if (emailHash) {
+    orConditions.push({ emailHash })
+  }
+
+  if (phoneHash) {
+    orConditions.push({ phoneHash })
+  }
+
+  /**
+   * Temporary legacy fallback for rows created before lookup hashes existed
+   * or local/dev databases that have not been fully backfilled yet.
+   */
   if (args.email) {
     orConditions.push({ email: args.email })
   }
@@ -151,7 +201,9 @@ async function findMatchedClientUser(args: {
     return { kind: 'none' }
   }
 
-  if (users.length > 1) {
+  const uniqueUserIds = new Set(users.map((user) => user.id))
+
+  if (uniqueUserIds.size > 1) {
     return { kind: 'conflict' }
   }
 
@@ -177,11 +229,27 @@ function buildMatchedProfileUpdateData(args: {
   const { profile, firstName, lastName, email, phone } = args
   const now = new Date()
 
+  const emailPatch =
+    profile.email == null && email
+      ? {
+          email,
+          emailHash: emailLookupHash(email),
+        }
+      : {}
+
+  const phonePatch =
+    profile.phone == null && phone
+      ? {
+          phone,
+          phoneHash: phoneLookupHash(phone),
+        }
+      : {}
+
   return {
     ...(!hasMeaningfulValue(profile.firstName) ? { firstName } : {}),
     ...(!hasMeaningfulValue(profile.lastName) ? { lastName } : {}),
-    ...(profile.email == null && email ? { email } : {}),
-    ...(profile.phone == null && phone ? { phone } : {}),
+    ...emailPatch,
+    ...phonePatch,
     ...(profile.userId != null &&
     profile.claimStatus !== ClientClaimStatus.CLAIMED
       ? {
@@ -371,6 +439,9 @@ export async function upsertProClient(
     }
 
     try {
+      const profileEmail = email ?? matchedUser.email ?? null
+      const profilePhone = phone ?? matchedUser.phone ?? null
+
       const createdProfile = await db.clientProfile.create({
         data: {
           userId: matchedUser.id,
@@ -378,8 +449,12 @@ export async function upsertProClient(
           lastName,
           claimStatus: ClientClaimStatus.CLAIMED,
           claimedAt: new Date(),
-          email: email ?? matchedUser.email ?? null,
-          phone: phone ?? matchedUser.phone ?? null,
+          email: profileEmail,
+          phone: profilePhone,
+          ...buildClientProfileContactLookupData({
+            email: profileEmail,
+            phone: profilePhone,
+          }),
         },
         select: CLIENT_PROFILE_IDENTITY_SELECT,
       })
@@ -404,6 +479,9 @@ export async function upsertProClient(
   }
 
   try {
+    const profileEmail = email ?? null
+    const profilePhone = phone ?? null
+
     const createdProfile = await db.clientProfile.create({
       data: {
         userId: null,
@@ -411,8 +489,12 @@ export async function upsertProClient(
         lastName,
         claimStatus: ClientClaimStatus.UNCLAIMED,
         claimedAt: null,
-        email: email ?? null,
-        phone: phone ?? null,
+        email: profileEmail,
+        phone: profilePhone,
+        ...buildClientProfileContactLookupData({
+          email: profileEmail,
+          phone: profilePhone,
+        }),
       },
       select: CLIENT_PROFILE_IDENTITY_SELECT,
     })

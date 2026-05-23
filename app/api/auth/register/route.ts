@@ -37,6 +37,11 @@ import { isHandleReserved } from '@/lib/handles'
 import { waitUntil } from '@vercel/functions'
 import { TRANSACTIONAL_SMS_POLICY_VERSION } from '@/lib/transactionalSmsPolicy'
 
+import {
+  buildClientProfileContactLookupData,
+  buildUserContactLookupData,
+} from '@/lib/security/contactLookup'
+
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
@@ -1018,6 +1023,7 @@ export async function POST(request: Request) {
         data: {
           email,
           phone,
+          ...buildUserContactLookupData({ email, phone }),
           phoneVerifiedAt: null,
           emailVerifiedAt: null,
           password: passwordHash,
@@ -1038,6 +1044,7 @@ export async function POST(request: Request) {
                     firstName,
                     lastName,
                     phone,
+                    ...buildClientProfileContactLookupData({ phone }),
                     phoneVerifiedAt: null,
                   },
                 }

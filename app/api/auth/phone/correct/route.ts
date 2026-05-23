@@ -19,6 +19,11 @@ import {
   logAuthEvent,
 } from '@/lib/observability/authEvents'
 
+import {
+  buildClientProfileContactLookupData,
+  buildUserContactLookupData,
+} from '@/lib/security/contactLookup'
+
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
@@ -36,6 +41,7 @@ async function updateUserPhone(args: {
       where: { id: args.userId },
       data: {
         phone: args.phone,
+        ...buildUserContactLookupData({ phone: args.phone }),
         phoneVerifiedAt: null,
       },
     })
@@ -45,6 +51,7 @@ async function updateUserPhone(args: {
         where: { userId: args.userId },
         data: {
           phone: args.phone,
+          ...buildClientProfileContactLookupData({ phone: args.phone }),
           phoneVerifiedAt: null,
         },
       })

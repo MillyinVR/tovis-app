@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Prisma, Role } from '@prisma/client'
+import { phoneLookupHash } from '@/lib/security/crypto/hashLookup'
 
 const mockRequireUser = vi.hoisted(() => vi.fn())
 const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
@@ -422,6 +423,7 @@ describe('app/api/auth/phone/correct/route', () => {
       where: { id: 'user_1' },
       data: {
         phone: '+15557654321',
+        phoneHash: phoneLookupHash('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -474,6 +476,7 @@ describe('app/api/auth/phone/correct/route', () => {
       where: { id: 'user_1' },
       data: {
         phone: '+15557654321',
+        phoneHash: phoneLookupHash('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -482,6 +485,7 @@ describe('app/api/auth/phone/correct/route', () => {
       where: { userId: 'user_1' },
       data: {
         phone: '+15557654321',
+        phoneHash: phoneLookupHash('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -544,6 +548,7 @@ describe('app/api/auth/phone/correct/route', () => {
       where: { id: 'user_1' },
       data: {
         phone: '+15557654321',
+        phoneHash: phoneLookupHash('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -659,6 +664,38 @@ describe('app/api/auth/phone/correct/route', () => {
     })
 
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('dual-writes phone lookup hashes when correcting a client phone', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser({
+        role: Role.CLIENT,
+        emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
+      }),
+    })
+
+    const result = await POST(makeRequest(' +1 (555) 765-4321 '))
+
+    expect(result.status).toBe(200)
+
+    expect(mockTxUserUpdate).toHaveBeenCalledWith({
+      where: { id: 'user_1' },
+      data: {
+        phone: '+15557654321',
+        phoneHash: phoneLookupHash('+15557654321'),
+        phoneVerifiedAt: null,
+      },
+    })
+
+    expect(mockTxClientProfileUpdateMany).toHaveBeenCalledWith({
+      where: { userId: 'user_1' },
+      data: {
+        phone: '+15557654321',
+        phoneHash: phoneLookupHash('+15557654321'),
+        phoneVerifiedAt: null,
+      },
+    })
   })
 
   it('returns 500 for unexpected internal failures', async () => {

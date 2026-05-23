@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ClientClaimStatus, Role } from '@prisma/client'
 
+import {
+  emailLookupHash,
+  phoneLookupHash,
+} from '@/lib/security/crypto/hashLookup'
+
 const mocks = vi.hoisted(() => ({
   prisma: {
     clientProfile: {
@@ -28,14 +33,21 @@ function makeProfile(overrides?: {
   firstName?: string
   lastName?: string
   email?: string | null
+  emailHash?: string | null
   phone?: string | null
+  phoneHash?: string | null
   user?: {
     id: string
     role: Role
     email: string | null
+    emailHash?: string | null
     phone: string | null
+    phoneHash?: string | null
   } | null
 }) {
+  const email = overrides?.email ?? null
+  const phone = overrides?.phone ?? null
+
   return {
     id: overrides?.id ?? 'client_1',
     userId: overrides?.userId ?? null,
@@ -43,8 +55,10 @@ function makeProfile(overrides?: {
     claimedAt: overrides?.claimedAt ?? null,
     firstName: overrides?.firstName ?? '',
     lastName: overrides?.lastName ?? '',
-    email: overrides?.email ?? null,
-    phone: overrides?.phone ?? null,
+    email,
+    emailHash: overrides?.emailHash ?? emailLookupHash(email),
+    phone,
+    phoneHash: overrides?.phoneHash ?? phoneLookupHash(phone),
     user: overrides?.user ?? null,
   }
 }
@@ -53,16 +67,50 @@ function makeUser(overrides?: {
   id?: string
   role?: Role
   email?: string | null
+  emailHash?: string | null
   phone?: string | null
+  phoneHash?: string | null
   clientProfile?: ReturnType<typeof makeProfile> | null
 }) {
+  const email = overrides?.email ?? 'client@example.com'
+  const phone = overrides?.phone ?? null
+
   return {
     id: overrides?.id ?? 'user_1',
     role: overrides?.role ?? Role.CLIENT,
-    email: overrides?.email ?? 'client@example.com',
-    phone: overrides?.phone ?? null,
+    email,
+    emailHash: overrides?.emailHash ?? emailLookupHash(email),
+    phone,
+    phoneHash: overrides?.phoneHash ?? phoneLookupHash(phone),
     clientProfile: overrides?.clientProfile ?? null,
   }
+}
+
+function mockClientProfileFindUniqueByWhere(
+  profiles: ReturnType<typeof makeProfile>[],
+) {
+  mocks.prisma.clientProfile.findUnique.mockImplementation(
+    async (args: { where?: Record<string, unknown> }) => {
+      const where = args.where ?? {}
+
+      return (
+        profiles.find((profile) => {
+          if (where.id && profile.id === where.id) return true
+          if (where.userId && profile.userId === where.userId) return true
+          if (where.emailHash && profile.emailHash === where.emailHash) {
+            return true
+          }
+          if (where.phoneHash && profile.phoneHash === where.phoneHash) {
+            return true
+          }
+          if (where.email && profile.email === where.email) return true
+          if (where.phone && profile.phone === where.phone) return true
+
+          return false
+        }) ?? null
+      )
+    },
+  )
 }
 
 describe('upsertProClient', () => {
@@ -95,19 +143,18 @@ describe('upsertProClient', () => {
   })
 
   it('returns IDENTITY_CONFLICT when email and phone match different client profiles', async () => {
-    mocks.prisma.clientProfile.findUnique
-      .mockResolvedValueOnce(
-        makeProfile({
-          id: 'client_email_match',
-          email: 'tori@example.com',
-        }),
-      )
-      .mockResolvedValueOnce(
-        makeProfile({
-          id: 'client_phone_match',
-          phone: '+16195551234',
-        }),
-      )
+    mockClientProfileFindUniqueByWhere([
+      makeProfile({
+        id: 'client_email_match',
+        email: 'tori@example.com',
+        phone: null,
+      }),
+      makeProfile({
+        id: 'client_phone_match',
+        email: null,
+        phone: '+16195551234',
+      }),
+    ])
 
     const result = await upsertProClient({
       firstName: 'Tori',
@@ -127,22 +174,56 @@ describe('upsertProClient', () => {
     expect(mocks.prisma.user.findMany).not.toHaveBeenCalled()
   })
 
+  it('matches an existing client profile by emailHash before legacy email', async () => {
+    const existingProfile = makeProfile({
+      id: 'client_hash_match',
+      firstName: 'Existing',
+      lastName: 'Client',
+      email: 'tori@example.com',
+      phone: null,
+    })
+
+    mockClientProfileFindUniqueByWhere([existingProfile])
+
+    const result = await upsertProClient({
+      firstName: 'Tori',
+      lastName: 'Morales',
+      email: ' Tori@Example.COM ',
+    })
+
+    expect(mocks.prisma.clientProfile.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          emailHash: emailLookupHash('tori@example.com'),
+        },
+      }),
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      clientId: 'client_hash_match',
+      userId: null,
+      email: 'tori@example.com',
+      claimStatus: ClientClaimStatus.UNCLAIMED,
+    })
+  })
+
   it('returns DATA_INTEGRITY_ERROR when a matched profile is linked to a non-client user', async () => {
-    mocks.prisma.clientProfile.findUnique
-      .mockResolvedValueOnce(
-        makeProfile({
-          id: 'client_1',
-          email: 'tori@example.com',
-          userId: 'user_pro_1',
-          user: {
-            id: 'user_pro_1',
-            role: Role.PRO,
-            email: 'tori@example.com',
-            phone: null,
-          },
-        }),
-      )
-      .mockResolvedValueOnce(null)
+    const existingProfile = makeProfile({
+      id: 'client_1',
+      email: 'tori@example.com',
+      userId: 'user_pro_1',
+      user: {
+        id: 'user_pro_1',
+        role: Role.PRO,
+        email: 'tori@example.com',
+        emailHash: emailLookupHash('tori@example.com'),
+        phone: null,
+        phoneHash: null,
+      },
+    })
+
+    mockClientProfileFindUniqueByWhere([existingProfile])
 
     const result = await upsertProClient({
       firstName: 'Tori',
@@ -177,10 +258,7 @@ describe('upsertProClient', () => {
       phone: '+16195551234',
     })
 
-    mocks.prisma.clientProfile.findUnique
-      .mockResolvedValueOnce(existingProfile)
-      .mockResolvedValueOnce(null)
-
+    mockClientProfileFindUniqueByWhere([existingProfile])
     mocks.prisma.clientProfile.update.mockResolvedValueOnce(updatedProfile)
 
     const result = await upsertProClient({
@@ -196,6 +274,7 @@ describe('upsertProClient', () => {
         firstName: 'Tori',
         lastName: 'Morales',
         phone: '+16195551234',
+        phoneHash: phoneLookupHash('+16195551234'),
       },
       select: expect.any(Object),
     })
@@ -210,10 +289,6 @@ describe('upsertProClient', () => {
   })
 
   it('returns CONTACT_IN_USE_BY_NON_CLIENT when a matching user is not a client', async () => {
-    mocks.prisma.clientProfile.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-
     mocks.prisma.user.findMany.mockResolvedValueOnce([
       makeUser({
         id: 'user_pro_1',
@@ -237,10 +312,6 @@ describe('upsertProClient', () => {
   })
 
   it('creates a claimed profile for an existing matched client user without a client profile', async () => {
-    mocks.prisma.clientProfile.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-
     mocks.prisma.user.findMany.mockResolvedValueOnce([
       makeUser({
         id: 'user_client_1',
@@ -265,7 +336,9 @@ describe('upsertProClient', () => {
           id: 'user_client_1',
           role: Role.CLIENT,
           email: 'tori@example.com',
+          emailHash: emailLookupHash('tori@example.com'),
           phone: '+16195551234',
+          phoneHash: phoneLookupHash('+16195551234'),
         },
       }),
     )
@@ -285,7 +358,9 @@ describe('upsertProClient', () => {
         claimStatus: ClientClaimStatus.CLAIMED,
         claimedAt: expect.any(Date),
         email: 'tori@example.com',
+        emailHash: emailLookupHash('tori@example.com'),
         phone: '+16195551234',
+        phoneHash: phoneLookupHash('+16195551234'),
       },
       select: expect.any(Object),
     })
@@ -300,10 +375,6 @@ describe('upsertProClient', () => {
   })
 
   it('reuses an existing client user profile and repairs claim state when needed', async () => {
-    mocks.prisma.clientProfile.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-
     const existingUserProfile = makeProfile({
       id: 'client_1',
       userId: 'user_client_1',
@@ -317,7 +388,9 @@ describe('upsertProClient', () => {
         id: 'user_client_1',
         role: Role.CLIENT,
         email: 'tori@example.com',
+        emailHash: emailLookupHash('tori@example.com'),
         phone: '+16195551234',
+        phoneHash: phoneLookupHash('+16195551234'),
       },
     })
 
@@ -345,7 +418,9 @@ describe('upsertProClient', () => {
           id: 'user_client_1',
           role: Role.CLIENT,
           email: 'tori@example.com',
+          emailHash: emailLookupHash('tori@example.com'),
           phone: '+16195551234',
+          phoneHash: phoneLookupHash('+16195551234'),
         },
       }),
     )
@@ -363,7 +438,9 @@ describe('upsertProClient', () => {
         firstName: 'Tori',
         lastName: 'Morales',
         email: 'tori@example.com',
+        emailHash: emailLookupHash('tori@example.com'),
         phone: '+16195551234',
+        phoneHash: phoneLookupHash('+16195551234'),
         claimStatus: ClientClaimStatus.CLAIMED,
         claimedAt: expect.any(Date),
       },
@@ -380,10 +457,6 @@ describe('upsertProClient', () => {
   })
 
   it('creates a new unclaimed client profile when no match exists', async () => {
-    mocks.prisma.clientProfile.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
-
     mocks.prisma.user.findMany.mockResolvedValueOnce([])
 
     mocks.prisma.clientProfile.create.mockResolvedValueOnce(
@@ -414,7 +487,9 @@ describe('upsertProClient', () => {
         claimStatus: ClientClaimStatus.UNCLAIMED,
         claimedAt: null,
         email: 'tori@example.com',
+        emailHash: emailLookupHash('tori@example.com'),
         phone: null,
+        phoneHash: null,
       },
       select: expect.any(Object),
     })
@@ -427,11 +502,8 @@ describe('upsertProClient', () => {
       claimStatus: ClientClaimStatus.UNCLAIMED,
     })
   })
-    it('returns IDENTITY_CONFLICT when email and phone match different user accounts', async () => {
-    mocks.prisma.clientProfile.findUnique
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce(null)
 
+  it('returns IDENTITY_CONFLICT when email and phone match different user accounts', async () => {
     mocks.prisma.user.findMany.mockResolvedValueOnce([
       makeUser({
         id: 'user_email_1',
@@ -476,9 +548,7 @@ describe('upsertProClient', () => {
       user: null,
     })
 
-    mocks.prisma.clientProfile.findUnique
-      .mockResolvedValueOnce(existingProfile)
-      .mockResolvedValueOnce(null)
+    mockClientProfileFindUniqueByWhere([existingProfile])
 
     const result = await upsertProClient({
       firstName: 'New',
@@ -499,7 +569,6 @@ describe('upsertProClient', () => {
   })
 
   it('creates a new unclaimed client profile when only phone is provided and no match exists', async () => {
-    mocks.prisma.clientProfile.findUnique.mockResolvedValueOnce(null)
     mocks.prisma.user.findMany.mockResolvedValueOnce([])
 
     mocks.prisma.clientProfile.create.mockResolvedValueOnce(
@@ -530,7 +599,9 @@ describe('upsertProClient', () => {
         claimStatus: ClientClaimStatus.UNCLAIMED,
         claimedAt: null,
         email: null,
+        emailHash: null,
         phone: '+16195551234',
+        phoneHash: phoneLookupHash('+16195551234'),
       },
       select: expect.any(Object),
     })

@@ -1,6 +1,12 @@
 import * as Sentry from '@sentry/nextjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import {
+  emailLookupHash,
+  phoneLookupHash,
+  sha256Hex,
+} from '@/lib/security/crypto/hashLookup'
+
 import { captureAuthException, logAuthEvent } from './authEvents'
 
 vi.mock('@sentry/nextjs', () => ({
@@ -8,7 +14,9 @@ vi.mock('@sentry/nextjs', () => ({
   captureException: vi.fn(),
 }))
 
-function readLoggedJson(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown> {
+function readLoggedJson(
+  spy: ReturnType<typeof vi.spyOn>,
+): Record<string, unknown> {
   const firstArg = spy.mock.calls[0]?.[0]
 
   if (typeof firstArg !== 'string') {
@@ -16,6 +24,10 @@ function readLoggedJson(spy: ReturnType<typeof vi.spyOn>): Record<string, unknow
   }
 
   return JSON.parse(firstArg) as Record<string, unknown>
+}
+
+function shortHash(hash: string | null): string | null {
+  return hash ? hash.slice(0, 12) : null
 }
 
 describe('authEvents', () => {
@@ -54,10 +66,14 @@ describe('authEvents', () => {
       code: 'INVALID_CREDENTIALS',
     })
 
-    expect(payload.userIdHash).toEqual(expect.any(String))
-    expect(payload.emailHash).toEqual(expect.any(String))
-    expect(payload.phoneHash).toEqual(expect.any(String))
-    expect(payload.verificationIdHash).toEqual(expect.any(String))
+    expect(payload.userIdHash).toBe(shortHash(sha256Hex('user_123')))
+    expect(payload.emailHash).toBe(
+      shortHash(emailLookupHash('Tori.Example@Example.com')),
+    )
+    expect(payload.phoneHash).toBe(shortHash(phoneLookupHash('+15551234567')))
+    expect(payload.verificationIdHash).toBe(
+      shortHash(sha256Hex('verify_123')),
+    )
 
     expect(serialized).not.toContain('user_123')
     expect(serialized).not.toContain('Tori.Example@Example.com')
@@ -68,6 +84,31 @@ describe('authEvents', () => {
     expect(payload.message).toBe(
       'Login failed for [redacted-email] with phone [redacted-phone-or-id]',
     )
+
+    infoSpy.mockRestore()
+  })
+
+  it('returns null contact hashes for malformed email and phone values without logging raw values', () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined)
+
+    logAuthEvent({
+      level: 'info',
+      event: 'auth.malformed_contact',
+      route: 'POST /api/auth/test',
+      email: 'not-an-email',
+      phone: '123',
+      message: 'Malformed contact input rejected',
+    })
+
+    expect(infoSpy).toHaveBeenCalledTimes(1)
+
+    const payload = readLoggedJson(infoSpy)
+    const serialized = JSON.stringify(payload)
+
+    expect(payload.emailHash).toBeNull()
+    expect(payload.phoneHash).toBeNull()
+    expect(serialized).not.toContain('not-an-email')
+    expect(serialized).not.toContain('"123"')
 
     infoSpy.mockRestore()
   })
@@ -136,21 +177,21 @@ describe('authEvents', () => {
     const withScopeMock = vi.mocked(Sentry.withScope)
 
     type MockSentryScope = {
-    setTag: (key: string, value: string) => void
-    setContext: (key: string, context: Record<string, unknown>) => void
+      setTag: (key: string, value: string) => void
+      setContext: (key: string, context: Record<string, unknown>) => void
     }
 
     withScopeMock.mockImplementation((callback: unknown) => {
-    if (typeof callback !== 'function') {
+      if (typeof callback !== 'function') {
         throw new Error('Expected Sentry.withScope to receive a callback.')
-    }
+      }
 
-    const scope: MockSentryScope = {
+      const scope: MockSentryScope = {
         setTag,
         setContext,
-    }
+      }
 
-    callback(scope)
+      callback(scope)
     })
 
     const error = new Error(
@@ -188,13 +229,20 @@ describe('authEvents', () => {
 
     expect(setContext).toHaveBeenCalledTimes(1)
 
-    const contextPayload = setContext.mock.calls[0]?.[1] as Record<string, unknown>
+    const contextPayload = setContext.mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >
     const serializedContext = JSON.stringify(contextPayload)
 
-    expect(contextPayload.userIdHash).toEqual(expect.any(String))
-    expect(contextPayload.emailHash).toEqual(expect.any(String))
-    expect(contextPayload.phoneHash).toEqual(expect.any(String))
-    expect(contextPayload.verificationIdHash).toEqual(expect.any(String))
+    expect(contextPayload.userIdHash).toBe(shortHash(sha256Hex('user_456')))
+    expect(contextPayload.emailHash).toBe(
+      shortHash(emailLookupHash('user@example.com')),
+    )
+    expect(contextPayload.phoneHash).toBe(shortHash(phoneLookupHash('+15551234567')))
+    expect(contextPayload.verificationIdHash).toBe(
+      shortHash(sha256Hex('verification_456')),
+    )
     expect(contextPayload.errorName).toBe('Error')
     expect(contextPayload.errorMessage).toBe(
       'Failed auth for [redacted-email] phone [redacted-phone-or-id] token=[redacted]',
@@ -240,14 +288,14 @@ describe('authEvents', () => {
     errorSpy.mockRestore()
   })
 
-    it('redacts unsafe auth event codes that look like one-time codes or secrets', () => {
+  it('redacts unsafe auth event codes that look like one-time codes or secrets', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 
     logAuthEvent({
-        level: 'warn',
-        event: 'auth.otp_failed',
-        route: 'POST /api/auth/verify',
-        code: '123456',
+      level: 'warn',
+      event: 'auth.otp_failed',
+      route: 'POST /api/auth/verify',
+      code: '123456',
     })
 
     const payload = readLoggedJson(warnSpy)
@@ -255,33 +303,16 @@ describe('authEvents', () => {
     expect(payload.code).toBe('[redacted]')
 
     warnSpy.mockRestore()
-    })
-
-it('keeps safe enum-style auth event codes', () => {
-  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-
-  logAuthEvent({
-    level: 'warn',
-    event: 'auth.login_failed',
-    route: 'POST /api/auth/login',
-    code: 'INVALID_CREDENTIALS',
   })
-
-  const payload = readLoggedJson(warnSpy)
-
-  expect(payload.code).toBe('INVALID_CREDENTIALS')
-
-  warnSpy.mockRestore()
-})
 
   it('keeps safe enum-style auth event codes', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 
     logAuthEvent({
-        level: 'warn',
-        event: 'auth.login_failed',
-        route: 'POST /api/auth/login',
-        code: 'INVALID_CREDENTIALS',
+      level: 'warn',
+      event: 'auth.login_failed',
+      route: 'POST /api/auth/login',
+      code: 'INVALID_CREDENTIALS',
     })
 
     const payload = readLoggedJson(warnSpy)
@@ -289,7 +320,7 @@ it('keeps safe enum-style auth event codes', () => {
     expect(payload.code).toBe('INVALID_CREDENTIALS')
 
     warnSpy.mockRestore()
-    })
+  })
 
   it('does not throw when meta contains arrays, dates, errors, nulls, or undefined values', () => {
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined)

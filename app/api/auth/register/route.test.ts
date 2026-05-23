@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
+import {
+  emailLookupHash,
+  phoneLookupHash,
+} from '@/lib/security/crypto/hashLookup'
+
 const mockHashPassword = vi.hoisted(() => vi.fn())
 const mockCreateVerificationToken = vi.hoisted(() => vi.fn())
 
@@ -453,7 +458,9 @@ describe('app/api/auth/register/route', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           email: 'pro-salon@example.com',
+          emailHash: emailLookupHash('pro-salon@example.com'),
           phone: '+15551234567',
+          phoneHash: phoneLookupHash('+15551234567'),
           role: 'PRO',
           transactionalSmsConsentAt: expect.any(Date),
           transactionalSmsConsentVersion: '2026-04-17',
@@ -522,7 +529,9 @@ describe('app/api/auth/register/route', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           email: 'pro-mobile@example.com',
+          emailHash: emailLookupHash('pro-mobile@example.com'),
           phone: '+15551234567',
+          phoneHash: phoneLookupHash('+15551234567'),
           role: 'PRO',
           transactionalSmsConsentAt: expect.any(Date),
           transactionalSmsConsentVersion: '2026-04-17',
@@ -568,6 +577,48 @@ describe('app/api/auth/register/route', () => {
       role: Role.PRO,
       authVersion: 1,
     })
+  })
+
+  it('dual-writes user and client contact lookup hashes during client signup', async () => {
+    const tx = {
+      user: {
+        create: vi.fn().mockResolvedValue({
+          id: 'user_hash_1',
+          email: 'client@example.com',
+          role: Role.CLIENT,
+          phone: '+15551234567',
+          authVersion: 1,
+        }),
+      },
+    }
+
+    mockPrisma.$transaction.mockImplementation(
+      async (fn: (txArg: typeof tx) => Promise<unknown>) => fn(tx),
+    )
+
+    const result = await POST(makeRequest(makeClientSignupBody()))
+
+    expect(result.status).toBe(201)
+
+    expect(tx.user.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          email: 'client@example.com',
+          emailHash: emailLookupHash('client@example.com'),
+          phone: '+15551234567',
+          phoneHash: phoneLookupHash('+15551234567'),
+          clientProfile: {
+            create: {
+              firstName: 'Tori',
+              lastName: 'Morales',
+              phone: '+15551234567',
+              phoneHash: phoneLookupHash('+15551234567'),
+              phoneVerifiedAt: null,
+            },
+          },
+        }),
+      }),
+    )
   })
 
   it('passes through the verified-register rate-limit response unchanged', async () => {
@@ -827,7 +878,9 @@ describe('app/api/auth/register/route', () => {
     expect(tx.user.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         email: 'pro@example.com',
+        emailHash: emailLookupHash('pro@example.com'),
         phone: '+15551234567',
+        phoneHash: phoneLookupHash('+15551234567'),
         role: 'PRO',
         transactionalSmsConsentAt: expect.any(Date),
         transactionalSmsConsentVersion: '2026-04-17',
@@ -946,7 +999,9 @@ describe('app/api/auth/register/route', () => {
     expect(tx.user.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         email: 'client@example.com',
+        emailHash: emailLookupHash('client@example.com'),
         phone: '+15551234567',
+        phoneHash: phoneLookupHash('+15551234567'),
         phoneVerifiedAt: null,
         emailVerifiedAt: null,
         password: 'hashed_password',
@@ -963,6 +1018,7 @@ describe('app/api/auth/register/route', () => {
             firstName: 'Tori',
             lastName: 'Morales',
             phone: '+15551234567',
+            phoneHash: phoneLookupHash('+15551234567'),
             phoneVerifiedAt: null,
           },
         },
@@ -1303,7 +1359,9 @@ describe('app/api/auth/register/route', () => {
     expect(createCall?.data).toEqual(
       expect.objectContaining({
         email: 'pro@example.com',
+        emailHash: emailLookupHash('pro@example.com'),
         phone: '+15551234567',
+        phoneHash: phoneLookupHash('+15551234567'),
         role: 'PRO',
         transactionalSmsConsentAt: expect.any(Date),
         transactionalSmsConsentVersion: '2026-04-17',

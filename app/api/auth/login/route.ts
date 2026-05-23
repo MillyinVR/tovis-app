@@ -17,6 +17,7 @@ import {
 } from '@/app/api/_utils'
 import { Prisma, Role } from '@prisma/client'
 import { captureAuthException } from '@/lib/observability/authEvents'
+import { emailLookupHash } from '@/lib/security/crypto/hashLookup'
 
 export const dynamic = 'force-dynamic'
 
@@ -171,6 +172,20 @@ function resolveIsHttps(request: Request): boolean {
   }
 }
 
+const LOGIN_USER_SELECT = {
+  id: true,
+  email: true,
+  password: true,
+  role: true,
+  authVersion: true,
+  loginAttempts: true,
+  lockedUntil: true,
+  phoneVerifiedAt: true,
+  emailVerifiedAt: true,
+  professionalProfile: { select: { id: true } },
+  clientProfile: { select: { id: true } },
+} satisfies Prisma.UserSelect
+
 export async function POST(request: Request) {
   let emailForLog: string | null = null
   let userIdForLog: string | null = null
@@ -195,22 +210,25 @@ export async function POST(request: Request) {
       })
     }
 
-    const user = await prisma.user.findUnique({
+  const emailHash = emailLookupHash(email)
+
+  const userByHash = emailHash
+    ? await prisma.user.findUnique({
+        where: { emailHash },
+        select: LOGIN_USER_SELECT,
+      })
+    : null
+
+  /**
+   * Temporary legacy fallback for rows created before emailHash existed
+   * or local/dev databases that have not been fully backfilled yet.
+   */
+  const user =
+    userByHash ??
+    (await prisma.user.findUnique({
       where: { email },
-      select: {
-        id: true,
-        email: true,
-        password: true,
-        role: true,
-        authVersion: true,
-        loginAttempts: true,
-        lockedUntil: true,
-        phoneVerifiedAt: true,
-        emailVerifiedAt: true,
-        professionalProfile: { select: { id: true } },
-        clientProfile: { select: { id: true } },
-      },
-    })
+      select: LOGIN_USER_SELECT,
+    }))
 
     const passwordHash = user?.password ?? DUMMY_PASSWORD_HASH
     const isValid = await verifyPassword(password, passwordHash)

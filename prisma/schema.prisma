@@ -880,7 +880,9 @@ model AdminPermission {
 model User {
   id              String    @id @default(cuid())
   email           String?   @unique @db.VarChar(320)
+  emailHash       String?   @unique @db.VarChar(128)
   phone           String?   @unique @db.VarChar(32)
+  phoneHash       String?   @unique @db.VarChar(128)
   phoneVerifiedAt DateTime?
   emailVerifiedAt DateTime?
 
@@ -1037,7 +1039,9 @@ model ClientProfile {
   claimedAt   DateTime?
 
   email           String?   @unique @db.VarChar(320)
+  emailHash       String?   @unique @db.VarChar(128)
   phone           String?   @unique @db.VarChar(32)
+  phoneHash       String?   @unique @db.VarChar(128)
   phoneVerifiedAt DateTime?
   avatarUrl       String?
 
@@ -1095,6 +1099,15 @@ model ClientAddress {
   lat Decimal? @db.Decimal(10, 7)
   lng Decimal? @db.Decimal(10, 7)
 
+  // Address encryption expansion fields.
+  // Keep raw fields during expand/dual-write/backfill phase.
+  encryptedAddressJson Json?
+  addressKeyVersion    String?   @db.VarChar(32)
+  postalCodePrefix     String?   @db.VarChar(12)
+  latApprox            Decimal?  @db.Decimal(8, 4)
+  lngApprox            Decimal?  @db.Decimal(8, 4)
+  encryptedAt          DateTime?
+
   radiusMiles Int?
 
   createdAt DateTime @default(now())
@@ -1107,6 +1120,9 @@ model ClientAddress {
   @@index([clientId, kind])
   @@index([clientId, isDefault])
   @@index([placeId])
+  @@index([postalCodePrefix])
+  @@index([latApprox, lngApprox])
+  @@index([addressKeyVersion])
 }
 
 model ProfessionalProfile {
@@ -1205,6 +1221,7 @@ model ProfessionalProfile {
   searchIndexEntries ProfessionalSearchIndex[]
 
   aftercareRebookSlots AftercareRebookSlot[]
+
   @@index([handleNormalized])
   @@index([verificationStatus])
 }
@@ -1379,6 +1396,15 @@ model ProfessionalLocation {
   lat Decimal? @db.Decimal(10, 7)
   lng Decimal? @db.Decimal(10, 7)
 
+  // Address encryption expansion fields.
+  // Keep raw fields during expand/dual-write/backfill phase.
+  encryptedAddressJson Json?
+  addressKeyVersion    String?   @db.VarChar(32)
+  postalCodePrefix     String?   @db.VarChar(12)
+  latApprox            Decimal?  @db.Decimal(8, 4)
+  lngApprox            Decimal?  @db.Decimal(8, 4)
+  encryptedAt          DateTime?
+
   // ✅ Source of truth for booking timezone
   timeZone String? @db.VarChar(64)
 
@@ -1412,6 +1438,9 @@ model ProfessionalLocation {
   @@index([professionalId, isBookable])
   @@index([lat, lng])
   @@index([isBookable, type, lat, lng])
+  @@index([postalCodePrefix])
+  @@index([latApprox, lngApprox])
+  @@index([addressKeyVersion])
 }
 
 // P2.4a foundation — denormalized search/discovery index.
@@ -1921,6 +1950,11 @@ model Booking {
   locationLatSnapshot     Float?
   locationLngSnapshot     Float?
 
+  encryptedLocationAddressSnapshotJson Json?
+  locationAddressSnapshotKeyVersion    String? @db.VarChar(32)
+  locationLatApprox                    Float?
+  locationLngApprox                    Float?
+
   // Client destination for mobile bookings
   clientAddressId String?
   clientAddress   ClientAddress? @relation(fields: [clientAddressId], references: [id], onDelete: SetNull)
@@ -1928,6 +1962,12 @@ model Booking {
   clientAddressSnapshot    Json?
   clientAddressLatSnapshot Float?
   clientAddressLngSnapshot Float?
+
+  encryptedClientAddressSnapshotJson Json?
+  clientAddressSnapshotKeyVersion    String?   @db.VarChar(32)
+  clientAddressLatApprox             Float?
+  clientAddressLngApprox             Float?
+  addressSnapshotsEncryptedAt        DateTime?
 
   // Client-friendly display (optional)
   clientTimeZoneAtBooking String? @db.VarChar(64)
@@ -2027,6 +2067,9 @@ model Booking {
   @@index([locationId, scheduledFor])
   @@index([professionalId, source])
   @@index([clientAddressId])
+  @@index([locationAddressSnapshotKeyVersion])
+  @@index([clientAddressSnapshotKeyVersion])
+  @@index([addressSnapshotsEncryptedAt])
   @@index([stripePaymentIntentId])
   @@index([stripeCheckoutSessionId])
   @@index([stripeConnectedAccountId])
@@ -2174,6 +2217,11 @@ model BookingHold {
   locationLatSnapshot     Float?
   locationLngSnapshot     Float?
 
+  encryptedLocationAddressSnapshotJson Json?
+  locationAddressSnapshotKeyVersion    String? @db.VarChar(32)
+  locationLatApprox                    Float?
+  locationLngApprox                    Float?
+
   client       ClientProfile?              @relation(fields: [clientId], references: [id])
   offering     ProfessionalServiceOffering @relation(fields: [offeringId], references: [id])
   professional ProfessionalProfile         @relation("ProHolds", fields: [professionalId], references: [id])
@@ -2185,6 +2233,12 @@ model BookingHold {
   clientAddressSnapshot    Json?
   clientAddressLatSnapshot Float?
   clientAddressLngSnapshot Float?
+
+  encryptedClientAddressSnapshotJson Json?
+  clientAddressSnapshotKeyVersion    String?   @db.VarChar(32)
+  clientAddressLatApprox             Float?
+  clientAddressLngApprox             Float?
+  addressSnapshotsEncryptedAt        DateTime?
 
   durationMinutesSnapshot Int?
   bufferMinutesSnapshot   Int?
@@ -2198,6 +2252,9 @@ model BookingHold {
   @@index([offeringId, scheduledFor])
   @@index([clientId, expiresAt])
   @@index([clientAddressId])
+  @@index([locationAddressSnapshotKeyVersion])
+  @@index([clientAddressSnapshotKeyVersion])
+  @@index([addressSnapshotsEncryptedAt])
 }
 
 model ProClientInvite {
@@ -2257,7 +2314,7 @@ model AftercareSummary {
 
   notes String?
 
-  rebookMode        AftercareRebookMode @default(NONE)
+  rebookMode        AftercareRebookMode  @default(NONE)
   rebookedFor       DateTime?
   rebookWindowStart DateTime?
   rebookWindowEnd   DateTime?
@@ -2275,10 +2332,11 @@ model AftercareSummary {
   @@index([sentToClientAt, createdAt])
   @@index([bookingId, sentToClientAt])
 }
+
 model AftercareRebookSlot {
   id String @id @default(cuid())
 
-  aftercareSummaryId String @unique
+  aftercareSummaryId String           @unique
   aftercareSummary   AftercareSummary @relation(fields: [aftercareSummaryId], references: [id], onDelete: Cascade)
 
   professionalId String
@@ -2302,6 +2360,7 @@ model AftercareRebookSlot {
   @@index([locationId, startsAt])
   @@index([offeringId])
 }
+
 model Product {
   id             String   @id @default(cuid())
   name           String
