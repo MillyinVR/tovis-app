@@ -16,6 +16,7 @@ import {
 } from '@/lib/booking/errors'
 import { startBookingSession } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -145,6 +146,7 @@ function buildStartSessionResponseBody(
 
 export async function POST(request: Request, ctx: Ctx) {
   let idempotencyRecordId: string | null = null
+  const { requestId } = readRequestMeta(request)
 
   try {
     const auth = await requirePro()
@@ -169,8 +171,6 @@ export async function POST(request: Request, ctx: Ctx) {
     if (!bookingId) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
-
-    const { requestId } = readRequestMeta(request)
 
     const idempotency = await beginRouteIdempotency<StartSessionResponseBody>({
       request,
@@ -229,7 +229,10 @@ export async function POST(request: Request, ctx: Ctx) {
       })
     }
 
-    console.error('POST /api/pro/bookings/[id]/start error', error)
+    console.error('POST /api/pro/bookings/[id]/start error', {
+      requestId,
+      error: safeError(error),
+    })
 
     return jsonFail(500, 'Internal server error')
   }

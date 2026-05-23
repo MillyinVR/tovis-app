@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
   },
   upsertProClient: vi.fn(),
+  buildAddressPrivacyWriteData: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -28,6 +29,10 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/clients/upsertProClient', () => ({
   upsertProClient: mocks.upsertProClient,
+}))
+
+vi.mock('@/lib/security/addressEncryption', () => ({
+  buildAddressPrivacyWriteData: mocks.buildAddressPrivacyWriteData,
 }))
 
 import { resolveProBookingClient } from './resolveProBookingClient'
@@ -46,7 +51,8 @@ function makeResolvedClient(overrides?: {
       overrides?.claimStatus !== undefined
         ? overrides.claimStatus
         : ClientClaimStatus.CLAIMED,
-    email: overrides?.email !== undefined ? overrides.email : 'client@example.com',
+    email:
+      overrides?.email !== undefined ? overrides.email : 'client@example.com',
     user: {
       email:
         overrides?.userEmail !== undefined
@@ -54,6 +60,30 @@ function makeResolvedClient(overrides?: {
           : 'client@example.com',
     },
   }
+}
+
+const addressPrivacyWriteData = {
+  encryptedAddressJson: {
+    v: 1,
+    algorithm: 'plaintext-json-expand-phase',
+    keyVersion: 'address-json-v1',
+    address: {
+      formattedAddress: '123 Main St, San Diego, CA 92101',
+      addressLine1: '123 Main St',
+      addressLine2: 'Apt 2',
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      placeId: 'place_123',
+      lat: '32.7157',
+      lng: '-117.1611',
+    },
+  },
+  addressKeyVersion: 'address-json-v1',
+  postalCodePrefix: '92101',
+  latApprox: new Prisma.Decimal('32.7157'),
+  lngApprox: new Prisma.Decimal('-117.1611'),
 }
 
 describe('resolveProBookingClient', () => {
@@ -78,6 +108,8 @@ describe('resolveProBookingClient', () => {
       email: 'newclient@example.com',
       claimStatus: ClientClaimStatus.UNCLAIMED,
     })
+
+    mocks.buildAddressPrivacyWriteData.mockReturnValue(addressPrivacyWriteData)
   })
 
   it('returns real DB truth for an existing non-mobile clientId path', async () => {
@@ -102,6 +134,8 @@ describe('resolveProBookingClient', () => {
     })
 
     expect(mocks.upsertProClient).not.toHaveBeenCalled()
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
+    expect(mocks.prisma.clientAddress.create).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       ok: true,
@@ -129,6 +163,8 @@ describe('resolveProBookingClient', () => {
     })
 
     expect(mocks.upsertProClient).not.toHaveBeenCalled()
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
+    expect(mocks.prisma.clientAddress.create).not.toHaveBeenCalled()
   })
 
   it('delegates new client creation/reuse to upsertProClient and returns claim status', async () => {
@@ -149,6 +185,9 @@ describe('resolveProBookingClient', () => {
       phone: '+16195551234',
       tx: undefined,
     })
+
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
+    expect(mocks.prisma.clientAddress.create).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       ok: true,
@@ -186,6 +225,9 @@ describe('resolveProBookingClient', () => {
         'That email and phone match different client profiles. Please double check with the client before continuing.',
       code: 'IDENTITY_CONFLICT',
     })
+
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
+    expect(mocks.prisma.clientAddress.create).not.toHaveBeenCalled()
   })
 
   it('returns a valid saved mobile service address when clientAddressId belongs to the client', async () => {
@@ -218,6 +260,9 @@ describe('resolveProBookingClient', () => {
         id: true,
       },
     })
+
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
+    expect(mocks.prisma.clientAddress.create).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       ok: true,
@@ -253,6 +298,9 @@ describe('resolveProBookingClient', () => {
       error: 'Please choose a valid saved service address.',
       code: 'CLIENT_SERVICE_ADDRESS_INVALID',
     })
+
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
+    expect(mocks.prisma.clientAddress.create).not.toHaveBeenCalled()
   })
 
   it('returns CLIENT_SERVICE_ADDRESS_REQUIRED for mobile bookings without a saved address or address payload', async () => {
@@ -277,6 +325,7 @@ describe('resolveProBookingClient', () => {
       code: 'CLIENT_SERVICE_ADDRESS_REQUIRED',
     })
 
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     expect(mocks.prisma.clientAddress.create).not.toHaveBeenCalled()
   })
 
@@ -310,10 +359,11 @@ describe('resolveProBookingClient', () => {
       code: 'CLIENT_SERVICE_ADDRESS_INVALID',
     })
 
+    expect(mocks.buildAddressPrivacyWriteData).not.toHaveBeenCalled()
     expect(mocks.prisma.clientAddress.create).not.toHaveBeenCalled()
   })
 
-  it('creates a new mobile service address and returns its id', async () => {
+  it('creates a new mobile service address with address privacy write fields and returns its id', async () => {
     mocks.prisma.clientProfile.findUnique.mockResolvedValueOnce(
       makeResolvedClient({
         id: 'client_mobile_1',
@@ -366,9 +416,20 @@ describe('resolveProBookingClient', () => {
       },
     })
 
-    const createCallArg = mocks.prisma.clientAddress.create.mock.calls[0]?.[0]
-    expect(createCallArg).toBeDefined()
-    expect(createCallArg).toMatchObject({
+    expect(mocks.buildAddressPrivacyWriteData).toHaveBeenCalledWith({
+      formattedAddress: '123 Main St, San Diego, CA 92101',
+      addressLine1: '123 Main St',
+      addressLine2: 'Apt 2',
+      city: 'San Diego',
+      state: 'CA',
+      postalCode: '92101',
+      countryCode: 'US',
+      placeId: 'place_123',
+      lat: 32.7157,
+      lng: -117.1611,
+    })
+
+    expect(mocks.prisma.clientAddress.create).toHaveBeenCalledWith({
       data: {
         clientId: 'client_mobile_1',
         kind: ClientAddressKind.SERVICE_ADDRESS,
@@ -382,16 +443,18 @@ describe('resolveProBookingClient', () => {
         postalCode: '92101',
         countryCode: 'US',
         placeId: 'place_123',
+        lat: new Prisma.Decimal('32.7157'),
+        lng: new Prisma.Decimal('-117.1611'),
+        encryptedAddressJson: addressPrivacyWriteData.encryptedAddressJson,
+        addressKeyVersion: 'address-json-v1',
+        postalCodePrefix: '92101',
+        latApprox: new Prisma.Decimal('32.7157'),
+        lngApprox: new Prisma.Decimal('-117.1611'),
       },
       select: {
         id: true,
       },
     })
-
-    expect(createCallArg.data.lat).toBeInstanceOf(Prisma.Decimal)
-    expect(createCallArg.data.lng).toBeInstanceOf(Prisma.Decimal)
-    expect(createCallArg.data.lat.toString()).toBe('32.7157')
-    expect(createCallArg.data.lng.toString()).toBe('-117.1611')
 
     expect(result).toEqual({
       ok: true,

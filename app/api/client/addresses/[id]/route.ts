@@ -1,10 +1,13 @@
 // app/api/client/addresses/[id]/route.ts
-import { prisma } from '@/lib/prisma'
-import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+
 import { ClientAddressKind, Prisma } from '@prisma/client'
+
+import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+import { decimalToNullableNumber } from '@/lib/booking/snapshots'
 import { isRecord } from '@/lib/guards'
 import { pickNumber, pickString } from '@/lib/pick'
-import { decimalToNullableNumber } from '@/lib/booking/snapshots'
+import { prisma } from '@/lib/prisma'
+import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,12 +37,27 @@ type ClientAddressRow = Prisma.ClientAddressGetPayload<{
   select: typeof ADDRESS_SELECT
 }>
 
+type NormalizedAddressValues = {
+  label: string | null
+  formattedAddress: string | null
+  addressLine1: string | null
+  addressLine2: string | null
+  city: string | null
+  state: string | null
+  postalCode: string | null
+  countryCode: string | null
+  placeId: string | null
+  lat: number | null
+  lng: number | null
+}
+
 function normalizeKind(value: unknown): ClientAddressKind | null {
   const s = pickString(value)?.toUpperCase() ?? ''
   if (s === ClientAddressKind.SEARCH_AREA) return ClientAddressKind.SEARCH_AREA
   if (s === ClientAddressKind.SERVICE_ADDRESS) {
     return ClientAddressKind.SERVICE_ADDRESS
   }
+
   return null
 }
 
@@ -53,12 +71,14 @@ function normalizeOptionalString(
   const s = pickString(value)
   if (!s) return null
   if (s.length > max) return 'invalid'
+
   return s
 }
 
 function normalizeBoolean(value: unknown): boolean | undefined | 'invalid' {
   if (value === undefined) return undefined
   if (typeof value === 'boolean') return value
+
   return 'invalid'
 }
 
@@ -68,6 +88,7 @@ function normalizeLatLng(value: unknown): number | null | undefined | 'invalid' 
 
   const n = pickNumber(value)
   if (n == null || !Number.isFinite(n)) return 'invalid'
+
   return n
 }
 
@@ -76,6 +97,7 @@ function coerceLatLng(
 ): number | null | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (value === null) return null
+
   return undefined
 }
 
@@ -122,6 +144,36 @@ function hasFullServiceAddress(args: {
   )
 
   return hasAddressLine && hasLocationAnchor
+}
+
+function getInvalidField(args: {
+  label: string | null | undefined | 'invalid'
+  formattedAddress: string | null | undefined | 'invalid'
+  addressLine1: string | null | undefined | 'invalid'
+  addressLine2: string | null | undefined | 'invalid'
+  city: string | null | undefined | 'invalid'
+  state: string | null | undefined | 'invalid'
+  postalCode: string | null | undefined | 'invalid'
+  countryCode: string | null | undefined | 'invalid'
+  placeId: string | null | undefined | 'invalid'
+  lat: number | null | undefined | 'invalid'
+  lng: number | null | undefined | 'invalid'
+  isDefault: boolean | undefined | 'invalid'
+}): string | null {
+  if (args.label === 'invalid') return 'label'
+  if (args.formattedAddress === 'invalid') return 'formattedAddress'
+  if (args.addressLine1 === 'invalid') return 'addressLine1'
+  if (args.addressLine2 === 'invalid') return 'addressLine2'
+  if (args.city === 'invalid') return 'city'
+  if (args.state === 'invalid') return 'state'
+  if (args.postalCode === 'invalid') return 'postalCode'
+  if (args.countryCode === 'invalid') return 'countryCode'
+  if (args.placeId === 'invalid') return 'placeId'
+  if (args.lat === 'invalid') return 'lat'
+  if (args.lng === 'invalid') return 'lng'
+  if (args.isDefault === 'invalid') return 'isDefault'
+
+  return null
 }
 
 function mapAddress(row: ClientAddressRow) {
@@ -191,6 +243,55 @@ async function ensureDefaultForKind(args: {
   })
 }
 
+function buildNextValues(args: {
+  existing: ClientAddressRow
+  label: string | null | undefined
+  formattedAddress: string | null | undefined
+  addressLine1: string | null | undefined
+  addressLine2: string | null | undefined
+  city: string | null | undefined
+  state: string | null | undefined
+  postalCode: string | null | undefined
+  countryCode: string | null | undefined
+  placeId: string | null | undefined
+  lat: number | null | undefined | 'invalid'
+  lng: number | null | undefined | 'invalid'
+}): NormalizedAddressValues {
+  return {
+    label: args.label !== undefined ? args.label : args.existing.label,
+    formattedAddress:
+      args.formattedAddress !== undefined
+        ? args.formattedAddress
+        : args.existing.formattedAddress,
+    addressLine1:
+      args.addressLine1 !== undefined
+        ? args.addressLine1
+        : args.existing.addressLine1,
+    addressLine2:
+      args.addressLine2 !== undefined
+        ? args.addressLine2
+        : args.existing.addressLine2,
+    city: args.city !== undefined ? args.city : args.existing.city,
+    state: args.state !== undefined ? args.state : args.existing.state,
+    postalCode:
+      args.postalCode !== undefined ? args.postalCode : args.existing.postalCode,
+    countryCode:
+      args.countryCode !== undefined
+        ? args.countryCode
+        : args.existing.countryCode,
+    placeId:
+      args.placeId !== undefined ? args.placeId : args.existing.placeId,
+    lat:
+      args.lat !== undefined
+        ? (coerceLatLng(args.lat) ?? null)
+        : decimalToNullableNumber(args.existing.lat),
+    lng:
+      args.lng !== undefined
+        ? (coerceLatLng(args.lng) ?? null)
+        : decimalToNullableNumber(args.existing.lng),
+  }
+}
+
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const auth = await requireClient()
@@ -254,32 +355,20 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const lng = normalizeLatLng(body.lng)
     const isDefault = normalizeBoolean(body.isDefault)
 
-    const invalidField =
-      label === 'invalid'
-        ? 'label'
-        : formattedAddress === 'invalid'
-          ? 'formattedAddress'
-          : addressLine1 === 'invalid'
-            ? 'addressLine1'
-            : addressLine2 === 'invalid'
-              ? 'addressLine2'
-              : city === 'invalid'
-                ? 'city'
-                : state === 'invalid'
-                  ? 'state'
-                  : postalCode === 'invalid'
-                    ? 'postalCode'
-                    : countryCode === 'invalid'
-                      ? 'countryCode'
-                      : placeId === 'invalid'
-                        ? 'placeId'
-                        : lat === 'invalid'
-                          ? 'lat'
-                          : lng === 'invalid'
-                            ? 'lng'
-                            : isDefault === 'invalid'
-                              ? 'isDefault'
-                              : null
+    const invalidField = getInvalidField({
+      label,
+      formattedAddress,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      postalCode,
+      countryCode,
+      placeId,
+      lat,
+      lng,
+      isDefault,
+    })
 
     if (invalidField) {
       return jsonFail(400, `Invalid ${invalidField}.`)
@@ -306,33 +395,22 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
     const nextKind = kindRaw ?? existing.kind
     const nextIsDefault =
-        typeof isDefault === 'boolean' ? isDefault : existing.isDefault
+      typeof isDefault === 'boolean' ? isDefault : existing.isDefault
 
-    const nextValues = {
-      label: label !== undefined ? label : existing.label,
-      formattedAddress:
-        formattedAddress !== undefined
-          ? formattedAddress
-          : existing.formattedAddress,
-      addressLine1:
-        addressLine1 !== undefined ? addressLine1 : existing.addressLine1,
-      addressLine2:
-        addressLine2 !== undefined ? addressLine2 : existing.addressLine2,
-      city: city !== undefined ? city : existing.city,
-      state: state !== undefined ? state : existing.state,
-      postalCode: postalCode !== undefined ? postalCode : existing.postalCode,
-      countryCode:
-        countryCode !== undefined ? countryCode : existing.countryCode,
-      placeId: placeId !== undefined ? placeId : existing.placeId,
-      lat:
-        lat !== undefined
-          ? coerceLatLng(lat) ?? null
-          : decimalToNullableNumber(existing.lat),
-      lng:
-        lng !== undefined
-          ? coerceLatLng(lng) ?? null
-          : decimalToNullableNumber(existing.lng),
-    }
+    const nextValues = buildNextValues({
+      existing,
+      label,
+      formattedAddress,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      postalCode,
+      countryCode,
+      placeId,
+      lat,
+      lng,
+    })
 
     if (nextKind === ClientAddressKind.SEARCH_AREA) {
       if (
@@ -373,6 +451,19 @@ export async function PATCH(req: Request, ctx: Ctx) {
       }
     }
 
+    const addressPrivacyData = buildAddressPrivacyWriteData({
+      formattedAddress: nextValues.formattedAddress,
+      addressLine1: nextValues.addressLine1,
+      addressLine2: nextValues.addressLine2,
+      city: nextValues.city,
+      state: nextValues.state,
+      postalCode: nextValues.postalCode,
+      countryCode: nextValues.countryCode,
+      placeId: nextValues.placeId,
+      lat: nextValues.lat,
+      lng: nextValues.lng,
+    })
+
     const updated = await prisma.$transaction(async (tx) => {
       if (nextIsDefault) {
         await tx.clientAddress.updateMany({
@@ -402,6 +493,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
           placeId: nextValues.placeId,
           lat: toDecimalOrNull(nextValues.lat),
           lng: toDecimalOrNull(nextValues.lng),
+          ...addressPrivacyData,
         },
         select: { id: true },
       })

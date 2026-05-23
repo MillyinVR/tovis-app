@@ -1,4 +1,5 @@
 // app/api/bookings/finalize/route.test.ts
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AftercareRebookMode,
@@ -41,6 +42,8 @@ const mocks = vi.hoisted(() => ({
   clientRateLimitKey: vi.fn(),
   tokenActorRateLimitKey: vi.fn(),
   rateLimitExceededResponse: vi.fn(),
+
+  safeError: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -77,6 +80,10 @@ vi.mock('@/lib/notifications/proNotifications', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 vi.mock('@/lib/booking/locationContext', () => ({
@@ -369,23 +376,24 @@ describe('POST /api/bookings/finalize', () => {
       user: { id: 'user_1' },
     })
 
-        mocks.clientRateLimitKey.mockReturnValue(
-          'user:user_1|client:client_1|ip:unknown-ip',
-        )
-        mocks.tokenActorRateLimitKey.mockReturnValue(
-          'token:aftercare_actor_hash|ip:unknown-ip',
-        )
+    mocks.clientRateLimitKey.mockReturnValue(
+      'user:user_1|client:client_1|ip:unknown-ip',
+    )
 
-        mocks.enforceRateLimit.mockResolvedValue({
-          allowed: true,
-          bucket: 'bookings:finalize',
-          key: 'user:user_1|client:client_1|ip:unknown-ip',
-          limit: 12,
-          remaining: 11,
-          resetAt: new Date('2026-03-11T19:05:00.000Z'),
-          retryAfterSeconds: 60,
-          source: 'redis',
-        })
+    mocks.tokenActorRateLimitKey.mockReturnValue(
+      'token:aftercare_actor_hash|ip:unknown-ip',
+    )
+
+    mocks.enforceRateLimit.mockResolvedValue({
+      allowed: true,
+      bucket: 'bookings:finalize',
+      key: 'user:user_1|client:client_1|ip:unknown-ip',
+      limit: 12,
+      remaining: 11,
+      resetAt: new Date('2026-03-11T19:05:00.000Z'),
+      retryAfterSeconds: 60,
+      source: 'redis',
+    })
 
     mocks.jsonFail.mockImplementation(
       (status: number, error: string, extra?: Record<string, unknown>) =>
@@ -403,6 +411,11 @@ describe('POST /api/bookings/finalize', () => {
           ...(data ?? {}),
         }),
     )
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }))
 
     mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
 
@@ -442,6 +455,7 @@ describe('POST /api/bookings/finalize', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('returns LOCATION_TYPE_REQUIRED when locationType is missing before idempotency starts', async () => {
@@ -858,6 +872,7 @@ describe('POST /api/bookings/finalize', () => {
       }),
     )
   })
+
   it('returns handled replay response without finalizing, notifying, or marking token used', async () => {
     const replayBody = makeSuccessResponseBody({
       id: 'booking_replayed',
@@ -953,6 +968,57 @@ describe('POST /api/bookings/finalize', () => {
         locationType: ServiceLocationType.SALON,
       },
     })
+
+    expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      responseStatus: 201,
+      responseBody: makeSuccessResponseBody(),
+    })
+
+    await expect(result.json()).resolves.toEqual(makeSuccessResponseBody())
+  })
+
+  it('logs safely and still finalizes when pro notification creation fails', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    expectIdempotencyStarted('idem_notification_fails_1')
+
+    const notificationError = new Error('notification blew up')
+    mocks.createProNotification.mockRejectedValueOnce(notificationError)
+
+    const result = await POST(
+      makeRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+          source: 'REQUESTED',
+        },
+        {
+          'idempotency-key': 'idem_notification_fails_1',
+          'x-request-id': 'request_123',
+        },
+      ),
+    )
+
+    expect(result.status).toBe(201)
+
+    expect(mocks.safeError).toHaveBeenCalledWith(notificationError)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/bookings/finalize pro notification error',
+      {
+        requestId: 'request_123',
+        bookingId: 'booking_1',
+        professionalId: 'pro_123',
+        error: {
+          name: 'Error',
+          message: 'notification blew up',
+        },
+      },
+    )
 
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
@@ -1451,10 +1517,16 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
+    expect(mocks.safeError).not.toHaveBeenCalled()
   })
 
-  it('returns internal error for unexpected failures and marks idempotency failed without marking token used', async () => {
-    mocks.finalizeBookingFromHold.mockRejectedValueOnce(new Error('boom'))
+  it('returns internal error, logs safely, captures exception, and marks idempotency failed without marking token used', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('boom')
+    mocks.finalizeBookingFromHold.mockRejectedValueOnce(thrown)
 
     const result = await POST(
       makeIdempotentRequest(
@@ -1474,7 +1546,7 @@ describe('POST /api/bookings/finalize', () => {
       code: 'INTERNAL_ERROR',
       retryable: false,
       uiAction: 'CONTACT_SUPPORT',
-      message: 'boom',
+      message: 'Internal server error',
     })
 
     expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
@@ -1482,10 +1554,66 @@ describe('POST /api/bookings/finalize', () => {
       operation: 'POST /api/bookings/finalize',
     })
 
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/bookings/finalize error',
+      {
+        requestId: null,
+        error: {
+          name: 'Error',
+          message: 'boom',
+        },
+      },
+    )
+
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
     expect(mocks.captureBookingException).toHaveBeenCalledWith({
-      error: expect.any(Error),
+      error: thrown,
+      route: 'POST /api/bookings/finalize',
+    })
+  })
+
+  it('includes request id in safe unexpected-error logs', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('boom with request id')
+    mocks.finalizeBookingFromHold.mockRejectedValueOnce(thrown)
+
+    const result = await POST(
+      makeRequest(
+        {
+          offeringId: 'offering_1',
+          holdId: 'hold_1',
+          locationType: 'SALON',
+        },
+        {
+          'idempotency-key': 'idem_boom_request_id_1',
+          'x-request-id': 'request_123',
+        },
+      ),
+    )
+
+    expect(result.status).toBe(500)
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/bookings/finalize error',
+      {
+        requestId: 'request_123',
+        error: {
+          name: 'Error',
+          message: 'boom with request id',
+        },
+      },
+    )
+
+    expect(mocks.captureBookingException).toHaveBeenCalledWith({
+      error: thrown,
       route: 'POST /api/bookings/finalize',
     })
   })

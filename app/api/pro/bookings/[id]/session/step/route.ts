@@ -18,6 +18,7 @@ import { SESSION_STEP_TRANSITIONS } from '@/lib/booking/lifecycleContract'
 import { transitionSessionStep } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +36,7 @@ function bookingJsonFail(
     message?: string
     userMessage?: string
   },
-) {
+): Response {
   const fail = getBookingFailPayload(code, overrides)
   return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
@@ -140,10 +141,14 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
 
 export async function POST(req: Request, ctx: Ctx) {
   let idempotencyRecordId: string | null = null
+  const requestId = readRequestId(req)
 
   try {
     const auth = await requirePro()
-    if (!auth.ok) return auth.res
+
+    if (!auth.ok) {
+      return auth.res
+    }
 
     const professionalId = auth.professionalId
     const actorUserId = auth.user.id
@@ -218,7 +223,7 @@ export async function POST(req: Request, ctx: Ctx) {
       bookingId,
       professionalId,
       nextStep,
-      requestId: readRequestId(req),
+      requestId,
       idempotencyKey: idempotency.idempotencyKey,
     })
 
@@ -259,7 +264,11 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    console.error('POST /api/pro/bookings/[id]/session/step error', error)
+    console.error('POST /api/pro/bookings/[id]/session/step error', {
+      requestId,
+      error: safeError(error),
+    })
+
     captureBookingException({
       error,
       route: 'POST /api/pro/bookings/[id]/session/step',

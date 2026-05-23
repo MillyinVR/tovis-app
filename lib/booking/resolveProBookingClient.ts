@@ -1,3 +1,5 @@
+// lib/booking/resolveProBookingClient.ts
+
 import {
   ClientAddressKind,
   ClientClaimStatus,
@@ -7,6 +9,7 @@ import {
 
 import { upsertProClient } from '@/lib/clients/upsertProClient'
 import { prisma } from '@/lib/prisma'
+import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -47,11 +50,13 @@ function normalizeOptionalString(
   const normalized = value.trim()
   if (!normalized) return null
   if (normalized.length > max) return 'invalid'
+
   return normalized
 }
 
 function normalizeOptionalId(value: unknown): string | null {
   if (typeof value !== 'string') return null
+
   const normalized = value.trim()
   return normalized ? normalized : null
 }
@@ -59,6 +64,7 @@ function normalizeOptionalId(value: unknown): string | null {
 function normalizeBoolean(value: unknown): boolean | undefined | 'invalid' {
   if (value === undefined) return undefined
   if (typeof value === 'boolean') return value
+
   return 'invalid'
 }
 
@@ -66,6 +72,7 @@ function normalizeLatLng(value: unknown): number | null | undefined | 'invalid' 
   if (value === undefined) return undefined
   if (value === null || value === '') return null
   if (typeof value !== 'number' || !Number.isFinite(value)) return 'invalid'
+
   return value
 }
 
@@ -74,6 +81,7 @@ function coerceLatLng(
 ): number | null | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (value === null) return null
+
   return undefined
 }
 
@@ -204,6 +212,36 @@ function hasAddressPayload(
   )
 }
 
+function getInvalidServiceAddressField(args: {
+  label: string | null | undefined | 'invalid'
+  formattedAddress: string | null | undefined | 'invalid'
+  addressLine1: string | null | undefined | 'invalid'
+  addressLine2: string | null | undefined | 'invalid'
+  city: string | null | undefined | 'invalid'
+  state: string | null | undefined | 'invalid'
+  postalCode: string | null | undefined | 'invalid'
+  countryCode: string | null | undefined | 'invalid'
+  placeId: string | null | undefined | 'invalid'
+  lat: number | null | undefined | 'invalid'
+  lng: number | null | undefined | 'invalid'
+  isDefault: boolean | undefined | 'invalid'
+}): string | null {
+  if (args.label === 'invalid') return 'label'
+  if (args.formattedAddress === 'invalid') return 'formattedAddress'
+  if (args.addressLine1 === 'invalid') return 'addressLine1'
+  if (args.addressLine2 === 'invalid') return 'addressLine2'
+  if (args.city === 'invalid') return 'city'
+  if (args.state === 'invalid') return 'state'
+  if (args.postalCode === 'invalid') return 'postalCode'
+  if (args.countryCode === 'invalid') return 'countryCode'
+  if (args.placeId === 'invalid') return 'placeId'
+  if (args.lat === 'invalid') return 'lat'
+  if (args.lng === 'invalid') return 'lng'
+  if (args.isDefault === 'invalid') return 'isDefault'
+
+  return null
+}
+
 function normalizeServiceAddressInput(
   value: ProBookingServiceAddressInput | null | undefined,
 ):
@@ -222,32 +260,20 @@ function normalizeServiceAddressInput(
   const lng = normalizeLatLng(value?.lng)
   const isDefault = normalizeBoolean(value?.isDefault)
 
-  const invalidField =
-    label === 'invalid'
-      ? 'label'
-      : formattedAddress === 'invalid'
-        ? 'formattedAddress'
-        : addressLine1 === 'invalid'
-          ? 'addressLine1'
-          : addressLine2 === 'invalid'
-            ? 'addressLine2'
-            : city === 'invalid'
-              ? 'city'
-              : state === 'invalid'
-                ? 'state'
-                : postalCode === 'invalid'
-                  ? 'postalCode'
-                  : countryCode === 'invalid'
-                    ? 'countryCode'
-                    : placeId === 'invalid'
-                      ? 'placeId'
-                      : lat === 'invalid'
-                        ? 'lat'
-                        : lng === 'invalid'
-                          ? 'lng'
-                          : isDefault === 'invalid'
-                            ? 'isDefault'
-                            : null
+  const invalidField = getInvalidServiceAddressField({
+    label,
+    formattedAddress,
+    addressLine1,
+    addressLine2,
+    city,
+    state,
+    postalCode,
+    countryCode,
+    placeId,
+    lat,
+    lng,
+    isDefault,
+  })
 
   if (invalidField) {
     return {
@@ -353,6 +379,19 @@ async function createServiceAddressInDb(args: {
     })
   }
 
+  const addressPrivacyData = buildAddressPrivacyWriteData({
+    formattedAddress: args.input.formattedAddress,
+    addressLine1: args.input.addressLine1,
+    addressLine2: args.input.addressLine2,
+    city: args.input.city,
+    state: args.input.state,
+    postalCode: args.input.postalCode,
+    countryCode: args.input.countryCode,
+    placeId: args.input.placeId,
+    lat: args.input.lat,
+    lng: args.input.lng,
+  })
+
   return args.db.clientAddress.create({
     data: {
       clientId: args.clientId,
@@ -369,6 +408,7 @@ async function createServiceAddressInDb(args: {
       placeId: args.input.placeId,
       lat: toDecimalOrNull(args.input.lat),
       lng: toDecimalOrNull(args.input.lng),
+      ...addressPrivacyData,
     },
     select: {
       id: true,

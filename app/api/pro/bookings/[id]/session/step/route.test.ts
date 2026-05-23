@@ -1,3 +1,5 @@
+// app/api/pro/bookings/[id]/session/step/route.test.ts
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BookingStatus, Role, SessionStep } from '@prisma/client'
 import { bookingError } from '@/lib/booking/errors'
@@ -25,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   completeRouteIdempotency: vi.fn(),
   failStartedRouteIdempotency: vi.fn(),
   isRouteIdempotencyHandled: vi.fn(),
+
+  safeError: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -47,6 +51,10 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 vi.mock('@/lib/idempotency', () => ({
@@ -155,6 +163,11 @@ describe('POST /api/pro/bookings/[id]/session/step', () => {
     mocks.pickString.mockImplementation((value: unknown) =>
       typeof value === 'string' && value.trim() ? value.trim() : null,
     )
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }))
 
     expectIdempotencyStarted()
 
@@ -603,6 +616,9 @@ describe('POST /api/pro/bookings/[id]/session/step', () => {
       }),
     )
 
+    expect(mocks.safeError).not.toHaveBeenCalled()
+    expect(mocks.captureBookingException).not.toHaveBeenCalled()
+
     expect(result).toEqual(
       expect.objectContaining({
         ok: false,
@@ -612,10 +628,15 @@ describe('POST /api/pro/bookings/[id]/session/step', () => {
     )
   })
 
-  it('returns internal error and marks idempotency failed for unexpected errors', async () => {
+  it('returns internal error, logs safely, captures exception, and marks idempotency failed for unexpected errors', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
     expectIdempotencyStarted('idem_step_boom_1')
 
-    mocks.transitionSessionStep.mockRejectedValueOnce(new Error('boom'))
+    const thrown = new Error('boom')
+    mocks.transitionSessionStep.mockRejectedValueOnce(thrown)
 
     const result = await POST(
       makeIdempotentRequest(
@@ -632,8 +653,21 @@ describe('POST /api/pro/bookings/[id]/session/step', () => {
       operation: 'POST /api/pro/bookings/[id]/session/step',
     })
 
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/pro/bookings/[id]/session/step error',
+      {
+        requestId: null,
+        error: {
+          name: 'Error',
+          message: 'boom',
+        },
+      },
+    )
+
     expect(mocks.captureBookingException).toHaveBeenCalledWith({
-      error: expect.any(Error),
+      error: thrown,
       route: 'POST /api/pro/bookings/[id]/session/step',
     })
 
@@ -644,5 +678,64 @@ describe('POST /api/pro/bookings/[id]/session/step', () => {
       status: 500,
       error: 'Internal server error',
     })
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('includes request id in safe unexpected-error logs', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    expectIdempotencyStarted('idem_step_boom_request_id_1')
+
+    const thrown = new Error('boom with request id')
+    mocks.transitionSessionStep.mockRejectedValueOnce(thrown)
+
+    const result = await POST(
+      makeRequest(
+        {
+          step: 'BEFORE_PHOTOS',
+        },
+        {
+          'idempotency-key': 'idem_step_boom_request_id_1',
+          'x-request-id': 'request_123',
+        },
+      ),
+      makeCtx(),
+    )
+
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/session/step',
+    })
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/pro/bookings/[id]/session/step error',
+      {
+        requestId: 'request_123',
+        error: {
+          name: 'Error',
+          message: 'boom with request id',
+        },
+      },
+    )
+
+    expect(mocks.captureBookingException).toHaveBeenCalledWith({
+      error: thrown,
+      route: 'POST /api/pro/bookings/[id]/session/step',
+    })
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
+
+    expect(result).toEqual({
+      ok: false,
+      status: 500,
+      error: 'Internal server error',
+    })
+
+    consoleErrorSpy.mockRestore()
   })
 })

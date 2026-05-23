@@ -31,17 +31,18 @@ import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
 import { isRecord } from '@/lib/guards'
+import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { createProNotification } from '@/lib/notifications/proNotifications'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { prisma } from '@/lib/prisma'
+import { bookingEntryPointFromBookingSource } from '@/lib/pro/readiness/bookingEntryPoint'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import {
   clientRateLimitKey,
   tokenActorRateLimitKey,
 } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
-import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
-import { createProNotification } from '@/lib/notifications/proNotifications'
-import { captureBookingException } from '@/lib/observability/bookingEvents'
-import { prisma } from '@/lib/prisma'
-import { bookingEntryPointFromBookingSource } from '@/lib/pro/readiness/bookingEntryPoint'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -538,10 +539,9 @@ function getAftercareTokenId(
 
 export async function POST(request: Request) {
   let idempotencyRecordId: string | null = null
+  const requestId = readRequestId(request)
 
   try {
-    const requestId = readRequestId(request)
-
     const rawBody: unknown = await request.json().catch(() => ({}))
     const parsedBody = parseFinalizeBody(rawBody)
 
@@ -642,10 +642,12 @@ export async function POST(request: Request) {
         locationType: body.locationType,
       })
     } catch (notificationError: unknown) {
-      console.error(
-        'POST /api/bookings/finalize pro notification error:',
-        notificationError,
-      )
+      console.error('POST /api/bookings/finalize pro notification error', {
+        requestId,
+        bookingId: result.booking.id,
+        professionalId: result.booking.professionalId,
+        error: safeError(notificationError),
+      })
     }
 
     const responseBody = buildFinalizeSuccessBody({
@@ -681,7 +683,10 @@ export async function POST(request: Request) {
       })
     }
 
-    console.error('POST /api/bookings/finalize error:', error)
+    console.error('POST /api/bookings/finalize error', {
+      requestId,
+      error: safeError(error),
+    })
 
     captureBookingException({
       error,
@@ -689,7 +694,7 @@ export async function POST(request: Request) {
     })
 
     return bookingJsonFail('INTERNAL_ERROR', {
-      message: error instanceof Error ? error.message : 'Internal server error',
+      message: 'Internal server error',
       userMessage: 'Internal server error',
     })
   }

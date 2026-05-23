@@ -1,21 +1,66 @@
 // app/api/client/addresses/route.ts
-import { prisma } from '@/lib/prisma'
-import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+
 import { ClientAddressKind, Prisma } from '@prisma/client'
+
+import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+import { decimalToNullableNumber } from '@/lib/booking/snapshots'
 import { isRecord } from '@/lib/guards'
 import { pickNumber, pickString } from '@/lib/pick'
-import { decimalToNullableNumber } from '@/lib/booking/snapshots'
+import { prisma } from '@/lib/prisma'
+import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 
 export const dynamic = 'force-dynamic'
+
+const ADDRESS_SELECT = {
+  id: true,
+  kind: true,
+  label: true,
+  isDefault: true,
+  formattedAddress: true,
+  addressLine1: true,
+  addressLine2: true,
+  city: true,
+  state: true,
+  postalCode: true,
+  countryCode: true,
+  placeId: true,
+  lat: true,
+  lng: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ClientAddressSelect
+
+type ClientAddressRow = Prisma.ClientAddressGetPayload<{
+  select: typeof ADDRESS_SELECT
+}>
+
+type NormalizedAddressInput = {
+  label: string | null
+  formattedAddress: string | null
+  addressLine1: string | null
+  addressLine2: string | null
+  city: string | null
+  state: string | null
+  postalCode: string | null
+  countryCode: string | null
+  placeId: string | null
+  lat: number | null | undefined
+  lng: number | null | undefined
+}
 
 function normalizeKind(value: unknown): ClientAddressKind | null {
   const s = pickString(value)?.toUpperCase() ?? ''
   if (s === ClientAddressKind.SEARCH_AREA) return ClientAddressKind.SEARCH_AREA
-  if (s === ClientAddressKind.SERVICE_ADDRESS) return ClientAddressKind.SERVICE_ADDRESS
+  if (s === ClientAddressKind.SERVICE_ADDRESS) {
+    return ClientAddressKind.SERVICE_ADDRESS
+  }
   return null
 }
 
-function normalizeOptionalString(value: unknown, max = 255): string | null | undefined | 'invalid' {
+function normalizeOptionalString(
+  value: unknown,
+  max = 255,
+): string | null | undefined | 'invalid' {
   if (value === undefined) return undefined
   if (value === null) return null
 
@@ -93,43 +138,57 @@ function hasFullServiceAddress(args: {
   return hasAddressLine && hasLocationAnchor
 }
 
-function sortAddresses<T extends { kind: ClientAddressKind; isDefault: boolean; createdAt: Date }>(
-  rows: T[],
-): T[] {
+function getInvalidField(args: {
+  label: string | null | undefined | 'invalid'
+  formattedAddress: string | null | undefined | 'invalid'
+  addressLine1: string | null | undefined | 'invalid'
+  addressLine2: string | null | undefined | 'invalid'
+  city: string | null | undefined | 'invalid'
+  state: string | null | undefined | 'invalid'
+  postalCode: string | null | undefined | 'invalid'
+  countryCode: string | null | undefined | 'invalid'
+  placeId: string | null | undefined | 'invalid'
+  lat: number | null | undefined | 'invalid'
+  lng: number | null | undefined | 'invalid'
+  isDefault: boolean | undefined | 'invalid'
+}): string | null {
+  if (args.label === 'invalid') return 'label'
+  if (args.formattedAddress === 'invalid') return 'formattedAddress'
+  if (args.addressLine1 === 'invalid') return 'addressLine1'
+  if (args.addressLine2 === 'invalid') return 'addressLine2'
+  if (args.city === 'invalid') return 'city'
+  if (args.state === 'invalid') return 'state'
+  if (args.postalCode === 'invalid') return 'postalCode'
+  if (args.countryCode === 'invalid') return 'countryCode'
+  if (args.placeId === 'invalid') return 'placeId'
+  if (args.lat === 'invalid') return 'lat'
+  if (args.lng === 'invalid') return 'lng'
+  if (args.isDefault === 'invalid') return 'isDefault'
+
+  return null
+}
+
+function sortAddresses<
+  T extends {
+    kind: ClientAddressKind
+    isDefault: boolean
+    createdAt: Date
+  },
+>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
     if (a.kind !== b.kind) {
       if (a.kind === ClientAddressKind.SEARCH_AREA) return -1
       if (b.kind === ClientAddressKind.SEARCH_AREA) return 1
     }
+
     if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1
+
     return a.createdAt.getTime() - b.createdAt.getTime()
   })
 }
 
-async function loadAddresses(clientId: string) {
-  const rows = await prisma.clientAddress.findMany({
-    where: { clientId },
-    select: {
-      id: true,
-      kind: true,
-      label: true,
-      isDefault: true,
-      formattedAddress: true,
-      addressLine1: true,
-      addressLine2: true,
-      city: true,
-      state: true,
-      postalCode: true,
-      countryCode: true,
-      placeId: true,
-      lat: true,
-      lng: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  })
-
-  return sortAddresses(rows).map((row) => ({
+function mapAddress(row: ClientAddressRow) {
+  return {
     id: row.id,
     kind: row.kind,
     label: row.label ?? null,
@@ -146,7 +205,44 @@ async function loadAddresses(clientId: string) {
     lng: decimalToNullableNumber(row.lng),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
-  }))
+  }
+}
+
+async function loadAddresses(clientId: string) {
+  const rows = await prisma.clientAddress.findMany({
+    where: { clientId },
+    select: ADDRESS_SELECT,
+  })
+
+  return sortAddresses(rows).map(mapAddress)
+}
+
+function normalizeAddressInput(args: {
+  label: string | null | undefined | 'invalid'
+  formattedAddress: string | null | undefined | 'invalid'
+  addressLine1: string | null | undefined | 'invalid'
+  addressLine2: string | null | undefined | 'invalid'
+  city: string | null | undefined | 'invalid'
+  state: string | null | undefined | 'invalid'
+  postalCode: string | null | undefined | 'invalid'
+  countryCode: string | null | undefined | 'invalid'
+  placeId: string | null | undefined | 'invalid'
+  lat: number | null | undefined | 'invalid'
+  lng: number | null | undefined | 'invalid'
+}): NormalizedAddressInput {
+  return {
+    label: args.label ?? null,
+    formattedAddress: args.formattedAddress ?? null,
+    addressLine1: args.addressLine1 ?? null,
+    addressLine2: args.addressLine2 ?? null,
+    city: args.city ?? null,
+    state: args.state ?? null,
+    postalCode: args.postalCode ?? null,
+    countryCode: args.countryCode ?? null,
+    placeId: args.placeId ?? null,
+    lat: coerceLatLng(args.lat),
+    lng: coerceLatLng(args.lng),
+  }
 }
 
 export async function GET() {
@@ -188,38 +284,38 @@ export async function POST(req: Request) {
     const lng = normalizeLatLng(body.lng)
     const isDefault = normalizeBoolean(body.isDefault)
 
-    const invalidField =
-      label === 'invalid' ? 'label' :
-      formattedAddress === 'invalid' ? 'formattedAddress' :
-      addressLine1 === 'invalid' ? 'addressLine1' :
-      addressLine2 === 'invalid' ? 'addressLine2' :
-      city === 'invalid' ? 'city' :
-      state === 'invalid' ? 'state' :
-      postalCode === 'invalid' ? 'postalCode' :
-      countryCode === 'invalid' ? 'countryCode' :
-      placeId === 'invalid' ? 'placeId' :
-      lat === 'invalid' ? 'lat' :
-      lng === 'invalid' ? 'lng' :
-      isDefault === 'invalid' ? 'isDefault' :
-      null
+    const invalidField = getInvalidField({
+      label,
+      formattedAddress,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      postalCode,
+      countryCode,
+      placeId,
+      lat,
+      lng,
+      isDefault,
+    })
 
     if (invalidField) {
       return jsonFail(400, `Invalid ${invalidField}.`)
     }
 
-    const normalized = {
-        label: label ?? null,
-        formattedAddress: formattedAddress ?? null,
-        addressLine1: addressLine1 ?? null,
-        addressLine2: addressLine2 ?? null,
-        city: city ?? null,
-        state: state ?? null,
-        postalCode: postalCode ?? null,
-        countryCode: countryCode ?? null,
-        placeId: placeId ?? null,
-        lat: coerceLatLng(lat),
-        lng: coerceLatLng(lng),
-      }
+    const normalized = normalizeAddressInput({
+      label,
+      formattedAddress,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      postalCode,
+      countryCode,
+      placeId,
+      lat,
+      lng,
+    })
 
     if (kind === ClientAddressKind.SEARCH_AREA) {
       if (!hasZipLikeData(normalized)) {
@@ -246,8 +342,20 @@ export async function POST(req: Request) {
       },
     })
 
-    const shouldBeDefault =
-      isDefault === true || existingCountForKind === 0
+    const shouldBeDefault = isDefault === true || existingCountForKind === 0
+
+    const addressPrivacyData = buildAddressPrivacyWriteData({
+      formattedAddress: normalized.formattedAddress,
+      addressLine1: normalized.addressLine1,
+      addressLine2: normalized.addressLine2,
+      city: normalized.city,
+      state: normalized.state,
+      postalCode: normalized.postalCode,
+      countryCode: normalized.countryCode,
+      placeId: normalized.placeId,
+      lat: normalized.lat,
+      lng: normalized.lng,
+    })
 
     const created = await prisma.$transaction(async (tx) => {
       if (shouldBeDefault) {
@@ -277,48 +385,15 @@ export async function POST(req: Request) {
           placeId: normalized.placeId,
           lat: toDecimalOrNull(normalized.lat),
           lng: toDecimalOrNull(normalized.lng),
+          ...addressPrivacyData,
         },
-        select: {
-          id: true,
-          kind: true,
-          label: true,
-          isDefault: true,
-          formattedAddress: true,
-          addressLine1: true,
-          addressLine2: true,
-          city: true,
-          state: true,
-          postalCode: true,
-          countryCode: true,
-          placeId: true,
-          lat: true,
-          lng: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+        select: ADDRESS_SELECT,
       })
     })
 
     return jsonOk(
       {
-        address: {
-          id: created.id,
-          kind: created.kind,
-          label: created.label ?? null,
-          isDefault: created.isDefault,
-          formattedAddress: created.formattedAddress ?? null,
-          addressLine1: created.addressLine1 ?? null,
-          addressLine2: created.addressLine2 ?? null,
-          city: created.city ?? null,
-          state: created.state ?? null,
-          postalCode: created.postalCode ?? null,
-          countryCode: created.countryCode ?? null,
-          placeId: created.placeId ?? null,
-          lat: decimalToNullableNumber(created.lat),
-          lng: decimalToNullableNumber(created.lng),
-          createdAt: created.createdAt.toISOString(),
-          updatedAt: created.updatedAt.toISOString(),
-        },
+        address: mapAddress(created),
       },
       201,
     )

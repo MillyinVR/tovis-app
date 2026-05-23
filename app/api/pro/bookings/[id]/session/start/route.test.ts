@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   completeRouteIdempotency: vi.fn(),
   failStartedRouteIdempotency: vi.fn(),
   isRouteIdempotencyHandled: vi.fn(),
+
+  safeError: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -56,6 +58,10 @@ vi.mock('@/lib/idempotency', () => ({
   IDEMPOTENCY_ROUTES: {
     BOOKING_START_SESSION: 'POST /api/pro/bookings/[id]/start',
   },
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 import { POST } from './route'
@@ -124,6 +130,11 @@ describe('POST /api/pro/bookings/[id]/start', () => {
     mocks.pickString.mockImplementation((value: unknown) =>
       typeof value === 'string' && value.trim() ? value.trim() : null,
     )
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }))
 
     expectIdempotencyStarted()
 
@@ -389,6 +400,8 @@ describe('POST /api/pro/bookings/[id]/start', () => {
       }),
     )
 
+    expect(mocks.safeError).not.toHaveBeenCalled()
+
     expect(result).toEqual(
       expect.objectContaining({
         ok: false,
@@ -398,8 +411,13 @@ describe('POST /api/pro/bookings/[id]/start', () => {
     )
   })
 
-  it('returns internal error and marks idempotency failed for unexpected errors', async () => {
-    mocks.startBookingSession.mockRejectedValueOnce(new Error('boom'))
+  it('returns internal error, logs safely, and marks idempotency failed for unexpected errors', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('boom')
+    mocks.startBookingSession.mockRejectedValueOnce(thrown)
 
     const result = await POST(
       makeIdempotentRequest('idem_start_boom_1'),
@@ -411,6 +429,19 @@ describe('POST /api/pro/bookings/[id]/start', () => {
       operation: 'POST /api/pro/bookings/[id]/start',
     })
 
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/pro/bookings/[id]/start error',
+      {
+        requestId: null,
+        error: {
+          name: 'Error',
+          message: 'boom',
+        },
+      },
+    )
+
     expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
 
     expect(result).toEqual({
@@ -418,5 +449,52 @@ describe('POST /api/pro/bookings/[id]/start', () => {
       status: 500,
       error: 'Internal server error',
     })
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('includes request id in safe unexpected-error logs', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('boom with request id')
+    mocks.startBookingSession.mockRejectedValueOnce(thrown)
+
+    const result = await POST(
+      makeRequest({
+        'idempotency-key': 'idem_start_boom_request_id_1',
+        'x-request-id': 'request_123',
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/start',
+    })
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/pro/bookings/[id]/start error',
+      {
+        requestId: 'request_123',
+        error: {
+          name: 'Error',
+          message: 'boom with request id',
+        },
+      },
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
+
+    expect(result).toEqual({
+      ok: false,
+      status: 500,
+      error: 'Internal server error',
+    })
+
+    consoleErrorSpy.mockRestore()
   })
 })
