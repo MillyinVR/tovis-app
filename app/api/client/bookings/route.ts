@@ -1,6 +1,7 @@
 // app/api/client/bookings/route.ts
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { safeError } from '@/lib/security/logging'
 
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
@@ -323,8 +324,11 @@ export async function GET() {
       },
       200,
     )
-  } catch (error) {
-    console.error('GET /api/client/bookings error:', error)
+  } catch (error: unknown) {
+    console.error('GET /api/client/bookings error', {
+      error: safeError(error),
+    })
+
     return jsonFail(500, 'Failed to load client bookings.')
   }
 }

@@ -23,6 +23,7 @@ import { DEFAULT_TIME_ZONE } from '@/lib/timeZone'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { clientRateLimitKey } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -183,7 +184,10 @@ export async function POST(req: Request, { params }: Ctx) {
       })
     }
 
-    console.error('POST /api/bookings/[id]/reschedule error', error)
+    console.error(
+      'POST /api/bookings/[id]/reschedule error',
+      safeError(error),
+    )
 
     return bookingJsonFail('INTERNAL_ERROR', {
       message:

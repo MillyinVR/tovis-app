@@ -12,6 +12,7 @@ import {
   type ConsultationDecisionAction,
   type ConsultationDecisionCtx,
 } from './_decision'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -91,8 +92,11 @@ export async function GET(_req: Request, ctx: Ctx) {
     if (!approval) return jsonFail(404, 'No consultation proposal found.')
 
     return jsonOk({ bookingId, approval })
-  } catch (e) {
-    console.error('GET /api/client/bookings/[id]/consultation error', e)
+  } catch (e: unknown) {
+    console.error('GET /api/client/bookings/[id]/consultation error', {
+      error: safeError(e),
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }
@@ -111,12 +115,15 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const { requestId, idempotencyKey } = readRequestMeta(req)
 
-    return handleConsultationDecision(action, ctx, {
+    return await handleConsultationDecision(action, ctx, {
       requestId,
       idempotencyKey,
     })
-  } catch (e) {
-    console.error('POST /api/client/bookings/[id]/consultation error', e)
+  } catch (e: unknown) {
+    console.error('POST /api/client/bookings/[id]/consultation error', {
+      error: safeError(e),
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }

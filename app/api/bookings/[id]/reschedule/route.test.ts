@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   enforceRateLimit: vi.fn(),
   clientRateLimitKey: vi.fn(),
   rateLimitExceededResponse: vi.fn(),
+
+  safeError: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -69,6 +71,10 @@ vi.mock('@/lib/rateLimit/response', () => ({
   rateLimitExceededResponse: mocks.rateLimitExceededResponse,
 }))
 
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
+}))
+
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { POST } from './route'
 
@@ -105,6 +111,11 @@ function expectIdempotencyStarted(key = 'idem_key_1'): void {
 describe('POST /api/bookings/[id]/reschedule', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }))
 
     mocks.requireClient.mockResolvedValue({
       ok: true,
@@ -628,8 +639,9 @@ describe('POST /api/bookings/[id]/reschedule', () => {
 
   it('fails idempotency and returns INTERNAL_ERROR for non-booking errors', async () => {
     const descriptor = getBookingErrorDescriptor('INTERNAL_ERROR')
+    const thrown = new Error('boom')
 
-    mocks.rescheduleBookingFromHold.mockRejectedValueOnce(new Error('boom'))
+    mocks.rescheduleBookingFromHold.mockRejectedValueOnce(thrown)
 
     const result = await POST(
       makeRequest({
@@ -642,6 +654,8 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       idempotencyRecordId: 'idem_record_1',
       operation: 'POST /api/bookings/[id]/reschedule',
     })
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       descriptor.httpStatus,

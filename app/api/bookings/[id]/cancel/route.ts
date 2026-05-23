@@ -18,6 +18,7 @@ import {
 import { cancelBooking } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
+import { safeError } from '@/lib/security/logging'
 import { clientRateLimitKey, proRateLimitKey } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
@@ -253,7 +254,7 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    console.error('POST /api/bookings/[id]/cancel error', error)
+    console.error('POST /api/bookings/[id]/cancel error', safeError(error))
 
     return jsonFail(500, 'Failed to cancel booking.')
   }

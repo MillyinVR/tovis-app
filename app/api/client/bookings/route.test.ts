@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   prismaWaitlistEntryFindMany: vi.fn(),
 
   buildClientBookingDTO: vi.fn(),
+  safeError: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -48,6 +49,10 @@ vi.mock('@/app/api/_utils/strings', () => ({
 
 vi.mock('@/lib/dto/clientBooking', () => ({
   buildClientBookingDTO: mocks.buildClientBookingDTO,
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 import { GET, POST } from './route'
@@ -162,11 +167,19 @@ function makeWaitlistRow(overrides?: Partial<Record<string, unknown>>) {
 
 describe('GET /api/client/bookings', () => {
   const NOW = new Date('2026-04-12T12:00:00.000Z')
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
     vi.clearAllMocks()
+
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }))
 
     mocks.requireClient.mockResolvedValue({
       ok: true,
@@ -223,6 +236,7 @@ describe('GET /api/client/bookings', () => {
   })
 
   afterEach(() => {
+    consoleErrorSpy.mockRestore()
     vi.useRealTimers()
   })
 
@@ -496,9 +510,13 @@ describe('GET /api/client/bookings', () => {
   })
 
   it('returns 500 when loading bookings fails', async () => {
-    mocks.prismaBookingFindMany.mockRejectedValueOnce(new Error('db blew up'))
+    const thrown = new Error('db blew up')
+
+    mocks.prismaBookingFindMany.mockRejectedValueOnce(thrown)
 
     const response = await GET()
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
 
     expect(response.status).toBe(500)
     await expect(response.json()).resolves.toEqual({

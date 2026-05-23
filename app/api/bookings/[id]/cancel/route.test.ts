@@ -23,6 +23,12 @@ const mocks = vi.hoisted(() => ({
   clientRateLimitKey: vi.fn(),
   proRateLimitKey: vi.fn(),
   rateLimitExceededResponse: vi.fn(),
+
+  safeError: vi.fn(),
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 vi.mock('@/app/api/_utils/responses', () => ({
@@ -94,6 +100,11 @@ function setStartedIdempotencyDefault(): void {
 describe('app/api/bookings/[id]/cancel/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    }))
 
     mocks.jsonFail.mockImplementation(
       (status: number, error: string, extra?: unknown) => ({
@@ -636,8 +647,18 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
     })
   })
 
-  it('fails idempotency and returns 500 when cancelBooking throws a non-booking error', async () => {
-    mocks.cancelBooking.mockRejectedValueOnce(new Error('boom'))
+  it('fails idempotency, logs a sanitized error, and returns 500 when cancelBooking throws a non-booking error', async () => {
+    const thrown = new Error('boom')
+
+    mocks.cancelBooking.mockRejectedValueOnce(thrown)
+    mocks.safeError.mockReturnValueOnce({
+      name: 'Error',
+      message: 'boom',
+    })
+
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
 
     const result = await POST(makeRequest(), makeCtx('booking_1'))
 
@@ -645,6 +666,21 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       idempotencyRecordId: 'idem_record_1',
       operation: 'POST /api/bookings/[id]/cancel',
     })
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/bookings/[id]/cancel error',
+      {
+        name: 'Error',
+        message: 'boom',
+      },
+    )
+
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+      'POST /api/bookings/[id]/cancel error',
+      thrown,
+    )
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(
       500,
@@ -656,6 +692,8 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
       status: 500,
       error: 'Failed to cancel booking.',
     })
+
+    consoleErrorSpy.mockRestore()
   })
 
   it('does not fail idempotency when an error happens before the ledger starts', async () => {
