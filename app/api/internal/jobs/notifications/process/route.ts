@@ -16,6 +16,7 @@ import { createSmsDeliveryProvider } from '@/lib/notifications/delivery/sendSms'
 import { getRedis } from '@/lib/redis'
 import { NotificationChannel, NotificationProvider } from '@prisma/client'
 import Twilio from 'twilio'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -206,9 +207,11 @@ export async function GET(req: Request) {
   try {
     return await runJob(req)
   } catch (err: unknown) {
-    console.error('GET /api/internal/jobs/notifications/process error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    return jsonFail(500, message)
+    console.error('GET /api/internal/jobs/notifications/process error', {
+      error: safeError(err),
+    })
+
+    return jsonFail(500, 'Internal server error')
   }
 }
 
@@ -216,8 +219,10 @@ export async function POST(req: Request) {
   try {
     return await runJob(req)
   } catch (err: unknown) {
-    console.error('POST /api/internal/jobs/notifications/process error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    return jsonFail(500, message)
+    console.error('POST /api/internal/jobs/notifications/process error', {
+      error: safeError(err),
+    })
+
+    return jsonFail(500, 'Internal server error')
   }
 }

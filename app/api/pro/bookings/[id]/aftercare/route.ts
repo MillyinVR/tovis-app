@@ -27,6 +27,7 @@ import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { proRateLimitKey } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -938,11 +939,15 @@ export async function GET(_req: Request, ctx: Ctx) {
       })
     }
 
-    console.error('GET /api/pro/bookings/[id]/aftercare error', error)
+    console.error('GET /api/pro/bookings/[id]/aftercare error', {
+      error: safeError(error),
+    })
+
     captureBookingException({
       error,
       route: 'GET /api/pro/bookings/[id]/aftercare',
     })
+
     return jsonFail(500, 'Internal server error.')
   }
 }
@@ -1064,11 +1069,15 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    console.error('POST /api/pro/bookings/[id]/aftercare error', error)
+    console.error('POST /api/pro/bookings/[id]/aftercare error', {
+      error: safeError(error),
+    })
+
     captureBookingException({
       error,
       route: 'POST /api/pro/bookings/[id]/aftercare',
     })
+
     return jsonFail(500, 'Internal server error.')
   }
 }

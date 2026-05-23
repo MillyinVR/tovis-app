@@ -1,3 +1,4 @@
+// app/api/internal/jobs/client-reminders/route.ts
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import {
   cancelDueAppointmentReminder,
@@ -6,6 +7,7 @@ import {
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import { prisma } from '@/lib/prisma'
 import { NotificationEventKey, Prisma } from '@prisma/client'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -307,8 +309,11 @@ async function handleJobRequest(req: Request, method: 'GET' | 'POST') {
   try {
     return await runJob(req)
   } catch (err: unknown) {
-    console.error(`${method} /api/internal/jobs/client-reminders error`, err)
-    return jsonFail(500, getErrorMessage(err))
+    console.error(`${method} /api/internal/jobs/client-reminders error`, {
+      error: safeError(err),
+    })
+
+    return jsonFail(500, 'Internal server error')
   }
 }
 

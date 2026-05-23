@@ -1,40 +1,34 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NotificationChannel, NotificationProvider } from '@prisma/client'
 
+const NOW = new Date('2026-04-13T18:30:00.000Z')
+
 const mocks = vi.hoisted(() => ({
+  jsonFail: vi.fn(),
+  jsonOk: vi.fn(),
+
   processDueDeliveries: vi.fn(),
 
   createInAppDeliveryProvider: vi.fn(),
   createSmsDeliveryProvider: vi.fn(),
   createEmailDeliveryProvider: vi.fn(),
 
-  inAppSend: vi.fn(),
-  smsSend: vi.fn(),
-  emailSend: vi.fn(),
-
   getRedis: vi.fn(),
   redisPublish: vi.fn(),
   redisIncr: vi.fn(),
 
-  twilioCtor: vi.fn(),
-  twilioMessagesCreate: vi.fn(),
+  twilioFactory: vi.fn(),
+  twilioMessageCreate: vi.fn(),
+
+  safeError: vi.fn((error: unknown) => ({
+    name: error instanceof Error ? error.name : 'NonErrorThrown',
+    message: error instanceof Error ? error.message : String(error),
+  })),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
-  jsonOk: (data: Record<string, unknown>, status = 200) =>
-    new Response(JSON.stringify({ ok: true, ...data }), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  jsonFail: (
-    status: number,
-    error: string,
-    extra?: Record<string, unknown>,
-  ) =>
-    new Response(JSON.stringify({ ok: false, error, ...(extra ?? {}) }), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    }),
+  jsonFail: mocks.jsonFail,
+  jsonOk: mocks.jsonOk,
 }))
 
 vi.mock('@/lib/notifications/delivery/processDueDeliveries', () => ({
@@ -58,174 +52,229 @@ vi.mock('@/lib/redis', () => ({
 }))
 
 vi.mock('twilio', () => ({
-  default: mocks.twilioCtor,
+  default: mocks.twilioFactory,
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 import { GET, POST } from './route'
 
+function makeJsonResponse(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+    },
+  })
+}
+
 function makeRequest(args?: {
   method?: 'GET' | 'POST'
-  search?: string
-  headers?: Record<string, string>
-}) {
-  const method = args?.method ?? 'GET'
-  const search = args?.search ?? ''
+  url?: string
+  authorization?: string
+  internalSecret?: string
+}): Request {
+  const headers = new Headers()
+
+  if (args?.authorization) {
+    headers.set('authorization', args.authorization)
+  }
+
+  if (args?.internalSecret) {
+    headers.set('x-internal-job-secret', args.internalSecret)
+  }
 
   return new Request(
-    `http://localhost/api/internal/jobs/notifications/process${search}`,
+    args?.url ?? 'http://localhost/api/internal/jobs/notifications/process',
     {
-      method,
-      headers: args?.headers,
+      method: args?.method ?? 'GET',
+      headers,
     },
   )
 }
 
-describe('app/api/internal/jobs/notifications/process/route', () => {
+function setRequiredEnv(): void {
+  process.env.INTERNAL_JOB_SECRET = 'job_secret_1'
+  process.env.TWILIO_ACCOUNT_SID = 'twilio_sid_1'
+  process.env.TWILIO_AUTH_TOKEN = 'twilio_token_1'
+  process.env.TWILIO_FROM_NUMBER = '+15550001111'
+  process.env.POSTMARK_SERVER_TOKEN = 'postmark_token_1'
+  process.env.POSTMARK_FROM_EMAIL = 'hello@example.com'
+  process.env.POSTMARK_MESSAGE_STREAM = 'outbound'
+}
+
+function clearEnv(): void {
+  delete process.env.INTERNAL_JOB_SECRET
+  delete process.env.CRON_SECRET
+  delete process.env.TWILIO_ACCOUNT_SID
+  delete process.env.TWILIO_AUTH_TOKEN
+  delete process.env.TWILIO_FROM_NUMBER
+  delete process.env.POSTMARK_SERVER_TOKEN
+  delete process.env.POSTMARK_FROM_EMAIL
+  delete process.env.POSTMARK_MESSAGE_STREAM
+}
+
+describe('app/api/internal/jobs/notifications/process/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
 
-    process.env.INTERNAL_JOB_SECRET = 'test-secret'
-    delete process.env.CRON_SECRET
+    clearEnv()
+    setRequiredEnv()
 
-    process.env.TWILIO_ACCOUNT_SID = 'twilio-sid'
-    process.env.TWILIO_AUTH_TOKEN = 'twilio-token'
-    process.env.TWILIO_FROM_NUMBER = '+15550000000'
+    mocks.jsonFail.mockImplementation((status: number, error: string) =>
+      makeJsonResponse(status, {
+        ok: false,
+        error,
+      }),
+    )
 
-    process.env.POSTMARK_SERVER_TOKEN = 'postmark-token'
-    process.env.POSTMARK_FROM_EMAIL = 'support@tovis.app'
-    process.env.POSTMARK_MESSAGE_STREAM = 'outbound'
+    mocks.jsonOk.mockImplementation((data: Record<string, unknown>) =>
+      makeJsonResponse(200, {
+        ok: true,
+        ...data,
+      }),
+    )
 
-    mocks.redisPublish.mockResolvedValue(1)
-    mocks.redisIncr.mockResolvedValue(2)
+    mocks.redisPublish.mockResolvedValue(2)
+    mocks.redisIncr.mockResolvedValue(7)
+
     mocks.getRedis.mockReturnValue({
       publish: mocks.redisPublish,
       incr: mocks.redisIncr,
     })
 
-    mocks.inAppSend.mockResolvedValue({
-      ok: true,
-      providerMessageId: 'in_app_msg_1',
-      providerStatus: 'published',
-      responseMeta: {
-        source: 'sendInApp',
-      },
-    })
-    mocks.smsSend.mockResolvedValue({
-      ok: true,
-      providerMessageId: 'sms_msg_1',
-      providerStatus: 'queued',
-      responseMeta: {
-        source: 'sendSms',
-      },
-    })
-    mocks.emailSend.mockResolvedValue({
-      ok: true,
-      providerMessageId: 'email_msg_1',
-      providerStatus: 'accepted',
-      responseMeta: {
-        source: 'sendEmail',
-      },
-    })
-
-    mocks.createInAppDeliveryProvider.mockReturnValue({
-      send: mocks.inAppSend,
-    })
-    mocks.createSmsDeliveryProvider.mockReturnValue({
-      send: mocks.smsSend,
-    })
-    mocks.createEmailDeliveryProvider.mockReturnValue({
-      send: mocks.emailSend,
-    })
-
-    mocks.twilioMessagesCreate.mockResolvedValue({
-      sid: 'SM123',
-      to: '+15551234567',
-      body: 'hello',
+    mocks.twilioMessageCreate.mockResolvedValue({
+      to: '+15550002222',
+      body: 'Reminder text',
       status: 'queued',
+      sid: 'SM_1',
     })
-    mocks.twilioCtor.mockReturnValue({
+
+    mocks.twilioFactory.mockReturnValue({
       messages: {
-        create: mocks.twilioMessagesCreate,
+        create: mocks.twilioMessageCreate,
       },
     })
+
+    mocks.createInAppDeliveryProvider.mockImplementation(
+      (args: { publish: (envelope: Record<string, unknown>) => Promise<unknown> }) => ({
+        send: vi.fn((request: Record<string, unknown>) =>
+          args.publish({
+            idempotencyKey: 'inapp_idem_1',
+            recipientInAppTargetId: 'client_1',
+            ...request,
+          }),
+        ),
+      }),
+    )
+
+    mocks.createSmsDeliveryProvider.mockImplementation(
+      (args: {
+        fromNumber: string
+        client: {
+          messages: {
+            create: (params: Record<string, unknown>) => Promise<unknown>
+          }
+        }
+      }) => ({
+        send: vi.fn((request: Record<string, unknown>) =>
+          args.client.messages.create({
+            from: args.fromNumber,
+            to: request.to ?? '+15550002222',
+            body: request.body ?? 'Reminder text',
+            statusCallback: request.statusCallback,
+          }),
+        ),
+      }),
+    )
+
+    mocks.createEmailDeliveryProvider.mockImplementation(
+      (args: Record<string, unknown>) => ({
+        send: vi.fn(async (request: Record<string, unknown>) => ({
+          accepted: true,
+          providerMessageId: 'email_1',
+          providerStatus: 'sent',
+          responseMeta: {
+            args,
+            request,
+          },
+        })),
+      }),
+    )
 
     mocks.processDueDeliveries.mockResolvedValue({
-      claimedCount: 2,
-      processedCount: 2,
-      sentCount: 1,
-      retryScheduledCount: 1,
-      finalFailureCount: 0,
-      orchestrationErrorCount: 0,
-      outcomes: [
-        {
-          deliveryId: 'delivery_1',
-          provider: NotificationProvider.INTERNAL_REALTIME,
-          channel: NotificationChannel.IN_APP,
-          result: 'SENT',
-        },
-        {
-          deliveryId: 'delivery_2',
-          provider: NotificationProvider.POSTMARK,
-          channel: NotificationChannel.EMAIL,
-          result: 'RETRY_SCHEDULED',
-          nextAttemptAt: new Date('2026-04-10T12:05:00.000Z'),
-        },
-      ],
+      claimedCount: 0,
+      sentCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
     })
   })
 
-  it('returns 500 when the internal job secret is not configured', async () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    clearEnv()
+  })
+
+  it('GET returns 500 when no job secret is configured', async () => {
     delete process.env.INTERNAL_JOB_SECRET
     delete process.env.CRON_SECRET
 
-    const response = await GET(makeRequest())
-    const json = await response.json()
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
 
-    expect(response.status).toBe(500)
-    expect(json).toEqual({
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
       error: 'Missing INTERNAL_JOB_SECRET or CRON_SECRET configuration.',
     })
+
     expect(mocks.processDueDeliveries).not.toHaveBeenCalled()
   })
 
-  it('returns 401 when the request is unauthorized', async () => {
-    const response = await GET(makeRequest())
-    const json = await response.json()
+  it('GET returns 401 when request is unauthorized', async () => {
+    const result = await GET(makeRequest())
 
-    expect(response.status).toBe(401)
-    expect(json).toEqual({
+    expect(result.status).toBe(401)
+    await expect(result.json()).resolves.toEqual({
       ok: false,
       error: 'Unauthorized',
     })
+
     expect(mocks.processDueDeliveries).not.toHaveBeenCalled()
   })
 
-  it('processes deliveries on GET and builds the provider registry with configured env values', async () => {
-    const response = await GET(
+  it('GET builds providers, clamps take, processes due deliveries, and returns summary', async () => {
+    const result = await GET(
       makeRequest({
-        method: 'GET',
-        search: '?take=5',
-        headers: {
-          authorization: 'Bearer test-secret',
-        },
+        url: 'http://localhost/api/internal/jobs/notifications/process?take=999',
+        authorization: 'Bearer job_secret_1',
       }),
     )
-    const json = await response.json()
 
-    expect(mocks.twilioCtor).toHaveBeenCalledWith('twilio-sid', 'twilio-token')
+    expect(mocks.twilioFactory).toHaveBeenCalledWith(
+      'twilio_sid_1',
+      'twilio_token_1',
+    )
 
     expect(mocks.createSmsDeliveryProvider).toHaveBeenCalledWith({
-      fromNumber: '+15550000000',
+      fromNumber: '+15550001111',
       client: {
         messages: {
           create: expect.any(Function),
         },
       },
     })
+
     expect(mocks.createEmailDeliveryProvider).toHaveBeenCalledWith({
-      apiToken: 'postmark-token',
-      fromEmail: 'support@tovis.app',
+      apiToken: 'postmark_token_1',
+      fromEmail: 'hello@example.com',
       messageStream: 'outbound',
     })
 
@@ -252,117 +301,232 @@ describe('app/api/internal/jobs/notifications/process/route', () => {
         },
       },
       claim: {
-        now: expect.any(Date),
-        batchSize: 5,
+        now: NOW,
+        batchSize: 250,
       },
     })
 
-    expect(response.status).toBe(200)
-    expect(json).toEqual({
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
       ok: true,
-      claimedCount: 2,
-      processedCount: 2,
-      sentCount: 1,
-      retryScheduledCount: 1,
-      finalFailureCount: 0,
-      orchestrationErrorCount: 0,
-      outcomes: [
-        {
-          deliveryId: 'delivery_1',
-          provider: NotificationProvider.INTERNAL_REALTIME,
-          channel: NotificationChannel.IN_APP,
-          result: 'SENT',
-        },
-        {
-          deliveryId: 'delivery_2',
-          provider: NotificationProvider.POSTMARK,
-          channel: NotificationChannel.EMAIL,
-          result: 'RETRY_SCHEDULED',
-          nextAttemptAt: '2026-04-10T12:05:00.000Z',
-        },
-      ],
-      take: 5,
-      processedAt: expect.any(String),
+      claimedCount: 0,
+      sentCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      take: 250,
+      processedAt: NOW.toISOString(),
     })
   })
 
-  it('accepts x-internal-job-secret on POST', async () => {
-    const response = await POST(
+  it('POST accepts x-internal-job-secret and uses default take', async () => {
+    const result = await POST(
       makeRequest({
         method: 'POST',
-        headers: {
-          'x-internal-job-secret': 'test-secret',
+        internalSecret: 'job_secret_1',
+      }),
+    )
+
+    expect(mocks.processDueDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claim: {
+          now: NOW,
+          batchSize: 100,
         },
       }),
     )
-    const json = await response.json()
 
-    expect(response.status).toBe(200)
-    expect(json.ok).toBe(true)
-    expect(mocks.processDueDeliveries).toHaveBeenCalledTimes(1)
+    expect(result.status).toBe(200)
+    await expect(result.json()).resolves.toEqual({
+      ok: true,
+      claimedCount: 0,
+      sentCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      take: 100,
+      processedAt: NOW.toISOString(),
+    })
+  })
+
+  it('uses CRON_SECRET when INTERNAL_JOB_SECRET is missing', async () => {
+    delete process.env.INTERNAL_JOB_SECRET
+    process.env.CRON_SECRET = 'cron_secret_1'
+
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer cron_secret_1',
+      }),
+    )
+
+    expect(result.status).toBe(200)
+    expect(mocks.processDueDeliveries).toHaveBeenCalled()
+  })
+
+  it('provider registry in-app sender publishes realtime notification and increments version', async () => {
+    await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
 
     const call = mocks.processDueDeliveries.mock.calls[0]?.[0]
-    expect(call.claim.batchSize).toBe(100)
-    expect(call.claim.now).toBeInstanceOf(Date)
-  })
+    const providers = call.providers
 
-  it('returns 500 when postmark configuration is missing', async () => {
-    delete process.env.POSTMARK_SERVER_TOKEN
-
-    const response = await GET(
-      makeRequest({
-        headers: {
-          authorization: 'Bearer test-secret',
-        },
-      }),
-    )
-    const json = await response.json()
-
-    expect(response.status).toBe(500)
-    expect(json).toEqual({
-      ok: false,
-      error: 'Missing POSTMARK_SERVER_TOKEN configuration.',
+    const result = await providers.inApp.send({
+      id: 'delivery_1',
+      idempotencyKey: 'inapp_idem_from_request',
+      recipientInAppTargetId: 'client_123',
+      payload: {
+        hello: 'world',
+      },
     })
-    expect(mocks.processDueDeliveries).not.toHaveBeenCalled()
-    expect(mocks.createEmailDeliveryProvider).not.toHaveBeenCalled()
-  })
 
-  it('returns 500 when processDueDeliveries throws', async () => {
-    mocks.processDueDeliveries.mockRejectedValueOnce(
-      new Error('notification worker exploded'),
-    )
-
-    const response = await GET(
-      makeRequest({
-        headers: {
-          authorization: 'Bearer test-secret',
+    expect(mocks.redisPublish).toHaveBeenCalledWith(
+      'notifications:in-app:client_123',
+      JSON.stringify({
+        idempotencyKey: 'inapp_idem_from_request',
+        recipientInAppTargetId: 'client_123',
+        id: 'delivery_1',
+        payload: {
+          hello: 'world',
         },
       }),
     )
-    const json = await response.json()
 
-    expect(response.status).toBe(500)
-    expect(json).toEqual({
-      ok: false,
-      error: 'notification worker exploded',
+    expect(mocks.redisIncr).toHaveBeenCalledWith(
+      'notifications:in-app:client_123:version',
+    )
+
+    expect(result).toEqual({
+      accepted: true,
+      providerMessageId: 'inapp_idem_from_request',
+      providerStatus: 'published',
+      responseMeta: {
+        source: 'app/api/internal/jobs/notifications/process',
+        channel: 'notifications:in-app:client_123',
+        version: 7,
+        subscriberCount: 2,
+      },
     })
   })
 
-  it('falls back to CRON_SECRET when INTERNAL_JOB_SECRET is absent', async () => {
-    delete process.env.INTERNAL_JOB_SECRET
-    process.env.CRON_SECRET = 'cron-secret'
+  it('provider registry in-app sender throws when Redis is not configured', async () => {
+    mocks.getRedis.mockReturnValueOnce(null)
 
-    const response = await GET(
+    await GET(
       makeRequest({
-        headers: {
-          authorization: 'Bearer cron-secret',
-        },
+        authorization: 'Bearer job_secret_1',
       }),
     )
-    const json = await response.json()
 
-    expect(response.status).toBe(200)
-    expect(json.ok).toBe(true)
-    expect(mocks.processDueDeliveries).toHaveBeenCalledTimes(1)
+    const call = mocks.processDueDeliveries.mock.calls[0]?.[0]
+    const providers = call.providers
+
+    await expect(
+      providers.inApp.send({
+        idempotencyKey: 'inapp_idem_1',
+        recipientInAppTargetId: 'client_1',
+      }),
+    ).rejects.toThrow(
+      'Redis is not configured. Set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN (or KV_REST_API_URL + KV_REST_API_TOKEN).',
+    )
+  })
+
+  it('provider registry sms sender delegates through Twilio client wrapper', async () => {
+    await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    const call = mocks.processDueDeliveries.mock.calls[0]?.[0]
+    const providers = call.providers
+
+    const result = await providers.sms.send({
+      to: '+15550003333',
+      body: 'SMS body',
+      statusCallback: 'https://example.com/twilio/status',
+    })
+
+    expect(mocks.twilioMessageCreate).toHaveBeenCalledWith({
+      from: '+15550001111',
+      to: '+15550003333',
+      body: 'SMS body',
+      statusCallback: 'https://example.com/twilio/status',
+    })
+
+    expect(result).toEqual({
+      to: '+15550002222',
+      body: 'Reminder text',
+      status: 'queued',
+      sid: 'SM_1',
+    })
+  })
+
+  it('GET logs safely and returns generic 500 when provider configuration throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    delete process.env.TWILIO_AUTH_TOKEN
+
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(mocks.safeError).toHaveBeenCalledWith(expect.any(Error))
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'GET /api/internal/jobs/notifications/process error',
+      {
+        error: {
+          name: 'Error',
+          message: 'Missing TWILIO_AUTH_TOKEN configuration.',
+        },
+      },
+    )
+
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Internal server error',
+    })
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('POST logs safely and returns generic 500 when processing throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('delivery failed for tori@example.com token secret')
+    mocks.processDueDeliveries.mockRejectedValueOnce(thrown)
+
+    const result = await POST(
+      makeRequest({
+        method: 'POST',
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/internal/jobs/notifications/process error',
+      {
+        error: {
+          name: 'Error',
+          message: 'delivery failed for tori@example.com token secret',
+        },
+      },
+    )
+
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Internal server error',
+    })
+
+    consoleErrorSpy.mockRestore()
   })
 })

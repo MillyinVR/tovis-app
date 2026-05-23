@@ -36,6 +36,11 @@ const mocks = vi.hoisted(() => ({
   enforceRateLimit: vi.fn(),
   proRateLimitKey: vi.fn(),
   rateLimitExceededResponse: vi.fn(),
+
+  safeError: vi.fn((error: unknown) => ({
+    name: error instanceof Error ? error.name : 'NonErrorThrown',
+    message: error instanceof Error ? error.message : String(error),
+  })),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -97,6 +102,10 @@ vi.mock('@/lib/idempotency', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 import { GET, POST } from './route'
@@ -1671,10 +1680,18 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     },
   )
 
-  it('POST returns 500 for unexpected errors and marks idempotency failed', async () => {
+  it('POST returns 500 for unexpected errors, logs safely, captures exception, and marks idempotency failed', async () => {
     expectIdempotencyStarted('idem_boom_1')
 
-    mocks.upsertBookingAftercare.mockRejectedValueOnce(new Error('boom'))
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error(
+      'boom for https://example.com/aftercare?token=raw_secret',
+    )
+
+    mocks.upsertBookingAftercare.mockRejectedValueOnce(thrown)
 
     const result = await POST(
       makeIdempotentRequest({
@@ -1691,8 +1708,21 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       operation: OPERATION,
     })
 
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/pro/bookings/[id]/aftercare error',
+      {
+        error: {
+          name: 'Error',
+          message:
+            'boom for https://example.com/aftercare?token=raw_secret',
+        },
+      },
+    )
+
     expect(mocks.captureBookingException).toHaveBeenCalledWith({
-      error: expect.any(Error),
+      error: thrown,
       route: OPERATION,
     })
 
@@ -1701,5 +1731,7 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
       ok: false,
       error: 'Internal server error.',
     })
+
+    consoleErrorSpy.mockRestore()
   })
 })

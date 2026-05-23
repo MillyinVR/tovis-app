@@ -14,6 +14,7 @@ import {
 import { buildTier1WaitlistAudience } from '@/lib/lastMinute/audience/buildTier1WaitlistAudience'
 import { buildTier2ReactivationAudience } from '@/lib/lastMinute/audience/buildTier2ReactivationAudience'
 import { buildTier3DiscoveryAudience } from '@/lib/lastMinute/audience/buildTier3DiscoveryAudience'
+import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -462,8 +463,9 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<ProcessTierPlanRes
     }
   } catch (err: unknown) {
     const message =
-      err instanceof Error ? err.message : 'Failed to process last-minute tier plan'
-
+      err instanceof Error && err.message
+        ? err.message.slice(0, 500)
+        : 'Failed to process last-minute tier plan'
     await prisma.lastMinuteTierPlan.updateMany({
       where: {
         id: plan.id,
@@ -550,9 +552,11 @@ export async function GET(req: Request) {
   try {
     return await runJob(req)
   } catch (err: unknown) {
-    console.error('GET /api/internal/jobs/last-minute/process error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    return jsonFail(500, message)
+    console.error('GET /api/internal/jobs/last-minute/process error', {
+      error: safeError(err),
+    })
+
+    return jsonFail(500, 'Internal server error')
   }
 }
 
@@ -560,8 +564,10 @@ export async function POST(req: Request) {
   try {
     return await runJob(req)
   } catch (err: unknown) {
-    console.error('POST /api/internal/jobs/last-minute/process error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    return jsonFail(500, message)
+    console.error('POST /api/internal/jobs/last-minute/process error', {
+      error: safeError(err),
+    })
+
+    return jsonFail(500, 'Internal server error')
   }
 }

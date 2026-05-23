@@ -18,10 +18,12 @@
 // case via the existing cancelBooking write boundary path. IN_PROGRESS will
 // always require human review since it may represent a live service.
 
-import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { prisma } from '@/lib/prisma'
-import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { BookingStatus } from '@prisma/client'
+
+import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { prisma } from '@/lib/prisma'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -37,8 +39,10 @@ function readEnv(name: string): string | null {
 function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = readEnv(name)
   if (!raw) return fallback
+
   const parsed = Number(raw)
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+
   return Math.trunc(parsed)
 }
 
@@ -66,7 +70,7 @@ function logStaleObservation(payload: Record<string, unknown>): void {
       app: 'tovis',
       namespace: 'booking',
       event: 'stale_session_observed',
-      ...payload,
+      payload: safeLogMeta(payload),
     }),
   )
 }
@@ -143,8 +147,6 @@ async function runJob(req: Request) {
     const staleInProgress = await prisma.booking.findMany({
       where: {
         status: BookingStatus.IN_PROGRESS,
-        // Use updatedAt as a proxy for last lifecycle activity. Booking rows
-        // are updated on every step transition + audit log creation.
         updatedAt: { lte: inProgressCutoff },
       },
       select: {
@@ -177,13 +179,18 @@ async function runJob(req: Request) {
         scannedAt,
       })
     }
-  } catch (err: unknown) {
+  } catch (error: unknown) {
+    console.error('GET /api/internal/jobs/stale-sessions error', {
+      error: safeError(error),
+    })
+
     captureBookingException({
-      error: err,
+      error,
       route: 'GET /api/internal/jobs/stale-sessions',
       event: 'STALE_SESSIONS_SCAN_ERROR',
     })
-    throw err
+
+    throw error
   }
 
   return jsonOk({
