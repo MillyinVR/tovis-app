@@ -64,13 +64,19 @@ function isAuthorizedJobRequest(req: Request): boolean {
 }
 
 function logStaleObservation(payload: Record<string, unknown>): void {
+  const safePayload = safeLogMeta(payload)
+
   console.warn(
     JSON.stringify({
       level: 'warn',
       app: 'tovis',
       namespace: 'booking',
       event: 'stale_session_observed',
-      payload: safeLogMeta(payload),
+      ...(safePayload &&
+      typeof safePayload === 'object' &&
+      !Array.isArray(safePayload)
+        ? safePayload
+        : { payload: safePayload }),
     }),
   )
 }
@@ -204,9 +210,17 @@ async function runJob(req: Request) {
 }
 
 export async function GET(req: Request) {
-  return runJob(req)
+  try {
+    return await runJob(req)
+  } catch {
+    return jsonFail(500, 'Internal server error')
+  }
 }
 
 export async function POST(req: Request) {
-  return runJob(req)
+  try {
+    return await runJob(req)
+  } catch {
+    return jsonFail(500, 'Internal server error')
+  }
 }

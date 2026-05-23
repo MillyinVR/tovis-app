@@ -1,6 +1,6 @@
 // app/api/internal/jobs/stale-sessions/route.test.ts
 import { BookingStatus, SessionStep } from '@prisma/client'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
@@ -253,17 +253,15 @@ describe('app/api/internal/jobs/stale-sessions/route.ts', () => {
       app: 'tovis',
       namespace: 'booking',
       event: 'stale_session_observed',
-      payload: {
-        kind: 'PENDING_NOT_ACCEPTED',
-        bookingId: 'booking_pending_1',
-        professionalId: 'pro_1',
-        clientId: 'client_1',
-        createdAt: '2026-04-10T18:30:00.000Z',
-        scheduledFor: '2026-04-15T18:30:00.000Z',
-        ageHours: 72,
-        thresholdHours: 48,
-        scannedAt: '2026-04-13T18:30:00.000Z',
-      },
+      kind: 'PENDING_NOT_ACCEPTED',
+      bookingId: 'booking_pending_1',
+      professionalId: 'pro_1',
+      clientId: 'client_1',
+      createdAt: '2026-04-10T18:30:00.000Z',
+      scheduledFor: '2026-04-15T18:30:00.000Z',
+      ageHours: 72,
+      thresholdHours: 48,
+      scannedAt: '2026-04-13T18:30:00.000Z',
     })
 
     expect(result.status).toBe(200)
@@ -353,7 +351,7 @@ describe('app/api/internal/jobs/stale-sessions/route.ts', () => {
     expect(mocks.bookingFindMany).toHaveBeenCalledTimes(2)
   })
 
-  it('logs safe error metadata, captures exception, and rethrows when scan fails', async () => {
+  it('logs safe error metadata, captures exception, and returns 500 when scan fails', async () => {
     const errorSpy = vi
       .spyOn(console, 'error')
       .mockImplementation(() => undefined)
@@ -364,13 +362,17 @@ describe('app/api/internal/jobs/stale-sessions/route.ts', () => {
 
     mocks.bookingFindMany.mockReset().mockRejectedValueOnce(thrown)
 
-    await expect(
-      GET(
-        makeRequest({
-          authorization: 'Bearer job_secret_1',
-        }),
-      ),
-    ).rejects.toThrow(thrown)
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(result.status).toBe(500)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Internal server error',
+    })
 
     expect(mocks.safeError).toHaveBeenCalledWith(thrown)
 

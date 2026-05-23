@@ -27,6 +27,11 @@ const mocks = vi.hoisted(() => ({
   applyStripePaymentSucceededInTransaction: vi.fn(),
   applyStripePaymentFailedInTransaction: vi.fn(),
   applyStripeCheckoutSessionStatusInTransaction: vi.fn(),
+
+  safeError: vi.fn((error: unknown) => ({
+    name: error instanceof Error ? error.name : 'NonErrorThrown',
+    message: error instanceof Error ? error.message : String(error),
+  })),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -61,6 +66,10 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
     mocks.applyStripePaymentFailedInTransaction,
   applyStripeCheckoutSessionStatusInTransaction:
     mocks.applyStripeCheckoutSessionStatusInTransaction,
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
 }))
 
 import { POST } from './route'
@@ -284,16 +293,39 @@ describe('POST /api/webhooks/stripe', () => {
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
-  it('rejects invalid Stripe signatures', async () => {
+  it('rejects invalid Stripe signatures and logs safely', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('bad signature')
     mocks.constructEvent.mockImplementationOnce(() => {
-      throw new Error('bad signature')
+      throw thrown
     })
 
     const response = await POST(makeWebhookRequest())
 
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/webhooks/stripe signature verification failed',
+      {
+        error: {
+          name: 'Error',
+          message: 'bad signature',
+        },
+      },
+    )
+
     expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      error: 'Invalid Stripe webhook signature.',
+      code: 'STRIPE_SIGNATURE_INVALID',
+    })
+
     expect(mocks.stripeWebhookEventCreate).not.toHaveBeenCalled()
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
+
+    consoleErrorSpy.mockRestore()
   })
 
   it('returns success for duplicate already-processed events without reprocessing', async () => {
@@ -646,12 +678,26 @@ describe('POST /api/webhooks/stripe', () => {
     })
   })
 
-  it('marks webhook event failed and returns 500 when applyStripePaymentSucceededInTransaction throws', async () => {
-    mocks.applyStripePaymentSucceededInTransaction.mockRejectedValueOnce(
-      new Error('db boom'),
-    )
+  it('marks webhook event failed and returns generic 500 when applyStripePaymentSucceededInTransaction throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('db boom')
+    mocks.applyStripePaymentSucceededInTransaction.mockRejectedValueOnce(thrown)
 
     const response = await POST(makeWebhookRequest())
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/webhooks/stripe processing error',
+      {
+        error: {
+          name: 'Error',
+          message: 'db boom',
+        },
+      },
+    )
 
     expect(mocks.stripeWebhookEventUpdate).toHaveBeenCalledWith({
       where: { stripeEventId: 'evt_test_1' },
@@ -665,14 +711,21 @@ describe('POST /api/webhooks/stripe', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Failed to process Stripe webhook.',
       code: 'STRIPE_WEBHOOK_PROCESSING_FAILED',
-      message: 'db boom',
     })
+
+    consoleErrorSpy.mockRestore()
   })
 
-  it('marks webhook event failed and returns 500 when processed marker update throws', async () => {
+  it('marks webhook event failed and returns generic 500 when processed marker update throws', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const thrown = new Error('processed marker failed')
+
     mocks.stripeWebhookEventUpdate.mockImplementationOnce(async (args) => {
       if ('processedAt' in args.data) {
-        throw new Error('processed marker failed')
+        throw thrown
       }
 
       return { id: 'webhook_event_1' }
@@ -680,8 +733,17 @@ describe('POST /api/webhooks/stripe', () => {
 
     const response = await POST(makeWebhookRequest())
 
-    expect(mocks.applyStripePaymentSucceededInTransaction).toHaveBeenCalledTimes(
-      1,
+    expect(mocks.applyStripePaymentSucceededInTransaction).toHaveBeenCalledTimes(1)
+
+    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/webhooks/stripe processing error',
+      {
+        error: {
+          name: 'Error',
+          message: 'processed marker failed',
+        },
+      },
     )
 
     expect(mocks.stripeWebhookEventUpdate).toHaveBeenLastCalledWith({
@@ -696,7 +758,46 @@ describe('POST /api/webhooks/stripe', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Failed to process Stripe webhook.',
       code: 'STRIPE_WEBHOOK_PROCESSING_FAILED',
-      message: 'processed marker failed',
     })
+
+    consoleErrorSpy.mockRestore()
+  })
+    it('logs safely when marking a failed webhook event also fails', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const processingError = new Error('payment sync failed')
+    const markError = new Error('mark failed')
+
+    mocks.applyStripePaymentSucceededInTransaction.mockRejectedValueOnce(
+      processingError,
+    )
+
+    mocks.stripeWebhookEventUpdate.mockRejectedValueOnce(markError)
+
+    const response = await POST(makeWebhookRequest())
+
+    expect(mocks.safeError).toHaveBeenCalledWith(processingError)
+    expect(mocks.safeError).toHaveBeenCalledWith(markError)
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/webhooks/stripe failed to mark event failed',
+      {
+        stripeEventId: 'evt_test_1',
+        error: {
+          name: 'Error',
+          message: 'mark failed',
+        },
+      },
+    )
+
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toEqual({
+      error: 'Failed to process Stripe webhook.',
+      code: 'STRIPE_WEBHOOK_PROCESSING_FAILED',
+    })
+
+    consoleErrorSpy.mockRestore()
   })
 })

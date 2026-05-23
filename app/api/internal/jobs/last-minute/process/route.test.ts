@@ -776,14 +776,14 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
     })
   })
 
-  it('records failed plan result and updateMany lastError when processing throws', async () => {
+  it('records failed plan result with a generic lastError when processing throws', async () => {
     const plan = makePlan({
       id: 'tier_plan_failed_1',
     })
 
     mocks.lastMinuteTierPlanFindMany.mockResolvedValueOnce([plan])
     mocks.lastMinuteTierPlanFindUnique.mockRejectedValueOnce(
-      new Error('transaction exploded'),
+      new Error('transaction exploded for tori@example.com token secret_123'),
     )
 
     const result = await GET(
@@ -798,7 +798,7 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
         processedAt: null,
       },
       data: {
-        lastError: 'transaction exploded',
+        lastError: 'Failed to process last-minute tier plan',
       },
     })
 
@@ -815,7 +815,7 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
           id: 'tier_plan_failed_1',
           openingId: 'opening_1',
           tier: LastMinuteTier.WAITLIST,
-          error: 'transaction exploded',
+          error: 'Failed to process last-minute tier plan',
         },
       ],
       processed: [],
@@ -828,6 +828,12 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
       .mockImplementation(() => undefined)
 
     const thrown = new Error('db failed for tori@example.com token secret_123')
+    const safeThrown = {
+      name: 'Error',
+      message: 'db failed for tori@example.com token secret_123',
+    }
+
+    mocks.safeError.mockReturnValueOnce(safeThrown)
     mocks.lastMinuteTierPlanFindMany.mockRejectedValueOnce(thrown)
 
     const result = await GET(
@@ -840,10 +846,7 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       'GET /api/internal/jobs/last-minute/process error',
       {
-        error: {
-          name: 'Error',
-          message: 'db failed for tori@example.com token secret_123',
-        },
+        error: safeThrown,
       },
     )
 
@@ -862,6 +865,12 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
       .mockImplementation(() => undefined)
 
     const thrown = new Error('post db failed for token secret_123')
+    const safeThrown = {
+      name: 'Error',
+      message: 'post db failed for token secret_123',
+    }
+
+    mocks.safeError.mockReturnValueOnce(safeThrown)
     mocks.lastMinuteTierPlanFindMany.mockRejectedValueOnce(thrown)
 
     const result = await POST(
@@ -875,10 +884,7 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       'POST /api/internal/jobs/last-minute/process error',
       {
-        error: {
-          name: 'Error',
-          message: 'post db failed for token secret_123',
-        },
+        error: safeThrown,
       },
     )
 
@@ -890,4 +896,4 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
 
     consoleErrorSpy.mockRestore()
   })
-})
+  })

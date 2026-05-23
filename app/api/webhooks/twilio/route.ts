@@ -3,14 +3,19 @@
 import { validateRequest } from 'twilio'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { getTwilioAuthToken } from '@/lib/twilio'
 
 export const dynamic = 'force-dynamic'
 
 function getPublicRequestUrl(req: Request): string {
   const url = new URL(req.url)
-  const proto = req.headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '')
-  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? url.host
+  const proto =
+    req.headers.get('x-forwarded-proto') ?? url.protocol.replace(':', '')
+  const host =
+    req.headers.get('x-forwarded-host') ??
+    req.headers.get('host') ??
+    url.host
 
   return `${proto}://${host}${url.pathname}${url.search}`
 }
@@ -44,20 +49,24 @@ export async function POST(req: Request) {
     const to = params.To ?? null
     const from = params.From ?? null
 
-    // Add DB persistence here later if needed.
-    console.info('Twilio webhook received', {
-      messageSid,
-      messageStatus,
-      to,
-      from,
-    })
+    console.info(
+      'Twilio webhook received',
+      safeLogMeta({
+        messageSid,
+        messageStatus,
+        to,
+        from,
+      }),
+    )
 
     return jsonOk({
-      ok: true,
       received: true,
     })
   } catch (err: unknown) {
-    console.error('POST /api/webhooks/twilio error', err)
+    console.error('POST /api/webhooks/twilio error', {
+      error: safeError(err),
+    })
+
     return jsonFail(500, 'Failed to process Twilio webhook.')
   }
 }

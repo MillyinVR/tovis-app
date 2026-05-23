@@ -4,7 +4,7 @@ import {
   StripeAccountStatus,
   StripeCheckoutSessionStatus,
 } from '@prisma/client'
-
+import { safeError } from '@/lib/security/logging'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { prisma } from '@/lib/prisma'
 import { getStripe, getStripeWebhookSecret } from '@/lib/stripe/server'
@@ -322,7 +322,9 @@ export async function POST(req: Request) {
   } catch (error: unknown) {
     console.error(
       'POST /api/webhooks/stripe signature verification failed',
-      error,
+      {
+        error: safeError(error),
+      },
     )
 
     return jsonFail(400, 'Invalid Stripe webhook signature.', {
@@ -402,21 +404,22 @@ const result = await prisma.$transaction(
       200,
     )
   } catch (error: unknown) {
-    console.error('POST /api/webhooks/stripe processing error', error)
+    console.error('POST /api/webhooks/stripe processing error', {
+      error: safeError(error),
+    })
 
     await markEventFailed({
       stripeEventId: event.id,
       error,
-    }).catch((markError) => {
+    }).catch((markError: unknown) => {
       console.error('POST /api/webhooks/stripe failed to mark event failed', {
         stripeEventId: event.id,
-        markError,
+        error: safeError(markError),
       })
     })
 
     return jsonFail(500, 'Failed to process Stripe webhook.', {
       code: 'STRIPE_WEBHOOK_PROCESSING_FAILED',
-      message: error instanceof Error ? error.message : String(error),
     })
   }
 }

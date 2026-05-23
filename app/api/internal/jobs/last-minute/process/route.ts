@@ -462,10 +462,7 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<ProcessTierPlanRes
       createdRecipients: transactionResult.createdRecipients,
     }
   } catch (err: unknown) {
-    const message =
-      err instanceof Error && err.message
-        ? err.message.slice(0, 500)
-        : 'Failed to process last-minute tier plan'
+    const message = 'Failed to process last-minute tier plan'
     await prisma.lastMinuteTierPlan.updateMany({
       where: {
         id: plan.id,

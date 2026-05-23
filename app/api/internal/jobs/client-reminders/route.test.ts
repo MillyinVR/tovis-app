@@ -447,13 +447,13 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
     })
   })
 
-  it('marks retryable failure and reports failed reminder when processing throws', async () => {
+  it('marks retryable failure with a generic error when processing throws', async () => {
     mocks.scheduledClientNotificationFindMany.mockResolvedValueOnce([
       { id: 'reminder_failed_1' },
     ])
 
     mocks.validateDueAppointmentReminder.mockRejectedValueOnce(
-      new Error('validation exploded'),
+      new Error('validation exploded for tori@example.com token secret_123'),
     )
 
     const result = await GET(
@@ -470,7 +470,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       },
       data: {
         failedAt: null,
-        lastError: 'validation exploded',
+        lastError: 'Failed to process scheduled reminder',
       },
     })
 
@@ -486,7 +486,7 @@ describe('app/api/internal/jobs/client-reminders/route.ts', () => {
       failed: [
         {
           id: 'reminder_failed_1',
-          error: 'validation exploded',
+          error: 'Failed to process scheduled reminder',
         },
       ],
     })

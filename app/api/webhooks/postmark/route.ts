@@ -3,6 +3,7 @@
 import { timingSafeEqual } from 'node:crypto'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,11 +23,16 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(aBuffer, bBuffer)
 }
 
-function parseBasicAuth(header: string | null): { username: string; password: string } | null {
+function parseBasicAuth(
+  header: string | null,
+): { username: string; password: string } | null {
   if (!header?.startsWith('Basic ')) return null
 
   try {
-    const decoded = Buffer.from(header.slice('Basic '.length), 'base64').toString('utf8')
+    const decoded = Buffer.from(
+      header.slice('Basic '.length),
+      'base64',
+    ).toString('utf8')
     const separatorIndex = decoded.indexOf(':')
 
     if (separatorIndex < 0) return null
@@ -74,24 +80,30 @@ export async function POST(req: Request) {
     }
 
     const recordType = pickString(payload.RecordType)
-    const messageId = pickString(payload.MessageID) ?? pickString(payload.MessageId)
+    const messageId =
+      pickString(payload.MessageID) ?? pickString(payload.MessageId)
     const recipient = pickString(payload.Recipient)
     const email = pickString(payload.Email)
 
     // Add DB persistence here later if needed.
-    console.info('Postmark webhook received', {
-      recordType,
-      messageId,
-      recipient,
-      email,
-    })
+    console.info(
+      'Postmark webhook received',
+      safeLogMeta({
+        recordType,
+        messageId,
+        recipient,
+        email,
+      }),
+    )
 
     return jsonOk({
-      ok: true,
       received: true,
     })
-  } catch (err: unknown) {
-    console.error('POST /api/webhooks/postmark error', err)
+  } catch (error: unknown) {
+    console.error('POST /api/webhooks/postmark error', {
+      error: safeError(error),
+    })
+
     return jsonFail(500, 'Failed to process Postmark webhook.')
   }
 }

@@ -119,10 +119,16 @@ async function markReminderRetryableFailureIfPending(args: {
   return result.count === 1
 }
 
+const GENERIC_REMINDER_PROCESS_ERROR = 'Failed to process scheduled reminder'
+
 function getErrorMessage(err: unknown): string {
-  return err instanceof Error
+  return err instanceof Error && err.message
     ? err.message
-    : 'Failed to process scheduled reminder'
+    : GENERIC_REMINDER_PROCESS_ERROR
+}
+
+function getSafeReminderProcessError(): string {
+  return GENERIC_REMINDER_PROCESS_ERROR
 }
 
 async function processReminder(args: {
@@ -190,13 +196,13 @@ async function processReminder(args: {
       }
     })
   } catch (err: unknown) {
-    const message = getErrorMessage(err)
+const message = getSafeReminderProcessError()
 
-    const markedRetryableFailure =
-      await markReminderRetryableFailureIfPending({
-        rowId: args.rowId,
-        error: message,
-      })
+const markedRetryableFailure =
+  await markReminderRetryableFailureIfPending({
+    rowId: args.rowId,
+    error: message,
+  })
 
     if (!markedRetryableFailure) {
       return {
