@@ -65,13 +65,13 @@ Use this table during the sprint.
 | Public search/profile privacy check completed | Tori | TODO | Unknown | No | No | No | No | Needs manual review of public profile/search payloads. |
 | Admin/support access policy reviewed | Tori / Support-Ops reviewer needed | IN PROGRESS | Partial | Partial | Unknown | No | No | Scoped admin permission checks exist for moderation and verification-doc open paths; policy review still needed. |
 | Launch risks converted to tickets | Tori | TODO | Partial | No | N/A | N/A | No | Remaining gaps need tracker tickets or explicit risk acceptance. |
-| SHA-256 vs HMAC contact hash decision documented | Tori / Security reviewer needed | TODO | No | No | No | No | No | `lib/security/crypto/hashLookup.ts` uses SHA-256; create `docs/security/contact-lookup-hash-threat-model.md`. |
+| SHA-256 vs HMAC contact hash decision documented | Tori / Security reviewer needed | IN PROGRESS | Yes (doc only) | N/A | N/A | N/A | No | Decision recorded in `docs/security/contact-lookup-hash-threat-model.md`. Code still uses SHA-256; HMAC-SHA256 migration is a future ticket. |
 | ClientAddress encrypted writes verified | Tori | DONE | Yes | Yes | Unknown | No | No | Create/update paths write address privacy fields. |
 | ProfessionalLocation encrypted writes verified | Tori | DONE | Yes | Yes | Unknown | No | No | Create/update/onboarding/offerings paths write address privacy fields. |
 | BookingHold/Booking encrypted snapshot writes verified | Tori | IN PROGRESS | Partial | Partial | Unknown | No | No | Envelope is written into legacy snapshot JSON columns; dedicated encrypted snapshot columns are not written. |
 | Address read/decrypt helper seam verified | Tori | TODO | Partial | No | No | No | No | Write helper exists; central decrypt/read helper does not. |
 | Pro session state refresh proof completed | Tori | TODO | No | No | No | No | No | No session state endpoint or polling UI yet. |
-| Test proof record created | Tori | TODO | No | No | No | No | No | Create `docs/launch-readiness/test-proof.md`. |
+| Test proof record created | Tori | IN PROGRESS | Yes | Yes | No | No | No | File exists with safe-logging proof and contact-hash decision. CI/staging/prod evidence not yet captured. See `docs/launch-readiness/test-proof.md`. |
 ---
 # 1. Documentation existence check
 Run:

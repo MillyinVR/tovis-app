@@ -34,3 +34,41 @@ grep -RIn \
   --exclude-dir=.git \
   --include='route.ts' \
   "console\.error([^,]*,[[:space:]]*error[)]" app/api/pro/bookings app/api/bookings
+```
+
+Result: no matches. The raw `console.error(..., error)` pattern is absent from
+the scoped booking route files.
+
+```bash
+pnpm vitest run \
+  app/api/pro/bookings/route.test.ts \
+  'app/api/pro/bookings/[id]/route.test.ts' \
+  'app/api/pro/bookings/[id]/cancel/route.test.ts' \
+  'app/api/pro/bookings/[id]/final-review/route.test.ts' \
+  'app/api/pro/bookings/[id]/consultation-services/route.test.ts' \
+  'app/api/pro/bookings/[id]/checkout/mark-paid/route.test.ts' \
+  'app/api/pro/bookings/[id]/checkout/waive/route.test.ts' \
+  'app/api/pro/bookings/[id]/invite/route.test.ts' \
+  'app/api/pro/bookings/[id]/rebook/route.test.ts' \
+  'app/api/pro/bookings/[id]/session/finish/route.test.ts' \
+  'app/api/bookings/[id]/reschedule/route.test.ts'
+```
+
+Result: 11 test files passed, 153 tests passed.
+
+```bash
+pnpm typecheck
+```
+
+Result: passed.
+
+### Limitations
+
+- Local only. CI run for the same suite is not yet recorded here.
+- Staging deploy verification not yet recorded.
+- Production verification not yet recorded.
+- Grep is scoped to `app/api/pro/bookings` and `app/api/bookings` and to the
+  pattern `console.error(..., error)`. Other call patterns (for example
+  `console.error('message', { ...payload })`) and other directories (notably
+  `lib/booking/writeBoundary.ts`) are not covered by this proof. A follow-up
+  ticket covers `logHoldCreateInternalError` sanitation.
