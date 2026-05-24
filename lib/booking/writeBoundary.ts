@@ -66,6 +66,7 @@ import {
   sanitizeTimeZone,
 } from '@/lib/timeZone'
 import { clampInt } from '@/lib/pick'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { createAftercareAccessDelivery } from '@/lib/clientActions/createAftercareAccessDelivery'
 import {
   normalizeAddress,
@@ -4394,37 +4395,29 @@ function logHoldCreateInternalError(args: {
   selectedClientAddressId: string | null
   durationMinutes: number
   bufferMinutes: number
-  salonLocationAddress: unknown
-  clientServiceAddress: unknown
-  holdCreateData: Prisma.BookingHoldUncheckedCreateInput
 }): void {
-  const serializedError =
-    args.error instanceof Error
-      ? {
-          name: args.error.name,
-          message: args.error.message,
-          stack: args.error.stack,
-        }
-      : args.error
-
-  console.error('performLockedCreateHold internal error', {
-    error: serializedError,
-    clientId: args.clientId,
-    offeringId: args.offeringId,
-    professionalId: args.professionalId,
-    requestedStart: args.requestedStart.toISOString(),
-    locationType: args.locationType,
-    requestedLocationId: args.requestedLocationId,
-    resolvedLocationId: args.resolvedLocationId,
-    resolvedTimeZone: args.resolvedTimeZone,
-    clientAddressId: args.clientAddressId,
-    selectedClientAddressId: args.selectedClientAddressId,
-    durationMinutes: args.durationMinutes,
-    bufferMinutes: args.bufferMinutes,
-    salonLocationAddress: args.salonLocationAddress,
-    clientServiceAddress: args.clientServiceAddress,
-    holdCreateData: args.holdCreateData,
-  })
+  // Route through safeError/safeLogMeta. Raw addresses, the salon/client
+  // formatted address strings, and the BookingHold create payload (which
+  // contains the address privacy envelope) are intentionally NOT logged —
+  // hold-create failures must not leak PII into operational logs.
+  console.error(
+    'performLockedCreateHold internal error',
+    safeLogMeta({
+      error: safeError(args.error),
+      clientId: args.clientId,
+      offeringId: args.offeringId,
+      professionalId: args.professionalId,
+      requestedStart: args.requestedStart.toISOString(),
+      locationType: args.locationType,
+      requestedLocationId: args.requestedLocationId,
+      resolvedLocationId: args.resolvedLocationId,
+      resolvedTimeZone: args.resolvedTimeZone,
+      clientAddressId: args.clientAddressId,
+      selectedClientAddressId: args.selectedClientAddressId,
+      durationMinutes: args.durationMinutes,
+      bufferMinutes: args.bufferMinutes,
+    }),
+  )
 }
 
 function logHoldCreateTiming(args: {
@@ -6666,19 +6659,34 @@ afterHoldPolicyMs = Date.now()
     locationId: locationContext.locationId,
     locationTimeZone: locationContext.timeZone,
 
+    // Legacy expand-phase columns (kept populated for backward compatibility
+    // with readers that have not migrated to the dedicated columns yet).
     locationAddressSnapshot: locationAddressSnapshotData.snapshot,
     locationAddressSnapshotKeyVersion: locationAddressSnapshotData.keyVersion,
     locationLatSnapshot: locationAddressSnapshotData.latSnapshot,
     locationLngSnapshot: locationAddressSnapshotData.lngSnapshot,
 
+    // Dedicated encrypted snapshot columns (canonical going forward).
+    encryptedLocationAddressSnapshotJson: locationAddressSnapshotData.snapshot,
+    locationLatApprox: locationAddressSnapshotData.latSnapshot,
+    locationLngApprox: locationAddressSnapshotData.lngSnapshot,
+
     clientAddressId:
       locationType === ServiceLocationType.MOBILE && selectedClientAddress
         ? selectedClientAddress.id
         : null,
+
+    // Legacy
     clientAddressSnapshot: clientAddressSnapshotData.snapshot,
     clientAddressSnapshotKeyVersion: clientAddressSnapshotData.keyVersion,
     clientAddressLatSnapshot: clientAddressSnapshotData.latSnapshot,
     clientAddressLngSnapshot: clientAddressSnapshotData.lngSnapshot,
+
+    // Dedicated
+    encryptedClientAddressSnapshotJson: clientAddressSnapshotData.snapshot,
+    clientAddressLatApprox: clientAddressSnapshotData.latSnapshot,
+    clientAddressLngApprox: clientAddressSnapshotData.lngSnapshot,
+
     addressSnapshotsEncryptedAt,
   } satisfies Prisma.BookingHoldUncheckedCreateInput
 
@@ -6760,9 +6768,6 @@ afterHoldPolicyMs = Date.now()
       selectedClientAddressId: selectedClientAddress?.id ?? null,
       durationMinutes,
       bufferMinutes: locationContext.bufferMinutes,
-      salonLocationAddress,
-      clientServiceAddress,
-      holdCreateData,
     })
 
     throw error
@@ -6985,6 +6990,7 @@ await enforceBookingOverlapPolicy({
       locationId: locationContext.locationId,
       locationTimeZone: locationContext.timeZone,
 
+      // Legacy expand-phase columns.
       locationAddressSnapshot: salonLocationAddressSnapshotData.snapshot,
       locationAddressSnapshotKeyVersion: salonLocationAddressSnapshotData.keyVersion,
       locationLatSnapshot:
@@ -6992,10 +6998,19 @@ await enforceBookingOverlapPolicy({
       locationLngSnapshot:
         decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
 
+      // Dedicated encrypted snapshot columns.
+      encryptedLocationAddressSnapshotJson: salonLocationAddressSnapshotData.snapshot,
+      locationLatApprox:
+        decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
+      locationLngApprox:
+        decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
+
       clientAddressId:
         validatedHold.value.locationType === ServiceLocationType.MOBILE
           ? validatedHold.value.holdClientAddressId
           : null,
+
+      // Legacy
       clientAddressSnapshot: mobileClientAddressSnapshotData.snapshot,
       clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
       clientAddressLatSnapshot:
@@ -7006,6 +7021,18 @@ await enforceBookingOverlapPolicy({
         validatedHold.value.locationType === ServiceLocationType.MOBILE
           ? decimalToNumber(hold.clientAddressLngSnapshot)
           : null,
+
+      // Dedicated
+      encryptedClientAddressSnapshotJson: mobileClientAddressSnapshotData.snapshot,
+      clientAddressLatApprox:
+        validatedHold.value.locationType === ServiceLocationType.MOBILE
+          ? decimalToNumber(hold.clientAddressLatSnapshot)
+          : null,
+      clientAddressLngApprox:
+        validatedHold.value.locationType === ServiceLocationType.MOBILE
+          ? decimalToNumber(hold.clientAddressLngSnapshot)
+          : null,
+
       addressSnapshotsEncryptedAt:
         salonLocationAddressSnapshotData.encryptedAt ??
         mobileClientAddressSnapshotData.encryptedAt,
@@ -8040,6 +8067,7 @@ async function performLockedFinalizeBookingFromHold(args: {
         locationId: locationContext.locationId,
         locationTimeZone: locationContext.timeZone,
 
+        // Legacy expand-phase columns.
         locationAddressSnapshot: salonLocationAddressSnapshotData.snapshot,
         locationAddressSnapshotKeyVersion: salonLocationAddressSnapshotData.keyVersion,
         locationLatSnapshot:
@@ -8047,10 +8075,19 @@ async function performLockedFinalizeBookingFromHold(args: {
         locationLngSnapshot:
           decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
 
+        // Dedicated encrypted snapshot columns.
+        encryptedLocationAddressSnapshotJson: salonLocationAddressSnapshotData.snapshot,
+        locationLatApprox:
+          decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
+        locationLngApprox:
+          decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
+
         clientAddressId:
           validatedHold.value.locationType === ServiceLocationType.MOBILE
             ? validatedHold.value.holdClientAddressId
             : null,
+
+        // Legacy
         clientAddressSnapshot: mobileClientAddressSnapshotData.snapshot,
         clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
         clientAddressLatSnapshot:
@@ -8061,6 +8098,18 @@ async function performLockedFinalizeBookingFromHold(args: {
           validatedHold.value.locationType === ServiceLocationType.MOBILE
             ? decimalToNumber(hold.clientAddressLngSnapshot)
             : null,
+
+        // Dedicated
+        encryptedClientAddressSnapshotJson: mobileClientAddressSnapshotData.snapshot,
+        clientAddressLatApprox:
+          validatedHold.value.locationType === ServiceLocationType.MOBILE
+            ? decimalToNumber(hold.clientAddressLatSnapshot)
+            : null,
+        clientAddressLngApprox:
+          validatedHold.value.locationType === ServiceLocationType.MOBILE
+            ? decimalToNumber(hold.clientAddressLngSnapshot)
+            : null,
+
         addressSnapshotsEncryptedAt:
           salonLocationAddressSnapshotData.encryptedAt ??
           mobileClientAddressSnapshotData.encryptedAt,
@@ -8495,19 +8544,32 @@ async function performLockedCreateProBooking(args: {
         locationId: locationContext.locationId,
         locationTimeZone: locationContext.timeZone,
 
+        // Legacy expand-phase columns.
         locationAddressSnapshot: salonLocationAddressSnapshotData.snapshot,
         locationAddressSnapshotKeyVersion: salonLocationAddressSnapshotData.keyVersion,
         locationLatSnapshot: salonLocationAddressSnapshotData.latSnapshot,
         locationLngSnapshot: salonLocationAddressSnapshotData.lngSnapshot,
 
+        // Dedicated encrypted snapshot columns.
+        encryptedLocationAddressSnapshotJson: salonLocationAddressSnapshotData.snapshot,
+        locationLatApprox: salonLocationAddressSnapshotData.latSnapshot,
+        locationLngApprox: salonLocationAddressSnapshotData.lngSnapshot,
+
         clientAddressId:
           args.locationType === ServiceLocationType.MOBILE && clientAddress
             ? clientAddress.id
             : null,
+          // Legacy
           clientAddressSnapshot: clientAddressSnapshotData.snapshot,
           clientAddressSnapshotKeyVersion: clientAddressSnapshotData.keyVersion,
           clientAddressLatSnapshot: clientAddressSnapshotData.latSnapshot,
           clientAddressLngSnapshot: clientAddressSnapshotData.lngSnapshot,
+
+          // Dedicated
+          encryptedClientAddressSnapshotJson: clientAddressSnapshotData.snapshot,
+          clientAddressLatApprox: clientAddressSnapshotData.latSnapshot,
+          clientAddressLngApprox: clientAddressSnapshotData.lngSnapshot,
+
           addressSnapshotsEncryptedAt,
 
         internalNotes: args.internalNotes ?? null,
@@ -8952,6 +9014,7 @@ assertCanCreateRebookFromSourceBooking({
         locationId: locationContext.locationId,
         locationTimeZone: locationContext.timeZone,
 
+        // Legacy expand-phase columns.
         locationAddressSnapshot: salonAddressSnapshotData.snapshot,
         locationAddressSnapshotKeyVersion: salonAddressSnapshotData.keyVersion,
         locationLatSnapshot:
@@ -8959,10 +9022,19 @@ assertCanCreateRebookFromSourceBooking({
         locationLngSnapshot:
           decimalToNumber(source.locationLngSnapshot) ?? locationContext.lng,
 
+        // Dedicated encrypted snapshot columns.
+        encryptedLocationAddressSnapshotJson: salonAddressSnapshotData.snapshot,
+        locationLatApprox:
+          decimalToNumber(source.locationLatSnapshot) ?? locationContext.lat,
+        locationLngApprox:
+          decimalToNumber(source.locationLngSnapshot) ?? locationContext.lng,
+
         clientAddressId:
           source.locationType === ServiceLocationType.MOBILE
             ? source.clientAddressId
             : null,
+
+        // Legacy
         clientAddressSnapshot: mobileClientAddressSnapshotData.snapshot,
         clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
         clientAddressLatSnapshot:
@@ -8973,6 +9045,18 @@ assertCanCreateRebookFromSourceBooking({
           source.locationType === ServiceLocationType.MOBILE
             ? decimalToNumber(source.clientAddressLngSnapshot)
             : null,
+
+        // Dedicated
+        encryptedClientAddressSnapshotJson: mobileClientAddressSnapshotData.snapshot,
+        clientAddressLatApprox:
+          source.locationType === ServiceLocationType.MOBILE
+            ? decimalToNumber(source.clientAddressLatSnapshot)
+            : null,
+        clientAddressLngApprox:
+          source.locationType === ServiceLocationType.MOBILE
+            ? decimalToNumber(source.clientAddressLngSnapshot)
+            : null,
+
         addressSnapshotsEncryptedAt:
           salonAddressSnapshotData.encryptedAt ??
           mobileClientAddressSnapshotData.encryptedAt,
