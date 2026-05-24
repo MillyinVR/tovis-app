@@ -5,6 +5,7 @@ import {
   Prisma,
   ServiceLocationType,
 } from '@prisma/client'
+import { ADDRESS_KEY_VERSION } from '@/lib/security/addressEncryption'
 
 const TEST_NOW = new Date('2026-03-18T16:00:00.000Z')
 const REQUESTED_START = new Date('2026-03-20T18:00:00.000Z')
@@ -30,6 +31,28 @@ const MOBILE_CLIENT_IN_RADIUS_LNG = -117.15
 const MOBILE_CLIENT_OUT_OF_RADIUS_LAT = 34.0522
 const MOBILE_CLIENT_OUT_OF_RADIUS_LNG = -118.2437
 
+const LEGACY_PLAINTEXT_CLIENT_SNAPSHOT = {
+  formattedAddress: '456 Client Home, San Diego, CA 92101',
+}
+
+const DEDICATED_CLIENT_ENCRYPTED_SNAPSHOT = {
+  v: 1,
+  algorithm: 'plaintext-json-expand-phase',
+  keyVersion: ADDRESS_KEY_VERSION,
+  address: {
+    formattedAddress: '456 Client Home, San Diego, CA 92101',
+    addressLine1: null,
+    addressLine2: null,
+    city: null,
+    state: null,
+    postalCode: null,
+    countryCode: null,
+    placeId: null,
+    lat: '32.7309876',
+    lng: '-117.1509876',
+  },
+}
+
 const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
   checkProReadinessForEntryPointWithDb: vi.fn(),
@@ -45,9 +68,13 @@ const mocks = vi.hoisted(() => ({
   txClientAddressFindFirst: vi.fn(),
   txProfessionalProfileFindUnique: vi.fn(),
   txBookingHoldFindUnique: vi.fn(),
+  txBookingHoldFindMany: vi.fn(),
   txBookingHoldCreate: vi.fn(),
   txBookingHoldDelete: vi.fn(),
+  txBookingFindMany: vi.fn(),
   txBookingCreate: vi.fn(),
+  txBookingServiceItemCreate: vi.fn(),
+  txBookingServiceItemCreateMany: vi.fn(),
 
   syncBookingAppointmentReminders: vi.fn(),
 }))
@@ -116,11 +143,17 @@ const tx = {
   },
   bookingHold: {
     findUnique: mocks.txBookingHoldFindUnique,
+    findMany: mocks.txBookingHoldFindMany,
     create: mocks.txBookingHoldCreate,
     delete: mocks.txBookingHoldDelete,
   },
   booking: {
+    findMany: mocks.txBookingFindMany,
     create: mocks.txBookingCreate,
+  },
+  bookingServiceItem: {
+    create: mocks.txBookingServiceItemCreate,
+    createMany: mocks.txBookingServiceItemCreateMany,
   },
 }
 
@@ -187,6 +220,13 @@ function makeMobileHold(
     clientAddressLngSnapshot?: number | null
     locationLatSnapshot?: number | null
     locationLngSnapshot?: number | null
+    encryptedLocationAddressSnapshotJson?: Prisma.JsonValue | null
+    encryptedClientAddressSnapshotJson?: Prisma.JsonValue | null
+    locationLatApprox?: number | null
+    locationLngApprox?: number | null
+    clientAddressLatApprox?: number | null
+    clientAddressLngApprox?: number | null
+    addressSnapshotsEncryptedAt?: Date | null
   } = {},
 ) {
   return {
@@ -208,10 +248,20 @@ function makeMobileHold(
       overrides.locationLngSnapshot === undefined
         ? MOBILE_BASE_LNG
         : overrides.locationLngSnapshot,
+    encryptedLocationAddressSnapshotJson:
+      overrides.encryptedLocationAddressSnapshotJson === undefined
+        ? null
+        : overrides.encryptedLocationAddressSnapshotJson,
+    locationLatApprox:
+      overrides.locationLatApprox === undefined
+        ? null
+        : overrides.locationLatApprox,
+    locationLngApprox:
+      overrides.locationLngApprox === undefined
+        ? null
+        : overrides.locationLngApprox,
     clientAddressId: CLIENT_ADDRESS_ID,
-    clientAddressSnapshot: {
-      formattedAddress: '456 Client Home, San Diego, CA 92101',
-    },
+    clientAddressSnapshot: LEGACY_PLAINTEXT_CLIENT_SNAPSHOT,
     clientAddressLatSnapshot:
       overrides.clientAddressLatSnapshot === undefined
         ? MOBILE_CLIENT_IN_RADIUS_LAT
@@ -220,15 +270,36 @@ function makeMobileHold(
       overrides.clientAddressLngSnapshot === undefined
         ? MOBILE_CLIENT_IN_RADIUS_LNG
         : overrides.clientAddressLngSnapshot,
+    encryptedClientAddressSnapshotJson:
+      overrides.encryptedClientAddressSnapshotJson === undefined
+        ? null
+        : overrides.encryptedClientAddressSnapshotJson,
+    clientAddressLatApprox:
+      overrides.clientAddressLatApprox === undefined
+        ? null
+        : overrides.clientAddressLatApprox,
+    clientAddressLngApprox:
+      overrides.clientAddressLngApprox === undefined
+        ? null
+        : overrides.clientAddressLngApprox,
+    addressSnapshotsEncryptedAt:
+      overrides.addressSnapshotsEncryptedAt === undefined
+        ? null
+        : overrides.addressSnapshotsEncryptedAt,
   }
 }
 
-function arrangeMobileContext() {
+function arrangeMobileContext(
+  overrides: {
+    lat?: number | null
+    lng?: number | null
+  } = {},
+) {
   mocks.resolveValidatedBookingContext.mockResolvedValueOnce({
     ok: true,
     durationMinutes: 90,
     priceStartingAt: new Prisma.Decimal('125.00'),
-    context: makeMobileContext(),
+    context: makeMobileContext(overrides),
   })
 }
 
@@ -316,6 +387,8 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
         formattedAddress: '456 Client Home, San Diego, CA 92101',
       },
     })
+    mocks.txBookingHoldFindMany.mockResolvedValue([])
+    mocks.txBookingFindMany.mockResolvedValue([])
 
     mocks.txBookingCreate.mockResolvedValue({
       id: BOOKING_ID,
@@ -323,6 +396,10 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
       scheduledFor: REQUESTED_START,
       professionalId: PROFESSIONAL_ID,
     })
+    mocks.txBookingServiceItemCreate.mockResolvedValue({
+      id: 'base_item_mobile_1',
+    })
+    mocks.txBookingServiceItemCreateMany.mockResolvedValue({ count: 0 })
 
     mocks.txBookingHoldDelete.mockResolvedValue({
       id: HOLD_ID,
@@ -466,7 +543,16 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
   })
 
   it('populates dedicated encrypted snapshot columns on mobile hold create', async () => {
-    arrangeMobileContext()
+    mocks.txClientAddressFindFirst.mockResolvedValueOnce(
+      makeMobileClientAddress({
+        lat: new Prisma.Decimal('32.7309876'),
+        lng: new Prisma.Decimal('-117.1509876'),
+      }),
+    )
+    arrangeMobileContext({
+      lat: 32.7157123,
+      lng: -117.1611987,
+    })
 
     await createHold(makeCreateHoldArgs())
 
@@ -477,15 +563,113 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           encryptedLocationAddressSnapshotJson: Prisma.JsonNull,
-          locationLatApprox: MOBILE_BASE_LAT,
-          locationLngApprox: MOBILE_BASE_LNG,
+          locationLatApprox: 32.7157,
+          locationLngApprox: -117.1612,
 
-          encryptedClientAddressSnapshotJson: expect.anything(),
-          clientAddressLatApprox: MOBILE_CLIENT_IN_RADIUS_LAT,
-          clientAddressLngApprox: MOBILE_CLIENT_IN_RADIUS_LNG,
+          encryptedClientAddressSnapshotJson: expect.objectContaining({
+            v: 1,
+            algorithm: 'plaintext-json-expand-phase',
+            keyVersion: ADDRESS_KEY_VERSION,
+            address: expect.objectContaining({
+              formattedAddress: '456 Client Home, San Diego, CA 92101',
+              lat: '32.7309876',
+              lng: '-117.1509876',
+            }),
+          }),
+          clientAddressLatApprox: 32.731,
+          clientAddressLngApprox: -117.151,
         }),
       }),
     )
+  })
+
+  it('does not copy legacy plaintext hold snapshots into dedicated encrypted booking columns', async () => {
+    mocks.txBookingHoldFindUnique.mockResolvedValueOnce(
+      makeMobileHold({
+        clientAddressLatSnapshot: 32.7309876,
+        clientAddressLngSnapshot: -117.1509876,
+      }),
+    )
+    arrangeMobileContext()
+
+    await finalizeBookingFromHold(makeFinalizeArgs())
+
+    expect(mocks.txBookingCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientAddressSnapshot: LEGACY_PLAINTEXT_CLIENT_SNAPSHOT,
+          encryptedClientAddressSnapshotJson: Prisma.JsonNull,
+          clientAddressLatApprox: 32.731,
+          clientAddressLngApprox: -117.151,
+          addressSnapshotsEncryptedAt: null,
+        }),
+      }),
+    )
+  })
+
+  it('reuses dedicated encrypted hold snapshots when present', async () => {
+    const encryptedAt = new Date('2026-03-18T15:00:00.000Z')
+    mocks.txBookingHoldFindUnique.mockResolvedValueOnce(
+      makeMobileHold({
+        encryptedClientAddressSnapshotJson: DEDICATED_CLIENT_ENCRYPTED_SNAPSHOT,
+        clientAddressLatApprox: 32.731,
+        clientAddressLngApprox: -117.151,
+        addressSnapshotsEncryptedAt: encryptedAt,
+      }),
+    )
+    arrangeMobileContext()
+
+    await finalizeBookingFromHold(makeFinalizeArgs())
+
+    expect(mocks.txBookingCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          encryptedClientAddressSnapshotJson:
+            DEDICATED_CLIENT_ENCRYPTED_SNAPSHOT,
+          clientAddressLatApprox: 32.731,
+          clientAddressLngApprox: -117.151,
+          addressSnapshotsEncryptedAt: encryptedAt,
+        }),
+      }),
+    )
+  })
+
+  it('logs hold create internal errors without raw address payloads and with safeError shape', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const error = new Error(
+      'create failed for 456 Client Home, San Diego, CA 92101 with clientAddressSnapshot payload',
+    )
+
+    mocks.txBookingHoldCreate.mockRejectedValueOnce(error)
+    arrangeMobileContext()
+
+    try {
+      await expect(createHold(makeCreateHoldArgs())).rejects.toBe(error)
+
+      expect(consoleError).toHaveBeenCalledWith(
+        'performLockedCreateHold internal error',
+        expect.objectContaining({
+          error: {
+            name: 'Error',
+            message: expect.any(String),
+          },
+          meta: expect.objectContaining({
+            clientId: CLIENT_ID,
+            offeringId: OFFERING_ID,
+            professionalId: PROFESSIONAL_ID,
+            clientAddressId: expect.any(String),
+            selectedClientAddressId: expect.any(String),
+          }),
+        }),
+      )
+
+      const loggedPayload = JSON.stringify(consoleError.mock.calls)
+      expect(loggedPayload).not.toContain('456 Client Home')
+      expect(loggedPayload).not.toContain('clientAddressSnapshot')
+      expect(loggedPayload).not.toContain('formattedAddress')
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
 })

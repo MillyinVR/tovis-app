@@ -144,6 +144,7 @@ import '@/lib/observability/bookingEvents'
 import {
   ADDRESS_KEY_VERSION,
   buildAddressPrivacyWriteData,
+  type AddressPrivacyEnvelopeV1,
 } from '@/lib/security/addressEncryption'
 
 
@@ -1140,11 +1141,17 @@ const RESCHEDULE_HOLD_SELECT = {
   locationAddressSnapshotKeyVersion: true,
   locationLatSnapshot: true,
   locationLngSnapshot: true,
+  encryptedLocationAddressSnapshotJson: true,
+  locationLatApprox: true,
+  locationLngApprox: true,
   clientAddressId: true,
   clientAddressSnapshot: true,
   clientAddressSnapshotKeyVersion: true,
   clientAddressLatSnapshot: true,
   clientAddressLngSnapshot: true,
+  encryptedClientAddressSnapshotJson: true,
+  clientAddressLatApprox: true,
+  clientAddressLngApprox: true,
   addressSnapshotsEncryptedAt: true,
 } satisfies Prisma.BookingHoldSelect
 
@@ -1162,11 +1169,17 @@ const FINALIZE_HOLD_SELECT = {
   locationAddressSnapshotKeyVersion: true,
   locationLatSnapshot: true,
   locationLngSnapshot: true,
+  encryptedLocationAddressSnapshotJson: true,
+  locationLatApprox: true,
+  locationLngApprox: true,
   clientAddressId: true,
   clientAddressSnapshot: true,
   clientAddressSnapshotKeyVersion: true,
   clientAddressLatSnapshot: true,
   clientAddressLngSnapshot: true,
+  encryptedClientAddressSnapshotJson: true,
+  clientAddressLatApprox: true,
+  clientAddressLngApprox: true,
   addressSnapshotsEncryptedAt: true,
 } satisfies Prisma.BookingHoldSelect
 
@@ -1324,12 +1337,18 @@ const REBOOK_SOURCE_BOOKING_SELECT = {
   locationAddressSnapshotKeyVersion: true,
   locationLatSnapshot: true,
   locationLngSnapshot: true,
+  encryptedLocationAddressSnapshotJson: true,
+  locationLatApprox: true,
+  locationLngApprox: true,
 
   clientAddressId: true,
   clientAddressSnapshot: true,
   clientAddressSnapshotKeyVersion: true,
   clientAddressLatSnapshot: true,
   clientAddressLngSnapshot: true,
+  encryptedClientAddressSnapshotJson: true,
+  clientAddressLatApprox: true,
+  clientAddressLngApprox: true,
   clientTimeZoneAtBooking: true,
   addressSnapshotsEncryptedAt: true,
 
@@ -3385,25 +3404,84 @@ type AddressSnapshotEncryptionInput = {
   lng: Prisma.Decimal | number | string | null | undefined
 }
 
-function buildEncryptedAddressSnapshotData(
-  input: AddressSnapshotEncryptionInput,
-): {
-  snapshot: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
+type AddressSnapshotWriteData = {
+  legacySnapshot: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
+  encryptedSnapshot: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
   keyVersion: string | null
   encryptedAt: Date | null
-  latSnapshot: number | null
-  lngSnapshot: number | null
-} {
+  latApprox: number | null
+  lngApprox: number | null
+}
+
+function coarsenCoordinate(value: unknown): number | null {
+  const numberValue = decimalToNumber(value)
+  if (numberValue === undefined) return null
+
+  return Number(numberValue.toFixed(4))
+}
+
+function buildNullAddressSnapshotData(input: {
+  lat?: unknown
+  lng?: unknown
+} = {}): AddressSnapshotWriteData {
+  return {
+    legacySnapshot: Prisma.JsonNull,
+    encryptedSnapshot: Prisma.JsonNull,
+    keyVersion: null,
+    encryptedAt: null,
+    latApprox: coarsenCoordinate(input.lat),
+    lngApprox: coarsenCoordinate(input.lng),
+  }
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string'
+}
+
+function isAddressPrivacyEnvelopeV1(
+  value: Prisma.JsonValue | null | undefined,
+): value is AddressPrivacyEnvelopeV1 {
+  if (!isJsonRecord(value)) return false
+  if (value.v !== 1) return false
+  if (value.algorithm !== 'plaintext-json-expand-phase') return false
+  if (value.keyVersion !== ADDRESS_KEY_VERSION) return false
+
+  const address = value.address
+  if (!isJsonRecord(address)) return false
+
+  return (
+    isNullableString(address.formattedAddress) &&
+    isNullableString(address.addressLine1) &&
+    isNullableString(address.addressLine2) &&
+    isNullableString(address.city) &&
+    isNullableString(address.state) &&
+    isNullableString(address.postalCode) &&
+    isNullableString(address.countryCode) &&
+    isNullableString(address.placeId) &&
+    isNullableString(address.lat) &&
+    isNullableString(address.lng)
+  )
+}
+
+function toValidatedEncryptedAddressSnapshotInput(
+  snapshot: Prisma.JsonValue | null | undefined,
+): Prisma.InputJsonValue | null {
+  if (!isAddressPrivacyEnvelopeV1(snapshot)) return null
+
+  return toInputJsonValue(snapshot)
+}
+
+function buildEncryptedAddressSnapshotData(
+  input: AddressSnapshotEncryptionInput,
+): AddressSnapshotWriteData {
   const formattedAddress = normalizeAddress(input.formattedAddress)
 
   if (!formattedAddress) {
-    return {
-      snapshot: Prisma.JsonNull,
-      keyVersion: null,
-      encryptedAt: null,
-      latSnapshot: decimalToNullableNumber(input.lat),
-      lngSnapshot: decimalToNullableNumber(input.lng),
-    }
+    return buildNullAddressSnapshotData(input)
   }
 
   const privacyData = buildAddressPrivacyWriteData({
@@ -3420,35 +3498,57 @@ function buildEncryptedAddressSnapshotData(
   })
 
   return {
-    snapshot: privacyData.encryptedAddressJson,
+    legacySnapshot: privacyData.encryptedAddressJson,
+    encryptedSnapshot: privacyData.encryptedAddressJson,
     keyVersion: ADDRESS_KEY_VERSION,
     encryptedAt: new Date(),
-    latSnapshot: decimalToNullableNumber(privacyData.latApprox),
-    lngSnapshot: decimalToNullableNumber(privacyData.lngApprox),
+    latApprox: decimalToNullableNumber(privacyData.latApprox),
+    lngApprox: decimalToNullableNumber(privacyData.lngApprox),
   }
 }
 
 function reuseEncryptedAddressSnapshotData(
-  snapshot: Prisma.JsonValue | null | undefined,
-  keyVersion: string | null | undefined,
-  encryptedAt: Date | null | undefined,
-): {
-  snapshot: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput
-  keyVersion: string | null
-  encryptedAt: Date | null
-} {
-  if (snapshot == null) {
-    return {
-      snapshot: Prisma.JsonNull,
-      keyVersion: null,
-      encryptedAt: null,
-    }
-  }
+  input: {
+    legacySnapshot: Prisma.JsonValue | null | undefined
+    dedicatedEncryptedSnapshot?: Prisma.JsonValue | null | undefined
+    keyVersion: string | null | undefined
+    encryptedAt: Date | null | undefined
+    latApprox?: unknown
+    lngApprox?: unknown
+    legacyLat?: unknown
+    legacyLng?: unknown
+    fallbackLat?: unknown
+    fallbackLng?: unknown
+  },
+): AddressSnapshotWriteData {
+  const dedicatedEncryptedSnapshot = toValidatedEncryptedAddressSnapshotInput(
+    input.dedicatedEncryptedSnapshot,
+  )
+  const legacyEncryptedSnapshot = toValidatedEncryptedAddressSnapshotInput(
+    input.legacySnapshot,
+  )
+  const encryptedSnapshot =
+    dedicatedEncryptedSnapshot ?? legacyEncryptedSnapshot
+  const hasEncryptedSnapshot = encryptedSnapshot !== null
 
   return {
-    snapshot: toNullableJsonCreateInput(snapshot) ?? Prisma.JsonNull,
-    keyVersion: keyVersion ?? ADDRESS_KEY_VERSION,
-    encryptedAt: encryptedAt ?? new Date(),
+    legacySnapshot:
+      toNullableJsonCreateInput(input.legacySnapshot) ?? Prisma.JsonNull,
+    encryptedSnapshot: encryptedSnapshot ?? Prisma.JsonNull,
+    keyVersion: hasEncryptedSnapshot
+      ? input.keyVersion ?? ADDRESS_KEY_VERSION
+      : null,
+    encryptedAt: hasEncryptedSnapshot
+      ? input.encryptedAt ?? new Date()
+      : null,
+    latApprox:
+      coarsenCoordinate(input.latApprox) ??
+      coarsenCoordinate(input.legacyLat) ??
+      coarsenCoordinate(input.fallbackLat),
+    lngApprox:
+      coarsenCoordinate(input.lngApprox) ??
+      coarsenCoordinate(input.legacyLng) ??
+      coarsenCoordinate(input.fallbackLng),
   }
 }
 
@@ -4402,21 +4502,23 @@ function logHoldCreateInternalError(args: {
   // hold-create failures must not leak PII into operational logs.
   console.error(
     'performLockedCreateHold internal error',
-    safeLogMeta({
+    {
       error: safeError(args.error),
-      clientId: args.clientId,
-      offeringId: args.offeringId,
-      professionalId: args.professionalId,
-      requestedStart: args.requestedStart.toISOString(),
-      locationType: args.locationType,
-      requestedLocationId: args.requestedLocationId,
-      resolvedLocationId: args.resolvedLocationId,
-      resolvedTimeZone: args.resolvedTimeZone,
-      clientAddressId: args.clientAddressId,
-      selectedClientAddressId: args.selectedClientAddressId,
-      durationMinutes: args.durationMinutes,
-      bufferMinutes: args.bufferMinutes,
-    }),
+      meta: safeLogMeta({
+        clientId: args.clientId,
+        offeringId: args.offeringId,
+        professionalId: args.professionalId,
+        requestedStart: args.requestedStart.toISOString(),
+        locationType: args.locationType,
+        requestedLocationId: args.requestedLocationId,
+        resolvedLocationId: args.resolvedLocationId,
+        resolvedTimeZone: args.resolvedTimeZone,
+        clientAddressId: args.clientAddressId,
+        selectedClientAddressId: args.selectedClientAddressId,
+        durationMinutes: args.durationMinutes,
+        bufferMinutes: args.bufferMinutes,
+      }),
+    },
   )
 }
 
@@ -6619,13 +6721,10 @@ afterHoldPolicyMs = Date.now()
           lat: locationContext.lat,
           lng: locationContext.lng,
         })
-      : {
-          snapshot: Prisma.JsonNull,
-          keyVersion: null,
-          encryptedAt: null,
-          latSnapshot: locationContext.lat,
-          lngSnapshot: locationContext.lng,
-        }
+      : buildNullAddressSnapshotData({
+          lat: locationContext.lat,
+          lng: locationContext.lng,
+        })
 
   const clientAddressSnapshotData =
     locationType === ServiceLocationType.MOBILE && selectedClientAddress
@@ -6634,13 +6733,7 @@ afterHoldPolicyMs = Date.now()
           lat: selectedClientAddress.lat,
           lng: selectedClientAddress.lng,
         })
-      : {
-          snapshot: Prisma.JsonNull,
-          keyVersion: null,
-          encryptedAt: null,
-          latSnapshot: null,
-          lngSnapshot: null,
-        }
+      : buildNullAddressSnapshotData()
 
   const addressSnapshotsEncryptedAt =
     locationAddressSnapshotData.encryptedAt ??
@@ -6661,15 +6754,16 @@ afterHoldPolicyMs = Date.now()
 
     // Legacy expand-phase columns (kept populated for backward compatibility
     // with readers that have not migrated to the dedicated columns yet).
-    locationAddressSnapshot: locationAddressSnapshotData.snapshot,
+    locationAddressSnapshot: locationAddressSnapshotData.legacySnapshot,
     locationAddressSnapshotKeyVersion: locationAddressSnapshotData.keyVersion,
-    locationLatSnapshot: locationAddressSnapshotData.latSnapshot,
-    locationLngSnapshot: locationAddressSnapshotData.lngSnapshot,
+    locationLatSnapshot: locationAddressSnapshotData.latApprox,
+    locationLngSnapshot: locationAddressSnapshotData.lngApprox,
 
     // Dedicated encrypted snapshot columns (canonical going forward).
-    encryptedLocationAddressSnapshotJson: locationAddressSnapshotData.snapshot,
-    locationLatApprox: locationAddressSnapshotData.latSnapshot,
-    locationLngApprox: locationAddressSnapshotData.lngSnapshot,
+    encryptedLocationAddressSnapshotJson:
+      locationAddressSnapshotData.encryptedSnapshot,
+    locationLatApprox: locationAddressSnapshotData.latApprox,
+    locationLngApprox: locationAddressSnapshotData.lngApprox,
 
     clientAddressId:
       locationType === ServiceLocationType.MOBILE && selectedClientAddress
@@ -6677,15 +6771,16 @@ afterHoldPolicyMs = Date.now()
         : null,
 
     // Legacy
-    clientAddressSnapshot: clientAddressSnapshotData.snapshot,
+    clientAddressSnapshot: clientAddressSnapshotData.legacySnapshot,
     clientAddressSnapshotKeyVersion: clientAddressSnapshotData.keyVersion,
-    clientAddressLatSnapshot: clientAddressSnapshotData.latSnapshot,
-    clientAddressLngSnapshot: clientAddressSnapshotData.lngSnapshot,
+    clientAddressLatSnapshot: clientAddressSnapshotData.latApprox,
+    clientAddressLngSnapshot: clientAddressSnapshotData.lngApprox,
 
     // Dedicated
-    encryptedClientAddressSnapshotJson: clientAddressSnapshotData.snapshot,
-    clientAddressLatApprox: clientAddressSnapshotData.latSnapshot,
-    clientAddressLngApprox: clientAddressSnapshotData.lngSnapshot,
+    encryptedClientAddressSnapshotJson:
+      clientAddressSnapshotData.encryptedSnapshot,
+    clientAddressLatApprox: clientAddressSnapshotData.latApprox,
+    clientAddressLngApprox: clientAddressSnapshotData.lngApprox,
 
     addressSnapshotsEncryptedAt,
   } satisfies Prisma.BookingHoldUncheckedCreateInput
@@ -6957,29 +7052,37 @@ await enforceBookingOverlapPolicy({
 
   const salonLocationAddressSnapshotData =
     validatedHold.value.locationType === ServiceLocationType.SALON
-      ? reuseEncryptedAddressSnapshotData(
-          hold.locationAddressSnapshot,
-          hold.locationAddressSnapshotKeyVersion,
-          hold.addressSnapshotsEncryptedAt,
-        )
-      : {
-          snapshot: Prisma.JsonNull,
-          keyVersion: null,
-          encryptedAt: null,
-        }
+      ? reuseEncryptedAddressSnapshotData({
+          legacySnapshot: hold.locationAddressSnapshot,
+          dedicatedEncryptedSnapshot:
+            hold.encryptedLocationAddressSnapshotJson,
+          keyVersion: hold.locationAddressSnapshotKeyVersion,
+          encryptedAt: hold.addressSnapshotsEncryptedAt,
+          latApprox: hold.locationLatApprox,
+          lngApprox: hold.locationLngApprox,
+          legacyLat: hold.locationLatSnapshot,
+          legacyLng: hold.locationLngSnapshot,
+          fallbackLat: locationContext.lat,
+          fallbackLng: locationContext.lng,
+        })
+      : buildNullAddressSnapshotData({
+          lat: hold.locationLatApprox ?? hold.locationLatSnapshot,
+          lng: hold.locationLngApprox ?? hold.locationLngSnapshot,
+        })
 
   const mobileClientAddressSnapshotData =
     validatedHold.value.locationType === ServiceLocationType.MOBILE
-      ? reuseEncryptedAddressSnapshotData(
-          hold.clientAddressSnapshot,
-          hold.clientAddressSnapshotKeyVersion,
-          hold.addressSnapshotsEncryptedAt,
-        )
-      : {
-          snapshot: Prisma.JsonNull,
-          keyVersion: null,
-          encryptedAt: null,
-        }
+      ? reuseEncryptedAddressSnapshotData({
+          legacySnapshot: hold.clientAddressSnapshot,
+          dedicatedEncryptedSnapshot: hold.encryptedClientAddressSnapshotJson,
+          keyVersion: hold.clientAddressSnapshotKeyVersion,
+          encryptedAt: hold.addressSnapshotsEncryptedAt,
+          latApprox: hold.clientAddressLatApprox,
+          lngApprox: hold.clientAddressLngApprox,
+          legacyLat: hold.clientAddressLatSnapshot,
+          legacyLng: hold.clientAddressLngSnapshot,
+        })
+      : buildNullAddressSnapshotData()
 
   const updated = await args.tx.booking.update({
     where: { id: booking.id },
@@ -6991,7 +7094,7 @@ await enforceBookingOverlapPolicy({
       locationTimeZone: locationContext.timeZone,
 
       // Legacy expand-phase columns.
-      locationAddressSnapshot: salonLocationAddressSnapshotData.snapshot,
+      locationAddressSnapshot: salonLocationAddressSnapshotData.legacySnapshot,
       locationAddressSnapshotKeyVersion: salonLocationAddressSnapshotData.keyVersion,
       locationLatSnapshot:
         decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
@@ -6999,11 +7102,10 @@ await enforceBookingOverlapPolicy({
         decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
 
       // Dedicated encrypted snapshot columns.
-      encryptedLocationAddressSnapshotJson: salonLocationAddressSnapshotData.snapshot,
-      locationLatApprox:
-        decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
-      locationLngApprox:
-        decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
+      encryptedLocationAddressSnapshotJson:
+        salonLocationAddressSnapshotData.encryptedSnapshot,
+      locationLatApprox: salonLocationAddressSnapshotData.latApprox,
+      locationLngApprox: salonLocationAddressSnapshotData.lngApprox,
 
       clientAddressId:
         validatedHold.value.locationType === ServiceLocationType.MOBILE
@@ -7011,7 +7113,7 @@ await enforceBookingOverlapPolicy({
           : null,
 
       // Legacy
-      clientAddressSnapshot: mobileClientAddressSnapshotData.snapshot,
+      clientAddressSnapshot: mobileClientAddressSnapshotData.legacySnapshot,
       clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
       clientAddressLatSnapshot:
         validatedHold.value.locationType === ServiceLocationType.MOBILE
@@ -7023,15 +7125,10 @@ await enforceBookingOverlapPolicy({
           : null,
 
       // Dedicated
-      encryptedClientAddressSnapshotJson: mobileClientAddressSnapshotData.snapshot,
-      clientAddressLatApprox:
-        validatedHold.value.locationType === ServiceLocationType.MOBILE
-          ? decimalToNumber(hold.clientAddressLatSnapshot)
-          : null,
-      clientAddressLngApprox:
-        validatedHold.value.locationType === ServiceLocationType.MOBILE
-          ? decimalToNumber(hold.clientAddressLngSnapshot)
-          : null,
+      encryptedClientAddressSnapshotJson:
+        mobileClientAddressSnapshotData.encryptedSnapshot,
+      clientAddressLatApprox: mobileClientAddressSnapshotData.latApprox,
+      clientAddressLngApprox: mobileClientAddressSnapshotData.lngApprox,
 
       addressSnapshotsEncryptedAt:
         salonLocationAddressSnapshotData.encryptedAt ??
@@ -8007,29 +8104,37 @@ async function performLockedFinalizeBookingFromHold(args: {
 
   const salonLocationAddressSnapshotData =
     validatedHold.value.locationType === ServiceLocationType.SALON
-      ? reuseEncryptedAddressSnapshotData(
-          hold.locationAddressSnapshot,
-          hold.locationAddressSnapshotKeyVersion,
-          hold.addressSnapshotsEncryptedAt,
-        )
-      : {
-          snapshot: Prisma.JsonNull,
-          keyVersion: null,
-          encryptedAt: null,
-        }
+      ? reuseEncryptedAddressSnapshotData({
+          legacySnapshot: hold.locationAddressSnapshot,
+          dedicatedEncryptedSnapshot:
+            hold.encryptedLocationAddressSnapshotJson,
+          keyVersion: hold.locationAddressSnapshotKeyVersion,
+          encryptedAt: hold.addressSnapshotsEncryptedAt,
+          latApprox: hold.locationLatApprox,
+          lngApprox: hold.locationLngApprox,
+          legacyLat: hold.locationLatSnapshot,
+          legacyLng: hold.locationLngSnapshot,
+          fallbackLat: locationContext.lat,
+          fallbackLng: locationContext.lng,
+        })
+      : buildNullAddressSnapshotData({
+          lat: hold.locationLatApprox ?? hold.locationLatSnapshot,
+          lng: hold.locationLngApprox ?? hold.locationLngSnapshot,
+        })
 
   const mobileClientAddressSnapshotData =
     validatedHold.value.locationType === ServiceLocationType.MOBILE
-      ? reuseEncryptedAddressSnapshotData(
-          hold.clientAddressSnapshot,
-          hold.clientAddressSnapshotKeyVersion,
-          hold.addressSnapshotsEncryptedAt,
-        )
-      : {
-          snapshot: Prisma.JsonNull,
-          keyVersion: null,
-          encryptedAt: null,
-        }
+      ? reuseEncryptedAddressSnapshotData({
+          legacySnapshot: hold.clientAddressSnapshot,
+          dedicatedEncryptedSnapshot: hold.encryptedClientAddressSnapshotJson,
+          keyVersion: hold.clientAddressSnapshotKeyVersion,
+          encryptedAt: hold.addressSnapshotsEncryptedAt,
+          latApprox: hold.clientAddressLatApprox,
+          lngApprox: hold.clientAddressLngApprox,
+          legacyLat: hold.clientAddressLatSnapshot,
+          legacyLng: hold.clientAddressLngSnapshot,
+        })
+      : buildNullAddressSnapshotData()
 
   let created: {
     id: string
@@ -8068,7 +8173,7 @@ async function performLockedFinalizeBookingFromHold(args: {
         locationTimeZone: locationContext.timeZone,
 
         // Legacy expand-phase columns.
-        locationAddressSnapshot: salonLocationAddressSnapshotData.snapshot,
+        locationAddressSnapshot: salonLocationAddressSnapshotData.legacySnapshot,
         locationAddressSnapshotKeyVersion: salonLocationAddressSnapshotData.keyVersion,
         locationLatSnapshot:
           decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
@@ -8076,11 +8181,10 @@ async function performLockedFinalizeBookingFromHold(args: {
           decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
 
         // Dedicated encrypted snapshot columns.
-        encryptedLocationAddressSnapshotJson: salonLocationAddressSnapshotData.snapshot,
-        locationLatApprox:
-          decimalToNumber(hold.locationLatSnapshot) ?? locationContext.lat,
-        locationLngApprox:
-          decimalToNumber(hold.locationLngSnapshot) ?? locationContext.lng,
+        encryptedLocationAddressSnapshotJson:
+          salonLocationAddressSnapshotData.encryptedSnapshot,
+        locationLatApprox: salonLocationAddressSnapshotData.latApprox,
+        locationLngApprox: salonLocationAddressSnapshotData.lngApprox,
 
         clientAddressId:
           validatedHold.value.locationType === ServiceLocationType.MOBILE
@@ -8088,7 +8192,7 @@ async function performLockedFinalizeBookingFromHold(args: {
             : null,
 
         // Legacy
-        clientAddressSnapshot: mobileClientAddressSnapshotData.snapshot,
+        clientAddressSnapshot: mobileClientAddressSnapshotData.legacySnapshot,
         clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
         clientAddressLatSnapshot:
           validatedHold.value.locationType === ServiceLocationType.MOBILE
@@ -8100,15 +8204,10 @@ async function performLockedFinalizeBookingFromHold(args: {
             : null,
 
         // Dedicated
-        encryptedClientAddressSnapshotJson: mobileClientAddressSnapshotData.snapshot,
-        clientAddressLatApprox:
-          validatedHold.value.locationType === ServiceLocationType.MOBILE
-            ? decimalToNumber(hold.clientAddressLatSnapshot)
-            : null,
-        clientAddressLngApprox:
-          validatedHold.value.locationType === ServiceLocationType.MOBILE
-            ? decimalToNumber(hold.clientAddressLngSnapshot)
-            : null,
+        encryptedClientAddressSnapshotJson:
+          mobileClientAddressSnapshotData.encryptedSnapshot,
+        clientAddressLatApprox: mobileClientAddressSnapshotData.latApprox,
+        clientAddressLngApprox: mobileClientAddressSnapshotData.lngApprox,
 
         addressSnapshotsEncryptedAt:
           salonLocationAddressSnapshotData.encryptedAt ??
@@ -8494,13 +8593,10 @@ async function performLockedCreateProBooking(args: {
             lat: locationContext.lat,
             lng: locationContext.lng,
           })
-        : {
-            snapshot: Prisma.JsonNull,
-            keyVersion: null,
-            encryptedAt: null,
-            latSnapshot: locationContext.lat ?? null,
-            lngSnapshot: locationContext.lng ?? null,
-          }
+        : buildNullAddressSnapshotData({
+            lat: locationContext.lat,
+            lng: locationContext.lng,
+          })
 
     const clientAddressSnapshotData =
       args.locationType === ServiceLocationType.MOBILE && clientAddress
@@ -8509,13 +8605,7 @@ async function performLockedCreateProBooking(args: {
             lat: clientAddress.lat,
             lng: clientAddress.lng,
           })
-        : {
-            snapshot: Prisma.JsonNull,
-            keyVersion: null,
-            encryptedAt: null,
-            latSnapshot: null,
-            lngSnapshot: null,
-          }
+        : buildNullAddressSnapshotData()
 
     const addressSnapshotsEncryptedAt =
       salonLocationAddressSnapshotData.encryptedAt ??
@@ -8545,30 +8635,32 @@ async function performLockedCreateProBooking(args: {
         locationTimeZone: locationContext.timeZone,
 
         // Legacy expand-phase columns.
-        locationAddressSnapshot: salonLocationAddressSnapshotData.snapshot,
+        locationAddressSnapshot: salonLocationAddressSnapshotData.legacySnapshot,
         locationAddressSnapshotKeyVersion: salonLocationAddressSnapshotData.keyVersion,
-        locationLatSnapshot: salonLocationAddressSnapshotData.latSnapshot,
-        locationLngSnapshot: salonLocationAddressSnapshotData.lngSnapshot,
+        locationLatSnapshot: salonLocationAddressSnapshotData.latApprox,
+        locationLngSnapshot: salonLocationAddressSnapshotData.lngApprox,
 
         // Dedicated encrypted snapshot columns.
-        encryptedLocationAddressSnapshotJson: salonLocationAddressSnapshotData.snapshot,
-        locationLatApprox: salonLocationAddressSnapshotData.latSnapshot,
-        locationLngApprox: salonLocationAddressSnapshotData.lngSnapshot,
+        encryptedLocationAddressSnapshotJson:
+          salonLocationAddressSnapshotData.encryptedSnapshot,
+        locationLatApprox: salonLocationAddressSnapshotData.latApprox,
+        locationLngApprox: salonLocationAddressSnapshotData.lngApprox,
 
         clientAddressId:
           args.locationType === ServiceLocationType.MOBILE && clientAddress
             ? clientAddress.id
             : null,
           // Legacy
-          clientAddressSnapshot: clientAddressSnapshotData.snapshot,
+          clientAddressSnapshot: clientAddressSnapshotData.legacySnapshot,
           clientAddressSnapshotKeyVersion: clientAddressSnapshotData.keyVersion,
-          clientAddressLatSnapshot: clientAddressSnapshotData.latSnapshot,
-          clientAddressLngSnapshot: clientAddressSnapshotData.lngSnapshot,
+          clientAddressLatSnapshot: clientAddressSnapshotData.latApprox,
+          clientAddressLngSnapshot: clientAddressSnapshotData.lngApprox,
 
           // Dedicated
-          encryptedClientAddressSnapshotJson: clientAddressSnapshotData.snapshot,
-          clientAddressLatApprox: clientAddressSnapshotData.latSnapshot,
-          clientAddressLngApprox: clientAddressSnapshotData.lngSnapshot,
+          encryptedClientAddressSnapshotJson:
+            clientAddressSnapshotData.encryptedSnapshot,
+          clientAddressLatApprox: clientAddressSnapshotData.latApprox,
+          clientAddressLngApprox: clientAddressSnapshotData.lngApprox,
 
           addressSnapshotsEncryptedAt,
 
@@ -8960,35 +9052,44 @@ assertCanCreateRebookFromSourceBooking({
 
   const salonAddressSnapshotData =
     source.locationType === ServiceLocationType.SALON
-      ? source.locationAddressSnapshot != null
-        ? reuseEncryptedAddressSnapshotData(
-            source.locationAddressSnapshot,
-            source.locationAddressSnapshotKeyVersion,
-            source.addressSnapshotsEncryptedAt,
-          )
+      ? source.locationAddressSnapshot != null ||
+        source.encryptedLocationAddressSnapshotJson != null
+        ? reuseEncryptedAddressSnapshotData({
+            legacySnapshot: source.locationAddressSnapshot,
+            dedicatedEncryptedSnapshot:
+              source.encryptedLocationAddressSnapshotJson,
+            keyVersion: source.locationAddressSnapshotKeyVersion,
+            encryptedAt: source.addressSnapshotsEncryptedAt,
+            latApprox: source.locationLatApprox,
+            lngApprox: source.locationLngApprox,
+            legacyLat: source.locationLatSnapshot,
+            legacyLng: source.locationLngSnapshot,
+            fallbackLat: locationContext.lat,
+            fallbackLng: locationContext.lng,
+          })
         : buildEncryptedAddressSnapshotData({
             formattedAddress: locationContext.formattedAddress,
             lat: source.locationLatSnapshot ?? locationContext.lat,
             lng: source.locationLngSnapshot ?? locationContext.lng,
           })
-      : {
-          snapshot: Prisma.JsonNull,
-          keyVersion: null,
-          encryptedAt: null,
-        }
+      : buildNullAddressSnapshotData({
+          lat: source.locationLatApprox ?? source.locationLatSnapshot,
+          lng: source.locationLngApprox ?? source.locationLngSnapshot,
+        })
 
   const mobileClientAddressSnapshotData =
     source.locationType === ServiceLocationType.MOBILE
-      ? reuseEncryptedAddressSnapshotData(
-          source.clientAddressSnapshot,
-          source.clientAddressSnapshotKeyVersion,
-          source.addressSnapshotsEncryptedAt,
-        )
-      : {
-          snapshot: Prisma.JsonNull,
-          keyVersion: null,
-          encryptedAt: null,
-        }
+      ? reuseEncryptedAddressSnapshotData({
+          legacySnapshot: source.clientAddressSnapshot,
+          dedicatedEncryptedSnapshot: source.encryptedClientAddressSnapshotJson,
+          keyVersion: source.clientAddressSnapshotKeyVersion,
+          encryptedAt: source.addressSnapshotsEncryptedAt,
+          latApprox: source.clientAddressLatApprox,
+          lngApprox: source.clientAddressLngApprox,
+          legacyLat: source.clientAddressLatSnapshot,
+          legacyLng: source.clientAddressLngSnapshot,
+        })
+      : buildNullAddressSnapshotData()
 
   let createdBooking: {
     id: string
@@ -9015,7 +9116,7 @@ assertCanCreateRebookFromSourceBooking({
         locationTimeZone: locationContext.timeZone,
 
         // Legacy expand-phase columns.
-        locationAddressSnapshot: salonAddressSnapshotData.snapshot,
+        locationAddressSnapshot: salonAddressSnapshotData.legacySnapshot,
         locationAddressSnapshotKeyVersion: salonAddressSnapshotData.keyVersion,
         locationLatSnapshot:
           decimalToNumber(source.locationLatSnapshot) ?? locationContext.lat,
@@ -9023,11 +9124,10 @@ assertCanCreateRebookFromSourceBooking({
           decimalToNumber(source.locationLngSnapshot) ?? locationContext.lng,
 
         // Dedicated encrypted snapshot columns.
-        encryptedLocationAddressSnapshotJson: salonAddressSnapshotData.snapshot,
-        locationLatApprox:
-          decimalToNumber(source.locationLatSnapshot) ?? locationContext.lat,
-        locationLngApprox:
-          decimalToNumber(source.locationLngSnapshot) ?? locationContext.lng,
+        encryptedLocationAddressSnapshotJson:
+          salonAddressSnapshotData.encryptedSnapshot,
+        locationLatApprox: salonAddressSnapshotData.latApprox,
+        locationLngApprox: salonAddressSnapshotData.lngApprox,
 
         clientAddressId:
           source.locationType === ServiceLocationType.MOBILE
@@ -9035,7 +9135,7 @@ assertCanCreateRebookFromSourceBooking({
             : null,
 
         // Legacy
-        clientAddressSnapshot: mobileClientAddressSnapshotData.snapshot,
+        clientAddressSnapshot: mobileClientAddressSnapshotData.legacySnapshot,
         clientAddressSnapshotKeyVersion: mobileClientAddressSnapshotData.keyVersion,
         clientAddressLatSnapshot:
           source.locationType === ServiceLocationType.MOBILE
@@ -9047,15 +9147,10 @@ assertCanCreateRebookFromSourceBooking({
             : null,
 
         // Dedicated
-        encryptedClientAddressSnapshotJson: mobileClientAddressSnapshotData.snapshot,
-        clientAddressLatApprox:
-          source.locationType === ServiceLocationType.MOBILE
-            ? decimalToNumber(source.clientAddressLatSnapshot)
-            : null,
-        clientAddressLngApprox:
-          source.locationType === ServiceLocationType.MOBILE
-            ? decimalToNumber(source.clientAddressLngSnapshot)
-            : null,
+        encryptedClientAddressSnapshotJson:
+          mobileClientAddressSnapshotData.encryptedSnapshot,
+        clientAddressLatApprox: mobileClientAddressSnapshotData.latApprox,
+        clientAddressLngApprox: mobileClientAddressSnapshotData.lngApprox,
 
         addressSnapshotsEncryptedAt:
           salonAddressSnapshotData.encryptedAt ??
