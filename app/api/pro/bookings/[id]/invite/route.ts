@@ -1,9 +1,11 @@
+// app/api/pro/bookings/[id]/invite/route.ts
 import { ContactMethod, ProClientInviteStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { prisma } from '@/lib/prisma'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -179,11 +181,14 @@ async function maybeQueueInviteDelivery(args: {
     }
   } catch (error: unknown) {
     console.error('POST /api/pro/bookings/[id]/invite delivery enqueue failed', {
-      professionalId: args.professionalId,
-      bookingId: args.booking.id,
-      clientId: args.booking.clientId,
-      inviteId: args.invite.id,
-      error,
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: 'POST /api/pro/bookings/[id]/invite',
+        professionalId: args.professionalId,
+        bookingId: args.booking.id,
+        clientId: args.booking.clientId,
+        inviteId: args.invite.id,
+      }),
     })
 
     return {
@@ -292,7 +297,13 @@ export async function POST(request: Request, ctx: Ctx) {
       200,
     )
   } catch (error: unknown) {
-    console.error('POST /api/pro/bookings/[id]/invite error', error)
+    console.error('POST /api/pro/bookings/[id]/invite error', {
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: 'POST /api/pro/bookings/[id]/invite',
+      }),
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }

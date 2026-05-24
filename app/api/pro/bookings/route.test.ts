@@ -30,6 +30,10 @@ const mocks = vi.hoisted(() => ({
   beginIdempotency: vi.fn(),
   completeIdempotency: vi.fn(),
   failIdempotency: vi.fn(),
+
+  safeError: vi.fn(),
+  safeLogMeta: vi.fn(),
+  captureBookingException: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -67,6 +71,15 @@ vi.mock('@/lib/idempotency', () => ({
   IDEMPOTENCY_ROUTES: {
     PRO_BOOKING_CREATE: 'POST /api/pro/bookings',
   },
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
+  safeLogMeta: mocks.safeLogMeta,
+}))
+
+vi.mock('@/lib/observability/bookingEvents', () => ({
+  captureBookingException: mocks.captureBookingException,
 }))
 
 import { POST } from './route'
@@ -261,6 +274,15 @@ describe('POST /api/pro/bookings', () => {
 
     mocks.completeIdempotency.mockResolvedValue(undefined)
     mocks.failIdempotency.mockResolvedValue(undefined)
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : String(error),
+    }))
+
+    mocks.safeLogMeta.mockImplementation((meta: unknown) => meta)
+
+    mocks.captureBookingException.mockResolvedValue(undefined)
 
     mocks.createProBookingWithClient.mockResolvedValue({
       ok: true,
@@ -951,4 +973,106 @@ describe('POST /api/pro/bookings', () => {
       }),
     )
   })
-})
+    it('logs unexpected errors through safe logging helpers and captures the exception', async () => {
+      const consoleErrorSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined)
+
+      const error = new Error('database exploded')
+
+      mocks.createProBookingWithClient.mockRejectedValueOnce(error)
+
+      const result = await POST(
+        makeIdempotentRequest(validBody(), 'idem_unexpected_error_1'),
+      )
+
+      expect(mocks.failIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_1',
+      })
+
+      expect(mocks.safeError).toHaveBeenCalledWith(error)
+      expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+        route: 'POST /api/pro/bookings',
+        idempotencyRecordId: 'idem_record_1',
+      })
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'POST /api/pro/bookings error',
+        {
+          error: {
+            name: 'Error',
+            message: 'database exploded',
+          },
+          meta: {
+            route: 'POST /api/pro/bookings',
+            idempotencyRecordId: 'idem_record_1',
+          },
+        },
+      )
+
+      expect(mocks.captureBookingException).toHaveBeenCalledWith({
+        error,
+        route: 'POST /api/pro/bookings',
+      })
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          ok: false,
+          status: 500,
+          code: 'INTERNAL_ERROR',
+        }),
+      )
+
+      consoleErrorSpy.mockRestore()
+    })
+    it('logs idempotency failure-update errors through safe logging helpers', async () => {
+      const consoleErrorSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined)
+
+      const bookingErrorThrown = new Error('booking creation exploded')
+      const failError = new Error('idempotency update exploded')
+
+      mocks.createProBookingWithClient.mockRejectedValueOnce(bookingErrorThrown)
+      mocks.failIdempotency.mockRejectedValueOnce(failError)
+
+      const result = await POST(
+        makeIdempotentRequest(validBody(), 'idem_fail_update_error_1'),
+      )
+
+      expect(mocks.safeError).toHaveBeenCalledWith(failError)
+      expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+        route: 'POST /api/pro/bookings',
+        idempotencyRecordId: 'idem_record_1',
+      })
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'POST /api/pro/bookings idempotency failure update error',
+        {
+          error: {
+            name: 'Error',
+            message: 'idempotency update exploded',
+          },
+          meta: {
+            route: 'POST /api/pro/bookings',
+            idempotencyRecordId: 'idem_record_1',
+          },
+        },
+      )
+
+      expect(mocks.captureBookingException).toHaveBeenCalledWith({
+        error: bookingErrorThrown,
+        route: 'POST /api/pro/bookings',
+      })
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          ok: false,
+          status: 500,
+          code: 'INTERNAL_ERROR',
+        }),
+      )
+
+      consoleErrorSpy.mockRestore()
+    })
+  })

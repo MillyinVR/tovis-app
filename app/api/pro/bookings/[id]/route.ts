@@ -45,6 +45,7 @@ import {
 } from '@/lib/booking/errors'
 import { updateProBooking } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -417,7 +418,12 @@ export async function GET(_req: Request, ctx: Ctx) {
       })
     }
 
-    console.error('GET /api/pro/bookings/[id] error:', error)
+    console.error('GET /api/pro/bookings/[id] error', {
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: 'GET /api/pro/bookings/[id]',
+      }),
+    })
     captureBookingException({ error, route: 'GET /api/pro/bookings/[id]' })
     return bookingJsonFail('INTERNAL_ERROR', {
       message:
@@ -650,7 +656,17 @@ export async function PATCH(req: Request, ctx: Ctx) {
 
     return jsonOk(responseBody, 200)
   } catch (error: unknown) {
-    await failProBookingUpdateIdempotency(idempotencyRecordId)
+    await failProBookingUpdateIdempotency(idempotencyRecordId).catch(
+      (failError: unknown) => {
+        console.error('PATCH /api/pro/bookings/[id] idempotency failure update error', {
+          error: safeError(failError),
+          meta: safeLogMeta({
+            route: PATCH_ROUTE_OPERATION,
+            idempotencyRecordId,
+          }),
+        })
+      },
+    )
 
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
@@ -659,7 +675,13 @@ export async function PATCH(req: Request, ctx: Ctx) {
       })
     }
 
-    console.error('PATCH /api/pro/bookings/[id] error:', error)
+    console.error('PATCH /api/pro/bookings/[id] error', {
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: PATCH_ROUTE_OPERATION,
+        idempotencyRecordId,
+      }),
+    })
     captureBookingException({ error, route: PATCH_ROUTE_OPERATION })
     return bookingJsonFail('INTERNAL_ERROR', {
       message:

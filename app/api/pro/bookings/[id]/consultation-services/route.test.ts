@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   pickString: vi.fn(),
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
+
+  safeError: vi.fn(),
+  safeLogMeta: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -21,6 +24,11 @@ vi.mock('@/lib/prisma', () => ({
       findMany: mocks.professionalServiceOfferingFindMany,
     },
   },
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
+  safeLogMeta: mocks.safeLogMeta,
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -178,6 +186,14 @@ describe('app/api/pro/bookings/[id]/consultation-services/route.ts', () => {
         ...(typeof payload === 'object' && payload !== null ? payload : {}),
       }),
     )
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : String(error),
+    }))
+
+    mocks.safeLogMeta.mockImplementation((meta: unknown) => meta)
+
   })
 
   it('returns auth response when requirePro fails', async () => {
@@ -330,24 +346,42 @@ describe('app/api/pro/bookings/[id]/consultation-services/route.ts', () => {
     })
   })
 
-  it('returns 500 when loading consultation services fails', async () => {
-    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('logs unexpected errors through safe logging helpers and returns 500', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
 
-    mocks.bookingFindUnique.mockRejectedValueOnce(new Error('db boom'))
+    const error = new Error('db boom')
+    mocks.bookingFindUnique.mockRejectedValueOnce(error)
 
-    const result = await GET(makeRequest(), makeCtx())
+    try {
+      const result = await GET(makeRequest(), makeCtx())
 
-    expect(result.status).toBe(500)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'Internal server error',
-    })
+      expect(result.status).toBe(500)
+      await expect(result.json()).resolves.toEqual({
+        ok: false,
+        error: 'Internal server error',
+      })
 
-    expect(spy).toHaveBeenCalledWith(
-      'GET /api/pro/bookings/[id]/consultation-services error',
-      expect.any(Error),
-    )
+      expect(mocks.safeError).toHaveBeenCalledWith(error)
+      expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+        route: 'GET /api/pro/bookings/[id]/consultation-services',
+      })
 
-    spy.mockRestore()
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'GET /api/pro/bookings/[id]/consultation-services error',
+        {
+          error: {
+            name: 'Error',
+            message: 'db boom',
+          },
+          meta: {
+            route: 'GET /api/pro/bookings/[id]/consultation-services',
+          },
+        },
+      )
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 })

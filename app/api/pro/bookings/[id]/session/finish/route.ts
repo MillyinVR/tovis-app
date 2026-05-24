@@ -15,7 +15,7 @@ import {
 } from '@/lib/booking/errors'
 import { finishBookingSession } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
-
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
@@ -241,8 +241,13 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    console.error('POST /api/pro/bookings/[id]/session/finish error', error)
-
+    console.error('POST /api/pro/bookings/[id]/session/finish error', {
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: 'POST /api/pro/bookings/[id]/session/finish',
+        idempotencyRecordId,
+      }),
+    })
     return jsonFail(500, 'Internal server error')
   }
 }

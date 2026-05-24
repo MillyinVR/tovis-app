@@ -28,6 +28,7 @@ import {
 } from '@/lib/booking/errors'
 import { createRebookedBookingFromCompletedBooking } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -354,7 +355,13 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    console.error('POST /api/pro/bookings/[id]/rebook error', error)
+    console.error('POST /api/pro/bookings/[id]/rebook error', {
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: 'POST /api/pro/bookings/[id]/rebook',
+        idempotencyRecordId,
+      }),
+    })
 
     return jsonFail(500, 'Internal server error')
   }

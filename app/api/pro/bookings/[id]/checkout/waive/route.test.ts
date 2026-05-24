@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => ({
   enforceRateLimit: vi.fn(),
   proRateLimitKey: vi.fn(),
   rateLimitExceededResponse: vi.fn(),
+
+  safeError: vi.fn(),
+  safeLogMeta: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -56,6 +59,11 @@ vi.mock('@/lib/idempotency', () => ({
     PRO_BOOKING_CHECKOUT_WAIVE:
       'POST /api/pro/bookings/[id]/checkout/waive',
   },
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
+  safeLogMeta: mocks.safeLogMeta,
 }))
 
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -194,6 +202,13 @@ describe('POST /api/pro/bookings/[id]/checkout/waive', () => {
     mocks.pickString.mockImplementation((value: unknown) =>
       typeof value === 'string' && value.trim() ? value.trim() : null,
     )
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : String(error),
+    }))
+
+    mocks.safeLogMeta.mockImplementation((meta: unknown) => meta)
 
     mocks.proRateLimitKey.mockImplementation(
       (args: { professionalId?: string | null; userId?: string | null }) =>
@@ -520,12 +535,20 @@ describe('POST /api/pro/bookings/[id]/checkout/waive', () => {
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('returns INTERNAL_ERROR for unexpected failures and fails started idempotency', async () => {
-    mocks.waiveProBookingCheckout.mockRejectedValueOnce(new Error('boom'))
+  it('returns INTERNAL_ERROR for unexpected failures, logs safely, and fails started idempotency', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const error = new Error('boom')
+
+    mocks.waiveProBookingCheckout.mockRejectedValueOnce(error)
 
     const result = await POST(
       makeRequest(
-        {},
+        {
+          reason: 'Client comp',
+        },
         {
           'idempotency-key': 'idem_waive_1',
         },
@@ -538,6 +561,26 @@ describe('POST /api/pro/bookings/[id]/checkout/waive', () => {
       operation: 'POST /api/pro/bookings/[id]/checkout/waive',
     })
 
+    expect(mocks.safeError).toHaveBeenCalledWith(error)
+    expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+      route: 'POST /api/pro/bookings/[id]/checkout/waive',
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/pro/bookings/[id]/checkout/waive error',
+      {
+        error: {
+          name: 'Error',
+          message: 'boom',
+        },
+        meta: {
+          route: 'POST /api/pro/bookings/[id]/checkout/waive',
+          idempotencyRecordId: 'idem_record_1',
+        },
+      },
+    )
+
     expect(result.status).toBe(500)
     expectBookingFailPayload(await result.json(), 'INTERNAL_ERROR', {
       error: 'Internal server error',
@@ -545,5 +588,60 @@ describe('POST /api/pro/bookings/[id]/checkout/waive', () => {
     })
 
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+
+    consoleErrorSpy.mockRestore()
+    })
+    it('logs idempotency failure-update errors safely without masking the original error', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const waiveError = new Error('waive exploded')
+    const failError = new Error('idempotency cleanup exploded')
+
+    mocks.waiveProBookingCheckout.mockRejectedValueOnce(waiveError)
+    mocks.failStartedRouteIdempotency.mockRejectedValueOnce(failError)
+
+    const result = await POST(
+      makeRequest(
+        {
+          reason: 'Client comp',
+        },
+        {
+          'idempotency-key': 'idem_waive_cleanup_error_1',
+        },
+      ),
+      makeContext(),
+    )
+
+    expect(mocks.safeError).toHaveBeenCalledWith(failError)
+    expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+      route: 'POST /api/pro/bookings/[id]/checkout/waive',
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'POST /api/pro/bookings/[id]/checkout/waive idempotency failure update error',
+      {
+        error: {
+          name: 'Error',
+          message: 'idempotency cleanup exploded',
+        },
+        meta: {
+          route: 'POST /api/pro/bookings/[id]/checkout/waive',
+          idempotencyRecordId: 'idem_record_1',
+        },
+      },
+    )
+
+    expect(result.status).toBe(500)
+    expectBookingFailPayload(await result.json(), 'INTERNAL_ERROR', {
+      error: 'Internal server error',
+      message: 'waive exploded',
+    })
+
+    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
+
+    consoleErrorSpy.mockRestore()
   })
 })

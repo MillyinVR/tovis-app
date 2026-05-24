@@ -9,6 +9,7 @@ import {
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
 import {
   getBookingFailPayload,
@@ -440,11 +441,14 @@ export async function POST(req: Request) {
     return jsonOk(responseBody, 201)
   } catch (error: unknown) {
     if (idempotencyRecordId) {
-      await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-        console.error(
-          'POST /api/pro/bookings idempotency failure update error',
-          failError,
-        )
+      await failIdempotency({ idempotencyRecordId }).catch((failError: unknown) => {
+        console.error('POST /api/pro/bookings idempotency failure update error', {
+          error: safeError(failError),
+          meta: safeLogMeta({
+            route: 'POST /api/pro/bookings',
+            idempotencyRecordId,
+          }),
+        })
       })
     }
 
@@ -455,7 +459,14 @@ export async function POST(req: Request) {
       })
     }
 
-    console.error('POST /api/pro/bookings error', error)
+    console.error('POST /api/pro/bookings error', {
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: 'POST /api/pro/bookings',
+        idempotencyRecordId,
+      }),
+    })
+
     captureBookingException({ error, route: 'POST /api/pro/bookings' })
     return bookingJsonFail('INTERNAL_ERROR', {
       message:

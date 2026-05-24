@@ -15,6 +15,7 @@ import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { proRateLimitKey } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -191,6 +192,14 @@ export async function POST(request: Request, context: RouteParams) {
     await failStartedRouteIdempotency({
       idempotencyRecordId,
       operation: ROUTE_OPERATION,
+    }).catch((failError: unknown) => {
+      console.error(`${ROUTE_OPERATION} idempotency failure update error`, {
+        error: safeError(failError),
+        meta: safeLogMeta({
+          route: ROUTE_OPERATION,
+          idempotencyRecordId,
+        }),
+      })
     })
 
     if (isBookingError(error)) {
@@ -200,7 +209,13 @@ export async function POST(request: Request, context: RouteParams) {
       })
     }
 
-    console.error(`${ROUTE_OPERATION} error`, error)
+    console.error(`${ROUTE_OPERATION} error`, {
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: ROUTE_OPERATION,
+        idempotencyRecordId,
+      }),
+    })
 
     const message = error instanceof Error ? error.message : 'Unknown error.'
 

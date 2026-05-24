@@ -14,6 +14,9 @@ const mocks = vi.hoisted(() => ({
   completeRouteIdempotency: vi.fn(),
   failStartedRouteIdempotency: vi.fn(),
   isRouteIdempotencyHandled: vi.fn(),
+
+  safeError: vi.fn(),
+  safeLogMeta: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -42,6 +45,11 @@ vi.mock('@/lib/idempotency', () => ({
   IDEMPOTENCY_ROUTES: {
     PRO_BOOKING_CANCEL: 'PATCH /api/pro/bookings/[id]/cancel',
   },
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
+  safeLogMeta: mocks.safeLogMeta,
 }))
 
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -137,7 +145,12 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
 
     mocks.completeRouteIdempotency.mockResolvedValue(undefined)
     mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : String(error),
+    }))
 
+    mocks.safeLogMeta.mockImplementation((meta: unknown) => meta)
     mocks.cancelBooking.mockResolvedValue({
       booking: {
         id: 'booking_1',
@@ -534,14 +547,36 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
     })
   })
 
-  it('returns 500 for unknown errors and marks idempotency failed', async () => {
-    mocks.cancelBooking.mockRejectedValueOnce(new Error('boom'))
+  it('logs unknown errors safely, returns 500, and marks idempotency failed', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const error = new Error('boom')
+    mocks.cancelBooking.mockRejectedValueOnce(error)
 
     const result = await PATCH(makeRequest(), makeCtx('booking_1'))
 
     expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
       idempotencyRecordId: 'idem_record_1',
       operation: IDEMPOTENCY_ROUTE,
+    })
+
+    expect(mocks.safeError).toHaveBeenCalledWith(error)
+    expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+      route: IDEMPOTENCY_ROUTE,
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(`${IDEMPOTENCY_ROUTE} error`, {
+      error: {
+        name: 'Error',
+        message: 'boom',
+      },
+      meta: {
+        route: IDEMPOTENCY_ROUTE,
+        idempotencyRecordId: 'idem_record_1',
+      },
     })
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
@@ -551,6 +586,52 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
       status: 500,
       error: 'Internal server error',
     })
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('logs idempotency failure-update errors safely without masking the original error', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const cancelError = new Error('cancel exploded')
+    const failError = new Error('idempotency cleanup exploded')
+
+    mocks.cancelBooking.mockRejectedValueOnce(cancelError)
+    mocks.failStartedRouteIdempotency.mockRejectedValueOnce(failError)
+
+    const result = await PATCH(makeRequest(), makeCtx('booking_1'))
+
+    expect(mocks.safeError).toHaveBeenCalledWith(failError)
+    expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+      route: IDEMPOTENCY_ROUTE,
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      `${IDEMPOTENCY_ROUTE} idempotency failure update error`,
+      {
+        error: {
+          name: 'Error',
+          message: 'idempotency cleanup exploded',
+        },
+        meta: {
+          route: IDEMPOTENCY_ROUTE,
+          idempotencyRecordId: 'idem_record_1',
+        },
+      },
+    )
+
+    expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
+
+    expect(result).toEqual({
+      ok: false,
+      status: 500,
+      error: 'Internal server error',
+    })
+
+    consoleErrorSpy.mockRestore()
   })
 
   it('does not mark idempotency failed when error happens before ledger starts', async () => {

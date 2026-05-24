@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   bookingFindFirst: vi.fn(),
   upsertClientClaimLink: vi.fn(),
   createClientClaimInviteDelivery: vi.fn(),
+  safeError: vi.fn(),
+  safeLogMeta: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -30,6 +32,11 @@ vi.mock('@/lib/clients/clientClaimLinks', () => ({
 
 vi.mock('@/lib/clientActions/createClientClaimInviteDelivery', () => ({
   createClientClaimInviteDelivery: mocks.createClientClaimInviteDelivery,
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
+  safeLogMeta: mocks.safeLogMeta,
 }))
 
 import { POST } from './route'
@@ -150,6 +157,12 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
     mocks.createClientClaimInviteDelivery.mockResolvedValue(
       makeInviteDeliveryResult(),
     )
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : String(error),
+    }))
+
+    mocks.safeLogMeta.mockImplementation((meta: unknown) => meta)
   })
 
   it('returns auth response when requirePro fails', async () => {
@@ -472,9 +485,9 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
   })
 
   it('returns queued false when invite delivery enqueue fails but still returns 200 with the invite payload', async () => {
-    mocks.createClientClaimInviteDelivery.mockRejectedValueOnce(
-      new Error('dispatch enqueue failed'),
-    )
+    const error = new Error('dispatch enqueue failed')
+
+    mocks.createClientClaimInviteDelivery.mockRejectedValueOnce(error)
 
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
@@ -493,15 +506,30 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
 
       expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledTimes(1)
 
+      expect(mocks.safeError).toHaveBeenCalledWith(error)
+      expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+        route: 'POST /api/pro/bookings/[id]/invite',
+        professionalId: 'pro_123',
+        bookingId: 'booking_1',
+        clientId: 'client_123',
+        inviteId: 'invite_1',
+      })
+
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'POST /api/pro/bookings/[id]/invite delivery enqueue failed',
-        expect.objectContaining({
-          professionalId: 'pro_123',
-          bookingId: 'booking_1',
-          clientId: 'client_123',
-          inviteId: 'invite_1',
-          error: expect.any(Error),
-        }),
+        {
+          error: {
+            name: 'Error',
+            message: 'dispatch enqueue failed',
+          },
+          meta: {
+            route: 'POST /api/pro/bookings/[id]/invite',
+            professionalId: 'pro_123',
+            bookingId: 'booking_1',
+            clientId: 'client_123',
+            inviteId: 'invite_1',
+          },
+        },
       )
 
       expect(result).toEqual({
@@ -656,9 +684,9 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
   })
 
   it('returns INTERNAL_ERROR when invite creation throws', async () => {
-    mocks.upsertClientClaimLink.mockRejectedValueOnce(
-      new Error('invite helper exploded'),
-    )
+    const error = new Error('invite helper exploded')
+
+    mocks.upsertClientClaimLink.mockRejectedValueOnce(error)
 
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
@@ -686,9 +714,22 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
         error: 'Internal server error',
       })
 
+      expect(mocks.safeError).toHaveBeenCalledWith(error)
+      expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+        route: 'POST /api/pro/bookings/[id]/invite',
+      })
+
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'POST /api/pro/bookings/[id]/invite error',
-        expect.any(Error),
+        {
+          error: {
+            name: 'Error',
+            message: 'invite helper exploded',
+          },
+          meta: {
+            route: 'POST /api/pro/bookings/[id]/invite',
+          },
+        },
       )
     } finally {
       consoleErrorSpy.mockRestore()

@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { BookingServiceItemType } from '@prisma/client'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
@@ -245,8 +246,14 @@ export async function GET(_req: Request, ctx: Ctx) {
       },
       200,
     )
-  } catch (e) {
-    console.error('GET /api/pro/bookings/[id]/consultation-services error', e)
+  } catch (error: unknown) {
+    console.error('GET /api/pro/bookings/[id]/consultation-services error', {
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: 'GET /api/pro/bookings/[id]/consultation-services',
+      }),
+    })
+
     return jsonFail(500, 'Internal server error')
   }
 }

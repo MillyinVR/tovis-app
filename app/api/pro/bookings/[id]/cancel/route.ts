@@ -12,8 +12,11 @@ import {
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
 import { cancelBooking } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
+
+const ROUTE_OPERATION = 'PATCH /api/pro/bookings/[id]/cancel'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
@@ -140,7 +143,15 @@ export async function PATCH(req: Request, ctx: Ctx) {
   } catch (error: unknown) {
     await failStartedRouteIdempotency({
       idempotencyRecordId,
-      operation: 'PATCH /api/pro/bookings/[id]/cancel',
+      operation: ROUTE_OPERATION,
+    }).catch((failError: unknown) => {
+      console.error(`${ROUTE_OPERATION} idempotency failure update error`, {
+        error: safeError(failError),
+        meta: safeLogMeta({
+          route: ROUTE_OPERATION,
+          idempotencyRecordId,
+        }),
+      })
     })
 
     if (isBookingError(error)) {
@@ -152,7 +163,13 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
     }
 
-    console.error('PATCH /api/pro/bookings/[id]/cancel error', error)
+    console.error(`${ROUTE_OPERATION} error`, {
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: ROUTE_OPERATION,
+        idempotencyRecordId,
+      }),
+    })
 
     return jsonFail(500, 'Internal server error')
   }

@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   rateLimitExceededResponse: vi.fn(),
 
   safeError: vi.fn(),
+  safeLogMeta: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils/auth/requireClient', () => ({
@@ -73,6 +74,7 @@ vi.mock('@/lib/rateLimit/response', () => ({
 
 vi.mock('@/lib/security/logging', () => ({
   safeError: mocks.safeError,
+  safeLogMeta: mocks.safeLogMeta,
 }))
 
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -116,6 +118,8 @@ describe('POST /api/bookings/[id]/reschedule', () => {
       name: error instanceof Error ? error.name : 'UnknownError',
       message: error instanceof Error ? error.message : 'Unknown error',
     }))
+
+    mocks.safeLogMeta.mockImplementation((meta: unknown) => meta)
 
     mocks.requireClient.mockResolvedValue({
       ok: true,
@@ -637,46 +641,72 @@ describe('POST /api/bookings/[id]/reschedule', () => {
     })
   })
 
-  it('fails idempotency and returns INTERNAL_ERROR for non-booking errors', async () => {
+  it('logs unexpected errors through safe logging helpers, fails idempotency, and returns INTERNAL_ERROR', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
     const descriptor = getBookingErrorDescriptor('INTERNAL_ERROR')
     const thrown = new Error('boom')
 
     mocks.rescheduleBookingFromHold.mockRejectedValueOnce(thrown)
 
-    const result = await POST(
-      makeRequest({
-        holdId: 'hold_1',
-      }),
-      makeCtx(),
-    )
+    try {
+      const result = await POST(
+        makeRequest({
+          holdId: 'hold_1',
+        }),
+        makeCtx(),
+      )
 
-    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
-      operation: 'POST /api/bookings/[id]/reschedule',
-    })
+      expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_1',
+        operation: 'POST /api/bookings/[id]/reschedule',
+      })
 
-    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+      expect(mocks.safeError).toHaveBeenCalledWith(thrown)
+      expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+        route: 'POST /api/bookings/[id]/reschedule',
+        idempotencyRecordId: 'idem_record_1',
+      })
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      descriptor.httpStatus,
-      'Failed to reschedule booking.',
-      {
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'POST /api/bookings/[id]/reschedule error',
+        {
+          error: {
+            name: 'Error',
+            message: 'boom',
+          },
+          meta: {
+            route: 'POST /api/bookings/[id]/reschedule',
+            idempotencyRecordId: 'idem_record_1',
+          },
+        },
+      )
+
+      expect(mocks.jsonFail).toHaveBeenCalledWith(
+        descriptor.httpStatus,
+        'Failed to reschedule booking.',
+        {
+          code: descriptor.code,
+          retryable: descriptor.retryable,
+          uiAction: descriptor.uiAction,
+          message: 'boom',
+        },
+      )
+
+      expect(result).toEqual({
+        ok: false,
+        status: descriptor.httpStatus,
+        error: 'Failed to reschedule booking.',
         code: descriptor.code,
         retryable: descriptor.retryable,
         uiAction: descriptor.uiAction,
         message: 'boom',
-      },
-    )
-
-    expect(result).toEqual({
-      ok: false,
-      status: descriptor.httpStatus,
-      error: 'Failed to reschedule booking.',
-      code: descriptor.code,
-      retryable: descriptor.retryable,
-      uiAction: descriptor.uiAction,
-      message: 'boom',
-    })
+      })
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 
   it('does not fail idempotency when an error happens before the ledger starts', async () => {

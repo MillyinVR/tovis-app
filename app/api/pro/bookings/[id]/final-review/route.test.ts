@@ -29,6 +29,9 @@ const mocks = vi.hoisted(() => ({
   failIdempotency: vi.fn(),
 
   captureBookingException: vi.fn(),
+
+  safeError: vi.fn(),
+  safeLogMeta: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -63,6 +66,11 @@ vi.mock('@/lib/idempotency', () => ({
 
 vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
+  safeLogMeta: mocks.safeLogMeta,
 }))
 
 import { POST } from './route'
@@ -328,6 +336,14 @@ describe('app/api/pro/bookings/[id]/final-review/route.ts POST', () => {
 
     mocks.completeIdempotency.mockResolvedValue(undefined)
     mocks.failIdempotency.mockResolvedValue(undefined)
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : String(error),
+    }))
+
+    mocks.safeLogMeta.mockImplementation((meta: unknown) => meta)
+
     mocks.confirmBookingFinalReview.mockResolvedValue(makeConfirmResult())
   })
 
@@ -723,8 +739,14 @@ describe('app/api/pro/bookings/[id]/final-review/route.ts POST', () => {
     })
   })
 
-  it('returns 500 for unexpected errors, captures exception, and marks idempotency failed', async () => {
-    mocks.confirmBookingFinalReview.mockRejectedValueOnce(new Error('boom'))
+  it('logs unexpected errors safely, captures exception, and marks idempotency failed', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const error = new Error('boom')
+
+    mocks.confirmBookingFinalReview.mockRejectedValueOnce(error)
 
     const response = await POST(
       makeIdempotentRequest({
@@ -738,9 +760,26 @@ describe('app/api/pro/bookings/[id]/final-review/route.ts POST', () => {
       idempotencyRecordId: 'idem_record_1',
     })
 
+    expect(mocks.safeError).toHaveBeenCalledWith(error)
+    expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+      route: IDEMPOTENCY_ROUTE,
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(`${IDEMPOTENCY_ROUTE} error`, {
+      error: {
+        name: 'Error',
+        message: 'boom',
+      },
+      meta: {
+        route: IDEMPOTENCY_ROUTE,
+        idempotencyRecordId: 'idem_record_1',
+      },
+    })
+
     expect(mocks.captureBookingException).toHaveBeenCalledWith({
-      error: expect.any(Error),
-      route: 'POST /api/pro/bookings/[id]/final-review',
+      error,
+      route: IDEMPOTENCY_ROUTE,
     })
 
     expect(response.status).toBe(500)
@@ -748,5 +787,64 @@ describe('app/api/pro/bookings/[id]/final-review/route.ts POST', () => {
       ok: false,
       error: 'Internal server error',
     })
+
+    consoleErrorSpy.mockRestore()
   })
+  it('logs idempotency failure-update errors safely without masking the original error', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+
+    const finalReviewError = new Error('final review exploded')
+    const failError = new Error('idempotency cleanup exploded')
+
+    mocks.confirmBookingFinalReview.mockRejectedValueOnce(finalReviewError)
+    mocks.failIdempotency.mockRejectedValueOnce(failError)
+
+    const response = await POST(
+      makeIdempotentRequest({
+        key: 'idem_cleanup_boom_1',
+        body: makeValidBody(),
+      }),
+      makeCtx(),
+    )
+
+    expect(mocks.failIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(mocks.safeError).toHaveBeenCalledWith(failError)
+    expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+      route: IDEMPOTENCY_ROUTE,
+      idempotencyRecordId: 'idem_record_1',
+    })
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      `${IDEMPOTENCY_ROUTE} idempotency failure update error`,
+      {
+        error: {
+          name: 'Error',
+          message: 'idempotency cleanup exploded',
+        },
+        meta: {
+          route: IDEMPOTENCY_ROUTE,
+          idempotencyRecordId: 'idem_record_1',
+        },
+      },
+    )
+
+    expect(mocks.captureBookingException).toHaveBeenCalledWith({
+      error: finalReviewError,
+      route: IDEMPOTENCY_ROUTE,
+    })
+
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: 'Internal server error',
+    })
+
+    consoleErrorSpy.mockRestore()
+  })
+
 })

@@ -25,8 +25,11 @@ import {
   IDEMPOTENCY_ROUTES,
 } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
+
+const ROUTE_OPERATION = 'POST /api/pro/bookings/[id]/final-review'
 
 type Ctx = {
   params: { id: string } | Promise<{ id: string }>
@@ -379,12 +382,17 @@ async function failStartedIdempotency(
 ): Promise<void> {
   if (!idempotencyRecordId) return
 
-  await failIdempotency({ idempotencyRecordId }).catch((failError) => {
-    console.error(
-      'POST /api/pro/bookings/[id]/final-review idempotency failure update error:',
-      failError,
-    )
-  })
+  await failIdempotency({ idempotencyRecordId }).catch(
+    (failError: unknown) => {
+      console.error(`${ROUTE_OPERATION} idempotency failure update error`, {
+        error: safeError(failError),
+        meta: safeLogMeta({
+          route: ROUTE_OPERATION,
+          idempotencyRecordId,
+        }),
+      })
+    },
+  )
 }
 
 export async function POST(req: Request, ctx: Ctx) {
@@ -542,10 +550,16 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    console.error('POST /api/pro/bookings/[id]/final-review error', error)
+    console.error(`${ROUTE_OPERATION} error`, {
+      error: safeError(error),
+      meta: safeLogMeta({
+        route: ROUTE_OPERATION,
+        idempotencyRecordId,
+      }),
+    })
     captureBookingException({
       error,
-      route: 'POST /api/pro/bookings/[id]/final-review',
+      route: ROUTE_OPERATION,
     })
 
     return jsonFail(500, 'Internal server error')

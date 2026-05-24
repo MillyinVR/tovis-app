@@ -82,6 +82,9 @@ const mocks = vi.hoisted(() => ({
   completeRouteIdempotency: vi.fn(),
   failStartedRouteIdempotency: vi.fn(),
   isRouteIdempotencyHandled: vi.fn(),
+
+  safeError: vi.fn(),
+  safeLogMeta: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -106,6 +109,11 @@ vi.mock('@/lib/idempotency', () => ({
   IDEMPOTENCY_ROUTES: {
     BOOKING_FINISH_SESSION: 'POST /api/pro/bookings/[id]/session/finish',
   },
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
+  safeLogMeta: mocks.safeLogMeta,
 }))
 
 import { POST } from './route'
@@ -143,7 +151,9 @@ function expectIdempotencyStarted(key = 'idem_finish_booking_1'): void {
     requestHash: 'hash_1',
   })
 
-  mocks.isRouteIdempotencyHandled.mockReturnValue(false)
+  mocks.isRouteIdempotencyHandled.mockImplementation(
+    (result: { kind: string }) => result.kind === 'handled',
+  )
 }
 
 describe('POST /api/pro/bookings/[id]/session/finish', () => {
@@ -177,6 +187,13 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     mocks.pickString.mockImplementation((value: unknown) =>
       typeof value === 'string' && value.trim() ? value.trim() : null,
     )
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : String(error),
+    }))
+
+    mocks.safeLogMeta.mockImplementation((meta: unknown) => meta)
 
     expectIdempotencyStarted()
 
@@ -248,7 +265,6 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       kind: 'handled',
       response: handledResponse,
     })
-    mocks.isRouteIdempotencyHandled.mockReturnValue(true)
 
     const result = await POST(makeRequest(), makeCtx())
 
@@ -292,7 +308,6 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       kind: 'handled',
       response: handledResponse,
     })
-    mocks.isRouteIdempotencyHandled.mockReturnValue(true)
 
     const result = await POST(makeIdempotentRequest(), makeCtx())
 
@@ -314,7 +329,6 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       kind: 'handled',
       response: handledResponse,
     })
-    mocks.isRouteIdempotencyHandled.mockReturnValue(true)
 
     const result = await POST(makeIdempotentRequest(), makeCtx())
 
@@ -334,7 +348,6 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
       kind: 'handled',
       response: handledResponse,
     })
-    mocks.isRouteIdempotencyHandled.mockReturnValue(true)
 
     const result = await POST(makeIdempotentRequest(), makeCtx())
 
@@ -558,25 +571,54 @@ describe('POST /api/pro/bookings/[id]/session/finish', () => {
     )
   })
 
-  it('returns internal error and marks idempotency failed for unexpected errors', async () => {
-    mocks.finishBookingSession.mockRejectedValueOnce(new Error('boom'))
+  it('logs unexpected errors through safe logging helpers, returns internal error, and marks idempotency failed', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
 
-    const result = await POST(
-      makeIdempotentRequest('idem_finish_boom_1'),
-      makeCtx(),
-    )
+    const error = new Error('boom')
+    mocks.finishBookingSession.mockRejectedValueOnce(error)
 
-    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
-      operation: 'POST /api/pro/bookings/[id]/session/finish',
-    })
+    try {
+      const result = await POST(
+        makeIdempotentRequest('idem_finish_boom_1'),
+        makeCtx(),
+      )
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
+      expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_1',
+        operation: 'POST /api/pro/bookings/[id]/session/finish',
+      })
 
-    expect(result).toEqual({
-      ok: false,
-      status: 500,
-      error: 'Internal server error',
-    })
+      expect(mocks.safeError).toHaveBeenCalledWith(error)
+      expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+        route: 'POST /api/pro/bookings/[id]/session/finish',
+        idempotencyRecordId: 'idem_record_1',
+      })
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'POST /api/pro/bookings/[id]/session/finish error',
+        {
+          error: {
+            name: 'Error',
+            message: 'boom',
+          },
+          meta: {
+            route: 'POST /api/pro/bookings/[id]/session/finish',
+            idempotencyRecordId: 'idem_record_1',
+          },
+        },
+      )
+
+      expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
+
+      expect(result).toEqual({
+        ok: false,
+        status: 500,
+        error: 'Internal server error',
+      })
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 })

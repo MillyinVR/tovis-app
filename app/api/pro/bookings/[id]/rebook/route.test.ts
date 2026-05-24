@@ -25,6 +25,9 @@ const mocks = vi.hoisted(() => ({
   aftercareSummaryUpsert: vi.fn(),
 
   createRebookedBookingFromCompletedBooking: vi.fn(),
+
+  safeError: vi.fn(),
+  safeLogMeta: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -71,6 +74,11 @@ vi.mock('@/lib/idempotency', () => ({
   IDEMPOTENCY_ROUTES: {
     PRO_BOOKING_REBOOK: 'POST /api/pro/bookings/[id]/rebook',
   },
+}))
+
+vi.mock('@/lib/security/logging', () => ({
+  safeError: mocks.safeError,
+  safeLogMeta: mocks.safeLogMeta,
 }))
 
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -192,6 +200,13 @@ describe('POST /api/pro/bookings/[id]/rebook', () => {
 
     mocks.completeRouteIdempotency.mockResolvedValue(undefined)
     mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
+
+    mocks.safeError.mockImplementation((error: unknown) => ({
+      name: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : String(error),
+    }))
+
+    mocks.safeLogMeta.mockImplementation((meta: unknown) => meta)
 
     mocks.isRecord.mockImplementation(
       (value: unknown) =>
@@ -728,12 +743,12 @@ it('creates a rebooked booking in BOOK mode and completes idempotency', async ()
   mocks.pickIsoDate.mockReturnValueOnce(SCHEDULED_FOR)
 
   const result = await POST(
-      makeRequest({
-        mode: 'BOOK',
-        scheduledFor: SCHEDULED_FOR.toISOString(),
-      }),
-      makeCtx('booking_1'),
-    )
+    makeRequest({
+      mode: 'BOOK',
+      scheduledFor: SCHEDULED_FOR.toISOString(),
+    }),
+    makeCtx('booking_1'),
+  )
 
     expect(
       mocks.createRebookedBookingFromCompletedBooking,
@@ -820,24 +835,54 @@ it('creates a rebooked booking in BOOK mode and completes idempotency', async ()
     })
   })
 
-  it('returns 500 for unexpected errors and marks idempotency failed', async () => {
-    mocks.aftercareSummaryUpsert.mockRejectedValueOnce(new Error('boom'))
+  it('logs unexpected errors through safe logging helpers and marks idempotency failed', async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
 
-    const result = await POST(
-      makeRequest({ mode: 'CLEAR' }),
-      makeCtx('booking_1'),
-    )
+    const error = new Error('boom')
 
-    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
-      operation: 'POST /api/pro/bookings/[id]/rebook',
-    })
+    mocks.aftercareSummaryUpsert.mockRejectedValueOnce(error)
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
-    expect(result).toEqual({
-      ok: false,
-      status: 500,
-      error: 'Internal server error',
-    })
+    try {
+      const result = await POST(
+        makeRequest({ mode: 'CLEAR' }),
+        makeCtx('booking_1'),
+      )
+
+      expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_1',
+        operation: 'POST /api/pro/bookings/[id]/rebook',
+      })
+
+      expect(mocks.safeError).toHaveBeenCalledWith(error)
+      expect(mocks.safeLogMeta).toHaveBeenCalledWith({
+        route: 'POST /api/pro/bookings/[id]/rebook',
+        idempotencyRecordId: 'idem_record_1',
+      })
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'POST /api/pro/bookings/[id]/rebook error',
+        {
+          error: {
+            name: 'Error',
+            message: 'boom',
+          },
+          meta: {
+            route: 'POST /api/pro/bookings/[id]/rebook',
+            idempotencyRecordId: 'idem_record_1',
+          },
+        },
+      )
+
+      expect(mocks.jsonFail).toHaveBeenCalledWith(500, 'Internal server error')
+      expect(result).toEqual({
+        ok: false,
+        status: 500,
+        error: 'Internal server error',
+      })
+    } finally {
+      consoleErrorSpy.mockRestore()
+    }
   })
 })
