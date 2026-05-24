@@ -464,4 +464,28 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
     expect(mocks.txBookingCreate).not.toHaveBeenCalled()
     expect(mocks.txBookingHoldDelete).not.toHaveBeenCalled()
   })
+
+  it('populates dedicated encrypted snapshot columns on mobile hold create', async () => {
+    arrangeMobileContext()
+
+    await createHold(makeCreateHoldArgs())
+
+    // Dedicated encrypted columns must be populated alongside legacy ones.
+    // Mobile mode: location envelope is null (no salon address to encrypt);
+    // client envelope is present (the client home address).
+    expect(mocks.txBookingHoldCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          encryptedLocationAddressSnapshotJson: Prisma.JsonNull,
+          locationLatApprox: MOBILE_BASE_LAT,
+          locationLngApprox: MOBILE_BASE_LNG,
+
+          encryptedClientAddressSnapshotJson: expect.anything(),
+          clientAddressLatApprox: MOBILE_CLIENT_IN_RADIUS_LAT,
+          clientAddressLngApprox: MOBILE_CLIENT_IN_RADIUS_LNG,
+        }),
+      }),
+    )
+  })
+
 })
