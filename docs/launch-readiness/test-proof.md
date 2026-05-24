@@ -72,3 +72,57 @@ Result: passed.
   `console.error('message', { ...payload })`) and other directories (notably
   `lib/booking/writeBoundary.ts`) are not covered by this proof. A follow-up
   ticket covers `logHoldCreateInternalError` sanitation.
+
+---
+
+## Proof run — contact lookup hash decision documented
+
+- Checklist item: SHA-256 vs HMAC contact hash decision documented.
+- Owner: Tori Morales
+- Date: 2026-05-23
+- Related commits:
+  - `9ff31e3` — `Repair launch-readiness test-proof.md evidence record`
+    (added the truncated threat-model stub that was previously staged)
+  - `0abef2f` — `Complete contact lookup hash threat model`
+- Status: Decision recorded; code still uses SHA-256.
+- Environment:
+  - Local: yes (doc-only)
+  - CI: N/A (doc-only)
+  - Staging: N/A (doc-only)
+  - Production: N/A (doc-only)
+
+### Test summary
+
+This is a documentation proof, not a code proof. It records that the
+launch-time decision for contact lookup hashing has been written down and
+linked from the sprint-1 verification checklist.
+
+Decision (see `docs/security/contact-lookup-hash-threat-model.md` for full
+rationale):
+
+- Current implementation: plain SHA-256 over normalized contact field.
+- Risk: bounded — internal-only use, scoped to operator/DB compromise.
+- Accepted for private beta / early controlled launch.
+- Future migration: HMAC-SHA256 with a versioned, KMS-backed key, using a
+  dual-write + backfill + cut-over pattern. Out of scope for this sprint.
+
+### Commands run
+
+```bash
+sed -n '1,220p' docs/security/contact-lookup-hash-threat-model.md
+grep -n "SHA-256 vs HMAC contact hash decision documented" \
+  docs/launch-readiness/sprint-1-verification-checklist.md
+```
+
+Result: file exists, fences closed, trailing newline present; checklist
+row "SHA-256 vs HMAC contact hash decision documented" is `IN PROGRESS`
+and points at the threat-model doc.
+
+### Limitations
+
+- This proof covers the documented decision only. No code has changed.
+  `lib/security/crypto/hashLookup.ts` still uses SHA-256.
+- The HMAC-SHA256 migration is intentionally deferred. It is not tracked
+  by this proof and remains an open future ticket.
+- No CI/staging/prod runs apply — this is documentation, not runtime
+  behavior.
