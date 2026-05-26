@@ -216,9 +216,12 @@ describe('app/api/auth/email/send/route', () => {
       event: 'auth.email.send.app_url_missing',
       route: 'auth.email.send',
       userId: 'user_1',
-      email: 'user@example.com',
       code: 'APP_URL_MISSING',
     })
+
+    expect(JSON.stringify(mockLogAuthEvent.mock.calls)).not.toContain(
+      'user@example.com',
+    )
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
@@ -375,9 +378,12 @@ describe('app/api/auth/email/send/route', () => {
       provider: 'postmark',
       code: 'EMAIL_NOT_CONFIGURED',
       userId: 'user_1',
-      email: 'user@example.com',
       error: expect.any(Error),
     })
+
+    expect(JSON.stringify(mockCaptureAuthException.mock.calls)).not.toContain(
+      'user@example.com',
+    )
   })
 
   it('returns EMAIL_SEND_FAILED for other send failures', async () => {
@@ -411,8 +417,11 @@ describe('app/api/auth/email/send/route', () => {
       provider: 'postmark',
       code: 'EMAIL_SEND_FAILED',
       userId: 'user_1',
-      email: 'user@example.com',
       error: expect.any(Error),
     })
+
+    expect(JSON.stringify(mockCaptureAuthException.mock.calls)).not.toContain(
+      'user@example.com',
+    )
   })
 })

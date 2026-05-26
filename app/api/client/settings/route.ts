@@ -1,19 +1,23 @@
-// app/api/client/settings/route.ts
-import { prisma } from '@/lib/prisma'
-import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { ClientAddressKind } from '@prisma/client'
+
+import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
+import { decimalToNullableNumber } from '@/lib/booking/snapshots'
 import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
-import { decimalToNullableNumber } from '@/lib/booking/snapshots'
+import { prisma } from '@/lib/prisma'
 import { buildClientProfileContactLookupData } from '@/lib/security/contactLookup'
+import { normalizePhone as normalizePhoneForLookup } from '@/lib/security/contactNormalization'
+import { normalizeSettingsPhoneFromBody } from '@/lib/security/settingsContactInput'
 
 export const dynamic = 'force-dynamic'
 
 function formatDateOnlyUtc(value: Date | null | undefined): string | null {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) return null
+
   const y = value.getUTCFullYear()
   const m = String(value.getUTCMonth() + 1).padStart(2, '0')
   const d = String(value.getUTCDate()).padStart(2, '0')
+
   return `${y}-${m}-${d}`
 }
 
@@ -45,57 +49,72 @@ function parseDateOnlyToUtcNoon(value: unknown): Date | null | 'invalid' {
   const dt = new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0))
   if (Number.isNaN(dt.getTime())) return 'invalid'
 
+  if (
+    dt.getUTCFullYear() !== year ||
+    dt.getUTCMonth() !== month - 1 ||
+    dt.getUTCDate() !== day
+  ) {
+    return 'invalid'
+  }
+
   return dt
 }
 
-function normalizeOptionalString(value: unknown): string | null | undefined {
-  if (value === undefined) return undefined
-  if (value === null) return null
-
-  const s = pickString(value)
-  if (!s) return null
-  return s
-}
-
-function normalizeRequiredishName(value: unknown): string | undefined | 'invalid' {
+function normalizeRequiredishName(
+  value: unknown,
+): string | undefined | 'invalid' {
   if (value === undefined) return undefined
   if (value === null) return 'invalid'
 
   const s = pickString(value)
   if (!s) return ''
   if (s.length > 80) return 'invalid'
+
   return s
 }
 
-function normalizePhone(value: unknown): string | null | undefined | 'invalid' {
+function normalizeSettingsPhone(
+  value: unknown,
+): string | null | undefined | 'invalid' {
   if (value === undefined) return undefined
   if (value === null) return null
 
-  const s = pickString(value)
-  if (!s) return null
-  if (s.length > 40) return 'invalid'
-  return s
+  const raw = pickString(value)
+  if (!raw) return null
+  if (raw.length > 40) return 'invalid'
+
+  const normalized = normalizePhoneForLookup(raw)
+  return normalized ?? 'invalid'
 }
 
-function normalizeAvatarUrl(value: unknown): string | null | undefined | 'invalid' {
+function normalizeAvatarUrl(
+  value: unknown,
+): string | null | undefined | 'invalid' {
   if (value === undefined) return undefined
   if (value === null) return null
 
   const s = pickString(value)
   if (!s) return null
   if (s.length > 2000) return 'invalid'
+
   return s
 }
 
-function sortAddressesForSettings<T extends { kind: ClientAddressKind; isDefault: boolean; createdAt: Date }>(
-  addresses: T[],
-): T[] {
+function sortAddressesForSettings<
+  T extends {
+    kind: ClientAddressKind
+    isDefault: boolean
+    createdAt: Date
+  },
+>(addresses: T[]): T[] {
   return [...addresses].sort((a, b) => {
     if (a.kind !== b.kind) {
       if (a.kind === ClientAddressKind.SEARCH_AREA) return -1
       if (b.kind === ClientAddressKind.SEARCH_AREA) return 1
     }
+
     if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1
+
     return a.createdAt.getTime() - b.createdAt.getTime()
   })
 }
@@ -193,7 +212,8 @@ export async function PATCH(req: Request) {
 
     const firstName = normalizeRequiredishName(body.firstName)
     const lastName = normalizeRequiredishName(body.lastName)
-    const phone = normalizePhone(body.phone)
+    // pii-plaintext-read-ok: client settings PATCH accepts plaintext phone from request body so it can be normalized and lookup-hashed before storage
+    const phone = normalizeSettingsPhoneFromBody(body)
     const avatarUrl = normalizeAvatarUrl(body.avatarUrl)
     const dateOfBirth = parseDateOnlyToUtcNoon(body.dateOfBirth)
 
@@ -227,6 +247,7 @@ export async function PATCH(req: Request) {
     if (!hasAnyChange) {
       const current = await loadSettings(auth.clientId, auth.user.email ?? null)
       if (!current) return jsonFail(404, 'Client profile not found.')
+
       return jsonOk(current, 200)
     }
 

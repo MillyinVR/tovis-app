@@ -2,7 +2,19 @@
 
 import { Prisma } from '@prisma/client'
 
-export const ADDRESS_KEY_VERSION = 'address-json-v1' as const
+import {
+  decryptAead,
+  encryptAead,
+  isAeadEnvelopeV1,
+  type AeadEnvelopeV1,
+} from '@/lib/security/crypto/aead'
+
+export const ADDRESS_KEY_VERSION = 'address-aead-v1' as const
+export const ADDRESS_AEAD_ASSOCIATED_DATA = 'tovis:address-privacy:v1' as const
+
+const LEGACY_ADDRESS_KEY_VERSION = 'address-json-v1' as const
+const LEGACY_ADDRESS_ALGORITHM = 'plaintext-json-expand-phase' as const
+const ADDRESS_AEAD_ALGORITHM = 'aes-256-gcm-v1' as const
 
 const APPROX_COORDINATE_DECIMAL_PLACES = 4
 const MAX_POSTAL_CODE_PREFIX_LENGTH = 12
@@ -29,23 +41,36 @@ export type AddressPrivacyInput = {
   lng?: NullableNumberLike
 }
 
-export type AddressPrivacyEnvelopeV1 = {
-  v: 1
-  algorithm: 'plaintext-json-expand-phase'
-  keyVersion: typeof ADDRESS_KEY_VERSION
-  address: {
-    formattedAddress: string | null
-    addressLine1: string | null
-    addressLine2: string | null
-    city: string | null
-    state: string | null
-    postalCode: string | null
-    countryCode: string | null
-    placeId: string | null
-    lat: string | null
-    lng: string | null
-  }
+export type NormalizedAddressPrivacyPayload = {
+  formattedAddress: string | null
+  addressLine1: string | null
+  addressLine2: string | null
+  city: string | null
+  state: string | null
+  postalCode: string | null
+  countryCode: string | null
+  placeId: string | null
+  lat: string | null
+  lng: string | null
 }
+
+export type LegacyAddressPrivacyEnvelopeV1 = {
+  v: 1
+  algorithm: typeof LEGACY_ADDRESS_ALGORITHM
+  keyVersion: typeof LEGACY_ADDRESS_KEY_VERSION
+  address: NormalizedAddressPrivacyPayload
+}
+
+export type EncryptedAddressPrivacyEnvelopeV1 = {
+  v: 1
+  algorithm: typeof ADDRESS_AEAD_ALGORITHM
+  keyVersion: typeof ADDRESS_KEY_VERSION
+  ciphertext: AeadEnvelopeV1
+}
+
+export type AddressPrivacyEnvelopeV1 =
+  | LegacyAddressPrivacyEnvelopeV1
+  | EncryptedAddressPrivacyEnvelopeV1
 
 export type AddressPrivacyWriteData = {
   encryptedAddressJson: Prisma.InputJsonValue
@@ -115,26 +140,63 @@ function coordinateString(value: NullableNumberLike): string | null {
   return String(numberValue)
 }
 
-function buildAddressEnvelope(
+function buildNormalizedAddressPayload(
   input: AddressPrivacyInput,
-): AddressPrivacyEnvelopeV1 {
+): NormalizedAddressPrivacyPayload {
+  return {
+    formattedAddress: normalizeString(input.formattedAddress),
+    addressLine1: normalizeString(input.addressLine1),
+    addressLine2: normalizeString(input.addressLine2),
+    city: normalizeString(input.city),
+    state: normalizeString(input.state),
+    postalCode: normalizePostalCode(input.postalCode),
+    countryCode: normalizeCountryCode(input.countryCode),
+    placeId: normalizeString(input.placeId),
+    lat: coordinateString(input.lat),
+    lng: coordinateString(input.lng),
+  }
+}
+
+function buildLegacyAddressEnvelope(
+  input: AddressPrivacyInput,
+): LegacyAddressPrivacyEnvelopeV1 {
   return {
     v: 1,
-    algorithm: 'plaintext-json-expand-phase',
-    keyVersion: ADDRESS_KEY_VERSION,
-    address: {
-      formattedAddress: normalizeString(input.formattedAddress),
-      addressLine1: normalizeString(input.addressLine1),
-      addressLine2: normalizeString(input.addressLine2),
-      city: normalizeString(input.city),
-      state: normalizeString(input.state),
-      postalCode: normalizePostalCode(input.postalCode),
-      countryCode: normalizeCountryCode(input.countryCode),
-      placeId: normalizeString(input.placeId),
-      lat: coordinateString(input.lat),
-      lng: coordinateString(input.lng),
-    },
+    algorithm: LEGACY_ADDRESS_ALGORITHM,
+    keyVersion: LEGACY_ADDRESS_KEY_VERSION,
+    address: buildNormalizedAddressPayload(input),
   }
+}
+
+function buildEncryptedAddressEnvelope(
+  input: AddressPrivacyInput,
+): EncryptedAddressPrivacyEnvelopeV1 {
+  const address = buildNormalizedAddressPayload(input)
+
+  const ciphertext = encryptAead({
+    plaintext: JSON.stringify(address),
+    keyVersion: ADDRESS_KEY_VERSION,
+    associatedData: ADDRESS_AEAD_ASSOCIATED_DATA,
+  })
+
+  return {
+    v: 1,
+    algorithm: ADDRESS_AEAD_ALGORITHM,
+    keyVersion: ADDRESS_KEY_VERSION,
+    ciphertext,
+  }
+}
+
+export function buildAddressEnvelope(
+  input: AddressPrivacyInput,
+): EncryptedAddressPrivacyEnvelopeV1 {
+  return buildEncryptedAddressEnvelope(input)
+}
+
+export function buildLegacyAddressPrivacyEnvelopeForBackfill(
+  input: AddressPrivacyInput,
+): LegacyAddressPrivacyEnvelopeV1 {
+  return buildLegacyAddressEnvelope(input)
 }
 
 export function buildAddressPrivacyWriteData(
@@ -147,4 +209,76 @@ export function buildAddressPrivacyWriteData(
     latApprox: roundCoordinate(input.lat),
     lngApprox: roundCoordinate(input.lng),
   }
+}
+
+export function isAddressPrivacyEnvelopeV1(
+  value: unknown,
+): value is AddressPrivacyEnvelopeV1 {
+  if (!isRecord(value)) return false
+
+  if (value.v !== 1) return false
+  if (typeof value.algorithm !== 'string') return false
+  if (typeof value.keyVersion !== 'string') return false
+
+  if (
+    value.algorithm === LEGACY_ADDRESS_ALGORITHM &&
+    value.keyVersion === LEGACY_ADDRESS_KEY_VERSION
+  ) {
+    return isLegacyAddressPayload(value.address)
+  }
+
+  if (
+    value.algorithm === ADDRESS_AEAD_ALGORITHM &&
+    value.keyVersion === ADDRESS_KEY_VERSION
+  ) {
+    return isAeadEnvelopeV1(value.ciphertext)
+  }
+
+  return false
+}
+
+export function readAddressPrivacyEnvelope(
+  envelope: AddressPrivacyEnvelopeV1,
+): NormalizedAddressPrivacyPayload {
+  if (envelope.algorithm === LEGACY_ADDRESS_ALGORITHM) {
+    return envelope.address
+  }
+
+  const plaintext = decryptAead({
+    envelope: envelope.ciphertext,
+    associatedData: ADDRESS_AEAD_ASSOCIATED_DATA,
+  })
+
+  const parsed: unknown = JSON.parse(plaintext)
+
+  if (!isLegacyAddressPayload(parsed)) {
+    throw new Error('Invalid decrypted address privacy payload')
+  }
+
+  return parsed
+}
+
+function isLegacyAddressPayload(value: unknown): value is NormalizedAddressPrivacyPayload {
+  if (!isRecord(value)) return false
+
+  return (
+    isNullableStringValue(value.formattedAddress) &&
+    isNullableStringValue(value.addressLine1) &&
+    isNullableStringValue(value.addressLine2) &&
+    isNullableStringValue(value.city) &&
+    isNullableStringValue(value.state) &&
+    isNullableStringValue(value.postalCode) &&
+    isNullableStringValue(value.countryCode) &&
+    isNullableStringValue(value.placeId) &&
+    isNullableStringValue(value.lat) &&
+    isNullableStringValue(value.lng)
+  )
+}
+
+function isNullableStringValue(value: unknown): value is string | null {
+  return value === null || typeof value === 'string'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

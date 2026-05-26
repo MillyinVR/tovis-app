@@ -365,6 +365,19 @@ function buildAdminNotesAuditSuffix(adminNotes: string | undefined): string {
   return `adminNotesProvided=true adminNotesLength=${adminNotes.length}`
 }
 
+function buildSafeAdminModerationAuditNote(args: {
+  targetLabel: 'lookPostId' | 'lookCommentId' | 'requestId'
+  targetId: string
+  lookPostId?: string
+  adminNotes?: string
+}): string {
+  const targetPart = `${args.targetLabel}=${args.targetId}`
+  const lookPostPart = args.lookPostId ? ` lookPostId=${args.lookPostId}` : ''
+  const notesPart = buildAdminNotesAuditSuffix(args.adminNotes)
+
+  return `${targetPart}${lookPostPart} ${notesPart}`
+}
+
 function buildAdminActionLogData(args: {
   adminUserId: string
   action: string
@@ -636,9 +649,11 @@ async function executeLookPostModeration(
     logData: buildAdminActionLogData({
       adminUserId,
       action: buildLookPostLogAction(request.action),
-      note: `lookPostId=${updated.id} ${buildAdminNotesAuditSuffix(
-        request.adminNotes,
-      )}`,
+      note: buildSafeAdminModerationAuditNote({
+        targetLabel: 'lookPostId',
+        targetId: updated.id,
+        adminNotes: request.adminNotes,
+      }),
       scope,
     }),
   }
@@ -720,9 +735,12 @@ async function executeLookCommentModeration(
     logData: buildAdminActionLogData({
       adminUserId,
       action: buildLookCommentLogAction(request.action),
-      note: `lookCommentId=${updated.id} lookPostId=${
-        updated.lookPostId
-      } ${buildAdminNotesAuditSuffix(request.adminNotes)}`,
+      note: buildSafeAdminModerationAuditNote({
+        targetLabel: 'lookCommentId',
+        targetId: updated.id,
+        lookPostId: updated.lookPostId,
+        adminNotes: request.adminNotes,
+      }),
       scope,
     }),
   }
@@ -760,10 +778,9 @@ async function executeViralRequestModeration(
       requestId: request.targetId,
     })
 
-    const notificationsDto =
-      toQueuedViralRequestApprovalNotificationsDto({
-        jobId: fanOutJob.id,
-      })
+    const notificationsDto = toQueuedViralRequestApprovalNotificationsDto({
+      jobId: fanOutJob.id,
+    })
 
     return {
       response: toViralRequestModerationResultDto({
@@ -775,9 +792,11 @@ async function executeViralRequestModeration(
       logData: buildAdminActionLogData({
         adminUserId,
         action: buildViralRequestLogAction(request.action),
-        note: `requestId=${updated.id} ${buildAdminNotesAuditSuffix(
-          request.adminNotes,
-        )}`,
+        note: buildSafeAdminModerationAuditNote({
+          targetLabel: 'requestId',
+          targetId: updated.id,
+          adminNotes: request.adminNotes,
+        }),
         scope,
       }),
     }
@@ -794,9 +813,11 @@ async function executeViralRequestModeration(
     logData: buildAdminActionLogData({
       adminUserId,
       action: buildViralRequestLogAction(request.action),
-      note: `requestId=${updated.id} ${buildAdminNotesAuditSuffix(
-        request.adminNotes,
-      )}`,
+      note: buildSafeAdminModerationAuditNote({
+        targetLabel: 'requestId',
+        targetId: updated.id,
+        adminNotes: request.adminNotes,
+      }),
       scope,
     }),
   }

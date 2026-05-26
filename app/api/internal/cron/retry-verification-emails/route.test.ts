@@ -212,14 +212,12 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       appUrl: 'https://app.tovis.app',
     })
 
-    expect(mocks.logAuthEvent).toHaveBeenCalledTimes(2)
     expect(mocks.logAuthEvent).toHaveBeenNthCalledWith(1, {
       level: 'info',
       event: 'auth.email.retry_verification.sent',
       route: 'internal.cron.retry_verification_emails',
       provider: 'postmark',
       userId: 'user_1',
-      email: 'one@example.com',
     })
     expect(mocks.logAuthEvent).toHaveBeenNthCalledWith(2, {
       level: 'info',
@@ -227,7 +225,6 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       route: 'internal.cron.retry_verification_emails',
       provider: 'postmark',
       userId: 'user_2',
-      email: 'two@example.com',
     })
 
     expect(mocks.captureAuthException).not.toHaveBeenCalled()
@@ -436,6 +433,11 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
     )
     const json = await response.json()
 
+    expect(JSON.stringify(json)).not.toContain('fail@example.com')
+    expect(JSON.stringify(json)).not.toContain('POSTMARK_SERVER_TOKEN')
+    expect(JSON.stringify(mocks.captureAuthException.mock.calls)).not.toContain(
+      'fail@example.com',
+    )
     expect(mocks.issueAndSendEmailVerification).toHaveBeenCalledTimes(2)
 
     expect(mocks.captureAuthException).toHaveBeenCalledTimes(1)
@@ -445,7 +447,6 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       provider: 'postmark',
       code: 'EMAIL_NOT_CONFIGURED',
       userId: 'user_fail',
-      email: 'fail@example.com',
       error: expect.any(Error),
     })
 
@@ -456,7 +457,6 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       route: 'internal.cron.retry_verification_emails',
       provider: 'postmark',
       userId: 'user_ok',
-      email: 'ok@example.com',
     })
 
     expect(response.status).toBe(200)
@@ -472,7 +472,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       failed: [
         {
           userId: 'user_fail',
-          error: 'Missing env var: POSTMARK_SERVER_TOKEN',
+          code: 'EMAIL_NOT_CONFIGURED',
         },
       ],
     })
@@ -500,13 +500,18 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
     )
     const json = await response.json()
 
+    expect(JSON.stringify(json)).not.toContain('generic@example.com')
+    expect(JSON.stringify(json)).not.toContain('Postmark outage')
+    expect(JSON.stringify(mocks.captureAuthException.mock.calls)).not.toContain(
+      'generic@example.com',
+    )
+
     expect(mocks.captureAuthException).toHaveBeenCalledWith({
       event: 'auth.email.retry_verification.failed',
       route: 'internal.cron.retry_verification_emails',
       provider: 'postmark',
       code: 'EMAIL_SEND_FAILED',
       userId: 'user_fail_generic',
-      email: 'generic@example.com',
       error: expect.any(Error),
     })
 
@@ -523,7 +528,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       failed: [
         {
           userId: 'user_fail_generic',
-          error: 'Postmark outage',
+          code: 'EMAIL_SEND_FAILED',
         },
       ],
     })
@@ -544,7 +549,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
     expect(response.status).toBe(500)
     expect(json).toEqual({
       ok: false,
-      error: 'db exploded',
+      error: 'Internal server error',
     })
   })
 })

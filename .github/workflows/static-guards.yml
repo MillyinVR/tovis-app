@@ -35,14 +35,5 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run booking write boundary guard
-        run: pnpm check:booking-boundary
-
-      - name: Run media render boundary guard
-        run: pnpm check:media-render-boundary
-
-      - name: Run consultation canonical guard
-        run: pnpm check:consultation-canonical
-
-      - name: Run lifecycle field write guard
-        run: pnpm check:lifecycle-field-writes
+      - name: Run static guards
+        run: pnpm check:static-guards

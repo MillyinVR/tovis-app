@@ -1,11 +1,15 @@
 // lib/booking/writeBoundary.overlapPolicy.integration.test.ts
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingSource,
   BookingStatus,
   ServiceLocationType,
 } from '@prisma/client'
+
+const TEST_AEAD_KEYRING = JSON.stringify({
+  'address-aead-v1': 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
+})
 
 const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
@@ -292,6 +296,8 @@ function setupValidProCreateInputs() {
 
 describe('writeBoundary overlap policy integration', () => {
   beforeEach(() => {
+    process.env.PII_AEAD_KEYS_JSON = TEST_AEAD_KEYRING
+
     vi.resetAllMocks()
 
     setupTransactionMock()
@@ -355,6 +361,10 @@ describe('writeBoundary overlap policy integration', () => {
     mocks.syncBookingAppointmentReminders.mockResolvedValue(undefined)
     mocks.bumpScheduleVersion.mockResolvedValue(undefined)
     mocks.bumpScheduleConfigVersion.mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    delete process.env.PII_AEAD_KEYS_JSON
   })
 
   it('does not call overlap policy during hold creation because hold policy owns hold-time conflicts', async () => {

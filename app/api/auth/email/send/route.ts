@@ -8,8 +8,8 @@ import {
   issueAndSendEmailVerification,
 } from '@/lib/auth/emailVerification'
 import {
-  logAuthEvent,
   captureAuthException,
+  logAuthEvent,
 } from '@/lib/observability/authEvents'
 
 export const dynamic = 'force-dynamic'
@@ -21,28 +21,30 @@ type ResendEmailBody = {
   inviteToken?: unknown
 }
 
-function normalizeEmail(value: string | null): string | null {
+function normalizeRequiredEmailValue(value: string | null): string | null {
   if (typeof value !== 'string') return null
+
   const normalized = value.trim()
-  return normalized ? normalized : null
+  return normalized.length > 0 ? normalized : null
 }
 
 function sanitizeInternalPath(raw: string | null | undefined): string | null {
   const value = (raw ?? '').trim()
+
   if (!value) return null
   if (!value.startsWith('/')) return null
   if (value.startsWith('//')) return null
+
   return value
 }
 
 function sanitizeOptionalText(raw: string | null | undefined): string | null {
   const value = (raw ?? '').trim()
-  return value || null
+  return value.length > 0 ? value : null
 }
 
 export async function POST(request: Request) {
   let userIdForLog: string | null = null
-  let emailForLog: string | null = null
 
   try {
     const auth = await requireUser({ allowVerificationSession: true })
@@ -62,8 +64,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const email = normalizeEmail(auth.user.email)
-    emailForLog = email
+    const email = normalizeRequiredEmailValue(auth.user.email) // pii-plaintext-read-ok: email verification send requires the authenticated user's email destination
 
     if (!email) {
       return jsonFail(400, 'Email address missing.', {
@@ -78,7 +79,6 @@ export async function POST(request: Request) {
         event: 'auth.email.send.app_url_missing',
         route: 'auth.email.send',
         userId: auth.user.id,
-        email,
         code: 'APP_URL_MISSING',
       })
 
@@ -96,8 +96,8 @@ export async function POST(request: Request) {
       return throttle.response
     }
 
-    const body = ((await request.json().catch(() => ({}))) ??
-      {}) as ResendEmailBody
+    const rawBody: unknown = await request.json().catch(() => ({}))
+    const body = (rawBody ?? {}) as ResendEmailBody
 
     const nextForVerification = sanitizeInternalPath(pickString(body.next))
     const verificationIntent = sanitizeOptionalText(pickString(body.intent))
@@ -135,7 +135,6 @@ export async function POST(request: Request) {
         provider: 'postmark',
         code: 'EMAIL_NOT_CONFIGURED',
         userId: userIdForLog,
-        email: emailForLog,
         error,
       })
 
@@ -150,7 +149,6 @@ export async function POST(request: Request) {
       provider: 'postmark',
       code: 'EMAIL_SEND_FAILED',
       userId: userIdForLog,
-      email: emailForLog,
       error,
     })
 

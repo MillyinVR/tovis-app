@@ -5,7 +5,9 @@ import {
   BookingOverrideRule,
   Prisma,
 } from '@prisma/client'
+
 import type { ProSchedulingAppliedOverride } from '@/lib/booking/policies/proSchedulingPolicy'
+import { redactAuditPayload } from '@/lib/security/auditRedaction'
 
 type BuildBookingOverrideAuditRowsArgs = {
   bookingId: string
@@ -41,13 +43,14 @@ function normalizeUnknownToJson(
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) =>
-      item === undefined
+    return value.map((item) => {
+      if (item === undefined) return null
+
+      const normalized = normalizeUnknownToJson(item)
+      return normalized === Prisma.JsonNull
         ? null
-        : normalizeUnknownToJson(item) === Prisma.JsonNull
-          ? null
-          : (normalizeUnknownToJson(item) as Prisma.InputJsonValue),
-    )
+        : (normalized as Prisma.InputJsonValue)
+    })
   }
 
   if (typeof value === 'object') {
@@ -95,6 +98,50 @@ function mapAppliedOverrideToRule(
   }
 }
 
+function normalizeUnknownToRuntimeJson(value: unknown): Prisma.JsonValue {
+  if (value === null || value === undefined) return null
+
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeUnknownToRuntimeJson(item))
+  }
+
+  if (typeof value === 'object') {
+    const out: Record<string, Prisma.JsonValue> = {}
+
+    for (const [key, child] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
+      if (child === undefined) continue
+      out[key] = normalizeUnknownToRuntimeJson(child)
+    }
+
+    return out
+  }
+
+  return {
+    unsupportedType: String(typeof value),
+  }
+}
+
+function toRedactedAuditJson(value: unknown): Prisma.InputJsonValue {
+  const normalized = normalizeUnknownToRuntimeJson(value)
+  const redacted = redactAuditPayload(normalized)
+
+  return normalizeUnknownToJson(redacted) as Prisma.InputJsonValue
+}
+
 function buildOldValue(args: {
   rule: ProSchedulingAppliedOverride
   advanceNoticeMinutes: number
@@ -104,23 +151,23 @@ function buildOldValue(args: {
 }): Prisma.InputJsonValue {
   switch (args.rule) {
     case 'ADVANCE_NOTICE':
-      return normalizeUnknownToJson({
+      return toRedactedAuditJson({
         allowShortNotice: false,
         advanceNoticeMinutes: args.advanceNoticeMinutes,
-      }) as Prisma.InputJsonValue
+      })
 
     case 'MAX_DAYS_AHEAD':
-      return normalizeUnknownToJson({
+      return toRedactedAuditJson({
         allowFarFuture: false,
         maxDaysAhead: args.maxDaysAhead,
-      }) as Prisma.InputJsonValue
+      })
 
     case 'WORKING_HOURS':
-      return normalizeUnknownToJson({
+      return toRedactedAuditJson({
         allowOutsideWorkingHours: false,
         workingHours: args.workingHours,
         timeZone: args.timeZone,
-      }) as Prisma.InputJsonValue
+      })
   }
 }
 
@@ -133,24 +180,35 @@ function buildNewValue(args: {
 }): Prisma.InputJsonValue {
   switch (args.rule) {
     case 'ADVANCE_NOTICE':
-      return normalizeUnknownToJson({
+      return toRedactedAuditJson({
         allowShortNotice: true,
         advanceNoticeMinutes: args.advanceNoticeMinutes,
-      }) as Prisma.InputJsonValue
+      })
 
     case 'MAX_DAYS_AHEAD':
-      return normalizeUnknownToJson({
+      return toRedactedAuditJson({
         allowFarFuture: true,
         maxDaysAhead: args.maxDaysAhead,
-      }) as Prisma.InputJsonValue
+      })
 
     case 'WORKING_HOURS':
-      return normalizeUnknownToJson({
+      return toRedactedAuditJson({
         allowOutsideWorkingHours: true,
         workingHours: args.workingHours,
         timeZone: args.timeZone,
-      }) as Prisma.InputJsonValue
+      })
   }
+}
+
+function buildMetadata(args: {
+  appliedRule: ProSchedulingAppliedOverride
+  timeZone: string
+}): Prisma.InputJsonValue {
+  return toRedactedAuditJson({
+    source: 'booking_override_audit',
+    appliedOverride: args.appliedRule,
+    timeZone: args.timeZone,
+  })
 }
 
 export function buildBookingOverrideAuditRows(
@@ -160,7 +218,6 @@ export function buildBookingOverrideAuditRows(
   if (!normalizedReason) return []
 
   const normalizedAction = normalizeAuditAction(args.action)
-
   const uniqueRules = Array.from(new Set(args.appliedOverrides))
 
   return uniqueRules.map((appliedRule) => ({
@@ -188,9 +245,8 @@ export function buildBookingOverrideAuditRows(
     }),
     bookingScheduledForBefore: args.bookingScheduledForBefore ?? null,
     bookingScheduledForAfter: args.bookingScheduledForAfter,
-    metadata: normalizeUnknownToJson({
-      source: 'booking_override_audit',
-      appliedOverride: appliedRule,
+    metadata: buildMetadata({
+      appliedRule,
       timeZone: args.timeZone,
     }),
     createdAt: new Date(),

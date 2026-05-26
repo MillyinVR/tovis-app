@@ -11,6 +11,7 @@ import {
   logAuthEvent,
 } from '@/lib/observability/authEvents'
 import { prisma } from '@/lib/prisma'
+import { normalizeEmail } from '@/lib/security/contactNormalization'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -19,6 +20,11 @@ const DEFAULT_TAKE = 50
 const MAX_TAKE = 50
 const RETRY_DELAY_MS = 5 * 60 * 1000
 const ROUTE = 'internal.cron.retry_verification_emails'
+
+type RetryVerificationFailure = {
+  userId: string
+  code: 'EMAIL_NOT_CONFIGURED' | 'EMAIL_SEND_FAILED'
+}
 
 function readEnv(name: string): string | null {
   const value = process.env[name]?.trim()
@@ -29,10 +35,7 @@ function getJobSecret(): string | null {
   return readEnv('INTERNAL_JOB_SECRET') ?? readEnv('CRON_SECRET')
 }
 
-function isAuthorizedJobRequest(req: Request): boolean {
-  const secret = getJobSecret()
-  if (!secret) return false
-
+function isAuthorizedJobRequest(req: Request, secret: string): boolean {
   const authHeader = req.headers.get('authorization')
   if (authHeader === `Bearer ${secret}`) return true
 
@@ -51,14 +54,7 @@ function readTake(req: Request): number {
   return Math.max(1, Math.min(MAX_TAKE, parsed))
 }
 
-function normalizeEmail(value: string | null | undefined): string | null {
-  const normalized = (value ?? '').trim()
-  return normalized.length > 0 ? normalized : null
-}
-
-function classifyEmailError(
-  error: unknown,
-): 'EMAIL_NOT_CONFIGURED' | 'EMAIL_SEND_FAILED' {
+function classifyEmailError(error: unknown): RetryVerificationFailure['code'] {
   const message = error instanceof Error ? error.message : ''
   return message.includes('Missing env var: POSTMARK_')
     ? 'EMAIL_NOT_CONFIGURED'
@@ -74,7 +70,7 @@ async function runJob(req: Request) {
     )
   }
 
-  if (!isAuthorizedJobRequest(req)) {
+  if (!isAuthorizedJobRequest(req, secret)) {
     return jsonFail(401, 'Unauthorized')
   }
 
@@ -122,7 +118,7 @@ async function runJob(req: Request) {
   let failedCount = 0
   let skippedCount = 0
 
-  const failed: Array<{ userId: string; error: string }> = []
+  const failed: RetryVerificationFailure[] = []
 
   for (const candidate of candidates) {
     const email = normalizeEmail(candidate.email)
@@ -148,20 +144,15 @@ async function runJob(req: Request) {
         route: ROUTE,
         provider: 'postmark',
         userId: candidate.id,
-        email,
       })
     } catch (error: unknown) {
       failedCount += 1
 
       const code = classifyEmailError(error)
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Could not send verification email.'
 
       failed.push({
         userId: candidate.id,
-        error: message,
+        code,
       })
 
       captureAuthException({
@@ -170,7 +161,6 @@ async function runJob(req: Request) {
         provider: 'postmark',
         code,
         userId: candidate.id,
-        email,
         error,
       })
     }
@@ -193,8 +183,7 @@ export async function GET(req: Request) {
     return await runJob(req)
   } catch (err: unknown) {
     console.error('GET /api/internal/cron/retry-verification-emails error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    return jsonFail(500, message)
+    return jsonFail(500, 'Internal server error')
   }
 }
 
@@ -206,7 +195,6 @@ export async function POST(req: Request) {
       'POST /api/internal/cron/retry-verification-emails error',
       err,
     )
-    const message = err instanceof Error ? err.message : 'Internal server error'
-    return jsonFail(500, message)
+    return jsonFail(500, 'Internal server error')
   }
 }

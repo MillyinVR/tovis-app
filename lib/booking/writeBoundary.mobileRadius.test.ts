@@ -37,21 +37,23 @@ const LEGACY_PLAINTEXT_CLIENT_SNAPSHOT = {
 
 const DEDICATED_CLIENT_ENCRYPTED_SNAPSHOT = {
   v: 1,
-  algorithm: 'plaintext-json-expand-phase',
+  algorithm: 'aes-256-gcm-v1',
   keyVersion: ADDRESS_KEY_VERSION,
-  address: {
-    formattedAddress: '456 Client Home, San Diego, CA 92101',
-    addressLine1: null,
-    addressLine2: null,
-    city: null,
-    state: null,
-    postalCode: null,
-    countryCode: null,
-    placeId: null,
-    lat: '32.7309876',
-    lng: '-117.1509876',
+  ciphertext: {
+    v: 1,
+    algorithm: 'aes-256-gcm-v1',
+    keyVersion: ADDRESS_KEY_VERSION,
+    nonce: 'test-nonce',
+    ciphertext: 'test-ciphertext',
+    authTag: 'test-auth-tag',
   },
-}
+} satisfies Prisma.InputJsonValue
+
+const TEST_AEAD_KEYRING = JSON.stringify({
+  'address-aead-v1': 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
+})
+
+type TestJsonSnapshot = Prisma.JsonValue | Prisma.InputJsonValue | null
 
 const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
@@ -220,8 +222,8 @@ function makeMobileHold(
     clientAddressLngSnapshot?: number | null
     locationLatSnapshot?: number | null
     locationLngSnapshot?: number | null
-    encryptedLocationAddressSnapshotJson?: Prisma.JsonValue | null
-    encryptedClientAddressSnapshotJson?: Prisma.JsonValue | null
+    encryptedLocationAddressSnapshotJson?: TestJsonSnapshot
+    encryptedClientAddressSnapshotJson?: TestJsonSnapshot
     locationLatApprox?: number | null
     locationLngApprox?: number | null
     clientAddressLatApprox?: number | null
@@ -335,6 +337,7 @@ function makeFinalizeArgs() {
 
 describe('lib/booking/writeBoundary mobile radius guards', () => {
   beforeEach(() => {
+    process.env.PII_AEAD_KEYS_JSON = TEST_AEAD_KEYRING
     vi.clearAllMocks()
     vi.useFakeTimers()
     vi.setSystemTime(TEST_NOW)
@@ -410,6 +413,7 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
   })
 
   afterEach(() => {
+    delete process.env.PII_AEAD_KEYS_JSON
     vi.useRealTimers()
   })
 
@@ -542,46 +546,60 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
     expect(mocks.txBookingHoldDelete).not.toHaveBeenCalled()
   })
 
-  it('populates dedicated encrypted snapshot columns on mobile hold create', async () => {
-    mocks.txClientAddressFindFirst.mockResolvedValueOnce(
-      makeMobileClientAddress({
-        lat: new Prisma.Decimal('32.7309876'),
-        lng: new Prisma.Decimal('-117.1509876'),
-      }),
-    )
-    arrangeMobileContext({
-      lat: 32.7157123,
-      lng: -117.1611987,
-    })
-
-    await createHold(makeCreateHoldArgs())
-
-    // Dedicated encrypted columns must be populated alongside legacy ones.
-    // Mobile mode: location envelope is null (no salon address to encrypt);
-    // client envelope is present (the client home address).
-    expect(mocks.txBookingHoldCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          encryptedLocationAddressSnapshotJson: Prisma.JsonNull,
-          locationLatApprox: 32.7157,
-          locationLngApprox: -117.1612,
-
-          encryptedClientAddressSnapshotJson: expect.objectContaining({
-            v: 1,
-            algorithm: 'plaintext-json-expand-phase',
-            keyVersion: ADDRESS_KEY_VERSION,
-            address: expect.objectContaining({
-              formattedAddress: '456 Client Home, San Diego, CA 92101',
-              lat: '32.7309876',
-              lng: '-117.1509876',
-            }),
-          }),
-          clientAddressLatApprox: 32.731,
-          clientAddressLngApprox: -117.151,
-        }),
-      }),
-    )
+it('populates dedicated encrypted snapshot columns on mobile hold create', async () => {
+  mocks.txClientAddressFindFirst.mockResolvedValueOnce(
+    makeMobileClientAddress({
+      lat: new Prisma.Decimal('32.7309876'),
+      lng: new Prisma.Decimal('-117.1509876'),
+    }),
+  )
+  arrangeMobileContext({
+    lat: 32.7157123,
+    lng: -117.1611987,
   })
+
+  await createHold(makeCreateHoldArgs())
+
+  const createCall = mocks.txBookingHoldCreate.mock.calls.at(-1)?.[0]
+  const encryptedClientAddressSnapshotJson =
+    createCall?.data?.encryptedClientAddressSnapshotJson
+
+  expect(createCall).toEqual(
+    expect.objectContaining({
+      data: expect.objectContaining({
+        encryptedLocationAddressSnapshotJson: Prisma.JsonNull,
+        locationLatApprox: 32.7157,
+        locationLngApprox: -117.1612,
+        clientAddressLatApprox: 32.731,
+        clientAddressLngApprox: -117.151,
+      }),
+    }),
+  )
+
+  expect(encryptedClientAddressSnapshotJson).toEqual(
+    expect.objectContaining({
+      v: 1,
+      algorithm: 'aes-256-gcm-v1',
+      keyVersion: ADDRESS_KEY_VERSION,
+      ciphertext: expect.objectContaining({
+        v: 1,
+        algorithm: 'aes-256-gcm-v1',
+        keyVersion: ADDRESS_KEY_VERSION,
+        nonce: expect.any(String),
+        ciphertext: expect.any(String),
+        authTag: expect.any(String),
+      }),
+    }),
+  )
+
+  const encryptedSnapshotText = JSON.stringify(encryptedClientAddressSnapshotJson)
+
+  expect(encryptedSnapshotText).not.toContain('456 Client Home')
+  expect(encryptedSnapshotText).not.toContain('San Diego')
+  expect(encryptedSnapshotText).not.toContain('92101')
+  expect(encryptedSnapshotText).not.toContain('32.7309876')
+  expect(encryptedSnapshotText).not.toContain('-117.1509876')
+})
 
   it('does not copy legacy plaintext hold snapshots into dedicated encrypted booking columns', async () => {
     mocks.txBookingHoldFindUnique.mockResolvedValueOnce(
@@ -609,6 +627,7 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
 
   it('reuses dedicated encrypted hold snapshots when present', async () => {
     const encryptedAt = new Date('2026-03-18T15:00:00.000Z')
+
     mocks.txBookingHoldFindUnique.mockResolvedValueOnce(
       makeMobileHold({
         encryptedClientAddressSnapshotJson: DEDICATED_CLIENT_ENCRYPTED_SNAPSHOT,
@@ -621,11 +640,12 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
 
     await finalizeBookingFromHold(makeFinalizeArgs())
 
-    expect(mocks.txBookingCreate).toHaveBeenCalledWith(
+    const createCall = mocks.txBookingCreate.mock.calls.at(-1)?.[0]
+
+    expect(createCall).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          encryptedClientAddressSnapshotJson:
-            DEDICATED_CLIENT_ENCRYPTED_SNAPSHOT,
+          encryptedClientAddressSnapshotJson: DEDICATED_CLIENT_ENCRYPTED_SNAPSHOT,
           clientAddressLatApprox: 32.731,
           clientAddressLngApprox: -117.151,
           addressSnapshotsEncryptedAt: encryptedAt,

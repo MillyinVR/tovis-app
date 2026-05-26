@@ -117,11 +117,11 @@ vi.mock('@/app/api/_utils', () => {
 
     pickString: (value: unknown) => (typeof value === 'string' ? value : null),
 
-    normalizeEmail: (value: unknown) => {
+    normalizeEmail: vi.fn((value: unknown) => {
       if (typeof value !== 'string') return null
       const normalized = value.trim().toLowerCase()
       return normalized || null
-    },
+    }),
 
     enforceRateLimit: mockEnforceRateLimit,
     rateLimitIdentity: mockRateLimitIdentity,

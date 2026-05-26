@@ -29,6 +29,10 @@ const MOBILE_CLIENT_IN_RADIUS_LNG = -117.15
 const MOBILE_CLIENT_OUT_OF_RADIUS_LAT = 34.0522
 const MOBILE_CLIENT_OUT_OF_RADIUS_LNG = -118.2437
 
+const TEST_AEAD_KEYRING = JSON.stringify({
+  'address-aead-v1': 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
+})
+
 const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
   checkProReadinessForEntryPointWithDb: vi.fn(),
@@ -338,6 +342,8 @@ function arrangeMobileProBookingScenario(args: {
 
 describe('lib/booking/writeBoundary override audit', () => {
   beforeEach(() => {
+    process.env.PII_AEAD_KEYS_JSON = TEST_AEAD_KEYRING
+
     vi.clearAllMocks()
     vi.useFakeTimers()
     vi.setSystemTime(TEST_NOW)
@@ -445,6 +451,7 @@ describe('lib/booking/writeBoundary override audit', () => {
   })
 
   afterEach(() => {
+    delete process.env.PII_AEAD_KEYS_JSON
     vi.useRealTimers()
   })
 

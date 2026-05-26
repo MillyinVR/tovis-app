@@ -7,6 +7,10 @@ import type {
   ClientActionIdempotencyInput,
   ClientActionIdempotencyKeys,
 } from './types'
+import {
+  normalizeEmail,
+  normalizePhone,
+} from '@/lib/security/contactNormalization'
 
 type ClientActionIdempotencyArgs = ClientActionIdempotencyInput & {
   /**
@@ -41,26 +45,6 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   if (typeof value !== 'string') return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
-}
-
-function normalizeEmail(value: string | null | undefined): string | null {
-  const normalized = normalizeOptionalString(value)
-  return normalized ? normalized.toLowerCase() : null
-}
-
-function normalizePhone(value: string | null | undefined): string | null {
-  const normalized = normalizeOptionalString(value)
-  if (!normalized) return null
-
-  /**
-   * Keep leading "+" if present, but otherwise normalize formatting noise.
-   * This is only for fingerprinting/idempotency, not E.164 validation.
-   */
-  const hasLeadingPlus = normalized.startsWith('+')
-  const digitsOnly = normalized.replace(/[^\d]/g, '')
-
-  if (!digitsOnly) return null
-  return hasLeadingPlus ? `+${digitsOnly}` : digitsOnly
 }
 
 function slugifyActionType(value: string): string {

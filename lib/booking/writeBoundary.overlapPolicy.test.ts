@@ -16,6 +16,9 @@ const TEST_NOW = new Date('2026-04-12T18:00:00.000Z')
 const REQUESTED_START = new Date('2030-05-01T18:00:00.000Z')
 const REQUESTED_END = new Date('2030-05-01T19:15:00.000Z')
 const HOLD_EXPIRES_AT = new Date('2026-04-12T18:10:00.000Z')
+const TEST_AEAD_KEYRING = JSON.stringify({
+  'address-aead-v1': 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
+})
 
 const mocks = vi.hoisted(() => ({
   withLockedProfessionalTransaction: vi.fn(),
@@ -571,6 +574,8 @@ function makeProCreateOffering() {
 
 describe('lib/booking/writeBoundary overlap policy wiring', () => {
   beforeEach(() => {
+    process.env.PII_AEAD_KEYS_JSON = TEST_AEAD_KEYRING
+
     vi.useFakeTimers()
     vi.setSystemTime(TEST_NOW)
 
@@ -724,6 +729,7 @@ describe('lib/booking/writeBoundary overlap policy wiring', () => {
   })
 
   afterEach(() => {
+    delete process.env.PII_AEAD_KEYS_JSON
     vi.useRealTimers()
   })
 

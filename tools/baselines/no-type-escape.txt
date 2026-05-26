@@ -1,0 +1,30 @@
+app/api/admin/look-comments/[id]/moderate/route.test.ts|as unknown as|return req as unknown as NextRequest
+app/api/admin/looks/[id]/moderate/route.test.ts|as unknown as|return req as unknown as NextRequest
+app/api/admin/viral-service-requests/[id]/moderate/route.test.ts|as unknown as|return req as unknown as NextRequest
+app/api/availability/bootstrap/route.ts|as unknown as|cached: cachedPayload as unknown as Record<string, unknown>,
+app/api/pro/offerings/route.ts|as unknown as|return v as unknown as Prisma.InputJsonValue
+app/api/viral-service-requests/upload/route.test.ts|as unknown as|return req as unknown as NextRequest
+lib/aftercare/unclaimedAftercareAccess.test.ts|as unknown as|const tx = { __brand: 'tx' } as unknown as Prisma.TransactionClient
+lib/availability/data/otherPros.test.ts|as unknown as|client: readClient as unknown as Parameters<
+lib/boards/index.test.ts|as unknown as|return await callback(db as unknown as Prisma.TransactionClient)
+lib/boards/index.test.ts|as unknown as|return db as unknown as Prisma.TransactionClient
+lib/boards/index.test.ts|as unknown as|return db as unknown as PrismaClient
+lib/booking/holdPolicy.overlapContract.test.ts|as unknown as|} as unknown as Prisma.TransactionClient
+lib/booking/schedulingConflicts.test.ts|as unknown as|return tx as unknown as PrismaTransactionClient
+lib/booking/writeBoundary.aftercareRebookSlot.test.ts|as unknown as|const mockedPrisma = prisma as unknown as {
+lib/follows/index.test.ts|as unknown as|return db as unknown as Prisma.TransactionClient
+lib/follows/index.test.ts|as unknown as|return db as unknown as PrismaClient
+lib/jobs/looksSocial/enqueue.test.ts|as unknown as|return value as unknown as PrismaClient
+lib/jobs/looksSocial/indexLookPostDocument.test.ts|as unknown as|} as unknown as IndexLookPostDocumentDb
+lib/looks/counters.test.ts|as unknown as|return value as unknown as Prisma.TransactionClient
+lib/looks/publication/service.test.ts|as unknown as|return mocks.prisma as unknown as PublicationDb
+lib/notifications/appointmentReminders.test.ts|as unknown as|const tx = txMock as unknown as Prisma.TransactionClient
+lib/notifications/delivery/processDueDeliveries.test.ts|as unknown as|} as unknown as Response
+lib/notifications/delivery/sendEmail.test.ts|as unknown as|} as unknown as EmailProviderSendRequest
+lib/notifications/delivery/sendEmail.test.ts|as unknown as|} as unknown as EmailProviderSendRequest
+lib/notifications/delivery/sendEmail.test.ts|as unknown as|} as unknown as Response
+lib/notifications/delivery/sendInApp.test.ts|as unknown as|publish: null as unknown as never,
+lib/notifications/delivery/sendSms.test.ts|as unknown as|} as unknown as SmsProviderSendRequest
+lib/notifications/delivery/sendSms.test.ts|as unknown as|} as unknown as SmsProviderSendRequest
+lib/prisma.ts|as unknown as|const globalForPrisma = globalThis as unknown as {
+lib/viralRequests/index.test.ts|as unknown as|return value as unknown as Prisma.TransactionClient

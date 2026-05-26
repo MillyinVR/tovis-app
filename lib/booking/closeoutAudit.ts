@@ -1,6 +1,8 @@
 // lib/booking/closeoutAudit.ts
 import { BookingCloseoutAuditAction, Prisma } from '@prisma/client'
 
+import { redactAuditPayload } from '@/lib/security/auditRedaction'
+
 type CreateBookingCloseoutAuditLogArgs = {
   tx: Prisma.TransactionClient
   bookingId: string
@@ -17,6 +19,7 @@ type CreateBookingCloseoutAuditLogArgs = {
 
 export function normalizeIdempotencyKey(value?: string | null): string | null {
   if (typeof value !== 'string') return null
+
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
 }
@@ -43,6 +46,7 @@ function toInputJsonValue(value: Prisma.JsonValue): Prisma.InputJsonValue {
   for (const key of Object.keys(value)) {
     const child = value[key]
     if (child === undefined) continue
+
     out[key] = child === null ? null : toInputJsonValue(child)
   }
 
@@ -54,7 +58,17 @@ function toNullableJsonCreateInput(
 ): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
   if (value === undefined) return undefined
   if (value === null) return Prisma.JsonNull
+
   return toInputJsonValue(value)
+}
+
+function toRedactedJsonCreateInput(
+  value: Prisma.JsonValue | null | undefined,
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return Prisma.JsonNull
+
+  return toInputJsonValue(redactAuditPayload(value))
 }
 
 function sortAuditValue(value: unknown): unknown {
@@ -79,6 +93,7 @@ function sortAuditValue(value: unknown): unknown {
   for (const key of Object.keys(record).sort()) {
     const child = record[key]
     if (child === undefined) continue
+
     out[key] = sortAuditValue(child)
   }
 
@@ -86,7 +101,10 @@ function sortAuditValue(value: unknown): unknown {
 }
 
 export function areAuditValuesEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(sortAuditValue(left)) === JSON.stringify(sortAuditValue(right))
+  return (
+    JSON.stringify(sortAuditValue(left)) ===
+    JSON.stringify(sortAuditValue(right))
+  )
 }
 
 function mergeAuditMetadata(
@@ -96,11 +114,7 @@ function mergeAuditMetadata(
     source: 'booking_closeout_audit',
   }
 
-  if (
-    metadata &&
-    typeof metadata === 'object' &&
-    !Array.isArray(metadata)
-  ) {
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
     return {
       ...base,
       ...metadata,
@@ -122,9 +136,9 @@ export async function createBookingCloseoutAuditLog(
       route: args.route,
       requestId: normalizeIdempotencyKey(args.requestId),
       idempotencyKey: normalizeIdempotencyKey(args.idempotencyKey),
-      oldValue: toNullableJsonCreateInput(args.oldValue ?? null),
-      newValue: toNullableJsonCreateInput(args.newValue ?? null),
-      metadata: toNullableJsonCreateInput(mergeAuditMetadata(args.metadata)),
+      oldValue: toRedactedJsonCreateInput(args.oldValue ?? null),
+      newValue: toRedactedJsonCreateInput(args.newValue ?? null),
+      metadata: toRedactedJsonCreateInput(mergeAuditMetadata(args.metadata)),
     },
   })
 }

@@ -3467,10 +3467,49 @@ function isAddressPrivacyEnvelopeV1(
   )
 }
 
+function isAeadAddressPrivacyEnvelopeV1(
+  value: Prisma.JsonValue | null | undefined,
+): value is Prisma.JsonObject {
+  if (!isJsonRecord(value)) return false
+  if (value.v !== 1) return false
+  if (value.algorithm !== 'aes-256-gcm-v1') return false
+  if (value.keyVersion !== ADDRESS_KEY_VERSION) return false
+
+  const ciphertext = value.ciphertext
+  if (!isJsonRecord(ciphertext)) return false
+
+  return (
+    ciphertext.v === 1 &&
+    ciphertext.algorithm === 'aes-256-gcm-v1' &&
+    ciphertext.keyVersion === ADDRESS_KEY_VERSION &&
+    typeof ciphertext.nonce === 'string' &&
+    typeof ciphertext.ciphertext === 'string' &&
+    typeof ciphertext.authTag === 'string'
+  )
+}
+
+function isReusableAddressPrivacyEnvelope(
+  value: Prisma.JsonValue | null | undefined,
+): value is Prisma.JsonObject | AddressPrivacyEnvelopeV1 {
+  return (
+    isAddressPrivacyEnvelopeV1(value) ||
+    isAeadAddressPrivacyEnvelopeV1(value)
+  )
+}
+
 function toValidatedEncryptedAddressSnapshotInput(
   snapshot: Prisma.JsonValue | null | undefined,
 ): Prisma.InputJsonValue | null {
-  if (!isAddressPrivacyEnvelopeV1(snapshot)) return null
+  if (!isReusableAddressPrivacyEnvelope(snapshot)) return null
+
+  return toInputJsonValue(snapshot)
+}
+
+function toValidatedLegacyAddressSnapshotInput(
+  snapshot: Prisma.JsonValue | null | undefined,
+): Prisma.InputJsonValue | null {
+  if (snapshot == null) return null
+  if (isReusableAddressPrivacyEnvelope(snapshot)) return null
 
   return toInputJsonValue(snapshot)
 }
@@ -3483,6 +3522,10 @@ function buildEncryptedAddressSnapshotData(
   if (!formattedAddress) {
     return buildNullAddressSnapshotData(input)
   }
+
+  const legacySnapshot = toInputJsonValue({
+    formattedAddress,
+  })
 
   const privacyData = buildAddressPrivacyWriteData({
     formattedAddress,
@@ -3498,7 +3541,7 @@ function buildEncryptedAddressSnapshotData(
   })
 
   return {
-    legacySnapshot: privacyData.encryptedAddressJson,
+    legacySnapshot,
     encryptedSnapshot: privacyData.encryptedAddressJson,
     keyVersion: ADDRESS_KEY_VERSION,
     encryptedAt: new Date(),
@@ -3532,8 +3575,8 @@ function reuseEncryptedAddressSnapshotData(
   const hasEncryptedSnapshot = encryptedSnapshot !== null
 
   return {
-    legacySnapshot:
-      toNullableJsonCreateInput(input.legacySnapshot) ?? Prisma.JsonNull,
+  legacySnapshot:
+    toValidatedLegacyAddressSnapshotInput(input.legacySnapshot) ?? Prisma.JsonNull,
     encryptedSnapshot: encryptedSnapshot ?? Prisma.JsonNull,
     keyVersion: hasEncryptedSnapshot
       ? input.keyVersion ?? ADDRESS_KEY_VERSION

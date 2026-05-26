@@ -8,6 +8,7 @@ import {
   phoneLookupHash,
 } from '@/lib/security/crypto/hashLookup'
 import { buildClientProfileContactLookupData } from '@/lib/security/contactLookup'
+import { normalizeContactInput } from '@/lib/security/contactNormalization'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -17,18 +18,6 @@ function getDb(tx?: Prisma.TransactionClient): DbClient {
 
 function normalizeRequiredString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function normalizeEmail(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const normalized = value.trim().toLowerCase()
-  return normalized ? normalized : null
-}
-
-function normalizeOptionalPhone(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const normalized = value.trim()
-  return normalized ? normalized : null
 }
 
 function hasMeaningfulValue(value: string | null | undefined): value is string {
@@ -326,8 +315,7 @@ export async function upsertProClient(
 
   const firstName = normalizeRequiredString(args.firstName)
   const lastName = normalizeRequiredString(args.lastName)
-  const email = normalizeEmail(args.email)
-  const phone = normalizeOptionalPhone(args.phone)
+  const { email, phone } = normalizeContactInput(args)
 
   if (!firstName || !lastName || (!email && !phone)) {
     return {

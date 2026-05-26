@@ -9,6 +9,10 @@ const ALLOWED_FILES = new Set([
   // writeBoundary.ts (`deleteExpiredHoldsForProfessional`,
   // `deleteActiveHoldsForClient`); not a user-facing surface.
   normalize('lib/booking/holdCleanup.ts'),
+  // One-time operational backfill for legacy Booking / BookingHold address
+  // snapshots. It is intentionally dry-run by default and only writes encrypted
+  // dedicated address snapshot columns plus approximate coordinates.
+  normalize('prisma/scripts/backfillAddressEncryption.ts'),
   // Test-data reset script for the last-minute booking suite. Runs only
   // against the test database via `scripts/with-test-db.mjs`.
   normalize('prisma/test-data/resetLastMinuteTestData.cjs'),
