@@ -210,25 +210,25 @@ export async function POST(request: Request) {
       })
     }
 
-  const emailHash = emailLookupHash(email)
+    const emailHash = emailLookupHash(email)
 
-  const userByHash = emailHash
-    ? await prisma.user.findUnique({
-        where: { emailHash },
+    const userByHash = emailHash
+      ? await prisma.user.findFirst({
+          where: { emailHash },
+          select: LOGIN_USER_SELECT,
+        })
+      : null
+
+    /**
+     * Temporary legacy fallback for rows created before emailHash existed
+     * or local/dev databases that have not been fully backfilled yet.
+     */
+    const user =
+      userByHash ??
+      (await prisma.user.findUnique({
+        where: { email },
         select: LOGIN_USER_SELECT,
-      })
-    : null
-
-  /**
-   * Temporary legacy fallback for rows created before emailHash existed
-   * or local/dev databases that have not been fully backfilled yet.
-   */
-  const user =
-    userByHash ??
-    (await prisma.user.findUnique({
-      where: { email },
-      select: LOGIN_USER_SELECT,
-    }))
+      }))
 
     const passwordHash = user?.password ?? DUMMY_PASSWORD_HASH
     const isValid = await verifyPassword(password, passwordHash)

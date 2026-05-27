@@ -9,6 +9,7 @@ import {
 const mocks = vi.hoisted(() => ({
   prisma: {
     clientProfile: {
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
       create: vi.fn(),
@@ -86,9 +87,29 @@ function makeUser(overrides?: {
   }
 }
 
-function mockClientProfileFindUniqueByWhere(
+function mockClientProfileLookupByWhere(
   profiles: ReturnType<typeof makeProfile>[],
 ) {
+  mocks.prisma.clientProfile.findFirst.mockImplementation(
+    async (args: { where?: Record<string, unknown> }) => {
+      const where = args.where ?? {}
+
+      return (
+        profiles.find((profile) => {
+          if (where.emailHash && profile.emailHash === where.emailHash) {
+            return true
+          }
+
+          if (where.phoneHash && profile.phoneHash === where.phoneHash) {
+            return true
+          }
+
+          return false
+        }) ?? null
+      )
+    },
+  )
+
   mocks.prisma.clientProfile.findUnique.mockImplementation(
     async (args: { where?: Record<string, unknown> }) => {
       const where = args.where ?? {}
@@ -97,12 +118,6 @@ function mockClientProfileFindUniqueByWhere(
         profiles.find((profile) => {
           if (where.id && profile.id === where.id) return true
           if (where.userId && profile.userId === where.userId) return true
-          if (where.emailHash && profile.emailHash === where.emailHash) {
-            return true
-          }
-          if (where.phoneHash && profile.phoneHash === where.phoneHash) {
-            return true
-          }
           if (where.email && profile.email === where.email) return true
           if (where.phone && profile.phone === where.phone) return true
 
@@ -117,6 +132,7 @@ describe('upsertProClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
 
+    mocks.prisma.clientProfile.findFirst.mockResolvedValue(null)
     mocks.prisma.clientProfile.findUnique.mockResolvedValue(null)
     mocks.prisma.clientProfile.update.mockResolvedValue(null)
     mocks.prisma.clientProfile.create.mockResolvedValue(null)
@@ -138,12 +154,12 @@ describe('upsertProClient', () => {
       code: 'VALIDATION_ERROR',
     })
 
+    expect(mocks.prisma.clientProfile.findFirst).not.toHaveBeenCalled()
     expect(mocks.prisma.clientProfile.findUnique).not.toHaveBeenCalled()
-    expect(mocks.prisma.user.findMany).not.toHaveBeenCalled()
   })
 
   it('returns IDENTITY_CONFLICT when email and phone match different client profiles', async () => {
-    mockClientProfileFindUniqueByWhere([
+    mockClientProfileLookupByWhere([
       makeProfile({
         id: 'client_email_match',
         email: 'tori@example.com',
@@ -183,7 +199,7 @@ describe('upsertProClient', () => {
       phone: null,
     })
 
-    mockClientProfileFindUniqueByWhere([existingProfile])
+    mockClientProfileLookupByWhere([existingProfile])
 
     const result = await upsertProClient({
       firstName: 'Tori',
@@ -191,7 +207,7 @@ describe('upsertProClient', () => {
       email: ' Tori@Example.COM ',
     })
 
-    expect(mocks.prisma.clientProfile.findUnique).toHaveBeenCalledWith(
+    expect(mocks.prisma.clientProfile.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           emailHash: emailLookupHash('tori@example.com'),
@@ -223,7 +239,7 @@ describe('upsertProClient', () => {
       },
     })
 
-    mockClientProfileFindUniqueByWhere([existingProfile])
+    mockClientProfileLookupByWhere([existingProfile])
 
     const result = await upsertProClient({
       firstName: 'Tori',
@@ -258,7 +274,7 @@ describe('upsertProClient', () => {
       phone: '+16195551234',
     })
 
-    mockClientProfileFindUniqueByWhere([existingProfile])
+    mockClientProfileLookupByWhere([existingProfile])
     mocks.prisma.clientProfile.update.mockResolvedValueOnce(updatedProfile)
 
     const result = await upsertProClient({
@@ -548,7 +564,7 @@ describe('upsertProClient', () => {
       user: null,
     })
 
-    mockClientProfileFindUniqueByWhere([existingProfile])
+    mockClientProfileLookupByWhere([existingProfile])
 
     const result = await upsertProClient({
       firstName: 'New',

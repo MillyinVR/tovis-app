@@ -878,13 +878,17 @@ model AdminPermission {
 }
 
 model User {
-  id              String    @id @default(cuid())
-  email           String?   @unique @db.VarChar(320)
-  emailHash       String?   @unique @db.VarChar(128)
-  phone           String?   @unique @db.VarChar(32)
-  phoneHash       String?   @unique @db.VarChar(128)
-  phoneVerifiedAt DateTime?
-  emailVerifiedAt DateTime?
+  id                  String    @id @default(cuid())
+  email               String    @unique @db.VarChar(320)
+  emailHash           String?   @db.VarChar(128)
+  emailHashV2         String?   @unique @db.VarChar(128)
+  emailHashKeyVersion Int?
+  phone               String?   @unique @db.VarChar(32)
+  phoneHash           String?   @db.VarChar(128)
+  phoneHashV2         String?   @unique @db.VarChar(128)
+  phoneHashKeyVersion Int?
+  phoneVerifiedAt     DateTime?
+  emailVerifiedAt     DateTime?
 
   lookLikes    LookLike[]
   lookComments LookComment[]
@@ -961,6 +965,9 @@ model User {
   supportTicketsHandled SupportTicket[]        @relation("SupportTicketHandledBy")
   verificationDocuments VerificationDocument[]
   viralServiceRequests  ViralServiceRequest[]  @relation("ViralServiceRequestReviewedByUser")
+
+  @@index([emailHashKeyVersion])
+  @@index([phoneHashKeyVersion])
 }
 
 model IdempotencyKey {
@@ -1038,12 +1045,16 @@ model ClientProfile {
   claimStatus ClientClaimStatus @default(UNCLAIMED)
   claimedAt   DateTime?
 
-  email           String?   @unique @db.VarChar(320)
-  emailHash       String?   @unique @db.VarChar(128)
-  phone           String?   @unique @db.VarChar(32)
-  phoneHash       String?   @unique @db.VarChar(128)
-  phoneVerifiedAt DateTime?
-  avatarUrl       String?
+  email               String?   @unique @db.VarChar(320)
+  emailHash           String?   @db.VarChar(128)
+  emailHashV2         String?   @unique @db.VarChar(128)
+  emailHashKeyVersion Int?
+  phone               String?   @unique @db.VarChar(32)
+  phoneHash           String?   @db.VarChar(128)
+  phoneHashV2         String?   @unique @db.VarChar(128)
+  phoneHashKeyVersion Int?
+  phoneVerifiedAt     DateTime?
+  avatarUrl           String?
 
   dateOfBirth            DateTime?
   preferredContactMethod ContactMethod?
@@ -1078,6 +1089,8 @@ model ClientProfile {
   boards       Board[]
 
   @@index([claimStatus])
+  @@index([emailHashKeyVersion])
+  @@index([phoneHashKeyVersion])
 }
 
 model ClientAddress {

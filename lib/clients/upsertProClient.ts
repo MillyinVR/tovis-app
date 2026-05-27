@@ -92,7 +92,7 @@ async function findMatchedClientProfile(args: {
   const [emailMatch, legacyEmailMatch, phoneMatch, legacyPhoneMatch] =
     await Promise.all([
       emailHash
-        ? args.db.clientProfile.findUnique({
+        ? args.db.clientProfile.findFirst({
             where: { emailHash },
             select: CLIENT_PROFILE_IDENTITY_SELECT,
           })
@@ -104,7 +104,7 @@ async function findMatchedClientProfile(args: {
           })
         : Promise.resolve(null),
       phoneHash
-        ? args.db.clientProfile.findUnique({
+        ? args.db.clientProfile.findFirst({
             where: { phoneHash },
             select: CLIENT_PROFILE_IDENTITY_SELECT,
           })

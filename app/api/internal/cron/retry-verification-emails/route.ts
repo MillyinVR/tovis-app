@@ -91,9 +91,6 @@ async function runJob(req: Request) {
       createdAt: {
         lte: olderThan,
       },
-      email: {
-        not: null,
-      },
       emailVerificationTokens: {
         none: {
           purpose: AuthVerificationPurpose.EMAIL_VERIFY,

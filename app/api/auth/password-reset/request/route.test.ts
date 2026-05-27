@@ -14,6 +14,7 @@ const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   user: {
+    findFirst: vi.fn(),
     findUnique: vi.fn(),
   },
 }))
@@ -74,10 +75,10 @@ function makeRequest(
   })
 }
 
-function mockUserFindUniqueByWhere(
+function mockUserLookupByWhere(
   user: { id: string; email: string | null } | null,
 ) {
-  mockPrisma.user.findUnique.mockImplementation(
+  mockPrisma.user.findFirst.mockImplementation(
     async (args: { where?: Record<string, unknown> }) => {
       const where = args.where ?? {}
 
@@ -90,6 +91,16 @@ function mockUserFindUniqueByWhere(
       ) {
         return user
       }
+
+      return null
+    },
+  )
+
+  mockPrisma.user.findUnique.mockImplementation(
+    async (args: { where?: Record<string, unknown> }) => {
+      const where = args.where ?? {}
+
+      if (!user) return null
 
       if (where.email && where.email === user.email) {
         return user
@@ -112,6 +123,7 @@ describe('app/api/auth/password-reset/request/route', () => {
     mockLogAuthEvent.mockReset()
     mockCaptureAuthException.mockReset()
 
+    mockPrisma.user.findFirst.mockReset()
     mockPrisma.user.findUnique.mockReset()
 
     mockRateLimitIdentity.mockResolvedValue({
@@ -148,6 +160,7 @@ describe('app/api/auth/password-reset/request/route', () => {
     expect(result).toBe(rateLimitRes)
     expect(result.status).toBe(429)
 
+    expect(mockPrisma.user.findFirst).not.toHaveBeenCalled()
     expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
     expect(mockGetPasswordResetAppUrlFromRequest).not.toHaveBeenCalled()
     expect(mockGetPasswordResetRequestIp).not.toHaveBeenCalled()
@@ -168,6 +181,7 @@ describe('app/api/auth/password-reset/request/route', () => {
     expect(result.status).toBe(200)
     expect(body).toEqual({ ok: true })
 
+    expect(mockPrisma.user.findFirst).not.toHaveBeenCalled()
     expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
     expect(mockIssueAndSendPasswordReset).not.toHaveBeenCalled()
     expect(mockLogAuthEvent).not.toHaveBeenCalled()
@@ -175,7 +189,7 @@ describe('app/api/auth/password-reset/request/route', () => {
   })
 
   it('looks up users by emailHash before legacy email', async () => {
-    mockUserFindUniqueByWhere({
+    mockUserLookupByWhere({
       id: 'user_1',
       email: 'user@example.com',
     })
@@ -188,7 +202,7 @@ describe('app/api/auth/password-reset/request/route', () => {
 
     expect(result.status).toBe(200)
 
-    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+    expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
       where: {
         emailHash: emailLookupHash('user@example.com'),
       },
@@ -212,10 +226,10 @@ describe('app/api/auth/password-reset/request/route', () => {
   })
 
   it('falls back to legacy email lookup when emailHash lookup misses', async () => {
+    mockPrisma.user.findFirst.mockResolvedValue(null)
+
     mockPrisma.user.findUnique.mockImplementation(
       async (args: { where?: Record<string, unknown> }) => {
-        if (args.where?.emailHash) return null
-
         if (args.where?.email === 'user@example.com') {
           return {
             id: 'user_1',
@@ -235,14 +249,14 @@ describe('app/api/auth/password-reset/request/route', () => {
 
     expect(result.status).toBe(200)
 
-    expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(1, {
+    expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
       where: {
         emailHash: emailLookupHash('user@example.com'),
       },
       select: { id: true, email: true },
     })
 
-    expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(2, {
+    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
       where: {
         email: 'user@example.com',
       },
@@ -259,6 +273,7 @@ describe('app/api/auth/password-reset/request/route', () => {
   })
 
   it('returns ok when the user is not found', async () => {
+    mockPrisma.user.findFirst.mockResolvedValue(null)
     mockPrisma.user.findUnique.mockResolvedValue(null)
 
     const result = await POST(
@@ -271,14 +286,14 @@ describe('app/api/auth/password-reset/request/route', () => {
     expect(result.status).toBe(200)
     expect(body).toEqual({ ok: true })
 
-    expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(1, {
+    expect(mockPrisma.user.findFirst).toHaveBeenCalledWith({
       where: {
         emailHash: emailLookupHash('missing@example.com'),
       },
       select: { id: true, email: true },
     })
 
-    expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(2, {
+    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
       where: {
         email: 'missing@example.com',
       },
@@ -291,10 +306,11 @@ describe('app/api/auth/password-reset/request/route', () => {
   })
 
   it('returns ok when the matched user record no longer has a usable email', async () => {
-    mockPrisma.user.findUnique.mockResolvedValue({
+    mockPrisma.user.findFirst.mockResolvedValue({
       id: 'user_1',
       email: '   ',
     })
+    mockPrisma.user.findUnique.mockResolvedValue(null)
 
     const result = await POST(
       makeRequest({
@@ -312,7 +328,7 @@ describe('app/api/auth/password-reset/request/route', () => {
   })
 
   it('returns ok when app URL resolution fails and logs a structured warning', async () => {
-    mockUserFindUniqueByWhere({
+    mockUserLookupByWhere({
       id: 'user_1',
       email: 'user@example.com',
     })
@@ -342,7 +358,7 @@ describe('app/api/auth/password-reset/request/route', () => {
   })
 
   it('issues and sends a password reset when the user exists', async () => {
-    mockUserFindUniqueByWhere({
+    mockUserLookupByWhere({
       id: 'user_1',
       email: 'user@example.com',
     })
@@ -381,7 +397,7 @@ describe('app/api/auth/password-reset/request/route', () => {
   })
 
   it('still returns ok when password reset issuance or email sending fails and captures the exception', async () => {
-    mockUserFindUniqueByWhere({
+    mockUserLookupByWhere({
       id: 'user_1',
       email: 'user@example.com',
     })

@@ -178,9 +178,6 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
         createdAt: {
           lte: new Date('2026-04-16T11:55:00.000Z'),
         },
-        email: {
-          not: null,
-        },
         emailVerificationTokens: {
           none: {
             purpose: AuthVerificationPurpose.EMAIL_VERIFY,
@@ -268,9 +265,6 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
         createdAt: {
           lte: new Date('2026-04-16T11:55:00.000Z'),
         },
-        email: {
-          not: null,
-        },
         emailVerificationTokens: {
           none: {
             purpose: AuthVerificationPurpose.EMAIL_VERIFY,
@@ -329,9 +323,6 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
         emailVerifiedAt: null,
         createdAt: {
           lte: new Date('2026-04-16T11:55:00.000Z'),
-        },
-        email: {
-          not: null,
         },
         emailVerificationTokens: {
           none: {

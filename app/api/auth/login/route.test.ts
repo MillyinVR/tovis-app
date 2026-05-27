@@ -15,6 +15,7 @@ const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   user: {
+    findFirst: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
   },
@@ -196,8 +197,8 @@ function makeUser(args?: {
   }
 }
 
-function mockUserFindUniqueByWhere(user: ReturnType<typeof makeUser> | null) {
-  mockPrisma.user.findUnique.mockImplementation(
+function mockUserLookupByWhere(user: ReturnType<typeof makeUser> | null) {
+  mockPrisma.user.findFirst.mockImplementation(
     async (args: { where?: Record<string, unknown> }) => {
       const where = args.where ?? {}
 
@@ -206,6 +207,16 @@ function mockUserFindUniqueByWhere(user: ReturnType<typeof makeUser> | null) {
       if (where.emailHash && where.emailHash === emailLookupHash(user.email)) {
         return user
       }
+
+      return null
+    },
+  )
+
+  mockPrisma.user.findUnique.mockImplementation(
+    async (args: { where?: Record<string, unknown> }) => {
+      const where = args.where ?? {}
+
+      if (!user) return null
 
       if (where.email && where.email === user.email) {
         return user
@@ -335,7 +346,7 @@ describe('app/api/auth/login/route', () => {
   })
 
   it('increments loginAttempts and returns 401 before the lock threshold', async () => {
-    mockUserFindUniqueByWhere(
+    mockUserLookupByWhere(
       makeUser({
         loginAttempts: 3,
       }),
@@ -520,7 +531,7 @@ describe('app/api/auth/login/route', () => {
     })
 
     // existing email + wrong password -> must use stored hash
-    mockUserFindUniqueByWhere(
+    mockUserLookupByWhere(
       makeUser({
         loginAttempts: 3,
       }),
@@ -652,7 +663,7 @@ describe('app/api/auth/login/route', () => {
       loginAttempts: 0,
     })
 
-    mockUserFindUniqueByWhere(user)
+    mockUserLookupByWhere(user)
     mockVerifyPassword.mockResolvedValue(true)
     mockPrisma.user.update.mockResolvedValue({
       id: 'user_1',
@@ -672,7 +683,7 @@ describe('app/api/auth/login/route', () => {
 
     expect(result.status).toBe(200)
 
-    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith(
+    expect(mockPrisma.user.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           emailHash: emailLookupHash('user@example.com'),
@@ -680,13 +691,7 @@ describe('app/api/auth/login/route', () => {
       }),
     )
 
-    expect(mockPrisma.user.findUnique).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          email: 'user@example.com',
-        },
-      }),
-    )
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
   })
 
   it('falls back to legacy email lookup when emailHash lookup misses', async () => {
@@ -694,9 +699,10 @@ describe('app/api/auth/login/route', () => {
       loginAttempts: 0,
     })
 
+    mockPrisma.user.findFirst.mockResolvedValueOnce(null)
+
     mockPrisma.user.findUnique.mockImplementation(
       async (args: { where?: Record<string, unknown> }) => {
-        if (args.where?.emailHash) return null
         if (args.where?.email === 'user@example.com') return user
         return null
       },
@@ -721,7 +727,7 @@ describe('app/api/auth/login/route', () => {
 
     expect(result.status).toBe(200)
 
-    expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(
+    expect(mockPrisma.user.findFirst).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         where: {
@@ -731,7 +737,7 @@ describe('app/api/auth/login/route', () => {
     )
 
     expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(
-      2,
+      1,
       expect.objectContaining({
         where: {
           email: 'user@example.com',

@@ -49,7 +49,7 @@ export async function POST(req: Request) {
     const emailHash = emailLookupHash(email)
 
     const userByHash = emailHash
-      ? await prisma.user.findUnique({
+      ? await prisma.user.findFirst({
           where: { emailHash },
           select: PASSWORD_RESET_USER_SELECT,
         })
