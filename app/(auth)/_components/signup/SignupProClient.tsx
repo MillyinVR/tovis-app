@@ -17,8 +17,8 @@ import { TRANSACTIONAL_SMS_CHECKBOX_LABEL } from '@/lib/transactionalSmsPolicy'
 
 type VerificationSendState = boolean | 'pending'
 
-function sanitizePhone(v: string) {
-  return v.replace(/\s+/g, '')
+function compactPhoneInputForSubmit(value: string): string {
+  return value.trim().replace(/\s+/gu, '')
 }
 
 function sanitizeNextUrl(nextUrl: unknown): string | null {
@@ -486,7 +486,7 @@ export default function SignupProClient() {
     if (!firstName.trim() || !lastName.trim()) {
       return setError('First and last name are required.')
     }
-    if (!sanitizePhone(phone).trim()) {
+    if (!compactPhoneInputForSubmit(phone)) {
       return setError('Phone number is required.')
     }
     if (!transactionalSmsConsent) {
@@ -562,7 +562,7 @@ export default function SignupProClient() {
           role: 'PRO',
           firstName,
           lastName,
-          phone: sanitizePhone(phone),
+          phone: compactPhoneInputForSubmit(phone),
           tapIntentId: ti ?? undefined,
           businessName: businessName.trim()
             ? businessName.trim()
@@ -625,7 +625,7 @@ export default function SignupProClient() {
     !loading &&
     Boolean(firstName.trim()) &&
     Boolean(lastName.trim()) &&
-    Boolean(sanitizePhone(phone).trim()) &&
+    Boolean(compactPhoneInputForSubmit(phone)) &&
     Boolean(email.trim()) &&
     Boolean(password.trim()) &&
     isLocationConfirmed() &&

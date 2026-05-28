@@ -4,22 +4,24 @@
  * Ensures contact normalization has one canonical source of truth.
  *
  * Allowed:
- * - `normalizeEmail` / `normalizePhone` definitions in
- *   `lib/security/contactNormalization.ts`
- * - imports/references to those functions from other files
+ * - contact normalization definitions in `lib/security/contactNormalization.ts`
  * - tests for the canonical module
+ * - imports/references/calls from other files
  *
- * Banned:
- * - route-local or utility-local `normalizeEmail(...)` definitions
- * - route-local or utility-local `normalizePhone(...)` definitions
- * - duplicate exported aliases that redefine the normalization contract
+ * Banned outside the canonical module:
+ * - route-local or utility-local email/phone normalization definitions
+ * - domain-specific normalization aliases that re-implement the contract
+ * - helper names like `cleanPhone`, `sanitizeEmail`, `normalizeEmailForLookup`,
+ *   `normalizePhoneForVerification`, etc.
  *
- * This guard intentionally checks definitions, not call sites. Callers should
- * import from `@/lib/security/contactNormalization`.
+ * Important:
+ * This guard checks definitions, not call sites. Callers should import from:
+ *
+ *   @/lib/security/contactNormalization
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { extname, join, relative, sep } from 'node:path'
 import process from 'node:process'
 
 const repoRoot = process.cwd()
@@ -40,70 +42,116 @@ const IGNORED_DIR_NAMES = new Set([
 ])
 
 const ALLOWLISTED_FILES = new Set([
-  `lib${sep}security${sep}contactNormalization.ts`,
-  `lib${sep}security${sep}contactNormalization.test.ts`,
+  pathForPlatform('lib/security/contactNormalization.ts'),
+  pathForPlatform('lib/security/contactNormalization.test.ts'),
+  pathForPlatform('lib/security/redaction.ts'),
+  pathForPlatform('lib/security/redaction.test.ts'),
 ])
 
-const DEFINITION_PATTERNS = [
+/**
+ * Function or variable names that usually mean a file is defining its own
+ * contact normalization contract instead of importing the canonical one.
+ *
+ * These names intentionally include historical/domain aliases found in audits.
+ */
+const BANNED_CONTACT_NORMALIZER_NAMES = [
+  'cleanEmail',
+  'cleanPhone',
+  'normalizeContact',
+  'normalizeContactInput',
+  'normalizeContactForLookup',
+  'normalizeEmail',
+  'normalizeEmailForHash',
+  'normalizeEmailForLookup',
+  'normalizePhone',
+  'normalizePhoneForLookup',
+  'normalizePhoneForVerification',
+  'sanitizeEmail',
+  'sanitizePhone',
+]
+
+const DEFINITION_PATTERNS = BANNED_CONTACT_NORMALIZER_NAMES.flatMap((name) => [
   {
-    name: 'function normalizeEmail',
-    regex: /\bfunction\s+normalizeEmail\s*\(/u,
+    name: `function ${name}`,
+    regex: new RegExp(`\\bfunction\\s+${escapeRegExp(name)}\\s*\\(`, 'u'),
   },
   {
-    name: 'function normalizePhone',
-    regex: /\bfunction\s+normalizePhone\s*\(/u,
+    name: `const ${name}`,
+    regex: new RegExp(`\\bconst\\s+${escapeRegExp(name)}\\s*=`, 'u'),
   },
   {
-    name: 'const normalizeEmail',
-    regex: /\bconst\s+normalizeEmail\s*=/u,
+    name: `let ${name}`,
+    regex: new RegExp(`\\blet\\s+${escapeRegExp(name)}\\s*=`, 'u'),
   },
   {
-    name: 'const normalizePhone',
-    regex: /\bconst\s+normalizePhone\s*=/u,
+    name: `var ${name}`,
+    regex: new RegExp(`\\bvar\\s+${escapeRegExp(name)}\\s*=`, 'u'),
   },
   {
-    name: 'let normalizeEmail',
-    regex: /\blet\s+normalizeEmail\s*=/u,
+    name: `${name} property function`,
+    regex: new RegExp(
+      `\\b${escapeRegExp(name)}\\s*:\\s*(?:async\\s*)?(?:function\\s*)?\\(`,
+      'u',
+    ),
   },
   {
-    name: 'let normalizePhone',
-    regex: /\blet\s+normalizePhone\s*=/u,
+    name: `${name} arrow property`,
+    regex: new RegExp(
+      `\\b${escapeRegExp(name)}\\s*:\\s*(?:async\\s*)?\\([^)]*\\)\\s*=>`,
+      'u',
+    ),
+  },
+])
+
+/**
+ * Catch anonymous-looking helpers such as:
+ *   const phone = value.replace(/\D/g, '')
+ *   const digits = rawPhone.replace(/\D/gu, '')
+ *
+ * This is intentionally scoped to suspicious local variable assignments.
+ * It should not ban legitimate calls to canonical normalizePhone(...).
+ */
+const SUSPICIOUS_PHONE_DIGIT_PATTERNS = [
+  {
+    name: 'local phone digit stripping',
+    regex:
+      /\bconst\s+(?:digits|phoneDigits|normalizedPhone|cleanedPhone|phone)\s*=\s*[^;\n]+\.replace\(\s*\/\\D\/[a-z]*\s*,\s*['"]{2}\s*\)/u,
   },
   {
-    name: 'var normalizeEmail',
-    regex: /\bvar\s+normalizeEmail\s*=/u,
-  },
-  {
-    name: 'var normalizePhone',
-    regex: /\bvar\s+normalizePhone\s*=/u,
-  },
-  {
-    name: 'normalizeEmail property function',
-    regex: /\bnormalizeEmail\s*:\s*(?:async\s*)?(?:function\s*)?\(/u,
-  },
-  {
-    name: 'normalizePhone property function',
-    regex: /\bnormalizePhone\s*:\s*(?:async\s*)?(?:function\s*)?\(/u,
-  },
-  {
-    name: 'normalizeEmail arrow property',
-    regex: /\bnormalizeEmail\s*:\s*(?:async\s*)?\([^)]*\)\s*=>/u,
-  },
-  {
-    name: 'normalizePhone arrow property',
-    regex: /\bnormalizePhone\s*:\s*(?:async\s*)?\([^)]*\)\s*=>/u,
+    name: 'local phone non-digit stripping',
+    regex:
+      /\bconst\s+(?:digits|phoneDigits|normalizedPhone|cleanedPhone|phone)\s*=\s*[^;\n]+\.replace\(\s*\/\[\^0-9\]\/[a-z]*\s*,\s*['"]{2}\s*\)/u,
   },
 ]
 
-function getExtension(filePath) {
-  const slashIndex = filePath.lastIndexOf(sep)
-  const fileName = slashIndex === -1 ? filePath : filePath.slice(slashIndex + 1)
-  const dotIndex = fileName.lastIndexOf('.')
-  return dotIndex === -1 ? '' : fileName.slice(dotIndex)
+/**
+ * Catch local email lower/trim normalization patterns. This is intentionally
+ * narrow to avoid flagging display-only formatting.
+ */
+const SUSPICIOUS_EMAIL_NORMALIZATION_PATTERNS = [
+  {
+    name: 'local email trim/lowercase normalization',
+    regex:
+      /\bconst\s+(?:email|normalizedEmail|cleanedEmail|emailForLookup|emailForHash)\s*=\s*[^;\n]+\.trim\(\)\.toLowerCase\(\)/u,
+  },
+]
+
+const ALL_PATTERNS = [
+  ...DEFINITION_PATTERNS,
+  ...SUSPICIOUS_PHONE_DIGIT_PATTERNS,
+  ...SUSPICIOUS_EMAIL_NORMALIZATION_PATTERNS,
+]
+
+function pathForPlatform(path) {
+  return path.split('/').join(sep)
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function hasSourceExtension(filePath) {
-  return SOURCE_EXTENSIONS.has(getExtension(filePath))
+  return SOURCE_EXTENSIONS.has(extname(filePath))
 }
 
 function normalizeRelativePath(filePath) {
@@ -120,7 +168,12 @@ function collectFiles(dirPath, output) {
   try {
     entries = readdirSync(dirPath)
   } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    ) {
       return
     }
 
@@ -164,7 +217,7 @@ function findViolations(filePath) {
   const sourceLines = source.split('\n')
   const violations = []
 
-  for (const pattern of DEFINITION_PATTERNS) {
+  for (const pattern of ALL_PATTERNS) {
     const regex = new RegExp(pattern.regex.source, 'gu')
 
     for (const match of source.matchAll(regex)) {
@@ -204,7 +257,7 @@ function main() {
     'Contact normalization must be defined only in lib/security/contactNormalization.ts.',
   )
   console.error(
-    'Import normalizeEmail/normalizePhone from @/lib/security/contactNormalization instead of defining local helpers.',
+    'Import email/phone normalization helpers from @/lib/security/contactNormalization instead of defining local helpers.',
   )
   console.error('')
 
@@ -216,7 +269,12 @@ function main() {
   }
 
   console.error('')
-  console.error(`Found ${violations.length} violation${violations.length === 1 ? '' : 's'}.`)
+  console.error(
+    `Found ${violations.length} violation${
+      violations.length === 1 ? '' : 's'
+    }.`,
+  )
+
   process.exitCode = 1
 }
 

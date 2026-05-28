@@ -9,24 +9,48 @@
  * - do not throw for user input
  *
  * Keep all email/phone normalization in this file. Do not add route-local
- * normalizeEmail/normalizePhone helpers elsewhere.
+ * email/phone normalization helpers elsewhere. Domain-specific helpers may
+ * exist only as thin delegates to this module.
  */
 
 const MAX_EMAIL_LENGTH = 254
 const MAX_PHONE_DIGITS = 15
+const MIN_INTERNATIONAL_PHONE_DIGITS = 8
 const NANP_DIGIT_LENGTH = 10
 const NANP_COUNTRY_CODE = '1'
+
+const CONTROL_CHARS_PATTERN = /[\x00-\x1F\x7F]/u
+const WHITESPACE_PATTERN = /\s/u
+const EMAIL_AT_PATTERN = /@/gu
+
+/**
+ * We intentionally reject phone strings with letters instead of stripping them.
+ * Silently turning "555-FLOWERS" into digits would require keypad mapping and
+ * would make lookup hashes less predictable.
+ */
+const PHONE_ALPHA_PATTERN = /[A-Za-z]/u
+
+/**
+ * Common extension markers. If a user submits an extension, the base phone
+ * number may still be valid, but storing/hash-normalizing the extension-less
+ * number from this raw string would be surprising. Require callers to provide
+ * the base number separately.
+ */
+const PHONE_EXTENSION_PATTERN =
+  /(?:^|[\s,;])(?:ext\.?|extension|x)\s*\d+\s*$/iu
 
 export type NormalizedContactInput = {
   email: string | null
   phone: string | null
 }
 
+export type ContactLookupKind = 'EMAIL' | 'PHONE'
+
 /**
  * Normalizes user-supplied email for lookup/hash usage.
  *
  * Policy:
- * - trims leading/trailing whitespace, including common unicode whitespace
+ * - trims leading/trailing whitespace, including common Unicode whitespace
  * - lowercases
  * - rejects empty values
  * - rejects values longer than 254 chars
@@ -34,6 +58,7 @@ export type NormalizedContactInput = {
  * - requires non-empty local and domain parts
  * - requires at least one dot in the domain
  * - rejects obvious whitespace/control characters inside the address
+ * - rejects leading/trailing dots and repeated dots in local/domain parts
  *
  * This is not intended to prove an email is deliverable. It is intended to
  * produce one stable lookup representation or `null`.
@@ -45,19 +70,16 @@ export function normalizeEmail(value: unknown): string | null {
 
   if (normalized.length === 0) return null
   if (normalized.length > MAX_EMAIL_LENGTH) return null
-  if (/[\s\x00-\x1F\x7F]/u.test(normalized)) return null
+  if (CONTROL_CHARS_PATTERN.test(normalized)) return null
+  if (WHITESPACE_PATTERN.test(normalized)) return null
 
-  const atMatches = normalized.match(/@/gu)
+  const atMatches = normalized.match(EMAIL_AT_PATTERN)
   if (!atMatches || atMatches.length !== 1) return null
 
   const [localPart, domainPart] = normalized.split('@')
 
-  if (!localPart || !domainPart) return null
-  if (localPart.startsWith('.') || localPart.endsWith('.')) return null
-  if (localPart.includes('..')) return null
-  if (domainPart.startsWith('.') || domainPart.endsWith('.')) return null
-  if (domainPart.includes('..')) return null
-  if (!domainPart.includes('.')) return null
+  if (!isValidEmailPart(localPart)) return null
+  if (!isValidEmailDomain(domainPart)) return null
 
   return normalized
 }
@@ -66,7 +88,8 @@ export function normalizeEmail(value: unknown): string | null {
  * Normalizes user-supplied phone values for lookup/hash usage.
  *
  * Policy:
- * - strips all non-digits
+ * - rejects alphabetic input and extension-bearing strings
+ * - strips non-digit separators from otherwise numeric-looking values
  * - accepts 10-digit NANP numbers and prefixes +1
  * - accepts 11-digit NANP numbers starting with 1 and prefixes +
  * - accepts other international-looking numbers between 8 and 15 digits
@@ -81,11 +104,14 @@ export function normalizeEmail(value: unknown): string | null {
 export function normalizePhone(value: unknown): string | null {
   if (typeof value !== 'string') return null
 
-  const digits = value.replace(/\D/gu, '')
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return null
+  if (PHONE_ALPHA_PATTERN.test(trimmed)) return null
+  if (PHONE_EXTENSION_PATTERN.test(trimmed)) return null
 
-  if (digits.length === 0) return null
-  if (digits.length > MAX_PHONE_DIGITS) return null
-  if (/^0+$/u.test(digits)) return null
+  const digits = trimmed.replace(/\D/gu, '')
+
+  if (!isUsablePhoneDigits(digits)) return null
 
   if (digits.length === NANP_DIGIT_LENGTH) {
     return `+${NANP_COUNTRY_CODE}${digits}`
@@ -98,9 +124,10 @@ export function normalizePhone(value: unknown): string | null {
     return `+${digits}`
   }
 
-  // Conservative international fallback. E.164 allows up to 15 digits; we use
-  // 8 as a pragmatic lower bound to avoid hashing tiny local fragments.
-  if (digits.length >= 8 && digits.length <= MAX_PHONE_DIGITS) {
+  if (
+    digits.length >= MIN_INTERNATIONAL_PHONE_DIGITS &&
+    digits.length <= MAX_PHONE_DIGITS
+  ) {
     return `+${digits}`
   }
 
@@ -111,8 +138,7 @@ export function normalizePhone(value: unknown): string | null {
  * Normalizes contact fields from an object boundary.
  *
  * Use this when callers receive a larger args/body object and need both email
- * and phone normalized without reading plaintext contact fields in route,
- * client, booking, or other non-security modules.
+ * and phone normalized with one canonical contract.
  */
 export function normalizeContactInput(args: {
   email?: unknown
@@ -125,10 +151,10 @@ export function normalizeContactInput(args: {
 }
 
 /**
- * Normalize a contact value by type.
+ * Normalizes a contact value by lookup kind.
  */
 export function normalizeContactForLookup(
-  kind: 'EMAIL' | 'PHONE',
+  kind: ContactLookupKind,
   value: unknown,
 ): string | null {
   switch (kind) {
@@ -137,6 +163,46 @@ export function normalizeContactForLookup(
     case 'PHONE':
       return normalizePhone(value)
   }
+}
+
+/**
+ * Legacy/domain delegate for lookup hashing.
+ *
+ * Keep this here so older call sites can migrate without keeping their own
+ * normalization implementation in hashLookup.ts.
+ */
+export function normalizeEmailForLookup(value: unknown): string | null {
+  return normalizeEmail(value)
+}
+
+/**
+ * Legacy/domain delegate for lookup hashing.
+ *
+ * Keep this here so older call sites can migrate without keeping their own
+ * normalization implementation in hashLookup.ts.
+ */
+export function normalizePhoneForLookup(value: unknown): string | null {
+  return normalizePhone(value)
+}
+
+/**
+ * Delegate for observability/auth event hashing.
+ *
+ * Auth telemetry must use the same canonical contact value as auth lookup
+ * hashes, otherwise event correlation and privacy review drift.
+ */
+export function normalizeEmailForHash(value: unknown): string | null {
+  return normalizeEmail(value)
+}
+
+/**
+ * Delegate for phone verification flows.
+ *
+ * Verification, login, settings, and lookup hashing must agree on exactly one
+ * canonical phone representation.
+ */
+export function normalizePhoneForVerification(value: unknown): string | null {
+  return normalizePhone(value)
 }
 
 /**
@@ -151,4 +217,27 @@ export function isNormalizedEmail(value: unknown): value is string {
  */
 export function isNormalizedPhone(value: unknown): value is string {
   return typeof value === 'string' && normalizePhone(value) === value
+}
+
+function isValidEmailPart(value: string | undefined): value is string {
+  if (!value) return false
+  if (value.startsWith('.') || value.endsWith('.')) return false
+  if (value.includes('..')) return false
+
+  return true
+}
+
+function isValidEmailDomain(value: string | undefined): value is string {
+  if (!isValidEmailPart(value)) return false
+  if (!value.includes('.')) return false
+
+  return true
+}
+
+function isUsablePhoneDigits(digits: string): boolean {
+  if (digits.length === 0) return false
+  if (digits.length > MAX_PHONE_DIGITS) return false
+  if (/^0+$/u.test(digits)) return false
+
+  return true
 }

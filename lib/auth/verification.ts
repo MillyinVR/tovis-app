@@ -1,6 +1,6 @@
-// lib/auth/verification.ts
-
 import 'server-only'
+
+import { normalizePhoneForVerification } from '@/lib/security/contactNormalization'
 
 export type PhoneVerificationChannel = 'sms' | 'call'
 
@@ -12,12 +12,19 @@ export function pickString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-export function normalizePhoneForVerification(value: unknown): string {
-  const phone = pickString(value)
-  return phone.replace(/[^\d+]/g, '')
+/**
+ * Returns the canonical phone value used by verification flows.
+ *
+ * Invalid or missing values return an empty string to preserve the existing
+ * caller contract in this module.
+ */
+export function getVerificationPhoneLookupValue(value: unknown): string {
+  return normalizePhoneForVerification(value) ?? ''
 }
 
-export function parsePhoneVerificationChannel(value: unknown): PhoneVerificationChannel {
+export function parsePhoneVerificationChannel(
+  value: unknown,
+): PhoneVerificationChannel {
   const raw = pickString(value).toLowerCase()
   if (raw === 'call') return 'call'
   return 'sms'

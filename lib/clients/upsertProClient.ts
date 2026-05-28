@@ -1,4 +1,4 @@
-// lib/clients/upsertProClient.ts 
+// lib/clients/upsertProClient.ts
 
 import { ClientClaimStatus, Prisma, Role } from '@prisma/client'
 
@@ -7,7 +7,11 @@ import {
   emailLookupHash,
   phoneLookupHash,
 } from '@/lib/security/crypto/hashLookup'
-import { buildClientProfileContactLookupData } from '@/lib/security/contactLookup'
+import {
+  buildClientProfileContactLookupData,
+  buildEmailLookupHashV2ForContactInput,
+  buildPhoneLookupHashV2ForContactInput,
+} from '@/lib/security/contactLookup'
 import { normalizeContactInput } from '@/lib/security/contactNormalization'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -42,16 +46,24 @@ const CLIENT_PROFILE_IDENTITY_SELECT = {
   lastName: true,
   email: true,
   emailHash: true,
+  emailHashV2: true,
+  emailHashKeyVersion: true,
   phone: true,
   phoneHash: true,
+  phoneHashV2: true,
+  phoneHashKeyVersion: true,
   user: {
     select: {
       id: true,
       role: true,
       email: true,
       emailHash: true,
+      emailHashV2: true,
+      emailHashKeyVersion: true,
       phone: true,
       phoneHash: true,
+      phoneHashV2: true,
+      phoneHashKeyVersion: true,
     },
   },
 } satisfies Prisma.ClientProfileSelect
@@ -65,8 +77,12 @@ const USER_IDENTITY_SELECT = {
   role: true,
   email: true,
   emailHash: true,
+  emailHashV2: true,
+  emailHashKeyVersion: true,
   phone: true,
   phoneHash: true,
+  phoneHashV2: true,
+  phoneHashKeyVersion: true,
   clientProfile: {
     select: CLIENT_PROFILE_IDENTITY_SELECT,
   },
@@ -81,79 +97,46 @@ type FindMatchedClientProfileResult =
   | { kind: 'conflict' }
   | { kind: 'profile'; profile: ClientProfileIdentityRecord }
 
-async function findMatchedClientProfile(args: {
-  db: DbClient
-  email: string | null
-  phone: string | null
-}): Promise<FindMatchedClientProfileResult> {
-  const emailHash = emailLookupHash(args.email)
-  const phoneHash = phoneLookupHash(args.phone)
-
-  const [emailMatch, legacyEmailMatch, phoneMatch, legacyPhoneMatch] =
-    await Promise.all([
-      emailHash
-        ? args.db.clientProfile.findFirst({
-            where: { emailHash },
-            select: CLIENT_PROFILE_IDENTITY_SELECT,
-          })
-        : Promise.resolve(null),
-      args.email
-        ? args.db.clientProfile.findUnique({
-            where: { email: args.email },
-            select: CLIENT_PROFILE_IDENTITY_SELECT,
-          })
-        : Promise.resolve(null),
-      phoneHash
-        ? args.db.clientProfile.findFirst({
-            where: { phoneHash },
-            select: CLIENT_PROFILE_IDENTITY_SELECT,
-          })
-        : Promise.resolve(null),
-      args.phone
-        ? args.db.clientProfile.findUnique({
-            where: { phone: args.phone },
-            select: CLIENT_PROFILE_IDENTITY_SELECT,
-          })
-        : Promise.resolve(null),
-    ])
-
-  const matches = [
-    emailMatch,
-    legacyEmailMatch,
-    phoneMatch,
-    legacyPhoneMatch,
-  ].filter((profile): profile is ClientProfileIdentityRecord => profile !== null)
-
-  const uniqueProfileIds = new Set(matches.map((profile) => profile.id))
-
-  if (uniqueProfileIds.size > 1) {
-    return { kind: 'conflict' }
-  }
-
-  const profile = matches[0]
-  if (profile) {
-    return { kind: 'profile', profile }
-  }
-
-  return { kind: 'none' }
-}
-
 type FindMatchedClientUserResult =
   | { kind: 'none' }
   | { kind: 'conflict' }
   | { kind: 'non_client' }
   | { kind: 'client'; user: UserIdentityRecord }
 
-async function findMatchedClientUser(args: {
-  db: DbClient
+function buildClientProfileLookupOrConditions(args: {
   email: string | null
   phone: string | null
-}): Promise<FindMatchedClientUserResult> {
-  const emailHash = emailLookupHash(args.email)
-  const phoneHash = phoneLookupHash(args.phone)
+}): Prisma.ClientProfileWhereInput[] {
+  const lookupEmail =
+    args.email // pii-plaintext-read-ok: pro-client contact matching passes canonical email into security blind-index helper
+  const lookupPhone =
+    args.phone // pii-plaintext-read-ok: pro-client contact matching passes canonical phone into security blind-index helper
 
-  const orConditions: Prisma.UserWhereInput[] = []
+  const emailHashV2 = buildEmailLookupHashV2ForContactInput(lookupEmail)
+  const phoneHashV2 = buildPhoneLookupHashV2ForContactInput(lookupPhone)
+  const emailHash = emailLookupHash(lookupEmail)
+  const phoneHash = phoneLookupHash(lookupPhone)
 
+  const orConditions: Prisma.ClientProfileWhereInput[] = []
+
+  if (emailHashV2) {
+    orConditions.push({
+      emailHashV2: emailHashV2.hash,
+      emailHashKeyVersion: emailHashV2.keyVersion,
+    })
+  }
+
+  if (phoneHashV2) {
+    orConditions.push({
+      phoneHashV2: phoneHashV2.hash,
+      phoneHashKeyVersion: phoneHashV2.keyVersion,
+    })
+  }
+
+  /**
+   * Legacy SHA-256 fallback for rows created before HMAC v2 backfill.
+   * Remove after burn-in and legacy hash column drop.
+   */
   if (emailHash) {
     orConditions.push({ emailHash })
   }
@@ -163,16 +146,126 @@ async function findMatchedClientUser(args: {
   }
 
   /**
-   * Temporary legacy fallback for rows created before lookup hashes existed
-   * or local/dev databases that have not been fully backfilled yet.
+   * Temporary plaintext fallback for local/dev databases and rows that predate
+   * lookup hashes. Remove after contact hash v2 migration, backfill, and burn-in.
    */
-  if (args.email) {
-    orConditions.push({ email: args.email })
+  if (lookupEmail) {
+    orConditions.push({ email: lookupEmail })
   }
 
-  if (args.phone) {
-    orConditions.push({ phone: args.phone })
+  if (lookupPhone) {
+    orConditions.push({ phone: lookupPhone })
   }
+
+  return orConditions
+}
+
+function buildUserLookupOrConditions(args: {
+  email: string | null
+  phone: string | null
+}): Prisma.UserWhereInput[] {
+  const lookupEmail =
+    args.email // pii-plaintext-read-ok: user contact matching passes canonical email into security blind-index helper
+  const lookupPhone =
+    args.phone // pii-plaintext-read-ok: user contact matching passes canonical phone into security blind-index helper
+
+  const emailHashV2 = buildEmailLookupHashV2ForContactInput(lookupEmail)
+  const phoneHashV2 = buildPhoneLookupHashV2ForContactInput(lookupPhone)
+  const emailHash = emailLookupHash(lookupEmail)
+  const phoneHash = phoneLookupHash(lookupPhone)
+
+  const orConditions: Prisma.UserWhereInput[] = []
+
+  if (emailHashV2) {
+    orConditions.push({
+      emailHashV2: emailHashV2.hash,
+      emailHashKeyVersion: emailHashV2.keyVersion,
+    })
+  }
+
+  if (phoneHashV2) {
+    orConditions.push({
+      phoneHashV2: phoneHashV2.hash,
+      phoneHashKeyVersion: phoneHashV2.keyVersion,
+    })
+  }
+
+  /**
+   * Legacy SHA-256 fallback for rows created before HMAC v2 backfill.
+   * Remove after burn-in and legacy hash column drop.
+   */
+  if (emailHash) {
+    orConditions.push({ emailHash })
+  }
+
+  if (phoneHash) {
+    orConditions.push({ phoneHash })
+  }
+
+  /**
+   * Temporary plaintext fallback for local/dev databases and rows that predate
+   * lookup hashes. Remove after contact hash v2 migration, backfill, and burn-in.
+   */
+  if (lookupEmail) {
+    orConditions.push({ email: lookupEmail })
+  }
+
+  if (lookupPhone) {
+    orConditions.push({ phone: lookupPhone })
+  }
+
+  return orConditions
+}
+
+async function findMatchedClientProfile(args: {
+  db: DbClient
+  email: string | null
+  phone: string | null
+}): Promise<FindMatchedClientProfileResult> {
+  const orConditions = buildClientProfileLookupOrConditions({
+    email: args.email,
+    phone: args.phone,
+  })
+
+  if (orConditions.length === 0) {
+    return { kind: 'none' }
+  }
+
+  const profiles = await args.db.clientProfile.findMany({
+    where: {
+      OR: orConditions,
+    },
+    select: CLIENT_PROFILE_IDENTITY_SELECT,
+    take: 2,
+  })
+
+  if (profiles.length === 0) {
+    return { kind: 'none' }
+  }
+
+  const uniqueProfileIds = new Set(profiles.map((profile) => profile.id))
+
+  if (uniqueProfileIds.size > 1) {
+    return { kind: 'conflict' }
+  }
+
+  const profile = profiles[0]
+  if (!profile) {
+    return { kind: 'none' }
+  }
+
+  return { kind: 'profile', profile }
+}
+
+async function findMatchedClientUser(args: {
+  db: DbClient
+  email: string | null
+  phone: string | null
+}): Promise<FindMatchedClientUserResult> {
+  const orConditions = buildUserLookupOrConditions({
+    email: args.email,
+    phone: args.phone,
+  })
 
   if (orConditions.length === 0) {
     return { kind: 'none' }
@@ -218,19 +311,33 @@ function buildMatchedProfileUpdateData(args: {
   const { profile, firstName, lastName, email, phone } = args
   const now = new Date()
 
+  const emailContactData =
+    email != null ? buildClientProfileContactLookupData({ email }) : {}
+
+  const phoneContactData =
+    phone != null ? buildClientProfileContactLookupData({ phone }) : {}
+
   const emailPatch =
-    profile.email == null && email
+    email &&
+    (profile.email == null || // pii-plaintext-read-ok: expand-phase contact repair only checks whether profile email is already populated
+      profile.emailHash == null ||
+      profile.emailHashV2 == null ||
+      profile.emailHashKeyVersion == null)
       ? {
-          email,
-          emailHash: emailLookupHash(email),
+          ...(profile.email == null ? { email } : {}), // pii-plaintext-read-ok: expand-phase contact repair writes email only when profile email is missing
+          ...emailContactData,
         }
       : {}
 
   const phonePatch =
-    profile.phone == null && phone
+    phone &&
+    (profile.phone == null || // pii-plaintext-read-ok: expand-phase contact repair only checks whether profile phone is already populated
+      profile.phoneHash == null ||
+      profile.phoneHashV2 == null ||
+      profile.phoneHashKeyVersion == null)
       ? {
-          phone,
-          phoneHash: phoneLookupHash(phone),
+          ...(profile.phone == null ? { phone } : {}), // pii-plaintext-read-ok: expand-phase contact repair writes phone only when profile phone is missing
+          ...phoneContactData,
         }
       : {}
 

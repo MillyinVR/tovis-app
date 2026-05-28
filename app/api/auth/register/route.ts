@@ -15,11 +15,14 @@ import {
   jsonFail,
   jsonOk,
   pickString,
-  normalizeEmail,
   enforceRateLimit,
   rateLimitIdentity,
   phoneRateLimitIdentity,
 } from '@/app/api/_utils'
+import {
+  normalizeEmail,
+  normalizePhone,
+} from '@/lib/security/contactNormalization'
 import { startTwilioVerifyPhoneVerification } from '@/lib/twilio/verify'
 import {
   Prisma,
@@ -161,28 +164,6 @@ function getClientIp(request: Request): string | null {
 function getUserAgent(request: Request): string | null {
   const value = request.headers.get('user-agent')?.trim()
   return value || null
-}
-
-function cleanPhone(v: unknown): string | null {
-  const raw = pickString(v)
-  if (!raw) return null
-  const cleaned = raw.replace(/[^\d+]/g, '').trim()
-  if (!cleaned) return null
-
-  const digits = cleaned.replace(/[^\d]/g, '')
-  if (digits.length < 10) return null
-
-  // US-only assumption for now
-  if (!cleaned.startsWith('+') && digits.length === 10) return `+1${digits}`
-  if (
-    !cleaned.startsWith('+') &&
-    digits.length === 11 &&
-    digits.startsWith('1')
-  ) {
-    return `+${digits}`
-  }
-
-  return cleaned
 }
 
 function normalizeRole(v: unknown): 'CLIENT' | 'PRO' | null {
@@ -663,7 +644,7 @@ export async function POST(request: Request) {
     const lastName = pickString(body.lastName)
 
     const rawPhone = pickString(body.phone)
-    const phone = rawPhone ? cleanPhone(rawPhone) : null
+    const phone = rawPhone ? normalizePhone(rawPhone) : null
 
     emailForLog = email
     phoneForLog = phone
@@ -815,36 +796,34 @@ export async function POST(request: Request) {
       })
     }
 
-  const identity = await rateLimitIdentity()
+    const identity = await rateLimitIdentity()
 
-  const registerBucket = captcha.failOpen
-    ? 'auth:register'
-    : 'auth:register:verified'
+    const registerBucket = captcha.failOpen
+      ? 'auth:register'
+      : 'auth:register:verified'
 
-  const registerRateLimitRes = await enforceRateLimit({
-    bucket: registerBucket,
-    identity,
-  })
-
-  if (registerRateLimitRes) return registerRateLimitRes
-
-  const phoneIdentity = phoneRateLimitIdentity(phone)
-
-  const smsPhoneHourRes = await enforceRateLimit({
-    bucket: 'auth:sms-phone-hour',
-    identity: phoneIdentity,
-  })
-
-  if (smsPhoneHourRes) return smsPhoneHourRes
-
-  const smsPhoneDayRes = await enforceRateLimit({
-    bucket: 'auth:sms-phone-day',
-    identity: phoneIdentity,
-  })
-
-  if (smsPhoneDayRes) return smsPhoneDayRes
+    const registerRateLimitRes = await enforceRateLimit({
+      bucket: registerBucket,
+      identity,
+    })
 
     if (registerRateLimitRes) return registerRateLimitRes
+
+    const phoneIdentity = phoneRateLimitIdentity(phone)
+
+    const smsPhoneHourRes = await enforceRateLimit({
+      bucket: 'auth:sms-phone-hour',
+      identity: phoneIdentity,
+    })
+
+    if (smsPhoneHourRes) return smsPhoneHourRes
+
+    const smsPhoneDayRes = await enforceRateLimit({
+      bucket: 'auth:sms-phone-day',
+      identity: phoneIdentity,
+    })
+
+    if (smsPhoneDayRes) return smsPhoneDayRes
 
     // pro profession
     const professionRaw = pickUpper(body.professionType)

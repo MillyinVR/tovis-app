@@ -1,132 +1,220 @@
 // lib/security/crypto/hashLookup.ts
-import { createHash } from 'crypto'
+import { createHash, createHmac } from 'node:crypto'
+
+import {
+  normalizeEmailForLookup,
+  normalizePhoneForLookup,
+} from '@/lib/security/contactNormalization'
+
+const LEGACY_CONTACT_HASH_ALGORITHM = 'sha256' as const
+const CONTACT_LOOKUP_HMAC_ALGORITHM = 'hmac-sha256' as const
 
 /**
- * Normalizes an email address for lookup hashing.
+ * Current HMAC key version for contact lookup blind indexes.
  *
- * Intentional behavior:
- * - trims surrounding whitespace
- * - lowercases the whole email
- * - requires exactly one "@"
- * - requires non-empty local and domain parts
- * - rejects obvious malformed emails
- *
- * Non-goals:
- * - provider-specific normalization, such as Gmail dot removal
- * - Unicode/domain punycode normalization
- * - full RFC 5322 email validation
- *
- * Provider-specific normalization can merge accounts unexpectedly, so do not add
- * it unless product/security explicitly decides that behavior is correct.
+ * Keep this numeric because the Prisma schema stores:
+ * - User.emailHashKeyVersion Int?
+ * - User.phoneHashKeyVersion Int?
+ * - ClientProfile.emailHashKeyVersion Int?
+ * - ClientProfile.phoneHashKeyVersion Int?
  */
-export function normalizeEmailForLookup(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== 'string') return null
+export const CONTACT_LOOKUP_HMAC_KEY_VERSION = 1 as const
 
-  const normalized = value.trim().toLowerCase()
-  if (!normalized) return null
+const CONTACT_LOOKUP_HMAC_KEYS_ENV = 'PII_LOOKUP_HMAC_KEYS_JSON'
 
-  const atIndex = normalized.indexOf('@')
-  const lastAtIndex = normalized.lastIndexOf('@')
+type ContactLookupHmacKeyVersion = typeof CONTACT_LOOKUP_HMAC_KEY_VERSION
 
-  if (atIndex <= 0 || atIndex !== lastAtIndex) return null
+export type ContactLookupHashV2 = {
+  hash: string
+  keyVersion: ContactLookupHmacKeyVersion
+}
 
-  const localPart = normalized.slice(0, atIndex)
-  const domainPart = normalized.slice(atIndex + 1)
+type ContactLookupHmacKeyring = ReadonlyMap<number, Buffer>
 
-  if (!localPart || !domainPart) return null
-  if (domainPart.startsWith('.') || domainPart.endsWith('.')) return null
-  if (!domainPart.includes('.')) return null
-  if (/\s/.test(normalized)) return null
+let cachedContactLookupHmacKeyring: ContactLookupHmacKeyring | null = null
+let cachedContactLookupHmacRawEnv: string | null = null
 
-  return normalized
+/**
+ * Legacy lowercase SHA-256 hex digest.
+ *
+ * This is retained only for expand/burn-in compatibility with existing
+ * `emailHash` / `phoneHash` columns. Do not use this for new blind indexes.
+ */
+export function legacySha256Hex(value: string): string {
+  return createHash(LEGACY_CONTACT_HASH_ALGORITHM)
+    .update(value, 'utf8')
+    .digest('hex')
 }
 
 /**
- * Normalizes a phone number for lookup hashing.
+ * Backward-compatible alias for existing non-contact token/hash callers.
  *
- * Intentional behavior:
- * - accepts common formatted phone values
- * - strips spaces, parentheses, dashes, dots, and other non-digits
- * - preserves a leading "+"
- * - returns an E.164-ish value when possible
- * - defaults 10-digit NANP numbers to "+1"
- *
- * Notes:
- * - This is intentionally conservative and dependency-free.
- * - If later you add libphonenumber-js, replace this implementation with
- *   region-aware parsing while keeping this function contract stable.
- */
-export function normalizePhoneForLookup(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  if (!trimmed) return null
-
-  const hasLeadingPlus = trimmed.startsWith('+')
-  const digits = trimmed.replace(/\D/g, '')
-
-  if (!digits) return null
-
-  /**
-   * Basic E.164 maximum is 15 digits. We also reject very short numbers because
-   * values like "123" are usually test junk, extensions, or malformed input.
-   */
-  if (digits.length < 7 || digits.length > 15) return null
-
-  if (hasLeadingPlus) {
-    return `+${digits}`
-  }
-
-  /**
-   * Product currently appears US/CA-centered in several flows. For plain
-   * 10-digit numbers, normalize to NANP +1. For 11 digits already starting
-   * with 1, normalize to +<digits>.
-   */
-  if (digits.length === 10) {
-    return `+1${digits}`
-  }
-
-  if (digits.length === 11 && digits.startsWith('1')) {
-    return `+${digits}`
-  }
-
-  /**
-   * For other international-looking numbers without "+", normalize to "+digits"
-   * rather than storing multiple variants. This avoids raw phone lookup drift.
-   */
-  return `+${digits}`
-}
-
-/**
- * Returns a lowercase SHA-256 hex digest.
- *
- * This helper intentionally accepts only strings. Callers should normalize
- * emails/phones/tokens before hashing so hashes are stable and comparable.
+ * For contact lookup code, prefer `legacyContactLookupHash(...)` or the v2
+ * helpers below so the legacy/v2 distinction is explicit.
  */
 export function sha256Hex(value: string): string {
-  return createHash('sha256').update(value, 'utf8').digest('hex')
+  return legacySha256Hex(value)
 }
 
 /**
- * Convenience helper for email lookup hashes.
+ * Legacy contact lookup hash.
+ *
+ * This intentionally uses the canonical normalizer from
+ * `lib/security/contactNormalization.ts`; hashLookup must not define its own
+ * email/phone normalization.
  */
-export function emailLookupHash(
-  value: string | null | undefined,
-): string | null {
+export function legacyContactLookupHash(value: string): string {
+  return legacySha256Hex(value)
+}
+
+/**
+ * HMAC-SHA256 contact lookup hash for v2 blind indexes.
+ *
+ * The value passed here must already be canonicalized. Callers that start from
+ * raw user input should use `emailLookupHashV2(...)` or `phoneLookupHashV2(...)`.
+ */
+export function contactLookupHmacHex(args: {
+  normalizedValue: string
+  keyVersion?: ContactLookupHmacKeyVersion
+}): ContactLookupHashV2 {
+  const keyVersion = args.keyVersion ?? CONTACT_LOOKUP_HMAC_KEY_VERSION
+  const key = getContactLookupHmacKey(keyVersion)
+
+  return {
+    hash: createHmac(CONTACT_LOOKUP_HMAC_ALGORITHM.replace('hmac-', ''), key)
+      .update(args.normalizedValue, 'utf8')
+      .digest('hex'),
+    keyVersion,
+  }
+}
+
+/**
+ * Legacy helper for email lookup hashes.
+ *
+ * Writes/reads the old SHA-256 `emailHash` value during burn-in.
+ */
+export function emailLookupHash(value: unknown): string | null {
   const normalized = normalizeEmailForLookup(value)
-  return normalized ? sha256Hex(normalized) : null
+  return normalized ? legacyContactLookupHash(normalized) : null
 }
 
 /**
- * Convenience helper for phone lookup hashes.
+ * Legacy helper for phone lookup hashes.
+ *
+ * Writes/reads the old SHA-256 `phoneHash` value during burn-in.
  */
-export function phoneLookupHash(
-  value: string | null | undefined,
-): string | null {
+export function phoneLookupHash(value: unknown): string | null {
   const normalized = normalizePhoneForLookup(value)
-  return normalized ? sha256Hex(normalized) : null
+  return normalized ? legacyContactLookupHash(normalized) : null
+}
+
+/**
+ * HMAC v2 helper for email lookup hashes.
+ *
+ * Writes/reads the new `emailHashV2` value.
+ */
+export function emailLookupHashV2(value: unknown): ContactLookupHashV2 | null {
+  const normalized = normalizeEmailForLookup(value)
+  return normalized ? contactLookupHmacHex({ normalizedValue: normalized }) : null
+}
+
+/**
+ * HMAC v2 helper for phone lookup hashes.
+ *
+ * Writes/reads the new `phoneHashV2` value.
+ */
+export function phoneLookupHashV2(value: unknown): ContactLookupHashV2 | null {
+  const normalized = normalizePhoneForLookup(value)
+  return normalized ? contactLookupHmacHex({ normalizedValue: normalized }) : null
+}
+
+/**
+ * Test-only cache reset for env-backed keyring changes.
+ */
+export function clearContactLookupHmacKeyringCacheForTests(): void {
+  cachedContactLookupHmacKeyring = null
+  cachedContactLookupHmacRawEnv = null
+}
+
+function getContactLookupHmacKey(
+  keyVersion: ContactLookupHmacKeyVersion,
+): Buffer {
+  const keyring = readContactLookupHmacKeyring()
+  const key = keyring.get(keyVersion)
+
+  if (!key) {
+    throw new Error(`Missing contact lookup HMAC key version: ${keyVersion}`)
+  }
+
+  return key
+}
+
+function readContactLookupHmacKeyring(): ContactLookupHmacKeyring {
+  const rawEnv = process.env[CONTACT_LOOKUP_HMAC_KEYS_ENV]
+
+  if (!rawEnv || rawEnv.trim().length === 0) {
+    throw new Error(`Missing required env ${CONTACT_LOOKUP_HMAC_KEYS_ENV}`)
+  }
+
+  if (
+    cachedContactLookupHmacKeyring &&
+    cachedContactLookupHmacRawEnv === rawEnv
+  ) {
+    return cachedContactLookupHmacKeyring
+  }
+
+  const keyring = parseContactLookupHmacKeyring(rawEnv)
+
+  cachedContactLookupHmacKeyring = keyring
+  cachedContactLookupHmacRawEnv = rawEnv
+
+  return keyring
+}
+
+function parseContactLookupHmacKeyring(
+  rawEnv: string,
+): ContactLookupHmacKeyring {
+  const parsed: unknown = JSON.parse(rawEnv)
+
+  if (!isRecord(parsed)) {
+    throw new Error(`${CONTACT_LOOKUP_HMAC_KEYS_ENV} must be a JSON object`)
+  }
+
+  const keyring = new Map<number, Buffer>()
+
+  for (const [rawKeyVersion, rawKey] of Object.entries(parsed)) {
+    const keyVersion = Number(rawKeyVersion)
+
+    if (!Number.isInteger(keyVersion) || keyVersion <= 0) {
+      throw new Error(
+        `${CONTACT_LOOKUP_HMAC_KEYS_ENV} contains invalid key version: ${rawKeyVersion}`,
+      )
+    }
+
+    if (typeof rawKey !== 'string') {
+      throw new Error(
+        `${CONTACT_LOOKUP_HMAC_KEYS_ENV}.${rawKeyVersion} must be a base64 string`,
+      )
+    }
+
+    const key = Buffer.from(rawKey, 'base64')
+
+    if (key.length !== 32) {
+      throw new Error(
+        `${CONTACT_LOOKUP_HMAC_KEYS_ENV}.${rawKeyVersion} must decode to 32 bytes`,
+      )
+    }
+
+    keyring.set(keyVersion, key)
+  }
+
+  if (keyring.size === 0) {
+    throw new Error(`${CONTACT_LOOKUP_HMAC_KEYS_ENV} must contain at least one key`)
+  }
+
+  return keyring
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

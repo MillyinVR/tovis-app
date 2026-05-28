@@ -221,11 +221,20 @@ function formatCooldown(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, '0')}`
 }
 
+function getPhoneDisplayDigits(value: string): string {
+  return Array.from(value)
+    .filter((char) => char >= '0' && char <= '9')
+    .join('')
+}
+
 function maskPhone(phone: string | null): string | null {
   if (!phone) return null
-  const digits = phone.replace(/\D/g, '')
-  if (digits.length < 4) return phone
-  return `*** *** ${digits.slice(-4)}`
+
+  const displayDigits = getPhoneDisplayDigits(phone)
+
+  if (displayDigits.length < 4) return phone
+
+  return `*** *** ${displayDigits.slice(-4)}`
 }
 
 export default function VerifyPhonePage() {

@@ -6,8 +6,11 @@ import {
   getTwilioClient,
   getTwilioVerifyServiceSid,
 } from '@/lib/twilio'
-import type { PhoneVerificationChannel } from '@/lib/auth/verification'
-import { maskPhone, normalizePhoneForVerification } from '@/lib/auth/verification'
+import {
+  getVerificationPhoneLookupValue,
+  maskPhone,
+  type PhoneVerificationChannel,
+} from '@/lib/auth/verification'
 
 export type SendPhoneVerificationCodeResult =
   | {
@@ -38,7 +41,10 @@ export async function sendPhoneVerificationCode(args: {
   phone: string
   channel?: PhoneVerificationChannel
 }): Promise<SendPhoneVerificationCodeResult> {
-  const to = normalizePhoneForVerification(args.phone)
+  const submittedPhone =
+    args.phone // pii-plaintext-read-ok: phone verification helper passes submitted phone into security contact lookup helper before sending SMS
+
+  const to = getVerificationPhoneLookupValue(submittedPhone)
 
   if (!to) {
     return { ok: false, error: 'Missing phone number.' }
@@ -70,7 +76,10 @@ export async function checkPhoneVerificationCode(args: {
   phone: string
   code: string
 }): Promise<CheckPhoneVerificationCodeResult> {
-  const to = normalizePhoneForVerification(args.phone)
+  const submittedPhone =
+    args.phone // pii-plaintext-read-ok: phone verification helper passes submitted phone into security contact lookup helper before checking SMS code
+
+  const to = getVerificationPhoneLookupValue(submittedPhone)
   const code = args.code.trim()
 
   if (!to) {

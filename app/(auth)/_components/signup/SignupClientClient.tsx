@@ -38,8 +38,8 @@ function normalizeTrimmed(value: string | null | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function sanitizePhone(value: string) {
-  return value.replace(/\s+/g, '')
+function compactPhoneInputForSubmit(value: string): string {
+  return value.trim().replace(/\s+/gu, '')
 }
 
 function sanitizeNextUrl(nextUrl: unknown): string | null {
@@ -376,7 +376,7 @@ export default function SignupClientClient() {
       return setError('Please enter a valid ZIP code.')
     }
 
-    if (!sanitizePhone(phone).trim()) {
+    if (!compactPhoneInputForSubmit(phone)) {
       return setError('Phone number is required.')
     }
     if (!transactionalSmsConsent) {
@@ -407,7 +407,7 @@ export default function SignupClientClient() {
           role: 'CLIENT',
           firstName,
           lastName,
-          phone: sanitizePhone(phone),
+          phone: compactPhoneInputForSubmit(phone),
           tosAccepted: true,
           transactionalSmsConsent,
           turnstileToken,
@@ -468,7 +468,7 @@ export default function SignupClientClient() {
       firstName.trim() &&
       lastName.trim() &&
       isUsZip(zip) &&
-      sanitizePhone(phone).trim() &&
+      compactPhoneInputForSubmit(phone) &&
       email.trim() &&
       password.trim() &&
       confirmed &&

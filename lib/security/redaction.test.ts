@@ -54,10 +54,20 @@ describe('redactPhone', () => {
     expect(redactPhone('+15551234567')).toBe('***4567')
   })
 
+  it('redacts messy phone-like strings without requiring canonical phone validity', () => {
+    expect(redactPhone('call me at 555.123.4567 ext 89')).toBe('***6789')
+    expect(redactPhone('phone: +1 (555) 123-4567!!!')).toBe('***4567')
+  })
+
+  it('redacts values with unicode and punctuation while preserving only the final decimal digits', () => {
+    expect(redactPhone('☎️ +1 — 555 — 123 — 4567')).toBe('***4567')
+  })
+
   it('handles malformed values safely', () => {
     expect(redactPhone('abc')).toBe(redactionLabels.phone)
     expect(redactPhone('123')).toBe(redactionLabels.phone)
     expect(redactPhone('')).toBe(redactionLabels.phone)
+    expect(redactPhone('   ')).toBe(redactionLabels.phone)
   })
 
   it('handles nullish and non-string values safely', () => {

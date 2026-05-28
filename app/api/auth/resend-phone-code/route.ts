@@ -2,9 +2,8 @@
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import {
+  getVerificationPhoneLookupValue,
   isRecord,
-  normalizePhoneForVerification,
-  parsePhoneVerificationChannel,
 } from '@/lib/auth/verification'
 import { sendPhoneVerificationCode } from '@/lib/auth/phoneVerification'
 
@@ -12,7 +11,11 @@ export const dynamic = 'force-dynamic'
 
 function readBodyPhone(raw: unknown): string {
   if (!isRecord(raw)) return ''
-  return normalizePhoneForVerification(raw.phone)
+
+  const submittedPhone =
+    raw.phone // pii-plaintext-read-ok: verification route passes submitted phone into security contact lookup helper
+
+  return getVerificationPhoneLookupValue(submittedPhone)
 }
 
 export async function POST(req: Request) {
@@ -24,7 +27,7 @@ export async function POST(req: Request) {
       return jsonFail(400, 'Missing phone number.')
     }
 
-  const result = await sendPhoneVerificationCode({ phone, channel: 'sms' })
+    const result = await sendPhoneVerificationCode({ phone, channel: 'sms' })
 
     if (!result.ok) {
       return jsonFail(400, result.error)

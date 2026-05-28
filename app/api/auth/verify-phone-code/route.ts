@@ -2,7 +2,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { checkPhoneVerificationCode } from '@/lib/auth/phoneVerification'
 import {
   isRecord,
-  normalizePhoneForVerification,
+  getVerificationPhoneLookupValue,
   pickString,
 } from '@/lib/auth/verification'
 
@@ -16,7 +16,10 @@ export async function POST(req: Request) {
       return jsonFail(400, 'Invalid request body.')
     }
 
-    const phone = normalizePhoneForVerification(raw.phone)
+    const phone = getVerificationPhoneLookupValue(
+      raw.phone, // pii-plaintext-read-ok: verification route must canonicalize submitted phone before comparing SMS verification target
+    )
+    
     const code = pickString(raw.code)
 
     if (!phone) {

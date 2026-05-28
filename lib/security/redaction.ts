@@ -56,6 +56,18 @@ function maskString(value: string, options: RedactionOptions = {}): string {
 }
 
 /**
+ * Extracts decimal characters for display redaction only.
+ *
+ * This is intentionally not contact normalization. Redaction must mask messy
+ * phone-like strings even when they are not valid lookup/store values.
+ */
+function collectDisplayDigits(value: string): string {
+  return Array.from(value)
+    .filter((char) => char >= '0' && char <= '9')
+    .join('')
+}
+
+/**
  * Redacts an email address while preserving enough shape for debugging.
  *
  * Example:
@@ -78,7 +90,7 @@ export function redactEmail(value: unknown): string {
     const localPart = normalized.slice(0, atIndex)
     const domainPart = normalized.slice(atIndex + 1)
 
-    if (!localPart || !domainPart || /\s/.test(normalized)) {
+    if (!localPart || !domainPart || /\s/u.test(normalized)) {
       return REDACTED_EMAIL
     }
 
@@ -104,11 +116,11 @@ export function redactPhone(value: unknown): string {
     const input = toSafeString(value)
     if (!input) return REDACTED_PHONE
 
-    const digits = input.replace(/\D/g, '')
+    const displayDigits = collectDisplayDigits(input)
 
-    if (digits.length < 4) return REDACTED_PHONE
+    if (displayDigits.length < 4) return REDACTED_PHONE
 
-    return `***${digits.slice(-4)}`
+    return `***${displayDigits.slice(-4)}`
   } catch {
     return REDACTED_PHONE
   }

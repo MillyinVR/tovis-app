@@ -82,8 +82,6 @@ app/api/auth/register/route.ts:direct property read:const verificationEmail = no
 app/api/auth/register/route.ts:direct property read:if (user.phone) {
 app/api/auth/register/route.ts:direct property read:res.cookies.set('tovis_client_zip', signupLocation.postalCode, {
 app/api/auth/register/route.ts:direct property read:typeof v.postalCode === 'string' &&
-app/api/auth/resend-phone-code/route.ts:direct property read:return normalizePhoneForVerification(raw.phone)
-app/api/auth/verify-phone-code/route.ts:direct property read:const phone = normalizePhoneForVerification(raw.phone)
 app/api/calendar/route.ts:Prisma select/include plaintext field:email: true,
 app/api/calendar/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/calendar/route.ts:Prisma select/include plaintext field:lastName: true,
@@ -431,7 +429,6 @@ app/pro/reviews/page.tsx:optional direct property read:const first = pickNonEmpt
 app/pro/reviews/page.tsx:optional direct property read:const last = pickNonEmptyString(rev.client?.lastName)
 app/pro/verification/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/verification/page.tsx:Prisma select/include plaintext field:lastName: true,
-lib/auth/phoneVerification.ts:direct property read:const to = normalizePhoneForVerification(args.phone)
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:email: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:firstName: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:lastName: true,
@@ -489,20 +486,10 @@ lib/clients/upsertProClient.ts:Prisma select/include plaintext field:lastName: t
 lib/clients/upsertProClient.ts:Prisma select/include plaintext field:phone: true,
 lib/clients/upsertProClient.ts:direct property read:...(!hasMeaningfulValue(profile.firstName) ? { firstName } : {}),
 lib/clients/upsertProClient.ts:direct property read:...(!hasMeaningfulValue(profile.lastName) ? { lastName } : {}),
-lib/clients/upsertProClient.ts:direct property read:args.email
-lib/clients/upsertProClient.ts:direct property read:args.phone
-lib/clients/upsertProClient.ts:direct property read:const emailHash = emailLookupHash(args.email)
 lib/clients/upsertProClient.ts:direct property read:const firstName = normalizeRequiredString(args.firstName)
 lib/clients/upsertProClient.ts:direct property read:const lastName = normalizeRequiredString(args.lastName)
-lib/clients/upsertProClient.ts:direct property read:const phoneHash = phoneLookupHash(args.phone)
 lib/clients/upsertProClient.ts:direct property read:const profileEmail = email ?? matchedUser.email ?? null
 lib/clients/upsertProClient.ts:direct property read:const profilePhone = phone ?? matchedUser.phone ?? null
-lib/clients/upsertProClient.ts:direct property read:if (args.email) {
-lib/clients/upsertProClient.ts:direct property read:if (args.phone) {
-lib/clients/upsertProClient.ts:direct property read:orConditions.push({ email: args.email })
-lib/clients/upsertProClient.ts:direct property read:orConditions.push({ phone: args.phone })
-lib/clients/upsertProClient.ts:direct property read:profile.email == null && email
-lib/clients/upsertProClient.ts:direct property read:profile.phone == null && phone
 lib/currentUser.ts:Prisma select/include plaintext field:email: true,
 lib/currentUser.ts:Prisma select/include plaintext field:firstName: true,
 lib/currentUser.ts:Prisma select/include plaintext field:lastName: true,
