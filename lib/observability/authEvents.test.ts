@@ -1,3 +1,4 @@
+// lib/observability/authEvents.test.ts
 import * as Sentry from '@sentry/nextjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -48,7 +49,8 @@ describe('authEvents', () => {
       email: 'Tori.Example@Example.com',
       phone: '+15551234567',
       verificationId: 'verify_123',
-      message: 'Login failed for Tori.Example@Example.com with phone +15551234567',
+      message:
+        'Login failed for Tori.Example@Example.com with phone +15551234567',
     })
 
     expect(infoSpy).toHaveBeenCalledTimes(1)
@@ -168,13 +170,14 @@ describe('authEvents', () => {
     warnSpy.mockRestore()
   })
 
-  it('captures auth exceptions with hashed context and sanitized structured log metadata', () => {
+  it('captures auth exceptions with hashed context, sanitized Sentry exception, and sanitized structured log metadata', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     const setTag = vi.fn()
     const setContext = vi.fn()
 
     const withScopeMock = vi.mocked(Sentry.withScope)
+    const captureExceptionMock = vi.mocked(Sentry.captureException)
 
     type MockSentryScope = {
       setTag: (key: string, value: string) => void
@@ -219,7 +222,26 @@ describe('authEvents', () => {
     })
 
     expect(Sentry.withScope).toHaveBeenCalledTimes(1)
-    expect(Sentry.captureException).toHaveBeenCalledWith(error)
+    expect(captureExceptionMock).toHaveBeenCalledTimes(1)
+
+    const capturedError = captureExceptionMock.mock.calls[0]?.[0]
+
+    expect(capturedError).toBeInstanceOf(Error)
+    expect(capturedError).not.toBe(error)
+    expect((capturedError as Error).name).toBe('Error')
+    expect((capturedError as Error).message).toBe(
+      'Failed auth for [redacted-email] phone [redacted-phone-or-id] token=[redacted]',
+    )
+
+    const serializedCapturedError = JSON.stringify({
+      name: (capturedError as Error).name,
+      message: (capturedError as Error).message,
+      stack: (capturedError as Error).stack,
+    })
+
+    expect(serializedCapturedError).not.toContain('user@example.com')
+    expect(serializedCapturedError).not.toContain('+15551234567')
+    expect(serializedCapturedError).not.toContain('raw_token_1')
 
     expect(setTag).toHaveBeenCalledWith('area', 'auth')
     expect(setTag).toHaveBeenCalledWith('auth.event', 'auth.register_failed')
@@ -239,7 +261,9 @@ describe('authEvents', () => {
     expect(contextPayload.emailHash).toBe(
       shortHash(emailLookupHash('user@example.com')),
     )
-    expect(contextPayload.phoneHash).toBe(shortHash(phoneLookupHash('+15551234567')))
+    expect(contextPayload.phoneHash).toBe(
+      shortHash(phoneLookupHash('+15551234567')),
+    )
     expect(contextPayload.verificationIdHash).toBe(
       shortHash(sha256Hex('verification_456')),
     )

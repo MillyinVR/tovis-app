@@ -1,16 +1,17 @@
 // lib/clientActions/idempotency.ts
 
-import crypto from 'crypto'
+import crypto from 'node:crypto'
+
+import {
+  normalizeEmailForLookup,
+  normalizePhoneForLookup,
+} from '@/lib/security/contactNormalization'
 
 import type {
   ClientActionEntityRefs,
   ClientActionIdempotencyInput,
   ClientActionIdempotencyKeys,
 } from './types'
-import {
-  normalizeEmail,
-  normalizePhone,
-} from '@/lib/security/contactNormalization'
 
 type ClientActionIdempotencyArgs = ClientActionIdempotencyInput & {
   /**
@@ -38,7 +39,7 @@ const ENTITY_REF_ORDER = [
 ] as const satisfies readonly (keyof ClientActionEntityRefs)[]
 
 function sha256(input: string): string {
-  return crypto.createHash('sha256').update(input).digest('hex')
+  return crypto.createHash('sha256').update(input, 'utf8').digest('hex')
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
@@ -77,8 +78,8 @@ export function buildClientActionRecipientFingerprint(
 ): string {
   const clientId = normalizeOptionalString(args.clientId)
   const professionalId = normalizeOptionalString(args.professionalId)
-  const recipientEmail = normalizeEmail(args.recipientEmail)
-  const recipientPhone = normalizePhone(args.recipientPhone)
+  const recipientEmail = normalizeEmailForLookup(args.recipientEmail)
+  const recipientPhone = normalizePhoneForLookup(args.recipientPhone)
 
   const serialized = serializeStableParts([
     `clientId:${clientId ?? 'null'}`,
@@ -106,7 +107,9 @@ export function buildClientActionBaseKey(
     `recipient:${recipientFingerprint}`,
   ])
 
-  return `client-action:${slugifyActionType(args.actionType)}:${sha256(serialized)}`
+  return `client-action:${slugifyActionType(args.actionType)}:${sha256(
+    serialized,
+  )}`
 }
 
 function resolveSendCycleDiscriminator(

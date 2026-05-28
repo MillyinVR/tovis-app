@@ -44,11 +44,6 @@ function stringLookupHash(value: string | null | undefined): string | null {
   return normalized ? sha256Hex(normalized) : null
 }
 
-function normalizeEmailForHash(value: string | null | undefined): string | null {
-  const normalized = value?.trim().toLowerCase()
-  return normalized && normalized.length > 0 ? normalized : null
-}
-
 function isSensitiveKey(key: string): boolean {
   const lower = key.toLowerCase()
 
@@ -78,6 +73,23 @@ function isSensitiveKey(key: string): boolean {
 function truncateString(value: string): string {
   if (value.length <= MAX_STRING_LENGTH) return value
   return `${value.slice(0, MAX_STRING_LENGTH)}…`
+}
+
+function sanitizeErrorMessage(message: string | null | undefined): string | null {
+  const normalized = message?.trim()
+  if (!normalized) return null
+
+  // Avoid common accidental leaks. This is intentionally conservative.
+  const redacted = normalized
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '[redacted-email]')
+    .replace(/\+?[1-9]\d{1,14}\b/gu, '[redacted-phone-or-id]')
+    .replace(/token=[^&\s]+/giu, 'token=[redacted]')
+    .replace(/code=[^&\s]+/giu, 'code=[redacted]')
+    .replace(/secret=[^&\s]+/giu, 'secret=[redacted]')
+    .replace(/password=[^&\s]+/giu, 'password=[redacted]')
+    .replace(/https?:\/\/[^\s]+/giu, '[redacted-url]')
+
+  return truncateString(redacted)
 }
 
 function sanitizeValue(value: unknown, depth: number): unknown {
@@ -155,23 +167,6 @@ function sanitizeMeta(
   return out
 }
 
-function sanitizeErrorMessage(message: string | null | undefined): string | null {
-  const normalized = message?.trim()
-  if (!normalized) return null
-
-  // Avoid common accidental leaks. This is intentionally conservative.
-  const redacted = normalized
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
-    .replace(/\+?[1-9]\d{1,14}\b/g, '[redacted-phone-or-id]')
-    .replace(/token=[^&\s]+/gi, 'token=[redacted]')
-    .replace(/code=[^&\s]+/gi, 'code=[redacted]')
-    .replace(/secret=[^&\s]+/gi, 'secret=[redacted]')
-    .replace(/password=[^&\s]+/gi, 'password=[redacted]')
-    .replace(/https?:\/\/[^\s]+/gi, '[redacted-url]')
-
-  return truncateString(redacted)
-}
-
 function writeLine(level: AuthEventLevel, payload: Record<string, unknown>): void {
   const line = JSON.stringify(payload)
 
@@ -192,11 +187,37 @@ function sanitizeEventCode(code: string | null | undefined): string | null {
   const normalized = code?.trim()
   if (!normalized) return null
 
-  if (/^[A-Z][A-Z0-9_:.:-]{1,80}$/.test(normalized)) {
+  if (/^[A-Z][A-Z0-9_:.:-]{1,80}$/u.test(normalized)) {
     return normalized
   }
 
   return REDACTED
+}
+
+function errorName(error: unknown): string {
+  if (error instanceof Error && error.name.trim().length > 0) {
+    return error.name
+  }
+
+  return 'Error'
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  return String(error)
+}
+
+function sanitizedExceptionForCapture(error: unknown): Error {
+  const name = errorName(error)
+  const message = sanitizeErrorMessage(errorMessage(error)) ?? 'Redacted auth error'
+
+  const sanitized = new Error(message)
+  sanitized.name = name
+
+  return sanitized
 }
 
 export function logAuthEvent(input: AuthEventInput): void {
@@ -221,11 +242,7 @@ export function logAuthEvent(input: AuthEventInput): void {
 }
 
 export function captureAuthException(input: CaptureAuthExceptionInput): void {
-  const err =
-    input.error instanceof Error
-      ? input.error
-      : new Error(String(input.error))
-
+  const sanitizedError = sanitizedExceptionForCapture(input.error)
   const sanitizedMeta = sanitizeMeta(input.meta)
   const safeCode = sanitizeEventCode(input.code)
 
@@ -238,16 +255,16 @@ export function captureAuthException(input: CaptureAuthExceptionInput): void {
     if (safeCode) scope.setTag('auth.code', safeCode)
 
     scope.setContext('auth', {
-    userIdHash: shortenHash(stringLookupHash(input.userId)),
-    emailHash: shortenHash(emailLookupHash(input.email)),
-    phoneHash: shortenHash(phoneLookupHash(input.phone)),
-    verificationIdHash: shortenHash(stringLookupHash(input.verificationId)),
-      errorName: err.name,
-      errorMessage: sanitizeErrorMessage(err.message),
+      userIdHash: shortenHash(stringLookupHash(input.userId)),
+      emailHash: shortenHash(emailLookupHash(input.email)),
+      phoneHash: shortenHash(phoneLookupHash(input.phone)),
+      verificationIdHash: shortenHash(stringLookupHash(input.verificationId)),
+      errorName: sanitizedError.name,
+      errorMessage: sanitizedError.message,
       ...sanitizedMeta,
     })
 
-    Sentry.captureException(err)
+    Sentry.captureException(sanitizedError)
   })
 
   logAuthEvent({
@@ -260,10 +277,10 @@ export function captureAuthException(input: CaptureAuthExceptionInput): void {
     email: input.email,
     phone: input.phone,
     verificationId: input.verificationId,
-    message: err.message,
+    message: sanitizedError.message,
     meta: {
-      errorName: err.name,
-      errorMessage: sanitizeErrorMessage(err.message),
+      errorName: sanitizedError.name,
+      errorMessage: sanitizedError.message,
       ...sanitizedMeta,
     },
   })

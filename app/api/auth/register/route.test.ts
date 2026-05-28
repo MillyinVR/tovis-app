@@ -1,9 +1,14 @@
+// app/api/auth/register/route.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
 import {
+  clearContactLookupHmacKeyringCacheForTests,
+  CONTACT_LOOKUP_HMAC_KEY_VERSION,
   emailLookupHash,
+  emailLookupHashV2,
   phoneLookupHash,
+  phoneLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 
 const mockHashPassword = vi.hoisted(() => vi.fn())
@@ -48,6 +53,8 @@ const mockPrisma = vi.hoisted(() => ({
 }))
 
 const ORIGINAL_ENV = { ...process.env }
+
+const TEST_HMAC_KEY = Buffer.alloc(32, 7).toString('base64')
 
 vi.mock('@/lib/prisma', () => ({
   prisma: mockPrisma,
@@ -288,6 +295,30 @@ function makeRequest(body: unknown) {
   })
 }
 
+function expectedEmailLookupData(email: string) {
+  const emailHashV2 = emailLookupHashV2(email)
+
+  expect(emailHashV2).not.toBeNull()
+
+  return {
+    emailHash: emailLookupHash(email),
+    emailHashV2: emailHashV2?.hash,
+    emailHashKeyVersion: emailHashV2?.keyVersion,
+  }
+}
+
+function expectedPhoneLookupData(phone: string) {
+  const phoneHashV2 = phoneLookupHashV2(phone)
+
+  expect(phoneHashV2).not.toBeNull()
+
+  return {
+    phoneHash: phoneLookupHash(phone),
+    phoneHashV2: phoneHashV2?.hash,
+    phoneHashKeyVersion: phoneHashV2?.keyVersion,
+  }
+}
+
 function makeCompleteDcaLicenseTypesResponse() {
   return makeJsonResponse({
     getAllLicenseTypes: [
@@ -339,6 +370,11 @@ function makeJsonResponse(data: unknown, status = 200) {
 describe('app/api/auth/register/route', () => {
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV }
+
+    process.env.PII_LOOKUP_HMAC_KEYS_JSON = JSON.stringify({
+      [CONTACT_LOOKUP_HMAC_KEY_VERSION]: TEST_HMAC_KEY,
+    })
+    clearContactLookupHmacKeyringCacheForTests()
 
     resetMockGroup(mockPrisma.user)
     resetMockGroup(mockPrisma.professionalProfile)
@@ -437,6 +473,7 @@ describe('app/api/auth/register/route', () => {
     process.env = { ...ORIGINAL_ENV }
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+    clearContactLookupHmacKeyringCacheForTests()
   })
 
   it('creates the initial PRO_SALON location as non-bookable', async () => {
@@ -458,9 +495,9 @@ describe('app/api/auth/register/route', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           email: 'pro-salon@example.com',
-          emailHash: emailLookupHash('pro-salon@example.com'),
+          ...expectedEmailLookupData('pro-salon@example.com'),
           phone: '+15551234567',
-          phoneHash: phoneLookupHash('+15551234567'),
+          ...expectedPhoneLookupData('+15551234567'),
           role: 'PRO',
           transactionalSmsConsentAt: expect.any(Date),
           transactionalSmsConsentVersion: '2026-04-17',
@@ -529,9 +566,9 @@ describe('app/api/auth/register/route', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           email: 'pro-mobile@example.com',
-          emailHash: emailLookupHash('pro-mobile@example.com'),
+          ...expectedEmailLookupData('pro-mobile@example.com'),
           phone: '+15551234567',
-          phoneHash: phoneLookupHash('+15551234567'),
+          ...expectedPhoneLookupData('+15551234567'),
           role: 'PRO',
           transactionalSmsConsentAt: expect.any(Date),
           transactionalSmsConsentVersion: '2026-04-17',
@@ -604,19 +641,19 @@ describe('app/api/auth/register/route', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           email: 'client@example.com',
-          emailHash: emailLookupHash('client@example.com'),
+          ...expectedEmailLookupData('client@example.com'),
           phone: '+15551234567',
-          phoneHash: phoneLookupHash('+15551234567'),
+          ...expectedPhoneLookupData('+15551234567'),
           clientProfile: {
             create: {
               firstName: 'Tori',
               lastName: 'Morales',
               phone: '+15551234567',
-              phoneHash: phoneLookupHash('+15551234567'),
+              ...expectedPhoneLookupData('+15551234567'),
               phoneVerifiedAt: null,
             },
           },
-        }),
+        })
       }),
     )
   })
@@ -690,6 +727,25 @@ describe('app/api/auth/register/route', () => {
         role: 'CLIENT',
       },
     })
+  })
+
+  it('rejects phone values that canonical normalization refuses', async () => {
+    const body = {
+      ...makeClientSignupBody(),
+      phone: '555-123-4567 ext 9',
+    }
+
+    const result = await POST(makeRequest(body))
+    const data = await result.json()
+
+    expect(result.status).toBe(400)
+    expect(data).toEqual({
+      ok: false,
+      error: 'Enter a valid phone number.',
+      code: 'INVALID_PHONE_FORMAT',
+    })
+
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
   it('returns 503 when signup is disabled', async () => {
@@ -878,9 +934,9 @@ describe('app/api/auth/register/route', () => {
     expect(tx.user.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         email: 'pro@example.com',
-        emailHash: emailLookupHash('pro@example.com'),
+        ...expectedEmailLookupData('pro@example.com'),
         phone: '+15551234567',
-        phoneHash: phoneLookupHash('+15551234567'),
+        ...expectedPhoneLookupData('+15551234567'),
         role: 'PRO',
         transactionalSmsConsentAt: expect.any(Date),
         transactionalSmsConsentVersion: '2026-04-17',
@@ -999,9 +1055,9 @@ describe('app/api/auth/register/route', () => {
     expect(tx.user.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         email: 'client@example.com',
-        emailHash: emailLookupHash('client@example.com'),
+        ...expectedEmailLookupData('client@example.com'),
         phone: '+15551234567',
-        phoneHash: phoneLookupHash('+15551234567'),
+        ...expectedPhoneLookupData('+15551234567'),
         phoneVerifiedAt: null,
         emailVerifiedAt: null,
         password: 'hashed_password',
@@ -1018,7 +1074,7 @@ describe('app/api/auth/register/route', () => {
             firstName: 'Tori',
             lastName: 'Morales',
             phone: '+15551234567',
-            phoneHash: phoneLookupHash('+15551234567'),
+            ...expectedPhoneLookupData('+15551234567'),
             phoneVerifiedAt: null,
           },
         },
@@ -1359,9 +1415,9 @@ describe('app/api/auth/register/route', () => {
     expect(createCall?.data).toEqual(
       expect.objectContaining({
         email: 'pro@example.com',
-        emailHash: emailLookupHash('pro@example.com'),
+        ...expectedEmailLookupData('pro@example.com'),
         phone: '+15551234567',
-        phoneHash: phoneLookupHash('+15551234567'),
+        ...expectedPhoneLookupData('+15551234567'),
         role: 'PRO',
         transactionalSmsConsentAt: expect.any(Date),
         transactionalSmsConsentVersion: '2026-04-17',

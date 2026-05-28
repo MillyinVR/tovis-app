@@ -55,6 +55,50 @@ describe('lib/clientActions/idempotency', () => {
       expect(first).toBe(second)
     })
 
+    it('treats invalid recipient contact snapshots as null values', () => {
+      const invalid = buildClientActionRecipientFingerprint({
+        clientId: 'client_123',
+        professionalId: 'pro_123',
+        recipientEmail: 'not-an-email',
+        recipientPhone: '123',
+      })
+
+      const nulls = buildClientActionRecipientFingerprint({
+        clientId: 'client_123',
+        professionalId: 'pro_123',
+        recipientEmail: null,
+        recipientPhone: null,
+      })
+
+      expect(invalid).toBe(nulls)
+    })
+
+    it('does not silently strip phone extensions into the base recipient phone', () => {
+      const withExtension = buildClientActionRecipientFingerprint({
+        clientId: 'client_123',
+        professionalId: 'pro_123',
+        recipientEmail: 'client@example.com',
+        recipientPhone: '555-123-4567 ext 9',
+      })
+
+      const basePhone = buildClientActionRecipientFingerprint({
+        clientId: 'client_123',
+        professionalId: 'pro_123',
+        recipientEmail: 'client@example.com',
+        recipientPhone: '+15551234567',
+      })
+
+      const noPhone = buildClientActionRecipientFingerprint({
+        clientId: 'client_123',
+        professionalId: 'pro_123',
+        recipientEmail: 'client@example.com',
+        recipientPhone: null,
+      })
+
+      expect(withExtension).not.toBe(basePhone)
+      expect(withExtension).toBe(noPhone)
+    })
+
     it('returns a different fingerprint when recipient identity changes', () => {
       const first = buildClientActionRecipientFingerprint({
         clientId: 'client_123',

@@ -2,7 +2,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Prisma, Role } from '@prisma/client'
-import { phoneLookupHash } from '@/lib/security/crypto/hashLookup'
+import {
+  clearContactLookupHmacKeyringCacheForTests,
+  CONTACT_LOOKUP_HMAC_KEY_VERSION,
+  phoneLookupHash,
+  phoneLookupHashV2,
+} from '@/lib/security/crypto/hashLookup'
 
 const mockRequireUser = vi.hoisted(() => vi.fn())
 const mockEnforceRateLimit = vi.hoisted(() => vi.fn())
@@ -19,6 +24,7 @@ const mockTxClientProfileUpdateMany = vi.hoisted(() => vi.fn())
 const mockTxProfessionalProfileUpdateMany = vi.hoisted(() => vi.fn())
 
 const mockPrismaTransaction = vi.hoisted(() => vi.fn())
+const TEST_HMAC_KEY = Buffer.alloc(32, 7).toString('base64')
 
 const mockPrisma = vi.hoisted(() => ({
   $transaction: mockPrismaTransaction,
@@ -135,6 +141,16 @@ function makeUniqueConstraintError(): Prisma.PrismaClientKnownRequestError {
   )
 }
 
+function expectedPhoneLookupData(phone: string | null) {
+  const phoneHashV2 = phoneLookupHashV2(phone)
+
+  return {
+    phoneHash: phoneLookupHash(phone),
+    phoneHashV2: phoneHashV2?.hash ?? null,
+    phoneHashKeyVersion: phoneHashV2?.keyVersion ?? null,
+  }
+}
+
 function arrangeTransaction() {
   const tx = {
     user: {
@@ -170,6 +186,11 @@ describe('app/api/auth/phone/correct/route', () => {
     mockTxProfessionalProfileUpdateMany.mockReset()
     mockPrismaTransaction.mockReset()
 
+    process.env.PII_LOOKUP_HMAC_KEYS_JSON = JSON.stringify({
+      [CONTACT_LOOKUP_HMAC_KEY_VERSION]: TEST_HMAC_KEY,
+    })
+    clearContactLookupHmacKeyringCacheForTests()
+
     arrangeTransaction()
 
     mockIsRuntimeFlagEnabled.mockResolvedValue(false)
@@ -200,6 +221,7 @@ describe('app/api/auth/phone/correct/route', () => {
   })
 
   afterEach(() => {
+    clearContactLookupHmacKeyringCacheForTests()
     vi.restoreAllMocks()
   })
 
@@ -423,7 +445,7 @@ describe('app/api/auth/phone/correct/route', () => {
       where: { id: 'user_1' },
       data: {
         phone: '+15557654321',
-        phoneHash: phoneLookupHash('+15557654321'),
+        ...expectedPhoneLookupData('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -476,7 +498,7 @@ describe('app/api/auth/phone/correct/route', () => {
       where: { id: 'user_1' },
       data: {
         phone: '+15557654321',
-        phoneHash: phoneLookupHash('+15557654321'),
+        ...expectedPhoneLookupData('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -485,7 +507,7 @@ describe('app/api/auth/phone/correct/route', () => {
       where: { userId: 'user_1' },
       data: {
         phone: '+15557654321',
-        phoneHash: phoneLookupHash('+15557654321'),
+        ...expectedPhoneLookupData('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -548,7 +570,7 @@ describe('app/api/auth/phone/correct/route', () => {
       where: { id: 'user_1' },
       data: {
         phone: '+15557654321',
-        phoneHash: phoneLookupHash('+15557654321'),
+        ...expectedPhoneLookupData('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -683,7 +705,7 @@ describe('app/api/auth/phone/correct/route', () => {
       where: { id: 'user_1' },
       data: {
         phone: '+15557654321',
-        phoneHash: phoneLookupHash('+15557654321'),
+        ...expectedPhoneLookupData('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -692,7 +714,7 @@ describe('app/api/auth/phone/correct/route', () => {
       where: { userId: 'user_1' },
       data: {
         phone: '+15557654321',
-        phoneHash: phoneLookupHash('+15557654321'),
+        ...expectedPhoneLookupData('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
