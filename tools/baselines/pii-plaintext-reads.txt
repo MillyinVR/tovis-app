@@ -149,7 +149,6 @@ app/api/client/settings/route.ts:direct property read:const lastName = normalize
 app/api/client/settings/route.ts:direct property read:const updated = await loadSettings(auth.clientId, auth.user.email ?? null)
 app/api/debug/me/route.ts:direct property read:? { id: user.id, email: user.email, role: user.role }
 app/api/internal/cron/retry-verification-emails/route.ts:Prisma select/include plaintext field:email: true,
-app/api/internal/cron/retry-verification-emails/route.ts:Prisma where/order plaintext field:email: {
 app/api/internal/cron/retry-verification-emails/route.ts:direct property read:const email = normalizeEmail(candidate.email)
 app/api/looks/[id]/comments/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/looks/[id]/comments/route.ts:Prisma select/include plaintext field:lastName: true,
