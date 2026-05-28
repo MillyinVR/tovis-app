@@ -35,3 +35,53 @@ Command:
 
 ```bash
 node tools/check-canonical-normalization.mjs
+
+mkdir -p docs/privacy
+cat > docs/privacy/admin-action-log-redaction-proof.md <<'EOF'
+# AdminActionLog Redaction Proof
+
+## Status
+
+AdminActionLog was inspected during Phase 1 privacy/PII hardening.
+
+Current Prisma schema fields:
+
+- id
+- adminUserId
+- professionalId
+- serviceId
+- categoryId
+- action
+- note
+- createdAt
+
+AdminActionLog currently does not contain oldValue, newValue, metadata, payload, snapshot, or other arbitrary JSON fields.
+
+## Decision
+
+No `redactAuditPayload(...)` call is required for AdminActionLog at this time because there is no JSON audit payload to redact.
+
+Existing arbitrary audit payload redaction is handled for:
+
+- BookingOverrideAuditLog oldValue/newValue
+- BookingCloseoutAuditLog oldValue/newValue
+
+## Follow-up trigger
+
+If AdminActionLog later gains any JSON-like field, including but not limited to:
+
+- oldValue
+- newValue
+- metadata
+- payload
+- before
+- after
+- snapshot
+- details
+
+then writes to that field must pass through `lib/security/auditRedaction.ts` before persistence.
+
+## Verification command
+
+```bash
+grep -n "model AdminActionLog" -A80 prisma/schema.prisma
