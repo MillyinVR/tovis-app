@@ -189,8 +189,13 @@ const ADDRESS_ENVELOPE_KEYS = new Set([
 
 /**
  * Redacts a value before storing it in long-lived audit/log JSON.
+ *
+ * Accepts `unknown` intentionally because this function is the safety boundary.
+ * Callers should not need to pre-shape route bodies, Prisma snapshots, or
+ * service metadata before sending them through audit redaction.
  */
-export function redactAuditPayload(value: JsonValue): JsonValue {
+export function redactAuditPayload(value: unknown): JsonValue {
+  if (!isJsonValue(value)) return REDACTED
   return redactValue(value, 0)
 }
 
@@ -198,8 +203,8 @@ export function redactAuditPayload(value: JsonValue): JsonValue {
  * Redacts old/new audit pair payloads with the same policy.
  */
 export function redactAuditChangeSet(args: {
-  oldValue: JsonValue
-  newValue: JsonValue
+  oldValue: unknown
+  newValue: unknown
 }): {
   oldValue: JsonValue
   newValue: JsonValue
@@ -216,14 +221,22 @@ export function redactAuditChangeSet(args: {
  * The current expand-phase envelope can still contain plaintext address fields,
  * so the whole object should be redacted in audit storage.
  */
-export function isAddressPrivacyEnvelopeLike(value: JsonValue): value is JsonObject {
+export function isAddressPrivacyEnvelopeLike(
+  value: unknown,
+): value is JsonObject {
   if (!isJsonObject(value)) return false
 
   const algorithm = value.algorithm
   const keyVersion = value.keyVersion
 
   if (typeof algorithm !== 'string') return false
-  if (typeof keyVersion !== 'string') return false
+
+  if (
+    typeof keyVersion !== 'string' &&
+    typeof keyVersion !== 'number'
+  ) {
+    return false
+  }
 
   const keys = Object.keys(value)
   if (keys.length < 3) return false
@@ -274,8 +287,13 @@ function redactObject(value: JsonObject, depth: number): JsonValue {
     return {
       redacted: true,
       reason: 'address_privacy_envelope',
-      algorithm: typeof value.algorithm === 'string' ? value.algorithm : REDACTED,
-      keyVersion: typeof value.keyVersion === 'string' ? value.keyVersion : REDACTED,
+      algorithm:
+        typeof value.algorithm === 'string' ? value.algorithm : REDACTED,
+      keyVersion:
+        typeof value.keyVersion === 'string' ||
+        typeof value.keyVersion === 'number'
+          ? value.keyVersion
+          : REDACTED,
     }
   }
 

@@ -1,11 +1,14 @@
 // app/api/admin/categories/[id]/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/app/api/_utils/auth/requireUser'
-import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
-import { jsonFail } from '@/app/api/_utils'
-import { pickMethod, pickString } from '@/app/api/_utils/pick'
 import { AdminPermissionRole, Role } from '@prisma/client'
+
+import { jsonFail } from '@/app/api/_utils'
+import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { pickMethod, pickString } from '@/app/api/_utils/pick'
+import { writeAdminAuditLog } from '@/lib/admin/auditLog'
+import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,60 +19,88 @@ async function getParams(ctx: Ctx): Promise<Params> {
   return await Promise.resolve(ctx.params)
 }
 
-function trimId(v: unknown) {
-  return typeof v === 'string' ? v.trim() : ''
+function trimId(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function parseRequiredActiveFlag(value: unknown): boolean | null {
+  const raw = pickString(value)?.trim().toLowerCase() ?? ''
+
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+
+  return null
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const auth = await requireUser({ roles: [Role.ADMIN] })
     if (!auth.ok) return auth.res
+
     const user = auth.user
 
     const { id } = await getParams(ctx)
     const categoryId = trimId(id)
-    if (!categoryId) return jsonFail(400, 'Missing id')
 
-    const perm = await requireAdminPermission({
+    if (!categoryId) {
+      return jsonFail(400, 'Missing id')
+    }
+
+    const permission = await requireAdminPermission({
       adminUserId: user.id,
-      allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
+      allowedRoles: [
+        AdminPermissionRole.SUPER_ADMIN,
+        AdminPermissionRole.SUPPORT,
+      ],
       scope: { categoryId },
     })
-    if (!perm.ok) return perm.res
+
+    if (!permission.ok) {
+      return permission.res
+    }
 
     const form = await req.formData()
     const method = pickMethod(form.get('_method'))
-    if (method !== 'PATCH') return jsonFail(400, 'Unsupported')
 
-    // HTML forms send strings. We only accept explicit true/false.
-    const isActiveRaw = pickString(form.get('isActive'))?.toLowerCase() ?? ''
-    if (isActiveRaw !== 'true' && isActiveRaw !== 'false') {
+    if (method !== 'PATCH') {
+      return jsonFail(400, 'Unsupported')
+    }
+
+    const isActive = parseRequiredActiveFlag(form.get('isActive'))
+
+    if (isActive == null) {
       return jsonFail(400, 'Invalid isActive (expected true/false)')
     }
-    const isActive = isActiveRaw === 'true'
 
     const updated = await prisma.serviceCategory.update({
       where: { id: categoryId },
       data: { isActive },
-      select: { id: true, name: true, slug: true, isActive: true },
+      select: {
+        id: true,
+        isActive: true,
+      },
     })
 
-    await prisma.adminActionLog
-      .create({
-        data: {
-          adminUserId: user.id,
-          categoryId: updated.id,
-          action: 'CATEGORY_TOGGLED',
-          note: `${updated.name} (${updated.slug}) -> ${updated.isActive ? 'ENABLED' : 'DISABLED'}`,
-        },
-      })
-      .catch(() => null)
+    await writeAdminAuditLog({
+      adminUserId: user.id,
+      categoryId: updated.id,
+      action: 'CATEGORY_TOGGLED',
+      note: `isActive=${String(updated.isActive)}`,
+      metadata: {
+        categoryId: updated.id,
+        isActive: updated.isActive,
+      },
+    }).catch(() => null)
 
-    // ✅ 303 for form navigation (PRG pattern)
-    return NextResponse.redirect(new URL('/admin/categories', req.url), { status: 303 })
-  } catch (err: unknown) {
-    console.error('POST /api/admin/categories/[id] error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
+    return NextResponse.redirect(new URL('/admin/categories', req.url), {
+      status: 303,
+    })
+  } catch (error: unknown) {
+    console.error('POST /api/admin/categories/[id] error', error)
+
+    const message =
+      error instanceof Error ? error.message : 'Internal server error'
+
     return jsonFail(500, message)
   }
 }

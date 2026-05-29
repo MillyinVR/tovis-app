@@ -1,10 +1,12 @@
 // app/api/admin/permissions/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { AdminPermissionRole } from '@prisma/client'
 
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { pickMethod, pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { prisma } from '@/lib/prisma'
 
@@ -188,7 +190,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       return jsonFail(400, 'Missing adminUserId/role')
     }
 
-    await prisma.adminPermission.create({
+    const created = await prisma.adminPermission.create({
       data: {
         adminUserId,
         role,
@@ -199,28 +201,31 @@ export async function POST(req: NextRequest): Promise<Response> {
       select: { id: true },
     })
 
-    await prisma.adminActionLog
-      .create({
-        data: {
-          adminUserId: auth.user.id,
-          action: 'ADMIN_PERMISSION_CREATED',
-          note: [
-            `for=${adminUserId}`,
-            `role=${role}`,
-            `pro=${professionalId ?? '-'}`,
-            `svc=${serviceId ?? '-'}`,
-            `cat=${categoryId ?? '-'}`,
-          ].join(' '),
-        },
-      })
-      .catch(() => null)
+    await writeAdminAuditLog({
+      adminUserId: auth.user.id,
+      professionalId,
+      serviceId,
+      categoryId,
+      action: 'ADMIN_PERMISSION_CREATED',
+      note: 'Admin permission created',
+      metadata: {
+        permissionId: created.id,
+        grantedAdminUserId: adminUserId,
+        role,
+        hasProfessionalScope: professionalId !== null,
+        hasServiceScope: serviceId !== null,
+        hasCategoryScope: categoryId !== null,
+      },
+    }).catch(() => null)
 
     return NextResponse.redirect(new URL('/admin/permissions', req.url), {
       status: 303,
     })
   } catch (error: unknown) {
     const message = errorMessageFromUnknown(error)
+
     console.error('POST /api/admin/permissions error', error)
+
     return jsonFail(500, message)
   }
 }

@@ -88,7 +88,7 @@ describe('auditRedaction', () => {
     })
   })
 
-  it('preserves safe operational fields while redacting timestamp-like fields', () => {
+  it('preserves safe operational fields while redacting timestamp-like string fields only when they match sensitive patterns', () => {
     const result = redactAuditPayload({
       bookingId: 'booking_123',
       professionalId: 'pro_123',
@@ -114,11 +114,11 @@ describe('auditRedaction', () => {
       retryable: false,
       attempt: 2,
       durationMs: 123,
-      createdAt: '[REDACTED]',
+      createdAt: '2026-05-25T12:00:00.000Z',
     })
   })
 
-  it('redacts encrypted address snapshot fields completely', () => {
+  it('summarizes address privacy envelopes when passed directly', () => {
     const envelope = {
       v: 1,
       algorithm: 'plaintext-json-expand-phase',
@@ -135,6 +135,50 @@ describe('auditRedaction', () => {
     }
 
     expect(isAddressPrivacyEnvelopeLike(envelope)).toBe(true)
+
+    expect(redactAuditPayload(envelope)).toEqual({
+      redacted: true,
+      reason: 'address_privacy_envelope',
+      algorithm: 'plaintext-json-expand-phase',
+      keyVersion: 'address-expand-phase-v1',
+    })
+  })
+
+  it('supports numeric address envelope key versions', () => {
+    const envelope = {
+      v: 1,
+      algorithm: 'aes-256-gcm',
+      keyVersion: 1,
+      street: '123 Main St',
+      city: 'Los Angeles',
+      postalCode: '90001',
+    }
+
+    expect(isAddressPrivacyEnvelopeLike(envelope)).toBe(true)
+
+    expect(redactAuditPayload(envelope)).toEqual({
+      redacted: true,
+      reason: 'address_privacy_envelope',
+      algorithm: 'aes-256-gcm',
+      keyVersion: 1,
+    })
+  })
+
+  it('redacts encrypted address snapshot fields completely when the containing key is sensitive', () => {
+    const envelope = {
+      v: 1,
+      algorithm: 'plaintext-json-expand-phase',
+      keyVersion: 'address-expand-phase-v1',
+      street: '123 Main St',
+      street2: 'Apt 4',
+      city: 'Los Angeles',
+      region: 'CA',
+      postalCode: '90001',
+      country: 'US',
+      lat: 34.052235,
+      lng: -118.243683,
+      label: 'Home',
+    }
 
     const result = redactAuditPayload({
       bookingId: 'booking_123',
@@ -243,15 +287,23 @@ describe('auditRedaction', () => {
     expect(Object.keys(result as Record<string, unknown>)).toHaveLength(101)
   })
 
+  it('redacts non-json top-level values defensively', () => {
+    expect(redactAuditPayload(undefined)).toBe('[REDACTED]')
+    expect(redactAuditPayload(Symbol('secret'))).toBe('[REDACTED]')
+    expect(redactAuditPayload(() => 'secret')).toBe('[REDACTED]')
+  })
+
   it('redacts non-json object values defensively when encountered inside objects', () => {
     const result = redactAuditPayload({
       safe: 'value',
       weird: undefined,
+      callback: () => 'secret',
     })
 
     expect(result).toEqual({
       safe: 'value',
       weird: '[REDACTED]',
+      callback: '[REDACTED]',
     })
   })
 
@@ -263,5 +315,15 @@ describe('auditRedaction', () => {
     }
 
     expect(isAddressPrivacyEnvelopeLike(value)).toBe(false)
+  })
+
+  it('does not throw for circular non-json objects', () => {
+    const circular: Record<string, unknown> = {
+      safe: 'value',
+    }
+    circular.self = circular
+
+    expect(() => redactAuditPayload(circular)).not.toThrow()
+    expect(redactAuditPayload(circular)).toBe('[REDACTED]')
   })
 })

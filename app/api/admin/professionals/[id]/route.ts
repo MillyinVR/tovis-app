@@ -1,12 +1,15 @@
 // app/api/admin/professionals/[id]/route.ts
+
 import { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { requireUser } from '@/app/api/_utils/auth/requireUser'
-import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
-import { jsonFail, jsonOk } from '@/app/api/_utils'
-import { pickBool, pickString } from '@/app/api/_utils/pick'
-import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { AdminPermissionRole, Role, VerificationStatus } from '@prisma/client'
+
+import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { pickBool, pickString } from '@/app/api/_utils/pick'
+import { writeAdminAuditLog } from '@/lib/admin/auditLog'
+import { prisma } from '@/lib/prisma'
+import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,29 +20,35 @@ async function getParams(ctx: Ctx): Promise<Params> {
   return await Promise.resolve(ctx.params)
 }
 
-function trimId(v: unknown): string {
-  return typeof v === 'string' ? v.trim() : ''
+function trimId(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
 }
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function normalizeStatus(v: unknown): VerificationStatus | null {
-  const s = pickString(v)?.trim().toUpperCase()
-  if (!s) return null
+function normalizeStatus(value: unknown): VerificationStatus | null {
+  const status = pickString(value)?.trim().toUpperCase()
+  if (!status) return null
 
-  if (s === 'PENDING') return VerificationStatus.PENDING
-  if (s === 'APPROVED') return VerificationStatus.APPROVED
-  if (s === 'REJECTED') return VerificationStatus.REJECTED
-  if (s === 'NEEDS_INFO') return VerificationStatus.NEEDS_INFO
+  if (status === 'PENDING') return VerificationStatus.PENDING
+  if (status === 'APPROVED') return VerificationStatus.APPROVED
+  if (status === 'REJECTED') return VerificationStatus.REJECTED
+  if (status === 'NEEDS_INFO') return VerificationStatus.NEEDS_INFO
 
   return null
 }
 
-async function readJsonBody(req: NextRequest): Promise<Record<string, unknown> | null> {
-  const ct = req.headers.get('content-type') ?? ''
-  if (ct && !ct.includes('application/json')) return null
+async function readJsonBody(
+  req: NextRequest,
+): Promise<Record<string, unknown> | null> {
+  const contentType = req.headers.get('content-type') ?? ''
+
+  if (contentType && !contentType.includes('application/json')) {
+    return null
+  }
+
   try {
     const parsed: unknown = await req.json()
     return isRecord(parsed) ? parsed : {}
@@ -48,46 +57,74 @@ async function readJsonBody(req: NextRequest): Promise<Record<string, unknown> |
   }
 }
 
+function buildVerificationUpdateNote(args: {
+  status: VerificationStatus | null
+  licenseVerified: boolean | null
+}): string {
+  return [
+    `status=${args.status ?? 'UNCHANGED'}`,
+    `licenseVerified=${
+      args.licenseVerified == null ? 'UNCHANGED' : String(args.licenseVerified)
+    }`,
+  ].join(' ')
+}
+
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
     const auth = await requireUser({ roles: [Role.ADMIN] })
     if (!auth.ok) return auth.res
+
     const user = auth.user
 
     const { id } = await getParams(ctx)
     const professionalId = trimId(id)
-    if (!professionalId) return jsonFail(400, 'Missing professional id.')
 
-    const perm = await requireAdminPermission({
+    if (!professionalId) {
+      return jsonFail(400, 'Missing professional id.')
+    }
+
+    const permission = await requireAdminPermission({
       adminUserId: user.id,
-      allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.REVIEWER],
+      allowedRoles: [
+        AdminPermissionRole.SUPER_ADMIN,
+        AdminPermissionRole.REVIEWER,
+      ],
       scope: { professionalId },
     })
-    if (!perm.ok) return perm.res
 
-    // Optional but helpful: reject totally wrong content types
+    if (!permission.ok) {
+      return permission.res
+    }
+
     const body = await readJsonBody(req)
-    if (body === null) return jsonFail(415, 'Content-Type must be application/json.')
+
+    if (body === null) {
+      return jsonFail(415, 'Content-Type must be application/json.')
+    }
 
     const rawStatus = pickString(body.verificationStatus)
     const status = normalizeStatus(rawStatus)
     const licenseVerified = pickBool(body.licenseVerified)
 
-    // If they sent a non-empty status string but it’s invalid, reject (don’t silently ignore)
     if (rawStatus && !status) {
-      return jsonFail(400, 'Invalid verificationStatus. Use PENDING, APPROVED, REJECTED, or NEEDS_INFO.')
+      return jsonFail(
+        400,
+        'Invalid verificationStatus. Use PENDING, APPROVED, REJECTED, or NEEDS_INFO.',
+      )
     }
 
     if (status == null && licenseVerified == null) {
       return jsonFail(400, 'Nothing to update.')
     }
 
-    // Nice: fail with 404 instead of throwing a Prisma error
     const exists = await prisma.professionalProfile.findUnique({
       where: { id: professionalId },
       select: { id: true },
     })
-    if (!exists) return jsonFail(404, 'Professional not found.')
+
+    if (!exists) {
+      return jsonFail(404, 'Professional not found.')
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
       const professional = await tx.professionalProfile.update({
@@ -96,16 +133,13 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
           ...(status != null ? { verificationStatus: status } : {}),
           ...(licenseVerified != null ? { licenseVerified } : {}),
         },
-        select: { id: true, verificationStatus: true, licenseVerified: true },
+        select: {
+          id: true,
+          verificationStatus: true,
+          licenseVerified: true,
+        },
       })
 
-      // P2.4b — refresh ProfessionalSearchIndex for this pro when their
-      // verification status changes. Skipped when only `licenseVerified`
-      // changes (that field is not denormalized into the index). Passes
-      // `tx` so the refresh sees the just-updated status (and the
-      // just-bookable locations when approving). The refresh helper has
-      // its own try/catch and is best-effort — a refresh failure cannot
-      // roll back the verification mutation.
       if (status != null) {
         await refreshProfessional(professionalId, 'verification.status', tx)
       }
@@ -113,22 +147,23 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       return professional
     })
 
-    // best-effort log (never fail request)
-    await prisma.adminActionLog
-      .create({
-        data: {
-          adminUserId: user.id,
-          professionalId,
-          action: 'PRO_VERIFICATION_UPDATED',
-          note: `status=${status ?? 'UNCHANGED'} licenseVerified=${licenseVerified ?? 'UNCHANGED'}`,
-        },
-      })
-      .catch(() => null)
+    await writeAdminAuditLog({
+      adminUserId: user.id,
+      professionalId,
+      action: 'PRO_VERIFICATION_UPDATED',
+      note: buildVerificationUpdateNote({
+        status,
+        licenseVerified,
+      }),
+    }).catch(() => null)
 
     return jsonOk({ professional: updated })
-  } catch (err: unknown) {
-    console.error('PATCH /api/admin/professionals/[id] error', err)
-    const message = err instanceof Error ? err.message : 'Internal server error'
+  } catch (error: unknown) {
+    console.error('PATCH /api/admin/professionals/[id] error', error)
+
+    const message =
+      error instanceof Error ? error.message : 'Internal server error'
+
     return jsonFail(500, message)
   }
 }

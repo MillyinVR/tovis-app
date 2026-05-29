@@ -41,8 +41,6 @@ app/(main)/booking/AvailabilityDrawer/hooks/useMobileAddresses.ts:direct propert
 app/(main)/booking/AvailabilityDrawer/hooks/useMobileAddresses.ts:direct property read:typeof row.addressLine1 === 'string' && row.addressLine1.trim()
 app/(main)/booking/AvailabilityDrawer/hooks/useMobileAddresses.ts:direct property read:typeof row.addressLine2 === 'string' && row.addressLine2.trim()
 app/(main)/booking/AvailabilityDrawer/hooks/useMobileAddresses.ts:direct property read:typeof row.postalCode === 'string' && row.postalCode.trim()
-app/admin/logs/page.tsx:direct property read:const who = l.adminUser?.email ?? 'Unknown admin'
-app/admin/logs/page.tsx:optional direct property read:const who = l.adminUser?.email ?? 'Unknown admin'
 app/admin/permissions/page.tsx:direct property read:<div className="text-sm font-extrabold">{u?.email ?? p.adminUserId}</div>
 app/admin/permissions/page.tsx:direct property read:{u.email}
 app/admin/permissions/page.tsx:optional direct property read:<div className="text-sm font-extrabold">{u?.email ?? p.adminUserId}</div>

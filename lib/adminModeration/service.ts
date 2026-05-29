@@ -40,6 +40,10 @@ import {
   toQueuedViralRequestApprovalNotificationsDto,
   toViralRequestDto,
 } from '@/lib/viralRequests/contracts'
+import {
+  writeAdminAuditLog,
+  type WriteAdminAuditLogArgs,
+} from '@/lib/admin/auditLog'
 
 type AdminModerationDb = Prisma.TransactionClient | PrismaClient
 type JsonRecord = Record<string, unknown>
@@ -76,9 +80,14 @@ type ParsedAdminModerationRequest =
   | ParsedLookCommentModerationRequest
   | ParsedViralRequestModerationRequest
 
+type AdminModerationAuditLogData = Omit<
+  WriteAdminAuditLogArgs,
+  'adminUserId' | 'tx'
+>
+
 type ExecuteAdminModerationResult = {
   response: AdminModerationResultDto
-  logData: Prisma.AdminActionLogUncheckedCreateInput
+  logData: AdminModerationAuditLogData
 }
 
 const lookPostPermissionSelect =
@@ -379,18 +388,24 @@ function buildSafeAdminModerationAuditNote(args: {
 }
 
 function buildAdminActionLogData(args: {
-  adminUserId: string
   action: string
-  note?: string
+  targetLabel: 'lookPostId' | 'lookCommentId' | 'requestId'
+  targetId: string
+  lookPostId?: string
+  adminNotes?: string
   scope?: AdminPermissionScope
-}): Prisma.AdminActionLogUncheckedCreateInput {
+}): AdminModerationAuditLogData {
   return {
-    adminUserId: args.adminUserId,
     action: args.action,
-    note: args.note ?? undefined,
-    professionalId: args.scope?.professionalId ?? undefined,
-    serviceId: args.scope?.serviceId ?? undefined,
-    categoryId: args.scope?.categoryId ?? undefined,
+    note: buildSafeAdminModerationAuditNote({
+      targetLabel: args.targetLabel,
+      targetId: args.targetId,
+      lookPostId: args.lookPostId,
+      adminNotes: args.adminNotes,
+    }),
+    professionalId: args.scope?.professionalId ?? null,
+    serviceId: args.scope?.serviceId ?? null,
+    categoryId: args.scope?.categoryId ?? null,
   }
 }
 
@@ -647,13 +662,10 @@ async function executeLookPostModeration(
   return {
     response,
     logData: buildAdminActionLogData({
-      adminUserId,
       action: buildLookPostLogAction(request.action),
-      note: buildSafeAdminModerationAuditNote({
-        targetLabel: 'lookPostId',
-        targetId: updated.id,
-        adminNotes: request.adminNotes,
-      }),
+      targetLabel: 'lookPostId',
+      targetId: updated.id,
+      adminNotes: request.adminNotes,
       scope,
     }),
   }
@@ -733,14 +745,11 @@ async function executeLookCommentModeration(
   return {
     response,
     logData: buildAdminActionLogData({
-      adminUserId,
       action: buildLookCommentLogAction(request.action),
-      note: buildSafeAdminModerationAuditNote({
-        targetLabel: 'lookCommentId',
-        targetId: updated.id,
-        lookPostId: updated.lookPostId,
-        adminNotes: request.adminNotes,
-      }),
+      targetLabel: 'lookCommentId',
+      targetId: updated.id,
+      lookPostId: updated.lookPostId,
+      adminNotes: request.adminNotes,
       scope,
     }),
   }
@@ -790,13 +799,10 @@ async function executeViralRequestModeration(
         notifications: notificationsDto,
       }),
       logData: buildAdminActionLogData({
-        adminUserId,
         action: buildViralRequestLogAction(request.action),
-        note: buildSafeAdminModerationAuditNote({
-          targetLabel: 'requestId',
-          targetId: updated.id,
-          adminNotes: request.adminNotes,
-        }),
+        targetLabel: 'requestId',
+        targetId: updated.id,
+        adminNotes: request.adminNotes,
         scope,
       }),
     }
@@ -811,13 +817,10 @@ async function executeViralRequestModeration(
   return {
     response,
     logData: buildAdminActionLogData({
-      adminUserId,
       action: buildViralRequestLogAction(request.action),
-      note: buildSafeAdminModerationAuditNote({
-        targetLabel: 'requestId',
-        targetId: updated.id,
-        adminNotes: request.adminNotes,
-      }),
+      targetLabel: 'requestId',
+      targetId: updated.id,
+      adminNotes: request.adminNotes,
       scope,
     }),
   }
@@ -860,8 +863,10 @@ async function runModerationRequest(
   const executed = await prisma.$transaction(async (tx) => {
     const result = await executeAdminModeration(tx, adminUserId, request)
 
-    await tx.adminActionLog.create({
-      data: result.logData,
+    await writeAdminAuditLog({
+      tx,
+      adminUserId,
+      ...result.logData,
     })
 
     return result

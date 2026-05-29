@@ -1,4 +1,5 @@
 // app/api/admin/services/[id]/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { AdminPermissionRole, Prisma } from '@prisma/client'
 
@@ -6,6 +7,7 @@ import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { safeUrl } from '@/app/api/_utils/media'
 import { pickBool, pickInt, pickMethod, pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { parseMoney } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
@@ -79,7 +81,9 @@ function statusFromUnknown(error: unknown): number {
   return typeof typed?.status === 'number' ? typed.status : 500
 }
 
-async function getServiceOr404(serviceId: string): Promise<ServiceForPatch | null> {
+async function getServiceOr404(
+  serviceId: string,
+): Promise<ServiceForPatch | null> {
   return await prisma.service.findUnique({
     where: { id: serviceId },
     select: {
@@ -96,7 +100,10 @@ async function assertAdminScopeOrThrow(args: {
 }): Promise<void> {
   const ok = await hasAdminPermission({
     adminUserId: args.adminUserId,
-    allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
+    allowedRoles: [
+      AdminPermissionRole.SUPER_ADMIN,
+      AdminPermissionRole.SUPPORT,
+    ],
     scope: {
       serviceId: args.serviceId,
       categoryId: args.categoryId,
@@ -112,7 +119,10 @@ async function assertAdminCategoryScopeOrThrow(args: {
 }): Promise<void> {
   const ok = await hasAdminPermission({
     adminUserId: args.adminUserId,
-    allowedRoles: [AdminPermissionRole.SUPER_ADMIN, AdminPermissionRole.SUPPORT],
+    allowedRoles: [
+      AdminPermissionRole.SUPER_ADMIN,
+      AdminPermissionRole.SUPPORT,
+    ],
     scope: {
       categoryId: args.categoryId,
     },
@@ -140,6 +150,16 @@ function redirectToService(req: NextRequest, serviceId: string): Response {
     new URL(`/admin/services/${encodeURIComponent(serviceId)}`, req.url),
     { status: 303 },
   )
+}
+
+function buildServiceUpdateAuditNote(args: {
+  changedKeys: string[]
+  categoryChanged: boolean
+}): string {
+  return [
+    `changedKeys=${args.changedKeys.join(',')}`,
+    `categoryChanged=${String(args.categoryChanged)}`,
+  ].join(' ')
 }
 
 async function handleUpdate(req: NextRequest, ctx: Ctx): Promise<Response> {
@@ -220,17 +240,13 @@ async function patchFromForm(args: PatchArgs): Promise<Response> {
       data: { isActive: isActiveParsed },
     })
 
-    await prisma.adminActionLog
-      .create({
-        data: {
-          adminUserId,
-          serviceId: service.id,
-          categoryId: service.categoryId,
-          action: 'SERVICE_TOGGLED',
-          note: `isActive=${isActiveParsed}`,
-        },
-      })
-      .catch(() => null)
+    await writeAdminAuditLog({
+      adminUserId,
+      serviceId: service.id,
+      categoryId: service.categoryId,
+      action: 'SERVICE_TOGGLED',
+      note: `isActive=${String(isActiveParsed)}`,
+    }).catch(() => null)
 
     if (wantsRedirect(req)) {
       return redirectToService(req, service.id)
@@ -344,24 +360,18 @@ async function patchFromForm(args: PatchArgs): Promise<Response> {
   })
 
   const changedKeys = Object.keys(update)
-  const note =
-    typeof update.name === 'string'
-      ? update.name
-      : changedKeys.length === 1 && changedKeys.includes('defaultImageUrl')
-        ? 'defaultImageUrl'
-        : '(partial update)'
+  const categoryId = nextCategoryId ?? service.categoryId
 
-  await prisma.adminActionLog
-    .create({
-      data: {
-        adminUserId,
-        serviceId: service.id,
-        categoryId: nextCategoryId ?? service.categoryId,
-        action: 'SERVICE_UPDATED',
-        note,
-      },
-    })
-    .catch(() => null)
+  await writeAdminAuditLog({
+    adminUserId,
+    serviceId: service.id,
+    categoryId,
+    action: 'SERVICE_UPDATED',
+    note: buildServiceUpdateAuditNote({
+      changedKeys,
+      categoryChanged: categoryId !== service.categoryId,
+    }),
+  }).catch(() => null)
 
   if (wantsRedirect(req)) {
     return redirectToService(req, service.id)
