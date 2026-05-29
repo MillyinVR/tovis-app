@@ -128,6 +128,35 @@ async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T
 }
 
+function expectAdminAuditLogWrite(args: {
+  adminUserId: string
+  professionalId: string | null
+  serviceId?: string | null
+  categoryId?: string | null
+  action: string
+}) {
+  expect(mocks.adminActionLog.create).toHaveBeenCalledWith({
+    data: {
+      adminUserId: args.adminUserId,
+      professionalId: args.professionalId,
+      serviceId: args.serviceId ?? null,
+      categoryId: args.categoryId ?? null,
+      action: args.action,
+      note: '{"note":"[REDACTED]"}',
+    },
+    select: {
+      id: true,
+      createdAt: true,
+      adminUserId: true,
+      professionalId: true,
+      serviceId: true,
+      categoryId: true,
+      action: true,
+      note: true,
+    },
+  })
+}
+
 describe('app/api/admin/professionals/[id]/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -382,13 +411,10 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
       }),
     )
 
-    expect(mocks.adminActionLog.create).toHaveBeenCalledWith({
-      data: {
-        adminUserId: 'admin_1',
-        professionalId: 'pro_1',
-        action: 'PRO_VERIFICATION_UPDATED',
-        note: 'status=APPROVED licenseVerified=true',
-      },
+    expectAdminAuditLogWrite({
+      adminUserId: 'admin_1',
+      professionalId: 'pro_1',
+      action: 'PRO_VERIFICATION_UPDATED',
     })
 
     expect(body).toEqual({
@@ -441,13 +467,10 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
     expect(mocks.professionalLocation.updateMany).not.toHaveBeenCalled()
     expect(mocks.refreshProfessional).not.toHaveBeenCalled()
 
-    expect(mocks.adminActionLog.create).toHaveBeenCalledWith({
-      data: {
-        adminUserId: 'admin_1',
-        professionalId: 'pro_1',
-        action: 'PRO_VERIFICATION_UPDATED',
-        note: 'status=UNCHANGED licenseVerified=false',
-      },
+    expectAdminAuditLogWrite({
+      adminUserId: 'admin_1',
+      professionalId: 'pro_1',
+      action: 'PRO_VERIFICATION_UPDATED',
     })
 
     expect(body).toEqual({
@@ -508,13 +531,10 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
       }),
     )
 
-    expect(mocks.adminActionLog.create).toHaveBeenCalledWith({
-      data: {
-        adminUserId: 'admin_1',
-        professionalId: 'pro_1',
-        action: 'PRO_VERIFICATION_UPDATED',
-        note: 'status=REJECTED licenseVerified=UNCHANGED',
-      },
+    expectAdminAuditLogWrite({
+      adminUserId: 'admin_1',
+      professionalId: 'pro_1',
+      action: 'PRO_VERIFICATION_UPDATED',
     })
 
     expect(body).toEqual({

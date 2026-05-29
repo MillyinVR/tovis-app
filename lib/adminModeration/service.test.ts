@@ -183,6 +183,35 @@ async function readJson(res: Response): Promise<unknown> {
   return await res.json()
 }
 
+function expectAdminAuditLogWrite(args: {
+  adminUserId?: string
+  action: string
+  professionalId?: string | null
+  serviceId?: string | null
+  categoryId?: string | null
+}) {
+  expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
+    data: {
+      adminUserId: args.adminUserId ?? 'admin_1',
+      action: args.action,
+      note: '{"note":"[REDACTED]"}',
+      professionalId: args.professionalId ?? null,
+      serviceId: args.serviceId ?? null,
+      categoryId: args.categoryId ?? null,
+    },
+    select: {
+      id: true,
+      createdAt: true,
+      adminUserId: true,
+      professionalId: true,
+      serviceId: true,
+      categoryId: true,
+      action: true,
+      note: true,
+    },
+  })
+}
+
 function makeLookPostRow(
   overrides?: Partial<{
     id: string
@@ -502,15 +531,11 @@ describe('lib/adminModeration/service.ts', () => {
 
     expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
 
-    expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
-      data: {
-        adminUserId: 'admin_1',
-        action: 'LOOK_POST_APPROVED',
-        note: 'lookPostId=look_1 adminNotesProvided=true adminNotesLength=17',
-        professionalId: 'pro_1',
-        serviceId: 'service_1',
-        categoryId: 'cat_1',
-      },
+    expectAdminAuditLogWrite({
+      action: 'LOOK_POST_APPROVED',
+      professionalId: 'pro_1',
+      serviceId: 'service_1',
+      categoryId: 'cat_1',
     })
 
     const lookPostApproveLogArg =
@@ -567,15 +592,11 @@ describe('lib/adminModeration/service.ts', () => {
 
     expect(res.status).toBe(200)
 
-    expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
-      data: {
-        adminUserId: 'admin_1',
-        action: 'LOOK_POST_APPROVED',
-        note: 'lookPostId=look_1 adminNotesProvided=false',
-        professionalId: 'pro_1',
-        serviceId: 'service_1',
-        categoryId: 'cat_1',
-      },
+    expectAdminAuditLogWrite({
+      action: 'LOOK_POST_APPROVED',
+      professionalId: 'pro_1',
+      serviceId: 'service_1',
+      categoryId: 'cat_1',
     })
   })
 
@@ -622,13 +643,9 @@ describe('lib/adminModeration/service.ts', () => {
       requestId: 'request_1',
     })
 
-    expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
-      data: {
-        adminUserId: 'admin_1',
-        action: 'VIRAL_REQUEST_APPROVED',
-        note: 'requestId=request_1 adminNotesProvided=true adminNotesLength=13',
-        categoryId: 'cat_1',
-      },
+    expectAdminAuditLogWrite({
+      action: 'VIRAL_REQUEST_APPROVED',
+      categoryId: 'cat_1',
     })
 
     const viralRequestLogArg =
@@ -757,15 +774,11 @@ describe('lib/adminModeration/service.ts', () => {
 
     expect(mocks.enqueueRecomputeLookCounts).not.toHaveBeenCalled()
 
-    expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
-      data: {
-        adminUserId: 'admin_1',
-        action: 'LOOK_POST_REMOVED',
-        note: 'lookPostId=look_1 adminNotesProvided=true adminNotesLength=16',
-        professionalId: 'pro_1',
-        serviceId: 'service_1',
-        categoryId: 'cat_1',
-      },
+    expectAdminAuditLogWrite({
+      action: 'LOOK_POST_REMOVED',
+      professionalId: 'pro_1',
+      serviceId: 'service_1',
+      categoryId: 'cat_1',
     })
 
     const lookPostRemoveLogArg =
@@ -865,16 +878,11 @@ describe('lib/adminModeration/service.ts', () => {
       mocks.enqueueFanOutViralRequestApprovalNotifications,
     ).not.toHaveBeenCalled()
 
-    expect(mocks.prisma.adminActionLog.create).toHaveBeenCalledWith({
-      data: {
-        adminUserId: 'admin_1',
-        action: 'LOOK_COMMENT_REMOVED',
-        note:
-          'lookCommentId=comment_1 lookPostId=look_9 adminNotesProvided=true adminNotesLength=16',
-        professionalId: 'pro_9',
-        serviceId: 'service_9',
-        categoryId: 'cat_9',
-      },
+    expectAdminAuditLogWrite({
+      action: 'LOOK_COMMENT_REMOVED',
+      professionalId: 'pro_9',
+      serviceId: 'service_9',
+      categoryId: 'cat_9',
     })
 
     const lookCommentRemoveLogArg =
