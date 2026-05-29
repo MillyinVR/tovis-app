@@ -1,23 +1,28 @@
 // app/api/auth/login/route.ts
-import { prisma } from '@/lib/prisma'
+
+import { Prisma, Role } from '@prisma/client'
+
 import {
-  DUMMY_PASSWORD_HASH,
-  verifyPassword,
-  createActiveToken,
-  createVerificationToken,
-} from '@/lib/auth'
-import { consumeTapIntent } from '@/lib/tapIntentConsume'
-import {
+  enforceRateLimit,
   jsonFail,
   jsonOk,
-  pickString,
   normalizeEmail,
-  enforceRateLimit,
+  pickString,
   rateLimitIdentity,
 } from '@/app/api/_utils'
-import { Prisma, Role } from '@prisma/client'
+import {
+  createActiveToken,
+  createVerificationToken,
+  DUMMY_PASSWORD_HASH,
+  verifyPassword,
+} from '@/lib/auth'
+import { consumeTapIntent } from '@/lib/tapIntentConsume'
 import { captureAuthException } from '@/lib/observability/authEvents'
-import { emailLookupHash } from '@/lib/security/crypto/hashLookup'
+import { prisma } from '@/lib/prisma'
+import {
+  emailLookupHash,
+  emailLookupHashV2,
+} from '@/lib/security/crypto/hashLookup'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +35,37 @@ type LoginBody = {
 
 const LOGIN_LOCK_THRESHOLD = 10
 const LOGIN_LOCK_WINDOW_MS = 30 * 60 * 1000
+
+const LOGIN_USER_SELECT = {
+  id: true,
+  email: true,
+  password: true,
+  role: true,
+  authVersion: true,
+  loginAttempts: true,
+  lockedUntil: true,
+  phoneVerifiedAt: true,
+  emailVerifiedAt: true,
+  professionalProfile: {
+    select: {
+      id: true,
+    },
+  },
+  clientProfile: {
+    select: {
+      id: true,
+    },
+  },
+} satisfies Prisma.UserSelect
+
+type LoginUserRecord = Prisma.UserGetPayload<{
+  select: typeof LOGIN_USER_SELECT
+}>
+
+type FailedLoginAttemptState = {
+  loginAttempts: number
+  lockedUntil: Date | string | null
+}
 
 function invalidCredentialsResponse() {
   return jsonFail(401, 'Invalid credentials', {
@@ -48,18 +84,128 @@ function getRetryAfterSeconds(lockedUntil: Date, now: Date): number {
   return Math.max(1, Math.ceil((lockedUntil.getTime() - now.getTime()) / 1000))
 }
 
-type FailedLoginAttemptState = {
-  loginAttempts: number
-  lockedUntil: Date | string | null
-}
-
 function coerceDate(value: Date | string | null): Date | null {
   if (value instanceof Date) return value
+
   if (typeof value === 'string' && value.trim()) {
     const parsed = new Date(value)
     return Number.isNaN(parsed.getTime()) ? null : parsed
   }
+
   return null
+}
+
+function normalizeExpectedRole(raw: unknown): Role | null {
+  const value = pickString(raw)?.trim().toUpperCase() ?? ''
+
+  if (value === Role.ADMIN) return Role.ADMIN
+  if (value === Role.PRO) return Role.PRO
+  if (value === Role.CLIENT) return Role.CLIENT
+
+  return null
+}
+
+function hostToHostname(hostHeader: string | null): string | null {
+  if (!hostHeader) return null
+
+  const first = hostHeader.split(',')[0]?.trim().toLowerCase() ?? ''
+  if (!first) return null
+
+  if (first.startsWith('[')) {
+    const end = first.indexOf(']')
+    if (end === -1) return null
+    return first.slice(1, end)
+  }
+
+  const portIndex = first.indexOf(':')
+  return portIndex >= 0 ? first.slice(0, portIndex) : first
+}
+
+function resolveCookieDomain(hostname: string | null): string | undefined {
+  if (!hostname) return undefined
+
+  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) {
+    return '.tovis.app'
+  }
+
+  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) {
+    return '.tovis.me'
+  }
+
+  return undefined
+}
+
+function resolveIsHttps(request: Request): boolean {
+  const forwardedProto = request.headers
+    .get('x-forwarded-proto')
+    ?.trim()
+    .toLowerCase()
+
+  if (forwardedProto === 'https') return true
+  if (forwardedProto === 'http') return false
+
+  try {
+    return new URL(request.url).protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function buildLoginLookupWhereConditions(
+  email: string,
+): Prisma.UserWhereInput[] {
+  const emailHashV2 = emailLookupHashV2(email)
+  const emailHash = emailLookupHash(email)
+
+  const orConditions: Prisma.UserWhereInput[] = []
+
+  if (emailHashV2) {
+    orConditions.push({
+      emailHashV2: emailHashV2.hash,
+      emailHashKeyVersion: emailHashV2.keyVersion,
+    })
+  }
+
+  /**
+   * Legacy SHA-256 fallback for rows created before HMAC v2 backfill.
+   * Remove after HMAC v2 burn-in and legacy hash column drop.
+   */
+  if (emailHash) {
+    orConditions.push({ emailHash })
+  }
+
+  /**
+   * Temporary plaintext fallback for local/dev databases and rows that predate
+   * lookup hashes. Remove after contact hash v2 migration, backfill, and burn-in.
+   */
+  orConditions.push({ email })
+
+  return orConditions
+}
+
+async function findLoginUserByEmail(email: string): Promise<LoginUserRecord | null> {
+  const users = await prisma.user.findMany({
+    where: {
+      OR: buildLoginLookupWhereConditions(email),
+    },
+    select: LOGIN_USER_SELECT,
+    take: 2,
+  })
+
+  if (users.length === 0) return null
+
+  const uniqueUserIds = new Set(users.map((user) => user.id))
+
+  /**
+   * This should only happen if legacy/plaintext fallback data is inconsistent.
+   * For login, fail closed as invalid credentials instead of guessing which
+   * identity owns the submitted email.
+   */
+  if (uniqueUserIds.size > 1) {
+    return null
+  }
+
+  return users[0] ?? null
 }
 
 async function recordFailedLoginAttempt(
@@ -117,83 +263,18 @@ async function clearLoginLockState(userId: string) {
   })
 }
 
-function normalizeExpectedRole(raw: unknown): Role | null {
-  const s = pickString(raw)?.trim().toUpperCase() ?? ''
-  if (s === Role.ADMIN) return Role.ADMIN
-  if (s === Role.PRO) return Role.PRO
-  if (s === Role.CLIENT) return Role.CLIENT
-  return null
-}
-
-function hostToHostname(hostHeader: string | null): string | null {
-  if (!hostHeader) return null
-
-  const first = hostHeader.split(',')[0]?.trim().toLowerCase() ?? ''
-  if (!first) return null
-
-  // Handle IPv6 like "[::1]:3000"
-  if (first.startsWith('[')) {
-    const end = first.indexOf(']')
-    if (end === -1) return null
-    return first.slice(1, end)
-  }
-
-  // Strip port if present: "localhost:3000" -> "localhost"
-  const idx = first.indexOf(':')
-  return idx >= 0 ? first.slice(0, idx) : first
-}
-
-function resolveCookieDomain(hostname: string | null): string | undefined {
-  if (!hostname) return undefined
-
-  // Share cookie across subdomains of tovis.app or tovis.me
-  if (hostname === 'tovis.app' || hostname.endsWith('.tovis.app')) {
-    return '.tovis.app'
-  }
-  if (hostname === 'tovis.me' || hostname.endsWith('.tovis.me')) {
-    return '.tovis.me'
-  }
-
-  // localhost / other hosts: host-only cookie (no Domain attribute)
-  return undefined
-}
-
-function resolveIsHttps(request: Request): boolean {
-  // Prefer proxy headers (Vercel / reverse proxies)
-  const xfProto = request.headers.get('x-forwarded-proto')?.trim().toLowerCase()
-  if (xfProto === 'https') return true
-  if (xfProto === 'http') return false
-
-  // Fallback to request.url
-  try {
-    return new URL(request.url).protocol === 'https:'
-  } catch {
-    return false
-  }
-}
-
-const LOGIN_USER_SELECT = {
-  id: true,
-  email: true,
-  password: true,
-  role: true,
-  authVersion: true,
-  loginAttempts: true,
-  lockedUntil: true,
-  phoneVerifiedAt: true,
-  emailVerifiedAt: true,
-  professionalProfile: { select: { id: true } },
-  clientProfile: { select: { id: true } },
-} satisfies Prisma.UserSelect
-
 export async function POST(request: Request) {
   let emailForLog: string | null = null
   let userIdForLog: string | null = null
 
   try {
     const identity = await rateLimitIdentity()
-    const rlRes = await enforceRateLimit({ bucket: 'auth:login', identity })
-    if (rlRes) return rlRes
+    const rateLimitResponse = await enforceRateLimit({
+      bucket: 'auth:login',
+      identity,
+    })
+
+    if (rateLimitResponse) return rateLimitResponse
 
     const body = (await request.json().catch(() => ({}))) as LoginBody
 
@@ -210,26 +291,7 @@ export async function POST(request: Request) {
       })
     }
 
-    const emailHash = emailLookupHash(email)
-
-    const userByHash = emailHash
-      ? await prisma.user.findFirst({
-          where: { emailHash },
-          select: LOGIN_USER_SELECT,
-        })
-      : null
-
-    /**
-     * Temporary legacy fallback for rows created before emailHash existed
-     * or local/dev databases that have not been fully backfilled yet.
-     */
-    const user =
-      userByHash ??
-      (await prisma.user.findUnique({
-        where: { email },
-        select: LOGIN_USER_SELECT,
-      }))
-
+    const user = await findLoginUserByEmail(email)
     const passwordHash = user?.password ?? DUMMY_PASSWORD_HASH
     const isValid = await verifyPassword(password, passwordHash)
 
@@ -242,9 +304,7 @@ export async function POST(request: Request) {
     const now = new Date()
 
     if (user.lockedUntil && user.lockedUntil.getTime() > now.getTime()) {
-      return accountLockedResponse(
-        getRetryAfterSeconds(user.lockedUntil, now),
-      )
+      return accountLockedResponse(getRetryAfterSeconds(user.lockedUntil, now))
     }
 
     if (!isValid) {
@@ -260,9 +320,6 @@ export async function POST(request: Request) {
       return invalidCredentialsResponse()
     }
 
-    // Correct password path starts here.
-    // Clear partial/expired lockout state before downstream business checks
-    // so lockout tracks password failures, not later authorization/setup gates.
     const clearedUser = await clearLoginLockState(user.id)
 
     if (expectedRole && clearedUser.role !== expectedRole) {
@@ -304,7 +361,7 @@ export async function POST(request: Request) {
       userId: clearedUser.id,
     })
 
-    const res = jsonOk(
+    const response = jsonOk(
       {
         user: {
           id: clearedUser.id,
@@ -325,7 +382,7 @@ export async function POST(request: Request) {
     const cookieDomain = resolveCookieDomain(hostname)
     const isHttps = resolveIsHttps(request)
 
-    res.cookies.set('tovis_token', token, {
+    response.cookies.set('tovis_token', token, {
       httpOnly: true,
       secure: isHttps,
       sameSite: 'lax',
@@ -334,7 +391,7 @@ export async function POST(request: Request) {
       ...(cookieDomain ? { domain: cookieDomain } : {}),
     })
 
-    return res
+    return response
   } catch (error: unknown) {
     captureAuthException({
       event: 'auth.login.failed',
@@ -345,6 +402,8 @@ export async function POST(request: Request) {
       error,
     })
 
-    return jsonFail(500, 'Internal server error', { code: 'INTERNAL' })
+    return jsonFail(500, 'Internal server error', {
+      code: 'INTERNAL',
+    })
   }
 }

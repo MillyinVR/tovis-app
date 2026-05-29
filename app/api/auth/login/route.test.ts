@@ -1,6 +1,14 @@
+// app/api/auth/login/route.test.ts
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
-import { emailLookupHash } from '@/lib/security/crypto/hashLookup'
+
+import {
+  CONTACT_LOOKUP_HMAC_KEY_VERSION,
+  clearContactLookupHmacKeyringCacheForTests,
+  emailLookupHash,
+  emailLookupHashV2,
+} from '@/lib/security/crypto/hashLookup'
 
 const mockVerifyPassword = vi.hoisted(() => vi.fn())
 const mockCreateActiveToken = vi.hoisted(() => vi.fn())
@@ -15,8 +23,7 @@ const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
 const mockPrisma = vi.hoisted(() => ({
   user: {
-    findFirst: vi.fn(),
-    findUnique: vi.fn(),
+    findMany: vi.fn(),
     update: vi.fn(),
   },
   $queryRaw: vi.fn(),
@@ -131,6 +138,17 @@ vi.mock('@/app/api/_utils', () => {
 
 import { POST } from './route'
 
+const TEST_HMAC_KEY = Buffer.alloc(32, 7).toString('base64')
+
+const clearedUserSelect = {
+  id: true,
+  email: true,
+  role: true,
+  authVersion: true,
+  phoneVerifiedAt: true,
+  emailVerifiedAt: true,
+} as const
+
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
   for (const fn of Object.values(group)) {
     fn.mockReset()
@@ -153,6 +171,8 @@ function makeRequest(
 }
 
 function makeUser(args?: {
+  id?: string
+  email?: string
   role?: Role
   authVersion?: number
   loginAttempts?: number
@@ -165,8 +185,8 @@ function makeUser(args?: {
   const role = args?.role ?? Role.CLIENT
 
   return {
-    id: 'user_1',
-    email: 'user@example.com',
+    id: args?.id ?? 'user_1',
+    email: args?.email ?? 'user@example.com',
     password: 'stored_hash',
     role,
     authVersion: args?.authVersion ?? 1,
@@ -197,49 +217,62 @@ function makeUser(args?: {
   }
 }
 
-function mockUserLookupByWhere(user: ReturnType<typeof makeUser> | null) {
-  mockPrisma.user.findFirst.mockImplementation(
-    async (args: { where?: Record<string, unknown> }) => {
-      const where = args.where ?? {}
+function expectedEmailLookupData(email: string) {
+  const hmac = emailLookupHashV2(email)
 
-      if (!user) return null
+  return {
+    emailHash: emailLookupHash(email),
+    emailHashV2: hmac?.hash ?? null,
+    emailHashKeyVersion: hmac?.keyVersion ?? null,
+  }
+}
 
-      if (where.emailHash && where.emailHash === emailLookupHash(user.email)) {
-        return user
-      }
+function mockUserLookupByWhere(users: ReturnType<typeof makeUser>[]) {
+  mockPrisma.user.findMany.mockImplementation(
+    async (args: { where?: { OR?: Record<string, unknown>[] } }) => {
+      const conditions = args.where?.OR ?? []
 
-      return null
-    },
-  )
+      return users
+        .filter((user) => {
+          const lookup = expectedEmailLookupData(user.email)
 
-  mockPrisma.user.findUnique.mockImplementation(
-    async (args: { where?: Record<string, unknown> }) => {
-      const where = args.where ?? {}
+          return conditions.some((condition) => {
+            if (
+              condition.emailHashV2 &&
+              condition.emailHashKeyVersion &&
+              condition.emailHashV2 === lookup.emailHashV2 &&
+              condition.emailHashKeyVersion === lookup.emailHashKeyVersion
+            ) {
+              return true
+            }
 
-      if (!user) return null
+            if (
+              condition.emailHash &&
+              condition.emailHash === lookup.emailHash
+            ) {
+              return true
+            }
 
-      if (where.email && where.email === user.email) {
-        return user
-      }
+            if (condition.email && condition.email === user.email) {
+              return true
+            }
 
-      return null
+            return false
+          })
+        })
+        .slice(0, 2)
     },
   )
 }
 
-const clearedUserSelect = {
-  id: true,
-  email: true,
-  role: true,
-  authVersion: true,
-  phoneVerifiedAt: true,
-  emailVerifiedAt: true,
-} as const
-
 describe('app/api/auth/login/route', () => {
   beforeEach(() => {
-    resetMockGroup(mockPrisma.user)
+    process.env.PII_LOOKUP_HMAC_KEYS_JSON = JSON.stringify({
+      [CONTACT_LOOKUP_HMAC_KEY_VERSION]: TEST_HMAC_KEY,
+    })
+    clearContactLookupHmacKeyringCacheForTests()
 
+    resetMockGroup(mockPrisma.user)
     mockPrisma.$queryRaw.mockReset()
 
     mockVerifyPassword.mockReset()
@@ -259,6 +292,8 @@ describe('app/api/auth/login/route', () => {
     })
     mockEnforceRateLimit.mockResolvedValue(null)
 
+    mockPrisma.user.findMany.mockResolvedValue([])
+
     mockCreateActiveToken.mockReturnValue('active_token')
     mockCreateVerificationToken.mockReturnValue('verification_token')
 
@@ -268,6 +303,9 @@ describe('app/api/auth/login/route', () => {
   })
 
   afterEach(() => {
+    delete process.env.PII_LOOKUP_HMAC_KEYS_JSON
+    clearContactLookupHmacKeyringCacheForTests()
+
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
@@ -290,7 +328,7 @@ describe('app/api/auth/login/route', () => {
     })
     expect(result).toBe(rateLimitRes)
     expect(result.status).toBe(429)
-    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.user.findMany).not.toHaveBeenCalled()
     expect(mockVerifyPassword).not.toHaveBeenCalled()
     expect(mockPrisma.$queryRaw).not.toHaveBeenCalled()
     expect(mockPrisma.user.update).not.toHaveBeenCalled()
@@ -314,12 +352,12 @@ describe('app/api/auth/login/route', () => {
       code: 'MISSING_CREDENTIALS',
     })
 
-    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.user.findMany).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('returns 401 when the user is not found and still burns dummy bcrypt time', async () => {
-    mockPrisma.user.findUnique.mockResolvedValue(null)
+    mockPrisma.user.findMany.mockResolvedValue([])
     mockVerifyPassword.mockResolvedValue(false)
 
     const result = await POST(
@@ -337,20 +375,18 @@ describe('app/api/auth/login/route', () => {
       code: 'INVALID_CREDENTIALS',
     })
 
-    expect(mockVerifyPassword).toHaveBeenCalledWith(
-      'Secret123!',
-      'dummy_hash',
-    )
+    expect(mockPrisma.user.findMany).toHaveBeenCalledTimes(1)
+    expect(mockVerifyPassword).toHaveBeenCalledWith('Secret123!', 'dummy_hash')
     expect(mockPrisma.$queryRaw).not.toHaveBeenCalled()
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('increments loginAttempts and returns 401 before the lock threshold', async () => {
-    mockUserLookupByWhere(
+    mockUserLookupByWhere([
       makeUser({
         loginAttempts: 3,
       }),
-    )
+    ])
     mockVerifyPassword.mockResolvedValue(false)
     mockPrisma.$queryRaw.mockResolvedValue([
       {
@@ -387,11 +423,11 @@ describe('app/api/auth/login/route', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-16T12:00:00.000Z'))
 
-    mockPrisma.user.findUnique.mockResolvedValue(
+    mockUserLookupByWhere([
       makeUser({
         loginAttempts: 9,
       }),
-    )
+    ])
     mockVerifyPassword.mockResolvedValue(false)
     mockPrisma.$queryRaw.mockResolvedValue([
       {
@@ -429,11 +465,11 @@ describe('app/api/auth/login/route', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-16T12:00:00.000Z'))
 
-    mockPrisma.user.findUnique.mockResolvedValue(
+    mockUserLookupByWhere([
       makeUser({
         loginAttempts: 9,
       }),
-    )
+    ])
     mockVerifyPassword.mockResolvedValue(false)
     mockPrisma.$queryRaw.mockResolvedValue([
       {
@@ -471,12 +507,12 @@ describe('app/api/auth/login/route', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-16T12:00:00.000Z'))
 
-    mockPrisma.user.findUnique.mockResolvedValue(
+    mockUserLookupByWhere([
       makeUser({
         loginAttempts: 10,
         lockedUntil: new Date('2026-04-16T12:30:00.000Z'),
       }),
-    )
+    ])
     mockVerifyPassword.mockResolvedValue(true)
 
     const result = await POST(
@@ -507,8 +543,7 @@ describe('app/api/auth/login/route', () => {
   it('uses bcrypt verification work in both failure branches and returns the same failure response', async () => {
     mockVerifyPassword.mockResolvedValue(false)
 
-    // non-existent email -> must use dummy hash
-    mockPrisma.user.findUnique.mockResolvedValue(null)
+    mockPrisma.user.findMany.mockResolvedValueOnce([])
     const missingUserResult = await POST(
       makeRequest({
         email: 'missing@example.com',
@@ -530,12 +565,11 @@ describe('app/api/auth/login/route', () => {
       code: 'INVALID_CREDENTIALS',
     })
 
-    // existing email + wrong password -> must use stored hash
-    mockUserLookupByWhere(
+    mockUserLookupByWhere([
       makeUser({
         loginAttempts: 3,
       }),
-    )
+    ])
     mockPrisma.$queryRaw.mockResolvedValueOnce([
       {
         loginAttempts: 4,
@@ -569,12 +603,12 @@ describe('app/api/auth/login/route', () => {
   })
 
   it('returns 403 when expectedRole does not match the user role and still clears lock state', async () => {
-    mockPrisma.user.findUnique.mockResolvedValue(
+    mockUserLookupByWhere([
       makeUser({
         role: Role.CLIENT,
         loginAttempts: 4,
       }),
-    )
+    ])
     mockVerifyPassword.mockResolvedValue(true)
     mockPrisma.user.update.mockResolvedValue({
       id: 'user_1',
@@ -615,13 +649,13 @@ describe('app/api/auth/login/route', () => {
   })
 
   it('returns 409 when a PRO account is missing its professional profile and still clears lock state', async () => {
-    mockPrisma.user.findUnique.mockResolvedValue(
+    mockUserLookupByWhere([
       makeUser({
         role: Role.PRO,
         loginAttempts: 2,
         professionalProfileId: null,
       }),
-    )
+    ])
     mockVerifyPassword.mockResolvedValue(true)
     mockPrisma.user.update.mockResolvedValue({
       id: 'user_1',
@@ -658,12 +692,13 @@ describe('app/api/auth/login/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('looks up users by emailHash before falling back to legacy email', async () => {
+  it('looks up users by HMAC emailHashV2 before legacy hash and plaintext email fallback', async () => {
     const user = makeUser({
       loginAttempts: 0,
     })
+    const lookup = expectedEmailLookupData('user@example.com')
 
-    mockUserLookupByWhere(user)
+    mockUserLookupByWhere([user])
     mockVerifyPassword.mockResolvedValue(true)
     mockPrisma.user.update.mockResolvedValue({
       id: 'user_1',
@@ -683,30 +718,32 @@ describe('app/api/auth/login/route', () => {
 
     expect(result.status).toBe(200)
 
-    expect(mockPrisma.user.findFirst).toHaveBeenCalledWith(
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          emailHash: emailLookupHash('user@example.com'),
+          OR: [
+            {
+              emailHashV2: lookup.emailHashV2,
+              emailHashKeyVersion: lookup.emailHashKeyVersion,
+            },
+            {
+              emailHash: lookup.emailHash,
+            },
+            {
+              email: 'user@example.com',
+            },
+          ],
         },
       }),
     )
-
-    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled()
   })
 
-  it('falls back to legacy email lookup when emailHash lookup misses', async () => {
+  it('falls back through the same OR lookup when only plaintext email matches', async () => {
     const user = makeUser({
       loginAttempts: 0,
     })
 
-    mockPrisma.user.findFirst.mockResolvedValueOnce(null)
-
-    mockPrisma.user.findUnique.mockImplementation(
-      async (args: { where?: Record<string, unknown> }) => {
-        if (args.where?.email === 'user@example.com') return user
-        return null
-      },
-    )
+    mockPrisma.user.findMany.mockResolvedValueOnce([user])
 
     mockVerifyPassword.mockResolvedValue(true)
     mockPrisma.user.update.mockResolvedValue({
@@ -726,28 +763,45 @@ describe('app/api/auth/login/route', () => {
     )
 
     expect(result.status).toBe(200)
+    expect(mockPrisma.user.findMany).toHaveBeenCalledTimes(1)
+  })
 
-    expect(mockPrisma.user.findFirst).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        where: {
-          emailHash: emailLookupHash('user@example.com'),
-        },
+  it('fails closed as invalid credentials when lookup conditions match multiple users', async () => {
+    mockPrisma.user.findMany.mockResolvedValueOnce([
+      makeUser({
+        id: 'user_1',
+        email: 'user@example.com',
+      }),
+      makeUser({
+        id: 'user_2',
+        email: 'user@example.com',
+      }),
+    ])
+
+    mockVerifyPassword.mockResolvedValue(false)
+
+    const result = await POST(
+      makeRequest({
+        email: 'user@example.com',
+        password: 'Secret123!',
       }),
     )
+    const body = await result.json()
 
-    expect(mockPrisma.user.findUnique).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        where: {
-          email: 'user@example.com',
-        },
-      }),
-    )
+    expect(result.status).toBe(401)
+    expect(body).toEqual({
+      ok: false,
+      error: 'Invalid credentials',
+      code: 'INVALID_CREDENTIALS',
+    })
+
+    expect(mockVerifyPassword).toHaveBeenCalledWith('Secret123!', 'dummy_hash')
+    expect(mockPrisma.user.update).not.toHaveBeenCalled()
+    expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('issues a verification token when the user is not fully verified', async () => {
-    mockPrisma.user.findUnique.mockResolvedValue(
+    mockUserLookupByWhere([
       makeUser({
         role: Role.CLIENT,
         loginAttempts: 4,
@@ -755,7 +809,7 @@ describe('app/api/auth/login/route', () => {
         phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
         emailVerifiedAt: null,
       }),
-    )
+    ])
     mockVerifyPassword.mockResolvedValue(true)
     mockPrisma.user.update.mockResolvedValue({
       id: 'user_1',
@@ -811,13 +865,13 @@ describe('app/api/auth/login/route', () => {
   })
 
   it('issues an active token when the user is fully verified', async () => {
-    mockPrisma.user.findUnique.mockResolvedValue(
+    mockUserLookupByWhere([
       makeUser({
         role: Role.PRO,
         phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
         emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
       }),
-    )
+    ])
     mockVerifyPassword.mockResolvedValue(true)
     mockPrisma.user.update.mockResolvedValue({
       id: 'user_1',
@@ -869,11 +923,13 @@ describe('app/api/auth/login/route', () => {
 
     const setCookie = result.headers.get('set-cookie')
     expect(setCookie).toContain('tovis_token=active_token')
+    expect(setCookie).toContain('Domain=.tovis.app')
+    expect(setCookie).toContain('Secure')
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
   it('auto-unlocks an expired lock and clears state on successful login', async () => {
-    mockPrisma.user.findUnique.mockResolvedValue(
+    mockUserLookupByWhere([
       makeUser({
         role: Role.CLIENT,
         loginAttempts: 10,
@@ -881,7 +937,7 @@ describe('app/api/auth/login/route', () => {
         phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
         emailVerifiedAt: null,
       }),
-    )
+    ])
     mockVerifyPassword.mockResolvedValue(true)
     mockPrisma.user.update.mockResolvedValue({
       id: 'user_1',
@@ -930,7 +986,8 @@ describe('app/api/auth/login/route', () => {
   })
 
   it('returns 500 and captures the exception when login throws unexpectedly', async () => {
-    mockPrisma.user.findUnique.mockRejectedValue(new Error('db blew up'))
+    const error = new Error('db blew up')
+    mockPrisma.user.findMany.mockRejectedValue(error)
 
     const result = await POST(
       makeRequest({
@@ -953,7 +1010,7 @@ describe('app/api/auth/login/route', () => {
       code: 'INTERNAL',
       userId: null,
       email: 'user@example.com',
-      error: expect.any(Error),
+      error,
     })
   })
 })

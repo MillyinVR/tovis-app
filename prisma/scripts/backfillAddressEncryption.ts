@@ -12,7 +12,12 @@ const prisma = new PrismaClient()
 const DEFAULT_BATCH_SIZE = 100
 const MAX_BATCH_SIZE = 500
 
-type BackfillTarget = 'booking' | 'bookingHold' | 'all'
+type BackfillTarget =
+  | 'booking'
+  | 'bookingHold'
+  | 'clientAddress'
+  | 'professionalLocation'
+  | 'all'
 
 type CliOptions = {
   dryRun: boolean
@@ -93,6 +98,8 @@ function parseOptions(argv: string[]): CliOptions {
       if (
         rawTarget === 'booking' ||
         rawTarget === 'bookingHold' ||
+        rawTarget === 'clientAddress' ||
+        rawTarget === 'professionalLocation' ||
         rawTarget === 'all'
       ) {
         options.target = rawTarget
@@ -151,7 +158,24 @@ function parseLegacyAddressSnapshot(
   return value
 }
 
-function buildAddressInput(args: AddressSnapshotBuildArgs): AddressPrivacyInput | null {
+function buildLegacyAddressSnapshot(input: LegacyAddressSnapshot): LegacyAddressSnapshot {
+  return {
+    formattedAddress: input.formattedAddress,
+    addressLine1: input.addressLine1,
+    addressLine2: input.addressLine2,
+    city: input.city,
+    state: input.state,
+    postalCode: input.postalCode,
+    countryCode: input.countryCode,
+    placeId: input.placeId,
+    lat: input.lat,
+    lng: input.lng,
+  }
+}
+
+function buildAddressInput(
+  args: AddressSnapshotBuildArgs,
+): AddressPrivacyInput | null {
   const formattedAddress = pickString(args.snapshot?.formattedAddress)
   const addressLine1 = pickString(args.snapshot?.addressLine1)
   const addressLine2 = pickString(args.snapshot?.addressLine2)
@@ -229,15 +253,16 @@ function addStats(left: BackfillStats, right: BackfillStats): BackfillStats {
 }
 
 function logDryRunRow(args: {
-  target: 'booking' | 'bookingHold'
+  target: Exclude<BackfillTarget, 'all'>
   id: string
-  hasLocationSnapshot: boolean
-  hasClientSnapshot: boolean
+  fields: Record<string, boolean>
 }) {
   console.log('backfillAddressEncryption dry-run eligible row', args)
 }
 
-async function backfillBookingHolds(options: CliOptions): Promise<BackfillStats> {
+async function backfillBookingHolds(
+  options: CliOptions,
+): Promise<BackfillStats> {
   const stats = emptyStats()
   let cursor: string | undefined
 
@@ -246,16 +271,8 @@ async function backfillBookingHolds(options: CliOptions): Promise<BackfillStats>
       where: {
         addressSnapshotsEncryptedAt: null,
         OR: [
-          {
-            locationAddressSnapshot: {
-              not: Prisma.JsonNull,
-            },
-          },
-          {
-            clientAddressSnapshot: {
-              not: Prisma.JsonNull,
-            },
-          },
+          { locationAddressSnapshot: { not: Prisma.JsonNull } },
+          { clientAddressSnapshot: { not: Prisma.JsonNull } },
         ],
       },
       orderBy: { id: 'asc' },
@@ -305,13 +322,13 @@ async function backfillBookingHolds(options: CliOptions): Promise<BackfillStats>
           logDryRunRow({
             target: 'bookingHold',
             id: row.id,
-            hasLocationSnapshot: locationPatch !== null,
-            hasClientSnapshot: clientPatch !== null,
+            fields: {
+              locationAddress: locationPatch !== null,
+              clientAddress: clientPatch !== null,
+            },
           })
           continue
         }
-
-        const encryptedAt = new Date()
 
         await prisma.bookingHold.update({
           where: { id: row.id },
@@ -332,7 +349,7 @@ async function backfillBookingHolds(options: CliOptions): Promise<BackfillStats>
                   clientAddressLngApprox: clientPatch.lngApprox,
                 }
               : {}),
-            addressSnapshotsEncryptedAt: encryptedAt,
+            addressSnapshotsEncryptedAt: new Date(),
           },
           select: { id: true },
         })
@@ -363,16 +380,8 @@ async function backfillBookings(options: CliOptions): Promise<BackfillStats> {
       where: {
         addressSnapshotsEncryptedAt: null,
         OR: [
-          {
-            locationAddressSnapshot: {
-              not: Prisma.JsonNull,
-            },
-          },
-          {
-            clientAddressSnapshot: {
-              not: Prisma.JsonNull,
-            },
-          },
+          { locationAddressSnapshot: { not: Prisma.JsonNull } },
+          { clientAddressSnapshot: { not: Prisma.JsonNull } },
         ],
       },
       orderBy: { id: 'asc' },
@@ -422,13 +431,13 @@ async function backfillBookings(options: CliOptions): Promise<BackfillStats> {
           logDryRunRow({
             target: 'booking',
             id: row.id,
-            hasLocationSnapshot: locationPatch !== null,
-            hasClientSnapshot: clientPatch !== null,
+            fields: {
+              locationAddress: locationPatch !== null,
+              clientAddress: clientPatch !== null,
+            },
           })
           continue
         }
-
-        const encryptedAt = new Date()
 
         await prisma.booking.update({
           where: { id: row.id },
@@ -449,7 +458,7 @@ async function backfillBookings(options: CliOptions): Promise<BackfillStats> {
                   clientAddressLngApprox: clientPatch.lngApprox,
                 }
               : {}),
-            addressSnapshotsEncryptedAt: encryptedAt,
+            addressSnapshotsEncryptedAt: new Date(),
           },
           select: { id: true },
         })
@@ -471,6 +480,199 @@ async function backfillBookings(options: CliOptions): Promise<BackfillStats> {
   return stats
 }
 
+async function backfillClientAddresses(
+  options: CliOptions,
+): Promise<BackfillStats> {
+  const stats = emptyStats()
+  let cursor: string | undefined
+
+  for (;;) {
+    const rows = await prisma.clientAddress.findMany({
+      where: {
+        encryptedAddressJson: {
+          equals: Prisma.DbNull,
+        },
+      },
+      orderBy: { id: 'asc' },
+      take: options.batchSize,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        formattedAddress: true,
+        addressLine1: true,
+        addressLine2: true,
+        city: true,
+        state: true,
+        postalCode: true,
+        countryCode: true,
+        placeId: true,
+        lat: true,
+        lng: true,
+      },
+    })
+
+    if (rows.length === 0) break
+
+    for (const row of rows) {
+      stats.scanned += 1
+
+      try {
+        const patch = buildPrivacyPatch(
+          buildAddressInput({
+            snapshot: buildLegacyAddressSnapshot(row),
+            latSnapshot: row.lat,
+            lngSnapshot: row.lng,
+          }),
+        )
+
+        if (!patch) {
+          stats.skipped += 1
+          continue
+        }
+
+        stats.eligible += 1
+
+        if (options.dryRun) {
+          logDryRunRow({
+            target: 'clientAddress',
+            id: row.id,
+            fields: {
+              address: true,
+            },
+          })
+          continue
+        }
+
+          await prisma.clientAddress.update({
+            where: { id: row.id },
+            data: {
+              encryptedAddressJson: patch.encryptedAddressJson,
+              latApprox: patch.latApprox,
+              lngApprox: patch.lngApprox,
+            },
+            select: { id: true },
+          })
+
+        stats.updated += 1
+      } catch (error) {
+        stats.failed += 1
+        console.error('clientAddress address encryption backfill failed', {
+          id: row.id,
+          error: safeError(error),
+        })
+      }
+    }
+
+    cursor = rows.at(-1)?.id
+    if (!cursor) break
+  }
+
+  return stats
+}
+
+async function backfillProfessionalLocations(
+  options: CliOptions,
+): Promise<BackfillStats> {
+  const stats = emptyStats()
+  let cursor: string | undefined
+
+  for (;;) {
+    const rows = await prisma.professionalLocation.findMany({
+      where: {
+        encryptedAddressJson: {
+          equals: Prisma.DbNull,
+        },
+      },
+      orderBy: { id: 'asc' },
+      take: options.batchSize,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        formattedAddress: true,
+        addressLine1: true,
+        addressLine2: true,
+        city: true,
+        state: true,
+        postalCode: true,
+        countryCode: true,
+        placeId: true,
+        lat: true,
+        lng: true,
+      },
+    })
+
+    if (rows.length === 0) break
+
+    for (const row of rows) {
+      stats.scanned += 1
+
+      try {
+        const patch = buildPrivacyPatch(
+          buildAddressInput({
+            snapshot: buildLegacyAddressSnapshot(row),
+            latSnapshot: row.lat,
+            lngSnapshot: row.lng,
+          }),
+        )
+
+        if (!patch) {
+          stats.skipped += 1
+          continue
+        }
+
+        stats.eligible += 1
+
+        if (options.dryRun) {
+          logDryRunRow({
+            target: 'professionalLocation',
+            id: row.id,
+            fields: {
+              address: true,
+            },
+          })
+          continue
+        }
+
+      await prisma.professionalLocation.update({
+        where: { id: row.id },
+        data: {
+          encryptedAddressJson: patch.encryptedAddressJson,
+          latApprox: patch.latApprox,
+          lngApprox: patch.lngApprox,
+        },
+        select: { id: true },
+      })
+
+        stats.updated += 1
+      } catch (error) {
+        stats.failed += 1
+        console.error(
+          'professionalLocation address encryption backfill failed',
+          {
+            id: row.id,
+            error: safeError(error),
+          },
+        )
+      }
+    }
+
+    cursor = rows.at(-1)?.id
+    if (!cursor) break
+  }
+
+  return stats
+}
+
+async function runTarget(
+  label: Exclude<BackfillTarget, 'all'>,
+  runner: (options: CliOptions) => Promise<BackfillStats>,
+  options: CliOptions,
+): Promise<BackfillStats> {
+  const stats = await runner(options)
+  console.log(`${label} backfill complete`, stats)
+  return stats
+}
+
 async function main() {
   const options = parseOptions(process.argv.slice(2))
 
@@ -483,17 +685,35 @@ async function main() {
   let total = emptyStats()
 
   if (options.target === 'bookingHold' || options.target === 'all') {
-    const bookingHoldStats = await backfillBookingHolds(options)
-    total = addStats(total, bookingHoldStats)
-
-    console.log('bookingHold backfill complete', bookingHoldStats)
+    total = addStats(
+      total,
+      await runTarget('bookingHold', backfillBookingHolds, options),
+    )
   }
 
   if (options.target === 'booking' || options.target === 'all') {
-    const bookingStats = await backfillBookings(options)
-    total = addStats(total, bookingStats)
+    total = addStats(
+      total,
+      await runTarget('booking', backfillBookings, options),
+    )
+  }
 
-    console.log('booking backfill complete', bookingStats)
+  if (options.target === 'clientAddress' || options.target === 'all') {
+    total = addStats(
+      total,
+      await runTarget('clientAddress', backfillClientAddresses, options),
+    )
+  }
+
+  if (options.target === 'professionalLocation' || options.target === 'all') {
+    total = addStats(
+      total,
+      await runTarget(
+        'professionalLocation',
+        backfillProfessionalLocations,
+        options,
+      ),
+    )
   }
 
   console.log('backfillAddressEncryption complete', {
