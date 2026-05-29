@@ -1,12 +1,12 @@
 // lib/security/contactLookup.ts
-
+import { normalizePhoneForVerification } from '@/lib/security/contactNormalization'
 import {
   emailLookupHash,
   emailLookupHashV2,
   phoneLookupHash,
   phoneLookupHashV2,
+  type ContactLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
-import { normalizePhoneForVerification } from '@/lib/security/contactNormalization'
 
 export type UserContactLookupWriteData = {
   emailHash?: string | null
@@ -31,27 +31,25 @@ type BuildContactLookupDataInput = {
   phone?: unknown
 }
 
+/**
+ * Builds dual-write contact lookup data for expand/burn-in.
+ *
+ * Contract:
+ * - omitted field / `undefined` means leave existing DB value unchanged
+ * - provided valid value means write legacy SHA-256 hash and HMAC v2 hash
+ * - provided invalid/null/empty value means clear legacy + v2 hash fields
+ */
 function buildContactLookupData(
   input: BuildContactLookupDataInput,
 ): UserContactLookupWriteData {
   const data: UserContactLookupWriteData = {}
 
   if (input.email !== undefined) {
-    const legacyEmailHash = emailLookupHash(input.email)
-    const emailHashV2 = emailLookupHashV2(input.email)
-
-    data.emailHash = legacyEmailHash
-    data.emailHashV2 = emailHashV2?.hash ?? null
-    data.emailHashKeyVersion = emailHashV2?.keyVersion ?? null
+    Object.assign(data, buildEmailLookupWriteData(input.email))
   }
 
   if (input.phone !== undefined) {
-    const legacyPhoneHash = phoneLookupHash(input.phone)
-    const phoneHashV2 = phoneLookupHashV2(input.phone)
-
-    data.phoneHash = legacyPhoneHash
-    data.phoneHashV2 = phoneHashV2?.hash ?? null
-    data.phoneHashKeyVersion = phoneHashV2?.keyVersion ?? null
+    Object.assign(data, buildPhoneLookupWriteData(input.phone))
   }
 
   return data
@@ -71,16 +69,49 @@ export function buildClientProfileContactLookupData(
 
 export function buildEmailLookupHashV2ForContactInput(
   value: unknown,
-): ReturnType<typeof emailLookupHashV2> {
+): ContactLookupHashV2 | null {
   return emailLookupHashV2(value)
 }
 
 export function buildPhoneLookupHashV2ForContactInput(
   value: unknown,
-): ReturnType<typeof phoneLookupHashV2> {
+): ContactLookupHashV2 | null {
   return phoneLookupHashV2(value)
 }
 
+/**
+ * Verification flows historically expect an empty string for invalid/missing
+ * phone values. Keep that behavior here so callers do not reimplement phone
+ * normalization locally.
+ */
 export function buildVerificationPhoneLookupValue(value: unknown): string {
   return normalizePhoneForVerification(value) ?? ''
+}
+
+function buildEmailLookupWriteData(value: unknown): Pick<
+  UserContactLookupWriteData,
+  'emailHash' | 'emailHashV2' | 'emailHashKeyVersion'
+> {
+  const legacyHash = emailLookupHash(value)
+  const hmacHash = emailLookupHashV2(value)
+
+  return {
+    emailHash: legacyHash,
+    emailHashV2: hmacHash?.hash ?? null,
+    emailHashKeyVersion: hmacHash?.keyVersion ?? null,
+  }
+}
+
+function buildPhoneLookupWriteData(value: unknown): Pick<
+  UserContactLookupWriteData,
+  'phoneHash' | 'phoneHashV2' | 'phoneHashKeyVersion'
+> {
+  const legacyHash = phoneLookupHash(value)
+  const hmacHash = phoneLookupHashV2(value)
+
+  return {
+    phoneHash: legacyHash,
+    phoneHashV2: hmacHash?.hash ?? null,
+    phoneHashKeyVersion: hmacHash?.keyVersion ?? null,
+  }
 }

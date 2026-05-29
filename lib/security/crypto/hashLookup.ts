@@ -7,7 +7,7 @@ import {
 } from '@/lib/security/contactNormalization'
 
 const LEGACY_CONTACT_HASH_ALGORITHM = 'sha256' as const
-const CONTACT_LOOKUP_HMAC_ALGORITHM = 'hmac-sha256' as const
+const CONTACT_LOOKUP_HMAC_ALGORITHM = 'sha256' as const
 
 /**
  * Current HMAC key version for contact lookup blind indexes.
@@ -22,11 +22,9 @@ export const CONTACT_LOOKUP_HMAC_KEY_VERSION = 1 as const
 
 const CONTACT_LOOKUP_HMAC_KEYS_ENV = 'PII_LOOKUP_HMAC_KEYS_JSON'
 
-type ContactLookupHmacKeyVersion = typeof CONTACT_LOOKUP_HMAC_KEY_VERSION
-
 export type ContactLookupHashV2 = {
   hash: string
-  keyVersion: ContactLookupHmacKeyVersion
+  keyVersion: number
 }
 
 type ContactLookupHmacKeyring = ReadonlyMap<number, Buffer>
@@ -59,12 +57,12 @@ export function sha256Hex(value: string): string {
 /**
  * Legacy contact lookup hash.
  *
- * This intentionally uses the canonical normalizer from
- * `lib/security/contactNormalization.ts`; hashLookup must not define its own
- * email/phone normalization.
+ * This intentionally expects an already-canonical contact value. Callers that
+ * start from raw user input should use `emailLookupHash(...)` or
+ * `phoneLookupHash(...)`.
  */
-export function legacyContactLookupHash(value: string): string {
-  return legacySha256Hex(value)
+export function legacyContactLookupHash(normalizedValue: string): string {
+  return legacySha256Hex(normalizedValue)
 }
 
 /**
@@ -75,13 +73,13 @@ export function legacyContactLookupHash(value: string): string {
  */
 export function contactLookupHmacHex(args: {
   normalizedValue: string
-  keyVersion?: ContactLookupHmacKeyVersion
+  keyVersion?: number
 }): ContactLookupHashV2 {
   const keyVersion = args.keyVersion ?? CONTACT_LOOKUP_HMAC_KEY_VERSION
   const key = getContactLookupHmacKey(keyVersion)
 
   return {
-    hash: createHmac(CONTACT_LOOKUP_HMAC_ALGORITHM.replace('hmac-', ''), key)
+    hash: createHmac(CONTACT_LOOKUP_HMAC_ALGORITHM, key)
       .update(args.normalizedValue, 'utf8')
       .digest('hex'),
     keyVersion,
@@ -95,6 +93,7 @@ export function contactLookupHmacHex(args: {
  */
 export function emailLookupHash(value: unknown): string | null {
   const normalized = normalizeEmailForLookup(value)
+
   return normalized ? legacyContactLookupHash(normalized) : null
 }
 
@@ -105,6 +104,7 @@ export function emailLookupHash(value: unknown): string | null {
  */
 export function phoneLookupHash(value: unknown): string | null {
   const normalized = normalizePhoneForLookup(value)
+
   return normalized ? legacyContactLookupHash(normalized) : null
 }
 
@@ -115,6 +115,7 @@ export function phoneLookupHash(value: unknown): string | null {
  */
 export function emailLookupHashV2(value: unknown): ContactLookupHashV2 | null {
   const normalized = normalizeEmailForLookup(value)
+
   return normalized ? contactLookupHmacHex({ normalizedValue: normalized }) : null
 }
 
@@ -125,6 +126,7 @@ export function emailLookupHashV2(value: unknown): ContactLookupHashV2 | null {
  */
 export function phoneLookupHashV2(value: unknown): ContactLookupHashV2 | null {
   const normalized = normalizePhoneForLookup(value)
+
   return normalized ? contactLookupHmacHex({ normalizedValue: normalized }) : null
 }
 
@@ -136,9 +138,7 @@ export function clearContactLookupHmacKeyringCacheForTests(): void {
   cachedContactLookupHmacRawEnv = null
 }
 
-function getContactLookupHmacKey(
-  keyVersion: ContactLookupHmacKeyVersion,
-): Buffer {
+function getContactLookupHmacKey(keyVersion: number): Buffer {
   const keyring = readContactLookupHmacKeyring()
   const key = keyring.get(keyVersion)
 
@@ -174,7 +174,13 @@ function readContactLookupHmacKeyring(): ContactLookupHmacKeyring {
 function parseContactLookupHmacKeyring(
   rawEnv: string,
 ): ContactLookupHmacKeyring {
-  const parsed: unknown = JSON.parse(rawEnv)
+  let parsed: unknown
+
+  try {
+    parsed = JSON.parse(rawEnv)
+  } catch {
+    throw new Error(`${CONTACT_LOOKUP_HMAC_KEYS_ENV} must be valid JSON`)
+  }
 
   if (!isRecord(parsed)) {
     throw new Error(`${CONTACT_LOOKUP_HMAC_KEYS_ENV} must be a JSON object`)

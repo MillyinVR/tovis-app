@@ -13,9 +13,11 @@
  * - domain-specific normalization aliases that re-implement the contract
  * - helper names like `cleanPhone`, `sanitizeEmail`, `normalizeEmailForLookup`,
  *   `normalizePhoneForVerification`, etc.
+ * - local one-off phone digit stripping or email trim/lowercase normalization
  *
  * Important:
- * This guard checks definitions, not call sites. Callers should import from:
+ * This guard checks definitions and high-confidence local normalization logic,
+ * not normal call sites. Callers should import from:
  *
  *   @/lib/security/contactNormalization
  */
@@ -39,6 +41,7 @@ const IGNORED_DIR_NAMES = new Set([
   'dist',
   'build',
   'out',
+  '.vercel',
 ])
 
 const ALLOWLISTED_FILES = new Set([
@@ -47,6 +50,10 @@ const ALLOWLISTED_FILES = new Set([
   pathForPlatform('lib/security/redaction.ts'),
   pathForPlatform('lib/security/redaction.test.ts'),
 ])
+
+const IGNORED_FILE_PATTERNS = [
+  /\.d\.ts$/u,
+]
 
 /**
  * Function or variable names that usually mean a file is defining its own
@@ -73,31 +80,31 @@ const BANNED_CONTACT_NORMALIZER_NAMES = [
 const DEFINITION_PATTERNS = BANNED_CONTACT_NORMALIZER_NAMES.flatMap((name) => [
   {
     name: `function ${name}`,
-    regex: new RegExp(`\\bfunction\\s+${escapeRegExp(name)}\\s*\\(`, 'u'),
+    regex: new RegExp(String.raw`\bfunction\s+${escapeRegExp(name)}\s*\(`, 'u'),
   },
   {
     name: `const ${name}`,
-    regex: new RegExp(`\\bconst\\s+${escapeRegExp(name)}\\s*=`, 'u'),
+    regex: new RegExp(String.raw`\bconst\s+${escapeRegExp(name)}\s*=`, 'u'),
   },
   {
     name: `let ${name}`,
-    regex: new RegExp(`\\blet\\s+${escapeRegExp(name)}\\s*=`, 'u'),
+    regex: new RegExp(String.raw`\blet\s+${escapeRegExp(name)}\s*=`, 'u'),
   },
   {
     name: `var ${name}`,
-    regex: new RegExp(`\\bvar\\s+${escapeRegExp(name)}\\s*=`, 'u'),
+    regex: new RegExp(String.raw`\bvar\s+${escapeRegExp(name)}\s*=`, 'u'),
   },
   {
     name: `${name} property function`,
     regex: new RegExp(
-      `\\b${escapeRegExp(name)}\\s*:\\s*(?:async\\s*)?(?:function\\s*)?\\(`,
+      String.raw`\b${escapeRegExp(name)}\s*:\s*(?:async\s*)?(?:function\s*)?\(`,
       'u',
     ),
   },
   {
     name: `${name} arrow property`,
     regex: new RegExp(
-      `\\b${escapeRegExp(name)}\\s*:\\s*(?:async\\s*)?\\([^)]*\\)\\s*=>`,
+      String.raw`\b${escapeRegExp(name)}\s*:\s*(?:async\s*)?\([^)]*\)\s*=>`,
       'u',
     ),
   },
@@ -105,8 +112,9 @@ const DEFINITION_PATTERNS = BANNED_CONTACT_NORMALIZER_NAMES.flatMap((name) => [
 
 /**
  * Catch anonymous-looking helpers such as:
- *   const phone = value.replace(/\D/g, '')
- *   const digits = rawPhone.replace(/\D/gu, '')
+ *
+ *   const phone = value.replace(/\D/gu, '')
+ *   const digits = rawPhone.replace(/[^0-9]/gu, '')
  *
  * This is intentionally scoped to suspicious local variable assignments.
  * It should not ban legitimate calls to canonical normalizePhone(...).
@@ -134,6 +142,11 @@ const SUSPICIOUS_EMAIL_NORMALIZATION_PATTERNS = [
     regex:
       /\bconst\s+(?:email|normalizedEmail|cleanedEmail|emailForLookup|emailForHash)\s*=\s*[^;\n]+\.trim\(\)\.toLowerCase\(\)/u,
   },
+  {
+    name: 'local email lowercase/trim normalization',
+    regex:
+      /\bconst\s+(?:email|normalizedEmail|cleanedEmail|emailForLookup|emailForHash)\s*=\s*[^;\n]+\.toLowerCase\(\)\.trim\(\)/u,
+  },
 ]
 
 const ALL_PATTERNS = [
@@ -158,8 +171,9 @@ function normalizeRelativePath(filePath) {
   return relative(repoRoot, filePath).split(sep).join(sep)
 }
 
-function isAllowlisted(relativePath) {
-  return ALLOWLISTED_FILES.has(relativePath)
+function isIgnoredFile(relativePath) {
+  if (ALLOWLISTED_FILES.has(relativePath)) return true
+  return IGNORED_FILE_PATTERNS.some((pattern) => pattern.test(relativePath))
 }
 
 function collectFiles(dirPath, output) {
@@ -198,6 +212,16 @@ function collectFiles(dirPath, output) {
   }
 }
 
+function stripComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//gu, (match) => '\n'.repeat(countNewlines(match)))
+    .replace(/\/\/.*$/gmu, '')
+}
+
+function countNewlines(value) {
+  return value.split('\n').length - 1
+}
+
 function lineColumnForIndex(source, index) {
   const before = source.slice(0, index)
   const lines = before.split('\n')
@@ -211,10 +235,11 @@ function lineColumnForIndex(source, index) {
 function findViolations(filePath) {
   const relativePath = normalizeRelativePath(filePath)
 
-  if (isAllowlisted(relativePath)) return []
+  if (isIgnoredFile(relativePath)) return []
 
-  const source = readFileSync(filePath, 'utf8')
-  const sourceLines = source.split('\n')
+  const rawSource = readFileSync(filePath, 'utf8')
+  const source = stripComments(rawSource)
+  const sourceLines = rawSource.split('\n')
   const violations = []
 
   for (const pattern of ALL_PATTERNS) {

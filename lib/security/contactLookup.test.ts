@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
   buildClientProfileContactLookupData,
+  buildEmailLookupHashV2ForContactInput,
+  buildPhoneLookupHashV2ForContactInput,
   buildUserContactLookupData,
+  buildVerificationPhoneLookupValue,
 } from './contactLookup'
 import {
   clearContactLookupHmacKeyringCacheForTests,
@@ -47,7 +50,23 @@ describe('buildUserContactLookupData', () => {
     })
   })
 
-  it('preserves undefined fields for partial updates', () => {
+  it('preserves omitted fields for partial updates', () => {
+    const phoneHashV2 = phoneLookupHashV2('+15551234567')
+
+    expect(phoneHashV2).not.toBeNull()
+
+    expect(
+      buildUserContactLookupData({
+        phone: '(555) 123-4567',
+      }),
+    ).toEqual({
+      phoneHash: phoneLookupHash('+15551234567'),
+      phoneHashV2: phoneHashV2?.hash,
+      phoneHashKeyVersion: phoneHashV2?.keyVersion,
+    })
+  })
+
+  it('preserves explicitly undefined fields for partial updates', () => {
     const phoneHashV2 = phoneLookupHashV2('+15551234567')
 
     expect(phoneHashV2).not.toBeNull()
@@ -58,9 +77,6 @@ describe('buildUserContactLookupData', () => {
         phone: '(555) 123-4567',
       }),
     ).toEqual({
-      emailHash: undefined,
-      emailHashV2: undefined,
-      emailHashKeyVersion: undefined,
       phoneHash: phoneLookupHash('+15551234567'),
       phoneHashV2: phoneHashV2?.hash,
       phoneHashKeyVersion: phoneHashV2?.keyVersion,
@@ -81,6 +97,26 @@ describe('buildUserContactLookupData', () => {
       phoneHashV2: null,
       phoneHashKeyVersion: null,
     })
+  })
+
+  it('returns null hashes and key versions for null provided values', () => {
+    expect(
+      buildUserContactLookupData({
+        email: null,
+        phone: null,
+      }),
+    ).toEqual({
+      emailHash: null,
+      emailHashV2: null,
+      emailHashKeyVersion: null,
+      phoneHash: null,
+      phoneHashV2: null,
+      phoneHashKeyVersion: null,
+    })
+  })
+
+  it('returns an empty object when no contact fields are provided', () => {
+    expect(buildUserContactLookupData({})).toEqual({})
   })
 })
 
@@ -107,7 +143,23 @@ describe('buildClientProfileContactLookupData', () => {
     })
   })
 
-  it('preserves undefined fields for partial updates', () => {
+  it('preserves omitted fields for partial updates', () => {
+    const emailHashV2 = emailLookupHashV2('client@example.com')
+
+    expect(emailHashV2).not.toBeNull()
+
+    expect(
+      buildClientProfileContactLookupData({
+        email: ' Client@Example.COM ',
+      }),
+    ).toEqual({
+      emailHash: emailLookupHash('client@example.com'),
+      emailHashV2: emailHashV2?.hash,
+      emailHashKeyVersion: emailHashV2?.keyVersion,
+    })
+  })
+
+  it('preserves explicitly undefined fields for partial updates', () => {
     const emailHashV2 = emailLookupHashV2('client@example.com')
 
     expect(emailHashV2).not.toBeNull()
@@ -121,9 +173,6 @@ describe('buildClientProfileContactLookupData', () => {
       emailHash: emailLookupHash('client@example.com'),
       emailHashV2: emailHashV2?.hash,
       emailHashKeyVersion: emailHashV2?.keyVersion,
-      phoneHash: undefined,
-      phoneHashV2: undefined,
-      phoneHashKeyVersion: undefined,
     })
   })
 
@@ -141,5 +190,71 @@ describe('buildClientProfileContactLookupData', () => {
       phoneHashV2: null,
       phoneHashKeyVersion: null,
     })
+  })
+
+  it('returns null hashes and key versions for null provided values', () => {
+    expect(
+      buildClientProfileContactLookupData({
+        email: null,
+        phone: null,
+      }),
+    ).toEqual({
+      emailHash: null,
+      emailHashV2: null,
+      emailHashKeyVersion: null,
+      phoneHash: null,
+      phoneHashV2: null,
+      phoneHashKeyVersion: null,
+    })
+  })
+
+  it('returns an empty object when no contact fields are provided', () => {
+    expect(buildClientProfileContactLookupData({})).toEqual({})
+  })
+})
+
+describe('v2 contact lookup hash delegates', () => {
+  it('builds v2 email lookup hashes from contact input', () => {
+    const result = buildEmailLookupHashV2ForContactInput(' Tori@Example.COM ')
+
+    expect(result).toEqual({
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      keyVersion: CONTACT_LOOKUP_HMAC_KEY_VERSION,
+    })
+
+    expect(result?.hash).toBe(emailLookupHashV2('tori@example.com')?.hash)
+  })
+
+  it('returns null for invalid email contact input', () => {
+    expect(buildEmailLookupHashV2ForContactInput('not-an-email')).toBeNull()
+  })
+
+  it('builds v2 phone lookup hashes from contact input', () => {
+    const result = buildPhoneLookupHashV2ForContactInput('(555) 123-4567')
+
+    expect(result).toEqual({
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      keyVersion: CONTACT_LOOKUP_HMAC_KEY_VERSION,
+    })
+
+    expect(result?.hash).toBe(phoneLookupHashV2('+15551234567')?.hash)
+  })
+
+  it('returns null for invalid phone contact input', () => {
+    expect(buildPhoneLookupHashV2ForContactInput('123')).toBeNull()
+  })
+})
+
+describe('buildVerificationPhoneLookupValue', () => {
+  it('returns the canonical verification phone value', () => {
+    expect(buildVerificationPhoneLookupValue('(555) 123-4567')).toBe(
+      '+15551234567',
+    )
+  })
+
+  it('returns an empty string for invalid or missing phone values', () => {
+    expect(buildVerificationPhoneLookupValue('123')).toBe('')
+    expect(buildVerificationPhoneLookupValue(null)).toBe('')
+    expect(buildVerificationPhoneLookupValue(undefined)).toBe('')
   })
 })

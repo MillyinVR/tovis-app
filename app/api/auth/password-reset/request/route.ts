@@ -5,9 +5,9 @@ import { Prisma } from '@prisma/client'
 import {
   enforceRateLimit,
   jsonOk,
-  normalizeEmail,
   rateLimitIdentity,
 } from '@/app/api/_utils'
+import { normalizeEmail } from '@/lib/security/contactNormalization'
 import {
   getPasswordResetAppUrlFromRequest,
   getPasswordResetRequestIp,

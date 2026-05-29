@@ -125,12 +125,6 @@ vi.mock('@/app/api/_utils', () => {
 
     pickString: (value: unknown) => (typeof value === 'string' ? value : null),
 
-    normalizeEmail: vi.fn((value: unknown) => {
-      if (typeof value !== 'string') return null
-      const normalized = value.trim().toLowerCase()
-      return normalized || null
-    }),
-
     enforceRateLimit: mockEnforceRateLimit,
     rateLimitIdentity: mockRateLimitIdentity,
   }
@@ -734,6 +728,7 @@ describe('app/api/auth/login/route', () => {
             },
           ],
         },
+        take: 2,
       }),
     )
   })
@@ -764,6 +759,18 @@ describe('app/api/auth/login/route', () => {
 
     expect(result.status).toBe(200)
     expect(mockPrisma.user.findMany).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            {
+              email: 'user@example.com',
+            },
+          ]),
+        }),
+        take: 2,
+      }),
+    )
   })
 
   it('fails closed as invalid credentials when lookup conditions match multiple users', async () => {

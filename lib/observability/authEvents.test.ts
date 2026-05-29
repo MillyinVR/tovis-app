@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   emailLookupHash,
+  legacySha256Hex,
   phoneLookupHash,
-  sha256Hex,
 } from '@/lib/security/crypto/hashLookup'
 
 import { captureAuthException, logAuthEvent } from './authEvents'
@@ -68,13 +68,13 @@ describe('authEvents', () => {
       code: 'INVALID_CREDENTIALS',
     })
 
-    expect(payload.userIdHash).toBe(shortHash(sha256Hex('user_123')))
+    expect(payload.userIdHash).toBe(shortHash(legacySha256Hex('user_123')))
     expect(payload.emailHash).toBe(
       shortHash(emailLookupHash('Tori.Example@Example.com')),
     )
     expect(payload.phoneHash).toBe(shortHash(phoneLookupHash('+15551234567')))
     expect(payload.verificationIdHash).toBe(
-      shortHash(sha256Hex('verify_123')),
+      shortHash(legacySha256Hex('verify_123')),
     )
 
     expect(serialized).not.toContain('user_123')
@@ -257,7 +257,9 @@ describe('authEvents', () => {
     >
     const serializedContext = JSON.stringify(contextPayload)
 
-    expect(contextPayload.userIdHash).toBe(shortHash(sha256Hex('user_456')))
+    expect(contextPayload.userIdHash).toBe(
+      shortHash(legacySha256Hex('user_456')),
+    )
     expect(contextPayload.emailHash).toBe(
       shortHash(emailLookupHash('user@example.com')),
     )
@@ -265,7 +267,7 @@ describe('authEvents', () => {
       shortHash(phoneLookupHash('+15551234567')),
     )
     expect(contextPayload.verificationIdHash).toBe(
-      shortHash(sha256Hex('verification_456')),
+      shortHash(legacySha256Hex('verification_456')),
     )
     expect(contextPayload.errorName).toBe('Error')
     expect(contextPayload.errorMessage).toBe(
