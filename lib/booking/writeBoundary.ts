@@ -144,7 +144,7 @@ import '@/lib/observability/bookingEvents'
 import {
   ADDRESS_KEY_VERSION,
   buildAddressPrivacyWriteData,
-  type AddressPrivacyEnvelopeV1,
+  isAddressPrivacyEnvelopeV1 as isReusableAddressPrivacyEnvelope,
 } from '@/lib/security/addressEncryption'
 
 
@@ -3432,69 +3432,6 @@ function buildNullAddressSnapshotData(input: {
     latApprox: coarsenCoordinate(input.lat),
     lngApprox: coarsenCoordinate(input.lng),
   }
-}
-
-function isJsonRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isNullableString(value: unknown): value is string | null {
-  return value === null || typeof value === 'string'
-}
-
-function isAddressPrivacyEnvelopeV1(
-  value: Prisma.JsonValue | null | undefined,
-): value is AddressPrivacyEnvelopeV1 {
-  if (!isJsonRecord(value)) return false
-  if (value.v !== 1) return false
-  if (value.algorithm !== 'plaintext-json-expand-phase') return false
-  if (value.keyVersion !== ADDRESS_KEY_VERSION) return false
-
-  const address = value.address
-  if (!isJsonRecord(address)) return false
-
-  return (
-    isNullableString(address.formattedAddress) &&
-    isNullableString(address.addressLine1) &&
-    isNullableString(address.addressLine2) &&
-    isNullableString(address.city) &&
-    isNullableString(address.state) &&
-    isNullableString(address.postalCode) &&
-    isNullableString(address.countryCode) &&
-    isNullableString(address.placeId) &&
-    isNullableString(address.lat) &&
-    isNullableString(address.lng)
-  )
-}
-
-function isAeadAddressPrivacyEnvelopeV1(
-  value: Prisma.JsonValue | null | undefined,
-): value is Prisma.JsonObject {
-  if (!isJsonRecord(value)) return false
-  if (value.v !== 1) return false
-  if (value.algorithm !== 'aes-256-gcm-v1') return false
-  if (value.keyVersion !== ADDRESS_KEY_VERSION) return false
-
-  const ciphertext = value.ciphertext
-  if (!isJsonRecord(ciphertext)) return false
-
-  return (
-    ciphertext.v === 1 &&
-    ciphertext.algorithm === 'aes-256-gcm-v1' &&
-    ciphertext.keyVersion === ADDRESS_KEY_VERSION &&
-    typeof ciphertext.nonce === 'string' &&
-    typeof ciphertext.ciphertext === 'string' &&
-    typeof ciphertext.authTag === 'string'
-  )
-}
-
-function isReusableAddressPrivacyEnvelope(
-  value: Prisma.JsonValue | null | undefined,
-): value is Prisma.JsonObject | AddressPrivacyEnvelopeV1 {
-  return (
-    isAddressPrivacyEnvelopeV1(value) ||
-    isAeadAddressPrivacyEnvelopeV1(value)
-  )
 }
 
 function toValidatedEncryptedAddressSnapshotInput(

@@ -6,7 +6,7 @@ import { normalizePhone } from '@/lib/security/contactNormalization'
 export type NormalizedSettingsPhone = string | null | undefined | 'invalid'
 
 export function normalizeSettingsPhoneFromBody(
-  body: Record<string, unknown>,
+  body: unknown,
 ): NormalizedSettingsPhone {
   if (!isRecord(body)) return undefined
 

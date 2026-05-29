@@ -1,6 +1,6 @@
 // app/api/pro/locations/[id]/route.ts
 
-import { Prisma, ProfessionalLocationType } from '@prisma/client'
+import { type Prisma } from '@prisma/client'
 import { NextRequest } from 'next/server'
 
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
@@ -8,7 +8,7 @@ import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 import { hasOwn, isRecord, type UnknownRecord } from '@/lib/guards'
-import { pickBool, pickNumber, pickString } from '@/lib/pick'
+import { pickBool, pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { evaluatePublishableLocation } from '@/lib/pro/readiness/proReadiness'
 import {
@@ -16,6 +16,16 @@ import {
   refreshLocation,
 } from '@/lib/search/index/refreshSearchIndex'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
+import {
+  buildProfessionalLocationAddressPrivacyInput,
+  mapProfessionalLocation,
+  parseNullableProfessionalLocationCoordinate,
+  parseProfessionalLocationAddressInput,
+  PROFESSIONAL_LOCATION_SELECT,
+  professionalLocationDecimalToNumber,
+  professionalLocationNumberToDecimalOrNull,
+  requiresAddressForBookableProfessionalLocation,
+} from '@/lib/proLocations/locationInput'
 import {
   normalizeWorkingHours,
   toInputJsonValue,
@@ -27,27 +37,47 @@ type Params = {
   params: Promise<{ id: string }>
 }
 
-function requireAddressForType(type: ProfessionalLocationType) {
-  return (
-    type === ProfessionalLocationType.SALON ||
-    type === ProfessionalLocationType.SUITE
-  )
-}
+type OwnedLocationRow = Prisma.ProfessionalLocationGetPayload<{
+  select: typeof PROFESSIONAL_LOCATION_SELECT
+}>
 
 async function readParams(ctx: Params) {
   return await ctx.params
 }
 
-function decimalOrNull(value: number | null | undefined) {
-  if (value == null) return null
-  return new Prisma.Decimal(String(value))
+async function loadOwnedLocation(args: {
+  locationId: string
+  professionalId: string
+}): Promise<OwnedLocationRow | null> {
+  return await prisma.professionalLocation.findFirst({
+    where: {
+      id: args.locationId,
+      professionalId: args.professionalId,
+    },
+    select: PROFESSIONAL_LOCATION_SELECT,
+  })
 }
 
-function decimalInputToNumber(
-  value: Prisma.Decimal | null | undefined,
-): number | null {
-  if (value == null) return null
-  return value.toNumber()
+function pickNullablePatchString(
+  body: UnknownRecord,
+  key: string,
+): string | null | undefined {
+  return hasOwn(body, key) ? pickString(body[key]) : undefined
+}
+
+function hasAddressPrivacyRelevantChange(body: UnknownRecord): boolean {
+  return (
+    hasOwn(body, 'placeId') ||
+    hasOwn(body, 'formattedAddress') ||
+    hasOwn(body, 'addressLine1') ||
+    hasOwn(body, 'addressLine2') ||
+    hasOwn(body, 'city') ||
+    hasOwn(body, 'state') ||
+    hasOwn(body, 'postalCode') ||
+    hasOwn(body, 'countryCode') ||
+    hasOwn(body, 'lat') ||
+    hasOwn(body, 'lng')
+  )
 }
 
 export async function PATCH(req: NextRequest, ctx: Params) {
@@ -73,32 +103,9 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     const raw: unknown = await req.json().catch(() => ({}))
     const body: UnknownRecord = isRecord(raw) ? raw : {}
 
-    const existing = await prisma.professionalLocation.findFirst({
-      where: {
-        id: locationId,
-        professionalId,
-      },
-      select: {
-        id: true,
-        type: true,
-        isPrimary: true,
-        isBookable: true,
-
-        timeZone: true,
-        workingHours: true,
-
-        placeId: true,
-        formattedAddress: true,
-        addressLine1: true,
-        addressLine2: true,
-        city: true,
-        state: true,
-        postalCode: true,
-        countryCode: true,
-
-        lat: true,
-        lng: true,
-      },
+    const existing = await loadOwnedLocation({
+      locationId,
+      professionalId,
     })
 
     if (!existing) {
@@ -122,7 +129,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
 
       requestedPrimary = parsedPrimary
 
-      if (requestedPrimary === false && existing.isPrimary) {
+      if (!requestedPrimary && existing.isPrimary) {
         return jsonFail(
           400,
           'Cannot unset primary directly. Set another location as primary instead.',
@@ -155,103 +162,48 @@ export async function PATCH(req: NextRequest, ctx: Params) {
       data.isBookable = parsedBookable
     }
 
-    const placeIdIn = hasOwn(body, 'placeId')
-      ? pickString(body.placeId)
-      : undefined
-    if (placeIdIn !== undefined) {
-      data.placeId = placeIdIn
+    const placeIdIn = pickNullablePatchString(body, 'placeId')
+    const formattedAddressIn = pickNullablePatchString(body, 'formattedAddress')
+    const addressLine1In = pickNullablePatchString(body, 'addressLine1')
+    const addressLine2In = pickNullablePatchString(body, 'addressLine2')
+    const cityIn = pickNullablePatchString(body, 'city')
+    const stateIn = pickNullablePatchString(body, 'state')
+    const postalCodeIn = pickNullablePatchString(body, 'postalCode')
+    const countryCodeIn = pickNullablePatchString(body, 'countryCode')
+
+    if (placeIdIn !== undefined) data.placeId = placeIdIn
+    if (formattedAddressIn !== undefined) data.formattedAddress = formattedAddressIn
+    if (addressLine1In !== undefined) data.addressLine1 = addressLine1In // pii-plaintext-read-ok: pro location patch writes plaintext legacy address column during expand-phase encryption sync
+    if (addressLine2In !== undefined) data.addressLine2 = addressLine2In // pii-plaintext-read-ok: pro location patch writes plaintext legacy address column during expand-phase encryption sync
+    if (cityIn !== undefined) data.city = cityIn
+    if (stateIn !== undefined) data.state = stateIn
+    if (postalCodeIn !== undefined) data.postalCode = postalCodeIn // pii-plaintext-read-ok: pro location patch writes plaintext legacy postal column during expand-phase encryption sync
+    if (countryCodeIn !== undefined) data.countryCode = countryCodeIn
+
+    const lat = parseNullableProfessionalLocationCoordinate({
+      body,
+      key: 'lat',
+    })
+    if (!lat.ok) return jsonFail(400, lat.error)
+
+    const lng = parseNullableProfessionalLocationCoordinate({
+      body,
+      key: 'lng',
+    })
+    if (!lng.ok) return jsonFail(400, lng.error)
+
+    if (lat.value !== undefined) {
+      data.lat = professionalLocationNumberToDecimalOrNull(lat.value)
     }
 
-    const formattedAddressIn = hasOwn(body, 'formattedAddress')
-      ? pickString(body.formattedAddress)
-      : undefined
-    if (formattedAddressIn !== undefined) {
-      data.formattedAddress = formattedAddressIn
-    }
-
-    const addressLine1In = hasOwn(body, 'addressLine1')
-      ? pickString(body.addressLine1)
-      : undefined
-    if (addressLine1In !== undefined) {
-      data.addressLine1 = addressLine1In
-    }
-
-    const addressLine2In = hasOwn(body, 'addressLine2')
-      ? pickString(body.addressLine2)
-      : undefined
-    if (addressLine2In !== undefined) {
-      data.addressLine2 = addressLine2In
-    }
-
-    const cityIn = hasOwn(body, 'city') ? pickString(body.city) : undefined
-    if (cityIn !== undefined) {
-      data.city = cityIn
-    }
-
-    const stateIn = hasOwn(body, 'state') ? pickString(body.state) : undefined
-    if (stateIn !== undefined) {
-      data.state = stateIn
-    }
-
-    const postalCodeIn = hasOwn(body, 'postalCode')
-      ? pickString(body.postalCode)
-      : undefined
-    if (postalCodeIn !== undefined) {
-      data.postalCode = postalCodeIn
-    }
-
-    const countryCodeIn = hasOwn(body, 'countryCode')
-      ? pickString(body.countryCode)
-      : undefined
-    if (countryCodeIn !== undefined) {
-      data.countryCode = countryCodeIn
-    }
-
-    let latIn: Prisma.Decimal | null | undefined
-    let latNumberIn: number | null | undefined
-
-    if (hasOwn(body, 'lat')) {
-      if (body.lat === null) {
-        latIn = null
-        latNumberIn = null
-      } else {
-        const parsedLat = pickNumber(body.lat)
-
-        if (parsedLat == null) {
-          return jsonFail(400, 'lat must be a number or null')
-        }
-
-        latNumberIn = parsedLat
-        latIn = decimalOrNull(parsedLat)
-      }
-
-      data.lat = latIn
-    }
-
-    let lngIn: Prisma.Decimal | null | undefined
-    let lngNumberIn: number | null | undefined
-
-    if (hasOwn(body, 'lng')) {
-      if (body.lng === null) {
-        lngIn = null
-        lngNumberIn = null
-      } else {
-        const parsedLng = pickNumber(body.lng)
-
-        if (parsedLng == null) {
-          return jsonFail(400, 'lng must be a number or null')
-        }
-
-        lngNumberIn = parsedLng
-        lngIn = decimalOrNull(parsedLng)
-      }
-
-      data.lng = lngIn
+    if (lng.value !== undefined) {
+      data.lng = professionalLocationNumberToDecimalOrNull(lng.value)
     }
 
     const timeZoneIn = hasOwn(body, 'timeZone')
       ? pickString(body.timeZone)
       : undefined
+
     if (timeZoneIn !== undefined) {
       data.timeZone = timeZoneIn
     }
@@ -279,41 +231,31 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     const nextTimeZone =
       timeZoneIn !== undefined ? timeZoneIn : existing.timeZone ?? null
 
-    const nextPlaceId =
-      placeIdIn !== undefined ? placeIdIn : existing.placeId ?? null
-
-    const nextFormattedAddress =
-      formattedAddressIn !== undefined
-        ? formattedAddressIn
-        : existing.formattedAddress ?? null
-
-    const nextAddressLine1 =
-      addressLine1In !== undefined ? addressLine1In : existing.addressLine1 ?? null
-
-    const nextAddressLine2 =
-      addressLine2In !== undefined ? addressLine2In : existing.addressLine2 ?? null
-
-    const nextCity = cityIn !== undefined ? cityIn : existing.city ?? null
-    const nextState = stateIn !== undefined ? stateIn : existing.state ?? null
-
-    const nextPostalCode =
-      postalCodeIn !== undefined ? postalCodeIn : existing.postalCode ?? null
-
-    const nextCountryCode =
-      countryCodeIn !== undefined ? countryCodeIn : existing.countryCode ?? null
-
-    const nextLatDecimal = latIn !== undefined ? latIn : existing.lat ?? null
-    const nextLngDecimal = lngIn !== undefined ? lngIn : existing.lng ?? null
-
-    const nextLat =
-      latNumberIn !== undefined
-        ? latNumberIn
-        : decimalInputToNumber(existing.lat)
-
-    const nextLng =
-      lngNumberIn !== undefined
-        ? lngNumberIn
-        : decimalInputToNumber(existing.lng)
+    const nextAddress = {
+      formattedAddress:
+        formattedAddressIn !== undefined
+          ? formattedAddressIn
+          : existing.formattedAddress ?? null,
+      addressLine1:
+        addressLine1In !== undefined ? addressLine1In : existing.addressLine1 ?? null, // pii-plaintext-read-ok: pro location patch reuses existing plaintext legacy address only to rebuild encrypted privacy payload
+      addressLine2:
+        addressLine2In !== undefined ? addressLine2In : existing.addressLine2 ?? null, // pii-plaintext-read-ok: pro location patch reuses existing plaintext legacy address only to rebuild encrypted privacy payload
+      city: cityIn !== undefined ? cityIn : existing.city ?? null,
+      state: stateIn !== undefined ? stateIn : existing.state ?? null,
+      postalCode:
+        postalCodeIn !== undefined ? postalCodeIn : existing.postalCode ?? null, // pii-plaintext-read-ok: pro location patch reuses existing plaintext legacy postal code only to rebuild encrypted privacy payload
+      countryCode:
+        countryCodeIn !== undefined ? countryCodeIn : existing.countryCode ?? null,
+      placeId: placeIdIn !== undefined ? placeIdIn : existing.placeId ?? null,
+      latRaw:
+        lat.value !== undefined
+          ? lat.value
+          : professionalLocationDecimalToNumber(existing.lat),
+      lngRaw:
+        lng.value !== undefined
+          ? lng.value
+          : professionalLocationDecimalToNumber(existing.lng),
+    }
 
     const nextWorkingHours =
       workingHoursIn !== undefined
@@ -324,7 +266,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
       const publishable = evaluatePublishableLocation({
         id: existing.id,
         type: existing.type,
-        formattedAddress: nextFormattedAddress,
+        formattedAddress: nextAddress.formattedAddress,
         timeZone: nextTimeZone,
         workingHours: nextWorkingHours,
       })
@@ -339,13 +281,13 @@ export async function PATCH(req: NextRequest, ctx: Params) {
         )
       }
 
-      if (nextLatDecimal == null || nextLngDecimal == null) {
+      if (nextAddress.latRaw == null || nextAddress.lngRaw == null) {
         return jsonFail(400, 'Bookable locations must include lat/lng.')
       }
 
       if (
-        requireAddressForType(existing.type) &&
-        (!nextPlaceId || !nextFormattedAddress)
+        requiresAddressForBookableProfessionalLocation(existing.type) &&
+        (!nextAddress.placeId || !nextAddress.formattedAddress)
       ) {
         return jsonFail(
           400,
@@ -354,33 +296,12 @@ export async function PATCH(req: NextRequest, ctx: Params) {
       }
     }
 
-    const hasAddressPrivacyRelevantChange =
-      placeIdIn !== undefined ||
-      formattedAddressIn !== undefined ||
-      addressLine1In !== undefined ||
-      addressLine2In !== undefined ||
-      cityIn !== undefined ||
-      stateIn !== undefined ||
-      postalCodeIn !== undefined ||
-      countryCodeIn !== undefined ||
-      latIn !== undefined ||
-      lngIn !== undefined
-
-    if (hasAddressPrivacyRelevantChange) {
+    if (hasAddressPrivacyRelevantChange(body)) {
       Object.assign(
         data,
-        buildAddressPrivacyWriteData({
-          formattedAddress: nextFormattedAddress,
-          addressLine1: nextAddressLine1,
-          addressLine2: nextAddressLine2,
-          city: nextCity,
-          state: nextState,
-          postalCode: nextPostalCode,
-          countryCode: nextCountryCode,
-          placeId: nextPlaceId,
-          lat: nextLat,
-          lng: nextLng,
-        }),
+        buildAddressPrivacyWriteData(
+          buildProfessionalLocationAddressPrivacyInput(nextAddress),
+        ),
       )
     }
 
@@ -414,13 +335,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
           id: locationId,
           professionalId,
         },
-        select: {
-          id: true,
-          isPrimary: true,
-          isBookable: true,
-          timeZone: true,
-          type: true,
-        },
+        select: PROFESSIONAL_LOCATION_SELECT,
       })
     })
 
@@ -432,7 +347,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     await refreshLocation(locationId, 'location.update')
 
     return jsonOk({
-      location: result,
+      location: mapProfessionalLocation(result),
     })
   } catch (error) {
     console.error('PATCH /api/pro/locations/[id] error', error)
@@ -481,15 +396,13 @@ export async function DELETE(_req: NextRequest, ctx: Params) {
 
       return jsonOk({})
     } catch (error: unknown) {
-      const code = isRecord(error)
-        ? pickString((error as Record<string, unknown>).code)
-        : null
+      const code = isRecord(error) ? pickString(error.code) : null
 
       const message =
         error instanceof Error
           ? error.message
           : isRecord(error)
-            ? pickString((error as Record<string, unknown>).message)
+            ? pickString(error.message)
             : null
 
       if (
@@ -515,4 +428,3 @@ export async function DELETE(_req: NextRequest, ctx: Params) {
     return jsonFail(500, msg)
   }
 }
-

@@ -1,12 +1,15 @@
-import { ClientAddressKind } from '@prisma/client'
+// app/api/client/settings/route.ts
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
-import { decimalToNullableNumber } from '@/lib/booking/snapshots'
 import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
+import {
+  CLIENT_ADDRESS_SELECT,
+  mapClientAddress,
+  sortClientAddresses,
+} from '@/lib/clientAddresses/addressInput'
 import { buildClientProfileContactLookupData } from '@/lib/security/contactLookup'
-import { normalizePhone as normalizePhoneForLookup } from '@/lib/security/contactNormalization'
 import { normalizeSettingsPhoneFromBody } from '@/lib/security/settingsContactInput'
 
 export const dynamic = 'force-dynamic'
@@ -73,19 +76,6 @@ function normalizeRequiredishName(
   return s
 }
 
-function normalizeSettingsPhone(
-  value: unknown,
-): string | null | undefined | 'invalid' {
-  if (value === undefined) return undefined
-  if (value === null) return null
-
-  const raw = pickString(value)
-  if (!raw) return null
-  if (raw.length > 40) return 'invalid'
-
-  const normalized = normalizePhoneForLookup(raw)
-  return normalized ?? 'invalid'
-}
 
 function normalizeAvatarUrl(
   value: unknown,
@@ -100,25 +90,6 @@ function normalizeAvatarUrl(
   return s
 }
 
-function sortAddressesForSettings<
-  T extends {
-    kind: ClientAddressKind
-    isDefault: boolean
-    createdAt: Date
-  },
->(addresses: T[]): T[] {
-  return [...addresses].sort((a, b) => {
-    if (a.kind !== b.kind) {
-      if (a.kind === ClientAddressKind.SEARCH_AREA) return -1
-      if (b.kind === ClientAddressKind.SEARCH_AREA) return 1
-    }
-
-    if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1
-
-    return a.createdAt.getTime() - b.createdAt.getTime()
-  })
-}
-
 async function loadSettings(clientId: string, email: string | null) {
   const profile = await prisma.clientProfile.findUnique({
     where: { id: clientId },
@@ -130,31 +101,12 @@ async function loadSettings(clientId: string, email: string | null) {
       avatarUrl: true,
       dateOfBirth: true,
       addresses: {
-        select: {
-          id: true,
-          kind: true,
-          label: true,
-          isDefault: true,
-          formattedAddress: true,
-          addressLine1: true,
-          addressLine2: true,
-          city: true,
-          state: true,
-          postalCode: true,
-          countryCode: true,
-          placeId: true,
-          lat: true,
-          lng: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+        select: CLIENT_ADDRESS_SELECT,
       },
     },
   })
 
   if (!profile) return null
-
-  const addresses = sortAddressesForSettings(profile.addresses)
 
   return {
     profile: {
@@ -166,24 +118,7 @@ async function loadSettings(clientId: string, email: string | null) {
       avatarUrl: profile.avatarUrl ?? null,
       dateOfBirth: formatDateOnlyUtc(profile.dateOfBirth),
     },
-    addresses: addresses.map((address) => ({
-      id: address.id,
-      kind: address.kind,
-      label: address.label ?? null,
-      isDefault: address.isDefault,
-      formattedAddress: address.formattedAddress ?? null,
-      addressLine1: address.addressLine1 ?? null,
-      addressLine2: address.addressLine2 ?? null,
-      city: address.city ?? null,
-      state: address.state ?? null,
-      postalCode: address.postalCode ?? null,
-      countryCode: address.countryCode ?? null,
-      placeId: address.placeId ?? null,
-      lat: decimalToNullableNumber(address.lat),
-      lng: decimalToNullableNumber(address.lng),
-      createdAt: address.createdAt.toISOString(),
-      updatedAt: address.updatedAt.toISOString(),
-    })),
+    addresses: sortClientAddresses(profile.addresses).map(mapClientAddress),
   }
 }
 

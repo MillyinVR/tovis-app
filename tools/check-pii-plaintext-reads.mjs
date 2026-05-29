@@ -50,6 +50,17 @@ const ALLOWLISTED_PATH_PREFIXES = [
 
 const ALLOWLISTED_FILES = new Set([
   `tools${sep}check-pii-plaintext-reads.mjs`,
+
+  // Centralized client-address input normalization boundary.
+  // Raw client address fields are accepted here, normalized, and then callers
+  // should write address privacy data through lib/security/addressEncryption.
+  `lib${sep}clientAddresses${sep}addressInput.ts`,
+
+  // Centralized professional-location input normalization boundary.
+  // Raw professional location address fields are accepted here, normalized,
+  // and then callers should write address privacy data through
+  // lib/security/addressEncryption.
+  `lib${sep}proLocations${sep}locationInput.ts`,
 ])
 
 const IGNORED_FILE_PATTERNS = [

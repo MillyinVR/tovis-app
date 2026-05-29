@@ -95,46 +95,14 @@ app/api/calendar/route.ts:optional direct property read:const clientEmail = norm
 app/api/calendar/route.ts:optional direct property read:const organizerEmail = normalizeEmail(args.booking.professional?.user?.email)
 app/api/calendar/route.ts:optional direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
 app/api/calendar/route.ts:optional direct property read:typeof client?.lastName === 'string' ? client.lastName.trim() : ''
-app/api/client/addresses/[id]/route.ts:Prisma select/include plaintext field:addressLine1: true,
-app/api/client/addresses/[id]/route.ts:Prisma select/include plaintext field:addressLine2: true,
-app/api/client/addresses/[id]/route.ts:Prisma select/include plaintext field:postalCode: true,
-app/api/client/addresses/[id]/route.ts:direct property read:: args.existing.addressLine1,
-app/api/client/addresses/[id]/route.ts:direct property read:: args.existing.addressLine2,
-app/api/client/addresses/[id]/route.ts:direct property read:? args.addressLine1
-app/api/client/addresses/[id]/route.ts:direct property read:? args.addressLine2
-app/api/client/addresses/[id]/route.ts:direct property read:args.addressLine1 !== undefined
-app/api/client/addresses/[id]/route.ts:direct property read:args.addressLine2 !== undefined
-app/api/client/addresses/[id]/route.ts:direct property read:args.postalCode !== undefined ? args.postalCode : args.existing.postalCode,
-app/api/client/addresses/[id]/route.ts:direct property read:args.postalCode ||
 app/api/client/addresses/[id]/route.ts:direct property read:body.addressLine1 !== undefined ||
 app/api/client/addresses/[id]/route.ts:direct property read:body.addressLine2 !== undefined ||
 app/api/client/addresses/[id]/route.ts:direct property read:body.postalCode !== undefined ||
-app/api/client/addresses/[id]/route.ts:direct property read:const addressLine1 = normalizeOptionalString(body.addressLine1, 200)
-app/api/client/addresses/[id]/route.ts:direct property read:const addressLine2 = normalizeOptionalString(body.addressLine2, 200)
-app/api/client/addresses/[id]/route.ts:direct property read:const hasAddressLine = Boolean(args.formattedAddress || args.addressLine1)
-app/api/client/addresses/[id]/route.ts:direct property read:const postalCode = normalizeOptionalString(body.postalCode, 40)
-app/api/client/addresses/[id]/route.ts:direct property read:if (args.addressLine1 === 'invalid') return 'addressLine1'
-app/api/client/addresses/[id]/route.ts:direct property read:if (args.addressLine2 === 'invalid') return 'addressLine2'
-app/api/client/addresses/[id]/route.ts:direct property read:if (args.postalCode === 'invalid') return 'postalCode'
-app/api/client/addresses/route.ts:Prisma select/include plaintext field:addressLine1: true,
-app/api/client/addresses/route.ts:Prisma select/include plaintext field:addressLine2: true,
-app/api/client/addresses/route.ts:Prisma select/include plaintext field:postalCode: true,
-app/api/client/addresses/route.ts:direct property read:args.postalCode ||
-app/api/client/addresses/route.ts:direct property read:const addressLine1 = normalizeOptionalString(body.addressLine1, 200)
-app/api/client/addresses/route.ts:direct property read:const addressLine2 = normalizeOptionalString(body.addressLine2, 200)
-app/api/client/addresses/route.ts:direct property read:const hasAddressLine = Boolean(args.formattedAddress || args.addressLine1)
-app/api/client/addresses/route.ts:direct property read:const postalCode = normalizeOptionalString(body.postalCode, 40)
-app/api/client/addresses/route.ts:direct property read:if (args.addressLine1 === 'invalid') return 'addressLine1'
-app/api/client/addresses/route.ts:direct property read:if (args.addressLine2 === 'invalid') return 'addressLine2'
-app/api/client/addresses/route.ts:direct property read:if (args.postalCode === 'invalid') return 'postalCode'
 app/api/client/bookings/route.ts:Prisma select/include plaintext field:
-app/api/client/settings/route.ts:Prisma select/include plaintext field:addressLine1: true,
-app/api/client/settings/route.ts:Prisma select/include plaintext field:addressLine2: true,
 app/api/client/settings/route.ts:Prisma select/include plaintext field:dateOfBirth: true,
 app/api/client/settings/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/client/settings/route.ts:Prisma select/include plaintext field:lastName: true,
 app/api/client/settings/route.ts:Prisma select/include plaintext field:phone: true,
-app/api/client/settings/route.ts:Prisma select/include plaintext field:postalCode: true,
 app/api/client/settings/route.ts:direct property read:...(body.dateOfBirth !== undefined ? { dateOfBirth } : {}),
 app/api/client/settings/route.ts:direct property read:body.dateOfBirth !== undefined
 app/api/client/settings/route.ts:direct property read:const current = await loadSettings(auth.clientId, auth.user.email ?? null)
@@ -189,21 +157,6 @@ app/api/pro/clients/search/route.ts:Prisma select/include plaintext field:phone:
 app/api/pro/clients/search/route.ts:direct property read:`${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() ||
 app/api/pro/clients/search/route.ts:direct property read:c.user?.email ||
 app/api/pro/clients/search/route.ts:optional direct property read:c.user?.email ||
-app/api/pro/locations/[id]/route.ts:Prisma select/include plaintext field:addressLine1: true,
-app/api/pro/locations/[id]/route.ts:Prisma select/include plaintext field:addressLine2: true,
-app/api/pro/locations/[id]/route.ts:Prisma select/include plaintext field:postalCode: true,
-app/api/pro/locations/[id]/route.ts:direct property read:? pickString(body.addressLine1)
-app/api/pro/locations/[id]/route.ts:direct property read:? pickString(body.addressLine2)
-app/api/pro/locations/[id]/route.ts:direct property read:? pickString(body.postalCode)
-app/api/pro/locations/[id]/route.ts:direct property read:addressLine1In !== undefined ? addressLine1In : existing.addressLine1 ?? null
-app/api/pro/locations/[id]/route.ts:direct property read:addressLine2In !== undefined ? addressLine2In : existing.addressLine2 ?? null
-app/api/pro/locations/[id]/route.ts:direct property read:data.addressLine1 = addressLine1In
-app/api/pro/locations/[id]/route.ts:direct property read:data.addressLine2 = addressLine2In
-app/api/pro/locations/[id]/route.ts:direct property read:data.postalCode = postalCodeIn
-app/api/pro/locations/[id]/route.ts:direct property read:postalCodeIn !== undefined ? postalCodeIn : existing.postalCode ?? null
-app/api/pro/locations/route.ts:Prisma select/include plaintext field:addressLine1: true,
-app/api/pro/locations/route.ts:Prisma select/include plaintext field:addressLine2: true,
-app/api/pro/locations/route.ts:Prisma select/include plaintext field:postalCode: true,
 app/api/pro/onboarding/location/route.ts:direct property read:const effectivePostalCode = geo.postalCode || postalCode
 app/api/pro/onboarding/location/route.ts:direct property read:const postalCode = pickString(body.postalCode)
 app/api/pro/payments/stripe/connect-account/route.ts:Prisma select/include plaintext field:stripeAccountId: true,
@@ -471,9 +424,6 @@ lib/booking/writeBoundary.ts:direct property read:args.booking.client.user?.phon
 lib/booking/writeBoundary.ts:direct property read:if (!settings.stripeAccountId) {
 lib/booking/writeBoundary.ts:direct property read:if (args.email && !args.phone) return ContactMethod.EMAIL
 lib/booking/writeBoundary.ts:direct property read:if (args.phone && !args.email) return ContactMethod.SMS
-lib/booking/writeBoundary.ts:direct property read:isNullableString(address.addressLine1) &&
-lib/booking/writeBoundary.ts:direct property read:isNullableString(address.addressLine2) &&
-lib/booking/writeBoundary.ts:direct property read:isNullableString(address.postalCode) &&
 lib/booking/writeBoundary.ts:optional direct property read:`${(booking.client?.firstName ?? '').trim()} ${(booking.client?.lastName ?? '').trim()}`.trim()
 lib/booking/writeBoundary.ts:optional direct property read:args.booking.client.user?.email ?? null,
 lib/booking/writeBoundary.ts:optional direct property read:args.booking.client.user?.phone ?? null,
