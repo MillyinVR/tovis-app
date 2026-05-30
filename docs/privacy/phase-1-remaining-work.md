@@ -2,12 +2,13 @@
 
 ## Must finish before Phase 1 is complete
 
-- [ ] Run address encryption backfill in staging.
-- [ ] Record address encryption backfill result.
-- [ ] Run HMAC contact hash v2 backfill in staging.
-- [ ] Record HMAC v2 backfill result.
-- [ ] Confirm app readers are fully cut over to v2 lookup hashes.
+- [x] Run address encryption backfill in staging.
+- [x] Record address encryption backfill result.
+- [x] Run HMAC contact hash v2 backfill in staging.
+- [x] Record HMAC v2 backfill result.
+- [x] Confirm app readers are v2-first with legacy/plaintext burn-in fallback.
 - [ ] Define burn-in window for legacy SHA-256 contact hashes.
+- [ ] Remove plaintext contact lookup fallback after staging/prod verification.
 - [ ] Add follow-up migration to drop legacy SHA-256 lookup columns/indexes after burn-in.
 - [ ] Verify admin audit payload redaction.
 - [ ] Decide booking retention/anonymization policy.
@@ -27,20 +28,22 @@ Result:
 - `test:privacy-phase1`: passed, 8 files / 129 tests.
 - `test:privacy-export-delete`: passed, 2 files / 12 tests.
 - Total focused privacy tests: 10 files / 141 tests.
+- `pnpm typecheck`: passed.
 
 Notes:
 
 - `verify:privacy-phase1` now runs both Phase 1 privacy tests and export/delete privacy tests.
 - `deleteUserData` now clears legacy SHA-256 and HMAC v2 lookup hashes during anonymization.
 - The 471 known plaintext-read baseline entries are still open debt until burned down or formally accepted.
+- App contact lookup readers are v2-first, but still keep legacy SHA-256 and plaintext fallback during burn-in.
 
-## Current known deferred areas
+## HMAC contact hash v2 staging backfill
 
-- Booking-level anonymization is deferred until retention policy is finalized.
-- Message deletion is deferred until conversation ownership and retention are finalized.
-- Notification deliveries need real relation traversal.
-- Aftercare summaries need real Booking/Aftercare traversal.
-- Attribution events need real attribution identity traversal.
-- AdminActionLog export/delete needs real admin audit schema mapping.
-- Storage object byte deletion needs a storage write boundary.
-- Tenant-level export/delete belongs to WS-1 tenant work.
+Date: 2026-05-29  
+Environment: staging via `.env.staging.local`
+
+Commands:
+
+```bash
+pnpm exec dotenv -e .env.staging.local -- pnpm backfill:contact-hash-v2
+pnpm exec dotenv -e .env.staging.local -- pnpm backfill:contact-hash-v2 -- --write

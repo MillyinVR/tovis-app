@@ -4,7 +4,7 @@
 
 Phase 1 removes the hard public-launch privacy blocker by establishing canonical contact normalization, audit redaction, AEAD address encryption, HMAC contact lookup v2, and user export/delete foundations.
 
-Phase 1 is not fully closed yet. The core code paths and local proof commands now pass, but staging backfills, burn-in policy, legacy SHA-256 cleanup, retention decisions, and the plaintext-read baseline decision are still tracked in docs/privacy/phase-1-remaining-work.md.
+Phase 1 is not fully closed yet. The core code paths, local proof commands, and staging backfill scripts now pass. Burn-in policy, legacy SHA-256 cleanup, retention decisions, admin audit deployed-behavior verification, and the plaintext-read baseline decision are still tracked in docs/privacy/phase-1-remaining-work.md.
 
 ## Verification date
 
@@ -12,7 +12,7 @@ Phase 1 is not fully closed yet. The core code paths and local proof commands no
 
 ## Latest local proof
 
-Command:
+Commands:
 
 bash pnpm verify:privacy-phase1 pnpm typecheck 
 
@@ -29,7 +29,7 @@ Notes:
 
 - verify:privacy-phase1 now runs both Phase 1 privacy tests and export/delete privacy tests through pnpm test:privacy.
 - The 471 known plaintext-read baseline entries remain open debt until burned down or formally accepted.
-- These commands prove local guards/tests/typecheck. They do not prove staging backfills have run.
+- These commands prove local guards/tests/typecheck.
 
 ## Completed scope
 
@@ -79,7 +79,39 @@ Address encryption supports:
 - Dual-read compatibility for legacy plaintext expand-phase envelopes and encrypted AEAD envelopes.
 - Backfill support for booking snapshots, booking holds, client addresses, and professional locations.
 
-Status: implementation exists. Staging backfill execution and recorded results remain open.
+Status: implementation exists. Staging backfill command executed successfully with 0 failures. Staging had no address/snapshot rows to migrate at the time of execution.
+
+#### Address encryption staging backfill proof
+
+Date: 2026-05-29  
+Environment: staging via .env.staging.local
+
+Preflight:
+
+bash pnpm exec dotenv -e .env.staging.local -- node -e "for (const k of ['DATABASE_URL','PII_AEAD_KEYS_JSON']) console.log(k, process.env[k] ? 'set' : 'missing')" 
+
+Result:
+
+- DATABASE_URL: set.
+- PII_AEAD_KEYS_JSON: set.
+
+Command:
+
+bash pnpm exec dotenv -e .env.staging.local -- pnpm backfill:address-encryption -- --write 
+
+Result:
+
+- Write run completed with 0 failures.
+- BookingHold: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+- Booking: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+- ClientAddress: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+- ProfessionalLocation: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+
+Interpretation:
+
+- Address encryption staging backfill command executed successfully.
+- There were no staging address/snapshot rows to migrate.
+- Staging AEAD key/env wiring is valid.
 
 ### 1.4 HMAC contact lookup v2
 
@@ -99,7 +131,61 @@ The HMAC v2 path supports:
 - V2-first lookup for current auth/contact read paths.
 - Backfill script for existing User and ClientProfile rows.
 
-Status: implementation exists. HMAC v2 staging backfill, burn-in window, legacy SHA-256 fallback removal, and legacy column/index drop remain open.
+Status: implementation exists. Staging backfill command executed successfully with 0 failures. Staging had no User or ClientProfile rows to migrate at the time of execution. Burn-in window, plaintext fallback removal, legacy SHA-256 fallback removal, and legacy column/index drop remain open.
+
+#### Local script smoke test
+
+Date: 2026-05-29  
+Environment: local via .env.local
+
+Commands:
+
+bash pnpm exec dotenv -e .env.local -- pnpm backfill:contact-hash-v2 pnpm exec dotenv -e .env.local -- pnpm backfill:contact-hash-v2 -- --write 
+
+Result:
+
+- Dry run completed successfully.
+- Write run completed successfully.
+- User: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+- ClientProfile: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+
+Interpretation:
+
+- Script/env wiring is valid locally.
+- DATABASE_URL and PII_LOOKUP_HMAC_KEYS_JSON were loaded from .env.local.
+- Local database had no rows to backfill because local data had been reset.
+- This is local smoke proof, not staging proof.
+
+#### HMAC contact hash v2 staging backfill proof
+
+Date: 2026-05-29  
+Environment: staging via .env.staging.local
+
+Preflight:
+
+bash pnpm exec dotenv -e .env.staging.local -- node -e "for (const k of ['DATABASE_URL','PII_LOOKUP_HMAC_KEYS_JSON']) console.log(k, process.env[k] ? 'set' : 'missing')" 
+
+Result:
+
+- DATABASE_URL: set.
+- PII_LOOKUP_HMAC_KEYS_JSON: set.
+
+Commands:
+
+bash pnpm exec dotenv -e .env.staging.local -- pnpm backfill:contact-hash-v2 pnpm exec dotenv -e .env.staging.local -- pnpm backfill:contact-hash-v2 -- --write 
+
+Result:
+
+- Dry run completed with 0 failures.
+- Write run completed with 0 failures.
+- User: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+- ClientProfile: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+
+Interpretation:
+
+- HMAC v2 staging backfill command executed successfully.
+- There were no staging User or ClientProfile rows to migrate.
+- Staging HMAC key/env wiring is valid.
 
 ### 1.5 User export/delete foundation
 
@@ -147,10 +233,10 @@ text check-canonical-normalization: passed check-pii-plaintext-reads: passed (47
 
 The following items are intentionally not marked complete here:
 
-- Address encryption backfill in staging.
-- HMAC contact hash v2 backfill in staging.
 - Burn-in window for legacy SHA-256 contact hashes.
+- Plaintext contact lookup fallback removal after staging/prod verification.
 - Follow-up migration to drop legacy SHA-256 lookup columns/indexes after burn-in.
+- Admin audit deployed-behavior verification.
 - Booking retention/anonymization policy.
 - Message retention/deletion policy.
 - Formal decision on the 471 known plaintext-read baseline entries.
