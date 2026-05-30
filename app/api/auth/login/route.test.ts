@@ -733,8 +733,8 @@ describe('app/api/auth/login/route', () => {
     )
   })
 
-  it('falls back through the same OR lookup when only plaintext email matches', async () => {
-    const user = makeUser({
+  it('keeps plaintext email fallback during contact hash v2 burn-in', async () => {
+      const user = makeUser({
       loginAttempts: 0,
     })
 
