@@ -27,20 +27,12 @@ const MAX_DEPTH = 8
 
 const SAFE_EXACT_KEYS = new Set([
   'createdat',
-  'createdat',
-  'updatedat',
   'updatedat',
   'deletedat',
-  'deletedat',
-  'reviewedat',
   'reviewedat',
   'removedat',
-  'removedat',
-  'archivedat',
   'archivedat',
   'claimedat',
-  'claimedat',
-  'expiresat',
   'expiresat',
 ])
 
