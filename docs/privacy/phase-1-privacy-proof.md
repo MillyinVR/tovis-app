@@ -280,3 +280,26 @@ The following items are intentionally not marked complete here:
 - Message retention/deletion policy.
 - Formal decision on the 471 known plaintext-read baseline entries.
 - Deferred export/delete traversal for notification deliveries, aftercare summaries, attribution events, admin audit records, storage object bytes, and tenant-level workflows.
+### 1.6 Retention policy
+
+Documented Phase 1 retention policy in:
+
+- `docs/privacy/retention-policy.md`
+
+The policy covers:
+
+- User account anonymization.
+- Client profile anonymization.
+- Professional profile retention constraints.
+- Client address deletion.
+- Professional location retention constraints.
+- Booking retention/anonymization policy.
+- Message/conversation retention policy.
+- Aftercare summaries.
+- Notification deliveries.
+- Attribution events.
+- Admin action logs.
+- Media/storage objects.
+- Export/delete behavior.
+
+Status: policy complete. Booking-level anonymization, message deletion implementation, storage byte deletion, and remaining graph traversal are tracked as deferred implementation areas.

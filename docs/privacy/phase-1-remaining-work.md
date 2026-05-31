@@ -11,8 +11,8 @@
 - [x] Define burn-in window for legacy SHA-256 contact hashes.
 - [ ] Add follow-up migration to drop legacy SHA-256 lookup columns/indexes after pre-launch QA.
 - [x] Verify admin audit payload redaction.
-- [ ] Decide booking retention/anonymization policy.
-- [ ] Decide message retention/deletion policy.
+- [x] Decide booking retention/anonymization policy.
+- [x] Decide message retention/deletion policy.
 - [ ] Burn down or formally accept current PII plaintext-read baseline.
 - [x] Re-run final Phase 1 proof commands from clean tree.
 
@@ -40,6 +40,8 @@ Notes:
 - App contact lookup readers are now v2-first with legacy SHA-256 fallback only.
 - Because there are no real users yet, no extended production burn-in is required. Legacy SHA-256 fallback will remain through short pre-launch QA and should be removed before public launch after seed/demo/auth flows are verified with HMAC v2.
 - The 471 known plaintext-read baseline entries remain open debt until burned down or formally accepted.
+- Booking and message retention decisions are documented in `docs/privacy/retention-policy.md`.
+- Booking-level anonymization and message deletion implementation remain deferred follow-up work.
 
 ## HMAC contact hash v2 staging backfill
 
