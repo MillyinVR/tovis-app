@@ -13,7 +13,7 @@
 - [x] Verify admin audit payload redaction.
 - [x] Decide booking retention/anonymization policy.
 - [x] Decide message retention/deletion policy.
-- [ ] Burn down or formally accept current PII plaintext-read baseline.
+- [x] Burn down or formally accept current PII plaintext-read baseline.
 - [x] Re-run final Phase 1 proof commands from clean tree.
 
 ## Latest local proof
@@ -145,3 +145,30 @@ Decision:
 - AdminActionLog export/delete needs real admin audit schema mapping.
 - Storage object byte deletion needs a storage write boundary.
 - Tenant-level export/delete belongs to WS-1 tenant work.
+
+## PII plaintext-read baseline decision
+
+Date: 2026-05-31
+
+Decision: formally accepted for Phase 1 as tracked expand-phase debt.
+
+Current baseline:
+
+- `tools/baselines/pii-plaintext-reads.txt`
+- 471 known entries.
+- Guard command: `pnpm check:pii-plaintext-reads`.
+
+Rationale:
+
+- The guard blocks new plaintext-read entries outside approved security/privacy boundaries.
+- Existing entries are tracked explicitly in the baseline.
+- Plaintext contact lookup fallback has already been removed from login, password reset, and pro-client matching.
+- Remaining baseline entries are mostly UI rendering, operational workflows, notification/calendar/payment flows, booking/client/pro display, and deferred export/delete traversal areas.
+- These entries are accepted for Phase 1 only; they should be burned down over time by moving reads behind DTOs, privacy helpers, redaction helpers, or purpose-specific access boundaries.
+
+Policy:
+
+- Do not add new baseline entries casually.
+- Any new baseline entry must include a narrow reason or be fixed before merge.
+- Prefer reducing the baseline when touching related files.
+- Treat baseline growth as privacy debt requiring review.

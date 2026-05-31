@@ -453,6 +453,13 @@ The following are documented deferrals, not forgotten work:
 - Storage object byte deletion.
 - Tenant-level export/delete workflows.
 - Legacy SHA-256 column/index drop after pre-launch QA.
+## Plaintext-read baseline policy
+
+The Phase 1 plaintext-read baseline is accepted as tracked expand-phase debt, not as a permanent privacy posture.
+
+Current baseline entries must not grow without review. When code in a baselined area is touched, prefer reducing plaintext reads by moving data access behind typed DTOs, privacy helpers, redaction helpers, or purpose-specific selectors.
+
+Plaintext contact lookup fallback is not part of the accepted baseline posture and has been removed from the main identity lookup paths.
 
 ## Final notes
 

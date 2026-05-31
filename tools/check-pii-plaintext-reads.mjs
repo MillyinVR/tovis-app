@@ -6,8 +6,10 @@
  *
  * This is a PII-contract audit guard, not a complete proof of encryption.
  *
- * It supports a baseline file so the existing expand-phase debt can be tracked
- * without allowing new plaintext reads to sneak in.
+ * It supports a baseline file so accepted Phase 1 expand-phase debt can be
+ * tracked without allowing new plaintext reads to sneak in. Baseline growth
+ * should require privacy review; baseline reduction is preferred whenever
+ * touching related code.
  *
  * Commands:
  * - node tools/check-pii-plaintext-reads.mjs

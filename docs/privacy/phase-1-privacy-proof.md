@@ -303,3 +303,17 @@ The policy covers:
 - Export/delete behavior.
 
 Status: policy complete. Booking-level anonymization, message deletion implementation, storage byte deletion, and remaining graph traversal are tracked as deferred implementation areas.
+### 1.7 PII plaintext-read baseline decision
+
+The plaintext-read guard is implemented in:
+
+- `tools/check-pii-plaintext-reads.mjs`
+
+The known baseline is stored in:
+
+- `tools/baselines/pii-plaintext-reads.txt`
+
+Current result:
+
+```bash
+pnpm check:pii-plaintext-reads
