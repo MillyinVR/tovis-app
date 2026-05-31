@@ -246,11 +246,6 @@ function mockUserLookupByWhere(users: ReturnType<typeof makeUser>[]) {
             ) {
               return true
             }
-
-            if (condition.email && condition.email === user.email) {
-              return true
-            }
-
             return false
           })
         })
@@ -686,7 +681,7 @@ describe('app/api/auth/login/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('looks up users by HMAC emailHashV2 before legacy hash and plaintext email fallback', async () => {
+  it('looks up users by HMAC emailHashV2 before legacy hash without plaintext email fallback', async () => {
     const user = makeUser({
       loginAttempts: 0,
     })
@@ -723,9 +718,6 @@ describe('app/api/auth/login/route', () => {
             {
               emailHash: lookup.emailHash,
             },
-            {
-              email: 'user@example.com',
-            },
           ],
         },
         take: 2,
@@ -733,22 +725,11 @@ describe('app/api/auth/login/route', () => {
     )
   })
 
-  it('keeps plaintext email fallback during contact hash v2 burn-in', async () => {
-      const user = makeUser({
-      loginAttempts: 0,
-    })
+  it('does not include plaintext email fallback in the login lookup', async () => {
+    const lookup = expectedEmailLookupData('user@example.com')
 
-    mockPrisma.user.findMany.mockResolvedValueOnce([user])
-
-    mockVerifyPassword.mockResolvedValue(true)
-    mockPrisma.user.update.mockResolvedValue({
-      id: 'user_1',
-      email: 'user@example.com',
-      role: Role.CLIENT,
-      authVersion: 1,
-      phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
-      emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
-    })
+    mockPrisma.user.findMany.mockResolvedValueOnce([])
+    mockVerifyPassword.mockResolvedValue(false)
 
     const result = await POST(
       makeRequest({
@@ -757,17 +738,21 @@ describe('app/api/auth/login/route', () => {
       }),
     )
 
-    expect(result.status).toBe(200)
-    expect(mockPrisma.user.findMany).toHaveBeenCalledTimes(1)
+    expect(result.status).toBe(401)
+
     expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
-          OR: expect.arrayContaining([
+        where: {
+          OR: [
             {
-              email: 'user@example.com',
+              emailHashV2: lookup.emailHashV2,
+              emailHashKeyVersion: lookup.emailHashKeyVersion,
             },
-          ]),
-        }),
+            {
+              emailHash: lookup.emailHash,
+            },
+          ],
+        },
         take: 2,
       }),
     )
