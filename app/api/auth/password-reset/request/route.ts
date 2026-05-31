@@ -55,17 +55,12 @@ function buildPasswordResetLookupWhereConditions(
 
   /**
    * Legacy SHA-256 fallback for rows created before HMAC v2 backfill.
-   * Remove after HMAC v2 burn-in and legacy hash column drop.
+   * Keep through short pre-launch burn-in, then remove with the legacy hash
+   * column/index drop.
    */
   if (emailHash) {
     orConditions.push({ emailHash })
   }
-
-  /**
-   * Temporary plaintext fallback for local/dev databases and rows that predate
-   * lookup hashes. Remove after contact hash v2 migration, backfill, and burn-in.
-   */
-  orConditions.push({ email })
 
   return orConditions
 }

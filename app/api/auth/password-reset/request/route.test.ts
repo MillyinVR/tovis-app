@@ -125,11 +125,6 @@ function mockUserLookupByWhere(users: PasswordResetTestUser[]) {
             ) {
               return true
             }
-
-            if (condition.email && condition.email === user.email) {
-              return true
-            }
-
             return false
           })
         })
@@ -220,7 +215,7 @@ describe('app/api/auth/password-reset/request/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('looks up users by HMAC emailHashV2 before legacy hash and plaintext email fallback', async () => {
+  it('looks up users by HMAC emailHashV2 before legacy hash without plaintext email fallback', async () => {
     mockUserLookupByWhere([
       {
         id: 'user_1',
@@ -248,9 +243,6 @@ describe('app/api/auth/password-reset/request/route', () => {
           {
             emailHash: lookup.emailHash,
           },
-          {
-            email: 'user@example.com',
-          },
         ],
       },
       select: { id: true, email: true },
@@ -264,6 +256,43 @@ describe('app/api/auth/password-reset/request/route', () => {
       ip: '203.0.113.10',
       userAgent: null,
     })
+    })
+
+    it('does not include plaintext email fallback in the password reset lookup', async () => {
+    const lookup = expectedEmailLookupData('user@example.com')
+
+    mockPrisma.user.findMany.mockResolvedValueOnce([])
+
+    const result = await POST(
+      makeRequest({
+        email: 'user@example.com',
+      }),
+    )
+
+    expect(result.status).toBe(200)
+
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          {
+            emailHashV2: lookup.emailHashV2,
+            emailHashKeyVersion: lookup.emailHashKeyVersion,
+          },
+          {
+            emailHash: lookup.emailHash,
+          },
+        ],
+      },
+      select: { id: true, email: true },
+      take: 2,
+    })
+
+    const call = mockPrisma.user.findMany.mock.calls[0]?.[0]
+    expect(call.where.OR).not.toContainEqual({
+      email: 'user@example.com',
+    })
+
+    expect(mockIssueAndSendPasswordReset).not.toHaveBeenCalled()
   })
 
   it('returns ok when the user is not found', async () => {
@@ -290,9 +319,6 @@ describe('app/api/auth/password-reset/request/route', () => {
           },
           {
             emailHash: lookup.emailHash,
-          },
-          {
-            email: 'missing@example.com',
           },
         ],
       },
