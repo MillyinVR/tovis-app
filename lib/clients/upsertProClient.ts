@@ -145,18 +145,6 @@ function buildClientProfileLookupOrConditions(args: {
     orConditions.push({ phoneHash })
   }
 
-  /**
-   * Temporary plaintext fallback for local/dev databases and rows that predate
-   * lookup hashes. Remove after contact hash v2 migration, backfill, and burn-in.
-   */
-  if (lookupEmail) {
-    orConditions.push({ email: lookupEmail })
-  }
-
-  if (lookupPhone) {
-    orConditions.push({ phone: lookupPhone })
-  }
-
   return orConditions
 }
 
@@ -200,18 +188,6 @@ function buildUserLookupOrConditions(args: {
 
   if (phoneHash) {
     orConditions.push({ phoneHash })
-  }
-
-  /**
-   * Temporary plaintext fallback for local/dev databases and rows that predate
-   * lookup hashes. Remove after contact hash v2 migration, backfill, and burn-in.
-   */
-  if (lookupEmail) {
-    orConditions.push({ email: lookupEmail })
-  }
-
-  if (lookupPhone) {
-    orConditions.push({ phone: lookupPhone })
   }
 
   return orConditions

@@ -185,14 +185,6 @@ function whereMatchesProfile(
     return true
   }
 
-  if (where.email && profile.email === where.email) {
-    return true
-  }
-
-  if (where.phone && profile.phone === where.phone) {
-    return true
-  }
-
   if (where.id && profile.id === where.id) {
     return true
   }
@@ -291,7 +283,7 @@ describe('upsertProClient', () => {
     expect(mocks.prisma.user.findMany).not.toHaveBeenCalled()
   })
 
-  it('matches an existing client profile by emailHashV2 before legacy email', async () => {
+  it('matches an existing client profile by emailHashV2 before legacy email hash without plaintext fallback', async () => {
     const existingProfile = makeProfile({
       id: 'client_hash_match',
       firstName: 'Existing',
@@ -322,13 +314,18 @@ describe('upsertProClient', () => {
             {
               emailHash: emailLookupHash('tori@example.com'),
             },
-            {
-              email: 'tori@example.com',
-            },
           ]),
         },
       }),
     )
+
+    const profileLookupCall = mocks.prisma.clientProfile.findMany.mock.calls[0]?.[0] as {
+        where: { OR: Array<Record<string, unknown>> }
+      }
+
+      expect(profileLookupCall.where.OR).not.toContainEqual({
+        email: 'tori@example.com',
+      })
 
     expect(result).toEqual({
       ok: true,
@@ -368,6 +365,86 @@ describe('upsertProClient', () => {
       error:
         'Matched client profile is linked to a non-client user. Please resolve this before continuing.',
       code: 'DATA_INTEGRITY_ERROR',
+    })
+  })
+
+  it('does not include plaintext phone fallback in client profile lookup', async () => {
+    mocks.prisma.clientProfile.findMany.mockResolvedValueOnce([])
+    mocks.prisma.user.findMany.mockResolvedValueOnce([])
+    mocks.prisma.clientProfile.create.mockResolvedValueOnce(
+      makeProfile({
+        id: 'client_phone_only_1',
+        firstName: 'Tori',
+        lastName: 'Morales',
+        email: null,
+        phone: '+16195551234',
+      }),
+    )
+
+    const result = await upsertProClient({
+      firstName: 'Tori',
+      lastName: 'Morales',
+      phone: '+16195551234',
+    })
+
+    expect(result.ok).toBe(true)
+
+    const phoneHashV2 = phoneLookupHashV2('+16195551234')
+    expect(phoneHashV2).not.toBeNull()
+
+    const profileLookupCall = mocks.prisma.clientProfile.findMany.mock.calls[0]?.[0] as {
+      where: { OR: Array<Record<string, unknown>> }
+    }
+
+    expect(profileLookupCall.where.OR).toEqual(
+      expect.arrayContaining([
+        {
+          phoneHashV2: phoneHashV2?.hash,
+          phoneHashKeyVersion: phoneHashV2?.keyVersion,
+        },
+        {
+          phoneHash: phoneLookupHash('+16195551234'),
+        },
+      ]),
+    )
+
+    expect(profileLookupCall.where.OR).not.toContainEqual({
+      phone: '+16195551234',
+    })
+  })  
+
+  it('does not include plaintext email or phone fallback in user lookup', async () => {
+    mocks.prisma.clientProfile.findMany.mockResolvedValueOnce([])
+    mocks.prisma.user.findMany.mockResolvedValueOnce([])
+    mocks.prisma.clientProfile.create.mockResolvedValueOnce(
+      makeProfile({
+        id: 'client_new_1',
+        firstName: 'Tori',
+        lastName: 'Morales',
+        email: 'tori@example.com',
+        phone: '+16195551234',
+      }),
+    )
+
+    const result = await upsertProClient({
+      firstName: 'Tori',
+      lastName: 'Morales',
+      email: 'tori@example.com',
+      phone: '+16195551234',
+    })
+
+    expect(result.ok).toBe(true)
+
+    const userLookupCall = mocks.prisma.user.findMany.mock.calls[0]?.[0] as {
+      where: { OR: Array<Record<string, unknown>> }
+    }
+
+    expect(userLookupCall.where.OR).not.toContainEqual({
+      email: 'tori@example.com',
+    })
+
+    expect(userLookupCall.where.OR).not.toContainEqual({
+      phone: '+16195551234',
     })
   })
 
