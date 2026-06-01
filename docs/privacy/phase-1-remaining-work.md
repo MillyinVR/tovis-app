@@ -40,7 +40,7 @@ Result:
 * check-canonical-normalization: passed.
 * check-pii-plaintext-reads: passed with 471 known baseline entries.
 * test:privacy-phase1: passed, 8 files / 131 tests.
-* test:privacy-export-delete: passed, 4 files / 26 tests.
+* test:privacy-export-delete: passed, 4 files / 29 tests.
 * pnpm typecheck: passed.
 
 Notes:
@@ -52,10 +52,11 @@ Notes:
     * app/api/internal/privacy/export/[userId]/route.test.ts
     * app/api/internal/privacy/delete/[userId]/route.test.ts
 * deleteUserData clears legacy SHA-256 and HMAC v2 lookup hashes during anonymization.
-* exportUserData now uses explicit projections and negative tests to prevent internal secret/security field egress.
+* deleteUserData runs live anonymization inside a Prisma transaction when called with a Prisma client that supports $transaction.
+* exportUserData uses explicit projections and negative tests to prevent internal secret/security field egress.
 * Protected internal export/delete routes are present and covered by tests.
 * Plaintext contact lookup fallback has been removed from login, password reset, and pro-client matching.
-* Contact lookup readers are now HMAC v2-only.
+* Contact lookup readers are HMAC v2-only.
 * Because there are no real users yet, no extended production burn-in is required.
 * Booking and message retention decisions are documented in docs/privacy/retention-policy.md.
 * Privacy request operations are documented in docs/runbooks/privacy-request.md.
@@ -219,7 +220,33 @@ pnpm typecheck
 
 Result:
 
-* test:privacy-export-delete: passed, 4 files / 26 tests.
+* test:privacy-export-delete: passed, 4 files / 29 tests.
+* verify:privacy-phase1: passed.
+* pnpm typecheck: passed.
+
+Privacy delete transaction hardening
+
+Date: 2026-05-31
+
+deleteUserData now runs live ANONYMIZE work inside a Prisma transaction when called with a Prisma client that supports $transaction.
+
+Covered behavior:
+
+* DRY_RUN does not open a transaction.
+* Live ANONYMIZE opens one transaction.
+* Existing transaction clients do not recursively open another transaction.
+* Supported deletion/anonymization writes run through the transaction client.
+* Tests cover transaction behavior in lib/privacy/deleteUserData.test.ts.
+
+Verification:
+
+pnpm test:privacy-export-delete
+pnpm verify:privacy-phase1
+pnpm typecheck
+
+Result:
+
+* test:privacy-export-delete: passed, 4 files / 29 tests.
 * verify:privacy-phase1: passed.
 * pnpm typecheck: passed.
 
