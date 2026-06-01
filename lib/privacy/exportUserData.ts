@@ -2,6 +2,8 @@
 
 import { Prisma, type PrismaClient } from '@prisma/client'
 
+import { assertSafePrivacyExportPayload } from '@/lib/privacy/exportSafety'
+
 export type ExportUserDataInput = {
   db: PrismaClient | Prisma.TransactionClient
   userId: string
@@ -279,59 +281,6 @@ const tapIntentExportSelect = {
   createdAt: true,
 } satisfies Prisma.TapIntentSelect
 
-const FORBIDDEN_EXPORT_KEYS = new Set([
-  'password',
-  'emailHash',
-  'phoneHash',
-  'emailHashV2',
-  'phoneHashV2',
-  'emailHashKeyVersion',
-  'phoneHashKeyVersion',
-  'authVersion',
-  'loginAttempts',
-  'lockedUntil',
-  'tokenHash',
-  'metadata',
-  'metaJson',
-  'payload',
-  'payloadJson',
-  'data',
-  'contextJson',
-  'licenseRawJson',
-  'stripeCheckoutSessionId',
-  'stripePaymentIntentId',
-  'stripeConnectedAccountId',
-  'stripeLastEventId',
-  'recipientEmailSnapshot',
-  'recipientPhoneSnapshot',
-  'recipientPhone',
-  'recipientEmail',
-  'recipientTimeZone',
-  'destinationSnapshot',
-  'ipAddress',
-  'userAgent',
-  'transactionalSmsConsentIp',
-  'transactionalSmsConsentUserAgent',
-  'encryptedAddressJson',
-  'addressKeyVersion',
-  'postalCodePrefix',
-  'latApprox',
-  'lngApprox',
-  'encryptedAt',
-  'locationAddressSnapshot',
-  'clientAddressSnapshot',
-  'encryptedLocationAddressSnapshotJson',
-  'encryptedClientAddressSnapshotJson',
-  'locationAddressSnapshotKeyVersion',
-  'clientAddressSnapshotKeyVersion',
-  'addressSnapshotsEncryptedAt',
-  'storageBucket',
-  'storagePath',
-  'thumbBucket',
-  'thumbPath',
-  'signedUrl',
-])
-
 const aftercareSummaryExportSelect = {
   id: true,
   bookingId: true,
@@ -500,7 +449,7 @@ export async function exportUserData(
     ],
   }
 
-  assertNoForbiddenExportKeys(exported.data)
+  assertSafePrivacyExportPayload(exported)
 
   return exported
 }
@@ -756,15 +705,6 @@ function compactWhere<T>(items: Array<T | null>): T[] {
   return items.filter((item): item is T => item !== null)
 }
 
-function stripProfileRelations(
-  user: Prisma.UserGetPayload<{ select: typeof userExportSelect }>,
-): Omit<typeof user, 'clientProfile' | 'professionalProfile'> {
-  const { clientProfile: _clientProfile, professionalProfile: _professionalProfile, ...safeUser } =
-    user
-
-  return safeUser
-}
-
 function normalizeJson(value: unknown): unknown {
   return JSON.parse(
     JSON.stringify(value, (_key, childValue: unknown) => {
@@ -787,42 +727,6 @@ function normalizeJson(value: unknown): unknown {
 
 function normalizeJsonArray(value: unknown[]): unknown[] {
   return value.map(normalizeJson)
-}
-
-function assertNoForbiddenExportKeys(value: unknown): void {
-  const forbiddenPath = findForbiddenExportKeyPath(value)
-
-  if (forbiddenPath) {
-    throw new Error(
-      `Privacy export contains forbidden internal field: ${forbiddenPath}`,
-    )
-  }
-}
-
-function findForbiddenExportKeyPath(value: unknown, path = 'data'): string | null {
-  if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      const result = findForbiddenExportKeyPath(value[index], `${path}[${index}]`)
-      if (result) return result
-    }
-
-    return null
-  }
-
-  if (!isRecord(value)) return null
-
-  for (const [key, childValue] of Object.entries(value)) {
-    const childPath = `${path}.${key}`
-
-    if (FORBIDDEN_EXPORT_KEYS.has(key)) {
-      return childPath
-    }
-
-    const result = findForbiddenExportKeyPath(childValue, childPath)
-    if (result) return result
-  }
-
-  return null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

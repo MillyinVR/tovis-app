@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Prisma, Role } from '@prisma/client'
 
 import { exportUserData, USER_DATA_EXPORT_VERSION } from './exportUserData'
+import { UnsafePrivacyExportError } from './exportSafety'
 
 const mocks = vi.hoisted(() => ({
   db: {
@@ -807,34 +808,49 @@ describe('exportUserData', () => {
       select: expect.any(Object),
     })
   })
-  it('does not export internal security, token, storage, raw payload, or encryption fields', async () => {
+  it('fails closed when an unsafe internal field appears in the assembled export payload', async () => {
     mocks.db.user.findUnique.mockResolvedValueOnce(
       makeUser({
         id: 'user_1',
       }),
     )
 
-    const result = await exportUserData({
-      db: mocks.db as never,
-      userId: 'user_1',
+    mocks.db.mediaAsset.findMany.mockResolvedValueOnce([
+      {
+        id: 'media_unsafe_1',
+        professionalId: 'pro_1',
+        bookingId: 'booking_client_1',
+        reviewId: null,
+        uploadedByUserId: 'user_1',
+        uploadedByRole: 'CLIENT',
+        url: 'https://example.com/media.jpg',
+        thumbUrl: 'https://example.com/thumb.jpg',
+        mediaType: 'IMAGE',
+        caption: 'Before photo',
+        visibility: 'PRO_CLIENT',
+        isFeaturedInPortfolio: false,
+        isEligibleForLooks: false,
+        reviewLocked: false,
+        phase: 'BEFORE',
+        createdAt: new Date('2026-04-07T00:00:00.000Z'),
+        storagePath: 'media-private/pro_1/file.jpg',
+      },
+    ])
+
+    await expect(
+      exportUserData({
+        db: mocks.db as never,
+        userId: 'user_1',
+      }),
+    ).rejects.toMatchObject({
+      name: 'UnsafePrivacyExportError',
+      violations: [
+        {
+          path: '$.data.mediaAssets[0].storagePath',
+          reason: 'unsafe_key',
+        },
+      ],
     })
-
-    const serialized = JSON.stringify(result.data)
-
-    expect(serialized).not.toContain('password')
-    expect(serialized).not.toContain('emailHash')
-    expect(serialized).not.toContain('phoneHash')
-    expect(serialized).not.toContain('emailHashV2')
-    expect(serialized).not.toContain('phoneHashV2')
-    expect(serialized).not.toContain('tokenHash')
-    expect(serialized).not.toContain('encryptedAddressJson')
-    expect(serialized).not.toContain('addressKeyVersion')
-    expect(serialized).not.toContain('storagePath')
-    expect(serialized).not.toContain('storageBucket')
-    expect(serialized).not.toContain('recipientEmail')
-    expect(serialized).not.toContain('recipientPhone')
-    expect(serialized).not.toContain('payloadJson')
-    expect(serialized).not.toContain('metaJson')
   })
 
   it('omits attribution and admin audit records by default and documents the decision', async () => {
