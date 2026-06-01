@@ -72,7 +72,12 @@ async function readJson(response: Response): Promise<unknown> {
   return response.json()
 }
 
-function makeDeleteResult(mode: PrivacyDeleteMode) {
+function makeDeleteResult(
+  mode: PrivacyDeleteMode,
+  overrides?: {
+    limitations?: string[]
+  },
+) {
   return {
     executedAt: '2026-05-27T12:00:00.000Z',
     mode,
@@ -90,11 +95,18 @@ function makeDeleteResult(mode: PrivacyDeleteMode) {
         count: 1,
       },
     ],
-    limitations: [],
+    limitations: overrides?.limitations ?? [],
   }
 }
 
-function expectedResultSummary(mode: PrivacyDeleteMode) {
+function expectedResultSummary(
+  mode: PrivacyDeleteMode,
+  overrides?: {
+    limitations?: string[]
+  },
+) {
+  const limitations = overrides?.limitations ?? []
+
   return {
     executedAt: '2026-05-27T12:00:00.000Z',
     mode,
@@ -120,9 +132,9 @@ function expectedResultSummary(mode: PrivacyDeleteMode) {
       },
     ],
     version: 1,
-    limitations: [],
-    limitationsCount: 0,
-    requiresManualFollowUp: false,
+    limitations,
+    limitationsCount: limitations.length,
+    requiresManualFollowUp: limitations.length > 0,
   }
 }
 
@@ -131,7 +143,10 @@ function expectedAuditArgs(args: {
   mode: PrivacyDeleteMode
   requestId: string | null
   tx?: unknown
+  limitations?: string[]
 }) {
+  const limitations = args.limitations ?? []
+
   const base = {
     adminUserId: 'admin_1',
     action: args.action,
@@ -151,9 +166,9 @@ function expectedAuditArgs(args: {
       deleteVersion: 1,
       actionCount: 1,
       version: 1,
-      limitations: [],
-      limitationsCount: 0,
-      requiresManualFollowUp: false,
+      limitations,
+      limitationsCount: limitations.length,
+      requiresManualFollowUp: limitations.length > 0,
       clientProfileId: 'client_1',
       professionalProfileId: 'pro_1',
     },
@@ -241,6 +256,33 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     expect(mocks.writeAdminAuditLog).not.toHaveBeenCalled()
   })
 
+  it('rejects non-boolean dryRun values before auth', async () => {
+    const response = await POST(
+      makeRequest({
+        dryRun: 'true',
+        reason: 'User requested deletion.',
+        confirmUserId: 'user_1',
+      }),
+      makeContext('user_1'),
+    )
+
+    expect(response.status).toBe(400)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
+    expect(await readJson(response)).toEqual({
+      ok: false,
+      error: {
+        code: 'INVALID_DRY_RUN',
+        message: 'dryRun must be a boolean when provided.',
+      },
+    })
+
+    expect(mocks.requireUser).not.toHaveBeenCalled()
+    expect(mocks.requireAdminPermission).not.toHaveBeenCalled()
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+    expect(mocks.deleteUserData).not.toHaveBeenCalled()
+    expect(mocks.writeAdminAuditLog).not.toHaveBeenCalled()
+  })
+
   it('requires confirmUserId for live anonymize requests before auth', async () => {
     const response = await POST(
       makeRequest({
@@ -252,6 +294,7 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     )
 
     expect(response.status).toBe(400)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
     expect(await readJson(response)).toEqual({
       ok: false,
       error: {
@@ -316,6 +359,7 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     )
 
     expect(response.status).toBe(400)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
     expect(await readJson(response)).toEqual({
       ok: false,
       error: {
@@ -415,6 +459,44 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     )
   })
 
+  it('includes limitation metadata when dry-run requires manual follow-up', async () => {
+    const limitations = ['Storage object bytes require separate deletion.']
+
+    mocks.deleteUserData.mockResolvedValueOnce(
+      makeDeleteResult('DRY_RUN', {
+        limitations,
+      }),
+    )
+
+    const response = await POST(
+      makeRequest({
+        dryRun: true,
+        reason: 'User requested deletion.',
+      }),
+      makeContext('user_1'),
+    )
+
+    expect(response.status).toBe(200)
+
+    expect(await readJson(response)).toEqual({
+      ok: true,
+      data: {
+        result: expectedResultSummary('DRY_RUN', {
+          limitations,
+        }),
+      },
+    })
+
+    expect(mocks.writeAdminAuditLog).toHaveBeenCalledWith(
+      expectedAuditArgs({
+        action: 'privacy.user_delete_dry_run',
+        mode: 'DRY_RUN',
+        requestId: null,
+        limitations,
+      }),
+    )
+  })
+
   it('runs live ANONYMIZE and audit write in the same outer transaction', async () => {
     mocks.deleteUserData.mockResolvedValueOnce(makeDeleteResult('ANONYMIZE'))
 
@@ -428,6 +510,7 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     )
 
     expect(response.status).toBe(200)
+    expect(response.headers.get('Cache-Control')).toBe('no-store')
 
     expect(await readJson(response)).toEqual({
       ok: true,
