@@ -153,28 +153,28 @@ describe('writeAdminAuditLog', () => {
 
   it('uses a provided transaction client when supplied', async () => {
     const txCreate = vi.fn().mockResolvedValue({
-        id: 'audit_tx_1',
-        adminUserId: 'admin_1',
-        action: 'category.update',
-        note: null,
-        serviceId: null,
-        categoryId: 'category_1',
-        professionalId: null,
-        createdAt: new Date('2026-05-31T12:00:00.000Z'),
-        })
+      id: 'audit_tx_1',
+      adminUserId: 'admin_1',
+      action: 'category.update',
+      note: null,
+      serviceId: null,
+      categoryId: 'category_1',
+      professionalId: null,
+      createdAt: new Date('2026-05-31T12:00:00.000Z'),
+    })
 
-        const tx = {
-        adminActionLog: {
-            create: txCreate,
-        },
-        } as unknown as Prisma.TransactionClient
+    const tx = {
+      adminActionLog: {
+        create: txCreate,
+      },
+    } as unknown as Prisma.TransactionClient
 
-        const result = await writeAdminAuditLog({
-        adminUserId: 'admin_1',
-        action: 'category.update',
-        categoryId: 'category_1',
-        tx,
-        })
+    const result = await writeAdminAuditLog({
+      adminUserId: 'admin_1',
+      action: 'category.update',
+      categoryId: 'category_1',
+      tx,
+    })
 
     expect(txCreate).toHaveBeenCalledTimes(1)
     expect(mocks.adminActionLogCreate).not.toHaveBeenCalled()

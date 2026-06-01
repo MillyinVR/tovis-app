@@ -38,91 +38,98 @@ const SAFE_EXACT_KEYS = new Set([
 
 const SENSITIVE_EXACT_KEYS = new Set([
   // Auth/session/token fields
-  'accessToken',
-  'actionToken',
-  'apiKey',
+  'accesstoken',
+  'actiontoken',
+  'apikey',
   'authorization',
-  'authToken',
+  'auth',
+  'authtoken',
   'bearer',
-  'clientSecret',
+  'clientsecret',
   'csrf',
-  'csrfToken',
-  'idToken',
+  'csrftoken',
+  'idtoken',
   'jwt',
   'password',
-  'passwordHash',
-  'passwordResetToken',
-  'privateKey',
-  'publicToken',
-  'refreshToken',
+  'passwordhash',
+  'passwordresettoken',
+  'privatekey',
+  'publictoken',
+  'refreshtoken',
   'secret',
-  'secretKey',
+  'secretkey',
   'session',
-  'sessionToken',
+  'sessiontoken',
   'signature',
-  'signedUrl',
+  'signedurl',
   'token',
-  'tokenHash',
+  'tokenhash',
 
   // Contact / identity
   'address',
-  'addressLine1',
-  'addressLine2',
+  'addressline1',
+  'addressline2',
   'city',
-  'clientAddress',
-  'dateOfBirth',
+  'clientaddress',
+  'country',
+  'countrycode',
+  'dateofbirth',
   'dob',
   'email',
-  'emailAddress',
-  'firstName',
-  'fullName',
-  'lastName',
-  'legalName',
+  'emailaddress',
+  'firstname',
+  'fullname',
+  'lastname',
+  'legalname',
   'name',
   'phone',
-  'phoneNumber',
-  'postalCode',
+  'phonenumber',
+  'postalcode',
+  'state',
   'street',
   'street1',
   'street2',
   'zip',
-  'zipCode',
+  'zipcode',
 
   // Notes / free text likely to contain sensitive content
-  'aftercareBody',
-  'aftercareNotes',
+  'aftercarebody',
+  'aftercarenotes',
   'body',
-  'clientNotes',
-  'consultationNotes',
+  'clientnotes',
+  'consultationnotes',
   'description',
   'message',
   'note',
   'notes',
-  'privateNote',
-  'privateNotes',
+  'privatenote',
+  'privatenotes',
   'summary',
 
   // Media / storage
   'bucket',
-  'mediaPath',
-  'objectKey',
+  'mediapath',
+  'objectkey',
   'path',
-  'privateMediaPath',
-  'storageKey',
+  'privatemediapath',
+  'storagebucket',
+  'storagekey',
+  'storagepath',
+  'thumbpath',
   'url',
 
   // Payments / providers
-  'accountNumber',
-  'bankAccount',
+  'accountnumber',
+  'bankaccount',
   'card',
-  'cardNumber',
-  'paymentMethod',
-  'paymentSecret',
-  'routingNumber',
-  'stripeAccountId',
-  'stripeCustomerId',
-  'stripePaymentIntentId',
-  'stripeSecret',
+  'cardnumber',
+  'paymentmethod',
+  'paymentsecret',
+  'routingnumber',
+  'stripeaccountid',
+  'stripecustomerid',
+  'stripepaymentintentid',
+  'stripesecret',
 ])
 
 const SENSITIVE_KEY_PATTERNS = [
@@ -228,10 +235,12 @@ export function redactAuditChangeSet(args: {
 }
 
 /**
- * Returns true when an object looks like the current address privacy envelope.
+ * Returns true when an object looks like an address privacy envelope.
  *
- * The current expand-phase envelope can still contain plaintext address fields,
- * so the whole object should be redacted in audit storage.
+ * Legacy expand-phase envelopes can still contain plaintext address fields, so
+ * the whole object should be redacted in audit storage. Current AEAD envelopes
+ * are encrypted, but still represent address material and should not be copied
+ * wholesale into long-lived audit/debug JSON.
  */
 export function isAddressPrivacyEnvelopeLike(
   value: unknown,
@@ -368,14 +377,11 @@ function normalizeKeyForPolicy(key: string): string {
 
 function isSensitiveKey(key: string): boolean {
   const compact = normalizeKeyForPolicy(key)
-  const normalized = key.trim()
 
   if (SAFE_EXACT_KEYS.has(compact)) return false
-
-  if (SENSITIVE_EXACT_KEYS.has(normalized)) return true
   if (SENSITIVE_EXACT_KEYS.has(compact)) return true
 
-  return SENSITIVE_KEY_PATTERNS.some((pattern) => pattern.test(normalized))
+  return SENSITIVE_KEY_PATTERNS.some((pattern) => pattern.test(key))
 }
 
 function isSensitiveString(value: string): boolean {
@@ -385,6 +391,7 @@ function isSensitiveString(value: string): boolean {
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
+
 function containsCircularReference(
   value: unknown,
   seen = new WeakSet<object>(),
