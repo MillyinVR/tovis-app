@@ -40,6 +40,20 @@ describe('auditRedaction', () => {
       stripePaymentIntentId: '[REDACTED]',
     })
   })
+  
+  it('redacts exact generic name fields because they may contain personal identity data', () => {
+    const result = redactAuditPayload({
+      serviceId: 'service_1',
+      name: 'Tori Morales',
+      publicLabel: 'Hair Services',
+    })
+
+    expect(result).toEqual({
+      serviceId: 'service_1',
+      name: '[REDACTED]',
+      publicLabel: 'Hair Services',
+    })
+  })
 
   it('redacts sensitive keys by pattern', () => {
     const result = redactAuditPayload({

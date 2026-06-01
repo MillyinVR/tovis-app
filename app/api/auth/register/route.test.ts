@@ -5,9 +5,7 @@ import { Role } from '@prisma/client'
 import {
   clearContactLookupHmacKeyringCacheForTests,
   CONTACT_LOOKUP_HMAC_KEY_VERSION,
-  emailLookupHash,
   emailLookupHashV2,
-  phoneLookupHash,
   phoneLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 
@@ -39,6 +37,7 @@ const mockStartTwilioVerifyPhoneVerification = vi.hoisted(() => vi.fn())
 const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
+const mockBuildAddressPrivacyWriteData = vi.hoisted(() => vi.fn())
 
 const mockFetch = vi.hoisted(() => vi.fn())
 
@@ -122,6 +121,10 @@ vi.mock('@/lib/smsCountryPolicy', () => ({
 vi.mock('@/lib/observability/authEvents', () => ({
   logAuthEvent: mockLogAuthEvent,
   captureAuthException: mockCaptureAuthException,
+}))
+
+vi.mock('@/lib/security/addressEncryption', () => ({
+  buildAddressPrivacyWriteData: mockBuildAddressPrivacyWriteData,
 }))
 
 import { POST } from './route'
@@ -301,7 +304,7 @@ function expectedEmailLookupData(email: string) {
   expect(emailHashV2).not.toBeNull()
 
   return {
-    emailHash: emailLookupHash(email),
+    emailHash: null,
     emailHashV2: emailHashV2?.hash,
     emailHashKeyVersion: emailHashV2?.keyVersion,
   }
@@ -313,7 +316,7 @@ function expectedPhoneLookupData(phone: string) {
   expect(phoneHashV2).not.toBeNull()
 
   return {
-    phoneHash: phoneLookupHash(phone),
+    phoneHash: null,
     phoneHashV2: phoneHashV2?.hash,
     phoneHashKeyVersion: phoneHashV2?.keyVersion,
   }
@@ -374,6 +377,7 @@ describe('app/api/auth/register/route', () => {
     process.env.PII_LOOKUP_HMAC_KEYS_JSON = JSON.stringify({
       [CONTACT_LOOKUP_HMAC_KEY_VERSION]: TEST_HMAC_KEY,
     })
+
     clearContactLookupHmacKeyringCacheForTests()
 
     resetMockGroup(mockPrisma.user)
@@ -410,6 +414,21 @@ describe('app/api/auth/register/route', () => {
     mockLogAuthEvent.mockReset()
     mockCaptureAuthException.mockReset()
 
+    mockBuildAddressPrivacyWriteData.mockReset()
+    mockBuildAddressPrivacyWriteData.mockReturnValue({
+      addressPrivacyEnvelope: {
+        v: 1,
+        kid: 'test-address-key',
+        alg: 'aes-256-gcm',
+        iv: 'test-iv',
+        tag: 'test-tag',
+        ciphertext: 'test-ciphertext',
+      },
+      addressPrivacyKeyVersion: 1,
+      addressPostalCodeHash: 'test-postal-code-hash',
+      addressGeoHash: 'test-geo-hash',
+    })
+
     mockStartTwilioVerifyPhoneVerification.mockReset()
 
     mockFetch.mockReset()
@@ -419,13 +438,16 @@ describe('app/api/auth/register/route', () => {
       kind: 'ip',
       id: '198.51.100.10',
     })
+
     mockPhoneRateLimitIdentity.mockReturnValue({
       kind: 'phone',
       id: '+15551234567',
     })
+
     mockEnforceRateLimit.mockResolvedValue(null)
 
     mockIsRuntimeFlagEnabled.mockImplementation(async () => false)
+
     mockValidateSmsDestinationCountry.mockReturnValue({
       ok: true,
       phone: '+15551234567',
@@ -434,6 +456,7 @@ describe('app/api/auth/register/route', () => {
 
     mockValidatePassword.mockReturnValue(null)
     mockGetCurrentTosVersion.mockReturnValue('2026-04')
+
     mockVerifyTurnstileOrFailOpen.mockResolvedValue({
       ok: true,
       failOpen: false,
@@ -443,6 +466,7 @@ describe('app/api/auth/register/route', () => {
     mockCreateVerificationToken.mockReturnValue('verification_token')
 
     mockGetAppUrlFromRequest.mockReturnValue('http://localhost:3000')
+
     mockIssueAndSendEmailVerification.mockResolvedValue({
       id: 'evt_1',
       expiresAt: new Date('2026-04-09T12:00:00.000Z'),
@@ -532,6 +556,10 @@ describe('app/api/auth/register/route', () => {
                   lng: -117.1611,
                   timeZone: 'America/Los_Angeles',
                   workingHours: expect.any(Object),
+                  addressPrivacyEnvelope: expect.any(Object),
+                  addressPrivacyKeyVersion: expect.any(Number),
+                  addressPostalCodeHash: expect.any(String),
+                  addressGeoHash: expect.any(String),
                 }),
               },
             }),
@@ -601,6 +629,10 @@ describe('app/api/auth/register/route', () => {
                   lng: -117.1611,
                   timeZone: 'America/Los_Angeles',
                   workingHours: expect.any(Object),
+                  addressPrivacyEnvelope: expect.any(Object),
+                  addressPrivacyKeyVersion: expect.any(Number),
+                  addressPostalCodeHash: expect.any(String),
+                  addressGeoHash: expect.any(String),
                 }),
               },
             }),
@@ -616,7 +648,7 @@ describe('app/api/auth/register/route', () => {
     })
   })
 
-  it('dual-writes user and client contact lookup hashes during client signup', async () => {
+  it('writes v2 user and client contact lookup hashes during client signup', async () => {
     const tx = {
       user: {
         create: vi.fn().mockResolvedValue({
@@ -649,6 +681,7 @@ describe('app/api/auth/register/route', () => {
               firstName: 'Tori',
               lastName: 'Morales',
               phone: '+15551234567',
+              ...expectedEmailLookupData('client@example.com'),
               ...expectedPhoneLookupData('+15551234567'),
               phoneVerifiedAt: null,
             },
@@ -1074,6 +1107,7 @@ describe('app/api/auth/register/route', () => {
             firstName: 'Tori',
             lastName: 'Morales',
             phone: '+15551234567',
+            ...expectedEmailLookupData('client@example.com'),
             ...expectedPhoneLookupData('+15551234567'),
             phoneVerifiedAt: null,
           },

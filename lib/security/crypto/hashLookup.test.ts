@@ -173,6 +173,37 @@ describe('contactLookupHmacHex', () => {
     ).toThrow('Missing required env PII_LOOKUP_HMAC_KEYS_JSON')
   })
 
+  it('supports explicit key versions from the configured keyring', () => {
+    const keyV2 = Buffer.alloc(32, 9).toString('base64')
+
+    process.env.PII_LOOKUP_HMAC_KEYS_JSON = JSON.stringify({
+      [CONTACT_LOOKUP_HMAC_KEY_VERSION]: TEST_HMAC_KEY,
+      2: keyV2,
+    })
+    clearContactLookupHmacKeyringCacheForTests()
+
+    const result = contactLookupHmacHex({
+      normalizedValue: 'tori@example.com',
+      keyVersion: 2,
+    })
+
+    expect(result).toEqual({
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      keyVersion: 2,
+    })
+  })
+
+  it('throws when the HMAC key env is invalid JSON', () => {
+    process.env.PII_LOOKUP_HMAC_KEYS_JSON = '{nope'
+    clearContactLookupHmacKeyringCacheForTests()
+
+    expect(() =>
+      contactLookupHmacHex({
+        normalizedValue: 'tori@example.com',
+      }),
+    ).toThrow('PII_LOOKUP_HMAC_KEYS_JSON must be valid JSON')
+  })
+
   it('throws when the HMAC key is not 32 bytes', () => {
     process.env.PII_LOOKUP_HMAC_KEYS_JSON = JSON.stringify({
       [CONTACT_LOOKUP_HMAC_KEY_VERSION]: Buffer.alloc(16, 7).toString('base64'),

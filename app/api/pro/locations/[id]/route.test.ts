@@ -190,6 +190,7 @@ function makeExistingLocation(
   overrides: Partial<{
     id: string
     type: ProfessionalLocationType
+    name: string | null
     isPrimary: boolean
     isBookable: boolean
     timeZone: string | null
@@ -204,11 +205,73 @@ function makeExistingLocation(
     lat: Prisma.Decimal | null
     lng: Prisma.Decimal | null
     workingHours: unknown
+    bufferMinutes: number
+    stepMinutes: number
+    advanceNoticeMinutes: number
+    maxDaysAhead: number
+    createdAt: Date
+    updatedAt: Date
   }> = {},
 ) {
   return {
     id: 'loc_123',
     type: ProfessionalLocationType.SALON,
+    name: 'Studio',
+    isPrimary: false,
+    isBookable: false,
+    timeZone: 'America/Los_Angeles',
+    placeId: 'place_123',
+    formattedAddress: '123 Main St, San Diego, CA',
+    addressLine1: '123 Main St',
+    addressLine2: null,
+    city: 'San Diego',
+    state: 'CA',
+    postalCode: '92101',
+    countryCode: 'US',
+    lat: new Prisma.Decimal('32.715736'),
+    lng: new Prisma.Decimal('-117.161087'),
+    bufferMinutes: 15,
+    stepMinutes: 30,
+    advanceNoticeMinutes: 15,
+    maxDaysAhead: 365,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+    workingHours: validWorkingHours,
+    ...overrides,
+  }
+}
+
+function makeUpdatedLocation(
+  overrides: Partial<{
+    id: string
+    type: ProfessionalLocationType
+    name: string | null
+    isPrimary: boolean
+    isBookable: boolean
+    timeZone: string | null
+    placeId: string | null
+    formattedAddress: string | null
+    addressLine1: string | null
+    addressLine2: string | null
+    city: string | null
+    state: string | null
+    postalCode: string | null
+    countryCode: string | null
+    lat: Prisma.Decimal | null
+    lng: Prisma.Decimal | null
+    workingHours: unknown
+    bufferMinutes: number
+    stepMinutes: number
+    advanceNoticeMinutes: number
+    maxDaysAhead: number
+    createdAt: Date
+    updatedAt: Date
+  }> = {},
+) {
+  return {
+    id: 'loc_123',
+    type: ProfessionalLocationType.SALON,
+    name: 'Studio',
     isPrimary: false,
     isBookable: false,
     timeZone: 'America/Los_Angeles',
@@ -223,25 +286,12 @@ function makeExistingLocation(
     lat: new Prisma.Decimal('32.715736'),
     lng: new Prisma.Decimal('-117.161087'),
     workingHours: validWorkingHours,
-    ...overrides,
-  }
-}
-
-function makeUpdatedLocation(
-  overrides: Partial<{
-    id: string
-    isPrimary: boolean
-    isBookable: boolean
-    timeZone: string | null
-    type: ProfessionalLocationType
-  }> = {},
-) {
-  return {
-    id: 'loc_123',
-    isPrimary: false,
-    isBookable: false,
-    timeZone: 'America/Los_Angeles',
-    type: ProfessionalLocationType.SALON,
+    bufferMinutes: 15,
+    stepMinutes: 30,
+    advanceNoticeMinutes: 15,
+    maxDaysAhead: 365,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-02T00:00:00.000Z'),
     ...overrides,
   }
 }
@@ -367,10 +417,9 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
         select: {
           id: true,
           type: true,
+          name: true,
           isPrimary: true,
           isBookable: true,
-          timeZone: true,
-          placeId: true,
           formattedAddress: true,
           addressLine1: true,
           addressLine2: true,
@@ -378,9 +427,17 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
           state: true,
           postalCode: true,
           countryCode: true,
+          placeId: true,
           lat: true,
           lng: true,
+          timeZone: true,
           workingHours: true,
+          bufferMinutes: true,
+          stepMinutes: true,
+          advanceNoticeMinutes: true,
+          maxDaysAhead: true,
+          createdAt: true,
+          updatedAt: true,
         },
       })
 
@@ -499,12 +556,11 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
 
       const body = await readJson<{
         ok: true
-        location: {
-          id: string
-          isPrimary: boolean
-          isBookable: boolean
-          timeZone: string | null
-          type: ProfessionalLocationType
+        location: ReturnType<typeof makeUpdatedLocation> & {
+          lat: number | null
+          lng: number | null
+          createdAt: string
+          updatedAt: string
         }
       }>(result)
 
@@ -538,15 +594,36 @@ describe('app/api/pro/locations/[id]/route.ts', () => {
       expect(updateCall).toBeDefined()
       expectNoAddressPrivacyWrites(updateCall.data)
 
-      expect(body).toEqual({
+      expect(body).toMatchObject({
         ok: true,
         location: {
           id: 'loc_123',
+          name: 'Studio',
           isPrimary: false,
           isBookable: false,
           timeZone: 'America/Los_Angeles',
           type: ProfessionalLocationType.SALON,
         },
+      })
+
+      expect(body.location).toMatchObject({
+        formattedAddress: '123 Main St, San Diego, CA',
+        addressLine1: '123 Main St',
+        addressLine2: null,
+        city: 'San Diego',
+        state: 'CA',
+        postalCode: '92101',
+        countryCode: 'US',
+        placeId: 'place_123',
+        lat: 32.715736,
+        lng: -117.161087,
+        bufferMinutes: 15,
+        stepMinutes: 30,
+        advanceNoticeMinutes: 15,
+        maxDaysAhead: 365,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+        workingHours: validWorkingHours,
       })
     })
 

@@ -405,6 +405,10 @@ describe('deleteUserData', () => {
         dateOfBirth: null,
         emailHash: null,
         phoneHash: null,
+        emailHashV2: null,
+        emailHashKeyVersion: null,
+        phoneHashV2: null,
+        phoneHashKeyVersion: null,
       },
     })
 
@@ -425,6 +429,10 @@ describe('deleteUserData', () => {
         phone: null,
         emailHash: null,
         phoneHash: null,
+        emailHashV2: null,
+        emailHashKeyVersion: null,
+        phoneHashV2: null,
+        phoneHashKeyVersion: null,
         password: expect.stringMatching(/^\$2b\$12\$/),
       },
     })

@@ -44,6 +44,7 @@ import {
   buildClientProfileContactLookupData,
   buildUserContactLookupData,
 } from '@/lib/security/contactLookup'
+import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -1023,7 +1024,7 @@ export async function POST(request: Request) {
                     firstName,
                     lastName,
                     phone,
-                    ...buildClientProfileContactLookupData({ phone }),
+                    ...buildClientProfileContactLookupData({ email, phone }),
                     phoneVerifiedAt: null,
                   },
                 }
@@ -1092,6 +1093,19 @@ export async function POST(request: Request) {
                               lat: signupLocation.lat,
                               lng: signupLocation.lng,
 
+                              ...buildAddressPrivacyWriteData({
+                                formattedAddress: signupLocation.formattedAddress,
+                                addressLine1: null,
+                                addressLine2: null,
+                                city: signupLocation.city,
+                                state: signupLocation.state,
+                                postalCode: signupLocation.postalCode,
+                                countryCode: signupLocation.countryCode,
+                                placeId: signupLocation.placeId,
+                                lat: signupLocation.lat,
+                                lng: signupLocation.lng,
+                              }),
+
                               timeZone: finalTimeZone,
                               workingHours: defaultWorkingHours(),
                             }
@@ -1108,6 +1122,19 @@ export async function POST(request: Request) {
 
                               lat: signupLocation.lat,
                               lng: signupLocation.lng,
+
+                              ...buildAddressPrivacyWriteData({
+                                formattedAddress: null,
+                                addressLine1: null,
+                                addressLine2: null,
+                                city: signupLocation.city,
+                                state: signupLocation.state,
+                                postalCode: signupLocation.postalCode,
+                                countryCode: signupLocation.countryCode,
+                                placeId: null,
+                                lat: signupLocation.lat,
+                                lng: signupLocation.lng,
+                              }),
 
                               timeZone: finalTimeZone,
                               workingHours: defaultWorkingHours(),

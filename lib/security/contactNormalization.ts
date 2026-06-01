@@ -85,6 +85,15 @@ export function normalizeEmail(value: unknown): string | null {
 }
 
 /**
+ * Delegate for observability/auth event hashing.
+ *
+ * Auth telemetry must use the same canonical contact value as auth lookup
+ * hashes, otherwise event correlation and privacy review drift.
+ */
+export function normalizePhoneForHash(value: unknown): string | null {
+  return normalizePhone(value)
+}
+/**
  * Normalizes user-supplied phone values for lookup/hash usage.
  *
  * Policy:

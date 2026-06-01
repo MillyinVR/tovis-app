@@ -41,11 +41,12 @@ type UserWithProfiles = Prisma.UserGetPayload<{
 }>
 
 const EXPORTABLE_PRIVACY_DELETE_VERSION = 1
+
 // Valid bcrypt hash for an intentionally unknown random password.
 // Keeps deleted users unable to log in while preserving bcrypt-shaped data
 // for auth code that expects User.password to be a bcrypt hash.
 const DELETED_USER_PASSWORD_SENTINEL =
-'$2b$12$9NDZhwWiWa7NkQ1NA9w0/eRcYJ6HQtZUhlLk9d7uQdIKgMxHdKAri'
+  '$2b$12$9NDZhwWiWa7NkQ1NA9w0/eRcYJ6HQtZUhlLk9d7uQdIKgMxHdKAri'
 
 /**
  * Canonical user data deletion/anonymization boundary.
@@ -80,10 +81,25 @@ export async function deleteUserData(
 
   actions.push(
     await deleteClientAddresses(input.db, input.mode, clientProfileId),
-    await deleteProfessionalLocations(input.db, input.mode, professionalProfileId),
-    await deleteBookingHolds(input.db, input.mode, clientProfileId, professionalProfileId),
+    await deleteProfessionalLocations(
+      input.db,
+      input.mode,
+      professionalProfileId,
+    ),
+    await deleteBookingHolds(
+      input.db,
+      input.mode,
+      clientProfileId,
+      professionalProfileId,
+    ),
     await deleteClientActionTokens(input.db, input.mode, clientProfileId),
-    await deleteMediaAssets(input.db, input.mode, input.userId, clientProfileId, professionalProfileId),
+    await deleteMediaAssets(
+      input.db,
+      input.mode,
+      input.userId,
+      clientProfileId,
+      professionalProfileId,
+    ),
     await anonymizeClientProfile(input.db, input.mode, user),
     await anonymizeProfessionalProfile(input.db, input.mode, user),
     await anonymizeUser(input.db, input.mode, user),
@@ -258,7 +274,8 @@ async function deleteMediaAssets(
       model: 'MediaAsset',
       action: 'WOULD_DELETE',
       count,
-      notes: 'Deletes DB rows only. Storage object deletion must run through the media/storage write boundary.',
+      notes:
+        'Deletes DB rows only. Storage object deletion must run through the media/storage write boundary.',
     }
   }
 
@@ -268,7 +285,8 @@ async function deleteMediaAssets(
     model: 'MediaAsset',
     action: 'DELETED',
     count: result.count,
-    notes: 'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
+    notes:
+      'Deleted DB rows only. Storage object deletion must run through the media/storage write boundary.',
   }
 }
 
@@ -297,8 +315,17 @@ async function anonymizeClientProfile(
       email: null,
       phone: null,
       dateOfBirth: null,
+
+      // Legacy SHA-256 lookup fields.
       emailHash: null,
       phoneHash: null,
+
+      // HMAC v2 lookup fields. These must be cleared during anonymization so
+      // deleted users do not retain contact blind-index identifiers.
+      emailHashV2: null,
+      emailHashKeyVersion: null,
+      phoneHashV2: null,
+      phoneHashKeyVersion: null,
     },
   })
 
@@ -361,8 +388,18 @@ async function anonymizeUser(
     data: {
       email: deletedEmail(user.id),
       phone: null,
+
+      // Legacy SHA-256 lookup fields.
       emailHash: null,
       phoneHash: null,
+
+      // HMAC v2 lookup fields. These must be cleared during anonymization so
+      // deleted users do not retain contact blind-index identifiers.
+      emailHashV2: null,
+      emailHashKeyVersion: null,
+      phoneHashV2: null,
+      phoneHashKeyVersion: null,
+
       password: DELETED_USER_PASSWORD_SENTINEL,
     },
   })

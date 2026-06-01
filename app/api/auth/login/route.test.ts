@@ -6,7 +6,6 @@ import { Role } from '@prisma/client'
 import {
   CONTACT_LOOKUP_HMAC_KEY_VERSION,
   clearContactLookupHmacKeyringCacheForTests,
-  emailLookupHash,
   emailLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 
@@ -125,12 +124,6 @@ vi.mock('@/app/api/_utils', () => {
 
     pickString: (value: unknown) => (typeof value === 'string' ? value : null),
 
-    normalizeEmail: vi.fn((value: unknown) => {
-      if (typeof value !== 'string') return null
-      const normalized = value.trim().toLowerCase()
-      return normalized || null
-    }),
-
     enforceRateLimit: mockEnforceRateLimit,
     rateLimitIdentity: mockRateLimitIdentity,
   }
@@ -221,7 +214,6 @@ function expectedEmailLookupData(email: string) {
   const hmac = emailLookupHashV2(email)
 
   return {
-    emailHash: emailLookupHash(email),
     emailHashV2: hmac?.hash ?? null,
     emailHashKeyVersion: hmac?.keyVersion ?? null,
   }
@@ -239,24 +231,12 @@ function mockUserLookupByWhere(users: ReturnType<typeof makeUser>[]) {
           return conditions.some((condition) => {
             if (
               condition.emailHashV2 &&
-              condition.emailHashKeyVersion &&
+              condition.emailHashKeyVersion != null &&
               condition.emailHashV2 === lookup.emailHashV2 &&
               condition.emailHashKeyVersion === lookup.emailHashKeyVersion
             ) {
               return true
             }
-
-            if (
-              condition.emailHash &&
-              condition.emailHash === lookup.emailHash
-            ) {
-              return true
-            }
-
-            if (condition.email && condition.email === user.email) {
-              return true
-            }
-
             return false
           })
         })
@@ -692,7 +672,7 @@ describe('app/api/auth/login/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('looks up users by HMAC emailHashV2 before legacy hash and plaintext email fallback', async () => {
+  it('looks up users by HMAC emailHashV2 only', async () => {
     const user = makeUser({
       loginAttempts: 0,
     })
@@ -726,34 +706,18 @@ describe('app/api/auth/login/route', () => {
               emailHashV2: lookup.emailHashV2,
               emailHashKeyVersion: lookup.emailHashKeyVersion,
             },
-            {
-              emailHash: lookup.emailHash,
-            },
-            {
-              email: 'user@example.com',
-            },
           ],
         },
+        take: 2,
       }),
     )
   })
 
-  it('falls back through the same OR lookup when only plaintext email matches', async () => {
-    const user = makeUser({
-      loginAttempts: 0,
-    })
+  it('does not include legacy or plaintext fallback in the login lookup', async () => {
+    const lookup = expectedEmailLookupData('user@example.com')
 
-    mockPrisma.user.findMany.mockResolvedValueOnce([user])
-
-    mockVerifyPassword.mockResolvedValue(true)
-    mockPrisma.user.update.mockResolvedValue({
-      id: 'user_1',
-      email: 'user@example.com',
-      role: Role.CLIENT,
-      authVersion: 1,
-      phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
-      emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
-    })
+    mockPrisma.user.findMany.mockResolvedValueOnce([])
+    mockVerifyPassword.mockResolvedValue(false)
 
     const result = await POST(
       makeRequest({
@@ -762,8 +726,33 @@ describe('app/api/auth/login/route', () => {
       }),
     )
 
-    expect(result.status).toBe(200)
-    expect(mockPrisma.user.findMany).toHaveBeenCalledTimes(1)
+    expect(result.status).toBe(401)
+
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [
+            {
+              emailHashV2: lookup.emailHashV2,
+              emailHashKeyVersion: lookup.emailHashKeyVersion,
+            },
+          ],
+        },
+        take: 2,
+      }),
+    )
+
+    const call = mockPrisma.user.findMany.mock.calls[0]?.[0] as {
+      where: { OR: Array<Record<string, unknown>> }
+    }
+
+    expect(call.where.OR).not.toContainEqual({
+      emailHash: expect.any(String),
+    })
+
+    expect(call.where.OR).not.toContainEqual({
+      email: 'user@example.com',
+    })
   })
 
   it('fails closed as invalid credentials when lookup conditions match multiple users', async () => {

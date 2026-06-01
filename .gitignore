@@ -57,3 +57,6 @@ server.log
 
 playwright-report/
 test-results/
+
+.env*.local
+.env.staging.local

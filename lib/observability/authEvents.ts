@@ -1,11 +1,10 @@
 // lib/observability/authEvents.ts
 
 import * as Sentry from '@sentry/nextjs'
-
 import {
-  emailLookupHash,
-  phoneLookupHash,
-  sha256Hex,
+  emailLookupHashV2,
+  legacySha256Hex,
+  phoneLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 import { redactionLabels } from '@/lib/security/redaction'
 
@@ -39,9 +38,9 @@ function shortenHash(hash: string | null): string | null {
   return hash ? hash.slice(0, SHORT_HASH_LENGTH) : null
 }
 
-function stringLookupHash(value: string | null | undefined): string | null {
+function nonContactLookupHash(value: string | null | undefined): string | null {
   const normalized = value?.trim()
-  return normalized ? sha256Hex(normalized) : null
+  return normalized ? legacySha256Hex(normalized) : null
 }
 
 function isSensitiveKey(key: string): boolean {
@@ -220,6 +219,26 @@ function sanitizedExceptionForCapture(error: unknown): Error {
   return sanitized
 }
 
+function shortenContactHash(
+  hash: { hash: string; keyVersion: number } | null,
+): string | null {
+  return hash ? hash.hash.slice(0, SHORT_HASH_LENGTH) : null
+}
+
+function buildAuthEventHashes(input: {
+  userId?: string | null
+  email?: string | null
+  phone?: string | null
+  verificationId?: string | null
+}) {
+  return {
+    userIdHash: shortenHash(nonContactLookupHash(input.userId)),
+    emailHash: shortenContactHash(emailLookupHashV2(input.email)),
+    phoneHash: shortenContactHash(phoneLookupHashV2(input.phone)),
+    verificationIdHash: shortenHash(nonContactLookupHash(input.verificationId)),
+  }
+}
+
 export function logAuthEvent(input: AuthEventInput): void {
   const safeCode = sanitizeEventCode(input.code)
 
@@ -232,10 +251,7 @@ export function logAuthEvent(input: AuthEventInput): void {
     route: input.route,
     provider: input.provider ?? null,
     code: safeCode,
-    userIdHash: shortenHash(stringLookupHash(input.userId)),
-    emailHash: shortenHash(emailLookupHash(input.email)),
-    phoneHash: shortenHash(phoneLookupHash(input.phone)),
-    verificationIdHash: shortenHash(stringLookupHash(input.verificationId)),
+    ...buildAuthEventHashes(input),
     message: sanitizeErrorMessage(input.message),
     ...sanitizeMeta(input.meta),
   })
@@ -255,10 +271,7 @@ export function captureAuthException(input: CaptureAuthExceptionInput): void {
     if (safeCode) scope.setTag('auth.code', safeCode)
 
     scope.setContext('auth', {
-      userIdHash: shortenHash(stringLookupHash(input.userId)),
-      emailHash: shortenHash(emailLookupHash(input.email)),
-      phoneHash: shortenHash(phoneLookupHash(input.phone)),
-      verificationIdHash: shortenHash(stringLookupHash(input.verificationId)),
+      ...buildAuthEventHashes(input),
       errorName: sanitizedError.name,
       errorMessage: sanitizedError.message,
       ...sanitizedMeta,

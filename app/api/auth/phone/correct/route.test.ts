@@ -5,7 +5,6 @@ import { Prisma, Role } from '@prisma/client'
 import {
   clearContactLookupHmacKeyringCacheForTests,
   CONTACT_LOOKUP_HMAC_KEY_VERSION,
-  phoneLookupHash,
   phoneLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 
@@ -145,7 +144,7 @@ function expectedPhoneLookupData(phone: string | null) {
   const phoneHashV2 = phoneLookupHashV2(phone)
 
   return {
-    phoneHash: phoneLookupHash(phone),
+    phoneHash: null,
     phoneHashV2: phoneHashV2?.hash ?? null,
     phoneHashKeyVersion: phoneHashV2?.keyVersion ?? null,
   }
@@ -688,7 +687,7 @@ describe('app/api/auth/phone/correct/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('dual-writes phone lookup hashes when correcting a client phone', async () => {
+  it('writes v2 phone lookup hash and clears legacy phone hash when correcting a client phone', async () => {
     mockRequireUser.mockResolvedValue({
       ok: true,
       user: makeUser({

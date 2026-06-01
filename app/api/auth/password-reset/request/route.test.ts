@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   CONTACT_LOOKUP_HMAC_KEY_VERSION,
   clearContactLookupHmacKeyringCacheForTests,
-  emailLookupHash,
   emailLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 
@@ -92,7 +91,6 @@ function expectedEmailLookupData(email: string) {
   const hmac = emailLookupHashV2(email)
 
   return {
-    emailHash: emailLookupHash(email),
     emailHashV2: hmac?.hash ?? null,
     emailHashKeyVersion: hmac?.keyVersion ?? null,
   }
@@ -112,21 +110,10 @@ function mockUserLookupByWhere(users: PasswordResetTestUser[]) {
           return conditions.some((condition) => {
             if (
               condition.emailHashV2 &&
-              condition.emailHashKeyVersion &&
+              condition.emailHashKeyVersion != null &&
               condition.emailHashV2 === lookup.emailHashV2 &&
               condition.emailHashKeyVersion === lookup.emailHashKeyVersion
             ) {
-              return true
-            }
-
-            if (
-              condition.emailHash &&
-              condition.emailHash === lookup.emailHash
-            ) {
-              return true
-            }
-
-            if (condition.email && condition.email === user.email) {
               return true
             }
 
@@ -220,7 +207,7 @@ describe('app/api/auth/password-reset/request/route', () => {
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
   })
 
-  it('looks up users by HMAC emailHashV2 before legacy hash and plaintext email fallback', async () => {
+  it('looks up users by HMAC emailHashV2 only', async () => {
     mockUserLookupByWhere([
       {
         id: 'user_1',
@@ -245,12 +232,6 @@ describe('app/api/auth/password-reset/request/route', () => {
             emailHashV2: lookup.emailHashV2,
             emailHashKeyVersion: lookup.emailHashKeyVersion,
           },
-          {
-            emailHash: lookup.emailHash,
-          },
-          {
-            email: 'user@example.com',
-          },
         ],
       },
       select: { id: true, email: true },
@@ -264,6 +245,47 @@ describe('app/api/auth/password-reset/request/route', () => {
       ip: '203.0.113.10',
       userAgent: null,
     })
+  })
+
+  it('does not include legacy or plaintext fallback in the password reset lookup', async () => {
+    const lookup = expectedEmailLookupData('user@example.com')
+
+    mockPrisma.user.findMany.mockResolvedValueOnce([])
+
+    const result = await POST(
+      makeRequest({
+        email: 'user@example.com',
+      }),
+    )
+
+    expect(result.status).toBe(200)
+
+    expect(mockPrisma.user.findMany).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          {
+            emailHashV2: lookup.emailHashV2,
+            emailHashKeyVersion: lookup.emailHashKeyVersion,
+          },
+        ],
+      },
+      select: { id: true, email: true },
+      take: 2,
+    })
+
+    const call = mockPrisma.user.findMany.mock.calls[0]?.[0] as {
+      where: { OR: Array<Record<string, unknown>> }
+    }
+
+    expect(call.where.OR).not.toContainEqual({
+      emailHash: expect.any(String),
+    })
+
+    expect(call.where.OR).not.toContainEqual({
+      email: 'user@example.com',
+    })
+
+    expect(mockIssueAndSendPasswordReset).not.toHaveBeenCalled()
   })
 
   it('returns ok when the user is not found', async () => {
@@ -287,12 +309,6 @@ describe('app/api/auth/password-reset/request/route', () => {
           {
             emailHashV2: lookup.emailHashV2,
             emailHashKeyVersion: lookup.emailHashKeyVersion,
-          },
-          {
-            emailHash: lookup.emailHash,
-          },
-          {
-            email: 'missing@example.com',
           },
         ],
       },

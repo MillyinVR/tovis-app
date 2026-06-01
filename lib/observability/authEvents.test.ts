@@ -1,14 +1,18 @@
 // lib/observability/authEvents.test.ts
 import * as Sentry from '@sentry/nextjs'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  emailLookupHash,
-  phoneLookupHash,
-  sha256Hex,
+  clearContactLookupHmacKeyringCacheForTests,
+  CONTACT_LOOKUP_HMAC_KEY_VERSION,
+  emailLookupHashV2,
+  legacySha256Hex,
+  phoneLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 
 import { captureAuthException, logAuthEvent } from './authEvents'
+
+const TEST_HMAC_KEY = Buffer.alloc(32, 7).toString('base64')
 
 vi.mock('@sentry/nextjs', () => ({
   withScope: vi.fn(),
@@ -34,6 +38,18 @@ function shortHash(hash: string | null): string | null {
 describe('authEvents', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    process.env.PII_LOOKUP_HMAC_KEYS_JSON = JSON.stringify({
+      [CONTACT_LOOKUP_HMAC_KEY_VERSION]: TEST_HMAC_KEY,
+    })
+
+    clearContactLookupHmacKeyringCacheForTests()
+  })
+
+  afterEach(() => {
+    delete process.env.PII_LOOKUP_HMAC_KEYS_JSON
+    clearContactLookupHmacKeyringCacheForTests()
+    vi.restoreAllMocks()
   })
 
   it('logs hashed user identifiers instead of raw email, phone, userId, or verificationId', () => {
@@ -68,13 +84,15 @@ describe('authEvents', () => {
       code: 'INVALID_CREDENTIALS',
     })
 
-    expect(payload.userIdHash).toBe(shortHash(sha256Hex('user_123')))
+    expect(payload.userIdHash).toBe(shortHash(legacySha256Hex('user_123')))
     expect(payload.emailHash).toBe(
-      shortHash(emailLookupHash('Tori.Example@Example.com')),
+      shortHash(emailLookupHashV2('Tori.Example@Example.com')?.hash ?? null),
     )
-    expect(payload.phoneHash).toBe(shortHash(phoneLookupHash('+15551234567')))
+    expect(payload.phoneHash).toBe(
+      shortHash(phoneLookupHashV2('+15551234567')?.hash ?? null),
+    )
     expect(payload.verificationIdHash).toBe(
-      shortHash(sha256Hex('verify_123')),
+      shortHash(legacySha256Hex('verify_123')),
     )
 
     expect(serialized).not.toContain('user_123')
@@ -86,8 +104,6 @@ describe('authEvents', () => {
     expect(payload.message).toBe(
       'Login failed for [redacted-email] with phone [redacted-phone-or-id]',
     )
-
-    infoSpy.mockRestore()
   })
 
   it('returns null contact hashes for malformed email and phone values without logging raw values', () => {
@@ -111,8 +127,6 @@ describe('authEvents', () => {
     expect(payload.phoneHash).toBeNull()
     expect(serialized).not.toContain('not-an-email')
     expect(serialized).not.toContain('"123"')
-
-    infoSpy.mockRestore()
   })
 
   it('redacts sensitive meta fields recursively before logging', () => {
@@ -166,8 +180,6 @@ describe('authEvents', () => {
     expect(serialized).not.toContain('+15551234567')
     expect(serialized).not.toContain('https://signed.example')
     expect(serialized).not.toContain('media-private/bookings')
-
-    warnSpy.mockRestore()
   })
 
   it('captures auth exceptions with hashed context, sanitized Sentry exception, and sanitized structured log metadata', () => {
@@ -257,15 +269,17 @@ describe('authEvents', () => {
     >
     const serializedContext = JSON.stringify(contextPayload)
 
-    expect(contextPayload.userIdHash).toBe(shortHash(sha256Hex('user_456')))
+    expect(contextPayload.userIdHash).toBe(
+      shortHash(legacySha256Hex('user_456')),
+    )
     expect(contextPayload.emailHash).toBe(
-      shortHash(emailLookupHash('user@example.com')),
+      shortHash(emailLookupHashV2('user@example.com')?.hash ?? null),
     )
     expect(contextPayload.phoneHash).toBe(
-      shortHash(phoneLookupHash('+15551234567')),
+      shortHash(phoneLookupHashV2('+15551234567')?.hash ?? null),
     )
     expect(contextPayload.verificationIdHash).toBe(
-      shortHash(sha256Hex('verification_456')),
+      shortHash(legacySha256Hex('verification_456')),
     )
     expect(contextPayload.errorName).toBe('Error')
     expect(contextPayload.errorMessage).toBe(
@@ -308,8 +322,6 @@ describe('authEvents', () => {
     expect(serializedLog).not.toContain('verification_456')
     expect(serializedLog).not.toContain('raw_token_1')
     expect(serializedLog).not.toContain('raw_token_2')
-
-    errorSpy.mockRestore()
   })
 
   it('redacts unsafe auth event codes that look like one-time codes or secrets', () => {
@@ -325,8 +337,6 @@ describe('authEvents', () => {
     const payload = readLoggedJson(warnSpy)
 
     expect(payload.code).toBe('[redacted]')
-
-    warnSpy.mockRestore()
   })
 
   it('keeps safe enum-style auth event codes', () => {
@@ -342,8 +352,6 @@ describe('authEvents', () => {
     const payload = readLoggedJson(warnSpy)
 
     expect(payload.code).toBe('INVALID_CREDENTIALS')
-
-    warnSpy.mockRestore()
   })
 
   it('does not throw when meta contains arrays, dates, errors, nulls, or undefined values', () => {
@@ -377,7 +385,5 @@ describe('authEvents', () => {
     expect(payload.at).toBe('2026-05-22T12:00:00.000Z')
     expect(payload.empty).toBeNull()
     expect(payload).not.toHaveProperty('missing')
-
-    infoSpy.mockRestore()
   })
 })

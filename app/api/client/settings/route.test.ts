@@ -170,6 +170,7 @@ function expectClientProfileFindUniqueCalled() {
       addresses: {
         select: {
           id: true,
+          clientId: true,
           kind: true,
           label: true,
           isDefault: true,

@@ -39,7 +39,7 @@
     "test:privacy-phase1": "vitest run --config vitest.config.mts lib/security/contactNormalization.test.ts lib/security/crypto/hashLookup.test.ts lib/security/contactLookup.test.ts lib/clientActions/idempotency.test.ts lib/clients/upsertProClient.test.ts lib/observability/authEvents.test.ts app/api/auth/register/route.test.ts app/api/auth/phone/correct/route.test.ts",
     "test:privacy-export-delete": "vitest run --config vitest.config.mts lib/privacy/exportUserData.test.ts lib/privacy/deleteUserData.test.ts",
     "test:privacy": "pnpm test:privacy-phase1 && pnpm test:privacy-export-delete",
-    "verify:privacy-phase1": "pnpm check:privacy-guards && pnpm test:privacy-phase1",
+    "verify:privacy-phase1": "pnpm check:privacy-guards && pnpm test:privacy",
     "backfill:address-encryption": "tsx prisma/scripts/backfillAddressEncryption.ts",
     "backfill:contact-hash-v2": "tsx prisma/scripts/backfillContactHashV2.ts",
     "seed:booking-overrides": "tsx prisma/seeds/bookingOverridePermissions.ts",

@@ -4,10 +4,6 @@ import { ClientClaimStatus, Prisma, Role } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import {
-  emailLookupHash,
-  phoneLookupHash,
-} from '@/lib/security/crypto/hashLookup'
-import {
   buildClientProfileContactLookupData,
   buildEmailLookupHashV2ForContactInput,
   buildPhoneLookupHashV2ForContactInput,
@@ -114,8 +110,7 @@ function buildClientProfileLookupOrConditions(args: {
 
   const emailHashV2 = buildEmailLookupHashV2ForContactInput(lookupEmail)
   const phoneHashV2 = buildPhoneLookupHashV2ForContactInput(lookupPhone)
-  const emailHash = emailLookupHash(lookupEmail)
-  const phoneHash = phoneLookupHash(lookupPhone)
+
 
   const orConditions: Prisma.ClientProfileWhereInput[] = []
 
@@ -133,30 +128,6 @@ function buildClientProfileLookupOrConditions(args: {
     })
   }
 
-  /**
-   * Legacy SHA-256 fallback for rows created before HMAC v2 backfill.
-   * Remove after burn-in and legacy hash column drop.
-   */
-  if (emailHash) {
-    orConditions.push({ emailHash })
-  }
-
-  if (phoneHash) {
-    orConditions.push({ phoneHash })
-  }
-
-  /**
-   * Temporary plaintext fallback for local/dev databases and rows that predate
-   * lookup hashes. Remove after contact hash v2 migration, backfill, and burn-in.
-   */
-  if (lookupEmail) {
-    orConditions.push({ email: lookupEmail })
-  }
-
-  if (lookupPhone) {
-    orConditions.push({ phone: lookupPhone })
-  }
-
   return orConditions
 }
 
@@ -171,8 +142,7 @@ function buildUserLookupOrConditions(args: {
 
   const emailHashV2 = buildEmailLookupHashV2ForContactInput(lookupEmail)
   const phoneHashV2 = buildPhoneLookupHashV2ForContactInput(lookupPhone)
-  const emailHash = emailLookupHash(lookupEmail)
-  const phoneHash = phoneLookupHash(lookupPhone)
+
 
   const orConditions: Prisma.UserWhereInput[] = []
 
@@ -188,30 +158,6 @@ function buildUserLookupOrConditions(args: {
       phoneHashV2: phoneHashV2.hash,
       phoneHashKeyVersion: phoneHashV2.keyVersion,
     })
-  }
-
-  /**
-   * Legacy SHA-256 fallback for rows created before HMAC v2 backfill.
-   * Remove after burn-in and legacy hash column drop.
-   */
-  if (emailHash) {
-    orConditions.push({ emailHash })
-  }
-
-  if (phoneHash) {
-    orConditions.push({ phoneHash })
-  }
-
-  /**
-   * Temporary plaintext fallback for local/dev databases and rows that predate
-   * lookup hashes. Remove after contact hash v2 migration, backfill, and burn-in.
-   */
-  if (lookupEmail) {
-    orConditions.push({ email: lookupEmail })
-  }
-
-  if (lookupPhone) {
-    orConditions.push({ phone: lookupPhone })
   }
 
   return orConditions

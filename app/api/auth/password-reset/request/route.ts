@@ -5,9 +5,9 @@ import { Prisma } from '@prisma/client'
 import {
   enforceRateLimit,
   jsonOk,
-  normalizeEmail,
   rateLimitIdentity,
 } from '@/app/api/_utils'
+import { normalizeEmail } from '@/lib/security/contactNormalization'
 import {
   getPasswordResetAppUrlFromRequest,
   getPasswordResetRequestIp,
@@ -18,10 +18,7 @@ import {
   logAuthEvent,
 } from '@/lib/observability/authEvents'
 import { prisma } from '@/lib/prisma'
-import {
-  emailLookupHash,
-  emailLookupHashV2,
-} from '@/lib/security/crypto/hashLookup'
+import { emailLookupHashV2 } from '@/lib/security/crypto/hashLookup'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,32 +39,15 @@ function buildPasswordResetLookupWhereConditions(
   email: string,
 ): Prisma.UserWhereInput[] {
   const emailHashV2 = emailLookupHashV2(email)
-  const emailHash = emailLookupHash(email)
 
-  const orConditions: Prisma.UserWhereInput[] = []
+  if (!emailHashV2) return []
 
-  if (emailHashV2) {
-    orConditions.push({
+  return [
+    {
       emailHashV2: emailHashV2.hash,
       emailHashKeyVersion: emailHashV2.keyVersion,
-    })
-  }
-
-  /**
-   * Legacy SHA-256 fallback for rows created before HMAC v2 backfill.
-   * Remove after HMAC v2 burn-in and legacy hash column drop.
-   */
-  if (emailHash) {
-    orConditions.push({ emailHash })
-  }
-
-  /**
-   * Temporary plaintext fallback for local/dev databases and rows that predate
-   * lookup hashes. Remove after contact hash v2 migration, backfill, and burn-in.
-   */
-  orConditions.push({ email })
-
-  return orConditions
+    },
+  ]
 }
 
 async function findPasswordResetUserByEmail(

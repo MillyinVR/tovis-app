@@ -1,16 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ClientClaimStatus, Role } from '@prisma/client'
 
 import {
   clearContactLookupHmacKeyringCacheForTests,
   CONTACT_LOOKUP_HMAC_KEY_VERSION,
-  emailLookupHash,
   emailLookupHashV2,
-  phoneLookupHash,
   phoneLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 
 const TEST_HMAC_KEY = Buffer.alloc(32, 7).toString('base64')
+
+const LEGACY_EMAIL_HASH = 'legacy_email_hash'
+const LEGACY_PHONE_HASH = 'legacy_phone_hash'
 
 const mocks = vi.hoisted(() => ({
   prisma: {
@@ -79,7 +80,7 @@ function expectedEmailLookupData(email: string | null) {
   const emailHashV2 = emailLookupHashV2(email)
 
   return {
-    emailHash: emailLookupHash(email),
+    emailHash: null,
     emailHashV2: emailHashV2?.hash ?? null,
     emailHashKeyVersion: emailHashV2?.keyVersion ?? null,
   }
@@ -89,7 +90,7 @@ function expectedPhoneLookupData(phone: string | null) {
   const phoneHashV2 = phoneLookupHashV2(phone)
 
   return {
-    phoneHash: phoneLookupHash(phone),
+    phoneHash: null,
     phoneHashV2: phoneHashV2?.hash ?? null,
     phoneHashKeyVersion: phoneHashV2?.keyVersion ?? null,
   }
@@ -151,45 +152,19 @@ function whereMatchesProfile(
   where: Record<string, unknown>,
   profile: TestProfile,
 ): boolean {
-  if (where.emailHashV2 && profile.emailHashV2 === where.emailHashV2) {
-    return true
-  }
-
   if (
-    where.emailHashKeyVersion &&
+    typeof where.emailHashV2 === 'string' &&
+    profile.emailHashV2 === where.emailHashV2 &&
     profile.emailHashKeyVersion === where.emailHashKeyVersion
   ) {
-    if (!where.emailHashV2 || profile.emailHashV2 === where.emailHashV2) {
-      return true
-    }
-  }
-
-  if (where.phoneHashV2 && profile.phoneHashV2 === where.phoneHashV2) {
     return true
   }
 
   if (
-    where.phoneHashKeyVersion &&
+    typeof where.phoneHashV2 === 'string' &&
+    profile.phoneHashV2 === where.phoneHashV2 &&
     profile.phoneHashKeyVersion === where.phoneHashKeyVersion
   ) {
-    if (!where.phoneHashV2 || profile.phoneHashV2 === where.phoneHashV2) {
-      return true
-    }
-  }
-
-  if (where.emailHash && profile.emailHash === where.emailHash) {
-    return true
-  }
-
-  if (where.phoneHash && profile.phoneHash === where.phoneHash) {
-    return true
-  }
-
-  if (where.email && profile.email === where.email) {
-    return true
-  }
-
-  if (where.phone && profile.phone === where.phone) {
     return true
   }
 
@@ -219,7 +194,9 @@ function mockClientProfileLookupByWhere(profiles: TestProfile[]) {
     async (args: { where?: Record<string, unknown> }) => {
       const where = args.where ?? {}
 
-      return profiles.find((profile) => whereMatchesProfile(where, profile)) ?? null
+      return (
+        profiles.find((profile) => whereMatchesProfile(where, profile)) ?? null
+      )
     },
   )
 }
@@ -238,6 +215,12 @@ describe('upsertProClient', () => {
     mocks.prisma.clientProfile.update.mockResolvedValue(null)
     mocks.prisma.clientProfile.create.mockResolvedValue(null)
     mocks.prisma.user.findMany.mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    delete process.env.PII_LOOKUP_HMAC_KEYS_JSON
+    clearContactLookupHmacKeyringCacheForTests()
+    vi.restoreAllMocks()
   })
 
   it('returns VALIDATION_ERROR when first name, last name, and both contact fields are missing', async () => {
@@ -291,12 +274,13 @@ describe('upsertProClient', () => {
     expect(mocks.prisma.user.findMany).not.toHaveBeenCalled()
   })
 
-  it('matches an existing client profile by emailHashV2 before legacy email', async () => {
+  it('matches an existing client profile by emailHashV2 only', async () => {
     const existingProfile = makeProfile({
       id: 'client_hash_match',
       firstName: 'Existing',
       lastName: 'Client',
       email: 'tori@example.com',
+      emailHash: LEGACY_EMAIL_HASH,
       phone: null,
     })
 
@@ -314,21 +298,30 @@ describe('upsertProClient', () => {
     expect(mocks.prisma.clientProfile.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
-          OR: expect.arrayContaining([
+          OR: [
             {
               emailHashV2: emailHashV2?.hash,
               emailHashKeyVersion: emailHashV2?.keyVersion,
             },
-            {
-              emailHash: emailLookupHash('tori@example.com'),
-            },
-            {
-              email: 'tori@example.com',
-            },
-          ]),
+          ],
         },
       }),
     )
+
+    const profileLookupCall = mocks.prisma.clientProfile.findMany.mock
+      .calls[0]?.[0] as {
+      where: { OR: Array<Record<string, unknown>> }
+    }
+
+    expect(profileLookupCall.where.OR).not.toContainEqual({
+      emailHash: expect.any(String),
+    })
+
+    expect(profileLookupCall.where.OR).not.toContainEqual({
+      email: 'tori@example.com',
+    })
+
+    expect(mocks.prisma.clientProfile.update).not.toHaveBeenCalled()
 
     expect(result).toEqual({
       ok: true,
@@ -343,15 +336,15 @@ describe('upsertProClient', () => {
     const existingProfile = makeProfile({
       id: 'client_1',
       email: 'tori@example.com',
+      emailHash: LEGACY_EMAIL_HASH,
       userId: 'user_pro_1',
-      user: {
+      user: makeUser({
         id: 'user_pro_1',
         role: Role.PRO,
         email: 'tori@example.com',
-        ...expectedEmailLookupData('tori@example.com'),
+        emailHash: LEGACY_EMAIL_HASH,
         phone: null,
-        ...expectedPhoneLookupData(null),
-      },
+      }),
     })
 
     mockClientProfileLookupByWhere([existingProfile])
@@ -371,12 +364,102 @@ describe('upsertProClient', () => {
     })
   })
 
+  it('does not include plaintext or legacy phone fallback in client profile lookup', async () => {
+    mocks.prisma.clientProfile.findMany.mockResolvedValueOnce([])
+    mocks.prisma.user.findMany.mockResolvedValueOnce([])
+    mocks.prisma.clientProfile.create.mockResolvedValueOnce(
+      makeProfile({
+        id: 'client_phone_only_1',
+        firstName: 'Tori',
+        lastName: 'Morales',
+        email: null,
+        phone: '+16195551234',
+      }),
+    )
+
+    const result = await upsertProClient({
+      firstName: 'Tori',
+      lastName: 'Morales',
+      phone: '+16195551234',
+    })
+
+    expect(result.ok).toBe(true)
+
+    const phoneHashV2 = phoneLookupHashV2('+16195551234')
+    expect(phoneHashV2).not.toBeNull()
+
+    const profileLookupCall = mocks.prisma.clientProfile.findMany.mock
+      .calls[0]?.[0] as {
+      where: { OR: Array<Record<string, unknown>> }
+    }
+
+    expect(profileLookupCall.where.OR).toEqual([
+      {
+        phoneHashV2: phoneHashV2?.hash,
+        phoneHashKeyVersion: phoneHashV2?.keyVersion,
+      },
+    ])
+
+    expect(profileLookupCall.where.OR).not.toContainEqual({
+      phoneHash: expect.any(String),
+    })
+
+    expect(profileLookupCall.where.OR).not.toContainEqual({
+      phone: '+16195551234',
+    })
+  })
+
+  it('does not include legacy or plaintext fallback in user lookup', async () => {
+    mocks.prisma.clientProfile.findMany.mockResolvedValueOnce([])
+    mocks.prisma.user.findMany.mockResolvedValueOnce([])
+    mocks.prisma.clientProfile.create.mockResolvedValueOnce(
+      makeProfile({
+        id: 'client_new_1',
+        firstName: 'Tori',
+        lastName: 'Morales',
+        email: 'tori@example.com',
+        phone: '+16195551234',
+      }),
+    )
+
+    const result = await upsertProClient({
+      firstName: 'Tori',
+      lastName: 'Morales',
+      email: 'tori@example.com',
+      phone: '+16195551234',
+    })
+
+    expect(result.ok).toBe(true)
+
+    const userLookupCall = mocks.prisma.user.findMany.mock.calls[0]?.[0] as {
+      where: { OR: Array<Record<string, unknown>> }
+    }
+
+    const emailHashV2 = emailLookupHashV2('tori@example.com')
+    const phoneHashV2 = phoneLookupHashV2('+16195551234')
+
+    expect(emailHashV2).not.toBeNull()
+    expect(phoneHashV2).not.toBeNull()
+
+    expect(userLookupCall.where.OR).toEqual([
+      {
+        emailHashV2: emailHashV2?.hash,
+        emailHashKeyVersion: emailHashV2?.keyVersion,
+      },
+      {
+        phoneHashV2: phoneHashV2?.hash,
+        phoneHashKeyVersion: phoneHashV2?.keyVersion,
+      },
+    ])
+  })
+
   it('reuses a matched client profile and fills only missing fields', async () => {
     const existingProfile = makeProfile({
       id: 'client_1',
       firstName: '',
       lastName: '',
       email: 'tori@example.com',
+      emailHash: LEGACY_EMAIL_HASH,
       phone: null,
       claimStatus: ClientClaimStatus.UNCLAIMED,
       userId: null,
@@ -399,16 +482,19 @@ describe('upsertProClient', () => {
       phone: '+16195551234',
     })
 
-    expect(mocks.prisma.clientProfile.update).toHaveBeenCalledWith({
-      where: { id: 'client_1' },
-      data: {
-        firstName: 'Tori',
-        lastName: 'Morales',
-        phone: '+16195551234',
-        ...expectedPhoneLookupData('+16195551234'),
-      },
-      select: expect.any(Object),
-    })
+    expect(mocks.prisma.clientProfile.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'client_1' },
+        data: expect.objectContaining({
+          firstName: 'Tori',
+          lastName: 'Morales',
+          phone: '+16195551234',
+          phoneHash: null,
+          phoneHashV2: phoneLookupHashV2('+16195551234')?.hash,
+          phoneHashKeyVersion: CONTACT_LOOKUP_HMAC_KEY_VERSION,
+        }),
+      }),
+    )
 
     expect(result).toEqual({
       ok: true,
@@ -425,6 +511,7 @@ describe('upsertProClient', () => {
         id: 'user_pro_1',
         role: Role.PRO,
         email: 'tori@example.com',
+        emailHash: LEGACY_EMAIL_HASH,
       }),
     ])
 
@@ -448,7 +535,9 @@ describe('upsertProClient', () => {
         id: 'user_client_1',
         role: Role.CLIENT,
         email: 'tori@example.com',
+        emailHash: LEGACY_EMAIL_HASH,
         phone: '+16195551234',
+        phoneHash: LEGACY_PHONE_HASH,
         clientProfile: null,
       }),
     ])
@@ -463,14 +552,14 @@ describe('upsertProClient', () => {
         lastName: 'Morales',
         email: 'tori@example.com',
         phone: '+16195551234',
-        user: {
+        user: makeUser({
           id: 'user_client_1',
           role: Role.CLIENT,
           email: 'tori@example.com',
-          ...expectedEmailLookupData('tori@example.com'),
+          emailHash: LEGACY_EMAIL_HASH,
           phone: '+16195551234',
-          ...expectedPhoneLookupData('+16195551234'),
-        },
+          phoneHash: LEGACY_PHONE_HASH,
+        }),
       }),
     )
 
@@ -481,20 +570,21 @@ describe('upsertProClient', () => {
       phone: '+16195551234',
     })
 
-    expect(mocks.prisma.clientProfile.create).toHaveBeenCalledWith({
-      data: {
-        userId: 'user_client_1',
-        firstName: 'Tori',
-        lastName: 'Morales',
-        claimStatus: ClientClaimStatus.CLAIMED,
-        claimedAt: expect.any(Date),
-        email: 'tori@example.com',
-        ...expectedEmailLookupData('tori@example.com'),
-        phone: '+16195551234',
-        ...expectedPhoneLookupData('+16195551234'),
-      },
-      select: expect.any(Object),
-    })
+    expect(mocks.prisma.clientProfile.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: 'user_client_1',
+          firstName: 'Tori',
+          lastName: 'Morales',
+          claimStatus: ClientClaimStatus.CLAIMED,
+          claimedAt: expect.any(Date),
+          email: 'tori@example.com',
+          ...expectedEmailLookupData('tori@example.com'),
+          phone: '+16195551234',
+          ...expectedPhoneLookupData('+16195551234'),
+        }),
+      }),
+    )
 
     expect(result).toEqual({
       ok: true,
@@ -515,14 +605,14 @@ describe('upsertProClient', () => {
       lastName: '',
       email: null,
       phone: null,
-      user: {
+      user: makeUser({
         id: 'user_client_1',
         role: Role.CLIENT,
         email: 'tori@example.com',
-        ...expectedEmailLookupData('tori@example.com'),
+        emailHash: LEGACY_EMAIL_HASH,
         phone: '+16195551234',
-        ...expectedPhoneLookupData('+16195551234'),
-      },
+        phoneHash: LEGACY_PHONE_HASH,
+      }),
     })
 
     mocks.prisma.user.findMany.mockResolvedValueOnce([
@@ -530,7 +620,9 @@ describe('upsertProClient', () => {
         id: 'user_client_1',
         role: Role.CLIENT,
         email: 'tori@example.com',
+        emailHash: LEGACY_EMAIL_HASH,
         phone: '+16195551234',
+        phoneHash: LEGACY_PHONE_HASH,
         clientProfile: existingUserProfile,
       }),
     ])
@@ -545,14 +637,14 @@ describe('upsertProClient', () => {
         lastName: 'Morales',
         email: 'tori@example.com',
         phone: '+16195551234',
-        user: {
+        user: makeUser({
           id: 'user_client_1',
           role: Role.CLIENT,
           email: 'tori@example.com',
-          ...expectedEmailLookupData('tori@example.com'),
+          emailHash: LEGACY_EMAIL_HASH,
           phone: '+16195551234',
-          ...expectedPhoneLookupData('+16195551234'),
-        },
+          phoneHash: LEGACY_PHONE_HASH,
+        }),
       }),
     )
 
@@ -563,20 +655,21 @@ describe('upsertProClient', () => {
       phone: '+16195551234',
     })
 
-    expect(mocks.prisma.clientProfile.update).toHaveBeenCalledWith({
-      where: { id: 'client_1' },
-      data: {
-        firstName: 'Tori',
-        lastName: 'Morales',
-        email: 'tori@example.com',
-        ...expectedEmailLookupData('tori@example.com'),
-        phone: '+16195551234',
-        ...expectedPhoneLookupData('+16195551234'),
-        claimStatus: ClientClaimStatus.CLAIMED,
-        claimedAt: expect.any(Date),
-      },
-      select: expect.any(Object),
-    })
+    expect(mocks.prisma.clientProfile.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'client_1' },
+        data: expect.objectContaining({
+          firstName: 'Tori',
+          lastName: 'Morales',
+          email: 'tori@example.com',
+          ...expectedEmailLookupData('tori@example.com'),
+          phone: '+16195551234',
+          ...expectedPhoneLookupData('+16195551234'),
+          claimStatus: ClientClaimStatus.CLAIMED,
+          claimedAt: expect.any(Date),
+        }),
+      }),
+    )
 
     expect(result).toEqual({
       ok: true,
@@ -610,20 +703,21 @@ describe('upsertProClient', () => {
       email: 'tori@example.com',
     })
 
-    expect(mocks.prisma.clientProfile.create).toHaveBeenCalledWith({
-      data: {
-        userId: null,
-        firstName: 'Tori',
-        lastName: 'Morales',
-        claimStatus: ClientClaimStatus.UNCLAIMED,
-        claimedAt: null,
-        email: 'tori@example.com',
-        ...expectedEmailLookupData('tori@example.com'),
-        phone: null,
-        ...expectedPhoneLookupData(null),
-      },
-      select: expect.any(Object),
-    })
+    expect(mocks.prisma.clientProfile.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: null,
+          firstName: 'Tori',
+          lastName: 'Morales',
+          claimStatus: ClientClaimStatus.UNCLAIMED,
+          claimedAt: null,
+          email: 'tori@example.com',
+          ...expectedEmailLookupData('tori@example.com'),
+          phone: null,
+          ...expectedPhoneLookupData(null),
+        }),
+      }),
+    )
 
     expect(result).toEqual({
       ok: true,
@@ -640,6 +734,7 @@ describe('upsertProClient', () => {
         id: 'user_email_1',
         role: Role.CLIENT,
         email: 'tori@example.com',
+        emailHash: LEGACY_EMAIL_HASH,
         phone: null,
       }),
       makeUser({
@@ -647,6 +742,7 @@ describe('upsertProClient', () => {
         role: Role.CLIENT,
         email: null,
         phone: '+16195551234',
+        phoneHash: LEGACY_PHONE_HASH,
       }),
     ])
 
@@ -675,7 +771,9 @@ describe('upsertProClient', () => {
       firstName: 'Existing',
       lastName: 'Client',
       email: 'existing@example.com',
+      emailHash: LEGACY_EMAIL_HASH,
       phone: '+16195550000',
+      phoneHash: LEGACY_PHONE_HASH,
       user: null,
     })
 
@@ -685,7 +783,7 @@ describe('upsertProClient', () => {
       firstName: 'New',
       lastName: 'Name',
       email: 'existing@example.com',
-      phone: '+16195559999',
+      phone: '+16195550000',
     })
 
     expect(mocks.prisma.clientProfile.update).not.toHaveBeenCalled()
@@ -722,20 +820,21 @@ describe('upsertProClient', () => {
       phone: '+16195551234',
     })
 
-    expect(mocks.prisma.clientProfile.create).toHaveBeenCalledWith({
-      data: {
-        userId: null,
-        firstName: 'Phone',
-        lastName: 'Only',
-        claimStatus: ClientClaimStatus.UNCLAIMED,
-        claimedAt: null,
-        email: null,
-        ...expectedEmailLookupData(null),
-        phone: '+16195551234',
-        ...expectedPhoneLookupData('+16195551234'),
-      },
-      select: expect.any(Object),
-    })
+    expect(mocks.prisma.clientProfile.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: null,
+          firstName: 'Phone',
+          lastName: 'Only',
+          claimStatus: ClientClaimStatus.UNCLAIMED,
+          claimedAt: null,
+          email: null,
+          ...expectedEmailLookupData(null),
+          phone: '+16195551234',
+          ...expectedPhoneLookupData('+16195551234'),
+        }),
+      }),
+    )
 
     expect(result).toEqual({
       ok: true,
