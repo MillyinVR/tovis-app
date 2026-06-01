@@ -9,7 +9,14 @@ const mocks = vi.hoisted(() => ({
   requireAdminPermission: vi.fn(),
   deleteUserData: vi.fn(),
   writeAdminAuditLog: vi.fn(),
-  prisma: {},
+  tx: {
+    adminActionLog: {
+      create: vi.fn(),
+    },
+  },
+  prisma: {
+    $transaction: vi.fn(),
+  },
 }))
 
 vi.mock('@/app/api/_utils/auth/requireUser', () => ({
@@ -33,6 +40,11 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 import { POST } from './route'
+
+type PrivacyDeleteMode = 'DRY_RUN' | 'ANONYMIZE'
+type PrivacyDeleteAuditAction =
+  | 'privacy.user_delete_dry_run'
+  | 'privacy.user_delete'
 
 function makeRequest(body?: unknown, headers?: HeadersInit): NextRequest {
   return new NextRequest(
@@ -60,7 +72,7 @@ async function readJson(response: Response): Promise<unknown> {
   return response.json()
 }
 
-function makeDeleteResult(mode: 'DRY_RUN' | 'ANONYMIZE') {
+function makeDeleteResult(mode: PrivacyDeleteMode) {
   return {
     executedAt: '2026-05-27T12:00:00.000Z',
     mode,
@@ -80,6 +92,74 @@ function makeDeleteResult(mode: 'DRY_RUN' | 'ANONYMIZE') {
     ],
     limitations: [],
   }
+}
+
+function expectedResultSummary(mode: PrivacyDeleteMode) {
+  return {
+    executedAt: '2026-05-27T12:00:00.000Z',
+    mode,
+    subject: {
+      userId: 'user_1',
+      clientProfileId: 'client_1',
+      professionalProfileId: 'pro_1',
+    },
+    requestedByUserId: 'admin_1',
+    actionCounts: {
+      total: 1,
+      wouldDelete: 0,
+      wouldAnonymize: mode === 'DRY_RUN' ? 1 : 0,
+      deleted: 0,
+      anonymized: mode === 'ANONYMIZE' ? 1 : 0,
+      skipped: 0,
+    },
+    actions: [
+      {
+        model: 'User',
+        action: mode === 'DRY_RUN' ? 'WOULD_ANONYMIZE' : 'ANONYMIZED',
+        count: 1,
+      },
+    ],
+    version: 1,
+    limitations: [],
+    limitationsCount: 0,
+    requiresManualFollowUp: false,
+  }
+}
+
+function expectedAuditArgs(args: {
+  action: PrivacyDeleteAuditAction
+  mode: PrivacyDeleteMode
+  requestId: string | null
+  tx?: unknown
+}) {
+  const base = {
+    adminUserId: 'admin_1',
+    action: args.action,
+    note:
+      args.mode === 'DRY_RUN'
+        ? `Privacy delete dry-run for user user_1. Reason: User requested deletion.. Request id: ${
+            args.requestId ?? 'none'
+          }.`
+        : `Privacy delete/anonymize for user user_1. Reason: User requested deletion.. Request id: ${
+            args.requestId ?? 'none'
+          }.`,
+    targetType: 'user',
+    targetId: 'user_1',
+    metadata: {
+      requestId: args.requestId,
+      mode: args.mode,
+      deleteVersion: 1,
+      actionCount: 1,
+      version: 1,
+      limitations: [],
+      limitationsCount: 0,
+      requiresManualFollowUp: false,
+      clientProfileId: 'client_1',
+      professionalProfileId: 'pro_1',
+    },
+  }
+
+  return args.tx ? { ...base, tx: args.tx } : base
 }
 
 describe('POST /api/internal/privacy/delete/[userId]', () => {
@@ -104,6 +184,11 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     mocks.writeAdminAuditLog.mockResolvedValue({
       id: 'audit_1',
     })
+
+    mocks.prisma.$transaction.mockImplementation(
+      async (callback: (tx: typeof mocks.tx) => Promise<unknown>) =>
+        callback(mocks.tx),
+    )
   })
 
   it('requires a target user id before auth', async () => {
@@ -126,6 +211,7 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
 
     expect(mocks.requireUser).not.toHaveBeenCalled()
     expect(mocks.requireAdminPermission).not.toHaveBeenCalled()
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     expect(mocks.deleteUserData).not.toHaveBeenCalled()
     expect(mocks.writeAdminAuditLog).not.toHaveBeenCalled()
   })
@@ -150,6 +236,7 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
 
     expect(mocks.requireUser).not.toHaveBeenCalled()
     expect(mocks.requireAdminPermission).not.toHaveBeenCalled()
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     expect(mocks.deleteUserData).not.toHaveBeenCalled()
     expect(mocks.writeAdminAuditLog).not.toHaveBeenCalled()
   })
@@ -176,6 +263,7 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
 
     expect(mocks.requireUser).not.toHaveBeenCalled()
     expect(mocks.requireAdminPermission).not.toHaveBeenCalled()
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     expect(mocks.deleteUserData).not.toHaveBeenCalled()
     expect(mocks.writeAdminAuditLog).not.toHaveBeenCalled()
   })
@@ -212,6 +300,7 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
       roles: [Role.ADMIN],
     })
     expect(mocks.requireAdminPermission).not.toHaveBeenCalled()
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     expect(mocks.deleteUserData).not.toHaveBeenCalled()
     expect(mocks.writeAdminAuditLog).not.toHaveBeenCalled()
   })
@@ -240,6 +329,7 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
       roles: [Role.ADMIN],
     })
     expect(mocks.requireAdminPermission).not.toHaveBeenCalled()
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     expect(mocks.deleteUserData).not.toHaveBeenCalled()
     expect(mocks.writeAdminAuditLog).not.toHaveBeenCalled()
   })
@@ -276,11 +366,12 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
       adminUserId: 'admin_1',
       allowedRoles: [AdminPermissionRole.SUPER_ADMIN],
     })
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
     expect(mocks.deleteUserData).not.toHaveBeenCalled()
     expect(mocks.writeAdminAuditLog).not.toHaveBeenCalled()
   })
 
-  it('defaults to DRY_RUN and writes a dry-run admin audit log', async () => {
+  it('defaults to DRY_RUN and writes a structured dry-run admin audit log outside the live transaction path', async () => {
     mocks.deleteUserData.mockResolvedValueOnce(makeDeleteResult('DRY_RUN'))
 
     const response = await POST(
@@ -301,34 +392,11 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     expect(await readJson(response)).toEqual({
       ok: true,
       data: {
-        result: {
-          executedAt: '2026-05-27T12:00:00.000Z',
-          mode: 'DRY_RUN',
-          subject: {
-            userId: 'user_1',
-            clientProfileId: 'client_1',
-            professionalProfileId: 'pro_1',
-          },
-          requestedByUserId: 'admin_1',
-          actionCounts: {
-            total: 1,
-            wouldDelete: 0,
-            wouldAnonymize: 1,
-            deleted: 0,
-            anonymized: 0,
-            skipped: 0,
-          },
-          actions: [
-            {
-              model: 'User',
-              action: 'WOULD_ANONYMIZE',
-              count: 1,
-            },
-          ],
-          limitationsCount: 0,
-        },
+        result: expectedResultSummary('DRY_RUN'),
       },
     })
+
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
 
     expect(mocks.deleteUserData).toHaveBeenCalledWith({
       db: mocks.prisma,
@@ -338,15 +406,16 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
       reason: 'User requested deletion.',
     })
 
-    expect(mocks.writeAdminAuditLog).toHaveBeenCalledWith({
-      adminUserId: 'admin_1',
-      action: 'privacy.user_delete_dry_run',
-      note:
-        'Privacy delete dry-run for user user_1. Reason: User requested deletion.. Request id: req_123.',
-    })
+    expect(mocks.writeAdminAuditLog).toHaveBeenCalledWith(
+      expectedAuditArgs({
+        action: 'privacy.user_delete_dry_run',
+        mode: 'DRY_RUN',
+        requestId: 'req_123',
+      }),
+    )
   })
 
-  it('runs ANONYMIZE only when confirmUserId matches the target user id', async () => {
+  it('runs live ANONYMIZE and audit write in the same outer transaction', async () => {
     mocks.deleteUserData.mockResolvedValueOnce(makeDeleteResult('ANONYMIZE'))
 
     const response = await POST(
@@ -363,48 +432,64 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     expect(await readJson(response)).toEqual({
       ok: true,
       data: {
-        result: {
-          executedAt: '2026-05-27T12:00:00.000Z',
-          mode: 'ANONYMIZE',
-          subject: {
-            userId: 'user_1',
-            clientProfileId: 'client_1',
-            professionalProfileId: 'pro_1',
-          },
-          requestedByUserId: 'admin_1',
-          actionCounts: {
-            total: 1,
-            wouldDelete: 0,
-            wouldAnonymize: 0,
-            deleted: 0,
-            anonymized: 1,
-            skipped: 0,
-          },
-          actions: [
-            {
-              model: 'User',
-              action: 'ANONYMIZED',
-              count: 1,
-            },
-          ],
-          limitationsCount: 0,
-        },
+        result: expectedResultSummary('ANONYMIZE'),
       },
     })
 
+    expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(1)
+
     expect(mocks.deleteUserData).toHaveBeenCalledWith({
-      db: mocks.prisma,
+      db: mocks.tx,
       userId: 'user_1',
       mode: 'ANONYMIZE',
       requestedByUserId: 'admin_1',
       reason: 'User requested deletion.',
     })
 
-    expect(mocks.writeAdminAuditLog).toHaveBeenCalledWith({
-      adminUserId: 'admin_1',
-      action: 'privacy.user_delete',
-      note:
-        'Privacy delete/anonymize for user user_1. Reason: User requested deletion.. Request id: none.',
+    expect(mocks.writeAdminAuditLog).toHaveBeenCalledWith(
+      expectedAuditArgs({
+        action: 'privacy.user_delete',
+        mode: 'ANONYMIZE',
+        requestId: null,
+        tx: mocks.tx,
+      }),
+    )
+  })
+
+  it('does not commit live anonymization without an audit log', async () => {
+    const auditError = new Error('Audit write failed')
+
+    mocks.deleteUserData.mockResolvedValueOnce(makeDeleteResult('ANONYMIZE'))
+    mocks.writeAdminAuditLog.mockRejectedValueOnce(auditError)
+
+    await expect(
+      POST(
+        makeRequest({
+          dryRun: false,
+          reason: 'User requested deletion.',
+          confirmUserId: 'user_1',
+        }),
+        makeContext('user_1'),
+      ),
+    ).rejects.toThrow(auditError)
+
+    expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(1)
+
+    expect(mocks.deleteUserData).toHaveBeenCalledWith({
+      db: mocks.tx,
+      userId: 'user_1',
+      mode: 'ANONYMIZE',
+      requestedByUserId: 'admin_1',
+      reason: 'User requested deletion.',
     })
+
+    expect(mocks.writeAdminAuditLog).toHaveBeenCalledWith(
+      expectedAuditArgs({
+        action: 'privacy.user_delete',
+        mode: 'ANONYMIZE',
+        requestId: null,
+        tx: mocks.tx,
+      }),
+    )
   })
 })

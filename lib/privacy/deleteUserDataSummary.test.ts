@@ -1,3 +1,5 @@
+// lib/privacy/deleteUserDataSummary.test.ts
+
 import { describe, expect, it } from 'vitest'
 
 import type { DeleteUserDataResult } from './deleteUserData'
@@ -97,19 +99,45 @@ describe('summarizeDeleteUserDataResult', () => {
           count: 1,
         },
       ],
+      version: 1,
+      limitations: [
+        'Bookings are retained pending retention policy.',
+        'Storage object bytes require a separate workflow.',
+      ],
       limitationsCount: 2,
+      requiresManualFollowUp: true,
     })
   })
 
-  it('does not echo free-text reason, action notes, or limitation text', () => {
+  it('does not echo free-text reason or action notes', () => {
     const summary = summarizeDeleteUserDataResult(makeResult())
     const serialized = JSON.stringify(summary)
 
     expect(serialized).not.toContain('User emailed support')
     expect(serialized).not.toContain('Private operational note')
     expect(serialized).not.toContain('No matching holds')
-    expect(serialized).not.toContain('Bookings are retained')
-    expect(serialized).not.toContain('Storage object bytes')
+  })
+
+  it('preserves limitation text as operator-facing manual follow-up context', () => {
+    const summary = summarizeDeleteUserDataResult(makeResult())
+
+    expect(summary.limitations).toEqual([
+      'Bookings are retained pending retention policy.',
+      'Storage object bytes require a separate workflow.',
+    ])
+    expect(summary.limitationsCount).toBe(2)
+    expect(summary.requiresManualFollowUp).toBe(true)
+  })
+
+  it('sets requiresManualFollowUp to false when there are no limitations', () => {
+    const summary = summarizeDeleteUserDataResult({
+      ...makeResult(),
+      limitations: [],
+    })
+
+    expect(summary.limitations).toEqual([])
+    expect(summary.limitationsCount).toBe(0)
+    expect(summary.requiresManualFollowUp).toBe(false)
   })
 
   it('counts dry-run actions separately from live mutation actions', () => {

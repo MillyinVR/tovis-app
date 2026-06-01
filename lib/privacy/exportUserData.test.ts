@@ -38,6 +38,12 @@ const mocks = vi.hoisted(() => ({
     notification: {
       findMany: vi.fn(),
     },
+    clientNotification: {
+      findMany: vi.fn(),
+    },
+    scheduledClientNotification: {
+      findMany: vi.fn(),
+    },
     notificationDispatch: {
       findMany: vi.fn(),
     },
@@ -128,6 +134,8 @@ function resetFindManyMocks() {
   mocks.db.mediaAsset.findMany.mockResolvedValue([])
   mocks.db.message.findMany.mockResolvedValue([])
   mocks.db.notification.findMany.mockResolvedValue([])
+  mocks.db.clientNotification.findMany.mockResolvedValue([])
+  mocks.db.scheduledClientNotification.findMany.mockResolvedValue([])
   mocks.db.notificationDispatch.findMany.mockResolvedValue([])
   mocks.db.notificationDelivery.findMany.mockResolvedValue([])
   mocks.db.tapIntent.findMany.mockResolvedValue([])
@@ -310,6 +318,38 @@ function setupFindManyResults() {
       archivedAt: null,
       createdAt: new Date('2026-04-09T00:00:00.000Z'),
       updatedAt: new Date('2026-04-09T01:00:00.000Z'),
+    },
+  ])
+
+    mocks.db.clientNotification.findMany.mockResolvedValue([
+    {
+      id: 'client_notification_1',
+      clientId: 'client_1',
+      eventKey: 'AFTERCARE_READY',
+      title: 'Aftercare is ready',
+      body: 'Your aftercare summary is ready.',
+      href: '/client/aftercare/aftercare_1',
+      bookingId: 'booking_client_1',
+      aftercareId: 'aftercare_1',
+      readAt: null,
+      createdAt: new Date('2026-04-09T02:00:00.000Z'),
+      updatedAt: new Date('2026-04-09T03:00:00.000Z'),
+    },
+  ])
+
+  mocks.db.scheduledClientNotification.findMany.mockResolvedValue([
+    {
+      id: 'scheduled_client_notification_1',
+      clientId: 'client_1',
+      bookingId: 'booking_client_1',
+      eventKey: 'APPOINTMENT_REMINDER',
+      runAt: new Date('2026-04-03T16:00:00.000Z'),
+      href: '/client/bookings/booking_client_1',
+      processedAt: null,
+      cancelledAt: null,
+      failedAt: null,
+      createdAt: new Date('2026-04-02T00:00:00.000Z'),
+      updatedAt: new Date('2026-04-02T01:00:00.000Z'),
     },
   ])
 
@@ -553,6 +593,36 @@ describe('exportUserData', () => {
             createdAt: '2026-04-09T00:00:00.000Z',
           }),
         ],
+        clientNotifications: [
+          {
+            id: 'client_notification_1',
+            clientId: 'client_1',
+            eventKey: 'AFTERCARE_READY',
+            title: 'Aftercare is ready',
+            body: 'Your aftercare summary is ready.',
+            href: '/client/aftercare/aftercare_1',
+            bookingId: 'booking_client_1',
+            aftercareId: 'aftercare_1',
+            readAt: null,
+            createdAt: '2026-04-09T02:00:00.000Z',
+            updatedAt: '2026-04-09T03:00:00.000Z',
+          },
+        ],
+        scheduledClientNotifications: [
+          {
+            id: 'scheduled_client_notification_1',
+            clientId: 'client_1',
+            bookingId: 'booking_client_1',
+            eventKey: 'APPOINTMENT_REMINDER',
+            runAt: '2026-04-03T16:00:00.000Z',
+            href: '/client/bookings/booking_client_1',
+            processedAt: null,
+            cancelledAt: null,
+            failedAt: null,
+            createdAt: '2026-04-02T00:00:00.000Z',
+            updatedAt: '2026-04-02T01:00:00.000Z',
+          },
+        ],
         notificationDispatches: [
           expect.objectContaining({
             id: 'dispatch_1',
@@ -591,7 +661,7 @@ describe('exportUserData', () => {
         'Tenant-level exports, aggregate analytics, provider-side records, and storage object bytes are separate workflows.',
         'If Prisma schema adds new user-linked models, update this boundary and its schema-completeness test.',
         'MediaAsset export includes product-facing URLs and metadata but excludes storage bucket/path internals.',
-        'Notification dispatch/delivery exports exclude recipient contact snapshots, provider payloads, lease tokens, and provider message details.',
+        'Notification exports include safe inbox/schedule/dispatch/delivery fields and exclude recipient contact snapshots, structured payload/data fields, provider payloads, lease tokens, destination snapshots, provider message details, dedupe keys, and delivery error details.',
         'AttributionEvent export is omitted pending a disclosure decision for attribution/admin-adjacent records.',
         'AdminActionLog export is omitted from the default user export because it is an internal security/operational record.',
       ],
@@ -700,6 +770,18 @@ describe('exportUserData', () => {
       }),
     )
 
+    expect(mocks.db.clientNotification.findMany).toHaveBeenCalledWith({
+      where: { clientId: 'client_1' },
+      orderBy: { createdAt: 'asc' },
+      select: expect.any(Object),
+    })
+
+    expect(mocks.db.scheduledClientNotification.findMany).toHaveBeenCalledWith({
+      where: { clientId: 'client_1' },
+      orderBy: { createdAt: 'asc' },
+      select: expect.any(Object),
+    })
+
     expect(mocks.db.notificationDispatch.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -750,6 +832,9 @@ describe('exportUserData', () => {
     expect(result.data.bookingHolds).toEqual([])
     expect(result.data.clientActionTokens).toEqual([])
 
+    expect(result.data.clientNotifications).toEqual([])
+    expect(result.data.scheduledClientNotifications).toEqual([])
+
     expect(mocks.db.clientAddress.findMany).not.toHaveBeenCalled()
     expect(mocks.db.professionalLocation.findMany).not.toHaveBeenCalled()
     expect(mocks.db.booking.findMany).not.toHaveBeenCalled()
@@ -777,6 +862,9 @@ describe('exportUserData', () => {
     )
 
     expect(mocks.db.notification.findMany).not.toHaveBeenCalled()
+
+    expect(mocks.db.clientNotification.findMany).not.toHaveBeenCalled()
+    expect(mocks.db.scheduledClientNotification.findMany).not.toHaveBeenCalled()
 
     expect(mocks.db.notificationDispatch.findMany).toHaveBeenCalledWith(
       expect.objectContaining({

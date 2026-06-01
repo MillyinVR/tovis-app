@@ -1,3 +1,5 @@
+// lib/privacy/deleteUserDataSummary.ts
+
 import type {
   DeleteUserDataActionResult,
   DeleteUserDataResult,
@@ -9,6 +11,7 @@ export type DeleteUserDataActionSummary = Pick<
 >
 
 export type DeleteUserDataSummary = {
+  version: 1
   executedAt: string
   mode: DeleteUserDataResult['mode']
   subject: DeleteUserDataResult['subject']
@@ -22,20 +25,27 @@ export type DeleteUserDataSummary = {
     skipped: number
   }
   actions: DeleteUserDataActionSummary[]
+  limitations: string[]
   limitationsCount: number
+  requiresManualFollowUp: boolean
 }
+
+const DELETE_USER_DATA_SUMMARY_VERSION = 1 as const
 
 /**
  * Route-safe summary for privacy deletion/anonymization results.
  *
- * The canonical deleteUserData result may contain operational notes and a
- * request reason. Internal operators need the mutation plan, but route
- * responses should avoid echoing free-text support/admin context.
+ * The canonical deleteUserData result may contain request/admin free text.
+ * Internal routes should expose the mutation plan plus sanitized limitation
+ * text, without echoing the raw request reason.
  */
 export function summarizeDeleteUserDataResult(
   result: DeleteUserDataResult,
 ): DeleteUserDataSummary {
+  const limitations = result.limitations.map(sanitizeLimitation)
+
   return {
+    version: DELETE_USER_DATA_SUMMARY_VERSION,
     executedAt: result.executedAt,
     mode: result.mode,
     subject: result.subject,
@@ -46,7 +56,9 @@ export function summarizeDeleteUserDataResult(
       action,
       count,
     })),
-    limitationsCount: result.limitations.length,
+    limitations,
+    limitationsCount: limitations.length,
+    requiresManualFollowUp: limitations.length > 0,
   }
 }
 
@@ -79,4 +91,13 @@ function summarizeActionCounts(actions: DeleteUserDataActionResult[]): {
       skipped: 0,
     },
   )
+}
+
+function sanitizeLimitation(value: string): string {
+  return value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu, '[redacted-email]')
+    .replace(/\+?[1-9]\d{1,14}\b/gu, '[redacted-phone-or-id]')
+    .replace(/https?:\/\/[^\s]+/giu, '[redacted-url]')
+    .replace(/\b(?:token|secret|password|code)=\S+/giu, '[redacted-secret]')
+    .trim()
 }

@@ -30,6 +30,8 @@ export type ExportedUserData = {
     mediaAssets: unknown[]
     messages: unknown[]
     notifications: unknown[]
+    clientNotifications: unknown[]
+    scheduledClientNotifications: unknown[]
     notificationDispatches: unknown[]
     notificationDeliveries: unknown[]
     attributionEvents: unknown[]
@@ -252,6 +254,34 @@ const notificationExportSelect = {
   updatedAt: true,
 } satisfies Prisma.NotificationSelect
 
+const clientNotificationExportSelect = {
+  id: true,
+  clientId: true,
+  eventKey: true,
+  title: true,
+  body: true,
+  href: true,
+  bookingId: true,
+  aftercareId: true,
+  readAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ClientNotificationSelect
+
+const scheduledClientNotificationExportSelect = {
+  id: true,
+  clientId: true,
+  bookingId: true,
+  eventKey: true,
+  runAt: true,
+  href: true,
+  processedAt: true,
+  cancelledAt: true,
+  failedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ScheduledClientNotificationSelect
+
 const notificationDispatchExportSelect = {
   id: true,
   sourceKey: true,
@@ -271,6 +301,27 @@ const notificationDispatchExportSelect = {
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.NotificationDispatchSelect
+
+const notificationDeliveryExportSelect = {
+  id: true,
+  dispatchId: true,
+  channel: true,
+  provider: true,
+  status: true,
+  templateKey: true,
+  templateVersion: true,
+  attemptCount: true,
+  maxAttempts: true,
+  nextAttemptAt: true,
+  lastAttemptAt: true,
+  sentAt: true,
+  deliveredAt: true,
+  failedAt: true,
+  suppressedAt: true,
+  cancelledAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.NotificationDeliverySelect
 
 const tapIntentExportSelect = {
   id: true,
@@ -296,27 +347,6 @@ const aftercareSummaryExportSelect = {
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.AftercareSummarySelect
-
-const notificationDeliveryExportSelect = {
-  id: true,
-  dispatchId: true,
-  channel: true,
-  provider: true,
-  status: true,
-  templateKey: true,
-  templateVersion: true,
-  attemptCount: true,
-  maxAttempts: true,
-  nextAttemptAt: true,
-  lastAttemptAt: true,
-  sentAt: true,
-  deliveredAt: true,
-  failedAt: true,
-  suppressedAt: true,
-  cancelledAt: true,
-  createdAt: true,
-  updatedAt: true,
-} satisfies Prisma.NotificationDeliverySelect
 
 /**
  * Canonical user data export boundary.
@@ -354,6 +384,8 @@ export async function exportUserData(
     mediaAssets,
     messages,
     notifications,
+    clientNotifications,
+    scheduledClientNotifications,
     notificationDispatches,
     notificationDeliveries,
     attributionEvents,
@@ -375,6 +407,8 @@ export async function exportUserData(
     ),
     findMessages(input.db, input.userId, clientProfileId, professionalProfileId),
     findNotifications(input.db, professionalProfileId),
+    findClientNotifications(input.db, clientProfileId),
+    findScheduledClientNotifications(input.db, clientProfileId),
     findNotificationDispatches(
       input.db,
       input.userId,
@@ -432,6 +466,10 @@ export async function exportUserData(
       mediaAssets: normalizeJsonArray(mediaAssets),
       messages: normalizeJsonArray(messages),
       notifications: normalizeJsonArray(notifications),
+      clientNotifications: normalizeJsonArray(clientNotifications),
+      scheduledClientNotifications: normalizeJsonArray(
+        scheduledClientNotifications,
+      ),
       notificationDispatches: normalizeJsonArray(notificationDispatches),
       notificationDeliveries: normalizeJsonArray(notificationDeliveries),
       attributionEvents: normalizeJsonArray(attributionEvents),
@@ -443,7 +481,7 @@ export async function exportUserData(
       'Tenant-level exports, aggregate analytics, provider-side records, and storage object bytes are separate workflows.',
       'If Prisma schema adds new user-linked models, update this boundary and its schema-completeness test.',
       'MediaAsset export includes product-facing URLs and metadata but excludes storage bucket/path internals.',
-      'Notification dispatch/delivery exports exclude recipient contact snapshots, provider payloads, lease tokens, and provider message details.',
+      'Notification exports include safe inbox/schedule/dispatch/delivery fields and exclude recipient contact snapshots, structured payload/data fields, provider payloads, lease tokens, destination snapshots, provider message details, dedupe keys, and delivery error details.',
       'AttributionEvent export is omitted pending a disclosure decision for attribution/admin-adjacent records.',
       'AdminActionLog export is omitted from the default user export because it is an internal security/operational record.',
     ],
@@ -628,6 +666,33 @@ async function findNotifications(
   })
 }
 
+
+async function findClientNotifications(
+  db: PrismaClient | Prisma.TransactionClient,
+  clientProfileId: string | null,
+): Promise<unknown[]> {
+  if (!clientProfileId) return []
+
+  return db.clientNotification.findMany({
+    where: { clientId: clientProfileId },
+    orderBy: { createdAt: 'asc' },
+    select: clientNotificationExportSelect,
+  })
+}
+
+async function findScheduledClientNotifications(
+  db: PrismaClient | Prisma.TransactionClient,
+  clientProfileId: string | null,
+): Promise<unknown[]> {
+  if (!clientProfileId) return []
+
+  return db.scheduledClientNotification.findMany({
+    where: { clientId: clientProfileId },
+    orderBy: { createdAt: 'asc' },
+    select: scheduledClientNotificationExportSelect,
+  })
+}
+
 async function findNotificationDispatches(
   db: PrismaClient | Prisma.TransactionClient,
   userId: string,
@@ -727,10 +792,6 @@ function normalizeJson(value: unknown): unknown {
 
 function normalizeJsonArray(value: unknown[]): unknown[] {
   return value.map(normalizeJson)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 export const USER_DATA_EXPORT_VERSION = EXPORT_VERSION
