@@ -3,6 +3,7 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 
 import {
+  approximateCoordinateDecimalToFloat,
   buildAddressPrivacyWriteData,
   type AddressPrivacyInput,
 } from '@/lib/security/addressEncryption'
@@ -59,8 +60,10 @@ type AddressSnapshotBuildArgs = {
 
 type AddressPrivacyWritePatch = {
   encryptedAddressJson: Prisma.InputJsonValue
-  latApprox: number | null
-  lngApprox: number | null
+  addressKeyVersion: string
+  postalCodePrefix: string | null
+  latApprox: Prisma.Decimal | null
+  lngApprox: Prisma.Decimal | null
 }
 
 function parseOptions(argv: string[]): CliOptions {
@@ -152,13 +155,15 @@ function toNullableNumber(value: unknown): number | null {
 }
 
 function parseLegacyAddressSnapshot(
-  value: Prisma.JsonValue | null,
+  value: Prisma.JsonValue | null | undefined,
 ): LegacyAddressSnapshot | null {
   if (!isRecord(value)) return null
   return value
 }
 
-function buildLegacyAddressSnapshot(input: LegacyAddressSnapshot): LegacyAddressSnapshot {
+function buildLegacyAddressSnapshot(
+  input: LegacyAddressSnapshot,
+): LegacyAddressSnapshot {
   return {
     formattedAddress: input.formattedAddress,
     addressLine1: input.addressLine1,
@@ -227,9 +232,18 @@ function buildPrivacyPatch(
 
   return {
     encryptedAddressJson: privacy.encryptedAddressJson,
-    latApprox: toNullableNumber(privacy.latApprox),
-    lngApprox: toNullableNumber(privacy.lngApprox),
+    addressKeyVersion: privacy.addressKeyVersion,
+    postalCodePrefix: privacy.postalCodePrefix,
+    latApprox: privacy.latApprox,
+    lngApprox: privacy.lngApprox,
   }
+}
+
+function decimalToNullableNumber(value: Prisma.Decimal | null): number | null {
+  if (value === null) return null
+
+  const numberValue = value.toNumber()
+  return Number.isFinite(numberValue) ? numberValue : null
 }
 
 function emptyStats(): BackfillStats {
@@ -269,10 +283,30 @@ async function backfillBookingHolds(
   for (;;) {
     const rows = await prisma.bookingHold.findMany({
       where: {
-        addressSnapshotsEncryptedAt: null,
         OR: [
-          { locationAddressSnapshot: { not: Prisma.JsonNull } },
-          { clientAddressSnapshot: { not: Prisma.JsonNull } },
+          {
+            addressSnapshotsEncryptedAt: null,
+            OR: [
+              { locationAddressSnapshot: { not: Prisma.JsonNull } },
+              { clientAddressSnapshot: { not: Prisma.JsonNull } },
+            ],
+          },
+          {
+            locationAddressSnapshot: { not: Prisma.JsonNull },
+            encryptedLocationAddressSnapshotJson: { equals: Prisma.DbNull },
+          },
+          {
+            clientAddressSnapshot: { not: Prisma.JsonNull },
+            encryptedClientAddressSnapshotJson: { equals: Prisma.DbNull },
+          },
+          {
+            encryptedLocationAddressSnapshotJson: { not: Prisma.JsonNull },
+            locationAddressSnapshotKeyVersion: null,
+          },
+          {
+            encryptedClientAddressSnapshotJson: { not: Prisma.JsonNull },
+            clientAddressSnapshotKeyVersion: null,
+          },
         ],
       },
       orderBy: { id: 'asc' },
@@ -286,6 +320,11 @@ async function backfillBookingHolds(
         clientAddressSnapshot: true,
         clientAddressLatSnapshot: true,
         clientAddressLngSnapshot: true,
+        encryptedLocationAddressSnapshotJson: true,
+        encryptedClientAddressSnapshotJson: true,
+        locationAddressSnapshotKeyVersion: true,
+        clientAddressSnapshotKeyVersion: true,
+        addressSnapshotsEncryptedAt: true,
       },
     })
 
@@ -330,6 +369,8 @@ async function backfillBookingHolds(
           continue
         }
 
+        const encryptedAt = new Date()
+
         await prisma.bookingHold.update({
           where: { id: row.id },
           data: {
@@ -337,19 +378,23 @@ async function backfillBookingHolds(
               ? {
                   encryptedLocationAddressSnapshotJson:
                     locationPatch.encryptedAddressJson,
-                  locationLatApprox: locationPatch.latApprox,
-                  locationLngApprox: locationPatch.lngApprox,
+                  locationAddressSnapshotKeyVersion:
+                    locationPatch.addressKeyVersion,
+                  locationLatApprox: approximateCoordinateDecimalToFloat(locationPatch.latApprox),
+                  locationLngApprox: approximateCoordinateDecimalToFloat(locationPatch.lngApprox),
                 }
               : {}),
             ...(clientPatch
               ? {
                   encryptedClientAddressSnapshotJson:
                     clientPatch.encryptedAddressJson,
-                  clientAddressLatApprox: clientPatch.latApprox,
-                  clientAddressLngApprox: clientPatch.lngApprox,
+                  clientAddressSnapshotKeyVersion:
+                    clientPatch.addressKeyVersion,
+                  clientAddressLatApprox: decimalToNullableNumber(clientPatch.latApprox),
+                  clientAddressLngApprox: decimalToNullableNumber(clientPatch.lngApprox),
                 }
               : {}),
-            addressSnapshotsEncryptedAt: new Date(),
+            addressSnapshotsEncryptedAt: encryptedAt,
           },
           select: { id: true },
         })
@@ -378,10 +423,30 @@ async function backfillBookings(options: CliOptions): Promise<BackfillStats> {
   for (;;) {
     const rows = await prisma.booking.findMany({
       where: {
-        addressSnapshotsEncryptedAt: null,
         OR: [
-          { locationAddressSnapshot: { not: Prisma.JsonNull } },
-          { clientAddressSnapshot: { not: Prisma.JsonNull } },
+          {
+            addressSnapshotsEncryptedAt: null,
+            OR: [
+              { locationAddressSnapshot: { not: Prisma.JsonNull } },
+              { clientAddressSnapshot: { not: Prisma.JsonNull } },
+            ],
+          },
+          {
+            locationAddressSnapshot: { not: Prisma.JsonNull },
+            encryptedLocationAddressSnapshotJson: { equals: Prisma.DbNull },
+          },
+          {
+            clientAddressSnapshot: { not: Prisma.JsonNull },
+            encryptedClientAddressSnapshotJson: { equals: Prisma.DbNull },
+          },
+          {
+            encryptedLocationAddressSnapshotJson: { not: Prisma.JsonNull },
+            locationAddressSnapshotKeyVersion: null,
+          },
+          {
+            encryptedClientAddressSnapshotJson: { not: Prisma.JsonNull },
+            clientAddressSnapshotKeyVersion: null,
+          },
         ],
       },
       orderBy: { id: 'asc' },
@@ -395,6 +460,11 @@ async function backfillBookings(options: CliOptions): Promise<BackfillStats> {
         clientAddressSnapshot: true,
         clientAddressLatSnapshot: true,
         clientAddressLngSnapshot: true,
+        encryptedLocationAddressSnapshotJson: true,
+        encryptedClientAddressSnapshotJson: true,
+        locationAddressSnapshotKeyVersion: true,
+        clientAddressSnapshotKeyVersion: true,
+        addressSnapshotsEncryptedAt: true,
       },
     })
 
@@ -439,6 +509,8 @@ async function backfillBookings(options: CliOptions): Promise<BackfillStats> {
           continue
         }
 
+        const encryptedAt = new Date()
+
         await prisma.booking.update({
           where: { id: row.id },
           data: {
@@ -446,19 +518,23 @@ async function backfillBookings(options: CliOptions): Promise<BackfillStats> {
               ? {
                   encryptedLocationAddressSnapshotJson:
                     locationPatch.encryptedAddressJson,
-                  locationLatApprox: locationPatch.latApprox,
-                  locationLngApprox: locationPatch.lngApprox,
+                  locationAddressSnapshotKeyVersion:
+                    locationPatch.addressKeyVersion,
+                  locationLatApprox: decimalToNullableNumber(locationPatch.latApprox),
+                  locationLngApprox: decimalToNullableNumber(locationPatch.lngApprox),
                 }
               : {}),
             ...(clientPatch
               ? {
                   encryptedClientAddressSnapshotJson:
                     clientPatch.encryptedAddressJson,
-                  clientAddressLatApprox: clientPatch.latApprox,
-                  clientAddressLngApprox: clientPatch.lngApprox,
+                  clientAddressSnapshotKeyVersion:
+                    clientPatch.addressKeyVersion,
+                  clientAddressLatApprox: decimalToNullableNumber(clientPatch.latApprox),
+                  clientAddressLngApprox: decimalToNullableNumber(clientPatch.lngApprox),
                 }
               : {}),
-            addressSnapshotsEncryptedAt: new Date(),
+            addressSnapshotsEncryptedAt: encryptedAt,
           },
           select: { id: true },
         })
@@ -489,9 +565,15 @@ async function backfillClientAddresses(
   for (;;) {
     const rows = await prisma.clientAddress.findMany({
       where: {
-        encryptedAddressJson: {
-          equals: Prisma.DbNull,
-        },
+        OR: [
+          { encryptedAddressJson: { equals: Prisma.DbNull } },
+          { addressKeyVersion: null },
+          { encryptedAt: null },
+          {
+            postalCode: { not: null },
+            postalCodePrefix: null,
+          },
+        ],
       },
       orderBy: { id: 'asc' },
       take: options.batchSize,
@@ -508,6 +590,10 @@ async function backfillClientAddresses(
         placeId: true,
         lat: true,
         lng: true,
+        encryptedAddressJson: true,
+        addressKeyVersion: true,
+        postalCodePrefix: true,
+        encryptedAt: true,
       },
     })
 
@@ -543,12 +629,17 @@ async function backfillClientAddresses(
           continue
         }
 
+        const encryptedAt = new Date()
+
           await prisma.clientAddress.update({
             where: { id: row.id },
             data: {
               encryptedAddressJson: patch.encryptedAddressJson,
+              addressKeyVersion: patch.addressKeyVersion,
+              postalCodePrefix: patch.postalCodePrefix,
               latApprox: patch.latApprox,
               lngApprox: patch.lngApprox,
+              encryptedAt,
             },
             select: { id: true },
           })
@@ -579,9 +670,15 @@ async function backfillProfessionalLocations(
   for (;;) {
     const rows = await prisma.professionalLocation.findMany({
       where: {
-        encryptedAddressJson: {
-          equals: Prisma.DbNull,
-        },
+        OR: [
+          { encryptedAddressJson: { equals: Prisma.DbNull } },
+          { addressKeyVersion: null },
+          { encryptedAt: null },
+          {
+            postalCode: { not: null },
+            postalCodePrefix: null,
+          },
+        ],
       },
       orderBy: { id: 'asc' },
       take: options.batchSize,
@@ -598,6 +695,10 @@ async function backfillProfessionalLocations(
         placeId: true,
         lat: true,
         lng: true,
+        encryptedAddressJson: true,
+        addressKeyVersion: true,
+        postalCodePrefix: true,
+        encryptedAt: true,
       },
     })
 
@@ -633,12 +734,17 @@ async function backfillProfessionalLocations(
           continue
         }
 
+        const encryptedAt = new Date()
+
       await prisma.professionalLocation.update({
         where: { id: row.id },
         data: {
           encryptedAddressJson: patch.encryptedAddressJson,
+          addressKeyVersion: patch.addressKeyVersion,
+          postalCodePrefix: patch.postalCodePrefix,
           latApprox: patch.latApprox,
           lngApprox: patch.lngApprox,
+          encryptedAt,
         },
         select: { id: true },
       })
