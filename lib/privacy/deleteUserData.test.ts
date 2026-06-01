@@ -53,11 +53,9 @@ function makeUser(args?: {
   return {
     id: args?.id ?? 'user_1',
     email: 'person@example.com',
-    emailHash: 'legacy_email_hash',
     emailHashV2: 'hmac_email_hash_v2',
     emailHashKeyVersion: 1,
     phone: '+16195551234',
-    phoneHash: 'legacy_phone_hash',
     phoneHashV2: 'hmac_phone_hash_v2',
     phoneHashKeyVersion: 1,
     phoneVerifiedAt: new Date('2026-04-01T10:00:00.000Z'),
@@ -414,8 +412,6 @@ describe('deleteUserData', () => {
         email: null,
         phone: null,
         dateOfBirth: null,
-        emailHash: null,
-        phoneHash: null,
         emailHashV2: null,
         emailHashKeyVersion: null,
         phoneHashV2: null,
@@ -438,8 +434,6 @@ describe('deleteUserData', () => {
       data: {
         email: 'deleted-user_both@deleted.tovis.local',
         phone: null,
-        emailHash: null,
-        phoneHash: null,
         emailHashV2: null,
         emailHashKeyVersion: null,
         phoneHashV2: null,
@@ -627,8 +621,6 @@ describe('deleteUserData', () => {
 
     expect(serialized).not.toContain('person@example.com')
     expect(serialized).not.toContain('+16195551234')
-    expect(serialized).not.toContain('legacy_email_hash')
-    expect(serialized).not.toContain('legacy_phone_hash')
     expect(serialized).not.toContain('hmac_email_hash_v2')
     expect(serialized).not.toContain('hmac_phone_hash_v2')
     expect(serialized).not.toContain('stored_hash')

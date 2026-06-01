@@ -210,7 +210,7 @@ function makeUser(args?: {
   }
 }
 
-function expectedEmailLookupData(email: string) {
+function expectedEmailLookupV2Data(email: string) {
   const hmac = emailLookupHashV2(email)
 
   return {
@@ -226,18 +226,13 @@ function mockUserLookupByWhere(users: ReturnType<typeof makeUser>[]) {
 
       return users
         .filter((user) => {
-          const lookup = expectedEmailLookupData(user.email)
+          const lookup = expectedEmailLookupV2Data(user.email)
 
           return conditions.some((condition) => {
-            if (
-              condition.emailHashV2 &&
-              condition.emailHashKeyVersion != null &&
+            return (
               condition.emailHashV2 === lookup.emailHashV2 &&
               condition.emailHashKeyVersion === lookup.emailHashKeyVersion
-            ) {
-              return true
-            }
-            return false
+            )
           })
         })
         .slice(0, 2)
@@ -676,7 +671,7 @@ describe('app/api/auth/login/route', () => {
     const user = makeUser({
       loginAttempts: 0,
     })
-    const lookup = expectedEmailLookupData('user@example.com')
+    const lookup = expectedEmailLookupV2Data('user@example.com')
 
     mockUserLookupByWhere([user])
     mockVerifyPassword.mockResolvedValue(true)
@@ -714,7 +709,7 @@ describe('app/api/auth/login/route', () => {
   })
 
   it('does not include legacy or plaintext fallback in the login lookup', async () => {
-    const lookup = expectedEmailLookupData('user@example.com')
+    const lookup = expectedEmailLookupV2Data('user@example.com')
 
     mockPrisma.user.findMany.mockResolvedValueOnce([])
     mockVerifyPassword.mockResolvedValue(false)

@@ -58,11 +58,9 @@ function makeUser(args?: {
   return {
     id: args?.id ?? 'user_1',
     email: 'person@example.com',
-    emailHash: 'legacy_email_hash',
     emailHashV2: 'hmac_email_hash_v2',
     emailHashKeyVersion: 1,
     phone: '+16195551234',
-    phoneHash: 'legacy_phone_hash',
     phoneHashV2: 'hmac_phone_hash_v2',
     phoneHashKeyVersion: 1,
     password: 'stored_hash',

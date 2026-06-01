@@ -87,8 +87,10 @@ function makeRequest(
   })
 }
 
-function expectedEmailLookupData(email: string) {
+function expectedEmailLookupV2Data(email: string) {
   const hmac = emailLookupHashV2(email)
+
+  expect(hmac).not.toBeNull()
 
   return {
     emailHashV2: hmac?.hash ?? null,
@@ -103,21 +105,15 @@ function mockUserLookupByWhere(users: PasswordResetTestUser[]) {
 
       return users
         .filter((user) => {
-          if (!user.email) return false
+          if (!user.email?.trim()) return false
 
-          const lookup = expectedEmailLookupData(user.email)
+          const lookup = expectedEmailLookupV2Data(user.email)
 
           return conditions.some((condition) => {
-            if (
-              condition.emailHashV2 &&
-              condition.emailHashKeyVersion != null &&
+            return (
               condition.emailHashV2 === lookup.emailHashV2 &&
               condition.emailHashKeyVersion === lookup.emailHashKeyVersion
-            ) {
-              return true
-            }
-
-            return false
+            )
           })
         })
         .slice(0, 2)
@@ -215,7 +211,7 @@ describe('app/api/auth/password-reset/request/route', () => {
       },
     ])
 
-    const lookup = expectedEmailLookupData('user@example.com')
+    const lookup = expectedEmailLookupV2Data('user@example.com')
 
     const result = await POST(
       makeRequest({
@@ -248,7 +244,7 @@ describe('app/api/auth/password-reset/request/route', () => {
   })
 
   it('does not include legacy or plaintext fallback in the password reset lookup', async () => {
-    const lookup = expectedEmailLookupData('user@example.com')
+    const lookup = expectedEmailLookupV2Data('user@example.com')
 
     mockPrisma.user.findMany.mockResolvedValueOnce([])
 
@@ -291,7 +287,7 @@ describe('app/api/auth/password-reset/request/route', () => {
   it('returns ok when the user is not found', async () => {
     mockPrisma.user.findMany.mockResolvedValue([])
 
-    const lookup = expectedEmailLookupData('missing@example.com')
+    const lookup = expectedEmailLookupV2Data('missing@example.com')
 
     const result = await POST(
       makeRequest({

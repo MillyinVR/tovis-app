@@ -304,7 +304,6 @@ function expectedEmailLookupData(email: string) {
   expect(emailHashV2).not.toBeNull()
 
   return {
-    emailHash: null,
     emailHashV2: emailHashV2?.hash,
     emailHashKeyVersion: emailHashV2?.keyVersion,
   }
@@ -316,7 +315,6 @@ function expectedPhoneLookupData(phone: string) {
   expect(phoneHashV2).not.toBeNull()
 
   return {
-    phoneHash: null,
     phoneHashV2: phoneHashV2?.hash,
     phoneHashKeyVersion: phoneHashV2?.keyVersion,
   }

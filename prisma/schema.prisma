@@ -880,11 +880,9 @@ model AdminPermission {
 model User {
   id                  String    @id @default(cuid())
   email               String    @unique @db.VarChar(320)
-  emailHash           String?   @db.VarChar(128)
   emailHashV2         String?   @unique @db.VarChar(128)
   emailHashKeyVersion Int?
   phone               String?   @unique @db.VarChar(32)
-  phoneHash           String?   @db.VarChar(128)
   phoneHashV2         String?   @unique @db.VarChar(128)
   phoneHashKeyVersion Int?
   phoneVerifiedAt     DateTime?
@@ -1046,11 +1044,9 @@ model ClientProfile {
   claimedAt   DateTime?
 
   email               String?   @unique @db.VarChar(320)
-  emailHash           String?   @db.VarChar(128)
   emailHashV2         String?   @unique @db.VarChar(128)
   emailHashKeyVersion Int?
   phone               String?   @unique @db.VarChar(32)
-  phoneHash           String?   @db.VarChar(128)
   phoneHashV2         String?   @unique @db.VarChar(128)
   phoneHashKeyVersion Int?
   phoneVerifiedAt     DateTime?

@@ -10,9 +10,6 @@ import {
 
 const TEST_HMAC_KEY = Buffer.alloc(32, 7).toString('base64')
 
-const LEGACY_EMAIL_HASH = 'legacy_email_hash'
-const LEGACY_PHONE_HASH = 'legacy_phone_hash'
-
 const mocks = vi.hoisted(() => ({
   prisma: {
     clientProfile: {
@@ -37,11 +34,9 @@ type TestUser = {
   id: string
   role: Role
   email: string | null
-  emailHash: string | null
   emailHashV2: string | null
   emailHashKeyVersion: number | null
   phone: string | null
-  phoneHash: string | null
   phoneHashV2: string | null
   phoneHashKeyVersion: number | null
 }
@@ -54,11 +49,9 @@ type TestProfile = {
   firstName: string
   lastName: string
   email: string | null
-  emailHash: string | null
   emailHashV2: string | null
   emailHashKeyVersion: number | null
   phone: string | null
-  phoneHash: string | null
   phoneHashV2: string | null
   phoneHashKeyVersion: number | null
   user: TestUser | null
@@ -80,7 +73,6 @@ function expectedEmailLookupData(email: string | null) {
   const emailHashV2 = emailLookupHashV2(email)
 
   return {
-    emailHash: null,
     emailHashV2: emailHashV2?.hash ?? null,
     emailHashKeyVersion: emailHashV2?.keyVersion ?? null,
   }
@@ -90,7 +82,6 @@ function expectedPhoneLookupData(phone: string | null) {
   const phoneHashV2 = phoneLookupHashV2(phone)
 
   return {
-    phoneHash: null,
     phoneHashV2: phoneHashV2?.hash ?? null,
     phoneHashKeyVersion: phoneHashV2?.keyVersion ?? null,
   }
@@ -111,12 +102,10 @@ function makeProfile(overrides: MakeProfileOverrides = {}): TestProfile {
     firstName: overrides.firstName ?? '',
     lastName: overrides.lastName ?? '',
     email,
-    emailHash: overrides.emailHash ?? emailLookup.emailHash,
     emailHashV2: overrides.emailHashV2 ?? emailLookup.emailHashV2,
     emailHashKeyVersion:
       overrides.emailHashKeyVersion ?? emailLookup.emailHashKeyVersion,
     phone,
-    phoneHash: overrides.phoneHash ?? phoneLookup.phoneHash,
     phoneHashV2: overrides.phoneHashV2 ?? phoneLookup.phoneHashV2,
     phoneHashKeyVersion:
       overrides.phoneHashKeyVersion ?? phoneLookup.phoneHashKeyVersion,
@@ -135,12 +124,10 @@ function makeUser(overrides: MakeUserOverrides = {}): TestUserWithProfile {
     id: overrides.id ?? 'user_1',
     role: overrides.role ?? Role.CLIENT,
     email,
-    emailHash: overrides.emailHash ?? emailLookup.emailHash,
     emailHashV2: overrides.emailHashV2 ?? emailLookup.emailHashV2,
     emailHashKeyVersion:
       overrides.emailHashKeyVersion ?? emailLookup.emailHashKeyVersion,
     phone,
-    phoneHash: overrides.phoneHash ?? phoneLookup.phoneHash,
     phoneHashV2: overrides.phoneHashV2 ?? phoneLookup.phoneHashV2,
     phoneHashKeyVersion:
       overrides.phoneHashKeyVersion ?? phoneLookup.phoneHashKeyVersion,
@@ -274,13 +261,12 @@ describe('upsertProClient', () => {
     expect(mocks.prisma.user.findMany).not.toHaveBeenCalled()
   })
 
-  it('matches an existing client profile by emailHashV2 only', async () => {
+  it('matches an existing client profile by emailHashV2', async () => {
     const existingProfile = makeProfile({
       id: 'client_hash_match',
       firstName: 'Existing',
       lastName: 'Client',
       email: 'tori@example.com',
-      emailHash: LEGACY_EMAIL_HASH,
       phone: null,
     })
 
@@ -314,7 +300,6 @@ describe('upsertProClient', () => {
     }
 
     expect(profileLookupCall.where.OR).not.toContainEqual({
-      emailHash: expect.any(String),
     })
 
     expect(profileLookupCall.where.OR).not.toContainEqual({
@@ -336,13 +321,11 @@ describe('upsertProClient', () => {
     const existingProfile = makeProfile({
       id: 'client_1',
       email: 'tori@example.com',
-      emailHash: LEGACY_EMAIL_HASH,
       userId: 'user_pro_1',
       user: makeUser({
         id: 'user_pro_1',
         role: Role.PRO,
         email: 'tori@example.com',
-        emailHash: LEGACY_EMAIL_HASH,
         phone: null,
       }),
     })
@@ -364,7 +347,7 @@ describe('upsertProClient', () => {
     })
   })
 
-  it('does not include plaintext or legacy phone fallback in client profile lookup', async () => {
+  it('does not include plaintext phone fallback in client profile lookup', async () => {
     mocks.prisma.clientProfile.findMany.mockResolvedValueOnce([])
     mocks.prisma.user.findMany.mockResolvedValueOnce([])
     mocks.prisma.clientProfile.create.mockResolvedValueOnce(
@@ -401,7 +384,6 @@ describe('upsertProClient', () => {
     ])
 
     expect(profileLookupCall.where.OR).not.toContainEqual({
-      phoneHash: expect.any(String),
     })
 
     expect(profileLookupCall.where.OR).not.toContainEqual({
@@ -409,7 +391,7 @@ describe('upsertProClient', () => {
     })
   })
 
-  it('does not include legacy or plaintext fallback in user lookup', async () => {
+  it('does not include plaintext fallback in user lookup', async () => {
     mocks.prisma.clientProfile.findMany.mockResolvedValueOnce([])
     mocks.prisma.user.findMany.mockResolvedValueOnce([])
     mocks.prisma.clientProfile.create.mockResolvedValueOnce(
@@ -459,7 +441,6 @@ describe('upsertProClient', () => {
       firstName: '',
       lastName: '',
       email: 'tori@example.com',
-      emailHash: LEGACY_EMAIL_HASH,
       phone: null,
       claimStatus: ClientClaimStatus.UNCLAIMED,
       userId: null,
@@ -489,7 +470,6 @@ describe('upsertProClient', () => {
           firstName: 'Tori',
           lastName: 'Morales',
           phone: '+16195551234',
-          phoneHash: null,
           phoneHashV2: phoneLookupHashV2('+16195551234')?.hash,
           phoneHashKeyVersion: CONTACT_LOOKUP_HMAC_KEY_VERSION,
         }),
@@ -511,7 +491,6 @@ describe('upsertProClient', () => {
         id: 'user_pro_1',
         role: Role.PRO,
         email: 'tori@example.com',
-        emailHash: LEGACY_EMAIL_HASH,
       }),
     ])
 
@@ -535,9 +514,7 @@ describe('upsertProClient', () => {
         id: 'user_client_1',
         role: Role.CLIENT,
         email: 'tori@example.com',
-        emailHash: LEGACY_EMAIL_HASH,
         phone: '+16195551234',
-        phoneHash: LEGACY_PHONE_HASH,
         clientProfile: null,
       }),
     ])
@@ -556,9 +533,7 @@ describe('upsertProClient', () => {
           id: 'user_client_1',
           role: Role.CLIENT,
           email: 'tori@example.com',
-          emailHash: LEGACY_EMAIL_HASH,
           phone: '+16195551234',
-          phoneHash: LEGACY_PHONE_HASH,
         }),
       }),
     )
@@ -609,9 +584,7 @@ describe('upsertProClient', () => {
         id: 'user_client_1',
         role: Role.CLIENT,
         email: 'tori@example.com',
-        emailHash: LEGACY_EMAIL_HASH,
         phone: '+16195551234',
-        phoneHash: LEGACY_PHONE_HASH,
       }),
     })
 
@@ -620,9 +593,7 @@ describe('upsertProClient', () => {
         id: 'user_client_1',
         role: Role.CLIENT,
         email: 'tori@example.com',
-        emailHash: LEGACY_EMAIL_HASH,
         phone: '+16195551234',
-        phoneHash: LEGACY_PHONE_HASH,
         clientProfile: existingUserProfile,
       }),
     ])
@@ -641,9 +612,7 @@ describe('upsertProClient', () => {
           id: 'user_client_1',
           role: Role.CLIENT,
           email: 'tori@example.com',
-          emailHash: LEGACY_EMAIL_HASH,
           phone: '+16195551234',
-          phoneHash: LEGACY_PHONE_HASH,
         }),
       }),
     )
@@ -734,7 +703,6 @@ describe('upsertProClient', () => {
         id: 'user_email_1',
         role: Role.CLIENT,
         email: 'tori@example.com',
-        emailHash: LEGACY_EMAIL_HASH,
         phone: null,
       }),
       makeUser({
@@ -742,7 +710,6 @@ describe('upsertProClient', () => {
         role: Role.CLIENT,
         email: null,
         phone: '+16195551234',
-        phoneHash: LEGACY_PHONE_HASH,
       }),
     ])
 
@@ -771,9 +738,7 @@ describe('upsertProClient', () => {
       firstName: 'Existing',
       lastName: 'Client',
       email: 'existing@example.com',
-      emailHash: LEGACY_EMAIL_HASH,
       phone: '+16195550000',
-      phoneHash: LEGACY_PHONE_HASH,
       user: null,
     })
 

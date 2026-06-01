@@ -1,12 +1,11 @@
 // lib/security/crypto/hashLookup.ts
-import { createHash, createHmac } from 'node:crypto'
+import { createHmac } from 'node:crypto'
 
 import {
   normalizeEmailForLookup,
   normalizePhoneForLookup,
 } from '@/lib/security/contactNormalization'
 
-const LEGACY_CONTACT_HASH_ALGORITHM = 'sha256' as const
 const CONTACT_LOOKUP_HMAC_ALGORITHM = 'sha256' as const
 
 /**
@@ -33,39 +32,6 @@ let cachedContactLookupHmacKeyring: ContactLookupHmacKeyring | null = null
 let cachedContactLookupHmacRawEnv: string | null = null
 
 /**
- * Legacy lowercase SHA-256 hex digest.
- *
- * Retained for compatibility with existing legacy hashes and non-contact
- * short-hash logging. Do not use this for new contact blind indexes.
- */
-export function legacySha256Hex(value: string): string {
-  return createHash(LEGACY_CONTACT_HASH_ALGORITHM)
-    .update(value, 'utf8')
-    .digest('hex')
-}
-
-/**
- * Backward-compatible alias for existing non-contact token/hash callers.
- *
- * For contact lookup code, prefer `legacyContactLookupHash(...)` or the v2
- * helpers below so the legacy/v2 distinction is explicit.
- */
-export function sha256Hex(value: string): string {
-  return legacySha256Hex(value)
-}
-
-/**
- * Legacy contact lookup hash.
- *
- * This intentionally expects an already-canonical contact value. Callers that
- * start from raw user input should use `emailLookupHash(...)` or
- * `phoneLookupHash(...)`.
- */
-export function legacyContactLookupHash(normalizedValue: string): string {
-  return legacySha256Hex(normalizedValue)
-}
-
-/**
  * HMAC-SHA256 contact lookup hash for v2 blind indexes.
  *
  * The value passed here must already be canonicalized. Callers that start from
@@ -87,35 +53,9 @@ export function contactLookupHmacHex(args: {
 }
 
 /**
- * Legacy helper for email lookup hashes.
- *
- * Retained for old-data compatibility and legacy assertions only.
- * New contact lookup writes should use v2 HMAC fields and clear the legacy
- * SHA-256 `emailHash` field.
- */
-export function emailLookupHash(value: unknown): string | null {
-  const normalized = normalizeEmailForLookup(value)
-
-  return normalized ? legacyContactLookupHash(normalized) : null
-}
-
-/**
- * Legacy helper for phone lookup hashes.
- *
- * Retained for old-data compatibility and legacy assertions only.
- * New contact lookup writes should use v2 HMAC fields and clear the legacy
- * SHA-256 `phoneHash` field.
- */
-export function phoneLookupHash(value: unknown): string | null {
-  const normalized = normalizePhoneForLookup(value)
-
-  return normalized ? legacyContactLookupHash(normalized) : null
-}
-
-/**
  * HMAC v2 helper for email lookup hashes.
  *
- * Writes/reads the new `emailHashV2` value.
+ * Writes/reads the `emailHashV2` value.
  */
 export function emailLookupHashV2(value: unknown): ContactLookupHashV2 | null {
   const normalized = normalizeEmailForLookup(value)
@@ -126,7 +66,7 @@ export function emailLookupHashV2(value: unknown): ContactLookupHashV2 | null {
 /**
  * HMAC v2 helper for phone lookup hashes.
  *
- * Writes/reads the new `phoneHashV2` value.
+ * Writes/reads the `phoneHashV2` value.
  */
 export function phoneLookupHashV2(value: unknown): ContactLookupHashV2 | null {
   const normalized = normalizePhoneForLookup(value)
@@ -219,7 +159,9 @@ function parseContactLookupHmacKeyring(
   }
 
   if (keyring.size === 0) {
-    throw new Error(`${CONTACT_LOOKUP_HMAC_KEYS_ENV} must contain at least one key`)
+    throw new Error(
+      `${CONTACT_LOOKUP_HMAC_KEYS_ENV} must contain at least one key`,
+    )
   }
 
   return keyring
