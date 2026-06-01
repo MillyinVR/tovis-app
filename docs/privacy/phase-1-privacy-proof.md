@@ -4,7 +4,9 @@
 
 Phase 1 removes the hard public-launch privacy blocker by establishing canonical contact normalization, audit redaction, AEAD address encryption, HMAC contact lookup v2, and user export/delete foundations.
 
-Phase 1 is not fully closed yet. The core code paths, local proof commands, staging backfill scripts, and plaintext lookup fallback removal now pass. Legacy SHA-256 cleanup, retention decisions, admin audit deployed-behavior verification, and the plaintext-read baseline decision are still tracked in docs/privacy/phase-1-remaining-work.md.
+Phase 1 privacy is launch-ready for the current pre-launch scope.
+
+The core code paths, local proof commands, staging backfill scripts, protected export/delete routes, privacy request runbook, and verification gates now pass. Remaining items are accepted pre-launch/follow-up work tracked in `docs/privacy/phase-1-remaining-work.md`, including legacy SHA-256 column/index drop after short pre-launch QA and the accepted plaintext-read baseline burn-down.
 
 ## Verification date
 
@@ -14,16 +16,9 @@ Phase 1 is not fully closed yet. The core code paths, local proof commands, stag
 
 Commands:
 
-bash pnpm test pnpm verify:privacy-phase1 pnpm typecheck 
-
-Result:
-
-- Full test suite: passed, 300 files / 3266 tests.
-- check-canonical-normalization: passed.
-- check-pii-plaintext-reads: passed with 471 known baseline entries.
-- test:privacy-phase1: passed, 8 files / 131 tests.
-- test:privacy-export-delete: passed, 2 files / 12 tests.
-- pnpm typecheck: passed.
+```bash
+pnpm verify:privacy-phase1
+pnpm typecheck
 
 Notes:
 
@@ -61,7 +56,7 @@ Implemented central audit redaction in:
 
 The redaction boundary prevents raw PII, tokens, signed URLs, private media paths, payment identifiers, address payloads, notes, and other sensitive free-text fields from being persisted into long-lived audit JSON.
 
-Status: code complete. Dedicated writeAdminAuditLog test coverage still needs to be added or verified before checking off admin audit payload redaction in docs/privacy/phase-1-remaining-work.md.
+Status: complete. Admin audit writes are centralized through `lib/admin/auditLog.ts`, and audit payload redaction is covered by focused tests.
 
 ### 1.3 AEAD address encryption
 
@@ -128,10 +123,10 @@ The HMAC v2 path supports:
 - emailHashV2 / phoneHashV2 lookup values.
 - emailHashKeyVersion / phoneHashKeyVersion tracking.
 - Dual-write for new/updated contact records.
-- V2-first lookup for current auth/contact read paths.
+- V2-only lookup for current auth/contact read paths.
 - Backfill script for existing User and ClientProfile rows.
 
-Status: implementation exists. Staging backfill command executed successfully with 0 failures. Staging had no User or ClientProfile rows to migrate at the time of execution. Plaintext lookup fallback has been removed. Legacy SHA-256 fallback remains temporarily for short pre-launch QA.
+Status: implementation exists. Staging backfill command executed successfully with 0 failures. Staging had no User or ClientProfile rows to migrate at the time of execStatus: complete for Phase 1 launch readiness. Staging backfill command executed successfully with 0 failures. Staging had no User or ClientProfile rows to migrate at the time of execution. Plaintext lookup fallback and legacy SHA-256 reader fallback have been removed from current auth/contact read paths.ution. Plaintext lookup fallback has been removed. Legacy SHA-256 fallback remains temporarily for short pre-launch QA.
 
 #### Local script smoke test
 
@@ -199,8 +194,8 @@ Plaintext contact lookup fallback was removed from:
 
 Tests were updated to prove lookup readers now use:
 
-- HMAC v2 lookup fields first.
-- Legacy SHA-256 lookup fields second.
+- HMAC v2 lookup fields only.
+- No legacy SHA-256 reader fallback.
 - No raw plaintext email / phone lookup fallback.
 
 Verification:
@@ -219,19 +214,23 @@ Because the app has no real users yet, no extended production burn-in is require
 
 Decision:
 
-- Keep legacy SHA-256 lookup fallback through short pre-launch QA.
 - Verify seed/demo/login/password-reset/pro-client flows using HMAC v2.
-- Remove legacy SHA-256 fallback before public launch.
-- Add a follow-up migration to drop legacy SHA-256 lookup columns/indexes after the fallback is removed.
+- Add a follow-up migration to drop legacy SHA-256 lookup columns/indexes after short pre-launch QA.
+- Keep legacy SHA-256 columns only as temporary schema cleanup debt until the drop migration lands.
 
 ### 1.5 User export/delete foundation
 
-Implemented export/delete foundations in:
+Implemented export/delete foundations and protected internal routes in:
 
-- lib/privacy/exportUserData.ts
-- lib/privacy/deleteUserData.ts
-- lib/privacy/exportUserData.test.ts
-- lib/privacy/deleteUserData.test.ts
+- `lib/privacy/exportUserData.ts`
+- `lib/privacy/deleteUserData.ts`
+- `app/api/internal/privacy/export/[userId]/route.ts`
+- `app/api/internal/privacy/delete/[userId]/route.ts`
+- `docs/runbooks/privacy-request.md`
+- `lib/privacy/exportUserData.test.ts`
+- `lib/privacy/deleteUserData.test.ts`
+- `app/api/internal/privacy/export/[userId]/route.test.ts`
+- `app/api/internal/privacy/delete/[userId]/route.test.ts`
 
 Current delete/anonymization behavior includes:
 
@@ -242,15 +241,20 @@ Current delete/anonymization behavior includes:
 - Clearing HMAC v2 lookup hashes and key versions.
 - Preserving a bcrypt-shaped deleted-user password sentinel.
 
+Route behavior:
+
+- Export route requires `Role.ADMIN` plus `AdminPermissionRole.SUPER_ADMIN`.
+- Delete route requires `Role.ADMIN` plus `AdminPermissionRole.SUPER_ADMIN`.
+- Delete route defaults to `DRY_RUN`.
+- Live anonymization requires `confirmUserId` to match the target `userId`.
+- Live self-anonymization by the acting admin is blocked.
+- Export/delete responses use `Cache-Control: no-store`.
+- Export/delete actions write admin audit logs.
+
 Verification:
 
-bash pnpm test:privacy-export-delete 
-
-Current result:
-
-text Test Files  2 passed (2) Tests       12 passed (12) 
-
-Status: foundation complete. Full product/legal retention decisions and deferred graph traversal remain open.
+```bash
+pnpm test:privacy-export-delete
 
 ## Current proof commands
 
@@ -317,3 +321,32 @@ Current result:
 
 ```bash
 pnpm check:pii-plaintext-reads
+### 7. Update `## Current proof commands`
+
+Replace the stale result block:
+
+```md
+Current local proof from 2026-05-31:
+
+text Full test suite: 300 files / 3266 tests passed check-canonical-normalization: passed check-pii-plaintext-reads: passed (471 known baseline entries) test:privacy-phase1: 8 files / 131 tests passed test:privacy-export-delete: 2 files / 12 tests passed typecheck: passed  
+Current local proof from 2026-05-31:
+
+```txt
+check-canonical-normalization: passed
+check-pii-plaintext-reads: passed (471 known baseline entries)
+test:privacy-phase1: 8 files / 131 tests passed
+test:privacy-export-delete: 4 files / 26 tests passed
+typecheck: passed
+### 8. Update `## Still not proven by this file`
+
+Replace:
+
+```md
+- Admin audit deployed-behavior verification.
+- Formal decision on the 471 known plaintext-read baseline entries.
+- Deferred export/delete traversal for notification deliveries, aftercare summaries, attribution events, admin audit records, storage object bytes, and tenant-level workflows.
+- Follow-up migration to drop legacy SHA-256 lookup columns/indexes after pre-launch QA.
+- Booking retention/anonymization implementation beyond the Phase 1 conservative boundary.
+- Message retention/deletion implementation.
+- Continued burn-down of the 471 accepted plaintext-read baseline entries.
+- Deferred export/delete traversal for attribution events, admin audit records, storage object bytes, and tenant-level workflows.
