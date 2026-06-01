@@ -88,6 +88,7 @@ vi.mock('./crypto/aead', () => ({
 import {
   ADDRESS_AEAD_ASSOCIATED_DATA,
   ADDRESS_KEY_VERSION,
+  approximateCoordinateDecimalToFloat,
   buildAddressEnvelope,
   buildAddressPrivacyWriteData,
   buildLegacyAddressPrivacyEnvelopeForBackfill,
@@ -188,6 +189,30 @@ describe('addressEncryption', () => {
     )
     expect(JSON.stringify(writeData.encryptedAddressJson)).not.toContain(
       'place_123',
+    )
+  })
+
+  it('converts approximate Decimal coordinates to nullable floats for booking snapshots', () => {
+    expect(
+      approximateCoordinateDecimalToFloat(new Prisma.Decimal('34.0522')),
+    ).toBe(34.0522)
+
+    expect(
+      approximateCoordinateDecimalToFloat(new Prisma.Decimal('-118.2437')),
+    ).toBe(-118.2437)
+
+    expect(approximateCoordinateDecimalToFloat(null)).toBeNull()
+  })
+
+  it('keeps write-data coordinates as Decimal while allowing snapshot float conversion', () => {
+    const writeData = buildAddressPrivacyWriteData(input)
+
+    expect(writeData.latApprox).toBeInstanceOf(Prisma.Decimal)
+    expect(writeData.lngApprox).toBeInstanceOf(Prisma.Decimal)
+
+    expect(approximateCoordinateDecimalToFloat(writeData.latApprox)).toBe(34.0522)
+    expect(approximateCoordinateDecimalToFloat(writeData.lngApprox)).toBe(
+      -118.2437,
     )
   })
 

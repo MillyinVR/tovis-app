@@ -2,6 +2,8 @@
 
 import { Prisma, type PrismaClient } from '@prisma/client'
 
+import { assertSafePrivacyExportPayload } from '@/lib/privacy/exportSafety'
+
 export type ExportUserDataInput = {
   db: PrismaClient | Prisma.TransactionClient
   userId: string
@@ -39,6 +41,283 @@ export type ExportedUserData = {
 
 const EXPORT_VERSION = 1
 
+const userExportSelect = {
+  id: true,
+  email: true,
+  phone: true,
+  role: true,
+  emailVerifiedAt: true,
+  phoneVerifiedAt: true,
+  tosAcceptedAt: true,
+  tosVersion: true,
+  transactionalSmsConsentAt: true,
+  transactionalSmsConsentVersion: true,
+  transactionalSmsConsentSource: true,
+  createdAt: true,
+  updatedAt: true,
+  clientProfile: {
+    select: {
+      id: true,
+      userId: true,
+      firstName: true,
+      lastName: true,
+      claimStatus: true,
+      claimedAt: true,
+      email: true,
+      phone: true,
+      phoneVerifiedAt: true,
+      avatarUrl: true,
+      dateOfBirth: true,
+      preferredContactMethod: true,
+      alertBanner: true,
+    },
+  },
+  professionalProfile: {
+    select: {
+      id: true,
+      userId: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      phoneVerifiedAt: true,
+      businessName: true,
+      handle: true,
+      isPremium: true,
+      bio: true,
+      avatarUrl: true,
+      location: true,
+      timeZone: true,
+    },
+  },
+} satisfies Prisma.UserSelect
+
+const clientAddressExportSelect = {
+  id: true,
+  clientId: true,
+  kind: true,
+  label: true,
+  isDefault: true,
+  formattedAddress: true,
+  addressLine1: true,
+  addressLine2: true,
+  city: true,
+  state: true,
+  postalCode: true,
+  countryCode: true,
+  radiusMiles: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ClientAddressSelect
+
+const professionalLocationExportSelect = {
+  id: true,
+  professionalId: true,
+  type: true,
+  name: true,
+  isPrimary: true,
+  isBookable: true,
+  formattedAddress: true,
+  addressLine1: true,
+  addressLine2: true,
+  city: true,
+  state: true,
+  postalCode: true,
+  countryCode: true,
+  timeZone: true,
+  bufferMinutes: true,
+  stepMinutes: true,
+  advanceNoticeMinutes: true,
+  maxDaysAhead: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ProfessionalLocationSelect
+
+const bookingExportSelect = {
+  id: true,
+  clientId: true,
+  professionalId: true,
+  serviceId: true,
+  offeringId: true,
+  scheduledFor: true,
+  status: true,
+  locationType: true,
+  locationId: true,
+  clientAddressId: true,
+  clientTimeZoneAtBooking: true,
+  subtotalSnapshot: true,
+  totalAmount: true,
+  depositAmount: true,
+  tipAmount: true,
+  taxAmount: true,
+  discountAmount: true,
+  serviceSubtotalSnapshot: true,
+  productSubtotalSnapshot: true,
+  checkoutStatus: true,
+  selectedPaymentMethod: true,
+  paymentCollectedAt: true,
+  paymentAuthorizedAt: true,
+  paymentProvider: true,
+  totalDurationMinutes: true,
+  bufferMinutes: true,
+  source: true,
+  rebookOfBookingId: true,
+  clientNotes: true,
+  startedAt: true,
+  finishedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.BookingSelect
+
+const bookingHoldExportSelect = {
+  id: true,
+  offeringId: true,
+  professionalId: true,
+  clientId: true,
+  scheduledFor: true,
+  expiresAt: true,
+  locationType: true,
+  locationId: true,
+  locationTimeZone: true,
+  clientAddressId: true,
+  durationMinutesSnapshot: true,
+  bufferMinutesSnapshot: true,
+  endsAtSnapshot: true,
+  createdAt: true,
+} satisfies Prisma.BookingHoldSelect
+
+const clientActionTokenExportSelect = {
+  id: true,
+  kind: true,
+  singleUse: true,
+  bookingId: true,
+  consultationApprovalId: true,
+  aftercareSummaryId: true,
+  clientId: true,
+  professionalId: true,
+  deliveryMethod: true,
+  issuedByUserId: true,
+  expiresAt: true,
+  firstUsedAt: true,
+  lastUsedAt: true,
+  useCount: true,
+  revokedAt: true,
+  revokeReason: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.ClientActionTokenSelect
+
+const mediaAssetExportSelect = {
+  id: true,
+  professionalId: true,
+  bookingId: true,
+  reviewId: true,
+  uploadedByUserId: true,
+  uploadedByRole: true,
+  url: true,
+  thumbUrl: true,
+  mediaType: true,
+  caption: true,
+  visibility: true,
+  isFeaturedInPortfolio: true,
+  isEligibleForLooks: true,
+  reviewLocked: true,
+  phase: true,
+  createdAt: true,
+} satisfies Prisma.MediaAssetSelect
+
+const messageExportSelect = {
+  id: true,
+  threadId: true,
+  senderUserId: true,
+  body: true,
+  createdAt: true,
+} satisfies Prisma.MessageSelect
+
+const notificationExportSelect = {
+  id: true,
+  eventKey: true,
+  priority: true,
+  professionalId: true,
+  actorUserId: true,
+  bookingId: true,
+  reviewId: true,
+  title: true,
+  body: true,
+  href: true,
+  seenAt: true,
+  readAt: true,
+  clickedAt: true,
+  archivedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.NotificationSelect
+
+const notificationDispatchExportSelect = {
+  id: true,
+  sourceKey: true,
+  eventKey: true,
+  recipientKind: true,
+  priority: true,
+  userId: true,
+  professionalId: true,
+  clientId: true,
+  notificationId: true,
+  clientNotificationId: true,
+  title: true,
+  body: true,
+  href: true,
+  scheduledFor: true,
+  cancelledAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.NotificationDispatchSelect
+
+const tapIntentExportSelect = {
+  id: true,
+  cardId: true,
+  userId: true,
+  intentType: true,
+  expiresAt: true,
+  createdAt: true,
+} satisfies Prisma.TapIntentSelect
+
+const aftercareSummaryExportSelect = {
+  id: true,
+  bookingId: true,
+  notes: true,
+  rebookMode: true,
+  rebookedFor: true,
+  rebookWindowStart: true,
+  rebookWindowEnd: true,
+  draftSavedAt: true,
+  sentToClientAt: true,
+  lastEditedAt: true,
+  version: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.AftercareSummarySelect
+
+const notificationDeliveryExportSelect = {
+  id: true,
+  dispatchId: true,
+  channel: true,
+  provider: true,
+  status: true,
+  templateKey: true,
+  templateVersion: true,
+  attemptCount: true,
+  maxAttempts: true,
+  nextAttemptAt: true,
+  lastAttemptAt: true,
+  sentAt: true,
+  deliveredAt: true,
+  failedAt: true,
+  suppressedAt: true,
+  cancelledAt: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.NotificationDeliverySelect
+
 /**
  * Canonical user data export boundary.
  *
@@ -54,18 +333,15 @@ export async function exportUserData(
 ): Promise<ExportedUserData> {
   const user = await input.db.user.findUnique({
     where: { id: input.userId },
-    include: {
-      clientProfile: true,
-      professionalProfile: true,
-    },
+    select: userExportSelect,
   })
 
   if (!user) {
     throw new Error(`Cannot export user data: user not found (${input.userId})`)
   }
 
-  const clientProfileId = readId(user.clientProfile)
-  const professionalProfileId = readId(user.professionalProfile)
+  const clientProfileId = user.clientProfile?.id ?? null
+  const professionalProfileId = user.professionalProfile?.id ?? null
 
   const [
     clientAddresses,
@@ -91,17 +367,37 @@ export async function exportUserData(
     findBookingHolds(input.db, clientProfileId, professionalProfileId),
     findClientActionTokens(input.db, clientProfileId),
     findAftercareSummaries(input.db, clientProfileId, professionalProfileId),
-    findMediaAssets(input.db, input.userId, clientProfileId, professionalProfileId),
+    findMediaAssets(
+      input.db,
+      input.userId,
+      clientProfileId,
+      professionalProfileId,
+    ),
     findMessages(input.db, input.userId, clientProfileId, professionalProfileId),
-    findNotifications(input.db, input.userId, clientProfileId, professionalProfileId),
-    findNotificationDispatches(input.db, input.userId, clientProfileId, professionalProfileId),
-    findNotificationDeliveries(input.db, input.userId, clientProfileId, professionalProfileId),
-    findAttributionEvents(input.db, input.userId, clientProfileId, professionalProfileId),
-    findTapIntents(input.db, input.userId, clientProfileId, professionalProfileId),
+    findNotifications(input.db, professionalProfileId),
+    findNotificationDispatches(
+      input.db,
+      input.userId,
+      clientProfileId,
+      professionalProfileId,
+    ),
+    findNotificationDeliveries(
+      input.db,
+      input.userId,
+      clientProfileId,
+      professionalProfileId,
+    ),
+    findAttributionEvents(
+      input.db,
+      input.userId,
+      clientProfileId,
+      professionalProfileId,
+    ),
+    findTapIntents(input.db, input.userId),
     findAdminActionLogs(input.db, input.userId),
   ])
 
-  return {
+  const exported: ExportedUserData = {
     exportedAt: new Date().toISOString(),
     subject: {
       userId: input.userId,
@@ -109,7 +405,21 @@ export async function exportUserData(
       professionalProfileId,
     },
     data: {
-      user: normalizeJson(user),
+      user: normalizeJson({
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        emailVerifiedAt: user.emailVerifiedAt,
+        phoneVerifiedAt: user.phoneVerifiedAt,
+        tosAcceptedAt: user.tosAcceptedAt,
+        tosVersion: user.tosVersion,
+        transactionalSmsConsentAt: user.transactionalSmsConsentAt,
+        transactionalSmsConsentVersion: user.transactionalSmsConsentVersion,
+        transactionalSmsConsentSource: user.transactionalSmsConsentSource,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      }),
       clientProfile: normalizeJson(user.clientProfile),
       professionalProfile: normalizeJson(user.professionalProfile),
       clientAddresses: normalizeJsonArray(clientAddresses),
@@ -129,15 +439,19 @@ export async function exportUserData(
       adminActionLogs: normalizeJsonArray(adminActionLogs),
     },
     limitations: [
-    'This export covers user-linked records known to the privacy export boundary.',
-    'Tenant-level exports, aggregate analytics, provider-side records, and storage object bytes are separate workflows.',
-    'If Prisma schema adds new user-linked models, update this boundary and its schema-completeness test.',
-    'AftercareSummary export is temporarily omitted until wired through the real Booking/Aftercare relation.',
-    'NotificationDelivery export is temporarily omitted until wired through the real dispatch/recipient relation.',
-    'AttributionEvent export is temporarily omitted until wired through the real attribution identity fields.',
-    'AdminActionLog export is temporarily omitted until wired through the real admin audit schema fields.',
+      'This export covers user-linked records known to the privacy export boundary.',
+      'Tenant-level exports, aggregate analytics, provider-side records, and storage object bytes are separate workflows.',
+      'If Prisma schema adds new user-linked models, update this boundary and its schema-completeness test.',
+      'MediaAsset export includes product-facing URLs and metadata but excludes storage bucket/path internals.',
+      'Notification dispatch/delivery exports exclude recipient contact snapshots, provider payloads, lease tokens, and provider message details.',
+      'AttributionEvent export is omitted pending a disclosure decision for attribution/admin-adjacent records.',
+      'AdminActionLog export is omitted from the default user export because it is an internal security/operational record.',
     ],
   }
+
+  assertSafePrivacyExportPayload(exported)
+
+  return exported
 }
 
 async function findClientAddresses(
@@ -149,6 +463,7 @@ async function findClientAddresses(
   return db.clientAddress.findMany({
     where: { clientId: clientProfileId },
     orderBy: { createdAt: 'asc' },
+    select: clientAddressExportSelect,
   })
 }
 
@@ -161,6 +476,7 @@ async function findProfessionalLocations(
   return db.professionalLocation.findMany({
     where: { professionalId: professionalProfileId },
     orderBy: { createdAt: 'asc' },
+    select: professionalLocationExportSelect,
   })
 }
 
@@ -173,6 +489,7 @@ async function findBookingsAsClient(
   return db.booking.findMany({
     where: { clientId: clientProfileId },
     orderBy: { createdAt: 'asc' },
+    select: bookingExportSelect,
   })
 }
 
@@ -185,6 +502,7 @@ async function findBookingsAsProfessional(
   return db.booking.findMany({
     where: { professionalId: professionalProfileId },
     orderBy: { createdAt: 'asc' },
+    select: bookingExportSelect,
   })
 }
 
@@ -203,6 +521,7 @@ async function findBookingHolds(
       ]),
     },
     orderBy: { createdAt: 'asc' },
+    select: bookingHoldExportSelect,
   })
 }
 
@@ -215,21 +534,30 @@ async function findClientActionTokens(
   return db.clientActionToken.findMany({
     where: { clientId: clientProfileId },
     orderBy: { createdAt: 'asc' },
+    select: clientActionTokenExportSelect,
   })
 }
 
 async function findAftercareSummaries(
-  _db: PrismaClient | Prisma.TransactionClient,
-  _clientProfileId: string | null,
-  _professionalProfileId: string | null,
+  db: PrismaClient | Prisma.TransactionClient,
+  clientProfileId: string | null,
+  professionalProfileId: string | null,
 ): Promise<unknown[]> {
-  // Schema note:
-  // AftercareSummary is not directly keyed by clientId/professionalId in the
-  // current Prisma client. Wire this through the real Booking/Aftercare relation
-  // after inspecting schema.prisma instead of guessing relation names.
-  return []
-}
+  if (!clientProfileId && !professionalProfileId) return []
 
+  return db.aftercareSummary.findMany({
+    where: {
+      booking: {
+        OR: compactWhere([
+          clientProfileId ? { clientId: clientProfileId } : null,
+          professionalProfileId ? { professionalId: professionalProfileId } : null,
+        ]),
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: aftercareSummaryExportSelect,
+  })
+}
 
 async function findMediaAssets(
   db: PrismaClient | Prisma.TransactionClient,
@@ -240,12 +568,19 @@ async function findMediaAssets(
   return db.mediaAsset.findMany({
     where: {
       OR: compactWhere([
-        { ownerUserId: userId },
-        clientProfileId ? { clientId: clientProfileId } : null,
+        { uploadedByUserId: userId },
+        clientProfileId
+          ? {
+              booking: {
+                clientId: clientProfileId,
+              },
+            }
+          : null,
         professionalProfileId ? { professionalId: professionalProfileId } : null,
       ]),
     },
     orderBy: { createdAt: 'asc' },
+    select: mediaAssetExportSelect,
   })
 }
 
@@ -259,30 +594,37 @@ async function findMessages(
     where: {
       OR: compactWhere([
         { senderUserId: userId },
-        { recipientUserId: userId },
-        clientProfileId ? { clientId: clientProfileId } : null,
-        professionalProfileId ? { professionalId: professionalProfileId } : null,
+        clientProfileId
+          ? {
+              thread: {
+                clientId: clientProfileId,
+              },
+            }
+          : null,
+        professionalProfileId
+          ? {
+              thread: {
+                professionalId: professionalProfileId,
+              },
+            }
+          : null,
       ]),
     },
     orderBy: { createdAt: 'asc' },
+    select: messageExportSelect,
   })
 }
 
 async function findNotifications(
   db: PrismaClient | Prisma.TransactionClient,
-  userId: string,
-  clientProfileId: string | null,
   professionalProfileId: string | null,
 ): Promise<unknown[]> {
+  if (!professionalProfileId) return []
+
   return db.notification.findMany({
-    where: {
-      OR: compactWhere([
-        { recipientUserId: userId },
-        clientProfileId ? { clientId: clientProfileId } : null,
-        professionalProfileId ? { professionalId: professionalProfileId } : null,
-      ]),
-    },
+    where: { professionalId: professionalProfileId },
     orderBy: { createdAt: 'asc' },
+    select: notificationExportSelect,
   })
 }
 
@@ -295,26 +637,35 @@ async function findNotificationDispatches(
   return db.notificationDispatch.findMany({
     where: {
       OR: compactWhere([
-        { recipientUserId: userId },
+        { userId },
         clientProfileId ? { clientId: clientProfileId } : null,
         professionalProfileId ? { professionalId: professionalProfileId } : null,
       ]),
     },
     orderBy: { createdAt: 'asc' },
+    select: notificationDispatchExportSelect,
   })
 }
 
 async function findNotificationDeliveries(
-  _db: PrismaClient | Prisma.TransactionClient,
-  _userId: string,
-  _clientProfileId: string | null,
-  _professionalProfileId: string | null,
+  db: PrismaClient | Prisma.TransactionClient,
+  userId: string,
+  clientProfileId: string | null,
+  professionalProfileId: string | null,
 ): Promise<unknown[]> {
-  // Schema note:
-  // NotificationDelivery is not directly keyed by recipientUserId/clientId/
-  // professionalId in the current Prisma client. Wire this through the real
-  // dispatch/recipient relation after inspecting schema.prisma.
-  return []
+  return db.notificationDelivery.findMany({
+    where: {
+      dispatch: {
+        OR: compactWhere([
+          { userId },
+          clientProfileId ? { clientId: clientProfileId } : null,
+          professionalProfileId ? { professionalId: professionalProfileId } : null,
+        ]),
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: notificationDeliveryExportSelect,
+  })
 }
 
 async function findAttributionEvents(
@@ -323,28 +674,20 @@ async function findAttributionEvents(
   _clientProfileId: string | null,
   _professionalProfileId: string | null,
 ): Promise<unknown[]> {
-  // Schema note:
-  // AttributionEvent is not directly keyed by userId/clientId/professionalId in
-  // the current Prisma client. Wire this through the real attribution identity
-  // fields after inspecting schema.prisma.
+  // Attribution records can contain cross-user/admin-adjacent attribution
+  // context. Keep omitted from the default Phase 1 user export until the
+  // disclosure policy and safe projection are explicitly defined.
   return []
 }
 
 async function findTapIntents(
   db: PrismaClient | Prisma.TransactionClient,
   userId: string,
-  clientProfileId: string | null,
-  professionalProfileId: string | null,
 ): Promise<unknown[]> {
   return db.tapIntent.findMany({
-    where: {
-      OR: compactWhere([
-        { userId },
-        clientProfileId ? { clientId: clientProfileId } : null,
-        professionalProfileId ? { professionalId: professionalProfileId } : null,
-      ]),
-    },
+    where: { userId },
     orderBy: { createdAt: 'asc' },
+    select: tapIntentExportSelect,
   })
 }
 
@@ -352,22 +695,14 @@ async function findAdminActionLogs(
   _db: PrismaClient | Prisma.TransactionClient,
   _userId: string,
 ): Promise<unknown[]> {
-  // Schema note:
-  // AdminActionLog does not currently expose actorUserId/targetUserId in the
-  // Prisma client. Wire this through the real admin audit fields after inspecting
-  // schema.prisma.
+  // AdminActionLog is an internal operational/security record. It is omitted
+  // from the default user export unless a separate legal/support disclosure
+  // workflow explicitly approves a safe projection.
   return []
 }
 
 function compactWhere<T>(items: Array<T | null>): T[] {
   return items.filter((item): item is T => item !== null)
-}
-
-function readId(value: unknown): string | null {
-  if (!isRecord(value)) return null
-
-  const id = value.id
-  return typeof id === 'string' ? id : null
 }
 
 function normalizeJson(value: unknown): unknown {

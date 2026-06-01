@@ -63,6 +63,21 @@ const DELETED_USER_PASSWORD_SENTINEL =
 export async function deleteUserData(
   input: DeleteUserDataInput,
 ): Promise<DeleteUserDataResult> {
+  if (input.mode === 'ANONYMIZE' && canRunTransaction(input.db)) {
+    return input.db.$transaction((tx) =>
+      executeDeleteUserData({
+        ...input,
+        db: tx,
+      }),
+    )
+  }
+
+  return executeDeleteUserData(input)
+}
+
+async function executeDeleteUserData(
+  input: DeleteUserDataInput,
+): Promise<DeleteUserDataResult> {
   const user = await input.db.user.findUnique({
     where: { id: input.userId },
     include: {
@@ -261,8 +276,8 @@ async function deleteMediaAssets(
 ): Promise<DeleteUserDataActionResult> {
   const where = {
     OR: compactWhere([
-      { ownerUserId: userId },
-      clientProfileId ? { clientId: clientProfileId } : null,
+      { uploadedByUserId: userId },
+      clientProfileId ? { booking: { clientId: clientProfileId } } : null,
       professionalProfileId ? { professionalId: professionalProfileId } : null,
     ]),
   }
@@ -418,6 +433,12 @@ function deletedEmail(userId: string): string {
 function compactWhere<T>(items: Array<T | null>): T[] {
   return items.filter((item): item is T => item !== null)
 }
+
+function canRunTransaction(
+  db: PrismaClient | Prisma.TransactionClient,
+): db is PrismaClient {
+  return '$transaction' in db && typeof db.$transaction === 'function'
+} 
 
 function skipped(model: string, notes: string): DeleteUserDataActionResult {
   return {

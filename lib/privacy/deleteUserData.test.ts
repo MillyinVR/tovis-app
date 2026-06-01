@@ -7,6 +7,7 @@ import { deleteUserData, USER_DATA_DELETE_VERSION } from './deleteUserData'
 
 const mocks = vi.hoisted(() => ({
   db: {
+    $transaction: vi.fn(),
     user: {
       findUnique: vi.fn(),
       update: vi.fn(),
@@ -140,6 +141,13 @@ describe('deleteUserData', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-27T12:00:00.000Z'))
     vi.clearAllMocks()
+
+    mocks.db.$transaction.mockImplementation(async (callback) =>
+      callback({
+        ...mocks.db,
+        $transaction: undefined,
+      }),
+    ) 
 
     setupCounts()
     setupDeleteManyResults()
@@ -281,7 +289,10 @@ describe('deleteUserData', () => {
 
     expect(mocks.db.mediaAsset.count).toHaveBeenCalledWith({
       where: {
-        OR: [{ ownerUserId: 'user_1' }, { clientId: 'client_1' }],
+        OR: [
+          { uploadedByUserId: 'user_1' },
+          { booking: { clientId: 'client_1' } },
+        ],
       },
     })
 
@@ -388,8 +399,8 @@ describe('deleteUserData', () => {
     expect(mocks.db.mediaAsset.deleteMany).toHaveBeenCalledWith({
       where: {
         OR: [
-          { ownerUserId: 'user_both' },
-          { clientId: 'client_1' },
+          { uploadedByUserId: 'user_both' },
+          { booking: { clientId: 'client_1' } },
           { professionalId: 'pro_1' },
         ],
       },
@@ -519,10 +530,79 @@ describe('deleteUserData', () => {
 
     expect(mocks.db.mediaAsset.deleteMany).toHaveBeenCalledWith({
       where: {
-        OR: [{ ownerUserId: 'user_no_profiles' }],
+        OR: [{ uploadedByUserId: 'user_no_profiles' }],
       },
     })
 
+    expect(mocks.db.user.update).toHaveBeenCalledTimes(1)
+  })
+
+  it('wraps live anonymization in a transaction when the db client supports it', async () => {
+    mocks.db.user.findUnique.mockResolvedValueOnce(
+      makeUser({
+        id: 'user_1',
+        clientProfile: { id: 'client_1' },
+        professionalProfile: null,
+      }),
+    )
+
+    await deleteUserData({
+      db: mocks.db as never,
+      userId: 'user_1',
+      mode: 'ANONYMIZE',
+      requestedByUserId: 'admin_1',
+      reason: 'verified privacy deletion request',
+    })
+
+    expect(mocks.db.$transaction).toHaveBeenCalledTimes(1)
+    expect(mocks.db.user.update).toHaveBeenCalledTimes(1)
+    expect(mocks.db.clientProfile.update).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not wrap dry-run deletion planning in a transaction', async () => {
+    mocks.db.user.findUnique.mockResolvedValueOnce(
+      makeUser({
+        id: 'user_1',
+        clientProfile: { id: 'client_1' },
+        professionalProfile: null,
+      }),
+    )
+
+    await deleteUserData({
+      db: mocks.db as never,
+      userId: 'user_1',
+      mode: 'DRY_RUN',
+      requestedByUserId: 'admin_1',
+      reason: 'privacy request dry run',
+    })
+
+    expect(mocks.db.$transaction).not.toHaveBeenCalled()
+    expect(mocks.db.user.update).not.toHaveBeenCalled()
+  })
+
+  it('does not recursively open a transaction when already running with a transaction client', async () => {
+    const txDb = {
+      ...mocks.db,
+      $transaction: undefined,
+    }
+
+    mocks.db.user.findUnique.mockResolvedValueOnce(
+      makeUser({
+        id: 'user_1',
+        clientProfile: { id: 'client_1' },
+        professionalProfile: null,
+      }),
+    )
+
+    await deleteUserData({
+      db: txDb as never,
+      userId: 'user_1',
+      mode: 'ANONYMIZE',
+      requestedByUserId: 'admin_1',
+      reason: 'verified privacy deletion request',
+    })
+
+    expect(mocks.db.$transaction).not.toHaveBeenCalled()
     expect(mocks.db.user.update).toHaveBeenCalledTimes(1)
   })
 

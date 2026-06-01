@@ -20,6 +20,7 @@ const APPROX_COORDINATE_DECIMAL_PLACES = 4
 const MAX_POSTAL_CODE_PREFIX_LENGTH = 12
 
 type NullableString = string | null | undefined
+
 type NullableNumberLike =
   | number
   | string
@@ -121,7 +122,10 @@ function toFiniteNumber(value: NullableNumberLike): number | null {
     return Number.isFinite(value) ? value : null
   }
 
-  const numberValue = Number(value.toString())
+  const raw = value.toString().trim()
+  if (!raw) return null
+
+  const numberValue = Number(raw)
   return Number.isFinite(numberValue) ? numberValue : null
 }
 
@@ -131,6 +135,20 @@ function roundCoordinate(value: NullableNumberLike): Prisma.Decimal | null {
 
   const rounded = numberValue.toFixed(APPROX_COORDINATE_DECIMAL_PLACES)
   return new Prisma.Decimal(rounded)
+}
+
+/**
+ * Use this only for Booking / BookingHold snapshot approximation columns that
+ * are Float in Prisma. ClientAddress / ProfessionalLocation approximation
+ * columns should keep the Prisma.Decimal values from buildAddressPrivacyWriteData.
+ */
+export function approximateCoordinateDecimalToFloat(
+  value: Prisma.Decimal | null,
+): number | null {
+  if (value === null) return null
+
+  const numberValue = value.toNumber()
+  return Number.isFinite(numberValue) ? numberValue : null
 }
 
 function coordinateString(value: NullableNumberLike): string | null {
@@ -187,18 +205,37 @@ function buildEncryptedAddressEnvelope(
   }
 }
 
+/**
+ * Canonical address envelope builder for all new writes.
+ *
+ * New writes must be AEAD-only. Legacy plaintext envelopes are supported only
+ * for read/backfill burn-in through buildLegacyAddressPrivacyEnvelopeForBackfill
+ * and readAddressPrivacyEnvelope.
+ */
 export function buildAddressEnvelope(
   input: AddressPrivacyInput,
 ): EncryptedAddressPrivacyEnvelopeV1 {
   return buildEncryptedAddressEnvelope(input)
 }
 
+/**
+ * Legacy helper for backfill/test fixtures only.
+ *
+ * Do not use this for new application writes.
+ */
 export function buildLegacyAddressPrivacyEnvelopeForBackfill(
   input: AddressPrivacyInput,
 ): LegacyAddressPrivacyEnvelopeV1 {
   return buildLegacyAddressEnvelope(input)
 }
 
+/**
+ * Canonical address privacy write boundary.
+ *
+ * Use this for ClientAddress / ProfessionalLocation writes and for backfills.
+ * It writes the AEAD envelope plus the non-sensitive search/version metadata
+ * needed during the expand phase.
+ */
 export function buildAddressPrivacyWriteData(
   input: AddressPrivacyInput,
 ): AddressPrivacyWriteData {
@@ -224,7 +261,7 @@ export function isAddressPrivacyEnvelopeV1(
     value.algorithm === LEGACY_ADDRESS_ALGORITHM &&
     value.keyVersion === LEGACY_ADDRESS_KEY_VERSION
   ) {
-    return isLegacyAddressPayload(value.address)
+    return isNormalizedAddressPrivacyPayload(value.address)
   }
 
   if (
@@ -237,6 +274,13 @@ export function isAddressPrivacyEnvelopeV1(
   return false
 }
 
+/**
+ * Dual-read boundary for the AEAD burn-in period.
+ *
+ * This intentionally supports legacy plaintext envelopes so old rows can be
+ * read while the backfill/contract migration completes. New writes must still
+ * use buildAddressPrivacyWriteData/buildAddressEnvelope.
+ */
 export function readAddressPrivacyEnvelope(
   envelope: AddressPrivacyEnvelopeV1,
 ): NormalizedAddressPrivacyPayload {
@@ -249,16 +293,24 @@ export function readAddressPrivacyEnvelope(
     associatedData: ADDRESS_AEAD_ASSOCIATED_DATA,
   })
 
-  const parsed: unknown = JSON.parse(plaintext)
+  let parsed: unknown
 
-  if (!isLegacyAddressPayload(parsed)) {
+  try {
+    parsed = JSON.parse(plaintext)
+  } catch {
+    throw new Error('Invalid decrypted address privacy payload JSON')
+  }
+
+  if (!isNormalizedAddressPrivacyPayload(parsed)) {
     throw new Error('Invalid decrypted address privacy payload')
   }
 
   return parsed
 }
 
-function isLegacyAddressPayload(value: unknown): value is NormalizedAddressPrivacyPayload {
+function isNormalizedAddressPrivacyPayload(
+  value: unknown,
+): value is NormalizedAddressPrivacyPayload {
   if (!isRecord(value)) return false
 
   return (
