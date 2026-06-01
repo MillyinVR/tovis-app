@@ -1,3 +1,5 @@
+// app/api/internal/privacy/export/[userId]/route.test.ts
+
 import { AdminPermissionRole, Role } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -20,6 +22,7 @@ vi.mock('@/app/api/_utils/auth/requireAdminPermission', () => ({
 
 vi.mock('@/lib/privacy/exportUserData', () => ({
   exportUserData: mocks.exportUserData,
+  USER_DATA_EXPORT_VERSION: 1,
 }))
 
 vi.mock('@/lib/admin/auditLog', () => ({
@@ -54,6 +57,35 @@ async function readJson(response: Response): Promise<unknown> {
   return response.json()
 }
 
+function makeExportResult(args?: {
+  userId?: string
+  clientProfileId?: string | null
+  professionalProfileId?: string | null
+  limitations?: string[]
+}) {
+  return {
+    exportedAt: '2026-05-27T12:00:00.000Z',
+    subject: {
+      userId: args?.userId ?? 'user_1',
+      clientProfileId:
+        args?.clientProfileId === undefined ? 'client_1' : args.clientProfileId,
+      professionalProfileId:
+        args?.professionalProfileId === undefined
+          ? 'pro_1'
+          : args.professionalProfileId,
+    },
+    data: {
+      user: {
+        id: args?.userId ?? 'user_1',
+        email: 'person@example.com',
+      },
+      clientProfile: null,
+      professionalProfile: null,
+    },
+    limitations: args?.limitations ?? [],
+  }
+}
+
 describe('POST /api/internal/privacy/export/[userId]', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -71,21 +103,7 @@ describe('POST /api/internal/privacy/export/[userId]', () => {
       role: AdminPermissionRole.SUPER_ADMIN,
     })
 
-    mocks.exportUserData.mockResolvedValue({
-      exportedAt: '2026-05-27T12:00:00.000Z',
-      subject: {
-        userId: 'user_1',
-        clientProfileId: 'client_1',
-        professionalProfileId: 'pro_1',
-      },
-      data: {
-        user: {
-          id: 'user_1',
-          email: 'person@example.com',
-        },
-      },
-      limitations: [],
-    })
+    mocks.exportUserData.mockResolvedValue(makeExportResult())
 
     mocks.writeAdminAuditLog.mockResolvedValue({
       id: 'audit_1',
@@ -152,7 +170,7 @@ describe('POST /api/internal/privacy/export/[userId]', () => {
     expect(mocks.writeAdminAuditLog).not.toHaveBeenCalled()
   })
 
-  it('rejects a blank target user id', async () => {
+  it('rejects a blank target user id before auth', async () => {
     const response = await POST(makeRequest(), makeContext('   '))
 
     expect(response.status).toBe(400)
@@ -171,7 +189,7 @@ describe('POST /api/internal/privacy/export/[userId]', () => {
     expect(mocks.writeAdminAuditLog).not.toHaveBeenCalled()
   })
 
-  it('returns the privacy export with no-store headers and writes an admin audit log', async () => {
+  it('returns the privacy export with no-store headers and writes structured admin audit context', async () => {
     const response = await POST(
       makeRequest({
         'x-request-id': 'req_123',
@@ -185,21 +203,7 @@ describe('POST /api/internal/privacy/export/[userId]', () => {
     expect(await readJson(response)).toEqual({
       ok: true,
       data: {
-        export: {
-          exportedAt: '2026-05-27T12:00:00.000Z',
-          subject: {
-            userId: 'user_1',
-            clientProfileId: 'client_1',
-            professionalProfileId: 'pro_1',
-          },
-          data: {
-            user: {
-              id: 'user_1',
-              email: 'person@example.com',
-            },
-          },
-          limitations: [],
-        },
+        export: makeExportResult(),
       },
     })
 
@@ -212,18 +216,65 @@ describe('POST /api/internal/privacy/export/[userId]', () => {
       adminUserId: 'admin_1',
       action: 'privacy.user_export',
       note: 'Generated privacy export for user user_1. Request id: req_123.',
+      targetType: 'user',
+      targetId: 'user_1',
       professionalId: 'pro_1',
+      metadata: {
+        requestId: 'req_123',
+        exportVersion: 1,
+        clientProfileId: 'client_1',
+        professionalProfileId: 'pro_1',
+        exportedSections: ['user', 'clientProfile', 'professionalProfile'],
+        limitationCount: 0,
+      },
     })
   })
 
-  it('records request id as none when the header is missing', async () => {
-    await POST(makeRequest(), makeContext('user_1'))
+  it('keeps structured target context for client-only exports with no professional profile', async () => {
+    mocks.exportUserData.mockResolvedValueOnce(
+      makeExportResult({
+        professionalProfileId: null,
+        limitations: ['Client notification export is handled separately.'],
+      }),
+    )
+
+    const response = await POST(makeRequest(), makeContext('user_1'))
+
+    expect(response.status).toBe(200)
 
     expect(mocks.writeAdminAuditLog).toHaveBeenCalledWith({
       adminUserId: 'admin_1',
       action: 'privacy.user_export',
       note: 'Generated privacy export for user user_1. Request id: none.',
-      professionalId: 'pro_1',
+      targetType: 'user',
+      targetId: 'user_1',
+      professionalId: null,
+      metadata: {
+        requestId: null,
+        exportVersion: 1,
+        clientProfileId: 'client_1',
+        professionalProfileId: null,
+        exportedSections: ['user', 'clientProfile', 'professionalProfile'],
+        limitationCount: 1,
+      },
     })
+  })
+
+  it('records request id as null in metadata when the header is missing', async () => {
+    await POST(makeRequest(), makeContext('user_1'))
+
+    expect(mocks.writeAdminAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        adminUserId: 'admin_1',
+        action: 'privacy.user_export',
+        note: 'Generated privacy export for user user_1. Request id: none.',
+        targetType: 'user',
+        targetId: 'user_1',
+        professionalId: 'pro_1',
+        metadata: expect.objectContaining({
+          requestId: null,
+        }),
+      }),
+    )
   })
 })

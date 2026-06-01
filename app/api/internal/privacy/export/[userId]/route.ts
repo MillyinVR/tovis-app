@@ -1,3 +1,5 @@
+// app/api/internal/privacy/export/[userId]/route.ts
+
 import { AdminPermissionRole, Role } from '@prisma/client'
 import { NextResponse, type NextRequest } from 'next/server'
 
@@ -5,7 +7,10 @@ import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermis
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { prisma } from '@/lib/prisma'
-import { exportUserData } from '@/lib/privacy/exportUserData'
+import {
+  exportUserData,
+  USER_DATA_EXPORT_VERSION,
+} from '@/lib/privacy/exportUserData'
 
 type RouteContext = {
   params: Promise<{
@@ -77,6 +82,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return permission.res
   }
 
+  const requestId = readRequestId(request)
+
   const exported = await exportUserData({
     db: prisma,
     userId: targetUserId,
@@ -86,9 +93,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
     adminUserId: auth.user.id,
     action: PRIVACY_EXPORT_ACTION,
     note: `Generated privacy export for user ${targetUserId}. Request id: ${
-      readRequestId(request) ?? 'none'
+      requestId ?? 'none'
     }.`,
+    targetType: 'user',
+    targetId: targetUserId,
     professionalId: exported.subject.professionalProfileId,
+    metadata: {
+      requestId,
+      exportVersion: USER_DATA_EXPORT_VERSION,
+      clientProfileId: exported.subject.clientProfileId,
+      professionalProfileId: exported.subject.professionalProfileId,
+      exportedSections: Object.keys(exported.data),
+      limitationCount: exported.limitations.length,
+    },
   })
 
   return jsonOk({
