@@ -1,3 +1,4 @@
+// app/api/internal/privacy/delete/[userId]/route.ts
 import { AdminPermissionRole, Role } from '@prisma/client'
 import { NextResponse, type NextRequest } from 'next/server'
 
@@ -6,6 +7,7 @@ import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { prisma } from '@/lib/prisma'
 import { deleteUserData } from '@/lib/privacy/deleteUserData'
+import { summarizeDeleteUserDataResult } from '@/lib/privacy/deleteUserDataSummary'
 
 type RouteContext = {
   params: Promise<{
@@ -161,6 +163,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
   })
 
   return jsonOk({
-    result,
+    result: summarizeDeleteUserDataResult(result),
   })
 }

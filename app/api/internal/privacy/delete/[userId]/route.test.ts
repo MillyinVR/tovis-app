@@ -1,3 +1,5 @@
+// app/api/internal/privacy/delete/[userId]/route.test.ts
+
 import { AdminPermissionRole, Role } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -299,7 +301,32 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     expect(await readJson(response)).toEqual({
       ok: true,
       data: {
-        result: makeDeleteResult('DRY_RUN'),
+        result: {
+          executedAt: '2026-05-27T12:00:00.000Z',
+          mode: 'DRY_RUN',
+          subject: {
+            userId: 'user_1',
+            clientProfileId: 'client_1',
+            professionalProfileId: 'pro_1',
+          },
+          requestedByUserId: 'admin_1',
+          actionCounts: {
+            total: 1,
+            wouldDelete: 0,
+            wouldAnonymize: 1,
+            deleted: 0,
+            anonymized: 0,
+            skipped: 0,
+          },
+          actions: [
+            {
+              model: 'User',
+              action: 'WOULD_ANONYMIZE',
+              count: 1,
+            },
+          ],
+          limitationsCount: 0,
+        },
       },
     })
 
@@ -336,7 +363,32 @@ describe('POST /api/internal/privacy/delete/[userId]', () => {
     expect(await readJson(response)).toEqual({
       ok: true,
       data: {
-        result: makeDeleteResult('ANONYMIZE'),
+        result: {
+          executedAt: '2026-05-27T12:00:00.000Z',
+          mode: 'ANONYMIZE',
+          subject: {
+            userId: 'user_1',
+            clientProfileId: 'client_1',
+            professionalProfileId: 'pro_1',
+          },
+          requestedByUserId: 'admin_1',
+          actionCounts: {
+            total: 1,
+            wouldDelete: 0,
+            wouldAnonymize: 0,
+            deleted: 0,
+            anonymized: 1,
+            skipped: 0,
+          },
+          actions: [
+            {
+              model: 'User',
+              action: 'ANONYMIZED',
+              count: 1,
+            },
+          ],
+          limitationsCount: 0,
+        },
       },
     })
 
