@@ -10,11 +10,19 @@ The remaining items in this file are accepted follow-up work, scheduled pre-laun
 - [x] Remove plaintext contact lookup fallback from login, password reset, and pro-client matching.
 - [x] Cut contact lookup readers to HMAC v2-only.
 - [x] Define burn-in / no-real-users decision for legacy SHA-256 contact hashes.
+- [x] Add migration to drop legacy SHA-256 lookup columns/indexes.
+- [x] Apply legacy SHA-256 lookup column drop migration locally.
+- [x] Verify Prisma migration status after legacy SHA-256 cleanup.
 - [x] Harden address encryption backfill metadata/key-version writes.
 - [x] Harden user export projection so internal secrets/security fields are not exported.
 - [x] Add protected internal privacy export route.
 - [x] Add protected internal privacy delete/anonymize route.
+- [x] Ensure live privacy anonymization and admin audit write happen in the same transaction.
+- [x] Reject malformed `dryRun` values on the privacy delete route.
 - [x] Include privacy export/delete routes in Phase 1 verification.
+- [x] Include AEAD/address encryption tests in Phase 1 verification.
+- [x] Include audit redaction/admin audit tests in Phase 1 verification.
+- [x] Include login and password-reset route tests in Phase 1 verification.
 - [x] Add privacy request runbook.
 - [x] Verify admin audit payload redaction.
 - [x] Decide booking retention/anonymization policy.
@@ -23,13 +31,15 @@ The remaining items in this file are accepted follow-up work, scheduled pre-laun
 - [x] Re-run final Phase 1 proof commands from clean tree.
 ## Public-launch required follow-up
 These are not blocking the Phase 1 code contract, but should be completed before real public user data exists.
-- [ ] Remove legacy SHA-256 lookup fallback/repair paths if any remain.
-- [ ] Add follow-up migration to drop legacy SHA-256 lookup columns/indexes after pre-launch QA.
-- [ ] Re-run HMAC v2 seed/demo/login/password-reset/pro-client flows after legacy cleanup.
+- [x] Remove legacy SHA-256 lookup fallback/repair paths.
+- [x] Add migration to drop legacy SHA-256 lookup columns/indexes.
+- [x] Re-run final proof commands after the legacy SHA-256 cleanup migration.
+- [x] Expand `verify:privacy-phase1` to include AEAD, address encryption, audit redaction/admin audit, login, and password-reset proof tests.
+- [ ] Re-run HMAC v2 seed/demo/login/password-reset/pro-client flows against the target launch environment.
 - [ ] Re-run address encryption dry run/write run against the target launch environment.
-- [ ] Re-run final proof commands after the legacy SHA-256 cleanup migration.
+- [ ] Re-run final proof commands against the target launch environment before public launch.
 ## Latest local proof
-Date: 2026-05-31
+Date: 2026-06-01
 Commands:
 ```bash
 pnpm verify:privacy-phase1
@@ -37,27 +47,47 @@ pnpm typecheck
 
 Result:
 
-* check-canonical-normalization: passed.
-* check-pii-plaintext-reads: passed with 471 known baseline entries.
-* test:privacy-phase1: passed, 8 files / 131 tests.
-* test:privacy-export-delete: passed, 4 files / 29 tests.
-* pnpm typecheck: passed.
+check-canonical-normalization: passed
+check-pii-plaintext-reads: passed (471 known baseline entries)
+test:privacy-phase1: passed, 14 files / 195 tests
+test:privacy-export-delete: passed, 6 files / 45 tests
+pnpm typecheck: passed
 
 Notes:
 
 * verify:privacy-phase1 runs both Phase 1 privacy tests and export/delete privacy tests.
+* test:privacy-phase1 now includes:
+    * lib/security/contactNormalization.test.ts
+    * lib/security/crypto/hashLookup.test.ts
+    * lib/security/contactLookup.test.ts
+    * lib/security/crypto/aead.test.ts
+    * lib/security/addressEncryption.test.ts
+    * lib/security/auditRedaction.test.ts
+    * lib/admin/auditLog.test.ts
+    * lib/clientActions/idempotency.test.ts
+    * lib/clients/upsertProClient.test.ts
+    * lib/observability/authEvents.test.ts
+    * app/api/auth/register/route.test.ts
+    * app/api/auth/login/route.test.ts
+    * app/api/auth/password-reset/request/route.test.ts
+    * app/api/auth/phone/correct/route.test.ts
 * test:privacy-export-delete now includes:
+    * lib/privacy/exportSafety.test.ts
     * lib/privacy/exportUserData.test.ts
     * lib/privacy/deleteUserData.test.ts
+    * lib/privacy/deleteUserDataSummary.test.ts
     * app/api/internal/privacy/export/[userId]/route.test.ts
     * app/api/internal/privacy/delete/[userId]/route.test.ts
-* deleteUserData clears legacy SHA-256 and HMAC v2 lookup hashes during anonymization.
-* deleteUserData runs live anonymization inside a Prisma transaction when called with a Prisma client that supports $transaction.
+* deleteUserData clears HMAC v2 lookup hashes and key versions during anonymization.
+* Legacy SHA-256 contact lookup columns were removed by prisma/migrations/20260601000000_drop_legacy_contact_lookup_hashes/migration.sql.
+* The privacy delete route runs live anonymization and the matching admin audit write inside the same outer Prisma transaction.
+* The privacy delete route rejects malformed dryRun values instead of allowing ambiguous input to trigger live anonymization.
 * exportUserData uses explicit projections and negative tests to prevent internal secret/security field egress.
+* Attribution events and admin action logs are omitted from the default user export pending a separate disclosure decision.
 * Protected internal export/delete routes are present and covered by tests.
 * Plaintext contact lookup fallback has been removed from login, password reset, and pro-client matching.
 * Contact lookup readers are HMAC v2-only.
-* Because there are no real users yet, no extended production burn-in is required.
+* Because there are no real users yet, no extended production burn-in is required for the legacy SHA-256 contact lookup cleanup.
 * Booking and message retention decisions are documented in docs/privacy/retention-policy.md.
 * Privacy request operations are documented in docs/runbooks/privacy-request.md.
 
@@ -73,11 +103,11 @@ pnpm exec dotenv -e .env.staging.local -- pnpm backfill:contact-hash-v2 -- --wri
 
 Result:
 
-* Dry run loaded DATABASE_URL and PII_LOOKUP_HMAC_KEYS_JSON.
-* Dry run completed with 0 failures.
-* Write run completed with 0 failures.
-* User: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
-* ClientProfile: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+Dry run loaded DATABASE_URL and PII_LOOKUP_HMAC_KEYS_JSON.
+Dry run completed with 0 failures.
+Write run completed with 0 failures.
+User: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+ClientProfile: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
 
 Interpretation:
 
@@ -96,8 +126,8 @@ pnpm exec dotenv -e .env.staging.local -- node -e "for (const k of ['DATABASE_UR
 
 Result:
 
-* DATABASE_URL: set.
-* PII_AEAD_KEYS_JSON: set.
+DATABASE_URL: set
+PII_AEAD_KEYS_JSON: set
 
 Command:
 
@@ -105,11 +135,11 @@ pnpm exec dotenv -e .env.staging.local -- pnpm backfill:address-encryption -- --
 
 Result:
 
-* Write run completed with 0 failures.
-* BookingHold: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
-* Booking: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
-* ClientAddress: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
-* ProfessionalLocation: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+Write run completed with 0 failures.
+BookingHold: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+Booking: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+ClientAddress: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
+ProfessionalLocation: scanned 0, eligible 0, updated 0, skipped 0, failed 0.
 
 Interpretation:
 
@@ -146,9 +176,9 @@ pnpm exec dotenv -e .env.staging.local -- pnpm backfill:address-encryption -- --
 
 Result:
 
-* lib/security/addressEncryption.test.ts: passed, 9 tests.
-* pnpm typecheck: passed.
-* Staging dry run completed with 0 failures across all targets.
+lib/security/addressEncryption.test.ts: passed, 9 tests.
+pnpm typecheck: passed.
+Staging dry run completed with 0 failures across all targets.
 
 Plaintext contact lookup fallback removal
 
@@ -164,7 +194,7 @@ Current reader policy:
 
 * HMAC v2 lookup only.
 * No raw plaintext email/phone lookup fallback.
-* Legacy SHA-256 columns remain temporarily only for scheduled cleanup/drop migration work.
+* No legacy SHA-256 lookup fallback.
 
 Verification:
 
@@ -173,23 +203,48 @@ pnpm typecheck
 
 Result:
 
-* verify:privacy-phase1: passed.
-* pnpm typecheck: passed.
+verify:privacy-phase1: passed.
+pnpm typecheck: passed.
 
-Legacy SHA-256 cleanup decision
+Legacy SHA-256 cleanup
 
-Because the app has no real users yet, no extended production burn-in is required.
+Date: 2026-06-01
+
+Because the app has no real users yet, no extended production burn-in was required.
 
 Decision:
 
 * Treat HMAC v2 as the canonical contact lookup path.
-* Keep legacy SHA-256 columns only until short pre-launch QA confirms seed/demo/auth/pro-client flows.
-* Drop legacy SHA-256 lookup columns/indexes before public launch, unless real user data exists before that migration lands.
-* If real user data exists before legacy cleanup lands, switch to a safer staged migration plan instead of an immediate drop.
+* Remove legacy SHA-256 lookup helpers and fallback/repair paths.
+* Drop legacy SHA-256 lookup columns/indexes before public launch.
+* If real user data exists before a future privacy contract cleanup lands, use a safer staged migration plan instead of an immediate drop.
+
+Implemented migration:
+
+prisma/migrations/20260601000000_drop_legacy_contact_lookup_hashes/migration.sql
+
+Dropped columns:
+
+* User.emailHash
+* User.phoneHash
+* ClientProfile.emailHash
+* ClientProfile.phoneHash
+
+Verification:
+
+pnpm prisma migrate status
+rg 'DROP COLUMN.*emailHash|DROP COLUMN.*phoneHash' prisma/migrations -n
+rg '\bemailHash\b|\bphoneHash\b' prisma/schema.prisma prisma/migrations -n
+
+Result:
+
+Database schema is up to date.
+The new drop migration contains the expected DROP COLUMN statements.
+schema.prisma contains no legacy emailHash / phoneHash fields.
 
 Privacy export/delete route closeout
 
-Date: 2026-05-31
+Date: 2026-06-01
 
 Implemented protected internal routes:
 
@@ -206,11 +261,14 @@ Route behavior:
 * Requires authenticated ADMIN.
 * Requires SUPER_ADMIN permission.
 * Uses Cache-Control: no-store.
-* Writes admin audit logs.
+* Writes structured admin audit logs.
 * Export route returns the sanitized exportUserData payload.
+* Export audit logs include structured target context.
 * Delete route defaults to DRY_RUN.
+* Delete route rejects malformed dryRun values.
 * Delete route requires confirmUserId for live ANONYMIZE.
 * Delete route blocks live self-anonymization by the acting admin.
+* Live anonymization and the corresponding audit write run in the same outer transaction.
 
 Verification:
 
@@ -220,23 +278,24 @@ pnpm typecheck
 
 Result:
 
-* test:privacy-export-delete: passed, 4 files / 29 tests.
-* verify:privacy-phase1: passed.
-* pnpm typecheck: passed.
+test:privacy-export-delete: passed, 6 files / 45 tests.
+verify:privacy-phase1: passed.
+pnpm typecheck: passed.
 
 Privacy delete transaction hardening
 
-Date: 2026-05-31
+Date: 2026-06-01
 
-deleteUserData now runs live ANONYMIZE work inside a Prisma transaction when called with a Prisma client that supports $transaction.
+Live privacy delete/anonymize requests now run supported anonymization work and the matching admin audit write in the same outer Prisma transaction.
 
 Covered behavior:
 
 * DRY_RUN does not open a transaction.
 * Live ANONYMIZE opens one transaction.
-* Existing transaction clients do not recursively open another transaction.
 * Supported deletion/anonymization writes run through the transaction client.
-* Tests cover transaction behavior in lib/privacy/deleteUserData.test.ts.
+* The admin audit log write runs through the same transaction client.
+* If the audit log write fails, the live anonymization is not committed.
+* Tests cover route-level transaction behavior in app/api/internal/privacy/delete/[userId]/route.test.ts.
 
 Verification:
 
@@ -246,20 +305,21 @@ pnpm typecheck
 
 Result:
 
-* test:privacy-export-delete: passed, 4 files / 29 tests.
-* verify:privacy-phase1: passed.
-* pnpm typecheck: passed.
+test:privacy-export-delete: passed, 6 files / 45 tests.
+verify:privacy-phase1: passed.
+pnpm typecheck: passed.
 
 Current known deferred areas
 
 These are accepted follow-up areas, not unresolved Phase 1 blockers.
 
+* AEAD address raw-column drop after real-data burn-in.
 * Booking-level anonymization implementation after retention/legal policy is finalized.
 * Message deletion implementation after conversation ownership and retention rules are finalized.
-* Notification delivery traversal expansion.
-* Aftercare summary traversal expansion.
-* Attribution event disclosure decision and traversal.
-* AdminActionLog user-export/delete disclosure decision and schema mapping.
+* Notification delivery traversal expansion beyond the current safe export boundary, if needed.
+* Aftercare summary traversal expansion beyond the current safe export boundary, if needed.
+* Attribution event disclosure decision and optional safe projection.
+* AdminActionLog user-export/delete disclosure decision and optional safe projection.
 * Storage object byte deletion through a dedicated storage write boundary.
 * Tenant-level export/delete as part of WS-1 tenant work.
 * PII plaintext-read baseline burn-down from the accepted 471-entry baseline.
@@ -291,3 +351,9 @@ Policy:
 * Any new baseline entry must include a narrow reason or be fixed before merge.
 * Prefer reducing the baseline when touching related files.
 * Treat baseline growth as privacy debt requiring review.
+
+After replacing it, run:
+```bash
+pnpm verify:privacy-phase1
+pnpm typecheck
+git diff -- docs/privacy/phase-1-remaining-work.md
