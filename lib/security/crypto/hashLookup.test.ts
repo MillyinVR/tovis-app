@@ -10,12 +10,8 @@ import {
   clearContactLookupHmacKeyringCacheForTests,
   CONTACT_LOOKUP_HMAC_KEY_VERSION,
   contactLookupHmacHex,
-  emailLookupHash,
   emailLookupHashV2,
-  legacySha256Hex,
-  phoneLookupHash,
   phoneLookupHashV2,
-  sha256Hex,
 } from './hashLookup'
 
 const TEST_HMAC_KEY = Buffer.alloc(32, 7).toString('base64')
@@ -98,46 +94,6 @@ describe('normalizePhoneForLookup', () => {
   })
 })
 
-describe('legacy SHA-256 helpers', () => {
-  it('returns a stable lowercase SHA-256 hex digest', () => {
-    expect(sha256Hex('tori@example.com')).toBe(
-      '0c033774330f6d7cafc32205bfc9b73f86b3841154f24cc838c142d949aa4fc4',
-    )
-  })
-
-  it('keeps sha256Hex as an alias for legacySha256Hex', () => {
-    expect(sha256Hex('+15551234567')).toBe(
-      legacySha256Hex('+15551234567'),
-    )
-  })
-
-  it('returns a 64-character hex string', () => {
-    expect(sha256Hex('+15551234567')).toMatch(/^[a-f0-9]{64}$/u)
-  })
-})
-
-describe('legacy lookup hash helpers', () => {
-  it('hashes normalized emails with legacy SHA-256', () => {
-    expect(emailLookupHash(' Tori@Example.COM ')).toBe(
-      sha256Hex('tori@example.com'),
-    )
-  })
-
-  it('returns null for invalid emails', () => {
-    expect(emailLookupHash('not-an-email')).toBeNull()
-  })
-
-  it('hashes normalized phones with legacy SHA-256', () => {
-    expect(phoneLookupHash('(555) 123-4567')).toBe(
-      sha256Hex('+15551234567'),
-    )
-  })
-
-  it('returns null for invalid phones', () => {
-    expect(phoneLookupHash('123')).toBeNull()
-  })
-})
-
 describe('contactLookupHmacHex', () => {
   it('returns a stable v2 HMAC hash with key version', () => {
     const first = contactLookupHmacHex({
@@ -154,12 +110,18 @@ describe('contactLookupHmacHex', () => {
     })
   })
 
-  it('does not match the legacy SHA-256 hash', () => {
+  it('does not match a raw SHA-256 digest for the same normalized value', async () => {
+    const { createHash } = await import('node:crypto')
+
+    const rawSha256 = createHash('sha256')
+      .update('tori@example.com', 'utf8')
+      .digest('hex')
+
     const v2 = contactLookupHmacHex({
       normalizedValue: 'tori@example.com',
     })
 
-    expect(v2.hash).not.toBe(sha256Hex('tori@example.com'))
+    expect(v2.hash).not.toBe(rawSha256)
   })
 
   it('throws when the HMAC key env is missing', () => {

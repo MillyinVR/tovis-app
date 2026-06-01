@@ -1,9 +1,11 @@
 // lib/observability/authEvents.ts
 
+import { createHash } from 'node:crypto'
+
 import * as Sentry from '@sentry/nextjs'
+
 import {
   emailLookupHashV2,
-  legacySha256Hex,
   phoneLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 import { redactionLabels } from '@/lib/security/redaction'
@@ -31,6 +33,7 @@ type CaptureAuthExceptionInput = Omit<AuthEventInput, 'level' | 'message'> & {
 const MAX_STRING_LENGTH = 500
 const MAX_META_DEPTH = 3
 const SHORT_HASH_LENGTH = 12
+const NON_CONTACT_HASH_ALGORITHM = 'sha256' as const
 
 const REDACTED = redactionLabels.redacted
 
@@ -40,7 +43,11 @@ function shortenHash(hash: string | null): string | null {
 
 function nonContactLookupHash(value: string | null | undefined): string | null {
   const normalized = value?.trim()
-  return normalized ? legacySha256Hex(normalized) : null
+  if (!normalized) return null
+
+  return createHash(NON_CONTACT_HASH_ALGORITHM)
+    .update(normalized, 'utf8')
+    .digest('hex')
 }
 
 function isSensitiveKey(key: string): boolean {

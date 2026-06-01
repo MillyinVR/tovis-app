@@ -1,4 +1,5 @@
 // lib/security/contactLookup.ts
+
 import { normalizePhoneForVerification } from '@/lib/security/contactNormalization'
 import {
   emailLookupHashV2,
@@ -7,19 +8,15 @@ import {
 } from '@/lib/security/crypto/hashLookup'
 
 export type UserContactLookupWriteData = {
-  emailHash?: string | null
   emailHashV2?: string | null
   emailHashKeyVersion?: number | null
-  phoneHash?: string | null
   phoneHashV2?: string | null
   phoneHashKeyVersion?: number | null
 }
 
 export type ClientProfileContactLookupWriteData = {
-  emailHash?: string | null
   emailHashV2?: string | null
   emailHashKeyVersion?: number | null
-  phoneHash?: string | null
   phoneHashV2?: string | null
   phoneHashKeyVersion?: number | null
 }
@@ -34,8 +31,8 @@ type BuildContactLookupDataInput = {
  *
  * Contract:
  * - omitted field / `undefined` means leave existing DB value unchanged
- * - provided valid value means clear legacy SHA-256 hash and write HMAC v2 hash
- * - provided invalid/null/empty value means clear legacy + v2 hash fields
+ * - provided valid value means write HMAC v2 hash + key version
+ * - provided invalid/null/empty value means clear HMAC v2 hash + key version
  */
 function buildContactLookupData(
   input: BuildContactLookupDataInput,
@@ -86,27 +83,29 @@ export function buildVerificationPhoneLookupValue(value: unknown): string {
   return normalizePhoneForVerification(value) ?? ''
 }
 
-function buildEmailLookupWriteData(value: unknown): Pick<
+function buildEmailLookupWriteData(
+  value: unknown,
+): Pick<
   UserContactLookupWriteData,
-  'emailHash' | 'emailHashV2' | 'emailHashKeyVersion'
+  'emailHashV2' | 'emailHashKeyVersion'
 > {
   const hmacHash = emailLookupHashV2(value)
 
   return {
-    emailHash: null,
     emailHashV2: hmacHash?.hash ?? null,
     emailHashKeyVersion: hmacHash?.keyVersion ?? null,
   }
 }
 
-function buildPhoneLookupWriteData(value: unknown): Pick<
+function buildPhoneLookupWriteData(
+  value: unknown,
+): Pick<
   UserContactLookupWriteData,
-  'phoneHash' | 'phoneHashV2' | 'phoneHashKeyVersion'
+  'phoneHashV2' | 'phoneHashKeyVersion'
 > {
   const hmacHash = phoneLookupHashV2(value)
 
   return {
-    phoneHash: null,
     phoneHashV2: hmacHash?.hash ?? null,
     phoneHashKeyVersion: hmacHash?.keyVersion ?? null,
   }

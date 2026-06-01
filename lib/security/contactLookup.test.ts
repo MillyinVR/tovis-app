@@ -1,4 +1,5 @@
 // lib/security/contactLookup.test.ts
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
@@ -31,7 +32,7 @@ afterEach(() => {
 })
 
 describe('buildUserContactLookupData', () => {
-  it('builds v2 email and phone hashes and clears legacy hashes from normalized values', () => {
+  it('builds v2 email and phone hashes from normalized values', () => {
     const emailHashV2 = emailLookupHashV2('tori@example.com')
     const phoneHashV2 = phoneLookupHashV2('+15551234567')
 
@@ -44,10 +45,8 @@ describe('buildUserContactLookupData', () => {
         phone: '(555) 123-4567',
       }),
     ).toEqual({
-      emailHash: null,
       emailHashV2: emailHashV2?.hash,
       emailHashKeyVersion: emailHashV2?.keyVersion,
-      phoneHash: null,
       phoneHashV2: phoneHashV2?.hash,
       phoneHashKeyVersion: phoneHashV2?.keyVersion,
     })
@@ -63,7 +62,6 @@ describe('buildUserContactLookupData', () => {
         phone: '(555) 123-4567',
       }),
     ).toEqual({
-      phoneHash: null,
       phoneHashV2: phoneHashV2?.hash,
       phoneHashKeyVersion: phoneHashV2?.keyVersion,
     })
@@ -80,7 +78,6 @@ describe('buildUserContactLookupData', () => {
         phone: '(555) 123-4567',
       }),
     ).toEqual({
-      phoneHash: null,
       phoneHashV2: phoneHashV2?.hash,
       phoneHashKeyVersion: phoneHashV2?.keyVersion,
     })
@@ -93,10 +90,8 @@ describe('buildUserContactLookupData', () => {
         phone: '123',
       }),
     ).toEqual({
-      emailHash: null,
       emailHashV2: null,
       emailHashKeyVersion: null,
-      phoneHash: null,
       phoneHashV2: null,
       phoneHashKeyVersion: null,
     })
@@ -109,10 +104,8 @@ describe('buildUserContactLookupData', () => {
         phone: null,
       }),
     ).toEqual({
-      emailHash: null,
       emailHashV2: null,
       emailHashKeyVersion: null,
-      phoneHash: null,
       phoneHashV2: null,
       phoneHashKeyVersion: null,
     })
@@ -124,7 +117,7 @@ describe('buildUserContactLookupData', () => {
 })
 
 describe('buildClientProfileContactLookupData', () => {
-  it('builds v2 email and phone hashes and clears legacy hashes from normalized values', () => {
+  it('builds v2 email and phone hashes from normalized values', () => {
     const emailHashV2 = emailLookupHashV2('client@example.com')
     const phoneHashV2 = phoneLookupHashV2('+15551234567')
 
@@ -137,10 +130,8 @@ describe('buildClientProfileContactLookupData', () => {
         phone: '1-555-123-4567',
       }),
     ).toEqual({
-      emailHash: null,
       emailHashV2: emailHashV2?.hash,
       emailHashKeyVersion: emailHashV2?.keyVersion,
-      phoneHash: null,
       phoneHashV2: phoneHashV2?.hash,
       phoneHashKeyVersion: phoneHashV2?.keyVersion,
     })
@@ -156,7 +147,6 @@ describe('buildClientProfileContactLookupData', () => {
         email: ' Client@Example.COM ',
       }),
     ).toEqual({
-      emailHash: null,
       emailHashV2: emailHashV2?.hash,
       emailHashKeyVersion: emailHashV2?.keyVersion,
     })
@@ -173,7 +163,6 @@ describe('buildClientProfileContactLookupData', () => {
         phone: undefined,
       }),
     ).toEqual({
-      emailHash: null,
       emailHashV2: emailHashV2?.hash,
       emailHashKeyVersion: emailHashV2?.keyVersion,
     })
@@ -186,10 +175,8 @@ describe('buildClientProfileContactLookupData', () => {
         phone: 'abc',
       }),
     ).toEqual({
-      emailHash: null,
       emailHashV2: null,
       emailHashKeyVersion: null,
-      phoneHash: null,
       phoneHashV2: null,
       phoneHashKeyVersion: null,
     })
@@ -202,10 +189,8 @@ describe('buildClientProfileContactLookupData', () => {
         phone: null,
       }),
     ).toEqual({
-      emailHash: null,
       emailHashV2: null,
       emailHashKeyVersion: null,
-      phoneHash: null,
       phoneHashV2: null,
       phoneHashKeyVersion: null,
     })

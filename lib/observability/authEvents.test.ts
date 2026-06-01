@@ -1,4 +1,7 @@
 // lib/observability/authEvents.test.ts
+
+import { createHash } from 'node:crypto'
+
 import * as Sentry from '@sentry/nextjs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -6,7 +9,6 @@ import {
   clearContactLookupHmacKeyringCacheForTests,
   CONTACT_LOOKUP_HMAC_KEY_VERSION,
   emailLookupHashV2,
-  legacySha256Hex,
   phoneLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 
@@ -29,6 +31,10 @@ function readLoggedJson(
   }
 
   return JSON.parse(firstArg) as Record<string, unknown>
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
 }
 
 function shortHash(hash: string | null): string | null {
@@ -84,16 +90,14 @@ describe('authEvents', () => {
       code: 'INVALID_CREDENTIALS',
     })
 
-    expect(payload.userIdHash).toBe(shortHash(legacySha256Hex('user_123')))
+    expect(payload.userIdHash).toBe(shortHash(sha256Hex('user_123')))
     expect(payload.emailHash).toBe(
       shortHash(emailLookupHashV2('Tori.Example@Example.com')?.hash ?? null),
     )
     expect(payload.phoneHash).toBe(
       shortHash(phoneLookupHashV2('+15551234567')?.hash ?? null),
     )
-    expect(payload.verificationIdHash).toBe(
-      shortHash(legacySha256Hex('verify_123')),
-    )
+    expect(payload.verificationIdHash).toBe(shortHash(sha256Hex('verify_123')))
 
     expect(serialized).not.toContain('user_123')
     expect(serialized).not.toContain('Tori.Example@Example.com')
@@ -183,7 +187,9 @@ describe('authEvents', () => {
   })
 
   it('captures auth exceptions with hashed context, sanitized Sentry exception, and sanitized structured log metadata', () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
 
     const setTag = vi.fn()
     const setContext = vi.fn()
@@ -269,9 +275,7 @@ describe('authEvents', () => {
     >
     const serializedContext = JSON.stringify(contextPayload)
 
-    expect(contextPayload.userIdHash).toBe(
-      shortHash(legacySha256Hex('user_456')),
-    )
+    expect(contextPayload.userIdHash).toBe(shortHash(sha256Hex('user_456')))
     expect(contextPayload.emailHash).toBe(
       shortHash(emailLookupHashV2('user@example.com')?.hash ?? null),
     )
@@ -279,7 +283,7 @@ describe('authEvents', () => {
       shortHash(phoneLookupHashV2('+15551234567')?.hash ?? null),
     )
     expect(contextPayload.verificationIdHash).toBe(
-      shortHash(legacySha256Hex('verification_456')),
+      shortHash(sha256Hex('verification_456')),
     )
     expect(contextPayload.errorName).toBe('Error')
     expect(contextPayload.errorMessage).toBe(

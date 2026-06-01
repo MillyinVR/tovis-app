@@ -331,10 +331,6 @@ async function anonymizeClientProfile(
       phone: null,
       dateOfBirth: null,
 
-      // Legacy SHA-256 lookup fields.
-      emailHash: null,
-      phoneHash: null,
-
       // HMAC v2 lookup fields. These must be cleared during anonymization so
       // deleted users do not retain contact blind-index identifiers.
       emailHashV2: null,
@@ -403,10 +399,6 @@ async function anonymizeUser(
     data: {
       email: deletedEmail(user.id),
       phone: null,
-
-      // Legacy SHA-256 lookup fields.
-      emailHash: null,
-      phoneHash: null,
 
       // HMAC v2 lookup fields. These must be cleared during anonymization so
       // deleted users do not retain contact blind-index identifiers.

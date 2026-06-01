@@ -41,11 +41,9 @@ const CLIENT_PROFILE_IDENTITY_SELECT = {
   firstName: true,
   lastName: true,
   email: true,
-  emailHash: true,
   emailHashV2: true,
   emailHashKeyVersion: true,
   phone: true,
-  phoneHash: true,
   phoneHashV2: true,
   phoneHashKeyVersion: true,
   user: {
@@ -53,11 +51,9 @@ const CLIENT_PROFILE_IDENTITY_SELECT = {
       id: true,
       role: true,
       email: true,
-      emailHash: true,
       emailHashV2: true,
       emailHashKeyVersion: true,
       phone: true,
-      phoneHash: true,
       phoneHashV2: true,
       phoneHashKeyVersion: true,
     },
@@ -72,11 +68,9 @@ const USER_IDENTITY_SELECT = {
   id: true,
   role: true,
   email: true,
-  emailHash: true,
   emailHashV2: true,
   emailHashKeyVersion: true,
   phone: true,
-  phoneHash: true,
   phoneHashV2: true,
   phoneHashKeyVersion: true,
   clientProfile: {
@@ -111,7 +105,6 @@ function buildClientProfileLookupOrConditions(args: {
   const emailHashV2 = buildEmailLookupHashV2ForContactInput(lookupEmail)
   const phoneHashV2 = buildPhoneLookupHashV2ForContactInput(lookupPhone)
 
-
   const orConditions: Prisma.ClientProfileWhereInput[] = []
 
   if (emailHashV2) {
@@ -142,7 +135,6 @@ function buildUserLookupOrConditions(args: {
 
   const emailHashV2 = buildEmailLookupHashV2ForContactInput(lookupEmail)
   const phoneHashV2 = buildPhoneLookupHashV2ForContactInput(lookupPhone)
-
 
   const orConditions: Prisma.UserWhereInput[] = []
 
@@ -265,27 +257,25 @@ function buildMatchedProfileUpdateData(args: {
 
   const emailPatch =
     email &&
-    (profile.email == null || // pii-plaintext-read-ok: expand-phase contact repair only checks whether profile email is already populated
-      profile.emailHash == null ||
+    (profile.email == null || // pii-plaintext-read-ok: contact repair only checks whether profile email is already populated
       profile.emailHashV2 == null ||
       profile.emailHashKeyVersion == null)
       ? {
-          ...(profile.email == null ? { email } : {}), // pii-plaintext-read-ok: expand-phase contact repair writes email only when profile email is missing
+          ...(profile.email == null ? { email } : {}), // pii-plaintext-read-ok: contact repair writes email only when profile email is missing
           ...emailContactData,
         }
       : {}
 
-  const phonePatch =
-    phone &&
-    (profile.phone == null || // pii-plaintext-read-ok: expand-phase contact repair only checks whether profile phone is already populated
-      profile.phoneHash == null ||
-      profile.phoneHashV2 == null ||
-      profile.phoneHashKeyVersion == null)
-      ? {
-          ...(profile.phone == null ? { phone } : {}), // pii-plaintext-read-ok: expand-phase contact repair writes phone only when profile phone is missing
-          ...phoneContactData,
-        }
-      : {}
+    const phonePatch =
+      phone &&
+      (profile.phone == null || // pii-plaintext-read-ok: contact repair only checks whether profile phone is already populated
+        profile.phoneHashV2 == null ||
+        profile.phoneHashKeyVersion == null)
+        ? {
+            ...(profile.phone == null ? { phone } : {}), // pii-plaintext-read-ok: contact repair writes phone only when profile phone is missing
+            ...phoneContactData,
+          }
+        : {}
 
   return {
     ...(!hasMeaningfulValue(profile.firstName) ? { firstName } : {}),
