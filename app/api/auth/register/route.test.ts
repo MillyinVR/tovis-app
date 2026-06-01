@@ -5,9 +5,7 @@ import { Role } from '@prisma/client'
 import {
   clearContactLookupHmacKeyringCacheForTests,
   CONTACT_LOOKUP_HMAC_KEY_VERSION,
-  emailLookupHash,
   emailLookupHashV2,
-  phoneLookupHash,
   phoneLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 
@@ -306,7 +304,7 @@ function expectedEmailLookupData(email: string) {
   expect(emailHashV2).not.toBeNull()
 
   return {
-    emailHash: emailLookupHash(email),
+    emailHash: null,
     emailHashV2: emailHashV2?.hash,
     emailHashKeyVersion: emailHashV2?.keyVersion,
   }
@@ -318,7 +316,7 @@ function expectedPhoneLookupData(phone: string) {
   expect(phoneHashV2).not.toBeNull()
 
   return {
-    phoneHash: phoneLookupHash(phone),
+    phoneHash: null,
     phoneHashV2: phoneHashV2?.hash,
     phoneHashKeyVersion: phoneHashV2?.keyVersion,
   }
@@ -650,7 +648,7 @@ describe('app/api/auth/register/route', () => {
     })
   })
 
-  it('dual-writes user and client contact lookup hashes during client signup', async () => {
+  it('writes v2 user and client contact lookup hashes during client signup', async () => {
     const tx = {
       user: {
         create: vi.fn().mockResolvedValue({

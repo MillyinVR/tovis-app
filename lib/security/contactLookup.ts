@@ -1,9 +1,7 @@
 // lib/security/contactLookup.ts
 import { normalizePhoneForVerification } from '@/lib/security/contactNormalization'
 import {
-  emailLookupHash,
   emailLookupHashV2,
-  phoneLookupHash,
   phoneLookupHashV2,
   type ContactLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
@@ -32,11 +30,11 @@ type BuildContactLookupDataInput = {
 }
 
 /**
- * Builds dual-write contact lookup data for expand/burn-in.
+ * Builds contact lookup write data.
  *
  * Contract:
  * - omitted field / `undefined` means leave existing DB value unchanged
- * - provided valid value means write legacy SHA-256 hash and HMAC v2 hash
+ * - provided valid value means clear legacy SHA-256 hash and write HMAC v2 hash
  * - provided invalid/null/empty value means clear legacy + v2 hash fields
  */
 function buildContactLookupData(
@@ -92,11 +90,10 @@ function buildEmailLookupWriteData(value: unknown): Pick<
   UserContactLookupWriteData,
   'emailHash' | 'emailHashV2' | 'emailHashKeyVersion'
 > {
-  const legacyHash = emailLookupHash(value)
   const hmacHash = emailLookupHashV2(value)
 
   return {
-    emailHash: legacyHash,
+    emailHash: null,
     emailHashV2: hmacHash?.hash ?? null,
     emailHashKeyVersion: hmacHash?.keyVersion ?? null,
   }
@@ -106,11 +103,10 @@ function buildPhoneLookupWriteData(value: unknown): Pick<
   UserContactLookupWriteData,
   'phoneHash' | 'phoneHashV2' | 'phoneHashKeyVersion'
 > {
-  const legacyHash = phoneLookupHash(value)
   const hmacHash = phoneLookupHashV2(value)
 
   return {
-    phoneHash: legacyHash,
+    phoneHash: null,
     phoneHashV2: hmacHash?.hash ?? null,
     phoneHashKeyVersion: hmacHash?.keyVersion ?? null,
   }

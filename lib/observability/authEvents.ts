@@ -1,11 +1,10 @@
 // lib/observability/authEvents.ts
 
 import * as Sentry from '@sentry/nextjs'
-
 import {
-  emailLookupHash,
+  emailLookupHashV2,
   legacySha256Hex,
-  phoneLookupHash,
+  phoneLookupHashV2,
 } from '@/lib/security/crypto/hashLookup'
 import { redactionLabels } from '@/lib/security/redaction'
 
@@ -220,6 +219,12 @@ function sanitizedExceptionForCapture(error: unknown): Error {
   return sanitized
 }
 
+function shortenContactHash(
+  hash: { hash: string; keyVersion: number } | null,
+): string | null {
+  return hash ? hash.hash.slice(0, SHORT_HASH_LENGTH) : null
+}
+
 function buildAuthEventHashes(input: {
   userId?: string | null
   email?: string | null
@@ -228,8 +233,8 @@ function buildAuthEventHashes(input: {
 }) {
   return {
     userIdHash: shortenHash(nonContactLookupHash(input.userId)),
-    emailHash: shortenHash(emailLookupHash(input.email)),
-    phoneHash: shortenHash(phoneLookupHash(input.phone)),
+    emailHash: shortenContactHash(emailLookupHashV2(input.email)),
+    phoneHash: shortenContactHash(phoneLookupHashV2(input.phone)),
     verificationIdHash: shortenHash(nonContactLookupHash(input.verificationId)),
   }
 }
