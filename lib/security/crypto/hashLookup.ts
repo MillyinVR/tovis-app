@@ -35,8 +35,8 @@ let cachedContactLookupHmacRawEnv: string | null = null
 /**
  * Legacy lowercase SHA-256 hex digest.
  *
- * This is retained only for expand/burn-in compatibility with existing
- * `emailHash` / `phoneHash` columns. Do not use this for new blind indexes.
+ * Retained for compatibility with existing legacy hashes and non-contact
+ * short-hash logging. Do not use this for new contact blind indexes.
  */
 export function legacySha256Hex(value: string): string {
   return createHash(LEGACY_CONTACT_HASH_ALGORITHM)
@@ -89,7 +89,9 @@ export function contactLookupHmacHex(args: {
 /**
  * Legacy helper for email lookup hashes.
  *
- * Writes/reads the old SHA-256 `emailHash` value during burn-in.
+ * Retained for old-data compatibility and legacy assertions only.
+ * New contact lookup writes should use v2 HMAC fields and clear the legacy
+ * SHA-256 `emailHash` field.
  */
 export function emailLookupHash(value: unknown): string | null {
   const normalized = normalizeEmailForLookup(value)
@@ -100,7 +102,9 @@ export function emailLookupHash(value: unknown): string | null {
 /**
  * Legacy helper for phone lookup hashes.
  *
- * Writes/reads the old SHA-256 `phoneHash` value during burn-in.
+ * Retained for old-data compatibility and legacy assertions only.
+ * New contact lookup writes should use v2 HMAC fields and clear the legacy
+ * SHA-256 `phoneHash` field.
  */
 export function phoneLookupHash(value: unknown): string | null {
   const normalized = normalizePhoneForLookup(value)
