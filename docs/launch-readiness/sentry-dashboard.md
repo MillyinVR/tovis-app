@@ -6,7 +6,7 @@ Phase: Phase 2 — Launch ops proof
 Scope: Private beta and public rollout observability  
 Primary dashboard surface: Sentry-first  
 Supplemental dashboard sources: Provider dashboards where Sentry cannot own the signal  
-Current default status: TODO — dashboard proof not complete until live staging evidence is linked
+Current default status: IN PROGRESS — Sentry release/environment config is implemented locally; live dashboard and deployed staging evidence are still TODO.
 
 This document defines the minimum launch dashboard required for private beta and public rollout. The dashboard must show real staging or production signals, not just planned panels.
 
@@ -47,9 +47,9 @@ If a signal cannot be captured in Sentry, link the provider dashboard and docume
 |---|---|
 | Sentry project | TODO |
 | Sentry organization | TODO |
-| Environment names | TODO |
-| Release naming format | TODO |
-| Deployment marker strategy | TODO |
+| Environment names | `SENTRY_ENVIRONMENT` / `NEXT_PUBLIC_SENTRY_ENVIRONMENT`, falling back to Vercel/Node env values |
+| Release naming format | `SENTRY_RELEASE` / `NEXT_PUBLIC_SENTRY_RELEASE`, falling back to Vercel commit SHA |
+| Deployment marker strategy | Release/dist metadata is now set in server, edge, and client Sentry config; Sentry deploy/release view still needs staging verification |
 | Dashboard URL | TODO |
 | Staging dashboard verified | TODO |
 | Production dashboard verified | TODO |
@@ -62,22 +62,22 @@ Before private beta, Sentry events must include enough metadata to identify the 
 
 | Requirement | Status | Owner | Evidence | Notes |
 |---|---|---|---|---|
-| Server Sentry release set | TODO | Tori | TODO | Check sentry.server.config.ts. |
-| Edge Sentry release set | TODO | Tori | TODO | Check sentry.edge.config.ts. |
-| Client Sentry release set | TODO | Tori | TODO | Check instrumentation-client.ts. |
-| Environment value set | TODO | Tori | TODO | Example: staging, production. |
-| Deploy marker visible | TODO | Tori | TODO | Link Sentry deploy/release view if available. |
+| Server Sentry release set | IN PROGRESS | Tori | `sentry.server.config.ts`, `lib/observability/sentryConfig.ts` | Implemented locally; deployed Sentry event proof still TODO. |
+| Edge Sentry release set | IN PROGRESS | Tori | `sentry.edge.config.ts`, `lib/observability/sentryConfig.ts` | Implemented locally; deployed Sentry event proof still TODO. |
+| Client Sentry release set | IN PROGRESS | Tori | `instrumentation-client.ts` | Implemented locally; deployed browser event proof still TODO. |
+| Environment value set | IN PROGRESS | Tori | `lib/observability/sentryConfig.ts`, `instrumentation-client.ts` | Implemented locally; staging/production event proof still TODO. |
+| Deploy marker visible | TODO | Tori | TODO | Link Sentry deploy/release view after staging deploy. |
 | Source maps/upload behavior verified | TODO | Tori | TODO | Required if relying on Sentry stack traces. |
 
 ## Console/log capture policy
 
 | Question | Decision | Evidence/notes |
 |---|---|---|
-| Is console/log capture enabled? | TODO | TODO |
-| Which environments allow it? | TODO | TODO |
-| What redaction boundary protects logs? | TODO | TODO |
-| Which values must never be logged? | TODO | TODO |
-| Who owns reviewing log safety? | Tori | TODO |
+| Is console/log capture enabled? | Disabled by default | Server/edge config now enables Sentry console logging only when `SENTRY_ENABLE_LOGS` or `NEXT_PUBLIC_SENTRY_ENABLE_LOGS` is truthy. |
+| Which environments allow it? | TODO | Decide before enabling outside local/staging. |
+| What redaction boundary protects logs? | Central Sentry event scrubber | Server/edge events pass through `scrubSentryEvent()` in `lib/observability/sentryConfig.ts`, backed by `redactAuditPayload()`. |
+| Which values must never be logged? | Listed below | Keep this list current. |
+| Who owns reviewing log safety? | Tori | Required before enabling Sentry log capture in staging/production. |
 
 Sensitive values that must never be intentionally logged:
 
@@ -414,7 +414,16 @@ Private beta may proceed only when these are live enough to catch launch-critica
 
 ## Private beta evidence
 
-text Dashboard URL: Environment: Release: Last staging verification: Synthetic alert tested: Known gaps: Accepted risks: Decision: 
+```text
+Dashboard URL:
+Environment:
+Release:
+Last staging verification:
+Synthetic alert tested:
+Known gaps:
+Accepted risks:
+Decision:
+```
 
 ---
 
@@ -433,7 +442,20 @@ Public rollout requires:
 
 ## Public rollout evidence
 
-text Dashboard URL: Environment: Release: Last staging verification: Last production verification: Synthetic alert tested: Load proof linked: Chaos proof linked: Provider dashboards linked: Known gaps: Accepted risks: Decision: 
+```text
+Dashboard URL:
+Environment:
+Release:
+Last staging verification:
+Last production verification:
+Synthetic alert tested:
+Load proof linked:
+Chaos proof linked:
+Provider dashboards linked:
+Known gaps:
+Accepted risks:
+Decision:
+```
 
 ---
 
@@ -441,7 +463,33 @@ text Dashboard URL: Environment: Release: Last staging verification: Last produc
 
 Use this template when marking a section complete.
 
-md ## Evidence: <section>  Status: PASS / FAIL / BLOCKED / ACCEPTED RISK   Owner: Tori   Environment: staging / production   Dashboard link: TODO   Sentry query/widget: TODO   Provider dashboard link: TODO   Related alert: TODO   Related runbook: TODO   Threshold: TODO   Last verified: TODO   Verified by: Tori    ### What was verified  TODO  ### Known gaps  TODO  ### Launch decision  TODO 
+```md
+## Evidence: <section>
+
+Status: PASS / FAIL / BLOCKED / ACCEPTED RISK
+Owner: Tori
+Environment: staging / production
+Dashboard link: TODO
+Sentry query/widget: TODO
+Provider dashboard link: TODO
+Related alert: TODO
+Related runbook: TODO
+Threshold: TODO
+Last verified: TODO
+Verified by: Tori
+
+### What was verified
+
+TODO
+
+### Known gaps
+
+TODO
+
+### Launch decision
+
+TODO
+```
 
 ## Related documents
 
