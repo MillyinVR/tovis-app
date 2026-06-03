@@ -138,11 +138,11 @@ Private beta does not need perfect observability, but it does need enough visibi
 | Severity | High |
 | Owner | Tori |
 | Backup | TODO |
-| Decision | BLOCKS PRIVATE BETA |
+| Decision | BLOCKS PRIVATE BETA ALERT PROOF |
 | Private beta impact | Beta should not begin without alert routing for critical failures. |
 | Public rollout impact | Blocks public rollout. |
-| Mitigation | Create docs/launch-readiness/slack-alerts.md, map alert thresholds, owners, Slack destination, runbooks, and escalation path. |
-| Verification | Trigger at least one synthetic staging alert and record result. |
+| Mitigation | Alert map exists in docs/launch-readiness/slack-alerts.md. Finish thresholds/runbooks, then upgrade Sentry or choose an alternate alert path so a synthetic staging alert can be tested. |
+| Verification | Trigger at least one synthetic staging alert and record result after the Sentry plan or alternate alert path is available. |
 | Related docs | docs/launch-readiness/oncall.md, docs/launch-readiness/slack-alerts.md, docs/launch-readiness/go-no-go.md |
 | Last reviewed | TODO |
 
@@ -215,45 +215,45 @@ Known runbook areas include health/readiness, Redis, Postgres, Supabase Storage,
 
 ---
 
-## RISK-008 — Sentry release/deployment tagging not proven
+## RISK-008 — Sentry release/deployment tagging not deployed-verified
 
 | Field | Value |
 |---|---|
 | Severity | Medium |
 | Owner | Tori |
 | Backup | TODO |
-| Decision | BLOCKS PRIVATE BETA |
-| Private beta impact | Debugging beta regressions is much harder without release/environment tagging. |
+| Decision | BLOCKS PRIVATE BETA UNTIL DEPLOYED PROOF EXISTS |
+| Private beta impact | Debugging beta regressions is much harder without release/environment tagging visible in real Sentry events. |
 | Public rollout impact | Blocks public rollout. |
-| Mitigation | Add or verify Sentry release, dist, and environment configuration in server, edge, and client instrumentation. |
+| Mitigation | Local Sentry release, dist, and environment config is implemented in server, edge, and client instrumentation. Deploy to staging and confirm Sentry events show the expected release/environment. |
 | Verification | Sentry events show correct release/environment for staging deploy. |
 | Related docs | docs/launch-readiness/sentry-dashboard.md, docs/launch-readiness/private-beta-checklist.md |
 | Last reviewed | TODO |
 
 ### Notes
 
-This is boring until something breaks. Then it becomes the difference between “we know which deploy did it” and “lol good luck.”
+The code-level Sentry metadata work is implemented locally. This risk remains open until a staging Sentry event proves release/environment metadata is visible after deploy.
 
 ---
 
-## RISK-009 — Console/log capture policy not documented
+## RISK-009 — Console/log capture policy needs deployed confirmation
 
 | Field | Value |
 |---|---|
 | Severity | Medium |
 | Owner | Tori |
 | Backup | TODO |
-| Decision | BLOCKS PRIVATE BETA |
-| Private beta impact | Logs can accidentally retain sensitive values if capture policy is unclear. |
+| Decision | BLOCKS PRIVATE BETA UNTIL REVIEWED |
+| Private beta impact | Logs can accidentally retain sensitive values if capture policy is unclear or enabled without review. |
 | Public rollout impact | Blocks public rollout. |
-| Mitigation | Document whether console/log capture remains enabled, what redaction boundary protects it, and which fields must never be logged. |
-| Verification | docs/launch-readiness/sentry-dashboard.md or docs/launch-readiness/slack-alerts.md links to the policy. |
+| Mitigation | Sentry console/log capture is disabled by default and only enabled through SENTRY_ENABLE_LOGS or NEXT_PUBLIC_SENTRY_ENABLE_LOGS. Server/edge Sentry events are scrubbed through lib/observability/sentryConfig.ts and redactAuditPayload(). |
+| Verification | Confirm deployed env does not enable log capture unless explicitly reviewed, and record policy in docs/launch-readiness/sentry-dashboard.md. |
 | Related docs | docs/privacy/phase-1-privacy-proof.md, docs/launch-readiness/sentry-dashboard.md |
 | Last reviewed | TODO |
 
 ### Notes
 
-If console capture remains enabled, document why it is safe. If not safe, restrict it.
+The default is now safer than before. Do not enable Sentry console/log capture in staging or production until the log safety policy is reviewed.
 
 ---
 
@@ -550,6 +550,27 @@ High-risk routes must not fail open just because Redis got dramatic.
 This should be written before private beta ends, not after beta becomes public by accident. Sneaky launches are still launches.
 
 ---
+
+---
+
+## RISK-024 — Paid Sentry plan required for Slack alert routing
+
+| Field | Value |
+|---|---|
+| Severity | Medium |
+| Owner | Tori |
+| Backup | TODO |
+| Decision | BLOCKS PRIVATE BETA ALERT PROOF |
+| Private beta impact | Blocks Sentry-to-Slack alert verification until the required Sentry plan is available or an alternate alert path is chosen. |
+| Public rollout impact | Blocks public rollout if no tested alert routing exists. |
+| Mitigation | Upgrade Sentry or choose an alternate private-beta alert path before launch proof. |
+| Verification | Sentry alert routes to #tovis-ops-alerts, or alternate alert path is documented and tested. |
+| Related docs | docs/launch-readiness/oncall.md, docs/launch-readiness/slack-alerts.md, docs/launch-readiness/go-no-go.md |
+| Last reviewed | TODO |
+
+### Notes
+
+Sentry release/environment metadata can still be implemented now. Live Slack alert routing is deferred until the Sentry plan or alternate alerting path is available.
 
 # Closed or mitigated risks
 

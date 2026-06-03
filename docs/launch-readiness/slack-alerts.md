@@ -8,9 +8,11 @@ Primary private-beta alert destination: Slack-first
 Public rollout requirement: P1 escalation path must be stronger than passive Slack-only monitoring unless explicitly accepted in go-no-go.md  
 Primary owner: Tori  
 Backup owner: TODO — public rollout blocker  
-Current default status: TODO — alerts not launch-ready until routed and tested
+Current default status: BLOCKED — Sentry-to-Slack routing requires a paid Sentry plan or an alternate alerting path before it can be tested.
 
-This document maps launch-critical alerts to Slack destinations, owners, thresholds, dashboards, and runbooks.
+## Current blocker
+
+Sentry-to-Slack alert routing is currently blocked because the required Sentry plan is not available yet. This does not block the Sentry release/environment metadata work, but it does block private-beta alert proof until Sentry is upgraded or an alternate alerting path is chosen.
 
 ## Alert readiness rule
 
@@ -34,11 +36,11 @@ No orphan alerts. No alert should exist without a human who knows what to do wit
 
 | Destination | Purpose | Status | Notes |
 |---|---|---|---|
-| #tovis-ops-alerts | Proposed private-beta alert channel | TODO | Rename if the actual channel differs. |
-| #tovis-beta-support | Proposed beta support/feedback channel | TODO | Optional if support uses another path. |
-| #tovis-incidents | Proposed incident coordination channel | TODO | Optional for private beta, recommended before public rollout. |
-| Direct owner notification | Backup path for P1 during private beta | TODO | Do not rely on this for public rollout. |
-| PagerDuty/Opsgenie/equivalent | Public rollout P1 escalation | BLOCKED | Required before public rollout unless waived in go-no-go.md. |
+| `#tovis-ops-alerts` | Proposed private-beta alert channel | BLOCKED | Sentry-to-Slack routing requires a paid Sentry plan or alternate alerting path before this can be tested. |
+| `#tovis-beta-support` | Proposed beta support/feedback channel | TODO | Optional if support uses another path. |
+| `#tovis-incidents` | Proposed incident coordination channel | TODO | Optional for private beta, recommended before public rollout. |
+| Direct owner notification | Backup path for P1 during private beta | TODO | Can be used temporarily, but does not replace tested alert routing. |
+| PagerDuty/Opsgenie/equivalent | Public rollout P1 escalation | BLOCKED | Required before public rollout unless waived in `go-no-go.md`. |
 
 ## Severity routing
 
@@ -635,16 +637,26 @@ Before private beta, test at least one alert end-to-end.
 
 | Field | Value |
 |---|---|
-| Alert tested | TODO |
+| Alert tested | BLOCKED |
 | Environment | staging |
 | Date | TODO |
-| Trigger method | TODO |
-| Slack destination | TODO |
-| Acknowledged by | Tori |
+| Trigger method | Requires paid Sentry plan or alternate alerting path |
+| Slack destination | `#tovis-ops-alerts` |
+| Acknowledged by | TODO |
 | Time to Slack message | TODO |
 | Time to acknowledgement | TODO |
 | Runbook link included? | TODO |
-| Result | TODO |
+| Result | BLOCKED |
+
+### Blocker
+
+Sentry-to-Slack alert routing cannot be tested until the required Sentry plan is available or an alternate alerting path is selected and documented.
+
+### Acceptable unblock paths
+
+1. Upgrade Sentry and test Sentry-to-Slack routing.
+2. Choose an alternate private-beta alert path and document it here.
+3. Keep private beta blocked until alert routing proof exists.
 
 Before public rollout, test at least one P1 escalation path end-to-end.
 
@@ -663,13 +675,49 @@ Before public rollout, test at least one P1 escalation path end-to-end.
 
 Use this format for Slack alert messages where possible:
 
-text :rotating_light: <severity> <alert name>  Environment: <staging|production> Release: <release> Status: <triggered|resolved> Threshold: <threshold> Observed: <observed value> Dashboard: <link> Runbook: <link> Owner: <owner> Backup: <backup or TODO> Launch impact: <private beta blocker/public rollout blocker/info>  First action: 1. <step> 2. <step> 3. <step> 
+```text
+:rotating_light: <severity> <alert name>
+
+Environment: <staging|production>
+Release: <release>
+Status: <triggered|resolved>
+Threshold: <threshold>
+Observed: <observed value>
+Dashboard: <link>
+Runbook: <link>
+Owner: <owner>
+Backup: <backup or TODO>
+Launch impact: <private beta blocker/public rollout blocker/info>
+
+First action:
+1. <step>
+2. <step>
+3. <step>
+```
 
 ## Alert verification template
 
 Use this when marking an alert complete.
 
-md ## Verification: <alert name>  Status: PASS / FAIL / BLOCKED   Environment: staging / production   Date: TODO   Owner: Tori   Backup: TODO   Slack destination: TODO   Dashboard link: TODO   Runbook link: TODO   Trigger method: TODO   Threshold: TODO   Observed behavior: TODO   Acknowledged by: TODO   Time to acknowledgement: TODO   Result: TODO   Follow-up: TODO 
+```md
+## Verification: <alert name>
+
+Status: PASS / FAIL / BLOCKED
+Environment: staging / production
+Date: TODO
+Owner: Tori
+Backup: TODO
+Slack destination: TODO
+Dashboard link: TODO
+Runbook link: TODO
+Trigger method: TODO
+Threshold: TODO
+Observed behavior: TODO
+Acknowledged by: TODO
+Time to acknowledgement: TODO
+Result: TODO
+Follow-up: TODO
+```
 
 ## Public rollout requirements
 
@@ -678,12 +726,13 @@ Public rollout cannot proceed until:
 - Every P1 alert has a threshold.
 - Every P1 alert has a runbook.
 - Every P1 alert has an owner and backup.
-- Every P1 alert routes to Slack and tested escalation.
+- Every P1 alert routes to Slack or the approved alert destination.
+- Public P1 escalation is tested.
 - Every P2 alert has a threshold.
 - Every P2 alert has a runbook.
 - At least one synthetic P1 alert has been tested.
-- Alert links are recorded in go-no-go.md.
-- Open gaps are listed in risk-register.md.
+- Alert links are recorded in `go-no-go.md`.
+- Open gaps are listed in `risk-register.md`.
 
 ## Related documents
 
