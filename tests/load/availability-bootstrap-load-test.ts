@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 
 type Stage = {
@@ -6,8 +5,8 @@ type Stage = {
   rps: number
   durationSeconds: number
 }
-type LoadTestProfile = 'smoke' | 'baseline' | 'launch' | 'stress'
 
+type LoadTestProfile = 'smoke' | 'baseline' | 'launch' | 'stress'
 type Bucket = 'success' | 'expected429' | 'realFailure'
 type StatusValue = number | 'TIMEOUT' | 'NETWORK'
 
@@ -17,6 +16,25 @@ type RequestRecord = {
   status: StatusValue
   code: string | null
   bucket: Bucket
+}
+
+type AvailabilityBootstrapConfig = {
+  professionalId: string
+  serviceId: string
+  mediaId: string | null
+  locationType: string | null
+  locationId: string | null
+  clientAddressId: string | null
+  addOnIds: string[]
+  startDate: string | null
+  days: number
+  includeOtherPros: boolean
+  debug: boolean
+  viewerLat: number | null
+  viewerLng: number | null
+  radiusMiles: number | null
+  stepMinutes: number | null
+  leadMinutes: number | null
 }
 
 const STAGE_PROFILES: Record<LoadTestProfile, readonly Stage[]> = {
@@ -37,19 +55,6 @@ const STAGE_PROFILES: Record<LoadTestProfile, readonly Stage[]> = {
     { name: '200-rps', rps: 200, durationSeconds: 120 },
   ],
 } as const
-
-// Repo-confirmed CLIENT signup shape from SignupClientClient.tsx.
-// This intentionally avoids the PRO + CA-license DCA branch in this step.
-const DEFAULT_SIGNUP_LOCATION = Object.freeze({
-  kind: 'CLIENT_ZIP',
-  postalCode: '92101',
-  city: 'San Diego',
-  state: 'CA',
-  countryCode: 'US',
-  lat: 32.7157,
-  lng: -117.1611,
-  timeZoneId: 'America/Los_Angeles',
-})
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim()
@@ -76,10 +81,44 @@ function intEnv(name: string, fallback: number): number {
   return parsed
 }
 
+function optionalIntEnv(name: string): number | null {
+  const raw = process.env[name]?.trim()
+  if (!raw) return null
+
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${name} must be an integer.`)
+  }
+
+  return parsed
+}
+
+function optionalFloatEnv(name: string): number | null {
+  const raw = process.env[name]?.trim()
+  if (!raw) return null
+
+  const parsed = Number.parseFloat(raw)
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`${name} must be a finite number.`)
+  }
+
+  return parsed
+}
+
 function boolEnv(name: string, fallback = false): boolean {
   const raw = process.env[name]?.trim().toLowerCase()
   if (!raw) return fallback
   return raw === '1' || raw === 'true' || raw === 'yes'
+}
+
+function csvEnv(name: string): string[] {
+  const raw = process.env[name]?.trim()
+  if (!raw) return []
+
+  return raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
 }
 
 function loadTestProfileEnv(
@@ -99,9 +138,7 @@ function loadTestProfileEnv(
     return raw
   }
 
-  throw new Error(
-    `${name} must be one of: smoke, baseline, launch, stress.`,
-  )
+  throw new Error(`${name} must be one of: smoke, baseline, launch, stress.`)
 }
 
 function sleep(ms: number): Promise<void> {
@@ -143,60 +180,6 @@ function readEnvironmentName(): string {
   )
 }
 
-async function loadPhonePool(path: string | null): Promise<string[] | null> {
-  if (!path) return null
-
-  const raw = await readFile(path, 'utf8')
-  const lines = raw
-    .split(/\r?\n/g)
-    .map((line) => line.trim())
-    .filter(Boolean)
-
-  if (lines.length === 0) {
-    throw new Error(`LOAD_TEST_PHONE_POOL_FILE is empty: ${path}`)
-  }
-
-  return lines
-}
-
-function createPhoneAllocator(
-  phonePool: string[] | null,
-  allowGeneratedPhones: boolean,
-) {
-  let cursor = 0
-
-  return {
-    next(seq: number): string {
-      if (phonePool) {
-        if (cursor >= phonePool.length) {
-          throw new Error(
-            `Phone pool exhausted after ${cursor} requests. Add more numbers to LOAD_TEST_PHONE_POOL_FILE.`,
-          )
-        }
-
-        const value = phonePool[cursor]
-        cursor += 1
-
-        if (!value) {
-          throw new Error('Encountered an empty phone entry in the phone pool.')
-        }
-
-        return value
-      }
-
-      if (!allowGeneratedPhones) {
-        throw new Error(
-          'No phone pool configured. Set LOAD_TEST_PHONE_POOL_FILE, or set ALLOW_GENERATED_PHONE_NUMBERS=true only when staging is guaranteed to use non-delivering SMS test credentials/sinks.',
-        )
-      }
-
-      // Explicit opt-in only. This is intentionally not the default path.
-      const lastTenDigits = String(10_000_000_000 + seq).slice(-10)
-      return `+1${lastTenDigits}`
-    },
-  }
-}
-
 function buildTrustedIp(seq: number, prefix: string): string {
   const thirdOctet = (Math.floor(seq / 254) % 254) + 1
   const fourthOctet = (seq % 254) + 1
@@ -209,7 +192,7 @@ function buildHeaders(
   trustedIpPrefix: string | null,
 ): HeadersInit {
   const headers: Record<string, string> = {
-    'content-type': 'application/json',
+    accept: 'application/json',
   }
 
   if (trustedHeaderName && trustedIpPrefix) {
@@ -219,27 +202,82 @@ function buildHeaders(
   return headers
 }
 
-function buildPayload(
-  seq: number,
-  runId: string,
-  turnstileToken: string,
-  phone: string,
-) {
-  return {
-    email: `signup.load+${runId}.${seq}@example.com`,
-    password: 'SuperSecret123!',
-    role: 'CLIENT',
-    firstName: 'Load',
-    lastName: 'Test',
-    phone,
-    tosAccepted: true,
-    turnstileToken,
-    signupLocation: DEFAULT_SIGNUP_LOCATION,
+function appendOptionalParam(
+  searchParams: URLSearchParams,
+  name: string,
+  value: string | number | boolean | null,
+): void {
+  if (value == null) return
+  searchParams.set(name, String(value))
+}
+
+function buildUrl(baseUrl: string, config: AvailabilityBootstrapConfig): string {
+  const url = new URL('/api/availability/bootstrap', baseUrl)
+
+  url.searchParams.set('professionalId', config.professionalId)
+  url.searchParams.set('serviceId', config.serviceId)
+  url.searchParams.set('days', String(config.days))
+  url.searchParams.set('includeOtherPros', config.includeOtherPros ? '1' : '0')
+
+  appendOptionalParam(url.searchParams, 'mediaId', config.mediaId)
+  appendOptionalParam(url.searchParams, 'locationType', config.locationType)
+  appendOptionalParam(url.searchParams, 'locationId', config.locationId)
+  appendOptionalParam(
+    url.searchParams,
+    'clientAddressId',
+    config.clientAddressId,
+  )
+  appendOptionalParam(url.searchParams, 'startDate', config.startDate)
+  appendOptionalParam(url.searchParams, 'viewerLat', config.viewerLat)
+  appendOptionalParam(url.searchParams, 'viewerLng', config.viewerLng)
+  appendOptionalParam(url.searchParams, 'radiusMiles', config.radiusMiles)
+  appendOptionalParam(url.searchParams, 'stepMinutes', config.stepMinutes)
+  appendOptionalParam(url.searchParams, 'leadMinutes', config.leadMinutes)
+
+  if (config.addOnIds.length > 0) {
+    url.searchParams.set('addOnIds', config.addOnIds.join(','))
   }
+
+  if (config.debug) {
+    url.searchParams.set('debug', '1')
+  }
+
+  return url.toString()
+}
+
+function redactUrlForSummary(url: string): string {
+  const parsed = new URL(url)
+
+  const allowedParams = new Set([
+    'professionalId',
+    'serviceId',
+    'mediaId',
+    'locationType',
+    'locationId',
+    'clientAddressId',
+    'addOnIds',
+    'startDate',
+    'days',
+    'includeOtherPros',
+    'debug',
+    'viewerLat',
+    'viewerLng',
+    'radiusMiles',
+    'stepMinutes',
+    'leadMinutes',
+  ])
+
+  for (const key of [...parsed.searchParams.keys()]) {
+    if (!allowedParams.has(key)) {
+      parsed.searchParams.set(key, '[redacted]')
+    }
+  }
+
+  return parsed.toString()
 }
 
 function classifyStatus(status: StatusValue): Bucket {
-  if (status === 201) return 'success'
+  if (status === 200) return 'success'
   if (status === 429) return 'expected429'
   return 'realFailure'
 }
@@ -248,8 +286,18 @@ function parseCode(bodyText: string): string | null {
   if (!bodyText) return null
 
   try {
-    const parsed = JSON.parse(bodyText) as { code?: unknown }
-    return typeof parsed.code === 'string' ? parsed.code : null
+    const parsed: unknown = JSON.parse(bodyText)
+
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'code' in parsed &&
+      typeof parsed.code === 'string'
+    ) {
+      return parsed.code
+    }
+
+    return null
   } catch {
     return null
   }
@@ -270,30 +318,23 @@ function incrementCounter(
 async function sendRequest(args: {
   stage: Stage
   seq: number
-  runId: string
-  baseUrl: string
-  turnstileToken: string
+  url: string
   requestTimeoutMs: number
   trustedHeaderName: string | null
   trustedIpPrefix: string | null
-  phoneAllocator: ReturnType<typeof createPhoneAllocator>
 }): Promise<RequestRecord> {
-  const phone = args.phoneAllocator.next(args.seq)
-  const payload = buildPayload(args.seq, args.runId, args.turnstileToken, phone)
-
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), args.requestTimeoutMs)
   const startedAt = performance.now()
 
   try {
-    const response = await fetch(`${args.baseUrl}/api/auth/register`, {
-      method: 'POST',
+    const response = await fetch(args.url, {
+      method: 'GET',
       headers: buildHeaders(
         args.seq,
         args.trustedHeaderName,
         args.trustedIpPrefix,
       ),
-      body: JSON.stringify(payload),
       signal: controller.signal,
     })
 
@@ -331,14 +372,11 @@ async function sendRequest(args: {
 async function runStage(args: {
   stage: Stage
   startSeq: number
-  runId: string
-  baseUrl: string
-  turnstileToken: string
+  url: string
   requestTimeoutMs: number
   trustedHeaderName: string | null
   trustedIpPrefix: string | null
   maxInFlight: number
-  phoneAllocator: ReturnType<typeof createPhoneAllocator>
   records: RequestRecord[]
 }): Promise<number> {
   const totalRequests = args.stage.rps * args.stage.durationSeconds
@@ -368,13 +406,10 @@ async function runStage(args: {
       const task = sendRequest({
         stage: args.stage,
         seq,
-        runId: args.runId,
-        baseUrl: args.baseUrl,
-        turnstileToken: args.turnstileToken,
+        url: args.url,
         requestTimeoutMs: args.requestTimeoutMs,
         trustedHeaderName: args.trustedHeaderName,
         trustedIpPrefix: args.trustedIpPrefix,
-        phoneAllocator: args.phoneAllocator,
       })
         .then((record) => {
           args.records.push(record)
@@ -421,7 +456,7 @@ function buildStageSummary(stageName: string, records: RequestRecord[]) {
   return {
     stage: stageName,
     totalRequests: records.length,
-    success201: records.filter((record) => record.status === 201).length,
+    success200: records.filter((record) => record.status === 200).length,
     expected429: records.filter((record) => record.status === 429).length,
     realFailures: realFailureCount,
     realFailureRateExcluding429Pct:
@@ -432,7 +467,7 @@ function buildStageSummary(stageName: string, records: RequestRecord[]) {
       all: summarizeLatency(records),
       non429: summarizeLatency(non429),
       successOnly: summarizeLatency(
-        records.filter((record) => record.status === 201),
+        records.filter((record) => record.status === 200),
       ),
     },
     statusCounts,
@@ -443,10 +478,11 @@ function buildStageSummary(stageName: string, records: RequestRecord[]) {
 function buildSummary(args: {
   runId: string
   baseUrl: string
+  url: string
   profile: LoadTestProfile
   stages: readonly Stage[]
   totalPlannedRequests: number
-  phoneSource: string
+  config: AvailabilityBootstrapConfig
   records: RequestRecord[]
 }) {
   const statusCounts: Record<string, number> = {}
@@ -468,15 +504,31 @@ function buildSummary(args: {
     commit: readCommitSha(),
     environment: readEnvironmentName(),
     baseUrl: args.baseUrl,
-    route: 'POST /api/auth/register',
-    roleUnderTest: 'CLIENT',
-    phoneSource: args.phoneSource,
+    route: 'GET /api/availability/bootstrap',
+    config: {
+      professionalId: args.config.professionalId,
+      serviceId: args.config.serviceId,
+      mediaId: args.config.mediaId,
+      locationType: args.config.locationType,
+      locationId: args.config.locationId,
+      clientAddressId: args.config.clientAddressId,
+      addOnIds: args.config.addOnIds,
+      startDate: args.config.startDate,
+      days: args.config.days,
+      includeOtherPros: args.config.includeOtherPros,
+      debug: args.config.debug,
+      viewerLat: args.config.viewerLat,
+      viewerLng: args.config.viewerLng,
+      radiusMiles: args.config.radiusMiles,
+      stepMinutes: args.config.stepMinutes,
+      leadMinutes: args.config.leadMinutes,
+    },
     profile: args.profile,
     trafficPlan: args.stages,
     totalPlannedRequests: args.totalPlannedRequests,
     totals: {
       requests: args.records.length,
-      success201: args.records.filter((record) => record.status === 201).length,
+      success200: args.records.filter((record) => record.status === 200).length,
       expected429: args.records.filter((record) => record.status === 429).length,
       realFailures: realFailureCount,
       realFailureRateExcluding429Pct:
@@ -488,7 +540,7 @@ function buildSummary(args: {
       all: summarizeLatency(args.records),
       non429: summarizeLatency(non429),
       successOnly: summarizeLatency(
-        args.records.filter((record) => record.status === 201),
+        args.records.filter((record) => record.status === 200),
       ),
     },
     statusCounts,
@@ -499,49 +551,42 @@ function buildSummary(args: {
         args.records.filter((record) => record.stage === stage.name),
       ),
     ),
+    requestUrlPreview: redactUrlForSummary(args.url),
   }
 }
 
 async function main(): Promise<void> {
   const baseUrl = requireEnv('STAGING_BASE_URL').replace(/\/+$/, '')
-  const turnstileToken = requireEnv('TURNSTILE_TEST_TOKEN')
-
-  const phonePoolFile = optionalEnv('LOAD_TEST_PHONE_POOL_FILE')
-  const allowGeneratedPhones = boolEnv(
-    'ALLOW_GENERATED_PHONE_NUMBERS',
-    false,
-  )
-
-  const trustedHeaderName = optionalEnv('LOAD_TEST_TRUSTED_IP_HEADER_NAME')
-  const trustedIpPrefix = optionalEnv('LOAD_TEST_TRUSTED_IP_PREFIX')
-
-  const requestTimeoutMs = intEnv('LOAD_TEST_REQUEST_TIMEOUT_MS', 15000)
-  const maxInFlight = intEnv('LOAD_TEST_MAX_IN_FLIGHT', 2000)
-
   const profile = loadTestProfileEnv('LOAD_TEST_PROFILE', 'smoke')
   const stages = STAGE_PROFILES[profile]
 
-  const runId = new Date().toISOString().replace(/[-:.TZ]/g, '')
-  const phonePool = await loadPhonePool(phonePoolFile)
+  const config: AvailabilityBootstrapConfig = {
+    professionalId: requireEnv('LOAD_TEST_PROFESSIONAL_ID'),
+    serviceId: requireEnv('LOAD_TEST_SERVICE_ID'),
+    mediaId: optionalEnv('LOAD_TEST_MEDIA_ID'),
+    locationType: optionalEnv('LOAD_TEST_LOCATION_TYPE'),
+    locationId: optionalEnv('LOAD_TEST_LOCATION_ID'),
+    clientAddressId: optionalEnv('LOAD_TEST_CLIENT_ADDRESS_ID'),
+    addOnIds: csvEnv('LOAD_TEST_ADD_ON_IDS'),
+    startDate: optionalEnv('LOAD_TEST_START_DATE'),
+    days: intEnv('LOAD_TEST_SUMMARY_DAYS', 14),
+    includeOtherPros: boolEnv('LOAD_TEST_INCLUDE_OTHER_PROS', true),
+    debug: boolEnv('LOAD_TEST_AVAILABILITY_DEBUG', false),
+    viewerLat: optionalFloatEnv('LOAD_TEST_VIEWER_LAT'),
+    viewerLng: optionalFloatEnv('LOAD_TEST_VIEWER_LNG'),
+    radiusMiles: optionalFloatEnv('LOAD_TEST_RADIUS_MILES'),
+    stepMinutes: optionalIntEnv('LOAD_TEST_STEP_MINUTES'),
+    leadMinutes: optionalIntEnv('LOAD_TEST_LEAD_MINUTES'),
+  }
 
-  const totalPlannedRequests = stages.reduce(
-    (total, stage) => total + stage.rps * stage.durationSeconds,
-    0,
-  )
-
-  if (!phonePool && !allowGeneratedPhones) {
+  if ((config.viewerLat == null) !== (config.viewerLng == null)) {
     throw new Error(
-      'No phone pool configured. Set LOAD_TEST_PHONE_POOL_FILE, or set ALLOW_GENERATED_PHONE_NUMBERS=true only when staging is guaranteed to use non-delivering SMS test credentials/sinks.',
+      'LOAD_TEST_VIEWER_LAT and LOAD_TEST_VIEWER_LNG must be set together.',
     )
   }
 
-  if (phonePool && phonePool.length < totalPlannedRequests) {
-    throw new Error(
-      `Phone pool has ${phonePool.length} numbers, but selected profile "${profile}" requires ${totalPlannedRequests}. Add more numbers or use LOAD_TEST_PROFILE=smoke.`,
-    )
-  }
-
-  const phoneAllocator = createPhoneAllocator(phonePool, allowGeneratedPhones)
+  const trustedHeaderName = optionalEnv('LOAD_TEST_TRUSTED_IP_HEADER_NAME')
+  const trustedIpPrefix = optionalEnv('LOAD_TEST_TRUSTED_IP_PREFIX')
 
   if (
     (trustedHeaderName && !trustedIpPrefix) ||
@@ -552,27 +597,38 @@ async function main(): Promise<void> {
     )
   }
 
+  const requestTimeoutMs = intEnv('LOAD_TEST_REQUEST_TIMEOUT_MS', 15000)
+  const maxInFlight = intEnv('LOAD_TEST_MAX_IN_FLIGHT', 2000)
+
+  const totalPlannedRequests = stages.reduce(
+    (total, stage) => total + stage.rps * stage.durationSeconds,
+    0,
+  )
+
+  const runId = new Date().toISOString().replace(/[-:.TZ]/g, '')
+  const url = buildUrl(baseUrl, config)
+
   const records: RequestRecord[] = []
   let nextSeq = 1
 
   console.log(
     JSON.stringify(
       {
-    runId,
-    commit: readCommitSha(),
-    environment: readEnvironmentName(),
-    baseUrl,
-    route: 'POST /api/auth/register',
-    roleUnderTest: 'CLIENT',
-    phoneSource: phonePoolFile ? `pool:${phonePoolFile}` : 'generated',
-    profile,
-    trafficPlan: stages,
-    totalPlannedRequests,
-    requestTimeoutMs,
+        runId,
+        commit: readCommitSha(),
+        environment: readEnvironmentName(),
+        baseUrl,
+        route: 'GET /api/availability/bootstrap',
+        profile,
+        config,
+        trafficPlan: stages,
+        totalPlannedRequests,
+        requestTimeoutMs,
         maxInFlight,
         usingSyntheticTrustedIpHeader: Boolean(
           trustedHeaderName && trustedIpPrefix,
         ),
+        requestUrlPreview: redactUrlForSummary(url),
       },
       null,
       2,
@@ -587,14 +643,11 @@ async function main(): Promise<void> {
     nextSeq = await runStage({
       stage,
       startSeq: nextSeq,
-      runId,
-      baseUrl,
-      turnstileToken,
+      url,
       requestTimeoutMs,
       trustedHeaderName,
       trustedIpPrefix,
       maxInFlight,
-      phoneAllocator,
       records,
     })
   }
@@ -602,10 +655,11 @@ async function main(): Promise<void> {
   const summary = buildSummary({
     runId,
     baseUrl,
+    url,
     profile,
     stages,
     totalPlannedRequests,
-    phoneSource: phonePoolFile ? `pool:${phonePoolFile}` : 'generated',
+    config,
     records,
   })
 
