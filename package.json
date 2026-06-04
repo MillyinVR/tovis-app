@@ -46,6 +46,7 @@
     "test:load:checkout": "dotenv -e .env.local -- tsx tests/load/checkout-load-test.ts",
     "test:load:media-metadata": "dotenv -e .env.local -- tsx tests/load/media-metadata-load-test.ts",
     "test:load:notifications": "dotenv -e .env.local -- tsx tests/load/notification-processing-load-test.ts",
+    "test:load:stripe-webhook-replay": "dotenv -e .env.local -- tsx tests/load/stripe-webhook-replay-load-test.ts",
     "test:privacy-phase1": "vitest run --config vitest.config.mts lib/security/contactNormalization.test.ts lib/security/crypto/hashLookup.test.ts lib/security/contactLookup.test.ts lib/security/crypto/aead.test.ts lib/security/addressEncryption.test.ts lib/security/auditRedaction.test.ts lib/admin/auditLog.test.ts lib/clientActions/idempotency.test.ts lib/clients/upsertProClient.test.ts lib/observability/authEvents.test.ts app/api/auth/register/route.test.ts app/api/auth/login/route.test.ts app/api/auth/password-reset/request/route.test.ts app/api/auth/phone/correct/route.test.ts",
     "test:privacy-export-delete": "vitest run --config vitest.config.mts lib/privacy/exportSafety.test.ts lib/privacy/exportUserData.test.ts lib/privacy/deleteUserData.test.ts lib/privacy/deleteUserDataSummary.test.ts app/api/internal/privacy/export/[userId]/route.test.ts app/api/internal/privacy/delete/[userId]/route.test.ts",
     "test:privacy": "pnpm test:privacy-phase1 && pnpm test:privacy-export-delete",
