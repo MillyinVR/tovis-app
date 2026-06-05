@@ -31,7 +31,7 @@
     "db:test:seed": "pnpm db:test:push && pnpm seed:test && pnpm backfill:contact-hash-v2:test",
     "test:integration": "node scripts/with-test-db.mjs npx vitest run --config vitest.integration.config.mts",
     "test:integration:booking-overlap": "node scripts/with-test-db.mjs npx vitest run tests/integration/booking-overlap-concurrency.test.ts --config vitest.integration.config.mts --maxWorkers=1 --minWorkers=1",
-    "test:load:signup": "tsx tests/load/signup-load-test.ts",
+    "test:load:signup": "dotenv -e .env.local -- tsx tests/load/signup-load-test.ts",
     "check:booking-boundary": "node tools/check-booking-write-boundary.mjs",
     "check:media-render-boundary": "node tools/check-media-render-boundary.mjs",
     "check:consultation-canonical": "node tools/check-consultation-canonical.mjs",
