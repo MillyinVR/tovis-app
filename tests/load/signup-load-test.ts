@@ -203,17 +203,26 @@ function buildTrustedIp(seq: number, prefix: string): string {
   return `${prefix}.${thirdOctet}.${fourthOctet}`
 }
 
-function buildHeaders(
-  seq: number,
-  trustedHeaderName: string | null,
-  trustedIpPrefix: string | null,
-): HeadersInit {
+function buildHeaders(args: {
+  seq: number
+  baseUrl: string
+  trustedHeaderName: string | null
+  trustedIpPrefix: string | null
+}): HeadersInit {
+  const origin = new URL(args.baseUrl).origin
+
   const headers: Record<string, string> = {
+    accept: 'application/json',
     'content-type': 'application/json',
+    origin,
+    referer: `${origin}/`,
   }
 
-  if (trustedHeaderName && trustedIpPrefix) {
-    headers[trustedHeaderName] = buildTrustedIp(seq, trustedIpPrefix)
+  if (args.trustedHeaderName && args.trustedIpPrefix) {
+    headers[args.trustedHeaderName] = buildTrustedIp(
+      args.seq,
+      args.trustedIpPrefix,
+    )
   }
 
   return headers
@@ -233,6 +242,7 @@ function buildPayload(
     lastName: 'Test',
     phone,
     tosAccepted: true,
+    transactionalSmsConsent: true,
     turnstileToken,
     signupLocation: DEFAULT_SIGNUP_LOCATION,
   }
@@ -288,11 +298,12 @@ async function sendRequest(args: {
   try {
     const response = await fetch(`${args.baseUrl}/api/auth/register`, {
       method: 'POST',
-      headers: buildHeaders(
-        args.seq,
-        args.trustedHeaderName,
-        args.trustedIpPrefix,
-      ),
+      headers: buildHeaders({
+        seq: args.seq,
+        baseUrl: args.baseUrl,
+        trustedHeaderName: args.trustedHeaderName,
+        trustedIpPrefix: args.trustedIpPrefix,
+      }),
       body: JSON.stringify(payload),
       signal: controller.signal,
     })
@@ -610,6 +621,10 @@ async function main(): Promise<void> {
   })
 
   console.log(JSON.stringify(summary, null, 2))
+
+  if (summary.totals.realFailures > 0) {
+    process.exitCode = 1
+  }
 }
 
 main().catch((error: unknown) => {
