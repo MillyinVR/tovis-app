@@ -10,7 +10,9 @@ Use this file as the source of truth for launch readiness. Do not mark an item D
 - Tested locally means focused local proof exists.
 - Tested in CI means the relevant proof has run in CI.
 - Verified deployed means the behavior has been verified in staging or production.
-- Operationalized means monitoring, alerts, ownership, runbooks, rollout, or support workflow exists.
+- Operationalized means monitoring, alerts, owners, escalation, runbooks, rollout, or support workflow exists.
+
+Local proof and deployed operational proof are different things. A local passing suite proves code behavior. A deployed dashboard, alert, or provider check proves the system can be operated when real users are involved.
 
 ## Status legend
 
@@ -19,9 +21,11 @@ Use this file as the source of truth for launch readiness. Do not mark an item D
 | TODO | Not started or not proven. |
 | IN PROGRESS | Partially implemented or partially proven. |
 | DONE | Implemented, tested/documented where appropriate, committed, and not waiting on known required proof for this scope. |
+| PASS LOCALLY | Local proof passed, but deployed/operational proof may still be required. |
+| PASS DEPLOYED | Verified against deployed staging or production. |
 | BLOCKED | Cannot move forward until a dependency or decision is resolved. |
 | DEFERRED | Intentionally postponed beyond current launch-readiness scope. |
-| [~] | Partial evidence exists, but production-grade proof is still missing. |
+| PARTIAL | Some proof exists, but production-grade proof is still missing. |
 
 ## Proof columns
 
@@ -35,23 +39,24 @@ Use this file as the source of truth for launch readiness. Do not mark an item D
 
 ---
 
-# Current verified repo baseline
+# Current verified baseline
 
 | Item | Current state |
 |---|---|
-| Verified commit | 458a5a4bb0715c59a4198e9457c5b5a2c6cd4ef3 on main. |
-| Local vs origin | Local matched origin/main at verification time. |
-| pnpm typecheck | Passed locally. |
-| pnpm verify:privacy-phase1 | Passed locally. |
-| Privacy phase 1 tests | 20 files / 240 tests passed locally. |
-| Canonical normalization guard | Passed. |
-| PII plaintext-read guard | Passed with 471 known baseline entries. |
-| Phase 1 privacy status | Complete for current pre-launch scope. |
-| Launch operations status | PR 1 docs scaffold in progress; live dashboard, alerts, load proof, chaos proof, and deployed proof still open. |
-| Load tests | Signup load test exists; launch-critical load suite still missing. |
-| Chaos tests | Not implemented yet. |
-| On-call/launch docs | PR 1 docs scaffold being added. |
-| Public rollout status | Blocked until Phase 2 launch-ops proof is complete. |
+| Latest audited Phase 2 commit | 27bfa28 on main |
+| Earlier Phase 1 verified commit | 458a5a4bb0715c59a4198e9457c5b5a2c6cd4ef3 |
+| Phase 1 privacy status | Complete for current pre-launch scope; launch-env reruns remain tracked. |
+| Phase 2 repo-side status | Load suite, chaos suite, Sentry config, and launch docs are implemented. |
+| pnpm verify:launch-ops | PASS LOCALLY at commit 27bfa28 |
+| Chaos suite | PASS LOCALLY: 6 files / 17 tests passed |
+| Launch load suite | PASS LOCALLY: 8/8 launch load steps passed |
+| Deployed Sentry intake | PASS DEPLOYED: synthetic event captured, event ID e56044a034cb4fb78d1b09801fb43da5 |
+| Sentry release/environment metadata | Visible in deployed response metadata; dashboard proof still TODO |
+| Live dashboard proof | TODO |
+| Slack/Sentry alert routing | BLOCKED pending Sentry plan upgrade or approved alternate alerting path |
+| Backup owner | BLOCKED for public rollout |
+| P1 escalation path | BLOCKED for public rollout |
+| Public rollout status | NO-GO |
 
 ---
 
@@ -59,14 +64,17 @@ Use this file as the source of truth for launch readiness. Do not mark an item D
 
 | Area | Current status |
 |---|---|
-| Core product flow | Mostly wired; staging/browser proof still needed for launch confidence. |
-| Booking lifecycle slice | Strong; additional lifecycle/action matrix and deployed proof still needed. |
+| Core product flow | Mostly wired; full staging/browser proof still needed for launch confidence. |
+| Booking lifecycle slice | Strong local code/test posture; deployed lifecycle proof still needed. |
 | Privacy / PII readiness | Phase 1 complete for current pre-launch scope; remaining work is tracked operational/deferred privacy debt. |
-| Launch operations | In progress; docs scaffold is being created, but live dashboards, alert routing, load proof, and chaos proof remain open. |
+| Launch operations | Repo-side Phase 2 proof is green locally; live dashboards, alert routing, backup owner, and deployed/provider proof remain open. |
+| Sentry observability | Release/environment config implemented; deployed Sentry intake proven; dashboard sections and alert routing still TODO/BLOCKED. |
+| Load tests | Launch-critical load suite exists and passed locally; staging/rollout-commit proof still required before public rollout. |
+| Chaos tests | Chaos suite exists and passed locally; evidence should be recorded and rerun on rollout commit. |
 | White-label SaaS readiness | Not ready; tenant model and tenant visibility are not implemented. |
-| Private beta readiness | Not ready until private-beta gates, dashboard proof, alert path, rollback path, and core staging proof are complete. |
-| Public rollout readiness | Not ready until private beta exits cleanly, backup owner exists, P1 escalation is tested, load tests pass, and chaos tests pass. |
-| Current focus | Phase 2 launch ops proof: docs, Sentry dashboard, Slack alerts, load tests, chaos tests, go/no-go evidence. |
+| Private beta readiness | Still NO-GO until private-beta gates, live dashboard proof, alert path, rollback path, and core staging proof are complete or explicitly accepted. |
+| Public rollout readiness | NO-GO until private beta exits cleanly, backup owner exists, P1 escalation is tested, dashboards/alerts are live, load/chaos proof is current, and final signoff is complete. |
+| Current focus | Finish operational proof: dashboards, alert routing path, staging checks, provider proof, backup owner, go/no-go evidence. |
 
 ---
 
@@ -75,22 +83,24 @@ Use this file as the source of truth for launch readiness. Do not mark an item D
 | Item | Status | Implemented | Tested locally | Tested in CI | Verified deployed | Operationalized | Owner | Notes |
 |---|---|---:|---:|---:|---:|---:|---|---|
 | Phase 1 privacy/PII contract unblock | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | pnpm verify:privacy-phase1 passed locally; launch-env reruns remain tracked. |
-| On-call ownership doc | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | docs/launch-readiness/oncall.md; backup owner and public escalation still blocked. |
-| Go/no-go launch gate | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | docs/launch-readiness/go-no-go.md; evidence fields still TODO. |
-| Private beta checklist | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | docs/launch-readiness/private-beta-checklist.md; proof still TODO. |
-| Public rollout checklist | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | docs/launch-readiness/public-rollout-checklist.md; public rollout remains blocked. |
-| Risk register | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | docs/launch-readiness/risk-register.md; risks need review as proof lands. |
-| Sentry dashboard proof doc | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | docs/launch-readiness/sentry-dashboard.md; live dashboard evidence still TODO. |
-| Slack alert map | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | docs/launch-readiness/slack-alerts.md; routing/thresholds/testing still TODO. |
-| Load test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | docs/launch-readiness/load-test-plan.md; scripts/proof still TODO. |
-| Chaos test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | docs/launch-readiness/chaos-test-plan.md; tests/proof still TODO. |
+| On-call ownership doc | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Primary owner named; backup owner and public escalation still blocked. |
+| Go/no-go launch gate | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Evidence fields still need final proof links. |
+| Private beta checklist | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Proof still TODO; private beta remains NO-GO. |
+| Public rollout checklist | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Public rollout remains blocked. |
+| Risk register | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Review/update as proof lands. |
+| Sentry release/environment config | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | Implemented in server, edge, and client config; deployed metadata observed. |
+| Deployed Sentry intake | PASS DEPLOYED | Yes | N/A | Unknown | Yes | Partial | Tori | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5. |
+| Sentry dashboard proof doc | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Live dashboard links and section evidence still TODO. |
+| Slack alert map | IN PROGRESS / BLOCKED | Yes | N/A | N/A | No | Partial | Tori | Sentry-to-Slack routing requires paid Sentry plan or alternate alerting path. |
+| Load test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Plan exists; local suite proof now exists; staging proof still TODO. |
+| Chaos test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Plan exists; local suite proof now exists; evidence recording still needed. |
 | Full booking lifecycle E2E | IN PROGRESS | Partial | Partial | Unknown | No | No | Tori | API-assisted proof exists; full browser/staging proof still needed. |
-| Load tests for launch-critical flows | TODO | Partial | Partial | No | No | No | Tori | Signup load test exists only. |
-| Chaos tests for dependency failures | TODO | No | No | No | No | No | Tori | No tests/chaos coverage yet. |
-| Live dashboard panels | TODO | No | No | No | No | No | Tori | Sentry/dashboard sections planned but not proven live. |
-| Alert routing and escalation | TODO | No | No | No | No | No | Tori | Slack-first private beta path planned; public P1 escalation blocked. |
+| Load tests for launch-critical flows | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 8/8 launch load steps passed locally; staging/rollout proof still required. |
+| Chaos tests for dependency failures | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 6 chaos files / 17 tests passed locally. |
+| Live dashboard panels | TODO | Partial | N/A | N/A | No | No | Tori | Sentry intake is proven; dashboard panels are not. |
+| Alert routing and escalation | BLOCKED | Partial | No | No | No | No | Tori | Requires Sentry plan upgrade or approved alternate path; P1 escalation blocked. |
 | Named backup owner | BLOCKED | No | No | No | No | No | Tori | Required before public rollout. |
-| Provider/deployed readiness proof | TODO | Partial | Partial | Unknown | No | No | Tori | Health endpoints exist; staging/provider-live proof still needed. |
+| Provider/deployed readiness proof | TODO | Partial | Partial | Unknown | Partial | No | Tori | Domain/app/Sentry intake proof exists; full health/provider proof still needed. |
 | Rollback proof | IN PROGRESS | Partial | N/A | N/A | No | Partial | Tori | Rollback criteria in docs; actual drill/evidence still needed. |
 | Tenant data model / white-label isolation | TODO | No | No | No | No | No | Tori | Not required for first private beta unless white-label is in scope. |
 | UploadSession binding | TODO | No | No | No | No | No | Tori | Still needed if upload hardening remains public-launch scope. |
@@ -108,7 +118,7 @@ Remove the hard public-launch privacy blocker by establishing a real cryptograph
 
 DONE for current pre-launch scope.
 
-Local verification at commit 458a5a4:
+Earlier local verification at commit 458a5a4:
 
 | Command | Result |
 |---|---|
@@ -119,6 +129,8 @@ Local verification at commit 458a5a4:
 | pnpm test:privacy-phase1 | 14 files / 195 tests passed |
 | pnpm test:privacy-export-delete | 6 files / 45 tests passed |
 
+Rerun Phase 1 verification on the final private-beta/public-rollout commit before signoff.
+
 ## Items
 
 | Item | Status | Implemented | Tested locally | Tested in CI | Verified deployed | Operationalized | Owner | Notes |
@@ -126,11 +138,11 @@ Local verification at commit 458a5a4:
 | Canonical contact normalizer | DONE | Yes | Yes | Unknown | N/A | Partial | Tori | lib/security/contactNormalization.ts; guard passes. |
 | Canonical normalization guard | DONE | Yes | Yes | Unknown | N/A | Partial | Tori | tools/check-canonical-normalization.mjs. |
 | Audit payload redaction | DONE | Yes | Yes | Unknown | N/A | Partial | Tori | lib/security/auditRedaction.ts; applied to audit write paths. |
-| AEAD address envelope | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | lib/security/crypto/aead.ts; address encryption helper and backfill exist. |
-| Address encryption backfill script | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | prisma/scripts/backfillAddressEncryption.ts; launch-env rerun if applicable. |
+| AEAD address envelope | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | Address encryption helper and backfill exist. |
+| Address encryption backfill script | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | Launch-env rerun if applicable. |
 | PII plaintext-read guard | DONE | Yes | Yes | Unknown | N/A | Partial | Tori | Guard passes with 471 known baseline entries. |
 | HMAC contact hash v2 | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | HMAC helper, v2 columns, v2-only readers, and drop migration exist. |
-| HMAC v2 backfill script | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | prisma/scripts/backfillContactHashV2.ts; launch-env rerun if applicable. |
+| HMAC v2 backfill script | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | Launch-env rerun if applicable. |
 | Legacy SHA-256 contact hash drop migration | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | 20260601000000_drop_legacy_contact_lookup_hashes. |
 | Data export foundation | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | lib/privacy/exportUserData.ts. |
 | Data delete/anonymization foundation | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | lib/privacy/deleteUserData.ts. |
@@ -171,7 +183,7 @@ Local verification at commit 458a5a4:
 - Contact lookup uses HMAC v2.
 - Legacy SHA-256 contact hash columns are dropped.
 - Export/delete foundations exist and are protected.
-- Privacy verification commands pass.
+- Privacy verification commands pass on launch commit.
 - Remaining operational/deferred privacy work is tracked and does not masquerade as missing implementation.
 
 ---
@@ -184,85 +196,104 @@ Prove the system can be operated during private beta and public rollout.
 
 This phase is about operated readiness, not just code existence. Dashboards, alerts, runbooks, load proof, chaos proof, rollback, and go/no-go evidence must all exist before public rollout.
 
+## Current Phase 2 status
+
+| Area | Status | Notes |
+|---|---|---|
+| Launch docs scaffold | DONE / IN PROGRESS | Required docs exist and are being reconciled with new proof. |
+| Sentry release/environment config | DONE | Server, edge, and client config implemented. |
+| Deployed Sentry intake | PASS DEPLOYED | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5. |
+| Sentry dashboard proof | TODO LIVE PROOF | Dashboard sections still need links, thresholds, and evidence. |
+| Slack alert routing | BLOCKED | Requires Sentry plan upgrade or alternate alerting path. |
+| Launch load suite | PASS LOCALLY | 8/8 launch load steps passed locally. |
+| Chaos suite | PASS LOCALLY | 6 files / 17 tests passed locally. |
+| Backup owner | BLOCKED | Required before public rollout. |
+| P1 escalation | BLOCKED | Required before public rollout. |
+| Provider/staging proof | TODO | Health, provider dashboards, quotas, and storage policy proof still needed. |
+
 ## Phase 2 docs scaffold
 
 | Item | Status | Implemented | Tested locally | Tested in CI | Verified deployed | Operationalized | Owner | Notes |
 |---|---|---:|---:|---:|---:|---:|---|---|
-| On-call plan | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | docs/launch-readiness/oncall.md; backup and public escalation unresolved. |
-| Go/no-go gate | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | docs/launch-readiness/go-no-go.md; evidence still TODO. |
-| Private beta checklist | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | docs/launch-readiness/private-beta-checklist.md; evidence still TODO. |
-| Public rollout checklist | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | docs/launch-readiness/public-rollout-checklist.md; evidence still TODO. |
-| Risk register | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | docs/launch-readiness/risk-register.md; review/update as proof lands. |
-| Sentry dashboard proof doc | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | docs/launch-readiness/sentry-dashboard.md; live links still TODO. |
-| Slack alert map | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | docs/launch-readiness/slack-alerts.md; routing/testing still TODO. |
-| Load test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | docs/launch-readiness/load-test-plan.md; scripts/proof still TODO. |
-| Chaos test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | docs/launch-readiness/chaos-test-plan.md; tests/proof still TODO. |
+| On-call plan | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Backup and public escalation unresolved. |
+| Go/no-go gate | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Evidence fields still TODO. |
+| Private beta checklist | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Evidence still TODO. |
+| Public rollout checklist | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Public rollout remains blocked. |
+| Risk register | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Review/update as proof lands. |
+| Sentry dashboard proof doc | IN PROGRESS | Yes | N/A | N/A | Partial | Partial | Tori | Sentry intake proven; live dashboard links still TODO. |
+| Slack alert map | IN PROGRESS / BLOCKED | Yes | N/A | N/A | No | Partial | Tori | Routing/testing blocked. |
+| Load test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Local load proof exists; staging proof TODO. |
+| Chaos test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Local chaos proof exists; evidence recording TODO. |
 
 ## Observability and alerting
 
 | Item | Status | Implemented | Tested locally | Tested in CI | Verified deployed | Operationalized | Owner | Notes |
 |---|---|---:|---:|---:|---:|---:|---|---|
-| Sentry release/deployment tagging | TODO | No | No | No | No | No | Tori | Add release/dist/environment in server, edge, and client config. |
-| Console/log capture policy | TODO | No | No | No | No | No | Tori | Decide whether logs stay enabled and document redaction policy. |
-| Health/readiness dashboard section | TODO | Partial | Partial | Unknown | No | No | Tori | Health endpoints exist; dashboard evidence missing. |
-| Booking funnel dashboard section | TODO | No | No | No | No | No | Tori | Needs live Sentry/dashboard proof. |
-| Pro session lifecycle dashboard section | TODO | No | No | No | No | No | Tori | Needs live Sentry/dashboard proof. |
-| Media upload dashboard section | TODO | No | No | No | No | No | Tori | Needs live Sentry/dashboard proof. |
-| Payments/webhooks dashboard section | TODO | No | No | No | No | No | Tori | Needs live Sentry/dashboard proof. |
-| Notifications dashboard section | TODO | No | No | No | No | No | Tori | Needs live Sentry/dashboard proof. |
-| Background jobs dashboard section | TODO | Unknown | No | No | No | No | Tori | Identify launch-critical jobs first. |
-| Auth/rate limits dashboard section | TODO | No | No | No | No | No | Tori | Needs live Sentry/dashboard proof. |
-| Infra dependencies dashboard section | TODO | Partial | Partial | Unknown | No | No | Tori | Provider dashboards/runbooks exist; live dashboard proof missing. |
-| SLO/error budget dashboard section | TODO | No | No | No | No | No | Tori | Define thresholds and evidence. |
-| Slack private-beta alert channel | TODO | No | No | No | No | No | Tori | Required before private beta. |
-| P1/P2 Slack alert routing | TODO | No | No | No | No | No | Tori | Must link owner, threshold, dashboard, runbook. |
-| Synthetic staging alert test | TODO | No | No | No | No | No | Tori | Required before private beta. |
+| Sentry release/deployment tagging | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | Release/dist/environment config implemented; deployed metadata observed. |
+| Sentry synthetic event route/proof | PASS DEPLOYED | Yes | Yes | Unknown | Yes | Partial | Tori | Event ID e56044a034cb4fb78d1b09801fb43da5. |
+| Console/log capture policy | IN PROGRESS | Yes | N/A | N/A | Partial | Partial | Tori | Disabled by default; production enablement requires redaction review. |
+| Health/readiness dashboard section | TODO LIVE PROOF | Partial | Partial | Unknown | No | No | Tori | Health endpoints exist; dashboard evidence missing. |
+| Booking funnel dashboard section | TODO LIVE PROOF | Partial | Yes | Unknown | No | No | Tori | Local load proof exists; live Sentry proof TODO. |
+| Pro session lifecycle dashboard section | TODO LIVE PROOF | Partial | Partial | Unknown | No | No | Tori | Needs live Sentry/dashboard proof. |
+| Media upload dashboard section | TODO LIVE PROOF | Partial | Yes | Unknown | No | No | Tori | Local media load/chaos proof exists; live dashboard proof TODO. |
+| Payments/webhooks dashboard section | TODO LIVE PROOF | Partial | Yes | Unknown | No | No | Tori | Local checkout/webhook proof exists; live dashboard proof TODO. |
+| Notifications dashboard section | TODO LIVE PROOF | Partial | Yes | Unknown | No | No | Tori | Local notification load/chaos proof exists; live dashboard proof TODO. |
+| Background jobs dashboard section | TODO LIVE PROOF | Partial | Yes | Unknown | No | No | Tori | Notification processor covered locally; live dashboard proof TODO. |
+| Auth/rate limits dashboard section | TODO LIVE PROOF | Partial | Yes | Unknown | No | No | Tori | Signup/rate-limit behavior covered locally; live dashboard proof TODO. |
+| Infra dependencies dashboard section | TODO LIVE PROOF | Partial | Yes | Unknown | No | No | Tori | Provider dashboards/runbooks exist; live proof missing. |
+| SLO/error budget dashboard section | TODO | Partial | Partial | Unknown | No | No | Tori | Define thresholds and evidence. |
+| Slack private-beta alert channel | TODO / BLOCKED | No | No | No | No | No | Tori | Required before private beta unless alternate accepted. |
+| P1/P2 Slack alert routing | BLOCKED | No | No | No | No | No | Tori | Requires Sentry plan upgrade or alternate alert path. |
+| Synthetic staging alert test | BLOCKED | No | No | No | No | No | Tori | Required before private beta; blocked by alert routing. |
 | Public P1 escalation path | BLOCKED | No | No | No | No | No | Tori | Requires backup owner and tested escalation path. |
 
 ## Load tests
 
 | Item | Status | Implemented | Tested locally | Tested in CI | Verified deployed | Operationalized | Owner | Notes |
 |---|---|---:|---:|---:|---:|---:|---|---|
-| Signup load test | DONE | Yes | Partial | No | No | Partial | Tori | Existing tests/load/signup-load-test.ts; useful baseline only. |
-| Availability bootstrap load test | TODO | No | No | No | No | No | Tori | Add tests/load/availability-bootstrap-load-test.ts. |
-| Hold create load test | TODO | No | No | No | No | No | Tori | Add tests/load/hold-create-load-test.ts. |
-| Booking finalize load test | TODO | No | No | No | No | No | Tori | Critical public-rollout proof. |
-| Media metadata load test | TODO | No | No | No | No | No | Tori | Required if media in launch scope. |
-| Checkout load test | TODO | No | No | No | No | No | Tori | Required if payments in launch scope. |
-| Stripe webhook replay load test | TODO | No | No | No | No | No | Tori | Must prove replay/idempotency under pressure. |
-| Notification processing load test | TODO | No | No | No | No | No | Tori | Required if notifications enabled. |
-| Aggregate launch load suite | TODO | No | No | No | No | No | Tori | Add tests/load/run-launch-load-suite.ts. |
-| test:load:launch script | TODO | No | No | No | No | No | Tori | Add after scenario scripts exist. |
-| Staging load proof | TODO | No | No | No | No | No | Tori | Required before public rollout. |
+| Signup load test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed with expected 201/429 mix and zero real failures. |
+| Availability bootstrap load test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 30/30 successful requests in smoke run. |
+| Hold create load test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed with expected conflict/rate-limit pressure. |
+| Booking finalize load test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally. |
+| Media metadata load test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 10/10 successful requests in smoke run. |
+| Checkout load test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 10/10 successful requests in smoke run. |
+| Stripe webhook replay load test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 10/10 successful requests; duplicate replay behavior visible. |
+| Notification processing load test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 10/10 successful requests in smoke run. |
+| Aggregate launch load suite | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | tests/load/run-launch-load-suite.ts; 8/8 steps passed. |
+| test:load:launch script | DONE | Yes | Yes | Unknown | No | Partial | Tori | Exists and passed locally. |
+| Staging load proof | TODO | Yes | Partial | Unknown | No | No | Tori | Required before public rollout. |
 
 ## Chaos tests
 
 | Item | Status | Implemented | Tested locally | Tested in CI | Verified deployed | Operationalized | Owner | Notes |
 |---|---|---:|---:|---:|---:|---:|---|---|
-| Chaos test harness | TODO | No | No | No | No | No | Tori | Add tests/chaos/chaosTestHarness.ts. |
-| Redis outage chaos test | TODO | No | No | No | No | No | Tori | Must prove high-risk paths fail safely. |
-| Supabase Storage outage chaos test | TODO | No | No | No | No | No | Tori | Must avoid unsafe media state. |
-| Stripe webhook storm chaos test | TODO | No | No | No | No | No | Tori | Must prove dedupe/idempotency. |
-| Postmark degradation chaos test | TODO | No | No | No | No | No | Tori | Required if email enabled. |
-| Twilio degradation chaos test | TODO | No | No | No | No | No | Tori | Required if SMS enabled. |
-| DB replica lag chaos test | TODO | No | No | No | No | No | Tori | Must protect critical write/read paths. |
-| test:chaos script | TODO | No | No | No | No | No | Tori | Add after tests exist. |
-| verify:launch-ops script | TODO | No | No | No | No | No | Tori | Should aggregate chaos + launch load proof. |
+| Chaos test harness / suite | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Chaos suite exists under tests/chaos. |
+| Redis outage chaos test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally. |
+| Supabase Storage outage chaos test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally. |
+| Stripe webhook storm chaos test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally. |
+| Postmark degradation chaos test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally. |
+| Twilio degradation chaos test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally. |
+| DB degradation chaos test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally; distinct from full replica-lag proof if that remains in scope. |
+| DB replica lag chaos test | TODO / PARTIAL | Partial | Partial | Unknown | No | No | Tori | Generic DB degradation is covered; explicit replica-lag/stale-read proof still needs confirmation. |
+| test:chaos script | DONE | Yes | Yes | Unknown | No | Partial | Tori | Exists and passed locally. |
+| verify:launch-ops script | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally at commit 27bfa28; rerun on final launch commit. |
 
 ## Phase 2 acceptance criteria
 
 Private beta requires:
 
-- pnpm typecheck passes.
-- pnpm verify:privacy-phase1 passes.
+- pnpm typecheck passes on beta commit.
+- pnpm verify:privacy-phase1 passes on beta commit.
 - Private beta checklist is complete.
 - Rollback owner/path is documented.
-- Slack alert destination exists.
-- At least one synthetic staging alert routes successfully.
+- Slack alert destination or approved alternate alerting path exists.
+- At least one synthetic staging alert routes successfully, or alert-routing gap is explicitly accepted as a private-beta risk.
 - Health/readiness proof exists.
 - Booking lifecycle smoke proof exists.
 - Payment/webhook proof exists if payments are enabled.
 - Media/private-media proof exists if media is enabled.
+- Sentry intake is working.
+- Useful dashboard sections exist for launch-critical flows.
 - Risk register has no unowned High/Critical private-beta blockers.
 
 Public rollout requires:
@@ -272,8 +303,8 @@ Public rollout requires:
 - P1 escalation path is tested.
 - Live dashboard proof exists for all required sections.
 - P1/P2 alerts route and link to runbooks.
-- Load tests pass against staging.
-- Chaos tests pass.
+- Load tests pass on the rollout commit/environment.
+- Chaos tests pass on the rollout commit.
 - Provider quota/capacity is confirmed.
 - Rollback plan is complete.
 - go-no-go.md is signed with final public rollout decision.
@@ -292,7 +323,7 @@ Make the booking/session lifecycle impossible to complete incorrectly and prove 
 | Surface backend closeout blockers in Pro flow | DONE | Yes | Yes | Unknown | No | Partial | Tori | Pro sees blockers. |
 | Keep backend direct DONE transition blocked | DONE | Yes | Yes | Unknown | No | Partial | Tori | Write boundary blocks illegal transition. |
 | Add booking closeout smoke coverage | DONE | Yes | Yes | Unknown | No | Partial | Tori | Smoke coverage exists. |
-| Add full lifecycle action regression suite | TODO | Partial | Partial | No | No | No | Tori | Needs action-by-action legal/illegal proof. |
+| Add full lifecycle action regression suite | TODO / PARTIAL | Partial | Partial | No | No | No | Tori | Needs action-by-action legal/illegal proof if not already covered. |
 | Add full booking lifecycle browser E2E | IN PROGRESS | Partial | Partial | Unknown | No | No | Tori | API-assisted flow exists; full browser path pending. |
 | Add staging/prod lifecycle proof | TODO | No | No | No | No | No | Tori | Record proof against commit/environment. |
 | Add pro session state endpoint | TODO | No | No | No | No | No | Tori | Needed for polling/realtime MVP. |
@@ -320,12 +351,12 @@ Use secure action-token flows and make retryable mutations safe.
 | Add active-path guard against aftercare.publicToken usage | DONE | Yes | Yes | Unknown | No | Partial | Tori | Guard exists. |
 | Add rebook token GET/POST coverage | DONE | Yes | Yes | Unknown | No | Partial | Tori | Route coverage exists. |
 | Add token-scoped rebook idempotency | DONE | Yes | Yes | Unknown | No | Partial | Tori | Idempotency coverage exists. |
-| Add claim/NFC path tests and docs | DONE | Yes | Yes | Unknown | No | Partial | Tori | Docs/tests exist; deployed proof still needed. |
+| Add claim/NFC path tests and docs | DONE | Yes | Yes | Unknown | No | Partial | Tori | Claim/NFC tests exist; deployed proof still needed. |
 | Keep legacy AftercareSummary.publicToken only as deprecated field | IN PROGRESS | Yes | Partial | Unknown | No | No | Tori | Contraction still pending. |
 | Create idempotency route map document | TODO | No | No | No | No | No | Tori | Add docs/launch-readiness/idempotency-map.md. |
 | Add idempotency ledger cleanup/reaper | TODO | No | No | No | No | No | Tori | Retention/cleanup proof missing. |
 | Redact persisted idempotency response JSON | TODO | No | No | No | No | No | Tori | responseBodyJson can retain PII unless redacted. |
-| Add full retry/idempotency suite | TODO | Partial | Partial | Unknown | No | No | Tori | Several route tests exist; full suite missing. |
+| Add full retry/idempotency suite | TODO / PARTIAL | Partial | Partial | Unknown | No | No | Tori | Several route tests exist; full suite/map still missing. |
 
 ---
 
@@ -347,9 +378,10 @@ Harden storage, media, rate limits, request trust boundaries, and safe logging.
 | SMS fail-closed behavior when Redis unavailable | DONE | Yes | Yes | Unknown | No | Partial | Tori | Local proof exists. |
 | Token route rate limits | DONE | Yes | Yes | Unknown | No | Partial | Tori | Code coverage exists. |
 | Media route rate limits | DONE | Yes | Yes | Unknown | No | Partial | Tori | Code coverage exists. |
-| Origin/Referer checks | DONE | Yes | Yes | Unknown | No | Partial | Tori | Middleware exists. |
+| Origin/Referer checks | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | Middleware exists; deployed invalid-origin behavior observed during Sentry debug route testing. |
 | Booking route safe logging hardening | DONE | Yes | Yes | Unknown | No | Partial | Tori | Focused route proof exists. |
 | Hold-create internal error logging sanitization | DONE | Yes | Yes | Yes | No | Partial | Tori | Safe logging proof exists. |
+| Sentry redaction scrubber | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | Config implemented; review event payload safety before broad production logging. |
 | Supabase policy SQL tests | TODO | No | No | No | No | No | Tori | Still missing. |
 | Live Supabase bucket policy verification | TODO | Partial | No | No | No | No | Tori | Required before public rollout. |
 | No-bare-error logging CI guard | TODO | No | No | No | No | No | Tori | Add tools/check-no-bare-error-log.mjs. |
@@ -382,6 +414,7 @@ Make the app observable, diagnosable, and operable during production incidents.
 | Twilio readiness/config probe | DONE | Yes | Yes | Unknown | No | Partial | Tori | Probe exists. |
 | Health check orchestrator | DONE | Yes | Yes | Unknown | No | Partial | Tori | Orchestrator exists. |
 | Health tests | DONE | Yes | Yes | Unknown | No | Partial | Tori | Unit/route tests exist. |
+| Deployed health check proof | TODO | Yes | Partial | Unknown | No | No | Tori | Must run against staging/production. |
 | Provider live checks enabled in deployed env | TODO | Unknown | No | No | No | No | Tori | Verify HEALTH_CHECK_PROVIDERS_LIVE=true where intended. |
 | Replica lag readiness check | TODO | No | No | No | No | No | Tori | Read-replica support exists; lag check not verified. |
 
@@ -394,7 +427,7 @@ Make the app observable, diagnosable, and operable during production incidents.
 | Notification backlog runbook | DONE | Yes | N/A | N/A | N/A | Partial | Tori | Runbook exists. |
 | Private media incident runbook | DONE | Yes | N/A | N/A | N/A | Partial | Tori | Runbook exists. |
 | Privacy request runbook | DONE | Yes | N/A | N/A | N/A | Partial | Tori | Runbook exists. |
-| Runbooks linked from alerts | TODO | Partial | N/A | N/A | No | Partial | Tori | Planned in slack-alerts.md; actual alert links still TODO. |
+| Runbooks linked from alerts | TODO / PARTIAL | Partial | N/A | N/A | No | Partial | Tori | Planned in slack-alerts.md; actual alert links still TODO. |
 
 ---
 
@@ -409,7 +442,8 @@ Prove hot data paths are indexed and booking overlap is impossible.
 | Decide DB no-overlap constraint strategy | DONE | Yes | Yes | Unknown | No | Partial | Tori | Strategy decided and tested locally. |
 | Test overlapping appointment ranges | DONE | Yes | Yes | Unknown | No | Partial | Tori | Integration coverage exists. |
 | Booking concurrency integration test | DONE | Yes | Yes | Unknown | No | Partial | Tori | Overlap/concurrency proof exists. |
-| Review hot query indexes | IN PROGRESS | Partial | No | No | No | No | Tori | More EXPLAIN work needed. |
+| Local launch load performance smoke | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Smoke load generated p50/p95/p99 summaries. |
+| Review hot query indexes | IN PROGRESS | Partial | Partial | No | No | No | Tori | More EXPLAIN work needed. |
 | Review notification inbox indexes | TODO | No | No | No | No | No | Tori | Missing. |
 | Review booking dashboard query plans | TODO | No | No | No | No | No | Tori | Missing. |
 | Review availability query plans | TODO | No | No | No | No | No | Tori | Missing. |
@@ -495,15 +529,16 @@ Record proof against specific commits and environments.
 | Item | Status | Implemented | Tested locally | Tested in CI | Verified deployed | Operationalized | Owner | Notes |
 |---|---|---:|---:|---:|---:|---:|---|---|
 | docs/launch-readiness/test-proof.md | DONE | Yes | Yes | Partial | No | Partial | Tori | Existing proof doc records prior launch proof runs. |
-| Record commit SHA/date/env/command/result | IN PROGRESS | Yes | Yes | Partial | No | Partial | Tori | Continue adding entries as proof lands. |
+| Record commit SHA/date/env/command/result | IN PROGRESS | Yes | Yes | Partial | Partial | Partial | Tori | Continue adding entries as proof lands. |
 | Phase 1 privacy proof | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | docs/privacy/phase-1-privacy-proof.md. |
-| Full lifecycle proof | TODO | Partial | Partial | No | No | No | Tori | Tests exist but proof entry still needed. |
-| Load proof | TODO | No | No | No | No | No | Tori | Missing. |
-| Chaos proof | TODO | No | No | No | No | No | Tori | Missing. |
-| Deployed health/readiness proof | TODO | No | No | No | No | No | Tori | Needs staging/production proof. |
+| Full lifecycle proof | TODO / PARTIAL | Partial | Partial | No | No | No | Tori | Tests exist but proof entry still needed. |
+| Load proof | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Local launch load suite passed; staging proof still required. |
+| Chaos proof | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Local chaos suite passed; evidence should be recorded. |
+| Deployed Sentry intake proof | PASS DEPLOYED | Yes | N/A | Unknown | Yes | Partial | Tori | Event ID e56044a034cb4fb78d1b09801fb43da5. |
+| Deployed health/readiness proof | TODO | Yes | Partial | Unknown | No | No | Tori | Needs staging/production proof. |
 | Deployed storage policy proof | TODO | Partial | No | No | No | No | Tori | Repo proof exists; deployed proof missing. |
-| Dashboard proof | TODO | No | No | No | No | No | Tori | Needs live Sentry/provider dashboard links. |
-| Alert proof | TODO | No | No | No | No | No | Tori | Needs synthetic alert test. |
+| Dashboard proof | TODO LIVE PROOF | Partial | N/A | N/A | No | No | Tori | Needs live Sentry/provider dashboard links. |
+| Alert proof | BLOCKED | Partial | No | No | No | No | Tori | Needs Sentry plan upgrade or alternate alerting path. |
 
 ---
 
@@ -513,75 +548,111 @@ Do not launch publicly until every required public rollout item below is true.
 
 | Gate | Status | Notes |
 |---|---|---|
-| Phase 1 privacy verification passes on launch commit | DONE | Passed locally at verified commit; rerun on final launch commit. |
+| Phase 1 privacy verification passes on launch commit | TODO | Passed previously; rerun on final launch commit. |
 | Core booking/session flow has E2E/staging proof | IN PROGRESS | API-assisted proof exists; staging/browser proof still needed. |
 | Health live/ready endpoints are deployed and verified | TODO | Code exists; deployed proof missing. |
 | Production monitors watch live and ready endpoints | TODO | Not wired/proven. |
 | Runbooks exist and are linked from alerts | IN PROGRESS | Runbooks exist; alert linking/testing missing. |
-| Sentry dashboard exists with critical panels | TODO | Dashboard proof doc exists; live proof missing. |
-| Slack/private-beta alerts are routed and tested | TODO | Alert map exists; routing/testing missing. |
+| Sentry intake works | PASS DEPLOYED | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5. |
+| Sentry dashboard exists with critical panels | TODO LIVE PROOF | Dashboard proof doc exists; live proof missing. |
+| Slack/private-beta alerts are routed and tested | BLOCKED | Alert map exists; routing/testing blocked. |
 | P1 public escalation path is tested | BLOCKED | Requires backup owner and escalation path. |
 | Storage/private-media policies are deployed and verified | TODO | Repo proof exists; deployed proof missing. |
 | High-risk route rate limits are enforced in code | DONE | Code coverage exists; deployed telemetry still needed. |
-| Auth/SMS routes fail safely under abuse/backing-service failure | DONE | Local proof exists; chaos/deployed proof still needed. |
+| Auth/SMS routes fail safely under abuse/backing-service failure | DONE / PASS LOCALLY | Local proof exists; deployed telemetry still needed. |
 | Pro readiness/onboarding gates are enforced in code | DONE | Code coverage exists; deployed proof still needed. |
 | Realtime or polling strategy is implemented | TODO | Missing. |
-| Payment/Stripe webhook replay is proven idempotent | IN PROGRESS | Code/test proof exists; replay storm/load proof missing. |
-| Full retry/idempotency suite passes | TODO | Partial route coverage only. |
-| Load tests pass target thresholds | TODO | Signup-only load exists; hot-path suite missing. |
-| Chaos tests pass for Redis/provider outages | TODO | Missing. |
+| Payment/Stripe webhook replay is proven idempotent | PASS LOCALLY | Code/test/load/chaos proof exists; deployed/provider proof still needed. |
+| Full retry/idempotency suite passes | TODO / PARTIAL | Partial route coverage only. |
+| Load tests pass target thresholds | PASS LOCALLY | Launch suite passed locally; staging/public-rollout proof still required. |
+| Chaos tests pass for Redis/provider outages | PASS LOCALLY | Chaos suite passed locally; rerun on rollout commit and record evidence. |
 | Privacy/compliance docs exist | DONE | Phase 1 proof exists; deferred areas tracked. |
 | Launch-env privacy backfill reruns are recorded if applicable | TODO | Required if target env has relevant rows. |
 | Tenant data isolation is implemented if white-label launch is in scope | TODO | Missing; not required for first non-white-label beta. |
 | Rollout and rollback plans exist | IN PROGRESS | Docs scaffold exists; drills/proof missing. |
 | Support has launch scripts and escalation paths | TODO | Missing. |
+| Backup owner exists | BLOCKED | Required before public rollout. |
 | Go/no-go review is complete | TODO | Gate doc exists; final decision missing. |
 
 ---
 
-# Current PR 1 summary
+# Current Phase 2 summary
 
-## Completed or being added in PR 1
+## Completed repo-side work
 
-- docs/launch-readiness/oncall.md
-- docs/launch-readiness/go-no-go.md
-- docs/launch-readiness/private-beta-checklist.md
-- docs/launch-readiness/public-rollout-checklist.md
-- docs/launch-readiness/risk-register.md
-- docs/launch-readiness/sentry-dashboard.md
-- docs/launch-readiness/slack-alerts.md
-- docs/launch-readiness/load-test-plan.md
-- docs/launch-readiness/chaos-test-plan.md
-- Updated docs/launch-readiness/checklist.md
+- Launch readiness docs exist and are being reconciled with current proof.
+- Sentry release/environment/dist config exists across server, edge, and client.
+- Sentry console/log capture is disabled by default and opt-in by env.
+- Sentry event scrubber/redaction path exists.
+- test:load:launch exists.
+- test:chaos exists.
+- verify:launch-ops exists.
+- Aggregate launch load runner exists.
+- Launch-critical load scripts exist.
+- Chaos tests exist for Redis, Supabase Storage, Stripe webhook storm, Postmark, Twilio, and DB degradation.
+- Local Phase 2 verification passed.
+- Deployed Sentry synthetic event route works.
 
-## What PR 1 does
+## Current known proof
 
-- Corrects stale Phase 1 privacy status.
-- Adds explicit Phase 2 launch-ops docs.
-- Converts vague launch readiness into named gates, risks, owners, and proof requirements.
-- Keeps dashboards, alert routing, load tests, chaos tests, and deployed proof open until real evidence exists.
+| Proof | Result |
+|---|---|
+| pnpm test:chaos | PASS LOCALLY: 6 files / 17 tests |
+| pnpm test:load:launch | PASS LOCALLY: 8/8 steps |
+| pnpm verify:launch-ops | PASS LOCALLY |
+| Sentry synthetic event | PASS DEPLOYED: e56044a034cb4fb78d1b09801fb43da5 |
 
-## What PR 1 does not claim
+## What this does not claim
 
-- It does not claim live dashboards exist.
-- It does not claim Slack alerts are wired.
-- It does not claim load tests pass.
-- It does not claim chaos tests pass.
+- It does not claim private beta is ready.
 - It does not claim public rollout is ready.
+- It does not claim live dashboards are complete.
+- It does not claim Slack alerts are routed.
+- It does not claim P1 escalation is tested.
+- It does not claim provider quotas/capacity are verified.
+- It does not claim a backup owner exists.
+- It does not claim staging/provider proof is complete.
+- It does not claim rollback has been drilled.
 
-## Next priority after PR 1
+## Next priorities
 
-1. Add Sentry release/deployment markers.
-2. Decide and document Sentry console/log capture policy.
-3. Wire or document the Sentry dashboard sections.
-4. Choose Slack alert channel and test one synthetic staging alert.
-5. Add tests/load/availability-bootstrap-load-test.ts.
-6. Add the remaining launch-critical load tests.
-7. Add tests/chaos/chaosTestHarness.ts.
-8. Add first chaos tests for Redis, Storage, and Stripe webhook storm.
-9. Add test:load:launch, test:chaos, and verify:launch-ops.
-10. Record staging proof in go-no-go.md, test-proof.md, and related docs.
+1. Record local Phase 2 proof in docs/launch-readiness/test-proof.md.
+2. Update go-no-go.md with:
+   - local verify:launch-ops PASS,
+   - deployed Sentry event ID,
+   - remaining NO-GO blockers.
+3. Update sentry-dashboard.md with Sentry intake proof and keep dashboard sections TODO LIVE PROOF.
+4. Choose one alert path:
+   - upgrade Sentry and test Sentry-to-Slack, or
+   - document an alternate private-beta alerting path.
+5. Pick the Slack/private-beta ops channel.
+6. Name a backup owner before public rollout.
+7. Run deployed health/readiness proof.
+8. Link provider dashboards or provider status pages.
+9. Verify Supabase storage policies in deployed environment.
+10. Define SLO thresholds from current smoke/baseline load results.
+11. Rerun pnpm typecheck, pnpm test, pnpm verify:privacy-phase1, and pnpm verify:launch-ops on the final beta/rollout commit.
+12. Record all evidence in go-no-go.md, test-proof.md, sentry-dashboard.md, and the relevant checklist.
 
-## Then run
+## Then run before final private beta decision
 
-bash git diff --check pnpm typecheck pnpm verify:privacy-phase1 git status --short git diff --stat
+bash git status --short git rev-parse HEAD pnpm typecheck pnpm test pnpm verify:privacy-phase1 pnpm verify:launch-ops 
+
+If any command requires launch-only env values, record the exact command, environment, commit, and output in the relevant proof document.
+
+---
+
+# Maintenance rule
+
+Do not mark an item DONE because the file exists. Do not mark operational proof complete because a local test passed.
+
+A launch-readiness item is complete only when the required scope is satisfied:
+
+- Code items need committed implementation and passing tests.
+- Local proof items need command output and commit.
+- Deployed proof items need staging/production evidence.
+- Dashboard items need live links and useful signals.
+- Alert items need thresholds, routing, runbooks, owners, and verification.
+- Public rollout items need backup owner, tested escalation, rollout/rollback proof, and signoff.
+
+Local Phase 2 proof is a major milestone. Public rollout is still blocked until operational proof is real, linked, and boring. Boring is the goal. Dramatic launches are for fireworks, not booking software.

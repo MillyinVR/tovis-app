@@ -4,7 +4,7 @@
 
 Phase: Phase 2 — Launch ops proof  
 Scope: Private beta and public rollout failure-mode readiness  
-Current default status: TODO — required chaos/failure proof is not complete  
+Current default status: PASS LOCALLY / OPERATIONAL PROOF STILL OPEN  
 Primary owner: Tori  
 Target test style: Deterministic Vitest/service tests first  
 Target environment: Local/test harness first, staging-safe proof where applicable  
@@ -12,9 +12,23 @@ Production chaos testing: Not allowed unless explicitly approved and isolated
 
 This document defines the failure-mode tests required before public rollout. Load tests prove TOVIS can handle pressure. Chaos tests prove TOVIS fails safely when dependencies degrade, time out, duplicate, or return nonsense like a tiny API goblin with a vendetta.
 
+## Current Phase 2 chaos baseline
+
+| Item | Current state |
+|---|---|
+| Latest audited Phase 2 commit | 27bfa28 |
+| Chaos suite status | PASS LOCALLY |
+| Command | pnpm test:chaos |
+| Local result | 6 chaos files passed / 17 tests passed |
+| Aggregate launch ops proof | pnpm verify:launch-ops passed locally |
+| Public rollout status | Still NO-GO until operational proof is complete |
+| Remaining chaos-related proof | Record evidence, rerun on final rollout commit, link dashboard/alert/runbook evidence, confirm DB replica-lag scope |
+
+Local chaos proof is not the same as deployed operational proof. The suite proves deterministic failure behavior in the repo/test harness. Public rollout still requires current evidence, alert/runbook mapping, and go/no-go signoff.
+
 ## Chaos test rule
 
-A chaos scenario is not complete unless it has:
+A chaos scenario is not complete for public rollout unless it has:
 
 - Test path
 - Owner
@@ -26,29 +40,38 @@ A chaos scenario is not complete unless it has:
 - Pass/fail criteria
 - Staging-safe verification plan, if applicable
 - Risk-register link
-- Evidence from a passing run
+- Evidence from a passing run on the intended launch commit
 
 Do not break real staging providers unless the test is isolated, reversible, and explicitly approved.
+
+A chaos scenario can be marked PASS LOCALLY when deterministic test coverage exists and pnpm test:chaos passes. It should not be marked fully operationalized until dashboard/alert/runbook evidence is linked.
 
 ## Current status summary
 
 | Scenario | Test path | Status | Launch impact |
 |---|---|---|---|
-| Redis outage | tests/chaos/redis-outage.test.ts | TODO | Required before public rollout |
-| Supabase Storage outage | tests/chaos/storage-outage.test.ts | TODO | Required before public rollout |
-| Stripe webhook storm | tests/chaos/stripe-webhook-storm.test.ts | TODO | Required before public rollout |
-| Postmark degradation | tests/chaos/postmark-degradation.test.ts | TODO | Required before public rollout if email enabled |
-| Twilio degradation | tests/chaos/twilio-degradation.test.ts | TODO | Required before public rollout if SMS enabled |
-| DB replica lag/stale-read behavior | tests/chaos/db-replica-lag.test.ts | TODO | Required before public rollout |
-| Shared chaos harness | tests/chaos/chaosTestHarness.ts | TODO | Required before scenario tests |
+| Redis outage | tests/chaos/redis-outage.test.ts | PASS LOCALLY | Required before public rollout; alert routing still needs proof |
+| Supabase Storage outage | tests/chaos/supabase-storage-outage.test.ts | PASS LOCALLY | Required before public rollout; deployed storage/provider proof still needed |
+| Stripe webhook storm | tests/chaos/stripe-webhook-storm.test.ts | PASS LOCALLY | Required before public rollout; dashboard/provider alert proof still needed |
+| Postmark degradation | tests/chaos/postmark-degradation.test.ts | PASS LOCALLY | Required before public rollout if email enabled |
+| Twilio degradation | tests/chaos/twilio-degradation.test.ts | PASS LOCALLY | Required before public rollout if SMS enabled |
+| DB degradation | tests/chaos/db-degradation.test.ts | PASS LOCALLY | Required before public rollout; confirm whether explicit replica-lag proof is separately required |
+| DB replica lag/stale-read behavior | TODO / PARTIAL | PARTIAL | Generic DB degradation is covered; explicit replica-lag/stale-read proof needs confirmation |
+| Shared chaos harness/helpers | tests/chaos/* | IMPLEMENTED | Keep reusable helpers deterministic and provider-safe |
 
 ## Required package scripts
 
-Add these scripts when the chaos tests exist:
+These scripts now exist:
 
-json id="zy0vcr" {   "test:chaos": "vitest run --config vitest.config.mts tests/chaos",   "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch" } 
+json {   "test:chaos": "vitest run --config vitest.config.mts tests/chaos",   "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch" } 
 
-verify:launch-ops should not be considered complete until both chaos and load suites exist.
+verify:launch-ops has passed locally at commit 27bfa28.
+
+Before public rollout, rerun these scripts on the final rollout commit and record the output:
+
+bash pnpm test:chaos pnpm verify:launch-ops 
+
+If rollout proof uses a staging-config command with required database or provider env values, record the exact command, environment, commit, and output in docs/launch-readiness/test-proof.md and docs/launch-readiness/go-no-go.md.
 
 ## Preferred testing strategy
 
@@ -66,6 +89,7 @@ Avoid:
 - Creating real payment side effects.
 - Printing secrets or PII.
 - Writing test failures that depend on provider luck.
+- Calling a provider outage “tested” just because the provider dashboard exists. Cute, but no.
 
 ## Global chaos requirements
 
@@ -77,7 +101,7 @@ Every chaos test should prove:
 | App does not leak PII | Errors/logs do not expose secrets, addresses, raw tokens, signed URLs, or private paths. |
 | App fails safely | High-risk paths fail closed or degrade according to documented route policy. |
 | User-facing response is safe | Response does not expose internals or misleading success. |
-| Error is observable | Sentry/log/event path records useful redacted diagnostic data. |
+| Error is observable | Sentry/log/event path records useful redacted diagnostic data where applicable. |
 | Alert mapping exists | Related Slack alert exists or TODO is tracked. |
 | Runbook exists | Related runbook is linked or missing runbook is tracked. |
 | Recovery path is defined | Manual or automatic recovery behavior is documented. |
@@ -91,12 +115,13 @@ Every chaos test should prove:
 | Field | Value |
 |---|---|
 | Test path | tests/chaos/redis-outage.test.ts |
-| Status | TODO |
+| Status | PASS LOCALLY |
 | Owner | Tori |
 | Severity | High |
 | Related runbook | docs/runbooks/redis-outage.md |
 | Related alert | docs/launch-readiness/slack-alerts.md |
 | Related risk | RISK-022 |
+| Public rollout state | Required; local proof exists, alert-routing proof still open |
 
 ## Purpose
 
@@ -127,10 +152,11 @@ Prove Redis/rate-limit degradation does not make high-risk routes unsafe.
 - Safe error response is returned.
 - Related alert/runbook mapping exists.
 - Test passes through pnpm test:chaos.
+- Public rollout proof is recorded against the rollout commit.
 
-## Evidence template
+## Current evidence
 
-text id="jlx4hu" Command: Commit: Environment: Failure injected: Routes tested: Expected failures: Unexpected failures: PII/log safety: Alert mapping: Runbook: Decision: 
+text Status: PASS LOCALLY Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/redis-outage.md Decision: Local proof accepted; operational alert proof still required. 
 
 ---
 
@@ -140,13 +166,14 @@ text id="jlx4hu" Command: Commit: Environment: Failure injected: Routes tested: 
 
 | Field | Value |
 |---|---|
-| Test path | tests/chaos/storage-outage.test.ts |
-| Status | TODO |
+| Test path | tests/chaos/supabase-storage-outage.test.ts |
+| Status | PASS LOCALLY |
 | Owner | Tori |
 | Severity | High |
 | Related runbook | docs/runbooks/supabase-storage-outage.md |
 | Related alert | docs/launch-readiness/slack-alerts.md |
 | Related risk | RISK-020 |
+| Public rollout state | Required; local proof exists, deployed storage/provider proof still open |
 
 ## Purpose
 
@@ -179,6 +206,11 @@ Prove storage failures do not create unsafe media state or private-media leaks.
 - No signed URL/private path logged.
 - Cleanup or orphan prevention is documented.
 - Test passes through pnpm test:chaos.
+- Deployed storage policy proof is recorded before public rollout.
+
+## Current evidence
+
+text Status: PASS LOCALLY Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/supabase-storage-outage.md Decision: Local proof accepted; deployed storage/provider proof still required. 
 
 ---
 
@@ -189,12 +221,13 @@ Prove storage failures do not create unsafe media state or private-media leaks.
 | Field | Value |
 |---|---|
 | Test path | tests/chaos/stripe-webhook-storm.test.ts |
-| Status | TODO |
+| Status | PASS LOCALLY |
 | Owner | Tori |
 | Severity | Critical |
 | Related runbook | docs/runbooks/stripe-degradation.md |
 | Related alert | docs/launch-readiness/slack-alerts.md |
 | Related risk | RISK-019 |
+| Public rollout state | Required; local proof exists, Stripe/Sentry alert proof still open |
 
 ## Purpose
 
@@ -228,6 +261,11 @@ Prove repeated, duplicated, delayed, or invalid Stripe webhook events do not cor
 - No double mutation.
 - Idempotency path is proven.
 - Test passes through pnpm test:chaos.
+- Stripe/Sentry dashboard evidence is linked before public rollout.
+
+## Current evidence
+
+text Status: PASS LOCALLY Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/stripe-degradation.md Decision: Local proof accepted; operational webhook alert/dashboard proof still required. 
 
 ---
 
@@ -238,12 +276,13 @@ Prove repeated, duplicated, delayed, or invalid Stripe webhook events do not cor
 | Field | Value |
 |---|---|
 | Test path | tests/chaos/postmark-degradation.test.ts |
-| Status | TODO |
+| Status | PASS LOCALLY |
 | Owner | Tori |
 | Severity | Medium |
 | Related runbook | docs/runbooks/postmark-degradation.md |
 | Related alert | docs/launch-readiness/slack-alerts.md |
 | Related risk | RISK-021 |
+| Public rollout state | Required if email enabled; local proof exists, provider/alert proof still open |
 
 ## Purpose
 
@@ -274,6 +313,11 @@ Prove email failures are visible, retryable or manually recoverable, and do not 
 - No spam to real users.
 - No PII leakage.
 - Test passes through pnpm test:chaos.
+- Postmark dashboard/alert mapping is linked if email is enabled.
+
+## Current evidence
+
+text Status: PASS LOCALLY Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/postmark-degradation.md Decision: Local proof accepted; provider dashboard and alert proof still required if email is enabled. 
 
 ---
 
@@ -284,12 +328,13 @@ Prove email failures are visible, retryable or manually recoverable, and do not 
 | Field | Value |
 |---|---|
 | Test path | tests/chaos/twilio-degradation.test.ts |
-| Status | TODO |
+| Status | PASS LOCALLY |
 | Owner | Tori |
 | Severity | Medium |
 | Related runbook | docs/runbooks/twilio-degradation.md |
 | Related alert | docs/launch-readiness/slack-alerts.md |
 | Related risk | RISK-021 |
+| Public rollout state | Required if SMS enabled; local proof exists, provider/alert proof still open |
 
 ## Purpose
 
@@ -322,29 +367,40 @@ Prove SMS failures are visible, rate-limited, retryable or manually recoverable,
 - Retry/manual-follow-up path is documented.
 - No real-user spam.
 - Test passes through pnpm test:chaos.
+- Twilio dashboard/alert mapping is linked if SMS is enabled.
+
+## Current evidence
+
+text Status: PASS LOCALLY Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/twilio-degradation.md Decision: Local proof accepted; provider dashboard and alert proof still required if SMS is enabled. 
 
 ---
 
-# Scenario 6 — DB replica lag / stale-read behavior
+# Scenario 6 — DB degradation / stale-read behavior
 
 ## Status
 
 | Field | Value |
 |---|---|
-| Test path | tests/chaos/db-replica-lag.test.ts |
-| Status | TODO |
+| Current test path | tests/chaos/db-degradation.test.ts |
+| Previous planned path | tests/chaos/db-replica-lag.test.ts |
+| Status | PASS LOCALLY for DB degradation; PARTIAL for explicit replica-lag proof |
 | Owner | Tori |
 | Severity | Critical |
 | Related runbook | docs/runbooks/postgres-outage.md |
 | Related alert | docs/launch-readiness/slack-alerts.md |
 | Related risk | RISK-018 |
+| Public rollout state | Required; confirm whether explicit replica-lag/stale-read test is needed beyond DB degradation test |
 
 ## Purpose
 
-Prove launch-critical writes and post-write reads do not rely on stale replica state in ways that corrupt booking, payment, or lifecycle behavior.
+Prove launch-critical writes and post-write reads do not rely on stale or degraded database state in ways that corrupt booking, payment, or lifecycle behavior.
 
 ## Failure modes
 
+- Database unavailable
+- Database timeout
+- Database write failure
+- Database read failure
 - Read replica lags behind primary
 - Post-write read sees stale data
 - Booking finalize depends on stale availability/hold state
@@ -366,21 +422,42 @@ Prove launch-critical writes and post-write reads do not rely on stale replica s
 ## Pass criteria
 
 - Critical paths are primary-backed or otherwise protected.
-- Stale reads do not corrupt booking/payment/session state.
-- Safe stale read areas are documented.
+- DB degradation does not corrupt booking/payment/session state.
+- Stale reads do not corrupt booking/payment/session state if replica-lag behavior is in scope.
+- Safe stale-read areas are documented.
 - Test passes through pnpm test:chaos.
+- Any gap between generic DB degradation and explicit replica-lag coverage is documented.
+
+## Current evidence
+
+text Status: PASS LOCALLY for DB degradation Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/postgres-outage.md Decision: Local DB degradation proof accepted; explicit replica-lag/stale-read proof needs confirmation before public rollout. 
+
+## Follow-up decision needed
+
+Decide whether public rollout requires a separate db-replica-lag.test.ts.
+
+Recommended treatment:
+
+- If TOVIS is not using read replicas in the launch environment: mark explicit replica-lag proof as DEFERRED with note “no read replica enabled for launch.”
+- If DATABASE_URL_READ or read replica support is enabled in launch/staging: add explicit stale-read tests or proof before public rollout.
+- If the existing db-degradation.test.ts already covers stale-read semantics, update this section with the exact test cases and mark replica-lag proof PASS LOCALLY.
 
 ---
 
 # Shared chaos harness
 
-## Target file
+## Current status
 
-tests/chaos/chaosTestHarness.ts
+| Field | Value |
+|---|---|
+| Status | IMPLEMENTED / KEEP MAINTAINED |
+| Location | tests/chaos/* |
+| Owner | Tori |
+| Public rollout state | Harness exists enough for current passing suite; keep helpers deterministic and reusable |
 
-## Required helpers
+## Required helper behavior
 
-The harness should provide:
+The chaos harness should provide or preserve:
 
 - Provider failure injection helpers
 - Timeout helpers
@@ -392,7 +469,9 @@ The harness should provide:
 
 ## Suggested helper names
 
-ts id="g69lb9" createFailingProviderClient createTimeoutProviderClient createFlakyProviderClient expectSafeErrorResponse expectNoSensitiveValues expectRetryOrManualFollowUp expectNoDoubleMutation 
+ts createFailingProviderClient createTimeoutProviderClient createFlakyProviderClient expectSafeErrorResponse expectNoSensitiveValues expectRetryOrManualFollowUp expectNoDoubleMutation 
+
+The exact helper names do not matter as much as the behavior. No sacred cows here. Just make the tests readable, deterministic, and mean enough to catch regressions.
 
 ## Sensitive values to block in chaos output
 
@@ -402,6 +481,8 @@ Chaos tests must not print:
 - Session tokens
 - Reset tokens
 - Client action tokens
+- Claim tokens
+- Invite tokens
 - Stripe secrets or webhook secrets
 - Supabase service role keys
 - PII AEAD keys
@@ -418,40 +499,87 @@ Chaos tests must not print:
 
 Use this template for each chaos proof.
 
-md id="f5egjc" ## Chaos evidence: <scenario>  Status: PASS / FAIL / BLOCKED   Owner: Tori   Commit: TODO   Environment: local/test/staging   Date: TODO   Command: TODO   Test path: TODO   Related alert: TODO   Related runbook: TODO   Related risk: TODO    ### Failure injected  TODO  ### Expected safe behavior  TODO  ### Observed behavior  TODO  ### PII/log safety  TODO  ### Recovery path  TODO  ### Decision  TODO  ### Follow-up  TODO 
+md ## Chaos evidence: <scenario>  Status: PASS / FAIL / BLOCKED / ACCEPTED RISK Owner: Tori Commit: TODO Environment: local/test/staging Date: TODO Command: TODO Test path: TODO Related alert: TODO Related runbook: TODO Related risk: TODO  ### Failure injected  TODO  ### Expected safe behavior  TODO  ### Observed behavior  TODO  ### PII/log safety  TODO  ### Recovery path  TODO  ### Decision  TODO  ### Follow-up  TODO 
 
-## Required command proof
+## Current local command proof
 
-Before public rollout, record:
+text Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Total test files: 6 passed Total tests: 17 passed Failures: 0 Skipped: TODO Decision: PASS LOCALLY 
 
-bash pnpm test:chaos 
+## Required command proof before public rollout
+
+Before public rollout, record a fresh run on the intended rollout commit:
+
+bash pnpm test:chaos pnpm verify:launch-ops 
 
 Expected evidence:
 
-text id="f3vqs4" Command: Commit: Environment: Total test files: Total tests: Failures: Skipped: Decision: 
+text Command: Commit: Environment: Total test files: Total tests: Failures: Skipped: Decision: 
 
-## Launch treatment
+## Where to record evidence
+
+Record final proof in:
+
+- docs/launch-readiness/test-proof.md
+- docs/launch-readiness/go-no-go.md
+- docs/launch-readiness/risk-register.md
+- This file, if scenario-specific details changed
+
+---
+
+# Launch treatment
 
 | Launch stage | Chaos requirement |
 |---|---|
-| Private beta | Runbooks and alert mappings must exist. Deterministic chaos tests can still be in progress if risk is accepted. |
-| Public rollout | Required chaos scenarios must pass or be explicitly accepted with mitigation. Critical scenarios cannot be casually accepted. |
+| Private beta | Local chaos proof is a strong support signal. Runbooks and alert mappings must exist. Any missing operational alert proof must be explicitly accepted as a private-beta risk. |
+| Public rollout | Required chaos scenarios must pass on the rollout commit or be explicitly accepted with mitigation. Critical scenarios cannot be casually accepted. |
 
-## Automatic public rollout NO-GO
+## Private beta treatment
+
+Private beta may proceed with local chaos proof if:
+
+- pnpm test:chaos passes on the beta commit.
+- Required runbooks exist.
+- Related alerts are mapped, even if routing is blocked.
+- Alert-routing gap is explicitly documented in go-no-go.md.
+- Risk register has no unowned High/Critical blocker.
+- The beta cohort is small and support coverage is defined.
+
+## Public rollout treatment
+
+Public rollout requires:
+
+- pnpm test:chaos passes on the rollout commit.
+- pnpm verify:launch-ops passes on the rollout commit/environment.
+- Related P1/P2 alerts have thresholds.
+- Related P1/P2 alerts route to Slack or approved escalation path.
+- Runbooks are linked from alerts.
+- Backup owner exists.
+- P1 escalation path is tested.
+- DB replica-lag/stale-read scope is resolved.
+
+---
+
+# Automatic public rollout NO-GO
 
 Public rollout is blocked if:
 
-- Redis outage behavior is untested.
-- Storage outage behavior is untested.
-- Stripe webhook storm/idempotency behavior is untested.
-- DB replica lag/stale-read behavior is untested.
-- Private media failure behavior is untested.
+- Redis outage behavior is untested or failing.
+- Storage outage behavior is untested or failing.
+- Stripe webhook storm/idempotency behavior is untested or failing.
+- DB degradation behavior is untested or failing.
+- DB replica-lag/stale-read behavior is required but unresolved.
+- Private media failure behavior is untested or failing.
 - Notification provider degradation is untested while notifications are enabled.
 - Chaos tests leak PII/secrets in output.
 - Chaos test failures are unowned.
 - Related P1/P2 alerts lack runbooks.
+- Related P1/P2 alerts cannot route to an approved alert destination.
+- No backup owner exists for public rollout.
+- P1 escalation has not been tested.
 
-## Related documents
+---
+
+# Related documents
 
 - docs/launch-readiness/oncall.md
 - docs/launch-readiness/go-no-go.md
@@ -461,6 +589,7 @@ Public rollout is blocked if:
 - docs/launch-readiness/sentry-dashboard.md
 - docs/launch-readiness/slack-alerts.md
 - docs/launch-readiness/load-test-plan.md
+- docs/launch-readiness/test-proof.md
 - docs/runbooks/redis-outage.md
 - docs/runbooks/postgres-outage.md
 - docs/runbooks/supabase-storage-outage.md
@@ -470,6 +599,12 @@ Public rollout is blocked if:
 - docs/runbooks/private-media-incident.md
 - docs/runbooks/notification-backlog.md
 
-## Maintenance rule
+---
 
-Do not mark chaos proof complete because a test file exists. A chaos scenario counts only when it injects the failure, proves safe behavior, avoids PII leakage, links to an alert/runbook, and records evidence.
+# Maintenance rule
+
+Do not mark chaos proof complete because a test file exists.
+
+A chaos scenario counts as PASS LOCALLY only when it injects the failure, proves safe behavior, avoids PII leakage, links to the expected alert/runbook, and passes through pnpm test:chaos.
+
+A chaos scenario counts as public-rollout ready only when the passing evidence is recorded against the rollout commit and the operational path is linked. Local proof is excellent. Operational proof is the bouncer at the door.
