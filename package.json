@@ -39,7 +39,7 @@
     "check:no-type-escape": "node tools/check-no-type-escape.mjs",
     "check:canonical-normalization": "node tools/check-canonical-normalization.mjs",
     "check:pii-plaintext-reads": "node tools/check-pii-plaintext-reads.mjs",
-    "test:chaos": "vitest run --config vitest.config.mts tests/chaos",
+    "test:chaos": "dotenv -e .env.local -- vitest run --config vitest.config.mts tests/chaos",
     "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch",
     "check:privacy-guards": "pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads",
     "test:load:availability": "dotenv -e .env.local -- tsx tests/load/availability-bootstrap-load-test.ts",
