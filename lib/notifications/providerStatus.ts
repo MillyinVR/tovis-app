@@ -232,13 +232,22 @@ export function isRetryableProviderError(args: {
   if (args.provider === NotificationProvider.TWILIO) {
     if (!code) return true
 
-    // Twilio examples:
+    // Twilio send-time/API errors:
+    // 20429 = throttled / too many requests.
+    // 20500-style errors are provider/server availability failures.
+    //
+    // Twilio delivery-status examples:
     // 30001 queue overflow, 30002 account suspended, 30003 unreachable handset,
     // 30004 blocked, 30005 unknown destination, 30006 landline/unreachable carrier,
     // 30007 carrier violation, 30008 unknown error.
     //
     // Treat transient/platform-ish failures as retryable; recipient/content failures final.
-    return code === '30001' || code === '30008'
+    return (
+      code === '20429' ||
+      code.startsWith('205') ||
+      code === '30001' ||
+      code === '30008'
+    )
   }
 
   if (args.provider === NotificationProvider.POSTMARK) {
