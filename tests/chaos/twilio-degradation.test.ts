@@ -97,57 +97,57 @@ describe('chaos: Twilio degradation', () => {
     )
   })
 
-    it('documents current Twilio 20429 throttling classification as a final failure', async () => {
+  it('classifies Twilio 20429 throttling as retryable degradation', async () => {
     const create = vi.fn().mockRejectedValue(
-        makeTwilioError({
+      makeTwilioError({
         code: 20429,
         message: 'Too many requests',
-        }),
+      }),
     )
 
     const provider = makeProvider(create)
     const result = await provider.send(makeSmsRequest())
 
     expect(result).toEqual({
-        ok: false,
-        retryable: false,
-        code: '20429',
-        message: 'Too many requests',
-        providerStatus: 'failed',
-        responseMeta: {
+      ok: false,
+      retryable: true,
+      code: '20429',
+      message: 'Too many requests',
+      providerStatus: 'retryable_error',
+      responseMeta: {
         source: 'sendSms',
         errorName: 'Error',
-        nextStatus: NotificationDeliveryStatus.FAILED_FINAL,
-        eventType: NotificationDeliveryEventType.FAILED,
-        },
+        nextStatus: NotificationDeliveryStatus.FAILED_RETRYABLE,
+        eventType: NotificationDeliveryEventType.RETRY_SCHEDULED,
+      },
     })
-    })
+  })
 
-    it('documents current Twilio 20500 provider failure classification as a final failure', async () => {
+  it('classifies Twilio 20500 provider failure as retryable degradation', async () => {
     const create = vi.fn().mockRejectedValue(
-        makeTwilioError({
+      makeTwilioError({
         code: 20500,
         message: 'Twilio temporarily unavailable',
-        }),
+      }),
     )
 
     const provider = makeProvider(create)
     const result = await provider.send(makeSmsRequest())
 
     expect(result).toEqual({
-        ok: false,
-        retryable: false,
-        code: '20500',
-        message: 'Twilio temporarily unavailable',
-        providerStatus: 'failed',
-        responseMeta: {
+      ok: false,
+      retryable: true,
+      code: '20500',
+      message: 'Twilio temporarily unavailable',
+      providerStatus: 'retryable_error',
+      responseMeta: {
         source: 'sendSms',
         errorName: 'Error',
-        nextStatus: NotificationDeliveryStatus.FAILED_FINAL,
-        eventType: NotificationDeliveryEventType.FAILED,
-        },
+        nextStatus: NotificationDeliveryStatus.FAILED_RETRYABLE,
+        eventType: NotificationDeliveryEventType.RETRY_SCHEDULED,
+      },
     })
-    })
+  })
 
   it('classifies invalid destination errors as final failures', async () => {
     const create = vi.fn().mockRejectedValue(
