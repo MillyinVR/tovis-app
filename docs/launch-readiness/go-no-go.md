@@ -77,8 +77,8 @@ A gate is not complete without evidence.
 
 | Gate | Status | Owner | Evidence | Date | Notes |
 |---|---|---|---|---|---|
-| Local worktree is clean | TODO | Tori | TODO | TODO | Record git status --short. |
-| pnpm typecheck passes | TODO | Tori | TODO | TODO | Required before launch-stage testing. |
+| Local worktree is clean | TODO | Tori | `git status --short` showed local doc/test changes | 2026-06-07 | Worktree is intentionally dirty while Phase 2 proof/docs updates are being prepared. Recheck after commit. |
+| pnpm typecheck passes | PASS | Tori | `pnpm typecheck` passed | 2026-06-07 | Required before launch-stage testing. |
 | pnpm verify:privacy-phase1 passes | TODO | Tori | TODO | TODO | Required because Phase 1 privacy is a launch blocker. |
 | Phase 1 privacy proof is current | TODO | Tori | docs/privacy/phase-1-privacy-proof.md | TODO | Must reflect current launch commit. |
 | Remaining Phase 1 launch-env reruns are tracked | TODO | Tori | docs/privacy/phase-1-remaining-work.md | TODO | HMAC/address backfills may be launch-env reruns, not code blockers. |
