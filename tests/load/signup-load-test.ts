@@ -528,6 +528,7 @@ async function main(): Promise<void> {
 
   const requestTimeoutMs = intEnv('LOAD_TEST_REQUEST_TIMEOUT_MS', 15000)
   const maxInFlight = intEnv('LOAD_TEST_MAX_IN_FLIGHT', 2000)
+  const expectSignupSuccess = boolEnv('LOAD_TEST_EXPECT_SIGNUP_SUCCESS', false)
 
   const profile = loadTestProfileEnv('LOAD_TEST_PROFILE', 'smoke')
   const stages = STAGE_PROFILES[profile]
@@ -569,18 +570,19 @@ async function main(): Promise<void> {
   console.log(
     JSON.stringify(
       {
-    runId,
-    commit: readCommitSha(),
-    environment: readEnvironmentName(),
-    baseUrl,
-    route: 'POST /api/auth/register',
-    roleUnderTest: 'CLIENT',
-    phoneSource: phonePoolFile ? `pool:${phonePoolFile}` : 'generated',
-    profile,
-    trafficPlan: stages,
-    totalPlannedRequests,
-    requestTimeoutMs,
+        runId,
+        commit: readCommitSha(),
+        environment: readEnvironmentName(),
+        baseUrl,
+        route: 'POST /api/auth/register',
+        roleUnderTest: 'CLIENT',
+        phoneSource: phonePoolFile ? `pool:${phonePoolFile}` : 'generated',
+        profile,
+        trafficPlan: stages,
+        totalPlannedRequests,
+        requestTimeoutMs,
         maxInFlight,
+        expectSignupSuccess,
         usingSyntheticTrustedIpHeader: Boolean(
           trustedHeaderName && trustedIpPrefix,
         ),
@@ -623,6 +625,23 @@ async function main(): Promise<void> {
   console.log(JSON.stringify(summary, null, 2))
 
   if (summary.totals.realFailures > 0) {
+    process.exitCode = 1
+  }
+
+  if (expectSignupSuccess && summary.totals.success201 === 0) {
+    console.error(
+      'Signup load test expected at least one successful signup, but success201 was 0.',
+    )
+    process.exitCode = 1
+  }
+
+  if (
+    expectSignupSuccess &&
+    summary.totals.expected429 === summary.totals.requests
+  ) {
+    console.error(
+      'Signup load test expected successful signup coverage, but every request was rate limited.',
+    )
     process.exitCode = 1
   }
 }
