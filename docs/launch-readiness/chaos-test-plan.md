@@ -16,13 +16,15 @@ This document defines the failure-mode tests required before public rollout. Loa
 
 | Item | Current state |
 |---|---|
-| Latest audited Phase 2 commit | 27bfa28 |
+| Latest audited Phase 2 code commit | `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29` |
+| Proof-recording commit | `5dc37c1` — `Record Phase 2 launch ops local proof` |
+| Date verified | 2026-06-07 |
 | Chaos suite status | PASS LOCALLY |
-| Command | pnpm test:chaos |
+| Command | `pnpm test:chaos` |
 | Local result | 6 chaos files passed / 17 tests passed |
-| Aggregate launch ops proof | pnpm verify:launch-ops passed locally |
-| Public rollout status | Still NO-GO until operational proof is complete |
-| Remaining chaos-related proof | Record evidence, rerun on final rollout commit, link dashboard/alert/runbook evidence, confirm DB replica-lag scope |
+| Aggregate launch ops proof | `pnpm verify:launch-ops` passed locally; evidence recorded in `docs/launch-readiness/test-proof.md` |
+| Public rollout status | Still NO-GO until operational dashboard/alert/staging proof is complete |
+| Remaining chaos-related proof | Rerun on final rollout commit, link dashboard/alert/runbook evidence, resolve DB replica-lag/stale-read scope |
 
 Local chaos proof is not the same as deployed operational proof. The suite proves deterministic failure behavior in the repo/test harness. Public rollout still requires current evidence, alert/runbook mapping, and go/no-go signoff.
 
@@ -63,13 +65,21 @@ A chaos scenario can be marked PASS LOCALLY when deterministic test coverage exi
 
 These scripts now exist:
 
-json {   "test:chaos": "vitest run --config vitest.config.mts tests/chaos",   "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch" } 
+```json
+{
+  "test:chaos": "vitest run --config vitest.config.mts tests/chaos",
+  "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch"
+}
+```
 
-verify:launch-ops has passed locally at commit 27bfa28.
+`verify:launch-ops` passed locally on 2026-06-07 against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof was recorded in commit `5dc37c1`.
 
 Before public rollout, rerun these scripts on the final rollout commit and record the output:
 
-bash pnpm test:chaos pnpm verify:launch-ops 
+```bash
+pnpm test:chaos
+pnpm verify:launch-ops
+```
 
 If rollout proof uses a staging-config command with required database or provider env values, record the exact command, environment, commit, and output in docs/launch-readiness/test-proof.md and docs/launch-readiness/go-no-go.md.
 
@@ -156,7 +166,18 @@ Prove Redis/rate-limit degradation does not make high-risk routes unsafe.
 
 ## Current evidence
 
-text Status: PASS LOCALLY Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/redis-outage.md Decision: Local proof accepted; operational alert proof still required. 
+```text
+Status: PASS LOCALLY
+Command: pnpm test:chaos
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local/test harness
+Result: Included in 6 passing chaos files / 17 passing chaos tests
+Alert routing: TODO / BLOCKED
+Runbook: docs/runbooks/redis-outage.md
+Decision: Local proof accepted; operational alert proof still required.
+```
 
 ---
 
@@ -210,7 +231,18 @@ Prove storage failures do not create unsafe media state or private-media leaks.
 
 ## Current evidence
 
-text Status: PASS LOCALLY Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/supabase-storage-outage.md Decision: Local proof accepted; deployed storage/provider proof still required. 
+```text
+Status: PASS LOCALLY
+Command: pnpm test:chaos
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local/test harness
+Result: Included in 6 passing chaos files / 17 passing chaos tests
+Alert routing: TODO / BLOCKED
+Runbook: docs/runbooks/supabase-storage-outage.md
+Decision: Local proof accepted; deployed storage/provider proof still required.
+```
 
 ---
 
@@ -265,7 +297,18 @@ Prove repeated, duplicated, delayed, or invalid Stripe webhook events do not cor
 
 ## Current evidence
 
-text Status: PASS LOCALLY Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/stripe-degradation.md Decision: Local proof accepted; operational webhook alert/dashboard proof still required. 
+```text
+Status: PASS LOCALLY
+Command: pnpm test:chaos
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local/test harness
+Result: Included in 6 passing chaos files / 17 passing chaos tests
+Alert routing: TODO / BLOCKED
+Runbook: docs/runbooks/stripe-degradation.md
+Decision: Local proof accepted; operational webhook alert/dashboard proof still required.
+```
 
 ---
 
@@ -317,7 +360,18 @@ Prove email failures are visible, retryable or manually recoverable, and do not 
 
 ## Current evidence
 
-text Status: PASS LOCALLY Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/postmark-degradation.md Decision: Local proof accepted; provider dashboard and alert proof still required if email is enabled. 
+```text
+Status: PASS LOCALLY
+Command: pnpm test:chaos
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local/test harness
+Result: Included in 6 passing chaos files / 17 passing chaos tests
+Alert routing: TODO / BLOCKED
+Runbook: docs/runbooks/postmark-degradation.md
+Decision: Local proof accepted; provider dashboard and alert proof still required if email is enabled.
+```
 
 ---
 
@@ -371,7 +425,18 @@ Prove SMS failures are visible, rate-limited, retryable or manually recoverable,
 
 ## Current evidence
 
-text Status: PASS LOCALLY Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/twilio-degradation.md Decision: Local proof accepted; provider dashboard and alert proof still required if SMS is enabled. 
+```text
+Status: PASS LOCALLY
+Command: pnpm test:chaos
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local/test harness
+Result: Included in 6 passing chaos files / 17 passing chaos tests
+Alert routing: TODO / BLOCKED
+Runbook: docs/runbooks/twilio-degradation.md
+Decision: Local proof accepted; provider dashboard and alert proof still required if SMS is enabled.
+```
 
 ---
 
@@ -430,7 +495,18 @@ Prove launch-critical writes and post-write reads do not rely on stale or degrad
 
 ## Current evidence
 
-text Status: PASS LOCALLY for DB degradation Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Result: Included in 6 passing chaos files / 17 passing chaos tests Alert routing: TODO / BLOCKED Runbook: docs/runbooks/postgres-outage.md Decision: Local DB degradation proof accepted; explicit replica-lag/stale-read proof needs confirmation before public rollout. 
+```text
+Status: PASS LOCALLY for DB degradation
+Command: pnpm test:chaos
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local/test harness
+Result: Included in 6 passing chaos files / 17 passing chaos tests
+Alert routing: TODO / BLOCKED
+Runbook: docs/runbooks/postgres-outage.md
+Decision: Local DB degradation proof accepted; explicit replica-lag/stale-read proof needs confirmation before public rollout.
+```
 
 ## Follow-up decision needed
 
@@ -469,7 +545,15 @@ The chaos harness should provide or preserve:
 
 ## Suggested helper names
 
-ts createFailingProviderClient createTimeoutProviderClient createFlakyProviderClient expectSafeErrorResponse expectNoSensitiveValues expectRetryOrManualFollowUp expectNoDoubleMutation 
+```ts
+createFailingProviderClient
+createTimeoutProviderClient
+createFlakyProviderClient
+expectSafeErrorResponse
+expectNoSensitiveValues
+expectRetryOrManualFollowUp
+expectNoDoubleMutation
+```
 
 The exact helper names do not matter as much as the behavior. No sacred cows here. Just make the tests readable, deterministic, and mean enough to catch regressions.
 
@@ -499,21 +583,85 @@ Chaos tests must not print:
 
 Use this template for each chaos proof.
 
-md ## Chaos evidence: <scenario>  Status: PASS / FAIL / BLOCKED / ACCEPTED RISK Owner: Tori Commit: TODO Environment: local/test/staging Date: TODO Command: TODO Test path: TODO Related alert: TODO Related runbook: TODO Related risk: TODO  ### Failure injected  TODO  ### Expected safe behavior  TODO  ### Observed behavior  TODO  ### PII/log safety  TODO  ### Recovery path  TODO  ### Decision  TODO  ### Follow-up  TODO 
+```md
+## Chaos evidence: <scenario>
+
+Status: PASS / FAIL / BLOCKED / ACCEPTED RISK
+Owner: Tori
+Commit: TODO
+Environment: local/test/staging
+Date: TODO
+Command: TODO
+Test path: TODO
+Related alert: TODO
+Related runbook: TODO
+Related risk: TODO
+
+### Failure injected
+
+TODO
+
+### Expected safe behavior
+
+TODO
+
+### Observed behavior
+
+TODO
+
+### PII/log safety
+
+TODO
+
+### Recovery path
+
+TODO
+
+### Decision
+
+TODO
+
+### Follow-up
+
+TODO
+```
 
 ## Current local command proof
 
-text Command: pnpm test:chaos Commit: 27bfa28 Environment: local/test harness Total test files: 6 passed Total tests: 17 passed Failures: 0 Skipped: TODO Decision: PASS LOCALLY 
+```text
+Command: pnpm test:chaos
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local/test harness
+Total test files: 6 passed
+Total tests: 17 passed
+Failures: 0
+Skipped: 0
+Decision: PASS LOCALLY
+```
 
 ## Required command proof before public rollout
 
 Before public rollout, record a fresh run on the intended rollout commit:
 
-bash pnpm test:chaos pnpm verify:launch-ops 
+```bash
+pnpm test:chaos
+pnpm verify:launch-ops
+```
 
 Expected evidence:
 
-text Command: Commit: Environment: Total test files: Total tests: Failures: Skipped: Decision: 
+```text
+Command:
+Commit:
+Environment:
+Total test files:
+Total tests:
+Failures:
+Skipped:
+Decision:
+```
 
 ## Where to record evidence
 
