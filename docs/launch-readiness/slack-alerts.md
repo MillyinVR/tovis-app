@@ -20,7 +20,7 @@ Sentry event capture itself is no longer the blocker. A synthetic deployed Sentr
 | Route | POST /api/internal/debug/sentry-test |
 | Event ID | e56044a034cb4fb78d1b09801fb43da5 |
 | Result | HTTP 200, synthetic Sentry event captured |
-| Date | 2026-06-05 |
+| Date | 2026-06-07 |
 | Verified by | Tori |
 
 The remaining blocker is alert routing.
@@ -35,9 +35,9 @@ Sentry-to-Slack alert routing is currently blocked because the required Sentry p
 | Deployed Sentry intake | PASS | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5 |
 | Chaos suite | PASSED LOCALLY | pnpm test:chaos: 6 files / 17 tests passed |
 | Launch load suite | PASSED LOCALLY | pnpm test:load:launch: 8/8 launch load steps passed |
-| Aggregate launch ops verification | PASSED LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md` and commit `5dc37c1` |
-| Load plan reconciliation | PASS | Updated in commit `f41b203` — `Update load test plan with current Phase 2 proof` |
-| Sentry dashboard proof reconciliation | PASS | Updated in commit `aa4fe4d` — `Update Sentry dashboard proof with current Phase 2 status` |
+| Aggregate launch ops verification | PASSED LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md` |
+| Load plan reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/load-test-plan.md` |
+| Sentry dashboard proof reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/sentry-dashboard.md` |
 | Booking funnel runbook | PASS | `docs/runbooks/booking-funnel.md` exists |
 | Slack alert routing | BLOCKED | Requires paid Sentry plan or alternate alerting path |
 | Synthetic Slack alert proof | BLOCKED | Cannot complete until routing path exists |
@@ -127,9 +127,9 @@ These are initial targets. Tighten them when there is a named backup owner and t
 | Alert area | Runbook status | Launch impact |
 |---|---|---|
 | Booking funnel | `docs/runbooks/booking-funnel.md` exists | Supports booking/availability/hold/finalize alerts |
-| Auth/session | `docs/runbooks/auth-session.md` | Blocks complete auth alert readiness |
-| Pro session lifecycle | `docs/runbooks/pro-session-lifecycle.md` | Blocks complete pro lifecycle alert readiness |
-| SLO/error budget | `docs/runbooks/slo-error-budget.md` | Blocks complete public-rollout SLO alert readiness |
+| Auth/session | `docs/runbooks/auth-session.md` exists | Supports auth/session alerts; routing proof still TODO |
+| Pro session lifecycle | `docs/runbooks/pro-session-lifecycle.md` exists | Supports pro lifecycle alerts; routing proof still TODO |
+| SLO/error budget | `docs/runbooks/slo-error-budget.md` exists | Supports SLO/error budget alerts; routing proof still TODO |
 
 ---
 
@@ -711,7 +711,7 @@ Before private beta, test at least one alert end-to-end.
 |---|---|
 | Event tested | Synthetic Sentry event capture |
 | Environment | Production |
-| Date | 2026-06-05 |
+| Date | 2026-06-07 |
 | Trigger method | POST /api/internal/debug/sentry-test |
 | Result | PASS |
 | Event ID | e56044a034cb4fb78d1b09801fb43da5 |
