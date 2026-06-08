@@ -43,11 +43,11 @@ Local proof and deployed operational proof are different things. A local passing
 
 | Item | Current state |
 |---|---|
-| Latest audited Phase 2 commit | 27bfa28 on main |
+| Latest audited Phase 2 commit | `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29` |
 | Earlier Phase 1 verified commit | 458a5a4bb0715c59a4198e9457c5b5a2c6cd4ef3 |
 | Phase 1 privacy status | Complete for current pre-launch scope; launch-env reruns remain tracked. |
 | Phase 2 repo-side status | Load suite, chaos suite, Sentry config, and launch docs are implemented. |
-| pnpm verify:launch-ops | PASS LOCALLY at commit 27bfa28 |
+| pnpm verify:launch-ops | PASS LOCALLY against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; fresh rerun recorded in `docs/launch-readiness/test-proof.md` |
 | Chaos suite | PASS LOCALLY: 6 files / 17 tests passed |
 | Launch load suite | PASS LOCALLY: 8/8 launch load steps passed |
 | Deployed Sentry intake | PASS DEPLOYED: synthetic event captured, event ID e56044a034cb4fb78d1b09801fb43da5 |
@@ -93,7 +93,7 @@ Local proof and deployed operational proof are different things. A local passing
 | Sentry dashboard proof doc | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Live dashboard links and section evidence still TODO. |
 | Slack alert map | IN PROGRESS / BLOCKED | Yes | N/A | N/A | No | Partial | Tori | Sentry-to-Slack routing requires paid Sentry plan or alternate alerting path. |
 | Load test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Plan exists; local suite proof now exists; staging proof still TODO. |
-| Chaos test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Plan exists; local suite proof now exists; evidence recording still needed. |
+| Chaos test plan | IN PROGRESS / LOCAL PROOF EXISTS | Yes | N/A | N/A | No | Partial | Tori | Local chaos proof is recorded; operational dashboard/alert proof still TODO. |
 | Full booking lifecycle E2E | IN PROGRESS | Partial | Partial | Unknown | No | No | Tori | API-assisted proof exists; full browser/staging proof still needed. |
 | Load tests for launch-critical flows | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 8/8 launch load steps passed locally; staging/rollout proof still required. |
 | Chaos tests for dependency failures | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 6 chaos files / 17 tests passed locally. |
@@ -223,7 +223,7 @@ This phase is about operated readiness, not just code existence. Dashboards, ale
 | Sentry dashboard proof doc | IN PROGRESS | Yes | N/A | N/A | Partial | Partial | Tori | Sentry intake proven; live dashboard links still TODO. |
 | Slack alert map | IN PROGRESS / BLOCKED | Yes | N/A | N/A | No | Partial | Tori | Routing/testing blocked. |
 | Load test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Local load proof exists; staging proof TODO. |
-| Chaos test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Local chaos proof exists; evidence recording TODO. |
+| Chaos test plan | IN PROGRESS / LOCAL PROOF EXISTS | Yes | N/A | N/A | No | Partial | Tori | Local chaos proof is recorded; operational dashboard/alert proof still TODO. |
 
 ## Observability and alerting
 
@@ -276,7 +276,7 @@ This phase is about operated readiness, not just code existence. Dashboards, ale
 | DB degradation chaos test | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally; distinct from full replica-lag proof if that remains in scope. |
 | DB replica lag chaos test | TODO / PARTIAL | Partial | Partial | Unknown | No | No | Tori | Generic DB degradation is covered; explicit replica-lag/stale-read proof still needs confirmation. |
 | test:chaos script | DONE | Yes | Yes | Unknown | No | Partial | Tori | Exists and passed locally. |
-| verify:launch-ops script | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally at commit 27bfa28; rerun on final launch commit. |
+| verify:launch-ops script | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; rerun on final launch commit. |
 
 ## Phase 2 acceptance criteria
 
@@ -427,7 +427,7 @@ Make the app observable, diagnosable, and operable during production incidents.
 | Notification backlog runbook | DONE | Yes | N/A | N/A | N/A | Partial | Tori | Runbook exists. |
 | Private media incident runbook | DONE | Yes | N/A | N/A | N/A | Partial | Tori | Runbook exists. |
 | Privacy request runbook | DONE | Yes | N/A | N/A | N/A | Partial | Tori | Runbook exists. |
-| Runbooks linked from alerts | TODO / PARTIAL | Partial | N/A | N/A | No | Partial | Tori | Planned in slack-alerts.md; actual alert links still TODO. |
+| Runbooks linked from alerts | IN PROGRESS / ROUTING TODO | Yes | N/A | N/A | No | Partial | Tori | Runbooks are linked in launch alert docs; live alert routing/testing still TODO. |
 
 ---
 
@@ -552,7 +552,7 @@ Do not launch publicly until every required public rollout item below is true.
 | Core booking/session flow has E2E/staging proof | IN PROGRESS | API-assisted proof exists; staging/browser proof still needed. |
 | Health live/ready endpoints are deployed and verified | TODO | Code exists; deployed proof missing. |
 | Production monitors watch live and ready endpoints | TODO | Not wired/proven. |
-| Runbooks exist and are linked from alerts | IN PROGRESS | Runbooks exist; alert linking/testing missing. |
+| Runbooks exist and are linked from alerts | IN PROGRESS / ROUTING TODO | Runbooks exist and are linked; alert routing/testing still missing. |
 | Sentry intake works | PASS DEPLOYED | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5. |
 | Sentry dashboard exists with critical panels | TODO LIVE PROOF | Dashboard proof doc exists; live proof missing. |
 | Slack/private-beta alerts are routed and tested | BLOCKED | Alert map exists; routing/testing blocked. |
@@ -616,7 +616,7 @@ Do not launch publicly until every required public rollout item below is true.
 
 ## Next priorities
 
-1. Record local Phase 2 proof in docs/launch-readiness/test-proof.md.
+1. Keep local Phase 2 proof current in docs/launch-readiness/test-proof.md.
 2. Update go-no-go.md with:
    - local verify:launch-ops PASS,
    - deployed Sentry event ID,
@@ -636,7 +636,14 @@ Do not launch publicly until every required public rollout item below is true.
 
 ## Then run before final private beta decision
 
-bash git status --short git rev-parse HEAD pnpm typecheck pnpm test pnpm verify:privacy-phase1 pnpm verify:launch-ops 
+```bash
+git status --short
+git rev-parse HEAD
+pnpm typecheck
+pnpm test
+pnpm verify:privacy-phase1
+pnpm verify:launch-ops
+```
 
 If any command requires launch-only env values, record the exact command, environment, commit, and output in the relevant proof document.
 
