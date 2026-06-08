@@ -127,7 +127,7 @@ These are initial targets. Tighten them when there is a named backup owner and t
 | Alert area | Runbook status | Launch impact |
 |---|---|---|
 | Booking funnel | `docs/runbooks/booking-funnel.md` exists | Supports booking/availability/hold/finalize alerts |
-| Auth/session | `docs/runbooks/auth-session.md` TODO create | Blocks complete auth alert readiness |
+| Auth/session | `docs/runbooks/auth-session.md` | Blocks complete auth alert readiness |
 | Pro session lifecycle | `docs/runbooks/pro-session-lifecycle.md` TODO create | Blocks complete pro lifecycle alert readiness |
 | SLO/error budget | `docs/runbooks/slo-error-budget.md` TODO create | Blocks complete public-rollout SLO alert readiness |
 
@@ -350,7 +350,7 @@ Private media synthetic/policy proof must be linked before beta and public rollo
 | Destination | #tovis-ops-alerts or approved alternate |
 | Source | Sentry errors/app event |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
-| Runbook | docs/runbooks/auth-session.md — TODO create |
+| Runbook | docs/runbooks/auth-session.md |
 | Threshold | TODO |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
@@ -837,7 +837,7 @@ Public rollout cannot proceed until:
 - docs/runbooks/twilio-degradation.md
 - docs/runbooks/notification-backlog.md
 - docs/runbooks/booking-funnel.md
-- docs/runbooks/auth-session.md — TODO create
+- docs/runbooks/auth-session.md
 - docs/runbooks/pro-session-lifecycle.md — TODO create
 - docs/runbooks/slo-error-budget.md — TODO create
 

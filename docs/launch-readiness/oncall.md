@@ -197,7 +197,7 @@ Do not mark an alert complete because Sentry captured an event. Sentry intake pr
 | Notifications | P2 | Notification backlog or delivery failure spike | Tori | TODO | docs/runbooks/notification-backlog.md | TODO ROUTING PROOF |
 | Email provider | P2 | Postmark degradation | Tori | TODO | docs/runbooks/postmark-degradation.md | TODO ROUTING PROOF |
 | SMS provider | P2 | Twilio degradation | Tori | TODO | docs/runbooks/twilio-degradation.md | TODO ROUTING PROOF |
-| Auth | P1 | Login/register/password-reset failure spike | Tori | TODO | docs/runbooks/auth-session.md — TODO create | TODO ROUTING PROOF |
+| Auth | P1 | Login/register/password-reset failure spike | Tori | TODO | docs/runbooks/auth-session.md | TODO ROUTING PROOF |
 | Rate limits | P2 | Abnormal high-risk route rate-limit blocks | Tori | TODO | docs/runbooks/redis-outage.md | TODO ROUTING PROOF |
 | SLO/error budget | P2 | API error budget burn exceeds threshold | Tori | TODO | docs/runbooks/slo-error-budget.md — TODO create | TODO ROUTING PROOF |
 
@@ -348,7 +348,7 @@ The following runbooks should be linked from alerts where applicable:
 | Private media | docs/runbooks/private-media-incident.md |
 | Notifications | docs/runbooks/notification-backlog.md |
 | Booking funnel | docs/runbooks/booking-funnel.md |
-| Auth/session | docs/runbooks/auth-session.md — TODO create |
+| Auth/session | docs/runbooks/auth-session.md |
 | Pro session lifecycle | docs/runbooks/pro-session-lifecycle.md — TODO create |
 | SLO/error budget | docs/runbooks/slo-error-budget.md — TODO create |
 
@@ -463,7 +463,7 @@ TODO
 - docs/privacy/phase-1-privacy-proof.md
 - docs/privacy/phase-1-remaining-work.md
 - docs/runbooks/booking-funnel.md
-- docs/runbooks/auth-session.md — TODO create
+- docs/runbooks/auth-session.md
 - docs/runbooks/pro-session-lifecycle.md — TODO create
 - docs/runbooks/slo-error-budget.md — TODO create
 
