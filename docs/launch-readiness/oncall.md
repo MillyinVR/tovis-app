@@ -25,9 +25,9 @@ This file defines who owns launch incidents, where alerts route, which runbooks 
 | Chaos suite | PASSED LOCALLY | pnpm test:chaos: 6 files / 17 tests passed |
 | Launch load suite | PASSED LOCALLY | pnpm test:load:launch: 8/8 launch load steps passed |
 | Aggregate launch ops verification | PASSED LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md` and commit `5dc37c1` |
-| Load plan reconciliation | PASS | Updated in commit `f41b203` — `Update load test plan with current Phase 2 proof` |
-| Sentry dashboard proof reconciliation | PASS | Updated in commit `aa4fe4d` — `Update Sentry dashboard proof with current Phase 2 status` |
-| Slack alert map reconciliation | PASS | Updated in commit `12732a0` — `Update Slack alert map with current Phase 2 status` |
+| Load plan reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/load-test-plan.md` |
+| Sentry dashboard proof reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/sentry-dashboard.md` |
+| Slack alert map reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/slack-alerts.md` |
 | Slack alert routing | BLOCKED | Requires paid Sentry plan or approved alternate alerting path |
 | Synthetic alert delivery | BLOCKED | Cannot complete until routing path exists |
 | Backup owner | BLOCKED | Required before public launch |
@@ -47,7 +47,7 @@ Important distinction: local Phase 2 code proof is green, and deployed Sentry in
 | Phase 2 local load/chaos proof | DONE LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md`. |
 | Slack alert channel chosen | TODO / BLOCKED | Proposed channel is `#tovis-ops-alerts`; routing is blocked until Sentry plan upgrade or approved alternate path exists. |
 | P1/P2 alert thresholds documented | TODO | Must be completed in docs/launch-readiness/slack-alerts.md. |
-| Runbooks linked from alerts | PARTIAL | Booking funnel runbook now exists; auth/session, pro session lifecycle, and SLO/error budget runbooks still need to be created. |
+| Runbooks linked from alerts | IN PROGRESS / ROUTING TODO | Required runbooks are linked; live alert routing/testing still TODO. |
 | Synthetic alert tested | BLOCKED | At least one staging or production-safe synthetic alert must route to Slack or approved alternate before private beta. |
 | Public-launch pager path chosen | BLOCKED | PagerDuty/Opsgenie or equivalent escalation path must exist before public launch unless waived. |
 | Public-launch P1 acknowledgement tested | BLOCKED | Requires backup owner and escalation path. |
@@ -214,7 +214,7 @@ Before private beta, at least one alert must be tested end-to-end.
 | Event tested | Synthetic Sentry event capture |
 | Environment | Production |
 | Route | POST /api/internal/debug/sentry-test |
-| Date | 2026-06-05 |
+| Date | 2026-06-07 |
 | Result | PASS |
 | Event ID | e56044a034cb4fb78d1b09801fb43da5 |
 | What it proves | Deployed Sentry intake works. |
@@ -440,7 +440,7 @@ TODO
 | Choose Slack ops channel or approved alternate | High | Tori | Private beta | TODO |
 | Test synthetic alert routing | High | Tori | Private beta | BLOCKED |
 | Define P1/P2 alert thresholds | High | Tori | Private beta/public launch | TODO |
-| Link all P1/P2 alerts to runbooks | High | Tori | Public launch | PARTIAL — booking funnel runbook exists; auth/session, pro lifecycle, and SLO/error budget runbooks still TODO |
+| Link all P1/P2 alerts to runbooks | High | Tori | Public launch | IN PROGRESS / ROUTING TODO — required runbooks are linked; live alert routing/testing still TODO |
 | Decide public-launch pager path | High | Tori | Public launch | BLOCKED |
 | Test P1 acknowledgement path | High | Tori | Public launch | BLOCKED |
 | Complete live dashboard links | High | Tori | Private beta/public launch | TODO |
