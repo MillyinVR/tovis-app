@@ -53,11 +53,15 @@ This proof does not replace deployed staging proof, live Sentry dashboard proof,
 
 ### Commands run
 
-bash pnpm typecheck 
+```bash
+pnpm typecheck
+```
 
 Result: passed.
 
-bash pnpm verify:privacy-phase1 
+```bash
+pnpm verify:privacy-phase1
+```
 
 Result: passed.
 
@@ -68,7 +72,9 @@ Privacy verification details:
 - test:privacy-phase1: 14 files passed, 195 tests passed
 - test:privacy-export-delete: 6 files passed, 45 tests passed
 
-bash pnpm test:chaos 
+```bash
+pnpm test:chaos
+```
 
 Result: passed.
 
@@ -86,13 +92,33 @@ Known stderr during DB degradation tests:
 
 These stderr messages are expected for the DB degradation chaos tests. The tests verify controlled 500 behavior and no unsafe database failure detail leakage to callers.
 
-bash LOAD_TEST_ALLOW_SLOT_REUSE=true \ LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarded-for \ LOAD_TEST_TRUSTED_IP_PREFIX=10.252 \ LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true \ pnpm verify:launch-ops 
+```bash
+LOAD_TEST_ALLOW_SLOT_REUSE=true \
+LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarded-for \
+LOAD_TEST_TRUSTED_IP_PREFIX=10.252 \
+LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true \
+pnpm verify:launch-ops
+```
 
 Result: passed.
 
 Aggregate launch load result:
 
-json {   "runId": "20260608020633267",   "environment": "staging",   "baseUrl": "http://localhost:3000",   "profile": "smoke",   "suite": "launch-load",   "totals": {     "steps": 8,     "passed": 8,     "failed": 0,     "skipped": 0   } } 
+```json
+{
+  "runId": "20260608020633267",
+  "environment": "staging",
+  "baseUrl": "http://localhost:3000",
+  "profile": "smoke",
+  "suite": "launch-load",
+  "totals": {
+    "steps": 8,
+    "passed": 8,
+    "failed": 0,
+    "skipped": 0
+  }
+}
+```
 
 ### Launch load step results
 
@@ -122,7 +148,13 @@ json {   "runId": "20260608020633267",   "environment": "staging",   "baseUrl": 
 
 ### Important configuration used
 
-bash LOAD_TEST_ALLOW_SLOT_REUSE=true LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarded-for LOAD_TEST_TRUSTED_IP_PREFIX=10.252 LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true STAGING_BASE_URL=http://localhost:3000 
+```bash
+LOAD_TEST_ALLOW_SLOT_REUSE=true
+LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarded-for
+LOAD_TEST_TRUSTED_IP_PREFIX=10.252
+LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true
+STAGING_BASE_URL=http://localhost:3000
+```
 
 ### Notes
 
@@ -177,15 +209,37 @@ The focused proof covered Pro booking creation, Pro booking read/update, cancel,
 
 ### Commands run
 
-bash grep -RIn \   --exclude-dir=node_modules \   --exclude-dir=.next \   --exclude-dir=.git \   --include='route.ts' \   "console\.error([^,]*,[[:space:]]*error[)]" app/api/pro/bookings app/api/bookings 
+```bash
+grep -RIn \
+  --exclude-dir=node_modules \
+  --exclude-dir=.next \
+  --exclude-dir=.git \
+  --include='route.ts' \
+  "console\.error([^,]*,[[:space:]]*error[)]" app/api/pro/bookings app/api/bookings
+```
 
 Result: no matches. The raw console.error(..., error) pattern is absent from the scoped booking route files.
 
-bash pnpm vitest run \   app/api/pro/bookings/route.test.ts \   'app/api/pro/bookings/[id]/route.test.ts' \   'app/api/pro/bookings/[id]/cancel/route.test.ts' \   'app/api/pro/bookings/[id]/final-review/route.test.ts' \   'app/api/pro/bookings/[id]/consultation-services/route.test.ts' \   'app/api/pro/bookings/[id]/checkout/mark-paid/route.test.ts' \   'app/api/pro/bookings/[id]/checkout/waive/route.test.ts' \   'app/api/pro/bookings/[id]/invite/route.test.ts' \   'app/api/pro/bookings/[id]/rebook/route.test.ts' \   'app/api/pro/bookings/[id]/session/finish/route.test.ts' \   'app/api/bookings/[id]/reschedule/route.test.ts' 
+```bash
+pnpm vitest run \
+  app/api/pro/bookings/route.test.ts \
+  'app/api/pro/bookings/[id]/route.test.ts' \
+  'app/api/pro/bookings/[id]/cancel/route.test.ts' \
+  'app/api/pro/bookings/[id]/final-review/route.test.ts' \
+  'app/api/pro/bookings/[id]/consultation-services/route.test.ts' \
+  'app/api/pro/bookings/[id]/checkout/mark-paid/route.test.ts' \
+  'app/api/pro/bookings/[id]/checkout/waive/route.test.ts' \
+  'app/api/pro/bookings/[id]/invite/route.test.ts' \
+  'app/api/pro/bookings/[id]/rebook/route.test.ts' \
+  'app/api/pro/bookings/[id]/session/finish/route.test.ts' \
+  'app/api/bookings/[id]/reschedule/route.test.ts'
+```
 
 Result: 11 test files passed, 153 tests passed.
 
-bash pnpm typecheck 
+```bash
+pnpm typecheck
+```
 
 Result: passed.
 
@@ -226,7 +280,11 @@ Decision summary, see docs/security/contact-lookup-hash-threat-model.md for full
 
 ### Commands run
 
-bash sed -n '1,220p' docs/security/contact-lookup-hash-threat-model.md grep -n "SHA-256 vs HMAC contact hash decision documented" \   docs/launch-readiness/sprint-1-verification-checklist.md 
+```bash
+sed -n '1,220p' docs/security/contact-lookup-hash-threat-model.md
+grep -n "SHA-256 vs HMAC contact hash decision documented" \
+  docs/launch-readiness/sprint-1-verification-checklist.md
+```
 
 Result: file exists, fences closed, trailing newline present; checklist row "SHA-256 vs HMAC contact hash decision documented" is IN PROGRESS and points at the threat-model doc.
 
