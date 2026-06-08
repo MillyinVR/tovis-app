@@ -129,7 +129,7 @@ These are initial targets. Tighten them when there is a named backup owner and t
 | Booking funnel | `docs/runbooks/booking-funnel.md` exists | Supports booking/availability/hold/finalize alerts |
 | Auth/session | `docs/runbooks/auth-session.md` | Blocks complete auth alert readiness |
 | Pro session lifecycle | `docs/runbooks/pro-session-lifecycle.md` | Blocks complete pro lifecycle alert readiness |
-| SLO/error budget | `docs/runbooks/slo-error-budget.md` TODO create | Blocks complete public-rollout SLO alert readiness |
+| SLO/error budget | `docs/runbooks/slo-error-budget.md` | Blocks complete public-rollout SLO alert readiness |
 
 ---
 
@@ -653,7 +653,7 @@ Rate-limit synthetic or chaos proof should link to this alert.
 | Destination | #tovis-ops-alerts or approved alternate |
 | Source | Sentry performance/errors |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
-| Runbook | docs/runbooks/slo-error-budget.md — TODO create |
+| Runbook | docs/runbooks/slo-error-budget.md |
 | Threshold | TODO |
 | Private beta blocker | No, if core route alerts exist |
 | Public rollout blocker | Yes |
@@ -839,7 +839,7 @@ Public rollout cannot proceed until:
 - docs/runbooks/booking-funnel.md
 - docs/runbooks/auth-session.md
 - docs/runbooks/pro-session-lifecycle.md
-- docs/runbooks/slo-error-budget.md — TODO create
+- docs/runbooks/slo-error-budget.md
 
 ---
 

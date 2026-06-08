@@ -199,7 +199,7 @@ Do not mark an alert complete because Sentry captured an event. Sentry intake pr
 | SMS provider | P2 | Twilio degradation | Tori | TODO | docs/runbooks/twilio-degradation.md | TODO ROUTING PROOF |
 | Auth | P1 | Login/register/password-reset failure spike | Tori | TODO | docs/runbooks/auth-session.md | TODO ROUTING PROOF |
 | Rate limits | P2 | Abnormal high-risk route rate-limit blocks | Tori | TODO | docs/runbooks/redis-outage.md | TODO ROUTING PROOF |
-| SLO/error budget | P2 | API error budget burn exceeds threshold | Tori | TODO | docs/runbooks/slo-error-budget.md — TODO create | TODO ROUTING PROOF |
+| SLO/error budget | P2 | API error budget burn exceeds threshold | Tori | TODO | docs/runbooks/slo-error-budget.md | TODO ROUTING PROOF |
 
 ---
 
@@ -350,7 +350,7 @@ The following runbooks should be linked from alerts where applicable:
 | Booking funnel | docs/runbooks/booking-funnel.md |
 | Auth/session | docs/runbooks/auth-session.md |
 | Pro session lifecycle | docs/runbooks/pro-session-lifecycle.md |
-| SLO/error budget | docs/runbooks/slo-error-budget.md — TODO create |
+| SLO/error budget | docs/runbooks/slo-error-budget.md |
 
 If a required runbook does not exist, the related alert remains open until the runbook is created or an existing runbook is confirmed as sufficient.
 
@@ -465,7 +465,7 @@ TODO
 - docs/runbooks/booking-funnel.md
 - docs/runbooks/auth-session.md
 - docs/runbooks/pro-session-lifecycle.md
-- docs/runbooks/slo-error-budget.md — TODO create
+- docs/runbooks/slo-error-budget.md
 
 ---
 
