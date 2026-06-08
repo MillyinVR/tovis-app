@@ -9,7 +9,7 @@ Primary dashboard surface: Sentry-first, with provider dashboards linked where S
 Pager system: Not required for private beta, but required before public launch unless explicitly waived in go-no-go.md  
 Primary owner: Tori  
 Backup owner: TODO — public launch blocker  
-Current default status: IN PROGRESS / ALERT ROUTING BLOCKED — Phase 2 local code proof is green and deployed Sentry intake is proven, but Slack alert routing, synthetic alert delivery, backup owner, and public escalation are still incomplete.
+Current default status: IN PROGRESS / PARTIAL ALERT ROUTING PROOF — Phase 2 local code proof is green, deployed Sentry intake is proven, and a saved Sentry issue-alert rule can deliver notifications to `#tovis-ops-alerts`. Private beta on-call readiness is still incomplete until a production-safe app-generated synthetic alert is routed, acknowledged, and recorded with threshold/runbook evidence. Backup owner and public escalation remain public launch blockers.
 
 This file defines who owns launch incidents, where alerts route, which runbooks apply, and what must be true before TOVIS can move from private beta to public rollout.
 
@@ -28,12 +28,12 @@ This file defines who owns launch incidents, where alerts route, which runbooks 
 | Load plan reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/load-test-plan.md` |
 | Sentry dashboard proof reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/sentry-dashboard.md` |
 | Slack alert map reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/slack-alerts.md` |
-| Slack alert routing | BLOCKED | Requires paid Sentry plan or approved alternate alerting path |
-| Synthetic alert delivery | BLOCKED | Cannot complete until routing path exists |
+| Slack alert routing | PARTIAL PASS | Paid Sentry plan enabled; Sentry app added to `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered a test notification to Slack on 2026-06-07 at 8:36 PM local. |
+| Synthetic alert delivery | PARTIAL PASS / REAL SYNTHETIC TODO | Saved Sentry issue-alert rule can route test notifications to Slack. A production-safe app-generated synthetic alert with threshold, runbook link, and acknowledgement timing still needs to be tested before private beta. |
 | Backup owner | BLOCKED | Required before public launch |
 | Public P1 escalation | BLOCKED | Required before public launch unless explicitly waived |
 
-Important distinction: local Phase 2 code proof is green, and deployed Sentry intake works. That does not prove on-call readiness. On-call readiness requires alert routing, acknowledgement, owners, runbooks, and escalation.
+Important distinction: local Phase 2 code proof is green, deployed Sentry intake works, and saved Sentry issue-alert delivery to Slack works. That does not fully prove on-call readiness. On-call readiness still requires a production-safe app-generated synthetic alert, threshold/runbook evidence, acknowledgement timing, owners, dashboard links, backup ownership decisions, and public escalation.
 
 ---
 
@@ -45,10 +45,10 @@ Important distinction: local Phase 2 code proof is green, and deployed Sentry in
 | Backup owner named | BLOCKED | A named backup owner is required before public launch. |
 | Sentry intake verified | DONE | Production synthetic event captured: e56044a034cb4fb78d1b09801fb43da5. |
 | Phase 2 local load/chaos proof | DONE LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md`. |
-| Slack alert channel chosen | TODO / BLOCKED | Proposed channel is `#tovis-ops-alerts`; routing is blocked until Sentry plan upgrade or approved alternate path exists. |
+| Slack alert channel chosen | PARTIAL PASS | Private-beta Slack alert channel is `#tovis-ops-alerts`; Sentry app is added to the channel; saved Sentry issue-alert rule delivered a test notification on 2026-06-07 at 8:36 PM local. Real app-generated synthetic alert proof still TODO. |
 | P1/P2 alert thresholds documented | TODO | Must be completed in docs/launch-readiness/slack-alerts.md. |
-| Runbooks linked from alerts | IN PROGRESS / ROUTING TODO | Required runbooks are linked; live alert routing/testing still TODO. |
-| Synthetic alert tested | BLOCKED | At least one staging or production-safe synthetic alert must route to Slack or approved alternate before private beta. |
+| Runbooks linked from alerts | IN PROGRESS / REAL ALERT TEST TODO | Required runbooks are linked; basic Sentry-to-Slack delivery is proven; real alert messages still need runbook links verified before private beta. |
+| Synthetic alert tested | PARTIAL PASS / REAL SYNTHETIC TODO | Saved Sentry issue-alert rule delivered a test notification to `#tovis-ops-alerts`. At least one staging or production-safe app-generated synthetic alert must still route to Slack and be acknowledged before private beta. |
 | Public-launch pager path chosen | BLOCKED | PagerDuty/Opsgenie or equivalent escalation path must exist before public launch unless waived. |
 | Public-launch P1 acknowledgement tested | BLOCKED | Requires backup owner and escalation path. |
 
@@ -73,12 +73,12 @@ Until a backup owner is named, public launch remains blocked. Private beta can p
 
 | Destination | Purpose | Status | Notes |
 |---|---|---|---|
-| Slack private-beta ops channel | First-line alert routing during private beta | TODO / BLOCKED | Proposed channel: #tovis-ops-alerts; routing blocked until Sentry plan or alternate path exists. |
-| Sentry issues/events | Error grouping, regressions, performance visibility | PARTIAL | Sentry intake is proven; alert delivery is not. |
+| Slack private-beta ops channel | First-line alert routing during private beta | CONNECTED / SAVED ISSUE ALERT TEST PASSED | Channel: `#tovis-ops-alerts`. Paid Sentry plan enabled. Sentry app added to channel. Saved Sentry issue-alert rule delivered a test notification on 2026-06-07 at 8:36 PM local. Real app-generated synthetic alert proof still TODO. |
+| Sentry issues/events | Error grouping, regressions, performance visibility | PARTIAL PASS | Sentry intake is proven, and saved Sentry issue-alert delivery to Slack is proven. Real app-generated alert proof still TODO. |
 | Sentry dashboards | Primary app observability surface | TODO LIVE DASHBOARD PROOF | Dashboard links/sections still need live verification. |
 | Provider dashboards | Stripe, Twilio, Postmark, Supabase, Vercel, database/Redis provider status | TODO | Must be linked where Sentry is not source of truth. |
-| Direct owner notification | Temporary private-beta fallback | TODO | Acceptable only if documented, tested, and accepted in go-no-go.md. |
-| Email alert from Sentry | Possible alternate alert route | TODO | Can unblock private beta only if tested end-to-end. |
+| Direct owner notification | Temporary private-beta fallback | NOT SELECTED | Sentry-to-Slack is the selected private-beta alert path. Direct owner notification remains a fallback only if documented and accepted in go-no-go.md. |
+| Email alert from Sentry | Possible alternate alert route | NOT SELECTED | Sentry-to-Slack is the selected private-beta alert path. Email alerting may remain supplemental, but is not the primary beta alert path. |
 | Pager system | Public launch P1/P2 escalation | BLOCKED | Required before public launch unless waived. |
 
 ---
@@ -176,7 +176,7 @@ Every alert must have:
 
 No alert should be considered launch-ready without those fields.
 
-Do not mark an alert complete because Sentry captured an event. Sentry intake proves the app can report. Alert readiness requires the alert to reach the correct human and be acknowledged.
+Do not mark an alert complete because Sentry captured an event or because a saved Sentry issue-alert test notification reached Slack. Sentry intake proves the app can report. Sentry-to-Slack test delivery proves the routing path can reach the channel. Alert readiness still requires the launch-critical signal, threshold, runbook link, destination, owner, and acknowledgement behavior to be recorded.
 
 ---
 
@@ -220,30 +220,91 @@ Before private beta, at least one alert must be tested end-to-end.
 | What it proves | Deployed Sentry intake works. |
 | What it does not prove | Slack routing, alert thresholding, acknowledgement, escalation, dashboard completeness. |
 
-## Required synthetic alert proof
+## Current Sentry-to-Slack routing proof
 
 | Field | Value |
 |---|---|
-| Alert tested | TODO |
-| Environment | staging or production-safe synthetic route |
+| Alert tested | Saved Sentry issue-alert rule test notification |
+| Environment | Sentry test notification / no deployed app environment |
+| Date | 2026-06-07 |
+| Trigger method | Sentry alert builder test notification from saved issue-alert rule |
+| Destination | Tovis Slack workspace / `#tovis-ops-alerts` |
+| Slack message title | Sentry Test Issue |
+| Project | `tovis-app` |
+| Sentry alert shown in Slack | Issue Stream |
+| Short ID shown in Slack | TOVIS-APP-J |
+| Message observed by | Tori |
+| Time observed | 8:36 PM local |
+| Time to acknowledgement | TODO — formal acknowledgement workflow not yet tested |
+| Runbook link included? | No — default Sentry test issue message only |
+| Result | PASS FOR SAVED SENTRY ISSUE-ALERT RULE TO SLACK / REAL APP-GENERATED SYNTHETIC ALERT TODO |
+
+This confirms that a saved Sentry issue-alert rule can deliver a test notification to the intended private-beta Slack alert channel. It does not yet satisfy full private-beta alert proof because the test did not prove an app-generated production-safe signal, threshold behavior, runbook link, or acknowledgement timing.
+
+## Required production-safe synthetic alert proof
+
+| Field | Value |
+|---|---|
+| Alert tested | TODO — production-safe synthetic app alert |
+| Environment | staging or production-safe route |
 | Date | TODO |
 | Trigger method | TODO |
-| Destination | #tovis-ops-alerts or approved alternate |
+| Destination | `#tovis-ops-alerts` |
 | Acknowledged by | TODO |
 | Time to alert message | TODO |
 | Time to acknowledgement | TODO |
 | Runbook link included? | TODO |
-| Result | TODO / BLOCKED |
+| Result | TODO |
 
-## Current blocker
+## Remaining blocker
 
-Sentry-to-Slack routing cannot be tested until one of the following happens:
+The Sentry plan/routing blocker is resolved for basic Sentry-to-Slack delivery. The remaining private-beta blocker is full alert proof: at least one production-safe synthetic app alert must route to `#tovis-ops-alerts`, include or link the relevant runbook, be observed by the owner, and record acknowledgement timing.
 
-1. Sentry is upgraded and Slack routing is enabled.
-2. An alternate private-beta alert path is chosen, documented, and tested.
-3. Private beta remains blocked until alert routing proof exists.
+A direct owner notification or email alert is no longer the selected primary private-beta path because Sentry-to-Slack is available. Public launch still requires a stronger P1 escalation path unless explicitly accepted in go-no-go.md.
 
-A direct owner notification or email alert can temporarily unblock private beta only if it is explicitly accepted in go-no-go.md and tested end-to-end.
+---
+
+# Completed on-call routing evidence
+
+## On-call evidence: saved Sentry issue-alert rule to Slack
+
+Status: PARTIAL PASS  
+Owner: Tori  
+Backup: TODO  
+Environment: Sentry issue-alert rule / no deployed app environment  
+Date: 2026-06-07  
+Alert destination: Tovis Slack workspace / `#tovis-ops-alerts`  
+Routing test: Saved Sentry issue-alert rule test notification  
+Sentry event ID: N/A for default Sentry test notification  
+Dashboard link: TODO  
+Runbook link: Not included in default Sentry test issue message  
+Acknowledged by: Tori observed message in Slack; formal acknowledgement workflow TODO  
+Time observed: 8:36 PM local  
+Time to acknowledgement: TODO  
+
+### What was verified
+
+- Paid Sentry plan is enabled.
+- Sentry app is added to `#tovis-ops-alerts`.
+- Tori's Slack account is linked to Sentry as `support@tovis.app`.
+- Sentry alert builder can send a test issue notification to `#tovis-ops-alerts`.
+- The Slack message showed project `tovis-app`, alert `Issue Stream`, and short ID `TOVIS-APP-J`.
+- A Sentry issue-alert rule was created/saved for the `tovis-app` project.
+- The saved Sentry issue-alert rule can deliver a test notification to `#tovis-ops-alerts`.
+
+### Known gaps
+
+- This was a Sentry test notification, not an app-generated production-safe synthetic alert.
+- The message did not include a launch runbook link.
+- Formal acknowledgement timing was not recorded.
+- P1/P2 alert thresholds are still TODO.
+- Live dashboard links are still TODO.
+- Backup owner is still TODO for public launch.
+- Public P1 escalation is still TODO.
+
+### Launch decision
+
+This partially unblocks private-beta alert routing by proving Sentry-to-Slack delivery works. Private beta remains incomplete until a production-safe synthetic app alert is routed to `#tovis-ops-alerts`, acknowledged, and recorded with runbook/threshold evidence.
 
 ---
 
@@ -308,7 +369,8 @@ Private beta is blocked if any of the following are true:
 - Health/readiness proof is missing.
 - Booking lifecycle smoke proof is missing.
 - No alert destination exists.
-- No alert routing proof exists, unless a temporary alternate path is explicitly accepted in go-no-go.md.
+- No production-safe synthetic app alert proof exists, unless a temporary accepted risk is explicitly recorded in go-no-go.md.
+- Sentry-to-Slack delivery to `#tovis-ops-alerts` is broken during the beta window.
 - No owner is assigned for P1 alerts.
 - Privacy/export/delete authorization proof fails.
 - Payment/webhook verification proof fails when payments are enabled.
@@ -328,7 +390,7 @@ Public launch is blocked if any of the following are true:
 - go-no-go.md has not been reviewed and signed.
 - Public P1 escalation is passive Slack-only without explicit accepted risk.
 - Alert thresholds are undefined.
-- Alert routing has not been tested end-to-end.
+- P1/P2 launch-critical alert routing has not been tested end-to-end with threshold, runbook link, destination, and acknowledgement evidence.
 
 ---
 
@@ -437,10 +499,10 @@ TODO
 | Blocker | Severity | Owner | Required before | Current status |
 |---|---|---|---|---|
 | Name backup owner | High | Tori | Public launch | BLOCKED |
-| Choose Slack ops channel or approved alternate | High | Tori | Private beta | TODO |
-| Test synthetic alert routing | High | Tori | Private beta | BLOCKED |
+| Choose Slack ops channel or approved alternate | High | Tori | Private beta | DONE — selected `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered test notification to Slack |
+| Test synthetic alert routing | High | Tori | Private beta | PARTIAL PASS / REAL SYNTHETIC TODO — saved Sentry issue-alert rule reached Slack; production-safe app-generated synthetic alert still required |
+| Link all P1/P2 alerts to runbooks | High | Tori | Public launch | IN PROGRESS / REAL ALERT TEST TODO — required runbooks are linked; real alert messages still need runbook-link verification |
 | Define P1/P2 alert thresholds | High | Tori | Private beta/public launch | TODO |
-| Link all P1/P2 alerts to runbooks | High | Tori | Public launch | IN PROGRESS / ROUTING TODO — required runbooks are linked; live alert routing/testing still TODO |
 | Decide public-launch pager path | High | Tori | Public launch | BLOCKED |
 | Test P1 acknowledgement path | High | Tori | Public launch | BLOCKED |
 | Complete live dashboard links | High | Tori | Private beta/public launch | TODO |
@@ -473,6 +535,6 @@ TODO
 
 Do not mark an alert or on-call item complete because a doc exists, a local test passed, or Sentry captured an event.
 
-On-call readiness is complete only when the owner is named, the backup requirement is handled, the runbook link works, the alert destination is known, the routing path has been tested, and acknowledgement/escalation behavior is recorded.
+On-call readiness is complete only when the owner is named, the backup requirement is handled or explicitly accepted for private beta, the runbook link works, the alert destination is known, the routing path has been tested with a launch-relevant signal, and acknowledgement/escalation behavior is recorded.
 
-Local Phase 2 proof and deployed Sentry intake proof are supporting evidence. They do not replace alert routing, dashboard proof, backup ownership, or escalation proof.
+Local Phase 2 proof, deployed Sentry intake proof, and saved Sentry issue-alert delivery proof are supporting evidence. They do not replace launch-relevant app-generated synthetic alert proof, dashboard proof, backup ownership, or escalation proof.

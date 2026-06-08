@@ -53,7 +53,7 @@ Local proof and deployed operational proof are different things. A local passing
 | Deployed Sentry intake | PASS DEPLOYED: synthetic event captured, event ID e56044a034cb4fb78d1b09801fb43da5 |
 | Sentry release/environment metadata | Visible in deployed response metadata; dashboard proof still TODO |
 | Live dashboard proof | TODO |
-| Slack/Sentry alert routing | BLOCKED pending Sentry plan upgrade or approved alternate alerting path |
+| Slack/Sentry alert routing | PARTIAL PASS: paid Sentry plan enabled; `#tovis-ops-alerts` selected; saved Sentry issue-alert rule delivered a test notification to Slack. Production-safe app-generated synthetic alert proof still TODO. |
 | Backup owner | BLOCKED for public rollout |
 | P1 escalation path | BLOCKED for public rollout |
 | Public rollout status | NO-GO |
@@ -67,14 +67,14 @@ Local proof and deployed operational proof are different things. A local passing
 | Core product flow | Mostly wired; full staging/browser proof still needed for launch confidence. |
 | Booking lifecycle slice | Strong local code/test posture; deployed lifecycle proof still needed. |
 | Privacy / PII readiness | Phase 1 complete for current pre-launch scope; remaining work is tracked operational/deferred privacy debt. |
-| Launch operations | Repo-side Phase 2 proof is green locally; live dashboards, alert routing, backup owner, and deployed/provider proof remain open. |
-| Sentry observability | Release/environment config implemented; deployed Sentry intake proven; dashboard sections and alert routing still TODO/BLOCKED. |
+| Launch operations | Repo-side Phase 2 proof is green locally; saved Sentry issue-alert delivery to Slack is partially proven; live dashboards, production-safe app-generated alert proof, backup owner, support/rollback proof, and deployed/provider proof remain open. |
+| Sentry observability | Release/environment config implemented; deployed Sentry intake proven; saved Sentry issue-alert delivery to Slack partially proven; dashboard sections and production-safe app-generated alert proof still TODO. |
 | Load tests | Launch-critical load suite exists and passed locally; staging/rollout-commit proof still required before public rollout. |
 | Chaos tests | Chaos suite exists and passed locally; evidence is recorded; rerun on rollout commit. |
 | White-label SaaS readiness | Not ready; tenant model and tenant visibility are not implemented. |
 | Private beta readiness | Still NO-GO until private-beta gates, live dashboard proof, alert path, rollback path, and core staging proof are complete or explicitly accepted. |
 | Public rollout readiness | NO-GO until private beta exits cleanly, backup owner exists, P1 escalation is tested, dashboards/alerts are live, load/chaos proof is current, and final signoff is complete. |
-| Current focus | Finish operational proof: dashboards, alert routing path, staging checks, provider proof, backup owner, go/no-go evidence. |
+| Current focus | Finish operational proof: dashboards, production-safe app-generated alert proof, staging checks, provider proof, support/rollback path, backup owner, go/no-go evidence. |
 
 ---
 
@@ -91,14 +91,14 @@ Local proof and deployed operational proof are different things. A local passing
 | Sentry release/environment config | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | Implemented in server, edge, and client config; deployed metadata observed. |
 | Deployed Sentry intake | PASS DEPLOYED | Yes | N/A | Unknown | Yes | Partial | Tori | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5. |
 | Sentry dashboard proof doc | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Live dashboard links and section evidence still TODO. |
-| Slack alert map | IN PROGRESS / BLOCKED | Yes | N/A | N/A | No | Partial | Tori | Sentry-to-Slack routing requires paid Sentry plan or alternate alerting path. |
+| Slack alert map | IN PROGRESS / PARTIAL ROUTING PROOF | Yes | N/A | N/A | Partial | Partial | Tori | Paid Sentry plan enabled; saved Sentry issue-alert rule delivered to `#tovis-ops-alerts`; production-safe app-generated synthetic alert proof still TODO. |
 | Load test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Plan exists; local suite proof now exists; staging proof still TODO. |
 | Chaos test plan | IN PROGRESS / LOCAL PROOF EXISTS | Yes | N/A | N/A | No | Partial | Tori | Local chaos proof is recorded; operational dashboard/alert proof still TODO. |
 | Full booking lifecycle E2E | IN PROGRESS | Partial | Partial | Unknown | No | No | Tori | API-assisted proof exists; full browser/staging proof still needed. |
 | Load tests for launch-critical flows | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 8/8 launch load steps passed locally; staging/rollout proof still required. |
 | Chaos tests for dependency failures | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | 6 chaos files / 17 tests passed locally. |
 | Live dashboard panels | TODO | Partial | N/A | N/A | No | No | Tori | Sentry intake is proven; dashboard panels are not. |
-| Alert routing and escalation | BLOCKED | Partial | No | No | No | No | Tori | Requires Sentry plan upgrade or approved alternate path; P1 escalation blocked. |
+| Alert routing and escalation | PARTIAL PASS / P1 ESCALATION BLOCKED | Partial | N/A | No | Partial | Partial | Tori | Paid Sentry plan enabled; saved Sentry issue-alert rule delivered a test notification to `#tovis-ops-alerts`. Production-safe app-generated synthetic alert proof, acknowledgement timing, and public P1 escalation are still TODO/BLOCKED. |
 | Named backup owner | BLOCKED | No | No | No | No | No | Tori | Required before public rollout. |
 | Provider/deployed readiness proof | TODO | Partial | Partial | Unknown | Partial | No | Tori | Domain/app/Sentry intake proof exists; full health/provider proof still needed. |
 | Rollback proof | IN PROGRESS | Partial | N/A | N/A | No | Partial | Tori | Rollback criteria in docs; actual drill/evidence still needed. |
@@ -204,7 +204,7 @@ This phase is about operated readiness, not just code existence. Dashboards, ale
 | Sentry release/environment config | DONE | Server, edge, and client config implemented. |
 | Deployed Sentry intake | PASS DEPLOYED | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5. |
 | Sentry dashboard proof | TODO LIVE PROOF | Dashboard sections still need links, thresholds, and evidence. |
-| Slack alert routing | BLOCKED | Requires Sentry plan upgrade or alternate alerting path. |
+| Slack alert routing | PARTIAL PASS | Paid Sentry plan enabled; Sentry app added to `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered a test notification to Slack. Production-safe app-generated synthetic alert proof still TODO. |
 | Launch load suite | PASS LOCALLY | 8/8 launch load steps passed locally. |
 | Chaos suite | PASS LOCALLY | 6 files / 17 tests passed locally. |
 | Backup owner | BLOCKED | Required before public rollout. |
@@ -221,7 +221,7 @@ This phase is about operated readiness, not just code existence. Dashboards, ale
 | Public rollout checklist | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Public rollout remains blocked. |
 | Risk register | IN PROGRESS | Yes | N/A | N/A | N/A | Partial | Tori | Review/update as proof lands. |
 | Sentry dashboard proof doc | IN PROGRESS | Yes | N/A | N/A | Partial | Partial | Tori | Sentry intake proven; live dashboard links still TODO. |
-| Slack alert map | IN PROGRESS / BLOCKED | Yes | N/A | N/A | No | Partial | Tori | Routing/testing blocked. |
+| Slack alert map | IN PROGRESS / PARTIAL ROUTING PROOF | Yes | N/A | N/A | Partial | Partial | Tori | Saved Sentry issue-alert rule delivered to `#tovis-ops-alerts`; production-safe app-generated synthetic alert proof still TODO. |
 | Load test plan | IN PROGRESS | Yes | N/A | N/A | No | Partial | Tori | Local load proof exists; staging proof TODO. |
 | Chaos test plan | IN PROGRESS / LOCAL PROOF EXISTS | Yes | N/A | N/A | No | Partial | Tori | Local chaos proof is recorded; operational dashboard/alert proof still TODO. |
 
@@ -242,9 +242,9 @@ This phase is about operated readiness, not just code existence. Dashboards, ale
 | Auth/rate limits dashboard section | TODO LIVE PROOF | Partial | Yes | Unknown | No | No | Tori | Signup/rate-limit behavior covered locally; live dashboard proof TODO. |
 | Infra dependencies dashboard section | TODO LIVE PROOF | Partial | Yes | Unknown | No | No | Tori | Provider dashboards/runbooks exist; live proof missing. |
 | SLO/error budget dashboard section | TODO | Partial | Partial | Unknown | No | No | Tori | Define thresholds and evidence. |
-| Slack private-beta alert channel | TODO / BLOCKED | No | No | No | No | No | Tori | Required before private beta unless alternate accepted. |
-| P1/P2 Slack alert routing | BLOCKED | No | No | No | No | No | Tori | Requires Sentry plan upgrade or alternate alert path. |
-| Synthetic staging alert test | BLOCKED | No | No | No | No | No | Tori | Required before private beta; blocked by alert routing. |
+| Slack private-beta alert channel | DONE / PARTIAL ROUTING PROOF | Yes | N/A | No | Partial | Partial | Tori | `#tovis-ops-alerts` selected; Sentry app added; saved Sentry issue-alert rule delivered test notification. |
+| P1/P2 Slack alert routing | PARTIAL PASS / REAL APP-GENERATED SYNTHETIC TODO | Partial | N/A | No | Partial | Partial | Tori | Saved Sentry issue-alert rule delivered a test notification to `#tovis-ops-alerts`. P1/P2 launch-critical alert rules, thresholds, runbook links, acknowledgement timing, and production-safe app-generated synthetic alert proof are still TODO. |
+| Synthetic staging alert test | TODO REAL APP-GENERATED ALERT PROOF | Partial | No | No | No | Partial | Tori | Basic Sentry-to-Slack delivery is proven through saved issue-alert rule; production-safe app-generated synthetic alert still required before private beta unless explicitly accepted. |
 | Public P1 escalation path | BLOCKED | No | No | No | No | No | Tori | Requires backup owner and tested escalation path. |
 
 ## Load tests
@@ -286,8 +286,8 @@ Private beta requires:
 - pnpm verify:privacy-phase1 passes on beta commit.
 - Private beta checklist is complete.
 - Rollback owner/path is documented.
-- Slack alert destination or approved alternate alerting path exists.
-- At least one synthetic staging alert routes successfully, or alert-routing gap is explicitly accepted as a private-beta risk.
+- Slack alert destination exists and Sentry-to-Slack delivery to `#tovis-ops-alerts` is working during the beta window.
+- At least one production-safe app-generated synthetic alert routes successfully with acknowledgement/runbook evidence, or the remaining alert-proof gap is explicitly accepted as a private-beta risk.
 - Health/readiness proof exists.
 - Booking lifecycle smoke proof exists.
 - Payment/webhook proof exists if payments are enabled.
@@ -302,7 +302,7 @@ Public rollout requires:
 - Named backup owner exists.
 - P1 escalation path is tested.
 - Live dashboard proof exists for all required sections.
-- P1/P2 alerts route and link to runbooks.
+- P1/P2 launch-critical alerts route, link to runbooks, have thresholds, and have acknowledgement/escalation evidence.
 - Load tests pass on the rollout commit/environment.
 - Chaos tests pass on the rollout commit.
 - Provider quota/capacity is confirmed.
@@ -427,7 +427,7 @@ Make the app observable, diagnosable, and operable during production incidents.
 | Notification backlog runbook | DONE | Yes | N/A | N/A | N/A | Partial | Tori | Runbook exists. |
 | Private media incident runbook | DONE | Yes | N/A | N/A | N/A | Partial | Tori | Runbook exists. |
 | Privacy request runbook | DONE | Yes | N/A | N/A | N/A | Partial | Tori | Runbook exists. |
-| Runbooks linked from alerts | IN PROGRESS / ROUTING TODO | Yes | N/A | N/A | No | Partial | Tori | Runbooks are linked in launch alert docs; live alert routing/testing still TODO. |
+| Runbooks linked from alerts | IN PROGRESS / REAL ALERT TEST TODO | Yes | N/A | N/A | Partial | Partial | Tori | Runbooks are linked in launch alert docs; saved Sentry issue-alert delivery works; real launch alert messages still need runbook-link verification. |
 
 ---
 
@@ -538,7 +538,7 @@ Record proof against specific commits and environments.
 | Deployed health/readiness proof | TODO | Yes | Partial | Unknown | No | No | Tori | Needs staging/production proof. |
 | Deployed storage policy proof | TODO | Partial | No | No | No | No | Tori | Repo proof exists; deployed proof missing. |
 | Dashboard proof | TODO LIVE PROOF | Partial | N/A | N/A | No | No | Tori | Needs live Sentry/provider dashboard links. |
-| Alert proof | BLOCKED | Partial | No | No | No | No | Tori | Needs Sentry plan upgrade or alternate alerting path. |
+| Alert proof | PARTIAL PASS / REAL APP-GENERATED SYNTHETIC TODO | Partial | N/A | No | Partial | Partial | Tori | Saved Sentry issue-alert rule delivered to `#tovis-ops-alerts`; production-safe app-generated synthetic alert with threshold, runbook link, and acknowledgement timing still TODO. |
 
 ---
 
@@ -552,10 +552,10 @@ Do not launch publicly until every required public rollout item below is true.
 | Core booking/session flow has E2E/staging proof | IN PROGRESS | API-assisted proof exists; staging/browser proof still needed. |
 | Health live/ready endpoints are deployed and verified | TODO | Code exists; deployed proof missing. |
 | Production monitors watch live and ready endpoints | TODO | Not wired/proven. |
-| Runbooks exist and are linked from alerts | IN PROGRESS / ROUTING TODO | Runbooks exist and are linked; alert routing/testing still missing. |
+| Runbooks exist and are linked from alerts | IN PROGRESS / REAL ALERT TEST TODO | Runbooks exist and are linked; saved Sentry issue-alert delivery works; real launch alert messages still need runbook-link verification. |
 | Sentry intake works | PASS DEPLOYED | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5. |
 | Sentry dashboard exists with critical panels | TODO LIVE PROOF | Dashboard proof doc exists; live proof missing. |
-| Slack/private-beta alerts are routed and tested | BLOCKED | Alert map exists; routing/testing blocked. |
+| Slack/private-beta alerts are routed and tested | PARTIAL PASS / REAL APP-GENERATED SYNTHETIC TODO | Saved Sentry issue-alert rule delivered to `#tovis-ops-alerts`; production-safe app-generated synthetic alert with threshold, runbook link, and acknowledgement timing still TODO. |
 | P1 public escalation path is tested | BLOCKED | Requires backup owner and escalation path. |
 | Storage/private-media policies are deployed and verified | TODO | Repo proof exists; deployed proof missing. |
 | High-risk route rate limits are enforced in code | DONE | Code coverage exists; deployed telemetry still needed. |
@@ -607,7 +607,7 @@ Do not launch publicly until every required public rollout item below is true.
 - It does not claim private beta is ready.
 - It does not claim public rollout is ready.
 - It does not claim live dashboards are complete.
-- It does not claim Slack alerts are routed.
+- It does not claim launch-critical Slack alerts are fully proven; only saved Sentry issue-alert delivery to Slack is partially proven.
 - It does not claim P1 escalation is tested.
 - It does not claim provider quotas/capacity are verified.
 - It does not claim a backup owner exists.
@@ -622,10 +622,8 @@ Do not launch publicly until every required public rollout item below is true.
    - deployed Sentry event ID,
    - remaining NO-GO blockers.
 3. Update sentry-dashboard.md with Sentry intake proof and keep dashboard sections TODO LIVE PROOF.
-4. Choose one alert path:
-   - upgrade Sentry and test Sentry-to-Slack, or
-   - document an alternate private-beta alerting path.
-5. Pick the Slack/private-beta ops channel.
+4. Trigger and record one production-safe app-generated synthetic alert through Sentry-to-Slack with threshold/runbook/acknowledgement evidence.
+5. Build/link live Sentry dashboard sections for launch-critical flows.
 6. Name a backup owner before public rollout.
 7. Run deployed health/readiness proof.
 8. Link provider dashboards or provider status pages.
