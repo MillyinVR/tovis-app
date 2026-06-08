@@ -70,7 +70,7 @@ Local proof and deployed operational proof are different things. A local passing
 | Launch operations | Repo-side Phase 2 proof is green locally; live dashboards, alert routing, backup owner, and deployed/provider proof remain open. |
 | Sentry observability | Release/environment config implemented; deployed Sentry intake proven; dashboard sections and alert routing still TODO/BLOCKED. |
 | Load tests | Launch-critical load suite exists and passed locally; staging/rollout-commit proof still required before public rollout. |
-| Chaos tests | Chaos suite exists and passed locally; evidence should be recorded and rerun on rollout commit. |
+| Chaos tests | Chaos suite exists and passed locally; evidence is recorded; rerun on rollout commit. |
 | White-label SaaS readiness | Not ready; tenant model and tenant visibility are not implemented. |
 | Private beta readiness | Still NO-GO until private-beta gates, live dashboard proof, alert path, rollback path, and core staging proof are complete or explicitly accepted. |
 | Public rollout readiness | NO-GO until private beta exits cleanly, backup owner exists, P1 escalation is tested, dashboards/alerts are live, load/chaos proof is current, and final signoff is complete. |
@@ -533,7 +533,7 @@ Record proof against specific commits and environments.
 | Phase 1 privacy proof | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | docs/privacy/phase-1-privacy-proof.md. |
 | Full lifecycle proof | TODO / PARTIAL | Partial | Partial | No | No | No | Tori | Tests exist but proof entry still needed. |
 | Load proof | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Local launch load suite passed; staging proof still required. |
-| Chaos proof | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Local chaos suite passed; evidence should be recorded. |
+| Chaos proof | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Local chaos suite passed; evidence is recorded in `docs/launch-readiness/test-proof.md` and `docs/launch-readiness/chaos-test-plan.md`. |
 | Deployed Sentry intake proof | PASS DEPLOYED | Yes | N/A | Unknown | Yes | Partial | Tori | Event ID e56044a034cb4fb78d1b09801fb43da5. |
 | Deployed health/readiness proof | TODO | Yes | Partial | Unknown | No | No | Tori | Needs staging/production proof. |
 | Deployed storage policy proof | TODO | Partial | No | No | No | No | Tori | Repo proof exists; deployed proof missing. |
