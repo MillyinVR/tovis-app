@@ -226,7 +226,7 @@ The previous Redis chaos blocker is fixed and local chaos proof is green. The re
 
 ### Notes
 
-Known runbook areas include health/readiness, Redis, Postgres, Supabase Storage, Stripe, Postmark, Twilio, private media, notifications, and privacy requests.
+Known runbook areas include health/readiness, Redis, Postgres, Supabase Storage, Stripe, Postmark, Twilio, private media, notifications, booking funnel, auth/session, pro session lifecycle, SLO/error budget, and privacy requests.
 
 ---
 
@@ -536,7 +536,7 @@ The code-path proof is local green. The remaining launch risk is operational: ca
 | Public rollout impact | Blocks public rollout until auth/rate-limit alerts route to an approved destination and runbooks are linked. |
 | Mitigation | Redis outage chaos test passes locally, and signup strict success/rate-limit behavior has been separated in the load script. Finish auth/session/rate-limit alert routing and runbook coverage. |
 | Verification | Local proof recorded in `docs/launch-readiness/test-proof.md`; alert routing proof still TODO. |
-| Related docs | docs/launch-readiness/test-proof.md, docs/launch-readiness/chaos-test-plan.md, docs/launch-readiness/load-test-plan.md, docs/runbooks/redis-outage.md, docs/launch-readiness/slack-alerts.md |
+| Related docs | docs/launch-readiness/test-proof.md, docs/launch-readiness/chaos-test-plan.md, docs/launch-readiness/load-test-plan.md, docs/runbooks/redis-outage.md, docs/runbooks/auth-session.md, docs/launch-readiness/slack-alerts.md |
 | Last reviewed | 2026-06-07 |
 
 ### Notes
@@ -587,11 +587,9 @@ Sentry release/environment metadata can still be implemented now. Live Slack ale
 
 ---
 
-# Clos# Closed risks
+# Closed or mitigated risks
 
-Move risks here only when full launch-stage evidence exists and no remaining blocker is attached.ed or mitigated risks
-
-Move risks here only when evidence exists.
+Move risks here only when full launch-stage evidence exists and no remaining blocker is attached.
 
 ---
 
@@ -635,6 +633,10 @@ Before public rollout:
 - docs/runbooks/postmark-degradation.md
 - docs/runbooks/twilio-degradation.md
 - docs/runbooks/notification-backlog.md
+- docs/runbooks/slo-error-budget.md
+- docs/runbooks/pro-session-lifecycle.md
+- docs/runbooks/auth-session.md
+- docs/runbooks/booking-funnel.md
 
 ## Maintenance rule
 
