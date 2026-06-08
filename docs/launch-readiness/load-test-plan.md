@@ -4,12 +4,27 @@
 
 Phase: Phase 2 — Launch ops proof  
 Scope: Private beta and public rollout load readiness  
-Current default status: TODO — launch-critical load proof is not complete  
+Current default status: PASS LOCALLY / STAGING PROOF STILL OPEN  
 Primary owner: Tori  
 Target environment: Staging first, production only with explicit approval  
-Current known baseline: Signup load test exists; launch-critical booking/payment/media/notification load tests still need to be added.
+Current known baseline: Launch-critical load scripts exist and passed locally through `pnpm verify:launch-ops` on 2026-06-07. Deployed staging dashboard proof is still required.
 
 This document defines the load-test scenarios required before public rollout. Private beta may begin with smaller smoke proof and tight cohort limits, but public rollout requires load proof for the launch-critical paths.
+
+## Current Phase 2 load baseline
+
+| Item | Current state |
+|---|---|
+| Latest audited Phase 2 code commit | `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29` |
+| Proof-recording commit | `5dc37c1` — `Record Phase 2 launch ops local proof` |
+| Date verified | 2026-06-07 |
+| Load suite status | PASS LOCALLY |
+| Command | `pnpm verify:launch-ops` |
+| Local result | 8 launch load steps passed / 0 failed / 0 skipped |
+| Signup strict success proof | PASS LOCALLY — 30/30 successful client signups, 0 rate limits, 0 real failures |
+| Aggregate proof record | `docs/launch-readiness/test-proof.md` |
+| Public rollout status | Still NO-GO until deployed staging/dashboard/alert/provider proof is complete |
+| Remaining load-related proof | Rerun against deployed staging, link dashboards, confirm provider capacity, document cleanup and rollout decision |
 
 ## Load test rule
 
@@ -36,21 +51,36 @@ Do not run load tests against production unless the target environment, data iso
 
 | Scenario | Script | Status | Launch impact |
 |---|---|---|---|
-| Signup/register | tests/load/signup-load-test.ts | EXISTS | Useful baseline, not enough for public rollout |
-| Availability bootstrap | tests/load/availability-bootstrap-load-test.ts | TODO | Required before public rollout |
-| Hold create | tests/load/hold-create-load-test.ts | TODO | Required before public rollout |
-| Booking finalize | tests/load/booking-finalize-load-test.ts | TODO | Required before public rollout |
-| Media metadata | tests/load/media-metadata-load-test.ts | TODO | Required before public rollout |
-| Checkout | tests/load/checkout-load-test.ts | TODO | Required before public rollout |
-| Stripe webhook replay | tests/load/stripe-webhook-replay-load-test.ts | TODO | Required before public rollout |
-| Notification processing | tests/load/notification-processing-load-test.ts | TODO | Required before public rollout |
-| Aggregate launch load suite | tests/load/run-launch-load-suite.ts | TODO | Required before public rollout |
+| Signup/register | `tests/load/signup-load-test.ts` | PASS LOCALLY | Strict success proof exists locally; deployed staging proof still required |
+| Availability bootstrap | `tests/load/availability-bootstrap-load-test.ts` | PASS LOCALLY | Required before public rollout; deployed staging proof still required |
+| Hold create | `tests/load/hold-create-load-test.ts` | PASS LOCALLY | Required before public rollout; stronger staging seed capacity still recommended |
+| Booking finalize | `tests/load/booking-finalize-load-test.ts` | PASS LOCALLY | Required before public rollout; local proof used slot reuse |
+| Media metadata | `tests/load/media-metadata-load-test.ts` | PASS LOCALLY | Required before public rollout; deployed storage/dashboard proof still required |
+| Checkout | `tests/load/checkout-load-test.ts` | PASS LOCALLY | Required before public rollout; deployed staging/provider proof still required |
+| Stripe webhook replay | `tests/load/stripe-webhook-replay-load-test.ts` | PASS LOCALLY | Required before public rollout; Stripe/provider dashboard proof still required |
+| Notification processing | `tests/load/notification-processing-load-test.ts` | PASS LOCALLY | Required before public rollout if notifications enabled; alert/backlog proof still required |
+| Aggregate launch load suite | `tests/load/run-launch-load-suite.ts` | PASS LOCALLY | Required before public rollout; deployed staging proof still required |
 
 ## Required package scripts
 
-Add these scripts when the corresponding test files exist:
+These scripts now exist:
 
-json {   "test:load:signup": "tsx tests/load/signup-load-test.ts",   "test:load:availability": "tsx tests/load/availability-bootstrap-load-test.ts",   "test:load:holds": "tsx tests/load/hold-create-load-test.ts",   "test:load:booking-finalize": "tsx tests/load/booking-finalize-load-test.ts",   "test:load:media-metadata": "tsx tests/load/media-metadata-load-test.ts",   "test:load:checkout": "tsx tests/load/checkout-load-test.ts",   "test:load:stripe-webhook-replay": "tsx tests/load/stripe-webhook-replay-load-test.ts",   "test:load:notifications": "tsx tests/load/notification-processing-load-test.ts",   "test:load:launch": "tsx tests/load/run-launch-load-suite.ts" } 
+```json
+{
+  "test:load:signup": "tsx tests/load/signup-load-test.ts",
+  "test:load:availability": "tsx tests/load/availability-bootstrap-load-test.ts",
+  "test:load:holds": "tsx tests/load/hold-create-load-test.ts",
+  "test:load:booking-finalize": "tsx tests/load/booking-finalize-load-test.ts",
+  "test:load:media-metadata": "tsx tests/load/media-metadata-load-test.ts",
+  "test:load:checkout": "tsx tests/load/checkout-load-test.ts",
+  "test:load:stripe-webhook-replay": "tsx tests/load/stripe-webhook-replay-load-test.ts",
+  "test:load:notifications": "tsx tests/load/notification-processing-load-test.ts",
+  "test:load:launch": "tsx tests/load/run-launch-load-suite.ts",
+  "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch"
+}
+```
+
+`verify:launch-ops` passed locally on 2026-06-07 against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof was recorded in commit `5dc37c1`.
 
 test:load:launch should run only the launch-approved staged profile for staging. It should not silently run destructive or cost-heavy tests.
 
@@ -67,7 +97,12 @@ Use explicit profiles. Do not accidentally run a public-launch stress profile wh
 
 Initial scripts may mirror the existing signup stages:
 
-text 10 RPS for 60 seconds 50 RPS for 60 seconds 100 RPS for 60 seconds 200 RPS for 120 seconds 
+```text
+10 RPS for 60 seconds
+50 RPS for 60 seconds
+100 RPS for 60 seconds
+200 RPS for 120 seconds
+```
 
 If a route has provider cost or mutation risk, start with smoke and baseline only.
 
@@ -98,7 +133,45 @@ Rules:
 
 Every load test should print a final JSON summary with:
 
-json {   "runId": "TODO",   "commit": "TODO",   "environment": "staging",   "baseUrl": "TODO",   "routeOrFlow": "TODO",   "trafficPlan": [],   "totals": {     "requests": 0,     "successes": 0,     "expectedRateLimits": 0,     "realFailures": 0,     "realFailureRateExcludingExpectedRateLimitsPct": null   },   "latencyMs": {     "all": {       "p50": null,       "p95": null,       "p99": null     },     "successOnly": {       "p50": null,       "p95": null,       "p99": null     }   },   "statusCounts": {},   "codeCounts": {},   "perStage": [],   "dataCleanup": {     "required": false,     "completed": null,     "notes": "TODO"   },   "dashboardLink": "TODO",   "decision": "TODO" } 
+```json
+{
+  "runId": "TODO",
+  "commit": "TODO",
+  "environment": "staging",
+  "baseUrl": "TODO",
+  "routeOrFlow": "TODO",
+  "trafficPlan": [],
+  "totals": {
+    "requests": 0,
+    "successes": 0,
+    "expectedRateLimits": 0,
+    "realFailures": 0,
+    "realFailureRateExcludingExpectedRateLimitsPct": null
+  },
+  "latencyMs": {
+    "all": {
+      "p50": null,
+      "p95": null,
+      "p99": null
+    },
+    "successOnly": {
+      "p50": null,
+      "p95": null,
+      "p99": null
+    }
+  },
+  "statusCounts": {},
+  "codeCounts": {},
+  "perStage": [],
+  "dataCleanup": {
+    "required": false,
+    "completed": null,
+    "notes": "TODO"
+  },
+  "dashboardLink": "TODO",
+  "decision": "TODO"
+}
+```
 
 ## Success criteria
 
@@ -138,9 +211,9 @@ A load test fails if:
 | Field | Value |
 |---|---|
 | Script | tests/load/signup-load-test.ts |
-| Status | EXISTS |
-| Required for private beta | Useful but not sufficient |
-| Required for public rollout | Useful but not sufficient |
+| Status | PASS LOCALLY |
+| Required for private beta | Yes, as auth/register smoke proof |
+| Required for public rollout | Yes, but deployed staging proof is still required |
 | Owner | Tori |
 
 ## Purpose
@@ -160,6 +233,19 @@ Proves registration route behavior under staged request volume. This is a baseli
 
 Do not count this as complete public rollout load proof by itself.
 
+## Current evidence
+
+```text
+Status: PASS LOCALLY
+Command: LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarded-for LOAD_TEST_TRUSTED_IP_PREFIX=10.251 LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true pnpm test:load:signup
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local app via STAGING_BASE_URL=http://localhost:3000
+Result: 30/30 successful client signups, 0 rate limits, 0 real failures
+Decision: Local strict signup success proof accepted; deployed staging proof still required.
+```
+
 ---
 
 # Scenario 2 — Availability bootstrap
@@ -168,8 +254,8 @@ Do not count this as complete public rollout load proof by itself.
 
 | Field | Value |
 |---|---|
-| Script | tests/load/availability-bootstrap-load-test.ts |
-| Status | TODO |
+| Script | `tests/load/availability-bootstrap-load-test.ts` |
+| Status | PASS LOCALLY |
 | Required for private beta | Recommended smoke proof |
 | Required for public rollout | Yes |
 | Owner | Tori |
@@ -205,9 +291,35 @@ Proves GET /api/availability/bootstrap can handle staged traffic for service/pro
 - Sentry dashboard shows traffic/errors.
 - No unsafe PII is printed.
 
+## Current evidence
+
+```text
+Status: PASS LOCALLY
+Command: pnpm verify:launch-ops
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local app via STAGING_BASE_URL=http://localhost:3000
+Result: Included in 8/8 passing launch load steps
+Dashboard link: TODO
+Decision: Local proof accepted; deployed staging/dashboard proof still required.
+```
+
 ## Public rollout evidence
 
-text Command: Commit: Environment: Seeded pro/service: Total requests: Success rate: p95 latency: p99 latency: Real failures: Dashboard link: Decision: 
+```text
+Command:
+Commit:
+Environment:
+Seeded pro/service:
+Total requests:
+Success rate:
+p95 latency:
+p99 latency:
+Real failures:
+Dashboard link:
+Decision:
+```
 
 ---
 
@@ -217,8 +329,8 @@ text Command: Commit: Environment: Seeded pro/service: Total requests: Success r
 
 | Field | Value |
 |---|---|
-| Script | tests/load/hold-create-load-test.ts |
-| Status | TODO |
+| Script | `tests/load/hold-create-load-test.ts` |
+| Status | PASS LOCALLY |
 | Required for private beta | Recommended smoke proof |
 | Required for public rollout | Yes |
 | Owner | Tori |
@@ -247,9 +359,35 @@ Proves booking hold creation behaves correctly under concurrent load and does no
 - Expired/stale holds do not block future valid holds after expected timeout.
 - Cleanup removes test holds or uses expiring hold TTL.
 
+## Current evidence
+
+```text
+Status: PASS LOCALLY
+Command: pnpm verify:launch-ops
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local app via STAGING_BASE_URL=http://localhost:3000
+Result: Included in 8/8 passing launch load steps
+Dashboard link: TODO
+Decision: Local proof accepted; deployed staging/dashboard proof still required.
+```
+
 ## Public rollout evidence
 
-text Command: Commit: Environment: Slot pool: Total requests: Successes: Expected conflicts: Real failures: Cleanup result: Dashboard link: Decision: 
+```text
+Command:
+Commit:
+Environment:
+Slot pool:
+Total requests:
+Successes:
+Expected conflicts:
+Real failures:
+Cleanup result:
+Dashboard link:
+Decision:
+```
 
 ---
 
@@ -259,8 +397,8 @@ text Command: Commit: Environment: Slot pool: Total requests: Successes: Expecte
 
 | Field | Value |
 |---|---|
-| Script | tests/load/booking-finalize-load-test.ts |
-| Status | TODO |
+| Script | `tests/load/booking-finalize-load-test.ts` |
+| Status | PASS LOCALLY |
 | Required for private beta | Recommended smoke proof |
 | Required for public rollout | Yes |
 | Owner | Tori |
@@ -288,9 +426,36 @@ Proves hold-to-booking finalization behaves correctly under load and does not pr
 - Data cleanup is documented.
 - Booking lifecycle dashboard shows route behavior.
 
+## Current evidence
+
+```text
+Status: PASS LOCALLY
+Command: pnpm verify:launch-ops
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local app via STAGING_BASE_URL=http://localhost:3000
+Result: Included in 8/8 passing launch load steps; local proof used slot reuse and expected conflict behavior
+Dashboard link: TODO
+Decision: Local proof accepted; deployed staging proof with stronger seeded slot capacity still required.
+```
+
 ## Public rollout evidence
 
-text Command: Commit: Environment: Hold pool: Total requests: Successes: Idempotent replays: Real failures: Duplicate booking count: Cleanup result: Dashboard link: Decision: 
+```text
+Command:
+Commit:
+Environment:
+Hold pool:
+Total requests:
+Successes:
+Idempotent replays:
+Real failures:
+Duplicate booking count:
+Cleanup result:
+Dashboard link:
+Decision:
+```
 
 ---
 
@@ -300,8 +465,8 @@ text Command: Commit: Environment: Hold pool: Total requests: Successes: Idempot
 
 | Field | Value |
 |---|---|
-| Script | tests/load/media-metadata-load-test.ts |
-| Status | TODO |
+| Script | `tests/load/media-metadata-load-test.ts` |
+| Status | PASS LOCALLY |
 | Required for private beta | Recommended smoke proof |
 | Required for public rollout | Yes |
 | Owner | Tori |
@@ -328,9 +493,34 @@ Proves media metadata persistence and upload-adjacent behavior under load withou
 - No orphaned media rows after cleanup.
 - Storage/provider failures are visible in dashboard.
 
+## Current evidence
+
+```text
+Status: PASS LOCALLY
+Command: pnpm verify:launch-ops
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local app via STAGING_BASE_URL=http://localhost:3000
+Result: Included in 8/8 passing launch load steps
+Dashboard link: TODO
+Decision: Local proof accepted; deployed staging/storage/dashboard proof still required.
+```
+
 ## Public rollout evidence
 
-text Command: Commit: Environment: Total requests: Successes: Rejected invalid requests: Real failures: Orphan cleanup result: Dashboard link: Decision: 
+```text
+Command:
+Commit:
+Environment:
+Total requests:
+Successes:
+Rejected invalid requests:
+Real failures:
+Orphan cleanup result:
+Dashboard link:
+Decision:
+```
 
 ---
 
@@ -340,8 +530,8 @@ text Command: Commit: Environment: Total requests: Successes: Rejected invalid r
 
 | Field | Value |
 |---|---|
-| Script | tests/load/checkout-load-test.ts |
-| Status | TODO |
+| Script | `tests/load/checkout-load-test.ts` |
+| Status | PASS LOCALLY |
 | Required for private beta | Recommended smoke proof |
 | Required for public rollout | Yes |
 | Owner | Tori |
@@ -369,9 +559,35 @@ Proves checkout/session/payment-intent creation behaves correctly under load usi
 - Payment dashboard shows traffic/errors.
 - Cleanup or test-data isolation is documented.
 
+## Current evidence
+
+```text
+Status: PASS LOCALLY
+Command: pnpm verify:launch-ops
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local app via STAGING_BASE_URL=http://localhost:3000
+Result: Included in 8/8 passing launch load steps
+Dashboard link: TODO
+Decision: Local proof accepted; deployed staging/payment-provider proof still required.
+```
+
 ## Public rollout evidence
 
-text Command: Commit: Environment: Stripe mode: Total requests: Successes: Expected provider/rate-limit failures: Real failures: Duplicate checkout/payment mutation count: Dashboard link: Decision: 
+```text
+Command:
+Commit:
+Environment:
+Stripe mode:
+Total requests:
+Successes:
+Expected provider/rate-limit failures:
+Real failures:
+Duplicate checkout/payment mutation count:
+Dashboard link:
+Decision:
+```
 
 ---
 
@@ -381,8 +597,8 @@ text Command: Commit: Environment: Stripe mode: Total requests: Successes: Expec
 
 | Field | Value |
 |---|---|
-| Script | tests/load/stripe-webhook-replay-load-test.ts |
-| Status | TODO |
+| Script | `tests/load/stripe-webhook-replay-load-test.ts` |
+| Status | PASS LOCALLY |
 | Required for private beta | Recommended smoke/idempotency proof |
 | Required for public rollout | Yes |
 | Owner | Tori |
@@ -410,9 +626,36 @@ Proves Stripe webhook replay, signature verification, dedupe, and idempotent sta
 - Webhook dashboard shows received/processed/replayed/failure events.
 - No secrets printed.
 
+## Current evidence
+
+```text
+Status: PASS LOCALLY
+Command: pnpm verify:launch-ops
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local app via STAGING_BASE_URL=http://localhost:3000
+Result: Included in 8/8 passing launch load steps
+Dashboard link: TODO
+Decision: Local proof accepted; deployed staging/Stripe dashboard proof still required.
+```
+
 ## Public rollout evidence
 
-text Command: Commit: Environment: Fixture: Replay count: Accepted: Deduped: Rejected invalid signatures: Real failures: Double mutation count: Dashboard link: Decision: 
+```text
+Command:
+Commit:
+Environment:
+Fixture:
+Replay count:
+Accepted:
+Deduped:
+Rejected invalid signatures:
+Real failures:
+Double mutation count:
+Dashboard link:
+Decision:
+```
 
 ---
 
@@ -422,8 +665,8 @@ text Command: Commit: Environment: Fixture: Replay count: Accepted: Deduped: Rej
 
 | Field | Value |
 |---|---|
-| Script | tests/load/notification-processing-load-test.ts |
-| Status | TODO |
+| Script | `tests/load/notification-processing-load-test.ts` |
+| Status | PASS LOCALLY |
 | Required for private beta | Recommended if notifications enabled |
 | Required for public rollout | Yes if notifications enabled |
 | Owner | Tori |
@@ -451,9 +694,36 @@ Proves notification queue/drain behavior, provider degradation visibility, and m
 - No raw PII printed.
 - Notification dashboard shows traffic/errors/backlog.
 
+## Current evidence
+
+```text
+Status: PASS LOCALLY
+Command: pnpm verify:launch-ops
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local app via STAGING_BASE_URL=http://localhost:3000
+Result: Included in 8/8 passing launch load steps
+Dashboard link: TODO
+Decision: Local proof accepted; deployed staging/alert/backlog proof still required.
+```
+
 ## Public rollout evidence
 
-text Command: Commit: Environment: Delivery mode: Total notifications: Processed: Queued: Retried: Manual follow-up: Real failures: Dashboard link: Decision: 
+```text
+Command:
+Commit:
+Environment:
+Delivery mode:
+Total notifications:
+Processed:
+Queued:
+Retried:
+Manual follow-up:
+Real failures:
+Dashboard link:
+Decision:
+```
 
 ---
 
@@ -463,8 +733,8 @@ text Command: Commit: Environment: Delivery mode: Total notifications: Processed
 
 | Field | Value |
 |---|---|
-| Script | tests/load/run-launch-load-suite.ts |
-| Status | TODO |
+| Script | `tests/load/run-launch-load-suite.ts` |
+| Status | PASS LOCALLY |
 | Required for public rollout | Yes |
 | Owner | Tori |
 
@@ -494,7 +764,34 @@ Runs the approved launch load scenarios in a safe order and produces one summary
 
 ## Aggregate summary format
 
-json {   "runId": "TODO",   "commit": "TODO",   "environment": "staging",   "startedAt": "TODO",   "finishedAt": "TODO",   "scenarios": [],   "passed": false,   "failedScenarios": [],   "dashboardLink": "TODO",   "decision": "TODO" } 
+```json
+{
+  "runId": "TODO",
+  "commit": "TODO",
+  "environment": "staging",
+  "startedAt": "TODO",
+  "finishedAt": "TODO",
+  "scenarios": [],
+  "passed": false,
+  "failedScenarios": [],
+  "dashboardLink": "TODO",
+  "decision": "TODO"
+}
+```
+## Current evidence
+
+```text
+Status: PASS LOCALLY
+Command: LOAD_TEST_ALLOW_SLOT_REUSE=true LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarded-for LOAD_TEST_TRUSTED_IP_PREFIX=10.252 LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true pnpm verify:launch-ops
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29
+Proof-recording commit: 5dc37c1
+Date: 2026-06-07
+Environment: local app via STAGING_BASE_URL=http://localhost:3000
+Result: 8 steps passed / 0 failed / 0 skipped
+Dashboard link: TODO
+Decision: Local aggregate proof accepted; deployed staging/dashboard proof still required.
+```
+
 
 ---
 
@@ -533,15 +830,50 @@ Load scripts must not print:
 
 Use this template after each staging run.
 
-md ## Load evidence: <scenario>  Status: PASS / FAIL / BLOCKED   Owner: Tori   Commit: TODO   Environment: staging   Date: TODO   Command: TODO   Dashboard link: TODO   Script: TODO    ### Summary  Total requests: TODO   Successes: TODO   Expected rate limits/conflicts: TODO   Real failures: TODO   p50 latency: TODO   p95 latency: TODO   p99 latency: TODO    ### Data cleanup  Required: yes/no   Completed: yes/no   Notes: TODO    ### Decision  TODO  ### Follow-up  TODO 
+```md
+## Load evidence: <scenario>
+
+Status: PASS / FAIL / BLOCKED
+Owner: Tori
+Commit: TODO
+Environment: staging
+Date: TODO
+Command: TODO
+Dashboard link: TODO
+Script: TODO
+
+### Summary
+
+Total requests: TODO
+Successes: TODO
+Expected rate limits/conflicts: TODO
+Real failures: TODO
+p50 latency: TODO
+p95 latency: TODO
+p99 latency: TODO
+
+### Data cleanup
+
+Required: yes/no
+Completed: yes/no
+Notes: TODO
+
+### Decision
+
+TODO
+
+### Follow-up
+
+TODO
+```
 
 ## Public rollout requirement
 
 Public rollout remains blocked until:
 
-- Required load-test scripts exist.
-- test:load:launch exists.
-- Staging load proof is recorded.
+- Required load-test scripts exist — PASS LOCALLY.
+- `test:load:launch` exists — PASS LOCALLY.
+- Deployed staging load proof is recorded.
 - Booking finalize and Stripe webhook replay have no correctness failures.
 - Media/private-media load proof does not expose private data.
 - Notification load proof does not spam real users.
@@ -557,6 +889,8 @@ Public rollout remains blocked until:
 - docs/launch-readiness/sentry-dashboard.md
 - docs/launch-readiness/slack-alerts.md
 - tests/load/signup-load-test.ts
+- docs/launch-readiness/test-proof.md
+- tests/load/run-launch-load-suite.ts
 
 ## Maintenance rule
 
