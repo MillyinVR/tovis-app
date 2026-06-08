@@ -77,9 +77,9 @@ A gate is not complete without evidence.
 
 | Gate | Status | Owner | Evidence | Date | Notes |
 |---|---|---|---|---|---|
-| Local worktree is clean | TODO | Tori | `git status --short` showed local doc/test changes | 2026-06-07 | Worktree is intentionally dirty while Phase 2 proof/docs updates are being prepared. Recheck after commit. |
+| Local worktree is clean | TODO | Tori | TODO | TODO | Recheck with `git status --short` after this proof update is committed. |
 | pnpm typecheck passes | PASS | Tori | `pnpm typecheck` passed | 2026-06-07 | Required before launch-stage testing. |
-| pnpm verify:privacy-phase1 passes | TODO | Tori | TODO | TODO | Required because Phase 1 privacy is a launch blocker. |
+| pnpm verify:privacy-phase1 passes | PASS | Tori | `pnpm verify:privacy-phase1` passed: canonical normalization passed, PII plaintext reads passed with 471 known baseline entries, privacy tests passed 240 total tests | 2026-06-07 | Required because Phase 1 privacy is a launch blocker. |
 | Phase 1 privacy proof is current | TODO | Tori | docs/privacy/phase-1-privacy-proof.md | TODO | Must reflect current launch commit. |
 | Remaining Phase 1 launch-env reruns are tracked | TODO | Tori | docs/privacy/phase-1-remaining-work.md | TODO | HMAC/address backfills may be launch-env reruns, not code blockers. |
 | Local branch matches intended launch commit | PASS | Tori | git rev-parse HEAD returned ae30aff20aff8b205e65f57bf3ae8b5b8b553b29 | 2026-06-07 | Current audited commit recorded. |
@@ -211,8 +211,6 @@ LOAD_TEST_TRUSTED_IP_PREFIX=10.252 \
 LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true \
 pnpm verify:launch-ops
 
-### What was verified
-
 - pnpm test:chaos passed.
 - Chaos result: 6 files passed, 17 tests passed.
 - pnpm test:load:launch passed.
@@ -337,10 +335,10 @@ Use existing runbooks where possible:
 | Twilio | docs/runbooks/twilio-degradation.md |
 | Private media | docs/runbooks/private-media-incident.md |
 | Notifications | docs/runbooks/notification-backlog.md |
-| Booking funnel | TODO |
-| Auth/session | TODO |
-| Pro session lifecycle | TODO |
-| SLO/error budget | TODO |
+| Booking funnel | docs/runbooks/booking-funnel.md |
+| Auth/session | docs/runbooks/auth-session.md |
+| Pro session lifecycle | docs/runbooks/pro-session-lifecycle.md |
+| SLO/error budget | docs/runbooks/slo-error-budget.md |
 
 If a runbook is missing, either create it or explicitly map the alert to a sufficient existing runbook.
 

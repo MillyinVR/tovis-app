@@ -6,18 +6,21 @@ Do not mark a launch-readiness item fully proven unless the relevant command, en
 
 ---
 
-## Proof run — Phase 2 launch-ops local smoke proof
+## Proof run — Phase 2 launch ops local smoke proof rerun
 
-- Checklist item: Phase 2 launch ops proof — chaos suite and launch load suite.
+- Checklist item: Phase 2 launch ops local proof is current.
 - Owner: Tori Morales
 - Date: 2026-06-07
-- Related commit: TODO — run git rev-parse HEAD and paste the SHA here.
-- Status: Passed locally with documented caveats.
+- Related commits:
+  - ae30aff20aff8b205e65f57bf3ae8b5b8b553b29 — audited code commit used for earlier Phase 2 local proof
+  - 5dc37c1 — Record Phase 2 launch ops local proof
+  - 7f0fe87 — Link completed runbooks from Sentry dashboard proof
+- Status: Passed locally
 - Environment:
   - Local: yes
   - CI: not yet recorded
-  - Staging: not yet recorded
-  - Production: not yet recorded
+  - Deployed staging: not yet recorded
+  - Production: not used for load testing
 - Launch decision impact:
   - Local launch-ops harness: PASS
   - Deployed staging proof: TODO
@@ -27,33 +30,54 @@ Do not mark a launch-readiness item fully proven unless the relevant command, en
 
 ### Test summary
 
-This run verifies that the Phase 2 launch-ops local proof harness is green.
+This run verifies that the Phase 2 local launch-ops suite is green after the runbook-link cleanup and current alert/dashboard documentation updates.
 
 The proof covered:
 
-- chaos/failure-mode tests
-- availability bootstrap load
-- hold create load
-- booking finalize load
-- checkout load
-- media metadata load
-- notification processing load
-- Stripe webhook replay load
-- signup load with strict signup-success proof
+- TypeScript compile safety
+- Phase 1 privacy verification
+- Deterministic chaos tests
+- Aggregate launch load suite
+- Availability bootstrap
+- Hold create
+- Booking finalize
+- Checkout
+- Media metadata
+- Notification processing
+- Stripe webhook replay
+- Signup/register strict success mode
 
 This proof confirms the local launch-ops test harness works and that the smoke profile can complete successfully against a locally running app via STAGING_BASE_URL=http://localhost:3000.
 
-This proof does not replace deployed staging proof, live Sentry dashboard proof, provider dashboard proof, Slack/PagerDuty/Opsgenie alert routing proof, or public rollout signoff.
+This proof does not replace deployed staging proof, live Sentry dashboard proof, provider dashboard proof, Slack/PagerDuty/Opsgenie alert routing proof, backup owner assignment, public escalation proof, or launch signoff.
 
 ### Commands run
 
-bash pnpm vitest run tests/chaos/redis-outage.test.ts --config vitest.config.mts 
+bash pnpm typecheck 
 
-Result: 1 test file passed, 1 test passed.
+Result: passed.
+
+bash pnpm verify:privacy-phase1 
+
+Result: passed.
+
+Privacy verification details:
+
+- check-canonical-normalization: passed
+- check-pii-plaintext-reads: passed with 471 known baseline entries
+- test:privacy-phase1: 14 files passed, 195 tests passed
+- test:privacy-export-delete: 6 files passed, 45 tests passed
 
 bash pnpm test:chaos 
 
-Result: 6 test files passed, 17 tests passed.
+Result: passed.
+
+Chaos verification details:
+
+- 6 test files passed
+- 17 tests passed
+- Failures: 0
+- Skipped: 0
 
 Known stderr during DB degradation tests:
 
@@ -62,68 +86,60 @@ Known stderr during DB degradation tests:
 
 These stderr messages are expected for the DB degradation chaos tests. The tests verify controlled 500 behavior and no unsafe database failure detail leakage to callers.
 
-bash pnpm test 
-
-Result: 311 test files passed, 3317 tests passed.
-
-bash LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarded-for \ LOAD_TEST_TRUSTED_IP_PREFIX=10.251 \ LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true \ pnpm test:load:signup 
-
-Result: passed.
-
-Signup strict success proof:
-
-- Run ID: 20260607191115006
-- Profile: smoke
-- Base URL: http://localhost:3000
-- Requests: 30
-- success201: 30
-- expected429: 0
-- realFailures: 0
-- p50: 383.78 ms
-- p95: 407.27 ms
-- p99: 624.82 ms
-
 bash LOAD_TEST_ALLOW_SLOT_REUSE=true \ LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarded-for \ LOAD_TEST_TRUSTED_IP_PREFIX=10.252 \ LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true \ pnpm verify:launch-ops 
 
 Result: passed.
 
 Aggregate launch load result:
 
-- Run ID: 20260607191351099
-- Profile: smoke
-- Environment label: staging
-- Actual target: local app via STAGING_BASE_URL=http://localhost:3000
-- Total duration: 120591.24 ms
-- Steps: 8
-- Passed: 8
-- Failed: 0
-- Skipped: 0
+json {   "runId": "20260608020633267",   "environment": "staging",   "baseUrl": "http://localhost:3000",   "profile": "smoke",   "suite": "launch-load",   "totals": {     "steps": 8,     "passed": 8,     "failed": 0,     "skipped": 0   } } 
 
 ### Launch load step results
 
 | Step | Status | Result summary |
 |---|---|---|
-| availability-bootstrap | Passed | Smoke profile completed successfully. |
-| hold-create | Passed | 10 successful hold creates; no real failures in final full-suite run. |
-| booking-finalize | Passed | 1 hold/finalize flow succeeded; 4 expected TIME_BOOKED conflicts due to slot reuse; no real failures. |
+| availability-bootstrap | Passed | 30/30 successful requests; 0 real failures. |
+| hold-create | Passed | 10 successful hold creates in the successful full-suite rerun. |
+| booking-finalize | Passed | Hold/finalize flow succeeded with expected slot conflict behavior; 0 real failures. |
 | checkout | Passed | 10/10 successful checkout mark-paid requests. |
 | media-metadata | Passed | 10/10 successful media metadata requests. |
 | notifications | Passed | 10/10 successful notification processing requests. |
-| stripe-webhook-replay | Passed | 10/10 successful webhook replay requests; 9 duplicate replay responses and 1 unhandled replay event were reported by the script. |
+| stripe-webhook-replay | Passed | 10/10 successful webhook replay requests; duplicate replay behavior visible. |
 | signup | Passed | Strict signup-success mode enabled; 30/30 successful client signups, 0 rate limits, 0 real failures. |
+
+### Signup strict success proof
+
+- Run ID: 20260608020803866
+- Profile: smoke
+- Base URL: http://localhost:3000
+- Requests: 30
+- Success 201: 30
+- Expected 429: 0
+- Real failures: 0
+- p50 latency: 385.42 ms
+- p95 latency: 413.43 ms
+- p99 latency: 621.31 ms
 
 ### Important configuration used
 
 bash LOAD_TEST_ALLOW_SLOT_REUSE=true LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarded-for LOAD_TEST_TRUSTED_IP_PREFIX=10.252 LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true STAGING_BASE_URL=http://localhost:3000 
 
+### Notes
+
+An earlier launch load rerun failed at signup because the phone pool had already-used numbers and the script correctly classified ACCOUNT_EXISTS as real failures.
+
+The successful rerun used strict signup success mode and synthetic trusted IP headers so signup requests did not collapse into one rate-limit bucket.
+
+Slot reuse was intentionally enabled for local smoke proof because the available selected-day slot pool is limited and conflict pressure is expected during hold/finalize testing.
+
 ### Known limitations
 
 - Local only. This run targeted http://localhost:3000, not a deployed staging URL.
-- The load scripts reported environment: "staging" because of environment naming, but the actual target was local.
-- The load script output reported commit: null; record the actual commit manually using git rev-parse HEAD.
+- The load scripts reported "environment": "staging" because of environment naming, but the actual target was local.
+- The load script output reported "commit": null; record the actual commit manually using git rev-parse HEAD before final launch signoff.
 - Hold/finalize proof used LOAD_TEST_ALLOW_SLOT_REUSE=true, so expected slot conflicts are part of the proof. This is acceptable for local smoke proof but not final public rollout capacity proof.
 - Synthetic trusted IP headers were used to prove signup success behavior without all requests collapsing into one rate-limit bucket.
-- Signup load creates real local test users and consumes the phone pool. Future runs require a fresh phone pool.
+- Signup load creates real local test users and consumes the phone pool. Future runs require a fresh phone pool or generated non-delivering test numbers.
 - This does not prove deployed staging or production readiness.
 - This does not prove live Sentry dashboard coverage.
 - This does not prove Slack/PagerDuty/Opsgenie alert delivery.
@@ -132,11 +148,8 @@ bash LOAD_TEST_ALLOW_SLOT_REUSE=true LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarde
 
 ### Follow-ups
 
-- Record the current commit SHA.
+- Record the current commit SHA after this proof update is committed.
 - Update docs/launch-readiness/go-no-go.md to point to this proof.
-- Update docs/launch-readiness/load-test-plan.md from TODO to PASS LOCALLY / STAGING PROOF TODO.
-- Update docs/launch-readiness/chaos-test-plan.md from TODO/stale proof to PASS LOCALLY / OPERATIONAL PROOF TODO.
-- Update docs/launch-readiness/risk-register.md to mark local load/chaos implementation risks as mitigated locally while keeping dashboard/alert/provider proof risks open.
 - Run the same suite against a deployed staging target and record that separately.
 - Build and link live Sentry dashboard sections.
 - Wire alert routing and record one synthetic alert delivery proof.
