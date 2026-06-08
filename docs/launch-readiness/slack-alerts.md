@@ -35,7 +35,10 @@ Sentry-to-Slack alert routing is currently blocked because the required Sentry p
 | Deployed Sentry intake | PASS | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5 |
 | Chaos suite | PASSED LOCALLY | pnpm test:chaos: 6 files / 17 tests passed |
 | Launch load suite | PASSED LOCALLY | pnpm test:load:launch: 8/8 launch load steps passed |
-| Aggregate launch ops verification | PASSED LOCALLY | pnpm verify:launch-ops passed locally at commit 27bfa28 |
+| Aggregate launch ops verification | PASSED LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md` and commit `5dc37c1` |
+| Load plan reconciliation | PASS | Updated in commit `f41b203` — `Update load test plan with current Phase 2 proof` |
+| Sentry dashboard proof reconciliation | PASS | Updated in commit `aa4fe4d` — `Update Sentry dashboard proof with current Phase 2 status` |
+| Booking funnel runbook | PASS | `docs/runbooks/booking-funnel.md` exists |
 | Slack alert routing | BLOCKED | Requires paid Sentry plan or alternate alerting path |
 | Synthetic Slack alert proof | BLOCKED | Cannot complete until routing path exists |
 | Backup owner / escalation | BLOCKED | Required before public rollout |
@@ -118,6 +121,15 @@ These are initial targets. Tighten them when there is a named backup owner and t
 | Notifications | Tori | TODO | Backup blocks public rollout. |
 | Auth/session | Tori | TODO | Backup blocks public rollout. |
 | SLO/error budget | Tori | TODO | Backup blocks public rollout. |
+
+# Current runbook gap summary
+
+| Alert area | Runbook status | Launch impact |
+|---|---|---|
+| Booking funnel | `docs/runbooks/booking-funnel.md` exists | Supports booking/availability/hold/finalize alerts |
+| Auth/session | `docs/runbooks/auth-session.md` TODO create | Blocks complete auth alert readiness |
+| Pro session lifecycle | `docs/runbooks/pro-session-lifecycle.md` TODO create | Blocks complete pro lifecycle alert readiness |
+| SLO/error budget | `docs/runbooks/slo-error-budget.md` TODO create | Blocks complete public-rollout SLO alert readiness |
 
 ---
 
@@ -235,7 +247,7 @@ Chaos test or staging-safe synthetic alert proves Redis degradation routes corre
 | Destination | #tovis-ops-alerts or approved alternate |
 | Source | Sentry errors/app event |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
-| Runbook | TODO |
+| Runbook | docs/runbooks/booking-funnel.md |
 | Threshold | TODO |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
@@ -338,7 +350,7 @@ Private media synthetic/policy proof must be linked before beta and public rollo
 | Destination | #tovis-ops-alerts or approved alternate |
 | Source | Sentry errors/app event |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
-| Runbook | TODO |
+| Runbook | docs/runbooks/auth-session.md — TODO create |
 | Threshold | TODO |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
@@ -374,7 +386,7 @@ Synthetic auth failure alert or staging test must route to Slack or the approved
 | Destination | #tovis-ops-alerts or approved alternate |
 | Source | Sentry errors/app event |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
-| Runbook | TODO |
+| Runbook | docs/runbooks/booking-funnel.md |
 | Threshold | TODO |
 | Private beta blocker | Yes, if missing before beta |
 | Public rollout blocker | Yes |
@@ -407,7 +419,7 @@ Staging hold-create proof should be linked before public rollout.
 | Destination | #tovis-ops-alerts or approved alternate |
 | Source | Sentry performance/errors |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
-| Runbook | docs/runbooks/health-readiness.md |
+| Runbook | docs/runbooks/booking-funnel.md |
 | Threshold | TODO |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
@@ -441,7 +453,7 @@ Availability bootstrap load or synthetic proof should route failures to Slack or
 | Destination | #tovis-ops-alerts or approved alternate |
 | Source | Sentry errors/app event |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
-| Runbook | TODO |
+| Runbook | docs/runbooks/pro-session-lifecycle.md — TODO create |
 | Threshold | TODO |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
@@ -641,7 +653,7 @@ Rate-limit synthetic or chaos proof should link to this alert.
 | Destination | #tovis-ops-alerts or approved alternate |
 | Source | Sentry performance/errors |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
-| Runbook | TODO |
+| Runbook | docs/runbooks/slo-error-budget.md — TODO create |
 | Threshold | TODO |
 | Private beta blocker | No, if core route alerts exist |
 | Public rollout blocker | Yes |
@@ -736,7 +748,25 @@ Before public rollout, test at least one P1 escalation path end-to-end.
 
 Use this format for Slack alert messages where possible:
 
-text id="f2nsn5" :rotating_light: <severity> <alert name>  Environment: <staging|production> Release: <release> Status: <triggered|resolved> Threshold: <threshold> Observed: <observed value> Dashboard: <link> Runbook: <link> Owner: <owner> Backup: <backup or TODO> Launch impact: <private beta blocker/public rollout blocker/info>  First action: 1. <step> 2. <step> 3. <step> 
+```text
+:rotating_light: <severity> <alert name>
+
+Environment: <staging|production>
+Release: <release>
+Status: <triggered|resolved>
+Threshold: <threshold>
+Observed: <observed value>
+Dashboard: <link>
+Runbook: <link>
+Owner: <owner>
+Backup: <backup or TODO>
+Launch impact: <private beta blocker/public rollout blocker/info>
+
+First action:
+1. <step>
+2. <step>
+3. <step>
+```
 
 ---
 
@@ -744,7 +774,25 @@ text id="f2nsn5" :rotating_light: <severity> <alert name>  Environment: <staging
 
 Use this when marking an alert complete.
 
-md id="5zskpm" ## Verification: <alert name>  Status: PASS / FAIL / BLOCKED Environment: staging / production Date: TODO Owner: Tori Backup: TODO Destination: TODO Dashboard link: TODO Runbook link: TODO Trigger method: TODO Threshold: TODO Observed behavior: TODO Acknowledged by: TODO Time to acknowledgement: TODO Result: TODO Follow-up: TODO 
+```md
+## Verification: <alert name>
+
+Status: PASS / FAIL / BLOCKED  
+Environment: staging / production  
+Date: TODO  
+Owner: Tori  
+Backup: TODO  
+Destination: TODO  
+Dashboard link: TODO  
+Runbook link: TODO  
+Trigger method: TODO  
+Threshold: TODO  
+Observed behavior: TODO  
+Acknowledged by: TODO  
+Time to acknowledgement: TODO  
+Result: TODO  
+Follow-up: TODO  
+```
 
 ---
 
@@ -788,6 +836,10 @@ Public rollout cannot proceed until:
 - docs/runbooks/postmark-degradation.md
 - docs/runbooks/twilio-degradation.md
 - docs/runbooks/notification-backlog.md
+- docs/runbooks/booking-funnel.md
+- docs/runbooks/auth-session.md — TODO create
+- docs/runbooks/pro-session-lifecycle.md — TODO create
+- docs/runbooks/slo-error-budget.md — TODO create
 
 ---
 
