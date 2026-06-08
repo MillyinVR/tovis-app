@@ -136,22 +136,22 @@ Public rollout cannot begin until:
 
 | Area | Severity | Status | Evidence | Notes |
 |---|---|---|---|---|
-| Health/readiness failure | P1 | TODO | TODO | Required. |
-| Database/Postgres outage | P1 | TODO | TODO | Required. |
-| Redis/rate-limit failure | P1 | TODO | TODO | Required. |
-| Booking hold create failure spike | P2 | TODO | TODO | Required. |
-| Booking finalize failure spike | P1 | TODO | TODO | Required. |
-| Availability error/latency spike | P2 | TODO | TODO | Required. |
-| Pro session lifecycle failure spike | P2 | TODO | TODO | Required. |
-| Media upload/storage failure spike | P2 | TODO | TODO | Required. |
-| Private media access regression | P1 | TODO | TODO | Required. |
-| Stripe checkout/webhook failure spike | P1 | TODO | TODO | Required. |
-| Notification backlog/delivery failure | P2 | TODO | TODO | Required. |
-| Postmark degradation | P2 | TODO | TODO | Required if email enabled. |
-| Twilio degradation | P2 | TODO | TODO | Required if SMS enabled. |
-| Auth failure spike | P1 | TODO | TODO | Required. |
-| Rate-limit anomaly | P2 | TODO | TODO | Required. |
-| API error budget burn | P2 | TODO | TODO | Required. |
+| Health/readiness failure | P1 | TODO | docs/runbooks/health-readiness.md | Required. |
+| Database/Postgres outage | P1 | TODO | docs/runbooks/postgres-outage.md | Required. |
+| Redis/rate-limit failure | P1 | TODO | docs/runbooks/redis-outage.md | Required. |
+| Booking hold create failure spike | P2 | TODO | docs/runbooks/booking-funnel.md | Required. |
+| Booking finalize failure spike | P1 | TODO | docs/runbooks/booking-funnel.md | Required. |
+| Availability error/latency spike | P2 | TODO | docs/runbooks/booking-funnel.md | Required. |
+| Pro session lifecycle failure spike | P2 | TODO | docs/runbooks/pro-session-lifecycle.md | Required. |
+| Media upload/storage failure spike | P2 | TODO | docs/runbooks/supabase-storage-outage.md | Required. |
+| Private media access regression | P1 | TODO | docs/runbooks/private-media-incident.md | Required. |
+| Stripe checkout/webhook failure spike | P1 | TODO | docs/runbooks/stripe-degradation.md | Required. |
+| Notification backlog/delivery failure | P2 | TODO | docs/runbooks/notification-backlog.md | Required. |
+| Postmark degradation | P2 | TODO | docs/runbooks/postmark-degradation.md | Required if email enabled. |
+| Twilio degradation | P2 | TODO | docs/runbooks/twilio-degradation.md | Required if SMS enabled. |
+| Auth failure spike | P1 | TODO | docs/runbooks/auth-session.md | Required. |
+| Rate-limit anomaly | P2 | TODO | docs/runbooks/redis-outage.md | Required. |
+| API error budget burn | P2 | TODO | docs/runbooks/slo-error-budget.md | Required. |
 
 ## Required load test proof
 
@@ -159,21 +159,37 @@ Public rollout requires launch-critical load proof.
 
 | Flow | Status | Owner | Evidence | Notes |
 |---|---|---|---|---|
-| Load test harness exists | TODO | Tori | TODO | Required. |
-| pnpm test:load:launch exists | TODO | Tori | TODO | Required. |
-| Availability bootstrap load test | TODO | Tori | TODO | Required. |
-| Hold create load test | TODO | Tori | TODO | Required. |
-| Booking finalize load test | TODO | Tori | TODO | Required. |
-| Media metadata load test | TODO | Tori | TODO | Required. |
-| Checkout load test | TODO | Tori | TODO | Required. |
-| Stripe webhook replay load test | TODO | Tori | TODO | Required. |
-| Notification processing load test | TODO | Tori | TODO | Required. |
-| Load test summary recorded | TODO | Tori | TODO | Include commit, env, date, RPS, latency, failure rates. |
+| Load test harness exists | PASS | Tori | `tests/load/*`; `tests/load/run-launch-load-suite.ts`; package scripts | Required. |
+| pnpm test:load:launch exists | PASS | Tori | `pnpm test:load:launch` exists and is included in `pnpm verify:launch-ops` | Required. |
+| Availability bootstrap load test | PASS LOCALLY / STAGING TODO | Tori | `pnpm test:load:availability`; local proof in `docs/launch-readiness/test-proof.md` | Required. |
+| Hold create load test | PASS LOCALLY / STAGING TODO | Tori | `pnpm test:load:holds`; local proof in `docs/launch-readiness/test-proof.md` | Required. |
+| Booking finalize load test | PASS LOCALLY / STAGING TODO | Tori | `pnpm test:load:booking-finalize`; local proof in `docs/launch-readiness/test-proof.md` | Required. |
+| Media metadata load test | PASS LOCALLY / STAGING TODO | Tori | `pnpm test:load:media-metadata`; local proof in `docs/launch-readiness/test-proof.md` | Required. |
+| Checkout load test | PASS LOCALLY / STAGING TODO | Tori | `pnpm test:load:checkout`; local proof in `docs/launch-readiness/test-proof.md` | Required. |
+| Stripe webhook replay load test | PASS LOCALLY / STAGING TODO | Tori | `pnpm test:load:stripe-webhook-replay`; local proof in `docs/launch-readiness/test-proof.md` | Required. |
+| Notification processing load test | PASS LOCALLY / STAGING TODO | Tori | `pnpm test:load:notifications`; local proof in `docs/launch-readiness/test-proof.md` | Required. |
+| Load test summary recorded | PASS LOCALLY / STAGING TODO | Tori | Local proof recorded in `docs/launch-readiness/test-proof.md`; deployed staging proof still TODO | Include commit, env, date, RPS, latency, failure rates. |
 | Load test cleanup verified | TODO | Tori | TODO | Prevent staging/test data mess. |
 
 Required load-test summary fields:
 
-text Commit: Environment: Date: Command: Total requests: RPS profile: Success rate: p50 latency: p95 latency: p99 latency: Real failures: Expected rate limits: Data cleanup: Dashboard link: Decision: 
+```text
+Commit: TODO
+Environment: TODO
+Date: TODO
+Command: TODO
+Total requests: TODO
+RPS profile: TODO
+Success rate: TODO
+p50 latency: TODO
+p95 latency: TODO
+p99 latency: TODO
+Real failures: TODO
+Expected rate limits: TODO
+Data cleanup: TODO
+Dashboard link: TODO
+Decision: TODO
+```
 
 ## Required chaos/failure proof
 
@@ -181,13 +197,13 @@ Public rollout requires deterministic failure-mode proof.
 
 | Scenario | Status | Owner | Evidence | Notes |
 |---|---|---|---|---|
-| Chaos test harness exists | TODO | Tori | TODO | Required. |
-| pnpm test:chaos exists | TODO | Tori | TODO | Required. |
-| Redis outage behavior proven | TODO | Tori | TODO | Must not fail open on high-risk paths. |
-| Supabase Storage outage behavior proven | TODO | Tori | TODO | Must avoid unsafe media state. |
-| Stripe webhook storm behavior proven | TODO | Tori | TODO | Must prove dedupe/idempotency. |
-| Postmark degradation behavior proven | TODO | Tori | TODO | Must prove retry/manual follow-up. |
-| Twilio degradation behavior proven | TODO | Tori | TODO | Must prove retry/manual follow-up. |
+| Chaos test harness exists | PASS | Tori | `tests/chaos/*`; `pnpm test:chaos` | Required. |
+| pnpm test:chaos exists | PASS | Tori | `pnpm test:chaos` passed locally: 6 files / 17 tests | Required. |
+| Redis outage behavior proven | PASS LOCALLY / OPERATIONAL TODO | Tori | `tests/chaos/redis-outage.test.ts`; local proof in `docs/launch-readiness/test-proof.md` | Must not fail open on high-risk paths. |
+| Supabase Storage outage behavior proven | PASS LOCALLY / OPERATIONAL TODO | Tori | `tests/chaos/supabase-storage-outage.test.ts`; local proof in `docs/launch-readiness/test-proof.md` | Must avoid unsafe media state. |
+| Stripe webhook storm behavior proven | PASS LOCALLY / OPERATIONAL TODO | Tori | `tests/chaos/stripe-webhook-storm.test.ts`; local proof in `docs/launch-readiness/test-proof.md` | Must prove dedupe/idempotency. |
+| Postmark degradation behavior proven | PASS LOCALLY / OPERATIONAL TODO | Tori | `tests/chaos/postmark-degradation.test.ts`; local proof in `docs/launch-readiness/test-proof.md` | Must prove retry/manual follow-up. |
+| Twilio degradation behavior proven | PASS LOCALLY / OPERATIONAL TODO | Tori | `tests/chaos/twilio-degradation.test.ts`; local proof in `docs/launch-readiness/test-proof.md` | Must prove retry/manual follow-up. |
 | DB replica lag/stale-read behavior proven | TODO | Tori | TODO | Critical writes must not rely on stale reads. |
 | Chaos results recorded in risk register | TODO | Tori | docs/launch-readiness/risk-register.md | Required. |
 
@@ -291,7 +307,18 @@ Rollback or pause rollout if any of these occur:
 
 Post-rollback verification:
 
-text Health/readiness: Booking flow: Payment/webhook: Media/private-media: Notifications: Auth/session: Sentry errors: Open incidents: User comms: Decision: 
+```text
+Health/readiness: TODO
+Booking flow: TODO
+Payment/webhook: TODO
+Media/private-media: TODO
+Notifications: TODO
+Auth/session: TODO
+Sentry errors: TODO
+Open incidents: TODO
+User comms: TODO
+Decision: TODO
+```
 
 ## Support readiness
 
@@ -341,7 +368,23 @@ Public rollout is automatically blocked if any of the following are true:
 
 Final decision:
 
-text Decision: TODO Commit: TODO Environment: TODO Rollout stage: TODO Start date/time: TODO Accepted risks: TODO Blocking risks: TODO Rollback owner: TODO Rollback trigger: TODO Support channel: TODO Dashboard link: TODO Alert proof: TODO Load proof: TODO Chaos proof: TODO Notes: TODO 
+```text
+Decision: TODO
+Commit: TODO
+Environment: TODO
+Rollout stage: TODO
+Start date/time: TODO
+Accepted risks: TODO
+Blocking risks: TODO
+Rollback owner: TODO
+Rollback trigger: TODO
+Support channel: TODO
+Dashboard link: TODO
+Alert proof: TODO
+Load proof: TODO
+Chaos proof: TODO
+Notes: TODO
+```
 
 ## Related documents
 
