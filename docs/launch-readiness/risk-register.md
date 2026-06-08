@@ -4,12 +4,27 @@
 
 Phase: Phase 2 — Launch ops proof  
 Scope: Private beta and public rollout readiness  
-Current default risk posture: Private beta NO-GO until high-severity launch risks have owners and mitigations  
+Current default risk posture: Private beta NO-GO until live dashboard, alert routing, rollback, and launch-critical staging evidence are linked  
 Primary owner: Tori  
 Backup owner: TODO — public rollout blocker  
-Last reviewed: TODO
+Last reviewed: 2026-06-07
 
 This file tracks known launch risks, owners, mitigations, and launch decisions. A risk can be accepted only when it is understood, owned, and tied to a launch-stage decision.
+
+## Current Phase 2 proof baseline
+
+| Item | Current state |
+|---|---|
+| Latest audited Phase 2 code commit | `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29` |
+| Local proof-recording commit | `5dc37c1` — `Record Phase 2 launch ops local proof` |
+| Load-plan update commit | `f41b203` — `Update load test plan with current Phase 2 proof` |
+| Date reviewed | 2026-06-07 |
+| Local chaos proof | PASS LOCALLY — `pnpm test:chaos`: 6 files / 17 tests passed |
+| Local load proof | PASS LOCALLY — `pnpm verify:launch-ops`: 8/8 launch load steps passed |
+| Signup strict success proof | PASS LOCALLY — 30/30 successful client signups, 0 rate limits, 0 real failures |
+| Privacy proof | PASS — `pnpm verify:privacy-phase1` passed |
+| Remaining private-beta blockers | Live dashboard proof, alert routing proof, rollback path, risk acceptance/signoff |
+| Remaining public-rollout blockers | Deployed staging proof, provider capacity proof, backup owner, tested P1 escalation, dashboard/alert proof, final signoff |
 
 ## Risk decision values
 
@@ -57,12 +72,12 @@ The following risks cannot be casually accepted:
 
 | Severity | Open | Mitigated | Accepted private beta | Blocks private beta | Blocks public rollout |
 |---|---:|---:|---:|---:|---:|
-| Critical | TODO | TODO | TODO | TODO | TODO |
-| High | TODO | TODO | TODO | TODO | TODO |
-| Medium | TODO | TODO | TODO | TODO | TODO |
-| Low | TODO | TODO | TODO | TODO | TODO |
+| Critical | 2 | 0 | 0 | 1 | 2 |
+| High | 6 | 2 | 0 | 2 | 6 |
+| Medium | 5 | 1 | 4 | 1 | 3 |
+| Low | 0 | 0 | 0 | 0 | 0 |
 
-Update this table manually when risks change.
+This table is a reviewed snapshot, not an automatically generated source of truth. The individual risk entries are canonical.
 
 ---
 
@@ -81,7 +96,7 @@ Update this table manually when risks change.
 | Mitigation | Assign a named backup owner before public launch. |
 | Verification | Update docs/launch-readiness/oncall.md with backup owner and escalation path. |
 | Related docs | docs/launch-readiness/oncall.md, docs/launch-readiness/go-no-go.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
@@ -102,7 +117,7 @@ Private beta may proceed with Tori as primary owner only if the cohort is small,
 | Mitigation | Add PagerDuty/Opsgenie or equivalent tested escalation path before public launch, or explicitly waive with rationale. |
 | Verification | Synthetic P1 alert routes and is acknowledged through chosen escalation path. |
 | Related docs | docs/launch-readiness/oncall.md, docs/launch-readiness/slack-alerts.md, docs/launch-readiness/go-no-go.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
@@ -123,7 +138,7 @@ Slack-first is acceptable for private beta only. Public launch needs a stronger 
 | Mitigation | Build and verify Sentry-first dashboard sections for health, booking, pro lifecycle, media, payments, notifications, jobs, auth/rate limits, dependencies, and SLO/error budget. |
 | Verification | Link dashboard evidence in docs/launch-readiness/sentry-dashboard.md. |
 | Related docs | docs/launch-readiness/sentry-dashboard.md, docs/launch-readiness/checklist.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
@@ -144,7 +159,7 @@ Private beta does not need perfect observability, but it does need enough visibi
 | Mitigation | Alert map exists in docs/launch-readiness/slack-alerts.md. Finish thresholds/runbooks, then upgrade Sentry or choose an alternate alert path so a synthetic staging alert can be tested. |
 | Verification | Trigger at least one synthetic staging alert and record result after the Sentry plan or alternate alert path is available. |
 | Related docs | docs/launch-readiness/oncall.md, docs/launch-readiness/slack-alerts.md, docs/launch-readiness/go-no-go.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
@@ -152,7 +167,7 @@ Every alert must have owner, backup status, threshold, runbook, and destination.
 
 ---
 
-## RISK-005 — Load tests missing for launch-critical flows
+## RISK-005 — Deployed staging load proof missing for launch-critical flows
 
 | Field | Value |
 |---|---|
@@ -160,20 +175,20 @@ Every alert must have owner, backup status, threshold, runbook, and destination.
 | Owner | Tori |
 | Backup | TODO |
 | Decision | BLOCKS PUBLIC ROLLOUT |
-| Private beta impact | Can be accepted for small beta only if smoke tests and dashboard monitoring are green. |
-| Public rollout impact | Blocks public rollout. |
-| Mitigation | Add load tests for availability bootstrap, hold create, booking finalize, media metadata, checkout, Stripe webhook replay, and notification processing. |
-| Verification | pnpm test:load:launch passes against staging with command output recorded. |
-| Related docs | docs/launch-readiness/go-no-go.md, docs/launch-readiness/public-rollout-checklist.md |
-| Last reviewed | TODO |
+| Private beta impact | Local smoke proof exists; private beta can proceed only if dashboard/alert/rollback gaps are resolved or accepted. |
+| Public rollout impact | Blocks public rollout until deployed staging proof is recorded. |
+| Mitigation | Launch-critical load scripts exist and passed locally through `pnpm verify:launch-ops`. Run the same suite against deployed staging with safe seeded data and dashboard evidence. |
+| Verification | Local proof recorded in `docs/launch-readiness/test-proof.md`; deployed staging proof still TODO. |
+| Related docs | docs/launch-readiness/test-proof.md, docs/launch-readiness/load-test-plan.md, docs/launch-readiness/go-no-go.md, docs/launch-readiness/public-rollout-checklist.md |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
-Signup load testing alone is not enough. Booking/payment/media/notification hot paths need coverage before public rollout.
+Signup alone is no longer the only coverage. Availability bootstrap, hold create, booking finalize, media metadata, checkout, Stripe webhook replay, notification processing, and signup all passed locally through the launch suite. The remaining gap is deployed staging proof with dashboards and cleanup evidence.
 
 ---
 
-## RISK-006 — Chaos tests missing for dependency failure modes
+## RISK-006 — Deployed operational chaos proof and DB replica-lag scope unresolved
 
 | Field | Value |
 |---|---|
@@ -181,16 +196,16 @@ Signup load testing alone is not enough. Booking/payment/media/notification hot 
 | Owner | Tori |
 | Backup | TODO |
 | Decision | BLOCKS PUBLIC ROLLOUT |
-| Private beta impact | Can be accepted for small beta only if runbooks and manual mitigation are ready. |
-| Public rollout impact | Blocks public rollout. |
-| Mitigation | Add deterministic chaos tests for Redis outage, Supabase Storage outage, Stripe webhook storm, Postmark degradation, Twilio degradation, and DB replica lag. |
-| Verification | pnpm test:chaos passes and results are linked. |
-| Related docs | docs/launch-readiness/go-no-go.md, docs/launch-readiness/public-rollout-checklist.md |
-| Last reviewed | TODO |
+| Private beta impact | Local deterministic chaos proof exists; private beta can proceed only if runbooks/alerts/rollback gaps are resolved or accepted. |
+| Public rollout impact | Blocks public rollout until operational alert/runbook proof is linked and DB replica-lag scope is resolved. |
+| Mitigation | Deterministic chaos tests exist and pass locally for Redis outage, Supabase Storage outage, Stripe webhook storm, Postmark degradation, Twilio degradation, and DB degradation. Resolve whether explicit DB replica-lag/stale-read proof is applicable for launch. |
+| Verification | `pnpm test:chaos` passed locally: 6 files / 17 tests. Evidence recorded in `docs/launch-readiness/test-proof.md` and `docs/launch-readiness/chaos-test-plan.md`. |
+| Related docs | docs/launch-readiness/test-proof.md, docs/launch-readiness/chaos-test-plan.md, docs/launch-readiness/go-no-go.md, docs/launch-readiness/public-rollout-checklist.md |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
-Prefer deterministic Vitest/provider-boundary tests for this phase. Do not break real staging providers just to cosplay Netflix Chaos Monkey. We are not made of incident budget.
+The previous Redis chaos blocker is fixed and local chaos proof is green. The remaining chaos gap is operational proof: alerts, runbooks, dashboards, and DB replica-lag/stale-read scope if read replicas are used for launch.
 
 ---
 
@@ -207,7 +222,7 @@ Prefer deterministic Vitest/provider-boundary tests for this phase. Do not break
 | Mitigation | Link every critical alert to an existing or newly created runbook. |
 | Verification | docs/launch-readiness/slack-alerts.md has no P1/P2 alert without a runbook. |
 | Related docs | docs/launch-readiness/slack-alerts.md, docs/launch-readiness/oncall.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
@@ -215,24 +230,24 @@ Known runbook areas include health/readiness, Redis, Postgres, Supabase Storage,
 
 ---
 
-## RISK-008 — Sentry release/deployment tagging not deployed-verified
+## RISK-008 — Sentry intake proven; dashboard coverage still incomplete
 
 | Field | Value |
 |---|---|
 | Severity | Medium |
 | Owner | Tori |
 | Backup | TODO |
-| Decision | BLOCKS PRIVATE BETA UNTIL DEPLOYED PROOF EXISTS |
-| Private beta impact | Debugging beta regressions is much harder without release/environment tagging visible in real Sentry events. |
-| Public rollout impact | Blocks public rollout. |
-| Mitigation | Local Sentry release, dist, and environment config is implemented in server, edge, and client instrumentation. Deploy to staging and confirm Sentry events show the expected release/environment. |
-| Verification | Sentry events show correct release/environment for staging deploy. |
-| Related docs | docs/launch-readiness/sentry-dashboard.md, docs/launch-readiness/private-beta-checklist.md |
-| Last reviewed | TODO |
+| Decision | MITIGATED FOR INTAKE / DASHBOARD PROOF STILL OPEN |
+| Private beta impact | Sentry intake is proven, but beta still needs usable dashboard sections or an accepted observability gap. |
+| Public rollout impact | Blocks public rollout until dashboard coverage is complete. |
+| Mitigation | Sentry release/environment config is implemented. Deployed synthetic Sentry event was captured. Build and verify the 10 required dashboard sections. |
+| Verification | Synthetic event captured: `e56044a034cb4fb78d1b09801fb43da5`; dashboard links still TODO in `docs/launch-readiness/sentry-dashboard.md`. |
+| Related docs | docs/launch-readiness/sentry-dashboard.md, docs/launch-readiness/test-proof.md, docs/launch-readiness/private-beta-checklist.md |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
-The code-level Sentry metadata work is implemented locally. This risk remains open until a staging Sentry event proves release/environment metadata is visible after deploy.
+This risk is no longer “Sentry intake unknown.” Intake works. The remaining risk is whether humans have the live dashboards needed to detect and triage launch failures.
 
 ---
 
@@ -249,7 +264,7 @@ The code-level Sentry metadata work is implemented locally. This risk remains op
 | Mitigation | Sentry console/log capture is disabled by default and only enabled through SENTRY_ENABLE_LOGS or NEXT_PUBLIC_SENTRY_ENABLE_LOGS. Server/edge Sentry events are scrubbed through lib/observability/sentryConfig.ts and redactAuditPayload(). |
 | Verification | Confirm deployed env does not enable log capture unless explicitly reviewed, and record policy in docs/launch-readiness/sentry-dashboard.md. |
 | Related docs | docs/privacy/phase-1-privacy-proof.md, docs/launch-readiness/sentry-dashboard.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
@@ -270,7 +285,7 @@ The default is now safer than before. Do not enable Sentry console/log capture i
 | Mitigation | Keep tools/check-pii-plaintext-reads.mjs passing; burn down baseline when touching related code. |
 | Verification | pnpm check:pii-plaintext-reads passes and reports known baseline count. |
 | Related docs | docs/privacy/phase-1-privacy-proof.md, tools/baselines/pii-plaintext-reads.txt |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
@@ -396,7 +411,7 @@ This is not a Phase 1 blocker anymore, but it must not disappear.
 | Mitigation | Confirm limits/quotas for Vercel, database, Redis, Supabase Storage, Stripe, Postmark, Twilio, and Sentry. |
 | Verification | Record provider quota/capacity notes in docs/launch-readiness/public-rollout-checklist.md. |
 | Related docs | docs/launch-readiness/private-beta-checklist.md, docs/launch-readiness/public-rollout-checklist.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
@@ -417,7 +432,7 @@ A tiny beta can survive fuzzy quotas. Public launch cannot.
 | Mitigation | Document rollback owner, last known good commit, deploy rollback process, feature-disable strategy, payment/webhook rollback notes, and user communication path. |
 | Verification | docs/launch-readiness/private-beta-checklist.md and docs/launch-readiness/public-rollout-checklist.md contain rollback criteria. |
 | Related docs | docs/launch-readiness/private-beta-checklist.md, docs/launch-readiness/public-rollout-checklist.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
@@ -425,7 +440,7 @@ Rollback is not optional. “Hope deploy works” is not a rollback strategy; it
 
 ---
 
-## RISK-018 — Booking finalize correctness under load not proven
+## RISK-018 — Booking finalize deployed staging correctness under load not proven
 
 | Field | Value |
 |---|---|
@@ -433,20 +448,20 @@ Rollback is not optional. “Hope deploy works” is not a rollback strategy; it
 | Owner | Tori |
 | Backup | TODO |
 | Decision | BLOCKS PUBLIC ROLLOUT |
-| Private beta impact | Acceptable only for capped beta if booking lifecycle smoke proof is green and support monitoring is active. |
-| Public rollout impact | Blocks public rollout. |
-| Mitigation | Add and run booking finalize load test; confirm no double-booking, stale hold, or lifecycle integrity failure. |
-| Verification | pnpm test:load:launch output includes booking finalize proof. |
-| Related docs | docs/launch-readiness/go-no-go.md, docs/launch-readiness/public-rollout-checklist.md |
-| Last reviewed | TODO |
+| Private beta impact | Local proof exists; beta still needs booking lifecycle smoke/staging monitoring or accepted risk. |
+| Public rollout impact | Blocks public rollout until deployed staging proof is recorded. |
+| Mitigation | Booking finalize load test exists and passed locally through `pnpm verify:launch-ops`. Run against deployed staging with stronger seeded slot capacity and dashboard evidence. |
+| Verification | Local proof recorded in `docs/launch-readiness/test-proof.md`; deployed staging proof still TODO. |
+| Related docs | docs/launch-readiness/test-proof.md, docs/launch-readiness/load-test-plan.md, docs/launch-readiness/go-no-go.md, docs/launch-readiness/public-rollout-checklist.md |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
-Booking finalize is a revenue and trust path. Treat it like one.
+Booking finalize is locally covered now, including expected conflict behavior from slot reuse. Public rollout still needs deployed staging proof with safe seeded capacity and no data-integrity failures.
 
 ---
 
-## RISK-019 — Stripe webhook replay/idempotency under load not proven
+## RISK-019 — Stripe webhook replay/idempotency deployed staging proof missing
 
 | Field | Value |
 |---|---|
@@ -454,16 +469,16 @@ Booking finalize is a revenue and trust path. Treat it like one.
 | Owner | Tori |
 | Backup | TODO |
 | Decision | BLOCKS PUBLIC ROLLOUT |
-| Private beta impact | Acceptable only if webhook smoke/idempotency proof is green and beta volume is capped. |
-| Public rollout impact | Blocks public rollout. |
-| Mitigation | Add Stripe webhook replay load test and chaos storm test. |
-| Verification | Staging proof confirms signature verification, replay dedupe, no double mutation. |
-| Related docs | docs/launch-readiness/go-no-go.md, docs/launch-readiness/public-rollout-checklist.md, docs/runbooks/stripe-degradation.md |
-| Last reviewed | TODO |
+| Private beta impact | Local webhook replay load and chaos proof exist; beta still needs Stripe/webhook monitoring or accepted risk. |
+| Public rollout impact | Blocks public rollout until deployed staging/provider dashboard proof is recorded. |
+| Mitigation | Stripe webhook replay load test and webhook storm chaos test exist and passed locally. Run against deployed staging/test-mode configuration and link Stripe/Sentry dashboard evidence. |
+| Verification | Local proof recorded in `docs/launch-readiness/test-proof.md`; deployed staging/provider proof still TODO. |
+| Related docs | docs/launch-readiness/test-proof.md, docs/launch-readiness/load-test-plan.md, docs/launch-readiness/chaos-test-plan.md, docs/launch-readiness/go-no-go.md, docs/launch-readiness/public-rollout-checklist.md, docs/runbooks/stripe-degradation.md |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
-Never hand-wave webhook idempotency. Stripe will find the edge case at the most theatrical time.
+Local replay and storm behavior are covered. Public rollout still needs deployed staging/test-mode proof and provider dashboard visibility.
 
 ---
 
@@ -480,7 +495,7 @@ Never hand-wave webhook idempotency. Stripe will find the edge case at the most 
 | Mitigation | Verify storage policies and private media access behavior in staging. |
 | Verification | Storage/private-media proof linked from go-no-go.md. |
 | Related docs | docs/runbooks/private-media-incident.md, docs/runbooks/supabase-storage-outage.md, docs/launch-readiness/go-no-go.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
@@ -488,7 +503,7 @@ Private media is privacy-sensitive. Do not beta-test a leak. That’s not a feat
 
 ---
 
-## RISK-021 — Notification degradation handling not proven
+## RISK-021 — Notification degradation operational proof incomplete
 
 | Field | Value |
 |---|---|
@@ -496,20 +511,20 @@ Private media is privacy-sensitive. Do not beta-test a leak. That’s not a feat
 | Owner | Tori |
 | Backup | TODO |
 | Decision | BLOCKS PUBLIC ROLLOUT |
-| Private beta impact | Acceptable if manual follow-up path exists. |
-| Public rollout impact | Blocks public rollout if retry/manual-follow-up behavior is not proven. |
-| Mitigation | Prove Postmark/Twilio degradation handling and notification backlog behavior. |
-| Verification | Chaos tests and runbook links pass. |
-| Related docs | docs/runbooks/postmark-degradation.md, docs/runbooks/twilio-degradation.md, docs/runbooks/notification-backlog.md |
-| Last reviewed | TODO |
+| Private beta impact | Local notification load and provider degradation chaos proof exist; manual follow-up and alert routing still need to be accepted or proven. |
+| Public rollout impact | Blocks public rollout if retry/manual-follow-up behavior, provider alerts, and backlog visibility are not proven operationally. |
+| Mitigation | Postmark/Twilio degradation chaos tests and notification processing load test exist and pass locally. Link alert routing, notification backlog dashboard, and provider runbooks before public rollout. |
+| Verification | Local proof recorded in `docs/launch-readiness/test-proof.md`; alert/backlog/provider proof still TODO. |
+| Related docs | docs/launch-readiness/test-proof.md, docs/launch-readiness/chaos-test-plan.md, docs/launch-readiness/load-test-plan.md, docs/runbooks/postmark-degradation.md, docs/runbooks/twilio-degradation.md, docs/runbooks/notification-backlog.md |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
-Notifications can fail. The launch question is whether they fail visibly and recoverably.
+The code-path proof is local green. The remaining launch risk is operational: can Tori see notification failures, know who is affected, and recover or manually follow up?
 
 ---
 
-## RISK-022 — Auth/session/rate-limit behavior under provider degradation not proven
+## RISK-022 — Auth/session/rate-limit operational alert proof incomplete
 
 | Field | Value |
 |---|---|
@@ -517,20 +532,20 @@ Notifications can fail. The launch question is whether they fail visibly and rec
 | Owner | Tori |
 | Backup | TODO |
 | Decision | BLOCKS PUBLIC ROLLOUT |
-| Private beta impact | Acceptable only if rate-limit behavior and auth route alerts are active. |
-| Public rollout impact | Blocks public rollout. |
-| Mitigation | Add alert coverage and chaos tests for Redis/rate-limit degradation and auth failure spikes. |
-| Verification | pnpm test:chaos includes Redis/rate-limit behavior; Slack alerts are mapped. |
-| Related docs | docs/runbooks/redis-outage.md, docs/launch-readiness/slack-alerts.md |
-| Last reviewed | TODO |
+| Private beta impact | Local Redis/rate-limit chaos proof and signup load proof exist; private beta still needs alert routing or accepted alerting risk. |
+| Public rollout impact | Blocks public rollout until auth/rate-limit alerts route to an approved destination and runbooks are linked. |
+| Mitigation | Redis outage chaos test passes locally, and signup strict success/rate-limit behavior has been separated in the load script. Finish auth/session/rate-limit alert routing and runbook coverage. |
+| Verification | Local proof recorded in `docs/launch-readiness/test-proof.md`; alert routing proof still TODO. |
+| Related docs | docs/launch-readiness/test-proof.md, docs/launch-readiness/chaos-test-plan.md, docs/launch-readiness/load-test-plan.md, docs/runbooks/redis-outage.md, docs/launch-readiness/slack-alerts.md |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
-High-risk routes must not fail open just because Redis got dramatic.
+The previous Redis chaos failure is fixed. The remaining risk is not local test coverage; it is operational alerting and auth/session runbook completeness.
 
 ---
 
-## RISK-023 — Public rollout checklist not created
+## RISK-023 — Public rollout checklist not yet complete/signed off
 
 | Field | Value |
 |---|---|
@@ -539,17 +554,15 @@ High-risk routes must not fail open just because Redis got dramatic.
 | Backup | TODO |
 | Decision | BLOCKS PUBLIC ROLLOUT |
 | Private beta impact | Does not block private beta if private-beta checklist is complete. |
-| Public rollout impact | Blocks public rollout. |
-| Mitigation | Create docs/launch-readiness/public-rollout-checklist.md. |
-| Verification | Checklist exists and includes staged rollout, rollback criteria, provider quota confirmation, and final sign-off. |
+| Public rollout impact | Blocks public rollout until checklist is complete and signed. |
+| Mitigation | Public rollout checklist exists. Complete staged rollout, rollback criteria, provider quota confirmation, escalation proof, and final sign-off fields. |
+| Verification | `docs/launch-readiness/public-rollout-checklist.md` exists and is completed with evidence. |
 | Related docs | docs/launch-readiness/go-no-go.md, docs/launch-readiness/public-rollout-checklist.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
-This should be written before private beta ends, not after beta becomes public by accident. Sneaky launches are still launches.
-
----
+The file exists. The remaining risk is incomplete evidence/signoff, not missing scaffolding.
 
 ---
 
@@ -566,26 +579,19 @@ This should be written before private beta ends, not after beta becomes public b
 | Mitigation | Upgrade Sentry or choose an alternate private-beta alert path before launch proof. |
 | Verification | Sentry alert routes to #tovis-ops-alerts, or alternate alert path is documented and tested. |
 | Related docs | docs/launch-readiness/oncall.md, docs/launch-readiness/slack-alerts.md, docs/launch-readiness/go-no-go.md |
-| Last reviewed | TODO |
+| Last reviewed | 2026-06-07 |
 
 ### Notes
 
 Sentry release/environment metadata can still be implemented now. Live Slack alert routing is deferred until the Sentry plan or alternate alerting path is available.
 
-# Closed or mitigated risks
+---
+
+# Clos# Closed risks
+
+Move risks here only when full launch-stage evidence exists and no remaining blocker is attached.ed or mitigated risks
 
 Move risks here only when evidence exists.
-
-## RISK-000 — Example closed risk
-
-| Field | Value |
-|---|---|
-| Severity | Low |
-| Owner | Tori |
-| Decision | MITIGATED |
-| Mitigation | Example only. Remove this placeholder when the first real risk is closed. |
-| Verification | TODO |
-| Closed date | TODO |
 
 ---
 
@@ -619,6 +625,16 @@ Before public rollout:
 - docs/privacy/phase-1-remaining-work.md
 - docs/privacy/retention-policy.md
 - docs/runbooks/privacy-request.md
+- docs/launch-readiness/load-test-plan.md
+- docs/launch-readiness/chaos-test-plan.md
+- docs/launch-readiness/test-proof.md
+- docs/runbooks/redis-outage.md
+- docs/runbooks/postgres-outage.md
+- docs/runbooks/supabase-storage-outage.md
+- docs/runbooks/stripe-degradation.md
+- docs/runbooks/postmark-degradation.md
+- docs/runbooks/twilio-degradation.md
+- docs/runbooks/notification-backlog.md
 
 ## Maintenance rule
 
