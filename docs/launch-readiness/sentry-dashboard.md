@@ -284,7 +284,7 @@ Current proof status: Local load suite covers availability, holds, finalize, che
 Launch impact: Blocks private beta  
 Owner: Tori  
 Primary source: Sentry events/errors/performance  
-Related runbook: docs/runbooks/pro-session-lifecycle.md — TODO create  
+Related runbook: docs/runbooks/pro-session-lifecycle.md  
 Current proof status: Local lifecycle/write-boundary tests exist. Live dashboard proof TODO.
 
 ### Required signals
@@ -434,7 +434,7 @@ Current proof status: Notification processing job is covered by local load and D
 Launch impact: Blocks private beta  
 Owner: Tori  
 Primary source: Sentry errors/performance  
-Related runbooks: docs/runbooks/redis-outage.md, docs/runbooks/auth-session.md — TODO create auth/session runbook  
+Related runbooks: docs/runbooks/redis-outage.md, docs/runbooks/auth-session.md  
 Current proof status: Signup load proof exists. Redis/rate-limit failure behavior covered locally. Live dashboard proof TODO.
 
 ### Required signals
@@ -494,7 +494,7 @@ Current proof status: Deployed Sentry intake is proven. Local chaos tests cover 
 Launch impact: Blocks public rollout  
 Owner: Tori  
 Primary source: Sentry performance/errors  
-Related docs/runbook: docs/launch-readiness/go-no-go.md, docs/launch-readiness/risk-register.md, docs/runbooks/slo-error-budget.md — TODO create  
+Related docs/runbook: docs/launch-readiness/go-no-go.md, docs/launch-readiness/risk-register.md, docs/runbooks/slo-error-budget.md  
 Current proof status: Local load tests emit latency summaries. Formal SLO thresholds and live Sentry dashboard proof TODO.
 
 ### Required signals
@@ -699,9 +699,9 @@ TODO
 - docs/runbooks/notification-backlog.md
 - docs/runbooks/private-media-incident.md
 - docs/runbooks/booking-funnel.md
-- docs/runbooks/auth-session.md — TODO create
-- docs/runbooks/pro-session-lifecycle.md — TODO create
-- docs/runbooks/slo-error-budget.md — TODO create
+- docs/runbooks/auth-session.md
+- docs/runbooks/pro-session-lifecycle.md
+- docs/runbooks/slo-error-budget.md
 - docs/privacy/phase-1-privacy-proof.md
 - docs/privacy/phase-1-remaining-work.md
 
