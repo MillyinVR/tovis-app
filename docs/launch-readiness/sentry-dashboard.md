@@ -29,7 +29,9 @@ Important distinction:
 | Synthetic debug route | PASS | POST /api/internal/debug/sentry-test returned HTTP 200 on https://www.tovis.app |
 | Chaos suite | PASSED LOCALLY | pnpm test:chaos: 6 files / 17 tests passed |
 | Launch load suite | PASSED LOCALLY | pnpm test:load:launch: 8/8 launch load steps passed |
-| Aggregate launch ops verification | PASSED LOCALLY | pnpm verify:launch-ops passed locally at commit 27bfa28 |
+| Aggregate launch ops verification | PASSED LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md` and commit `5dc37c1` |
+| Load plan reconciliation | PASS | Updated in commit `f41b203` — `Update load test plan with current Phase 2 proof` |
+| Risk register reconciliation | PASS | Updated with current Phase 2 proof; commit TODO if not already recorded |
 | Live Sentry dashboard sections | TODO LIVE PROOF | Need dashboard/widget/query links per section |
 | Provider dashboard proof | TODO | Need Stripe/Postmark/Twilio/Supabase/Vercel/provider links where relevant |
 | Synthetic alert proof | TODO | Needs one safe alert routed to Slack or documented alternate path |
@@ -89,7 +91,8 @@ Do not mark a dashboard section complete because a test exists. Tests prove beha
 | Dashboard URL | TODO |
 | Staging dashboard verified | TODO |
 | Production dashboard verified | PARTIAL — synthetic production event captured |
-| Last local launch-ops proof | Commit 27bfa28, pnpm verify:launch-ops, PASS |
+| Last local launch-ops proof | Audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; `pnpm verify:launch-ops`, PASS; proof recorded in commit `5dc37c1` |
+| Last docs reconciliation proof | Load plan commit `f41b203`; risk-register commit TODO |
 | Last deployed Sentry intake proof | 2026-06-05, event ID e56044a034cb4fb78d1b09801fb43da5, PASS |
 | Last full dashboard proof | TODO |
 | Verified by | Tori |
@@ -126,11 +129,26 @@ Verified by: Tori
 
 ### Command shape
 
-bash set -a source .env.local set +a  export STAGING_BASE_URL="https://www.tovis.app" export INTERNAL_JOB_SECRET="$CRON_SECRET"  curl -i -X POST "$STAGING_BASE_URL/api/internal/debug/sentry-test" \   -H "Authorization: Bearer $INTERNAL_JOB_SECRET" \   -H "Origin: https://www.tovis.app" \   -H "Referer: https://www.tovis.app/" 
+```bash
+set -a
+source .env.local
+set +a
+
+export STAGING_BASE_URL="https://www.tovis.app"
+export INTERNAL_JOB_SECRET="$CRON_SECRET"
+
+curl -i -X POST "$STAGING_BASE_URL/api/internal/debug/sentry-test" \
+  -H "Authorization: Bearer $INTERNAL_JOB_SECRET" \
+  -H "Origin: https://www.tovis.app" \
+  -H "Referer: https://www.tovis.app/"
+```
 
 ### Observed response
 
-text HTTP/2 200 {"ok":true,"eventId":"e56044a034cb4fb78d1b09801fb43da5","message":"Synthetic Sentry event captured."} 
+```text
+HTTP/2 200
+{"ok":true,"eventId":"e56044a034cb4fb78d1b09801fb43da5","message":"Synthetic Sentry event captured."}
+```
 
 ### What this proves
 
@@ -235,8 +253,8 @@ Current proof status: Local endpoint/provider test coverage exists. Deployed Sen
 Launch impact: Blocks private beta  
 Owner: Tori  
 Primary source: Sentry events/errors/performance  
-Related runbook: docs/runbooks/booking-funnel.md or TODO if not created  
-Current proof status: Local load suite covers availability, holds, finalize, checkout, and media metadata. Live Sentry dashboard proof TODO.
+Related runbook: docs/runbooks/booking-funnel.md  
+Current proof status: Local load suite covers availability, holds, finalize, checkout, and media metadata. Booking funnel runbook exists. Live Sentry dashboard proof TODO.
 
 ### Required signals
 
@@ -266,7 +284,7 @@ Current proof status: Local load suite covers availability, holds, finalize, che
 Launch impact: Blocks private beta  
 Owner: Tori  
 Primary source: Sentry events/errors/performance  
-Related runbook: TODO  
+Related runbook: docs/runbooks/pro-session-lifecycle.md — TODO create  
 Current proof status: Local lifecycle/write-boundary tests exist. Live dashboard proof TODO.
 
 ### Required signals
@@ -388,7 +406,7 @@ Current proof status: Local notification processing load proof and provider degr
 Launch impact: Blocks public rollout if launch-critical jobs exist  
 Owner: Tori  
 Primary source: Sentry errors/performance  
-Related runbook: docs/runbooks/notification-backlog.md or TODO for non-notification jobs  
+Related runbook: docs/runbooks/notification-backlog.md for notification jobs; TODO create additional job runbook if non-notification launch-critical jobs are added  
 Current proof status: Notification processing job is covered by local load and DB degradation chaos tests. Live dashboard proof TODO.
 
 ### Required signals
@@ -416,7 +434,7 @@ Current proof status: Notification processing job is covered by local load and D
 Launch impact: Blocks private beta  
 Owner: Tori  
 Primary source: Sentry errors/performance  
-Related runbook: docs/runbooks/redis-outage.md  
+Related runbooks: docs/runbooks/redis-outage.md, docs/runbooks/auth-session.md — TODO create auth/session runbook  
 Current proof status: Signup load proof exists. Redis/rate-limit failure behavior covered locally. Live dashboard proof TODO.
 
 ### Required signals
@@ -476,7 +494,7 @@ Current proof status: Deployed Sentry intake is proven. Local chaos tests cover 
 Launch impact: Blocks public rollout  
 Owner: Tori  
 Primary source: Sentry performance/errors  
-Related docs: docs/launch-readiness/go-no-go.md, docs/launch-readiness/risk-register.md  
+Related docs/runbook: docs/launch-readiness/go-no-go.md, docs/launch-readiness/risk-register.md, docs/runbooks/slo-error-budget.md — TODO create  
 Current proof status: Local load tests emit latency summaries. Formal SLO thresholds and live Sentry dashboard proof TODO.
 
 ### Required signals
@@ -509,10 +527,16 @@ Current proof status: Local load tests emit latency summaries. Formal SLO thresh
 Status: PASS  
 Owner: Tori  
 Environment: local app using staging-style smoke profile  
-Commit: 27bfa28  
+Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29  
+Proof-recording commit: 5dc37c1 — Record Phase 2 launch ops local proof  
+Date verified: 2026-06-07  
 Command:
 
-bash DATABASE_URL="postgresql://postgres:postgres@localhost:5433/tovis_test" \ DIRECT_URL="postgresql://postgres:postgres@localhost:5433/tovis_test" \ pnpm verify:launch-ops 
+```bash
+DATABASE_URL="postgresql://postgres:postgres@localhost:5433/tovis_test" \
+DIRECT_URL="postgresql://postgres:postgres@localhost:5433/tovis_test" \
+pnpm verify:launch-ops
+```
 
 ### What was verified
 
@@ -527,7 +551,8 @@ bash DATABASE_URL="postgresql://postgres:postgres@localhost:5433/tovis_test" \ D
 - Media metadata passed: 10/10 successful requests.
 - Notification processing passed: 10/10 successful requests.
 - Stripe webhook replay passed: 10/10 successful requests with duplicate replay behavior visible.
-- Signup passed with expected 201/429 mix and zero real failures.
+- Signup passed in the aggregate launch load suite.
+- Strict signup success proof also passed separately with `LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true`: 30/30 successful client signups, 0 rate limits, 0 real failures.
 
 ### Known gaps
 
@@ -567,7 +592,18 @@ Private beta may proceed only when these are live enough to catch launch-critica
 
 ## Private beta evidence
 
-text Dashboard URL: Environment: Release: Last staging verification: Last production verification: Synthetic Sentry event tested: Synthetic alert tested: Known gaps: Accepted risks: Decision: 
+```text
+Dashboard URL:
+Environment:
+Release:
+Last staging verification:
+Last production verification:
+Synthetic Sentry event tested:
+Synthetic alert tested:
+Known gaps:
+Accepted risks:
+Decision:
+```
 
 ---
 
@@ -589,7 +625,21 @@ Public rollout requires:
 
 ## Public rollout evidence
 
-text Dashboard URL: Environment: Release: Last staging verification: Last production verification: Synthetic Sentry event tested: Synthetic alert tested: Load proof linked: Chaos proof linked: Provider dashboards linked: Known gaps: Accepted risks: Decision: 
+```text
+Dashboard URL:
+Environment:
+Release:
+Last staging verification:
+Last production verification:
+Synthetic Sentry event tested:
+Synthetic alert tested:
+Load proof linked:
+Chaos proof linked:
+Provider dashboards linked:
+Known gaps:
+Accepted risks:
+Decision:
+```
 
 ---
 
@@ -597,7 +647,33 @@ text Dashboard URL: Environment: Release: Last staging verification: Last produc
 
 Use this template when marking a section complete.
 
-md ## Evidence: <section>  Status: PASS / FAIL / BLOCKED / ACCEPTED RISK Owner: Tori Environment: staging / production Dashboard link: TODO Sentry query/widget: TODO Provider dashboard link: TODO Related alert: TODO Related runbook: TODO Threshold: TODO Last verified: TODO Verified by: Tori  ### What was verified  TODO  ### Known gaps  TODO  ### Launch decision  TODO 
+```md
+## Evidence: <section>
+
+Status: PASS / FAIL / BLOCKED / ACCEPTED RISK  
+Owner: Tori  
+Environment: staging / production  
+Dashboard link: TODO  
+Sentry query/widget: TODO  
+Provider dashboard link: TODO  
+Related alert: TODO  
+Related runbook: TODO  
+Threshold: TODO  
+Last verified: TODO  
+Verified by: Tori  
+
+### What was verified
+
+TODO
+
+### Known gaps
+
+TODO
+
+### Launch decision
+
+TODO
+```
 
 ---
 
@@ -622,6 +698,10 @@ md ## Evidence: <section>  Status: PASS / FAIL / BLOCKED / ACCEPTED RISK Owner: 
 - docs/runbooks/twilio-degradation.md
 - docs/runbooks/notification-backlog.md
 - docs/runbooks/private-media-incident.md
+- docs/runbooks/booking-funnel.md
+- docs/runbooks/auth-session.md — TODO create
+- docs/runbooks/pro-session-lifecycle.md — TODO create
+- docs/runbooks/slo-error-budget.md — TODO create
 - docs/privacy/phase-1-privacy-proof.md
 - docs/privacy/phase-1-remaining-work.md
 
