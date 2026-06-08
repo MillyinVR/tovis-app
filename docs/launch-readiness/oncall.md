@@ -24,7 +24,10 @@ This file defines who owns launch incidents, where alerts route, which runbooks 
 | Deployed Sentry intake | PASS | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5 |
 | Chaos suite | PASSED LOCALLY | pnpm test:chaos: 6 files / 17 tests passed |
 | Launch load suite | PASSED LOCALLY | pnpm test:load:launch: 8/8 launch load steps passed |
-| Aggregate launch ops verification | PASSED LOCALLY | pnpm verify:launch-ops passed locally at commit 27bfa28 |
+| Aggregate launch ops verification | PASSED LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md` and commit `5dc37c1` |
+| Load plan reconciliation | PASS | Updated in commit `f41b203` — `Update load test plan with current Phase 2 proof` |
+| Sentry dashboard proof reconciliation | PASS | Updated in commit `aa4fe4d` — `Update Sentry dashboard proof with current Phase 2 status` |
+| Slack alert map reconciliation | PASS | Updated in commit `12732a0` — `Update Slack alert map with current Phase 2 status` |
 | Slack alert routing | BLOCKED | Requires paid Sentry plan or approved alternate alerting path |
 | Synthetic alert delivery | BLOCKED | Cannot complete until routing path exists |
 | Backup owner | BLOCKED | Required before public launch |
@@ -41,10 +44,10 @@ Important distinction: local Phase 2 code proof is green, and deployed Sentry in
 | Primary owner named | DONE | Tori is the primary launch owner. |
 | Backup owner named | BLOCKED | A named backup owner is required before public launch. |
 | Sentry intake verified | DONE | Production synthetic event captured: e56044a034cb4fb78d1b09801fb43da5. |
-| Phase 2 local load/chaos proof | DONE LOCALLY | pnpm verify:launch-ops passed locally at commit 27bfa28. |
-| Slack alert channel chosen | TODO | Set the private-beta ops channel before wiring alerts. |
+| Phase 2 local load/chaos proof | DONE LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md`. |
+| Slack alert channel chosen | TODO / BLOCKED | Proposed channel is `#tovis-ops-alerts`; routing is blocked until Sentry plan upgrade or approved alternate path exists. |
 | P1/P2 alert thresholds documented | TODO | Must be completed in docs/launch-readiness/slack-alerts.md. |
-| Runbooks linked from alerts | PARTIAL | Runbooks exist, but alert-specific links/verification remain open. |
+| Runbooks linked from alerts | PARTIAL | Booking funnel runbook now exists; auth/session, pro session lifecycle, and SLO/error budget runbooks still need to be created. |
 | Synthetic alert tested | BLOCKED | At least one staging or production-safe synthetic alert must route to Slack or approved alternate before private beta. |
 | Public-launch pager path chosen | BLOCKED | PagerDuty/Opsgenie or equivalent escalation path must exist before public launch unless waived. |
 | Public-launch P1 acknowledgement tested | BLOCKED | Requires backup owner and escalation path. |
@@ -184,19 +187,19 @@ Do not mark an alert complete because Sentry captured an event. Sentry intake pr
 | Health/readiness | P1 | Readiness endpoint failing | Tori | TODO | docs/runbooks/health-readiness.md | TODO ROUTING PROOF |
 | Database | P1 | Postgres unavailable or severe query failures | Tori | TODO | docs/runbooks/postgres-outage.md | TODO ROUTING PROOF |
 | Redis/rate limits | P1 | Redis outage affects rate-limit/session safety | Tori | TODO | docs/runbooks/redis-outage.md | TODO ROUTING PROOF |
-| Booking funnel | P1 | Booking finalize failure spike | Tori | TODO | TODO | TODO ROUTING PROOF |
-| Booking funnel | P2 | Hold create failure spike | Tori | TODO | TODO | TODO ROUTING PROOF |
-| Availability | P2 | Availability bootstrap latency or error spike | Tori | TODO | docs/runbooks/health-readiness.md | TODO ROUTING PROOF |
-| Pro session lifecycle | P2 | Closeout/session lifecycle failures spike | Tori | TODO | TODO | TODO ROUTING PROOF |
+| Booking funnel | P1 | Booking finalize failure spike | Tori | TODO | docs/runbooks/booking-funnel.md | TODO ROUTING PROOF |
+| Booking funnel | P2 | Hold create failure spike | Tori | TODO | docs/runbooks/booking-funnel.md | TODO ROUTING PROOF |
+| Availability | P2 | Availability bootstrap latency or error spike | Tori | TODO | docs/runbooks/booking-funnel.md | TODO ROUTING PROOF |
+| Pro session lifecycle | P2 | Closeout/session lifecycle failures spike | Tori | TODO | docs/runbooks/pro-session-lifecycle.md — TODO create | TODO ROUTING PROOF |
 | Media uploads | P2 | Media upload/signing/metadata failures spike | Tori | TODO | docs/runbooks/supabase-storage-outage.md | TODO ROUTING PROOF |
 | Private media | P1 | Private media access policy regression | Tori | TODO | docs/runbooks/private-media-incident.md | TODO ROUTING PROOF |
 | Payments/webhooks | P1 | Stripe webhook verification or processing failure spike | Tori | TODO | docs/runbooks/stripe-degradation.md | TODO ROUTING PROOF |
 | Notifications | P2 | Notification backlog or delivery failure spike | Tori | TODO | docs/runbooks/notification-backlog.md | TODO ROUTING PROOF |
 | Email provider | P2 | Postmark degradation | Tori | TODO | docs/runbooks/postmark-degradation.md | TODO ROUTING PROOF |
 | SMS provider | P2 | Twilio degradation | Tori | TODO | docs/runbooks/twilio-degradation.md | TODO ROUTING PROOF |
-| Auth | P1 | Login/register/password-reset failure spike | Tori | TODO | TODO | TODO ROUTING PROOF |
+| Auth | P1 | Login/register/password-reset failure spike | Tori | TODO | docs/runbooks/auth-session.md — TODO create | TODO ROUTING PROOF |
 | Rate limits | P2 | Abnormal high-risk route rate-limit blocks | Tori | TODO | docs/runbooks/redis-outage.md | TODO ROUTING PROOF |
-| SLO/error budget | P2 | API error budget burn exceeds threshold | Tori | TODO | TODO | TODO ROUTING PROOF |
+| SLO/error budget | P2 | API error budget burn exceeds threshold | Tori | TODO | docs/runbooks/slo-error-budget.md — TODO create | TODO ROUTING PROOF |
 
 ---
 
@@ -344,10 +347,10 @@ The following runbooks should be linked from alerts where applicable:
 | Twilio | docs/runbooks/twilio-degradation.md |
 | Private media | docs/runbooks/private-media-incident.md |
 | Notifications | docs/runbooks/notification-backlog.md |
-| Booking funnel | TODO |
-| Auth/session | TODO |
-| Pro session lifecycle | TODO |
-| SLO/error budget | TODO |
+| Booking funnel | docs/runbooks/booking-funnel.md |
+| Auth/session | docs/runbooks/auth-session.md — TODO create |
+| Pro session lifecycle | docs/runbooks/pro-session-lifecycle.md — TODO create |
+| SLO/error budget | docs/runbooks/slo-error-budget.md — TODO create |
 
 If a required runbook does not exist, the related alert remains open until the runbook is created or an existing runbook is confirmed as sufficient.
 
@@ -357,7 +360,40 @@ If a required runbook does not exist, the related alert remains open until the r
 
 Use this template in docs/launch-readiness/slack-alerts.md for every alert.
 
-md ## Alert: <name>  Severity: P1 / P2 / P3 Owner: Tori Backup: TODO Destination: TODO Dashboard: TODO Runbook: TODO Source: Sentry / provider dashboard / app metric / synthetic check Threshold: TODO Escalation: TODO Private beta blocker: yes/no Public launch blocker: yes/no Status: TODO / PASS / BLOCKED / ACCEPTED RISK  ### User impact  TODO  ### First response  1. TODO 2. TODO 3. TODO  ### Verification  TODO  ### Rollback or mitigation  TODO 
+```md
+## Alert: <name>
+
+Severity: P1 / P2 / P3  
+Owner: Tori  
+Backup: TODO  
+Destination: TODO  
+Dashboard: TODO  
+Runbook: TODO  
+Source: Sentry / provider dashboard / app metric / synthetic check  
+Threshold: TODO  
+Escalation: TODO  
+Private beta blocker: yes/no  
+Public launch blocker: yes/no  
+Status: TODO / PASS / BLOCKED / ACCEPTED RISK  
+
+### User impact
+
+TODO
+
+### First response
+
+1. TODO
+2. TODO
+3. TODO
+
+### Verification
+
+TODO
+
+### Rollback or mitigation
+
+TODO
+```
 
 ---
 
@@ -365,7 +401,34 @@ md ## Alert: <name>  Severity: P1 / P2 / P3 Owner: Tori Backup: TODO Destination
 
 Use this when marking on-call readiness complete or accepted.
 
-md ## On-call evidence: <private beta / public launch>  Status: PASS / FAIL / BLOCKED / ACCEPTED RISK Owner: Tori Backup: TODO Environment: staging / production Date: TODO Alert destination: TODO Synthetic alert tested: TODO Sentry event ID: TODO Dashboard link: TODO Runbook link: TODO Acknowledged by: TODO Time to acknowledgement: TODO  ### What was verified  TODO  ### Known gaps  TODO  ### Launch decision  TODO 
+```md
+## On-call evidence: <private beta / public launch>
+
+Status: PASS / FAIL / BLOCKED / ACCEPTED RISK  
+Owner: Tori  
+Backup: TODO  
+Environment: staging / production  
+Date: TODO  
+Alert destination: TODO  
+Synthetic alert tested: TODO  
+Sentry event ID: TODO  
+Dashboard link: TODO  
+Runbook link: TODO  
+Acknowledged by: TODO  
+Time to acknowledgement: TODO  
+
+### What was verified
+
+TODO
+
+### Known gaps
+
+TODO
+
+### Launch decision
+
+TODO
+```
 
 ---
 
@@ -377,7 +440,7 @@ md ## On-call evidence: <private beta / public launch>  Status: PASS / FAIL / BL
 | Choose Slack ops channel or approved alternate | High | Tori | Private beta | TODO |
 | Test synthetic alert routing | High | Tori | Private beta | BLOCKED |
 | Define P1/P2 alert thresholds | High | Tori | Private beta/public launch | TODO |
-| Link all P1/P2 alerts to runbooks | High | Tori | Public launch | TODO |
+| Link all P1/P2 alerts to runbooks | High | Tori | Public launch | PARTIAL — booking funnel runbook exists; auth/session, pro lifecycle, and SLO/error budget runbooks still TODO |
 | Decide public-launch pager path | High | Tori | Public launch | BLOCKED |
 | Test P1 acknowledgement path | High | Tori | Public launch | BLOCKED |
 | Complete live dashboard links | High | Tori | Private beta/public launch | TODO |
@@ -399,6 +462,10 @@ md ## On-call evidence: <private beta / public launch>  Status: PASS / FAIL / BL
 - docs/launch-readiness/chaos-test-plan.md
 - docs/privacy/phase-1-privacy-proof.md
 - docs/privacy/phase-1-remaining-work.md
+- docs/runbooks/booking-funnel.md
+- docs/runbooks/auth-session.md — TODO create
+- docs/runbooks/pro-session-lifecycle.md — TODO create
+- docs/runbooks/slo-error-budget.md — TODO create
 
 ---
 
