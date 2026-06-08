@@ -29,9 +29,9 @@ Important distinction:
 | Synthetic debug route | PASS | POST /api/internal/debug/sentry-test returned HTTP 200 on https://www.tovis.app |
 | Chaos suite | PASSED LOCALLY | pnpm test:chaos: 6 files / 17 tests passed |
 | Launch load suite | PASSED LOCALLY | pnpm test:load:launch: 8/8 launch load steps passed |
-| Aggregate launch ops verification | PASSED LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md` and commit `5dc37c1` |
-| Load plan reconciliation | PASS | Updated in commit `f41b203` — `Update load test plan with current Phase 2 proof` |
-| Risk register reconciliation | PASS | Updated with current Phase 2 proof; commit TODO if not already recorded |
+| Aggregate launch ops verification | PASSED LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md` |
+| Load plan reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/load-test-plan.md` |
+| Risk register reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/risk-register.md` |
 | Live Sentry dashboard sections | TODO LIVE PROOF | Need dashboard/widget/query links per section |
 | Provider dashboard proof | TODO | Need Stripe/Postmark/Twilio/Supabase/Vercel/provider links where relevant |
 | Synthetic alert proof | TODO | Needs one safe alert routed to Slack or documented alternate path |
@@ -91,9 +91,9 @@ Do not mark a dashboard section complete because a test exists. Tests prove beha
 | Dashboard URL | TODO |
 | Staging dashboard verified | TODO |
 | Production dashboard verified | PARTIAL — synthetic production event captured |
-| Last local launch-ops proof | Audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; `pnpm verify:launch-ops`, PASS; proof recorded in commit `5dc37c1` |
-| Last docs reconciliation proof | Load plan commit `f41b203`; risk-register commit TODO |
-| Last deployed Sentry intake proof | 2026-06-05, event ID e56044a034cb4fb78d1b09801fb43da5, PASS |
+| Last local launch-ops proof | Audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; `pnpm verify:launch-ops`, PASS; proof recorded in `docs/launch-readiness/test-proof.md` |
+| Last docs reconciliation proof | Current Phase 2 status reflected across launch-readiness docs |
+| Last deployed Sentry intake proof | 2026-06-07, event ID e56044a034cb4fb78d1b09801fb43da5, PASS |
 | Last full dashboard proof | TODO |
 | Verified by | Tori |
 
@@ -124,7 +124,7 @@ Environment: production
 Base URL: https://www.tovis.app  
 Route: POST /api/internal/debug/sentry-test  
 Event ID: e56044a034cb4fb78d1b09801fb43da5  
-Verified from curl: 2026-06-05  
+Verified from curl: 2026-06-07  
 Verified by: Tori  
 
 ### Command shape
@@ -406,7 +406,7 @@ Current proof status: Local notification processing load proof and provider degr
 Launch impact: Blocks public rollout if launch-critical jobs exist  
 Owner: Tori  
 Primary source: Sentry errors/performance  
-Related runbook: docs/runbooks/notification-backlog.md for notification jobs; TODO create additional job runbook if non-notification launch-critical jobs are added  
+Related runbook: docs/runbooks/notification-backlog.md for notification jobs; add or map a sufficient runbook if non-notification launch-critical jobs are added  
 Current proof status: Notification processing job is covered by local load and DB degradation chaos tests. Live dashboard proof TODO.
 
 ### Required signals
@@ -528,7 +528,7 @@ Status: PASS
 Owner: Tori  
 Environment: local app using staging-style smoke profile  
 Audited code commit: ae30aff20aff8b205e65f57bf3ae8b5b8b553b29  
-Proof-recording commit: 5dc37c1 — Record Phase 2 launch ops local proof  
+Proof record: `docs/launch-readiness/test-proof.md`  
 Date verified: 2026-06-07  
 Command:
 
