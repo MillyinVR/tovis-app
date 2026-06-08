@@ -1,6 +1,15 @@
 # Launch Dashboard Checklist
 
-Use this checklist to build the production launch dashboard for TOVIS.
+Use this checklist to build the private-beta and public-rollout launch dashboard for TOVIS.
+
+## Status
+
+Phase: Phase 2 — Launch ops proof  
+Scope: Dashboard build checklist for private beta and public rollout  
+Primary owner: Tori  
+Current default status: CHECKLIST ONLY — live dashboard proof is still recorded in `docs/launch-readiness/sentry-dashboard.md`
+
+This file defines what the dashboard should contain. It is not proof that the dashboard is live. Live dashboard evidence, widget links, provider links, thresholds, and verification dates must be recorded in `docs/launch-readiness/sentry-dashboard.md`.
 
 The dashboard should answer one question fast:
 
@@ -536,17 +545,19 @@ daily review of incidents, error budget, and support tickets
 
 # Dashboard ownership
 
-| Dashboard section | Owner |
-|---|---|
-| Health/readiness | Engineering |
-| Booking funnel | Engineering/Product |
-| Session lifecycle | Engineering/Product |
-| Media uploads | Engineering |
-| Payments/Stripe | Engineering/Ops |
-| Notifications | Engineering/Ops |
-| Auth/rate limits | Engineering/Security |
-| Infrastructure | Engineering |
-| Support/user impact | Support/Product |
+| Dashboard section | Owner | Backup |
+|---|---|---|
+| Health/readiness | Tori | TODO |
+| Booking funnel | Tori | TODO |
+| Session lifecycle | Tori | TODO |
+| Media uploads | Tori | TODO |
+| Payments/Stripe | Tori | TODO |
+| Notifications | Tori | TODO |
+| Auth/rate limits | Tori | TODO |
+| Infrastructure | Tori | TODO |
+| Support/user impact | Tori | TODO |
+
+Backup owner remains a public-rollout blocker until named in `docs/launch-readiness/oncall.md`.
 
 ---
 
@@ -581,8 +592,37 @@ docs/runbooks/health-readiness.md
 docs/runbooks/postgres-outage.md
 docs/runbooks/redis-outage.md
 docs/runbooks/supabase-storage-outage.md
+docs/runbooks/private-media-incident.md
 docs/runbooks/stripe-degradation.md
 docs/runbooks/postmark-degradation.md
 docs/runbooks/twilio-degradation.md
 docs/runbooks/notification-backlog.md
+docs/runbooks/booking-funnel.md
+docs/runbooks/auth-session.md
+docs/runbooks/pro-session-lifecycle.md
+docs/runbooks/slo-error-budget.md
+
 ```
+
+---
+
+# Related launch-readiness docs
+
+```text
+docs/launch-readiness/sentry-dashboard.md
+docs/launch-readiness/slack-alerts.md
+docs/launch-readiness/oncall.md
+docs/launch-readiness/go-no-go.md
+docs/launch-readiness/risk-register.md
+docs/launch-readiness/test-proof.md
+docs/launch-readiness/load-test-plan.md
+docs/launch-readiness/chaos-test-plan.md
+```
+
+---
+
+# Maintenance rule
+
+Do not mark dashboard work complete in this checklist. This file describes the dashboard shape.
+
+Dashboard completion must be recorded in `docs/launch-readiness/sentry-dashboard.md` with live links, owner, threshold, related alert, related runbook, environment, and last verified date.
