@@ -190,7 +190,7 @@ Do not mark an alert complete because Sentry captured an event. Sentry intake pr
 | Booking funnel | P1 | Booking finalize failure spike | Tori | TODO | docs/runbooks/booking-funnel.md | TODO ROUTING PROOF |
 | Booking funnel | P2 | Hold create failure spike | Tori | TODO | docs/runbooks/booking-funnel.md | TODO ROUTING PROOF |
 | Availability | P2 | Availability bootstrap latency or error spike | Tori | TODO | docs/runbooks/booking-funnel.md | TODO ROUTING PROOF |
-| Pro session lifecycle | P2 | Closeout/session lifecycle failures spike | Tori | TODO | docs/runbooks/pro-session-lifecycle.md — TODO create | TODO ROUTING PROOF |
+| Pro session lifecycle | P2 | Closeout/session lifecycle failures spike | Tori | TODO | docs/runbooks/pro-session-lifecycle.md | TODO ROUTING PROOF |
 | Media uploads | P2 | Media upload/signing/metadata failures spike | Tori | TODO | docs/runbooks/supabase-storage-outage.md | TODO ROUTING PROOF |
 | Private media | P1 | Private media access policy regression | Tori | TODO | docs/runbooks/private-media-incident.md | TODO ROUTING PROOF |
 | Payments/webhooks | P1 | Stripe webhook verification or processing failure spike | Tori | TODO | docs/runbooks/stripe-degradation.md | TODO ROUTING PROOF |
@@ -349,7 +349,7 @@ The following runbooks should be linked from alerts where applicable:
 | Notifications | docs/runbooks/notification-backlog.md |
 | Booking funnel | docs/runbooks/booking-funnel.md |
 | Auth/session | docs/runbooks/auth-session.md |
-| Pro session lifecycle | docs/runbooks/pro-session-lifecycle.md — TODO create |
+| Pro session lifecycle | docs/runbooks/pro-session-lifecycle.md |
 | SLO/error budget | docs/runbooks/slo-error-budget.md — TODO create |
 
 If a required runbook does not exist, the related alert remains open until the runbook is created or an existing runbook is confirmed as sufficient.
@@ -464,7 +464,7 @@ TODO
 - docs/privacy/phase-1-remaining-work.md
 - docs/runbooks/booking-funnel.md
 - docs/runbooks/auth-session.md
-- docs/runbooks/pro-session-lifecycle.md — TODO create
+- docs/runbooks/pro-session-lifecycle.md
 - docs/runbooks/slo-error-budget.md — TODO create
 
 ---
