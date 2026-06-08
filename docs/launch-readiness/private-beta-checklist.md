@@ -37,7 +37,7 @@ Private beta exists to prove:
 |---|---|---|
 | Phase 2 local chaos suite | PASS | pnpm test:chaos: 6 files / 17 tests passed |
 | Phase 2 local launch load suite | PASS | pnpm test:load:launch: 8/8 launch load steps passed |
-| Aggregate launch ops verification | PASS LOCALLY | pnpm verify:launch-ops passed locally at commit 27bfa28 |
+| Aggregate launch ops verification | PASS LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; fresh local rerun recorded in `docs/launch-readiness/test-proof.md` |
 | Sentry release/environment config | IMPLEMENTED | lib/observability/sentryConfig.ts, sentry.server.config.ts, sentry.edge.config.ts, instrumentation-client.ts |
 | Deployed Sentry intake | PASS | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5 |
 | Live Sentry dashboard proof | TODO | Dashboard sections still need links/evidence |
@@ -94,7 +94,9 @@ Decision values:
 
 Recommended starting limit:
 
-text Private beta should start with a small known cohort before expanding. Do not begin with public signup traffic. 
+```text
+Private beta should start with a small known cohort before expanding. Do not begin with public signup traffic.
+```
 
 ---
 
@@ -107,7 +109,7 @@ text Private beta should start with a small known cohort before expanding. Do no
 | pnpm typecheck passes | TODO | Tori | TODO | Required. |
 | pnpm verify:privacy-phase1 passes | TODO | Tori | TODO | Required. |
 | pnpm test passes or focused equivalent is documented | TODO | Tori | TODO | Full suite preferred. |
-| Phase 2 local launch ops proof exists | PASS | Tori | pnpm verify:launch-ops passed locally at commit 27bfa28 | Local load/chaos proof is green. |
+| Phase 2 local launch ops proof exists | PASS | Tori | `docs/launch-readiness/test-proof.md`; `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29` | Local load/chaos proof is green. Deployed staging/dashboard/alert proof still TODO. |
 | Staging/deployed app is reachable | TODO | Tori | TODO | Link deployed URL/version. |
 | Sentry release/environment tagging exists | PASS | Tori | Sentry metadata visible in deployed response; event ID e56044a034cb4fb78d1b09801fb43da5 | Required for meaningful beta debugging. |
 | Sentry intake works in deployed environment | PASS | Tori | Synthetic event ID e56044a034cb4fb78d1b09801fb43da5 | Proves intake, not alert routing. |
@@ -136,7 +138,7 @@ text Private beta should start with a small known cohort before expanding. Do no
 | docs/launch-readiness/sentry-dashboard.md | IN PROGRESS | Tori | Sentry intake proven; dashboard proof still TODO. |
 | docs/launch-readiness/slack-alerts.md | BLOCKED | Tori | Routing blocked by Sentry plan or needs alternate alert path. |
 | docs/launch-readiness/load-test-plan.md | IN PROGRESS / LOCAL PROOF EXISTS | Tori | Local load suite is green; deployed staging proof still TODO. |
-| docs/launch-readiness/chaos-test-plan.md | IN PROGRESS / LOCAL PROOF EXISTS | Tori | Local chaos suite is green; evidence still needs doc alignment. |
+| docs/launch-readiness/chaos-test-plan.md | IN PROGRESS / LOCAL PROOF EXISTS | Tori | Local chaos suite is green and documented; operational alert/dashboard proof still TODO. |
 
 ---
 
@@ -170,8 +172,9 @@ Private beta does not require PagerDuty/Opsgenie, but it does require a tested a
 | Readiness failing | P1 | TODO / BLOCKED ROUTING | docs/runbooks/health-readiness.md | Required. |
 | Database/Postgres outage | P1 | TODO / BLOCKED ROUTING | docs/runbooks/postgres-outage.md | Required. |
 | Redis/rate-limit safety issue | P1 | TODO / BLOCKED ROUTING | docs/runbooks/redis-outage.md | Required. |
-| Booking finalize failure spike | P1 | TODO / BLOCKED ROUTING | TODO | Required. |
-| Hold create failure spike | P2 | TODO / BLOCKED ROUTING | TODO | Required. |
+| Booking finalize failure spike | P1 | TODO / BLOCKED ROUTING | docs/runbooks/booking-funnel.md | Required. |
+| Hold create failure spike | P2 | TODO / BLOCKED ROUTING | docs/runbooks/booking-funnel.md | Required. |
+| Auth failure spike | P1 | TODO / BLOCKED ROUTING | docs/runbooks/auth-session.md | Required. |
 | Availability bootstrap error/latency spike | P2 | TODO / BLOCKED ROUTING | docs/runbooks/health-readiness.md | Required. |
 | Stripe webhook verification/processing failure | P1 | TODO / BLOCKED ROUTING | docs/runbooks/stripe-degradation.md | Required if payments enabled. |
 | Media upload/storage failure | P2 | TODO / BLOCKED ROUTING | docs/runbooks/supabase-storage-outage.md | Required if media enabled. |
@@ -179,7 +182,6 @@ Private beta does not require PagerDuty/Opsgenie, but it does require a tested a
 | Notification backlog/delivery failure | P2 | TODO / BLOCKED ROUTING | docs/runbooks/notification-backlog.md | Required if notifications enabled. |
 | Postmark degradation | P2 | TODO / BLOCKED ROUTING | docs/runbooks/postmark-degradation.md | Required if email is beta-critical. |
 | Twilio degradation | P2 | TODO / BLOCKED ROUTING | docs/runbooks/twilio-degradation.md | Required if SMS is beta-critical. |
-| Auth failure spike | P1 | TODO / BLOCKED ROUTING | TODO | Required. |
 | Rate-limit anomaly | P2 | TODO / BLOCKED ROUTING | docs/runbooks/redis-outage.md | Required. |
 
 Every alert must have an owner, destination, threshold, runbook, and first-response instruction in docs/launch-readiness/slack-alerts.md.
@@ -200,7 +202,15 @@ If Sentry-to-Slack remains blocked, choose one private-beta path and document it
 
 Accepted private-beta alert path:
 
-text Alert path: TODO Tested date: TODO Tested by: Tori Signal tested: TODO Result: TODO Known limitation: TODO Accepted risk: TODO 
+```text
+Alert path: TODO
+Tested date: TODO
+Tested by: Tori
+Signal tested: TODO
+Result: TODO
+Known limitation: TODO
+Accepted risk: TODO
+```
 
 ---
 
@@ -420,7 +430,21 @@ Private beta is automatically blocked if any of the following are true:
 
 Final private beta decision:
 
-text Decision: TODO Commit: TODO Environment: TODO Start date: TODO Max beta users: TODO Sentry event proof: e56044a034cb4fb78d1b09801fb43da5 Dashboard proof: TODO Alert routing proof: TODO Support channel: TODO Accepted risks: TODO Blocking risks: TODO Rollback trigger: TODO Notes: TODO 
+```text
+Decision: TODO
+Commit: TODO
+Environment: TODO
+Start date: TODO
+Max beta users: TODO
+Sentry event proof: e56044a034cb4fb78d1b09801fb43da5
+Dashboard proof: TODO
+Alert routing proof: TODO
+Support channel: TODO
+Accepted risks: TODO
+Blocking risks: TODO
+Rollback trigger: TODO
+Notes: TODO
+```
 
 ---
 
@@ -448,6 +472,10 @@ text Decision: TODO Commit: TODO Environment: TODO Start date: TODO Max beta use
 - docs/runbooks/twilio-degradation.md
 - docs/runbooks/notification-backlog.md
 - docs/runbooks/private-media-incident.md
+- docs/runbooks/booking-funnel.md
+- docs/runbooks/auth-session.md
+- docs/runbooks/pro-session-lifecycle.md
+- docs/runbooks/slo-error-budget.md
 
 ---
 
