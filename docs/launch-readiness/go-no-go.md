@@ -181,11 +181,25 @@ Public rollout is automatically NO-GO if any of these are true:
 
 Run these before private beta decision:
 
-bash git status --short git rev-parse HEAD pnpm typecheck pnpm verify:privacy-phase1 
+```bash
+git status --short
+git rev-parse HEAD
+pnpm typecheck
+pnpm verify:privacy-phase1
+```
 
 Run these before public rollout decision:
 
-bash git status --short git rev-parse HEAD pnpm typecheck pnpm test pnpm verify:privacy-phase1 pnpm test:chaos pnpm test:load:launch pnpm verify:launch-ops 
+```bash
+git status --short
+git rev-parse HEAD
+pnpm typecheck
+pnpm test
+pnpm verify:privacy-phase1
+pnpm test:chaos
+pnpm test:load:launch
+pnpm verify:launch-ops
+```
 
 If pnpm test:load:launch requires staging-only secrets or seeded IDs, record the exact command, environment, commit, and output in the evidence section instead of pretending it ran in a generic environment. Tiny distinction. Huge difference. Classic deployment gremlin trap.
 
@@ -210,6 +224,9 @@ LOAD_TEST_TRUSTED_IP_HEADER_NAME=x-forwarded-for \
 LOAD_TEST_TRUSTED_IP_PREFIX=10.252 \
 LOAD_TEST_EXPECT_SIGNUP_SUCCESS=true \
 pnpm verify:launch-ops
+```
+
+### What was verified
 
 - pnpm test:chaos passed.
 - Chaos result: 6 files passed, 17 tests passed.
