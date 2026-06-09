@@ -1,12 +1,12 @@
 // lib/authClient.ts 
 'use client'
 
-export function currentPathWithQuery() {
+export function currentPathWithQuery(): string {
   if (typeof window === 'undefined') return '/'
   return window.location.pathname + window.location.search + window.location.hash
 }
 
-export function loginUrl(from?: string) {
+export function loginUrl(from?: string): string {
   const f = from ?? currentPathWithQuery()
   return `/login?from=${encodeURIComponent(f)}`
 }
@@ -17,6 +17,7 @@ export function loginUrl(from?: string) {
  */
 export function handleAuthRedirect(res: Response, from?: string): boolean {
   if (res.status !== 401) return false
+  if (typeof window === 'undefined') return true
   window.location.href = loginUrl(from)
   return true
 }
