@@ -6,7 +6,7 @@ Phase: Phase 2 — Launch ops proof
 Scope: Private beta and public rollout observability  
 Primary dashboard surface: Sentry-first  
 Supplemental dashboard sources: Provider dashboards where Sentry cannot own the signal  
-Current default status: IN PROGRESS — Sentry release/environment config is implemented in repo, Phase 2 chaos/load proof passed locally, deployed Sentry intake has been proven with a synthetic production event, and production-safe app-generated synthetic alert routing to `#tovis-ops-alerts` has been proven. Full dashboard section proof, provider dashboard links, staging/production dashboard review, runbook-link-in-message, and formal acknowledgement timing are still TODO.
+Current default status: IN PROGRESS — Sentry release/environment config is implemented in repo, Phase 2 chaos/load proof passed locally, deployed Sentry intake has been proven with a synthetic production event, production-safe app-generated synthetic alert routing to `#tovis-ops-alerts` has been proven, and deployed health/readiness endpoints have passed production proof. Full dashboard section links, provider dashboard links, staging/production dashboard review, runbook-link-in-message, and formal acknowledgement timing are still TODO.
 
 This document defines the minimum launch dashboard required for private beta and public rollout. The dashboard must show real staging or production signals, not just planned panels.
 
@@ -27,6 +27,7 @@ Important distinction:
 | Sentry release/environment config | IMPLEMENTED | lib/observability/sentryConfig.ts, sentry.server.config.ts, sentry.edge.config.ts, instrumentation-client.ts |
 | Deployed Sentry intake | PASS | Synthetic event captured from deployed route: e56044a034cb4fb78d1b09801fb43da5 |
 | Synthetic debug route | PASS | POST /api/internal/debug/sentry-test returned HTTP 200 on https://www.tovis.app |
+| Deployed health/readiness proof | PASS / DASHBOARD LINK TODO | `/api/health/live`, `/api/health`, and `/api/health/ready` returned HTTP 200 on `https://www.tovis.app`; readiness status `ok`; Redis readiness fixed in `bc88898`. |
 | Chaos suite | PASSED LOCALLY | pnpm test:chaos: 6 files / 17 tests passed |
 | Launch load suite | PASSED LOCALLY | pnpm test:load:launch: 8/8 launch load steps passed |
 | Aggregate launch ops verification | PASSED LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; proof recorded in `docs/launch-readiness/test-proof.md` |
@@ -38,7 +39,7 @@ Important distinction:
 | Slack alert routing | PASS / FOLLOW-UPS TODO | Paid Sentry plan enabled; Sentry app added to `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered a test notification; production-safe app-generated synthetic alert routed to Slack. Runbook-link-in-message and formal acknowledgement timing still TODO. |
 | Backup owner / escalation | BLOCKED | Required before public rollout |
 
-Local Phase 2 proof is not the same as deployed operational proof. The repo-side launch ops suite is implemented and locally green. Deployed Sentry intake has now been proven, and production-safe app-generated synthetic alert routing to Slack has been proven. Private beta and public rollout still require dashboard section proof, provider-dashboard evidence, runbook-link-in-message or accepted follow-up, formal acknowledgement timing or accepted follow-up, and route-specific P1/P2 alert thresholds.
+Local Phase 2 proof is not the same as deployed operational proof. The repo-side launch ops suite is implemented and locally green. Deployed Sentry intake, production-safe app-generated synthetic alert routing to Slack, and deployed health/readiness proof have now been proven. Private beta and public rollout still require dashboard section links, provider-dashboard evidence, deployed smoke proof for remaining core flows, runbook-link-in-message or accepted follow-up, formal acknowledgement timing or accepted follow-up, and route-specific P1/P2 alert thresholds.
 
 ---
 
@@ -66,7 +67,7 @@ Do not mark a dashboard section complete because a test exists. Tests prove beha
 
 | Section | Status | Owner | Evidence | Launch impact |
 |---|---|---|---|---|
-| Health/readiness | TODO LIVE PROOF | Tori | Health endpoints exist; live dashboard/synthetic proof TODO | Blocks private beta |
+| Health/readiness | PASS DEPLOYED / DASHBOARD LINK TODO | Tori | `/api/health/live`, `/api/health`, and `/api/health/ready` returned HTTP 200 on `https://www.tovis.app`; readiness status `ok`; Redis fixed in `bc88898`. Sentry dashboard/synthetic monitor link still TODO. | Dashboard link still blocks full observability proof |
 | Booking funnel | TODO LIVE PROOF | Tori | Local load proof exists; Sentry dashboard proof TODO | Blocks private beta |
 | Pro session lifecycle | TODO LIVE PROOF | Tori | Local lifecycle tests exist; Sentry dashboard proof TODO | Blocks private beta |
 | Media uploads | TODO LIVE PROOF | Tori | Local media load + storage chaos proof exists; dashboard/provider proof TODO | Blocks private beta |
@@ -95,6 +96,7 @@ Do not mark a dashboard section complete because a test exists. Tests prove beha
 | Last docs reconciliation proof | Current Phase 2 status reflected across launch-readiness docs |
 | Last deployed Sentry intake proof | 2026-06-07, event ID `e56044a034cb4fb78d1b09801fb43da5`, PASS |
 | Last app-generated synthetic alert proof | 2026-06-08, event ID `f7a0d19cb4a040a3a21f4679086f166f`, Slack short ID `TOVIS-APP-K`, PASS / RUNBOOK LINK TODO |
+| Last deployed health/readiness proof | 2026-06-09, `/api/health/live` PASS, `/api/health` PASS, `/api/health/ready` PASS, Redis readiness fixed in `bc88898`, PASS / DASHBOARD LINK TODO |
 | Last full dashboard proof | TODO |
 | Verified by | Tori |
 
@@ -291,29 +293,40 @@ Owner: Tori
 Primary source: Sentry and health/readiness endpoint  
 Supplemental source: Provider dashboards  
 Related runbook: docs/runbooks/health-readiness.md  
-Current proof status: Local endpoint/provider test coverage exists. Deployed Sentry intake proof exists. Live health dashboard/synthetic proof TODO.
+Current proof status: Local endpoint/provider test coverage exists. Deployed health/readiness proof passed on production. Deployed Sentry intake proof exists. Sentry dashboard/synthetic monitor link still TODO.
 
 ### Required signals
 
 | Signal | Source | Threshold | Status | Evidence |
 |---|---|---|---|---|
-| App live check success/failure | Sentry or synthetic check | 99%+ success during beta smoke window | TODO LIVE PROOF | TODO |
-| Readiness endpoint success/failure | Sentry or synthetic check | 99%+ success during beta smoke window | TODO LIVE PROOF | TODO |
-| Database readiness | Health/readiness endpoint | Healthy or degraded with clear component status | TODO LIVE PROOF | TODO |
-| Redis readiness | Health/readiness endpoint | Healthy or degraded with clear component status | TODO LIVE PROOF | TODO |
-| Storage readiness | Health/readiness endpoint/provider | Healthy or degraded with clear component status | TODO LIVE PROOF | TODO |
-| Stripe readiness | Health/readiness endpoint/provider | Healthy/configured if payments enabled | TODO LIVE PROOF | TODO |
-| Postmark readiness | Health/readiness endpoint/provider | Healthy/configured if email enabled | TODO LIVE PROOF | TODO |
-| Twilio readiness | Health/readiness endpoint/provider | Healthy/configured if SMS enabled | TODO LIVE PROOF | TODO |
-| Provider-live check setting | Env/deploy config | Explicitly known per environment | TODO LIVE PROOF | TODO |
+| App live check success/failure | `/api/health/live` / Sentry or synthetic check | 99%+ success during beta smoke window | PASS DEPLOYED / DASHBOARD LINK TODO | `curl -i "https://www.tovis.app/api/health/live"` returned HTTP 200, endpoint `live`, status `ok`. |
+| Health alias success/failure | `/api/health` / Sentry or synthetic check | 99%+ success during beta smoke window | PASS DEPLOYED / DASHBOARD LINK TODO | `curl -i "https://www.tovis.app/api/health"` returned HTTP 200, endpoint `live`, status `ok`. |
+| Readiness endpoint success/failure | `/api/health/ready` / Sentry or synthetic check | 99%+ success during beta smoke window | PASS DEPLOYED / DASHBOARD LINK TODO | `curl -i "https://www.tovis.app/api/health/ready"` returned HTTP 200, endpoint `ready`, status `ok`. |
+| Database readiness | Health/readiness endpoint | Healthy or degraded with clear component status | PASS DEPLOYED | Postgres returned `ok`; message: `Postgres is reachable.` |
+| Redis readiness | Health/readiness endpoint | Healthy or degraded with clear component status | PASS DEPLOYED | Redis returned `ok` after unique health key fix in `bc88898`; message: `Redis is reachable.` |
+| Storage readiness | Health/readiness endpoint/provider | Healthy or degraded with clear component status | PASS DEPLOYED | Supabase Storage returned `ok`; checked buckets: `media-private`, `media-public`. |
+| Stripe readiness | Health/readiness endpoint/provider | Healthy/configured if payments enabled | PASS CONFIG / LIVE CHECK DISABLED | Stripe configuration present; live provider check disabled. |
+| Postmark readiness | Health/readiness endpoint/provider | Healthy/configured if email enabled | PASS CONFIG / LIVE CHECK DISABLED | Postmark configuration present; live provider check disabled; from email and message stream configured. |
+| Twilio readiness | Health/readiness endpoint/provider | Healthy/configured if SMS enabled | PASS CONFIG / LIVE CHECK DISABLED | Twilio configuration present; live provider check disabled; from number configured. |
+| Provider-live check setting | Env/deploy config | Explicitly known per environment | PARTIAL | Stripe/Postmark/Twilio live provider checks are disabled; provider dashboard links still TODO. |
 
 ### Evidence required
 
-- Sentry dashboard/synthetic link
-- Last successful staging/production check
-- Last failed-check proof if available
-- Related Slack alert link
-- Provider dashboard links where Sentry is not source of truth
+Completed:
+
+- Production `/api/health/live` proof.
+- Production `/api/health` proof.
+- Production `/api/health/ready` proof.
+- Focused local health tests: `pnpm vitest run lib/health app/api/health`, 4 files passed, 34 tests passed.
+- Typecheck passed.
+- Redis readiness fixed in `bc88898`.
+
+Still required:
+
+- Sentry dashboard/synthetic monitor link.
+- Related Slack alert link for health/readiness failure.
+- Provider dashboard links where Sentry is not source of truth.
+- Provider live-check decision for Stripe/Postmark/Twilio.
 
 ---
 
@@ -533,16 +546,16 @@ Launch impact: Blocks private beta
 Owner: Tori  
 Primary source: Health/readiness and provider dashboards  
 Related runbooks: docs/runbooks/health-readiness.md, docs/runbooks/redis-outage.md, docs/runbooks/postgres-outage.md, docs/runbooks/supabase-storage-outage.md, docs/runbooks/stripe-degradation.md, docs/runbooks/postmark-degradation.md, docs/runbooks/twilio-degradation.md  
-Current proof status: Deployed Sentry intake is proven. Local chaos tests cover Redis, Supabase Storage, Stripe, Postmark, Twilio, and DB degradation. Provider dashboard/live health proof TODO.
+Current proof status: Deployed Sentry intake is proven. Deployed production health/readiness proof passed for Postgres, Redis, Supabase Storage, and provider configuration checks. Local chaos tests cover Redis, Supabase Storage, Stripe, Postmark, Twilio, and DB degradation. Provider dashboard links and live provider API checks are still TODO.
 
 ### Required signals
 
 | Dependency | Source | Threshold | Status | Evidence |
 |---|---|---|---|---|
 | Vercel/deploy environment | Vercel/Sentry | Deploy status visible | TODO PROVIDER LINK | TODO |
-| Database/Postgres | Health/provider | Healthy or degraded with clear route behavior | TODO LIVE PROOF | Local DB chaos proof exists |
-| Redis/rate-limit backend | Health/provider | Healthy or degraded with fail-closed behavior | TODO LIVE PROOF | Local Redis chaos proof exists |
-| Supabase Storage | Health/provider | Healthy or degraded with safe media behavior | TODO LIVE PROOF | Local storage chaos proof exists |
+| Database/Postgres | Health/provider | Healthy or degraded with clear route behavior | PASS DEPLOYED / PROVIDER LINK TODO | Production readiness returned Postgres `ok`; local DB chaos proof exists. |
+| Redis/rate-limit backend | Health/provider | Healthy or degraded with fail-closed behavior | PASS DEPLOYED / PROVIDER LINK TODO | Production readiness returned Redis `ok` after fix `bc88898`; local Redis chaos proof exists. |
+| Supabase Storage | Health/provider | Healthy or degraded with safe media behavior | PASS DEPLOYED / PROVIDER LINK TODO | Production readiness returned storage `ok` for `media-private` and `media-public`; local storage chaos proof exists. |
 | Stripe | Provider dashboard/Sentry | Provider incidents visible | TODO PROVIDER LINK | Local Stripe chaos/load proof exists |
 | Postmark | Provider dashboard/Sentry | Provider incidents visible | TODO PROVIDER LINK | Local Postmark chaos proof exists |
 | Twilio | Provider dashboard/Sentry | Provider incidents visible | TODO PROVIDER LINK | Local Twilio chaos proof exists |
@@ -638,7 +651,8 @@ pnpm verify:launch-ops
 Local Phase 2 code proof is complete.  
 Deployed Sentry intake proof is complete for the synthetic route.  
 Production-safe app-generated synthetic alert routing to Slack is complete.  
-Private beta dashboard proof, runbook-link/acknowledgement follow-ups, deployed smoke proof, support path, rollback path, and risk review remain incomplete.  
+Private beta dashboard links, runbook-link/acknowledgement follow-ups, deployed smoke proof for remaining core flows, support path, rollback path, and risk review remain incomplete.  
+Deployed health/readiness proof is complete.  
 Public rollout remains blocked.
 
 ---
@@ -649,7 +663,7 @@ Private beta may proceed only when these are live enough to catch launch-critica
 
 | Section | Required for private beta? | Status |
 |---|---:|---|
-| Health/readiness | Yes | TODO LIVE PROOF |
+| Health/readiness | Yes | PASS DEPLOYED / DASHBOARD LINK TODO |
 | Booking funnel | Yes | TODO LIVE PROOF |
 | Pro session lifecycle | Yes | TODO LIVE PROOF |
 | Media uploads | Yes | TODO LIVE PROOF |
@@ -783,4 +797,4 @@ A dashboard section is not complete because a heading exists, a test exists, a l
 
 A section is complete only when live evidence is linked, the owner is named, thresholds are documented, and the launch impact is clear.
 
-Local Phase 2 proof should be linked as supporting evidence. Deployed synthetic Sentry proof should be linked as intake/release evidence. Production-safe app-generated synthetic alert proof should be linked as alert-routing evidence. None of these replace full dashboard section proof, provider dashboard proof, route-specific P1/P2 thresholds, runbook-link-in-message, formal acknowledgement timing, backup ownership, or public escalation proof.
+Local Phase 2 proof should be linked as supporting evidence. Deployed synthetic Sentry proof should be linked as intake/release evidence. Production-safe app-generated synthetic alert proof should be linked as alert-routing evidence. Deployed health/readiness proof should be linked as production health evidence. None of these replace full dashboard section links, provider dashboard proof, deployed smoke proof for remaining core flows, route-specific P1/P2 thresholds, runbook-link-in-message, formal acknowledgement timing, backup ownership, or public escalation proof.
