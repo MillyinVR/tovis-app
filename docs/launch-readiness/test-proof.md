@@ -13,7 +13,7 @@ Do not mark a launch-readiness item fully proven unless the relevant command, en
 - Date: 2026-06-08
 - Related commits:
   - e9a93fb — Document partial Sentry Slack alert routing proof
-  - TODO — Add stable synthetic Sentry alert tags
+  - 92f2d63 — Add stable synthetic Sentry alert tags
 - Status: PASS
 - Environment:
   - Local: no
