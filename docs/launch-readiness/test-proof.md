@@ -109,7 +109,7 @@ Response body:
 - Provider dashboard coverage.
 - Public P1 escalation.
 - Backup owner.
-- Deployed smoke proof for health/readiness, booking, payments, media, notifications, privacy/export/delete, or rollback.
+- Deployed smoke proof for booking, payments, media, notifications, privacy/export/delete, or rollback.
 
 ### Known limitations
 
@@ -129,6 +129,138 @@ This clears the private-beta blocker for basic app-generated synthetic alert rou
 Private beta remains NO-GO until live dashboard proof, deployed smoke proof, support path, rollback path, risk review, and runbook-link/acknowledgement follow-ups are complete or explicitly accepted in `docs/launch-readiness/go-no-go.md`.
 
 Public rollout remains NO-GO until every private-beta blocker is closed, a named backup owner exists, and a tested P1 escalation path exists.
+
+---
+
+## Proof run — deployed health/readiness endpoints
+
+- Checklist item: Deployed health/readiness proof.
+- Owner: Tori Morales
+- Date: 2026-06-09
+- Related commit:
+  - bc88898 — Use unique Redis readiness health keys
+- Status: PASS
+- Environment:
+  - Local: yes, focused health tests only
+  - CI: not yet recorded
+  - Deployed staging: not used
+  - Production: yes
+  - Base URL: https://www.tovis.app
+- Launch decision impact:
+  - /api/health/live: PASS
+  - /api/health: PASS
+  - /api/health/ready: PASS
+  - Redis readiness: PASS after unique health key fix
+  - Private beta decision: deployed health/readiness proof is complete
+  - Public rollout proof: supports rollout, but public rollout still requires remaining Phase 2 gates
+
+### Test summary
+
+This proof verifies that the deployed production health endpoints are reachable and return controlled JSON responses.
+
+The live endpoint and health alias returned HTTP 200 with status ok.
+
+The readiness endpoint returned HTTP 200 with readiness status ok after Redis readiness was fixed to use unique health-check keys instead of one shared key.
+
+The earlier Redis degraded result was caused by the Redis health check using one shared key, health:ready:redis, which could be overwritten by overlapping readiness checks. Commit bc88898 changed the Redis health check to use unique keys with the prefix health:ready:redis.
+
+### Commands run
+
+bash curl -i "https://www.tovis.app/api/health/live" 
+
+Result: PASS.
+
+Observed summary:
+
+text HTTP/2 200 endpoint: live status: ok x-matched-path: /api/health/live 
+
+bash curl -i "https://www.tovis.app/api/health" 
+
+Result: PASS.
+
+Observed summary:
+
+text HTTP/2 200 endpoint: live status: ok x-matched-path: /api/health 
+
+bash curl -i "https://www.tovis.app/api/health/ready" 
+
+Result: PASS.
+
+Observed summary:
+
+text HTTP/2 200 endpoint: ready status: ok postgres: ok redis: ok storage: ok stripe: ok — configuration present; live provider check disabled postmark: ok — configuration present; live provider check disabled twilio: ok — configuration present; live provider check disabled 
+
+Redis details:
+
+text redis: ok message: Redis is reachable. keyPrefix: health:ready:redis timeoutMs: 2000 
+
+### Focused local health tests
+
+bash pnpm vitest run lib/health app/api/health 
+
+Result: PASS.
+
+text Test Files: 4 passed Tests: 34 passed 
+
+Covered files:
+
+- lib/health/summary.test.ts
+- lib/health/checks.test.ts
+- app/api/health/live/route.test.ts
+- app/api/health/ready/route.test.ts
+
+### Typecheck
+
+bash pnpm typecheck 
+
+Result: PASS.
+
+### What was verified
+
+- The deployed /api/health/live endpoint is reachable.
+- The deployed /api/health alias is reachable.
+- The deployed /api/health/ready endpoint is reachable.
+- The deployed readiness endpoint returns status: ok.
+- Postgres readiness returned ok.
+- Redis readiness returned ok after switching Redis health checks to unique keys.
+- Supabase Storage readiness returned ok for media-private and media-public.
+- Stripe configuration readiness returned ok; live provider check is disabled.
+- Postmark configuration readiness returned ok; live provider check is disabled.
+- Twilio configuration readiness returned ok; live provider check is disabled.
+- Focused local health tests passed.
+- Typecheck passed.
+
+### What was not verified
+
+- Stripe live provider API check was not enabled.
+- Postmark live provider API check was not enabled.
+- Twilio live provider API check was not enabled.
+- Sentry dashboard section links for health/readiness are still TODO.
+- Slack alert rule for health/readiness failure is still TODO.
+- Deployed booking lifecycle smoke proof is still TODO.
+- Deployed payment/webhook proof is still TODO if payments are enabled for beta.
+- Deployed media/private-storage proof is still TODO.
+- Deployed notification/provider proof is still TODO if email/SMS are enabled for beta.
+- Public rollout readiness is not fully proven.
+
+### Known limitations
+
+- This was production proof, not staging proof.
+- Provider live checks are disabled for Stripe, Postmark, and Twilio.
+- This proof does not replace Sentry dashboard section proof.
+- This proof does not replace route-specific alert threshold proof.
+- This proof does not replace support path proof.
+- This proof does not replace rollback proof.
+- This proof does not replace risk register review.
+- The previously exposed Upstash token must be rotated before private beta.
+
+### Launch decision
+
+Deployed health/readiness proof is complete for the private-beta health gate.
+
+Private beta remains NO-GO until remaining Phase 2 blockers are complete or explicitly accepted.
+
+Public rollout remains NO-GO.
 
 ---
 
