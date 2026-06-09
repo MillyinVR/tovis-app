@@ -187,12 +187,12 @@ async function fetchAutocomplete(args: {
   input: string
   sessionToken: string
 }) {
-  const url = new URL('/api/google/places/autocomplete', window.location.origin)
+  const url = new URL('/api/google/places/autocomplete', 'http://localhost')
   url.searchParams.set('input', args.input)
   url.searchParams.set('sessionToken', args.sessionToken)
   url.searchParams.set('components', 'country:us')
 
-  const res = await fetch(url.toString(), { cache: 'no-store' })
+  const res = await fetch(`${url.pathname}${url.search}`, { cache: 'no-store' })
   const data = await safeJsonRecord(res)
 
   if (!res.ok) {
@@ -226,11 +226,11 @@ async function fetchPlaceDetails(args: {
   placeId: string
   sessionToken: string
 }) {
-  const url = new URL('/api/google/places/details', window.location.origin)
+  const url = new URL('/api/google/places/details', 'http://localhost')
   url.searchParams.set('placeId', args.placeId)
   url.searchParams.set('sessionToken', args.sessionToken)
 
-  const res = await fetch(url.toString(), { cache: 'no-store' })
+  const res = await fetch(`${url.pathname}${url.search}`, { cache: 'no-store' })
   const data = await safeJsonRecord(res)
 
   if (!res.ok) {
@@ -260,11 +260,11 @@ async function fetchPlaceDetails(args: {
 }
 
 async function fetchGeocodeByPostal(args: { postalCode: string }) {
-  const url = new URL('/api/google/geocode', window.location.origin)
+  const url = new URL('/api/google/geocode', 'http://localhost')
   url.searchParams.set('postalCode', args.postalCode)
   url.searchParams.set('components', 'country:us')
 
-  const res = await fetch(url.toString(), { cache: 'no-store' })
+  const res = await fetch(`${url.pathname}${url.search}`, { cache: 'no-store' })
   const data = await safeJsonRecord(res)
 
   if (!res.ok) throw new Error(readErrorMessage(data) ?? 'ZIP lookup failed.')
@@ -290,11 +290,11 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
 }
 
 async function fetchTimeZoneId(args: { lat: number; lng: number }) {
-  const url = new URL('/api/google/timezone', window.location.origin)
+  const url = new URL('/api/google/timezone', 'http://localhost')
   url.searchParams.set('lat', String(args.lat))
   url.searchParams.set('lng', String(args.lng))
 
-  const res = await fetch(url.toString(), { cache: 'no-store' })
+  const res = await fetch(`${url.pathname}${url.search}`, { cache: 'no-store' })
   const data = await safeJsonRecord(res)
 
   if (!res.ok) {
