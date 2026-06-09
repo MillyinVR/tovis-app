@@ -6,6 +6,270 @@ Do not mark a launch-readiness item fully proven unless the relevant command, en
 
 ---
 
+## Proof run — local booking lifecycle, media, and checkout smoke proof
+
+- Checklist item: Local booking lifecycle, media/private-storage metadata, and checkout smoke proof.
+- Owner: Tori Morales
+- Date: 2026-06-09
+- Status: PASS locally
+- Environment:
+  - Local: yes
+  - Base URL: http://localhost:3000
+  - Local database: tovis_test
+  - CI: not recorded
+  - Deployed staging: not used
+  - Production: not used
+- Launch decision impact:
+  - Local booking lifecycle smoke: PASS
+  - Local media/private-storage metadata smoke: PASS
+  - Local checkout mark-paid smoke: PASS
+  - Deployed booking lifecycle proof: still TODO
+  - Deployed media/private-storage proof: still TODO
+  - Deployed payment/webhook proof: still TODO
+  - Private beta decision: still NO-GO until deployed/private-beta gates are complete or explicitly accepted
+  - Public rollout: NO-GO
+
+### Test summary
+
+This proof verifies that the local booking smoke flow can exercise the key Phase 2 booking path against a seeded local test database and a locally running app.
+
+The proof covered:
+
+- Availability bootstrap
+- Hold creation
+- Booking finalization
+- Booking session start
+- Booking session/media guards
+- Media metadata creation for media-private
+- Checkout mark-paid route
+
+The local app was run against the seeded tovis_test database. Client and pro authenticated browser cookies were used locally and were not recorded in this file.
+
+### Local target and IDs
+
+| Field | Value |
+|---|---|
+| Base URL | http://localhost:3000 |
+| Professional ID | cmpytirwf0002potkyjl2du5p |
+| Service ID | cmpytis0g000wpotkjydw3wrb |
+| Offering ID | cmpytis0t001opotkvocy3qhd |
+| Location ID | cmpytis06000epotkdzdyzl5w |
+| Booking ID used for media/checkout | cmq68ejz40005pob6zytpiw4v |
+| Media phase | AFTER |
+| Media visibility | PRO_CLIENT |
+| Storage bucket | media-private |
+
+### Availability bootstrap
+
+Command:
+
+bash pnpm test:load:availability 
+
+Result: PASS.
+
+Observed run summary:
+
+json {   "runId": "20260609055948899",   "baseUrl": "http://localhost:3000",   "route": "GET /api/availability/bootstrap",   "profile": "smoke",   "totals": {     "requests": 30,     "success200": 30,     "expected429": 0,     "realFailures": 0,     "realFailureRateExcluding429Pct": 0   },   "statusCounts": {     "200": 30   } } 
+
+### Hold creation
+
+Command:
+
+bash LOAD_TEST_ALLOW_SLOT_REUSE=true pnpm test:load:holds 
+
+Result: PASS.
+
+Observed run summary:
+
+json {   "runId": "20260609060140928",   "baseUrl": "http://localhost:3000",   "route": "POST /api/holds",   "profile": "smoke",   "totals": {     "requests": 10,     "success": 7,     "expected409": 0,     "expected429": 3,     "realFailures": 0,     "realFailureRateExcludingExpectedPct": 0   },   "statusCounts": {     "201": 7,     "429": 3   },   "codeCounts": {     "RATE_LIMITED": 3   } } 
+
+The three 429 RATE_LIMITED responses were expected by the load script and did not count as real failures.
+
+### Booking finalize
+
+Command:
+
+bash pnpm test:load:booking-finalize 
+
+Result: PASS.
+
+Observed run summary:
+
+json {   "runId": "20260609060102519",   "baseUrl": "http://localhost:3000",   "routes": {     "hold": "POST /api/holds",     "finalize": "POST /api/bookings/finalize"   },   "profile": "smoke",   "totals": {     "flowsAttempted": 5,     "hold": {       "success": 1,       "expected409": 4,       "expected429": 0,       "realFailures": 0     },     "finalize": {       "success": 1,       "expected409": 0,       "expected429": 0,       "realFailures": 0     },     "allSteps": {       "success": 2,       "expected409": 4,       "expected429": 0,       "realFailures": 0,       "realFailureRateExcludingExpectedPct": 0     }   },   "statusCounts": {     "201": 2,     "409": 4   },   "codeCounts": {     "TIME_BOOKED": 4   } } 
+
+The 409 TIME_BOOKED responses were expected slot-conflict behavior and did not count as real failures.
+
+### Booking session and media guards
+
+The media route correctly blocked invalid states before successful media proof:
+
+- PENDING booking blocked media upload with 403 FORBIDDEN.
+- ACCEPTED booking with no started session blocked AFTER media with 400 STEP_MISMATCH.
+- IN_PROGRESS booking at CONSULTATION blocked AFTER media with 400 STEP_MISMATCH.
+- Session start route returned 200 OK after the local test booking was moved into the appointment start window.
+- For local smoke only, the test booking was manually advanced to SessionStep.AFTER_PHOTOS to prove the media metadata route.
+
+Session start route result:
+
+json {   "ok": true,   "booking": {     "id": "cmq68ejz40005pob6zytpiw4v",     "status": "IN_PROGRESS",     "sessionStep": "CONSULTATION",     "startedAt": "2026-06-09T06:12:39.706Z",     "finishedAt": null   },   "meta": {     "mutated": true,     "noOp": false   },   "nextHref": "/pro/bookings/cmq68ejz40005pob6zytpiw4v/session" } 
+
+Manual local-only session state used for media smoke:
+
+json {   "id": "cmq68ejz40005pob6zytpiw4v",   "status": "IN_PROGRESS",   "sessionStep": "AFTER_PHOTOS",   "startedAt": "2026-06-09T06:17:08.045Z",   "finishedAt": null } 
+
+### Media/private-storage metadata
+
+Command:
+
+bash pnpm test:load:media-metadata 
+
+Result: PASS.
+
+Observed run summary:
+
+json {   "runId": "20260609061731667",   "baseUrl": "http://localhost:3000",   "route": "POST /api/pro/bookings/:bookingId/media",   "profile": "smoke",   "config": {     "bookingId": "cmq68ejz40005pob6zytpiw4v",     "professionalId": "cmpytirwf0002potkyjl2du5p",     "mediaType": "IMAGE",     "phase": "AFTER",     "visibility": "PRO_CLIENT",     "storageBucket": "media-private",     "storagePathPrefix": "bookings/cmq68ejz40005pob6zytpiw4v/after",     "hasProCookie": true   },   "totals": {     "requests": 10,     "success": 10,     "expected409": 0,     "expected429": 0,     "realFailures": 0,     "realFailureRateExcludingExpectedPct": 0   },   "statusCounts": {     "200": 10   },   "latencyMs": {     "all": {       "p50": 729.16,       "p95": 1336.26,       "p99": 1336.26     }   } } 
+
+### Checkout mark-paid
+
+Command:
+
+bash pnpm test:load:checkout 
+
+Result: PASS.
+
+Observed run summary:
+
+json {   "runId": "20260609061811227",   "baseUrl": "http://localhost:3000",   "route": "POST /api/pro/bookings/:bookingId/checkout/mark-paid",   "profile": "smoke",   "config": {     "bookingId": "cmq68ejz40005pob6zytpiw4v",     "action": "mark-paid",     "routeTemplate": "/api/pro/bookings/:bookingId/checkout/mark-paid",     "hasProCookie": true   },   "totals": {     "requests": 10,     "success": 10,     "expected409": 0,     "expected429": 0,     "realFailures": 0,     "realFailureRateExcludingExpectedPct": 0   },   "statusCounts": {     "200": 10   },   "latencyMs": {     "all": {       "p50": 81.72,       "p95": 749.53,       "p99": 749.53     }   } } 
+
+### What was verified
+
+- Availability bootstrap route returned successful responses locally.
+- Hold creation route worked locally with expected rate-limit behavior.
+- Booking finalize flow successfully created a finalized booking locally.
+- Booking conflict behavior returned expected 409 TIME_BOOKED responses.
+- Media route blocked invalid booking/session states before allowing media metadata creation.
+- Booking session start route worked locally after the booking was inside the allowed start window.
+- Media metadata route returned 10/10 successful responses after the booking was in an allowed AFTER_PHOTOS state.
+- Media metadata proof used media-private with PRO_CLIENT visibility.
+- Checkout mark-paid route returned 10/10 successful responses locally.
+- No real failures were reported by the successful load-script runs.
+
+### What was not verified
+
+- Deployed production booking lifecycle proof.
+- Deployed production media/private-storage proof.
+- Deployed production checkout/payment proof.
+- Stripe live checkout or live webhook behavior.
+- Client consultation approval workflow end-to-end.
+- Actual binary upload to Supabase Storage.
+- Production beta cookies or production beta seeded accounts.
+- CI execution for these exact proof runs.
+- Public rollout capacity.
+
+### Known limitations
+
+- This was local-only proof against http://localhost:3000.
+- The load scripts reported "environment": "staging" because of script naming/config, but the actual target was local.
+- Auth cookies were used locally but intentionally not recorded.
+- One local booking was manually advanced to SessionStep.AFTER_PHOTOS to isolate and prove media metadata route behavior.
+- Manual local DB updates must not be used as production proof.
+- LOAD_TEST_ALLOW_SLOT_REUSE=true was used for hold testing due to limited local smoke slot pools.
+- Expected 429 RATE_LIMITED and 409 TIME_BOOKED responses were treated as expected by the load scripts and did not count as real failures.
+- This proof supports confidence in private beta but does not close the deployed private-beta proof blockers.
+
+### Launch decision
+
+Local booking lifecycle, media metadata, and checkout smoke proof is complete.
+
+Private beta remains NO-GO until deployed booking lifecycle, deployed media/private-storage, deployed payment/webhook, notification/provider proof, support path, rollback path, risk review, dashboard proof, and remaining alert/runbook follow-ups are complete or explicitly accepted.
+
+Public rollout remains NO-GO.
+
+---
+
+## Proof run — local notification processing and Stripe webhook replay smoke proof
+
+- Checklist item: Local notification/provider job and Stripe webhook replay smoke proof.
+- Owner: Tori Morales
+- Date: 2026-06-09
+- Status: PASS locally
+- Environment:
+  - Local: yes
+  - Base URL: http://localhost:3000
+  - CI: not recorded
+  - Deployed staging: not used
+  - Production: not used
+- Launch decision impact:
+  - Local notification processing smoke: PASS
+  - Local Stripe webhook replay smoke: PASS
+  - Deployed notification/provider proof: still TODO
+  - Deployed payment/webhook proof: still TODO
+  - Private beta decision: still NO-GO until deployed/private-beta gates are complete or explicitly accepted
+  - Public rollout: NO-GO
+
+### Notification processing
+
+Command:
+
+bash pnpm test:load:notifications 
+
+Result: PASS.
+
+Observed run summary:
+
+json {   "runId": "20260609063454102",   "baseUrl": "http://localhost:3000",   "route": "POST /api/internal/jobs/notifications/process",   "profile": "smoke",   "config": {     "route": "/api/internal/jobs/notifications/process",     "method": "POST",     "take": 100,     "authMode": "bearer",     "hasJobSecret": true   },   "totals": {     "requests": 10,     "success": 10,     "expected401": 0,     "expected429": 0,     "realFailures": 0,     "realFailureRateExcludingExpectedPct": 0   },   "statusCounts": {     "200": 10   },   "latencyMs": {     "all": {       "p50": 20.35,       "p95": 1457.93,       "p99": 1457.93     }   } } 
+
+### Stripe webhook replay
+
+Command:
+
+bash pnpm test:load:stripe-webhook-replay 
+
+Result: PASS.
+
+Observed run summary:
+
+json {   "runId": "20260609063521648",   "baseUrl": "http://localhost:3000",   "route": "POST /api/webhooks/stripe",   "profile": "smoke",   "config": {     "route": "/api/webhooks/stripe",     "method": "POST",     "eventType": "charge.succeeded",     "replayMode": true,     "livemode": false,     "hasWebhookSecret": true,     "bookingId": "cmq68ejz40005pob6zytpiw4v"   },   "totals": {     "totalRequests": 10,     "success": 10,     "expected400": 0,     "expected429": 0,     "realFailures": 0,     "realFailureRateExcludingExpectedPct": 0,     "duplicates": 9,     "handled": 0,     "unhandled": 1   },   "statusCounts": {     "200": 10   },   "latencyMs": {     "all": {       "p50": 22.5,       "p95": 120.13,       "p99": 120.13     }   } } 
+
+### What was verified
+
+- Notification processing job route accepted authorized local smoke requests.
+- Notification processing returned 10/10 successful responses.
+- Stripe webhook route accepted signed local replay-mode webhook smoke requests.
+- Stripe webhook replay returned 10/10 successful responses.
+- Stripe webhook idempotency/duplicate handling was visible: 9 duplicate replay responses after the initial event.
+- No real failures were reported by either load script.
+
+### What was not verified
+
+- Deployed production notification/provider behavior.
+- Live Postmark provider delivery.
+- Live Twilio provider delivery.
+- Live Stripe checkout behavior.
+- Live Stripe webhook delivery from Stripe.
+- Deployed payment/webhook proof.
+- Deployed provider dashboard proof.
+- Public rollout capacity.
+
+### Known limitations
+
+- This was local-only proof against http://localhost:3000.
+- The load scripts reported "environment": "staging" because of script naming/config, but the actual target was local.
+- Secrets and cookies were used locally but intentionally not recorded.
+- Stripe replay mode used synthetic local webhook events, not real Stripe-delivered production events.
+- Notification processing proof verified route/job behavior, not live provider delivery.
+- This proof supports confidence in private beta but does not close deployed private-beta proof blockers.
+
+### Launch decision
+
+Local notification processing and Stripe webhook replay smoke proof is complete.
+
+Private beta remains NO-GO until deployed notification/provider proof, deployed payment/webhook proof, deployed booking/media proof, support path, rollback path, risk review, dashboard proof, and remaining alert/runbook follow-ups are complete or explicitly accepted.
+
+Public rollout remains NO-GO.
+
+---
+
 ## Proof run — production-safe app-generated synthetic Sentry alert routed to Slack
 
 - Checklist item: Production-safe app-generated synthetic alert routing proof.
