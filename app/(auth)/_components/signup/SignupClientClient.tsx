@@ -213,11 +213,11 @@ type ConfirmedZip = {
 }
 
 async function fetchGeocodeByPostal(args: { postalCode: string }) {
-  const url = new URL('/api/google/geocode', window.location.origin)
+  const url = new URL('/api/google/geocode', 'http://localhost')
   url.searchParams.set('postalCode', args.postalCode)
   url.searchParams.set('components', 'country:us')
 
-  const res = await fetch(url.toString(), { cache: 'no-store' })
+  const res = await fetch(`${url.pathname}${url.search}`, { cache: 'no-store' })
   const raw = (await res.json().catch(() => null)) as GeocodeResponse | null
   const geo = raw?.geo
 
@@ -245,11 +245,11 @@ async function fetchGeocodeByPostal(args: { postalCode: string }) {
 }
 
 async function fetchTimeZoneId(args: { lat: number; lng: number }) {
-  const url = new URL('/api/google/timezone', window.location.origin)
+  const url = new URL('/api/google/timezone', 'http://localhost')
   url.searchParams.set('lat', String(args.lat))
   url.searchParams.set('lng', String(args.lng))
 
-  const res = await fetch(url.toString(), { cache: 'no-store' })
+  const res = await fetch(`${url.pathname}${url.search}`, { cache: 'no-store' })
   const raw = (await res.json().catch(() => null)) as TimeZoneResponse | null
 
   if (!res.ok) {
