@@ -1,5 +1,7 @@
 // lib/health/redis.ts
 
+import { randomUUID } from 'node:crypto'
+
 import { getRedis } from '@/lib/redis'
 
 import {
@@ -8,7 +10,7 @@ import {
 } from './types'
 
 const REDIS_CHECK_NAME = 'redis' as const
-const REDIS_HEALTH_KEY = 'health:ready:redis'
+const REDIS_HEALTH_KEY_PREFIX = 'health:ready:redis'
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
@@ -47,14 +49,18 @@ async function pingRedis(): Promise<void> {
     )
   }
 
-  const value = `${Date.now()}`
-  await redis.set(REDIS_HEALTH_KEY, value, { ex: 30 })
+  const key = `${REDIS_HEALTH_KEY_PREFIX}:${randomUUID()}`
+  const value = `${Date.now()}:${randomUUID()}`
 
-  const storedValue = await redis.get<string>(REDIS_HEALTH_KEY)
+  await redis.set(key, value, { ex: 30 })
+
+  const storedValue = await redis.get<string>(key)
 
   if (storedValue !== value) {
     throw new Error('Redis health check read-after-write verification failed.')
   }
+
+  await redis.del(key)
 }
 
 export async function checkRedisHealth(
@@ -72,7 +78,7 @@ export async function checkRedisHealth(
       checkedAt: new Date().toISOString(),
       message: 'Redis is reachable.',
       details: {
-        key: REDIS_HEALTH_KEY,
+        keyPrefix: REDIS_HEALTH_KEY_PREFIX,
         timeoutMs,
       },
     }
@@ -84,7 +90,7 @@ export async function checkRedisHealth(
       checkedAt: new Date().toISOString(),
       message: getErrorMessage(error),
       details: {
-        key: REDIS_HEALTH_KEY,
+        keyPrefix: REDIS_HEALTH_KEY_PREFIX,
         timeoutMs,
       },
     }
