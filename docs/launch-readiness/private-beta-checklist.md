@@ -7,12 +7,12 @@ Scope: Controlled private beta only
 Current default decision: NO-GO until required evidence is linked or explicitly accepted  
 Primary owner: Tori  
 Backup owner: TODO — required before public rollout, optional only as an accepted private-beta risk  
-Alerting path: Slack-first through paid Sentry issue alerts routed to `#tovis-ops-alerts`; production-safe app-generated synthetic alert proof still TODO  
+Alerting path: Slack-first through paid Sentry issue alerts routed to `#tovis-ops-alerts`; production-safe app-generated synthetic alert routed successfully on 2026-06-08; runbook-link-in-message and formal acknowledgement timing still TODO  
 Dashboard surface: Sentry-first, with provider dashboards linked where needed
 
 This checklist defines the minimum requirements before TOVIS can enter private beta with a limited group of users. Private beta is not public launch. It is a controlled release with known users, explicit support coverage, operational visibility, and fast rollback.
 
-Important distinction: local Phase 2 code proof is now green, deployed Sentry intake is proven, and a saved Sentry issue-alert rule can deliver notifications to `#tovis-ops-alerts`. That does not mean private beta is ready. Private beta still requires live dashboard proof, production-safe app-generated synthetic alert proof with acknowledgement/runbook evidence, deployed flow proof, support path proof, rollback decisions, and risk review.
+Important distinction: local Phase 2 code proof is now green, deployed Sentry intake is proven, a saved Sentry issue-alert rule can deliver notifications to `#tovis-ops-alerts`, and a production-safe app-generated synthetic alert routed to Slack successfully. That does not mean private beta is ready. Private beta still requires live dashboard proof, runbook-link-in-message or accepted follow-up, formal acknowledgement timing or accepted follow-up, deployed flow proof, support path proof, rollback decisions, and risk review.
 
 ---
 
@@ -41,8 +41,8 @@ Private beta exists to prove:
 | Sentry release/environment config | IMPLEMENTED | lib/observability/sentryConfig.ts, sentry.server.config.ts, sentry.edge.config.ts, instrumentation-client.ts |
 | Deployed Sentry intake | PASS | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5 |
 | Live Sentry dashboard proof | TODO | Dashboard sections still need links/evidence |
-| Synthetic alert routing | PARTIAL PASS / REAL APP-GENERATED SYNTHETIC TODO | Saved Sentry issue-alert rule delivered a test notification to `#tovis-ops-alerts` on 2026-06-07 at 8:36 PM local. A production-safe app-generated synthetic alert with threshold, runbook link, and acknowledgement timing still needs to be tested before private beta. |
-| Slack alert routing | PARTIAL PASS | Paid Sentry plan enabled; Sentry app added to `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered a test notification to Slack. |
+| Synthetic alert routing | PASS / RUNBOOK LINK TODO | Production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts` on 2026-06-08 at 6:31 PM local. Event ID `f7a0d19cb4a040a3a21f4679086f166f`; alert key `launch-readiness.synthetic-sentry-alert.v2`; Slack short ID `TOVIS-APP-K`. Runbook link in Slack message and formal acknowledgement timing still TODO. |
+| Slack alert routing | PASS / RUNBOOK LINK TODO | Paid Sentry plan enabled; Sentry app added to `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered a test notification to Slack; production-safe app-generated synthetic alert routed to Slack on 2026-06-08. |
 | Backup owner | TODO | Required before public rollout; private-beta accepted risk only |
 | Private beta support path | TODO | Required before private beta |
 
@@ -60,13 +60,13 @@ Private beta exists to prove:
 | Owner | Tori |
 | Backup | TODO |
 | Support channel | TODO |
-| Slack ops channel | `#tovis-ops-alerts` — PARTIAL PASS |
+| Slack ops channel | `#tovis-ops-alerts` — PASS / RUNBOOK LINK TODO |
 | Alternate alert path | NOT SELECTED — Sentry-to-Slack is the selected private-beta alert path |
 | Sentry dashboard URL | TODO |
 | Sentry synthetic event proof | e56044a034cb4fb78d1b09801fb43da5 |
-| Slack routing proof | PARTIAL — saved Sentry issue-alert rule delivered a test notification to `#tovis-ops-alerts`; production-safe app-generated synthetic alert proof still TODO |
+| Slack routing proof | PASS / FOLLOW-UPS TODO — production-safe app-generated synthetic alert routed to `#tovis-ops-alerts`; event ID `f7a0d19cb4a040a3a21f4679086f166f`; Slack short ID `TOVIS-APP-K`; runbook-link-in-message and formal acknowledgement timing still TODO |
 | Accepted risks | TODO |
-| Blocking risks | Dashboard proof, production-safe app-generated synthetic alert proof, deployed smoke proof, support path, rollback proof, risk review |
+| Blocking risks | Dashboard proof, deployed smoke proof, support path, rollback proof, risk review, runbook-link-in-message/formal acknowledgement timing unless accepted as follow-ups |
 
 Decision values:
 
@@ -110,12 +110,12 @@ Private beta should start with a small known cohort before expanding. Do not beg
 | pnpm typecheck passes | TODO | Tori | TODO | Required. |
 | pnpm verify:privacy-phase1 passes | TODO | Tori | TODO | Required. |
 | pnpm test passes or focused equivalent is documented | TODO | Tori | TODO | Full suite preferred. |
-| Phase 2 local launch ops proof exists | PASS | Tori | `docs/launch-readiness/test-proof.md`; `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29` | Local load/chaos proof is green. Deployed staging/dashboard/app-generated alert proof still TODO. |
+| Phase 2 local launch ops proof exists | PASS | Tori | `docs/launch-readiness/test-proof.md`; `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29` | Local load/chaos proof is green. Production-safe app-generated alert routing is proven. Deployed staging/dashboard proof still TODO. |
 | Staging/deployed app is reachable | TODO | Tori | TODO | Link deployed URL/version. |
 | Sentry release/environment tagging exists | PASS | Tori | Sentry metadata visible in deployed response; event ID e56044a034cb4fb78d1b09801fb43da5 | Required for meaningful beta debugging. |
-| Sentry intake works in deployed environment | PASS | Tori | Synthetic event ID e56044a034cb4fb78d1b09801fb43da5 | Proves deployed Sentry intake. Separately, saved Sentry issue-alert delivery to Slack is partially proven. |
+| Sentry intake works in deployed environment | PASS | Tori | Synthetic event ID `e56044a034cb4fb78d1b09801fb43da5`; app-generated alert event ID `f7a0d19cb4a040a3a21f4679086f166f` | Proves deployed Sentry intake. Separately, saved Sentry issue-alert delivery and production-safe app-generated alert routing to Slack are proven. |
 | Sentry dashboard sections exist and are useful | TODO LIVE PROOF | Tori | docs/launch-readiness/sentry-dashboard.md | Needs live dashboard links/evidence. |
-| Synthetic alert routing works | PARTIAL PASS / REAL APP-GENERATED SYNTHETIC TODO | Tori | docs/launch-readiness/slack-alerts.md; docs/launch-readiness/oncall.md; docs/launch-readiness/go-no-go.md | Saved Sentry issue-alert rule delivered a test notification to `#tovis-ops-alerts`. A production-safe app-generated synthetic alert must still route to Slack, include/link the runbook, and record acknowledgement timing before private beta. |
+| Synthetic alert routing works | PASS / FORMAL ACK TIMING TODO | Tori | docs/launch-readiness/slack-alerts.md; docs/launch-readiness/oncall.md; docs/launch-readiness/go-no-go.md; docs/launch-readiness/test-proof.md | Production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts`; event ID `f7a0d19cb4a040a3a21f4679086f166f`; alert key `launch-readiness.synthetic-sentry-alert.v2`; Slack short ID `TOVIS-APP-K`. Runbook-link-in-message and formal acknowledgement timing still TODO. |
 | Health/readiness proof exists | TODO | Tori | TODO | Must include deployed environment. |
 | Booking lifecycle smoke proof exists | TODO | Tori | TODO | Client booking + pro session path. |
 | Payment/Stripe webhook proof exists | TODO | Tori | TODO | Signed webhook + idempotency/replay behavior. |
@@ -132,12 +132,12 @@ Private beta should start with a small known cohort before expanding. Do not beg
 
 | Document | Status | Owner | Notes |
 |---|---|---|---|
-| docs/launch-readiness/oncall.md | IN PROGRESS / PARTIAL ROUTING PROOF | Tori | Primary owner named; saved Sentry issue-alert delivery to Slack proven; backup owner still TODO for public rollout. |
+| docs/launch-readiness/oncall.md | IN PROGRESS / SYNTHETIC ALERT ROUTING PASS | Tori | Primary owner named; saved Sentry issue-alert delivery and production-safe app-generated alert routing to Slack proven; backup owner still TODO for public rollout. |
 | docs/launch-readiness/go-no-go.md | IN PROGRESS | Tori | Must contain current private beta gate. |
 | docs/launch-readiness/private-beta-checklist.md | IN PROGRESS | Tori | This file. |
 | docs/launch-readiness/risk-register.md | IN PROGRESS | Tori | Required before GO decision. |
 | docs/launch-readiness/sentry-dashboard.md | IN PROGRESS | Tori | Sentry intake proven; dashboard proof still TODO. |
-| docs/launch-readiness/slack-alerts.md | IN PROGRESS / PARTIAL ROUTING PROOF | Tori | Saved Sentry issue-alert rule delivered to `#tovis-ops-alerts`; production-safe app-generated synthetic alert proof still TODO. |
+| docs/launch-readiness/slack-alerts.md | IN PROGRESS / SYNTHETIC ALERT ROUTING PASS | Tori | Saved Sentry issue-alert rule delivered to `#tovis-ops-alerts`; production-safe app-generated synthetic alert routed to Slack; runbook-link-in-message/formal acknowledgement timing still TODO. |
 | docs/launch-readiness/load-test-plan.md | IN PROGRESS / LOCAL PROOF EXISTS | Tori | Local load suite is green; deployed staging proof still TODO. |
 | docs/launch-readiness/chaos-test-plan.md | IN PROGRESS / LOCAL PROOF EXISTS | Tori | Local chaos suite is green and documented; operational alert/dashboard proof still TODO. |
 
@@ -166,7 +166,7 @@ Sentry intake proof is not the same as dashboard proof. The event ID proves even
 
 # Required private-beta alerts
 
-Private beta does not require PagerDuty/Opsgenie, but it does require a tested alert path for critical signals. Slack is the selected private-beta path. Basic Sentry-to-Slack delivery is partially proven through a saved Sentry issue-alert rule, but private beta still requires at least one production-safe app-generated synthetic alert with threshold, runbook link, destination, acknowledgement, and recorded timing.
+Private beta does not require PagerDuty/Opsgenie, but it does require a tested alert path for critical signals. Slack is the selected private-beta path. Basic Sentry-to-Slack delivery is proven through a saved Sentry issue-alert rule, and production-safe app-generated synthetic alert routing to `#tovis-ops-alerts` is proven. Route-specific P1/P2 thresholds, runbook-link-in-message, and formal acknowledgement timing still need completion or explicit acceptance before private beta.
 
 | Alert area | Severity | Status | Runbook | Notes |
 |---|---|---|---|---|
@@ -195,22 +195,27 @@ Sentry-to-Slack is the selected private-beta alert path.
 
 | Option | Status | Notes |
 |---|---|---|
-| Paid Sentry + Slack integration | SELECTED / PARTIAL PASS | Paid Sentry plan enabled. Sentry app added to `#tovis-ops-alerts`. Saved Sentry issue-alert rule delivered a test notification to Slack. |
+| Paid Sentry + Slack integration | SELECTED / SYNTHETIC ALERT ROUTING PASS | Paid Sentry plan enabled. Sentry app added to `#tovis-ops-alerts`. Saved Sentry issue-alert rule delivered a test notification to Slack. Production-safe app-generated synthetic alert routed to Slack on 2026-06-08. |
 | Use Sentry email alerts to owner inbox | NOT SELECTED | May remain supplemental, but is not the primary private-beta alert path. |
 | Use Vercel/provider alert emails plus manual Slack posting | NOT SELECTED | Supplemental only; not enough for launch-critical app alerts. |
 | Build temporary internal alert endpoint/job | NOT SELECTED | Avoid unless Sentry-to-Slack cannot support required proof. |
-| Keep private beta blocked | CURRENT DEFAULT UNTIL REAL SYNTHETIC PROOF | Private beta remains NO-GO until app-generated synthetic alert proof, dashboard proof, support path, rollback path, and risk review are complete. |
+| Keep private beta blocked | CURRENT DEFAULT UNTIL REMAINING GATES COMPLETE | Private beta remains NO-GO until dashboard proof, deployed smoke proof, support path, rollback path, risk review, and runbook-link/acknowledgement follow-ups are complete or explicitly accepted. |
 
 Accepted private-beta alert path:
 
 ```text
 Alert path: Paid Sentry issue alerts routed to #tovis-ops-alerts
-Tested date: 2026-06-07
+Saved-rule test date: 2026-06-07
+App-generated synthetic test date: 2026-06-08
 Tested by: Tori
-Signal tested: Saved Sentry issue-alert rule test notification
-Result: PARTIAL PASS — saved Sentry issue-alert rule delivered to Slack
-Known limitation: This did not prove app-generated production-safe synthetic alert behavior, threshold behavior, runbook link, or acknowledgement timing.
-Accepted risk: TODO — remaining alerting risk must be resolved or explicitly accepted in go-no-go.md before private beta.
+Signals tested:
+- Saved Sentry issue-alert rule test notification
+- Production-safe app-generated synthetic Sentry alert
+Result: PASS / FOLLOW-UPS TODO — saved Sentry issue-alert rule delivered to Slack, and production-safe app-generated synthetic alert routed to Slack.
+App-generated event ID: f7a0d19cb4a040a3a21f4679086f166f
+Slack short ID: TOVIS-APP-K
+Known limitation: Runbook-link-in-message, formal acknowledgement timing, route-specific thresholds, dashboard proof, support path, rollback path, and risk review remain TODO.
+Accepted risk: TODO — remaining follow-ups must be resolved or explicitly accepted in go-no-go.md before private beta.
 ```
 
 ---
@@ -314,7 +319,7 @@ Rollback triggers:
 | Stripe | TODO | Tori | Local checkout/webhook load + chaos proof exists; provider proof TODO. |
 | Postmark | TODO | Tori | Local provider degradation proof exists; provider proof TODO. |
 | Twilio | TODO | Tori | Local provider degradation proof exists; provider proof TODO. |
-| Sentry | PARTIAL PASS | Tori | Deployed intake works; saved Sentry issue-alert delivery to Slack works; dashboard proof and app-generated synthetic alert proof still TODO. |
+| Sentry | PASS / DASHBOARD TODO | Tori | Deployed intake works; saved Sentry issue-alert delivery to Slack works; production-safe app-generated synthetic alert routed to Slack. Dashboard proof, runbook-link-in-message, formal acknowledgement timing, and route-specific thresholds still TODO. |
 | Domain/DNS | TODO | Tori | https://www.tovis.app resolves; formal proof TODO. |
 | Secrets/env vars | TODO | Tori | Must verify presence without recording values. |
 
@@ -371,7 +376,7 @@ Private beta can move toward public rollout only when:
 - Notifications are stable or safe failure paths are documented.
 - Support process is working.
 - Sentry dashboard has useful real data.
-- Alert path has been exercised with production-safe app-generated alert proof, acknowledgement timing, and runbook evidence.
+- Alert path has been exercised with production-safe app-generated alert proof; acknowledgement timing and runbook evidence are complete or explicitly accepted as follow-ups.
 - Load tests exist and pass against deployed staging or accepted launch-equivalent environment.
 - Chaos tests exist and pass.
 - Provider dashboards/proof are linked.
@@ -394,7 +399,7 @@ Private beta is automatically blocked if any of the following are true:
 - Sentry intake is broken.
 - Dashboard visibility is missing for launch-critical routes.
 - Slack alert destination is missing or Sentry-to-Slack delivery to `#tovis-ops-alerts` is broken during the beta window.
-- Production-safe app-generated synthetic alert proof is missing unless explicitly accepted as a private-beta risk.
+- Production-safe app-generated synthetic alert routing to `#tovis-ops-alerts` is missing or broken unless explicitly accepted as a private-beta risk.
 - No P1 owner is assigned.
 - Export/delete route authorization proof fails.
 - A suspected PII leak or privacy-boundary regression is open.
@@ -409,8 +414,8 @@ Private beta is automatically blocked if any of the following are true:
 | Blocker | Status | Owner | Required action |
 |---|---|---|---|
 | Live Sentry dashboard proof | TODO | Tori | Link dashboard sections and verify live data. |
-| Alert routing proof | PARTIAL PASS / REAL APP-GENERATED SYNTHETIC TODO | Tori | Saved Sentry issue-alert rule delivered a test notification to `#tovis-ops-alerts`; trigger and record a production-safe app-generated synthetic alert with threshold, runbook link, destination, acknowledgement timing, and result. |
-| Slack/private-beta ops destination | DONE / PARTIAL ROUTING PROOF | Tori | `#tovis-ops-alerts` selected; Sentry app added; saved Sentry issue-alert rule delivered test notification. |
+| Alert routing proof | PASS / FOLLOW-UPS TODO | Tori | Production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts`; event ID `f7a0d19cb4a040a3a21f4679086f166f`; Slack short ID `TOVIS-APP-K`. Runbook-link-in-message and formal acknowledgement timing still TODO or must be explicitly accepted. |
+| Slack/private-beta ops destination | DONE / SYNTHETIC ALERT ROUTING PASS | Tori | `#tovis-ops-alerts` selected; Sentry app added; saved Sentry issue-alert rule delivered test notification; production-safe app-generated synthetic alert routed to Slack. |
 | Support channel/path | TODO | Tori | Define support and bug intake path. |
 | Health/readiness deployed proof | TODO | Tori | Verify deployed endpoint and provider-live settings. |
 | Booking lifecycle deployed proof | TODO | Tori | Run smoke proof against target environment. |
@@ -440,7 +445,7 @@ Start date: TODO
 Max beta users: TODO
 Sentry event proof: e56044a034cb4fb78d1b09801fb43da5
 Dashboard proof: TODO
-Alert routing proof: PARTIAL — saved Sentry issue-alert rule delivered a test notification to #tovis-ops-alerts; production-safe app-generated synthetic alert proof TODO
+Alert routing proof: PASS / FOLLOW-UPS TODO — production-safe app-generated synthetic alert routed to #tovis-ops-alerts; event ID f7a0d19cb4a040a3a21f4679086f166f; Slack short ID TOVIS-APP-K; runbook-link-in-message and formal acknowledgement timing TODO
 Support channel: TODO
 Accepted risks: TODO
 Blocking risks: TODO
@@ -485,4 +490,4 @@ Notes: TODO
 
 Do not mark private beta as GO unless the required proof exists and is linked. Private beta is allowed to be small and imperfect; it is not allowed to be blind.
 
-Local Phase 2 proof, deployed Sentry intake proof, and saved Sentry issue-alert delivery proof should be linked as supporting evidence. They do not replace deployed dashboard proof, production-safe app-generated alert proof, support readiness, risk review, or rollback proof.
+Local Phase 2 proof, deployed Sentry intake proof, saved Sentry issue-alert delivery proof, and production-safe app-generated synthetic alert proof should be linked as supporting evidence. They do not replace deployed dashboard proof, route-specific thresholds, runbook-link-in-message, formal acknowledgement timing, support readiness, risk review, or rollback proof.

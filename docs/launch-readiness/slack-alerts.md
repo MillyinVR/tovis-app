@@ -8,7 +8,7 @@ Primary private-beta alert destination: Slack-first
 Public rollout requirement: P1 escalation path must be stronger than passive Slack-only monitoring unless explicitly accepted in go-no-go.md  
 Primary owner: Tori  
 Backup owner: TODO — public rollout blocker  
-Current default status: PARTIAL ALERT ROUTING PROOF — deployed Sentry intake has been proven with a synthetic production event, and a saved Sentry issue-alert rule can deliver notifications to `#tovis-ops-alerts`. Private beta alert proof is still incomplete until a production-safe app-generated synthetic alert with threshold, runbook link, destination, acknowledgement, and recorded timing is tested end-to-end.
+Current default status: APP-GENERATED SYNTHETIC ALERT ROUTING PASS / RUNBOOK LINK TODO — deployed Sentry intake has been proven with a synthetic production event, a saved Sentry issue-alert rule can deliver notifications to `#tovis-ops-alerts`, and a production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts` on 2026-06-08 at 6:31 PM local. Private beta alert routing proof is now PASS for the synthetic app alert, but runbook-link-in-message, formal acknowledgement timing, live dashboard proof, and public P1 escalation remain TODO.
 
 ## Current alert-routing proof
 
@@ -41,7 +41,30 @@ Sentry-to-Slack routing is no longer blocked by plan access. The paid Sentry pla
 | Verified by | Tori |
 | Result | PASS FOR SAVED SENTRY ISSUE-ALERT RULE TO SLACK / REAL APP-GENERATED SYNTHETIC ALERT TODO |
 
-This proves that a saved Sentry issue-alert rule can send a test issue notification to the private-beta Slack alert channel. It does not yet prove a production-safe synthetic app alert, threshold behavior, runbook link, acknowledgement process, P1 escalation, or dashboard completeness.
+This proves that a saved Sentry issue-alert rule can send a test issue notification to the private-beta Slack alert channel. That test alone did not prove a production-safe app-generated synthetic alert, threshold behavior, runbook link, acknowledgement process, P1 escalation, or dashboard completeness.
+
+A production-safe app-generated synthetic Sentry alert was later triggered successfully from the deployed app and routed to Slack:
+
+| Field | Value |
+|---|---|
+| Route | `POST /api/internal/debug/sentry-test` |
+| Environment | production |
+| Date tested | 2026-06-08 |
+| Time observed | 6:31 PM local |
+| Trigger method | Authorized curl request with production origin header and internal job secret |
+| Sentry event ID | `f7a0d19cb4a040a3a21f4679086f166f` |
+| Alert key | `launch-readiness.synthetic-sentry-alert.v2` |
+| Alert message | `TOVIS production-safe synthetic Sentry alert v2` |
+| Slack workspace | Tovis |
+| Slack channel | `#tovis-ops-alerts` |
+| Slack alert rule | `Notify #tovis-ops-alerts via Slack` |
+| Slack short ID | `TOVIS-APP-K` |
+| Message observed by | Tori |
+| Runbook link included? | No — follow-up TODO |
+| Formal acknowledgement timing | TODO |
+| Result | PASS |
+
+This proves that the deployed app can generate a production-safe synthetic Sentry alert and that Sentry can route that app-generated alert to the intended private-beta Slack alert channel. It does not yet prove runbook-link-in-message, formal acknowledgement timing, route-specific P1/P2 thresholds, public P1 escalation, or dashboard completeness.
 
 ## Current Phase 2 proof baseline
 
@@ -55,11 +78,11 @@ This proves that a saved Sentry issue-alert rule can send a test issue notificat
 | Load plan reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/load-test-plan.md` |
 | Sentry dashboard proof reconciliation | PASS | Current Phase 2 status reflected in `docs/launch-readiness/sentry-dashboard.md` |
 | Booking funnel runbook | PASS | `docs/runbooks/booking-funnel.md` exists |
-| Slack alert routing | PARTIAL PASS | Paid Sentry plan enabled; Sentry app added to `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered a test notification to Slack on 2026-06-07 at 8:36 PM local. |
-| Synthetic Slack alert proof | PARTIAL PASS / REAL APP-GENERATED SYNTHETIC TODO | Saved Sentry issue-alert rule can route test notifications to Slack. A production-safe app-generated synthetic alert with threshold, runbook link, and acknowledgement timing still needs to be tested before private beta. |
+| Slack alert routing | PASS / RUNBOOK LINK TODO | Paid Sentry plan enabled; Sentry app added to `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered a test notification to Slack on 2026-06-07; production-safe app-generated synthetic alert routed to Slack on 2026-06-08. |
+| Synthetic Slack alert proof | PASS / RUNBOOK LINK TODO | Production-safe app-generated synthetic alert routed to `#tovis-ops-alerts` on 2026-06-08 at 6:31 PM local. Event ID `f7a0d19cb4a040a3a21f4679086f166f`; alert key `launch-readiness.synthetic-sentry-alert.v2`; Slack short ID `TOVIS-APP-K`. Runbook link in Slack message and formal acknowledgement timing still TODO. |
 | Backup owner / escalation | BLOCKED | Required before public rollout |
 
-Important line: local Phase 2 code proof is green, deployed Sentry intake works, and saved Sentry issue-alert delivery to Slack works. Private beta alert proof is still not complete until a real production-safe synthetic alert is routed, acknowledged, and recorded with threshold/runbook evidence.
+Important line: local Phase 2 code proof is green, deployed Sentry intake works, saved Sentry issue-alert delivery to Slack works, and a production-safe app-generated synthetic alert routed to Slack successfully. Private beta alert routing proof is now PASS for the synthetic app alert. Runbook-link-in-message, formal acknowledgement timing, dashboard proof, deployed smoke proof, support path, rollback path, and risk review remain TODO.
 
 ---
 
@@ -90,7 +113,7 @@ Do not mark an alert complete because Sentry captured an event or because a save
 
 | Destination | Purpose | Status | Notes |
 |---|---|---|---|
-| #tovis-ops-alerts | Private-beta alert channel | CONNECTED / SAVED ISSUE ALERT TEST PASSED | Paid Sentry plan enabled. Sentry app added to channel. Saved Sentry issue-alert rule delivered a test notification on 2026-06-07 at 8:36 PM local. Real app-generated synthetic alert proof still TODO. |
+| #tovis-ops-alerts | Private-beta alert channel | CONNECTED / APP-GENERATED SYNTHETIC ALERT PASSED | Paid Sentry plan enabled. Sentry app added to channel. Saved Sentry issue-alert rule delivered a test notification on 2026-06-07. Production-safe app-generated synthetic alert routed to Slack on 2026-06-08 at 6:31 PM local. Runbook link in Slack message still TODO. |
 | #tovis-beta-support | Proposed beta support/feedback channel | TODO | Optional if support uses another path. |
 | #tovis-incidents | Proposed incident coordination channel | TODO | Optional for private beta, recommended before public rollout. |
 | Direct owner notification | Backup path for P1 during private beta | NOT SELECTED | Sentry-to-Slack is the selected private-beta alert path. Direct owner notification remains a fallback only if documented and accepted in go-no-go.md. |
@@ -729,20 +752,29 @@ Before private beta, test at least one alert end-to-end.
 
 This confirms that a saved Sentry issue-alert rule can deliver a test notification to the intended private-beta Slack alert channel. It does not yet satisfy full private-beta alert proof because the test did not prove an app-generated production-safe signal, threshold behavior, runbook link, or acknowledgement timing.
 
-## Required next app-generated synthetic alert proof
+## Current app-generated synthetic alert proof
 
 | Field | Value |
 |---|---|
-| Alert tested | TODO — production-safe app-generated synthetic alert |
-| Environment | staging or production-safe synthetic route |
-| Date | TODO |
-| Trigger method | TODO |
-| Destination | `#tovis-ops-alerts` |
-| Acknowledged by | TODO |
-| Time to alert message | TODO |
-| Time to acknowledgement | TODO |
-| Runbook link included? | TODO |
-| Result | TODO |
+| Alert tested | Production-safe app-generated synthetic Sentry alert |
+| Environment | production |
+| Date | 2026-06-08 |
+| Time observed | 6:31 PM local |
+| Route | `POST /api/internal/debug/sentry-test` |
+| Trigger method | Authorized curl request with production origin header and internal job secret |
+| Destination | Tovis Slack workspace / `#tovis-ops-alerts` |
+| Sentry event ID | `f7a0d19cb4a040a3a21f4679086f166f` |
+| Alert key | `launch-readiness.synthetic-sentry-alert.v2` |
+| Alert message | `TOVIS production-safe synthetic Sentry alert v2` |
+| Slack alert rule | `Notify #tovis-ops-alerts via Slack` |
+| Slack short ID | `TOVIS-APP-K` |
+| Acknowledged by | Tori observed the alert in Slack |
+| Time to alert message | Observed at 6:31 PM local |
+| Time to acknowledgement | TODO — formal acknowledgement workflow not yet timed |
+| Runbook link included? | No — follow-up TODO |
+| Result | PASS |
+
+This confirms that the deployed app can generate a production-safe synthetic Sentry alert and that Sentry can route the app-generated alert to `#tovis-ops-alerts`. It does not yet prove runbook-link-in-message, formal acknowledgement timing, public P1 escalation, or route-specific P1/P2 alert thresholds.
 
 ## Current synthetic Sentry event proof
 
@@ -759,9 +791,9 @@ This confirms that a saved Sentry issue-alert rule can deliver a test notificati
 
 ## Remaining blocker
 
-The Sentry plan/routing blocker is resolved for basic Sentry-to-Slack delivery. The remaining blocker is full private-beta alert proof: at least one production-safe synthetic app alert must route to `#tovis-ops-alerts`, include or link the relevant runbook, be observed by the owner, and record acknowledgement timing.
+The Sentry plan/routing blocker is resolved. Basic Sentry-to-Slack delivery is proven, and production-safe app-generated synthetic alert routing to `#tovis-ops-alerts` is proven.
 
-Public rollout remains blocked until P1 escalation is stronger than passive Slack-only monitoring or explicitly accepted in go-no-go.md.
+Remaining alert follow-ups before private beta are runbook-link-in-message and formal acknowledgement timing, unless those are explicitly accepted as private-beta follow-ups in go-no-go.md. Public rollout remains blocked until P1 escalation is stronger than passive Slack-only monitoring or explicitly accepted in go-no-go.md.
 
 ## Selected private-beta alert path
 
@@ -772,9 +804,10 @@ Current status:
 1. Paid Sentry plan enabled.
 2. Sentry app added to `#tovis-ops-alerts`.
 3. Saved Sentry issue-alert rule delivered a test notification to Slack.
-4. Real production-safe app-generated synthetic alert still TODO.
-5. Formal acknowledgement timing still TODO.
-6. Public P1 escalation still TODO.
+4. Production-safe app-generated synthetic alert routed to Slack successfully.
+5. Runbook link in Slack message still TODO.
+6. Formal acknowledgement timing still TODO.
+7. Public P1 escalation still TODO.
 
 Before public rollout, test at least one P1 escalation path end-to-end.
 
@@ -866,7 +899,31 @@ Acknowledged by: Tori observed message in Slack; formal acknowledgement workflow
 Time to alert message: Observed at 8:36 PM local  
 Time to acknowledgement: TODO  
 Result: Saved Sentry issue-alert rule can deliver to Slack  
-Follow-up: Create and trigger one production-safe app-generated synthetic alert with threshold, runbook link, destination, acknowledgement timing, and recorded result before private beta.
+Follow-up: Completed by production-safe app-generated synthetic alert test on 2026-06-08; see verification below.
+
+## Verification: production-safe app-generated synthetic alert to Slack
+
+Status: PASS  
+Environment: production  
+Date: 2026-06-08  
+Owner: Tori  
+Backup: TODO  
+Destination: Tovis Slack workspace / `#tovis-ops-alerts`  
+Dashboard link: TODO  
+Runbook link: Not included in Slack message — follow-up TODO  
+Trigger method: Authorized `POST /api/internal/debug/sentry-test` request with production origin header and internal job secret  
+Threshold: Synthetic alert trigger; route-specific P1/P2 thresholds still TODO  
+Observed behavior: Deployed app generated a Sentry event and Sentry posted the app-generated alert in `#tovis-ops-alerts`  
+Sentry event ID: `f7a0d19cb4a040a3a21f4679086f166f`  
+Alert key: `launch-readiness.synthetic-sentry-alert.v2`  
+Alert message: `TOVIS production-safe synthetic Sentry alert v2`  
+Slack alert rule: `Notify #tovis-ops-alerts via Slack`  
+Slack short ID: `TOVIS-APP-K`  
+Acknowledged by: Tori observed the alert in Slack; formal acknowledgement workflow TODO  
+Time to alert message: Observed at 6:31 PM local  
+Time to acknowledgement: TODO  
+Result: PASS  
+Follow-up: Add runbook link to Slack alert message or document accepted private-beta follow-up; define route-specific thresholds; public P1 escalation still TODO.
 
 ---
 
@@ -923,4 +980,4 @@ Do not mark an alert complete because a Slack channel exists, a Sentry event was
 
 An alert is complete only when the signal, threshold, routing, owner, runbook, and verification are all recorded.
 
-Sentry intake proof and saved Sentry issue-alert delivery proof are supporting evidence. They prove events can reach Sentry and a saved Sentry issue-alert rule can reach Slack. They do not prove launch-relevant app-generated alert behavior, acknowledgement, escalation, dashboard coverage, or operational readiness.
+Sentry intake proof, saved Sentry issue-alert delivery proof, and production-safe app-generated synthetic alert proof are supporting evidence. They prove events can reach Sentry, a saved Sentry issue-alert rule can reach Slack, and the deployed app can generate an alert that routes to `#tovis-ops-alerts`. They do not prove route-specific P1/P2 thresholds, runbook-link-in-message, formal acknowledgement timing, public escalation, dashboard coverage, or full operational readiness.
