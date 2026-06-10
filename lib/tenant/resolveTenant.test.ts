@@ -18,14 +18,17 @@ vi.mock('@/lib/prisma', () => ({
 
 import { TOVIS_ROOT_TENANT_SLUG } from './constants'
 import {
+  clearTenantResolutionCache,
   ensureRootTenant,
   getRootTenantId,
   normalizeHost,
   resolveTenantByHost,
+  TENANT_HOST_CACHE_TTL_MS,
 } from './resolveTenant'
 
 beforeEach(() => {
   vi.clearAllMocks()
+  clearTenantResolutionCache()
   mocks.tenantFindUnique.mockResolvedValue({ id: 'tenant_root' })
   mocks.tenantFindFirst.mockResolvedValue(null)
 })
@@ -99,6 +102,62 @@ describe('resolveTenantByHost', () => {
     await expect(resolveTenantByHost('app.tovis.example')).rejects.toThrow(
       /tovis-root/,
     )
+  })
+})
+
+describe('tenant resolution caching', () => {
+  it('memoizes the root tenant id across calls', async () => {
+    await getRootTenantId()
+    await getRootTenantId()
+    await resolveTenantByHost('app.tovis.example')
+
+    expect(mocks.tenantFindUnique).toHaveBeenCalledTimes(1)
+  })
+
+  it('serves repeated host lookups from cache within the TTL', async () => {
+    mocks.tenantFindFirst.mockResolvedValue({ id: 'tenant_a', slug: 'salon-a' })
+
+    const first = await resolveTenantByHost('booking.salon-a.com')
+    const second = await resolveTenantByHost('booking.salon-a.com')
+
+    expect(first).toEqual(second)
+    expect(mocks.tenantFindFirst).toHaveBeenCalledTimes(1)
+  })
+
+  it('caches misses so root-domain traffic does not re-query per request', async () => {
+    await resolveTenantByHost('app.tovis.example')
+    await resolveTenantByHost('app.tovis.example')
+
+    expect(mocks.tenantFindFirst).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-queries a host after the TTL expires', async () => {
+    vi.useFakeTimers()
+    try {
+      await resolveTenantByHost('booking.salon-a.com')
+
+      vi.advanceTimersByTime(TENANT_HOST_CACHE_TTL_MS + 1)
+      mocks.tenantFindFirst.mockResolvedValue({
+        id: 'tenant_a',
+        slug: 'salon-a',
+      })
+
+      const ctx = await resolveTenantByHost('booking.salon-a.com')
+
+      expect(mocks.tenantFindFirst).toHaveBeenCalledTimes(2)
+      expect(ctx.isRoot).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clearTenantResolutionCache forces fresh lookups', async () => {
+    await resolveTenantByHost('app.tovis.example')
+    clearTenantResolutionCache()
+    await resolveTenantByHost('app.tovis.example')
+
+    expect(mocks.tenantFindFirst).toHaveBeenCalledTimes(2)
+    expect(mocks.tenantFindUnique).toHaveBeenCalledTimes(2)
   })
 })
 
