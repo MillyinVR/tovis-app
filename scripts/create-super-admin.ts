@@ -5,7 +5,6 @@ import { normalizeEmail } from '../app/api/_utils/email'
 const prisma = new PrismaClient()
 
 const DEFAULT_ADMIN_EMAIL = 'admin@tovis.app'
-const DEFAULT_ADMIN_PASSWORD = 'password123'
 
 function requireNormalizedEmail(value: unknown, label = 'email'): string {
   const email = normalizeEmail(value)
@@ -20,7 +19,12 @@ async function main() {
     process.env.ADMIN_EMAIL ?? DEFAULT_ADMIN_EMAIL,
     'ADMIN_EMAIL',
   )
-  const rawPassword = process.env.ADMIN_PASSWORD ?? DEFAULT_ADMIN_PASSWORD
+  const rawPassword = process.env.ADMIN_PASSWORD
+  if (!rawPassword || rawPassword.length < 12) {
+    throw new Error(
+      'ADMIN_PASSWORD must be set to at least 12 characters; refusing to create an admin with a default or weak password',
+    )
+  }
   const hashedPassword = await hashPassword(rawPassword)
 
   const user = await prisma.user.upsert({
@@ -67,7 +71,6 @@ async function main() {
 
   console.log('Super admin ensured:')
   console.log(`email: ${user.email}`)
-  console.log(`password: ${rawPassword}`)
   console.log(`role: ${user.role}`)
 }
 
