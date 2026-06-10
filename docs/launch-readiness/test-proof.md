@@ -6,6 +6,29 @@ Do not mark a launch-readiness item fully proven unless the relevant command, en
 
 ---
 
+# Current Proof Index
+
+Last reconciled: 2026-06-10
+Current repo audit HEAD: `57ce1ef2fbb5be1480e0d41d1126d2d08c15bcdf`
+Private beta decision: NO-GO
+Public rollout decision: NO-GO
+
+| Proof area | Current status | Evidence location | Caveat |
+|---|---|---|---|
+| Current safe local verification | PASS | `docs/launch-readiness/phase-2-remaining-work.md` | `pnpm typecheck`, `pnpm verify:privacy-phase1`, and `pnpm test:chaos` passed on 2026-06-10. Full launch-ops/load proof was not rerun at current HEAD. |
+| Focused tenant/search verification | PASS LOCALLY | `docs/launch-readiness/tenant-foundation-audit.md` | `pnpm exec vitest run --config vitest.config.mts lib/tenant/resolveTenant.test.ts lib/tenant/visibility.test.ts lib/tenant/requestContext.test.ts lib/tenant/bookingAttribution.test.ts app/api/search/route.test.ts`: 5 files / 27 tests passed. Some covered helper files remain untracked. |
+| Full local launch-ops/load proof | PASS LOCALLY / STALE COMMIT | This file; `go-no-go.md`; `checklist.md` | Last full `pnpm verify:launch-ops` proof is tied to `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`. Rerun on final beta commit when env/data-impact profile is acceptable. |
+| Deployed Sentry intake | PASS DEPLOYED | Synthetic event `e56044a034cb4fb78d1b09801fb43da5` | Does not prove dashboard completeness or route-specific alerts. |
+| App-generated synthetic Slack alert | PASS / FOLLOW-UPS TODO | Event `f7a0d19cb4a040a3a21f4679086f166f`; `slack-alerts.md`; `oncall.md` | Runbook-link-in-message and formal acknowledgement timing remain open. |
+| Deployed health/readiness | PASS DEPLOYED / DASHBOARD LINK TODO | Proof run below; `sentry-dashboard.md` | Dashboard/synthetic monitor link and provider-live dashboard proof remain open. |
+| Local booking/media/checkout smoke | PASS LOCALLY | Proof run below | Target-environment booking/media/payment proof remains open. |
+| Local notification/Stripe replay smoke | PASS LOCALLY | Proof run below | Provider/deployed notification and Stripe proof remain open. |
+| Deployed smoke-proof checklist | TEMPLATE READY / EXECUTION TODO | `docs/launch-readiness/deployed-smoke-proof.md` | Execution against target environment still required. |
+| Support/rollback proof | TEMPLATE READY / HUMAN DECISIONS TODO | `docs/launch-readiness/private-beta-support-rollback.md` | Tori still must choose support hours/channel, rollback process, pause path, and comms path. |
+| Tenant foundation audit | READY / FINAL WORKTREE DECISION TODO | `docs/launch-readiness/tenant-foundation-audit.md` | Untracked tenant files must be committed, moved out of scope, or explicitly excluded before final proof. |
+
+---
+
 ## Proof run — local booking lifecycle, media, and checkout smoke proof
 
 - Checklist item: Local booking lifecycle, media/private-storage metadata, and checkout smoke proof.

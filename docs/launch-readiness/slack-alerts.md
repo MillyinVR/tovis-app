@@ -145,6 +145,33 @@ These are initial targets. Tighten them when there is a named backup owner and t
 
 ---
 
+# Initial Alert Thresholds
+
+These thresholds are the repo-owned starter thresholds for private-beta alert configuration. They are copied from `docs/launch-readiness/dashboard-checklist.md` where possible and should be tightened after real beta traffic establishes a baseline.
+
+| Alert area | Severity | Initial threshold | Verification source |
+|---|---|---|---|
+| Readiness failing | P1 | `/api/health/live` non-200 for 1 minute, `/api/health/ready` down for 1 minute, or readiness degraded for 5 minutes | Deployed health proof plus synthetic/monitor alert |
+| Database/Postgres outage | P1 | Postgres readiness down once, pool exhaustion sustained, or severe query failure spike | Health/readiness, provider dashboard, Sentry |
+| Redis/rate-limit safety issue | P1 | Redis degraded for 5 minutes, or high-risk route rate-limit safety fails open | Health/readiness, rate-limit dashboard, chaos proof |
+| Booking finalize failure spike | P1 | Booking finalize success `< 99%` for 5 minutes, 5xx `> 1%` for 5 minutes, or any confirmed double booking | Booking funnel dashboard, Sentry |
+| Stripe webhook verification/processing failure | P1 | Stripe webhook 2xx `< 99%` for 5 minutes, processing p95 `> 60s` for 5 minutes, sustained failed webhook count, or any duplicate payment side effect | Stripe dashboard, Sentry, app state |
+| Private media policy regression | P1 | Any confirmed private-media exposure or unauthorized access | Storage policy proof, Sentry, provider dashboard |
+| Auth failure spike | P1 | Auth route 5xx `> 1%`, broad login/register drop, or phone send success `< 95%` for 5 minutes | Auth/rate-limit dashboard, Sentry |
+| Hold create failure spike | P2 | Hold creation success `< 99%` for 5 minutes | Booking funnel dashboard, Sentry |
+| Availability bootstrap latency/error spike | P2 | Availability p95 above cold target for 5 minutes or sustained availability error spike | Booking funnel dashboard, Sentry |
+| Pro session lifecycle failure spike | P2 | Session start success `< 99%` for 5 minutes or sustained stuck-step/closeout blocker spike | Pro lifecycle dashboard, Sentry |
+| Media upload/storage failure | P2 | Media metadata success `< 99%` for 5 minutes, upload success `< 98%` for 5 minutes, or storage degraded for 5 minutes | Media dashboard, Supabase dashboard |
+| Notification backlog/delivery failure | P2 | Oldest pending notification `> 10 min`, processor success `< 98%` for 10 minutes, or critical provider delivery below threshold | Notification dashboard, provider dashboard |
+| Postmark degradation | P2 | Postmark readiness degraded for 10 minutes or email delivery success `< 98%` for 10 minutes | Postmark dashboard, Sentry |
+| Twilio degradation | P2 | Twilio readiness degraded for 10 minutes or SMS delivery success `< 95%` for 10 minutes | Twilio dashboard, Sentry |
+| Rate-limit anomaly | P2 | High-risk route 429 spike, suspicious drop to zero during attack traffic, or Redis/rate-limit backend anomaly | Auth/rate-limit dashboard |
+| API error budget burn | P2 | Route-specific P1/P2 threshold breached or API 5xx `> 1%` for 5 minutes | SLO/error-budget dashboard |
+
+Thresholds alone do not make an alert complete. Each alert still needs a live rule, dashboard link, runbook link in or adjacent to the alert message, routing proof, acknowledgement timing, and public escalation where required.
+
+---
+
 # Alert ownership summary
 
 | Alert area | Primary owner | Backup | Status |
@@ -185,7 +212,7 @@ These are initial targets. Tighten them when there is a named backup owner and t
 | Source | Sentry synthetic check, health/readiness monitor, or provider monitor |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/health-readiness.md |
-| Threshold | TODO |
+| Threshold | `/api/health/live` non-200 for 1 minute, `/api/health/ready` down for 1 minute, or readiness degraded for 5 minutes |
 | Private beta blocker | Yes, if missing or failing |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -219,7 +246,7 @@ Trigger or simulate a staging readiness alert and confirm it routes to Slack or 
 | Source | Health/readiness, Sentry errors, provider dashboard |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/postgres-outage.md |
-| Threshold | TODO |
+| Threshold | Postgres readiness down once, pool exhaustion sustained, or severe query failure spike |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -253,7 +280,7 @@ Trigger a staging-safe database readiness failure or synthetic failure and confi
 | Source | Health/readiness, Sentry errors, rate-limit wrapper signals |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/redis-outage.md |
-| Threshold | TODO |
+| Threshold | Redis degraded for 5 minutes, or high-risk route rate-limit safety fails open |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -287,7 +314,7 @@ Chaos test or staging-safe synthetic alert proves Redis degradation routes corre
 | Source | Sentry errors/app event |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/booking-funnel.md |
-| Threshold | TODO |
+| Threshold | Booking finalize success `< 99%` for 5 minutes, 5xx `> 1%` for 5 minutes, or any confirmed double booking |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -321,7 +348,7 @@ Alert must fire from staging test or synthetic failure before public rollout.
 | Source | Sentry errors/app event, Stripe dashboard |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/stripe-degradation.md |
-| Threshold | TODO |
+| Threshold | Stripe webhook 2xx `< 99%` for 5 minutes, processing p95 `> 60s` for 5 minutes, sustained failed webhook count, or any duplicate payment side effect |
 | Private beta blocker | Yes, if payments are enabled |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -390,7 +417,7 @@ Private media synthetic/policy proof must be linked before beta and public rollo
 | Source | Sentry errors/app event |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/auth-session.md |
-| Threshold | TODO |
+| Threshold | Auth route 5xx `> 1%`, broad login/register drop, or phone send success `< 95%` for 5 minutes |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -426,7 +453,7 @@ Synthetic auth failure alert or staging test must route to Slack or the approved
 | Source | Sentry errors/app event |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/booking-funnel.md |
-| Threshold | TODO |
+| Threshold | Hold creation success `< 99%` for 5 minutes |
 | Private beta blocker | Yes, if missing before beta |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -459,7 +486,7 @@ Staging hold-create proof should be linked before public rollout.
 | Source | Sentry performance/errors |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/booking-funnel.md |
-| Threshold | TODO |
+| Threshold | Availability p95 above cold target for 5 minutes or sustained availability error spike |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -493,7 +520,7 @@ Availability bootstrap load or synthetic proof should route failures to Slack or
 | Source | Sentry errors/app event |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/pro-session-lifecycle.md |
-| Threshold | TODO |
+| Threshold | Session start success `< 99%` for 5 minutes or sustained stuck-step/closeout blocker spike |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -526,7 +553,7 @@ Lifecycle smoke/regression proof should be linked.
 | Source | Sentry errors/performance, Supabase dashboard |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/supabase-storage-outage.md |
-| Threshold | TODO |
+| Threshold | Media metadata success `< 99%` for 5 minutes, upload success `< 98%` for 5 minutes, or storage degraded for 5 minutes |
 | Private beta blocker | Yes |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -559,7 +586,7 @@ Storage outage chaos test and upload proof should link to this alert.
 | Source | Sentry errors/app event, Postmark/Twilio dashboards |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/notification-backlog.md |
-| Threshold | TODO |
+| Threshold | Oldest pending notification `> 10 min`, processor success `< 98%` for 10 minutes, or critical provider delivery below threshold |
 | Private beta blocker | Yes, if notifications are beta-critical |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -593,7 +620,7 @@ Notification processing load/chaos proof should route failures to Slack or the a
 | Source | Postmark dashboard, Sentry errors |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/postmark-degradation.md |
-| Threshold | TODO |
+| Threshold | Postmark readiness degraded for 10 minutes or email delivery success `< 98%` for 10 minutes |
 | Private beta blocker | Yes, if email is beta-critical |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -626,7 +653,7 @@ Postmark degradation chaos test should link to this alert.
 | Source | Twilio dashboard, Sentry errors |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/twilio-degradation.md |
-| Threshold | TODO |
+| Threshold | Twilio readiness degraded for 10 minutes or SMS delivery success `< 95%` for 10 minutes |
 | Private beta blocker | Yes, if SMS is beta-critical |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -660,7 +687,7 @@ Twilio degradation chaos test should link to this alert.
 | Source | Sentry/app event, Redis/rate-limit backend |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/redis-outage.md |
-| Threshold | TODO |
+| Threshold | High-risk route 429 spike, suspicious drop to zero during attack traffic, or Redis/rate-limit backend anomaly |
 | Private beta blocker | Yes, if missing |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -693,7 +720,7 @@ Rate-limit synthetic or chaos proof should link to this alert.
 | Source | Sentry performance/errors |
 | Dashboard | docs/launch-readiness/sentry-dashboard.md |
 | Runbook | docs/runbooks/slo-error-budget.md |
-| Threshold | TODO |
+| Threshold | Route-specific P1/P2 threshold breached or API 5xx `> 1%` for 5 minutes |
 | Private beta blocker | No, if core route alerts exist |
 | Public rollout blocker | Yes |
 | Status | TODO ROUTING PROOF |
@@ -912,7 +939,7 @@ Destination: Tovis Slack workspace / `#tovis-ops-alerts`
 Dashboard link: TODO  
 Runbook link: Not included in Slack message — follow-up TODO  
 Trigger method: Authorized `POST /api/internal/debug/sentry-test` request with production origin header and internal job secret  
-Threshold: Synthetic alert trigger; route-specific P1/P2 thresholds still TODO  
+Threshold: Synthetic alert trigger; route-specific P1/P2 starter thresholds are documented above, but live alert-rule verification is still TODO
 Observed behavior: Deployed app generated a Sentry event and Sentry posted the app-generated alert in `#tovis-ops-alerts`  
 Sentry event ID: `f7a0d19cb4a040a3a21f4679086f166f`  
 Alert key: `launch-readiness.synthetic-sentry-alert.v2`  
@@ -923,7 +950,7 @@ Acknowledged by: Tori observed the alert in Slack; formal acknowledgement workfl
 Time to alert message: Observed at 6:31 PM local  
 Time to acknowledgement: TODO  
 Result: PASS  
-Follow-up: Add runbook link to Slack alert message or document accepted private-beta follow-up; define route-specific thresholds; public P1 escalation still TODO.
+Follow-up: Add runbook link to Slack alert message or document accepted private-beta follow-up; configure and verify live route-specific alert rules; public P1 escalation still TODO.
 
 ---
 

@@ -12,7 +12,7 @@ Dashboard surface: Sentry-first, with provider dashboards linked where needed
 
 This checklist defines the minimum requirements before TOVIS can enter private beta with a limited group of users. Private beta is not public launch. It is a controlled release with known users, explicit support coverage, operational visibility, and fast rollback.
 
-Important distinction: local Phase 2 code proof is now green, deployed Sentry intake is proven, a saved Sentry issue-alert rule can deliver notifications to `#tovis-ops-alerts`, and a production-safe app-generated synthetic alert routed to Slack successfully. That does not mean private beta is ready. Private beta still requires live dashboard proof, runbook-link-in-message or accepted follow-up, formal acknowledgement timing or accepted follow-up, deployed flow proof, support path proof, rollback decisions, and risk review.
+Important distinction: local Phase 2 code proof is now green, deployed Sentry intake is proven, a saved Sentry issue-alert rule can deliver notifications to `#tovis-ops-alerts`, starter alert thresholds are documented, and a production-safe app-generated synthetic alert routed to Slack successfully. That does not mean private beta is ready. Private beta still requires live dashboard proof, runbook-link-in-message or accepted follow-up, formal acknowledgement timing or accepted follow-up, deployed flow proof, support path decisions/proof, rollback decisions, and risk review.
 
 ---
 
@@ -35,15 +35,17 @@ Private beta exists to prove:
 
 | Item | Status | Evidence |
 |---|---|---|
+| Current repo safe verification | PASS | `pnpm typecheck`, `pnpm verify:privacy-phase1`, and `pnpm test:chaos` passed on current audit HEAD `57ce1ef2fbb5be1480e0d41d1126d2d08c15bcdf` on 2026-06-10 |
 | Phase 2 local chaos suite | PASS | pnpm test:chaos: 6 files / 17 tests passed |
 | Phase 2 local launch load suite | PASS | pnpm test:load:launch: 8/8 launch load steps passed |
-| Aggregate launch ops verification | PASS LOCALLY | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; fresh local rerun recorded in `docs/launch-readiness/test-proof.md` |
+| Aggregate launch ops verification | PASS LOCALLY / STALE COMMIT | `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; rerun on final beta commit |
 | Sentry release/environment config | IMPLEMENTED | lib/observability/sentryConfig.ts, sentry.server.config.ts, sentry.edge.config.ts, instrumentation-client.ts |
 | Deployed Sentry intake | PASS | Synthetic event captured: e56044a034cb4fb78d1b09801fb43da5 |
 | Live Sentry dashboard proof | TODO | Dashboard sections still need links/evidence |
 | Synthetic alert routing | PASS / RUNBOOK LINK TODO | Production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts` on 2026-06-08 at 6:31 PM local. Event ID `f7a0d19cb4a040a3a21f4679086f166f`; alert key `launch-readiness.synthetic-sentry-alert.v2`; Slack short ID `TOVIS-APP-K`. Runbook link in Slack message and formal acknowledgement timing still TODO. |
 | Slack alert routing | PASS / RUNBOOK LINK TODO | Paid Sentry plan enabled; Sentry app added to `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered a test notification to Slack; production-safe app-generated synthetic alert routed to Slack on 2026-06-08. |
 | Backup owner | ACCEPTED RISK (PRIVATE BETA) | Solo operator; single-owner risk accepted 2026-06-09 (go-no-go.md, RISK-001); named backup required before public rollout |
+| Deployed health/readiness proof | PASS / DASHBOARD LINK TODO | `/api/health/live`, `/api/health`, and `/api/health/ready` passed on `https://www.tovis.app`; dashboard/synthetic monitor link still TODO |
 | Private beta support path | TODO | Required before private beta |
 
 ---
@@ -55,7 +57,7 @@ Private beta exists to prove:
 | Decision | TODO |
 | Target start date | TODO |
 | Target end date | TODO |
-| Commit | TODO |
+| Commit | TODO — current audit HEAD is `57ce1ef2fbb5be1480e0d41d1126d2d08c15bcdf`; re-record after final beta changes are committed |
 | Environment | TODO |
 | Owner | Tori |
 | Backup | TODO |
@@ -66,7 +68,7 @@ Private beta exists to prove:
 | Sentry synthetic event proof | e56044a034cb4fb78d1b09801fb43da5 |
 | Slack routing proof | PASS / FOLLOW-UPS TODO — production-safe app-generated synthetic alert routed to `#tovis-ops-alerts`; event ID `f7a0d19cb4a040a3a21f4679086f166f`; Slack short ID `TOVIS-APP-K`; runbook-link-in-message and formal acknowledgement timing still TODO |
 | Accepted risks | TODO |
-| Blocking risks | Dashboard proof, deployed smoke proof, support path, rollback proof, risk review, runbook-link-in-message/formal acknowledgement timing unless accepted as follow-ups |
+| Blocking risks | Dashboard proof, deployed smoke proof for remaining core flows, support path, rollback proof, risk review, runbook-link-in-message/formal acknowledgement timing unless accepted as follow-ups |
 
 Decision values:
 
@@ -105,10 +107,10 @@ Private beta should start with a small known cohort before expanding. Do not beg
 
 | Gate | Status | Owner | Evidence | Notes |
 |---|---|---|---|---|
-| Local branch matches intended beta commit | TODO | Tori | TODO | Record git rev-parse HEAD. |
+| Local branch matches intended beta commit | PASS CURRENT AUDIT / FINAL BETA COMMIT TODO | Tori | `git rev-parse HEAD` returned `57ce1ef2fbb5be1480e0d41d1126d2d08c15bcdf` on 2026-06-10. | Re-record after untracked work is handled and before final beta decision. |
 | Local worktree is clean | TODO | Tori | TODO | Record git status --short. |
-| pnpm typecheck passes | TODO | Tori | TODO | Required. |
-| pnpm verify:privacy-phase1 passes | TODO | Tori | TODO | Required. |
+| pnpm typecheck passes | PASS CURRENT AUDIT | Tori | `pnpm typecheck` passed on 2026-06-10. | Re-run on final beta commit. |
+| pnpm verify:privacy-phase1 passes | PASS CURRENT AUDIT | Tori | `pnpm verify:privacy-phase1` passed on 2026-06-10. | Re-run on final beta commit. |
 | pnpm test passes or focused equivalent is documented | TODO | Tori | TODO | Full suite preferred. |
 | Phase 2 local launch ops proof exists | PASS | Tori | `docs/launch-readiness/test-proof.md`; `pnpm verify:launch-ops` passed locally against audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29` | Local load/chaos proof is green. Production-safe app-generated alert routing is proven. Deployed staging/dashboard proof still TODO. |
 | Staging/deployed app is reachable | TODO | Tori | TODO | Link deployed URL/version. |
@@ -116,14 +118,14 @@ Private beta should start with a small known cohort before expanding. Do not beg
 | Sentry intake works in deployed environment | PASS | Tori | Synthetic event ID `e56044a034cb4fb78d1b09801fb43da5`; app-generated alert event ID `f7a0d19cb4a040a3a21f4679086f166f` | Proves deployed Sentry intake. Separately, saved Sentry issue-alert delivery and production-safe app-generated alert routing to Slack are proven. |
 | Sentry dashboard sections exist and are useful | TODO LIVE PROOF | Tori | docs/launch-readiness/sentry-dashboard.md | Needs live dashboard links/evidence. |
 | Synthetic alert routing works | PASS / FORMAL ACK TIMING TODO | Tori | docs/launch-readiness/slack-alerts.md; docs/launch-readiness/oncall.md; docs/launch-readiness/go-no-go.md; docs/launch-readiness/test-proof.md | Production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts`; event ID `f7a0d19cb4a040a3a21f4679086f166f`; alert key `launch-readiness.synthetic-sentry-alert.v2`; Slack short ID `TOVIS-APP-K`. Runbook-link-in-message and formal acknowledgement timing still TODO. |
-| Health/readiness proof exists | TODO | Tori | TODO | Must include deployed environment. |
-| Booking lifecycle smoke proof exists | TODO | Tori | TODO | Client booking + pro session path. |
-| Payment/Stripe webhook proof exists | TODO | Tori | TODO | Signed webhook + idempotency/replay behavior. |
-| Media upload proof exists | TODO | Tori | TODO | Upload path and metadata persistence. |
-| Private media policy proof exists | TODO | Tori | TODO | Private media cannot be publicly accessed. |
-| Notifications proof exists | TODO | Tori | TODO | Email/SMS behavior or safe failure path. |
-| Export/delete route authorization proof exists | TODO | Tori | TODO | SUPER_ADMIN only. |
-| Privacy request runbook exists | TODO | Tori | docs/runbooks/privacy-request.md | Confirm current. |
+| Health/readiness proof exists | PASS DEPLOYED / DASHBOARD LINK TODO | Tori | docs/launch-readiness/sentry-dashboard.md | `/api/health/live`, `/api/health`, and `/api/health/ready` passed on `https://www.tovis.app`; dashboard/synthetic monitor link still TODO. |
+| Booking lifecycle smoke proof exists | PASS LOCALLY / DEPLOYED PROOF TODO | Tori | docs/launch-readiness/test-proof.md | Local API-assisted proof exists; target-environment client booking + pro session path still TODO. |
+| Payment/Stripe webhook proof exists | PASS LOCALLY / DEPLOYED PROVIDER PROOF TODO | Tori | docs/launch-readiness/test-proof.md | Local checkout/webhook replay proof exists; signed provider/deployed proof still TODO. |
+| Media upload proof exists | PASS LOCALLY / DEPLOYED PROOF TODO | Tori | docs/launch-readiness/test-proof.md | Local media metadata proof exists; deployed upload path and metadata persistence still TODO. |
+| Private media policy proof exists | PASS LOCALLY / DEPLOYED POLICY PROOF TODO | Tori | docs/launch-readiness/storage-policy-proof.md | Repo/local private-media proof exists; target-environment policy/access proof still TODO. |
+| Notifications proof exists | PASS LOCALLY / PROVIDER PROOF TODO | Tori | docs/launch-readiness/test-proof.md | Local notification processing proof exists; provider/dashboard proof still TODO. |
+| Export/delete route authorization proof exists | PASS LOCALLY / FINAL COMMIT RERUN TODO | Tori | `pnpm verify:privacy-phase1` passed on 2026-06-10; docs/privacy/phase-1-privacy-proof.md | SUPER_ADMIN-only proof passes locally; re-run on final beta commit. |
+| Privacy request runbook exists | DONE / REVIEW CURRENT TODO | Tori | docs/runbooks/privacy-request.md | File exists; confirm still current during final risk review. |
 | Phase 1 remaining work reviewed | TODO | Tori | docs/privacy/phase-1-remaining-work.md | Confirm no private-beta blocker remains. |
 
 ---
@@ -140,6 +142,9 @@ Private beta should start with a small known cohort before expanding. Do not beg
 | docs/launch-readiness/slack-alerts.md | IN PROGRESS / SYNTHETIC ALERT ROUTING PASS | Tori | Saved Sentry issue-alert rule delivered to `#tovis-ops-alerts`; production-safe app-generated synthetic alert routed to Slack; runbook-link-in-message/formal acknowledgement timing still TODO. |
 | docs/launch-readiness/load-test-plan.md | IN PROGRESS / LOCAL PROOF EXISTS | Tori | Local load suite is green; deployed staging proof still TODO. |
 | docs/launch-readiness/chaos-test-plan.md | IN PROGRESS / LOCAL PROOF EXISTS | Tori | Local chaos suite is green and documented; operational alert/dashboard proof still TODO. |
+| docs/launch-readiness/deployed-smoke-proof.md | READY / EXECUTION TODO | Tori | Defines exact target-environment smoke proof steps and evidence template. |
+| docs/launch-readiness/private-beta-support-rollback.md | READY / HUMAN DECISIONS TODO | Tori | Defines support path, rollback path, pause triggers, and comms templates. |
+| docs/launch-readiness/tenant-foundation-audit.md | READY / FINAL WORKTREE DECISION TODO | Tori | Records tenant foundation status and untracked tenant work. |
 
 ---
 
@@ -214,7 +219,7 @@ Signals tested:
 Result: PASS / FOLLOW-UPS TODO — saved Sentry issue-alert rule delivered to Slack, and production-safe app-generated synthetic alert routed to Slack.
 App-generated event ID: f7a0d19cb4a040a3a21f4679086f166f
 Slack short ID: TOVIS-APP-K
-Known limitation: Runbook-link-in-message, formal acknowledgement timing, route-specific thresholds, dashboard proof, support path, rollback path, and risk review remain TODO.
+Known limitation: Runbook-link-in-message, formal acknowledgement timing, live alert-rule/dashboard proof, route-specific routing proof, support path, rollback path, and risk review remain TODO. Route-specific starter thresholds are documented in `docs/launch-readiness/slack-alerts.md`.
 Accepted risk: TODO — remaining follow-ups must be resolved or explicitly accepted in go-no-go.md before private beta.
 ```
 
@@ -234,6 +239,8 @@ Accepted risk: TODO — remaining follow-ups must be resolved or explicitly acce
 | Beta participant expectations documented | TODO | Tori | TODO |
 | Incident owner during support window named | TODO | Tori | Usually Tori for private beta. |
 | Off-hours behavior documented | TODO | Tori | Needed even if beta is support-hours only. |
+
+Support decision scaffold: `docs/launch-readiness/private-beta-support-rollback.md`. The repo template is ready; Tori still must choose support hours, support channel, bug intake, payment/refund path if payments are enabled, privacy escalation, user-impact comms path, and off-hours behavior.
 
 ---
 
@@ -257,7 +264,7 @@ Private beta should include only the flows required to prove launch readiness.
 | Media upload | TODO | LOCAL MEDIA LOAD/STORAGE CHAOS PROOF EXISTS | Deployed storage/media proof still TODO. |
 | Notifications | TODO | LOCAL LOAD/CHAOS PROOF EXISTS | Provider/dashboard proof still TODO. |
 | Export/delete admin routes | Admin-only proof | TODO | Not beta user-facing. |
-| White-label/tenant features | No | TODO | Not ready for beta unless explicitly scoped. |
+| White-label/tenant features | No | PARTIAL FOUNDATION / NOT PRIVATE-BETA SCOPE | Tenant model, root seed/backfill, resolver, visibility helpers, and discovery guard foundation exist in the repo/worktree; white-label productization is not ready and remains out of first private-beta scope unless explicitly added. |
 
 ---
 
@@ -267,15 +274,15 @@ Private beta requires a clear rollback path.
 
 | Item | Status | Owner | Evidence/notes |
 |---|---|---|---|
-| Rollback owner named | TODO | Tori | TODO |
-| Last known good commit identified | TODO | Tori | TODO |
-| Deploy rollback process documented | TODO | Tori | TODO |
-| Feature disable/kill switch strategy documented | TODO | Tori | TODO |
-| Payment/webhook safe rollback note documented | TODO | Tori | TODO |
-| Media/storage rollback note documented | TODO | Tori | TODO |
-| Notification disable strategy documented | TODO | Tori | TODO |
-| User communication path documented | TODO | Tori | TODO |
-| Private beta pause criteria documented | TODO | Tori | TODO |
+| Rollback owner named | TEMPLATE READY / DECISION TODO | Tori | `docs/launch-readiness/private-beta-support-rollback.md` names Tori as default owner; final decision still required. |
+| Last known good commit identified | DECISION TODO | Tori | Record in `docs/launch-readiness/private-beta-support-rollback.md` before GO decision. |
+| Deploy rollback process documented | TEMPLATE READY / DECISION TODO | Tori | Process fields exist in `docs/launch-readiness/private-beta-support-rollback.md`; fill chosen deploy rollback path. |
+| Feature disable/kill switch strategy documented | TEMPLATE READY / DECISION TODO | Tori | Fill chosen pause/disable approach before GO decision. |
+| Payment/webhook safe rollback note documented | TEMPLATE READY / DECISION TODO | Tori | Required if payments are enabled. |
+| Media/storage rollback note documented | TEMPLATE READY / DECISION TODO | Tori | Required if media is enabled. |
+| Notification disable strategy documented | TEMPLATE READY / DECISION TODO | Tori | Required if notifications are enabled. |
+| User communication path documented | TEMPLATE READY / DECISION TODO | Tori | Message templates exist; final channel/timing still required. |
+| Private beta pause criteria documented | TEMPLATE READY / DECISION TODO | Tori | Pause triggers exist; final owner/process still required. |
 
 Rollback triggers:
 
@@ -319,7 +326,7 @@ Rollback triggers:
 | Stripe | TODO | Tori | Local checkout/webhook load + chaos proof exists; provider proof TODO. |
 | Postmark | TODO | Tori | Local provider degradation proof exists; provider proof TODO. |
 | Twilio | TODO | Tori | Local provider degradation proof exists; provider proof TODO. |
-| Sentry | PASS / DASHBOARD TODO | Tori | Deployed intake works; saved Sentry issue-alert delivery to Slack works; production-safe app-generated synthetic alert routed to Slack. Dashboard proof, runbook-link-in-message, formal acknowledgement timing, and route-specific thresholds still TODO. |
+| Sentry | PASS / DASHBOARD TODO | Tori | Deployed intake works; saved Sentry issue-alert delivery to Slack works; production-safe app-generated synthetic alert routed to Slack. Starter thresholds are documented; dashboard proof, runbook-link-in-message, formal acknowledgement timing, live alert-rule proof, and route-specific routing proof still TODO. |
 | Domain/DNS | TODO | Tori | https://www.tovis.app resolves; formal proof TODO. |
 | Secrets/env vars | TODO | Tori | Must verify presence without recording values. |
 
@@ -392,10 +399,10 @@ Private beta is automatically blocked if any of the following are true:
 
 - pnpm typecheck fails.
 - pnpm verify:privacy-phase1 fails.
-- Health/readiness proof is missing.
-- Booking lifecycle smoke proof is missing.
-- Stripe webhook verification proof is missing when payments are enabled.
-- Storage/private-media proof is missing when media is enabled.
+- Health/readiness deployed proof regresses.
+- Booking lifecycle deployed proof for the target environment is missing or not explicitly accepted as out of private-beta scope.
+- Stripe webhook deployed/provider proof is missing when payments are enabled.
+- Storage/private-media deployed policy proof is missing when media is enabled.
 - Sentry intake is broken.
 - Dashboard visibility is missing for launch-critical routes.
 - Slack alert destination is missing or Sentry-to-Slack delivery to `#tovis-ops-alerts` is broken during the beta window.
@@ -416,12 +423,12 @@ Private beta is automatically blocked if any of the following are true:
 | Live Sentry dashboard proof | TODO | Tori | Link dashboard sections and verify live data. |
 | Alert routing proof | PASS / FOLLOW-UPS TODO | Tori | Production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts`; event ID `f7a0d19cb4a040a3a21f4679086f166f`; Slack short ID `TOVIS-APP-K`. Runbook-link-in-message and formal acknowledgement timing still TODO or must be explicitly accepted. |
 | Slack/private-beta ops destination | DONE / SYNTHETIC ALERT ROUTING PASS | Tori | `#tovis-ops-alerts` selected; Sentry app added; saved Sentry issue-alert rule delivered test notification; production-safe app-generated synthetic alert routed to Slack. |
-| Support channel/path | TODO | Tori | Define support and bug intake path. |
-| Health/readiness deployed proof | TODO | Tori | Verify deployed endpoint and provider-live settings. |
+| Support channel/path | TEMPLATE READY / DECISION TODO | Tori | `docs/launch-readiness/private-beta-support-rollback.md` defines required fields; support hours/channel and bug intake path still require Tori decision. |
+| Health/readiness deployed proof | PASS / DASHBOARD LINK TODO | Tori | Deployed endpoints passed on `https://www.tovis.app`; link dashboard/synthetic monitor and provider-live setting evidence. |
 | Booking lifecycle deployed proof | TODO | Tori | Run smoke proof against target environment. |
 | Payment/webhook deployed proof | TODO | Tori | Verify signed webhook/replay behavior. |
 | Storage/private-media deployed proof | TODO | Tori | Verify policy/access behavior. |
-| Rollback path | TODO | Tori | Document owner, trigger, and deploy rollback process. |
+| Rollback path | TEMPLATE READY / DECISION TODO | Tori | `docs/launch-readiness/private-beta-support-rollback.md` defines required fields, pause triggers, and post-rollback smoke checks; final values still required. |
 | Risk register review | TODO | Tori | Confirm no unowned high-severity blocker. |
 
 ---
@@ -464,6 +471,10 @@ Notes: TODO
 - docs/launch-readiness/risk-register.md
 - docs/launch-readiness/public-rollout-checklist.md
 - docs/launch-readiness/checklist.md
+- docs/launch-readiness/phase-2-remaining-work.md
+- docs/launch-readiness/deployed-smoke-proof.md
+- docs/launch-readiness/private-beta-support-rollback.md
+- docs/launch-readiness/tenant-foundation-audit.md
 - docs/launch-readiness/load-test-plan.md
 - docs/launch-readiness/chaos-test-plan.md
 - docs/launch-readiness/test-proof.md
@@ -490,4 +501,4 @@ Notes: TODO
 
 Do not mark private beta as GO unless the required proof exists and is linked. Private beta is allowed to be small and imperfect; it is not allowed to be blind.
 
-Local Phase 2 proof, deployed Sentry intake proof, saved Sentry issue-alert delivery proof, and production-safe app-generated synthetic alert proof should be linked as supporting evidence. They do not replace deployed dashboard proof, route-specific thresholds, runbook-link-in-message, formal acknowledgement timing, support readiness, risk review, or rollback proof.
+Local Phase 2 proof, deployed Sentry intake proof, saved Sentry issue-alert delivery proof, and production-safe app-generated synthetic alert proof should be linked as supporting evidence. They do not replace deployed dashboard proof, live alert-rule proof, route-specific routing proof, runbook-link-in-message, formal acknowledgement timing, support readiness, risk review, or rollback proof.

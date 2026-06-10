@@ -473,13 +473,13 @@ Phase 2 code proof is now strong enough that the next bottleneck is not “write
 | Blocker | Blocks private beta? | Blocks public rollout? | Notes |
 |---|---:|---:|---|
 | Live dashboard proof missing | Yes | Yes | Sentry/provider dashboard sections need real links/evidence |
-| Synthetic alert routing missing | Yes | Yes | Slack or approved alternate path required |
-| Sentry-to-Slack unavailable on current plan | Yes, unless alternate path chosen | Yes, unless alternate path chosen | Pick upgrade or alternate alert path |
+| Synthetic alert follow-ups incomplete | Follow-up or accepted risk needed | Yes | Production-safe app-generated synthetic alert routed to Slack; runbook-link-in-message and formal acknowledgement timing remain open |
+| Sentry-to-Slack current plan/routing | No | Follow-up needed | Paid Sentry + Slack route is working for the synthetic app alert; live route-specific alert-rule proof remains open |
 | Backup owner missing | No, if accepted for private beta | Yes | Must be named before public rollout |
 | P1 escalation path untested | No, if accepted for private beta | Yes | Public launch needs stronger escalation |
-| Deployed/provider proof incomplete | Yes | Yes | Health, storage, Stripe, Postmark, Twilio, Redis, DB proof needed |
-| Formal SLO thresholds incomplete | Basic thresholds needed | Yes | Public rollout requires thresholds/error budget |
-| Rollback drill/proof incomplete | Recommended | Yes | Public rollout needs rollback confidence |
+| Deployed/provider proof incomplete | Yes | Yes | Deployed health/readiness proof exists; storage, Stripe, Postmark, Twilio, Redis/DB/provider dashboard proof and remaining flow proof still needed |
+| Live SLO/error-budget proof incomplete | No, if accepted for private beta | Yes | Starter thresholds exist; live Sentry/provider SLO dashboard proof still needed |
+| Rollback drill/proof incomplete | Yes | Yes | Repo template exists; private beta still needs rollback decisions, public rollout needs rollback confidence |
 
 ## Maintenance rule
 

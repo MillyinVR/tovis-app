@@ -93,7 +93,7 @@ Do not mark a dashboard section complete because a test exists. Tests prove beha
 | Staging dashboard verified | TODO |
 | Production dashboard verified | PARTIAL — synthetic production event captured; app-generated synthetic alert routed to Slack |
 | Last local launch-ops proof | Audited code commit `ae30aff20aff8b205e65f57bf3ae8b5b8b553b29`; `pnpm verify:launch-ops`, PASS; proof recorded in `docs/launch-readiness/test-proof.md` |
-| Last docs reconciliation proof | Current Phase 2 status reflected across launch-readiness docs |
+| Last docs reconciliation proof | 2026-06-10 repo-owned cleanup reflected current Phase 2 status across launch-readiness docs; remaining work split in `docs/launch-readiness/phase-2-remaining-work.md`. |
 | Last deployed Sentry intake proof | 2026-06-07, event ID `e56044a034cb4fb78d1b09801fb43da5`, PASS |
 | Last app-generated synthetic alert proof | 2026-06-08, event ID `f7a0d19cb4a040a3a21f4679086f166f`, Slack short ID `TOVIS-APP-K`, PASS / RUNBOOK LINK TODO |
 | Last deployed health/readiness proof | 2026-06-09, `/api/health/live` PASS, `/api/health` PASS, `/api/health/ready` PASS, Redis readiness fixed in `bc88898`, PASS / DASHBOARD LINK TODO |
@@ -577,13 +577,13 @@ Launch impact: Blocks public rollout
 Owner: Tori  
 Primary source: Sentry performance/errors  
 Related docs/runbook: docs/launch-readiness/go-no-go.md, docs/launch-readiness/risk-register.md, docs/runbooks/slo-error-budget.md  
-Current proof status: Local load tests emit latency summaries. Formal SLO thresholds and live Sentry dashboard proof TODO.
+Current proof status: Local load tests emit latency summaries, and starter SLO/alert thresholds are documented in `docs/launch-readiness/dashboard-checklist.md` and `docs/launch-readiness/slack-alerts.md`. Live Sentry SLO dashboard proof is still TODO.
 
 ### Required signals
 
 | Signal | Source | Threshold | Status | Evidence |
 |---|---|---|---|---|
-| API error rate | Sentry | Define private beta and public thresholds | TODO THRESHOLD | TODO |
+| API error rate | Sentry | Use route-specific P1/P2 thresholds from `docs/launch-readiness/slack-alerts.md`; tighten after beta baseline | TODO LIVE PROOF | TODO |
 | Core booking route p95 latency | Sentry/load tests | Define threshold from smoke/baseline results | TODO THRESHOLD | Local load proof exists |
 | Availability bootstrap p95 latency | Sentry/load tests | Define threshold from smoke/baseline results | TODO THRESHOLD | Local load proof exists |
 | Booking finalize p95 latency | Sentry/load tests | Define threshold from smoke/baseline results | TODO THRESHOLD | Local load proof exists |
@@ -644,7 +644,7 @@ pnpm verify:launch-ops
 - Runbook-link-in-message and formal acknowledgement timing are still TODO.
 - Provider dashboard links are still TODO.
 - Public backup owner is still TODO/BLOCKED.
-- Formal SLO thresholds are still TODO.
+- Live SLO dashboard proof is still TODO.
 
 ### Launch decision
 

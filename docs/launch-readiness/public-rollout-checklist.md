@@ -119,17 +119,17 @@ Public rollout cannot begin until:
 
 | Gate | Status | Owner | Evidence | Notes |
 |---|---|---|---|---|
-| Slack alerts documented | TODO | Tori | docs/launch-readiness/slack-alerts.md | Required. |
-| Slack alert channel chosen | TODO | Tori | TODO | Required. |
-| P1/P2 alert owners assigned | TODO | Tori | TODO | Required. |
+| Slack alerts documented | IN PROGRESS / STARTER THRESHOLDS READY | Tori | docs/launch-readiness/slack-alerts.md | Alert map, owners, starter thresholds, runbooks, destinations, and verification templates exist. Live rule proof still required. |
+| Slack alert channel chosen | PASS / RUNBOOK LINK TODO | Tori | docs/launch-readiness/slack-alerts.md | `#tovis-ops-alerts` selected and app-generated synthetic alert routed. Runbook link in message still TODO. |
+| P1/P2 alert owners assigned | PASS PRIMARY / BACKUP BLOCKED | Tori | docs/launch-readiness/slack-alerts.md; docs/launch-readiness/oncall.md | Tori is primary owner. Backup owner still blocks public rollout. |
 | Backup owner assigned | BLOCKED | Tori | TODO | Public rollout blocker. |
 | P1 escalation path chosen | BLOCKED | Tori | TODO | Public rollout blocker. |
 | P1 escalation path tested | BLOCKED | Tori | TODO | Public rollout blocker. |
 | Synthetic staging alert tested | TODO | Tori | TODO | Required. |
-| Every P1 alert has threshold | TODO | Tori | TODO | Required. |
-| Every P1 alert has runbook | TODO | Tori | TODO | Required. |
-| Every P2 alert has threshold | TODO | Tori | TODO | Required. |
-| Every P2 alert has runbook | TODO | Tori | TODO | Required. |
+| Every P1 alert has threshold | DONE FOR STARTER THRESHOLDS / LIVE RULE PROOF TODO | Tori | docs/launch-readiness/slack-alerts.md | Starter thresholds exist. Public rollout still requires live alert rules and routing proof. |
+| Every P1 alert has runbook | PASS DOC LINKED / ALERT MESSAGE TODO | Tori | docs/launch-readiness/slack-alerts.md; docs/launch-readiness/oncall.md | Runbooks are linked in docs. Real alert messages still need runbook-link verification. |
+| Every P2 alert has threshold | DONE FOR STARTER THRESHOLDS / LIVE RULE PROOF TODO | Tori | docs/launch-readiness/slack-alerts.md | Starter thresholds exist. Public rollout still requires live alert rules and routing proof. |
+| Every P2 alert has runbook | PASS DOC LINKED / ALERT MESSAGE TODO | Tori | docs/launch-readiness/slack-alerts.md; docs/launch-readiness/oncall.md | Runbooks are linked in docs. Real alert messages still need runbook-link verification. |
 | Alert routing tested after deploy | TODO | Tori | TODO | Required. |
 
 ## Required alert categories
@@ -294,16 +294,16 @@ Rollback or pause rollout if any of these occur:
 
 | Item | Status | Owner | Evidence/notes |
 |---|---|---|---|
-| Rollback owner named | TODO | Tori | TODO |
-| Backup rollback owner named | TODO | Tori | Required before public rollout. |
-| Last known good commit recorded | TODO | Tori | TODO |
-| Deploy rollback process documented | TODO | Tori | TODO |
-| Feature disable/kill switch path documented | TODO | Tori | TODO |
-| Payment/webhook rollback notes documented | TODO | Tori | TODO |
-| Media/storage rollback notes documented | TODO | Tori | TODO |
-| Notification disable/degrade path documented | TODO | Tori | TODO |
-| User communication path documented | TODO | Tori | TODO |
-| Post-rollback verification checklist documented | TODO | Tori | TODO |
+| Rollback owner named | TEMPLATE READY / DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md |
+| Backup rollback owner named | BLOCKED | Tori | Required before public rollout. |
+| Last known good commit recorded | DECISION TODO | Tori | Record before GO decision. |
+| Deploy rollback process documented | TEMPLATE READY / DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md |
+| Feature disable/kill switch path documented | TEMPLATE READY / DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md |
+| Payment/webhook rollback notes documented | TEMPLATE READY / DECISION TODO | Tori | Required if payments are enabled. |
+| Media/storage rollback notes documented | TEMPLATE READY / DECISION TODO | Tori | Required if media is enabled. |
+| Notification disable/degrade path documented | TEMPLATE READY / DECISION TODO | Tori | Required if notifications are enabled. |
+| User communication path documented | TEMPLATE READY / DECISION TODO | Tori | Message templates exist; final channel/timing still required. |
+| Post-rollback verification checklist documented | TEMPLATE READY / DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md |
 
 Post-rollback verification:
 
@@ -324,14 +324,14 @@ Decision: TODO
 
 | Gate | Status | Owner | Evidence | Notes |
 |---|---|---|---|---|
-| Public support channel defined | TODO | Tori | TODO | Required. |
-| Support hours defined | TODO | Tori | TODO | Required. |
-| Escalation from support to engineering defined | TODO | Tori | TODO | Required. |
-| Payment support path defined | TODO | Tori | TODO | Required. |
-| Privacy request support path defined | TODO | Tori | TODO | Required. |
-| Known limitations documented | TODO | Tori | TODO | Required. |
-| Incident user-comms template drafted | TODO | Tori | TODO | Required. |
-| Refund/manual resolution path documented | TODO | Tori | TODO | Required if payments are public. |
+| Public support channel defined | DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md | Template ready; final channel required. |
+| Support hours defined | DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md | Template ready; final hours required. |
+| Escalation from support to engineering defined | DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md | Template ready; public backup/escalation still blocked. |
+| Payment support path defined | DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md | Required if payments are public. |
+| Privacy request support path defined | DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md; docs/runbooks/privacy-request.md | Required. |
+| Known limitations documented | DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md | Required. |
+| Incident user-comms template drafted | TEMPLATE READY / DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md | Templates exist; final channel/timing required. |
+| Refund/manual resolution path documented | DECISION TODO | Tori | docs/launch-readiness/private-beta-support-rollback.md | Required if payments are public. |
 
 ## Automatic public rollout NO-GO
 
@@ -343,7 +343,7 @@ Public rollout is automatically blocked if any of the following are true:
 - pnpm typecheck fails.
 - pnpm test fails without documented acceptance.
 - pnpm verify:privacy-phase1 fails.
-- Health/readiness proof is missing.
+- Health/readiness deployed proof regresses.
 - Booking lifecycle proof is missing.
 - Payment/webhook proof is missing.
 - Private media proof is missing.
