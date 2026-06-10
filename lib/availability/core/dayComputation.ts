@@ -337,15 +337,15 @@ function scanBusyConflictFromIndex(args: {
 
   let index = args.startIndex
 
-  while (
-    index < args.busyIntervals.length &&
-    args.busyIntervals[index].end.getTime() <= requestedStartMs
-  ) {
+  let skipped = args.busyIntervals[index]
+  while (skipped !== undefined && skipped.end.getTime() <= requestedStartMs) {
     index += 1
+    skipped = args.busyIntervals[index]
   }
 
   for (let current = index; current < args.busyIntervals.length; current += 1) {
     const interval = args.busyIntervals[current]
+    if (interval === undefined) break
 
     if (interval.start.getTime() >= requestedEndMs) {
       return {

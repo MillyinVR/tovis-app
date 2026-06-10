@@ -633,7 +633,12 @@ function expectExactlyOneSuccess(
   expect(fulfilled).toHaveLength(1)
   expect(rejected).toHaveLength(1)
 
-  return { fulfilled, rejected }
+  const firstRejected = rejected[0]
+  if (firstRejected === undefined) {
+    throw new Error('Expected exactly one rejected result')
+  }
+
+  return { fulfilled, rejected, firstRejected }
 }
 
 function getRejectedText(result: PromiseRejectedResult): string {
@@ -717,9 +722,9 @@ describe('booking overlap concurrency integration', () => {
     })
 
     const results = await Promise.allSettled([p1, p2])
-    const { rejected } = expectExactlyOneSuccess(results)
+    const { firstRejected } = expectExactlyOneSuccess(results)
 
-    expect(getRejectedText(rejected[0])).toContain('HOLD')
+    expect(getRejectedText(firstRejected)).toContain('HOLD')
 
     await expect(
       db.bookingHold.count({
@@ -754,9 +759,9 @@ describe('booking overlap concurrency integration', () => {
     })
 
     const results = await Promise.allSettled([p1, p2])
-    const { rejected } = expectExactlyOneSuccess(results)
+    const { firstRejected } = expectExactlyOneSuccess(results)
 
-    expect(getRejectedText(rejected[0])).toContain('HOLD')
+    expect(getRejectedText(firstRejected)).toContain('HOLD')
 
     await expect(
       db.bookingHold.count({
@@ -792,9 +797,9 @@ describe('booking overlap concurrency integration', () => {
     })
 
     const results = await Promise.allSettled([p1, p2])
-    const { rejected } = expectExactlyOneSuccess(results)
+    const { firstRejected } = expectExactlyOneSuccess(results)
 
-    expect(getRejectedText(rejected[0])).toContain('BOOKING')
+    expect(getRejectedText(firstRejected)).toContain('BOOKING')
 
     await expect(
       db.booking.count({
@@ -826,9 +831,9 @@ describe('booking overlap concurrency integration', () => {
     })
 
     const results = await Promise.allSettled([p1, p2])
-    const { rejected } = expectExactlyOneSuccess(results)
+    const { firstRejected } = expectExactlyOneSuccess(results)
 
-    expect(getRejectedText(rejected[0])).toContain('BOOKING')
+    expect(getRejectedText(firstRejected)).toContain('BOOKING')
 
     await expect(
       db.booking.count({

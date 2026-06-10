@@ -1,8 +1,6 @@
 app/api/admin/look-comments/[id]/moderate/route.test.ts|as unknown as|return req as unknown as NextRequest
 app/api/admin/looks/[id]/moderate/route.test.ts|as unknown as|return req as unknown as NextRequest
 app/api/admin/viral-service-requests/[id]/moderate/route.test.ts|as unknown as|return req as unknown as NextRequest
-app/api/availability/bootstrap/route.ts|as unknown as|cached: cachedPayload as unknown as Record<string, unknown>,
-app/api/pro/offerings/route.ts|as unknown as|return v as unknown as Prisma.InputJsonValue
 app/api/viral-service-requests/upload/route.test.ts|as unknown as|return req as unknown as NextRequest
 lib/admin/auditLog.test.ts|as unknown as|} as unknown as Prisma.TransactionClient
 lib/aftercare/unclaimedAftercareAccess.test.ts|as unknown as|const tx = { __brand: 'tx' } as unknown as Prisma.TransactionClient
@@ -27,6 +25,5 @@ lib/notifications/delivery/sendEmail.test.ts|as unknown as|} as unknown as Respo
 lib/notifications/delivery/sendInApp.test.ts|as unknown as|publish: null as unknown as never,
 lib/notifications/delivery/sendSms.test.ts|as unknown as|} as unknown as SmsProviderSendRequest
 lib/notifications/delivery/sendSms.test.ts|as unknown as|} as unknown as SmsProviderSendRequest
-lib/prisma.ts|as unknown as|const globalForPrisma = globalThis as unknown as {
 lib/viralRequests/index.test.ts|as unknown as|return value as unknown as Prisma.TransactionClient
 tests/chaos/postmark-degradation.test.ts|as unknown as|} as unknown as Response

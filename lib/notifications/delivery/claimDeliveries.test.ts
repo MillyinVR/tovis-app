@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { requireDefined } from '@/lib/guards'
 import {
   NotificationChannel,
   NotificationDeliveryEventType,
@@ -271,9 +272,9 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
     )
 
     const firstUpdate =
-      mockTransaction.notificationDelivery.updateMany.mock.calls[0][0]
+      requireDefined(mockTransaction.notificationDelivery.updateMany.mock.calls[0])[0]
     const secondUpdate =
-      mockTransaction.notificationDelivery.updateMany.mock.calls[1][0]
+      requireDefined(mockTransaction.notificationDelivery.updateMany.mock.calls[1])[0]
 
     expect(firstUpdate.where.id).toBe('delivery_1')
     expect(secondUpdate.where.id).toBe('delivery_2')
@@ -299,7 +300,7 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
     }
 
     expect(
-      mockTransaction.notificationDeliveryEvent.create.mock.calls[0][0],
+      requireDefined(mockTransaction.notificationDeliveryEvent.create.mock.calls[0])[0],
     ).toEqual({
       data: {
         type: NotificationDeliveryEventType.CLAIMED,
@@ -321,7 +322,7 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
     })
 
     expect(
-      mockTransaction.notificationDeliveryEvent.create.mock.calls[1][0],
+      requireDefined(mockTransaction.notificationDeliveryEvent.create.mock.calls[1])[0],
     ).toEqual({
       data: {
         type: NotificationDeliveryEventType.CLAIMED,
@@ -576,7 +577,7 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
     ).toHaveBeenCalledTimes(1)
 
     expect(
-      mockTransaction.notificationDeliveryEvent.create.mock.calls[0][0],
+      requireDefined(mockTransaction.notificationDeliveryEvent.create.mock.calls[0])[0],
     ).toEqual({
       data: {
         type: NotificationDeliveryEventType.RETRY_SCHEDULED,
@@ -691,7 +692,7 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
     ).toHaveBeenCalledTimes(1)
 
     expect(
-      mockTransaction.notificationDeliveryEvent.create.mock.calls[0][0].data.type,
+      requireDefined(mockTransaction.notificationDeliveryEvent.create.mock.calls[0])[0].data.type,
     ).toBe(NotificationDeliveryEventType.CLAIMED)
 
     expect(result.deliveries.map((delivery) => delivery.id)).toEqual([
@@ -854,7 +855,7 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
       1,
     )
     expect(
-      mockTransaction.notificationDeliveryEvent.create.mock.calls[0][0].data.type,
+      requireDefined(mockTransaction.notificationDeliveryEvent.create.mock.calls[0])[0].data.type,
     ).toBe(NotificationDeliveryEventType.CLAIMED)
     expect(result.deliveries.map((delivery) => delivery.id)).toEqual([
       'delivery_resumed_1',

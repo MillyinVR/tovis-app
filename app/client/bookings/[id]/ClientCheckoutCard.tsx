@@ -417,7 +417,7 @@ export default function ClientCheckoutCard(props: Props) {
     if (parts.length > 2) return
 
     if (parts.length === 2) {
-      setTipInput(`${parts[0]}.${parts[1].slice(0, 2)}`)
+      setTipInput(`${parts[0] ?? ''}.${parts[1]?.slice(0, 2) ?? ''}`)
       return
     }
 

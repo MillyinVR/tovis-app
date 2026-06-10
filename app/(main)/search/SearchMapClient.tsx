@@ -240,10 +240,10 @@ const SERVICE_LEAD_WORDS = new Set([
 ])
 
 function looksServiceLed(raw: string) {
-  const tokens = tokenize(raw)
-  if (!tokens.length) return false
+  const firstToken = tokenize(raw)[0]
+  if (firstToken === undefined) return false
 
-  return SERVICE_LEAD_WORDS.has(tokens[0].toLowerCase())
+  return SERVICE_LEAD_WORDS.has(firstToken.toLowerCase())
 }
 
 function deriveAutocompleteTarget(raw: string): { serviceText: string; locationText: string } | null {
@@ -637,9 +637,8 @@ export default function SearchMapClient() {
         .map(normalizePrediction)
         .filter((prediction): prediction is PlacesPrediction => Boolean(prediction))
 
-      if (!predictions.length) return null
-
       const chosen = predictions[0]
+      if (chosen === undefined) return null
       const detailsParams = new URLSearchParams({
         placeId: chosen.placeId,
         sessionToken,
@@ -1065,8 +1064,9 @@ export default function SearchMapClient() {
                       if (event.key === 'Enter') {
                         event.preventDefault()
 
-                        if (acOpen && acPreds.length > 0 && acIndex >= 0 && acIndex < acPreds.length) {
-                          void commitSelection(acPreds[acIndex])
+                        const highlighted = acOpen ? acPreds[acIndex] : undefined
+                        if (highlighted !== undefined) {
+                          void commitSelection(highlighted)
                           return
                         }
 

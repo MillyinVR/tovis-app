@@ -279,7 +279,7 @@ export default function NewMediaPostForm() {
     }
 
     if (serviceIds.length === 1) {
-      setPrimaryServiceId(serviceIds[0])
+      setPrimaryServiceId(serviceIds[0] ?? null)
       return
     }
 

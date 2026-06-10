@@ -8,6 +8,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    // Integration suites share one database and several perform global
+    // cleanup (deleteMany({})), so test files must not run concurrently.
+    fileParallelism: false,
     include: ['tests/integration/**/*.test.ts'],
     exclude: [
       '**/node_modules/**',

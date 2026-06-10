@@ -877,6 +877,29 @@ model AdminPermission {
   @@index([categoryId])
 }
 
+// White-label tenant (salon) — see docs/architecture/tenant-model.md.
+// The reserved root tenant slug is 'tovis-root' (the TOVIS marketplace).
+// Visibility rule: tovis-root clients see all Pros; white-label clients see
+// only Pros whose homeTenantId is their own tenant.
+model Tenant {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  slug         String  @unique
+  name         String
+  customDomain String? @unique
+  isActive     Boolean @default(true)
+
+  homePros       ProfessionalProfile[] @relation("TenantHomePros")
+  homeClients    ClientProfile[]       @relation("TenantHomeClients")
+  proBookings    Booking[]             @relation("TenantProBookings")
+  clientBookings Booking[]             @relation("TenantClientHomeBookings")
+  nfcCards       NfcCard[]             @relation("TenantNfcCards")
+
+  @@index([isActive])
+}
+
 model User {
   id                  String    @id @default(cuid())
   email               String    @unique @db.VarChar(320)
@@ -1037,6 +1060,11 @@ model ClientProfile {
   id     String  @id @default(cuid())
   userId String? @unique
 
+  // Tenant the client signed up under (expand phase: nullable; backfilled to
+  // tovis-root). Drives what the client can discover.
+  homeTenantId String?
+  homeTenant   Tenant? @relation("TenantHomeClients", fields: [homeTenantId], references: [id], onDelete: Restrict)
+
   firstName String @default("")
   lastName  String @default("")
 
@@ -1087,6 +1115,7 @@ model ClientProfile {
   @@index([claimStatus])
   @@index([emailHashKeyVersion])
   @@index([phoneHashKeyVersion])
+  @@index([homeTenantId])
 }
 
 model ClientAddress {
@@ -1137,6 +1166,11 @@ model ClientAddress {
 model ProfessionalProfile {
   id     String @id @default(cuid())
   userId String @unique
+
+  // The Pro's one home tenant (expand phase: nullable; backfilled to
+  // tovis-root). Drives discovery visibility.
+  homeTenantId String?
+  homeTenant   Tenant? @relation("TenantHomePros", fields: [homeTenantId], references: [id], onDelete: Restrict)
 
   firstName       String    @default("")
   lastName        String    @default("")
@@ -1233,6 +1267,7 @@ model ProfessionalProfile {
 
   @@index([handleNormalized])
   @@index([verificationStatus])
+  @@index([homeTenantId])
 }
 
 model ProfessionalMonthlyAnalytics {
@@ -1938,6 +1973,15 @@ model Booking {
   serviceId      String
   offeringId     String?
 
+  // Tenant attribution snapshots, written at booking creation (expand phase:
+  // nullable; backfilled to tovis-root). proTenantId = revenue attribution
+  // (the Pro's home tenant); clientHomeTenantId = acquisition attribution
+  // (the client's signup tenant). See docs/architecture/tenant-model.md.
+  proTenantId        String?
+  proTenant          Tenant? @relation("TenantProBookings", fields: [proTenantId], references: [id], onDelete: Restrict)
+  clientHomeTenantId String?
+  clientHomeTenant   Tenant? @relation("TenantClientHomeBookings", fields: [clientHomeTenantId], references: [id], onDelete: Restrict)
+
   proClientInvite ProClientInvite?
 
   lastMinuteOpeningId String?            @unique
@@ -2083,6 +2127,8 @@ model Booking {
   @@index([stripeCheckoutSessionId])
   @@index([stripeConnectedAccountId])
   @@index([paymentProvider, checkoutStatus])
+  @@index([proTenantId, scheduledFor])
+  @@index([clientHomeTenantId])
 }
 
 model BookingOverrideAuditLog {
@@ -3234,8 +3280,13 @@ model NfcCard {
   professionalId String?
   professional   ProfessionalProfile? @relation(fields: [professionalId], references: [id])
 
-  // white-label salon cards (minimal tenant pointer)
-  salonSlug String? // or salonId if you already have a Salon model
+  // Issuing tenant (expand phase: nullable; backfilled to tovis-root).
+  tenantId String?
+  tenant   Tenant? @relation("TenantNfcCards", fields: [tenantId], references: [id], onDelete: Restrict)
+
+  /// @deprecated Superseded by tenantId. Read-only during the expand phase;
+  /// dropped in the contract-phase migration. No new writes.
+  salonSlug String?
 
   isActive          Boolean            @default(true)
   shortCode         String             @unique
@@ -3248,6 +3299,7 @@ model NfcCard {
   @@index([claimedByUserId])
   @@index([professionalId])
   @@index([salonSlug])
+  @@index([tenantId])
 }
 
 model TapIntent {

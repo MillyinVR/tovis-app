@@ -47,6 +47,22 @@ export function hasOwnKey<K extends string>(
   return Object.prototype.hasOwnProperty.call(obj, key)
 }
 
+/**
+ * Narrow away `undefined`/`null` for values that are logically guaranteed to
+ * exist (e.g. indexing a non-empty array) but that the type system cannot
+ * prove under `noUncheckedIndexedAccess`. Throws instead of asserting, so an
+ * impossible case fails loudly rather than propagating `undefined`.
+ */
+export function requireDefined<T>(
+  value: T | null | undefined,
+  label = 'value',
+): T {
+  if (value === null || value === undefined) {
+    throw new Error(`Expected ${label} to be defined`)
+  }
+  return value
+}
+
 // Back-compat: some files import clampInt from guards.
 // Keep one implementation only.
 export { clampInt } from '@/lib/pick'

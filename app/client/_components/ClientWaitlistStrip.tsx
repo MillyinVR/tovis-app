@@ -1,6 +1,8 @@
 // app/client/_components/ClientWaitlistStrip.tsx
 import Link from 'next/link'
 
+import { initialsForName } from '@/lib/initials'
+
 import type { ClientHomeWaitlistEntry } from '../_data/getClientHomeData'
 
 function professionalName(professional: {
@@ -12,16 +14,6 @@ function professionalName(professional: {
     professional.handle ??
     'Professional'
   ).trim()
-}
-
-function initialsForName(name: string): string {
-  const parts = name
-    .split(/\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-  if (parts.length === 0) return 'P'
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
 }
 
 function serviceName(entry: ClientHomeWaitlistEntry): string {

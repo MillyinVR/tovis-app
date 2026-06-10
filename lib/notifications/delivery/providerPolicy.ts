@@ -4,6 +4,8 @@ import {
   Prisma,
 } from '@prisma/client'
 
+import { requireDefined } from '@/lib/guards'
+
 import { type RenderedNotificationContent } from './renderNotificationContent'
 import {
   type DeliveryProviderBinding,
@@ -22,9 +24,12 @@ export const DELIVERY_RETRY_BACKOFF_MS = [
 
 export function getRetryDelayMs(nextAttemptCount: number): number {
   const index = Math.max(0, nextAttemptCount - 1)
-  return DELIVERY_RETRY_BACKOFF_MS[
-    Math.min(index, DELIVERY_RETRY_BACKOFF_MS.length - 1)
-  ]
+  return requireDefined(
+    DELIVERY_RETRY_BACKOFF_MS[
+      Math.min(index, DELIVERY_RETRY_BACKOFF_MS.length - 1)
+    ],
+    'delivery retry backoff delay',
+  )
 }
 
 const IN_APP_BINDING: DeliveryProviderBinding = {

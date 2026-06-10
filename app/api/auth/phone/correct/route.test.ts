@@ -519,7 +519,8 @@ describe('app/api/auth/phone/correct/route', () => {
     expect(
       mockPrismaTransaction.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mockStartTwilioVerifyPhoneVerification.mock.invocationCallOrder[0],
+      mockStartTwilioVerifyPhoneVerification.mock.invocationCallOrder[0] ??
+        Number.NEGATIVE_INFINITY,
     )
 
     expect(mockLogAuthEvent).toHaveBeenCalledWith({

@@ -326,7 +326,8 @@ export default function MapView({
   const center: [number, number] = useMemo(() => {
     if (hasOrigin) return [origin!.lat, origin!.lng]
     if (hasMe) return [me!.lat, me!.lng]
-    if (pins.length) return [pins[0].lat, pins[0].lng]
+    const firstPin = pins[0]
+    if (firstPin !== undefined) return [firstPin.lat, firstPin.lng]
     return [0, 0]
   }, [hasOrigin, origin, hasMe, me, pins])
 

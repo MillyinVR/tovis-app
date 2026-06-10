@@ -5,6 +5,7 @@ import type {
   ClientHomeAction,
   ClientHomeBooking,
 } from '../_data/getClientHomeData'
+import { bookingTitle } from './bookingDisplay'
 
 type AftercarePaymentAction = Extract<
   ClientHomeAction,
@@ -34,16 +35,6 @@ function professionalName(professional: {
     professional.handle ??
     'Professional'
   ).trim()
-}
-
-function bookingTitle(booking: ClientHomeBooking): string {
-  const serviceItemNames = booking.serviceItems
-    .map((item) => item.service?.name?.trim())
-    .filter((name): name is string => Boolean(name))
-  if (serviceItemNames.length === 1) return serviceItemNames[0]
-  if (serviceItemNames.length > 1)
-    return `${serviceItemNames[0]} + ${serviceItemNames.length - 1} more`
-  return booking.service?.name ?? 'Appointment'
 }
 
 function formatShortDate(date: Date | null | undefined): string {
