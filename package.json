@@ -42,6 +42,7 @@
     "test:chaos": "dotenv -e .env.local -- vitest run --config vitest.config.mts tests/chaos",
     "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch",
     "check:privacy-guards": "pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads",
+    "check:static-guards": "pnpm check:booking-boundary && pnpm check:media-render-boundary && pnpm check:consultation-canonical && pnpm check:lifecycle-field-writes && pnpm check:no-type-escape && pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads",
     "test:load:availability": "dotenv -e .env.local -- tsx tests/load/availability-bootstrap-load-test.ts",
     "test:load:holds": "dotenv -e .env.local -- tsx tests/load/hold-create-load-test.ts",
     "test:load:booking-finalize": "dotenv -e .env.local -- tsx tests/load/booking-finalize-load-test.ts",
