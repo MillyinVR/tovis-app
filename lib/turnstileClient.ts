@@ -1,3 +1,4 @@
+// lib/turnstileClient.ts
 'use client'
 
 declare global {
@@ -9,9 +10,10 @@ declare global {
     }
   }
 }
-
 const TURNSTILE_SCRIPT_SRC =
   'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+
+const TURNSTILE_TIMEOUT_MS = 120_000
 
 let scriptLoadPromise: Promise<void> | null = null
 
@@ -119,7 +121,7 @@ export async function getTurnstileToken(action: string): Promise<string> {
     const timeout = window.setTimeout(() => {
       cleanup()
       reject(new Error('Captcha timed out. Please try again.'))
-    }, 12000)
+    }, TURNSTILE_TIMEOUT_MS)
 
     try {
       widgetId = window.turnstile!.render(container, {
