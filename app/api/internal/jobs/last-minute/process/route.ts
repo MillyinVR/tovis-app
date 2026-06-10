@@ -175,9 +175,10 @@ function serviceSummary(plan: DueTierPlanRow): string {
     ),
   )
 
-  if (names.length === 0) return 'a service'
-  if (names.length === 1) return names[0]
-  return `${names[0]} +${names.length - 1} more`
+  const firstName = names[0]
+  if (firstName === undefined) return 'a service'
+  if (names.length === 1) return firstName
+  return `${firstName} +${names.length - 1} more`
 }
 
 function incentiveLabel(plan: DueTierPlanRow): string | null {

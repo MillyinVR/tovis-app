@@ -816,8 +816,9 @@ function bookingTotalLabel(event: BookingCalendarEvent): string | null {
     .map((item) => item.price)
     .filter((price): price is string => Boolean(price?.trim()))
 
-  if (prices.length === 0) return null
-  if (prices.length === 1) return prices[0]
+  const firstPrice = prices[0]
+  if (firstPrice === undefined) return null
+  if (prices.length === 1) return firstPrice
 
   return prices.join(' + ')
 }

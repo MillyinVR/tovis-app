@@ -163,12 +163,13 @@ export async function searchLooks(
     (item): item is NonNullable<typeof item> => item !== null,
   )
 
+  const lastRow = page[page.length - 1]
   const nextCursor =
-    hasMore && page.length > 0
+    hasMore && lastRow !== undefined
       ? encodeLooksFeedCursor({
           kind,
           sort,
-          row: page[page.length - 1],
+          row: lastRow,
         })
       : null
 

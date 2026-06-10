@@ -210,8 +210,9 @@ export async function GET() {
       select: bookingCardSelect,
     })
 
-    if (eligibleUpcoming.length === 1) {
-      const upcoming = eligibleUpcoming[0]
+    const upcoming = eligibleUpcoming.length === 1 ? eligibleUpcoming[0] : undefined
+
+    if (upcoming !== undefined) {
       const booking = toBookingCard(upcoming)
 
       const payload: ProSessionPayload = {

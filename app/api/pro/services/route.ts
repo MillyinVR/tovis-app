@@ -36,7 +36,7 @@ function resolveSelectedLocationType(args: {
   }
 
   if (supported.length === 1) {
-    return supported[0]
+    return supported[0] ?? null
   }
 
   return null

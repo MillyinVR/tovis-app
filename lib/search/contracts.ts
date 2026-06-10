@@ -112,12 +112,13 @@ export function paginateByCursor<T extends { id: string }>(
   const page = items.slice(startIndex, startIndex + args.limit + 1)
   const hasMore = page.length > args.limit
   const visible = hasMore ? page.slice(0, args.limit) : page
+  const lastVisible = visible[visible.length - 1]
 
   return {
     items: [...visible],
     nextCursor:
-      hasMore && visible.length > 0
-        ? encodeIdCursor(visible[visible.length - 1].id)
+      hasMore && lastVisible !== undefined
+        ? encodeIdCursor(lastVisible.id)
         : null,
   }
 }

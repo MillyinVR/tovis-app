@@ -13,6 +13,10 @@ const ALLOWED_FILES = new Set([
   // snapshots. It is intentionally dry-run by default and only writes encrypted
   // dedicated address snapshot columns plus approximate coordinates.
   normalize('prisma/scripts/backfillAddressEncryption.ts'),
+  // Expand-phase tenant backfill. Dry-run by default; writes only the
+  // proTenantId/clientHomeTenantId attribution columns (never lifecycle
+  // fields). See docs/architecture/tenant-model.md.
+  normalize('prisma/scripts/backfillTenantFoundation.ts'),
   // Test-data reset script for the last-minute booking suite. Runs only
   // against the test database via `scripts/with-test-db.mjs`.
   normalize('prisma/test-data/resetLastMinuteTestData.cjs'),

@@ -229,14 +229,16 @@ function localPartsToUtcDate(parts: DateParts, timeZone: string): Date {
     return sameParts(actual, parts)
   })
 
-  if (exactMatches.length !== 1) {
+  const exactMatch = exactMatches.length === 1 ? exactMatches[0] : undefined
+
+  if (exactMatch === undefined) {
     throw new Error(
       `Local wall time does not exist or is ambiguous in timezone ${tz}: ` +
         `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}T${pad2(parts.hour)}:${pad2(parts.minute)}:${pad2(parts.second)}`
     )
   }
 
-  return new Date(exactMatches[0])
+  return new Date(exactMatch)
 }
 
 function addDaysToYmd(ymd: string, days: number): string {

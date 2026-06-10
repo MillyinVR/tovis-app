@@ -42,6 +42,7 @@ export function moneyToCentsInt(value: string): number | null {
   if (!normalized) return null
 
   const [dollars, cents] = normalized.split('.')
+  if (dollars === undefined || cents === undefined) return null
 
   return Number.parseInt(dollars, 10) * 100 + Number.parseInt(cents, 10)
 }

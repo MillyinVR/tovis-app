@@ -215,6 +215,8 @@ function useModalA11y<T extends HTMLElement>(args: {
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
 
+      if (first === undefined || last === undefined) return
+
       if (active && !panel.contains(active)) {
         event.preventDefault()
         first.focus()

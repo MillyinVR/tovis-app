@@ -1,6 +1,8 @@
 // app/client/_components/FavoriteProsRow.tsx
 import Link from 'next/link'
 
+import { initialsForName } from '@/lib/initials'
+
 import type { ClientHomeFavoritePro } from '../_data/getClientHomeData'
 
 type FavoriteProsRowProps = {
@@ -21,16 +23,6 @@ function professionalName(professional: {
 
 function firstWord(name: string): string {
   return name.split(/\s+/)[0] ?? name
-}
-
-function initialsForName(name: string): string {
-  const parts = name
-    .split(/\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-  if (parts.length === 0) return 'P'
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
 }
 
 function ProAvatar({

@@ -62,7 +62,8 @@ function parsePersistedFilters(v: unknown): PersistedFilters | null {
 function getCookie(name: string) {
   if (typeof document === 'undefined') return null
   const m = document.cookie.match(new RegExp(`(?:^|; )${name.replace(/[-[\]/{}()*+?.\\^$|]/g, '\\$&')}=([^;]*)`))
-  return m ? decodeURIComponent(m[1]) : null
+  const captured = m?.[1]
+  return captured !== undefined ? decodeURIComponent(captured) : null
 }
 
 function setCookie(name: string, value: string, days = 120) {

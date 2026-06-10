@@ -1,6 +1,8 @@
 // lib/nfcShortCode.ts
 import { randomBytes } from 'crypto'
 
+import { requireDefined } from '@/lib/guards'
+
 /**
  * Crockford-ish Base32 alphabet:
  * - excludes I, L, O, U to avoid confusion and accidental words
@@ -11,7 +13,8 @@ export function generateShortCode(length = 8): string {
   const bytes = randomBytes(length)
   let out = ''
   for (let i = 0; i < length; i++) {
-    out += ALPHABET[bytes[i] % ALPHABET.length]
+    const byte = requireDefined(bytes[i], 'short code random byte')
+    out += ALPHABET.charAt(byte % ALPHABET.length)
   }
   return out
 }

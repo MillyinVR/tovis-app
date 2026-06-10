@@ -949,11 +949,11 @@ async function switchToDayByIndex(
 ): Promise<DaySwitchOutcome> {
   const buttons = await findDayButtons(page)
 
-  if (buttons.length <= targetIndex) {
+  const target = buttons[targetIndex]
+
+  if (target === undefined) {
     return { ok: false, reason: 'insufficient_day_buttons' }
   }
-
-  const target = buttons[targetIndex]
   const label = await readDayButtonLabel(target)
 
   await resetPerfStore(page)
@@ -1020,6 +1020,7 @@ async function createSuccessfulHold(
 
   for (let index = 0; index < attemptCount; index += 1) {
     const candidate = candidates[index]
+    if (candidate === undefined) continue
 
     try {
       await candidate.button.scrollIntoViewIfNeeded()

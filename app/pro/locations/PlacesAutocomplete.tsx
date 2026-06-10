@@ -364,9 +364,10 @@ export default function PlacesAutocomplete(props: {
               }
 
               if (e.key === 'Enter') {
-                if (!open || activeIndex < 0 || activeIndex >= items.length) return
-                e.preventDefault()
+                if (!open) return
                 const p = items[activeIndex]
+                if (p === undefined) return
+                e.preventDefault()
                 void pick(p.placeId, p.mainText || p.description)
               }
             }}

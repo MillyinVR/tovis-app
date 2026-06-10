@@ -117,7 +117,7 @@ export function buildMonthDayCells(args: {
   })
 
   return visibleDays.map((day, index) => {
-    const dayYmd = visibleDayKeys[index]
+    const dayYmd = visibleDayKeys[index] ?? visibleDayKey(day, timeZone)
     const anchoredDay = anchoredVisibleDay(day)
 
     return {

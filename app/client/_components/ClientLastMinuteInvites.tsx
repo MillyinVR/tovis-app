@@ -1,6 +1,8 @@
 // app/client/_components/ClientLastMinuteInvites.tsx
 import Link from 'next/link'
 
+import { initialsForName } from '@/lib/initials'
+
 import type { ClientHomeLastMinuteInvite } from '../_data/getClientHomeData'
 
 // Portrait gradient pool — cycles by invite index
@@ -42,23 +44,14 @@ function firstWord(name: string): string {
   return name.split(/\s+/)[0] ?? name
 }
 
-function initialsForName(name: string): string {
-  const parts = name
-    .split(/\s+/)
-    .map((p) => p.trim())
-    .filter(Boolean)
-  if (parts.length === 0) return 'P'
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
-}
-
 function inviteTitle(invite: ClientHomeLastMinuteInvite): string {
   const serviceNames = invite.opening.services
     .map((row) => row.service.name.trim())
     .filter(Boolean)
-  if (serviceNames.length === 0) return 'Last-minute opening'
-  if (serviceNames.length === 1) return serviceNames[0]
-  return `${serviceNames[0]} + ${serviceNames.length - 1} more`
+  const firstServiceName = serviceNames[0]
+  if (firstServiceName === undefined) return 'Last-minute opening'
+  if (serviceNames.length === 1) return firstServiceName
+  return `${firstServiceName} + ${serviceNames.length - 1} more`
 }
 
 function invitePrice(invite: ClientHomeLastMinuteInvite): string | null {
