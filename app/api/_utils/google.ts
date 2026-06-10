@@ -46,7 +46,7 @@ export async function fetchWithTimeout(
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<Response> {
   const controller = new AbortController()
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
     return await fetch(url, {
@@ -54,7 +54,7 @@ export async function fetchWithTimeout(
       signal: controller.signal,
     })
   } finally {
-    window.clearTimeout(timeoutId)
+    clearTimeout(timeoutId)
   }
 }
 
