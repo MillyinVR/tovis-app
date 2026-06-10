@@ -11,6 +11,7 @@ import {
   captureAuthException,
   logAuthEvent,
 } from '@/lib/observability/authEvents'
+import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -109,6 +110,7 @@ export async function POST(request: Request) {
       userId: auth.user.id,
       email,
       appUrl,
+      tenantContext: await resolveTenantContextForRequest(request),
       next: nextForVerification,
       intent: verificationIntent,
       inviteToken: verificationInviteToken,

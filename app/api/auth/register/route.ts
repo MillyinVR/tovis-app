@@ -9,6 +9,7 @@ import {
   getAppUrlFromRequest,
   issueAndSendEmailVerification,
 } from '@/lib/auth/emailVerification'
+import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { BUCKETS } from '@/lib/storageBuckets'
 import {
@@ -1221,6 +1222,7 @@ export async function POST(request: Request) {
               userId: user.id,
               email: verificationEmail,
               appUrl,
+              tenantContext: await resolveTenantContextForRequest(request),
               next: nextForVerification,
               intent: verificationIntent,
               inviteToken: verificationInviteToken,

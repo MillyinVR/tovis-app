@@ -4,6 +4,7 @@
 import Link from 'next/link'
 import { useCallback, useMemo, useState } from 'react'
 
+import { useBrand } from '@/lib/brand/BrandProvider'
 import { cn } from '@/lib/utils'
 
 type MeTab = 'boards' | 'following' | 'history'
@@ -207,6 +208,7 @@ export default function ClientMeDashboard({
   createBoardHref = null,
 }: ClientMeDashboardProps) {
   const [meTab, setMeTab] = useState<MeTab>('boards')
+  const { brand } = useBrand()
 
   const handleShare = useCallback(async () => {
     const url = globalThis.location.href
@@ -214,7 +216,7 @@ export default function ClientMeDashboard({
     try {
       if (typeof navigator.share === 'function') {
         await navigator.share({
-          title: `${displayName} on TOVIS`,
+          title: `${displayName} on ${brand.displayName}`,
           url,
         })
         return
@@ -228,7 +230,7 @@ export default function ClientMeDashboard({
     } catch {
       // ignore clipboard failures for now
     }
-  }, [displayName])
+  }, [displayName, brand.displayName])
 
   return (
     <div className="flex h-full flex-col overflow-hidden">

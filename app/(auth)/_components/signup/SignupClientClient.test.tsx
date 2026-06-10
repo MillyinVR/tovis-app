@@ -28,6 +28,15 @@ const mocks = vi.hoisted(() => {
   }
 })
 
+
+vi.mock('@/lib/brand/BrandProvider', () => ({
+  useBrand: () => ({
+    brand: { displayName: 'TOVIS' },
+    mode: 'dark',
+    setMode: () => {},
+  }),
+}))
+
 vi.mock('next/navigation', () => ({
   useRouter: () => mocks.router,
   useSearchParams: () => mocks.getSearchParams(),

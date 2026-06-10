@@ -14,6 +14,8 @@ import { createEmailDeliveryProvider } from '@/lib/notifications/delivery/sendEm
 import { createInAppDeliveryProvider } from '@/lib/notifications/delivery/sendInApp'
 import { createSmsDeliveryProvider } from '@/lib/notifications/delivery/sendSms'
 import { getRedis } from '@/lib/redis'
+import { rootTenantContext } from '@/lib/tenant/context'
+import { getRootTenantId } from '@/lib/tenant/resolveTenant'
 import { NotificationChannel, NotificationProvider } from '@prisma/client'
 import Twilio from 'twilio'
 import { safeError } from '@/lib/security/logging'
@@ -188,8 +190,13 @@ async function runJob(req: Request) {
   const take = readTake(req)
   const now = new Date()
 
+  // Background job has no tenant host; deliveries render root-brand copy
+  // until dispatches carry their own tenant attribution (WS-9).
+  const tenantContext = rootTenantContext(await getRootTenantId())
+
   const result = await processDueDeliveries({
     providers: buildProviderRegistry(),
+    tenantContext,
     claim: {
       now,
       batchSize: take,

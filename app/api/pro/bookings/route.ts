@@ -11,6 +11,7 @@ import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
+import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import {
   getBookingFailPayload,
   isBookingError,
@@ -394,6 +395,7 @@ export async function POST(req: Request) {
     const result = await createProBookingWithClient({
       professionalId,
       actorUserId,
+      tenantContext: await resolveTenantContextForRequest(req),
       overrideReason,
       clientId,
       client,

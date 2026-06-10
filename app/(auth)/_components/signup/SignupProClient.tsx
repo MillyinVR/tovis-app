@@ -13,7 +13,8 @@ import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
 import { getTurnstileToken } from '@/lib/turnstileClient'
 import { buildVerifyPhoneUrl } from './buildVerifyPhoneUrl'
-import { TRANSACTIONAL_SMS_CHECKBOX_LABEL } from '@/lib/transactionalSmsPolicy'
+import { buildTransactionalSmsCheckboxLabel } from '@/lib/transactionalSmsPolicy'
+import { useBrand } from '@/lib/brand/BrandProvider'
 
 type VerificationSendState = boolean | 'pending'
 
@@ -309,6 +310,7 @@ async function fetchTimeZoneId(args: { lat: number; lng: number }) {
 export default function SignupProClient() {
   const router = useRouter()
   const sp = useSearchParams()
+  const { brand } = useBrand()
 
   const ti = sp.get('ti')
   const loginHref = ti ? `/login?ti=${encodeURIComponent(ti)}` : '/login'
@@ -880,7 +882,7 @@ export default function SignupProClient() {
           <Input
             value={businessName}
             onChange={(e) => setBusinessName(e.target.value)}
-            placeholder="e.g. Salon De Tovis"
+            placeholder={`e.g. Salon De ${brand.displayName}`}
             autoComplete="organization"
           />
           <HelpText>You can add this later — we won’t block signup.</HelpText>
@@ -891,7 +893,7 @@ export default function SignupProClient() {
           <Input
             value={handle}
             onChange={(e) => setHandle(e.target.value)}
-            placeholder="e.g. iLoveTovis"
+            placeholder={`e.g. iLove${brand.displayName}`}
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
@@ -932,7 +934,9 @@ export default function SignupProClient() {
             className="mt-0.5 h-4 w-4 rounded border-surfaceGlass/20"
             required
           />
-          <span className="leading-5">{TRANSACTIONAL_SMS_CHECKBOX_LABEL}</span>
+          <span className="leading-5">
+            {buildTransactionalSmsCheckboxLabel(brand.displayName)}
+          </span>
         </label>
 
         <label className="grid gap-1.5">

@@ -4,6 +4,8 @@ import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { logAuthEvent } from '@/lib/observability/authEvents'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import type { TenantContext } from '@/lib/tenant/context'
 
 const POSTMARK_SEND_URL = 'https://api.postmarkapp.com/email'
 
@@ -168,14 +170,15 @@ export async function markPasswordResetTokenUsed(args: {
 export async function sendPasswordResetEmail(args: {
   to: string
   resetUrl: string
+  brandName: string
 }): Promise<void> {
   const apiToken = envOrThrow('POSTMARK_SERVER_TOKEN')
   const fromEmail = envOrThrow('POSTMARK_FROM_EMAIL')
   const messageStream = envOrNull('POSTMARK_MESSAGE_STREAM')
 
-  const subject = 'Reset your TOVIS password'
+  const subject = `Reset your ${args.brandName} password`
   const text = [
-    'We received a request to reset your TOVIS password.',
+    `We received a request to reset your ${args.brandName} password.`,
     '',
     `Open this link: ${args.resetUrl}`,
     '',
@@ -184,7 +187,7 @@ export async function sendPasswordResetEmail(args: {
   ].join('\n')
 
   const html = [
-    '<p>We received a request to reset your TOVIS password.</p>',
+    `<p>We received a request to reset your ${args.brandName} password.</p>`,
     `<p><a href="${args.resetUrl}">Reset your password</a></p>`,
     '<p>This link expires in 30 minutes.</p>',
     '<p>If you did not request this, you can ignore this email.</p>',
@@ -244,10 +247,12 @@ export async function issueAndSendPasswordReset(args: {
   userId: string
   email: string
   appUrl: string
+  tenantContext: TenantContext
   ip?: string | null
   userAgent?: string | null
   tx?: Prisma.TransactionClient
 }) {
+  const brand = getBrandForTenantContext(args.tenantContext)
   const issued = await createPasswordResetToken({
     userId: args.userId,
     ip: args.ip ?? null,
@@ -264,6 +269,7 @@ export async function issueAndSendPasswordReset(args: {
     await sendPasswordResetEmail({
       to: args.email,
       resetUrl,
+      brandName: brand.displayName,
     })
   } catch (error) {
     await markPasswordResetTokenUsed({

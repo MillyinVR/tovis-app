@@ -1,6 +1,6 @@
 // app/about/page.tsx
 import Link from 'next/link'
-import { TRANSACTIONAL_SMS_SUMMARY } from '@/lib/transactionalSmsPolicy'
+import { buildTransactionalSmsSummary } from '@/lib/transactionalSmsPolicy'
 import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
 import { getBrandConfig } from '@/lib/brand'
 
@@ -46,7 +46,7 @@ export default function AboutPage() {
               How {brand.displayName} uses SMS
             </h2>
             <p className="text-[14px] leading-relaxed text-textSecondary">
-              {TRANSACTIONAL_SMS_SUMMARY}
+              {buildTransactionalSmsSummary(brand.displayName)}
             </p>
           </section>
 

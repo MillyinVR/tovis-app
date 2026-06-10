@@ -1,6 +1,7 @@
 // tests/chaos/redis-outage.test.ts
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { rootTenantContext } from '@/lib/tenant/context'
 import {
   NotificationChannel,
   NotificationDeliveryStatus,
@@ -161,6 +162,7 @@ describe('chaos: Redis outage', () => {
 
   it('does not crash the notification delivery processor when Redis-backed in-app delivery fails', async () => {
     const result = await processDueDeliveries({
+      tenantContext: rootTenantContext('tenant_root'),
       providers: {
         inApp: createRedisOutageInAppProvider(),
         sms: createUnusedSmsProvider(),

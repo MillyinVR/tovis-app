@@ -12,6 +12,8 @@ import {
 } from '@/lib/observability/authEvents'
 import { prisma } from '@/lib/prisma'
 import { normalizeEmail } from '@/lib/security/contactNormalization'
+import { rootTenantContext } from '@/lib/tenant/context'
+import { getRootTenantId } from '@/lib/tenant/resolveTenant'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -85,6 +87,10 @@ async function runJob(req: Request) {
   const olderThan = new Date(now.getTime() - RETRY_DELAY_MS)
   const take = readTake(req)
 
+  // Cron has no tenant host; retried signup verifications send root-brand
+  // copy until users carry a home tenant (WS-9).
+  const tenantContext = rootTenantContext(await getRootTenantId())
+
   const candidates = await prisma.user.findMany({
     where: {
       emailVerifiedAt: null,
@@ -131,6 +137,7 @@ async function runJob(req: Request) {
         userId: candidate.id,
         email,
         appUrl,
+        tenantContext,
       })
 
       sentCount += 1

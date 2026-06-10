@@ -54,6 +54,7 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 import { createProBookingWithClient } from './createProBookingWithClient'
+import { rootTenantContext } from '@/lib/tenant/context'
 
 const scheduledFor = new Date('2026-03-11T19:30:00.000Z')
 
@@ -271,6 +272,7 @@ describe('createProBookingWithClient', () => {
     })
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -313,6 +315,7 @@ describe('createProBookingWithClient', () => {
 
   it('checks readiness using the PRO_CREATED entry point before creating side effects', async () => {
     await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -353,6 +356,7 @@ describe('createProBookingWithClient', () => {
     })
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -391,6 +395,7 @@ describe('createProBookingWithClient', () => {
 
   it('passes normalized client and service address data to resolveProBookingClient', async () => {
     await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -474,6 +479,7 @@ describe('createProBookingWithClient', () => {
     )
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: 'VIP exception',
@@ -523,6 +529,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       clientId: 'client_resolved_1',
       bookingId: 'booking_1',
@@ -573,6 +580,7 @@ describe('createProBookingWithClient', () => {
     )
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -617,6 +625,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       clientId: 'client_existing_1',
       bookingId: 'booking_1',
@@ -668,6 +677,7 @@ describe('createProBookingWithClient', () => {
     )
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -733,6 +743,7 @@ describe('createProBookingWithClient', () => {
     )
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -771,6 +782,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       clientId: 'client_unclaimed_1',
       bookingId: 'booking_1',
@@ -821,6 +833,7 @@ describe('createProBookingWithClient', () => {
     )
 
     await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -859,6 +872,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       clientId: 'client_unclaimed_1',
       bookingId: 'booking_1',
@@ -895,6 +909,7 @@ describe('createProBookingWithClient', () => {
     )
 
     await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -934,6 +949,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       clientId: 'client_unclaimed_1',
       bookingId: 'booking_1',
@@ -970,6 +986,7 @@ describe('createProBookingWithClient', () => {
     )
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -1030,6 +1047,7 @@ describe('createProBookingWithClient', () => {
     )
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -1093,6 +1111,7 @@ describe('createProBookingWithClient', () => {
     )
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -1160,6 +1179,7 @@ describe('createProBookingWithClient', () => {
     )
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -1231,6 +1251,7 @@ describe('createProBookingWithClient', () => {
     )
 
     const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
       professionalId: 'pro_1',
       actorUserId: 'user_1',
       overrideReason: null,
@@ -1288,6 +1309,7 @@ describe('createProBookingWithClient', () => {
 
     try {
       const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
         professionalId: 'pro_1',
         actorUserId: 'user_1',
         overrideReason: null,
@@ -1377,6 +1399,7 @@ describe('createProBookingWithClient', () => {
 
     try {
       const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
         professionalId: 'pro_1',
         actorUserId: 'user_1',
         overrideReason: null,
@@ -1454,6 +1477,7 @@ describe('createProBookingWithClient', () => {
 
     try {
       const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
         professionalId: 'pro_1',
         actorUserId: 'user_1',
         overrideReason: null,
@@ -1539,6 +1563,7 @@ describe('createProBookingWithClient', () => {
 
     try {
       const result = await createProBookingWithClient({
+      tenantContext: rootTenantContext('tenant_root'),
         professionalId: 'pro_1',
         actorUserId: 'user_1',
         overrideReason: null,

@@ -26,6 +26,11 @@ const mocks = vi.hoisted(() => ({
   })),
 }))
 
+
+vi.mock('@/lib/tenant/resolveTenant', () => ({
+  getRootTenantId: vi.fn(async () => 'tenant_root'),
+}))
+
 vi.mock('@/app/api/_utils', () => ({
   jsonFail: mocks.jsonFail,
   jsonOk: mocks.jsonOk,
@@ -283,6 +288,7 @@ describe('app/api/internal/jobs/notifications/process/route.ts', () => {
     })
 
     expect(mocks.processDueDeliveries).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       providers: {
         inApp: {
           provider: NotificationProvider.INTERNAL_REALTIME,

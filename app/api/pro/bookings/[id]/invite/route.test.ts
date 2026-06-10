@@ -12,6 +12,15 @@ const mocks = vi.hoisted(() => ({
   safeLogMeta: vi.fn(),
 }))
 
+
+vi.mock('@/lib/tenant/requestContext', () => ({
+  resolveTenantContextForRequest: vi.fn(async () => ({
+    isRoot: true,
+    tenantId: 'tenant_root',
+    slug: 'tovis-root',
+  })),
+}))
+
 vi.mock('@/app/api/_utils', () => ({
   requirePro: mocks.requirePro,
   jsonFail: mocks.jsonFail,
@@ -397,6 +406,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
     })
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       professionalId: 'pro_123',
       clientId: 'client_123',
       bookingId: 'booking_1',
@@ -470,6 +480,7 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
     )
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       professionalId: 'pro_123',
       clientId: 'client_123',
       bookingId: 'booking_1',

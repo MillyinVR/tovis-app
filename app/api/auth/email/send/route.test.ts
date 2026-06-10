@@ -10,6 +10,15 @@ const mockIssueAndSendEmailVerification = vi.hoisted(() => vi.fn())
 const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 const mockCaptureAuthException = vi.hoisted(() => vi.fn())
 
+
+vi.mock('@/lib/tenant/requestContext', () => ({
+  resolveTenantContextForRequest: vi.fn(async () => ({
+    isRoot: true,
+    tenantId: 'tenant_root',
+    slug: 'tovis-root',
+  })),
+}))
+
 vi.mock('@/app/api/_utils/auth/requireUser', () => ({
   requireUser: mockRequireUser,
 }))
@@ -287,6 +296,7 @@ describe('app/api/auth/email/send/route', () => {
     })
 
     expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       userId: 'user_1',
       email: 'user@example.com',
       appUrl: 'http://localhost:3000',
@@ -336,6 +346,7 @@ describe('app/api/auth/email/send/route', () => {
     })
 
     expect(mockIssueAndSendEmailVerification).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       userId: 'user_1',
       email: 'user@example.com',
       appUrl: 'http://localhost:3000',

@@ -6,6 +6,8 @@ import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClien
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { prisma } from '@/lib/prisma'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
+import type { TenantContext } from '@/lib/tenant/context'
+import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -146,6 +148,7 @@ function shouldAttemptInviteDelivery(invite: {
 async function maybeQueueInviteDelivery(args: {
   professionalId: string
   actorUserId: string | null
+  tenantContext: TenantContext
   booking: BookingInviteContext
   invite: ClaimInviteForDelivery
 }): Promise<InviteDeliverySummary> {
@@ -161,6 +164,7 @@ async function maybeQueueInviteDelivery(args: {
 
   try {
     const delivery = await createClientClaimInviteDelivery({
+      tenantContext: args.tenantContext,
       professionalId: args.professionalId,
       clientId: args.booking.clientId,
       bookingId: args.booking.id,
@@ -262,6 +266,7 @@ export async function POST(request: Request, ctx: Ctx) {
     const inviteDelivery = await maybeQueueInviteDelivery({
       professionalId: auth.professionalId,
       actorUserId: asTrimmedString(auth.user?.id) ?? null,
+      tenantContext: await resolveTenantContextForRequest(request),
       booking,
       invite: {
         id: invite.id,
