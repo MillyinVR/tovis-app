@@ -8,6 +8,7 @@ import {
   VerificationStatus,
 } from '@prisma/client'
 import { hashPassword } from '@/lib/auth'
+import { buildUserContactLookupData } from '@/lib/security/contactLookup'
 import { normalizeEmail } from '@/app/api/_utils/email'
 
 export type SeedBookingFlowOptions = {
@@ -214,6 +215,9 @@ export async function seedBookingFlow(
       email: professionalEmail,
       password: professionalPasswordHash,
       role: Role.PRO,
+      // Login resolves users via the emailHashV2 blind index, so the lookup
+      // hash must be written at creation time like the register route does.
+      ...buildUserContactLookupData({ email: professionalEmail }),
     },
     select: {
       id: true,
