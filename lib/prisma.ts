@@ -1,9 +1,10 @@
 import { PrismaClient } from '@prisma/client'
+import { globalRegistry } from './typed'
 
-const globalForPrisma = globalThis as unknown as {
-  prisma?: PrismaClient
-  prismaRead?: PrismaClient
-}
+const globalForPrisma = globalRegistry<{
+  prisma: PrismaClient
+  prismaRead: PrismaClient
+}>()
 
 const PRISMA_LOG: ('query' | 'error' | 'warn')[] =
   process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error']

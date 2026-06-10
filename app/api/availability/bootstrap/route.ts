@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto'
 import { ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { toRecord } from '@/lib/typed'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
 import { loadBusyIntervals } from '@/lib/availability/data/busyIntervals'
 import { buildSummaryCacheKey } from '@/lib/availability/data/cache'
@@ -893,7 +894,7 @@ export async function GET(req: Request) {
 
     const refreshedAvailableDays = pickAvailableDays(cachedPayload.availableDays)
     const refreshedSelectedDay = deriveSelectedDayFromCachedBootstrap({
-      cached: cachedPayload as unknown as Record<string, unknown>,
+      cached: toRecord(cachedPayload),
       availableDays: refreshedAvailableDays,
       todayDate,
     })

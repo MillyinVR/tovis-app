@@ -14,6 +14,7 @@ import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { parseMoney, moneyToString } from '@/lib/money'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
+import { toPrismaJson } from '@/lib/typed'
 
 export const dynamic = 'force-dynamic'
 
@@ -83,11 +84,6 @@ function defaultWorkingHours(): WorkingHoursObj {
     sat: { ...weekend },
     sun: { ...weekend },
   }
-}
-
-// Prisma JSON boundary cast: plain JSON-safe object.
-function toInputJsonValue(v: WorkingHoursObj): Prisma.InputJsonValue {
-  return v as unknown as Prisma.InputJsonValue
 }
 
 function salonCapableTypes(): readonly ProfessionalLocationType[] {
@@ -228,7 +224,7 @@ async function ensureLocationsForOffering(args: {
         isPrimary: totalLocationCount === 0,
         isBookable: false,
         timeZone: null,
-        workingHours: toInputJsonValue(defaultWorkingHours()),
+        workingHours: toPrismaJson(defaultWorkingHours()),
         ...emptyAddressPrivacyWriteData(),
       },
       select: { id: true },
@@ -246,7 +242,7 @@ async function ensureLocationsForOffering(args: {
         isPrimary: totalLocationCount === 0,
         isBookable: false,
         timeZone: null,
-        workingHours: toInputJsonValue(defaultWorkingHours()),
+        workingHours: toPrismaJson(defaultWorkingHours()),
         ...emptyAddressPrivacyWriteData(),
       },
       select: { id: true },
