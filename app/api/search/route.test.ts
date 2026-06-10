@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
 
   const parseSearchServicesParams = vi.fn()
   const searchServices = vi.fn()
+  const resolveTenantContextForRequest = vi.fn()
 
   return {
     SearchRequestError,
@@ -41,6 +42,7 @@ const mocks = vi.hoisted(() => {
     searchPros,
     parseSearchServicesParams,
     searchServices,
+    resolveTenantContextForRequest,
   }
 })
 
@@ -68,6 +70,10 @@ vi.mock('@/lib/search/services', () => ({
   searchServices: mocks.searchServices,
 }))
 
+vi.mock('@/lib/tenant', () => ({
+  resolveTenantContextForRequest: mocks.resolveTenantContextForRequest,
+}))
+
 import { GET } from './route'
 
 function makeRequest(path: string): Request {
@@ -77,6 +83,11 @@ function makeRequest(path: string): Request {
 describe('app/api/search/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    mocks.resolveTenantContextForRequest.mockResolvedValue({
+      tenantId: 'tenant_test',
+      mode: 'tenant',
+    })
 
     mocks.parseSearchProsParams.mockReturnValue({
       q: null,
@@ -157,7 +168,11 @@ describe('app/api/search/route.ts', () => {
     expect(res.status).toBe(200)
 
     expect(mocks.parseSearchProsParams).toHaveBeenCalledTimes(1)
-    expect(mocks.searchPros).toHaveBeenCalledWith(parsedProsParams)
+    expect(mocks.resolveTenantContextForRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.searchPros).toHaveBeenCalledWith(parsedProsParams, {
+      tenantId: 'tenant_test',
+      mode: 'tenant',
+    })
 
     const passedSearchParams =
       mocks.parseSearchProsParams.mock.calls[0]?.[0] as URLSearchParams
