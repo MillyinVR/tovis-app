@@ -29,7 +29,7 @@
 | Availability computation | `lib/availability/*` (see `docs/architecture/availability-drawer-enterprise-contract.md`) | perf CI (`perf-availability.yml`) |
 | Avatar initials | `lib/initials.ts` | review |
 | Client-home booking card display | `app/client/_components/bookingDisplay.ts` | review |
-| Brand tokens/copy | `lib/brand/` (`BrandProvider`, `tokens.ts`, `brands/`) — no hardcoded brand strings outside it; becomes tenant-resolved in the white-label workstream | review (scanner planned) |
+| Brand tokens/copy | `lib/brand/` (`BrandProvider`, `tokens.ts`, `brands/`, `forTenant.ts` for tenant-resolved branding) — no hardcoded brand strings outside it | `tools/check-no-hardcoded-brand-strings.mjs` |
 | Safe logging | `lib/security/logging.ts` (`safeError`, `safeLogMeta`) — never log raw errors or PII | `tools/check-pii-plaintext-reads.mjs` (partial) |
 
 "review" means there is no static guard yet; the module is canonical by
