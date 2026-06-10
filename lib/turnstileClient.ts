@@ -1,15 +1,19 @@
 // lib/turnstileClient.ts
 'use client'
 
+type TurnstileClient = {
+  render: (container: HTMLElement, options: Record<string, unknown>) => string
+  remove: (widgetId: string) => void
+  reset: (widgetId: string) => void
+  execute: (widgetId: string) => void
+}
+
 declare global {
   interface Window {
-    turnstile?: {
-      render: (container: HTMLElement, options: Record<string, unknown>) => string
-      remove: (widgetId: string) => void
-      execute: (widgetId: string) => void
-    }
+    turnstile?: TurnstileClient
   }
 }
+
 const TURNSTILE_SCRIPT_SRC =
   'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
 
@@ -41,8 +45,6 @@ function loadTurnstileScript(): Promise<void> {
     )
 
     if (existing) {
-      // If the script tag is already present and Turnstile is now available,
-      // resolve immediately instead of waiting on events that already fired.
       if (window.turnstile) {
         resolve()
         return
@@ -55,6 +57,7 @@ function loadTurnstileScript(): Promise<void> {
             resolve()
             return
           }
+
           fail()
         },
         { once: true },
@@ -74,6 +77,7 @@ function loadTurnstileScript(): Promise<void> {
         resolve()
         return
       }
+
       fail()
     }
 
@@ -84,15 +88,32 @@ function loadTurnstileScript(): Promise<void> {
   return scriptLoadPromise
 }
 
+function logTurnstileClientError(args: {
+  code: string
+  action: string
+}): void {
+  if (typeof window === 'undefined') return
+
+  console.error('Turnstile captcha error', {
+    code: args.code,
+    action: args.action,
+    host: window.location.hostname,
+    href: window.location.href,
+  })
+}
+
 export async function getTurnstileToken(action: string): Promise<string> {
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim()
+
   if (!siteKey) {
     throw new Error('Captcha is unavailable.')
   }
 
   await loadTurnstileScript()
 
-  if (!window.turnstile) {
+  const turnstile = window.turnstile
+
+  if (!turnstile) {
     throw new Error('Captcha is unavailable.')
   }
 
@@ -105,29 +126,49 @@ export async function getTurnstileToken(action: string): Promise<string> {
   document.body.appendChild(container)
 
   let widgetId: string | null = null
+  let cleanedUp = false
 
   return await new Promise<string>((resolve, reject) => {
     const cleanup = () => {
-      if (widgetId && window.turnstile) {
+      if (cleanedUp) return
+      cleanedUp = true
+
+      if (widgetId) {
         try {
-          window.turnstile.remove(widgetId)
+          turnstile.remove(widgetId)
         } catch {
           // Ignore cleanup errors.
         }
       }
+
       container.remove()
     }
 
     const timeout = window.setTimeout(() => {
+      if (widgetId) {
+        try {
+          turnstile.reset(widgetId)
+        } catch {
+          // Ignore reset errors.
+        }
+      }
+
       cleanup()
       reject(new Error('Captcha timed out. Please try again.'))
     }, TURNSTILE_TIMEOUT_MS)
 
+    const finishWithError = (message: string) => {
+      window.clearTimeout(timeout)
+      cleanup()
+      reject(new Error(message))
+    }
+
     try {
-      widgetId = window.turnstile!.render(container, {
+      widgetId = turnstile.render(container, {
         sitekey: siteKey,
         action,
         size: 'invisible',
+
         callback(token: unknown) {
           window.clearTimeout(timeout)
           cleanup()
@@ -139,23 +180,37 @@ export async function getTurnstileToken(action: string): Promise<string> {
 
           reject(new Error('Captcha failed. Please try again.'))
         },
-        'error-callback'() {
-          window.clearTimeout(timeout)
-          cleanup()
-          reject(new Error('Captcha failed. Please try again.'))
+
+        'error-callback'(code: unknown) {
+          const errorCode =
+            typeof code === 'string' && code.trim()
+              ? code.trim()
+              : 'unknown'
+
+          logTurnstileClientError({
+            code: errorCode,
+            action,
+          })
+
+          finishWithError('Captcha failed. Please try again.')
         },
+
         'expired-callback'() {
-          window.clearTimeout(timeout)
-          cleanup()
-          reject(new Error('Captcha expired. Please try again.'))
+          finishWithError('Captcha expired. Please try again.')
         },
       })
 
-      window.turnstile!.execute(widgetId)
-    } catch {
-      window.clearTimeout(timeout)
-      cleanup()
-      reject(new Error('Captcha failed. Please try again.'))
+      turnstile.execute(widgetId)
+    } catch (error) {
+      logTurnstileClientError({
+        code:
+          error instanceof Error && error.message
+            ? error.message
+            : 'render_or_execute_failed',
+        action,
+      })
+
+      finishWithError('Captcha failed. Please try again.')
     }
   })
 }
