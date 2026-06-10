@@ -5,7 +5,7 @@
 Phase: Phase 2 — Launch ops proof  
 Incident area: Booking funnel  
 Primary owner: Tori  
-Backup owner: TODO — required before public rollout  
+Backup owner: NONE — solo operator; accepted private-beta risk (2026-06-09, RISK-001); required before public rollout  
 Severity: High / Critical depending on failure mode  
 Last reviewed: 2026-06-07
 

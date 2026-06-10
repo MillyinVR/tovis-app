@@ -7,7 +7,7 @@ Scope: Private beta alert routing and public-launch escalation readiness
 Primary private-beta alert destination: Slack-first  
 Public rollout requirement: P1 escalation path must be stronger than passive Slack-only monitoring unless explicitly accepted in go-no-go.md  
 Primary owner: Tori  
-Backup owner: TODO — public rollout blocker  
+Backup owner: NONE — solo operator; accepted private-beta risk (2026-06-09, RISK-001); public rollout blocker  
 Current default status: APP-GENERATED SYNTHETIC ALERT ROUTING PASS / RUNBOOK LINK TODO — deployed Sentry intake has been proven with a synthetic production event, a saved Sentry issue-alert rule can deliver notifications to `#tovis-ops-alerts`, and a production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts` on 2026-06-08 at 6:31 PM local. Private beta alert routing proof is now PASS for the synthetic app alert, but runbook-link-in-message, formal acknowledgement timing, live dashboard proof, and public P1 escalation remain TODO.
 
 ## Current alert-routing proof

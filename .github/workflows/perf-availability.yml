@@ -44,6 +44,14 @@ jobs:
       JWT_SECRET: ci-test-jwt-secret-do-not-use-in-production
       AUTH_TRUSTED_IP_HEADER: x-forwarded-for
 
+      # Throwaway CI-only keyring for contact lookup blind indexes; must be a
+      # JSON object of {keyVersion: base64 32-byte key} including version "1".
+      PII_LOOKUP_HMAC_KEYS_JSON: '{"1":"etfeByiHOVyNpw8UkYzTNJd5Qw7H6otd6zcVsNknnEo="}'
+
+      # Throwaway CI-only AEAD keyring for address privacy envelopes; the
+      # booking hold path encrypts addresses with the address-aead-v1 key.
+      PII_AEAD_KEYS_JSON: '{"address-aead-v1":"hAqUA35ANVrdRmZNw+0RXJgboRX5qmLv2j55LUczX2E="}'
+
       NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
       SUPABASE_URL: http://127.0.0.1:54321
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-test-supabase-anon-key
@@ -59,15 +67,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           run_install: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20.20.2
           cache: pnpm
@@ -96,6 +104,11 @@ jobs:
       - name: Seed canonical perf data
         run: pnpm run seed
 
+      # Login looks up users by emailHashV2 only; seed.cjs does not write the
+      # v2 hashes, so backfill them like db:test:seed does locally.
+      - name: Backfill contact lookup hashes
+        run: pnpm run backfill:contact-hash-v2 -- --write
+
       - name: Verify required perf config
         run: |
           test -n "$PERF_BOOKING_URL" || (echo "Missing PERF_BOOKING_URL secret" && exit 1)
@@ -117,7 +130,7 @@ jobs:
 
       - name: Upload perf artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: availability-perf-artifacts
           retention-days: 14
@@ -129,7 +142,7 @@ jobs:
 
       - name: Upload Playwright results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: availability-perf-playwright-results
           retention-days: 14

@@ -46,14 +46,24 @@ jobs:
 
       JWT_SECRET: ci-test-jwt-secret-do-not-use-in-production
       NEXTAUTH_SECRET: test-nextauth-secret
+      AUTH_TRUSTED_IP_HEADER: x-forwarded-for
+
+      # Throwaway CI-only keyring for contact lookup blind indexes; must be a
+      # JSON object of {keyVersion: base64 32-byte key} including version "1".
+      PII_LOOKUP_HMAC_KEYS_JSON: '{"1":"etfeByiHOVyNpw8UkYzTNJd5Qw7H6otd6zcVsNknnEo="}'
+
+      # Throwaway CI-only AEAD keyring for address privacy envelopes; the
+      # booking hold path encrypts addresses with the address-aead-v1 key.
+      PII_AEAD_KEYS_JSON: '{"address-aead-v1":"hAqUA35ANVrdRmZNw+0RXJgboRX5qmLv2j55LUczX2E="}'
 
       SUPABASE_URL: http://127.0.0.1:54321
       NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
       SUPABASE_ANON_KEY: test-supabase-anon-key
       SUPABASE_SERVICE_ROLE_KEY: test-supabase-service-role-key
 
-      UPSTASH_REDIS_REST_URL: https://example.com
-      UPSTASH_REDIS_REST_TOKEN: test-upstash-token
+      # UPSTASH_REDIS_REST_* is intentionally unset: lib/redis.ts disables
+      # Redis cleanly when unconfigured, while a fake URL makes every cache
+      # operation issue a failing HTTP request.
 
       TWILIO_ACCOUNT_SID: test-twilio-sid
       TWILIO_AUTH_TOKEN: test-twilio-token
@@ -62,15 +72,15 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           run_install: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20.20.2
           cache: pnpm
@@ -87,12 +97,18 @@ jobs:
 
       - name: Seed test data
         run: pnpm run seed
+
+      # Login looks up users by emailHashV2 only; seed.cjs does not write the
+      # v2 hashes, so backfill them like db:test:seed does locally.
+      - name: Backfill contact lookup hashes
+        run: pnpm run backfill:contact-hash-v2 -- --write
+
       - name: Run browser E2E
         run: pnpm run test:e2e:ci
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: playwright-report
@@ -101,7 +117,7 @@ jobs:
 
       - name: Upload Playwright test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: test-results

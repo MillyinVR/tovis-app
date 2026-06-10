@@ -5,7 +5,7 @@
 Phase: Phase 2 — Launch ops proof  
 Scope: Private beta and public rollout auth/session incident response  
 Primary owner: Tori  
-Backup owner: TODO — public rollout blocker  
+Backup owner: NONE — solo operator; accepted private-beta risk (2026-06-09, RISK-001); public rollout blocker  
 Related alert map: docs/launch-readiness/slack-alerts.md  
 Related dashboard: docs/launch-readiness/sentry-dashboard.md  
 Related launch gate: docs/launch-readiness/go-no-go.md  

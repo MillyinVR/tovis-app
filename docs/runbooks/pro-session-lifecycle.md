@@ -6,7 +6,7 @@ Phase: Phase 2 — Launch ops proof
 Scope: Private beta and public rollout operational readiness  
 Incident area: Pro session lifecycle, closeout, aftercare, media/payment blockers  
 Primary owner: Tori  
-Backup owner: TODO — public rollout blocker  
+Backup owner: NONE — solo operator; accepted private-beta risk (2026-06-09, RISK-001); public rollout blocker  
 Related alert: Pro session lifecycle or closeout failure spike  
 Related launch docs:
 - docs/launch-readiness/oncall.md

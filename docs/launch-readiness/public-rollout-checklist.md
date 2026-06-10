@@ -6,7 +6,7 @@ Phase: Phase 2 — Launch ops proof
 Scope: Public rollout readiness after private beta  
 Current default decision: NO-GO  
 Primary owner: Tori  
-Backup owner: TODO — required before public rollout  
+Backup owner: NONE — solo operator; accepted private-beta risk (2026-06-09, RISK-001); still required before public rollout  
 Private beta required first: Yes  
 Public rollout requires: private beta proof, load proof, chaos proof, alert proof, rollback proof, and signed go/no-go decision
 
