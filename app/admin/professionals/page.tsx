@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
+import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import AdminGuard from '../_components/AdminGuard'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
 import { ProfessionalLocationType, VerificationStatus } from '@prisma/client'
@@ -80,7 +81,8 @@ export default async function AdminProfessionalsPage({
   const verificationStatus = parseVerificationStatus(sp.status)
 
   const pros = await prisma.professionalProfile.findMany({
-    where: { verificationStatus },
+    // Platform-operator surface: intentionally reads across all tenants.
+    where: { ...platformCrossTenantProVisibilityFilter(), verificationStatus },
     orderBy: [{ licenseVerified: 'asc' }, { id: 'asc' }],
     select: {
       id: true,

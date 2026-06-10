@@ -110,7 +110,11 @@ vi.mock('@/lib/discovery/nearby', () => ({
   isOpenNowAtLocation: mocks.isOpenNowAtLocation,
 }))
 
+import { rootTenantContext } from '@/lib/tenant/context'
+
 import { parseSearchProsParams, searchPros } from './pros'
+
+const ROOT_CTX = rootTenantContext('tenant_root')
 
 type SyntheticCandidate = {
   professionalId: string
@@ -317,7 +321,7 @@ describe('lib/search/pros.ts', () => {
         [makePrimaryRow({ professionalId: 'pro_1' })],
       )
 
-      const result = await searchPros(DEFAULT_PARAMS)
+      const result = await searchPros(DEFAULT_PARAMS, ROOT_CTX)
 
       expect(result).toEqual({
         items: [
@@ -367,7 +371,7 @@ describe('lib/search/pros.ts', () => {
     it('runs only the candidates query when no pros match (skips primary lookup)', async () => {
       mocks.queryRaw.mockResolvedValueOnce([])
 
-      const result = await searchPros(DEFAULT_PARAMS)
+      const result = await searchPros(DEFAULT_PARAMS, ROOT_CTX)
 
       expect(result).toEqual({ items: [], nextCursor: null })
       expect(mocks.queryRaw).toHaveBeenCalledTimes(1)
@@ -391,7 +395,7 @@ describe('lib/search/pros.ts', () => {
         lat: 32.7,
         lng: -117.1,
         mobileOnly: true,
-      })
+      }, ROOT_CTX)
 
       expect(result.items[0]?.minPrice).toBe(110)
       expect(result.items[0]?.supportsMobile).toBe(true)
@@ -422,7 +426,7 @@ describe('lib/search/pros.ts', () => {
         ...DEFAULT_PARAMS,
         lat: 32.7,
         lng: -117.1,
-      })
+      }, ROOT_CTX)
 
       expect(result.items[0]?.closestLocation?.id).toBe('loc_closest')
       expect(result.items[0]?.primaryLocation?.id).toBe('loc_primary')
@@ -441,7 +445,7 @@ describe('lib/search/pros.ts', () => {
         [],
       )
 
-      const result = await searchPros(DEFAULT_PARAMS)
+      const result = await searchPros(DEFAULT_PARAMS, ROOT_CTX)
 
       expect(result.items[0]?.primaryLocation?.id).toBe('loc_only')
     })
@@ -458,7 +462,7 @@ describe('lib/search/pros.ts', () => {
         [makePrimaryRow({ professionalId: 'pro_1' })],
       )
 
-      const result = await searchPros(DEFAULT_PARAMS)
+      const result = await searchPros(DEFAULT_PARAMS, ROOT_CTX)
 
       expect(result.items[0]?.ratingCount).toBe(42)
     })
@@ -488,7 +492,7 @@ describe('lib/search/pros.ts', () => {
         ...DEFAULT_PARAMS,
         sort: 'NAME',
         limit: 1,
-      })
+      }, ROOT_CTX)
 
       expect(page1.items.map((item) => item.id)).toEqual(['pro_1'])
       expect(page1.nextCursor).toBe(encodeIdCursor('pro_1'))
@@ -500,7 +504,7 @@ describe('lib/search/pros.ts', () => {
         sort: 'NAME',
         cursorId: 'pro_1',
         limit: 1,
-      })
+      }, ROOT_CTX)
 
       expect(page2.items.map((item) => item.id)).toEqual(['pro_2'])
       expect(page2.nextCursor).toBe(encodeIdCursor('pro_2'))
@@ -531,7 +535,7 @@ describe('lib/search/pros.ts', () => {
       const result = await searchPros({
         ...DEFAULT_PARAMS,
         openNowOnly: true,
-      })
+      }, ROOT_CTX)
 
       expect(mocks.isOpenNowAtLocation).toHaveBeenCalledTimes(2)
       expect(result.items.map((item) => item.id)).toEqual(['pro_open'])

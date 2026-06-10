@@ -5,6 +5,7 @@ import {
   parseSearchProsParams,
   searchPros,
 } from '@/lib/search/pros'
+import { resolveTenantContextForRequest } from '@/lib/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +15,7 @@ export async function GET(req: Request) {
 
     const body = await searchPros(
       parseSearchProsParams(searchParams),
+      await resolveTenantContextForRequest(req),
     )
 
     return jsonOk({

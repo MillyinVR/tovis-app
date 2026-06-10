@@ -31,9 +31,13 @@ const DISCOVERY_QUERY_PATTERNS = [
 ]
 
 // Referencing any of these counts as tenant-aware.
+// platformCrossTenantProVisibilityFilter is the explicit opt-out for
+// platform-operator surfaces that intentionally read across all tenants.
 const TENANT_HELPER_PATTERNS = [
   'proDiscoveryVisibilityFilter',
   'searchIndexVisibilityFilter',
+  'searchIndexVisibilitySql',
+  'platformCrossTenantProVisibilityFilter',
 ]
 
 const SCAN_DIRS = ['app', 'lib']

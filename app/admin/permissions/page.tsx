@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
+import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { getCurrentUser } from '@/lib/currentUser'
 import { AdminPermissionRole, ProfessionalLocationType } from '@prisma/client'
 
@@ -120,6 +121,8 @@ export default async function AdminPermissionsPage() {
       take: 5000,
     }),
     prisma.professionalProfile.findMany({
+      // Platform-operator surface: intentionally reads across all tenants.
+      where: platformCrossTenantProVisibilityFilter(),
       select: {
         id: true,
         businessName: true,

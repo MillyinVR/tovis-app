@@ -36,6 +36,8 @@ import {
 } from '@/lib/discovery/nearby'
 import { prismaRead } from '@/lib/prisma'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { searchIndexVisibilitySql } from '@/lib/tenant'
+import type { TenantContext } from '@/lib/tenant'
 import {
   SearchRequestError,
   type SearchProItemDto,
@@ -214,6 +216,7 @@ function toFiniteCount(value: number | bigint): number {
 
 export async function searchPros(
   params: SearchProsParams,
+  tenantContext: TenantContext,
 ): Promise<SearchProsResponseDto> {
   const hasOrigin = params.lat != null && params.lng != null
 
@@ -223,6 +226,9 @@ export async function searchPros(
     Prisma.sql`psi."verificationStatus" = ANY(${[...PUBLICLY_APPROVED_PRO_STATUSES] as VerificationStatus[]}::"VerificationStatus"[])`,
   )
   filters.push(Prisma.sql`psi."isBookable" = TRUE`)
+  // Asymmetric tenant visibility — white-label contexts only see their own
+  // tenant's pros; tovis-root sees all. See docs/architecture/tenant-model.md.
+  filters.push(searchIndexVisibilitySql(tenantContext))
 
   if (hasOrigin) {
     const radiusMeters = params.radiusMiles * METERS_PER_MILE

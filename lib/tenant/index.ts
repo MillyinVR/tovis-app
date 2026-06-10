@@ -12,9 +12,12 @@ export {
   normalizeHost,
   resolveTenantByHost,
 } from './resolveTenant'
+export { resolveTenantContextForRequest } from './requestContext'
 export {
   bookingTenantVisibilityFilter,
   nfcCardTenantVisibilityFilter,
+  platformCrossTenantProVisibilityFilter,
   proDiscoveryVisibilityFilter,
   searchIndexVisibilityFilter,
+  searchIndexVisibilitySql,
 } from './visibility'

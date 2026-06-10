@@ -9,6 +9,7 @@ import {
   parseSearchServicesParams,
   searchServices,
 } from '@/lib/search/services'
+import { resolveTenantContextForRequest } from '@/lib/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +38,7 @@ export async function GET(req: Request) {
 
     const result = await searchPros(
       parseSearchProsParams(searchParams),
+      await resolveTenantContextForRequest(req),
     )
 
     return jsonOk({

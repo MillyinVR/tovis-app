@@ -69,6 +69,7 @@ const mocks = vi.hoisted(() => ({
 
   txClientAddressFindFirst: vi.fn(),
   txProfessionalProfileFindUnique: vi.fn(),
+  txClientProfileFindUnique: vi.fn(),
   txBookingHoldFindUnique: vi.fn(),
   txBookingHoldFindMany: vi.fn(),
   txBookingHoldCreate: vi.fn(),
@@ -142,6 +143,9 @@ const tx = {
   },
   professionalProfile: {
     findUnique: mocks.txProfessionalProfileFindUnique,
+  },
+  clientProfile: {
+    findUnique: mocks.txClientProfileFindUnique,
   },
   bookingHold: {
     findUnique: mocks.txBookingHoldFindUnique,

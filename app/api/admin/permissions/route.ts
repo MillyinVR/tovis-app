@@ -9,6 +9,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { prisma } from '@/lib/prisma'
+import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -104,6 +105,8 @@ export async function GET(): Promise<Response> {
         }),
 
         prisma.professionalProfile.findMany({
+          // Platform-operator surface: intentionally reads across all tenants.
+          where: platformCrossTenantProVisibilityFilter(),
           select: {
             id: true,
             businessName: true,

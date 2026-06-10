@@ -31,6 +31,7 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { resolveBookingTenantAttribution } from '@/lib/tenant/bookingAttribution'
 import { upper } from '@/lib/booking/guards'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 import {
@@ -8123,6 +8124,11 @@ async function performLockedFinalizeBookingFromHold(args: {
     professionalId: string
   }
 
+  const tenantAttribution = await resolveBookingTenantAttribution(args.tx, {
+    professionalId: args.offering.professionalId,
+    clientId: args.clientId,
+  })
+
   try {
     created = await args.tx.booking.create({
       data: {
@@ -8130,6 +8136,7 @@ async function performLockedFinalizeBookingFromHold(args: {
         professionalId: args.offering.professionalId,
         serviceId: args.offering.serviceId,
         offeringId: args.offering.id,
+        ...tenantAttribution,
         scheduledFor: requestedStart,
         status: args.initialStatus,
         source: args.source,
@@ -8599,6 +8606,11 @@ async function performLockedCreateProBooking(args: {
     status: BookingStatus
   }
 
+  const tenantAttribution = await resolveBookingTenantAttribution(args.tx, {
+    professionalId: args.professionalId,
+    clientId: args.clientId,
+  })
+
   try {
     booking = await args.tx.booking.create({
       data: {
@@ -8606,6 +8618,7 @@ async function performLockedCreateProBooking(args: {
         clientId: args.clientId,
         serviceId: offering.serviceId,
         offeringId: offering.id,
+        ...tenantAttribution,
         scheduledFor: requestedStart,
         status: getProCreatedBookingStatus(),
         creationIdempotencyKey: args.idempotencyKey ?? null,
@@ -9077,6 +9090,11 @@ assertCanCreateRebookFromSourceBooking({
     scheduledFor: Date
   }
 
+  const tenantAttribution = await resolveBookingTenantAttribution(args.tx, {
+    professionalId: source.professionalId,
+    clientId: source.clientId,
+  })
+
   try {
     createdBooking = await args.tx.booking.create({
       data: {
@@ -9085,6 +9103,8 @@ assertCanCreateRebookFromSourceBooking({
 
         serviceId: primary.serviceId,
         offeringId: primary.offeringId,
+
+        ...tenantAttribution,
 
         scheduledFor: requestedStart,
         status: args.initialStatus,

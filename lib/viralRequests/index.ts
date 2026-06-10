@@ -11,6 +11,7 @@ import {
 
 import { notifyMatchedProsAboutApprovedViralRequest } from '@/lib/notifications/social'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { canTransitionViralRequestStatus } from '@/lib/viralRequests/status'
 
 export type ViralRequestsDb = PrismaClient | Prisma.TransactionClient
@@ -606,6 +607,10 @@ export async function findMatchingProsByRequestedCategory(
 
   const rows = await db.professionalProfile.findMany({
     where: {
+      // Viral requests are a tovis-root marketplace feature; matching fans
+      // out across all tenants by design. Thread a real TenantContext here
+      // if viral requests ever become tenant-facing.
+      ...platformCrossTenantProVisibilityFilter(),
       verificationStatus: {
         in: [...PUBLICLY_APPROVED_PRO_STATUSES],
       },

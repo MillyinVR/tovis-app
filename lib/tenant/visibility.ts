@@ -12,7 +12,7 @@
 // NULL (not yet backfilled) do NOT match an equality filter, so white-label
 // contexts can never see un-attributed rows. Root context is unaffected.
 
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 import type { TenantContext } from './context'
 
@@ -57,4 +57,33 @@ export function nfcCardTenantVisibilityFilter(
 ): Prisma.NfcCardWhereInput {
   if (ctx.isRoot) return {}
   return { tenantId: ctx.tenantId }
+}
+
+/**
+ * Raw-SQL variant of searchIndexVisibilityFilter for queries built with
+ * Prisma.sql over ProfessionalSearchIndex (aliased `psi`). Uses an indexed
+ * subquery on ProfessionalProfile.homeTenantId; denormalizing the tenant
+ * onto the search index is a follow-up if white-label search volume ever
+ * warrants it.
+ */
+export function searchIndexVisibilitySql(ctx: TenantContext): Prisma.Sql {
+  if (ctx.isRoot) return Prisma.sql`TRUE`
+
+  return Prisma.sql`psi."professionalId" IN (
+    SELECT pp."id" FROM "ProfessionalProfile" pp
+    WHERE pp."homeTenantId" = ${ctx.tenantId}
+  )`
+}
+
+/**
+ * Explicit marker for surfaces that intentionally read professionals across
+ * all tenants: platform-operator admin pages and (for now) the viral-request
+ * fan-out, which is a tovis-root marketplace feature. Using this helper —
+ * rather than omitting the tenant filter — is what
+ * tools/check-tenant-aware-discovery.mjs accepts as proof the cross-tenant
+ * read was a decision, not an oversight. Thread a real TenantContext instead
+ * when a surface becomes tenant-facing.
+ */
+export function platformCrossTenantProVisibilityFilter(): Prisma.ProfessionalProfileWhereInput {
+  return {}
 }
