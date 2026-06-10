@@ -25,15 +25,25 @@ const BASELINE_PATH = path.join(
 
 const BRAND_PATTERN = /TOVIS|Tovis/
 
-// Identifier-ish usages that are not user-facing copy.
-const IGNORED_LINE_PATTERNS = [
-  /tovis-root/, // reserved tenant slug
-  /tovis-app/, // repo/package name
-  /tovis\.app/, // platform domain in emails/links (own WS-6 follow-up)
-  /@tovis/, // package scope / email addresses
-  /process\.env\.TOVIS_/, // platform env var names
-  /TOVIS_TOS_VERSION|TOVIS_ROOT_TENANT/, // env/constant identifiers
+// Identifier-ish tokens that are not user-facing copy. These are STRIPPED
+// from the line before the brand pattern runs (never used to skip a whole
+// line) so copy like `Contact TOVIS at support@tovis.app` is still caught
+// via the remaining standalone "TOVIS".
+const IGNORED_TOKEN_PATTERNS = [
+  /[\w.+-]*@tovis[\w.-]*/g, // email addresses / package scopes
+  /(?:www\.)?tovis\.app/g, // platform domain in links (own WS-6 follow-up)
+  /tovis-root/g, // reserved tenant slug
+  /tovis-app/g, // repo/package name
+  /TOVIS_[A-Z0-9_]+/g, // env var / constant identifiers
 ]
+
+function stripIgnoredTokens(line) {
+  let result = line
+  for (const pattern of IGNORED_TOKEN_PATTERNS) {
+    result = result.replace(pattern, '')
+  }
+  return result
+}
 
 const ALLOWED_PATH_PREFIXES = ['lib/brand/', 'lib/tenant/constants.ts']
 
@@ -120,8 +130,7 @@ function findViolations() {
       const lines = fs.readFileSync(file, 'utf8').split('\n')
 
       lines.forEach((line, index) => {
-        if (!BRAND_PATTERN.test(line)) return
-        if (IGNORED_LINE_PATTERNS.some((pattern) => pattern.test(line))) return
+        if (!BRAND_PATTERN.test(stripIgnoredTokens(line))) return
 
         violations.push({
           file: rel,

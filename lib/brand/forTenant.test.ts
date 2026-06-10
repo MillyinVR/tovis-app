@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   rootTenantContext,
@@ -21,5 +21,19 @@ describe('getBrandForTenantContext', () => {
     )
 
     expect(brand).toBe(tovisBrand)
+  })
+
+  it('never lets NEXT_PUBLIC_BRAND decide an unregistered white-label tenant brand', () => {
+    vi.stubEnv('NEXT_PUBLIC_BRAND', 'some-other-brand')
+
+    try {
+      const brand = getBrandForTenantContext(
+        whiteLabelTenantContext({ tenantId: 'tenant_a', slug: 'salon-a' }),
+      )
+
+      expect(brand).toBe(tovisBrand)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 })

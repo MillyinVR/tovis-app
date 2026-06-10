@@ -11,12 +11,19 @@
 //
 // Emails, SMS, and notification copy migrate onto this path as the
 // check-no-hardcoded-brand-strings baseline burns down (WS-6).
+//
+// This deliberately does NOT go through resolveBrandId: that chain falls
+// back to host mapping and NEXT_PUBLIC_BRAND, which must never decide a
+// white-label tenant's branding. An unregistered tenant slug falls back to
+// the TOVIS brand explicitly.
 
+import { tovisBrand } from './brands/tovis'
+import { getRegisteredBrandConfig } from './index'
+import type { BrandConfig } from './types'
 import type { TenantContext } from '@/lib/tenant/context'
 
-import { getBrandConfig } from './index'
-import type { BrandConfig } from './types'
-
 export function getBrandForTenantContext(ctx: TenantContext): BrandConfig {
-  return getBrandConfig({ tenantBrandId: ctx.isRoot ? 'tovis' : ctx.slug })
+  if (ctx.isRoot) return tovisBrand
+
+  return getRegisteredBrandConfig(ctx.slug) ?? tovisBrand
 }
