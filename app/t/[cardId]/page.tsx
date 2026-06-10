@@ -25,7 +25,7 @@ type TapCard = {
   isActive: boolean
   claimedAt: Date | null
   professionalId: string | null
-  salonSlug: string | null
+  tenant: { slug: string }
 }
 
 type DerivedTapIntent = {
@@ -78,13 +78,13 @@ async function buildDerivedTapIntent(card: TapCard): Promise<DerivedTapIntent> {
     }
   }
 
-  if (card.type === NfcCardType.SALON_WHITE_LABEL && card.salonSlug) {
+  if (card.type === NfcCardType.SALON_WHITE_LABEL) {
     return {
       intentType: 'SALON_WHITE_LABEL',
       payloadJson: {
-        salonSlug: card.salonSlug,
+        tenantSlug: card.tenant.slug,
       },
-      nextUrl: `/signup?salon=${encodeURIComponent(card.salonSlug)}`,
+      nextUrl: `/signup?salon=${encodeURIComponent(card.tenant.slug)}`,
     }
   }
 
@@ -113,7 +113,7 @@ export default async function TapPage(props: {
       isActive: true,
       claimedAt: true,
       professionalId: true,
-      salonSlug: true,
+      tenant: { select: { slug: true } },
     },
   })
 

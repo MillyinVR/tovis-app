@@ -32,7 +32,7 @@ correct where an actor *belongs* somewhere.
 | `ClientProfile` | `homeTenantId` | The tenant the client signed up under. Drives what the client can discover. |
 | `Booking` | `proTenantId` | Snapshot of the Pro's home tenant at booking time. Revenue attribution. |
 | `Booking` | `clientHomeTenantId` | Snapshot of the client's home tenant at booking time. Acquisition attribution. |
-| `NfcCard` | `tenantId` | Issuing tenant. Replaces the legacy `salonSlug` placeholder (deprecated; see below). |
+| `NfcCard` | `tenantId` | Issuing tenant. Replaced the legacy `salonSlug` placeholder (dropped in the contract phase). |
 
 Booking tenant fields are **snapshots written at creation time** by the
 booking write boundary — they are never recomputed from current profile rows,
@@ -46,21 +46,35 @@ Models deliberately **without** tenant columns (derive via relations):
   derive their tenant through `booking` or `professional`. Adding columns
   there is denormalization we only do when a measured query needs it.
 
-### Deprecation: `NfcCard.salonSlug`
+### Removed: `NfcCard.salonSlug`
 
 `salonSlug` was a placeholder ("or salonId if you already have a Salon
-model"). `tenantId` supersedes it. Expand phase keeps `salonSlug` readable;
-no new writes. Drop it in the contract-phase migration after `tenantId`
-backfill is verified.
+model"). `tenantId` superseded it; the column was dropped in the
+contract-phase migration (`tenant_contract_phase`) after the launch-env
+backfill was verified (2026-06-10). White-label tap redirects now read the
+tenant slug through the card's `tenant` relation.
 
 ## Expand–contract migration plan
 
 | Phase | Step | Status |
 |---|---|---|
-| Expand | Create `Tenant`; add **nullable** tenant columns + FKs + indexes | this PR (`add_tenant_foundation` migration) |
-| Backfill | `prisma/scripts/backfillTenantFoundation.ts` — ensure `tovis-root`, point every existing row at it (idempotent, batched, dry-run default) | this PR (script); run per environment |
-| Verify | Backfill reports zero remaining NULL tenant fields; isolation tests green | per environment |
-| Contract | `NOT NULL` on the five columns; drop `NfcCard.salonSlug`; booking write boundary starts writing tenant snapshots on create | follow-up PR (Q2, with WS-5 enforcement) |
+| Expand | Create `Tenant`; add **nullable** tenant columns + FKs + indexes | done (`add_tenant_foundation` migration) |
+| Backfill | `backfillTenantFoundation` script — ensure `tovis-root`, point every existing row at it | done; verified in the launch env 2026-06-10 (zero NULLs); script removed in the contract phase (it queries states that no longer typecheck) |
+| Verify | Backfill reports zero remaining NULL tenant fields; isolation tests green | done per environment |
+| Contract | `NOT NULL` on the five columns; drop `NfcCard.salonSlug`; every profile/card creation site stamps its tenant | done (`tenant_contract_phase` migration) |
+
+Post-contract invariants:
+
+- Profile creation stamps `homeTenantId`: signup uses the request-host
+  tenant; pro-created clients inherit the Pro's home tenant
+  (`upsertProClient` requires `professionalId`).
+- Booking creation snapshots both tenant columns via
+  `resolveBookingTenantAttribution`, which now throws on missing profiles
+  instead of writing NULL.
+- NFC cards always carry an issuing tenant: root for standard types, the
+  named tenant for `SALON_WHITE_LABEL` (admin form takes a tenant slug).
+- New environments get `tovis-root` from the seed (`prisma/seed.cjs`) or
+  `ensureRootTenant()` — the backfill script no longer exists.
 
 FKs use `onDelete: Restrict` — a tenant with attached data must never be
 deletable; offboarding a tenant is an explicit migration, not a cascade.

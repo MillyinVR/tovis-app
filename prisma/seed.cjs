@@ -252,6 +252,7 @@ async function upsertAdmin({
 async function upsertClientUser({
   email,
   password,
+  rootTenantId,
   phone = '+15555550100',
 }) {
   const normalizedEmail = normalizeEmail(email)
@@ -296,6 +297,7 @@ async function upsertClientUser({
     },
     create: {
       userId: user.id,
+      homeTenantId: rootTenantId,
       firstName: 'Test',
       lastName: 'Client',
       email: normalizedEmail,
@@ -326,6 +328,7 @@ async function upsertUnclaimedClientProfile({
   email = null,
   phone = null,
   preferredContactMethod = null,
+  rootTenantId,
 }) {
   const normalizedFirstName =
     typeof firstName === 'string' ? firstName.trim() : ''
@@ -400,6 +403,7 @@ async function upsertUnclaimedClientProfile({
   return prisma.clientProfile.create({
     data: {
       userId: null,
+      homeTenantId: rootTenantId,
       claimStatus: ClientClaimStatus.UNCLAIMED,
       claimedAt: null,
       firstName: normalizedFirstName,
@@ -423,6 +427,7 @@ async function upsertUnclaimedClientProfile({
 async function upsertProfessionalUser({
   email,
   password,
+  rootTenantId,
   phone = '+15555550103',
 }) {
   const normalizedEmail = normalizeEmail(email)
@@ -475,6 +480,7 @@ async function upsertProfessionalUser({
     },
     create: {
       userId: user.id,
+      homeTenantId: rootTenantId,
       firstName: 'Test',
       lastName: 'Professional',
       phone: verifiedAuth.phone,
@@ -800,12 +806,13 @@ async function main() {
 
   // Reserved root tenant — every seeded row belongs to the TOVIS marketplace.
   // Must match lib/tenant/constants.ts (TOVIS_ROOT_TENANT_SLUG).
-  await prisma.tenant.upsert({
+  const rootTenant = await prisma.tenant.upsert({
     where: { slug: 'tovis-root' },
     update: {},
     create: { slug: 'tovis-root', name: 'TOVIS', isActive: true },
     select: { id: true },
   })
+  const rootTenantId = rootTenant.id
 
   const seedPassword = process.env.SEED_TEST_PASSWORD || 'password123'
 
@@ -821,11 +828,13 @@ async function main() {
   const { user: proUser, professionalProfile } = await upsertProfessionalUser({
     email: proEmail,
     password: proPassword,
+    rootTenantId,
   })
 
   const { user: clientUser } = await upsertClientUser({
     email: clientEmail,
     password: clientPassword,
+    rootTenantId,
   })
 
   const adminUser = await upsertAdmin({
@@ -839,6 +848,7 @@ async function main() {
     email: 'unclaimed-email@tovis.app',
     phone: null,
     preferredContactMethod: ContactMethod.EMAIL,
+    rootTenantId,
   })
 
   const unclaimedPhoneClient = await upsertUnclaimedClientProfile({
@@ -847,6 +857,7 @@ async function main() {
     email: null,
     phone: '+15555550101',
     preferredContactMethod: ContactMethod.SMS,
+    rootTenantId,
   })
 
   await ensureProfessionalLocation(professionalProfile.id)

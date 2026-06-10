@@ -361,6 +361,11 @@ describe('lib/booking/writeBoundary mobile radius guards', () => {
 
     mocks.txProfessionalProfileFindUnique.mockResolvedValue({
       mobileRadiusMiles: 15,
+      homeTenantId: 'tenant_root',
+    })
+
+    mocks.txClientProfileFindUnique.mockResolvedValue({
+      homeTenantId: 'tenant_root',
     })
 
     mocks.txClientAddressFindFirst.mockResolvedValue(makeMobileClientAddress())

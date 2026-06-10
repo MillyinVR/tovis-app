@@ -30,6 +30,7 @@ const db = new PrismaClient({
 })
 
 type Fixtures = {
+  tenantId: string
   categoryId: string
   serviceId: string
   clientUserId: string
@@ -85,6 +86,13 @@ async function cleanupAll(): Promise<void> {
 async function seedFixtures(): Promise<Fixtures> {
   const tag = `concurrency_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
+  const tenant = await db.tenant.upsert({
+    where: { slug: 'tovis-root' },
+    update: {},
+    create: { slug: 'tovis-root', name: 'TOVIS', isActive: true },
+    select: { id: true },
+  })
+
   const clientUser = await db.user.create({
     data: {
       email: `${tag}_client@example.com`,
@@ -106,6 +114,7 @@ async function seedFixtures(): Promise<Fixtures> {
   const client = await db.clientProfile.create({
     data: {
       userId: clientUser.id,
+      homeTenantId: tenant.id,
       firstName: 'Client',
       lastName: 'Test',
     },
@@ -115,6 +124,7 @@ async function seedFixtures(): Promise<Fixtures> {
   const professional = await db.professionalProfile.create({
     data: {
       userId: proUser.id,
+      homeTenantId: tenant.id,
       firstName: 'Pro',
       lastName: 'Test',
       timeZone: 'America/Los_Angeles',
@@ -251,6 +261,7 @@ async function seedFixtures(): Promise<Fixtures> {
   })
 
   return {
+    tenantId: tenant.id,
     categoryId: category.id,
     serviceId: service.id,
     clientUserId: clientUser.id,
@@ -310,6 +321,8 @@ async function createLockedBooking(args: {
       data: {
         clientId: fx.clientId,
         professionalId: fx.professionalId,
+        proTenantId: fx.tenantId,
+        clientHomeTenantId: fx.tenantId,
         serviceId: fx.serviceId,
         offeringId: fx.offeringId,
         scheduledFor: args.start,

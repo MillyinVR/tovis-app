@@ -685,6 +685,7 @@ describe('app/api/auth/register/route', () => {
           ...expectedPhoneLookupData('+15551234567'),
           clientProfile: {
             create: {
+              homeTenantId: 'tenant_root',
               firstName: 'Tori',
               lastName: 'Morales',
               phone: '+15551234567',
@@ -1111,6 +1112,7 @@ describe('app/api/auth/register/route', () => {
         transactionalSmsConsentUserAgent: 'vitest',
         clientProfile: {
           create: {
+            homeTenantId: 'tenant_root',
             firstName: 'Tori',
             lastName: 'Morales',
             phone: '+15551234567',

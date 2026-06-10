@@ -451,6 +451,8 @@ async function createInitialBookingForFlow(
     data: {
       clientId: seed.credentials.client.clientId,
       professionalId: seed.credentials.professional.professionalId,
+      proTenantId: seed.tenantId,
+      clientHomeTenantId: seed.tenantId,
       serviceId: seed.services.base.id,
       offeringId: seed.offering.id,
       scheduledFor,

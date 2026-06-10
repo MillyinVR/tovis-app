@@ -88,7 +88,6 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
         claimedAt: true,
         claimedByUserId: true,
         professionalId: true,
-        salonSlug: true,
       },
     })
 

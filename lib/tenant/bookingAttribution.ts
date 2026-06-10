@@ -7,28 +7,28 @@
 // create time and never recomputed, matching the Booking model's snapshot
 // philosophy for addresses and pricing.
 //
-// During the expand phase either value may be null (un-backfilled profiles);
-// the contract migration makes the columns NOT NULL once the launch-env
-// backfill is verified.
+// Contract phase: homeTenantId is NOT NULL on both profiles, so attribution
+// is always resolvable — a missing profile row here is a data-integrity bug
+// in the caller and throws rather than writing a null snapshot.
 
 type AttributionTx = {
   professionalProfile: {
     findUnique: (args: {
       where: { id: string }
       select: { homeTenantId: true }
-    }) => Promise<{ homeTenantId: string | null } | null>
+    }) => Promise<{ homeTenantId: string } | null>
   }
   clientProfile: {
     findUnique: (args: {
       where: { id: string }
       select: { homeTenantId: true }
-    }) => Promise<{ homeTenantId: string | null } | null>
+    }) => Promise<{ homeTenantId: string } | null>
   }
 }
 
 export type BookingTenantAttribution = {
-  proTenantId: string | null
-  clientHomeTenantId: string | null
+  proTenantId: string
+  clientHomeTenantId: string
 }
 
 export async function resolveBookingTenantAttribution(
@@ -46,8 +46,20 @@ export async function resolveBookingTenantAttribution(
     }),
   ])
 
+  if (!pro) {
+    throw new Error(
+      `resolveBookingTenantAttribution: professional ${args.professionalId} not found`,
+    )
+  }
+
+  if (!client) {
+    throw new Error(
+      `resolveBookingTenantAttribution: client ${args.clientId} not found`,
+    )
+  }
+
   return {
-    proTenantId: pro?.homeTenantId ?? null,
-    clientHomeTenantId: client?.homeTenantId ?? null,
+    proTenantId: pro.homeTenantId,
+    clientHomeTenantId: client.homeTenantId,
   }
 }

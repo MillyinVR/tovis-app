@@ -1060,10 +1060,10 @@ model ClientProfile {
   id     String  @id @default(cuid())
   userId String? @unique
 
-  // Tenant the client signed up under (expand phase: nullable; backfilled to
-  // tovis-root). Drives what the client can discover.
-  homeTenantId String?
-  homeTenant   Tenant? @relation("TenantHomeClients", fields: [homeTenantId], references: [id], onDelete: Restrict)
+  // Tenant the client signed up under (contract phase: required; creation
+  // sites stamp it). Drives what the client can discover.
+  homeTenantId String
+  homeTenant   Tenant @relation("TenantHomeClients", fields: [homeTenantId], references: [id], onDelete: Restrict)
 
   firstName String @default("")
   lastName  String @default("")
@@ -1167,10 +1167,10 @@ model ProfessionalProfile {
   id     String @id @default(cuid())
   userId String @unique
 
-  // The Pro's one home tenant (expand phase: nullable; backfilled to
-  // tovis-root). Drives discovery visibility.
-  homeTenantId String?
-  homeTenant   Tenant? @relation("TenantHomePros", fields: [homeTenantId], references: [id], onDelete: Restrict)
+  // The Pro's one home tenant (contract phase: required; creation sites
+  // stamp it). Drives discovery visibility.
+  homeTenantId String
+  homeTenant   Tenant @relation("TenantHomePros", fields: [homeTenantId], references: [id], onDelete: Restrict)
 
   firstName       String    @default("")
   lastName        String    @default("")
@@ -1973,14 +1973,14 @@ model Booking {
   serviceId      String
   offeringId     String?
 
-  // Tenant attribution snapshots, written at booking creation (expand phase:
-  // nullable; backfilled to tovis-root). proTenantId = revenue attribution
-  // (the Pro's home tenant); clientHomeTenantId = acquisition attribution
-  // (the client's signup tenant). See docs/architecture/tenant-model.md.
-  proTenantId        String?
-  proTenant          Tenant? @relation("TenantProBookings", fields: [proTenantId], references: [id], onDelete: Restrict)
-  clientHomeTenantId String?
-  clientHomeTenant   Tenant? @relation("TenantClientHomeBookings", fields: [clientHomeTenantId], references: [id], onDelete: Restrict)
+  // Tenant attribution snapshots, written at booking creation (contract
+  // phase: required). proTenantId = revenue attribution (the Pro's home
+  // tenant); clientHomeTenantId = acquisition attribution (the client's
+  // signup tenant). See docs/architecture/tenant-model.md.
+  proTenantId        String
+  proTenant          Tenant @relation("TenantProBookings", fields: [proTenantId], references: [id], onDelete: Restrict)
+  clientHomeTenantId String
+  clientHomeTenant   Tenant @relation("TenantClientHomeBookings", fields: [clientHomeTenantId], references: [id], onDelete: Restrict)
 
   proClientInvite ProClientInvite?
 
@@ -3280,13 +3280,10 @@ model NfcCard {
   professionalId String?
   professional   ProfessionalProfile? @relation(fields: [professionalId], references: [id])
 
-  // Issuing tenant (expand phase: nullable; backfilled to tovis-root).
-  tenantId String?
-  tenant   Tenant? @relation("TenantNfcCards", fields: [tenantId], references: [id], onDelete: Restrict)
-
-  /// @deprecated Superseded by tenantId. Read-only during the expand phase;
-  /// dropped in the contract-phase migration. No new writes.
-  salonSlug String?
+  // Issuing tenant (contract phase: required; root tenant for standard
+  // cards, the white-label tenant for SALON_WHITE_LABEL cards).
+  tenantId String
+  tenant   Tenant @relation("TenantNfcCards", fields: [tenantId], references: [id], onDelete: Restrict)
 
   isActive          Boolean            @default(true)
   shortCode         String             @unique
@@ -3298,7 +3295,6 @@ model NfcCard {
   @@index([type])
   @@index([claimedByUserId])
   @@index([professionalId])
-  @@index([salonSlug])
   @@index([tenantId])
 }
 

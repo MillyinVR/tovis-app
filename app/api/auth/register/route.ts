@@ -763,6 +763,12 @@ export async function POST(request: Request) {
       })
     }
 
+    // Signup tenant = the tenant whose domain served the request
+    // (docs/architecture/tenant-model.md): root domain -> tovis-root,
+    // white-label custom domain -> that tenant. Stamped onto the new
+    // profile as its permanent home tenant.
+    const tenantContext = await resolveTenantContextForRequest(request)
+
     let tosVersion: string
     try {
       tosVersion = getCurrentTosVersion()
@@ -1022,6 +1028,7 @@ export async function POST(request: Request) {
             role === 'CLIENT'
               ? {
                   create: {
+                    homeTenantId: tenantContext.tenantId,
                     firstName,
                     lastName,
                     phone,
@@ -1035,6 +1042,7 @@ export async function POST(request: Request) {
             role === 'PRO'
               ? {
                   create: {
+                    homeTenantId: tenantContext.tenantId,
                     firstName,
                     lastName,
                     phone,
@@ -1222,7 +1230,7 @@ export async function POST(request: Request) {
               userId: user.id,
               email: verificationEmail,
               appUrl,
-              tenantContext: await resolveTenantContextForRequest(request),
+              tenantContext,
               next: nextForVerification,
               intent: verificationIntent,
               inviteToken: verificationInviteToken,

@@ -124,6 +124,7 @@ describe('resolveProBookingClient', () => {
     )
 
     const result = await resolveProBookingClient({
+      professionalId: 'pro_1',
       locationType: ServiceLocationType.SALON,
       clientId: 'client_existing_1',
     })
@@ -151,6 +152,7 @@ describe('resolveProBookingClient', () => {
     mocks.prisma.clientProfile.findUnique.mockResolvedValueOnce(null)
 
     const result = await resolveProBookingClient({
+      professionalId: 'pro_1',
       locationType: ServiceLocationType.SALON,
       clientId: 'missing_client',
     })
@@ -169,6 +171,7 @@ describe('resolveProBookingClient', () => {
 
   it('delegates new client creation/reuse to upsertProClient and returns claim status', async () => {
     const result = await resolveProBookingClient({
+      professionalId: 'pro_1',
       locationType: ServiceLocationType.SALON,
       client: {
         firstName: 'Tori',
@@ -179,6 +182,7 @@ describe('resolveProBookingClient', () => {
     })
 
     expect(mocks.upsertProClient).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: 'tori@example.com',
@@ -209,6 +213,7 @@ describe('resolveProBookingClient', () => {
     })
 
     const result = await resolveProBookingClient({
+      professionalId: 'pro_1',
       locationType: ServiceLocationType.SALON,
       client: {
         firstName: 'Tori',
@@ -245,6 +250,7 @@ describe('resolveProBookingClient', () => {
     })
 
     const result = await resolveProBookingClient({
+      professionalId: 'pro_1',
       locationType: ServiceLocationType.MOBILE,
       clientId: 'client_mobile_1',
       clientAddressId: 'addr_existing_1',
@@ -287,6 +293,7 @@ describe('resolveProBookingClient', () => {
     mocks.prisma.clientAddress.findFirst.mockResolvedValueOnce(null)
 
     const result = await resolveProBookingClient({
+      professionalId: 'pro_1',
       locationType: ServiceLocationType.MOBILE,
       clientId: 'client_mobile_1',
       clientAddressId: 'addr_wrong_1',
@@ -314,6 +321,7 @@ describe('resolveProBookingClient', () => {
     )
 
     const result = await resolveProBookingClient({
+      professionalId: 'pro_1',
       locationType: ServiceLocationType.MOBILE,
       clientId: 'client_mobile_1',
     })
@@ -340,6 +348,7 @@ describe('resolveProBookingClient', () => {
     )
 
     const result = await resolveProBookingClient({
+      professionalId: 'pro_1',
       locationType: ServiceLocationType.MOBILE,
       clientId: 'client_mobile_1',
       serviceAddress: {
@@ -380,6 +389,7 @@ describe('resolveProBookingClient', () => {
     })
 
     const result = await resolveProBookingClient({
+      professionalId: 'pro_1',
       locationType: ServiceLocationType.MOBILE,
       clientId: 'client_mobile_1',
       serviceAddress: {

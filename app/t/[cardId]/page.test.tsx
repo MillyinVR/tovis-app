@@ -46,7 +46,7 @@ function makeCard(overrides?: {
   isActive?: boolean
   claimedAt?: Date | null
   professionalId?: string | null
-  salonSlug?: string | null
+  tenantSlug?: string
 }) {
   return {
     id: overrides?.id ?? 'card_1',
@@ -60,8 +60,7 @@ function makeCard(overrides?: {
       overrides && 'professionalId' in overrides
         ? overrides.professionalId
         : null,
-    salonSlug:
-      overrides && 'salonSlug' in overrides ? overrides.salonSlug : null,
+    tenant: { slug: overrides?.tenantSlug ?? 'tovis-root' },
   }
 }
 
@@ -129,7 +128,7 @@ describe('app/t/[cardId]/page.tsx', () => {
         isActive: true,
         claimedAt: true,
         professionalId: true,
-        salonSlug: true,
+        tenant: { select: { slug: true } },
       },
     })
 
@@ -344,7 +343,7 @@ describe('app/t/[cardId]/page.tsx', () => {
         id: 'card_salon_1',
         type: NfcCardType.SALON_WHITE_LABEL,
         claimedAt: new Date('2026-04-10T12:00:00.000Z'),
-        salonSlug: 'glow-house',
+        tenantSlug: 'glow-house',
       }),
     )
 
@@ -360,7 +359,7 @@ describe('app/t/[cardId]/page.tsx', () => {
         userId: 'user_1',
         intentType: 'SALON_WHITE_LABEL',
         payloadJson: {
-          salonSlug: 'glow-house',
+          tenantSlug: 'glow-house',
           nextUrl: '/signup?salon=glow-house',
         },
         expiresAt: new Date('2026-04-12T12:30:00.000Z'),

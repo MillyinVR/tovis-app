@@ -21,6 +21,9 @@ const mocks = vi.hoisted(() => ({
     user: {
       findMany: vi.fn(),
     },
+    professionalProfile: {
+      findUnique: vi.fn(),
+    },
   },
 }))
 
@@ -202,6 +205,9 @@ describe('upsertProClient', () => {
     mocks.prisma.clientProfile.update.mockResolvedValue(null)
     mocks.prisma.clientProfile.create.mockResolvedValue(null)
     mocks.prisma.user.findMany.mockResolvedValue([])
+    mocks.prisma.professionalProfile.findUnique.mockResolvedValue({
+      homeTenantId: 'tenant_root',
+    })
   })
 
   afterEach(() => {
@@ -212,6 +218,7 @@ describe('upsertProClient', () => {
 
   it('returns VALIDATION_ERROR when first name, last name, and both contact fields are missing', async () => {
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: '',
       lastName: '  ',
       email: undefined,
@@ -244,6 +251,7 @@ describe('upsertProClient', () => {
     ])
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: 'tori@example.com',
@@ -273,6 +281,7 @@ describe('upsertProClient', () => {
     mockClientProfileLookupByWhere([existingProfile])
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: ' Tori@Example.COM ',
@@ -333,6 +342,7 @@ describe('upsertProClient', () => {
     mockClientProfileLookupByWhere([existingProfile])
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: 'tori@example.com',
@@ -361,6 +371,7 @@ describe('upsertProClient', () => {
     )
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       phone: '+16195551234',
@@ -405,6 +416,7 @@ describe('upsertProClient', () => {
     )
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: 'tori@example.com',
@@ -457,6 +469,7 @@ describe('upsertProClient', () => {
     mocks.prisma.clientProfile.update.mockResolvedValueOnce(updatedProfile)
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: 'tori@example.com',
@@ -495,6 +508,7 @@ describe('upsertProClient', () => {
     ])
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: 'tori@example.com',
@@ -539,6 +553,7 @@ describe('upsertProClient', () => {
     )
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: 'tori@example.com',
@@ -618,6 +633,7 @@ describe('upsertProClient', () => {
     )
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: 'tori@example.com',
@@ -667,6 +683,7 @@ describe('upsertProClient', () => {
     )
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: 'tori@example.com',
@@ -714,6 +731,7 @@ describe('upsertProClient', () => {
     ])
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Tori',
       lastName: 'Morales',
       email: 'tori@example.com',
@@ -745,6 +763,7 @@ describe('upsertProClient', () => {
     mockClientProfileLookupByWhere([existingProfile])
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'New',
       lastName: 'Name',
       email: 'existing@example.com',
@@ -780,6 +799,7 @@ describe('upsertProClient', () => {
     )
 
     const result = await upsertProClient({
+      professionalId: 'pro_1',
       firstName: 'Phone',
       lastName: 'Only',
       phone: '+16195551234',
