@@ -82,6 +82,21 @@ export function getBrandConfig(input: BrandResolutionInput = {}): BrandConfig {
   return brandRegistry[id] ?? tovisBrand
 }
 
+/**
+ * Exact registry lookup with no host/env fallback chain. Tenant-aware
+ * resolution must use this: an unregistered white-label slug has to fall
+ * back to the TOVIS brand explicitly, never to whatever NEXT_PUBLIC_BRAND
+ * happens to be in the deployment (which would leak one tenant's branding
+ * to another).
+ */
+export function getRegisteredBrandConfig(
+  id: string | null | undefined,
+): BrandConfig | null {
+  const normalized = normalizeBrandId(id)
+
+  return normalized ? brandRegistry[normalized] ?? null : null
+}
+
 export function getInitialMode(brand: BrandConfig): BrandMode {
   return brand.defaultMode
 }
