@@ -92,6 +92,12 @@ jobs:
 
       - name: Seed test data
         run: pnpm run seed
+
+      # Login looks up users by emailHashV2 only; seed.cjs does not write the
+      # v2 hashes, so backfill them like db:test:seed does locally.
+      - name: Backfill contact lookup hashes
+        run: pnpm run backfill:contact-hash-v2 -- --write
+
       - name: Run browser E2E
         run: pnpm run test:e2e:ci
 

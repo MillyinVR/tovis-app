@@ -100,6 +100,11 @@ jobs:
       - name: Seed canonical perf data
         run: pnpm run seed
 
+      # Login looks up users by emailHashV2 only; seed.cjs does not write the
+      # v2 hashes, so backfill them like db:test:seed does locally.
+      - name: Backfill contact lookup hashes
+        run: pnpm run backfill:contact-hash-v2 -- --write
+
       - name: Verify required perf config
         run: |
           test -n "$PERF_BOOKING_URL" || (echo "Missing PERF_BOOKING_URL secret" && exit 1)
