@@ -1,0 +1,8 @@
+# Discovery surfaces that pre-date tenant visibility wiring (WS-5).
+# Shrink this list as routes adopt lib/tenant visibility helpers.
+# Never add new entries — new discovery surfaces must be tenant-aware.
+app/admin/permissions/page.tsx
+app/admin/professionals/page.tsx
+app/api/admin/permissions/route.ts
+lib/search/pros.ts
+lib/viralRequests/index.ts
