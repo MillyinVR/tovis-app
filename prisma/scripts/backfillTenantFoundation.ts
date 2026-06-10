@@ -8,8 +8,11 @@
 //
 // Idempotent and batched; dry run by default. Usage:
 //   pnpm backfill:tenant-foundation              # dry run (counts only)
-//   pnpm backfill:tenant-foundation -- --write   # apply
-//   pnpm backfill:tenant-foundation -- --write --batch-size=250
+//   pnpm backfill:tenant-foundation --write      # apply
+//   pnpm backfill:tenant-foundation --write --batch-size=250
+//
+// (npm-style `pnpm backfill:tenant-foundation -- --write` also works; the
+// literal `--` separator is ignored.)
 
 import { PrismaClient } from '@prisma/client'
 
@@ -39,6 +42,11 @@ function parseCliOptions(argv: string[]): CliOptions {
   let batchSize = DEFAULT_BATCH_SIZE
 
   for (const arg of argv) {
+    // pnpm forwards the npm-style `--` separator to the script verbatim.
+    if (arg === '--') {
+      continue
+    }
+
     if (arg === '--write') {
       write = true
       continue
