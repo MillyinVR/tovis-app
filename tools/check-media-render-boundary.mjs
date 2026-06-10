@@ -29,6 +29,11 @@ const ALLOWED_FILES = new Set([
   // Maintenance script that intentionally manipulates raw URL fields to
   // backfill / repair stored data; never returns these to a client.
   normalize('scripts/fix-media-urls.ts'),
+  // Privacy export deliberately discloses only the stored product-facing
+  // url/thumbUrl values and never renders media. It must NOT go through
+  // renderMediaUrls: exportSafety.ts rejects signed URLs (`token=`,
+  // `media-private`) and storage pointer keys in export payloads.
+  normalize('lib/privacy/exportUserData.ts'),
 ])
 
 const TEMP_ALLOWED_FILES = new Set([])
