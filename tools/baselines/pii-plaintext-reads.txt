@@ -51,7 +51,6 @@ app/admin/professionals/[id]/page.tsx:direct property read:loc.postalCode?.trim(
 app/admin/professionals/[id]/page.tsx:optional direct property read:const email = pro.user?.email || 'No email'
 app/admin/professionals/page.tsx:direct property read:<span className="text-xs font-bold text-textSecondary">({p.user.email})</span>
 app/admin/runtime-flags/page.tsx:direct property read:Signed in as {info.email ?? 'admin user'}
-app/api/_utils/auth/phoneVerificationSend.ts:direct property read:console.log(`${logTag} sent`, { to: args.phone, sid: twilio.sid })
 app/api/_utils/auth/verificationThrottle.ts:direct property read:const phone = args.phone?.trim()
 app/api/admin/permissions/route.ts:Prisma select/include plaintext field:email: true,
 app/api/auth/email/verify/route.ts:Prisma select/include plaintext field:email: true,
