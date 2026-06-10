@@ -92,8 +92,13 @@ async function chooseEnabledSlotByIndex(
 
   const targetIndex =
     index >= 0 && index < enabledVisibleSlots.length ? index : 0
+  const targetSlot = enabledVisibleSlots[targetIndex]
 
-  await enabledVisibleSlots[targetIndex].click()
+  if (targetSlot === undefined) {
+    throw new Error('No enabled time slot found in availability drawer')
+  }
+
+  await targetSlot.click()
 }
 
 async function enabledSlotCount(page: Page): Promise<number> {

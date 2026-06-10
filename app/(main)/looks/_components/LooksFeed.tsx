@@ -739,11 +739,13 @@ export default function LooksFeed() {
             ) : (
               items.map((item, idx) => {
                 const signal =
-                  BOOKING_SIGNALS[hashStringToIndex(item.id, BOOKING_SIGNALS.length)]
+                  BOOKING_SIGNALS[
+                    hashStringToIndex(item.id, BOOKING_SIGNALS.length)
+                  ] ?? ''
                 const futureSelf =
                   FUTURE_SELF_LINES[
                     hashStringToIndex(item.id + '_future', FUTURE_SELF_LINES.length)
-                  ]
+                  ] ?? ''
                 const isActive = idx === activeIndex
 
                 const rightRail = (

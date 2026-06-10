@@ -1,5 +1,6 @@
 // lib/booking/lifecycleActionViewModel.test.ts
 import { describe, expect, it } from 'vitest'
+import { requireDefined } from '@/lib/guards'
 import { BookingStatus, SessionStep } from '@prisma/client'
 import {
   buildLifecycleActionViewModel,
@@ -38,8 +39,8 @@ describe('buildLifecycleActionViewModel — pro role', () => {
     expect(verbs(vm)).toEqual(['ACCEPT', 'CANCEL'])
     expect(vm.isTerminal).toBe(false)
     expect(vm.isInProgress).toBe(false)
-    expect(vm.actions[0].method).toBe('PATCH')
-    expect(vm.actions[0].payload).toEqual({
+    expect(requireDefined(vm.actions[0]).method).toBe('PATCH')
+    expect(requireDefined(vm.actions[0]).payload).toEqual({
       status: 'ACCEPTED',
       notifyClient: true,
     })
@@ -51,10 +52,10 @@ describe('buildLifecycleActionViewModel — pro role', () => {
       input({ status: BookingStatus.ACCEPTED, role: 'PRO' }),
     )
     expect(verbs(vm)).toEqual(['START_SESSION', 'CANCEL'])
-    expect(vm.actions[0].href).toBe(
+    expect(requireDefined(vm.actions[0]).href).toBe(
       `/api/pro/bookings/${BOOKING_ID}/session/start`,
     )
-    expect(vm.actions[0].method).toBe('POST')
+    expect(requireDefined(vm.actions[0]).method).toBe('POST')
     expect(vm.displayLabel).toBe('Confirmed')
   })
 
@@ -76,8 +77,8 @@ describe('buildLifecycleActionViewModel — pro role', () => {
         }),
       )
       expect(verbs(vm)).toEqual(['CONTINUE_SESSION'])
-      expect(vm.actions[0].method).toBe('NAVIGATE')
-      expect(vm.actions[0].href).toBe(`/pro/bookings/${BOOKING_ID}/session`)
+      expect(requireDefined(vm.actions[0]).method).toBe('NAVIGATE')
+      expect(requireDefined(vm.actions[0]).href).toBe(`/pro/bookings/${BOOKING_ID}/session`)
       expect(vm.isInProgress).toBe(true)
       expect(vm.isTerminal).toBe(false)
     }
@@ -116,8 +117,8 @@ describe('buildLifecycleActionViewModel — pro role', () => {
     const vm = buildLifecycleActionViewModel(
       input({ status: BookingStatus.PENDING, role: 'PRO' }),
     )
-    expect(vm.actions[0].idempotencyKeyHint).toBe(`${BOOKING_ID}:ACCEPT`)
-    expect(vm.actions[1].idempotencyKeyHint).toBe(`${BOOKING_ID}:CANCEL`)
+    expect(requireDefined(vm.actions[0]).idempotencyKeyHint).toBe(`${BOOKING_ID}:ACCEPT`)
+    expect(requireDefined(vm.actions[1]).idempotencyKeyHint).toBe(`${BOOKING_ID}:CANCEL`)
   })
 
   it('blockers: BEFORE_MEDIA_REQUIRED when at BEFORE_PHOTOS with zero before media', () => {
@@ -150,7 +151,7 @@ describe('buildLifecycleActionViewModel — client role', () => {
       input({ status: BookingStatus.PENDING, role: 'CLIENT' }),
     )
     expect(verbs(vm)).toEqual(['CLIENT_RESCHEDULE', 'CLIENT_CANCEL'])
-    expect(vm.actions[1].href).toBe(`/api/bookings/${BOOKING_ID}/cancel`)
+    expect(requireDefined(vm.actions[1]).href).toBe(`/api/bookings/${BOOKING_ID}/cancel`)
   })
 
   it('ACCEPTED → Reschedule + Cancel booking', () => {

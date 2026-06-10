@@ -1,7 +1,10 @@
 // app/client/_components/UpcomingAppointmentCard.tsx
 import Link from 'next/link'
 
+import { initialsForName } from '@/lib/initials'
+
 import type { ClientHomeBooking } from '../_data/getClientHomeData'
+import { bookingTitle } from './bookingDisplay'
 
 function formatWhen(date: Date, timeZone?: string | null): string {
   try {
@@ -53,26 +56,6 @@ function professionalName(professional: {
     professional.handle ??
     'Professional'
   ).trim()
-}
-
-function initialsForName(name: string): string {
-  const parts = name
-    .split(/\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-  if (parts.length === 0) return 'P'
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
-}
-
-function bookingTitle(booking: ClientHomeBooking): string {
-  const serviceItemNames = booking.serviceItems
-    .map((item) => item.service?.name?.trim())
-    .filter((name): name is string => Boolean(name))
-  if (serviceItemNames.length === 1) return serviceItemNames[0]
-  if (serviceItemNames.length > 1)
-    return `${serviceItemNames[0]} + ${serviceItemNames.length - 1} more`
-  return booking.service?.name ?? 'Appointment'
 }
 
 function bookingLocation(booking: ClientHomeBooking): string | null {

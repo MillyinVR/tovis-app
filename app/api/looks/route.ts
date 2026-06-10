@@ -173,12 +173,13 @@ export async function GET(req: Request) {
       (item): item is NonNullable<typeof item> => item !== null,
     )
 
+    const lastItem = items[items.length - 1]
     const nextCursor =
-      hasMore && items.length > 0
+      hasMore && lastItem !== undefined
         ? encodeLooksFeedCursor({
             kind,
             sort,
-            row: items[items.length - 1],
+            row: lastItem,
           })
         : null
 

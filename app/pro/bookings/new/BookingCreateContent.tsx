@@ -124,7 +124,7 @@ function buildClientAddressesByClientId(
   }
 
   for (const clientId of Object.keys(grouped)) {
-    grouped[clientId].sort((a, b) => {
+    grouped[clientId]?.sort((a, b) => {
       if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1
       return a.label.localeCompare(b.label)
     })

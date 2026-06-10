@@ -129,7 +129,10 @@ async function main(): Promise<void> {
       }
     }
 
-    cursor = batch[batch.length - 1].id
+    const lastRow = batch[batch.length - 1]
+    if (lastRow === undefined) break
+
+    cursor = lastRow.id
     if (batch.length < args.batchSize) break
   }
 

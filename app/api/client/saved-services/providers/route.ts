@@ -448,7 +448,10 @@ export async function GET(req: Request) {
     }
 
     for (const serviceId of Object.keys(byServiceId)) {
-      byServiceId[serviceId].sort((a, b) => {
+      const rows = byServiceId[serviceId]
+      if (rows === undefined) continue
+
+      rows.sort((a, b) => {
         const aTime = new Date(a.opening.startAt).getTime()
         const bTime = new Date(b.opening.startAt).getTime()
 
@@ -456,7 +459,7 @@ export async function GET(req: Request) {
         return a.distanceMiles - b.distanceMiles
       })
 
-      byServiceId[serviceId] = byServiceId[serviceId].slice(0, perService)
+      byServiceId[serviceId] = rows.slice(0, perService)
     }
 
     const payload: SavedServiceProvidersPayload = {

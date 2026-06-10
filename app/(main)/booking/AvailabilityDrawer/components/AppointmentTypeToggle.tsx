@@ -71,11 +71,12 @@ export default function AppointmentTypeToggle({
   offering,
 }: Props) {
   const modes = getAvailableModes({ allowed, offering })
+  const firstMode = modes[0]
 
-  if (modes.length === 0) return null
+  if (firstMode === undefined) return null
 
   const isSingleMode = modes.length === 1
-  const effectiveValue = modes.includes(value) ? value : modes[0]
+  const effectiveValue = modes.includes(value) ? value : firstMode
   const activeMeta = MODE_META[effectiveValue]
   const activePrice = getModePrice(offering, effectiveValue)
 

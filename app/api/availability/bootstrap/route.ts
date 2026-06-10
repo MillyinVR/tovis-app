@@ -105,6 +105,7 @@ function measureMs(
   const start = timers[startLabel]
   const end = timers[endLabel]
 
+  if (start === undefined || end === undefined) return 0
   if (!Number.isFinite(start) || !Number.isFinite(end)) return 0
   return Math.max(0, end - start)
 }
