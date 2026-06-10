@@ -36,6 +36,15 @@ const mocks = vi.hoisted(() => ({
   captureBookingException: vi.fn(),
 }))
 
+
+vi.mock('@/lib/tenant/requestContext', () => ({
+  resolveTenantContextForRequest: vi.fn(async () => ({
+    isRoot: true,
+    tenantId: 'tenant_root',
+    slug: 'tovis-root',
+  })),
+}))
+
 vi.mock('@/app/api/_utils', () => ({
   requirePro: mocks.requirePro,
   jsonFail: mocks.jsonFail,
@@ -594,6 +603,7 @@ describe('POST /api/pro/bookings', () => {
     })
 
     expect(mocks.createProBookingWithClient).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       professionalId: 'pro_123',
       actorUserId: 'user_123',
       overrideReason: 'VIP manual exception',
@@ -681,6 +691,7 @@ describe('POST /api/pro/bookings', () => {
     )
 
     expect(mocks.createProBookingWithClient).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       professionalId: 'pro_123',
       actorUserId: 'user_123',
       overrideReason: null,
@@ -757,6 +768,7 @@ describe('POST /api/pro/bookings', () => {
     )
 
     expect(mocks.createProBookingWithClient).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       professionalId: 'pro_123',
       actorUserId: 'user_123',
       overrideReason: null,

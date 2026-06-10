@@ -1,7 +1,7 @@
 // lib/booking/lifecycleContract.ts
 //
 // Single source of truth for all legal BookingStatus and SessionStep
-// transitions in the Tovis booking lifecycle.
+// transitions in the booking lifecycle.
 //
 // ┌──────────┐  accept   ┌──────────┐  start   ┌─────────────┐
 // │ PENDING  │ ────────► │ ACCEPTED │ ────────► │ IN_PROGRESS │

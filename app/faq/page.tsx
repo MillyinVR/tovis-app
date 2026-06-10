@@ -1,6 +1,6 @@
 // app/faq/page.tsx
 import Link from 'next/link'
-import { TRANSACTIONAL_SMS_PAGE_COPY } from '@/lib/transactionalSmsPolicy'
+import { buildTransactionalSmsPageCopy } from '@/lib/transactionalSmsPolicy'
 import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
 import { getBrandConfig } from '@/lib/brand'
 
@@ -21,7 +21,7 @@ export default function FaqPage() {
     },
     {
       q: `What SMS messages can ${n} send?`,
-      a: TRANSACTIONAL_SMS_PAGE_COPY,
+      a: buildTransactionalSmsPageCopy(brand.displayName),
     },
     {
       q: `Does ${n} send marketing or promotional SMS?`,

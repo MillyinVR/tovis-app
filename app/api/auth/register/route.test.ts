@@ -55,6 +55,15 @@ const ORIGINAL_ENV = { ...process.env }
 
 const TEST_HMAC_KEY = Buffer.alloc(32, 7).toString('base64')
 
+
+vi.mock('@/lib/tenant/requestContext', () => ({
+  resolveTenantContextForRequest: vi.fn(async () => ({
+    isRoot: true,
+    tenantId: 'tenant_root',
+    slug: 'tovis-root',
+  })),
+}))
+
 vi.mock('@/lib/prisma', () => ({
   prisma: mockPrisma,
 }))

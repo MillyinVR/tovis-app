@@ -1,6 +1,6 @@
 // app/privacy/page.tsx
 import Link from 'next/link'
-import { TRANSACTIONAL_SMS_PAGE_COPY } from '@/lib/transactionalSmsPolicy'
+import { buildTransactionalSmsPageCopy } from '@/lib/transactionalSmsPolicy'
 import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
 import { getBrandConfig } from '@/lib/brand'
 
@@ -44,7 +44,7 @@ export default function PrivacyPage() {
               How we use phone numbers
             </h2>
             <p className="text-[14px] leading-relaxed text-textSecondary">
-              {TRANSACTIONAL_SMS_PAGE_COPY}
+              {buildTransactionalSmsPageCopy(brand.displayName)}
             </p>
           </section>
 

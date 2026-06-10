@@ -19,6 +19,8 @@ import {
   buildProviderSendRequest,
   getRetryDelayMs,
 } from './providerPolicy'
+import type { TenantContext } from '@/lib/tenant/context'
+
 import { renderNotificationContent } from './renderNotificationContent'
 import {
   type EmailProviderSendRequest,
@@ -131,11 +133,13 @@ function hasRetryAttemptsRemaining(
 
 function buildProviderRequest(
   delivery: ClaimedNotificationDelivery,
+  tenantContext: TenantContext,
 ): ProviderSendRequest {
   const content = renderNotificationContent({
     channel: delivery.channel,
     templateKey: getTemplateKeyForDelivery(delivery),
     templateVersion: delivery.templateVersion,
+    tenantContext,
     dispatch: {
       eventKey: delivery.dispatch.eventKey,
       title: delivery.dispatch.title,
@@ -303,6 +307,7 @@ async function finalizeSendResult(args: {
 async function processClaimedDelivery(args: {
   delivery: ClaimedNotificationDelivery
   providers: DeliveryProviderRegistry
+  tenantContext: TenantContext
   now: Date
 }): Promise<ProcessedDeliveryOutcome> {
   const leaseToken = args.delivery.leaseToken
@@ -319,7 +324,7 @@ async function processClaimedDelivery(args: {
   }
 
   try {
-    const request = buildProviderRequest(args.delivery)
+    const request = buildProviderRequest(args.delivery, args.tenantContext)
     const sendResult = await sendWithProvider({
       request,
       providers: args.providers,
@@ -396,6 +401,7 @@ function buildResultSummary(args: {
 
 export async function processDueDeliveries(args: {
   providers: DeliveryProviderRegistry
+  tenantContext: TenantContext
   claim?: ProcessDueDeliveriesArgs
 }): Promise<ProcessDueDeliveriesResult> {
   const now = normalizeNow(args.claim?.now)
@@ -411,6 +417,7 @@ export async function processDueDeliveries(args: {
     const outcome = await processClaimedDelivery({
       delivery,
       providers: args.providers,
+      tenantContext: args.tenantContext,
       now,
     })
 

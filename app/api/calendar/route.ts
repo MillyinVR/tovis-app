@@ -11,7 +11,9 @@ import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { normalizeEmail } from '@/app/api/_utils/email'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail } from '@/app/api/_utils/responses'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { prisma } from '@/lib/prisma'
+import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import {
   getZonedParts,
   isValidIanaTimeZone,
@@ -292,6 +294,7 @@ function buildCalendarInvite(args: {
   location: string | null
   startUtc: Date
   endUtc: Date
+  brandName: string
 }): string {
   const serviceName = args.booking.service?.name?.trim() || 'Appointment'
   const professionalName =
@@ -337,7 +340,7 @@ function buildCalendarInvite(args: {
   return buildIcs([
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//TOVIS//EN',
+    `PRODID:-//${escapeIcsText(args.brandName)}//EN`,
     'CALSCALE:GREGORIAN',
     'METHOD:REQUEST',
     `X-WR-TIMEZONE:${escapeIcsText(args.appointmentTimeZone)}`,
@@ -429,12 +432,16 @@ export async function GET(req: Request) {
       return jsonFail(409, locationResult.error)
     }
 
+    const tenantContext = await resolveTenantContextForRequest(req)
+    const brand = getBrandForTenantContext(tenantContext)
+
     const ics = buildCalendarInvite({
       booking,
       appointmentTimeZone: timeZoneResult.timeZone,
       location: locationResult.location,
       startUtc,
       endUtc,
+      brandName: brand.displayName,
     })
 
     return new NextResponse(ics, {

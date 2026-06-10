@@ -1,24 +1,4 @@
 # Hardcoded brand copy that pre-dates tenant-resolved branding (WS-6).
 # Migrate these to lib/brand and shrink the list; never add entries.
-app/(auth)/_components/signup/SignupProClient.tsx|placeholder="e.g. Salon De Tovis"
-app/(auth)/_components/signup/SignupProClient.tsx|placeholder="e.g. iLoveTovis"
-app/api/_utils/auth/phoneVerificationSend.ts|body: `TOVIS: Your verification code is ${code}. Expires in 10 minutes.`,
-app/api/calendar/route.ts|'PRODID:-//TOVIS//EN',
 app/api/internal/debug/sentry-test/route.ts|const SYNTHETIC_ALERT_MESSAGE = 'TOVIS production-safe synthetic Sentry alert v2'
-app/client/ClientBookingsDashboard.tsx|title: `${displayName} on TOVIS`,
-app/client/_components/RequestLookCard.tsx|Seen something not on Tovis yet? Tell us — we&apos;ll bring it here.
-lib/auth/emailVerification.ts|'<p>Verify your email to finish setting up your TOVIS account.</p>',
-lib/auth/emailVerification.ts|'Verify your email to finish setting up your TOVIS account.',
-lib/auth/emailVerification.ts|const subject = 'Verify your email for TOVIS'
-lib/auth/passwordReset.ts|'<p>We received a request to reset your TOVIS password.</p>',
-lib/auth/passwordReset.ts|'We received a request to reset your TOVIS password.',
-lib/auth/passwordReset.ts|const subject = 'Reset your TOVIS password'
-lib/booking/lifecycleContract.ts|// transitions in the Tovis booking lifecycle.
 lib/booking/writeBoundary.ts|return trimmed ? `TOVIS booking: ${trimmed}` : `TOVIS booking ${args.bookingId}`
-lib/clientActions/createClientClaimInviteDelivery.ts|return 'Claim your TOVIS profile'
-lib/clientActions/createClientClaimInviteDelivery.ts|return 'You’ve been invited to claim your TOVIS client profile and access your booking details.'
-lib/clientActions/createClientClaimInviteDelivery.ts|return `${invitedName}, you’ve been invited to claim your TOVIS client profile and access your booking details.`
-lib/notifications/delivery/renderNotificationContent.ts|const BRAND_PREFIX = 'TOVIS'
-lib/transactionalSmsPolicy.ts|'I agree to receive transactional SMS/text messages from TOVIS for account verification and appointment updates, including appointment confirmations, reminders, reschedules, and cancellations. TOVIS does not send marketing or promotional SMS. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help.'
-lib/transactionalSmsPolicy.ts|'TOVIS sends transactional SMS only for account verification and appointment updates. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help. No marketing or promotional SMS.'
-lib/transactionalSmsPolicy.ts|'TOVIS uses SMS only for transactional messages related to your account and appointments. Messages may include account verification codes, appointment confirmations, appointment reminders, reschedules, and cancellations. Message frequency varies. Message and data rates may apply. Reply STOP to opt out and HELP for help. TOVIS does not send marketing or promotional SMS.'

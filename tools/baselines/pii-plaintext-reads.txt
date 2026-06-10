@@ -458,7 +458,7 @@ lib/notifications/clientNotifications.ts:direct property read:const profilePhone
 lib/notifications/clientNotifications.ts:direct property read:const userPhone = normNullableString(client.user?.phone, 64)
 lib/notifications/clientNotifications.ts:optional direct property read:const userPhone = normNullableString(client.user?.phone, 64)
 lib/notifications/delivery/processDueDeliveries.ts:direct property read:return args.providers.email.send(args.request)
-lib/notifications/delivery/renderNotificationContent.ts:direct property read:...renderer.email(args.dispatch),
+lib/notifications/delivery/renderNotificationContent.ts:direct property read:...renderer.email(args.dispatch, brandName),
 lib/notifications/dispatch/enqueueDispatch.ts:direct property read:const email = normNullableString(args.recipient.email, MAX_EMAIL)
 lib/notifications/dispatch/enqueueDispatch.ts:direct property read:const phone = normNullableString(args.recipient.phone, MAX_PHONE)
 lib/notifications/dispatch/enqueueDispatch.ts:direct property read:return args.capabilities.hasEmailDestination ? args.email : null

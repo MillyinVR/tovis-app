@@ -24,6 +24,15 @@ const mockPrisma = vi.hoisted(() => ({
   },
 }))
 
+
+vi.mock('@/lib/tenant/requestContext', () => ({
+  resolveTenantContextForRequest: vi.fn(async () => ({
+    isRoot: true,
+    tenantId: 'tenant_root',
+    slug: 'tovis-root',
+  })),
+}))
+
 vi.mock('@/lib/prisma', () => ({
   prisma: mockPrisma,
 }))
@@ -235,6 +244,7 @@ describe('app/api/auth/password-reset/request/route', () => {
     })
 
     expect(mockIssueAndSendPasswordReset).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       userId: 'user_1',
       email: 'user@example.com',
       appUrl: 'http://localhost:3000',
@@ -429,6 +439,7 @@ describe('app/api/auth/password-reset/request/route', () => {
     expect(mockGetPasswordResetRequestIp).toHaveBeenCalledTimes(1)
 
     expect(mockIssueAndSendPasswordReset).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       userId: 'user_1',
       email: 'user@example.com',
       appUrl: 'http://localhost:3000',

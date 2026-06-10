@@ -55,6 +55,10 @@ vi.mock('@/lib/security/logging', () => ({
   safeError: mocks.safeError,
 }))
 
+vi.mock('@/lib/tenant/resolveTenant', () => ({
+  getRootTenantId: vi.fn(async () => 'tenant_root'),
+}))
+
 vi.mock('twilio', () => ({
   default: vi.fn(() => ({
     messages: {
@@ -148,6 +152,7 @@ describe('chaos: DB degradation', () => {
     )
 
     expect(mocks.processDueDeliveries).toHaveBeenCalledWith({
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       providers: {
         inApp: expect.objectContaining({
           provider: NotificationProvider.INTERNAL_REALTIME,

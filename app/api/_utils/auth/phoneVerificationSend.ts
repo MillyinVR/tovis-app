@@ -193,6 +193,7 @@ async function storeFreshPhoneVerificationCode(args: {
 export async function issueAndSendPhoneVerificationCode(args: {
   userId: string
   phone: string
+  brandName: string
   logTag?: string
 }): Promise<{ sid: string | null }> {
   const logTag = args.logTag ?? '[phone/send]'
@@ -212,7 +213,7 @@ export async function issueAndSendPhoneVerificationCode(args: {
 
   const twilio = await sendTwilioSms({
     to: args.phone,
-    body: `TOVIS: Your verification code is ${code}. Expires in 10 minutes.`,
+    body: `${args.brandName}: Your verification code is ${code}. Expires in 10 minutes.`,
   })
 
   if (process.env.NODE_ENV !== 'production') {

@@ -32,6 +32,7 @@ import {
   parsePasswordResetToken,
   sendPasswordResetEmail,
 } from './passwordReset'
+import { rootTenantContext } from '@/lib/tenant/context'
 
 const ORIGINAL_ENV = { ...process.env }
 
@@ -224,6 +225,7 @@ describe('lib/auth/passwordReset', () => {
     )
 
     await sendPasswordResetEmail({
+      brandName: 'TOVIS',
       to: 'user@example.com',
       resetUrl: 'https://app.tovis.app/reset-password/prt_1.abcdef123456',
     })
@@ -270,6 +272,7 @@ describe('lib/auth/passwordReset', () => {
 
     await expect(
       sendPasswordResetEmail({
+      brandName: 'TOVIS',
         to: 'user@example.com',
         resetUrl: 'https://app.tovis.app/reset-password/prt_1.abcdef123456',
       }),
@@ -295,6 +298,7 @@ describe('lib/auth/passwordReset', () => {
 
     await expect(
       sendPasswordResetEmail({
+      brandName: 'TOVIS',
         to: 'user@example.com',
         resetUrl: 'https://app.tovis.app/reset-password/prt_1.abcdef123456',
       }),
@@ -313,6 +317,7 @@ describe('lib/auth/passwordReset', () => {
     )
 
     const result = await issueAndSendPasswordReset({
+      tenantContext: rootTenantContext('tenant_root'),
       userId: 'user_1',
       email: 'user@example.com',
       appUrl: 'https://app.tovis.app',
@@ -349,6 +354,7 @@ describe('lib/auth/passwordReset', () => {
 
     await expect(
       issueAndSendPasswordReset({
+      tenantContext: rootTenantContext('tenant_root'),
         userId: 'user_1',
         email: 'user@example.com',
         appUrl: 'https://app.tovis.app',

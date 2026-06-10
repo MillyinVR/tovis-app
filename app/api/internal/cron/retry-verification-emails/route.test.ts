@@ -14,6 +14,11 @@ const mocks = vi.hoisted(() => ({
   logAuthEvent: vi.fn(),
 }))
 
+
+vi.mock('@/lib/tenant/resolveTenant', () => ({
+  getRootTenantId: vi.fn(async () => 'tenant_root'),
+}))
+
 vi.mock('@/app/api/_utils', () => ({
   jsonOk: (data: Record<string, unknown>, status = 200) =>
     new Response(JSON.stringify({ ok: true, ...data }), {
@@ -199,11 +204,13 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
 
     expect(mocks.issueAndSendEmailVerification).toHaveBeenCalledTimes(2)
     expect(mocks.issueAndSendEmailVerification).toHaveBeenNthCalledWith(1, {
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       userId: 'user_1',
       email: 'one@example.com',
       appUrl: 'https://app.tovis.app',
     })
     expect(mocks.issueAndSendEmailVerification).toHaveBeenNthCalledWith(2, {
+      tenantContext: { isRoot: true, tenantId: 'tenant_root', slug: 'tovis-root' },
       userId: 'user_2',
       email: 'two@example.com',
       appUrl: 'https://app.tovis.app',

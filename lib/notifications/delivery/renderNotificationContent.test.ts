@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { NotificationChannel, NotificationEventKey } from '@prisma/client'
 
+import { rootTenantContext } from '@/lib/tenant/context'
+
 import { NOTIFICATION_EVENT_DEFINITIONS } from '../eventKeys'
 import {
   renderNotificationContent,
@@ -46,6 +48,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
 
   it('renders in-app content from dispatch values', () => {
     const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
       channel: NotificationChannel.IN_APP,
       templateKey: 'booking_confirmed',
       templateVersion: 1,
@@ -64,6 +67,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
 
   it('renders branded SMS content with absolute app href appended', () => {
     const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
       channel: NotificationChannel.SMS,
       templateKey: 'booking_confirmed',
       dispatch: makeDispatch(),
@@ -83,6 +87,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
 
   it('renders branded email content with CTA text and html using absolute app href', () => {
     const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
       channel: NotificationChannel.EMAIL,
       templateKey: 'aftercare_ready',
       dispatch: makeDispatch({
@@ -115,6 +120,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
 
   it('renders viral request approved email content with the viral CTA label and absolute app href', () => {
     const result = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
       channel: NotificationChannel.EMAIL,
       templateKey: 'viral_request_approved',
       dispatch: makeDispatch({
@@ -153,6 +159,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
 
   it('drops unsafe external href values from rendered content', () => {
     const inAppResult = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
       channel: NotificationChannel.IN_APP,
       templateKey: 'payment_action_required',
       dispatch: makeDispatch({
@@ -164,6 +171,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
     })
 
     const smsResult = renderNotificationContent({
+      tenantContext: rootTenantContext('tenant_root'),
       channel: NotificationChannel.SMS,
       templateKey: 'payment_action_required',
       dispatch: makeDispatch({
@@ -194,6 +202,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
   it('throws for unsupported template versions', () => {
     expect(() =>
       renderNotificationContent({
+        tenantContext: rootTenantContext('tenant_root'),
         channel: NotificationChannel.EMAIL,
         templateKey: 'booking_confirmed',
         templateVersion: 2,
@@ -205,6 +214,7 @@ describe('lib/notifications/delivery/renderNotificationContent', () => {
   it('can render every currently defined template key', () => {
     for (const definition of Object.values(NOTIFICATION_EVENT_DEFINITIONS)) {
       const result = renderNotificationContent({
+        tenantContext: rootTenantContext('tenant_root'),
         channel: NotificationChannel.IN_APP,
         templateKey: definition.templateKey,
         templateVersion: 1,

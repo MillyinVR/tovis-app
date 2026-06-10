@@ -8,6 +8,7 @@ import {
   NotificationRecipientKind,
 } from '@prisma/client'
 
+import { rootTenantContext } from '@/lib/tenant/context'
 import { EmailDeliveryProvider } from './sendEmail'
 import { InAppDeliveryProvider } from './sendInApp'
 import { SmsDeliveryProvider } from './sendSms'
@@ -228,6 +229,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: {
         now,
         batchSize: 10,
@@ -305,6 +307,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: { now },
     })
 
@@ -374,6 +377,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: { now },
     })
 
@@ -445,6 +449,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: { now },
     })
 
@@ -517,6 +522,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: { now },
     })
 
@@ -585,6 +591,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: { now },
     })
 
@@ -642,6 +649,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: { now },
     })
 
@@ -701,6 +709,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: { now },
     })
 
@@ -751,6 +760,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: { now },
     })
 
@@ -818,6 +828,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: { now },
     })
 
@@ -854,6 +865,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
 
     const result = await processDueDeliveries({
       providers,
+      tenantContext: rootTenantContext('tenant_root'),
       claim: { now, batchSize: 20 },
     })
 
@@ -879,6 +891,7 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     await expect(
       processDueDeliveries({
         providers,
+        tenantContext: rootTenantContext('tenant_root'),
         claim: {
           now: new Date('invalid'),
         },

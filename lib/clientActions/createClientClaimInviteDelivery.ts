@@ -2,6 +2,9 @@
 
 import { ContactMethod, Prisma } from '@prisma/client'
 
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import type { TenantContext } from '@/lib/tenant/context'
+
 import { buildClientActionLinkForType } from './linkBuilders'
 import { enqueueClientActionDispatch } from './enqueueClientActionDispatch'
 import { orchestrateClientActionDelivery } from './orchestrateClientActionDelivery'
@@ -16,6 +19,7 @@ export type CreateClientClaimInviteDeliveryArgs = {
   bookingId: string
   inviteId: string
   rawToken: string
+  tenantContext: TenantContext
 
   invitedName?: string | null
   invitedEmail?: string | null
@@ -41,18 +45,21 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
   return trimmed.length > 0 ? trimmed : null
 }
 
-function buildInviteTitle(): string {
-  return 'Claim your TOVIS profile'
+function buildInviteTitle(args: { brandName: string }): string {
+  return `Claim your ${args.brandName} profile`
 }
 
-function buildInviteBody(args: { invitedName: string | null }): string {
+function buildInviteBody(args: {
+  invitedName: string | null
+  brandName: string
+}): string {
   const invitedName = normalizeOptionalString(args.invitedName)
 
   if (invitedName) {
-    return `${invitedName}, you’ve been invited to claim your TOVIS client profile and access your booking details.`
+    return `${invitedName}, you’ve been invited to claim your ${args.brandName} client profile and access your booking details.`
   }
 
-  return 'You’ve been invited to claim your TOVIS client profile and access your booking details.'
+  return `You’ve been invited to claim your ${args.brandName} client profile and access your booking details.`
 }
 
 function buildInvitePayload(
@@ -114,6 +121,7 @@ export async function createClientClaimInviteDelivery(
   args: CreateClientClaimInviteDeliveryArgs,
 ): Promise<CreateClientClaimInviteDeliveryResult> {
   const plan = buildOrchestrationPlan(args)
+  const brand = getBrandForTenantContext(args.tenantContext)
 
   const link = buildClientActionLinkForType({
     actionType: 'CLIENT_CLAIM_INVITE',
@@ -123,9 +131,10 @@ export async function createClientClaimInviteDelivery(
   const dispatch = await enqueueClientActionDispatch({
     plan,
     href: link.href,
-    title: buildInviteTitle(),
+    title: buildInviteTitle({ brandName: brand.displayName }),
     body: buildInviteBody({
       invitedName: normalizeOptionalString(args.invitedName),
+      brandName: brand.displayName,
     }),
     payload: buildInvitePayload(args),
     tx: args.tx,

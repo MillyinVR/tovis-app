@@ -1,7 +1,11 @@
 // app/client/_components/RequestLookCard.tsx
+import { getBrandConfig } from '@/lib/brand'
+
 import ClientViralRequestsPanel from '../components/ClientViralRequestsPanel'
 
 export default function RequestLookCard() {
+  const brand = getBrandConfig()
+
   return (
     <section className="px-4">
       <div className="mb-1.5">
@@ -11,7 +15,8 @@ export default function RequestLookCard() {
         </span>
       </div>
       <p className="mb-3 text-[11px] leading-relaxed text-textMuted">
-        Seen something not on Tovis yet? Tell us — we&apos;ll bring it here.
+        Seen something not on {brand.displayName} yet? Tell us — we&apos;ll
+        bring it here.
       </p>
 
       <div

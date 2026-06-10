@@ -16,6 +16,7 @@ import { isRecord } from '@/lib/guards'
 import { enqueueDispatch } from '@/lib/notifications/dispatch/enqueueDispatch'
 import { prisma } from '@/lib/prisma'
 import { checkProReadinessForEntryPoint } from '@/lib/pro/readiness/proReadiness'
+import type { TenantContext } from '@/lib/tenant/context'
 
 import {
   resolveProBookingClient,
@@ -46,6 +47,7 @@ type InviteClientSnapshot = Prisma.ClientProfileGetPayload<{
 export type CreateProBookingWithClientArgs = {
   professionalId: string
   actorUserId: string
+  tenantContext: TenantContext
   overrideReason: string | null
   requestId?: string | null
   idempotencyKey?: string | null
@@ -254,6 +256,7 @@ async function tryCreateInvite(args: {
 async function tryEnqueueInviteDelivery(args: {
   professionalId: string
   actorUserId: string
+  tenantContext: TenantContext
   bookingId: string
   clientId: string
   clientUserId: string | null
@@ -261,6 +264,7 @@ async function tryEnqueueInviteDelivery(args: {
 }): Promise<void> {
   try {
     await createClientClaimInviteDelivery({
+      tenantContext: args.tenantContext,
       professionalId: args.professionalId,
       clientId: args.clientId,
       bookingId: args.bookingId,
@@ -441,6 +445,7 @@ export async function createProBookingWithClient(
       await tryEnqueueInviteDelivery({
         professionalId: args.professionalId,
         actorUserId: args.actorUserId,
+        tenantContext: args.tenantContext,
         bookingId: bookingResult.booking.id,
         clientId: resolvedClient.clientId,
         clientUserId: resolvedClient.clientUserId,

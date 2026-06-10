@@ -1,9 +1,11 @@
 import { NotificationChannel, NotificationEventKey, Prisma } from '@prisma/client'
 
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import type { TenantContext } from '@/lib/tenant/context'
+
 import { type NotificationTemplateKey } from '../eventKeys'
 
 const DEFAULT_TEMPLATE_VERSION = 1
-const BRAND_PREFIX = 'TOVIS'
 const MAX_EMAIL_SUBJECT = 160
 const MAX_SMS_TEXT = 320
 
@@ -49,22 +51,23 @@ export type RenderNotificationContentArgs = {
   channel: NotificationChannel
   templateKey: NotificationTemplateKey
   templateVersion?: number | null
+  tenantContext: TenantContext
   dispatch: NotificationRenderDispatchLike
 }
 
 type TemplateRendererSet = {
-  inApp: (dispatch: NotificationRenderDispatchLike) => Omit<
-    RenderedInAppNotificationContent,
-    'templateKey' | 'templateVersion'
-  >
-  sms: (dispatch: NotificationRenderDispatchLike) => Omit<
-    RenderedSmsNotificationContent,
-    'templateKey' | 'templateVersion'
-  >
-  email: (dispatch: NotificationRenderDispatchLike) => Omit<
-    RenderedEmailNotificationContent,
-    'templateKey' | 'templateVersion'
-  >
+  inApp: (
+    dispatch: NotificationRenderDispatchLike,
+    brandName: string,
+  ) => Omit<RenderedInAppNotificationContent, 'templateKey' | 'templateVersion'>
+  sms: (
+    dispatch: NotificationRenderDispatchLike,
+    brandName: string,
+  ) => Omit<RenderedSmsNotificationContent, 'templateKey' | 'templateVersion'>
+  email: (
+    dispatch: NotificationRenderDispatchLike,
+    brandName: string,
+  ) => Omit<RenderedEmailNotificationContent, 'templateKey' | 'templateVersion'>
 }
 
 function normalizeTemplateVersion(value: number | null | undefined): number {
@@ -151,9 +154,9 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;')
 }
 
-function buildBrandSubject(title: string): string {
+function buildBrandSubject(title: string, brandName: string): string {
   const normalizedTitle = normalizeText(title)
-  const subject = normalizedTitle ? `${BRAND_PREFIX}: ${normalizedTitle}` : BRAND_PREFIX
+  const subject = normalizedTitle ? `${brandName}: ${normalizedTitle}` : brandName
   return clip(subject, MAX_EMAIL_SUBJECT)
 }
 
@@ -167,6 +170,7 @@ function buildEmailText(args: {
   body: string
   href: string
   ctaLabel: string
+  brandName: string
 }): string {
   const lines = [args.title]
 
@@ -178,7 +182,7 @@ function buildEmailText(args: {
     lines.push('', `${args.ctaLabel}: ${args.href}`)
   }
 
-  lines.push('', `Sent by ${BRAND_PREFIX}`)
+  lines.push('', `Sent by ${args.brandName}`)
 
   return lines.join('\n')
 }
@@ -188,12 +192,13 @@ function buildEmailHtml(args: {
   body: string
   href: string
   ctaLabel: string
+  brandName: string
 }): string {
   const safeTitle = escapeHtml(args.title)
   const safeBody = escapeHtml(args.body)
   const safeHref = escapeHtml(args.href)
   const safeCtaLabel = escapeHtml(args.ctaLabel)
-  const safeBrand = escapeHtml(BRAND_PREFIX)
+  const safeBrand = escapeHtml(args.brandName)
 
   const bodyParagraph = safeBody ? `<p>${safeBody}</p>` : ''
   const linkParagraph = safeHref
@@ -226,36 +231,38 @@ function buildStandardTemplateRenderer(ctaLabel: string): TemplateRendererSet {
       }
     },
 
-    sms(dispatch) {
+    sms(dispatch, brandName) {
       const title = normalizeText(dispatch.title)
       const body = normalizeText(dispatch.body)
       const href = buildExternalAppHref(dispatch.href)
 
       return {
         channel: NotificationChannel.SMS,
-        text: joinSmsParts([`${BRAND_PREFIX}: ${title}`, body, href]),
+        text: joinSmsParts([`${brandName}: ${title}`, body, href]),
       }
     },
 
-    email(dispatch) {
+    email(dispatch, brandName) {
       const title = normalizeText(dispatch.title)
       const body = normalizeText(dispatch.body)
       const href = buildExternalAppHref(dispatch.href)
 
       return {
         channel: NotificationChannel.EMAIL,
-        subject: buildBrandSubject(title),
+        subject: buildBrandSubject(title, brandName),
         text: buildEmailText({
           title,
           body,
           href,
           ctaLabel,
+          brandName,
         }),
         html: buildEmailHtml({
           title,
           body,
           href,
           ctaLabel,
+          brandName,
         }),
       }
     },
@@ -357,10 +364,11 @@ export function renderNotificationContent(
 ): RenderedNotificationContent {
   const templateVersion = normalizeTemplateVersion(args.templateVersion)
   const renderer = getTemplateRenderer(args.templateKey)
+  const brandName = getBrandForTenantContext(args.tenantContext).displayName
 
   if (args.channel === NotificationChannel.IN_APP) {
     return {
-      ...renderer.inApp(args.dispatch),
+      ...renderer.inApp(args.dispatch, brandName),
       templateKey: args.templateKey,
       templateVersion,
     }
@@ -368,14 +376,14 @@ export function renderNotificationContent(
 
   if (args.channel === NotificationChannel.SMS) {
     return {
-      ...renderer.sms(args.dispatch),
+      ...renderer.sms(args.dispatch, brandName),
       templateKey: args.templateKey,
       templateVersion,
     }
   }
 
   return {
-    ...renderer.email(args.dispatch),
+    ...renderer.email(args.dispatch, brandName),
     templateKey: args.templateKey,
     templateVersion,
   }

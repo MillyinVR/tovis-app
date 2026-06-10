@@ -3,6 +3,8 @@ import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { logAuthEvent } from '@/lib/observability/authEvents'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import type { TenantContext } from '@/lib/tenant/context'
 
 const POSTMARK_SEND_URL = 'https://api.postmarkapp.com/email'
 
@@ -160,14 +162,15 @@ export async function markEmailVerificationTokenUsed(args: {
 export async function sendVerificationEmail(args: {
   to: string
   verifyUrl: string
+  brandName: string
 }): Promise<void> {
   const apiToken = envOrThrow('POSTMARK_SERVER_TOKEN')
   const fromEmail = envOrThrow('POSTMARK_FROM_EMAIL')
   const messageStream = envOrNull('POSTMARK_MESSAGE_STREAM')
 
-  const subject = 'Verify your email for TOVIS'
+  const subject = `Verify your email for ${args.brandName}`
   const text = [
-    'Verify your email to finish setting up your TOVIS account.',
+    `Verify your email to finish setting up your ${args.brandName} account.`,
     '',
     `Open this link: ${args.verifyUrl}`,
     '',
@@ -176,7 +179,7 @@ export async function sendVerificationEmail(args: {
   ].join('\n')
 
   const html = [
-    '<p>Verify your email to finish setting up your TOVIS account.</p>',
+    `<p>Verify your email to finish setting up your ${args.brandName} account.</p>`,
     `<p><a href="${args.verifyUrl}">Verify your email</a></p>`,
     '<p>This link expires in 24 hours.</p>',
     '<p>If you did not create this account, you can ignore this email.</p>',
@@ -236,11 +239,13 @@ export async function issueAndSendEmailVerification(args: {
   userId: string
   email: string
   appUrl: string
+  tenantContext: TenantContext
   next?: string | null
   intent?: string | null
   inviteToken?: string | null
   tx?: Prisma.TransactionClient
 }) {
+  const brand = getBrandForTenantContext(args.tenantContext)
   const issued = await createEmailVerificationToken({
     userId: args.userId,
     email: args.email,
@@ -260,6 +265,7 @@ export async function issueAndSendEmailVerification(args: {
     await sendVerificationEmail({
       to: args.email,
       verifyUrl,
+      brandName: brand.displayName,
     })
   } catch (error) {
     await markEmailVerificationTokenUsed({

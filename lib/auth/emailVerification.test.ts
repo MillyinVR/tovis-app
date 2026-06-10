@@ -27,6 +27,7 @@ import {
   markEmailVerificationTokenUsed,
   sendVerificationEmail,
 } from './emailVerification'
+import { rootTenantContext } from '@/lib/tenant/context'
 
 const ORIGINAL_ENV = { ...process.env }
 
@@ -177,6 +178,7 @@ describe('lib/auth/emailVerification', () => {
     )
 
     await sendVerificationEmail({
+      brandName: 'TOVIS',
       to: 'user@example.com',
       verifyUrl: 'https://app.tovis.app/verify-email?token=abc',
     })
@@ -223,6 +225,7 @@ describe('lib/auth/emailVerification', () => {
 
     await expect(
       sendVerificationEmail({
+      brandName: 'TOVIS',
         to: 'user@example.com',
         verifyUrl: 'https://app.tovis.app/verify-email?token=abc',
       }),
@@ -248,6 +251,7 @@ describe('lib/auth/emailVerification', () => {
 
     await expect(
       sendVerificationEmail({
+      brandName: 'TOVIS',
         to: 'user@example.com',
         verifyUrl: 'https://app.tovis.app/verify-email?token=abc',
       }),
@@ -266,6 +270,7 @@ describe('lib/auth/emailVerification', () => {
     )
 
     const result = await issueAndSendEmailVerification({
+      tenantContext: rootTenantContext('tenant_root'),
       userId: 'user_1',
       email: 'user@example.com',
       appUrl: 'https://app.tovis.app',
@@ -303,6 +308,7 @@ describe('lib/auth/emailVerification', () => {
 
     await expect(
       issueAndSendEmailVerification({
+      tenantContext: rootTenantContext('tenant_root'),
         userId: 'user_1',
         email: 'user@example.com',
         appUrl: 'https://app.tovis.app',

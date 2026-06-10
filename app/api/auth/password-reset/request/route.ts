@@ -19,6 +19,7 @@ import {
 } from '@/lib/observability/authEvents'
 import { prisma } from '@/lib/prisma'
 import { emailLookupHashV2 } from '@/lib/security/crypto/hashLookup'
+import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 
 export const dynamic = 'force-dynamic'
 
@@ -144,6 +145,7 @@ export async function POST(req: Request) {
       userId: user.id,
       email: userEmail,
       appUrl,
+      tenantContext: await resolveTenantContextForRequest(req),
       ip,
       userAgent,
     })
