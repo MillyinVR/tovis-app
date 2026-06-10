@@ -46,6 +46,11 @@ jobs:
 
       JWT_SECRET: ci-test-jwt-secret-do-not-use-in-production
       NEXTAUTH_SECRET: test-nextauth-secret
+      AUTH_TRUSTED_IP_HEADER: x-forwarded-for
+
+      # Throwaway CI-only keyring for contact lookup blind indexes; must be a
+      # JSON object of {keyVersion: base64 32-byte key} including version "1".
+      PII_LOOKUP_HMAC_KEYS_JSON: '{"1":"etfeByiHOVyNpw8UkYzTNJd5Qw7H6otd6zcVsNknnEo="}'
 
       SUPABASE_URL: http://127.0.0.1:54321
       NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
