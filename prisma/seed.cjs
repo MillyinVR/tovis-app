@@ -798,6 +798,15 @@ async function enqueueSeedLookScoringJobs(lookPostId) {
 async function main() {
   console.log('SEED DATABASE_URL:', process.env.DATABASE_URL)
 
+  // Reserved root tenant — every seeded row belongs to the TOVIS marketplace.
+  // Must match lib/tenant/constants.ts (TOVIS_ROOT_TENANT_SLUG).
+  await prisma.tenant.upsert({
+    where: { slug: 'tovis-root' },
+    update: {},
+    create: { slug: 'tovis-root', name: 'TOVIS', isActive: true },
+    select: { id: true },
+  })
+
   const seedPassword = process.env.SEED_TEST_PASSWORD || 'password123'
 
   const proEmail = normalizeEmail('pro@tovis.app')
