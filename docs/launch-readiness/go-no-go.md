@@ -9,7 +9,7 @@ Primary dashboard surface: Sentry-first
 Primary private-beta alerting path: Slack-first, unless an approved alternate alert path is documented here  
 Public-launch escalation: BLOCKED until named backup owner and tested P1 escalation path exist  
 Primary owner: Tori  
-Backup owner: TODO — public rollout blocker
+Backup owner: NONE — solo operator; accepted private-beta risk (2026-06-09); public rollout blocker
 
 This document is the launch decision gate for TOVIS. It should block launch unless the required proof exists. Do not mark an item green because the code “probably works.” Link the command output, dashboard, runbook, staging proof, production-safe synthetic proof, or PR that proves it.
 
@@ -39,7 +39,7 @@ This document is the launch decision gate for TOVIS. It should block launch unle
 | Live Sentry dashboard proof | TODO | Dashboard sections still need links/evidence |
 | Synthetic alert routing | PASS / RUNBOOK LINK TODO | Production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts` on 2026-06-08 at 6:31 PM local. Event ID `f7a0d19cb4a040a3a21f4679086f166f`; alert key `launch-readiness.synthetic-sentry-alert.v2`; Slack short ID `TOVIS-APP-K`. Runbook link in Slack message and formal acknowledgement timing still TODO. |
 | Slack alert routing | PASS / RUNBOOK LINK TODO | Paid Sentry plan enabled; Sentry app added to `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered a test notification to Slack; production-safe app-generated synthetic alert routed to Slack on 2026-06-08. |
-| Backup owner | BLOCKED | Required before public rollout |
+| Backup owner | ACCEPTED RISK (PRIVATE BETA) / BLOCKED (PUBLIC) | Solo operator; single-owner risk accepted 2026-06-09 per RISK-001; named backup required before public rollout |
 | Public P1 escalation | BLOCKED | Required before public rollout unless explicitly waived |
 
 ---
@@ -93,7 +93,7 @@ A gate is not complete without evidence.
 | Slack alert destination exists | PASS / RUNBOOK LINK TODO | Tori | docs/launch-readiness/slack-alerts.md; docs/launch-readiness/oncall.md; docs/launch-readiness/test-proof.md | 2026-06-08 | `#tovis-ops-alerts` exists, Sentry app is added, saved Sentry issue-alert rule delivered a test notification, and production-safe app-generated synthetic alert routed to Slack. Runbook link in Slack message still TODO. |
 | P1/P2 alert map exists | TODO / PARTIAL | Tori | docs/launch-readiness/slack-alerts.md | 2026-06-07 | Alert map and runbook links exist, but thresholds, dashboard links, launch-specific alert rules, and launch-specific verification are still TODO. |
 | On-call owner is named | PASS | Tori | docs/launch-readiness/oncall.md | TODO | Tori is primary owner. |
-| Backup owner status is explicit | PASS FOR PRIVATE BETA ONLY | Tori | docs/launch-readiness/oncall.md | TODO | Missing backup is allowed for private beta only if accepted; public rollout remains blocked. |
+| Backup owner status is explicit | PASS FOR PRIVATE BETA ONLY | Tori | docs/launch-readiness/oncall.md; docs/launch-readiness/risk-register.md RISK-001 | 2026-06-09 | Tori is the sole project owner; no backup exists. Single-owner risk explicitly accepted for private beta on 2026-06-09. Public rollout remains blocked until a named backup exists. |
 | Synthetic alert tested | PASS / FORMAL ACK TIMING TODO | Tori | docs/launch-readiness/slack-alerts.md; docs/launch-readiness/oncall.md; docs/launch-readiness/test-proof.md | 2026-06-08 | Production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts`; event ID `f7a0d19cb4a040a3a21f4679086f166f`; alert key `launch-readiness.synthetic-sentry-alert.v2`; Slack short ID `TOVIS-APP-K`. Tori observed the alert in Slack; formal acknowledgement timing and runbook-link-in-message remain TODO. |
 | Private beta checklist complete | TODO | Tori | docs/launch-readiness/private-beta-checklist.md | TODO | Must include cohort, support path, rollback trigger. |
 | Risk register created and reviewed | TODO | Tori | docs/launch-readiness/risk-register.md | TODO | High risks must have owner and mitigation. |
@@ -484,7 +484,7 @@ These are not automatically launch blockers if tracked and accepted, but they mu
 | Message deletion implementation | Deferred until retention/ownership policy is converted into code | docs/privacy/phase-1-remaining-work.md |
 | Storage object byte deletion workflow | Deferred follow-up; must be tracked for privacy operations | docs/privacy/phase-1-remaining-work.md |
 | Launch-environment backfill reruns | Required before public launch if launch env has relevant rows | docs/privacy/phase-1-remaining-work.md |
-| Missing named backup owner | Allowed only as private-beta accepted risk; public launch blocker | docs/launch-readiness/oncall.md |
+| Missing named backup owner | ACCEPTED as private-beta risk on 2026-06-09 (solo operator, recorded in RISK-001); public launch blocker | docs/launch-readiness/oncall.md, docs/launch-readiness/risk-register.md |
 | Sentry-to-Slack alert routing | Saved Sentry issue-alert delivery and production-safe app-generated synthetic alert routing are proven; remaining follow-ups are runbook-link-in-message, formal acknowledgement timing, route-specific thresholds, dashboard coverage, and public P1 escalation | docs/launch-readiness/slack-alerts.md, docs/launch-readiness/oncall.md, docs/launch-readiness/test-proof.md |
 | Deployed staging dashboard proof missing | Private beta/public rollout blocker until linked or accepted | docs/launch-readiness/sentry-dashboard.md |
 

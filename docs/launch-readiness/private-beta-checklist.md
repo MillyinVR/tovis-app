@@ -6,7 +6,7 @@ Phase: Phase 2 — Launch ops proof
 Scope: Controlled private beta only  
 Current default decision: NO-GO until required evidence is linked or explicitly accepted  
 Primary owner: Tori  
-Backup owner: TODO — required before public rollout, optional only as an accepted private-beta risk  
+Backup owner: NONE — solo operator; accepted private-beta risk (2026-06-09, RISK-001); required before public rollout  
 Alerting path: Slack-first through paid Sentry issue alerts routed to `#tovis-ops-alerts`; production-safe app-generated synthetic alert routed successfully on 2026-06-08; runbook-link-in-message and formal acknowledgement timing still TODO  
 Dashboard surface: Sentry-first, with provider dashboards linked where needed
 
@@ -43,7 +43,7 @@ Private beta exists to prove:
 | Live Sentry dashboard proof | TODO | Dashboard sections still need links/evidence |
 | Synthetic alert routing | PASS / RUNBOOK LINK TODO | Production-safe app-generated synthetic Sentry alert routed to `#tovis-ops-alerts` on 2026-06-08 at 6:31 PM local. Event ID `f7a0d19cb4a040a3a21f4679086f166f`; alert key `launch-readiness.synthetic-sentry-alert.v2`; Slack short ID `TOVIS-APP-K`. Runbook link in Slack message and formal acknowledgement timing still TODO. |
 | Slack alert routing | PASS / RUNBOOK LINK TODO | Paid Sentry plan enabled; Sentry app added to `#tovis-ops-alerts`; saved Sentry issue-alert rule delivered a test notification to Slack; production-safe app-generated synthetic alert routed to Slack on 2026-06-08. |
-| Backup owner | TODO | Required before public rollout; private-beta accepted risk only |
+| Backup owner | ACCEPTED RISK (PRIVATE BETA) | Solo operator; single-owner risk accepted 2026-06-09 (go-no-go.md, RISK-001); named backup required before public rollout |
 | Private beta support path | TODO | Required before private beta |
 
 ---

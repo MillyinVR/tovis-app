@@ -6,8 +6,8 @@ Phase: Phase 2 — Launch ops proof
 Scope: Private beta and public rollout readiness  
 Current default risk posture: Private beta NO-GO until live dashboard, alert routing, rollback, and launch-critical staging evidence are linked  
 Primary owner: Tori  
-Backup owner: TODO — public rollout blocker  
-Last reviewed: 2026-06-07
+Backup owner: NONE — solo operator; accepted private-beta risk (2026-06-09, RISK-001); public rollout blocker  
+Last reviewed: 2026-06-09
 
 This file tracks known launch risks, owners, mitigations, and launch decisions. A risk can be accepted only when it is understood, owned, and tied to a launch-stage decision.
 
@@ -73,7 +73,7 @@ The following risks cannot be casually accepted:
 | Severity | Open | Mitigated | Accepted private beta | Blocks private beta | Blocks public rollout |
 |---|---:|---:|---:|---:|---:|
 | Critical | 2 | 0 | 0 | 1 | 2 |
-| High | 6 | 2 | 0 | 2 | 6 |
+| High | 5 | 2 | 1 | 2 | 6 |
 | Medium | 5 | 1 | 4 | 1 | 3 |
 | Low | 0 | 0 | 0 | 0 | 0 |
 
@@ -89,18 +89,18 @@ This table is a reviewed snapshot, not an automatically generated source of trut
 |---|---|
 | Severity | High |
 | Owner | Tori |
-| Backup | TODO |
-| Decision | BLOCKS PUBLIC ROLLOUT |
-| Private beta impact | Can be accepted for small controlled beta if explicitly signed off. |
+| Backup | NONE — Tori is the sole project owner; no second person exists to name. |
+| Decision | ACCEPTED FOR PRIVATE BETA (2026-06-09); BLOCKS PUBLIC ROLLOUT |
+| Private beta impact | Accepted for small controlled beta on 2026-06-09; acceptance recorded in go-no-go.md. |
 | Public rollout impact | Blocks public rollout. |
-| Mitigation | Assign a named backup owner before public launch. |
-| Verification | Update docs/launch-readiness/oncall.md with backup owner and escalation path. |
+| Mitigation | Solo-operator beta constraints: small cohort, explicit support hours, documented rollback procedure. Recruit or contract a named backup owner before public launch. |
+| Verification | Update docs/launch-readiness/oncall.md with backup owner and escalation path when one exists. |
 | Related docs | docs/launch-readiness/oncall.md, docs/launch-readiness/go-no-go.md |
-| Last reviewed | 2026-06-07 |
+| Last reviewed | 2026-06-09 |
 
 ### Notes
 
-Private beta may proceed with Tori as primary owner only if the cohort is small, support hours are explicit, and this risk is accepted in go-no-go.md.
+Tori is the only owner of the project; there is currently no second person who could serve as backup. The single-owner risk is explicitly accepted for private beta as of 2026-06-09 (recorded in go-no-go.md), conditional on a small cohort and explicit support hours. Public rollout remains blocked until a named backup owner exists.
 
 ---
 

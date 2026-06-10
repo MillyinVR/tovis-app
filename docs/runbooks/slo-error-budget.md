@@ -6,7 +6,7 @@ Phase: Phase 2 — Launch ops proof
 Scope: Private beta and public rollout reliability readiness  
 Incident area: API error rate, latency, SLO/error budget burn, broad reliability degradation  
 Primary owner: Tori  
-Backup owner: TODO — public rollout blocker  
+Backup owner: NONE — solo operator; accepted private-beta risk (2026-06-09, RISK-001); public rollout blocker  
 Related alert: API error budget burn exceeds threshold  
 Related launch docs:
 - docs/launch-readiness/oncall.md
