@@ -2,7 +2,7 @@
 
 import type { Metadata } from 'next'
 import type { CSSProperties, ReactNode } from 'react'
-import { cookies, headers } from 'next/headers'
+import { cookies } from 'next/headers'
 import { Fraunces, Inter_Tight, JetBrains_Mono } from 'next/font/google'
 
 import './globals.css'
@@ -14,7 +14,8 @@ import '@/lib/brand/proLastMinute.css'
 
 import RoleFooter from '@/app/_components/RoleFooter'
 import { BrandProvider } from '@/lib/brand/BrandProvider'
-import { getBrandConfig } from '@/lib/brand'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
 const interTight = Inter_Tight({
   variable: '--font-body',
@@ -39,10 +40,6 @@ export const dynamic = 'force-dynamic'
 
 type RootLayoutProps = {
   children: ReactNode
-}
-
-type BrandRequestInput = {
-  host: string | null
 }
 
 const bodyClassName = [
@@ -71,19 +68,9 @@ const footerMountStyle: CSSProperties = {
   pointerEvents: 'auto',
 }
 
-async function getBrandRequestInput(): Promise<BrandRequestInput> {
-  const requestHeaders = await headers()
-  const forwardedHost = requestHeaders.get('x-forwarded-host')
-  const host = forwardedHost ?? requestHeaders.get('host')
-
-  return {
-    host,
-  }
-}
-
 export async function generateMetadata(): Promise<Metadata> {
-  const brandInput = await getBrandRequestInput()
-  const brand = getBrandConfig(brandInput)
+  const tenantContext = await resolveTenantContextForLayout()
+  const brand = getBrandForTenantContext(tenantContext)
 
   return {
     title: brand.displayName,
@@ -94,10 +81,13 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function RootLayout({ children }: RootLayoutProps) {
   await cookies()
 
+  const tenantContext = await resolveTenantContextForLayout()
+  const brand = getBrandForTenantContext(tenantContext)
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={bodyClassName}>
-        <BrandProvider>
+        <BrandProvider brand={brand}>
           <div style={appContentStyle}>{children}</div>
 
           <div id="tovis-footer-host" style={footerHostStyle}>

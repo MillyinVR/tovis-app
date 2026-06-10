@@ -1,7 +1,6 @@
 // lib/tenant/resolveTenant.ts
 //
-// Request → tenant context. Skeleton for the white-label domain resolver
-// (Q2 wires this into middleware/layouts). Resolution rule:
+// Request → tenant context. Resolution rule:
 //
 //   1. If the request host exactly matches an active tenant's customDomain,
 //      resolve that white-label tenant.
@@ -10,6 +9,13 @@
 // The root Tenant row must exist (created by seed/backfill). Resolving
 // before the backfill has run is a deployment-order bug, so it throws
 // loudly instead of inventing a tenant.
+//
+// The root layout resolves a tenant context on every page render, so both
+// lookups here are load-bounded: the root tenant id is memoized for the
+// process lifetime (the reserved row is never deleted or re-slugged), and
+// host → domain lookups go through a bounded TTL cache. Domain mappings
+// change rarely; adding/removing a customDomain may take up to
+// TENANT_HOST_CACHE_TTL_MS to be observed, which is acceptable for branding.
 
 import { prisma } from '@/lib/prisma'
 
@@ -31,7 +37,30 @@ export function normalizeHost(host: string | null | undefined): string | null {
   return withoutPort || null
 }
 
+export const TENANT_HOST_CACHE_TTL_MS = 60_000
+
+// Hosts arrive from request headers, so the cache must stay bounded even if
+// a client sprays arbitrary Host values. Past the cap the whole map resets —
+// crude, but it keeps the worst case at one extra DB lookup per request.
+const TENANT_HOST_CACHE_MAX_ENTRIES = 500
+
+type CachedHostLookup = {
+  tenant: { id: string; slug: string } | null
+  expiresAt: number
+}
+
+let cachedRootTenantId: string | null = null
+const hostLookupCache = new Map<string, CachedHostLookup>()
+
+/** Test-only: reset process-level tenant resolution caches. */
+export function clearTenantResolutionCache(): void {
+  cachedRootTenantId = null
+  hostLookupCache.clear()
+}
+
 export async function getRootTenantId(): Promise<string> {
+  if (cachedRootTenantId) return cachedRootTenantId
+
   const root = await prisma.tenant.findUnique({
     where: { slug: TOVIS_ROOT_TENANT_SLUG },
     select: { id: true },
@@ -44,6 +73,7 @@ export async function getRootTenantId(): Promise<string> {
     )
   }
 
+  cachedRootTenantId = root.id
   return root.id
 }
 
@@ -66,16 +96,40 @@ export async function ensureRootTenant(): Promise<string> {
   return root.id
 }
 
+async function lookupTenantByCustomDomain(
+  normalizedHost: string,
+): Promise<{ id: string; slug: string } | null> {
+  const now = Date.now()
+  const cached = hostLookupCache.get(normalizedHost)
+
+  if (cached && cached.expiresAt > now) {
+    return cached.tenant
+  }
+
+  const tenant = await prisma.tenant.findFirst({
+    where: { customDomain: normalizedHost, isActive: true },
+    select: { id: true, slug: true },
+  })
+
+  if (hostLookupCache.size >= TENANT_HOST_CACHE_MAX_ENTRIES) {
+    hostLookupCache.clear()
+  }
+
+  hostLookupCache.set(normalizedHost, {
+    tenant,
+    expiresAt: now + TENANT_HOST_CACHE_TTL_MS,
+  })
+
+  return tenant
+}
+
 export async function resolveTenantByHost(
   host: string | null | undefined,
 ): Promise<TenantContext> {
   const normalized = normalizeHost(host)
 
   if (normalized) {
-    const tenant = await prisma.tenant.findFirst({
-      where: { customDomain: normalized, isActive: true },
-      select: { id: true, slug: true },
-    })
+    const tenant = await lookupTenantByCustomDomain(normalized)
 
     if (tenant && tenant.slug !== TOVIS_ROOT_TENANT_SLUG) {
       return whiteLabelTenantContext({ tenantId: tenant.id, slug: tenant.slug })

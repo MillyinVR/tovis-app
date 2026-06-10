@@ -14,8 +14,19 @@ type BrandContextValue = {
 
 const BrandContext = createContext<BrandContextValue | null>(null)
 
-export function BrandProvider({ children }: { children: React.ReactNode }) {
-  const brand = useMemo(() => getBrandConfig(), [])
+type BrandProviderProps = {
+  children: React.ReactNode
+  /**
+   * Tenant-resolved brand from the server (root layout via
+   * getBrandForTenantContext). When omitted — detached client trees and
+   * tests — falls back to the env/host default chain, which is only safe
+   * for root-brand surfaces.
+   */
+  brand?: BrandConfig
+}
+
+export function BrandProvider({ children, brand: brandProp }: BrandProviderProps) {
+  const brand = useMemo(() => brandProp ?? getBrandConfig(), [brandProp])
   const [mode, setMode] = useState<BrandMode>(() => getInitialMode(brand))
 
   const tokens = brand.tokensByMode[mode]
