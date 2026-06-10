@@ -167,7 +167,9 @@ export async function getTurnstileToken(action: string): Promise<string> {
       widgetId = turnstile.render(container, {
         sitekey: siteKey,
         action,
-        size: 'invisible',
+        size: 'compact',
+        execution: 'execute',
+        appearance: 'interaction-only',
 
         callback(token: unknown) {
           window.clearTimeout(timeout)
