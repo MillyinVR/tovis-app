@@ -336,6 +336,7 @@ export default function VerifyPhonePage() {
 
     return {
       isFullyVerified: nextStatus.isFullyVerified,
+      sessionKind: nextStatus.sessionKind,
       nextUrl,
       role: nextStatus.role,
     }
@@ -351,7 +352,11 @@ export default function VerifyPhonePage() {
 
         if (cancelled) return
 
-        if (result.isFullyVerified) {
+        // Only leave once the session cookie is ACTIVE — the status call
+        // upgrades stale VERIFICATION sessions itself, so this holds on the
+        // first load. Redirecting on isFullyVerified alone loops against the
+        // app shells, which reject VERIFICATION-kind sessions.
+        if (result.isFullyVerified && result.sessionKind === 'ACTIVE') {
           const dest =
             nextFromQuery ?? result.nextUrl ?? buildDefaultNextUrl(result.role)
           router.replace(dest)
@@ -600,7 +605,7 @@ export default function VerifyPhonePage() {
       const refreshed = await refreshStatus()
       router.refresh()
 
-      if (refreshed.isFullyVerified) {
+      if (refreshed.isFullyVerified && refreshed.sessionKind === 'ACTIVE') {
         const dest =
           nextFromQuery ??
           recoveredNextUrl ??
