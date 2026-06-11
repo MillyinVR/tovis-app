@@ -4,6 +4,7 @@ import { AuthVerificationPurpose } from '@prisma/client'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import {
   getAppUrlFromRequest,
+  isInactiveRecipientError,
   issueAndSendEmailVerification,
 } from '@/lib/auth/emailVerification'
 import {
@@ -25,7 +26,7 @@ const ROUTE = 'internal.cron.retry_verification_emails'
 
 type RetryVerificationFailure = {
   userId: string
-  code: 'EMAIL_NOT_CONFIGURED' | 'EMAIL_SEND_FAILED'
+  code: 'EMAIL_NOT_CONFIGURED' | 'EMAIL_SEND_FAILED' | 'EMAIL_RECIPIENT_INACTIVE'
 }
 
 function readEnv(name: string): string | null {
@@ -57,6 +58,8 @@ function readTake(req: Request): number {
 }
 
 function classifyEmailError(error: unknown): RetryVerificationFailure['code'] {
+  if (isInactiveRecipientError(error)) return 'EMAIL_RECIPIENT_INACTIVE'
+
   const message = error instanceof Error ? error.message : ''
   return message.includes('Missing env var: POSTMARK_')
     ? 'EMAIL_NOT_CONFIGURED'
@@ -94,6 +97,7 @@ async function runJob(req: Request) {
   const candidates = await prisma.user.findMany({
     where: {
       emailVerifiedAt: null,
+      emailSendPermanentlyFailedAt: null,
       createdAt: {
         lte: olderThan,
       },
@@ -120,6 +124,7 @@ async function runJob(req: Request) {
   let sentCount = 0
   let failedCount = 0
   let skippedCount = 0
+  let permanentlyFailedCount = 0
 
   const failed: RetryVerificationFailure[] = []
 
@@ -167,6 +172,35 @@ async function runJob(req: Request) {
         userId: candidate.id,
         error,
       })
+
+      if (code === 'EMAIL_RECIPIENT_INACTIVE') {
+        try {
+          await prisma.user.update({
+            where: { id: candidate.id },
+            data: { emailSendPermanentlyFailedAt: now },
+          })
+
+          permanentlyFailedCount += 1
+
+          logAuthEvent({
+            level: 'warn',
+            event: 'auth.email.retry_verification.permanently_failed',
+            route: ROUTE,
+            provider: 'postmark',
+            code,
+            userId: candidate.id,
+          })
+        } catch (markError: unknown) {
+          captureAuthException({
+            event: 'auth.email.retry_verification.mark_permanent_failed',
+            route: ROUTE,
+            provider: 'postmark',
+            code,
+            userId: candidate.id,
+            error: markError,
+          })
+        }
+      }
     }
   }
 
@@ -176,6 +210,7 @@ async function runJob(req: Request) {
     sentCount,
     failedCount,
     skippedCount,
+    permanentlyFailedCount,
     take,
     processedAt: now.toISOString(),
     failed,

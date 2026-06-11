@@ -23,8 +23,10 @@ import {
   buildVerifyEmailUrl,
   createEmailVerificationToken,
   getAppUrlFromRequest,
+  isInactiveRecipientError,
   issueAndSendEmailVerification,
   markEmailVerificationTokenUsed,
+  PostmarkSendError,
   sendVerificationEmail,
 } from './emailVerification'
 import { rootTenantContext } from '@/lib/tenant/context'
@@ -223,16 +225,56 @@ describe('lib/auth/emailVerification', () => {
       }),
     )
 
-    await expect(
-      sendVerificationEmail({
+    const error = await sendVerificationEmail({
       brandName: 'TOVIS',
-        to: 'user@example.com',
-        verifyUrl: 'https://app.tovis.app/verify-email?token=abc',
-      }),
-    ).rejects.toThrow('Sender signature not found.')
+      to: 'user@example.com',
+      verifyUrl: 'https://app.tovis.app/verify-email?token=abc',
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    )
+
+    expect(error).toBeInstanceOf(PostmarkSendError)
+    expect((error as PostmarkSendError).message).toBe(
+      'Sender signature not found.',
+    )
+    expect((error as PostmarkSendError).errorCode).toBeNull()
+    expect(isInactiveRecipientError(error)).toBe(false)
   })
 
   it('throws when Postmark responds with a non-zero ErrorCode', async () => {
+    process.env.POSTMARK_SERVER_TOKEN = 'pm_test_token'
+    process.env.POSTMARK_FROM_EMAIL = 'hello@tovis.app'
+
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ErrorCode: 300,
+          Message: 'Invalid email request.',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+
+    const error = await sendVerificationEmail({
+      brandName: 'TOVIS',
+      to: 'user@example.com',
+      verifyUrl: 'https://app.tovis.app/verify-email?token=abc',
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    )
+
+    expect(error).toBeInstanceOf(PostmarkSendError)
+    expect((error as PostmarkSendError).message).toBe('Invalid email request.')
+    expect((error as PostmarkSendError).errorCode).toBe(300)
+    expect(isInactiveRecipientError(error)).toBe(false)
+  })
+
+  it('flags an inactive-recipient rejection (ErrorCode 406) on a 200 response', async () => {
     process.env.POSTMARK_SERVER_TOKEN = 'pm_test_token'
     process.env.POSTMARK_FROM_EMAIL = 'hello@tovis.app'
 
@@ -249,13 +291,61 @@ describe('lib/auth/emailVerification', () => {
       ),
     )
 
-    await expect(
-      sendVerificationEmail({
+    const error = await sendVerificationEmail({
       brandName: 'TOVIS',
-        to: 'user@example.com',
-        verifyUrl: 'https://app.tovis.app/verify-email?token=abc',
-      }),
-    ).rejects.toThrow('Inactive recipient.')
+      to: 'user@example.com',
+      verifyUrl: 'https://app.tovis.app/verify-email?token=abc',
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    )
+
+    expect(error).toBeInstanceOf(PostmarkSendError)
+    expect((error as PostmarkSendError).message).toBe('Inactive recipient.')
+    expect((error as PostmarkSendError).errorCode).toBe(406)
+    expect(isInactiveRecipientError(error)).toBe(true)
+  })
+
+  it('flags an inactive-recipient rejection (ErrorCode 406) on a 422 response', async () => {
+    process.env.POSTMARK_SERVER_TOKEN = 'pm_test_token'
+    process.env.POSTMARK_FROM_EMAIL = 'hello@tovis.app'
+
+    mockFetch.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ErrorCode: 406,
+          Message:
+            'You tried to send to recipient(s) that have been marked as inactive.',
+        }),
+        {
+          status: 422,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+
+    const error = await sendVerificationEmail({
+      brandName: 'TOVIS',
+      to: 'user@example.com',
+      verifyUrl: 'https://app.tovis.app/verify-email?token=abc',
+    }).then(
+      () => null,
+      (caught: unknown) => caught,
+    )
+
+    expect(error).toBeInstanceOf(PostmarkSendError)
+    expect((error as PostmarkSendError).message).toBe(
+      'You tried to send to recipient(s) that have been marked as inactive.',
+    )
+    expect((error as PostmarkSendError).errorCode).toBe(406)
+    expect(isInactiveRecipientError(error)).toBe(true)
+  })
+
+  it('does not flag plain errors as inactive-recipient failures', () => {
+    expect(isInactiveRecipientError(new Error('Inactive recipient.'))).toBe(
+      false,
+    )
+    expect(isInactiveRecipientError(null)).toBe(false)
   })
 
   it('issues, sends, and logs a successful verification email event', async () => {
