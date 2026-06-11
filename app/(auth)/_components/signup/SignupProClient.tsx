@@ -13,6 +13,11 @@ import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
 import { getTurnstileToken } from '@/lib/turnstileClient'
 import { buildVerifyPhoneUrl } from './buildVerifyPhoneUrl'
+import {
+  buildLoginHref,
+  readSignupForwardedParams,
+  sanitizeNextUrl,
+} from './signupSearchParams'
 import { buildTransactionalSmsCheckboxLabel } from '@/lib/transactionalSmsPolicy'
 import { useBrand } from '@/lib/brand/BrandProvider'
 
@@ -20,15 +25,6 @@ type VerificationSendState = boolean | 'pending'
 
 function compactPhoneInputForSubmit(value: string): string {
   return value.trim().replace(/\s+/gu, '')
-}
-
-function sanitizeNextUrl(nextUrl: unknown): string | null {
-  if (typeof nextUrl !== 'string') return null
-  const s = nextUrl.trim()
-  if (!s) return null
-  if (!s.startsWith('/')) return null
-  if (s.startsWith('//')) return null
-  return s
 }
 
 function readVerificationSendState(
@@ -312,13 +308,36 @@ export default function SignupProClient() {
   const sp = useSearchParams()
   const { brand } = useBrand()
 
-  const ti = sp.get('ti')
-  const loginHref = ti ? `/login?ti=${encodeURIComponent(ti)}` : '/login'
+  const {
+    ti,
+    from,
+    nextFromQuery,
+    intent,
+    inviteToken,
+    emailPrefill,
+    phonePrefill,
+    nameParts,
+  } = useMemo(() => readSignupForwardedParams(sp), [sp])
 
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [email, setEmail] = useState('')
+  const loginHref = useMemo(
+    () =>
+      buildLoginHref({
+        role: 'PRO',
+        ti,
+        from,
+        next: nextFromQuery,
+        intent,
+        inviteToken,
+        email: emailPrefill || null,
+        phone: phonePrefill || null,
+      }),
+    [ti, from, nextFromQuery, intent, inviteToken, emailPrefill, phonePrefill],
+  )
+
+  const [firstName, setFirstName] = useState(nameParts.firstName)
+  const [lastName, setLastName] = useState(nameParts.lastName)
+  const [phone, setPhone] = useState(phonePrefill)
+  const [email, setEmail] = useState(emailPrefill)
   const [password, setPassword] = useState('')
   const [tosAccepted, setTosAccepted] = useState(false)
   const [transactionalSmsConsent, setTransactionalSmsConsent] = useState(false)
@@ -566,6 +585,9 @@ export default function SignupProClient() {
           lastName,
           phone: compactPhoneInputForSubmit(phone),
           tapIntentId: ti ?? undefined,
+          next: nextFromQuery ?? undefined,
+          intent: intent ?? undefined,
+          inviteToken: inviteToken ?? undefined,
           businessName: businessName.trim()
             ? businessName.trim()
             : undefined,
@@ -595,7 +617,8 @@ export default function SignupProClient() {
 
       router.refresh()
 
-      const nextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
+      const responseNextUrl = sanitizeNextUrl(readStringField(data, 'nextUrl'))
+      const nextUrl = responseNextUrl ?? nextFromQuery
       const emailVerificationSent = readVerificationSendState(
         data,
         'emailVerificationSent',

@@ -11,6 +11,11 @@ import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
 import { getTurnstileToken } from '@/lib/turnstileClient'
 import { buildVerifyPhoneUrl } from './buildVerifyPhoneUrl'
+import {
+  buildLoginHref,
+  readSignupForwardedParams,
+  sanitizeNextUrl,
+} from './signupSearchParams'
 import { buildTransactionalSmsCheckboxLabel } from '@/lib/transactionalSmsPolicy'
 import { useBrand } from '@/lib/brand/BrandProvider'
 
@@ -33,23 +38,8 @@ type TimeZoneResponse = {
   error?: string
 }
 
-function normalizeTrimmed(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
 function compactPhoneInputForSubmit(value: string): string {
   return value.trim().replace(/\s+/gu, '')
-}
-
-function sanitizeNextUrl(nextUrl: unknown): string | null {
-  if (typeof nextUrl !== 'string') return null
-  const s = nextUrl.trim()
-  if (!s) return null
-  if (!s.startsWith('/')) return null
-  if (s.startsWith('//')) return null
-  return s
 }
 
 function readVerificationSendState(
@@ -59,65 +49,6 @@ function readVerificationSendState(
   const value = data?.[key]
   if (value === 'pending') return 'pending'
   return value === true
-}
-
-function splitFullName(fullName: string | null): {
-  firstName: string
-  lastName: string
-} {
-  if (!fullName) {
-    return { firstName: '', lastName: '' }
-  }
-
-  const parts = fullName
-    .split(/\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-
-  if (parts.length === 0) {
-    return { firstName: '', lastName: '' }
-  }
-
-  if (parts.length === 1) {
-    return { firstName: parts[0] ?? '', lastName: '' }
-  }
-
-  return {
-    firstName: parts[0] ?? '',
-    lastName: parts.slice(1).join(' '),
-  }
-}
-
-function appendIfPresent(
-  params: URLSearchParams,
-  key: string,
-  value: string | null,
-): void {
-  if (value) params.set(key, value)
-}
-
-function buildLoginHref(args: {
-  ti: string | null
-  from: string | null
-  next: string | null
-  intent: string | null
-  inviteToken: string | null
-  email: string | null
-  phone: string | null
-}): string {
-  const params = new URLSearchParams()
-
-  appendIfPresent(params, 'ti', args.ti)
-  appendIfPresent(params, 'from', args.from)
-  appendIfPresent(params, 'next', args.next)
-  appendIfPresent(params, 'intent', args.intent)
-  appendIfPresent(params, 'inviteToken', args.inviteToken)
-  appendIfPresent(params, 'email', args.email)
-  appendIfPresent(params, 'phone', args.phone)
-  params.set('role', 'CLIENT')
-
-  const qs = params.toString()
-  return qs ? `/login?${qs}` : '/login'
 }
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
@@ -267,22 +198,21 @@ export default function SignupClientClient() {
   const sp = useSearchParams()
   const { brand } = useBrand()
 
-  const ti = normalizeTrimmed(sp.get('ti'))
-  const from = sanitizeNextUrl(sp.get('from'))
-  const nextFromQuery = sanitizeNextUrl(sp.get('next')) ?? from
-  const intent = normalizeTrimmed(sp.get('intent'))
-  const inviteToken = normalizeTrimmed(sp.get('inviteToken'))
-  const emailPrefill = normalizeTrimmed(sp.get('email')) ?? ''
-  const phonePrefill = normalizeTrimmed(sp.get('phone')) ?? ''
-
-  const nameParts = useMemo(
-    () => splitFullName(normalizeTrimmed(sp.get('name'))),
-    [sp],
-  )
+  const {
+    ti,
+    from,
+    nextFromQuery,
+    intent,
+    inviteToken,
+    emailPrefill,
+    phonePrefill,
+    nameParts,
+  } = useMemo(() => readSignupForwardedParams(sp), [sp])
 
   const loginHref = useMemo(
     () =>
       buildLoginHref({
+        role: 'CLIENT',
         ti,
         from,
         next: nextFromQuery,
