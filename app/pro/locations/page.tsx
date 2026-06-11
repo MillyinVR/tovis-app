@@ -36,6 +36,11 @@ export default async function ProLocationsPage() {
     redirect('/login?from=/pro/locations')
   }
 
+  const profile = await prisma.professionalProfile.findUnique({
+    where: { id: user.professionalProfile.id },
+    select: { mobileRadiusMiles: true },
+  })
+
   const rows = await prisma.professionalLocation.findMany({
     where: { professionalId: user.professionalProfile.id },
     orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
@@ -79,5 +84,10 @@ export default async function ProLocationsPage() {
     createdAt: r.createdAt.toISOString(),
   }))
 
-  return <LocationsClient initialLocations={initialLocations} />
+  return (
+    <LocationsClient
+      initialLocations={initialLocations}
+      initialMobileRadiusMiles={profile?.mobileRadiusMiles ?? null}
+    />
+  )
 }

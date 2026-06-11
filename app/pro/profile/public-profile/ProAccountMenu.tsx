@@ -128,6 +128,12 @@ export default function ProAccountMenu(props: Props) {
         hint: 'Edit pricing & availability',
       },
       {
+        label: 'Manage locations',
+        href: '/pro/locations',
+        emoji: '📍',
+        hint: 'Salon, suite & mobile base',
+      },
+      {
         label: 'Upload',
         href: props.uploadHref,
         emoji: '⬆️',

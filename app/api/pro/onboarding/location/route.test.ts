@@ -34,9 +34,9 @@ const mocks = vi.hoisted(() => {
   )
 
   const requirePro = vi.fn()
-  const getGoogleMapsKey = vi.fn()
-  const fetchWithTimeout = vi.fn()
-  const safeJson = vi.fn()
+  const googlePlaceDetails = vi.fn()
+  const googleGeocodePostal = vi.fn()
+  const googleTimeZoneId = vi.fn()
 
   const bumpScheduleConfigVersion = vi.fn()
   const refreshLocation = vi.fn()
@@ -45,6 +45,7 @@ const mocks = vi.hoisted(() => {
   const professionalLocation = {
     updateMany: vi.fn(),
     create: vi.fn(),
+    count: vi.fn(),
   }
 
   const professionalProfile = {
@@ -61,9 +62,9 @@ const mocks = vi.hoisted(() => {
     jsonOk,
     jsonFail,
     requirePro,
-    getGoogleMapsKey,
-    fetchWithTimeout,
-    safeJson,
+    googlePlaceDetails,
+    googleGeocodePostal,
+    googleTimeZoneId,
     bumpScheduleConfigVersion,
     refreshLocation,
     buildAddressPrivacyWriteData,
@@ -82,9 +83,12 @@ vi.mock('@/app/api/_utils', () => ({
   jsonFail: mocks.jsonFail,
   pickString: (value: unknown) =>
     typeof value === 'string' && value.trim() ? value.trim() : null,
-  getGoogleMapsKey: mocks.getGoogleMapsKey,
-  fetchWithTimeout: mocks.fetchWithTimeout,
-  safeJson: mocks.safeJson,
+}))
+
+vi.mock('@/app/api/_utils/google', () => ({
+  googlePlaceDetails: mocks.googlePlaceDetails,
+  googleGeocodePostal: mocks.googleGeocodePostal,
+  googleTimeZoneId: mocks.googleTimeZoneId,
 }))
 
 vi.mock('@/app/api/_utils/auth/requirePro', () => ({
@@ -168,94 +172,28 @@ async function readJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T
 }
 
-function googleOkResponse(): Response {
-  return new Response(JSON.stringify({ ok: true }), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  })
-}
-
-function googlePlacePayload() {
+function parsedPlace() {
   return {
-    status: 'OK',
-    result: {
-      place_id: 'place_123',
-      name: 'Vivid Salon',
-      formatted_address: '123 Main St, San Diego, CA 92101',
-      geometry: {
-        location: {
-          lat: 32.715736,
-          lng: -117.161087,
-        },
-      },
-      address_components: [
-        {
-          long_name: 'San Diego',
-          short_name: 'San Diego',
-          types: ['locality'],
-        },
-        {
-          long_name: 'California',
-          short_name: 'CA',
-          types: ['administrative_area_level_1'],
-        },
-        {
-          long_name: '92101',
-          short_name: '92101',
-          types: ['postal_code'],
-        },
-        {
-          long_name: 'United States',
-          short_name: 'US',
-          types: ['country'],
-        },
-      ],
-    },
+    placeId: 'place_123',
+    name: 'Vivid Salon',
+    formattedAddress: '123 Main St, San Diego, CA 92101',
+    lat: 32.715736,
+    lng: -117.161087,
+    city: 'San Diego',
+    state: 'CA',
+    postalCode: '92101',
+    countryCode: 'US',
   }
 }
 
-function googlePostalPayload() {
+function parsedPostal() {
   return {
-    status: 'OK',
-    results: [
-      {
-        geometry: {
-          location: {
-            lat: 32.715736,
-            lng: -117.161087,
-          },
-        },
-        address_components: [
-          {
-            long_name: 'San Diego',
-            short_name: 'San Diego',
-            types: ['locality'],
-          },
-          {
-            long_name: 'California',
-            short_name: 'CA',
-            types: ['administrative_area_level_1'],
-          },
-          {
-            long_name: '92101',
-            short_name: '92101',
-            types: ['postal_code'],
-          },
-          {
-            long_name: 'United States',
-            short_name: 'US',
-            types: ['country'],
-          },
-        ],
-      },
-    ],
-  }
-}
-
-function googleTimeZonePayload() {
-  return {
-    status: 'OK',
-    timeZoneId: 'America/Los_Angeles',
+    lat: 32.715736,
+    lng: -117.161087,
+    city: 'San Diego',
+    state: 'CA',
+    postalCode: '92101',
+    countryCode: 'US',
   }
 }
 
@@ -270,8 +208,9 @@ describe('POST /api/pro/onboarding/location', () => {
       proId: 'pro_123',
     })
 
-    mocks.getGoogleMapsKey.mockReturnValue('google_key')
-    mocks.fetchWithTimeout.mockResolvedValue(googleOkResponse())
+    mocks.googlePlaceDetails.mockResolvedValue(parsedPlace())
+    mocks.googleGeocodePostal.mockResolvedValue(parsedPostal())
+    mocks.googleTimeZoneId.mockResolvedValue('America/Los_Angeles')
     mocks.bumpScheduleConfigVersion.mockResolvedValue(1)
     mocks.refreshLocation.mockResolvedValue(undefined)
     mocks.buildAddressPrivacyWriteData.mockReturnValue(addressPrivacyWriteData)
@@ -286,6 +225,7 @@ describe('POST /api/pro/onboarding/location', () => {
     )
 
     mocks.professionalLocation.updateMany.mockResolvedValue({ count: 1 })
+    mocks.professionalLocation.count.mockResolvedValue(0)
 
     mocks.professionalLocation.create.mockResolvedValue({
       id: 'loc_123',
@@ -361,10 +301,6 @@ describe('POST /api/pro/onboarding/location', () => {
   })
 
   it('creates a draft salon location with address privacy fields, updates profile timezone, and syncs side effects', async () => {
-    mocks.safeJson
-      .mockResolvedValueOnce(googlePlacePayload())
-      .mockResolvedValueOnce(googleTimeZonePayload())
-
     const result = await POST(
       makeRequest({
         mode: 'SALON',
@@ -478,11 +414,35 @@ describe('POST /api/pro/onboarding/location', () => {
     })
   })
 
-  it('creates a draft suite location when mode is SUITE', async () => {
-    mocks.safeJson
-      .mockResolvedValueOnce(googlePlacePayload())
-      .mockResolvedValueOnce(googleTimeZonePayload())
+  it('preserves profile mobile config when adding a salon while a mobile base exists', async () => {
+    mocks.professionalLocation.count.mockResolvedValue(1)
 
+    const result = await POST(
+      makeRequest({
+        mode: 'SALON',
+        placeId: 'place_123',
+      }),
+    )
+
+    expect(result.status).toBe(200)
+
+    expect(mocks.professionalLocation.count).toHaveBeenCalledWith({
+      where: {
+        professionalId: 'pro_123',
+        type: ProfessionalLocationType.MOBILE_BASE,
+      },
+    })
+
+    expect(mocks.professionalProfile.update).toHaveBeenCalledWith({
+      where: { id: 'pro_123' },
+      data: {
+        timeZone: 'America/Los_Angeles',
+      },
+      select: { id: true },
+    })
+  })
+
+  it('creates a draft suite location when mode is SUITE', async () => {
     mocks.professionalLocation.create.mockResolvedValue({
       id: 'loc_suite',
       type: ProfessionalLocationType.SUITE,
@@ -542,10 +502,6 @@ describe('POST /api/pro/onboarding/location', () => {
   })
 
   it('does not unset existing primary locations when makePrimary is false', async () => {
-    mocks.safeJson
-      .mockResolvedValueOnce(googlePlacePayload())
-      .mockResolvedValueOnce(googleTimeZonePayload())
-
     await POST(
       makeRequest({
         mode: 'SALON',
@@ -568,16 +524,10 @@ describe('POST /api/pro/onboarding/location', () => {
   })
 
   it('returns 400 when Google place details do not include coordinates', async () => {
-    mocks.safeJson.mockResolvedValueOnce({
-      status: 'OK',
-      result: {
-        place_id: 'place_123',
-        name: 'Vivid Salon',
-        formatted_address: '123 Main St',
-        geometry: {
-          location: {},
-        },
-      },
+    mocks.googlePlaceDetails.mockResolvedValueOnce({
+      ...parsedPlace(),
+      lat: null,
+      lng: null,
     })
 
     const result = await POST(
@@ -653,10 +603,6 @@ describe('POST /api/pro/onboarding/location', () => {
   })
 
   it('creates a draft mobile base location with address privacy fields, updates profile mobile config, bumps version, and refreshes index', async () => {
-    mocks.safeJson
-      .mockResolvedValueOnce(googlePostalPayload())
-      .mockResolvedValueOnce(googleTimeZonePayload())
-
     mocks.professionalLocation.create.mockResolvedValue({
       id: 'loc_mobile',
       type: ProfessionalLocationType.MOBILE_BASE,
@@ -774,10 +720,6 @@ describe('POST /api/pro/onboarding/location', () => {
   })
 
   it('converts radiusKm to miles for mobile config', async () => {
-    mocks.safeJson
-      .mockResolvedValueOnce(googlePostalPayload())
-      .mockResolvedValueOnce(googleTimeZonePayload())
-
     await POST(
       makeRequest({
         mode: 'MOBILE',
@@ -809,16 +751,10 @@ describe('POST /api/pro/onboarding/location', () => {
   })
 
   it('returns 400 when postal geocode does not include coordinates', async () => {
-    mocks.safeJson.mockResolvedValueOnce({
-      status: 'OK',
-      results: [
-        {
-          geometry: {
-            location: {},
-          },
-          address_components: [],
-        },
-      ],
+    mocks.googleGeocodePostal.mockResolvedValueOnce({
+      ...parsedPostal(),
+      lat: null,
+      lng: null,
     })
 
     const result = await POST(
@@ -853,17 +789,9 @@ describe('POST /api/pro/onboarding/location', () => {
       .spyOn(console, 'error')
       .mockImplementation(() => undefined)
 
-    mocks.fetchWithTimeout.mockResolvedValue(
-      new Response(JSON.stringify({ status: 'REQUEST_DENIED' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+    mocks.googlePlaceDetails.mockRejectedValueOnce(
+      new Error('Google said nope.'),
     )
-
-    mocks.safeJson.mockResolvedValueOnce({
-      status: 'REQUEST_DENIED',
-      error_message: 'Google said nope.',
-    })
 
     const result = await POST(
       makeRequest({
@@ -897,10 +825,6 @@ describe('POST /api/pro/onboarding/location', () => {
     const consoleErrorSpy = vi
       .spyOn(console, 'error')
       .mockImplementation(() => undefined)
-
-    mocks.safeJson
-      .mockResolvedValueOnce(googlePlacePayload())
-      .mockResolvedValueOnce(googleTimeZonePayload())
 
     mocks.prisma.$transaction.mockRejectedValue(new Error('db exploded'))
 

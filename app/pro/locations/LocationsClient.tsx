@@ -53,6 +53,49 @@ function kmToMiles(km: number) {
   return Math.round(km * 0.621371)
 }
 
+const PUBLISH_BLOCKER_LABELS: Record<string, string> = {
+  LOCATION_MISSING_TIMEZONE: 'missing timezone',
+  LOCATION_MISSING_WORKING_HOURS: 'missing working hours',
+  SALON_MISSING_ADDRESS: 'missing salon/suite address',
+  NO_ACTIVE_OFFERING: 'no active service offering',
+  NO_BOOKABLE_LOCATION: 'no bookable location',
+  MOBILE_MISSING_BASE_CONFIG: 'missing mobile ZIP or radius',
+  OFFERING_MISSING_SALON_PRICE_OR_DURATION: 'salon services missing price or duration',
+  OFFERING_MISSING_MOBILE_PRICE_OR_DURATION: 'mobile services missing price or duration',
+  STRIPE_NOT_READY: 'Stripe payouts not finished',
+  VERIFICATION_NOT_APPROVED: 'verification not approved',
+}
+
+function publishBlockerLabel(code: string): string {
+  return PUBLISH_BLOCKER_LABELS[code] ?? code.replaceAll('_', ' ').toLowerCase()
+}
+
+function readPublishBlockers(data: unknown): string[] {
+  if (typeof data !== 'object' || data === null) return []
+
+  const record = data as Record<string, unknown>
+  const out: string[] = []
+
+  if (Array.isArray(record.blockers)) {
+    for (const blocker of record.blockers) {
+      if (typeof blocker === 'string') out.push(publishBlockerLabel(blocker))
+    }
+  }
+
+  if (Array.isArray(record.blockedLocations)) {
+    for (const entry of record.blockedLocations) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const blockers = (entry as Record<string, unknown>).blockers
+      if (!Array.isArray(blockers)) continue
+      for (const blocker of blockers) {
+        if (typeof blocker === 'string') out.push(publishBlockerLabel(blocker))
+      }
+    }
+  }
+
+  return [...new Set(out)]
+}
+
 function ConfirmModal(props: {
   open: boolean
   title: string
@@ -139,8 +182,22 @@ function Toast(props: ToastState) {
   )
 }
 
-export default function LocationsClient({ initialLocations }: { initialLocations: ProLocation[] }) {
+export default function LocationsClient({
+  initialLocations,
+  initialMobileRadiusMiles = null,
+}: {
+  initialLocations: ProLocation[]
+  initialMobileRadiusMiles?: number | null
+}) {
   const [locations, setLocations] = useState<ProLocation[]>(initialLocations)
+  const [mobileRadiusMiles, setMobileRadiusMiles] = useState<number | null>(
+    initialMobileRadiusMiles,
+  )
+
+  // Inline mobile-base edit form
+  const [editingBaseId, setEditingBaseId] = useState<string | null>(null)
+  const [editBaseZip, setEditBaseZip] = useState('')
+  const [editBaseRadius, setEditBaseRadius] = useState(15)
 
   const [busy, setBusy] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -435,8 +492,107 @@ async function updateAdvanceNotice(
     }
   }
 
+  function openBaseEditor(l: ProLocation) {
+    setError(null)
+    setEditBaseZip(l.postalCode ?? '')
+    setEditBaseRadius(mobileRadiusMiles ?? 15)
+    setEditingBaseId(l.id)
+  }
+
+  async function saveMobileBaseEdit(id: string) {
+    setBusy(true)
+    setBusyId(id)
+    setError(null)
+
+    try {
+      const zip = editBaseZip.trim()
+      if (!isValidUsZip(zip)) throw new Error('Enter a valid US ZIP code (e.g. 92024).')
+
+      const res = await fetch(`/api/pro/locations/${encodeURIComponent(id)}/mobile-base`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          postalCode: zip,
+          radiusMiles: clampInt(Number(editBaseRadius), 1, 200),
+        }),
+      })
+
+      const data = await safeJson(res)
+      if (!res.ok) throw new Error(readErrorMessage(data) ?? `Failed to update mobile base (${res.status}).`)
+
+      const nextRadius =
+        typeof data === 'object' && data !== null && 'mobileRadiusMiles' in data
+          ? Number((data as Record<string, unknown>).mobileRadiusMiles)
+          : null
+      if (nextRadius != null && Number.isFinite(nextRadius)) {
+        setMobileRadiusMiles(nextRadius)
+      }
+
+      showToast({ tone: 'success', title: 'Mobile base updated' })
+      setEditingBaseId(null)
+      await refresh()
+    } catch (e: unknown) {
+      const msg = errorMessageFromUnknown(e, 'Failed to update mobile base.')
+      setError(msg)
+      showToast({ tone: 'error', title: 'Couldn’t update mobile base', body: msg })
+    } finally {
+      setBusy(false)
+      setBusyId(null)
+    }
+  }
+
+  async function publishLocations() {
+    setBusy(true)
+    setBusyId(null)
+    setError(null)
+
+    try {
+      const res = await fetch('/api/pro/schedule/publish', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+      })
+      const data = await safeJson(res)
+
+      if (!res.ok) {
+        const blockers = readPublishBlockers(data)
+        const detail = blockers.length
+          ? `Fix first: ${blockers.join(', ')}.`
+          : readErrorMessage(data) ?? `Publish failed (${res.status}).`
+        throw new Error(detail)
+      }
+
+      const published =
+        typeof data === 'object' && data !== null && 'locationsPublished' in data
+          ? Number((data as Record<string, unknown>).locationsPublished)
+          : 0
+
+      const skipped = readPublishBlockers(data)
+
+      showToast(
+        {
+          tone: 'success',
+          title: published
+            ? `Published ${published} location${published === 1 ? '' : 's'}`
+            : 'Nothing to publish',
+          body: skipped.length ? `Some locations were skipped: ${skipped.join(', ')}.` : null,
+        },
+        skipped.length ? 5000 : 2200,
+      )
+      await refresh()
+    } catch (e: unknown) {
+      const msg = errorMessageFromUnknown(e, 'Failed to publish locations.')
+      setError(msg)
+      showToast({ tone: 'error', title: 'Couldn’t publish', body: msg }, 5000)
+    } finally {
+      setBusy(false)
+      setBusyId(null)
+    }
+  }
+
   const radiusOptions = useMemo(() => [5, 10, 15, 25, 40, 60, 100, 150, 200], [])
+  const radiusMilesOptions = useMemo(() => [5, 10, 15, 25, 50, 75, 100, 150, 200], [])
   const primaryCount = useMemo(() => locations.filter((l) => l.isPrimary).length, [locations])
+  const draftCount = useMemo(() => locations.filter((l) => !l.isBookable).length, [locations])
 
   return (
     <div className="grid gap-4">
@@ -672,6 +828,32 @@ async function updateAdvanceNotice(
         </div>
       </div>
 
+      {/* Publish drafts */}
+      {draftCount > 0 ? (
+        <div className="tovis-glass rounded-card border border-toneWarn/30 bg-bgSecondary p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-[13px] font-black text-textPrimary">
+                {draftCount} location{draftCount === 1 ? '' : 's'} not bookable yet
+              </div>
+              <div className="mt-1 text-[12px] text-textSecondary">
+                Clients can’t book a location until it’s published. Publishing checks each
+                location for a timezone, working hours, and (for salons/suites) an address.
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => void publishLocations()}
+              disabled={busy}
+              className="rounded-full border border-accentPrimary/45 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60"
+            >
+              {busy ? 'Publishing…' : 'Publish locations'}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {/* List */}
       <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
         <div className="mb-3 text-[13px] font-black text-textPrimary">Your locations</div>
@@ -723,6 +905,9 @@ async function updateAdvanceNotice(
                       <div className="mt-1 text-[12px] font-semibold text-textSecondary">
                         TZ: {l.timeZone || '—'} • Lat/Lng: {l.lat ?? '—'},{l.lng ?? '—'} • Notice:{' '}
                         {formatAdvanceNotice(l.advanceNoticeMinutes)}
+                        {l.type === 'MOBILE_BASE' && mobileRadiusMiles != null
+                          ? ` • Radius: ${mobileRadiusMiles} mi`
+                          : null}
                       </div>
                     </div>
 
@@ -777,7 +962,80 @@ async function updateAdvanceNotice(
                     </label>
                   </div>
 
+                  {l.type === 'MOBILE_BASE' && editingBaseId === l.id ? (
+                    <div className="mt-3 grid gap-3 rounded-2xl border border-white/10 bg-bgSecondary/50 p-3">
+                      <div className="text-[12px] font-black text-textSecondary">Edit mobile base</div>
+
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <label className="grid gap-2">
+                          <div className="text-[12px] font-black text-textSecondary">ZIP code</div>
+                          <input
+                            value={editBaseZip}
+                            onChange={(e) => setEditBaseZip(e.target.value)}
+                            placeholder="e.g. 92024"
+                            className={cn(
+                              'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                              'text-[13px] font-semibold text-textPrimary placeholder:text-textSecondary/70 outline-none',
+                            )}
+                            disabled={busy}
+                            inputMode="numeric"
+                          />
+                        </label>
+
+                        <label className="grid gap-2">
+                          <div className="text-[12px] font-black text-textSecondary">Travel radius</div>
+                          <select
+                            value={editBaseRadius}
+                            onChange={(e) => setEditBaseRadius(Number(e.target.value))}
+                            className={cn(
+                              'rounded-2xl border border-white/12 bg-bgPrimary/30 px-3 py-2',
+                              'text-[13px] font-bold text-textPrimary outline-none',
+                            )}
+                            disabled={busy}
+                          >
+                            {radiusMilesOptions.map((mi) => (
+                              <option key={mi} value={mi}>
+                                {mi} mi
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditingBaseId(null)}
+                          disabled={busy}
+                          className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
+                        >
+                          Cancel
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => void saveMobileBaseEdit(l.id)}
+                          disabled={busy}
+                          className="rounded-full border border-accentPrimary/45 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60"
+                        >
+                          {busyId === l.id ? 'Saving…' : 'Save changes'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="mt-3 flex flex-wrap gap-2">
+                    {l.type === 'MOBILE_BASE' && editingBaseId !== l.id ? (
+                      <button
+                        type="button"
+                        onClick={() => openBaseEditor(l)}
+                        disabled={busy}
+                        className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
+                      >
+                        Edit base
+                      </button>
+                    ) : null}
+
                     {!l.isPrimary ? (
                       <button
                         type="button"
