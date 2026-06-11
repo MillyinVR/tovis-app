@@ -91,7 +91,7 @@ async function fillSharedIdentityFields(
   await page.getByLabel('Last name').fill('Signup')
   await page.getByLabel(/^Phone/).fill(args.phone)
   await page.getByLabel('Email address').fill(args.email)
-  await page.getByLabel('Password', { exact: true }).fill('SuperSecret123!')
+  await page.getByLabel(/^Password/).fill('SuperSecret123!')
 
   await page
     .getByRole('checkbox', { name: /transactional SMS/i })
@@ -184,7 +184,7 @@ test.describe('signup flows', () => {
 
     await page.getByLabel(/^Phone/).fill(phone)
     await page.getByLabel('Email address').fill(email)
-    await page.getByLabel('Password', { exact: true }).fill('SuperSecret123!')
+    await page.getByLabel(/^Password/).fill('SuperSecret123!')
     await page.getByRole('checkbox', { name: /transactional SMS/i }).check()
     await page
       .getByRole('checkbox', { name: /I agree to the Terms/i })

@@ -192,7 +192,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
     mocks.setSearchParams({})
   })
 
-  it('keeps submit disabled until both transactional SMS consent and terms consent are checked', async () => {
+  it('shows inline consent errors instead of submitting when consents are missing', async () => {
     setFetchSequence([
       jsonResponse({
         geo: {
@@ -218,13 +218,64 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
       name: 'Create Pro Account',
     })
 
-    expect(submitButton.hasAttribute('disabled')).toBe(true)
+    expect(submitButton.hasAttribute('disabled')).toBe(false)
+
+    fireEvent.click(submitButton)
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          'Required so we can send verification codes and appointment updates.',
+        ),
+      ).toBeTruthy()
+    })
+
+    expect(
+      screen.getByText('Please accept the Terms and Privacy Policy.'),
+    ).toBeTruthy()
+    expect(mocks.getTurnstileToken).not.toHaveBeenCalled()
 
     checkTransactionalSmsConsent()
-    expect(submitButton.hasAttribute('disabled')).toBe(true)
-
     checkTermsConsent()
-    expect(submitButton.hasAttribute('disabled')).toBe(false)
+
+    expect(
+      screen.queryByText(
+        'Required so we can send verification codes and appointment updates.',
+      ),
+    ).toBeNull()
+    expect(
+      screen.queryByText('Please accept the Terms and Privacy Policy.'),
+    ).toBeNull()
+  })
+
+  it('inline-flags a missing license number and focuses the location first when unconfirmed', async () => {
+    setFetchSequence([])
+
+    render(<SignupProClient />)
+
+    fillRequiredFields()
+    fireEvent.change(screen.getByLabelText(/License number/i), {
+      target: { value: '' },
+    })
+    checkAllRequiredConsents()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Create Pro Account' }),
+    )
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Please choose an address from the dropdown.'),
+      ).toBeTruthy()
+    })
+
+    expect(
+      screen.getByText('License number is required for this profession.'),
+    ).toBeTruthy()
+
+    expect(document.activeElement?.id).toBe('signup-pro-location')
+    expect(mocks.getTurnstileToken).not.toHaveBeenCalled()
+    expect(mocks.hardNavigate).not.toHaveBeenCalled()
   })
 
   it('submits with separate transactional SMS consent, tosAccepted, and turnstileToken, then treats pending verification sends as optimistic success', async () => {
@@ -404,7 +455,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
       (
         screen.getByPlaceholderText('+1 (___) ___-____') as HTMLInputElement
       ).value,
-    ).toBe('+16195550000')
+    ).toBe('+1 (619) 555-0000')
 
     const loginLink = screen.getByRole('link', { name: 'Sign in' })
     const loginHref = loginLink.getAttribute('href') ?? ''
