@@ -4,8 +4,6 @@
 
 app/(auth)/_components/login/LoginClient.tsx:direct property read:appendIfPresent(params, 'email', args.email)
 app/(auth)/_components/login/LoginClient.tsx:direct property read:appendIfPresent(params, 'phone', args.phone)
-app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:appendIfPresent(params, 'email', args.email)
-app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:appendIfPresent(params, 'phone', args.phone)
 app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:const [firstName, setFirstName] = useState(nameParts.firstName)
 app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:const [lastName, setLastName] = useState(nameParts.lastName)
 app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:if (confirmed?.postalCode && confirmed.postalCode === raw) {
@@ -14,6 +12,8 @@ app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:typeof
 app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:url.searchParams.set('postalCode', args.postalCode)
 app/(auth)/_components/signup/SignupClientClient.tsx:optional direct property read:if (confirmed?.postalCode && confirmed.postalCode === raw) {
 app/(auth)/_components/signup/SignupClientClient.tsx:optional direct property read:typeof geo?.postalCode === 'string' ? geo.postalCode : null
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:const [firstName, setFirstName] = useState(nameParts.firstName)
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:const [lastName, setLastName] = useState(nameParts.lastName)
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:if (proMode === 'MOBILE') return Boolean(confirmed.postalCode)
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:setLocQuery(geo.postalCode ?? raw)
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:typeof geo?.postalCode === 'string' ? geo.postalCode : null
@@ -21,6 +21,8 @@ app/(auth)/_components/signup/SignupProClient.tsx:direct property read:typeof pl
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:url.searchParams.set('postalCode', args.postalCode)
 app/(auth)/_components/signup/SignupProClient.tsx:optional direct property read:typeof geo?.postalCode === 'string' ? geo.postalCode : null
 app/(auth)/_components/signup/SignupProClient.tsx:optional direct property read:typeof place?.postalCode === 'string' ? place.postalCode : null,
+app/(auth)/_components/signup/signupSearchParams.ts:direct property read:appendIfPresent(params, 'email', args.email)
+app/(auth)/_components/signup/signupSearchParams.ts:direct property read:appendIfPresent(params, 'phone', args.phone)
 app/(auth)/signup/page.tsx:direct property read:appendIfPresent(params, 'email', firstParam(args.searchParams.email))
 app/(auth)/signup/page.tsx:direct property read:appendIfPresent(params, 'phone', firstParam(args.searchParams.phone))
 app/(auth)/verify-email/page.tsx:direct property read:appendIfPresent(params, 'email', args.email)
