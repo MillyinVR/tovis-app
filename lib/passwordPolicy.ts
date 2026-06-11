@@ -1,6 +1,8 @@
 import breachedPasswords from './data/breached-passwords-10k.json'
 
-export const PASSWORD_MIN_LEN = 10
+import { PASSWORD_MIN_LEN } from './passwordPolicyConstants'
+
+export { PASSWORD_MIN_LEN } from './passwordPolicyConstants'
 
 const BREACHED_PASSWORDS = new Set(
   breachedPasswords.map((password) => password.trim().toLowerCase()).filter(Boolean),

@@ -4,21 +4,72 @@
 
 app/(auth)/_components/login/LoginClient.tsx:direct property read:appendIfPresent(params, 'email', args.email)
 app/(auth)/_components/login/LoginClient.tsx:direct property read:appendIfPresent(params, 'phone', args.phone)
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:FIELD_IDS.firstName,
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:FIELD_IDS.lastName,
 app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:const [firstName, setFirstName] = useState(nameParts.firstName)
 app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:const [lastName, setLastName] = useState(nameParts.lastName)
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:errors.phone = 'Enter a valid phone number.'
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:errors.phone = 'Phone number is required.'
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:errors.zip = zipResult.errorMessage ?? 'Please confirm your ZIP code.'
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:fieldErrors.firstName,
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:fieldErrors.lastName,
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:id={FIELD_IDS.email}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:id={FIELD_IDS.firstName}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:id={FIELD_IDS.lastName}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:id={FIELD_IDS.phone}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:id={FIELD_IDS.zip}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:id={`${FIELD_IDS.email}-error`}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:id={`${FIELD_IDS.firstName}-error`}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:id={`${FIELD_IDS.lastName}-error`}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:id={`${FIELD_IDS.phone}-error`}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:id={`${FIELD_IDS.zip}-error`}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:if (!email.trim()) errors.email = 'Email is required.'
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:if (!firstName.trim()) errors.firstName = 'First name is required.'
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:if (!lastName.trim()) errors.lastName = 'Last name is required.'
 app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:if (confirmed?.postalCode && confirmed.postalCode === raw) {
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:message={fieldErrors.email}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:message={fieldErrors.firstName}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:message={fieldErrors.lastName}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:message={fieldErrors.phone}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:message={fieldErrors.zip}
 app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:setZip(geo.postalCode ?? raw)
 app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:typeof geo?.postalCode === 'string' ? geo.postalCode : null
 app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:url.searchParams.set('postalCode', args.postalCode)
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:{...fieldErrorDescribedBy(FIELD_IDS.email, fieldErrors.email)}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:{...fieldErrorDescribedBy(FIELD_IDS.phone, fieldErrors.phone)}
+app/(auth)/_components/signup/SignupClientClient.tsx:direct property read:{...fieldErrorDescribedBy(FIELD_IDS.zip, fieldErrors.zip)}
 app/(auth)/_components/signup/SignupClientClient.tsx:optional direct property read:if (confirmed?.postalCode && confirmed.postalCode === raw) {
 app/(auth)/_components/signup/SignupClientClient.tsx:optional direct property read:typeof geo?.postalCode === 'string' ? geo.postalCode : null
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:FIELD_IDS.firstName,
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:FIELD_IDS.lastName,
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:const [firstName, setFirstName] = useState(nameParts.firstName)
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:const [lastName, setLastName] = useState(nameParts.lastName)
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:errors.phone = 'Enter a valid phone number.'
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:errors.phone = 'Phone number is required.'
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:fieldErrors.firstName,
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:fieldErrors.lastName,
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:id={FIELD_IDS.email}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:id={FIELD_IDS.firstName}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:id={FIELD_IDS.lastName}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:id={FIELD_IDS.phone}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:id={`${FIELD_IDS.email}-error`}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:id={`${FIELD_IDS.firstName}-error`}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:id={`${FIELD_IDS.lastName}-error`}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:id={`${FIELD_IDS.phone}-error`}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:if (!email.trim()) errors.email = 'Email is required.'
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:if (!firstName.trim()) errors.firstName = 'First name is required.'
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:if (!lastName.trim()) errors.lastName = 'Last name is required.'
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:if (proMode === 'MOBILE') return Boolean(confirmed.postalCode)
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:message={fieldErrors.email}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:message={fieldErrors.firstName}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:message={fieldErrors.lastName}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:message={fieldErrors.phone}
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:setLocQuery(geo.postalCode ?? raw)
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:typeof geo?.postalCode === 'string' ? geo.postalCode : null
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:typeof place?.postalCode === 'string' ? place.postalCode : null,
 app/(auth)/_components/signup/SignupProClient.tsx:direct property read:url.searchParams.set('postalCode', args.postalCode)
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:{...fieldErrorDescribedBy(FIELD_IDS.email, fieldErrors.email)}
+app/(auth)/_components/signup/SignupProClient.tsx:direct property read:{...fieldErrorDescribedBy(FIELD_IDS.phone, fieldErrors.phone)}
 app/(auth)/_components/signup/SignupProClient.tsx:optional direct property read:typeof geo?.postalCode === 'string' ? geo.postalCode : null
 app/(auth)/_components/signup/SignupProClient.tsx:optional direct property read:typeof place?.postalCode === 'string' ? place.postalCode : null,
 app/(auth)/_components/signup/signupSearchParams.ts:direct property read:appendIfPresent(params, 'email', args.email)
