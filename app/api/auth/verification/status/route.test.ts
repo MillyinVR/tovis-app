@@ -4,12 +4,28 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role, VerificationStatus } from '@prisma/client'
 
 const mockRequireUser = vi.hoisted(() => vi.fn())
+const mockCreateActiveToken = vi.hoisted(() => vi.fn())
+const mockLogAuthEvent = vi.hoisted(() => vi.fn())
 
 vi.mock('@/app/api/_utils/auth/requireUser', () => ({
   requireUser: mockRequireUser,
 }))
 
+vi.mock('@/lib/auth', () => ({
+  createActiveToken: mockCreateActiveToken,
+}))
+
+vi.mock('@/lib/observability/authEvents', () => ({
+  logAuthEvent: mockLogAuthEvent,
+}))
+
 import { GET } from './route'
+
+function makeRequest() {
+  return new Request('http://localhost/api/auth/verification/status', {
+    headers: { host: 'localhost:3000' },
+  })
+}
 
 function makeUser(args?: {
   role?: Role
@@ -33,6 +49,7 @@ function makeUser(args?: {
     email: 'user@example.com',
     phone: '+15551234567',
     role,
+    authVersion: 1,
     sessionKind: args?.sessionKind ?? 'ACTIVE',
     phoneVerifiedAt,
     emailVerifiedAt,
@@ -68,6 +85,9 @@ function makeUser(args?: {
 describe('app/api/auth/verification/status/route', () => {
   beforeEach(() => {
     mockRequireUser.mockReset()
+    mockCreateActiveToken.mockReset()
+    mockCreateActiveToken.mockReturnValue('active_token_test')
+    mockLogAuthEvent.mockReset()
   })
 
   it('passes through a failed auth result unchanged', async () => {
@@ -78,7 +98,7 @@ describe('app/api/auth/verification/status/route', () => {
       res,
     })
 
-    const result = await GET()
+    const result = await GET(makeRequest())
 
     expect(mockRequireUser).toHaveBeenCalledWith({
       allowVerificationSession: true,
@@ -97,7 +117,7 @@ describe('app/api/auth/verification/status/route', () => {
       }),
     })
 
-    const result = await GET()
+    const result = await GET(makeRequest())
     const body = await result.json()
 
     expect(result.status).toBe(200)
@@ -134,7 +154,7 @@ describe('app/api/auth/verification/status/route', () => {
       }),
     })
 
-    const result = await GET()
+    const result = await GET(makeRequest())
     const body = await result.json()
 
     expect(result.status).toBe(200)
@@ -166,7 +186,7 @@ describe('app/api/auth/verification/status/route', () => {
       }),
     })
 
-    const result = await GET()
+    const result = await GET(makeRequest())
     const body = await result.json()
 
     expect(result.status).toBe(200)
@@ -190,7 +210,7 @@ describe('app/api/auth/verification/status/route', () => {
       }),
     })
 
-    const result = await GET()
+    const result = await GET(makeRequest())
     const body = await result.json()
 
     expect(result.status).toBe(200)
@@ -212,7 +232,7 @@ describe('app/api/auth/verification/status/route', () => {
       }),
     })
 
-    const result = await GET()
+    const result = await GET(makeRequest())
     const body = await result.json()
 
     expect(result.status).toBe(200)
@@ -234,7 +254,7 @@ describe('app/api/auth/verification/status/route', () => {
       }),
     })
 
-    const result = await GET()
+    const result = await GET(makeRequest())
     const body = await result.json()
 
     expect(result.status).toBe(200)
@@ -245,5 +265,75 @@ describe('app/api/auth/verification/status/route', () => {
       phone: '+15551234567',
       role: Role.CLIENT,
     })
+  })
+
+  it('upgrades a stale VERIFICATION session to ACTIVE once fully verified', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser({
+        role: Role.CLIENT,
+        sessionKind: 'VERIFICATION',
+      }),
+    })
+
+    const result = await GET(makeRequest())
+    const body = await result.json()
+
+    expect(result.status).toBe(200)
+    expect(body.sessionKind).toBe('ACTIVE')
+    expect(body.isFullyVerified).toBe(true)
+    expect(body.nextUrl).toBe('/looks')
+
+    expect(mockCreateActiveToken).toHaveBeenCalledWith({
+      userId: 'user_1',
+      role: Role.CLIENT,
+      authVersion: 1,
+    })
+
+    const setCookie = result.headers.get('set-cookie')
+    expect(setCookie).toContain('tovis_token=active_token_test')
+    expect(setCookie).toContain('HttpOnly')
+
+    expect(mockLogAuthEvent).toHaveBeenCalledWith({
+      level: 'info',
+      event: 'auth.session.upgraded_from_stale_verification',
+      route: 'auth.verification.status',
+      userId: 'user_1',
+    })
+  })
+
+  it('does not upgrade or set a cookie while verification is incomplete', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser({
+        role: Role.CLIENT,
+        sessionKind: 'VERIFICATION',
+        emailVerifiedAt: null,
+      }),
+    })
+
+    const result = await GET(makeRequest())
+    const body = await result.json()
+
+    expect(body.sessionKind).toBe('VERIFICATION')
+    expect(result.headers.get('set-cookie')).toBeNull()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
+  })
+
+  it('does not reissue a cookie for sessions that are already ACTIVE', async () => {
+    mockRequireUser.mockResolvedValue({
+      ok: true,
+      user: makeUser({
+        role: Role.CLIENT,
+        sessionKind: 'ACTIVE',
+      }),
+    })
+
+    const result = await GET(makeRequest())
+    const body = await result.json()
+
+    expect(body.sessionKind).toBe('ACTIVE')
+    expect(result.headers.get('set-cookie')).toBeNull()
+    expect(mockCreateActiveToken).not.toHaveBeenCalled()
   })
 })
