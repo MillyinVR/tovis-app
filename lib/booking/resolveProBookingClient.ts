@@ -149,6 +149,7 @@ type NormalizedServiceAddressInput = {
 }
 
 export type ResolveProBookingClientArgs = {
+  professionalId: string
   locationType: ServiceLocationType
   clientId?: string | null
   client?: NewClientInput | null
@@ -439,6 +440,7 @@ async function createServiceAddress(args: {
 }
 
 async function resolveClientIdentity(args: {
+  professionalId: string
   clientId?: string | null
   client?: NewClientInput | null
   tx?: Prisma.TransactionClient
@@ -496,6 +498,7 @@ async function resolveClientIdentity(args: {
   }
 
   const upserted = await upsertProClient({
+    professionalId: args.professionalId,
     firstName: clientInput.firstName,
     lastName: clientInput.lastName,
     email: clientInput.email,
@@ -522,6 +525,7 @@ export async function resolveProBookingClient(
   const db = getDb(args.tx)
 
   const resolvedClient = await resolveClientIdentity({
+    professionalId: args.professionalId,
     clientId: args.clientId,
     client: args.client,
     tx: args.tx,

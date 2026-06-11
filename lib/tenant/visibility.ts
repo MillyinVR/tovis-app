@@ -8,9 +8,9 @@
 // - root tenant context (tovis-root) sees everything: empty filter
 // - white-label context sees only rows belonging to its own tenant
 //
-// Fail-closed note for the expand phase: rows whose tenant column is still
-// NULL (not yet backfilled) do NOT match an equality filter, so white-label
-// contexts can never see un-attributed rows. Root context is unaffected.
+// Contract phase: tenant columns are NOT NULL, so every row matches exactly
+// one tenant and white-label equality filters are total. (During the expand
+// phase the same equality filters also failed closed for NULL rows.)
 
 import { Prisma } from '@prisma/client'
 

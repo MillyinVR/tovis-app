@@ -7,8 +7,8 @@
 // Matrix:
 // - white-label context sees only own-tenant Pros / bookings / NFC cards
 // - tovis-root context sees everything
-// - rows with NULL tenant columns (not yet backfilled) fail closed for
-//   white-label contexts and remain visible to root
+// (Contract phase: tenant columns are NOT NULL, so the expand-phase
+// "un-backfilled NULL row" dimension no longer exists.)
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
@@ -59,7 +59,6 @@ let salonBCtx: TenantContext
 let rootPro: SeededPro
 let salonAPro: SeededPro
 let salonBPro: SeededPro
-let unattributedPro: SeededPro
 
 const seededProIds: string[] = []
 const seededBookingIds: string[] = []
@@ -89,7 +88,7 @@ async function seedTenant(slug: string, name: string): Promise<string> {
 
 async function seedPro(args: {
   label: string
-  homeTenantId: string | null
+  homeTenantId: string
 }): Promise<SeededPro> {
   const user = await db.user.create({
     data: {
@@ -145,7 +144,6 @@ beforeAll(async () => {
   rootPro = await seedPro({ label: 'root_pro', homeTenantId: rootTenantId })
   salonAPro = await seedPro({ label: 'salon_a_pro', homeTenantId: salonATenantId })
   salonBPro = await seedPro({ label: 'salon_b_pro', homeTenantId: salonBTenantId })
-  unattributedPro = await seedPro({ label: 'legacy_pro', homeTenantId: null })
 
   // One client + one booking per pro tenant, with tenant snapshots set the
   // way the booking write boundary will write them after the contract phase.
@@ -186,13 +184,12 @@ beforeAll(async () => {
 
   const bookingSpecs: Array<{
     pro: SeededPro
-    proTenantId: string | null
+    proTenantId: string
     hourOffset: number
   }> = [
     { pro: salonAPro, proTenantId: salonATenantId, hourOffset: 10 },
     { pro: salonBPro, proTenantId: salonBTenantId, hourOffset: 11 },
     { pro: rootPro, proTenantId: rootTenantId, hourOffset: 12 },
-    { pro: unattributedPro, proTenantId: null, hourOffset: 13 },
   ]
 
   for (const spec of bookingSpecs) {
@@ -218,10 +215,9 @@ beforeAll(async () => {
     seededBookingIds.push(booking.id)
   }
 
-  const cardSpecs: Array<{ tenantId: string | null; code: string }> = [
+  const cardSpecs: Array<{ tenantId: string; code: string }> = [
     { tenantId: salonATenantId, code: `${tag}A` },
     { tenantId: salonBTenantId, code: `${tag}B` },
-    { tenantId: null, code: `${tag}L` },
   ]
 
   for (const spec of cardSpecs) {
@@ -297,17 +293,6 @@ describe('pro discovery isolation', () => {
     )
   })
 
-  it('un-backfilled pros (NULL tenant) fail closed for white-label tenants', async () => {
-    const ids = await visiblePros(salonACtx)
-
-    expect(ids).not.toContain(unattributedPro.professionalId)
-  })
-
-  it('un-backfilled pros remain visible to root (no filter)', async () => {
-    const ids = await visiblePros(rootCtx)
-
-    expect(ids).toContain(unattributedPro.professionalId)
-  })
 })
 
 describe('booking tenant isolation', () => {
@@ -336,7 +321,7 @@ describe('booking tenant isolation', () => {
     expect(proIds).not.toContain(salonBPro.professionalId)
   })
 
-  it('root sees bookings from every tenant, including un-attributed', async () => {
+  it('root sees bookings from every tenant', async () => {
     const proIds = await visibleBookings(rootCtx)
 
     expect(proIds).toEqual(
@@ -344,7 +329,6 @@ describe('booking tenant isolation', () => {
         salonAPro.professionalId,
         salonBPro.professionalId,
         rootPro.professionalId,
-        unattributedPro.professionalId,
       ]),
     )
   })
@@ -361,7 +345,7 @@ describe('nfc card tenant isolation', () => {
     return seededOnly(rows, seededCardIds).map((row) => row.id)
   }
 
-  it('tenant A sees only its own cards; un-attributed cards fail closed', async () => {
+  it('tenant A sees only its own cards', async () => {
     const ids = await visibleCards(salonACtx)
 
     expect(ids).toEqual([seededCardIds[0]])

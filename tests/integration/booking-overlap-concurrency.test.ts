@@ -48,6 +48,7 @@ type TestClient = {
 }
 
 type Fixtures = {
+  tenantId: string
   categoryId: string
   serviceId: string
   proUserId: string
@@ -119,7 +120,11 @@ async function cleanupAll(): Promise<void> {
   await db.user.deleteMany({})
 }
 
-async function seedClient(tag: string, index: number): Promise<TestClient> {
+async function seedClient(
+  tag: string,
+  index: number,
+  tenantId: string,
+): Promise<TestClient> {
   const user = await db.user.create({
     data: {
       email: `${tag}_client_${index}@example.com`,
@@ -132,6 +137,7 @@ async function seedClient(tag: string, index: number): Promise<TestClient> {
   const client = await db.clientProfile.create({
     data: {
       userId: user.id,
+      homeTenantId: tenantId,
       firstName: `Client ${index}`,
       lastName: 'Overlap',
     },
@@ -167,7 +173,17 @@ async function seedFixtures(): Promise<Fixtures> {
     .toString(36)
     .slice(2, 8)}`
 
-  const clients = await Promise.all([seedClient(tag, 1), seedClient(tag, 2)])
+  const tenant = await db.tenant.upsert({
+    where: { slug: 'tovis-root' },
+    update: {},
+    create: { slug: 'tovis-root', name: 'TOVIS', isActive: true },
+    select: { id: true },
+  })
+
+  const clients = await Promise.all([
+    seedClient(tag, 1, tenant.id),
+    seedClient(tag, 2, tenant.id),
+  ])
 
   const proUser = await db.user.create({
     data: {
@@ -181,6 +197,7 @@ async function seedFixtures(): Promise<Fixtures> {
   const professional = await db.professionalProfile.create({
     data: {
       userId: proUser.id,
+      homeTenantId: tenant.id,
       firstName: 'Concurrency',
       lastName: 'Pro',
       businessName: 'Concurrency Studio',
@@ -301,6 +318,7 @@ async function seedFixtures(): Promise<Fixtures> {
   })
 
   return {
+    tenantId: tenant.id,
     categoryId: category.id,
     serviceId: service.id,
     proUserId: proUser.id,
@@ -314,6 +332,7 @@ async function seedFixtures(): Promise<Fixtures> {
 }
 
 function bookingData(args: {
+  tenantId: string
   clientId: string
   professionalId: string
   serviceId: string
@@ -339,6 +358,16 @@ function bookingData(args: {
     professional: {
       connect: {
         id: args.professionalId,
+      },
+    },
+    proTenant: {
+      connect: {
+        id: args.tenantId,
+      },
+    },
+    clientHomeTenant: {
+      connect: {
+        id: args.tenantId,
       },
     },
     service: {
@@ -407,6 +436,7 @@ async function createDirectBooking(args: {
 
   const booking = await db.booking.create({
     data: bookingData({
+      tenantId: fx.tenantId,
       clientId: args.clientId,
       professionalId: args.professionalId ?? fx.professionalId,
       serviceId: args.serviceId ?? fx.serviceId,
@@ -467,6 +497,7 @@ async function createLockedBooking(args: {
 
     const booking = await tx.booking.create({
       data: bookingData({
+        tenantId: fx.tenantId,
         clientId: args.clientId,
         professionalId: fx.professionalId,
         serviceId: fx.serviceId,

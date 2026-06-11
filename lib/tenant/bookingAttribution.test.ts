@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { resolveBookingTenantAttribution } from './bookingAttribution'
 
 function makeTx(args: {
-  proHomeTenantId: string | null | undefined
-  clientHomeTenantId: string | null | undefined
+  proHomeTenantId: string | undefined
+  clientHomeTenantId: string | undefined
 }) {
   return {
     professionalProfile: {
@@ -50,28 +50,31 @@ describe('resolveBookingTenantAttribution', () => {
     })
   })
 
-  it('returns nulls for un-backfilled profiles (expand phase)', async () => {
-    const tx = makeTx({ proHomeTenantId: null, clientHomeTenantId: null })
-
-    await expect(
-      resolveBookingTenantAttribution(tx, {
-        professionalId: 'pro_1',
-        clientId: 'client_1',
-      }),
-    ).resolves.toEqual({ proTenantId: null, clientHomeTenantId: null })
-  })
-
-  it('returns nulls when profiles are missing rather than failing the booking', async () => {
+  it('throws when the professional profile is missing (contract-phase integrity)', async () => {
     const tx = makeTx({
       proHomeTenantId: undefined,
-      clientHomeTenantId: undefined,
+      clientHomeTenantId: 'tenant_root',
     })
 
     await expect(
       resolveBookingTenantAttribution(tx, {
         professionalId: 'pro_missing',
+        clientId: 'client_1',
+      }),
+    ).rejects.toThrow(/professional pro_missing not found/)
+  })
+
+  it('throws when the client profile is missing (contract-phase integrity)', async () => {
+    const tx = makeTx({
+      proHomeTenantId: 'tenant_salon',
+      clientHomeTenantId: undefined,
+    })
+
+    await expect(
+      resolveBookingTenantAttribution(tx, {
+        professionalId: 'pro_1',
         clientId: 'client_missing',
       }),
-    ).resolves.toEqual({ proTenantId: null, clientHomeTenantId: null })
+    ).rejects.toThrow(/client client_missing not found/)
   })
 })

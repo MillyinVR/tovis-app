@@ -26,7 +26,7 @@ type IntentType =
 type NfcCardIntentSource = {
   type: NfcCardType
   professionalId: string | null
-  salonSlug: string | null
+  tenant: { slug: string }
 }
 
 type BuiltTapIntent = {
@@ -54,13 +54,13 @@ function buildIntentFromCard(card: NfcCardIntentSource): BuiltTapIntent {
     }
   }
 
-  if (card.type === NfcCardType.SALON_WHITE_LABEL && card.salonSlug) {
+  if (card.type === NfcCardType.SALON_WHITE_LABEL) {
     return {
       intentType: 'SALON_WHITE_LABEL',
       payloadJson: {
-        salonSlug: card.salonSlug,
+        tenantSlug: card.tenant.slug,
       },
-      nextUrl: `/signup?salon=${encodeURIComponent(card.salonSlug)}`,
+      nextUrl: `/signup?salon=${encodeURIComponent(card.tenant.slug)}`,
     }
   }
 
@@ -90,7 +90,7 @@ export default async function TapPage(props: {
       claimedAt: true,
       claimedByUserId: true,
       professionalId: true,
-      salonSlug: true,
+      tenant: { select: { slug: true } },
     },
   })
 

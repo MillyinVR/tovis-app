@@ -325,6 +325,12 @@ function toSuccessfulResult(profile: {
 }
 
 export type UpsertProClientArgs = {
+  /**
+   * The Pro this client record is created on behalf of. A pro-created
+   * client's home tenant is the Pro's home tenant (acquisition attribution,
+   * docs/architecture/tenant-model.md).
+   */
+  professionalId: string
   firstName: unknown
   lastName: unknown
   email?: unknown
@@ -368,6 +374,22 @@ export async function upsertProClient(
       code: 'VALIDATION_ERROR',
     }
   }
+
+  const proForTenant = await db.professionalProfile.findUnique({
+    where: { id: args.professionalId },
+    select: { homeTenantId: true },
+  })
+
+  if (!proForTenant) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Professional profile not found.',
+      code: 'VALIDATION_ERROR',
+    }
+  }
+
+  const homeTenantId = proForTenant.homeTenantId
 
   const matchedProfileResult = await findMatchedClientProfile({
     db,
@@ -476,6 +498,7 @@ export async function upsertProClient(
       const createdProfile = await db.clientProfile.create({
         data: {
           userId: matchedUser.id,
+          homeTenantId,
           firstName,
           lastName,
           claimStatus: ClientClaimStatus.CLAIMED,
@@ -516,6 +539,7 @@ export async function upsertProClient(
     const createdProfile = await db.clientProfile.create({
       data: {
         userId: null,
+        homeTenantId,
         firstName,
         lastName,
         claimStatus: ClientClaimStatus.UNCLAIMED,

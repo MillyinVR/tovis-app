@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { getRootTenantId } from '@/lib/tenant/resolveTenant'
 import { CopyButton } from './_components/CopyButton'
 import { formatShortCode, generateShortCode } from '@/lib/nfcShortCode'
 import { NfcCardType, Prisma } from '@prisma/client'
@@ -91,12 +92,31 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
     const type = parseNfcCardType(formData.get('type'))
     const isActive = String(formData.get('isActive') ?? 'true') === 'true'
 
-    const salonSlugRaw = String(formData.get('salonSlug') ?? '').trim()
-    const salonSlug = salonSlugRaw ? salonSlugRaw : null
+    // Issuing tenant: white-label cards belong to the tenant named in the
+    // form; every other card type is issued by the root tenant.
+    let tenantId: string
 
-    const safeSalonSlug = type === NfcCardType.SALON_WHITE_LABEL ? salonSlug : null
-    if (type === NfcCardType.SALON_WHITE_LABEL && !safeSalonSlug) {
-      redirect('/admin/nfc?error=salonSlug')
+    if (type === NfcCardType.SALON_WHITE_LABEL) {
+      const tenantSlug = String(formData.get('tenantSlug') ?? '')
+        .trim()
+        .toLowerCase()
+
+      if (!tenantSlug) {
+        redirect('/admin/nfc?error=tenantSlug')
+      }
+
+      const tenant = await prisma.tenant.findUnique({
+        where: { slug: tenantSlug },
+        select: { id: true, isActive: true },
+      })
+
+      if (!tenant || !tenant.isActive) {
+        redirect('/admin/nfc?error=tenantSlug')
+      }
+
+      tenantId = tenant.id
+    } else {
+      tenantId = await getRootTenantId()
     }
 
     await prisma.$transaction(async (tx) => {
@@ -111,7 +131,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
               data: {
                 type,
                 isActive,
-                salonSlug: safeSalonSlug,
+                tenantId,
                 claimedAt: null,
                 claimedByUserId: null,
                 professionalId: null,
@@ -183,9 +203,9 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
           </div>
         ) : null}
 
-        {errorFlag === 'salonSlug' ? (
+        {errorFlag === 'tenantSlug' ? (
           <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
-            Salon slug is required for <span className="font-mono">SALON_WHITE_LABEL</span> cards.
+            An active tenant slug is required for <span className="font-mono">SALON_WHITE_LABEL</span> cards.
           </div>
         ) : null}
       </div>
@@ -238,9 +258,9 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
               </label>
 
               <label className="grid gap-1">
-                <span className="text-xs font-medium text-neutral-700">Salon slug (only for white label)</span>
+                <span className="text-xs font-medium text-neutral-700">Tenant slug (only for white label)</span>
                 <input
-                  name="salonSlug"
+                  name="tenantSlug"
                   placeholder="e.g. luxe-la"
                   className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-300"
                 />

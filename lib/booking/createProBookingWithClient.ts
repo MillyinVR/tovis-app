@@ -386,6 +386,7 @@ export async function createProBookingWithClient(
   )
 
   const resolvedClient = await resolveProBookingClient({
+    professionalId: args.professionalId,
     locationType: args.locationType,
     clientId: args.clientId,
     client: normalizedClient,

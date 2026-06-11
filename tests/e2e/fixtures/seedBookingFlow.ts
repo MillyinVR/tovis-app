@@ -22,6 +22,9 @@ export type SeedBookingFlowOptions = {
 export type SeedBookingFlowResult = {
   tag: string
 
+  /** Root tenant id every seeded row is attributed to. */
+  tenantId: string
+
   credentials: {
     client: {
       email: string
@@ -135,6 +138,15 @@ export async function seedBookingFlow(
   const tag = makeTag()
   const approvedAt = new Date()
 
+  // Contract phase: profiles require a home tenant. E2E rows all belong to
+  // the reserved root tenant (slug must match lib/tenant/constants.ts).
+  const rootTenant = await prisma.tenant.upsert({
+    where: { slug: 'tovis-root' },
+    update: {},
+    create: { slug: 'tovis-root', name: 'TOVIS', isActive: true },
+    select: { id: true },
+  })
+
   const categorySlug = `${tag}-category`
   const professionalEmail = requireNormalizedEmail(
     `${tag}_pro@example.com`,
@@ -178,6 +190,7 @@ export async function seedBookingFlow(
     (await prisma.clientProfile.create({
       data: {
         userId: existingClientUser.id,
+        homeTenantId: rootTenant.id,
         firstName: 'Test',
         lastName: 'Client',
       },
@@ -233,6 +246,7 @@ export async function seedBookingFlow(
   const professionalProfile = await prisma.professionalProfile.create({
     data: {
       userId: professionalUser.id,
+      homeTenantId: rootTenant.id,
       firstName: 'E2E',
       lastName: 'Professional',
       businessName: 'E2E Test Pro',
@@ -410,6 +424,7 @@ export async function seedBookingFlow(
 
   return {
     tag,
+    tenantId: rootTenant.id,
     credentials: {
       client: {
         email: existingClientEmail,

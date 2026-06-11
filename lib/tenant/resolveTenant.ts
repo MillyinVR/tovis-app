@@ -69,7 +69,7 @@ export async function getRootTenantId(): Promise<string> {
   if (!root) {
     throw new Error(
       `Reserved root tenant '${TOVIS_ROOT_TENANT_SLUG}' does not exist. ` +
-        'Run prisma/scripts/backfillTenantFoundation.ts (or seed) first.',
+        'Run the seed (prisma/seed.cjs) or ensureRootTenant() first.',
     )
   }
 

@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     const body: UnknownRecord = isRecord(raw) ? raw : {}
 
     const result = await upsertProClient({
+      professionalId: auth.professionalId,
       firstName: body.firstName,
       lastName: body.lastName,
       email: body.email,

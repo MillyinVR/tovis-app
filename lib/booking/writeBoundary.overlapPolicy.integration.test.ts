@@ -273,6 +273,11 @@ function setupCreatedBooking(status = BookingStatus.ACCEPTED) {
 function setupValidProCreateInputs() {
   mocks.prisma.clientProfile.findUnique.mockResolvedValue({
     id: 'client_1',
+    homeTenantId: 'tenant_root',
+  })
+
+  mocks.prisma.professionalProfile.findUnique.mockResolvedValue({
+    homeTenantId: 'tenant_root',
   })
 
   mocks.prisma.professionalServiceOffering.findFirst.mockResolvedValue({
@@ -305,6 +310,15 @@ describe('writeBoundary overlap policy integration', () => {
     setupValidHold()
     setupCreatedHold()
     setupCreatedBooking()
+
+    // Tenant attribution snapshots resolved at booking create.
+    mocks.prisma.professionalProfile.findUnique.mockResolvedValue({
+      homeTenantId: 'tenant_root',
+    })
+    mocks.prisma.clientProfile.findUnique.mockResolvedValue({
+      id: 'client_1',
+      homeTenantId: 'tenant_root',
+    })
 
     mocks.checkProReadinessForEntryPointWithDb.mockResolvedValue({
       ok: true,

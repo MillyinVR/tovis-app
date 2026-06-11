@@ -431,6 +431,7 @@ describe('createProBookingWithClient', () => {
     })
 
     expect(mocks.resolveProBookingClient).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
       locationType: ServiceLocationType.MOBILE,
       clientId: undefined,
       client: {
