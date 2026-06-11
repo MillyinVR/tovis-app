@@ -36,6 +36,7 @@ const PRO_HEADER_ROUTE_TITLES: ProHeaderRouteTitle[] = [
   { path: '/pro/profile', title: 'Profile' },
   { path: PRO_PUBLIC_PROFILE_PATH, title: 'Public Profile' },
   { path: '/pro/media', title: 'Media' },
+  { path: '/pro/locations', title: 'Locations' },
 ]
 
 const PRO_HEADER_TABS: ProHeaderTabItem[] = [
@@ -45,6 +46,7 @@ const PRO_HEADER_TABS: ProHeaderTabItem[] = [
   { href: '/pro/bookings', label: 'Bookings', match: 'prefix' },
   { href: '/pro/last-minute', label: 'Last Minute', match: 'prefix' },
   { href: '/pro/store', label: 'Store', match: 'prefix' },
+  { href: '/pro/locations', label: 'Locations', match: 'prefix' },
 ]
 
 function titleFromPath(pathname: string | null, brandName: string): string {
