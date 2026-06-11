@@ -117,12 +117,18 @@ export async function getTurnstileToken(action: string): Promise<string> {
     throw new Error('Captcha is unavailable.')
   }
 
+  // In interaction-only mode the widget stays invisible unless Cloudflare
+  // decides the user must complete a challenge — and then it renders inside
+  // this container. Parking it off-screen made those signups fail with
+  // "Captcha failed" because the challenge could never be seen or clicked
+  // (Safari/strict-privacy/VPN users get challenged routinely). Keep it as a
+  // visible-capable bottom-right overlay instead: it takes no space and
+  // shows nothing unless a challenge is required.
   const container = document.createElement('div')
-  container.setAttribute('aria-hidden', 'true')
-  container.style.position = 'absolute'
-  container.style.left = '-9999px'
-  container.style.width = '1px'
-  container.style.height = '1px'
+  container.style.position = 'fixed'
+  container.style.bottom = '16px'
+  container.style.right = '16px'
+  container.style.zIndex = '2147483647'
   document.body.appendChild(container)
 
   let widgetId: string | null = null
