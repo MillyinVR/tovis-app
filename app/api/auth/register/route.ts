@@ -999,6 +999,11 @@ export async function POST(request: Request) {
 
     const passwordHash = await hashPassword(password)
 
+    // Tenant the account signs up under (tenant-model expand phase): drives
+    // discovery visibility for both roles, so it must be stamped at create
+    // time rather than left to the backfill.
+    const tenantContext = await resolveTenantContextForRequest(request)
+
     const { user } = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -1027,6 +1032,7 @@ export async function POST(request: Request) {
                     phone,
                     ...buildClientProfileContactLookupData({ email, phone }),
                     phoneVerifiedAt: null,
+                    homeTenantId: tenantContext.tenantId,
                   },
                 }
               : undefined,
@@ -1039,6 +1045,7 @@ export async function POST(request: Request) {
                     lastName,
                     phone,
                     phoneVerifiedAt: null,
+                    homeTenantId: tenantContext.tenantId,
                     timeZone: finalTimeZone,
 
                     bio: '',
@@ -1222,7 +1229,7 @@ export async function POST(request: Request) {
               userId: user.id,
               email: verificationEmail,
               appUrl,
-              tenantContext: await resolveTenantContextForRequest(request),
+              tenantContext,
               next: nextForVerification,
               intent: verificationIntent,
               inviteToken: verificationInviteToken,
