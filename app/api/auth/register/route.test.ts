@@ -692,6 +692,7 @@ describe('app/api/auth/register/route', () => {
               ...expectedEmailLookupData('client@example.com'),
               ...expectedPhoneLookupData('+15551234567'),
               phoneVerifiedAt: null,
+              homeTenantId: 'tenant_root',
             },
           },
         })
@@ -1119,6 +1120,7 @@ describe('app/api/auth/register/route', () => {
             ...expectedEmailLookupData('client@example.com'),
             ...expectedPhoneLookupData('+15551234567'),
             phoneVerifiedAt: null,
+            homeTenantId: 'tenant_root',
           },
         },
       }),

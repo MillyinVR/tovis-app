@@ -357,6 +357,103 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
     })
   })
 
+  it('prefills from forwarded params, carries next into register, and falls back to query next for verify-phone', async () => {
+    mocks.setSearchParams({
+      ti: 'tap_pro_1',
+      next: '/pro/services?from=invite',
+      intent: 'TEAM_INVITE',
+      inviteToken: 'invite_token_1',
+      email: 'prefill-pro@example.com',
+      phone: '+16195550000',
+      name: 'Pre Filled Pro',
+    })
+
+    const fetchMock = setFetchSequence([
+      jsonResponse({
+        geo: {
+          lat: 32.7157,
+          lng: -117.1611,
+          postalCode: '92101',
+          city: 'San Diego',
+          state: 'CA',
+          countryCode: 'US',
+        },
+      }),
+      jsonResponse({
+        timeZoneId: 'America/Los_Angeles',
+      }),
+      jsonResponse({
+        nextUrl: null,
+        emailVerificationSent: 'pending',
+        phoneVerificationSent: 'pending',
+      }),
+    ])
+
+    render(<SignupProClient />)
+
+    expect(
+      (screen.getByLabelText(/First name/i) as HTMLInputElement).value,
+    ).toBe('Pre')
+    expect(
+      (screen.getByLabelText(/Last name/i) as HTMLInputElement).value,
+    ).toBe('Filled Pro')
+    expect(
+      (screen.getByLabelText(/Email address/i) as HTMLInputElement).value,
+    ).toBe('prefill-pro@example.com')
+    expect(
+      (
+        screen.getByPlaceholderText('+1 (___) ___-____') as HTMLInputElement
+      ).value,
+    ).toBe('+16195550000')
+
+    const loginLink = screen.getByRole('link', { name: 'Sign in' })
+    const loginHref = loginLink.getAttribute('href') ?? ''
+    expect(loginHref).toContain('ti=tap_pro_1')
+    expect(loginHref).toContain('next=%2Fpro%2Fservices%3Ffrom%3Dinvite')
+    expect(loginHref).toContain('email=prefill-pro%40example.com')
+    expect(loginHref).toContain('role=PRO')
+
+    await confirmMobileZip('92101')
+    fireEvent.change(screen.getByLabelText(/License number/i), {
+      target: { value: '123456' },
+    })
+    fireEvent.change(getPasswordInput(), {
+      target: { value: 'longpassword' },
+    })
+    checkAllRequiredConsents()
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Create Pro Account' }),
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
+
+    const registerBody = JSON.parse(
+      String(fetchMock.mock.calls[2]?.[1]?.body ?? '{}'),
+    )
+
+    expect(registerBody).toMatchObject({
+      tapIntentId: 'tap_pro_1',
+      next: '/pro/services?from=invite',
+      intent: 'TEAM_INVITE',
+      inviteToken: 'invite_token_1',
+      email: 'prefill-pro@example.com',
+      phone: '+16195550000',
+      firstName: 'Pre',
+      lastName: 'Filled Pro',
+    })
+
+    // Register returned no nextUrl, so the query param must drive the
+    // post-verification redirect.
+    await waitFor(() => {
+      expect(mocks.hardNavigate).toHaveBeenCalledWith(
+        '/verify-phone?next=%2Fpro%2Fservices%3Ffrom%3Dinvite',
+      )
+    })
+  })
+
   it('surfaces turnstile errors and does not call register', async () => {
     const fetchMock = setFetchSequence([
       jsonResponse({

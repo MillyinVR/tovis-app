@@ -61,3 +61,25 @@ Install dependencies:
 
 ```bash
 npm install
+## Signup flows
+
+- `signup.spec.ts`
+  - signup chooser routing to client and pro forms
+  - client signup with ZIP confirm (Google proxies intercepted in-browser)
+  - salon pro signup via Places autocomplete
+  - mobile pro signup with base ZIP + radius
+  - licensed pro signup degrading to manual review when DCA is unconfigured
+
+Run logged-out, so the auth setup project is not needed:
+
+```bash
+PORT=3100 PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 \
+  npx dotenv -e .env.e2e.local -- \
+  npx playwright test tests/e2e/signup.spec.ts --no-deps
+```
+
+Use a port with no running dev server so Playwright starts a fresh one with
+the `.env.e2e.local` environment (test database, Cloudflare always-pass
+Turnstile test keys, Twilio/Postmark/DCA unset). Reusing a dev server that was
+started with `.env.local` would write signups to the dev database and call
+real providers.

@@ -31,7 +31,6 @@ function appendIfPresent(
 function buildQueryString(args: {
   searchParams: SearchParamsInput
   roleOverride?: 'CLIENT' | 'PRO'
-  includeEmailForLogin?: boolean
 }): string {
   const params = new URLSearchParams()
 
@@ -46,12 +45,7 @@ function buildQueryString(args: {
   )
   appendIfPresent(params, 'name', firstParam(args.searchParams.name))
   appendIfPresent(params, 'phone', firstParam(args.searchParams.phone))
-
-  if (args.includeEmailForLogin) {
-    appendIfPresent(params, 'email', firstParam(args.searchParams.email))
-  } else {
-    appendIfPresent(params, 'email', firstParam(args.searchParams.email))
-  }
+  appendIfPresent(params, 'email', firstParam(args.searchParams.email))
 
   if (args.roleOverride) {
     params.set('role', args.roleOverride)
@@ -82,7 +76,6 @@ export default async function SignupChooserPage(props: PageProps) {
 
   const loginQs = buildQueryString({
     searchParams: resolvedSearchParams,
-    includeEmailForLogin: true,
   })
 
   if (intent === 'CLAIM_INVITE' && role === 'CLIENT') {
