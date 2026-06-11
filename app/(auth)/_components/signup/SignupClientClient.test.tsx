@@ -192,7 +192,7 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     expect(screen.getByDisplayValue('Tori')).toBeTruthy()
     expect(screen.getByDisplayValue('Morales')).toBeTruthy()
     expect(screen.getByDisplayValue('tori@example.com')).toBeTruthy()
-    expect(screen.getByDisplayValue('+16195551234')).toBeTruthy()
+    expect(screen.getByDisplayValue('+1 (619) 555-1234')).toBeTruthy()
 
     expect(
       screen.getByText(
@@ -525,7 +525,41 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
     expect(mocks.router.refresh).not.toHaveBeenCalled()
   })
 
-  it('keeps submit disabled until the required fields, confirmed ZIP, and both consents are present', async () => {
+  it('shows inline field errors instead of submitting when required fields are missing', async () => {
+    setFetchSequence([])
+
+    render(<SignupClientClient />)
+
+    const submitButton = screen.getByRole('button', {
+      name: 'Create Client Account',
+    })
+
+    expect(submitButton.hasAttribute('disabled')).toBe(false)
+
+    fireEvent.click(submitButton)
+
+    await waitFor(() => {
+      expect(screen.getByText('First name is required.')).toBeTruthy()
+    })
+
+    expect(screen.getByText('Last name is required.')).toBeTruthy()
+    expect(screen.getByText('Please confirm your ZIP code.')).toBeTruthy()
+    expect(screen.getByText('Phone number is required.')).toBeTruthy()
+    expect(screen.getByText('Email is required.')).toBeTruthy()
+    expect(screen.getByText('Password is required.')).toBeTruthy()
+    expect(
+      screen.getByText('Please accept the Terms and Privacy Policy.'),
+    ).toBeTruthy()
+
+    // Focus lands on the first invalid field.
+    expect(document.activeElement?.id).toBe('signup-first-name')
+
+    expect(mocks.getTurnstileToken).not.toHaveBeenCalled()
+    expect(mocks.router.refresh).not.toHaveBeenCalled()
+    expect(mocks.hardNavigate).not.toHaveBeenCalled()
+  })
+
+  it('flags a too-short password inline before calling register', async () => {
     mocks.setSearchParams({
       name: 'Tori Morales',
       email: 'tori@example.com',
@@ -550,28 +584,42 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
 
     render(<SignupClientClient />)
 
-    const submitButton = screen.getByRole('button', {
-      name: 'Create Client Account',
-    })
-
-    expect(submitButton.hasAttribute('disabled')).toBe(true)
-
     await confirmZip('92101')
 
     fireEvent.change(getPasswordInput(), {
-      target: { value: 'supersecret123' },
+      target: { value: 'short' },
     })
 
-    expect(submitButton.hasAttribute('disabled')).toBe(true)
+    checkAllRequiredConsents()
 
-    checkTransactionalSmsConsent()
-    expect(submitButton.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Create Client Account' }),
+    )
 
-    checkTermsConsent()
-    expect(submitButton.hasAttribute('disabled')).toBe(false)
+    await waitFor(() => {
+      expect(
+        screen.getByText('Password must be at least 10 characters.'),
+      ).toBeTruthy()
+    })
 
-    expect(mocks.router.refresh).not.toHaveBeenCalled()
+    expect(mocks.getTurnstileToken).not.toHaveBeenCalled()
     expect(mocks.hardNavigate).not.toHaveBeenCalled()
+  })
+
+  it('formats the phone number as the user types', () => {
+    setFetchSequence([])
+
+    render(<SignupClientClient />)
+
+    const phoneInput = screen.getByPlaceholderText(
+      '+1 (___) ___-____',
+    ) as HTMLInputElement
+
+    fireEvent.change(phoneInput, { target: { value: '6195551234' } })
+    expect(phoneInput.value).toBe('(619) 555-1234')
+
+    fireEvent.change(phoneInput, { target: { value: '+16195551234' } })
+    expect(phoneInput.value).toBe('+1 (619) 555-1234')
   })
 
   it('lets the user clear a confirmed ZIP and re-enter it', async () => {

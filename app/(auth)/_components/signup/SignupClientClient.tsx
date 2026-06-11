@@ -16,10 +16,53 @@ import {
   readSignupForwardedParams,
   sanitizeNextUrl,
 } from './signupSearchParams'
+import {
+  FieldErrorText,
+  fieldErrorDescribedBy,
+  focusFieldById,
+} from './fieldErrors'
 import { buildTransactionalSmsCheckboxLabel } from '@/lib/transactionalSmsPolicy'
 import { useBrand } from '@/lib/brand/BrandProvider'
+import { PASSWORD_MIN_LEN } from '@/lib/passwordPolicyConstants'
+import {
+  compactPhoneInputForSubmit,
+  formatPhoneInputValue,
+  isLikelyValidPhoneInput,
+} from '@/lib/phoneInputFormat'
 
 type VerificationSendState = boolean | 'pending'
+
+type ClientField =
+  | 'firstName'
+  | 'lastName'
+  | 'zip'
+  | 'phone'
+  | 'smsConsent'
+  | 'email'
+  | 'password'
+  | 'tos'
+
+const FIELD_IDS: Record<ClientField, string> = {
+  firstName: 'signup-first-name',
+  lastName: 'signup-last-name',
+  zip: 'signup-zip',
+  phone: 'signup-phone',
+  smsConsent: 'signup-sms-consent',
+  email: 'signup-email',
+  password: 'signup-password',
+  tos: 'signup-tos',
+}
+
+const FIELD_ORDER: ClientField[] = [
+  'firstName',
+  'lastName',
+  'zip',
+  'phone',
+  'smsConsent',
+  'email',
+  'password',
+  'tos',
+]
 
 type GeocodeResponse = {
   geo?: {
@@ -36,10 +79,6 @@ type GeocodeResponse = {
 type TimeZoneResponse = {
   timeZoneId?: string
   error?: string
-}
-
-function compactPhoneInputForSubmit(value: string): string {
-  return value.trim().replace(/\s+/gu, '')
 }
 
 function readVerificationSendState(
@@ -233,40 +272,58 @@ export default function SignupClientClient() {
   const [zipLoading, setZipLoading] = useState(false)
   const [confirmed, setConfirmed] = useState<ConfirmedZip | null>(null)
 
-  const [phone, setPhone] = useState(phonePrefill)
+  const [phone, setPhone] = useState(() => formatPhoneInputValue(phonePrefill))
   const [email, setEmail] = useState(emailPrefill)
   const [password, setPassword] = useState('')
   const [tosAccepted, setTosAccepted] = useState(false)
   const [transactionalSmsConsent, setTransactionalSmsConsent] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<Record<ClientField, string>>
+  >({})
   const [loading, setLoading] = useState(false)
+
+  function setFieldError(field: ClientField, message: string | null) {
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      if (message) next[field] = message
+      else delete next[field]
+      return next
+    })
+  }
 
   function resetZip(next = '') {
     setZip(next)
     setConfirmed(null)
   }
 
+  type ZipConfirmResult = {
+    confirmed: ConfirmedZip | null
+    errorMessage: string | null
+  }
+
   async function confirmZipIfValid(
     rawInput?: string,
-  ): Promise<ConfirmedZip | null> {
+  ): Promise<ZipConfirmResult> {
     const raw = (rawInput ?? zip).trim()
 
-    if (!raw) return null
+    if (!raw) return { confirmed: null, errorMessage: null }
 
     if (confirmed?.postalCode && confirmed.postalCode === raw) {
-      return confirmed
+      return { confirmed, errorMessage: null }
     }
 
     if (!isUsZip(raw)) {
       setConfirmed(null)
-      setError('Please enter a valid 5-digit ZIP code.')
-      return null
+      return {
+        confirmed: null,
+        errorMessage: 'Please enter a valid 5-digit ZIP code.',
+      }
     }
 
-    if (zipLoading) return confirmed
+    if (zipLoading) return { confirmed, errorMessage: null }
 
     setZipLoading(true)
-    setError(null)
 
     try {
       const geo = await fetchGeocodeByPostal({ postalCode: raw })
@@ -284,14 +341,22 @@ export default function SignupClientClient() {
 
       setConfirmed(nextConfirmed)
       setZip(geo.postalCode ?? raw)
-      return nextConfirmed
+      return { confirmed: nextConfirmed, errorMessage: null }
     } catch (e) {
       setConfirmed(null)
-      setError(e instanceof Error ? e.message : 'Could not confirm ZIP code.')
-      return null
+      return {
+        confirmed: null,
+        errorMessage:
+          e instanceof Error ? e.message : 'Could not confirm ZIP code.',
+      }
     } finally {
       setZipLoading(false)
     }
+  }
+
+  async function handleZipBlur() {
+    const result = await confirmZipIfValid(zip)
+    setFieldError('zip', result.errorMessage)
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -299,32 +364,47 @@ export default function SignupClientClient() {
     if (loading) return
     setError(null)
 
-    if (!firstName.trim() || !lastName.trim()) {
-      return setError('First and last name are required.')
-    }
+    const errors: Partial<Record<ClientField, string>> = {}
 
-    const confirmedZip = await confirmZipIfValid(zip)
+    if (!firstName.trim()) errors.firstName = 'First name is required.'
+    if (!lastName.trim()) errors.lastName = 'Last name is required.'
+
+    const zipResult = await confirmZipIfValid(zip)
+    const confirmedZip = zipResult.confirmed
     if (!confirmedZip) {
-      return setError('Please enter a valid ZIP code.')
+      errors.zip = zipResult.errorMessage ?? 'Please confirm your ZIP code.'
     }
 
     if (!compactPhoneInputForSubmit(phone)) {
-      return setError('Phone number is required.')
+      errors.phone = 'Phone number is required.'
+    } else if (!isLikelyValidPhoneInput(phone)) {
+      errors.phone = 'Enter a valid phone number.'
     }
+
     if (!transactionalSmsConsent) {
-      return setError(
-        'You must agree to receive transactional SMS messages for account verification and appointment updates.',
-      )
+      errors.smsConsent =
+        'Required so we can send verification codes and appointment updates.'
     }
-    if (!email.trim()) {
-      return setError('Email is required.')
-    }
+    if (!email.trim()) errors.email = 'Email is required.'
     if (!password.trim()) {
-      return setError('Password is required.')
+      errors.password = 'Password is required.'
+    } else if (password.length < PASSWORD_MIN_LEN) {
+      errors.password = `Password must be at least ${PASSWORD_MIN_LEN} characters.`
     }
     if (!tosAccepted) {
-      return setError('You must accept the Terms and Privacy Policy.')
+      errors.tos = 'Please accept the Terms and Privacy Policy.'
     }
+
+    setFieldErrors(errors)
+
+    const firstInvalid = FIELD_ORDER.find((field) => errors[field])
+    if (firstInvalid) {
+      focusFieldById(FIELD_IDS[firstInvalid])
+      return
+    }
+
+    // Unreachable when validation passed; narrows the type for the body below.
+    if (!confirmedZip) return
 
     setLoading(true)
     try {
@@ -395,19 +475,6 @@ export default function SignupClientClient() {
     }
   }
 
-  const canSubmit = Boolean(
-    !loading &&
-      firstName.trim() &&
-      lastName.trim() &&
-      isUsZip(zip) &&
-      compactPhoneInputForSubmit(phone) &&
-      email.trim() &&
-      password.trim() &&
-      confirmed &&
-      transactionalSmsConsent &&
-      tosAccepted,
-  )
-
   return (
     <AuthShell
       title={
@@ -421,7 +488,7 @@ export default function SignupClientClient() {
           : 'Find pros, book fast, and keep your beauty life organized.'
       }
     >
-      <form onSubmit={handleSubmit} className="grid gap-5">
+      <form onSubmit={handleSubmit} className="grid gap-5" noValidate>
         {isClaimInviteFlow ? (
           <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
             <span className="font-black text-textPrimary">Claim invite:</span>{' '}
@@ -434,20 +501,44 @@ export default function SignupClientClient() {
           <label className="grid gap-1.5">
             <FieldLabel>First name</FieldLabel>
             <Input
+              id={FIELD_IDS.firstName}
               value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
+              onChange={(e) => {
+                setFirstName(e.target.value)
+                setFieldError('firstName', null)
+              }}
               required
               autoComplete="given-name"
+              {...fieldErrorDescribedBy(
+                FIELD_IDS.firstName,
+                fieldErrors.firstName,
+              )}
+            />
+            <FieldErrorText
+              id={`${FIELD_IDS.firstName}-error`}
+              message={fieldErrors.firstName}
             />
           </label>
 
           <label className="grid gap-1.5">
             <FieldLabel>Last name</FieldLabel>
             <Input
+              id={FIELD_IDS.lastName}
               value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
+              onChange={(e) => {
+                setLastName(e.target.value)
+                setFieldError('lastName', null)
+              }}
               required
               autoComplete="family-name"
+              {...fieldErrorDescribedBy(
+                FIELD_IDS.lastName,
+                fieldErrors.lastName,
+              )}
+            />
+            <FieldErrorText
+              id={`${FIELD_IDS.lastName}-error`}
+              message={fieldErrors.lastName}
             />
           </label>
 
@@ -462,19 +553,25 @@ export default function SignupClientClient() {
             </div>
 
             <Input
+              id={FIELD_IDS.zip}
               value={zip}
               onChange={(e) => {
                 const v = e.target.value
                 setZip(v)
                 setConfirmed(null)
-                setError(null)
+                setFieldError('zip', null)
               }}
               onBlur={() => {
-                void confirmZipIfValid(zip)
+                void handleZipBlur()
               }}
               placeholder="e.g. 92024"
               inputMode="numeric"
               autoComplete="postal-code"
+              {...fieldErrorDescribedBy(FIELD_IDS.zip, fieldErrors.zip)}
+            />
+            <FieldErrorText
+              id={`${FIELD_IDS.zip}-error`}
+              message={fieldErrors.zip}
             />
 
             <div className="flex items-center justify-between gap-3">
@@ -518,58 +615,106 @@ export default function SignupClientClient() {
             </span>
           </div>
           <Input
+            id={FIELD_IDS.phone}
             value={phone}
-            onChange={(e) => setPhone(e.target.value)}
+            onChange={(e) => {
+              setPhone(formatPhoneInputValue(e.target.value))
+              setFieldError('phone', null)
+            }}
             inputMode="tel"
             autoComplete="tel"
             placeholder="+1 (___) ___-____"
             required
+            {...fieldErrorDescribedBy(FIELD_IDS.phone, fieldErrors.phone)}
+          />
+          <FieldErrorText
+            id={`${FIELD_IDS.phone}-error`}
+            message={fieldErrors.phone}
           />
         </label>
 
         <label className="flex items-start gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-3 text-sm text-textSecondary">
           <input
+            id={FIELD_IDS.smsConsent}
             type="checkbox"
             checked={transactionalSmsConsent}
-            onChange={(e) => setTransactionalSmsConsent(e.target.checked)}
+            onChange={(e) => {
+              setTransactionalSmsConsent(e.target.checked)
+              setFieldError('smsConsent', null)
+            }}
             className="mt-0.5 h-4 w-4 rounded border-surfaceGlass/20"
             required
+            {...fieldErrorDescribedBy(
+              FIELD_IDS.smsConsent,
+              fieldErrors.smsConsent,
+            )}
           />
           <span className="leading-5">
             {buildTransactionalSmsCheckboxLabel(brand.displayName)}
+            <FieldErrorText
+              id={`${FIELD_IDS.smsConsent}-error`}
+              message={fieldErrors.smsConsent}
+            />
           </span>
         </label>
 
         <label className="grid gap-1.5">
           <FieldLabel>Email address</FieldLabel>
           <Input
+            id={FIELD_IDS.email}
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value)
+              setFieldError('email', null)
+            }}
             type="email"
             required
             autoComplete="email"
             inputMode="email"
+            {...fieldErrorDescribedBy(FIELD_IDS.email, fieldErrors.email)}
+          />
+          <FieldErrorText
+            id={`${FIELD_IDS.email}-error`}
+            message={fieldErrors.email}
           />
         </label>
 
         <label className="grid gap-1.5">
           <FieldLabel>Password</FieldLabel>
           <Input
+            id={FIELD_IDS.password}
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value)
+              setFieldError('password', null)
+            }}
             type="password"
             required
             autoComplete="new-password"
+            {...fieldErrorDescribedBy(
+              FIELD_IDS.password,
+              fieldErrors.password,
+            )}
+          />
+          <HelpText>At least {PASSWORD_MIN_LEN} characters.</HelpText>
+          <FieldErrorText
+            id={`${FIELD_IDS.password}-error`}
+            message={fieldErrors.password}
           />
         </label>
 
         <label className="flex items-start gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-3 text-sm text-textSecondary">
           <input
+            id={FIELD_IDS.tos}
             type="checkbox"
             checked={tosAccepted}
-            onChange={(e) => setTosAccepted(e.target.checked)}
+            onChange={(e) => {
+              setTosAccepted(e.target.checked)
+              setFieldError('tos', null)
+            }}
             className="mt-0.5 h-4 w-4 rounded border-surfaceGlass/20"
             required
+            {...fieldErrorDescribedBy(FIELD_IDS.tos, fieldErrors.tos)}
           />
           <span className="leading-5">
             I agree to the{' '}
@@ -590,6 +735,10 @@ export default function SignupClientClient() {
             <span className="mt-1 block text-[11px] text-textSecondary/80">
               Protected by Turnstile.
             </span>
+            <FieldErrorText
+              id={`${FIELD_IDS.tos}-error`}
+              message={fieldErrors.tos}
+            />
           </span>
         </label>
 
@@ -600,7 +749,7 @@ export default function SignupClientClient() {
         ) : null}
 
         <div className="grid gap-2 pt-1">
-          <PrimaryButton loading={loading} disabled={!canSubmit}>
+          <PrimaryButton loading={loading}>
             {loading ? 'Creating…' : 'Create Client Account'}
           </PrimaryButton>
 
