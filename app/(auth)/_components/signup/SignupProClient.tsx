@@ -18,13 +18,63 @@ import {
   readSignupForwardedParams,
   sanitizeNextUrl,
 } from './signupSearchParams'
+import {
+  FieldErrorText,
+  fieldErrorDescribedBy,
+  focusFieldById,
+} from './fieldErrors'
 import { buildTransactionalSmsCheckboxLabel } from '@/lib/transactionalSmsPolicy'
 import { useBrand } from '@/lib/brand/BrandProvider'
+import { PASSWORD_MIN_LEN } from '@/lib/passwordPolicyConstants'
+import {
+  formatPhoneInputValue,
+  isLikelyValidPhoneInput,
+} from '@/lib/phoneInputFormat'
 
 type VerificationSendState = boolean | 'pending'
 
+type ProField =
+  | 'location'
+  | 'radius'
+  | 'licenseNumber'
+  | 'firstName'
+  | 'lastName'
+  | 'phone'
+  | 'smsConsent'
+  | 'email'
+  | 'password'
+  | 'tos'
+
+const FIELD_IDS: Record<ProField, string> = {
+  location: 'signup-pro-location',
+  radius: 'signup-pro-radius',
+  licenseNumber: 'signup-pro-license-number',
+  firstName: 'signup-first-name',
+  lastName: 'signup-last-name',
+  phone: 'signup-phone',
+  smsConsent: 'signup-sms-consent',
+  email: 'signup-email',
+  password: 'signup-password',
+  tos: 'signup-tos',
+}
+
+const FIELD_ORDER: ProField[] = [
+  'location',
+  'radius',
+  'licenseNumber',
+  'firstName',
+  'lastName',
+  'phone',
+  'smsConsent',
+  'email',
+  'password',
+  'tos',
+]
+
 function compactPhoneInputForSubmit(value: string): string {
-  return value.trim().replace(/\s+/gu, '')
+  const digits = value.replace(/\D/gu, '')
+  if (!digits) return ''
+  return value.trim().startsWith('+') ? `+${digits}` : digits
 }
 
 function readVerificationSendState(
@@ -336,7 +386,7 @@ export default function SignupProClient() {
 
   const [firstName, setFirstName] = useState(nameParts.firstName)
   const [lastName, setLastName] = useState(nameParts.lastName)
-  const [phone, setPhone] = useState(phonePrefill)
+  const [phone, setPhone] = useState(() => formatPhoneInputValue(phonePrefill))
   const [email, setEmail] = useState(emailPrefill)
   const [password, setPassword] = useState('')
   const [tosAccepted, setTosAccepted] = useState(false)
@@ -365,7 +415,19 @@ export default function SignupProClient() {
   const [confirmed, setConfirmed] = useState<ConfirmedLocation | null>(null)
 
   const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<Record<ProField, string>>
+  >({})
   const [loading, setLoading] = useState(false)
+
+  function setFieldError(field: ProField, message: string | null) {
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      if (message) next[field] = message
+      else delete next[field]
+      return next
+    })
+  }
 
   const needsLicense = requiresCaBbcLicense(professionType)
 
@@ -373,6 +435,7 @@ export default function SignupProClient() {
     setLocQuery(nextQuery)
     setLocPredictions([])
     setConfirmed(null)
+    setFieldError('location', null)
   }
 
   function locationLabel() {
@@ -392,7 +455,7 @@ export default function SignupProClient() {
   }
 
   async function refreshPredictions(input: string) {
-    setError(null)
+    setFieldError('location', null)
     setConfirmed(null)
 
     if (proMode === 'MOBILE') {
@@ -414,7 +477,8 @@ export default function SignupProClient() {
       setLocPredictions(preds.slice(0, 6))
     } catch (e: unknown) {
       setLocPredictions([])
-      setError(
+      setFieldError(
+        'location',
         e instanceof Error
           ? e.message
           : 'Location search is unavailable right now.',
@@ -425,7 +489,7 @@ export default function SignupProClient() {
   }
 
   async function pickPrediction(p: GooglePrediction) {
-    setError(null)
+    setFieldError('location', null)
     setLocLoading(true)
 
     try {
@@ -456,18 +520,21 @@ export default function SignupProClient() {
       setLocQuery(p.description)
     } catch (e: unknown) {
       setConfirmed(null)
-      setError(e instanceof Error ? e.message : 'Could not confirm location.')
+      setFieldError(
+        'location',
+        e instanceof Error ? e.message : 'Could not confirm location.',
+      )
     } finally {
       setLocLoading(false)
     }
   }
 
   async function confirmZip() {
-    setError(null)
+    setFieldError('location', null)
 
     const raw = locQuery.trim()
     if (!isUsZip(raw)) {
-      setError('Please enter a valid 5-digit ZIP code.')
+      setFieldError('location', 'Please enter a valid 5-digit ZIP code.')
       return
     }
 
@@ -493,7 +560,10 @@ export default function SignupProClient() {
       setLocQuery(geo.postalCode ?? raw)
     } catch (e: unknown) {
       setConfirmed(null)
-      setError(e instanceof Error ? e.message : 'Could not confirm ZIP code.')
+      setFieldError(
+        'location',
+        e instanceof Error ? e.message : 'Could not confirm ZIP code.',
+      )
     } finally {
       setLocLoading(false)
     }
@@ -504,45 +574,59 @@ export default function SignupProClient() {
     if (loading) return
     setError(null)
 
-    if (!firstName.trim() || !lastName.trim()) {
-      return setError('First and last name are required.')
-    }
-    if (!compactPhoneInputForSubmit(phone)) {
-      return setError('Phone number is required.')
-    }
-    if (!transactionalSmsConsent) {
-      return setError(
-        'You must agree to receive transactional SMS messages for account verification and appointment updates.',
-      )
-    }
-    if (!email.trim()) {
-      return setError('Email is required.')
-    }
-    if (!password.trim()) {
-      return setError('Password is required.')
-    }
-    if (!tosAccepted) {
-      return setError('You must accept the Terms and Privacy Policy.')
-    }
+    const errors: Partial<Record<ProField, string>> = {}
 
     if (!isLocationConfirmed() || !confirmed) {
-      return setError(
+      errors.location =
         proMode === 'MOBILE'
           ? 'Please confirm your ZIP code.'
-          : 'Please choose an address from the dropdown.',
-      )
+          : 'Please choose an address from the dropdown.'
     }
 
     if (proMode === 'MOBILE') {
       const n = Number(mobileRadiusMiles)
       if (!Number.isFinite(n) || n < 1 || n > 200) {
-        return setError('Please enter a mobile radius between 1 and 200 miles.')
+        errors.radius = 'Please enter a mobile radius between 1 and 200 miles.'
       }
     }
 
     if (needsLicense && !licenseNumber.trim()) {
-      return setError('License number is required for this profession.')
+      errors.licenseNumber = 'License number is required for this profession.'
     }
+
+    if (!firstName.trim()) errors.firstName = 'First name is required.'
+    if (!lastName.trim()) errors.lastName = 'Last name is required.'
+
+    if (!compactPhoneInputForSubmit(phone)) {
+      errors.phone = 'Phone number is required.'
+    } else if (!isLikelyValidPhoneInput(phone)) {
+      errors.phone = 'Enter a valid phone number.'
+    }
+
+    if (!transactionalSmsConsent) {
+      errors.smsConsent =
+        'Required so we can send verification codes and appointment updates.'
+    }
+    if (!email.trim()) errors.email = 'Email is required.'
+    if (!password.trim()) {
+      errors.password = 'Password is required.'
+    } else if (password.length < PASSWORD_MIN_LEN) {
+      errors.password = `Password must be at least ${PASSWORD_MIN_LEN} characters.`
+    }
+    if (!tosAccepted) {
+      errors.tos = 'Please accept the Terms and Privacy Policy.'
+    }
+
+    setFieldErrors(errors)
+
+    const firstInvalid = FIELD_ORDER.find((field) => errors[field])
+    if (firstInvalid) {
+      focusFieldById(FIELD_IDS[firstInvalid])
+      return
+    }
+
+    // Unreachable when validation passed; narrows the type for the body below.
+    if (!confirmed) return
 
     const signupLocation =
       proMode === 'MOBILE'
@@ -646,26 +730,12 @@ export default function SignupProClient() {
   const handlePreview = normalizeHandleInput(handle.trim())
   const handleIsTrimmed = handle.trim() !== handlePreview
 
-  const canSubmit =
-    !loading &&
-    Boolean(firstName.trim()) &&
-    Boolean(lastName.trim()) &&
-    Boolean(compactPhoneInputForSubmit(phone)) &&
-    Boolean(email.trim()) &&
-    Boolean(password.trim()) &&
-    isLocationConfirmed() &&
-    transactionalSmsConsent &&
-    tosAccepted &&
-    (!needsLicense || Boolean(licenseNumber.trim())) &&
-    (proMode !== 'MOBILE' ||
-      (Number(mobileRadiusMiles) >= 1 && Number(mobileRadiusMiles) <= 200))
-
   return (
     <AuthShell
       title="Create Pro Account"
       subtitle="Run your business from your phone — set up takes minutes."
     >
-      <form onSubmit={handleSubmit} className="grid gap-5">
+      <form onSubmit={handleSubmit} className="grid gap-5" noValidate>
         <div className="grid gap-2">
           <FieldLabel>Profession</FieldLabel>
           <Select
@@ -744,11 +814,16 @@ export default function SignupProClient() {
 
           <div className="relative">
             <Input
+              id={FIELD_IDS.location}
               value={locQuery}
               onChange={(e) => refreshPredictions(e.target.value)}
               placeholder={locationPlaceholder()}
               autoComplete="off"
               inputMode={proMode === 'MOBILE' ? 'numeric' : 'text'}
+              {...fieldErrorDescribedBy(
+                FIELD_IDS.location,
+                fieldErrors.location,
+              )}
             />
 
             {proMode === 'SALON' && locPredictions.length > 0 ? (
@@ -806,6 +881,11 @@ export default function SignupProClient() {
               </HelpText>
             )}
           </div>
+
+          <FieldErrorText
+            id={`${FIELD_IDS.location}-error`}
+            message={fieldErrors.location}
+          />
         </div>
 
         {proMode === 'MOBILE' ? (
@@ -817,13 +897,22 @@ export default function SignupProClient() {
               </span>
             </div>
             <Input
+              id={FIELD_IDS.radius}
               value={mobileRadiusMiles}
-              onChange={(e) => setMobileRadiusMiles(e.target.value)}
+              onChange={(e) => {
+                setMobileRadiusMiles(e.target.value)
+                setFieldError('radius', null)
+              }}
               inputMode="numeric"
               placeholder="e.g. 15"
               required
+              {...fieldErrorDescribedBy(FIELD_IDS.radius, fieldErrors.radius)}
             />
             <HelpText>How far you travel from your base ZIP.</HelpText>
+            <FieldErrorText
+              id={`${FIELD_IDS.radius}-error`}
+              message={fieldErrors.radius}
+            />
           </label>
         ) : null}
 
@@ -850,13 +939,22 @@ export default function SignupProClient() {
               <label className="grid gap-1.5">
                 <FieldLabel>License number</FieldLabel>
                 <Input
+                  id={FIELD_IDS.licenseNumber}
                   value={licenseNumber}
                   onChange={(e) => {
                     setLicenseNumber(e.target.value)
-                    setError(null)
+                    setFieldError('licenseNumber', null)
                   }}
                   placeholder="e.g. 123456"
                   autoCapitalize="characters"
+                  {...fieldErrorDescribedBy(
+                    FIELD_IDS.licenseNumber,
+                    fieldErrors.licenseNumber,
+                  )}
+                />
+                <FieldErrorText
+                  id={`${FIELD_IDS.licenseNumber}-error`}
+                  message={fieldErrors.licenseNumber}
                 />
               </label>
             </div>
@@ -882,20 +980,44 @@ export default function SignupProClient() {
           <label className="grid gap-1.5">
             <FieldLabel>First name</FieldLabel>
             <Input
+              id={FIELD_IDS.firstName}
               value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
+              onChange={(e) => {
+                setFirstName(e.target.value)
+                setFieldError('firstName', null)
+              }}
               required
               autoComplete="given-name"
+              {...fieldErrorDescribedBy(
+                FIELD_IDS.firstName,
+                fieldErrors.firstName,
+              )}
+            />
+            <FieldErrorText
+              id={`${FIELD_IDS.firstName}-error`}
+              message={fieldErrors.firstName}
             />
           </label>
 
           <label className="grid gap-1.5">
             <FieldLabel>Last name</FieldLabel>
             <Input
+              id={FIELD_IDS.lastName}
               value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
+              onChange={(e) => {
+                setLastName(e.target.value)
+                setFieldError('lastName', null)
+              }}
               required
               autoComplete="family-name"
+              {...fieldErrorDescribedBy(
+                FIELD_IDS.lastName,
+                fieldErrors.lastName,
+              )}
+            />
+            <FieldErrorText
+              id={`${FIELD_IDS.lastName}-error`}
+              message={fieldErrors.lastName}
             />
           </label>
         </div>
@@ -940,58 +1062,106 @@ export default function SignupProClient() {
             </span>
           </div>
           <Input
+            id={FIELD_IDS.phone}
             value={phone}
-            onChange={(e) => setPhone(e.target.value)}
+            onChange={(e) => {
+              setPhone(formatPhoneInputValue(e.target.value))
+              setFieldError('phone', null)
+            }}
             inputMode="tel"
             autoComplete="tel"
             placeholder="+1 (___) ___-____"
             required
+            {...fieldErrorDescribedBy(FIELD_IDS.phone, fieldErrors.phone)}
+          />
+          <FieldErrorText
+            id={`${FIELD_IDS.phone}-error`}
+            message={fieldErrors.phone}
           />
         </label>
 
         <label className="flex items-start gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-3 text-sm text-textSecondary">
           <input
+            id={FIELD_IDS.smsConsent}
             type="checkbox"
             checked={transactionalSmsConsent}
-            onChange={(e) => setTransactionalSmsConsent(e.target.checked)}
+            onChange={(e) => {
+              setTransactionalSmsConsent(e.target.checked)
+              setFieldError('smsConsent', null)
+            }}
             className="mt-0.5 h-4 w-4 rounded border-surfaceGlass/20"
             required
+            {...fieldErrorDescribedBy(
+              FIELD_IDS.smsConsent,
+              fieldErrors.smsConsent,
+            )}
           />
           <span className="leading-5">
             {buildTransactionalSmsCheckboxLabel(brand.displayName)}
+            <FieldErrorText
+              id={`${FIELD_IDS.smsConsent}-error`}
+              message={fieldErrors.smsConsent}
+            />
           </span>
         </label>
 
         <label className="grid gap-1.5">
           <FieldLabel>Email address</FieldLabel>
           <Input
+            id={FIELD_IDS.email}
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value)
+              setFieldError('email', null)
+            }}
             type="email"
             required
             autoComplete="email"
             inputMode="email"
+            {...fieldErrorDescribedBy(FIELD_IDS.email, fieldErrors.email)}
+          />
+          <FieldErrorText
+            id={`${FIELD_IDS.email}-error`}
+            message={fieldErrors.email}
           />
         </label>
 
         <label className="grid gap-1.5">
           <FieldLabel>Password</FieldLabel>
           <Input
+            id={FIELD_IDS.password}
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value)
+              setFieldError('password', null)
+            }}
             type="password"
             required
             autoComplete="new-password"
+            {...fieldErrorDescribedBy(
+              FIELD_IDS.password,
+              fieldErrors.password,
+            )}
+          />
+          <HelpText>At least {PASSWORD_MIN_LEN} characters.</HelpText>
+          <FieldErrorText
+            id={`${FIELD_IDS.password}-error`}
+            message={fieldErrors.password}
           />
         </label>
 
         <label className="flex items-start gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-3 text-sm text-textSecondary">
           <input
+            id={FIELD_IDS.tos}
             type="checkbox"
             checked={tosAccepted}
-            onChange={(e) => setTosAccepted(e.target.checked)}
+            onChange={(e) => {
+              setTosAccepted(e.target.checked)
+              setFieldError('tos', null)
+            }}
             className="mt-0.5 h-4 w-4 rounded border-surfaceGlass/20"
             required
+            {...fieldErrorDescribedBy(FIELD_IDS.tos, fieldErrors.tos)}
           />
           <span className="leading-5">
             I agree to the{' '}
@@ -1012,6 +1182,10 @@ export default function SignupProClient() {
             <span className="mt-1 block text-[11px] text-textSecondary/80">
               Protected by Turnstile.
             </span>
+            <FieldErrorText
+              id={`${FIELD_IDS.tos}-error`}
+              message={fieldErrors.tos}
+            />
           </span>
         </label>
 
@@ -1022,7 +1196,7 @@ export default function SignupProClient() {
         ) : null}
 
         <div className="grid gap-2 pt-1">
-          <PrimaryButton loading={loading} disabled={!canSubmit}>
+          <PrimaryButton loading={loading}>
             {loading ? 'Creating…' : 'Create Pro Account'}
           </PrimaryButton>
 
