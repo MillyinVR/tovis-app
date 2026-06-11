@@ -8,6 +8,28 @@ import type { TenantContext } from '@/lib/tenant/context'
 
 const POSTMARK_SEND_URL = 'https://api.postmarkapp.com/email'
 
+// Postmark API ErrorCode for recipients marked inactive/suppressed (hard
+// bounce, spam complaint, or manual suppression). Retrying these never
+// succeeds until the suppression is lifted on the Postmark side.
+export const POSTMARK_INACTIVE_RECIPIENT_ERROR_CODE = 406
+
+export class PostmarkSendError extends Error {
+  readonly errorCode: number | null
+
+  constructor(message: string, errorCode: number | null) {
+    super(message)
+    this.name = 'PostmarkSendError'
+    this.errorCode = errorCode
+  }
+}
+
+export function isInactiveRecipientError(error: unknown): boolean {
+  return (
+    error instanceof PostmarkSendError &&
+    error.errorCode === POSTMARK_INACTIVE_RECIPIENT_ERROR_CODE
+  )
+}
+
 export const EMAIL_VERIFICATION_EXPIRY_MS = 1000 * 60 * 60 * 24 // 24 hours
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -214,24 +236,25 @@ export async function sendVerificationEmail(args: {
     parsed = null
   }
 
+  const errorCode =
+    isRecord(parsed) && typeof parsed.ErrorCode === 'number'
+      ? parsed.ErrorCode
+      : null
+
   if (!response.ok) {
     const message =
       isRecord(parsed) && typeof parsed.Message === 'string'
         ? parsed.Message
         : rawText || `Postmark request failed with HTTP ${response.status}.`
-    throw new Error(message)
+    throw new PostmarkSendError(message, errorCode)
   }
 
-  if (
-    isRecord(parsed) &&
-    typeof parsed.ErrorCode === 'number' &&
-    parsed.ErrorCode !== 0
-  ) {
+  if (errorCode !== null && errorCode !== 0) {
     const message =
-      typeof parsed.Message === 'string'
+      isRecord(parsed) && typeof parsed.Message === 'string'
         ? parsed.Message
         : 'Postmark rejected the verification email.'
-    throw new Error(message)
+    throw new PostmarkSendError(message, errorCode)
   }
 }
 

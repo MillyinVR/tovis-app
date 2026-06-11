@@ -6,8 +6,10 @@ const TEST_NOW = new Date('2026-04-16T12:00:00.000Z')
 
 const mocks = vi.hoisted(() => ({
   prismaUserFindMany: vi.fn(),
+  prismaUserUpdate: vi.fn(),
 
   getAppUrlFromRequest: vi.fn(),
+  isInactiveRecipientError: vi.fn(),
   issueAndSendEmailVerification: vi.fn(),
 
   captureAuthException: vi.fn(),
@@ -40,12 +42,14 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     user: {
       findMany: mocks.prismaUserFindMany,
+      update: mocks.prismaUserUpdate,
     },
   },
 }))
 
 vi.mock('@/lib/auth/emailVerification', () => ({
   getAppUrlFromRequest: mocks.getAppUrlFromRequest,
+  isInactiveRecipientError: mocks.isInactiveRecipientError,
   issueAndSendEmailVerification: mocks.issueAndSendEmailVerification,
 }))
 
@@ -84,6 +88,8 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
 
     mocks.getAppUrlFromRequest.mockReturnValue('https://app.tovis.app')
     mocks.prismaUserFindMany.mockResolvedValue([])
+    mocks.prismaUserUpdate.mockResolvedValue({ id: 'user_1' })
+    mocks.isInactiveRecipientError.mockReturnValue(false)
     mocks.issueAndSendEmailVerification.mockResolvedValue({
       id: 'evt_1',
       expiresAt: new Date('2026-04-17T12:00:00.000Z'),
@@ -180,6 +186,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
     expect(mocks.prismaUserFindMany).toHaveBeenCalledWith({
       where: {
         emailVerifiedAt: null,
+        emailSendPermanentlyFailedAt: null,
         createdAt: {
           lte: new Date('2026-04-16T11:55:00.000Z'),
         },
@@ -241,6 +248,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       sentCount: 2,
       failedCount: 0,
       skippedCount: 0,
+      permanentlyFailedCount: 0,
       take: 5,
       processedAt: TEST_NOW.toISOString(),
       failed: [],
@@ -269,6 +277,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
     expect(mocks.prismaUserFindMany).toHaveBeenCalledWith({
       where: {
         emailVerifiedAt: null,
+        emailSendPermanentlyFailedAt: null,
         createdAt: {
           lte: new Date('2026-04-16T11:55:00.000Z'),
         },
@@ -328,6 +337,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
     expect(mocks.prismaUserFindMany).toHaveBeenCalledWith({
       where: {
         emailVerifiedAt: null,
+        emailSendPermanentlyFailedAt: null,
         createdAt: {
           lte: new Date('2026-04-16T11:55:00.000Z'),
         },
@@ -358,6 +368,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       sentCount: 0,
       failedCount: 0,
       skippedCount: 0,
+      permanentlyFailedCount: 0,
       take: 50,
       processedAt: TEST_NOW.toISOString(),
       failed: [],
@@ -394,6 +405,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       sentCount: 0,
       failedCount: 0,
       skippedCount: 1,
+      permanentlyFailedCount: 0,
       take: 50,
       processedAt: TEST_NOW.toISOString(),
       failed: [],
@@ -465,6 +477,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       sentCount: 1,
       failedCount: 1,
       skippedCount: 0,
+      permanentlyFailedCount: 0,
       take: 50,
       processedAt: TEST_NOW.toISOString(),
       failed: [
@@ -513,6 +526,8 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       error: expect.any(Error),
     })
 
+    expect(mocks.prismaUserUpdate).not.toHaveBeenCalled()
+
     expect(response.status).toBe(200)
     expect(json).toEqual({
       ok: true,
@@ -521,12 +536,170 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
       sentCount: 0,
       failedCount: 1,
       skippedCount: 0,
+      permanentlyFailedCount: 0,
       take: 50,
       processedAt: TEST_NOW.toISOString(),
       failed: [
         {
           userId: 'user_fail_generic',
           code: 'EMAIL_SEND_FAILED',
+        },
+      ],
+    })
+  })
+
+  it('marks the user permanently failed when Postmark reports an inactive recipient', async () => {
+    mocks.prismaUserFindMany.mockResolvedValue([
+      {
+        id: 'user_inactive',
+        email: 'inactive@example.com',
+        createdAt: new Date('2026-04-16T11:15:00.000Z'),
+      },
+      {
+        id: 'user_ok',
+        email: 'ok@example.com',
+        createdAt: new Date('2026-04-16T11:10:00.000Z'),
+      },
+    ])
+
+    const inactiveError = new Error(
+      'You tried to send to recipient(s) that have been marked as inactive.',
+    )
+
+    mocks.issueAndSendEmailVerification
+      .mockRejectedValueOnce(inactiveError)
+      .mockResolvedValueOnce({
+        id: 'evt_ok',
+        expiresAt: new Date('2026-04-17T12:00:00.000Z'),
+      })
+    mocks.isInactiveRecipientError.mockImplementation(
+      (error: unknown) => error === inactiveError,
+    )
+
+    const response = await GET(
+      makeRequest({
+        headers: {
+          authorization: 'Bearer test-secret',
+        },
+      }),
+    )
+    const json = await response.json()
+
+    expect(JSON.stringify(json)).not.toContain('inactive@example.com')
+    expect(JSON.stringify(mocks.captureAuthException.mock.calls)).not.toContain(
+      'inactive@example.com',
+    )
+
+    expect(mocks.prismaUserUpdate).toHaveBeenCalledTimes(1)
+    expect(mocks.prismaUserUpdate).toHaveBeenCalledWith({
+      where: { id: 'user_inactive' },
+      data: { emailSendPermanentlyFailedAt: TEST_NOW },
+    })
+
+    expect(mocks.captureAuthException).toHaveBeenCalledTimes(1)
+    expect(mocks.captureAuthException).toHaveBeenCalledWith({
+      event: 'auth.email.retry_verification.failed',
+      route: 'internal.cron.retry_verification_emails',
+      provider: 'postmark',
+      code: 'EMAIL_RECIPIENT_INACTIVE',
+      userId: 'user_inactive',
+      error: inactiveError,
+    })
+
+    expect(mocks.logAuthEvent).toHaveBeenCalledWith({
+      level: 'warn',
+      event: 'auth.email.retry_verification.permanently_failed',
+      route: 'internal.cron.retry_verification_emails',
+      provider: 'postmark',
+      code: 'EMAIL_RECIPIENT_INACTIVE',
+      userId: 'user_inactive',
+    })
+
+    expect(response.status).toBe(200)
+    expect(json).toEqual({
+      ok: true,
+      scannedCount: 2,
+      attemptedCount: 2,
+      sentCount: 1,
+      failedCount: 1,
+      skippedCount: 0,
+      permanentlyFailedCount: 1,
+      take: 50,
+      processedAt: TEST_NOW.toISOString(),
+      failed: [
+        {
+          userId: 'user_inactive',
+          code: 'EMAIL_RECIPIENT_INACTIVE',
+        },
+      ],
+    })
+  })
+
+  it('continues the sweep when marking a permanent failure fails', async () => {
+    mocks.prismaUserFindMany.mockResolvedValue([
+      {
+        id: 'user_inactive',
+        email: 'inactive@example.com',
+        createdAt: new Date('2026-04-16T11:15:00.000Z'),
+      },
+      {
+        id: 'user_ok',
+        email: 'ok@example.com',
+        createdAt: new Date('2026-04-16T11:10:00.000Z'),
+      },
+    ])
+
+    const inactiveError = new Error(
+      'You tried to send to recipient(s) that have been marked as inactive.',
+    )
+
+    mocks.issueAndSendEmailVerification
+      .mockRejectedValueOnce(inactiveError)
+      .mockResolvedValueOnce({
+        id: 'evt_ok',
+        expiresAt: new Date('2026-04-17T12:00:00.000Z'),
+      })
+    mocks.isInactiveRecipientError.mockImplementation(
+      (error: unknown) => error === inactiveError,
+    )
+    mocks.prismaUserUpdate.mockRejectedValueOnce(new Error('db write failed'))
+
+    const response = await GET(
+      makeRequest({
+        headers: {
+          authorization: 'Bearer test-secret',
+        },
+      }),
+    )
+    const json = await response.json()
+
+    expect(mocks.captureAuthException).toHaveBeenCalledTimes(2)
+    expect(mocks.captureAuthException).toHaveBeenLastCalledWith({
+      event: 'auth.email.retry_verification.mark_permanent_failed',
+      route: 'internal.cron.retry_verification_emails',
+      provider: 'postmark',
+      code: 'EMAIL_RECIPIENT_INACTIVE',
+      userId: 'user_inactive',
+      error: expect.any(Error),
+    })
+
+    expect(mocks.issueAndSendEmailVerification).toHaveBeenCalledTimes(2)
+
+    expect(response.status).toBe(200)
+    expect(json).toEqual({
+      ok: true,
+      scannedCount: 2,
+      attemptedCount: 2,
+      sentCount: 1,
+      failedCount: 1,
+      skippedCount: 0,
+      permanentlyFailedCount: 0,
+      take: 50,
+      processedAt: TEST_NOW.toISOString(),
+      failed: [
+        {
+          userId: 'user_inactive',
+          code: 'EMAIL_RECIPIENT_INACTIVE',
         },
       ],
     })

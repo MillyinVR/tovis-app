@@ -911,6 +911,11 @@ model User {
   phoneVerifiedAt     DateTime?
   emailVerifiedAt     DateTime?
 
+  // Set when Postmark reports the address as inactive/suppressed (hard
+  // bounce, spam complaint, or manual suppression, ErrorCode 406). Excludes
+  // the user from verification-email retry sweeps.
+  emailSendPermanentlyFailedAt DateTime?
+
   lookLikes    LookLike[]
   lookComments LookComment[]
 
