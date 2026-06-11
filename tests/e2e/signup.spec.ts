@@ -83,20 +83,34 @@ async function interceptGoogleProxies(page: Page) {
   )
 }
 
-async function fillSharedIdentityFields(
-  page: Page,
-  args: { email: string; phone: string },
-) {
+/** Pro wizard step 1 → 2 transition after the location is confirmed. */
+async function continueFromWorkStep(page: Page) {
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByLabel('First name')).toBeVisible()
+}
+
+/** Pro wizard step 2 ("About you"), then continue to the account step. */
+async function completeProIdentityStep(page: Page, args: { phone: string }) {
   await page.getByLabel('First name').fill('E2E')
   await page.getByLabel('Last name').fill('Signup')
   await page.getByLabel(/^Phone/).fill(args.phone)
+  await page.getByRole('checkbox', { name: /transactional SMS/i }).check()
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByLabel('Email address')).toBeVisible()
+}
+
+/** Pro wizard step 3 ("Account") and final submit. */
+async function completeProAccountStepAndSubmit(
+  page: Page,
+  args: { email: string },
+) {
   await page.getByLabel('Email address').fill(args.email)
   await page.getByLabel(/^Password/).fill('SuperSecret123!')
-
-  await page
-    .getByRole('checkbox', { name: /transactional SMS/i })
-    .check()
   await page.getByRole('checkbox', { name: /I agree to the Terms/i }).check()
+
+  const submit = page.getByRole('button', { name: 'Create Pro Account' })
+  await expect(submit).toBeEnabled()
+  await submit.click()
 }
 
 async function expectSignedUpAndOnVerifyPhone(page: Page) {
@@ -159,8 +173,9 @@ test.describe('signup flows', () => {
     await page.goto('/signup')
     await page.getByRole('link', { name: /I’m a Pro — Offer services/ }).click()
     await page.waitForURL('**/signup/pro**')
+    await expect(page.getByText('Step 1 of 3')).toBeVisible()
     await expect(
-      page.getByRole('button', { name: 'Create Pro Account' }),
+      page.getByRole('button', { name: 'Continue' }),
     ).toBeVisible()
   })
 
@@ -217,14 +232,11 @@ test.describe('signup flows', () => {
     await page.getByRole('button', { name: /123 Main St/ }).click()
     await expect(page.getByText('Confirmed', { exact: true })).toBeVisible()
 
-    await fillSharedIdentityFields(page, {
+    await continueFromWorkStep(page)
+    await completeProIdentityStep(page, { phone: nextPhone() })
+    await completeProAccountStepAndSubmit(page, {
       email: nextEmail('pro_salon'),
-      phone: nextPhone(),
     })
-
-    const submit = page.getByRole('button', { name: 'Create Pro Account' })
-    await expect(submit).toBeEnabled()
-    await submit.click()
 
     await expectSignedUpAndOnVerifyPhone(page)
 
@@ -249,14 +261,11 @@ test.describe('signup flows', () => {
 
     await page.getByLabel('Mobile radius (miles)').fill('25')
 
-    await fillSharedIdentityFields(page, {
+    await continueFromWorkStep(page)
+    await completeProIdentityStep(page, { phone: nextPhone() })
+    await completeProAccountStepAndSubmit(page, {
       email: nextEmail('pro_mobile'),
-      phone: nextPhone(),
     })
-
-    const submit = page.getByRole('button', { name: 'Create Pro Account' })
-    await expect(submit).toBeEnabled()
-    await submit.click()
 
     await expectSignedUpAndOnVerifyPhone(page)
   })
@@ -278,14 +287,11 @@ test.describe('signup flows', () => {
     await page.getByRole('button', { name: /123 Main St/ }).click()
     await expect(page.getByText('Confirmed', { exact: true })).toBeVisible()
 
-    await fillSharedIdentityFields(page, {
+    await continueFromWorkStep(page)
+    await completeProIdentityStep(page, { phone: nextPhone() })
+    await completeProAccountStepAndSubmit(page, {
       email: nextEmail('pro_licensed'),
-      phone: nextPhone(),
     })
-
-    const submit = page.getByRole('button', { name: 'Create Pro Account' })
-    await expect(submit).toBeEnabled()
-    await submit.click()
 
     // DCA is intentionally unconfigured in the e2e env, so signup must
     // degrade to the manual-review path instead of blocking the account.

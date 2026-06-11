@@ -107,8 +107,30 @@ function setFetchSequence(responses: Response[]) {
   return fetchMock
 }
 
+function geoResponses() {
+  return [
+    jsonResponse({
+      geo: {
+        lat: 32.7157,
+        lng: -117.1611,
+        postalCode: '92101',
+        city: 'San Diego',
+        state: 'CA',
+        countryCode: 'US',
+      },
+    }),
+    jsonResponse({
+      timeZoneId: 'America/Los_Angeles',
+    }),
+  ]
+}
+
 function clickMobileMode() {
   fireEvent.click(screen.getByRole('button', { name: 'Mobile' }))
+}
+
+function clickContinue() {
+  fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
 }
 
 async function confirmMobileZip(zip = '92101') {
@@ -154,12 +176,25 @@ function checkTransactionalSmsConsent() {
   fireEvent.click(getTransactionalSmsCheckbox())
 }
 
-function checkAllRequiredConsents() {
-  checkTransactionalSmsConsent()
-  checkTermsConsent()
+function fillLicenseNumber(value = '123456') {
+  fireEvent.change(screen.getByLabelText(/License number/i), {
+    target: { value },
+  })
 }
 
-function fillRequiredFields() {
+/** Step 1 ("Your work"): confirmed mobile ZIP + license, then Continue. */
+async function completeWorkStep() {
+  await confirmMobileZip('92101')
+  fillLicenseNumber()
+  clickContinue()
+
+  await waitFor(() => {
+    expect(screen.getByLabelText(/First name/i)).toBeTruthy()
+  })
+}
+
+/** Step 2 ("About you") field fills, without the consent checkbox. */
+function fillIdentityFields() {
   fireEvent.change(screen.getByLabelText(/First name/i), {
     target: { value: 'Tori' },
   })
@@ -169,15 +204,35 @@ function fillRequiredFields() {
   fireEvent.change(screen.getByPlaceholderText('+1 (___) ___-____'), {
     target: { value: '+16195551234' },
   })
+}
+
+async function completeIdentityStep() {
+  fillIdentityFields()
+  checkTransactionalSmsConsent()
+  clickContinue()
+
+  await waitFor(() => {
+    expect(screen.getByLabelText(/Email address/i)).toBeTruthy()
+  })
+}
+
+/** Step 3 ("Account") field fills, without the terms checkbox. */
+function fillAccountFields(email = 'pro@example.com') {
   fireEvent.change(screen.getByLabelText(/Email address/i), {
-    target: { value: 'pro@example.com' },
+    target: { value: email },
   })
   fireEvent.change(getPasswordInput(), {
     target: { value: 'longpassword' },
   })
-  fireEvent.change(screen.getByLabelText(/License number/i), {
-    target: { value: '123456' },
-  })
+}
+
+function clickCreateAccount() {
+  fireEvent.click(screen.getByRole('button', { name: 'Create Pro Account' }))
+}
+
+async function walkToAccountStep() {
+  await completeWorkStep()
+  await completeIdentityStep()
 }
 
 describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
@@ -192,76 +247,49 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
     mocks.setSearchParams({})
   })
 
-  it('shows inline consent errors instead of submitting when consents are missing', async () => {
-    setFetchSequence([
-      jsonResponse({
-        geo: {
-          lat: 32.7157,
-          lng: -117.1611,
-          postalCode: '92101',
-          city: 'San Diego',
-          state: 'CA',
-          countryCode: 'US',
-        },
-      }),
-      jsonResponse({
-        timeZoneId: 'America/Los_Angeles',
-      }),
-    ])
+  it('walks the three steps and shows step-scoped fields with progress', async () => {
+    setFetchSequence(geoResponses())
 
     render(<SignupProClient />)
 
-    await confirmMobileZip('92101')
-    fillRequiredFields()
+    expect(screen.getByText('Step 1 of 3')).toBeTruthy()
+    expect(screen.getByText('Your work')).toBeTruthy()
+    expect(screen.queryByLabelText(/First name/i)).toBeNull()
+    expect(screen.queryByLabelText(/Email address/i)).toBeNull()
 
-    const submitButton = screen.getByRole('button', {
-      name: 'Create Pro Account',
-    })
+    await completeWorkStep()
 
-    expect(submitButton.hasAttribute('disabled')).toBe(false)
+    expect(screen.getByText('Step 2 of 3')).toBeTruthy()
+    expect(screen.getByText('About you')).toBeTruthy()
+    expect(screen.queryByLabelText(/License number/i)).toBeNull()
+    expect(screen.queryByLabelText(/Email address/i)).toBeNull()
 
-    fireEvent.click(submitButton)
+    await completeIdentityStep()
+
+    expect(screen.getByText('Step 3 of 3')).toBeTruthy()
+    expect(screen.getByText('Account')).toBeTruthy()
+    expect(screen.queryByLabelText(/First name/i)).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Create Pro Account' }),
+    ).toBeTruthy()
+
+    // Back returns to the previous step with state intact.
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
 
     await waitFor(() => {
-      expect(
-        screen.getByText(
-          'Required so we can send verification codes and appointment updates.',
-        ),
-      ).toBeTruthy()
+      expect(screen.getByText('Step 2 of 3')).toBeTruthy()
     })
-
     expect(
-      screen.getByText('Please accept the Terms and Privacy Policy.'),
-    ).toBeTruthy()
-    expect(mocks.getTurnstileToken).not.toHaveBeenCalled()
-
-    checkTransactionalSmsConsent()
-    checkTermsConsent()
-
-    expect(
-      screen.queryByText(
-        'Required so we can send verification codes and appointment updates.',
-      ),
-    ).toBeNull()
-    expect(
-      screen.queryByText('Please accept the Terms and Privacy Policy.'),
-    ).toBeNull()
+      (screen.getByLabelText(/First name/i) as HTMLInputElement).value,
+    ).toBe('Tori')
   })
 
-  it('inline-flags a missing license number and focuses the location first when unconfirmed', async () => {
+  it('blocks Continue with inline errors for the current step only', async () => {
     setFetchSequence([])
 
     render(<SignupProClient />)
 
-    fillRequiredFields()
-    fireEvent.change(screen.getByLabelText(/License number/i), {
-      target: { value: '' },
-    })
-    checkAllRequiredConsents()
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Create Pro Account' }),
-    )
+    clickContinue()
 
     await waitFor(() => {
       expect(
@@ -273,26 +301,66 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
       screen.getByText('License number is required for this profession.'),
     ).toBeTruthy()
 
+    // Later-step errors must not appear yet.
+    expect(screen.queryByText('First name is required.')).toBeNull()
+    expect(screen.queryByText('Email is required.')).toBeNull()
+
     expect(document.activeElement?.id).toBe('signup-pro-location')
+    expect(screen.getByText('Step 1 of 3')).toBeTruthy()
     expect(mocks.getTurnstileToken).not.toHaveBeenCalled()
     expect(mocks.hardNavigate).not.toHaveBeenCalled()
   })
 
+  it('shows inline consent errors on their own steps instead of submitting', async () => {
+    setFetchSequence(geoResponses())
+
+    render(<SignupProClient />)
+
+    await completeWorkStep()
+
+    fillIdentityFields()
+    clickContinue()
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          'Required so we can send verification codes and appointment updates.',
+        ),
+      ).toBeTruthy()
+    })
+
+    checkTransactionalSmsConsent()
+    expect(
+      screen.queryByText(
+        'Required so we can send verification codes and appointment updates.',
+      ),
+    ).toBeNull()
+
+    clickContinue()
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Email address/i)).toBeTruthy()
+    })
+
+    fillAccountFields()
+    clickCreateAccount()
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Please accept the Terms and Privacy Policy.'),
+      ).toBeTruthy()
+    })
+
+    expect(mocks.getTurnstileToken).not.toHaveBeenCalled()
+
+    checkTermsConsent()
+    expect(
+      screen.queryByText('Please accept the Terms and Privacy Policy.'),
+    ).toBeNull()
+  })
+
   it('submits with separate transactional SMS consent, tosAccepted, and turnstileToken, then treats pending verification sends as optimistic success', async () => {
     const fetchMock = setFetchSequence([
-      jsonResponse({
-        geo: {
-          lat: 32.7157,
-          lng: -117.1611,
-          postalCode: '92101',
-          city: 'San Diego',
-          state: 'CA',
-          countryCode: 'US',
-        },
-      }),
-      jsonResponse({
-        timeZoneId: 'America/Los_Angeles',
-      }),
+      ...geoResponses(),
       jsonResponse({
         nextUrl: '/pro/calendar',
         emailVerificationSent: 'pending',
@@ -302,13 +370,10 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
     render(<SignupProClient />)
 
-    await confirmMobileZip('92101')
-    fillRequiredFields()
-    checkAllRequiredConsents()
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Create Pro Account' }),
-    )
+    await walkToAccountStep()
+    fillAccountFields()
+    checkTermsConsent()
+    clickCreateAccount()
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(3)
@@ -365,19 +430,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
   it('preserves explicit retry redirect params when register reports real send failures', async () => {
     const fetchMock = setFetchSequence([
-      jsonResponse({
-        geo: {
-          lat: 32.7157,
-          lng: -117.1611,
-          postalCode: '92101',
-          city: 'San Diego',
-          state: 'CA',
-          countryCode: 'US',
-        },
-      }),
-      jsonResponse({
-        timeZoneId: 'America/Los_Angeles',
-      }),
+      ...geoResponses(),
       jsonResponse({
         nextUrl: '/pro/calendar',
         emailVerificationSent: false,
@@ -387,13 +440,10 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
     render(<SignupProClient />)
 
-    await confirmMobileZip('92101')
-    fillRequiredFields()
-    checkAllRequiredConsents()
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Create Pro Account' }),
-    )
+    await walkToAccountStep()
+    fillAccountFields()
+    checkTermsConsent()
+    clickCreateAccount()
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(3)
@@ -420,19 +470,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
     })
 
     const fetchMock = setFetchSequence([
-      jsonResponse({
-        geo: {
-          lat: 32.7157,
-          lng: -117.1611,
-          postalCode: '92101',
-          city: 'San Diego',
-          state: 'CA',
-          countryCode: 'US',
-        },
-      }),
-      jsonResponse({
-        timeZoneId: 'America/Los_Angeles',
-      }),
+      ...geoResponses(),
       jsonResponse({
         nextUrl: null,
         emailVerificationSent: 'pending',
@@ -442,21 +480,6 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
     render(<SignupProClient />)
 
-    expect(
-      (screen.getByLabelText(/First name/i) as HTMLInputElement).value,
-    ).toBe('Pre')
-    expect(
-      (screen.getByLabelText(/Last name/i) as HTMLInputElement).value,
-    ).toBe('Filled Pro')
-    expect(
-      (screen.getByLabelText(/Email address/i) as HTMLInputElement).value,
-    ).toBe('prefill-pro@example.com')
-    expect(
-      (
-        screen.getByPlaceholderText('+1 (___) ___-____') as HTMLInputElement
-      ).value,
-    ).toBe('+1 (619) 555-0000')
-
     const loginLink = screen.getByRole('link', { name: 'Sign in' })
     const loginHref = loginLink.getAttribute('href') ?? ''
     expect(loginHref).toContain('ti=tap_pro_1')
@@ -464,18 +487,35 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
     expect(loginHref).toContain('email=prefill-pro%40example.com')
     expect(loginHref).toContain('role=PRO')
 
-    await confirmMobileZip('92101')
-    fireEvent.change(screen.getByLabelText(/License number/i), {
-      target: { value: '123456' },
+    await completeWorkStep()
+
+    expect(
+      (screen.getByLabelText(/First name/i) as HTMLInputElement).value,
+    ).toBe('Pre')
+    expect(
+      (screen.getByLabelText(/Last name/i) as HTMLInputElement).value,
+    ).toBe('Filled Pro')
+    expect(
+      (
+        screen.getByPlaceholderText('+1 (___) ___-____') as HTMLInputElement
+      ).value,
+    ).toBe('+1 (619) 555-0000')
+
+    checkTransactionalSmsConsent()
+    clickContinue()
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Email address/i)).toBeTruthy()
     })
+
+    expect(
+      (screen.getByLabelText(/Email address/i) as HTMLInputElement).value,
+    ).toBe('prefill-pro@example.com')
+
     fireEvent.change(getPasswordInput(), {
       target: { value: 'longpassword' },
     })
-    checkAllRequiredConsents()
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Create Pro Account' }),
-    )
+    checkTermsConsent()
+    clickCreateAccount()
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(3)
@@ -506,21 +546,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
   })
 
   it('surfaces turnstile errors and does not call register', async () => {
-    const fetchMock = setFetchSequence([
-      jsonResponse({
-        geo: {
-          lat: 32.7157,
-          lng: -117.1611,
-          postalCode: '92101',
-          city: 'San Diego',
-          state: 'CA',
-          countryCode: 'US',
-        },
-      }),
-      jsonResponse({
-        timeZoneId: 'America/Los_Angeles',
-      }),
-    ])
+    const fetchMock = setFetchSequence(geoResponses())
 
     mocks.getTurnstileToken.mockRejectedValue(
       new Error('Captcha timed out. Please try again.'),
@@ -528,13 +554,10 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
     render(<SignupProClient />)
 
-    await confirmMobileZip('92101')
-    fillRequiredFields()
-    checkAllRequiredConsents()
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Create Pro Account' }),
-    )
+    await walkToAccountStep()
+    fillAccountFields()
+    checkTermsConsent()
+    clickCreateAccount()
 
     await waitFor(() => {
       expect(
@@ -549,19 +572,7 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
   it('shows the neutral duplicate-account error from register failures', async () => {
     setFetchSequence([
-      jsonResponse({
-        geo: {
-          lat: 32.7157,
-          lng: -117.1611,
-          postalCode: '92101',
-          city: 'San Diego',
-          state: 'CA',
-          countryCode: 'US',
-        },
-      }),
-      jsonResponse({
-        timeZoneId: 'America/Los_Angeles',
-      }),
+      ...geoResponses(),
       jsonResponse(
         {
           error: 'An account already exists with those details.',
@@ -572,13 +583,10 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
 
     render(<SignupProClient />)
 
-    await confirmMobileZip('92101')
-    fillRequiredFields()
-    checkAllRequiredConsents()
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Create Pro Account' }),
-    )
+    await walkToAccountStep()
+    fillAccountFields()
+    checkTermsConsent()
+    clickCreateAccount()
 
     await waitFor(() => {
       expect(

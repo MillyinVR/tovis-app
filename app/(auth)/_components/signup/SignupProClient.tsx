@@ -71,6 +71,21 @@ const FIELD_ORDER: ProField[] = [
   'tos',
 ]
 
+const STEP_LABELS = ['Your work', 'About you', 'Account'] as const
+
+const LAST_STEP = STEP_LABELS.length - 1
+
+const STEP_FIELDS: ProField[][] = [
+  ['location', 'radius', 'licenseNumber'],
+  ['firstName', 'lastName', 'phone', 'smsConsent'],
+  ['email', 'password', 'tos'],
+]
+
+function stepOfField(field: ProField): number {
+  const index = STEP_FIELDS.findIndex((fields) => fields.includes(field))
+  return index === -1 ? 0 : index
+}
+
 function compactPhoneInputForSubmit(value: string): string {
   const digits = value.replace(/\D/gu, '')
   if (!digits) return ''
@@ -419,6 +434,7 @@ export default function SignupProClient() {
     Partial<Record<ProField, string>>
   >({})
   const [loading, setLoading] = useState(false)
+  const [step, setStep] = useState(0)
 
   function setFieldError(field: ProField, message: string | null) {
     setFieldErrors((prev) => {
@@ -569,61 +585,108 @@ export default function SignupProClient() {
     }
   }
 
+  function validateFields(
+    fields: readonly ProField[],
+  ): Partial<Record<ProField, string>> {
+    const errors: Partial<Record<ProField, string>> = {}
+
+    for (const field of fields) {
+      switch (field) {
+        case 'location':
+          if (!isLocationConfirmed() || !confirmed) {
+            errors.location =
+              proMode === 'MOBILE'
+                ? 'Please confirm your ZIP code.'
+                : 'Please choose an address from the dropdown.'
+          }
+          break
+        case 'radius':
+          if (proMode === 'MOBILE') {
+            const n = Number(mobileRadiusMiles)
+            if (!Number.isFinite(n) || n < 1 || n > 200) {
+              errors.radius =
+                'Please enter a mobile radius between 1 and 200 miles.'
+            }
+          }
+          break
+        case 'licenseNumber':
+          if (needsLicense && !licenseNumber.trim()) {
+            errors.licenseNumber =
+              'License number is required for this profession.'
+          }
+          break
+        case 'firstName':
+          if (!firstName.trim()) errors.firstName = 'First name is required.'
+          break
+        case 'lastName':
+          if (!lastName.trim()) errors.lastName = 'Last name is required.'
+          break
+        case 'phone':
+          if (!compactPhoneInputForSubmit(phone)) {
+            errors.phone = 'Phone number is required.'
+          } else if (!isLikelyValidPhoneInput(phone)) {
+            errors.phone = 'Enter a valid phone number.'
+          }
+          break
+        case 'smsConsent':
+          if (!transactionalSmsConsent) {
+            errors.smsConsent =
+              'Required so we can send verification codes and appointment updates.'
+          }
+          break
+        case 'email':
+          if (!email.trim()) errors.email = 'Email is required.'
+          break
+        case 'password':
+          if (!password.trim()) {
+            errors.password = 'Password is required.'
+          } else if (password.length < PASSWORD_MIN_LEN) {
+            errors.password = `Password must be at least ${PASSWORD_MIN_LEN} characters.`
+          }
+          break
+        case 'tos':
+          if (!tosAccepted) {
+            errors.tos = 'Please accept the Terms and Privacy Policy.'
+          }
+          break
+      }
+    }
+
+    return errors
+  }
+
+  /**
+   * Renders the errors, jumps to the step owning the first invalid field,
+   * and focuses it. Returns true when anything was invalid.
+   */
+  function surfaceErrors(
+    errors: Partial<Record<ProField, string>>,
+  ): boolean {
+    setFieldErrors(errors)
+
+    const firstInvalid = FIELD_ORDER.find((field) => errors[field])
+    if (!firstInvalid) return false
+
+    const targetStep = stepOfField(firstInvalid)
+    if (targetStep !== step) setStep(targetStep)
+
+    // Defer so the field exists when a step change re-renders the form.
+    window.setTimeout(() => focusFieldById(FIELD_IDS[firstInvalid]), 0)
+    return true
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (loading) return
     setError(null)
 
-    const errors: Partial<Record<ProField, string>> = {}
-
-    if (!isLocationConfirmed() || !confirmed) {
-      errors.location =
-        proMode === 'MOBILE'
-          ? 'Please confirm your ZIP code.'
-          : 'Please choose an address from the dropdown.'
-    }
-
-    if (proMode === 'MOBILE') {
-      const n = Number(mobileRadiusMiles)
-      if (!Number.isFinite(n) || n < 1 || n > 200) {
-        errors.radius = 'Please enter a mobile radius between 1 and 200 miles.'
-      }
-    }
-
-    if (needsLicense && !licenseNumber.trim()) {
-      errors.licenseNumber = 'License number is required for this profession.'
-    }
-
-    if (!firstName.trim()) errors.firstName = 'First name is required.'
-    if (!lastName.trim()) errors.lastName = 'Last name is required.'
-
-    if (!compactPhoneInputForSubmit(phone)) {
-      errors.phone = 'Phone number is required.'
-    } else if (!isLikelyValidPhoneInput(phone)) {
-      errors.phone = 'Enter a valid phone number.'
-    }
-
-    if (!transactionalSmsConsent) {
-      errors.smsConsent =
-        'Required so we can send verification codes and appointment updates.'
-    }
-    if (!email.trim()) errors.email = 'Email is required.'
-    if (!password.trim()) {
-      errors.password = 'Password is required.'
-    } else if (password.length < PASSWORD_MIN_LEN) {
-      errors.password = `Password must be at least ${PASSWORD_MIN_LEN} characters.`
-    }
-    if (!tosAccepted) {
-      errors.tos = 'Please accept the Terms and Privacy Policy.'
-    }
-
-    setFieldErrors(errors)
-
-    const firstInvalid = FIELD_ORDER.find((field) => errors[field])
-    if (firstInvalid) {
-      focusFieldById(FIELD_IDS[firstInvalid])
+    if (step < LAST_STEP) {
+      if (surfaceErrors(validateFields(STEP_FIELDS[step] ?? []))) return
+      setStep(step + 1)
       return
     }
+
+    if (surfaceErrors(validateFields(FIELD_ORDER))) return
 
     // Unreachable when validation passed; narrows the type for the body below.
     if (!confirmed) return
@@ -736,6 +799,30 @@ export default function SignupProClient() {
       subtitle="Run your business from your phone — set up takes minutes."
     >
       <form onSubmit={handleSubmit} className="grid gap-5" noValidate>
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs font-black tracking-wide text-textSecondary">
+              Step {step + 1} of {STEP_LABELS.length}
+            </span>
+            <span className="text-xs font-black text-textPrimary">
+              {STEP_LABELS[step]}
+            </span>
+          </div>
+          <div className="flex gap-1.5" aria-hidden="true">
+            {STEP_LABELS.map((label, index) => (
+              <div
+                key={label}
+                className={cn(
+                  'h-1 flex-1 rounded-full transition',
+                  index <= step ? 'bg-accentPrimary/60' : 'bg-surfaceGlass/15',
+                )}
+              />
+            ))}
+          </div>
+        </div>
+
+        {step === 0 ? (
+          <>
         <div className="grid gap-2">
           <FieldLabel>Profession</FieldLabel>
           <Select
@@ -974,8 +1061,11 @@ export default function SignupProClient() {
           </div>
         ) : null}
 
-        <div className="h-px w-full bg-surfaceGlass/10" />
+          </>
+        ) : null}
 
+        {step === 1 ? (
+          <>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-1.5">
             <FieldLabel>First name</FieldLabel>
@@ -1104,7 +1194,11 @@ export default function SignupProClient() {
             />
           </span>
         </label>
+          </>
+        ) : null}
 
+        {step === LAST_STEP ? (
+          <>
         <label className="grid gap-1.5">
           <FieldLabel>Email address</FieldLabel>
           <Input
@@ -1188,6 +1282,8 @@ export default function SignupProClient() {
             />
           </span>
         </label>
+          </>
+        ) : null}
 
         {error ? (
           <div className="rounded-card border border-toneDanger/25 bg-toneDanger/10 px-3 py-2 text-sm font-bold text-toneDanger">
@@ -1197,8 +1293,27 @@ export default function SignupProClient() {
 
         <div className="grid gap-2 pt-1">
           <PrimaryButton loading={loading}>
-            {loading ? 'Creating…' : 'Create Pro Account'}
+            {step < LAST_STEP
+              ? 'Continue'
+              : loading
+                ? 'Creating…'
+                : 'Create Pro Account'}
           </PrimaryButton>
+
+          {step > 0 ? (
+            <button
+              type="button"
+              onClick={() => setStep(step - 1)}
+              className={cn(
+                'inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-sm font-black transition',
+                'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
+                'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
+                'focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
+              )}
+            >
+              Back
+            </button>
+          ) : null}
 
           <SecondaryLinkButton href={loginHref}>Sign in</SecondaryLinkButton>
         </div>
