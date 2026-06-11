@@ -27,6 +27,7 @@ import { buildTransactionalSmsCheckboxLabel } from '@/lib/transactionalSmsPolicy
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { PASSWORD_MIN_LEN } from '@/lib/passwordPolicyConstants'
 import {
+  compactPhoneInputForSubmit,
   formatPhoneInputValue,
   isLikelyValidPhoneInput,
 } from '@/lib/phoneInputFormat'
@@ -86,11 +87,6 @@ function stepOfField(field: ProField): number {
   return index === -1 ? 0 : index
 }
 
-function compactPhoneInputForSubmit(value: string): string {
-  const digits = value.replace(/\D/gu, '')
-  if (!digits) return ''
-  return value.trim().startsWith('+') ? `+${digits}` : digits
-}
 
 function readVerificationSendState(
   data: Record<string, unknown> | null,

@@ -45,6 +45,17 @@ export function formatPhoneInputValue(raw: string): string {
 }
 
 /**
+ * Collapses a display-formatted phone value into the compact form the
+ * signup/login APIs receive — digits with an optional leading `+`. The
+ * canonical parse still happens server-side via normalizePhone.
+ */
+export function compactPhoneInputForSubmit(value: string): string {
+  const compact = digitsOnly(value)
+  if (!compact) return ''
+  return value.trim().startsWith('+') ? `+${compact}` : compact
+}
+
+/**
  * Light client-side plausibility check so forms can flag obviously short
  * numbers inline before submit. The server remains authoritative.
  */

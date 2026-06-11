@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  compactPhoneInputForSubmit,
   formatPhoneInputValue,
   isLikelyValidPhoneInput,
 } from './phoneInputFormat'
@@ -41,6 +42,22 @@ describe('formatPhoneInputValue', () => {
   it('returns empty string for empty input', () => {
     expect(formatPhoneInputValue('')).toBe('')
     expect(formatPhoneInputValue('   ')).toBe('')
+  })
+})
+
+describe('compactPhoneInputForSubmit', () => {
+  it('collapses display formatting to digits', () => {
+    expect(compactPhoneInputForSubmit('(619) 555-1234')).toBe('6195551234')
+    expect(compactPhoneInputForSubmit('+1 (619) 555-1234')).toBe(
+      '+16195551234',
+    )
+    expect(compactPhoneInputForSubmit('+447911123456')).toBe('+447911123456')
+  })
+
+  it('returns empty string when there are no digits', () => {
+    expect(compactPhoneInputForSubmit('')).toBe('')
+    expect(compactPhoneInputForSubmit('+')).toBe('')
+    expect(compactPhoneInputForSubmit('abc')).toBe('')
   })
 })
 

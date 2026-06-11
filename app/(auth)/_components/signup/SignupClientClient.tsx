@@ -25,6 +25,7 @@ import { buildTransactionalSmsCheckboxLabel } from '@/lib/transactionalSmsPolicy
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { PASSWORD_MIN_LEN } from '@/lib/passwordPolicyConstants'
 import {
+  compactPhoneInputForSubmit,
   formatPhoneInputValue,
   isLikelyValidPhoneInput,
 } from '@/lib/phoneInputFormat'
@@ -78,12 +79,6 @@ type GeocodeResponse = {
 type TimeZoneResponse = {
   timeZoneId?: string
   error?: string
-}
-
-function compactPhoneInputForSubmit(value: string): string {
-  const digits = value.replace(/\D/gu, '')
-  if (!digits) return ''
-  return value.trim().startsWith('+') ? `+${digits}` : digits
 }
 
 function readVerificationSendState(
