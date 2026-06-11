@@ -30,10 +30,17 @@ function nextEmail(label: string): string {
   return `${tag}_${label}_${emailCounter}@example.com`
 }
 
+const phoneSeed = Math.floor(Math.random() * 1_000_000)
+
 function nextPhone(): string {
   phoneCounter += 1
-  const suffix = (Date.now() + phoneCounter) % 10_000_000
-  return `619${String(suffix).padStart(7, '0')}`
+  const n = phoneSeed + phoneCounter
+  // The register route validates with libphonenumber, which enforces real
+  // NANP rules — the exchange code must be 2xx–9xx, so build one explicitly
+  // instead of slicing a timestamp (a 0xx exchange fails as invalid).
+  const exchange = 200 + (n % 800)
+  const subscriber = n % 10_000
+  return `619${exchange}${String(subscriber).padStart(4, '0')}`
 }
 
 const GEO = {

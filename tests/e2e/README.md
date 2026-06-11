@@ -80,6 +80,7 @@ PORT=3100 PLAYWRIGHT_BASE_URL=http://127.0.0.1:3100 \
 
 Use a port with no running dev server so Playwright starts a fresh one with
 the `.env.e2e.local` environment (test database, Cloudflare always-pass
-Turnstile test keys, Twilio/Postmark/DCA unset). Reusing a dev server that was
-started with `.env.local` would write signups to the dev database and call
-real providers.
+Turnstile test keys, Twilio/Postmark/DCA unset, Upstash Redis unset so the
+in-memory rate limiter is used). Reusing a dev server that was started with
+`.env.local` would write signups to the dev database, call real providers,
+and pollute production rate-limit state in Redis.
