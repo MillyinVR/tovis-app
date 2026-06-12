@@ -35,9 +35,59 @@ These are not blocking the Phase 1 code contract, but should be completed before
 - [x] Add migration to drop legacy SHA-256 lookup columns/indexes.
 - [x] Re-run final proof commands after the legacy SHA-256 cleanup migration.
 - [x] Expand `verify:privacy-phase1` to include AEAD, address encryption, audit redaction/admin audit, login, and password-reset proof tests.
-- [ ] Re-run HMAC v2 seed/demo/login/password-reset/pro-client flows against the target launch environment.
-- [ ] Re-run address encryption dry run/write run against the target launch environment.
-- [ ] Re-run final proof commands against the target launch environment before public launch.
+- [ ] Re-run HMAC v2 seed/demo/login/password-reset/pro-client flows against the target launch environment. (Partially complete 2026-06-12: HMAC v2 backfill executed against production and deployed login/password-reset smoke proof recorded below. Remaining: pro-client matching flow proof through the app.)
+- [x] Re-run address encryption dry run/write run against the target launch environment. (Completed 2026-06-12; evidence below.)
+- [ ] Re-run final proof commands against the target launch environment before public launch. (Fresh local run recorded 2026-06-12 below; rerun once more on the final launch commit.)
+
+## Production (target launch environment) rerun
+
+Date: 2026-06-12
+Environment: production via `.env.production.local` (pulled with `vercel env pull --environment=production`) layered with the verified PII keyrings from `.env.local`. The Vercel production env stores `PII_LOOKUP_HMAC_KEYS_JSON` and `PII_AEAD_KEYS_JSON` as unpullable values; the `.env.local` keyrings were previously verified to recompute production `User.emailHashV2` values exactly (2026-06-11).
+
+Preflight:
+
+```bash
+pnpm exec dotenv -e .env.production.local -e .env.local -- node -e "for (const k of ['DATABASE_URL','DIRECT_URL','PII_LOOKUP_HMAC_KEYS_JSON','PII_AEAD_KEYS_JSON']) console.log(k, process.env[k] ? 'set' : 'MISSING')"
+```
+
+Result: all four set.
+
+HMAC contact hash v2 backfill:
+
+```bash
+pnpm exec dotenv -e .env.production.local -e .env.local -- pnpm backfill:contact-hash-v2
+pnpm exec dotenv -e .env.production.local -e .env.local -- pnpm backfill:contact-hash-v2 -- --write
+```
+
+Result:
+
+- Dry run: scanned 41, eligible 20 (all ClientProfile email hashes), failed 0.
+- Write run: User scanned 21, eligible 0, skipped 21. ClientProfile scanned 20, eligible 20, updated 20, failed 0.
+- Idempotency re-check (dry run after write): scanned 41, eligible 0, skipped 41, failed 0.
+
+Address encryption backfill:
+
+```bash
+pnpm exec dotenv -e .env.production.local -e .env.local -- pnpm backfill:address-encryption
+pnpm exec dotenv -e .env.production.local -e .env.local -- pnpm backfill:address-encryption -- --write
+```
+
+Result:
+
+- Dry run: ProfessionalLocation scanned 2, eligible 2, failed 0.
+- Write run: ProfessionalLocation scanned 2, eligible 2, updated 2, failed 0. ClientAddress/Booking/BookingHold: 0 rows eligible.
+- Idempotency re-check (dry run after write): 0 eligible, 0 failed.
+
+Deployed flow smoke proof (https://www.tovis.app):
+
+- `POST /api/auth/login` with a nonexistent email and Origin/Referer headers returned **401** (HMAC v2 lookup path executed; a missing keyring would return 500).
+- `POST /api/auth/password-reset/request` returned **200 {"ok":true}** (HMAC v2 hash path executed without error).
+
+Local proof commands re-run the same day on `main` (post PR #80):
+
+- `pnpm verify:privacy-phase1` passed: canonical-normalization and pii-plaintext-reads guards passed, privacy phase 1 tests passed, export/delete tests 6 files / 45 tests passed.
+- `pnpm typecheck` passed.
+
 ## Latest local proof
 Date: 2026-06-01
 Commands:
