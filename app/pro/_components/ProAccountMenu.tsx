@@ -1,4 +1,4 @@
-// app/pro/profile/public-profile/ProAccountMenu.tsx
+// app/pro/_components/ProAccountMenu.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'

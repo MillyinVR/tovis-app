@@ -30,7 +30,7 @@ vi.mock('next/link', () => ({
 
 import ProAccountMenu from './ProAccountMenu'
 
-describe('app/pro/profile/public-profile/ProAccountMenu', () => {
+describe('app/pro/_components/ProAccountMenu', () => {
   const fetchMock = vi.fn()
 
   beforeEach(() => {

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 
 import { cn } from '@/lib/utils'
+import LogoutButton from './components/LogoutButton'
 
 type MeTabKey = 'boards' | 'following' | 'history'
 
@@ -441,8 +442,12 @@ export default function ClientMeDashboard({
     <div className="h-full overflow-y-auto bg-bgPrimary text-textPrimary">
       <div className="mx-auto w-full max-w-[430px] px-4 pb-28 pt-6">
         <section>
-          <div className="text-[11px] font-black tracking-[0.18em] text-textSecondary">
-            {formattedHandle.toUpperCase()}
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[11px] font-black tracking-[0.18em] text-textSecondary">
+              {formattedHandle.toUpperCase()}
+            </div>
+
+            <LogoutButton />
           </div>
 
           <div className="mt-5 flex items-start gap-4">

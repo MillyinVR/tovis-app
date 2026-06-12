@@ -5,6 +5,7 @@ import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
+import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
 import '@/lib/brand/proOverview.css'
 import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
 import { getProOnboardingRedirectHref } from '@/lib/pro/readiness/onboardingGate'
@@ -76,9 +77,18 @@ export default async function ProRootLayout({
     redirect(onboardingRedirectHref)
   }
 
+  const pro = user.professionalProfile
+  const publicUrl = isPubliclyApprovedProStatus(pro.verificationStatus)
+    ? `/professionals/${encodeURIComponent(pro.id)}`
+    : null
+
   return (
     <div className="min-h-dvh bg-bgPrimary text-textPrimary">
-      <ProHeader />
+      <ProHeader
+        businessName={pro.businessName}
+        subtitle={pro.handle ? `@${pro.handle}` : null}
+        publicUrl={publicUrl}
+      />
       <ProComplianceBanner />
       <ProReadinessBanner />
 
