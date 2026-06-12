@@ -50,6 +50,9 @@ type CalendarDesktopShellProps = {
   onBack: () => void
   onNext: () => void
 
+  pendingBarDismissed: boolean
+  onDismissPendingBar: () => void
+
   cal: CalendarData
 }
 
@@ -140,6 +143,8 @@ export function CalendarDesktopShell(props: CalendarDesktopShellProps) {
     onToday,
     onBack,
     onNext,
+    pendingBarDismissed,
+    onDismissPendingBar,
     cal,
   } = props
 
@@ -312,32 +317,35 @@ export function CalendarDesktopShell(props: CalendarDesktopShellProps) {
             />
           </div>
 
-          <footer className="brand-pro-calendar-desktop-pending-banner">
-            <PendingRequestSurface
-              copy={desktopPendingRequestCopy}
-              event={topPendingRequest}
-              pendingCount={cal.management.pendingRequests.length}
-              busy={Boolean(
-                topPendingBookingId &&
-                  cal.managementActionBusyId === topPendingBookingId,
-              )}
-              error={cal.managementActionError}
-              variant="desktop"
-              actionMode="label"
-              showOpenAllAction
-              onOpenAll={() => cal.openManagement('pendingRequests')}
-              onApprove={() => {
-                if (topPendingBookingId) {
-                  void cal.approveBookingById(topPendingBookingId)
-                }
-              }}
-              onDeny={() => {
-                if (topPendingBookingId) {
-                  void cal.denyBookingById(topPendingBookingId)
-                }
-              }}
-            />
-          </footer>
+          {topPendingRequest && !pendingBarDismissed ? (
+            <footer className="brand-pro-calendar-desktop-pending-banner">
+              <PendingRequestSurface
+                copy={desktopPendingRequestCopy}
+                event={topPendingRequest}
+                pendingCount={cal.management.pendingRequests.length}
+                busy={Boolean(
+                  topPendingBookingId &&
+                    cal.managementActionBusyId === topPendingBookingId,
+                )}
+                error={cal.managementActionError}
+                variant="desktop"
+                actionMode="label"
+                showOpenAllAction
+                onOpenAll={() => cal.openManagement('pendingRequests')}
+                onApprove={() => {
+                  if (topPendingBookingId) {
+                    void cal.approveBookingById(topPendingBookingId)
+                  }
+                }}
+                onDeny={() => {
+                  if (topPendingBookingId) {
+                    void cal.denyBookingById(topPendingBookingId)
+                  }
+                }}
+                onDismiss={onDismissPendingBar}
+              />
+            </footer>
+          ) : null}
         </div>
 
         <EditScheduleOverlay

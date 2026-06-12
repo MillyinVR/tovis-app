@@ -23,6 +23,7 @@ type PendingRequestSurfaceProps = {
   onOpenAll: () => void
   onApprove: () => void
   onDeny: () => void
+  onDismiss?: () => void
   actionMode?: PendingRequestActionMode
   showOpenAllAction?: boolean
 }
@@ -138,6 +139,7 @@ export function PendingRequestSurface(props: PendingRequestSurfaceProps) {
     onOpenAll,
     onApprove,
     onDeny,
+    onDismiss,
     actionMode,
     showOpenAllAction = false,
   } = props
@@ -224,6 +226,21 @@ export function PendingRequestSurface(props: PendingRequestSurfaceProps) {
             </button>
           ) : null}
         </div>
+
+        {onDismiss ? (
+          <button
+            type="button"
+            onClick={(clickEvent) => {
+              clickEvent.stopPropagation()
+              onDismiss()
+            }}
+            className="brand-pro-calendar-pending-dismiss brand-focus"
+            aria-label={copy.dismissLabel}
+            title={copy.dismissLabel}
+          >
+            –
+          </button>
+        ) : null}
       </div>
 
       {error ? (

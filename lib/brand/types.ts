@@ -149,6 +149,7 @@ export type BrandProCalendarPendingRequestCopy = {
   openRequestsLabel: string
   approveLabel: string
   denyLabel: string
+  dismissLabel: string
 }
 
 export type BrandProCalendarLegendCopy = {

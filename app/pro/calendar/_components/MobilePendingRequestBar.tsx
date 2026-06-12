@@ -12,12 +12,14 @@ import type { CalendarEvent } from '../_types'
 type MobilePendingRequestBarProps = {
   copy: BrandProCalendarPendingRequestCopy
   event: CalendarEvent | undefined
+  dismissed: boolean
   pendingCount: number
   busy: boolean
   error: string | null
   onOpenAll: () => void
   onApprove: () => void
   onDeny: () => void
+  onDismiss: () => void
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
@@ -26,13 +28,17 @@ export function MobilePendingRequestBar(props: MobilePendingRequestBarProps) {
   const {
     copy,
     event,
+    dismissed,
     pendingCount,
     busy,
     error,
     onOpenAll,
     onApprove,
     onDeny,
+    onDismiss,
   } = props
+
+  if (!event || pendingCount <= 0 || dismissed) return null
 
   return (
     <div
@@ -50,6 +56,7 @@ export function MobilePendingRequestBar(props: MobilePendingRequestBarProps) {
         onOpenAll={onOpenAll}
         onApprove={onApprove}
         onDeny={onDeny}
+        onDismiss={onDismiss}
       />
     </div>
   )

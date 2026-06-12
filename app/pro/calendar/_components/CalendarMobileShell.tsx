@@ -45,6 +45,9 @@ type CalendarMobileShellProps = {
   topPendingRequest: CalendarEvent | undefined
   topPendingBookingId: string | null
 
+  pendingBarDismissed: boolean
+  onDismissPendingBar: () => void
+
   cal: CalendarData
 }
 
@@ -88,6 +91,8 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
     onNext,
     topPendingRequest,
     topPendingBookingId,
+    pendingBarDismissed,
+    onDismissPendingBar,
     cal,
   } = props
 
@@ -216,6 +221,7 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
       <MobilePendingRequestBar
         copy={copy.mobilePendingRequest}
         event={topPendingRequest}
+        dismissed={pendingBarDismissed}
         pendingCount={cal.management.pendingRequests.length}
         busy={Boolean(
           topPendingBookingId &&
@@ -233,6 +239,7 @@ export function CalendarMobileShell(props: CalendarMobileShellProps) {
             void cal.denyBookingById(topPendingBookingId)
           }
         }}
+        onDismiss={onDismissPendingBar}
       />
     </>
   )
