@@ -218,7 +218,7 @@ app/api/_utils/rateLimit.ts
 lib/rateLimit/*
 lib/cache/*
 lib/health/redis.ts
-middleware.ts
+proxy.ts
 auth routes
 SMS routes
 notification processing
