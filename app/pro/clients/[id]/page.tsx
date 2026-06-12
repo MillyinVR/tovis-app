@@ -9,6 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 
 import EditAlertBannerForm from './EditAlertBannerForm'
 import NewAllergyForm from './NewAllergyForm'
@@ -63,11 +64,9 @@ const CLIENT_DETAIL_SELECT = {
       createdAt: true,
       recordedBy: {
         select: {
-          user: {
-            select: {
-              email: true,
-            },
-          },
+          businessName: true,
+          firstName: true,
+          lastName: true,
         },
       },
     },
@@ -96,11 +95,8 @@ const BOOKING_ROW_SELECT = {
   professional: {
     select: {
       businessName: true,
-      user: {
-        select: {
-          email: true,
-        },
-      },
+      firstName: true,
+      lastName: true,
     },
   },
   aftercareSummary: {
@@ -139,11 +135,8 @@ const CLIENT_LEFT_REVIEW_SELECT = {
   professional: {
     select: {
       businessName: true,
-      user: {
-        select: {
-          email: true,
-        },
-      },
+      firstName: true,
+      lastName: true,
     },
   },
 } satisfies Prisma.ReviewSelect
@@ -156,11 +149,8 @@ const PRO_FEEDBACK_SELECT = {
   professional: {
     select: {
       businessName: true,
-      user: {
-        select: {
-          email: true,
-        },
-      },
+      firstName: true,
+      lastName: true,
     },
   },
 } satisfies Prisma.ClientProfessionalNoteSelect
@@ -300,7 +290,8 @@ function buildBookingSearchIndex(booking: BookingRow): string {
     booking.service?.name,
     booking.service?.category?.name,
     booking.professional?.businessName,
-    booking.professional?.user?.email,
+    booking.professional?.firstName,
+    booking.professional?.lastName,
     booking.status,
     booking.aftercareSummary?.notes,
     String(booking.totalDurationMinutes ?? ''),
@@ -463,8 +454,13 @@ function ClientAllergiesList({ client }: { client: ClientDetailRecord }) {
 
           <div className="mt-2 text-[11px] font-semibold text-textSecondary/80">
             Recorded {formatDate(allergy.createdAt)}
-            {allergy.recordedBy?.user?.email
-              ? ` • by ${allergy.recordedBy.user.email}`
+            {allergy.recordedBy
+              ? ` • by ${formatPublicProfileDisplayName({
+                  businessName: allergy.recordedBy.businessName,
+                  firstName: allergy.recordedBy.firstName,
+                  lastName: allergy.recordedBy.lastName,
+                  fallback: 'Professional',
+                })}`
               : ''}
           </div>
         </div>
@@ -583,10 +579,12 @@ function ServiceHistoryList({
           moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ??
           '0.00'
         const when = formatDate(booking.scheduledFor)
-        const proName =
-          booking.professional?.businessName ||
-          booking.professional?.user?.email ||
-          'Professional'
+        const proName = formatPublicProfileDisplayName({
+          businessName: booking.professional?.businessName,
+          firstName: booking.professional?.firstName,
+          lastName: booking.professional?.lastName,
+          fallback: 'Professional',
+        })
 
         return (
           <Link
@@ -712,10 +710,12 @@ function ClientLeftReviewsList({
   return (
     <div className="grid gap-3">
       {reviews.map((review) => {
-        const proName =
-          review.professional?.businessName ||
-          review.professional?.user?.email ||
-          'Professional'
+        const proName = formatPublicProfileDisplayName({
+          businessName: review.professional?.businessName,
+          firstName: review.professional?.firstName,
+          lastName: review.professional?.lastName,
+          fallback: 'Professional',
+        })
 
         return (
           <div
@@ -769,10 +769,12 @@ function ProFeedbackList({ feedback }: { feedback: ProFeedbackRow[] }) {
   return (
     <div className="grid gap-3">
       {feedback.map((note) => {
-        const proName =
-          note.professional?.businessName ||
-          note.professional?.user?.email ||
-          'Professional'
+        const proName = formatPublicProfileDisplayName({
+          businessName: note.professional?.businessName,
+          firstName: note.professional?.firstName,
+          lastName: note.professional?.lastName,
+          fallback: 'Professional',
+        })
 
         return (
           <div
