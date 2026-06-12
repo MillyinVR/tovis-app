@@ -26,8 +26,12 @@ const BASELINE_PATH = path.join(
 
 // Signals that a file enumerates professionals (a discovery read).
 const DISCOVERY_QUERY_PATTERNS = [
-  'professionalSearchIndex.findMany',
-  'professionalProfile.findMany',
+  { query: 'professionalSearchIndex.findMany' },
+  { query: 'professionalProfile.findMany' },
+  {
+    query: 'professionalLocation.findMany',
+    qualifiers: ['PUBLICLY_APPROVED_PRO_STATUSES'],
+  },
 ]
 
 // Referencing any of these counts as tenant-aware.
@@ -115,9 +119,14 @@ function findViolations() {
 
       const content = fs.readFileSync(file, 'utf8')
 
-      const matchedPatterns = DISCOVERY_QUERY_PATTERNS.filter((pattern) =>
-        content.includes(pattern),
-      )
+      const matchedPatterns = DISCOVERY_QUERY_PATTERNS.filter((pattern) => {
+        if (!content.includes(pattern.query)) return false
+
+        return (
+          !pattern.qualifiers ||
+          pattern.qualifiers.some((qualifier) => content.includes(qualifier))
+        )
+      }).map((pattern) => pattern.query)
       if (matchedPatterns.length === 0) continue
 
       const isTenantAware = TENANT_HELPER_PATTERNS.some((pattern) =>

@@ -6,6 +6,8 @@ import {
 } from '@prisma/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { rootTenantContext, whiteLabelTenantContext } from '@/lib/tenant/context'
+
 const mocks = vi.hoisted(() => ({
   professionalLocationFindMany: vi.fn(),
   professionalServiceOfferingFindMany: vi.fn(),
@@ -65,6 +67,12 @@ const baseOfferingRow = {
   },
 }
 
+const ROOT_CONTEXT = rootTenantContext('tenant_root')
+const SALON_CONTEXT = whiteLabelTenantContext({
+  tenantId: 'tenant_salon_a',
+  slug: 'salon-a',
+})
+
 describe('loadOtherProsNearby', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -74,6 +82,7 @@ describe('loadOtherProsNearby', () => {
 
   it('queries only bookable, geo-valid, publicly approved pros for salon alternates', async () => {
     await loadOtherProsNearby({
+      tenantContext: ROOT_CONTEXT,
       centerLat: 32.715736,
       centerLng: -117.161087,
       radiusMiles: 15,
@@ -113,8 +122,33 @@ describe('loadOtherProsNearby', () => {
     )
   })
 
+  it('scopes white-label other-pro alternates to professionals in the request tenant', async () => {
+    await loadOtherProsNearby({
+      tenantContext: SALON_CONTEXT,
+      centerLat: 32.715736,
+      centerLng: -117.161087,
+      radiusMiles: 15,
+      serviceId: 'service_1',
+      locationType: ServiceLocationType.SALON,
+      excludeProfessionalId: 'current_pro',
+      limit: 6,
+    })
+
+    expect(mocks.professionalLocationFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          professional: expect.objectContaining({
+            homeTenantId: 'tenant_salon_a',
+            verificationStatus: { in: ['APPROVED'] },
+          }),
+        }),
+      }),
+    )
+  })
+
   it('queries mobile-base locations for mobile alternates', async () => {
     await loadOtherProsNearby({
+      tenantContext: ROOT_CONTEXT,
       centerLat: 32.715736,
       centerLng: -117.161087,
       radiusMiles: 15,
@@ -140,36 +174,37 @@ describe('loadOtherProsNearby', () => {
 
   it('uses the provided read client when supplied', async () => {
     const readClient = {
-        professionalLocation: {
+      professionalLocation: {
         findMany: vi.fn().mockResolvedValue([]),
-        },
-        professionalServiceOffering: {
+      },
+      professionalServiceOffering: {
         findMany: vi.fn().mockResolvedValue([]),
-        },
+      },
     }
 
     await loadOtherProsNearby({
-        centerLat: 32.715736,
-        centerLng: -117.161087,
-        radiusMiles: 15,
-        serviceId: 'service_1',
-        locationType: ServiceLocationType.SALON,
-        excludeProfessionalId: 'current_pro',
-        limit: 6,
-        client: readClient as unknown as Parameters<
+      tenantContext: ROOT_CONTEXT,
+      centerLat: 32.715736,
+      centerLng: -117.161087,
+      radiusMiles: 15,
+      serviceId: 'service_1',
+      locationType: ServiceLocationType.SALON,
+      excludeProfessionalId: 'current_pro',
+      limit: 6,
+      client: readClient as unknown as Parameters<
         typeof loadOtherProsNearby
-        >[0]['client'],
+      >[0]['client'],
     })
 
     expect(readClient.professionalLocation.findMany).toHaveBeenCalledTimes(1)
     expect(mocks.professionalLocationFindMany).not.toHaveBeenCalled()
-    })
-
+  })
 
   it('returns an empty list when no candidate locations are found', async () => {
     mocks.professionalLocationFindMany.mockResolvedValueOnce([])
 
     const result = await loadOtherProsNearby({
+      tenantContext: ROOT_CONTEXT,
       centerLat: 32.715736,
       centerLng: -117.161087,
       radiusMiles: 15,
@@ -185,6 +220,7 @@ describe('loadOtherProsNearby', () => {
 
   it('filters out the current professional at the query boundary', async () => {
     await loadOtherProsNearby({
+      tenantContext: ROOT_CONTEXT,
       centerLat: 32.715736,
       centerLng: -117.161087,
       radiusMiles: 15,
@@ -205,6 +241,7 @@ describe('loadOtherProsNearby', () => {
 
   it('does not query unbounded result sets', async () => {
     await loadOtherProsNearby({
+      tenantContext: ROOT_CONTEXT,
       centerLat: 32.715736,
       centerLng: -117.161087,
       radiusMiles: 50,
@@ -228,6 +265,7 @@ describe('loadOtherProsNearby', () => {
     ])
 
     await loadOtherProsNearby({
+      tenantContext: ROOT_CONTEXT,
       centerLat: 32.715736,
       centerLng: -117.161087,
       radiusMiles: 15,
@@ -237,29 +275,29 @@ describe('loadOtherProsNearby', () => {
       limit: 6,
     })
 
-expect(mocks.professionalServiceOfferingFindMany).toHaveBeenCalledWith(
-    expect.objectContaining({
+    expect(mocks.professionalServiceOfferingFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
         where: expect.objectContaining({
-        professionalId: { in: ['pro_1'] },
-        serviceId: 'service_1',
-        isActive: true,
-        offersInSalon: true,
-        salonPriceStartingAt: { not: null },
-        salonDurationMinutes: { not: null },
+          professionalId: { in: ['pro_1'] },
+          serviceId: 'service_1',
+          isActive: true,
+          offersInSalon: true,
+          salonPriceStartingAt: { not: null },
+          salonDurationMinutes: { not: null },
         }),
         select: expect.objectContaining({
-        id: true,
-        professionalId: true,
-        professional: {
+          id: true,
+          professionalId: true,
+          professional: {
             select: {
-            id: true,
-            businessName: true,
-            avatarUrl: true,
+              id: true,
+              businessName: true,
+              avatarUrl: true,
             },
-        },
+          },
         }),
         take: 2000,
-    }),
+      }),
     )
   })
 })
@@ -273,6 +311,7 @@ describe('loadOtherProsNearbyCached', () => {
 
   it('bypasses cached behavior when cacheEnabled is false', async () => {
     await loadOtherProsNearbyCached({
+      tenantContext: ROOT_CONTEXT,
       centerLat: 32.715736,
       centerLng: -117.161087,
       radiusMiles: 15,
@@ -293,6 +332,7 @@ describe('loadOtherProsNearbyCached', () => {
     ])
 
     const result = await loadOtherProsNearbyCached({
+      tenantContext: ROOT_CONTEXT,
       centerLat: 32.715736,
       centerLng: -117.161087,
       radiusMiles: 15,

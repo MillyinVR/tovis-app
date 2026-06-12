@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Prisma, ProfessionType } from '@prisma/client'
 
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { rootTenantContext, whiteLabelTenantContext } from '@/lib/tenant/context'
 
 const mocks = vi.hoisted(() => {
   const prisma = {
@@ -29,6 +30,12 @@ import { loadNearbyPros } from './nearbyPros'
 const DEFAULT_WORKING_HOURS = {
   mon: { enabled: true, start: '09:00', end: '17:00' },
 }
+
+const ROOT_CONTEXT = rootTenantContext('tenant_root')
+const SALON_CONTEXT = whiteLabelTenantContext({
+  tenantId: 'tenant_salon_a',
+  slug: 'salon-a',
+})
 
 function makeLocationRow(args: {
   locationId: string
@@ -115,15 +122,18 @@ describe('lib/discovery/nearbyPros.ts', () => {
   })
 
   it('queries only primary, bookable, publicly approved locations and excludes the provided professional id', async () => {
-    await loadNearbyPros({
-      lat: 32.7157,
-      lng: -117.1611,
-      radiusMiles: 15,
-      categoryId: null,
-      serviceId: null,
-      excludeProfessionalId: 'pro_self',
-      limit: 20,
-    })
+    await loadNearbyPros(
+      {
+        lat: 32.7157,
+        lng: -117.1611,
+        radiusMiles: 15,
+        categoryId: null,
+        serviceId: null,
+        excludeProfessionalId: 'pro_self',
+        limit: 20,
+      },
+      ROOT_CONTEXT,
+    )
 
     expect(mocks.prisma.professionalLocation.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -141,6 +151,32 @@ describe('lib/discovery/nearbyPros.ts', () => {
 
     expect(mocks.prisma.review.groupBy).not.toHaveBeenCalled()
     expect(mocks.prisma.professionalServiceOffering.findMany).not.toHaveBeenCalled()
+  })
+
+  it('scopes white-label nearby discovery to professionals in the request tenant', async () => {
+    await loadNearbyPros(
+      {
+        lat: 32.7157,
+        lng: -117.1611,
+        radiusMiles: 15,
+        categoryId: null,
+        serviceId: null,
+        excludeProfessionalId: null,
+        limit: 20,
+      },
+      SALON_CONTEXT,
+    )
+
+    expect(mocks.prisma.professionalLocation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          professional: expect.objectContaining({
+            homeTenantId: 'tenant_salon_a',
+            verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
+          }),
+        }),
+      }),
+    )
   })
 
   it('returns stable nearby cards ordered by distance and filtered by category', async () => {
@@ -198,15 +234,18 @@ describe('lib/discovery/nearbyPros.ts', () => {
       }),
     ])
 
-    const result = await loadNearbyPros({
-      lat: 32.7157,
-      lng: -117.1611,
-      radiusMiles: 15,
-      categoryId: 'cat_hair',
-      serviceId: null,
-      excludeProfessionalId: null,
-      limit: 20,
-    })
+    const result = await loadNearbyPros(
+      {
+        lat: 32.7157,
+        lng: -117.1611,
+        radiusMiles: 15,
+        categoryId: 'cat_hair',
+        serviceId: null,
+        excludeProfessionalId: null,
+        limit: 20,
+      },
+      ROOT_CONTEXT,
+    )
 
     expect(result.map((row) => row.id)).toEqual(['pro_1', 'pro_2'])
 
@@ -254,15 +293,18 @@ describe('lib/discovery/nearbyPros.ts', () => {
       }),
     ])
 
-    const result = await loadNearbyPros({
-      lat: 32.7157,
-      lng: -117.1611,
-      radiusMiles: 15,
-      categoryId: null,
-      serviceId: 'svc_target',
-      excludeProfessionalId: 'pro_self',
-      limit: 20,
-    })
+    const result = await loadNearbyPros(
+      {
+        lat: 32.7157,
+        lng: -117.1611,
+        radiusMiles: 15,
+        categoryId: null,
+        serviceId: 'svc_target',
+        excludeProfessionalId: 'pro_self',
+        limit: 20,
+      },
+      ROOT_CONTEXT,
+    )
 
     expect(mocks.prisma.professionalServiceOffering.findMany).toHaveBeenCalledWith(
       expect.objectContaining({

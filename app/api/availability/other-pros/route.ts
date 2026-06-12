@@ -20,6 +20,7 @@ import {
 } from '@/lib/booking/locationContext'
 import { withVersionedCache } from '@/lib/cache/versionedCache'
 import { prisma, prismaRead } from '@/lib/prisma'
+import { resolveTenantContextForRequest } from '@/lib/tenant'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
@@ -589,6 +590,7 @@ export async function GET(req: Request) {
     }
 
     const otherPros = await loadOtherProsNearbyCached({
+      tenantContext: await resolveTenantContextForRequest(req),
       centerLat,
       centerLng,
       radiusMiles,

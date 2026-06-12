@@ -12,6 +12,7 @@ import {
 } from '@/lib/discovery/nearby'
 import { prisma } from '@/lib/prisma'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { proDiscoveryVisibilityFilter, type TenantContext } from '@/lib/tenant'
 
 const LOCATION_SELECT = {
   id: true,
@@ -83,6 +84,7 @@ function compareNullableText(a: string | null, b: string | null): number {
 
 export async function loadNearbyPros(
   args: NearbyProsArgs,
+  tenantContext: TenantContext,
 ): Promise<NearbyProCard[]> {
   const bounds = boundsForRadiusMiles(args.lat, args.lng, args.radiusMiles)
 
@@ -94,6 +96,7 @@ export async function loadNearbyPros(
         ? { professionalId: { not: args.excludeProfessionalId } }
         : {}),
       professional: {
+        ...proDiscoveryVisibilityFilter(tenantContext),
         verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
       },
       lat: {

@@ -38,6 +38,7 @@ import {
 } from '@/lib/booking/errors'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import { clampInt } from '@/lib/pick'
+import { resolveTenantContextForRequest, tenantCacheScope } from '@/lib/tenant'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 export const dynamic = 'force-dynamic'
@@ -524,6 +525,9 @@ export async function GET(req: Request) {
       })
     }
 
+    const tenantContext = await resolveTenantContextForRequest(req)
+    const tenantScope = tenantCacheScope(tenantContext)
+
     type AlternateRow = {
       pro: {
         id: string
@@ -546,6 +550,7 @@ export async function GET(req: Request) {
 
     const computeAlternatesPayload = async (): Promise<AlternatesCacheValue> => {
       const otherPros = await loadOtherProsNearbyCached({
+        tenantContext,
         centerLat,
         centerLng,
         radiusMiles,
@@ -640,6 +645,7 @@ export async function GET(req: Request) {
       // `nowUtc` baked into busy-intervals computation can be up to 60s
       // stale on a hit; acceptable because lead-time minimums are minutes.
       const cacheExtra = stableHash({
+        tenantScope,
         serviceId,
         offeringId: offeringDbId,
         locationType: effectiveLocationType,

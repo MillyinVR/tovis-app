@@ -19,6 +19,12 @@ const mocks = vi.hoisted(() => ({
   // resolveValidatedBookingContext is the inner placement validator —
   // intercept it so we don't have to fully simulate booking-context lookups.
   resolveValidatedBookingContext: vi.fn(),
+  resolveTenantContextForRequest: vi.fn(),
+  tenantContext: {
+    isRoot: false,
+    tenantId: 'tenant_salon_a',
+    slug: 'salon-a',
+  },
 }))
 
 vi.mock('@/lib/booking/cacheVersion', () => ({
@@ -65,6 +71,10 @@ vi.mock('@/lib/booking/locationContext', async () => {
     resolveValidatedBookingContext: mocks.resolveValidatedBookingContext,
   }
 })
+
+vi.mock('@/lib/tenant', () => ({
+  resolveTenantContextForRequest: mocks.resolveTenantContextForRequest,
+}))
 
 import { GET } from './route'
 
@@ -134,6 +144,7 @@ describe('GET /api/availability/other-pros', () => {
     mocks.resolveValidatedBookingContext.mockResolvedValue(
       makeValidatedContext(),
     )
+    mocks.resolveTenantContextForRequest.mockResolvedValue(mocks.tenantContext)
     mocks.loadOtherProsNearbyCached.mockResolvedValue([
       {
         id: 'pro-2',
@@ -248,7 +259,10 @@ describe('GET /api/availability/other-pros', () => {
 
     expect(mocks.loadOtherProsNearbyCached).toHaveBeenCalledTimes(1)
     const args = mocks.loadOtherProsNearbyCached.mock.calls[0]?.[0]
-    expect(args).toMatchObject({ client: expect.anything() })
+    expect(args).toMatchObject({
+      client: expect.anything(),
+      tenantContext: mocks.tenantContext,
+    })
   })
 
   it('returns 404 when offering not found (and caches the negative result under same key)', async () => {
