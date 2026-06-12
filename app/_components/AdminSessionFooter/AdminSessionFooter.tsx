@@ -4,6 +4,7 @@
 import { usePathname } from 'next/navigation'
 import { HeadphonesIcon, LayoutDashboard, Nfc, Scissors, UserCheck } from 'lucide-react'
 import NavItem from '@/app/_components/navigation/FooterNavItem'
+import FooterSignOutItem from '@/app/_components/navigation/FooterSignOutItem'
 
 type Props = {
   supportBadge?: string | null
@@ -47,6 +48,7 @@ export default function AdminSessionFooter({ supportBadge }: Props) {
               ) : null
             }
           />
+          <FooterSignOutItem />
         </div>
       </div>
     </div>
