@@ -1,7 +1,14 @@
 ﻿// app/(main)/booking/AvailabilityDrawer/AvailabilityDrawer.tsx
 'use client'
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from 'react'
 import { useRouter } from 'next/navigation'
 
 import type {
@@ -580,6 +587,9 @@ export default function AvailabilityDrawer(props: {
   const [selected, setSelected] = useState<SelectedHold | null>(null)
   const [holdUntil, setHoldUntil] = useState<number | null>(null)
   const [holding, setHolding] = useState(false)
+  // Keeps the drawer's CTA in a visible pending state while the add-ons
+  // route fetches on the server; the drawer unmounts when it renders.
+  const [navigatingToAddOns, startAddOnsNavigation] = useTransition()
   const [selectedDayYMD, setSelectedDayYMD] = useState<string | null>(null)
   const [period, setPeriod] = useState<Period>('AFTERNOON')
   const [otherProsRequested, setOtherProsRequested] = useState(false)
@@ -1418,6 +1428,8 @@ export default function AvailabilityDrawer(props: {
   ) {
     const effectiveOfferingId = offeringId || resolvedOfferingId
     if (!effectiveOfferingId || holding) return
+    // Don't let a new hold replace the one the add-ons page is loading with.
+    if (navigatingToAddOns) return
 
     const holdMetricKey = buildClientMetricKey('hold')
 
@@ -1580,6 +1592,7 @@ export default function AvailabilityDrawer(props: {
 
   async function onContinue() {
     if (!selected?.holdId || !selected?.offeringId || holding) return
+    if (navigatingToAddOns) return
 
     const payload: ConfirmHoldSelection = {
       holdId: selected.holdId,
@@ -1648,8 +1661,11 @@ export default function AvailabilityDrawer(props: {
       qs.set('clientAddressId', selectedClientAddressId)
     }
 
-    onClose()
-    router.push(`/booking/add-ons?${qs.toString()}`)
+    // Keep the drawer open while the add-ons page loads so the CTA can show
+    // a pending state instead of dropping the user back on the old screen.
+    startAddOnsNavigation(() => {
+      router.push(`/booking/add-ons?${qs.toString()}`)
+    })
   }
 
   const selectedLine = selected?.slotISO
@@ -1665,6 +1681,7 @@ export default function AvailabilityDrawer(props: {
       <DrawerShell
         open={open}
         onClose={() => {
+          if (navigatingToAddOns) return
           void hardResetUi({ deleteHold: true })
           onClose()
         }}
@@ -1674,6 +1691,7 @@ export default function AvailabilityDrawer(props: {
               type="button"
               data-testid="availability-close-button"
               onClick={() => {
+                if (navigatingToAddOns) return
                 void hardResetUi({ deleteHold: true })
                 onClose()
               }}
@@ -1693,6 +1711,7 @@ export default function AvailabilityDrawer(props: {
           <StickyCTA
             canContinue={Boolean(selected?.holdId && holdUntil)}
             loading={holding}
+            navigating={navigatingToAddOns}
             onContinue={onContinue}
             selectedLine={selectedLine}
             continueLabel={continueLabel}
@@ -1775,7 +1794,7 @@ export default function AvailabilityDrawer(props: {
             <>
               <AppointmentTypeToggle
                 value={activeLocationType}
-                disabled={holding}
+                disabled={holding || navigatingToAddOns}
                 allowed={allowed}
                 offering={offering}
                 onChange={(nextType) => {
@@ -1787,7 +1806,7 @@ export default function AvailabilityDrawer(props: {
                 <SalonLocationSelector
                   value={requestedLocationId ?? summary.request.locationId}
                   options={summary.locationOptions}
-                  disabled={holding}
+                  disabled={holding || navigatingToAddOns}
                   onChange={(nextLocationId) => {
                     void selectSalonLocation(nextLocationId)
                   }}
@@ -1800,7 +1819,7 @@ export default function AvailabilityDrawer(props: {
             <>
               <AppointmentTypeToggle
                 value={activeLocationType}
-                disabled={holding}
+                disabled={holding || navigatingToAddOns}
                 allowed={allowed}
                 offering={offering}
                 onChange={(nextType) => {
@@ -1813,7 +1832,7 @@ export default function AvailabilityDrawer(props: {
                 options={mobileAddresses}
                 loading={loadingMobileAddresses}
                 error={mobileAddressesError}
-                disabled={holding}
+                disabled={holding || navigatingToAddOns}
                 onChange={setSelectedClientAddressId}
                 onAddAddress={() => setAddressCreateOpen(true)}
               />
@@ -1860,6 +1879,8 @@ export default function AvailabilityDrawer(props: {
                   days={dayScrollerDays}
                   selectedYMD={selectedDayYMD}
                   onSelect={(ymd) => {
+                    if (navigatingToAddOns) return
+
                     if (pendingDaySwitchMetricKeyRef.current) {
                       cancelAvailabilityMetric({
                         metric: 'day_switch_to_times_visible_ms',
@@ -1958,6 +1979,7 @@ export default function AvailabilityDrawer(props: {
                 selected={selected}
                 period={period}
                 onSelectPeriod={(nextPeriod) => {
+                  if (navigatingToAddOns) return
                   void hardResetUi({ deleteHold: true })
                   setPeriod(nextPeriod)
                 }}
@@ -2013,10 +2035,18 @@ export default function AvailabilityDrawer(props: {
                     onClick={() => {
                       void onContinue()
                     }}
-                    className="mt-3 flex h-[46px] w-full items-center justify-center rounded-full bg-accentPrimary text-[14px] font-black tracking-[0.03em] text-bgPrimary transition hover:bg-accentPrimaryHover"
+                    disabled={holding || navigatingToAddOns}
+                    aria-busy={navigatingToAddOns}
+                    className="mt-3 flex h-[46px] w-full items-center justify-center gap-2 rounded-full bg-accentPrimary text-[14px] font-black tracking-[0.03em] text-bgPrimary transition hover:bg-accentPrimaryHover disabled:cursor-not-allowed disabled:opacity-70"
                     style={{ fontFamily: 'var(--font-mono)' }}
                   >
-                    {continueLabel}
+                    {navigatingToAddOns ? (
+                      <span
+                        aria-hidden
+                        className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-bgPrimary/30 border-t-bgPrimary"
+                      />
+                    ) : null}
+                    {navigatingToAddOns ? 'Loading add-ons…' : continueLabel}
                   </button>
                 </div>
               ) : null}

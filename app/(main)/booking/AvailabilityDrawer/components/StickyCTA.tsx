@@ -4,6 +4,7 @@
 type StickyCTAProps = {
   canContinue: boolean
   loading: boolean
+  navigating: boolean
   onContinue: () => void
   selectedLine: string | null
   continueLabel: string
@@ -12,11 +13,16 @@ type StickyCTAProps = {
 export default function StickyCTA({
   canContinue,
   loading,
+  navigating,
   onContinue,
   selectedLine,
   continueLabel,
 }: StickyCTAProps) {
-  const buttonLabel = loading
+  const pending = loading || navigating
+
+  const buttonLabel = navigating
+    ? 'Loading add-ons…'
+    : loading
     ? 'Holding your time…'
     : canContinue
     ? continueLabel
@@ -50,27 +56,38 @@ export default function StickyCTA({
       <button
         type="button"
         onClick={onContinue}
-        disabled={!canContinue || loading}
+        disabled={!canContinue || pending}
+        aria-busy={pending}
         style={{
           width: '100%',
           height: 52,
           borderRadius: 999,
           border: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
           background: canContinue ? '#E05A28' : 'rgba(244,239,231,0.1)',
           color: canContinue ? '#ffffff' : 'rgba(244,239,231,0.3)',
           fontSize: 14,
           fontWeight: 900,
           letterSpacing: '0.04em',
           fontFamily: 'var(--font-mono)',
-          cursor: canContinue && !loading ? 'pointer' : 'not-allowed',
+          cursor: canContinue && !pending ? 'pointer' : 'not-allowed',
           transition: 'background 0.2s ease, color 0.2s ease',
           boxShadow: canContinue ? '0 4px 20px rgba(224,90,40,0.45)' : 'none',
         }}
       >
+        {pending ? (
+          <span
+            aria-hidden
+            className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"
+          />
+        ) : null}
         {buttonLabel}
       </button>
 
-      {!canContinue && !loading ? (
+      {!canContinue && !pending ? (
         <div
           style={{
             marginTop: 8,
