@@ -6,6 +6,7 @@
 // be able to access risky booking, marketplace, or workflow actions until their
 // readiness blockers are resolved.
 
+import { blockerCopy } from '@/lib/pro/readiness/blockerCopy'
 import type {
   ProReadiness,
   ProReadinessBlocker,
@@ -13,36 +14,22 @@ import type {
 
 const PRO_ONBOARDING_HOME = '/pro/onboarding'
 
+// Every blocker fix-it href (see blockerCopy.ts) must fall under one of
+// these prefixes, otherwise the gate would redirect to a page it then
+// blocks, looping the pro back to onboarding forever.
 const UNREADY_PRO_ALLOWED_PATH_PREFIXES = [
   '/pro/onboarding',
   '/pro/profile',
   '/pro/services',
   '/pro/locations',
+  // Working hours are edited in the calendar, so unready pros need it.
+  // Clients still cannot book an unready pro — readiness is enforced
+  // server-side in availability and booking creation.
+  '/pro/calendar',
   '/pro/payments',
   '/pro/verification',
   '/pro/settings',
 ] as const
-
-const BLOCKER_ONBOARDING_HREFS: Partial<Record<ProReadinessBlocker, string>> = {
-  NO_ACTIVE_OFFERING: '/pro/services',
-  OFFERING_MISSING_SALON_PRICE_OR_DURATION: '/pro/services',
-  OFFERING_MISSING_MOBILE_PRICE_OR_DURATION: '/pro/services',
-
-  NO_BOOKABLE_LOCATION: '/pro/locations',
-  SALON_MISSING_ADDRESS: '/pro/locations',
-  MOBILE_MISSING_BASE_CONFIG: '/pro/locations',
-  LOCATION_MISSING_TIMEZONE: '/pro/locations',
-  LOCATION_MISSING_GEO: '/pro/locations',
-
-  // Calendar is intentionally blocked while unready for now. Route this
-  // through onboarding so the page can explain what to fix without looping.
-  LOCATION_MISSING_WORKING_HOURS: PRO_ONBOARDING_HOME,
-
-  STRIPE_NOT_READY: '/pro/payments',
-
-  VERIFICATION_NOT_APPROVED: '/pro/verification',
-  VERIFICATION_NOT_BROADLY_DISCOVERABLE: '/pro/verification',
-}
 
 function normalizeProPath(pathname: string): string {
   const trimmed = pathname.trim()
@@ -88,7 +75,7 @@ export function getNextOnboardingHref(
   blockers: readonly ProReadinessBlocker[],
 ): string {
   for (const blocker of blockers) {
-    const href = BLOCKER_ONBOARDING_HREFS[blocker]
+    const href = blockerCopy(blocker)?.href
 
     if (href) return href
   }

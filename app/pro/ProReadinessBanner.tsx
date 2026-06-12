@@ -4,18 +4,13 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-type LiveBookingMode = 'SALON' | 'MOBILE'
+import {
+  PRO_BLOCKER_COPY,
+  type ProBlockerCopy,
+} from '@/lib/pro/readiness/blockerCopy'
+import type { ProReadinessBlocker } from '@/lib/pro/readiness/proReadiness'
 
-type ProReadinessBlocker =
-  | 'NO_ACTIVE_OFFERING'
-  | 'NO_BOOKABLE_LOCATION'
-  | 'SALON_MISSING_ADDRESS'
-  | 'MOBILE_MISSING_BASE_CONFIG'
-  | 'LOCATION_MISSING_TIMEZONE'
-  | 'LOCATION_MISSING_WORKING_HOURS'
-  | 'OFFERING_MISSING_SALON_PRICE_OR_DURATION'
-  | 'OFFERING_MISSING_MOBILE_PRICE_OR_DURATION'
-  | 'VERIFICATION_NOT_APPROVED'
+type LiveBookingMode = 'SALON' | 'MOBILE'
 
 type ProReadiness =
   | {
@@ -31,50 +26,6 @@ type ProReadiness =
 type ReadinessResponse = {
   ok: true
   readiness: ProReadiness
-}
-
-type BlockerViewModel = {
-  label: string
-  href: string
-}
-
-const BLOCKER_LABELS: Record<ProReadinessBlocker, BlockerViewModel> = {
-  NO_ACTIVE_OFFERING: {
-    label: 'Add at least one active service offering.',
-    href: '/pro/services',
-  },
-  NO_BOOKABLE_LOCATION: {
-    label: 'Add or publish at least one bookable location.',
-    href: '/pro/locations',
-  },
-  SALON_MISSING_ADDRESS: {
-    label: 'Add a valid address to your salon or suite location.',
-    href: '/pro/locations',
-  },
-  MOBILE_MISSING_BASE_CONFIG: {
-    label: 'Add your mobile base postal code and service radius.',
-    href: '/pro/locations',
-  },
-  LOCATION_MISSING_TIMEZONE: {
-    label: 'Add a valid timezone to every bookable location.',
-    href: '/pro/locations',
-  },
-  LOCATION_MISSING_WORKING_HOURS: {
-    label: 'Add working hours for every bookable location.',
-    href: '/pro/calendar',
-  },
-  OFFERING_MISSING_SALON_PRICE_OR_DURATION: {
-    label: 'Add salon pricing and duration to salon services.',
-    href: '/pro/services',
-  },
-  OFFERING_MISSING_MOBILE_PRICE_OR_DURATION: {
-    label: 'Add mobile pricing and duration to mobile services.',
-    href: '/pro/services',
-  },
-  VERIFICATION_NOT_APPROVED: {
-    label: 'Finish professional verification.',
-    href: '/pro/verification',
-  },
 }
 
 function isReadinessResponse(value: unknown): value is ReadinessResponse {
@@ -103,8 +54,8 @@ function isReadinessResponse(value: unknown): value is ReadinessResponse {
 
 function blockerViewModels(blockers: readonly ProReadinessBlocker[]) {
   return blockers
-    .map((blocker) => BLOCKER_LABELS[blocker])
-    .filter((item): item is BlockerViewModel => Boolean(item))
+    .map((blocker) => PRO_BLOCKER_COPY[blocker])
+    .filter((item): item is ProBlockerCopy => Boolean(item))
 }
 
 export default function ProReadinessBanner() {
