@@ -109,6 +109,27 @@ function pickOne(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? '' : value
 }
 
+// Older links land context params on /messages directly; hand them to
+// /messages/start, which owns param-driven thread resolution.
+function buildStartRedirectQuery(sp: SearchParamsShape): string | null {
+  const contextType = pickOne(sp.contextType).trim()
+  const contextId = pickOne(sp.contextId).trim()
+
+  if (!contextType || !contextId) return null
+
+  const query = new URLSearchParams()
+  query.set('contextType', contextType)
+  query.set('contextId', contextId)
+
+  const professionalId = pickOne(sp.professionalId).trim()
+  const clientId = pickOne(sp.clientId).trim()
+
+  if (professionalId) query.set('professionalId', professionalId)
+  if (clientId) query.set('clientId', clientId)
+
+  return query.toString()
+}
+
 function readFilter(sp: SearchParamsShape): InboxFilter {
   const raw = pickOne(sp.filter).trim().toLowerCase()
 
@@ -538,6 +559,13 @@ export default async function MessagesInboxPage(props: PageProps) {
   }
 
   const sp = await Promise.resolve(props.searchParams ?? {})
+
+  const startQuery = buildStartRedirectQuery(sp)
+
+  if (startQuery) {
+    redirect(`/messages/start?${startQuery}`)
+  }
+
   const activeFilter = readFilter(sp)
 
   const threads = await findInboxThreads({

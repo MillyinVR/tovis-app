@@ -1,9 +1,8 @@
 // app/messages/start/page.tsx
-import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { MessageThreadContextType } from '@prisma/client'
 import { getCurrentUser } from '@/lib/currentUser'
-import { getServerOrigin } from '@/lib/serverOrigin'
+import { resolveMessageThread } from '@/lib/messagesResolve'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,27 +15,6 @@ type PageProps = {
 type ResolvedContext = {
   contextType: MessageThreadContextType
   contextId: string
-}
-
-type ResolvePayload = {
-  contextType: MessageThreadContextType
-  contextId: string
-  createIfMissing: true
-  professionalId?: string
-  clientId?: string
-}
-
-type ResolveThreadResponse = {
-  ok: true
-  thread: {
-    id: string
-  }
-}
-
-type JsonRecord = Record<string, unknown>
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function pickOne(value: string | string[] | undefined): string {
@@ -134,18 +112,6 @@ function resolveContextFromSearchParams(sp: SearchParamsShape): ResolvedContext 
   return null
 }
 
-function isResolveThreadResponse(value: unknown): value is ResolveThreadResponse {
-  if (!isRecord(value)) return false
-  if (value.ok !== true) return false
-  if (!isRecord(value.thread)) return false
-
-  return typeof value.thread.id === 'string' && value.thread.id.length > 0
-}
-
-async function readResolveResponse(res: Response): Promise<unknown> {
-  return await res.json().catch(() => null)
-}
-
 export default async function MessagesStartPage(props: PageProps) {
   const user = await getCurrentUser().catch(() => null)
 
@@ -161,59 +127,33 @@ export default async function MessagesStartPage(props: PageProps) {
     redirect('/messages')
   }
 
-  const professionalId = pickOne(sp.professionalId)
-  const clientId = pickOne(sp.clientId)
+  const professionalId = pickOne(sp.professionalId).trim()
+  const clientId = pickOne(sp.clientId).trim()
 
-  const origin = await getServerOrigin()
-
-  if (!origin) {
-    console.warn('[messages/start] missing origin')
-    redirect('/messages')
-  }
-
-  const requestHeaders = await headers()
-  const cookie = requestHeaders.get('cookie') ?? ''
-
-  const payload: ResolvePayload = {
-    contextType: resolvedContext.contextType,
-    contextId: resolvedContext.contextId,
-    createIfMissing: true,
-    ...(professionalId ? { professionalId } : {}),
-    ...(clientId ? { clientId } : {}),
-  }
-
-  const res = await fetch(`${origin}/api/messages/resolve`, {
-    method: 'POST',
-    cache: 'no-store',
-    headers: {
-      'content-type': 'application/json',
-      cookie,
+  const outcome = await resolveMessageThread({
+    viewer: user,
+    input: {
+      contextType: resolvedContext.contextType,
+      contextId: resolvedContext.contextId,
+      createIfMissing: true,
+      ...(professionalId ? { professionalId } : {}),
+      ...(clientId ? { clientId } : {}),
     },
-    body: JSON.stringify(payload),
-  }).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : 'Unknown fetch error'
-
-    console.error('[messages/start] resolve request failed', {
-      error: message,
-    })
-
-    return null
   })
 
-  if (!res) {
-    redirect('/messages')
-  }
-
-  const data = await readResolveResponse(res)
-
-  if (!res.ok || !isResolveThreadResponse(data)) {
+  if (!outcome.ok) {
     console.warn('[messages/start] resolve failed', {
-      status: res.status,
-      ok: res.ok,
+      status: outcome.status,
+      error: outcome.error,
     })
 
     redirect('/messages')
   }
 
-  redirect(`/messages/thread/${encodeURIComponent(data.thread.id)}`)
+  if (!outcome.thread) {
+    console.warn('[messages/start] resolve returned no thread')
+    redirect('/messages')
+  }
+
+  redirect(`/messages/thread/${encodeURIComponent(outcome.thread.id)}`)
 }
