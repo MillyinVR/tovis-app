@@ -10,6 +10,7 @@ import {
 import { hashPassword } from '@/lib/auth'
 import { buildUserContactLookupData } from '@/lib/security/contactLookup'
 import { normalizeEmail } from '@/app/api/_utils/email'
+import { getZonedParts } from '@/lib/timeZone'
 
 export type SeedBookingFlowOptions = {
   withSavedAddress?: boolean
@@ -24,6 +25,9 @@ export type SeedBookingFlowResult = {
 
   /** Root tenant id every seeded row is attributed to. */
   tenantId: string
+
+  /** Time zone used for the professional profile and all seeded locations. */
+  timeZone: string
 
   credentials: {
     client: {
@@ -87,7 +91,30 @@ type SeedDeps = {
 const DEFAULT_PROFESSIONAL_PASSWORD = 'TestPassword123!'
 const FIXED_CLIENT_EMAIL = 'client@tovis.app'
 const FIXED_CLIENT_PASSWORD = 'password123'
-const DEFAULT_TIME_ZONE = 'America/Los_Angeles'
+const SEED_TIME_ZONE_CANDIDATES = [
+  'America/Los_Angeles',
+  'America/New_York',
+  'America/Sao_Paulo',
+  'UTC',
+  'Europe/Berlin',
+  'Asia/Dubai',
+  'Asia/Tokyo',
+  'Pacific/Auckland',
+]
+
+/**
+ * Working-hours validation rejects appointments whose end crosses local
+ * midnight, and the lifecycle spec books "now" (session start requires it).
+ * Pick a salon time zone where it is currently mid-day so the appointment
+ * always fits inside the location's working day regardless of when CI runs.
+ */
+export function pickSeedTimeZone(now: Date = new Date()): string {
+  for (const tz of SEED_TIME_ZONE_CANDIDATES) {
+    const { hour } = getZonedParts(now, tz)
+    if (hour >= 6 && hour < 16) return tz
+  }
+  return 'UTC'
+}
 const DEFAULT_OFFERING_TITLE = 'E2E Base Offering'
 
 function requireNormalizedEmail(value: unknown, label: string): string {
@@ -127,6 +154,7 @@ export async function seedBookingFlow(
   options: SeedBookingFlowOptions = {},
 ): Promise<SeedBookingFlowResult> {
   const prisma = deps.prisma
+  const timeZone = pickSeedTimeZone()
 
   const withSavedAddress = options.withSavedAddress ?? true
   const withAddOn = options.withAddOn ?? true
@@ -253,7 +281,7 @@ export async function seedBookingFlow(
       handle: professionalHandle,
       handleNormalized: professionalHandle,
       location: 'San Diego, CA',
-      timeZone: DEFAULT_TIME_ZONE,
+      timeZone,
       ...(offersMobile
         ? {
             mobileBasePostalCode: '92101',
@@ -333,7 +361,7 @@ export async function seedBookingFlow(
       countryCode: 'US',
       lat: coord('32.7157000'),
       lng: coord('-117.1611000'),
-      timeZone: DEFAULT_TIME_ZONE,
+      timeZone,
       workingHours: workingHoursJson(),
       bufferMinutes: 15,
       stepMinutes: 15,
@@ -361,7 +389,7 @@ export async function seedBookingFlow(
           countryCode: 'US',
           lat: coord('32.7165000'),
           lng: coord('-117.1625000'),
-          timeZone: DEFAULT_TIME_ZONE,
+          timeZone,
           workingHours: workingHoursJson(),
           bufferMinutes: 15,
           stepMinutes: 15,
@@ -425,6 +453,7 @@ export async function seedBookingFlow(
   return {
     tag,
     tenantId: rootTenant.id,
+    timeZone,
     credentials: {
       client: {
         email: existingClientEmail,

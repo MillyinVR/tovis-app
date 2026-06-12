@@ -34,15 +34,17 @@ Use this runbook for these alert categories:
 
 | Alert | Severity | Initial threshold |
 |---|---|---|
-| Availability bootstrap error spike | P2 / P1 if widespread | TODO — define in docs/launch-readiness/slack-alerts.md |
-| Availability bootstrap p95 latency spike | P2 | TODO |
-| Hold create 5xx spike | P1/P2 | TODO |
-| Hold create conflict spike above expected baseline | P2 | TODO |
-| Booking finalize 5xx spike | P1 | TODO |
+| Availability bootstrap error spike | P2 / P1 if widespread | 5xx `> 1%` of availability requests for 5 minutes; P1 if `> 5%` for 5 minutes or the route is fully failing |
+| Availability bootstrap p95 latency spike | P2 | p95 `> 700 ms` (cold-path target, docs/launch-readiness/traffic-model.md) for 5 minutes |
+| Hold create 5xx spike | P1/P2 | Hold creation success `< 99%` or 5xx `> 1%` for 5 minutes (P2); P1 if success `< 95%` for 5 minutes |
+| Hold create conflict spike above expected baseline | P2 | 409-class conflicts `> 3×` trailing 1-hour baseline for 15 minutes (conflicts are correctness, not errors — alert only on abnormal spikes) |
+| Booking finalize 5xx spike | P1 | Finalize success `< 99%` for 5 minutes or 5xx `> 1%` for 5 minutes |
 | Booking finalize duplicate/integrity failure | P1 | Any confirmed case |
-| Booking funnel conversion drop | P2 | TODO |
-| Booking route rate-limit anomaly | P2 | TODO |
-| Booking dashboard no-data / observability gap | P2 | TODO |
+| Booking funnel conversion drop | P2 | Hold→finalize conversion `< 50%` of trailing 7-day baseline for 30 minutes with nonzero hold volume |
+| Booking route rate-limit anomaly | P2 | 429s `> 5%` of booking-route traffic for 10 minutes, or 429s at zero during sustained elevated traffic |
+| Booking dashboard no-data / observability gap | P2 | No booking-funnel events for 15 minutes while site traffic is nonzero |
+
+These are the starter thresholds from docs/launch-readiness/slack-alerts.md made route-specific; tighten after real beta traffic establishes a baseline.
 
 ---
 
@@ -413,7 +415,7 @@ text Date: Commit: Environment: Dashboard link: Alert link: Route/workflow: Fail
 | Gap | Launch impact |
 |---|---|
 | Booking funnel dashboard link missing | Blocks full dashboard proof. |
-| Booking funnel alert threshold TODO | Blocks alert proof. |
+| Booking funnel alert thresholds defined (2026-06-11) but live Sentry alert rules not yet configured against them | Blocks alert proof. |
 | Backup owner TODO | Blocks public rollout. |
 | Synthetic booking alert not tested | Blocks public rollout and likely private beta unless accepted. |
 | Deployed staging load proof missing | Blocks public rollout. |
