@@ -3,22 +3,43 @@
 
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import type { VerificationDocumentType } from '@prisma/client'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
+
+export type VerificationMethodOption = {
+  type: VerificationDocumentType
+  title: string
+  description: string
+}
+
+type VerificationUploadClientProps = {
+  methods: VerificationMethodOption[]
+}
 
 function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null
 }
 
-export default function VerificationUploadClient() {
+export default function VerificationUploadClient({
+  methods,
+}: VerificationUploadClientProps) {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement | null>(null)
 
+  const [selectedType, setSelectedType] = useState<VerificationDocumentType>(
+    methods[0]?.type ?? 'LICENSE',
+  )
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
 
-  async function uploadLicenseImage(file: File) {
+  const selectedMethod =
+    methods.find((m) => m.type === selectedType) ?? methods[0] ?? null
+
+  async function uploadVerificationDocument(file: File) {
+    if (!selectedMethod) throw new Error('Pick a document type first.')
+
     // 1) signed upload init
     const metaRes = await fetch('/api/pro/uploads', {
       method: 'POST',
@@ -63,8 +84,8 @@ export default function VerificationUploadClient() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        type: 'LICENSE',
-        label: 'License (pro upload)',
+        type: selectedMethod.type,
+        label: `${selectedMethod.title} (pro upload)`,
         url: ref,
       }),
     })
@@ -76,13 +97,46 @@ export default function VerificationUploadClient() {
     }
   }
 
+  if (methods.length === 0) return null
+
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-3">
+      <div className="grid gap-2" role="radiogroup" aria-label="Document type">
+        {methods.map((method) => {
+          const selected = method.type === selectedType
+          return (
+            <button
+              key={method.type}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              disabled={uploading}
+              onClick={() => {
+                setSelectedType(method.type)
+                setError(null)
+                setDone(false)
+              }}
+              className={cn(
+                'rounded-card border p-3 text-left transition',
+                selected
+                  ? 'border-accentPrimary/35 bg-accentPrimary/14'
+                  : 'border-surfaceGlass/14 bg-bgPrimary/25 hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
+                uploading && 'cursor-not-allowed opacity-60',
+              )}
+            >
+              <div className="text-xs font-black text-textPrimary">{method.title}</div>
+              <div className="mt-0.5 text-xs text-textSecondary">{method.description}</div>
+            </button>
+          )
+        })}
+      </div>
+
       <input
         ref={fileRef}
         type="file"
         accept="image/*"
         disabled={uploading}
+        aria-label="Verification document photo"
         onChange={async (e) => {
           const file = e.target.files?.[0] ?? null
           if (!file) return
@@ -101,7 +155,7 @@ export default function VerificationUploadClient() {
 
           setUploading(true)
           try {
-            await uploadLicenseImage(file)
+            await uploadVerificationDocument(file)
             setDone(true)
             router.refresh()
           } catch (err: unknown) {
@@ -127,12 +181,14 @@ export default function VerificationUploadClient() {
           uploading && 'cursor-not-allowed opacity-60',
         )}
       >
-        {uploading ? 'Uploading…' : 'Choose license photo'}
+        {uploading
+          ? 'Uploading…'
+          : `Upload ${selectedMethod ? selectedMethod.title.toLowerCase() : 'document'} photo`}
       </button>
 
       {done ? (
         <div className="rounded-card border border-toneSuccess/25 bg-toneSuccess/10 px-3 py-2 text-xs font-black text-toneSuccess">
-          Uploaded ✔️
+          Uploaded ✔️ We’ll review it shortly.
         </div>
       ) : null}
 

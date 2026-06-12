@@ -45,6 +45,7 @@ const PRO_HEADER_ROUTE_TITLES: ProHeaderRouteTitle[] = [
   { path: PRO_PUBLIC_PROFILE_PATH, title: 'Public Profile' },
   { path: '/pro/media', title: 'Media' },
   { path: '/pro/locations', title: 'Locations' },
+  { path: '/pro/verification', title: 'Verification' },
 ]
 
 const PRO_HEADER_TABS: ProHeaderTabItem[] = [

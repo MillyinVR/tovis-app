@@ -2,13 +2,31 @@
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-import { VerificationStatus, VerificationDocumentType } from '@prisma/client'
+import { VerificationStatus } from '@prisma/client'
+import {
+  verificationDocTypeLabel,
+  verificationMethodsForProfession,
+} from '@/lib/pro/verification/methods'
 import VerificationUploadClient from './VerificationUploadClient'
+import DeleteDocButton from './DeleteDocButton'
 
 export const dynamic = 'force-dynamic'
 
 function fmtDate(d: Date) {
   return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: '2-digit' }).format(d)
+}
+
+function statusBadgeClasses(status: VerificationStatus): string {
+  if (status === VerificationStatus.APPROVED) {
+    return 'border-toneSuccess/25 bg-toneSuccess/10 text-toneSuccess'
+  }
+  if (
+    status === VerificationStatus.PENDING ||
+    status === VerificationStatus.PENDING_MANUAL_REVIEW
+  ) {
+    return 'border-toneWarn/25 bg-toneWarn/10 text-toneWarn'
+  }
+  return 'border-toneDanger/25 bg-toneDanger/10 text-toneDanger'
 }
 
 export default async function ProVerificationPage() {
@@ -46,7 +64,7 @@ export default async function ProVerificationPage() {
 
   if (!pro) redirect('/pro')
 
-  const licenseDocs = pro.verificationDocs.filter((d) => d.type === VerificationDocumentType.LICENSE)
+  const methods = verificationMethodsForProfession(pro.professionType)
 
   return (
     <main className="mx-auto max-w-3xl pb-24 pt-6 font-sans">
@@ -83,13 +101,13 @@ export default async function ProVerificationPage() {
         <div className="mt-5 h-px w-full bg-white/10" />
 
         <div className="mt-5">
-          <div className="text-sm font-black text-textPrimary">Upload license photo</div>
+          <div className="text-sm font-black text-textPrimary">Upload a verification document</div>
           <div className="mt-1 text-xs text-textSecondary">
-            Upload a clear photo (front, readable). We keep it private and only admins can view it.
+            Pick a document type, then upload a clear photo. We keep it private and only admins can view it.
           </div>
 
           <div className="mt-3">
-            <VerificationUploadClient />
+            <VerificationUploadClient methods={methods} />
           </div>
         </div>
 
@@ -98,18 +116,18 @@ export default async function ProVerificationPage() {
         <div className="mt-5">
           <div className="text-sm font-black text-textPrimary">Documents</div>
 
-          {licenseDocs.length === 0 ? (
-            <div className="mt-2 text-xs text-textSecondary">No license documents uploaded yet.</div>
+          {pro.verificationDocs.length === 0 ? (
+            <div className="mt-2 text-xs text-textSecondary">No documents uploaded yet.</div>
           ) : (
             <div className="mt-3 grid gap-2">
-              {licenseDocs.map((d) => (
+              {pro.verificationDocs.map((d) => (
                 <div key={d.id} className="rounded-card border border-white/10 bg-bgPrimary/25 p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-xs font-black text-textPrimary">
-                        {d.label ?? 'License'}{' '}
+                        {d.label ?? verificationDocTypeLabel(d.type)}{' '}
                         <span className="text-textSecondary/70">
-                          • {fmtDate(d.createdAt)}
+                          {d.label ? `• ${verificationDocTypeLabel(d.type)} ` : ''}• {fmtDate(d.createdAt)}
                         </span>
                       </div>
                       {d.adminNote ? (
@@ -117,17 +135,19 @@ export default async function ProVerificationPage() {
                       ) : null}
                     </div>
 
-                    <div
-                      className={[
-                        'rounded-full border px-2 py-0.5 text-[11px] font-black',
-                        d.status === VerificationStatus.APPROVED
-                          ? 'border-toneSuccess/25 bg-toneSuccess/10 text-toneSuccess'
-                          : d.status === VerificationStatus.PENDING
-                            ? 'border-toneWarn/25 bg-toneWarn/10 text-toneWarn'
-                            : 'border-toneDanger/25 bg-toneDanger/10 text-toneDanger',
-                      ].join(' ')}
-                    >
-                      {d.status}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <div
+                        className={[
+                          'rounded-full border px-2 py-0.5 text-[11px] font-black',
+                          statusBadgeClasses(d.status),
+                        ].join(' ')}
+                      >
+                        {d.status}
+                      </div>
+
+                      {d.status === VerificationStatus.PENDING ? (
+                        <DeleteDocButton docId={d.id} />
+                      ) : null}
                     </div>
                   </div>
                 </div>

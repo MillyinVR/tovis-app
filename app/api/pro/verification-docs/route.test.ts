@@ -206,6 +206,81 @@ describe('app/api/pro/verification-docs/route.ts', () => {
     })
   })
 
+  it('accepts canonical ID_CARD document type', async () => {
+    const result = await POST(
+      makePostRequest({
+        ...validBody,
+        type: 'ID_CARD',
+        url: 'supabase://media-private/verification/pro_1/id-card.jpg',
+      }),
+    )
+
+    expect(result.status).toBe(201)
+
+    expect(mocks.txVerificationDocumentCreate).toHaveBeenCalledWith({
+      data: {
+        professionalId: 'pro_1',
+        type: VerificationDocumentType.ID_CARD,
+        label: 'Cosmetology license',
+        url: 'supabase://media-private/verification/pro_1/id-card.jpg',
+        status: VerificationStatus.PENDING,
+      },
+      select: {
+        id: true,
+      },
+    })
+  })
+
+  it('accepts canonical MAKEUP_PRIMARY document type', async () => {
+    const result = await POST(
+      makePostRequest({
+        ...validBody,
+        type: 'MAKEUP_PRIMARY',
+        url: 'supabase://media-private/verification/pro_1/cert.jpg',
+      }),
+    )
+
+    expect(result.status).toBe(201)
+
+    expect(mocks.txVerificationDocumentCreate).toHaveBeenCalledWith({
+      data: {
+        professionalId: 'pro_1',
+        type: VerificationDocumentType.MAKEUP_PRIMARY,
+        label: 'Cosmetology license',
+        url: 'supabase://media-private/verification/pro_1/cert.jpg',
+        status: VerificationStatus.PENDING,
+      },
+      select: {
+        id: true,
+      },
+    })
+  })
+
+  it('accepts canonical MAKEUP_SECONDARY document type', async () => {
+    const result = await POST(
+      makePostRequest({
+        ...validBody,
+        type: 'makeup_secondary',
+        url: 'supabase://media-private/verification/pro_1/cert-2.jpg',
+      }),
+    )
+
+    expect(result.status).toBe(201)
+
+    expect(mocks.txVerificationDocumentCreate).toHaveBeenCalledWith({
+      data: {
+        professionalId: 'pro_1',
+        type: VerificationDocumentType.MAKEUP_SECONDARY,
+        label: 'Cosmetology license',
+        url: 'supabase://media-private/verification/pro_1/cert-2.jpg',
+        status: VerificationStatus.PENDING,
+      },
+      select: {
+        id: true,
+      },
+    })
+  })
+
   it('accepts OTHER document type and stores it as MAKEUP_PRIMARY', async () => {
     const result = await POST(
       makePostRequest({

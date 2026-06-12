@@ -73,7 +73,7 @@ function messageForKind(args: {
   const { kind, expiresInDays } = args
 
   if (kind === 'MISSING_DOC') {
-    return 'Finish verification: upload your license photo to get approved and appear in the marketplace.'
+    return 'Finish verification: upload your license or certificate to get approved and appear in the marketplace.'
   }
 
   if (kind === 'PENDING_REVIEW') {
