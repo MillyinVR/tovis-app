@@ -22,6 +22,11 @@ import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import {
+  proDiscoveryVisibilityFilter,
+  tenantCacheScope,
+  type TenantContext,
+} from '@/lib/tenant'
 
 type AvailabilityDbClient = Prisma.TransactionClient | typeof prisma
 
@@ -39,6 +44,7 @@ export type OtherProRow = {
 }
 
 export type LoadOtherProsNearbyArgs = {
+  tenantContext: TenantContext
   centerLat: number
   centerLng: number
   radiusMiles: number
@@ -134,6 +140,7 @@ export async function loadOtherProsNearby(
       timeZone: { not: null },
       workingHours: { not: Prisma.JsonNull },
       professional: {
+        ...proDiscoveryVisibilityFilter(args.tenantContext),
         verificationStatus: { in: [...PUBLICLY_APPROVED_PRO_STATUSES] },
       },
       lat: {
@@ -334,10 +341,12 @@ export async function loadOtherProsNearbyCached(
       excludeProfessionalId: args.excludeProfessionalId,
       limit: args.limit,
       client: args.client,
+      tenantContext: args.tenantContext,
     })
   }
 
   const key = buildOtherProsCacheKey({
+    tenantScope: tenantCacheScope(args.tenantContext),
     serviceId: args.serviceId,
     locationType: args.locationType,
     excludeProfessionalId: args.excludeProfessionalId,
@@ -362,6 +371,7 @@ export async function loadOtherProsNearbyCached(
     excludeProfessionalId: args.excludeProfessionalId,
     limit: args.limit,
     client: args.client,
+    tenantContext: args.tenantContext,
   })
 
   void cacheSetJson(key, fresh, TTL_OTHER_PROS_SECONDS)

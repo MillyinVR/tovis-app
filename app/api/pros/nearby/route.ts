@@ -1,6 +1,7 @@
 // app/api/pros/nearby/route.ts
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { loadNearbyPros } from '@/lib/discovery/nearbyPros'
+import { resolveTenantContextForRequest } from '@/lib/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -81,15 +82,18 @@ export async function GET(req: Request) {
       pickString(searchParams.get('excludeProfessionalId')),
     )
 
-    const pros = await loadNearbyPros({
-      lat,
-      lng,
-      radiusMiles,
-      categoryId,
-      serviceId,
-      excludeProfessionalId,
-      limit,
-    })
+    const pros = await loadNearbyPros(
+      {
+        lat,
+        lng,
+        radiusMiles,
+        categoryId,
+        serviceId,
+        excludeProfessionalId,
+        limit,
+      },
+      await resolveTenantContextForRequest(req),
+    )
 
     return jsonOk({
       ok: true,

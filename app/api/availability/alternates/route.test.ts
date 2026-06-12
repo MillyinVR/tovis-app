@@ -15,6 +15,13 @@ const mocks = vi.hoisted(() => ({
   loadOtherProsNearbyCached: vi.fn(),
 
   computeDaySlotsFast: vi.fn(),
+  resolveTenantContextForRequest: vi.fn(),
+  tenantCacheScope: vi.fn(),
+  tenantContext: {
+    isRoot: false,
+    tenantId: 'tenant_salon_a',
+    slug: 'salon-a',
+  },
 }))
 
 vi.mock('@/lib/booking/cacheVersion', () => ({
@@ -57,6 +64,11 @@ vi.mock('@/lib/availability/core/dayComputation', async () => {
     computeDaySlotsFast: mocks.computeDaySlotsFast,
   }
 })
+
+vi.mock('@/lib/tenant', () => ({
+  resolveTenantContextForRequest: mocks.resolveTenantContextForRequest,
+  tenantCacheScope: mocks.tenantCacheScope,
+}))
 
 import { GET } from './route'
 
@@ -160,6 +172,8 @@ describe('GET /api/availability/alternates', () => {
       },
     ])
     mocks.loadAvailabilityOfferingContext.mockResolvedValue(makeBaseContext())
+    mocks.resolveTenantContextForRequest.mockResolvedValue(mocks.tenantContext)
+    mocks.tenantCacheScope.mockReturnValue('tenant:tenant_salon_a')
     mocks.computeDaySlotsFast.mockResolvedValue({
       ok: true,
       dayStartUtc: new Date(`${FUTURE_DATE}T00:00:00.000Z`),
@@ -188,6 +202,16 @@ describe('GET /api/availability/alternates', () => {
     expect(body.alternates[0].pro.id).toBe('pro-2')
     expect(mocks.withVersionedCache).toHaveBeenCalledTimes(1)
     expect(mocks.loadOtherProsNearbyCached).toHaveBeenCalled()
+    expect(mocks.loadOtherProsNearbyCached).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantContext: mocks.tenantContext,
+      }),
+    )
+    expect(mocks.stableHash).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantScope: 'tenant:tenant_salon_a',
+      }),
+    )
   })
 
   it('cache hit: short-circuits loader, returns cached alternates', async () => {

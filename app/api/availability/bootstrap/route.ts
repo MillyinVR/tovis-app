@@ -44,6 +44,7 @@ import { withVersionedCache } from '@/lib/cache/versionedCache'
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
 import { prismaRead } from '@/lib/prisma'
+import { resolveTenantContextForRequest, tenantCacheScope } from '@/lib/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -655,9 +656,13 @@ export async function GET(req: Request) {
     const durationMinutes = addOnResult.durationMinutes
     markTimer(timers, 'addons:end')
 
+    const tenantContext = await resolveTenantContextForRequest(req)
+    const tenantScope = tenantCacheScope(tenantContext)
+
     const summaryKeyExtra = debug
       ? null
       : buildSummaryCacheKey({
+          tenantScope,
           professionalId,
           serviceId,
           locationId,
@@ -728,6 +733,7 @@ export async function GET(req: Request) {
         const result =
           includeOtherPros && centerLat != null && centerLng != null
             ? await loadOtherProsNearbyCached({
+                tenantContext,
                 centerLat,
                 centerLng,
                 radiusMiles,

@@ -11,7 +11,7 @@ const AVAIL_PLACEMENT_CACHE_VERSION = 'v2'
 const AVAIL_BUSY_CACHE_VERSION = 'v7'
 const AVAIL_SUMMARY_CACHE_VERSION = 'v9'
 const AVAIL_DAY_CACHE_VERSION = 'v7'
-const AVAIL_OTHER_PROS_CACHE_VERSION = 'v1'
+const AVAIL_OTHER_PROS_CACHE_VERSION = 'v2'
 
 type PlacementCacheKeyArgs = {
   professionalId: string
@@ -33,6 +33,7 @@ type BusyIntervalsCacheKeyArgs = {
 }
 
 type SummaryCacheKeyArgs = {
+  tenantScope: string
   professionalId: string
   serviceId: string
   locationId: string
@@ -73,6 +74,7 @@ type DayCacheKeyArgs = {
 }
 
 type OtherProsCacheKeyArgs = {
+  tenantScope: string
   serviceId: string
   locationType: ServiceLocationType
   excludeProfessionalId: string
@@ -164,6 +166,7 @@ export function buildBusyIntervalsCacheKey(
 export function buildSummaryCacheKey(args: SummaryCacheKeyArgs): string {
   return [
     `avail:summary:${AVAIL_SUMMARY_CACHE_VERSION}`,
+    args.tenantScope,
     args.professionalId,
     args.serviceId,
     args.locationId,
@@ -220,6 +223,7 @@ export function buildDayCacheKey(args: DayCacheKeyArgs): string {
 export function buildOtherProsCacheKey(args: OtherProsCacheKeyArgs): string {
   return [
     `avail:otherPros:${AVAIL_OTHER_PROS_CACHE_VERSION}`,
+    args.tenantScope,
     args.serviceId,
     args.locationType,
     args.excludeProfessionalId,

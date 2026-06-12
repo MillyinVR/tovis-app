@@ -17,11 +17,19 @@ const mocks = vi.hoisted(() => {
   })
 
   const loadNearbyPros = vi.fn()
+  const resolveTenantContextForRequest = vi.fn()
+  const tenantContext = {
+    isRoot: false,
+    tenantId: 'tenant_salon_a',
+    slug: 'salon-a',
+  }
 
   return {
     jsonOk,
     jsonFail,
     loadNearbyPros,
+    resolveTenantContextForRequest,
+    tenantContext,
   }
 })
 
@@ -39,6 +47,10 @@ vi.mock('@/lib/discovery/nearbyPros', () => ({
   loadNearbyPros: mocks.loadNearbyPros,
 }))
 
+vi.mock('@/lib/tenant', () => ({
+  resolveTenantContextForRequest: mocks.resolveTenantContextForRequest,
+}))
+
 import { GET } from './route'
 
 function makeRequest(path: string): Request {
@@ -49,6 +61,7 @@ describe('app/api/pros/nearby/route.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.loadNearbyPros.mockResolvedValue([])
+    mocks.resolveTenantContextForRequest.mockResolvedValue(mocks.tenantContext)
   })
 
   it('returns 400 when lat is missing', async () => {
@@ -62,6 +75,7 @@ describe('app/api/pros/nearby/route.ts', () => {
     })
 
     expect(mocks.loadNearbyPros).not.toHaveBeenCalled()
+    expect(mocks.resolveTenantContextForRequest).not.toHaveBeenCalled()
   })
 
   it('rejects unsupported offering aliases', async () => {
@@ -77,6 +91,7 @@ describe('app/api/pros/nearby/route.ts', () => {
     })
 
     expect(mocks.loadNearbyPros).not.toHaveBeenCalled()
+    expect(mocks.resolveTenantContextForRequest).not.toHaveBeenCalled()
   })
 
   it('passes normalized params to the shared nearby-pros loader', async () => {
@@ -120,24 +135,27 @@ describe('app/api/pros/nearby/route.ts', () => {
       },
     ])
 
-    const res = await GET(
-      makeRequest(
-        '/api/pros/nearby?lat=32.7157&lng=-117.1611&radiusMiles=25&categoryId=cat_hair&serviceId=svc_1&excludeProfessionalId=pro_1&limit=12',
-      ),
+    const req = makeRequest(
+      '/api/pros/nearby?lat=32.7157&lng=-117.1611&radiusMiles=25&categoryId=cat_hair&serviceId=svc_1&excludeProfessionalId=pro_1&limit=12',
     )
+    const res = await GET(req)
     const body = await res.json()
 
     expect(res.status).toBe(200)
+    expect(mocks.resolveTenantContextForRequest).toHaveBeenCalledWith(req)
 
-    expect(mocks.loadNearbyPros).toHaveBeenCalledWith({
-      lat: 32.7157,
-      lng: -117.1611,
-      radiusMiles: 25,
-      categoryId: 'cat_hair',
-      serviceId: 'svc_1',
-      excludeProfessionalId: 'pro_1',
-      limit: 12,
-    })
+    expect(mocks.loadNearbyPros).toHaveBeenCalledWith(
+      {
+        lat: 32.7157,
+        lng: -117.1611,
+        radiusMiles: 25,
+        categoryId: 'cat_hair',
+        serviceId: 'svc_1',
+        excludeProfessionalId: 'pro_1',
+        limit: 12,
+      },
+      mocks.tenantContext,
+    )
 
     expect(body).toEqual({
       ok: true,
