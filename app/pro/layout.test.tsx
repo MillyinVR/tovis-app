@@ -219,7 +219,7 @@ describe('app/pro/layout', () => {
     expect(React.isValidElement(result)).toBe(true)
   })
 
-  it('falls back to onboarding when an unready blocker has no direct setup path', async () => {
+  it('routes the working-hours blocker to the calendar hours editor', async () => {
     mockGetCurrentUser.mockResolvedValue(makeProUser())
     mockHeaders.mockResolvedValue(
       makeHeaders({ 'x-pathname': '/pro/bookings/new' }),
@@ -234,6 +234,6 @@ describe('app/pro/layout', () => {
         children: <div>pro page</div>,
         modal: <div>modal</div>,
       }),
-    ).rejects.toThrow('NEXT_REDIRECT:/pro/onboarding')
+    ).rejects.toThrow('NEXT_REDIRECT:/pro/calendar')
   })
 })

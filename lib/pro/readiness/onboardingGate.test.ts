@@ -54,9 +54,13 @@ describe('onboardingGate', () => {
       expect(canAccessProPathWhileUnready('/pro/settings')).toBe(true)
     })
 
+    it('allows the calendar while unready because working hours are edited there', () => {
+      expect(canAccessProPathWhileUnready('/pro/calendar')).toBe(true)
+      expect(canAccessProPathWhileUnready('/pro/calendar#week')).toBe(true)
+    })
+
     it('blocks booking, marketplace, client, media, and dashboard paths while unready', () => {
       expect(canAccessProPathWhileUnready('/pro')).toBe(false)
-      expect(canAccessProPathWhileUnready('/pro/calendar')).toBe(false)
       expect(canAccessProPathWhileUnready('/pro/bookings')).toBe(false)
       expect(canAccessProPathWhileUnready('/pro/bookings/new')).toBe(false)
       expect(canAccessProPathWhileUnready('/pro/bookings/booking_1')).toBe(
@@ -83,7 +87,7 @@ describe('onboardingGate', () => {
       expect(canAccessProPathWhileUnready('/pro/bookings/new?foo=bar')).toBe(
         false,
       )
-      expect(canAccessProPathWhileUnready('/pro/calendar#week')).toBe(false)
+      expect(canAccessProPathWhileUnready('/pro/dashboard#stats')).toBe(false)
     })
 
     it('does not accidentally allow similarly named paths', () => {
@@ -128,14 +132,16 @@ describe('onboardingGate', () => {
       )
     })
 
-    it('routes working-hours blockers to onboarding because calendar is gated while unready', () => {
-    expect(getNextOnboardingHref(['LOCATION_MISSING_WORKING_HOURS'])).toBe(
-        '/pro/onboarding',
-    )
+    it('routes working-hours blockers to the calendar hours editor', () => {
+      expect(getNextOnboardingHref(['LOCATION_MISSING_WORKING_HOURS'])).toBe(
+        '/pro/calendar',
+      )
     })
 
-    it('routes payment blockers to payments', () => {
-      expect(getNextOnboardingHref(['STRIPE_NOT_READY'])).toBe('/pro/payments')
+    it('routes payment blockers to payment settings on the profile', () => {
+      expect(getNextOnboardingHref(['STRIPE_NOT_READY'])).toBe(
+        '/pro/profile/public-profile',
+      )
     })
 
     it('routes verification blockers to verification', () => {
@@ -154,7 +160,7 @@ describe('onboardingGate', () => {
           'NO_ACTIVE_OFFERING',
           'NO_BOOKABLE_LOCATION',
         ]),
-      ).toBe('/pro/payments')
+      ).toBe('/pro/profile/public-profile')
 
       expect(getNextOnboardingHref([])).toBe('/pro/onboarding')
     })
@@ -210,7 +216,7 @@ describe('onboardingGate', () => {
 
       expect(
         shouldGateProPath({
-          pathname: '/pro/calendar',
+          pathname: '/pro/dashboard',
           readiness: unreadyWithLocationBlocker,
         }),
       ).toBe(true)
@@ -253,10 +259,17 @@ describe('onboardingGate', () => {
 
       expect(
         getProOnboardingRedirectHref({
+          pathname: '/pro/dashboard',
+          readiness: unreadyWithStripeBlocker,
+        }),
+      ).toBe('/pro/profile/public-profile')
+
+      expect(
+        getProOnboardingRedirectHref({
           pathname: '/pro/calendar',
           readiness: unreadyWithStripeBlocker,
         }),
-      ).toBe('/pro/payments')
+      ).toBeNull()
 
       expect(
         getProOnboardingRedirectHref({
