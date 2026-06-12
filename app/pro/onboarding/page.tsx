@@ -7,8 +7,10 @@
 
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { VerificationStatus } from '@prisma/client'
 
 import { getCurrentUser } from '@/lib/currentUser'
+import { prisma } from '@/lib/prisma'
 import { PRO_BLOCKER_COPY } from '@/lib/pro/readiness/blockerCopy'
 import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
 
@@ -29,9 +31,39 @@ export default async function ProOnboardingPage() {
     redirect(PRO_HOME)
   }
 
-  const items = readiness.blockers
+  const blockerItems = readiness.blockers
     .map((blocker) => PRO_BLOCKER_COPY[blocker])
     .filter(Boolean)
+
+  // Verification isn't a hard readiness blocker while it's pending, so it
+  // never shows up in the blocker list for a fresh pro — but it's the one
+  // setup item they can't discover on their own. Surface it here until
+  // they're approved.
+  const verification = await prisma.professionalProfile.findUnique({
+    where: { id: user.professionalProfile.id },
+    select: {
+      verificationStatus: true,
+      _count: { select: { verificationDocs: true } },
+    },
+  })
+
+  const showVerificationItem =
+    verification != null &&
+    verification.verificationStatus !== VerificationStatus.APPROVED
+
+  const verificationItem = showVerificationItem
+    ? {
+        label:
+          verification._count.verificationDocs === 0
+            ? 'Upload your license or ID to get verified.'
+            : 'Verification is in review — check status or add documents.',
+        href: '/pro/verification',
+      }
+    : null
+
+  const items = verificationItem
+    ? [...blockerItems, verificationItem]
+    : blockerItems
 
   return (
     <div className="mx-auto grid w-full max-w-3xl gap-4 px-4 py-6">

@@ -18,8 +18,9 @@ function pickString(v: unknown) {
 function parseDocType(v: unknown): VerificationDocumentType | null {
   const s = pickString(v).toUpperCase()
   if (s === 'LICENSE') return VerificationDocumentType.LICENSE
-  if (s === 'ID') return VerificationDocumentType.ID_CARD
-  if (s === 'OTHER') return VerificationDocumentType.MAKEUP_PRIMARY
+  if (s === 'ID' || s === 'ID_CARD') return VerificationDocumentType.ID_CARD
+  if (s === 'OTHER' || s === 'MAKEUP_PRIMARY') return VerificationDocumentType.MAKEUP_PRIMARY
+  if (s === 'MAKEUP_SECONDARY') return VerificationDocumentType.MAKEUP_SECONDARY
   return null
 }
 

@@ -841,8 +841,11 @@ export default function SignupProClient() {
 
           {professionType === 'MAKEUP_ARTIST' ? (
             <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
-              Makeup artists don’t require a CA license check here. (You’ll add
-              alternative verification later: portfolio + ID, etc.)
+              Makeup artists don’t require a CA license check here. After
+              signup, you’ll upload your makeup certificate and a photo ID on
+              the{' '}
+              <span className="font-black text-textPrimary">Verification</span>{' '}
+              page of your pro dashboard.
             </div>
           ) : null}
         </div>
@@ -1049,7 +1052,8 @@ export default function SignupProClient() {
                 {' '}
                 after signup
               </span>{' '}
-              for admin approval.
+              on the Verification page of your pro dashboard for admin
+              approval.
               <div className="mt-1">
                 You can still set up services + your calendar immediately.
               </div>
