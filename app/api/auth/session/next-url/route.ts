@@ -1,27 +1,11 @@
 // app/api/auth/session/next-url/route.ts
-import { Prisma } from '@prisma/client'
-
 import { jsonOk } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
-import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
+import { nextUrlFromPayloadJson } from '@/lib/security/safeNextUrl'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-function safeNextUrl(v: unknown): string | null {
-  if (typeof v !== 'string') return null
-  const s = v.trim()
-  if (!s) return null
-  if (!s.startsWith('/')) return null
-  if (s.startsWith('//')) return null
-  return s
-}
-
-function nextUrlFromPayloadJson(payloadJson: Prisma.JsonValue): string | null {
-  if (!isRecord(payloadJson)) return null
-  return safeNextUrl(payloadJson.nextUrl)
-}
 
 export async function GET() {
   const auth = await requireUser({ allowVerificationSession: true })

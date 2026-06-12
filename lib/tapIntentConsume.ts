@@ -1,21 +1,7 @@
 // lib/tapIntentConsume.ts
 import { prisma } from '@/lib/prisma'
-import { NfcCardType, Prisma, Role } from '@prisma/client'
-import { isRecord } from '@/lib/guards'
-
-function safeNextUrl(v: unknown): string | null {
-  if (typeof v !== 'string') return null
-  const s = v.trim()
-  if (!s) return null
-  if (!s.startsWith('/')) return null
-  if (s.startsWith('//')) return null
-  return s
-}
-
-function nextUrlFromPayloadJson(payloadJson: Prisma.JsonValue): string | null {
-  if (!isRecord(payloadJson)) return null
-  return safeNextUrl(payloadJson.nextUrl)
-}
+import { NfcCardType, Role } from '@prisma/client'
+import { nextUrlFromPayloadJson } from '@/lib/security/safeNextUrl'
 
 export async function consumeTapIntent(args: { tapIntentId: string | null; userId: string }) {
   const { tapIntentId, userId } = args
