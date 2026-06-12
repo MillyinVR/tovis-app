@@ -114,6 +114,7 @@ function makeSummary(
       { date: '2026-03-12', slotCount: 2 },
     ],
     otherPros: [],
+    locationOptions: [],
     waitlistSupported: true,
     offering: {
       id: 'offering_1',

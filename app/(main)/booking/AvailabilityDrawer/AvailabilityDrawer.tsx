@@ -21,6 +21,7 @@ import DayScroller from './components/DayScroller'
 import DebugPanel from './components/DebugPanel'
 import DrawerShell from './components/DrawerShell'
 import MobileAddressSelector from './components/MobileAddressSelector'
+import SalonLocationSelector from './components/SalonLocationSelector'
 import OtherPros from './components/OtherPros'
 import SlotChips from './components/SlotChips'
 import StickyCTA from './components/StickyCTA'
@@ -584,6 +585,9 @@ export default function AvailabilityDrawer(props: {
   const [otherProsRequested, setOtherProsRequested] = useState(false)
   const [slotRetryKey, setSlotRetryKey] = useState(0)
   const [holdError, setHoldError] = useState<string | null>(null)
+  const [requestedLocationId, setRequestedLocationId] = useState<string | null>(
+    null,
+  )
 
   const otherProsRef = useRef<HTMLDivElement | null>(null)
   const holdStatusRef = useRef<HTMLDivElement | null>(null)
@@ -652,6 +656,7 @@ export default function AvailabilityDrawer(props: {
     locationType,
     selectedClientAddressId,
     otherProsRequested,
+    requestedLocationId,
   )
 
   const summary: AvailabilityBootstrapOk | null = data
@@ -897,6 +902,9 @@ export default function AvailabilityDrawer(props: {
 
       await hardResetUi({ deleteHold: true })
       setLocationType(next)
+      // A salon pick must not leak into mobile mode — the engine would
+      // reject a salon locationId against MOBILE availability.
+      setRequestedLocationId(null)
       setSelectedDayYMD(null)
       setOtherProsRequested(false)
       clearDaySlots()
@@ -904,6 +912,30 @@ export default function AvailabilityDrawer(props: {
       setError(null)
     },
     [activeLocationType, hardResetUi, clearDaySlots, clearAlternates, setError],
+  )
+
+  const selectSalonLocation = useCallback(
+    async (nextLocationId: string) => {
+      if (nextLocationId === summary?.request.locationId) {
+        setRequestedLocationId(nextLocationId)
+        return
+      }
+
+      await hardResetUi({ deleteHold: true })
+      setRequestedLocationId(nextLocationId)
+      setSelectedDayYMD(null)
+      setOtherProsRequested(false)
+      clearDaySlots()
+      clearAlternates()
+      setError(null)
+    },
+    [
+      summary?.request.locationId,
+      hardResetUi,
+      clearDaySlots,
+      clearAlternates,
+      setError,
+    ],
   )
 
   const requestOtherPros = useCallback(
@@ -951,6 +983,7 @@ export default function AvailabilityDrawer(props: {
     setSelectedDayYMD(null)
     setPeriod('AFTERNOON')
     setOtherProsRequested(false)
+    setRequestedLocationId(null)
     clearDaySlots()
     clearAlternates()
 
@@ -1739,15 +1772,28 @@ export default function AvailabilityDrawer(props: {
           ) : null}
 
           {summary && primary && !showMobileAddressSelector ? (
-            <AppointmentTypeToggle
-              value={activeLocationType}
-              disabled={holding}
-              allowed={allowed}
-              offering={offering}
-              onChange={(nextType) => {
-                void resetForLocationModeChange(nextType)
-              }}
-            />
+            <>
+              <AppointmentTypeToggle
+                value={activeLocationType}
+                disabled={holding}
+                allowed={allowed}
+                offering={offering}
+                onChange={(nextType) => {
+                  void resetForLocationModeChange(nextType)
+                }}
+              />
+
+              {activeLocationType === 'SALON' ? (
+                <SalonLocationSelector
+                  value={requestedLocationId ?? summary.request.locationId}
+                  options={summary.locationOptions}
+                  disabled={holding}
+                  onChange={(nextLocationId) => {
+                    void selectSalonLocation(nextLocationId)
+                  }}
+                />
+              ) : null}
+            </>
           ) : null}
 
           {showMobileAddressSelector ? (

@@ -162,6 +162,7 @@ export function useAvailability(
   locationType: ServiceLocationType | null,
   clientAddressId?: string | null,
   includeOtherPros = true,
+  requestedLocationId: string | null = null,
 ) {
   const router = useRouter()
   const requestSeqRef = useRef(0)
@@ -332,6 +333,7 @@ export function useAvailability(
       buildAvailabilityPrefetchArgsFromContext({
         context,
         locationType,
+        locationId: requestedLocationId,
         clientAddressId: requiresClientAddress
           ? normalizedClientAddressId
           : null,
@@ -348,6 +350,7 @@ export function useAvailability(
       ctxViewerRadiusMiles,
       ctxViewerPlaceId,
       locationType,
+      requestedLocationId,
       normalizedClientAddressId,
       requiresClientAddress,
     ],
@@ -360,6 +363,7 @@ export function useAvailability(
       professionalId: primaryPrefetchArgs.professionalId,
       serviceId: primaryPrefetchArgs.serviceId,
       locationType: primaryPrefetchArgs.locationType,
+      locationId: primaryPrefetchArgs.locationId,
       mediaId: primaryPrefetchArgs.mediaId,
       clientAddressId: primaryPrefetchArgs.clientAddressId,
       viewer: primaryPrefetchArgs.viewer,
@@ -375,6 +379,7 @@ export function useAvailability(
     return buildAvailabilityPrefetchArgsFromContext({
       context,
       locationType,
+      locationId: requestedLocationId,
       clientAddressId: requiresClientAddress
         ? normalizedClientAddressId
         : null,
@@ -391,6 +396,7 @@ export function useAvailability(
     ctxViewerRadiusMiles,
     ctxViewerPlaceId,
     locationType,
+    requestedLocationId,
     normalizedClientAddressId,
     requiresClientAddress,
     includeOtherPros,
@@ -403,6 +409,7 @@ export function useAvailability(
       professionalId: fullPrefetchArgs.professionalId,
       serviceId: fullPrefetchArgs.serviceId,
       locationType: fullPrefetchArgs.locationType,
+      locationId: fullPrefetchArgs.locationId,
       mediaId: fullPrefetchArgs.mediaId,
       clientAddressId: fullPrefetchArgs.clientAddressId,
       viewer: fullPrefetchArgs.viewer,
@@ -602,6 +609,7 @@ export function useAvailability(
       const nextArgs = buildAvailabilityPrefetchArgsFromContext({
         context: contextRef.current,
         locationType,
+        locationId: requestedLocationId,
         clientAddressId: requiresClientAddress
           ? normalizedClientAddressId
           : null,
@@ -641,6 +649,7 @@ export function useAvailability(
     refreshing,
     loadingMore,
     locationType,
+    requestedLocationId,
     requiresClientAddress,
     normalizedClientAddressId,
     handleAvailabilityError,

@@ -102,6 +102,7 @@ function makeSummary(overrides: Partial<BootstrapOk> = {}): BootstrapOk {
     availableDays: [{ date: DAY, slotCount: 1 }],
     selectedDay: null,
     otherPros: [],
+    locationOptions: [],
     waitlistSupported: true,
     offering: {
       id: 'offering_1',

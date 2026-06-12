@@ -207,6 +207,21 @@ export type AvailabilitySummaryDebug = {
  * Availability: BOOTSTRAP mode
  * -------------------------- */
 
+/**
+ * One bookable salon/suite option for the primary pro. Present so the
+ * client can choose which location to visit when the pro has several.
+ * Empty for mobile mode.
+ */
+export type AvailabilityLocationOption = {
+  id: string
+  type: string
+  name: string | null
+  city: string | null
+  state: string | null
+  formattedAddress: string | null
+  isPrimary: boolean
+}
+
 export type AvailabilityBootstrapOk = ApiOk<
   AvailabilityFreshness & {
     mode: 'BOOTSTRAP'
@@ -249,6 +264,7 @@ export type AvailabilityBootstrapOk = ApiOk<
     selectedDay: AvailabilitySelectedDay | null
 
     otherPros: AvailabilityOtherPro[]
+    locationOptions: AvailabilityLocationOption[]
     waitlistSupported: boolean
     offering: AvailabilityOffering
 

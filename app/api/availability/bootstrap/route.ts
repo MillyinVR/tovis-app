@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto'
 
-import { ServiceLocationType } from '@prisma/client'
+import { ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { toRecord } from '@/lib/typed'
@@ -447,6 +447,50 @@ async function resolveRequestedDurationMinutes(args: {
   })
 }
 
+type SalonLocationOption = {
+  id: string
+  type: ProfessionalLocationType
+  name: string | null
+  city: string | null
+  state: string | null
+  formattedAddress: string | null
+  isPrimary: boolean
+}
+
+/**
+ * Bookable salon/suite options for this pro, so the client can choose
+ * which one to visit when there is more than one. Mobile mode gets no
+ * options — the client supplies their own address and the engine picks
+ * the base.
+ */
+async function loadSalonLocationOptions(args: {
+  professionalId: string
+  effectiveLocationType: ServiceLocationType
+}): Promise<SalonLocationOption[]> {
+  if (args.effectiveLocationType !== ServiceLocationType.SALON) return []
+
+  return prismaRead.professionalLocation.findMany({
+    where: {
+      professionalId: args.professionalId,
+      isBookable: true,
+      type: {
+        in: [ProfessionalLocationType.SALON, ProfessionalLocationType.SUITE],
+      },
+    },
+    select: {
+      id: true,
+      type: true,
+      name: true,
+      city: true,
+      state: true,
+      formattedAddress: true,
+      isPrimary: true,
+    },
+    orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+    take: 20,
+  })
+}
+
 export async function GET(req: Request) {
   const timers: TimerMap = {}
   markTimer(timers, 'total:start')
@@ -700,9 +744,15 @@ export async function GET(req: Request) {
         return result
       })()
 
-      const [busy, otherPros] = await Promise.all([
+      const locationOptionsPromise = loadSalonLocationOptions({
+        professionalId,
+        effectiveLocationType,
+      })
+
+      const [busy, otherPros, locationOptions] = await Promise.all([
         busyPromise,
         otherProsPromise,
+        locationOptionsPromise,
       ])
 
       markTimer(timers, 'slots:start')
@@ -849,6 +899,7 @@ export async function GET(req: Request) {
         availableDays,
         selectedDay,
         otherPros,
+        locationOptions,
         waitlistSupported: true,
         offering: offeringPayload,
 

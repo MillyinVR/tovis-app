@@ -3,6 +3,7 @@ import type {
   AvailabilityAlternatesResponse,
   AvailabilityBootstrapResponse,
   AvailabilityDayResponse,
+  AvailabilityLocationOption,
   AvailabilityOffering,
   AvailabilityOtherPro,
   AvailabilityPrimaryPro,
@@ -197,6 +198,37 @@ function pickAvailabilityOtherPro(x: unknown): AvailabilityOtherPro | null {
     timeZone,
     distanceMiles: distanceMiles ?? null,
   }
+}
+
+function pickAvailabilityLocationOptions(
+  x: unknown,
+): AvailabilityLocationOption[] {
+  // Tolerant by design: older cached payloads have no locationOptions,
+  // and a malformed entry should not fail the whole bootstrap parse.
+  if (!Array.isArray(x)) return []
+
+  const out: AvailabilityLocationOption[] = []
+
+  for (const row of x) {
+    if (!isRecord(row)) continue
+
+    const id = pickString(row.id)
+    const type = pickString(row.type)
+    if (!id || !type) continue
+
+    out.push({
+      id,
+      type,
+      name: row.name == null ? null : pickString(row.name),
+      city: row.city == null ? null : pickString(row.city),
+      state: row.state == null ? null : pickString(row.state),
+      formattedAddress:
+        row.formattedAddress == null ? null : pickString(row.formattedAddress),
+      isPrimary: pickBoolean(row.isPrimary) ?? false,
+    })
+  }
+
+  return out
 }
 
 function pickAvailabilitySelectedDay(
@@ -541,6 +573,7 @@ export function parseAvailabilityBootstrapResponse(
     availableDays,
     selectedDay,
     otherPros,
+    locationOptions: pickAvailabilityLocationOptions(x.locationOptions),
     waitlistSupported,
     offering,
     ...(debug !== undefined ? { debug } : {}),
