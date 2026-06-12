@@ -2,7 +2,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import AuthShell from '../AuthShell'
@@ -282,6 +282,8 @@ export default function SignupClientClient() {
     Partial<Record<ClientField, string>>
   >({})
   const [loading, setLoading] = useState(false)
+  const [captchaChallengeActive, setCaptchaChallengeActive] = useState(false)
+  const captchaHostRef = useRef<HTMLDivElement | null>(null)
 
   function setFieldError(field: ClientField, message: string | null) {
     setFieldErrors((prev) => {
@@ -408,7 +410,11 @@ export default function SignupClientClient() {
 
     setLoading(true)
     try {
-      const turnstileToken = await getTurnstileToken('signup_client')
+      const turnstileToken = await getTurnstileToken('signup_client', {
+        container: captchaHostRef.current,
+        onInteractiveChallenge: () => setCaptchaChallengeActive(true),
+      })
+      setCaptchaChallengeActive(false)
 
       const res = await fetch('/api/auth/register', {
         method: 'POST',
@@ -471,6 +477,7 @@ export default function SignupClientClient() {
       console.error(err)
       setError(err instanceof Error ? err.message : 'Signup failed.')
     } finally {
+      setCaptchaChallengeActive(false)
       setLoading(false)
     }
   }
@@ -749,6 +756,13 @@ export default function SignupClientClient() {
         ) : null}
 
         <div className="grid gap-2 pt-1">
+          {captchaChallengeActive ? (
+            <p className="text-sm font-bold">
+              Complete the security check below to continue.
+            </p>
+          ) : null}
+          <div ref={captchaHostRef} className="justify-self-center empty:hidden" />
+
           <PrimaryButton loading={loading}>
             {loading ? 'Creating…' : 'Create Client Account'}
           </PrimaryButton>

@@ -259,7 +259,12 @@ describe('app/(auth)/_components/signup/SignupClientClient.tsx', () => {
       expect(fetchMock).toHaveBeenCalledTimes(3)
     })
 
-    expect(mocks.getTurnstileToken).toHaveBeenCalledWith('signup_client')
+    expect(mocks.getTurnstileToken).toHaveBeenCalledWith(
+      'signup_client',
+      expect.objectContaining({
+        onInteractiveChallenge: expect.any(Function),
+      }),
+    )
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
