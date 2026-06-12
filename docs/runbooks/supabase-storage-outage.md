@@ -78,7 +78,6 @@ Possible messages:
 Missing env var: NEXT_PUBLIC_SUPABASE_URL
 Missing env var: SUPABASE_URL
 Missing env var: SUPABASE_SERVICE_ROLE_KEY
-Missing env var: SUPABASE_SECRET_KEY
 Bucket lookup returned no bucket data.
 One or more Supabase Storage buckets are not reachable.
 Supabase Storage health check timed out after 2000ms.
@@ -191,7 +190,6 @@ Verify production has:
 NEXT_PUBLIC_SUPABASE_URL
 SUPABASE_URL, if used as fallback
 SUPABASE_SERVICE_ROLE_KEY
-SUPABASE_SECRET_KEY, if using legacy fallback
 ```
 
 Do not paste service-role keys or Supabase secrets into incident notes.

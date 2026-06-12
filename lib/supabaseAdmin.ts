@@ -17,13 +17,10 @@ function mustGetEnv(name: string): string {
 let _admin: SupabaseClient | null = null
 
 function getServiceRoleKey(): string {
-  // Prefer a single canonical env var, but keep compatibility with your older names.
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
-    process.env.SUPABASE_SECRET_KEY?.trim()
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
 
   if (!key) {
-    throw new Error('Missing env var: SUPABASE_SERVICE_ROLE_KEY (or legacy SUPABASE_SECRET_KEY)')
+    throw new Error('Missing env var: SUPABASE_SERVICE_ROLE_KEY')
   }
 
   return key

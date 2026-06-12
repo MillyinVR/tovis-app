@@ -1,0 +1,20 @@
+# Gitleaks config for tovis-app.
+# Extends the default ruleset; allowlists cover synthetic test fixtures only.
+# Never allowlist a real credential — rotate it instead (see docs/runbooks/).
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic test fixtures and local test artifacts"
+paths = [
+  # Unit-test fixtures: fake JWTs, idempotency keys, synthetic tokens.
+  '''.*\.test\.tsx?$''',
+  # Playwright local artifacts (historical commits; now gitignored).
+  '''^test-results/.*''',
+  '''^playwright/\.auth/.*''',
+]
+regexes = [
+  # TypeScript union-typed parameter named `key` in last-minute settings route.
+  '''tier2NightBeforeMinutes''',
+]

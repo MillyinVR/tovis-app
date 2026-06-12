@@ -1,0 +1,4 @@
+# Historical findings accepted after review. Format: commit:file:rule:start-line
+# Local-dev CRON_SECRET committed in a PowerShell test-env script; value replaced
+# with a placeholder in the working tree and the deployed CRON_SECRET rotated.
+431b01fc8c5049b6d7285c27973d804272510db4:prisma/test-data/set-last-minute-test-env.ps1:generic-api-key:12
