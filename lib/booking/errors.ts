@@ -558,7 +558,9 @@ const BOOKING_ERROR_CATALOG: Record<BookingErrorCode, BookingErrorMeta> = {
     userMessage: "That aftercare link does not match this service.",
   },
   AFTERCARE_DELIVERY_FAILED: {
-    httpStatus: 409,
+    // Downstream delivery dependency failed; 503 (not 409) so clients and
+    // monitoring treat it as a retryable service condition, not a conflict.
+    httpStatus: 503,
     retryable: true,
     uiAction: "NONE",
     message: "Aftercare access delivery could not be queued.",

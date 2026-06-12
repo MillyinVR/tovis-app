@@ -2273,7 +2273,7 @@ async function maybeCreateAftercareAccessDeliveryInBoundary(args: {
         professionalId: args.booking.professionalId,
         aftercareId: args.aftercareId,
         clientId: args.booking.clientId,
-        error,
+        error: safeError(error),
       },
     )
 
