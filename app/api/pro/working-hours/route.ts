@@ -38,6 +38,34 @@ function parseMode(v: unknown): LocationMode | null {
   return null
 }
 
+function parseLocationId(v: unknown): string | null {
+  const s = typeof v === 'string' ? v.trim() : ''
+  return s || null
+}
+
+function modeForType(type: ProfessionalLocationType): LocationMode {
+  return type === ProfessionalLocationType.MOBILE_BASE ? 'MOBILE' : 'SALON'
+}
+
+async function findOwnedBookableLocation(args: {
+  professionalId: string
+  locationId: string
+}) {
+  return prisma.professionalLocation.findFirst({
+    where: {
+      id: args.locationId,
+      professionalId: args.professionalId,
+      isBookable: true,
+    },
+    select: {
+      id: true,
+      type: true,
+      isPrimary: true,
+      workingHours: true,
+    },
+  })
+}
+
 function typesForMode(mode: LocationMode): ProfessionalLocationType[] {
   return mode === 'MOBILE'
     ? [ProfessionalLocationType.MOBILE_BASE]
@@ -101,6 +129,37 @@ export async function GET(req: Request) {
 
     const professionalId = auth.professionalId
     const { searchParams } = new URL(req.url)
+    const requestedLocationId = parseLocationId(searchParams.get('locationId'))
+
+    if (requestedLocationId) {
+      const loc = await findOwnedBookableLocation({
+        professionalId,
+        locationId: requestedLocationId,
+      })
+
+      if (!loc) {
+        return jsonFail(404, 'Location not found or not bookable.')
+      }
+
+      const normalizedFromDb = normalizeWorkingHours(loc.workingHours)
+
+      const payload: GetResponse = {
+        ok: true,
+        locationType: modeForType(loc.type),
+        locationId: loc.id,
+        location: {
+          id: loc.id,
+          type: loc.type,
+          isPrimary: loc.isPrimary,
+        },
+        workingHours: normalizedFromDb ?? defaultWorkingHours(),
+        usedDefault: normalizedFromDb == null,
+        missingLocation: false,
+      }
+
+      return jsonOk(payload, 200)
+    }
+
     const mode = parseMode(searchParams.get('locationType')) ?? 'SALON'
 
     const loc = await pickRepresentativeLocation({ professionalId, mode })
@@ -158,8 +217,10 @@ export async function POST(req: Request) {
 
     const { searchParams } = new URL(req.url)
 
+    const requestedLocationId = parseLocationId(searchParams.get('locationId'))
     const mode = parseMode(searchParams.get('locationType'))
-    if (!mode) {
+
+    if (!requestedLocationId && !mode) {
       return jsonFail(400, 'Missing or invalid locationType.')
     }
 
@@ -176,6 +237,59 @@ export async function POST(req: Request) {
         400,
         'workingHours must contain mon..sun with { enabled, start, end } and valid HH:MM times. Overnight ranges are allowed.',
       )
+    }
+
+    if (requestedLocationId) {
+      const loc = await findOwnedBookableLocation({
+        professionalId,
+        locationId: requestedLocationId,
+      })
+
+      if (!loc) {
+        return jsonFail(404, 'Location not found or not bookable.')
+      }
+
+      const locationMode = modeForType(loc.type)
+
+      if (mode && mode !== locationMode) {
+        return jsonFail(400, 'locationType does not match that location.')
+      }
+
+      await prisma.professionalLocation.update({
+        where: {
+          id: loc.id,
+        },
+        data: {
+          workingHours: toInputJsonValue(normalized),
+        },
+        select: {
+          id: true,
+        },
+      })
+
+      await bumpScheduleConfigVersion(professionalId)
+      await refreshProfessional(professionalId, 'workingHours.update')
+
+      return jsonOk(
+        {
+          locationType: locationMode,
+          locationId: loc.id,
+          location: {
+            id: loc.id,
+            type: loc.type,
+            isPrimary: loc.isPrimary,
+          },
+          workingHours: normalized,
+          usedDefault: false,
+          updatedCount: 1,
+          updatedLocationIds: [loc.id],
+        },
+        200,
+      )
+    }
+
+    if (!mode) {
+      return jsonFail(400, 'Missing or invalid locationType.')
     }
 
     const matchingLocations = await findMatchingBookableLocations({

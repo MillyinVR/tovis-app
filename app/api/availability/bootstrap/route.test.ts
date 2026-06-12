@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   getScheduleVersion: vi.fn(),
   getScheduleConfigVersion: vi.fn(),
 
+  professionalLocationFindMany: vi.fn(),
+
   buildSummaryCacheKey: vi.fn(),
   withVersionedCache: vi.fn(),
 
@@ -20,6 +22,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/booking/cacheVersion', () => ({
   getScheduleVersion: mocks.getScheduleVersion,
   getScheduleConfigVersion: mocks.getScheduleConfigVersion,
+}))
+
+vi.mock('@/lib/prisma', () => ({
+  prismaRead: {
+    professionalLocation: {
+      findMany: mocks.professionalLocationFindMany,
+    },
+  },
 }))
 
 vi.mock('@/lib/availability/data/cache', () => ({
@@ -128,6 +138,7 @@ describe('GET /api/availability/bootstrap', () => {
     })
     mocks.loadBusyIntervals.mockResolvedValue([])
     mocks.loadOtherProsNearbyCached.mockResolvedValue([])
+    mocks.professionalLocationFindMany.mockResolvedValue([])
     mocks.loadAvailabilityOfferingContext.mockResolvedValue(makeBaseContext())
     mocks.computeDaySlotsFast.mockResolvedValue({
       ok: true,
@@ -152,6 +163,51 @@ describe('GET /api/availability/bootstrap', () => {
     expect(body.locationType).toBe('SALON')
     expect(mocks.withVersionedCache).toHaveBeenCalledTimes(1)
     expect(mocks.computeDaySlotsFast).toHaveBeenCalled()
+  })
+
+  it('returns bookable salon location options for salon mode', async () => {
+    mocks.professionalLocationFindMany.mockResolvedValue([
+      {
+        id: 'salon-1',
+        type: 'SALON',
+        name: 'Downtown Studio',
+        city: 'New York',
+        state: 'NY',
+        formattedAddress: '1 Main St, New York, NY',
+        isPrimary: true,
+      },
+      {
+        id: 'suite-1',
+        type: 'SUITE',
+        name: null,
+        city: 'Brooklyn',
+        state: 'NY',
+        formattedAddress: '2 Side St, Brooklyn, NY',
+        isPrimary: false,
+      },
+    ])
+
+    const response = await getBootstrap({
+      professionalId: 'pro-1',
+      serviceId: 'service-1',
+    })
+
+    const body = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(body.locationOptions).toEqual([
+      expect.objectContaining({ id: 'salon-1', isPrimary: true }),
+      expect.objectContaining({ id: 'suite-1', type: 'SUITE' }),
+    ])
+
+    expect(mocks.professionalLocationFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          professionalId: 'pro-1',
+          isBookable: true,
+        }),
+      }),
+    )
   })
 
   it('cache hit: short-circuits the compute and returns the cached payload', async () => {

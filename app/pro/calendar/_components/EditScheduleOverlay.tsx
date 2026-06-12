@@ -4,7 +4,9 @@
 import { useEffect, useId } from 'react'
 import type { MouseEvent } from 'react'
 
-import WorkingHoursTabs from './WorkingHoursTabs'
+import WorkingHoursTabs, {
+  type WorkingHoursLocationOption,
+} from './WorkingHoursTabs'
 
 import type { BrandProCalendarCopy } from '@/lib/brand/types'
 import type { LocationType } from './WorkingHoursForm'
@@ -20,6 +22,9 @@ type EditScheduleOverlayProps = {
 
   canSalon: boolean
   canMobile: boolean
+
+  locations?: ReadonlyArray<WorkingHoursLocationOption>
+  defaultLocationId?: string | null
 
   activeEditorType?: LocationType
   onChangeEditorType?: (next: LocationType) => void
@@ -63,6 +68,8 @@ export function EditScheduleOverlay(props: EditScheduleOverlayProps) {
     copy,
     canSalon,
     canMobile,
+    locations,
+    defaultLocationId,
     activeEditorType,
     onChangeEditorType,
     onSavedAny,
@@ -159,6 +166,8 @@ export function EditScheduleOverlay(props: EditScheduleOverlayProps) {
             copy={copy.workingHours}
             canSalon={canSalon}
             canMobile={canMobile}
+            locations={locations}
+            defaultLocationId={defaultLocationId}
             activeEditorType={activeEditorType}
             onChangeEditorType={onChangeEditorType}
             onSavedAny={onSavedAny}

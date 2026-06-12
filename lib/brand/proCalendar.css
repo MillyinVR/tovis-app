@@ -2871,6 +2871,33 @@
   padding-bottom: 4px;
 }
 
+.brand-pro-calendar-working-tabs-location-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.brand-pro-calendar-working-tabs-location-picker-label {
+  color: rgb(var(--text-muted));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.brand-pro-calendar-working-tabs-location-picker-select {
+  width: 100%;
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: 12px;
+  background: rgb(var(--surface-glass) / 0.04);
+  color: rgb(var(--text-primary));
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .brand-pro-calendar-working-tabs-button,
 .brand-pro-calendar-working-tabs-single {
   flex-shrink: 0;

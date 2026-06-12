@@ -30,6 +30,7 @@ export type AvailabilityPrefetchArgs = {
   professionalId: string
   serviceId: string
   locationType: ServiceLocationType | null
+  locationId?: string | null
   mediaId?: string | null
   clientAddressId?: string | null
   viewer?: ViewerContext | null
@@ -85,6 +86,7 @@ function buildBaseQueryKey(args: {
   proId: string
   serviceId: string
   locationType: ServiceLocationType | null
+  locationId: string
   mediaId: string
   clientAddressId: string
   viewer: ViewerContext | null
@@ -99,6 +101,7 @@ function buildBaseQueryKey(args: {
     `pro=${args.proId}`,
     `service=${args.serviceId}`,
     `loc=${args.locationType ?? 'AUTO'}`,
+    `locId=${args.locationId || 'AUTO'}`,
     `media=${args.mediaId}`,
     `clientAddress=${args.clientAddressId}`,
     viewerKey,
@@ -172,6 +175,7 @@ export function buildAvailabilitySummaryPrefetchKey(args: {
   professionalId: string
   serviceId: string
   locationType: ServiceLocationType | null
+  locationId?: string | null
   mediaId?: string | null
   clientAddressId?: string | null
   viewer?: ViewerContext | null
@@ -183,6 +187,7 @@ export function buildAvailabilitySummaryPrefetchKey(args: {
     proId: normalizeTrimmed(args.professionalId),
     serviceId: normalizeTrimmed(args.serviceId),
     locationType: args.locationType,
+    locationId: normalizeTrimmed(args.locationId),
     mediaId: normalizeTrimmed(args.mediaId),
     clientAddressId: normalizeTrimmed(args.clientAddressId),
     viewer: args.viewer ?? null,
@@ -201,6 +206,7 @@ export async function fetchAvailabilitySummaryWindow(
 ): Promise<BootstrapOk> {
   const professionalId = normalizeTrimmed(args.professionalId)
   const serviceId = normalizeTrimmed(args.serviceId)
+  const locationId = normalizeTrimmed(args.locationId)
   const mediaId = normalizeTrimmed(args.mediaId)
   const clientAddressId = normalizeTrimmed(args.clientAddressId)
   const locationType = args.locationType ?? null
@@ -225,6 +231,7 @@ export async function fetchAvailabilitySummaryWindow(
     proId: professionalId,
     serviceId,
     locationType,
+    locationId,
     mediaId,
     clientAddressId,
     viewer,
@@ -254,6 +261,10 @@ export async function fetchAvailabilitySummaryWindow(
 
     if (locationType) {
       qs.set('locationType', locationType)
+    }
+
+    if (locationId) {
+      qs.set('locationId', locationId)
     }
 
     if (mediaId) {
@@ -344,6 +355,7 @@ export async function prefetchAvailabilitySummary(
 export function buildAvailabilityPrefetchArgsFromContext(args: {
   context: DrawerContext
   locationType: ServiceLocationType | null
+  locationId?: string | null
   clientAddressId?: string | null
   includeOtherPros?: boolean
   days?: number
@@ -367,6 +379,7 @@ export function buildAvailabilityPrefetchArgsFromContext(args: {
     professionalId,
     serviceId,
     locationType,
+    locationId: normalizeTrimmed(args.locationId) || null,
     mediaId: normalizeTrimmed(args.context.mediaId),
     clientAddressId: clientAddressId || null,
     viewer: normalizeViewer(args.context),
