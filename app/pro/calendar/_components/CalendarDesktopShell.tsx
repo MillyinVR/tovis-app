@@ -346,6 +346,8 @@ export function CalendarDesktopShell(props: CalendarDesktopShellProps) {
           copy={copy}
           canSalon={cal.canSalon}
           canMobile={cal.canMobile}
+          locations={cal.scopedLocations}
+          defaultLocationId={cal.activeLocationId}
           activeEditorType={cal.hoursEditorLocationType}
           onChangeEditorType={cal.setHoursEditorLocationType}
           onSavedAny={cal.reload}

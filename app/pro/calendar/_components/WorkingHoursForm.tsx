@@ -49,6 +49,7 @@ type WorkingHoursFormProps = {
   initialHours?: ApiWorkingHours | null
   onSaved?: (hours: ApiWorkingHours) => void
   locationType?: LocationType
+  locationId?: string | null
 }
 
 type DayDefinition = {
@@ -431,8 +432,13 @@ function redirectToLogin(
   router.push(`/login?${params.toString()}`)
 }
 
-function workingHoursEndpoint(locationType: LocationType): string {
+function workingHoursEndpoint(
+  locationType: LocationType,
+  locationId?: string | null,
+): string {
   const params = new URLSearchParams({ locationType })
+
+  if (locationId) params.set('locationId', locationId)
 
   return `/api/pro/working-hours?${params.toString()}`
 }
@@ -508,6 +514,7 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
     initialHours,
     onSaved,
     locationType = 'SALON',
+    locationId = null,
   } = props
 
   const router = useRouter()
@@ -535,11 +542,14 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
       }
 
       try {
-        const response = await fetch(workingHoursEndpoint(locationType), {
-          method: 'GET',
-          cache: 'no-store',
-          signal: controller.signal,
-        })
+        const response = await fetch(
+          workingHoursEndpoint(locationType, locationId),
+          {
+            method: 'GET',
+            cache: 'no-store',
+            signal: controller.signal,
+          },
+        )
 
         if (response.status === 401) {
           redirectToLogin(router, 'working-hours')
@@ -578,7 +588,7 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
     void loadHours()
 
     return () => controller.abort()
-  }, [copy.status.failedLoadHours, initialHours, locationType, router])
+  }, [copy.status.failedLoadHours, initialHours, locationId, locationType, router])
 
   function updateDay<K extends keyof DayConfig>(
     dayKey: WeekdayKey,
@@ -622,11 +632,14 @@ export default function WorkingHoursForm(props: WorkingHoursFormProps) {
     setSaving(true)
 
     try {
-      const response = await fetch(workingHoursEndpoint(locationType), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workingHours: payload }),
-      })
+      const response = await fetch(
+        workingHoursEndpoint(locationType, locationId),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workingHours: payload }),
+        },
+      )
 
       if (response.status === 401) {
         redirectToLogin(router, 'working-hours')

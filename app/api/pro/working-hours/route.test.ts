@@ -44,6 +44,7 @@ const mocks = vi.hoisted(() => {
     professionalLocation: {
       findFirst: vi.fn(),
       findMany: vi.fn(),
+      update: vi.fn(),
     },
     $transaction: vi.fn(),
   }
@@ -269,6 +270,167 @@ describe('app/api/pro/working-hours/route.ts', () => {
         },
         orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
       })
+    })
+  })
+
+  describe('GET with locationId', () => {
+    it('returns the hours for that specific owned bookable location', async () => {
+      mocks.prisma.professionalLocation.findFirst.mockResolvedValue({
+        id: 'loc_suite_2',
+        type: ProfessionalLocationType.SUITE,
+        isPrimary: false,
+        workingHours: defaultWorkingHours(),
+      })
+
+      const res = await GET(
+        makeRequest('GET', '/api/pro/working-hours?locationId=loc_suite_2'),
+      )
+
+      expect(res.status).toBe(200)
+
+      const body = await readJson<{
+        ok: true
+        locationType: 'SALON' | 'MOBILE'
+        locationId: string | null
+        usedDefault: boolean
+        missingLocation: boolean
+      }>(res)
+
+      expect(body.locationType).toBe('SALON')
+      expect(body.locationId).toBe('loc_suite_2')
+      expect(body.usedDefault).toBe(false)
+      expect(body.missingLocation).toBe(false)
+
+      expect(mocks.prisma.professionalLocation.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: 'loc_suite_2',
+          professionalId: 'pro_123',
+          isBookable: true,
+        },
+        select: {
+          id: true,
+          type: true,
+          isPrimary: true,
+          workingHours: true,
+        },
+      })
+    })
+
+    it('returns 404 when the location is not owned or not bookable', async () => {
+      mocks.prisma.professionalLocation.findFirst.mockResolvedValue(null)
+
+      const res = await GET(
+        makeRequest('GET', '/api/pro/working-hours?locationId=loc_other'),
+      )
+
+      expect(res.status).toBe(404)
+
+      const body = await readJson<{ ok: false; error: string }>(res)
+      expect(body.error).toBe('Location not found or not bookable.')
+    })
+  })
+
+  describe('POST with locationId', () => {
+    it('updates only the targeted location', async () => {
+      mocks.prisma.professionalLocation.findFirst.mockResolvedValue({
+        id: 'loc_salon_2',
+        type: ProfessionalLocationType.SALON,
+        isPrimary: false,
+        workingHours: defaultWorkingHours(),
+      })
+
+      mocks.prisma.professionalLocation.update.mockResolvedValue({
+        id: 'loc_salon_2',
+      })
+
+      const workingHours = defaultWorkingHours()
+
+      const res = await POST(
+        makeRequest(
+          'POST',
+          '/api/pro/working-hours?locationType=SALON&locationId=loc_salon_2',
+          { workingHours },
+        ),
+      )
+
+      expect(res.status).toBe(200)
+
+      const body = await readJson<{
+        ok: true
+        locationType: 'SALON' | 'MOBILE'
+        locationId: string | null
+        updatedCount: number
+        updatedLocationIds: string[]
+      }>(res)
+
+      expect(mocks.prisma.professionalLocation.update).toHaveBeenCalledWith({
+        where: {
+          id: 'loc_salon_2',
+        },
+        data: {
+          workingHours,
+        },
+        select: {
+          id: true,
+        },
+      })
+
+      expect(mocks.prisma.professionalLocation.findMany).not.toHaveBeenCalled()
+      expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
+
+      expect(mocks.bumpScheduleConfigVersion).toHaveBeenCalledWith('pro_123')
+      expect(mocks.refreshProfessional).toHaveBeenCalledWith(
+        'pro_123',
+        'workingHours.update',
+      )
+
+      expect(body).toMatchObject({
+        locationType: 'SALON',
+        locationId: 'loc_salon_2',
+        updatedCount: 1,
+        updatedLocationIds: ['loc_salon_2'],
+      })
+    })
+
+    it('returns 404 when the targeted location is not owned or not bookable', async () => {
+      mocks.prisma.professionalLocation.findFirst.mockResolvedValue(null)
+
+      const res = await POST(
+        makeRequest('POST', '/api/pro/working-hours?locationId=loc_other', {
+          workingHours: defaultWorkingHours(),
+        }),
+      )
+
+      expect(res.status).toBe(404)
+
+      const body = await readJson<{ ok: false; error: string }>(res)
+      expect(body.error).toBe('Location not found or not bookable.')
+
+      expect(mocks.prisma.professionalLocation.update).not.toHaveBeenCalled()
+    })
+
+    it('rejects a locationType that does not match the targeted location', async () => {
+      mocks.prisma.professionalLocation.findFirst.mockResolvedValue({
+        id: 'loc_mobile_2',
+        type: ProfessionalLocationType.MOBILE_BASE,
+        isPrimary: false,
+        workingHours: defaultWorkingHours(),
+      })
+
+      const res = await POST(
+        makeRequest(
+          'POST',
+          '/api/pro/working-hours?locationType=SALON&locationId=loc_mobile_2',
+          { workingHours: defaultWorkingHours() },
+        ),
+      )
+
+      expect(res.status).toBe(400)
+
+      const body = await readJson<{ ok: false; error: string }>(res)
+      expect(body.error).toBe('locationType does not match that location.')
+
+      expect(mocks.prisma.professionalLocation.update).not.toHaveBeenCalled()
     })
   })
 

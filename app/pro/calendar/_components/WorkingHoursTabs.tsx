@@ -1,29 +1,28 @@
 // app/pro/calendar/_components/WorkingHoursTabs.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 
-import WorkingHoursForm, {
-  type ApiWorkingHours,
-  type LocationType,
-} from './WorkingHoursForm'
+import WorkingHoursForm, { type LocationType } from './WorkingHoursForm'
 
 import type { BrandWorkingHoursCopy } from '@/lib/brand/types'
 
-import {
-  errorMessageFromUnknown,
-  readErrorMessage,
-  safeJson,
-} from '@/lib/http'
-import { isRecord } from '@/lib/guards'
-
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+export type WorkingHoursLocationOption = {
+  id: string
+  type: string
+  name: string | null
+  formattedAddress: string | null
+  isPrimary: boolean
+}
 
 type WorkingHoursTabsProps = {
   copy: BrandWorkingHoursCopy
   canSalon: boolean
   canMobile: boolean
+  locations?: ReadonlyArray<WorkingHoursLocationOption>
+  defaultLocationId?: string | null
   activeEditorType?: LocationType
   onChangeEditorType?: (next: LocationType) => void
   onSavedAny?: () => void
@@ -42,25 +41,6 @@ type TabButtonProps = {
   active: boolean
   onClick: () => void
 }
-
-type StateCardProps = {
-  children: ReactNode
-  danger?: boolean
-}
-
-type WeekdayKey = keyof ApiWorkingHours
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const WEEKDAY_KEYS: ReadonlyArray<WeekdayKey> = [
-  'mon',
-  'tue',
-  'wed',
-  'thu',
-  'fri',
-  'sat',
-  'sun',
-]
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────
 
@@ -83,45 +63,6 @@ function locationTabs(
       tone: 'mobile',
     },
   ]
-}
-
-function makeHoursDay(enabled: boolean) {
-  return {
-    enabled,
-    start: '09:00',
-    end: '17:00',
-  }
-}
-
-/**
- * Safe non-null schedule default.
- * Never feed null/garbage into WorkingHoursForm.
- */
-function defaultHours(): ApiWorkingHours {
-  return {
-    mon: makeHoursDay(true),
-    tue: makeHoursDay(true),
-    wed: makeHoursDay(true),
-    thu: makeHoursDay(true),
-    fri: makeHoursDay(true),
-    sat: makeHoursDay(false),
-    sun: makeHoursDay(false),
-  }
-}
-
-function looksLikeHours(value: unknown): value is ApiWorkingHours {
-  if (!isRecord(value)) return false
-
-  for (const day of WEEKDAY_KEYS) {
-    const row = value[day]
-
-    if (!isRecord(row)) return false
-    if (typeof row.enabled !== 'boolean') return false
-    if (typeof row.start !== 'string') return false
-    if (typeof row.end !== 'string') return false
-  }
-
-  return true
 }
 
 function isLocationTab(value: LocationTab | undefined): value is LocationTab {
@@ -174,50 +115,56 @@ function isAvailableLocationType(
   return tabs.some((tab) => tab.value === locationType)
 }
 
-function endpointForLocationType(locationType: LocationType): string {
-  const params = new URLSearchParams({ locationType })
-
-  return `/api/pro/working-hours?${params.toString()}`
+function modeForLocationType(type: string): LocationType {
+  return type.trim().toUpperCase() === 'MOBILE_BASE' ? 'MOBILE' : 'SALON'
 }
 
-function errorFromResponse(args: {
-  response: Response
-  data: unknown
-  locationType: LocationType
-}): string {
-  return (
-    readErrorMessage(args.data) ??
-    `Failed to load ${args.locationType.toLowerCase()} hours. (${
-      args.response.status
-    })`
-  )
+const LOCATION_TYPE_LABELS: Record<string, string> = {
+  MOBILE_BASE: 'Mobile base',
+  SUITE: 'Suite',
+  SALON: 'Salon',
 }
 
-async function loadWorkingHours(args: {
-  locationType: LocationType
-  signal: AbortSignal
-}): Promise<ApiWorkingHours> {
-  const response = await fetch(endpointForLocationType(args.locationType), {
-    method: 'GET',
-    cache: 'no-store',
-    signal: args.signal,
-  })
+function locationOptionLabel(location: WorkingHoursLocationOption): string {
+  const name = (location.name ?? '').trim()
+  const address = (location.formattedAddress ?? '').trim()
+  const base =
+    name || LOCATION_TYPE_LABELS[location.type.trim().toUpperCase()] || 'Location'
+  const withAddress = address ? `${base} — ${address}` : base
 
-  const data: unknown = await safeJson(response)
+  return location.isPrimary ? `${withAddress} (Primary)` : withAddress
+}
 
-  if (!response.ok) {
-    throw new Error(
-      errorFromResponse({
-        response,
-        data,
-        locationType: args.locationType,
-      }),
-    )
+function locationsForMode(
+  locations: ReadonlyArray<WorkingHoursLocationOption>,
+  mode: LocationType,
+): WorkingHoursLocationOption[] {
+  return locations
+    .filter((location) => modeForLocationType(location.type) === mode)
+    .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+}
+
+function resolveSelectedLocationId(args: {
+  modeLocations: ReadonlyArray<WorkingHoursLocationOption>
+  selectedId: string | null
+  defaultLocationId: string | null
+}): string | null {
+  const { modeLocations, selectedId, defaultLocationId } = args
+
+  if (modeLocations.length === 0) return null
+
+  if (selectedId && modeLocations.some((l) => l.id === selectedId)) {
+    return selectedId
   }
 
-  const rawWorkingHours = isRecord(data) ? data.workingHours : null
+  if (
+    defaultLocationId &&
+    modeLocations.some((l) => l.id === defaultLocationId)
+  ) {
+    return defaultLocationId
+  }
 
-  return looksLikeHours(rawWorkingHours) ? rawWorkingHours : defaultHours()
+  return modeLocations[0]?.id ?? null
 }
 
 // ─── Exported component ───────────────────────────────────────────────────────
@@ -227,6 +174,8 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
     copy,
     canSalon,
     canMobile,
+    locations = [],
+    defaultLocationId = null,
     activeEditorType,
     onChangeEditorType,
     onSavedAny,
@@ -261,15 +210,28 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
 
   const showTabs = availableTabs.length > 1
 
-  const [initialByMode, setInitialByMode] = useState<
-    Record<LocationType, ApiWorkingHours>
+  // Per-mode location selection so each salon/suite/mobile base can keep
+  // its own hours. Falls back to mode-wide editing when no locations are
+  // supplied (legacy behavior).
+  const [selectedByMode, setSelectedByMode] = useState<
+    Record<LocationType, string | null>
   >({
-    SALON: defaultHours(),
-    MOBILE: defaultHours(),
+    SALON: null,
+    MOBILE: null,
   })
 
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const modeLocations = useMemo(
+    () => locationsForMode(locations, safeActive),
+    [locations, safeActive],
+  )
+
+  const selectedLocationId = resolveSelectedLocationId({
+    modeLocations,
+    selectedId: selectedByMode[safeActive],
+    defaultLocationId,
+  })
+
+  const showLocationPicker = modeLocations.length > 1
 
   function setActive(next: LocationType): void {
     if (onChangeEditorType) {
@@ -279,75 +241,6 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
 
     setLocalActive(next)
   }
-
-  useEffect(() => {
-    if (active === safeActive) return
-
-    if (onChangeEditorType) {
-      onChangeEditorType(safeActive)
-      return
-    }
-
-    setLocalActive(safeActive)
-  }, [active, safeActive, onChangeEditorType])
-
-  useEffect(() => {
-    const controller = new AbortController()
-
-    async function loadAll(): Promise<void> {
-      setError(null)
-      setLoading(true)
-
-      try {
-        const shouldLoadSalon = availableTabs.some(
-          (tab) => tab.value === 'SALON',
-        )
-
-        const shouldLoadMobile = availableTabs.some(
-          (tab) => tab.value === 'MOBILE',
-        )
-
-        const [salon, mobile] = await Promise.all([
-          shouldLoadSalon
-            ? loadWorkingHours({
-                locationType: 'SALON',
-                signal: controller.signal,
-              })
-            : Promise.resolve(defaultHours()),
-          shouldLoadMobile
-            ? loadWorkingHours({
-                locationType: 'MOBILE',
-                signal: controller.signal,
-              })
-            : Promise.resolve(defaultHours()),
-        ])
-
-        if (controller.signal.aborted) return
-
-        setInitialByMode({
-          SALON: salon,
-          MOBILE: mobile,
-        })
-      } catch (caught) {
-        if (controller.signal.aborted) return
-
-        setError(
-          errorMessageFromUnknown(
-            caught,
-            copy.status.failedLoadHours,
-          ),
-        )
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false)
-        }
-      }
-    }
-
-    void loadAll()
-
-    return () => controller.abort()
-  }, [availableTabs, copy.status.failedLoadHours])
 
   return (
     <section
@@ -395,28 +288,40 @@ export default function WorkingHoursTabs(props: WorkingHoursTabsProps) {
           )}
         </div>
 
-        <div className="brand-pro-calendar-working-tabs-state-list">
-          {loading ? (
-            <StateCard>{copy.status.loadingSchedule}</StateCard>
-          ) : null}
+        {showLocationPicker ? (
+          <label className="brand-pro-calendar-working-tabs-location-picker">
+            <span className="brand-pro-calendar-working-tabs-location-picker-label">
+              Location
+            </span>
 
-          {error ? <StateCard danger>{error}</StateCard> : null}
-        </div>
+            <select
+              value={selectedLocationId ?? ''}
+              onChange={(event) =>
+                setSelectedByMode((previous) => ({
+                  ...previous,
+                  [safeActive]: event.target.value || null,
+                }))
+              }
+              className="brand-pro-calendar-working-tabs-location-picker-select brand-focus"
+              aria-label="Choose which location these hours apply to"
+            >
+              {modeLocations.map((location) => (
+                <option key={location.id} value={location.id}>
+                  {locationOptionLabel(location)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
 
       <div className="brand-pro-calendar-working-tabs-form-shell">
         <WorkingHoursForm
+          key={`${safeActive}:${selectedLocationId ?? 'mode'}`}
           copy={copy}
           locationType={safeActive}
-          initialHours={initialByMode[safeActive] ?? defaultHours()}
-          onSaved={(hours) => {
-            const safeHours = looksLikeHours(hours) ? hours : defaultHours()
-
-            setInitialByMode((previous) => ({
-              ...previous,
-              [safeActive]: safeHours,
-            }))
-
+          locationId={selectedLocationId}
+          onSaved={() => {
             onSavedAny?.()
           }}
         />
@@ -442,18 +347,5 @@ function TabButton(props: TabButtonProps) {
     >
       {tab.shortLabel}
     </button>
-  )
-}
-
-function StateCard(props: StateCardProps) {
-  const { children, danger = false } = props
-
-  return (
-    <div
-      className="brand-pro-calendar-working-tabs-state"
-      data-danger={danger ? 'true' : 'false'}
-    >
-      {children}
-    </div>
   )
 }
