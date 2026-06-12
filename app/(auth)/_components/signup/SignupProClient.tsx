@@ -3,7 +3,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import AuthShell from '../AuthShell'
@@ -430,6 +430,8 @@ export default function SignupProClient() {
     Partial<Record<ProField, string>>
   >({})
   const [loading, setLoading] = useState(false)
+  const [captchaChallengeActive, setCaptchaChallengeActive] = useState(false)
+  const captchaHostRef = useRef<HTMLDivElement | null>(null)
   const [step, setStep] = useState(0)
 
   function setFieldError(field: ProField, message: string | null) {
@@ -715,7 +717,11 @@ export default function SignupProClient() {
 
     setLoading(true)
     try {
-      const turnstileToken = await getTurnstileToken('signup_pro')
+      const turnstileToken = await getTurnstileToken('signup_pro', {
+        container: captchaHostRef.current,
+        onInteractiveChallenge: () => setCaptchaChallengeActive(true),
+      })
+      setCaptchaChallengeActive(false)
 
       const res = await fetch('/api/auth/register', {
         method: 'POST',
@@ -782,6 +788,7 @@ export default function SignupProClient() {
       console.error(err)
       setError(err instanceof Error ? err.message : 'Signup failed.')
     } finally {
+      setCaptchaChallengeActive(false)
       setLoading(false)
     }
   }
@@ -1288,6 +1295,13 @@ export default function SignupProClient() {
         ) : null}
 
         <div className="grid gap-2 pt-1">
+          {captchaChallengeActive ? (
+            <p className="text-sm font-bold">
+              Complete the security check below to continue.
+            </p>
+          ) : null}
+          <div ref={captchaHostRef} className="justify-self-center empty:hidden" />
+
           <PrimaryButton loading={loading}>
             {step < LAST_STEP
               ? 'Continue'
