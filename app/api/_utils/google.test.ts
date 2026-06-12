@@ -51,20 +51,38 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+const ADDRESS_COMPONENTS_V1 = [
+  {
+    longText: 'San Diego',
+    shortText: 'San Diego',
+    types: ['locality'],
+  },
+  {
+    longText: 'California',
+    shortText: 'CA',
+    types: ['administrative_area_level_1'],
+  },
+  {
+    longText: '92101',
+    shortText: '92101',
+    types: ['postal_code'],
+  },
+  {
+    longText: 'United States',
+    shortText: 'US',
+    types: ['country'],
+  },
+]
+
 describe('googlePlaceDetails', () => {
-  it('parses place details into a flat shape', async () => {
+  it('parses Places API (New) details into a flat shape', async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
-        status: 'OK',
-        result: {
-          place_id: 'place_123',
-          name: 'Vivid Salon',
-          formatted_address: '123 Main St, San Diego, CA 92101',
-          geometry: {
-            location: { lat: 32.715736, lng: -117.161087 },
-          },
-          address_components: ADDRESS_COMPONENTS,
-        },
+        id: 'place_123',
+        displayName: { text: 'Vivid Salon', languageCode: 'en' },
+        formattedAddress: '123 Main St, San Diego, CA 92101',
+        location: { latitude: 32.715736, longitude: -117.161087 },
+        addressComponents: ADDRESS_COMPONENTS_V1,
       }),
     )
 
@@ -81,16 +99,23 @@ describe('googlePlaceDetails', () => {
       postalCode: '92101',
       countryCode: 'US',
     })
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+
+    expect(url).toBe('https://places.googleapis.com/v1/places/place_123')
+
+    const headers = init.headers as Record<string, string>
+
+    expect(headers['X-Goog-Api-Key']).toBe('google_key')
+    expect(headers['X-Goog-FieldMask']).toContain('addressComponents')
+    expect(headers['X-Goog-Session-Token']).toBe('session_123')
   })
 
-  it('returns null coordinates when geometry is missing', async () => {
+  it('returns null coordinates when location is missing', async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
-        status: 'OK',
-        result: {
-          place_id: 'place_123',
-          geometry: { location: {} },
-        },
+        id: 'place_123',
+        location: {},
       }),
     )
 
@@ -100,17 +125,38 @@ describe('googlePlaceDetails', () => {
     expect(place.lng).toBeNull()
   })
 
-  it('throws the Google error message on non-OK status', async () => {
+  it('throws the Google error message on an error response', async () => {
     fetchMock.mockResolvedValue(
-      jsonResponse({
-        status: 'REQUEST_DENIED',
-        error_message: 'Google said nope.',
-      }),
+      jsonResponse(
+        {
+          error: {
+            code: 403,
+            status: 'PERMISSION_DENIED',
+            message: 'Google said nope.',
+          },
+        },
+        403,
+      ),
     )
 
     await expect(googlePlaceDetails('place_123')).rejects.toThrow(
       'Google said nope.',
     )
+  })
+
+  it('accepts an already-prefixed places/ resource name', async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        id: 'place_123',
+        location: { latitude: 1, longitude: 2 },
+      }),
+    )
+
+    await googlePlaceDetails('places/place_123')
+
+    const [url] = fetchMock.mock.calls[0] as [string]
+
+    expect(url).toBe('https://places.googleapis.com/v1/places/place_123')
   })
 })
 

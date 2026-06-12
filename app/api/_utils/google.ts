@@ -137,69 +137,106 @@ function componentMap(addressComponents: unknown): Record<string, string> {
   return out
 }
 
+// Places API (New) returns components as { longText, shortText, types },
+// unlike the legacy long_name/short_name shape used by the Geocoding API.
+function componentMapV1(addressComponents: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+
+  if (!Array.isArray(addressComponents)) return out
+
+  for (const item of addressComponents) {
+    if (!isRecord(item)) continue
+
+    const typesRaw = item.types
+    const types = Array.isArray(typesRaw)
+      ? typesRaw.filter((type): type is string => typeof type === 'string')
+      : []
+
+    const longName = typeof item.longText === 'string' ? item.longText : ''
+    const shortName = typeof item.shortText === 'string' ? item.shortText : ''
+    const value = (shortName || longName).trim()
+
+    if (!value) continue
+
+    for (const type of types) {
+      out[type] = value
+    }
+  }
+
+  return out
+}
+
+function readDisplayNameText(displayName: unknown): string | null {
+  if (typeof displayName === 'string') return displayName.trim() || null
+  if (!isRecord(displayName)) return null
+
+  const text = displayName.text
+
+  return typeof text === 'string' ? text.trim() || null : null
+}
+
 export async function googlePlaceDetails(
   placeId: string,
   sessionToken?: string | null,
 ): Promise<GooglePlaceDetails> {
-  const url = new URL('https://maps.googleapis.com/maps/api/place/details/json')
+  // Legacy maps/api/place/details is rejected for newer API keys; this
+  // uses Places API (New), same as the /api/google/places proxy routes.
+  const trimmed = placeId.trim()
+  const name = trimmed.startsWith('places/') ? trimmed : `places/${trimmed}`
+  const url = `https://places.googleapis.com/v1/${encodeURI(name)}`
 
-  url.searchParams.set('key', getGoogleMapsKey())
-  url.searchParams.set('place_id', placeId)
-  url.searchParams.set(
-    'fields',
-    [
-      'place_id',
-      'name',
-      'formatted_address',
-      'geometry/location',
-      'address_component',
-      'types',
-    ].join(','),
-  )
-  url.searchParams.set('language', 'en')
-
-  if (sessionToken) {
-    url.searchParams.set('sessiontoken', sessionToken)
-  }
-
-  const res = await fetchWithTimeout(url.toString(), {
+  const res = await fetchWithTimeout(url, {
     method: 'GET',
-    headers: { Accept: 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      'X-Goog-Api-Key': getGoogleMapsKey(),
+      // FieldMask is required by Places API (New)
+      'X-Goog-FieldMask': [
+        'id',
+        'displayName',
+        'formattedAddress',
+        'location',
+        'addressComponents',
+      ].join(','),
+      ...(sessionToken ? { 'X-Goog-Session-Token': sessionToken } : {}),
+    },
     cache: 'no-store',
   })
 
   const data = await safeJson<unknown>(res)
 
-  if (!res.ok) throw new Error('Google request failed.')
   if (!isRecord(data)) throw new Error('Google response malformed.')
 
-  const status = String(data.status ?? '')
+  if (!res.ok) {
+    const error = isRecord(data.error) ? data.error : {}
 
-  if (status !== 'OK') {
-    throw new Error(String(data.error_message ?? `Google status: ${status}`))
+    throw new Error(
+      typeof error.message === 'string' && error.message.trim()
+        ? error.message
+        : 'Google request failed.',
+    )
   }
 
-  const result = isRecord(data.result) ? data.result : {}
-  const geometry = isRecord(result.geometry) ? result.geometry : {}
-  const location = isRecord(geometry.location) ? geometry.location : {}
+  const location = isRecord(data.location) ? data.location : {}
 
-  const lat = typeof location.lat === 'number' ? location.lat : null
-  const lng = typeof location.lng === 'number' ? location.lng : null
-  const components = componentMap(result.address_components)
+  const lat = typeof location.latitude === 'number' ? location.latitude : null
+  const lng =
+    typeof location.longitude === 'number' ? location.longitude : null
+  const components = componentMapV1(data.addressComponents)
 
   return {
-    placeId: typeof result.place_id === 'string' ? result.place_id : placeId,
-    name: typeof result.name === 'string' ? result.name : null,
+    placeId: typeof data.id === 'string' ? data.id : trimmed,
+    name: readDisplayNameText(data.displayName),
     formattedAddress:
-      typeof result.formatted_address === 'string'
-        ? result.formatted_address
-        : null,
+      typeof data.formattedAddress === 'string' ? data.formattedAddress : null,
     lat,
     lng,
     city:
       components.locality ||
       components.postal_town ||
       components.sublocality ||
+      components.sublocality_level_1 ||
+      components.neighborhood ||
       null,
     state: components.administrative_area_level_1 || null,
     postalCode: components.postal_code || null,
