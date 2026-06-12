@@ -460,7 +460,7 @@ async function createInitialBookingForFlow(
       source: BookingSource.REQUESTED,
       locationType: ServiceLocationType.SALON,
       locationId: seed.locations.salon.id,
-      locationTimeZone: 'America/Los_Angeles',
+      locationTimeZone: seed.timeZone,
       locationAddressSnapshot: {
         formattedAddress: '123 Salon St, San Diego, CA 92101',
       },
@@ -794,7 +794,7 @@ test.describe('full booking lifecycle launch proof', () => {
           createProductReminder: false,
           productReminderDaysAfter: 7,
           version: booking.aftercareSummary?.version ?? 0,
-          timeZone: 'America/Los_Angeles',
+          timeZone: seed.timeZone,
         },
       })
 
