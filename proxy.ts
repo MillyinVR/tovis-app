@@ -1,4 +1,4 @@
-// middleware.ts
+// proxy.ts
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { verifyMiddlewareToken } from '@/lib/auth/middlewareToken'
@@ -243,7 +243,7 @@ function originCheckFail(requestId: string): NextResponse {
   return withRequestId(res, requestId)
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID()
   const pathname = normalizePathname(req.nextUrl.pathname)
 

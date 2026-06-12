@@ -7,7 +7,7 @@ vi.mock('@/lib/auth/middlewareToken', () => ({
   verifyMiddlewareToken: mockVerifyMiddlewareToken,
 }))
 
-import { middleware } from './middleware'
+import { proxy } from './proxy'
 
 const ORIGINAL_APP_URL = process.env.NEXT_PUBLIC_APP_URL
 
@@ -36,7 +36,7 @@ function makeRequest(
   return new NextRequest(url, { headers })
 }
 
-describe('middleware', () => {
+describe('proxy', () => {
   beforeEach(() => {
     process.env.NEXT_PUBLIC_APP_URL = 'https://app.tovis.app'
     mockVerifyMiddlewareToken.mockReset()
@@ -63,7 +63,7 @@ describe('middleware', () => {
       cookie: 'tovis_token=test_verification_token',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(mockVerifyMiddlewareToken).toHaveBeenCalledWith(
       'test_verification_token',
@@ -87,7 +87,7 @@ describe('middleware', () => {
       cookie: 'tovis_token=test_verification_token',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
     const body = await res.json()
 
     expect(res.status).toBe(403)
@@ -111,7 +111,7 @@ describe('middleware', () => {
       cookie: 'tovis_token=test_verification_token',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
@@ -134,7 +134,7 @@ describe('middleware', () => {
       },
     )
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
@@ -154,7 +154,7 @@ describe('middleware', () => {
       cookie: 'tovis_token=test_verification_token',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
@@ -177,7 +177,7 @@ describe('middleware', () => {
       cookie: 'tovis_token=test_verification_token',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(307)
     expect(res.headers.get('location')).toBe(
@@ -202,7 +202,7 @@ describe('middleware', () => {
       cookie: 'tovis_token=test_active_token',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
@@ -227,7 +227,7 @@ describe('middleware', () => {
       cookie: 'tovis_token=test_active_token',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
@@ -250,7 +250,7 @@ describe('middleware', () => {
       cookie: 'tovis_token=test_active_token',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
@@ -273,7 +273,7 @@ describe('middleware', () => {
       cookie: 'tovis_token=test_active_token',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
@@ -286,7 +286,7 @@ describe('middleware', () => {
 
     const req = makeRequest('https://app.tovis.app/login')
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(mockVerifyMiddlewareToken).toHaveBeenCalledWith(null)
     expect(res.status).toBe(200)
@@ -313,7 +313,7 @@ describe('middleware', () => {
       value: 'POST',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
@@ -342,7 +342,7 @@ describe('middleware', () => {
       value: 'PATCH',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
@@ -370,7 +370,7 @@ describe('middleware', () => {
       value: 'POST',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
@@ -397,7 +397,7 @@ describe('middleware', () => {
       value: 'POST',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
     const body = await res.json()
 
     expect(res.status).toBe(403)
@@ -425,7 +425,7 @@ describe('middleware', () => {
       value: 'POST',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
     const body = await res.json()
 
     expect(res.status).toBe(403)
@@ -446,7 +446,7 @@ describe('middleware', () => {
       value: 'POST',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('location')).toBeNull()
@@ -463,7 +463,7 @@ describe('middleware', () => {
       value: 'POST',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
@@ -488,7 +488,7 @@ describe('middleware', () => {
       value: 'DELETE',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
@@ -509,7 +509,7 @@ describe('middleware', () => {
       cookie: 'tovis_token=test_active_token',
     })
 
-    const res = await middleware(req)
+    const res = await proxy(req)
 
     expect(res.status).toBe(200)
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
