@@ -494,7 +494,7 @@ async function updateAdvanceNotice(
 
   function openBaseEditor(l: ProLocation) {
     setError(null)
-    setEditBaseZip(l.postalCode ?? '')
+    setEditBaseZip(l.postalCode ?? '') // pii-plaintext-read-ok: pro edits own mobile base ZIP during expand-phase encryption sync
     setEditBaseRadius(mobileRadiusMiles ?? 15)
     setEditingBaseId(l.id)
   }
