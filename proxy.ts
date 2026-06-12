@@ -94,6 +94,13 @@ function isAllowedVerificationPath(pathname: string): boolean {
   return false
 }
 
+// Unlike hostToHostname, keeps the port: this feeds absolute URLs the
+// browser must reconnect to, so dropping a non-default port breaks them.
+function hostWithPort(hostHeader: string | null): string | null {
+  const first = hostHeader?.split(',')[0]?.trim().toLowerCase() ?? ''
+  return first || null
+}
+
 function resolveAppOrigin(req: NextRequest): string {
   const envUrl = process.env.NEXT_PUBLIC_APP_URL?.trim()
   if (envUrl) {
@@ -105,12 +112,12 @@ function resolveAppOrigin(req: NextRequest): string {
     req.nextUrl.protocol.replace(/:$/, '') ||
     'https'
 
-  const hostname = hostToHostname(
+  const host = hostWithPort(
     req.headers.get('x-forwarded-host') ?? req.headers.get('host'),
   )
 
-  if (hostname) {
-    return `${forwardedProto}://${hostname}`
+  if (host) {
+    return `${forwardedProto}://${host}`
   }
 
   return req.nextUrl.origin.replace(/\/+$/, '')

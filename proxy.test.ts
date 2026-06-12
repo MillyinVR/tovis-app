@@ -75,6 +75,28 @@ describe('proxy', () => {
     expect(res.headers.get('x-request-id')).toBe('req_test_123')
   })
 
+  it('keeps the request port in verification redirects when NEXT_PUBLIC_APP_URL is unset', async () => {
+    delete process.env.NEXT_PUBLIC_APP_URL
+
+    mockVerifyMiddlewareToken.mockResolvedValue({
+      userId: 'user_1',
+      role: 'CLIENT',
+      sessionKind: 'VERIFICATION',
+      authVersion: 1,
+    })
+
+    const req = makeRequest('http://127.0.0.1:3000/signup/client', {
+      cookie: 'tovis_token=test_verification_token',
+    })
+
+    const res = await proxy(req)
+
+    expect(res.status).toBe(307)
+    expect(res.headers.get('location')).toBe(
+      'http://127.0.0.1:3000/verify-phone?next=%2Fsignup%2Fclient',
+    )
+  })
+
   it('returns 403 JSON for VERIFICATION sessions hitting non-verification API routes', async () => {
     mockVerifyMiddlewareToken.mockResolvedValue({
       userId: 'user_1',
