@@ -278,7 +278,7 @@ export default async function BookingReceiptPage(props: PageProps) {
       ? messageStartHref({ kind: 'BOOKING', bookingId: booking.id })
       : null
 
-  const dashboardHref = isProViewer ? '/pro/bookings' : '/client/bookings'
+  const dashboardHref = isProViewer ? '/pro/bookings' : '/client'
   const dashboardLabel = isProViewer ? 'Go to pro dashboard' : 'Go to dashboard'
 
   const duration =
