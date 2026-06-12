@@ -418,32 +418,51 @@ async function attachBookingMedia(args: {
   })
 }
 
-function nextStartableQuarterHour(): Date {
-  const now = new Date()
-  const scheduledFor = new Date(now)
+const QUARTER_HOUR_MS = 15 * 60 * 1000
 
-  scheduledFor.setUTCSeconds(0, 0)
+/**
+ * The accept PATCH revalidates advance notice (advanceNoticeMinutes 0 →
+ * scheduledFor must still be >= now) roughly 10-20s after the slot is
+ * computed, so the slot needs enough lead to survive login plus that
+ * request on a slow runner.
+ */
+const MIN_SCHEDULE_LEAD_MS = 90 * 1000
 
-  const minutes = scheduledFor.getUTCMinutes()
-  const remainder = minutes % 15
+/**
+ * Session start requires now >= scheduledFor - 15min (isWithinStartWindow
+ * in lib/booking/writeBoundary.ts). Wait with 30s of slack inside the
+ * window so the request isn't racing its lower edge.
+ */
+const SESSION_START_EARLY_WINDOW_MS = 15 * 60 * 1000
+const SESSION_START_WINDOW_SLACK_MS = 30 * 1000
 
-  if (remainder !== 0) {
-    scheduledFor.setUTCMinutes(minutes + (15 - remainder))
+/**
+ * Earliest quarter-hour slot that is at least MIN_SCHEDULE_LEAD_MS in the
+ * future. Quarter-hour alignment is required by the working-window step
+ * check (STEP_MISMATCH); the seeded working window starts at local
+ * midnight in a whole-hour-offset zone, so UTC quarter-hours are aligned.
+ * Because the grid is 15min wide, the slot can land up to ~16.5min out —
+ * waitForSessionStartWindow covers that gap before session start.
+ */
+function nextStartableQuarterHour(now: Date = new Date()): Date {
+  const earliestMs = now.getTime() + MIN_SCHEDULE_LEAD_MS
+  return new Date(Math.ceil(earliestMs / QUARTER_HOUR_MS) * QUARTER_HOUR_MS)
+}
+
+async function waitForSessionStartWindow(scheduledFor: Date): Promise<void> {
+  const startableAtMs =
+    scheduledFor.getTime() -
+    (SESSION_START_EARLY_WINDOW_MS - SESSION_START_WINDOW_SLACK_MS)
+  const waitMs = startableAtMs - Date.now()
+
+  if (waitMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, waitMs))
   }
-
-  const diffMs = scheduledFor.getTime() - now.getTime()
-  const fourteenMinutesMs = 14 * 60 * 1000
-
-  if (diffMs > fourteenMinutesMs) {
-    scheduledFor.setUTCMinutes(scheduledFor.getUTCMinutes() - 15)
-  }
-
-  return scheduledFor
 }
 
 async function createInitialBookingForFlow(
   seed: SeedBookingFlowResult,
-): Promise<string> {
+): Promise<{ bookingId: string; scheduledFor: Date }> {
   const scheduledFor = nextStartableQuarterHour()
 
 
@@ -496,7 +515,7 @@ async function createInitialBookingForFlow(
     },
   })
 
-  return booking.id
+  return { bookingId: booking.id, scheduledFor }
 }
 
 async function expectBookingState(args: {
@@ -619,7 +638,7 @@ test.describe('full booking lifecycle launch proof', () => {
 
     const resolvedBaseUrl = baseUrlFrom(baseURL)
 
-    const bookingId = await createInitialBookingForFlow(seed)
+    const { bookingId, scheduledFor } = await createInitialBookingForFlow(seed)
     createdBookingId = bookingId
 
     let booking = await expectBookingState({
@@ -658,6 +677,8 @@ test.describe('full booking lifecycle launch proof', () => {
         bookingId,
         status: BookingStatus.ACCEPTED,
       })
+
+      await waitForSessionStartWindow(scheduledFor)
 
       await postJson({
         request: proRequest,
@@ -838,6 +859,68 @@ test.describe('full booking lifecycle launch proof', () => {
       ).resolves.toBe(2)
     } finally {
       await proContext.close()
+    }
+  })
+})
+
+test.describe('nextStartableQuarterHour', () => {
+  const cases: Array<{ now: string; expected: string; reason: string }> = [
+    {
+      now: '2026-06-12T14:00:00.000Z',
+      expected: '2026-06-12T14:15:00.000Z',
+      reason: 'exactly on a boundary must not return the boundary itself',
+    },
+    {
+      now: '2026-06-12T14:00:30.000Z',
+      expected: '2026-06-12T14:15:00.000Z',
+      reason:
+        'seconds past a boundary must not return the boundary that just passed (run 27420150558 flake)',
+    },
+    {
+      now: '2026-06-12T14:13:30.000Z',
+      expected: '2026-06-12T14:15:00.000Z',
+      reason: 'a boundary exactly MIN_SCHEDULE_LEAD_MS away is still usable',
+    },
+    {
+      now: '2026-06-12T14:14:59.000Z',
+      expected: '2026-06-12T14:30:00.000Z',
+      reason:
+        'a boundary closer than MIN_SCHEDULE_LEAD_MS would be in the past by the accept step',
+    },
+    {
+      now: '2026-06-12T14:15:01.000Z',
+      expected: '2026-06-12T14:30:00.000Z',
+      reason: 'just past a boundary rounds up to the next one',
+    },
+    {
+      now: '2026-06-12T23:59:30.000Z',
+      expected: '2026-06-13T00:15:00.000Z',
+      reason: 'lead requirement carries across the UTC day boundary',
+    },
+  ]
+
+  for (const { now, expected, reason } of cases) {
+    test(`now=${now} → ${expected} (${reason})`, () => {
+      expect(nextStartableQuarterHour(new Date(now)).toISOString()).toBe(
+        expected,
+      )
+    })
+  }
+
+  test('slot always has at least the minimum lead and stays on the quarter-hour grid', () => {
+    const base = Date.parse('2026-06-12T14:00:00.000Z')
+
+    for (let offsetSeconds = 0; offsetSeconds < 15 * 60; offsetSeconds += 7) {
+      const now = new Date(base + offsetSeconds * 1000)
+      const slot = nextStartableQuarterHour(now)
+
+      expect(slot.getTime() - now.getTime()).toBeGreaterThanOrEqual(
+        MIN_SCHEDULE_LEAD_MS,
+      )
+      expect(slot.getTime() % QUARTER_HOUR_MS).toBe(0)
+      expect(slot.getTime() - now.getTime()).toBeLessThan(
+        MIN_SCHEDULE_LEAD_MS + QUARTER_HOUR_MS,
+      )
     }
   })
 })
