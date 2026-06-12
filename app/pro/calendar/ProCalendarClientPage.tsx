@@ -1,7 +1,7 @@
 // app/pro/calendar/ProCalendarClientPage.tsx
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import BlockTimeModal from './_components/BlockTimeModal'
 import EditBlockModal from './_components/EditBlockModal'
@@ -128,6 +128,24 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
     [topPendingRequest],
   )
 
+  // Dismissal is keyed to the current set of pending requests, so the bar
+  // returns as soon as a new request arrives or the set changes.
+  const pendingRequestsKey = useMemo(
+    () => cal.management.pendingRequests.map((event) => event.id).join('|'),
+    [cal.management.pendingRequests],
+  )
+
+  const [dismissedPendingKey, setDismissedPendingKey] = useState<
+    string | null
+  >(null)
+
+  const pendingBarDismissed =
+    pendingRequestsKey.length > 0 && dismissedPendingKey === pendingRequestsKey
+
+  const dismissPendingBar = useCallback(() => {
+    setDismissedPendingKey(pendingRequestsKey)
+  }, [pendingRequestsKey])
+
   const viewTitle = useMemo(
     () => calendarTitleForView(view, copy.titles),
     [copy.titles, view],
@@ -153,6 +171,8 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onNext={goNext}
         topPendingRequest={topPendingRequest}
         topPendingBookingId={topPendingBookingId}
+        pendingBarDismissed={pendingBarDismissed}
+        onDismissPendingBar={dismissPendingBar}
         cal={cal}
       />
 
@@ -171,6 +191,8 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onToday={goToToday}
         onBack={goBack}
         onNext={goNext}
+        pendingBarDismissed={pendingBarDismissed}
+        onDismissPendingBar={dismissPendingBar}
         cal={cal}
       />
 
@@ -190,6 +212,8 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onToday={goToToday}
         onBack={goBack}
         onNext={goNext}
+        pendingBarDismissed={pendingBarDismissed}
+        onDismissPendingBar={dismissPendingBar}
         cal={cal}
       />
 

@@ -168,6 +168,7 @@ const proCalendar: BrandConfig['proCalendar'] = {
     openRequestsLabel: 'Open pending booking requests',
     approveLabel: 'Approve pending booking',
     denyLabel: 'Deny pending booking',
+    dismissLabel: 'Hide pending requests bar',
   },
 
   legend: {

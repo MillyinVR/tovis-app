@@ -1148,6 +1148,26 @@
   opacity: 0.55;
 }
 
+.brand-pro-calendar-pending-dismiss {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  place-items: center;
+  border: 1px solid rgb(var(--surface-glass) / 0.16);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: rgb(var(--text-muted));
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.brand-pro-calendar-pending-dismiss:hover {
+  border-color: rgb(var(--surface-glass) / 0.3);
+  color: rgb(var(--text-primary));
+}
+
 @media (max-width: 767px) {
   .brand-pro-calendar-page {
     padding-bottom: calc(
@@ -3319,10 +3339,14 @@
 
 /* Floating pending request bar */
 
+/*
+  Pinned to the viewport (not the frame): the frame's min-height can exceed
+  short viewports, which previously pushed this bar below the fold.
+*/
 .brand-pro-calendar-tablet-pending-bar {
-  position: absolute;
+  position: fixed;
   right: 16px;
-  bottom: 14px;
+  bottom: calc(14px + env(safe-area-inset-bottom));
   left: 16px;
   z-index: 40;
   pointer-events: none;
@@ -3824,11 +3848,24 @@
 
 /* Pending footer */
 
+/*
+  Pinned to the viewport: the panel's min-height can exceed short viewports,
+  which previously pushed this footer below the fold.
+*/
 .brand-pro-calendar-desktop-pending-banner {
-  flex-shrink: 0;
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
   border-top: 1px solid rgb(var(--surface-glass) / 0.16);
-  background: rgb(var(--tone-pending) / 0.04);
-  padding: 10px 24px;
+  background:
+    linear-gradient(
+      rgb(var(--tone-pending) / 0.04),
+      rgb(var(--tone-pending) / 0.04)
+    ),
+    rgb(var(--bg-primary));
+  padding: 10px 24px calc(10px + env(safe-area-inset-bottom));
 }
 
 .brand-pro-calendar-desktop-pending-banner .brand-pro-calendar-pending-shell {

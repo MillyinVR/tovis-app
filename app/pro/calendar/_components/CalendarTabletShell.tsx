@@ -43,6 +43,9 @@ type CalendarTabletShellProps = {
   onBack: () => void
   onNext: () => void
 
+  pendingBarDismissed: boolean
+  onDismissPendingBar: () => void
+
   cal: CalendarData
 }
 
@@ -113,6 +116,8 @@ type TabletCalendarBodyProps = {
 type TabletPendingBarProps = {
   copy: BrandProCalendarCopy
   cal: CalendarData
+  dismissed: boolean
+  onDismiss: () => void
 }
 
 type StateBannerProps = {
@@ -138,6 +143,8 @@ export function CalendarTabletShell(props: CalendarTabletShellProps) {
     onToday,
     onBack,
     onNext,
+    pendingBarDismissed,
+    onDismissPendingBar,
     cal,
   } = props
 
@@ -201,7 +208,12 @@ export function CalendarTabletShell(props: CalendarTabletShellProps) {
           cal={cal}
         />
 
-        <TabletPendingBar copy={copy} cal={cal} />
+        <TabletPendingBar
+          copy={copy}
+          cal={cal}
+          dismissed={pendingBarDismissed}
+          onDismiss={onDismissPendingBar}
+        />
 
         <EditScheduleOverlay
           open={cal.showHoursForm}
@@ -391,10 +403,12 @@ function TabletCalendarBody(props: TabletCalendarBodyProps) {
 }
 
 function TabletPendingBar(props: TabletPendingBarProps) {
-  const { copy, cal } = props
+  const { copy, cal, dismissed, onDismiss } = props
 
   const topPendingRequest = firstPendingBooking(cal.management.pendingRequests)
   const topPendingBookingId = bookingActionId(topPendingRequest)
+
+  if (!topPendingRequest || dismissed) return null
 
   return (
     <div className="brand-pro-calendar-tablet-pending-bar">
@@ -420,6 +434,7 @@ function TabletPendingBar(props: TabletPendingBarProps) {
             void cal.denyBookingById(topPendingBookingId)
           }
         }}
+        onDismiss={onDismiss}
       />
     </div>
   )
