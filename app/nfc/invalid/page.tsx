@@ -1,133 +1,41 @@
 // app/nfc/invalid/page.tsx
-import { redirect } from 'next/navigation'
-import { NfcCardType, Prisma } from '@prisma/client'
+import Link from 'next/link'
 
-import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import PublicTopBar from '@/app/_components/PublicTopBar/PublicTopBar'
 
-function safeNextUrl(value: string | null): string | null {
-  if (!value) return null
+export default function NfcInvalidPage() {
+  return (
+    <main className="min-h-screen w-full text-textPrimary">
+      <PublicTopBar />
 
-  const normalized = value.trim()
+      <div className="mx-auto w-full max-w-2xl px-6 pb-20 sm:px-10">
+        <header className="mb-10 mt-2">
+          <div className="tovis-section-label mb-4">NFC card</div>
+          <h1 className="font-display text-[36px] font-semibold leading-tight tracking-tight">
+            This card isn&rsquo;t active
+          </h1>
+          <p className="mt-4 text-[14px] leading-relaxed text-textSecondary">
+            The NFC card you tapped is invalid or has been deactivated. If you
+            think this is a mistake, reach out to the professional who gave you
+            the card, or contact support.
+          </p>
+        </header>
 
-  if (!normalized) return null
-  if (!normalized.startsWith('/')) return null
-  if (normalized.startsWith('//')) return null
-
-  return normalized
-}
-
-type IntentType =
-  | 'SIGNUP_CLIENT'
-  | 'SIGNUP_PRO'
-  | 'BOOK_PRO'
-  | 'SALON_WHITE_LABEL'
-
-type NfcCardIntentSource = {
-  type: NfcCardType
-  professionalId: string | null
-  tenant: { slug: string }
-}
-
-type BuiltTapIntent = {
-  intentType: IntentType
-  payloadJson: Prisma.InputJsonObject
-  nextUrl: string
-}
-
-function buildIntentFromCard(card: NfcCardIntentSource): BuiltTapIntent {
-  if (card.type === NfcCardType.PRO_BOOKING && card.professionalId) {
-    return {
-      intentType: 'BOOK_PRO',
-      payloadJson: {
-        professionalId: card.professionalId,
-      },
-      nextUrl: `/professionals/${card.professionalId}`,
-    }
-  }
-
-  if (card.type === NfcCardType.CLIENT_REFERRAL) {
-    return {
-      intentType: 'SIGNUP_CLIENT',
-      payloadJson: {},
-      nextUrl: '/signup?role=CLIENT',
-    }
-  }
-
-  if (card.type === NfcCardType.SALON_WHITE_LABEL) {
-    return {
-      intentType: 'SALON_WHITE_LABEL',
-      payloadJson: {
-        tenantSlug: card.tenant.slug,
-      },
-      nextUrl: `/signup?salon=${encodeURIComponent(card.tenant.slug)}`,
-    }
-  }
-
-  return {
-    intentType: 'SIGNUP_CLIENT',
-    payloadJson: {},
-    nextUrl: '/signup?role=CLIENT',
-  }
-}
-
-export default async function TapPage(props: {
-  params: Promise<{ cardId: string }>
-  searchParams?: Promise<Record<string, string | undefined>>
-}) {
-  const { cardId } = await props.params
-  const searchParams = (await props.searchParams) ?? {}
-  const nextOverride = safeNextUrl(searchParams.next ?? null)
-
-  const card = await prisma.nfcCard.findUnique({
-    where: {
-      id: cardId,
-    },
-    select: {
-      id: true,
-      type: true,
-      isActive: true,
-      claimedAt: true,
-      claimedByUserId: true,
-      professionalId: true,
-      tenant: { select: { slug: true } },
-    },
-  })
-
-  if (!card || !card.isActive) {
-    redirect('/nfc/invalid')
-  }
-
-  const user = await getCurrentUser().catch(() => null)
-
-  const derived = buildIntentFromCard(card)
-  const nextUrl = nextOverride ?? derived.nextUrl
-
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 30)
-
-  const intent = await prisma.tapIntent.create({
-    data: {
-      cardId: card.id,
-      userId: user?.id ?? null,
-      intentType: derived.intentType,
-      payloadJson: {
-        ...derived.payloadJson,
-        nextUrl,
-      },
-      expiresAt,
-    },
-    select: {
-      id: true,
-    },
-  })
-
-  if (!user) {
-    redirect(`/signup?ti=${encodeURIComponent(intent.id)}`)
-  }
-
-  redirect(
-    `${nextUrl}${nextUrl.includes('?') ? '&' : '?'}ti=${encodeURIComponent(
-      intent.id,
-    )}`,
+        <div className="flex flex-wrap gap-4 text-[14px]">
+          <Link
+            href="/"
+            className="font-semibold text-accentPrimary underline-offset-2 transition hover:underline"
+          >
+            Go to the homepage
+          </Link>
+          <Link
+            href="/support"
+            className="font-semibold text-accentPrimary underline-offset-2 transition hover:underline"
+          >
+            Contact support
+          </Link>
+        </div>
+      </div>
+    </main>
   )
 }

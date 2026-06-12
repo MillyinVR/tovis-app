@@ -4,18 +4,7 @@ import { NfcCardType, Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
-
-function safeNextUrl(value: string | null): string | null {
-  if (!value) return null
-
-  const normalized = value.trim()
-
-  if (!normalized) return null
-  if (!normalized.startsWith('/')) return null
-  if (normalized.startsWith('//')) return null
-
-  return normalized
-}
+import { safeNextUrl } from '@/lib/security/safeNextUrl'
 
 type IntentType = 'CLAIM_CARD' | 'BOOK_PRO' | 'SALON_WHITE_LABEL'
 
