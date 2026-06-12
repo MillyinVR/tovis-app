@@ -11,6 +11,7 @@ import {
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,6 +43,8 @@ type InboxThread = {
   professional: {
     id: string
     businessName: string | null
+    firstName: string
+    lastName: string
     avatarUrl: string | null
   } | null
   participants: {
@@ -352,7 +355,12 @@ function buildThreadPresentation(params: {
     viewerRole === Role.PRO
       ? formatPersonName(thread.client?.firstName, thread.client?.lastName) ||
         'Client'
-      : thread.professional?.businessName || 'Professional'
+      : formatPublicProfileDisplayName({
+          businessName: thread.professional?.businessName,
+          firstName: thread.professional?.firstName,
+          lastName: thread.professional?.lastName,
+          fallback: 'Professional',
+        })
 
   const avatarUrl =
     viewerRole === Role.PRO
@@ -446,6 +454,8 @@ async function findInboxThreads(params: {
         select: {
           id: true,
           businessName: true,
+          firstName: true,
+          lastName: true,
           avatarUrl: true,
         },
       },

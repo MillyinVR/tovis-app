@@ -135,9 +135,19 @@ export function formatBusinessName(
 
 export function formatPublicProfileDisplayName(args: {
   businessName: string | null | undefined
+  firstName?: string | null
+  lastName?: string | null
   fallback?: string
 }): string {
-  return trimToNull(args.businessName) ?? args.fallback ?? 'Beauty professional'
+  const businessName = trimToNull(args.businessName)
+  if (businessName) return businessName
+
+  const personName = [trimToNull(args.firstName), trimToNull(args.lastName)]
+    .filter(Boolean)
+    .join(' ')
+  if (personName) return personName
+
+  return args.fallback ?? 'Beauty professional'
 }
 
 export function formatProfessionLabel(

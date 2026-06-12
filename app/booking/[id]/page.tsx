@@ -7,6 +7,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import { messageStartHref } from '@/lib/messages'
+import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { DEFAULT_TIME_ZONE, pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
@@ -75,9 +76,10 @@ const bookingReceiptSelect = {
     select: {
       id: true,
       businessName: true,
+      firstName: true,
+      lastName: true,
       timeZone: true,
       location: true,
-      user: { select: { email: true } },
     },
   },
 } satisfies Prisma.BookingSelect
@@ -258,7 +260,12 @@ export default async function BookingReceiptPage(props: PageProps) {
   const professional = booking.professional
   const service = booking.service
 
-  const proName = professional?.businessName || professional?.user?.email || 'Professional'
+  const proName = formatPublicProfileDisplayName({
+    businessName: professional?.businessName,
+    firstName: professional?.firstName,
+    lastName: professional?.lastName,
+    fallback: 'Professional',
+  })
   const serviceName = service?.name || 'Service'
 
   const appointmentTz = resolveReceiptTimeZone({
