@@ -72,7 +72,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     const raw: unknown = await req.json().catch(() => ({}))
     const body = isRecord(raw) ? raw : {}
 
-    const postalCode = pickString(body.postalCode)
+    const postalCode = pickString(body.postalCode) // pii-plaintext-read-ok: request body carries the new ZIP the pro is submitting, not stored PII
     const radiusMiles =
       body.radiusMiles === undefined ? undefined : pickRadiusMiles(body.radiusMiles)
 
@@ -97,7 +97,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
         id: true,
         type: true,
         isPrimary: true,
-        postalCode: true,
+        postalCode: true, // pii-plaintext-read-ok: pro reads own mobile base ZIP during expand-phase encryption sync
       },
     })
 
@@ -187,7 +187,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
           },
           select: {
             id: true,
-            postalCode: true,
+            postalCode: true, // pii-plaintext-read-ok: pro reads own mobile base ZIP during expand-phase encryption sync
             timeZone: true,
           },
         })
