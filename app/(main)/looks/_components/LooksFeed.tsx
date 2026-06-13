@@ -105,30 +105,6 @@ function parseComments(raw: unknown): UiComment[] {
   return parseLooksCommentsResponse(raw)
 }
 
-function hashStringToIndex(id: string, mod: number) {
-  let hash = 0
-  for (let i = 0; i < id.length; i += 1) {
-    hash = (hash * 31 + id.charCodeAt(i)) >>> 0
-  }
-  return mod === 0 ? 0 : hash % mod
-}
-
-const BOOKING_SIGNALS = [
-  'Booked today',
-  'Filling fast',
-  'Popular near you',
-  'New availability',
-  'High rebook rate',
-  'Clients saved this',
-] as const
-
-const FUTURE_SELF_LINES = [
-  'Wake up ready.',
-  'Low-maintenance glow.',
-  'Future-you called. Do it.',
-  'Main-character upgrade.',
-] as const
-
 const FOOTER_HEIGHT = UI_SIZES.footerHeight
 const OVERLAY_BOTTOM = UI_SIZES.footerHeight + UI_SIZES.rightRailBottomOffset
 const RIGHT_RAIL_BOTTOM = UI_SIZES.rightRailBottom
@@ -833,14 +809,6 @@ export default function LooksFeed() {
               </div>
             ) : (
               items.map((item, idx) => {
-                const signal =
-                  BOOKING_SIGNALS[
-                    hashStringToIndex(item.id, BOOKING_SIGNALS.length)
-                  ] ?? ''
-                const futureSelf =
-                  FUTURE_SELF_LINES[
-                    hashStringToIndex(item.id + '_future', FUTURE_SELF_LINES.length)
-                  ] ?? ''
                 const isActive = idx === activeIndex
 
                 const rightRail = (
@@ -874,8 +842,6 @@ export default function LooksFeed() {
                     item={item}
                     isActive={isActive}
                     rightRailBottom={OVERLAY_BOTTOM}
-                    signal={signal}
-                    futureSelf={futureSelf}
                     rightRail={rightRail}
                     onDoubleClickLike={() => handleDoubleClickLikeOnly(item.id)}
                     onTouchEndLike={() => handleTouchEndLikeOnly(item.id)}

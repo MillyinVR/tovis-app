@@ -15,8 +15,6 @@ type ClampStyle = CSSProperties & {
 type Props = {
   item: FeedItem
   rightRailBottom: number
-  signal: string
-  futureSelf: string
 }
 
 function pickTrimmed(v: unknown): string | null {
