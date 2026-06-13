@@ -5,6 +5,8 @@ import { headers } from 'next/headers'
 import { notFound } from 'next/navigation'
 
 import { parseLooksDetailResponse } from '@/lib/looks/parsers'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 import LookDetailClient from './LookDetailClient'
 
 export const dynamic = 'force-dynamic'
@@ -94,13 +96,17 @@ export async function generateMetadata({
     return {}
   }
 
-  const proName = item.professional.businessName ?? 'a TOVIS pro'
+  // Brand copy is tenant-resolved (white-label aware), never hardcoded.
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+
+  const proName =
+    item.professional.businessName ?? `a ${brand.displayName} pro`
   const caption = item.caption?.trim() ?? ''
 
   const title = caption ? `${caption.slice(0, 80)} — ${proName}` : `A look by ${proName}`
   const description = caption
     ? caption.slice(0, 160)
-    : `Discover this look by ${proName} on TOVIS — then book your appointment.`
+    : `Discover this look by ${proName} on ${brand.displayName} — then book your appointment.`
 
   const image = item.primaryMedia.thumbUrl ?? item.primaryMedia.url
   const isVideo = item.primaryMedia.mediaType === 'VIDEO'
