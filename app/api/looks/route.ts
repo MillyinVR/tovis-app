@@ -14,6 +14,7 @@ import {
 import { looksFeedSelect } from '@/lib/looks/selects'
 import { mapLooksFeedMediaToDto } from '@/lib/looks/mappers'
 import type { LooksFeedResponseDto } from '@/lib/looks/types'
+import { resolveTenantContextForRequest } from '@/lib/tenant'
 
 export const dynamic = 'force-dynamic'
 
@@ -91,8 +92,11 @@ export async function GET(req: Request) {
           })
         : []
 
+    const tenant = await resolveTenantContextForRequest(req)
+
     const where = buildLooksFeedWhere({
       kind,
+      tenant,
       categorySlug: rawCategorySlug,
       q,
       followingProfessionalIds,

@@ -7,6 +7,8 @@ import {
 } from '@prisma/client'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { buildLookPostSpotlightEligibilityWhere } from '@/lib/looks/spotlight'
+import { proDiscoveryVisibilityFilter } from '@/lib/tenant'
+import type { TenantContext } from '@/lib/tenant'
 
 export const LOOKS_SPOTLIGHT_SLUG = 'spotlight'
 
@@ -21,6 +23,11 @@ export type LooksMediaFeedKind = LooksFeedKind
 
 export type BuildLooksFeedWhereArgs = {
   kind: LooksFeedKind
+  // Tenant scope for the underlying Pro discovery: root sees every tenant's
+  // looks; a white-label context sees only looks authored by its own Pros.
+  // Required so a discovery surface can never omit tenant scoping by accident
+  // (the leak this field closes — see docs/architecture/tenant-model.md).
+  tenant: TenantContext
   categorySlug?: string | null
   q?: string | null
   followingProfessionalIds?: readonly string[] | null
@@ -228,6 +235,9 @@ export function buildLooksFeedWhere(
         verificationStatus: {
           in: [...PUBLICLY_APPROVED_PRO_STATUSES],
         },
+        // Asymmetric tenant visibility: spreads `{}` for root (no-op) or
+        // `{ homeTenantId }` for a white-label context.
+        ...proDiscoveryVisibilityFilter(args.tenant),
       },
     },
     ...(and.length > 0 ? { AND: and } : {}),
