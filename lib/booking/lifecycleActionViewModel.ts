@@ -215,6 +215,7 @@ function proActions(input: LifecycleViewModelInput): LifecycleAction[] {
       label: 'Start booking',
       method: 'POST',
       href: `/api/pro/bookings/${safeId}/session/start`,
+      payload: { explicitSelection: true },
       idempotencyKeyHint: idempotencyKeyHint(bookingId, 'START_SESSION'),
       primary: true,
     })

@@ -314,6 +314,9 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onDeny={() => {
           void cal.denyBooking()
         }}
+        onStartSession={() => {
+          void cal.startSession()
+        }}
       />
 
       <BookingOverrideConfirmModal

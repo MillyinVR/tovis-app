@@ -122,15 +122,21 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
   return out
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
 function buildStartSessionIdempotencyBody(args: {
   professionalId: string
   actorUserId: string
   bookingId: string
+  explicitSelection: boolean
 }): JsonObjectPayload {
   return {
     professionalId: args.professionalId,
     actorUserId: args.actorUserId,
     bookingId: args.bookingId,
+    explicitSelection: args.explicitSelection,
   }
 }
 
@@ -172,6 +178,10 @@ export async function POST(request: Request, ctx: Ctx) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
+    const rawBody: unknown = await request.json().catch(() => ({}))
+    const body = isRecord(rawBody) ? rawBody : {}
+    const explicitSelection = body.explicitSelection === true
+
     const idempotency = await beginRouteIdempotency<StartSessionResponseBody>({
       request,
       actor: {
@@ -184,6 +194,7 @@ export async function POST(request: Request, ctx: Ctx) {
         professionalId,
         actorUserId,
         bookingId,
+        explicitSelection,
       }),
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -205,6 +216,8 @@ export async function POST(request: Request, ctx: Ctx) {
       professionalId,
       requestId,
       idempotencyKey: idempotency.idempotencyKey,
+      explicitSelection,
+      actorUserId,
     })
 
     const responseBody = buildStartSessionResponseBody(result)

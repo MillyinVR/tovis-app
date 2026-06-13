@@ -880,6 +880,65 @@ export function useBookingModal(deps: BookingModalDeps) {
     savingReschedule,
   ])
 
+  const startSession = useCallback(async () => {
+    if (!booking || savingReschedule) return
+
+    setSavingReschedule(true)
+    setBookingError(null)
+
+    try {
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `pro-booking-start-${booking.id}-${Date.now()}-${Math.random()
+              .toString(36)
+              .slice(2)}`
+
+      const response = await fetch(
+        `/api/pro/bookings/${encodeURIComponent(booking.id)}/session/start`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': idempotencyKey,
+            'x-idempotency-key': idempotencyKey,
+          },
+          body: JSON.stringify({ explicitSelection: true }),
+        },
+      )
+
+      const data: unknown = await safeJson(response)
+
+      if (!response.ok) {
+        const message = apiMessage(data, 'Failed to start session.')
+        throw new Error(message)
+      }
+
+      const nextHref =
+        isRecord(data) && typeof data.nextHref === 'string'
+          ? data.nextHref
+          : `/pro/bookings/${encodeURIComponent(booking.id)}/session`
+
+      resetBookingState()
+      await reloadCalendar()
+      forceProFooterRefresh()
+
+      if (typeof window !== 'undefined') {
+        window.location.href = nextHref
+      }
+    } catch (caught) {
+      setBookingError(errorMessageFromUnknown(caught))
+    } finally {
+      setSavingReschedule(false)
+    }
+  }, [
+    booking,
+    forceProFooterRefresh,
+    reloadCalendar,
+    resetBookingState,
+    savingReschedule,
+  ])
+
   const denyBooking = useCallback(async () => {
     await mutateBookingStatus({
       status: 'CANCELLED',
@@ -928,6 +987,7 @@ export function useBookingModal(deps: BookingModalDeps) {
     submitChanges,
     approveBooking,
     denyBooking,
+    startSession,
 
     bookingOverridePrompt: bookingOverride?.prompt ?? null,
     bookingOverrideIntent: bookingOverride?.intent ?? 'accept',

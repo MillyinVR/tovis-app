@@ -57,11 +57,13 @@ enum BookingOverrideRule {
   ADVANCE_NOTICE
   MAX_DAYS_AHEAD
   WORKING_HOURS
+  START_WINDOW
 }
 
 enum BookingOverrideAction {
   CREATE
   UPDATE
+  START
 }
 
 enum ProfessionType {

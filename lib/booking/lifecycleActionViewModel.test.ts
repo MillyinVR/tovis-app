@@ -56,6 +56,9 @@ describe('buildLifecycleActionViewModel — pro role', () => {
       `/api/pro/bookings/${BOOKING_ID}/session/start`,
     )
     expect(requireDefined(vm.actions[0]).method).toBe('POST')
+    expect(requireDefined(vm.actions[0]).payload).toEqual({
+      explicitSelection: true,
+    })
     expect(vm.displayLabel).toBe('Confirmed')
   })
 
