@@ -32,7 +32,14 @@ const FEED_LIMIT = 24
 const FEED_CACHE_TTL_MS = 15_000
 const UPDATING_DELAY_MS = 250
 
-type FeedCacheEntry = { items: FeedItem[]; expiresAt: number }
+type FeedCacheEntry = {
+  items: FeedItem[]
+  nextCursor: string | null
+  expiresAt: number
+}
+
+// When the active slide is within this many items of the end, fetch the next page.
+const LOAD_MORE_THRESHOLD = 4
 
 function withSpotlight(cats: UiCategory[]) {
   if (cats.some((c) => c.slug === SPOTLIGHT_TAB.slug)) return cats
@@ -86,8 +93,12 @@ function parseCategories(raw: unknown): UiCategory[] {
   return withSpotlight([ALL_TAB, ...Array.from(map.values())])
 }
 
-function parseFeedItems(raw: unknown): FeedItem[] {
-  return parseLooksFeedEnvelope(raw).items
+function parseFeedEnvelope(raw: unknown): {
+  items: FeedItem[]
+  nextCursor: string | null
+} {
+  const envelope = parseLooksFeedEnvelope(raw)
+  return { items: envelope.items, nextCursor: envelope.nextCursor }
 }
 
 function parseComments(raw: unknown): UiComment[] {
@@ -155,6 +166,8 @@ export default function LooksFeed() {
   const { brand } = useBrand()
 
   const [items, setItems] = useState<FeedItem[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [feedError, setFeedError] = useState<string | null>(null)
@@ -182,6 +195,8 @@ export default function LooksFeed() {
   const hasLoadedOnceRef = useRef(false)
   const feedCacheRef = useRef(new Map<string, FeedCacheEntry>())
   const abortRef = useRef<AbortController | null>(null)
+  const loadMoreAbortRef = useRef<AbortController | null>(null)
+  const loadMoreInFlight = useRef(false)
   const updatingTimerRef = useRef<number | null>(null)
 
   const likeInFlight = useRef<Record<string, boolean>>({})
@@ -260,6 +275,7 @@ export default function LooksFeed() {
 
     if (cachedFresh && cached) {
       setItems(cached.items)
+      setNextCursor(cached.nextCursor)
       setFeedError(null)
       setLoading(false)
       setRefreshing(false)
@@ -314,11 +330,13 @@ export default function LooksFeed() {
         throw new Error(asTrimmedString(isRecord(raw) ? raw.error : null) ?? 'Failed to load looks')
       }
 
-      const nextItems = parseFeedItems(raw)
+      const { items: nextItems, nextCursor: cursor } = parseFeedEnvelope(raw)
 
       setItems(nextItems)
+      setNextCursor(cursor)
       feedCacheRef.current.set(key, {
         items: nextItems,
+        nextCursor: cursor,
         expiresAt: Date.now() + FEED_CACHE_TTL_MS,
       })
       hasLoadedOnceRef.current = true
@@ -336,6 +354,73 @@ export default function LooksFeed() {
     }
   }, [activeCategorySlug, query])
 
+  const loadMore = useCallback(async () => {
+    if (loadMoreInFlight.current) return
+    if (!nextCursor) return
+
+    loadMoreInFlight.current = true
+    setLoadingMore(true)
+
+    loadMoreAbortRef.current?.abort()
+    const abortController = new AbortController()
+    loadMoreAbortRef.current = abortController
+
+    try {
+      const qs = new URLSearchParams()
+      qs.set('limit', String(FEED_LIMIT))
+      qs.set('cursor', nextCursor)
+
+      if (activeCategorySlug && activeCategorySlug !== ALL_TAB.slug) {
+        qs.set('category', activeCategorySlug)
+      }
+
+      if (query.trim()) {
+        qs.set('q', query.trim())
+      }
+
+      const res = await fetch(`/api/looks?${qs.toString()}`, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+        signal: abortController.signal,
+      })
+
+      const raw = await safeJson(res)
+      if (abortController.signal.aborted) return
+      if (!res.ok) return
+
+      const { items: moreItems, nextCursor: cursor } = parseFeedEnvelope(raw)
+
+      const cacheKey = makeFeedKey({
+        slug: activeCategorySlug,
+        q: query,
+        limit: FEED_LIMIT,
+      })
+
+      setItems((prev) => {
+        const seen = new Set(prev.map((item) => item.id))
+        const merged = [
+          ...prev,
+          ...moreItems.filter((item) => !seen.has(item.id)),
+        ]
+
+        feedCacheRef.current.set(cacheKey, {
+          items: merged,
+          nextCursor: cursor,
+          expiresAt: Date.now() + FEED_CACHE_TTL_MS,
+        })
+
+        return merged
+      })
+      setNextCursor(cursor)
+    } catch (error: unknown) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      // A failed page-append is non-fatal; the feed keeps what it has.
+    } finally {
+      loadMoreInFlight.current = false
+      setLoadingMore(false)
+    }
+  }, [activeCategorySlug, nextCursor, query])
+
   useEffect(() => {
     void loadCategories()
   }, [loadCategories])
@@ -343,6 +428,16 @@ export default function LooksFeed() {
   useEffect(() => {
     void loadFeed()
   }, [loadFeed])
+
+  // Prefetch the next page as the active slide nears the end of the loaded set.
+  useEffect(() => {
+    if (!nextCursor) return
+    if (loadingMore) return
+    if (items.length === 0) return
+    if (activeIndex >= items.length - LOAD_MORE_THRESHOLD) {
+      void loadMore()
+    }
+  }, [activeIndex, items.length, nextCursor, loadingMore, loadMore])
 
   function onSelectCategory(categoryName: string) {
     const found = cats.find((c) => c.name === categoryName)
@@ -672,7 +767,7 @@ export default function LooksFeed() {
       if (typeof window === 'undefined') return
 
       const lookPostId = item.id
-      const url = `${window.location.origin}/looks?m=${encodeURIComponent(lookPostId)}`
+      const url = `${window.location.origin}/looks/${encodeURIComponent(lookPostId)}`
 
       try {
         const share = getNavigatorShare()
@@ -825,6 +920,27 @@ export default function LooksFeed() {
               }}
             >
               Updating…
+            </div>
+          ) : null}
+
+          {loadingMore ? (
+            <div
+              className="text-xs font-semibold text-textSecondary"
+              style={{
+                position: 'absolute',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                bottom: OVERLAY_BOTTOM,
+                background: 'rgba(0,0,0,0.28)',
+                border: '1px solid rgba(255,255,255,0.10)',
+                borderRadius: 999,
+                padding: '6px 12px',
+                backdropFilter: 'blur(14px)',
+                WebkitBackdropFilter: 'blur(14px)',
+                pointerEvents: 'none',
+              }}
+            >
+              Loading more…
             </div>
           ) : null}
         </div>

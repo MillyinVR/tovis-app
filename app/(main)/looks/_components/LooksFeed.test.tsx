@@ -717,6 +717,6 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
     })
 
     const sharedUrl = mockWriteText.mock.calls[0]?.[0]
-    expect(sharedUrl).toBe(`${window.location.origin}/looks?m=look_share_1`)
+    expect(sharedUrl).toBe(`${window.location.origin}/looks/look_share_1`)
   })
 })

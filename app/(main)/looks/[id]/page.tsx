@@ -1,4 +1,6 @@
 // app/(main)/looks/[id]/page.tsx
+import { cache } from 'react'
+import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import { notFound } from 'next/navigation'
 
@@ -71,6 +73,56 @@ async function fetchLookDetail(lookPostId: string) {
   return item
 }
 
+// Memoized per request so generateMetadata and the page render share one fetch.
+const getLookDetail = cache(fetchLookDetail)
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<Params>
+}): Promise<Metadata> {
+  const resolved = await params
+  const lookPostId = pickString(resolved.id)
+
+  if (!lookPostId) return {}
+
+  let item: Awaited<ReturnType<typeof fetchLookDetail>>
+  try {
+    item = await getLookDetail(lookPostId)
+  } catch {
+    // Don't let a metadata fetch failure 500 the page; fall back to defaults.
+    return {}
+  }
+
+  const proName = item.professional.businessName ?? 'a TOVIS pro'
+  const caption = item.caption?.trim() ?? ''
+
+  const title = caption ? `${caption.slice(0, 80)} — ${proName}` : `A look by ${proName}`
+  const description = caption
+    ? caption.slice(0, 160)
+    : `Discover this look by ${proName} on TOVIS — then book your appointment.`
+
+  const image = item.primaryMedia.thumbUrl ?? item.primaryMedia.url
+  const isVideo = item.primaryMedia.mediaType === 'VIDEO'
+
+  return {
+    title,
+    description,
+    openGraph: {
+      type: isVideo ? 'video.other' : 'article',
+      title,
+      description,
+      ...(image ? { images: [{ url: image }] } : {}),
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      ...(image ? { images: [image] } : {}),
+    },
+  }
+}
+
 export default async function LookDetailPage({
   params,
 }: {
@@ -83,6 +135,6 @@ export default async function LookDetailPage({
     notFound()
   }
 
-  const item = await fetchLookDetail(lookPostId)
+  const item = await getLookDetail(lookPostId)
   return <LookDetailClient initialItem={item} />
 }
