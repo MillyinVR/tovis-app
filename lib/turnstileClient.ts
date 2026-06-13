@@ -102,7 +102,24 @@ function logTurnstileClientError(args: {
   })
 }
 
-export async function getTurnstileToken(action: string): Promise<string> {
+export type TurnstileTokenOptions = {
+  /**
+   * Host element for the widget. When provided, an interactive challenge
+   * renders inline where the user is already looking (e.g. above the submit
+   * button) instead of in a floating bottom-right overlay they can miss.
+   */
+  container?: HTMLElement | null
+  /**
+   * Fires when Cloudflare escalates to an interactive challenge, so callers
+   * can tell the user a check is waiting instead of silently spinning.
+   */
+  onInteractiveChallenge?: () => void
+}
+
+export async function getTurnstileToken(
+  action: string,
+  options?: TurnstileTokenOptions,
+): Promise<string> {
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim()
 
   if (!siteKey) {
@@ -119,17 +136,22 @@ export async function getTurnstileToken(action: string): Promise<string> {
 
   // In interaction-only mode the widget stays invisible unless Cloudflare
   // decides the user must complete a challenge — and then it renders inside
-  // this container. Parking it off-screen made those signups fail with
-  // "Captcha failed" because the challenge could never be seen or clicked
-  // (Safari/strict-privacy/VPN users get challenged routinely). Keep it as a
-  // visible-capable bottom-right overlay instead: it takes no space and
-  // shows nothing unless a challenge is required.
+  // this container (Safari/strict-privacy/VPN users get challenged
+  // routinely). Prefer the caller-provided inline host so the challenge
+  // appears in the form itself; fall back to a visible-capable bottom-right
+  // overlay that takes no space unless a challenge is required.
+  const host = options?.container ?? null
   const container = document.createElement('div')
-  container.style.position = 'fixed'
-  container.style.bottom = '16px'
-  container.style.right = '16px'
-  container.style.zIndex = '2147483647'
-  document.body.appendChild(container)
+
+  if (host) {
+    host.appendChild(container)
+  } else {
+    container.style.position = 'fixed'
+    container.style.bottom = '16px'
+    container.style.right = '16px'
+    container.style.zIndex = '2147483647'
+    document.body.appendChild(container)
+  }
 
   let widgetId: string | null = null
   let cleanedUp = false
@@ -151,14 +173,9 @@ export async function getTurnstileToken(action: string): Promise<string> {
     }
 
     const timeout = window.setTimeout(() => {
-      if (widgetId) {
-        try {
-          turnstile.reset(widgetId)
-        } catch {
-          // Ignore reset errors.
-        }
-      }
-
+      // Do not reset() here: the widget is being abandoned, and resetting a
+      // widget Cloudflare already tore down throws an async TurnstileError
+      // ("Nothing to reset found for provided container") seen in production.
       cleanup()
       reject(new Error('Captcha timed out. Please try again.'))
     }, TURNSTILE_TIMEOUT_MS)
@@ -205,6 +222,10 @@ export async function getTurnstileToken(action: string): Promise<string> {
 
         'expired-callback'() {
           finishWithError('Captcha expired. Please try again.')
+        },
+
+        'before-interactive-callback'() {
+          options?.onInteractiveChallenge?.()
         },
       })
 

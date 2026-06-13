@@ -245,10 +245,6 @@ app/client/bookings/[id]/page.tsx:direct property read:raw.professional.user.ema
 app/client/bookings/[id]/page.tsx:direct property read:typeof raw.professional?.user?.email === 'string' &&
 app/client/bookings/[id]/page.tsx:optional direct property read:booking.consultation?.consultationNotes ||
 app/client/bookings/[id]/page.tsx:optional direct property read:typeof raw.professional?.user?.email === 'string' &&
-app/client/bookings/page.tsx:direct property read:const handle = (user.email?.split('@')[0] ?? 'you')
-app/client/bookings/page.tsx:direct property read:user.clientProfile?.firstName?.trim() ||
-app/client/bookings/page.tsx:direct property read:user.email?.split('@')[0] ||
-app/client/bookings/page.tsx:optional direct property read:user.clientProfile?.firstName?.trim() ||
 app/client/components/SavedServicesWithProviders.tsx:direct property read:const postalCode = pickText(place.postalCode) || null
 app/client/consultation/[token]/page.tsx:direct property read:const clientLabel = [data.booking.client.firstName, data.booking.client.lastName]
 app/client/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:

@@ -2,28 +2,24 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { hardNavigate } from '@/lib/hardNavigate'
 
 export default function LogoutButton({ className }: { className?: string }) {
   const [loading, setLoading] = useState(false)
-  const router = useRouter()
 
   async function onLogout() {
     if (loading) return
     setLoading(true)
 
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-        cache: 'no-store',
-      })
-    } finally {
-      // Hard nav: guarantees server components re-evaluate with cleared cookie
-      window.location.assign('/login')
-      // (router.replace('/login') also works, hard nav is just more stubborn/reliable)
-    }
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+    }).catch(() => null)
+
+    // Hard nav: guarantees server components re-evaluate with cleared cookie
+    hardNavigate('/login')
   }
 
   return (
@@ -38,7 +34,7 @@ export default function LogoutButton({ className }: { className?: string }) {
         className ?? '',
       )}
     >
-      {loading ? 'Logging out…' : 'Logout'}
+      {loading ? 'Signing out…' : 'Sign out'}
     </button>
   )
 }

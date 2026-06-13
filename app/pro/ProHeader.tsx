@@ -7,6 +7,14 @@ import { usePathname } from 'next/navigation'
 
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { PRO_PUBLIC_PROFILE_PATH } from '@/lib/routes'
+import ProAccountMenu from './_components/ProAccountMenu'
+
+type ProHeaderProps = {
+  businessName?: string | null
+  subtitle?: string | null
+  publicUrl?: string | null
+}
+
 type NotificationSummaryResponse = {
   hasUnread: boolean
   count: number
@@ -68,7 +76,11 @@ function isTabActive(pathname: string, tab: ProHeaderTabItem): boolean {
   return pathname === tab.href || pathname.startsWith(`${tab.href}/`)
 }
 
-export default function ProHeader() {
+export default function ProHeader({
+  businessName,
+  subtitle,
+  publicUrl,
+}: ProHeaderProps) {
   const pathname = usePathname()
   const { brand } = useBrand()
   const [hasUnread, setHasUnread] = useState(false)
@@ -122,7 +134,19 @@ export default function ProHeader() {
               </h1>
             </div>
 
-            <NotificationsLink hasUnread={hasUnread} />
+            <div className="flex items-center gap-2">
+              <NotificationsLink hasUnread={hasUnread} />
+
+              <ProAccountMenu
+                businessName={businessName}
+                subtitle={subtitle}
+                publicUrl={publicUrl}
+                looksHref="/looks"
+                proServicesHref={`${PRO_PUBLIC_PROFILE_PATH}?tab=services`}
+                uploadHref="/pro/media/new"
+                messagesHref="/messages"
+              />
+            </div>
           </div>
 
           <ProHeaderTabs pathname={pathname} />
