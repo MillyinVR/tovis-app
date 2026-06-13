@@ -72,7 +72,7 @@ function args(overrides: Partial<Parameters<typeof uploadWithProgress>[0]> = {})
 describe('uploadWithProgress', () => {
   beforeEach(() => {
     FakeXHR.instances = []
-    vi.stubGlobal('XMLHttpRequest', FakeXHR as unknown as typeof XMLHttpRequest)
+    vi.stubGlobal('XMLHttpRequest', FakeXHR)
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co')
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', 'sb_publishable_anon_key')
   })
