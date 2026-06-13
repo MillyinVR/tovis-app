@@ -71,4 +71,33 @@ describe('PendingActionButton', () => {
     expect(button).toHaveAttribute('data-variant', 'danger')
     expect(button).toHaveAttribute('data-grow', '2')
   })
+
+  it('shows transition banner when pending with transitionLabel', () => {
+    mocks.useFormStatus.mockReturnValue({ pending: true })
+
+    render(
+      <PendingActionButton
+        pendingLabel="Starting…"
+        transitionLabel="Starting service…"
+      >
+        Start service
+      </PendingActionButton>,
+    )
+
+    const banner = screen.getByRole('status')
+    expect(banner).toHaveTextContent('Starting service…')
+    expect(banner).toHaveClass('brand-pro-session-transition-banner')
+  })
+
+  it('hides transition banner when idle even with transitionLabel', () => {
+    mocks.useFormStatus.mockReturnValue({ pending: false })
+
+    render(
+      <PendingActionButton transitionLabel="Starting service…">
+        Start service
+      </PendingActionButton>,
+    )
+
+    expect(screen.queryByRole('status')).toBeNull()
+  })
 })

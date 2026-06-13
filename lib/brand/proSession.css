@@ -804,6 +804,58 @@
 }
 
 /* ──────────────────────────────────────────────────────────────────
+   Upload progress
+────────────────────────────────────────────────────────────────── */
+
+.brand-pro-session-upload-progress {
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  background: rgb(var(--surface-glass) / 0.15);
+  overflow: hidden;
+}
+
+.brand-pro-session-upload-progress-bar {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  background: rgb(var(--accent-primary));
+  transition: width 200ms ease;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Step transition banner
+────────────────────────────────────────────────────────────────── */
+
+.brand-pro-session-transition-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  margin-bottom: 8px;
+  padding: 10px 16px;
+  border: 1px solid rgb(var(--accent-primary) / 0.22);
+  border-radius: 10px;
+  background: rgb(var(--accent-primary) / 0.07);
+  color: rgb(var(--accent-primary-hover));
+  font-size: 12px;
+  font-weight: 850;
+  animation: brand-pro-session-pulse-subtle 1.6s ease-in-out infinite;
+}
+
+@keyframes brand-pro-session-pulse-subtle {
+  0%,
+  100% {
+    opacity: 0.8;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────
    Aftercare / wrap-up
 ────────────────────────────────────────────────────────────────── */
 

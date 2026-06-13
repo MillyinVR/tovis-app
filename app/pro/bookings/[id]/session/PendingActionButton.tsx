@@ -24,6 +24,18 @@ function Spinner() {
   )
 }
 
+function TransitionBanner({ label }: { label: string }) {
+  const { pending } = useFormStatus()
+  if (!pending) return null
+
+  return (
+    <div className="brand-pro-session-transition-banner" role="status">
+      <Spinner />
+      {label}
+    </div>
+  )
+}
+
 export default function PendingActionButton({
   children,
   variant = 'primary',
@@ -31,6 +43,7 @@ export default function PendingActionButton({
   disabled = false,
   grow,
   pendingLabel,
+  transitionLabel,
 }: {
   children: ReactNode
   variant?: ButtonVariant
@@ -38,30 +51,37 @@ export default function PendingActionButton({
   disabled?: boolean
   grow?: 1 | 2
   pendingLabel?: string
+  transitionLabel?: string
 }) {
   const { pending } = useFormStatus()
 
   const isDisabled = disabled || pending
 
   return (
-    <button
-      type="submit"
-      className="brand-pro-session-button brand-focus"
-      data-variant={variant}
-      data-full={full}
-      data-grow={grow}
-      data-pending={pending || undefined}
-      disabled={isDisabled}
-      aria-disabled={isDisabled}
-    >
-      {pending ? (
-        <>
-          <Spinner />
-          {pendingLabel ?? children}
-        </>
-      ) : (
-        children
-      )}
-    </button>
+    <>
+      {transitionLabel ? (
+        <TransitionBanner label={transitionLabel} />
+      ) : null}
+
+      <button
+        type="submit"
+        className="brand-pro-session-button brand-focus"
+        data-variant={variant}
+        data-full={full}
+        data-grow={grow}
+        data-pending={pending || undefined}
+        disabled={isDisabled}
+        aria-disabled={isDisabled}
+      >
+        {pending ? (
+          <>
+            <Spinner />
+            {pendingLabel ?? children}
+          </>
+        ) : (
+          children
+        )}
+      </button>
+    </>
   )
 }

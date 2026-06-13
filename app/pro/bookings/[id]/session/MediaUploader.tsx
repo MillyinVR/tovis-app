@@ -1,9 +1,8 @@
 // app/pro/bookings/[id]/session/MediaUploader.tsx
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabaseBrowser } from '@/lib/supabaseBrowser'
 import MediaFill from '@/app/_components/media/MediaFill'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
@@ -17,6 +16,7 @@ import {
   processImageForUpload,
   formatBytes,
 } from '@/lib/media/processImageForUpload'
+import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 
 type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
 type MediaType = 'IMAGE' | 'VIDEO'
@@ -102,12 +102,14 @@ function bytesFromMb(mb: number): number {
   return mb * 1024 * 1024
 }
 
-function statusLabel(status: UploadState): string {
+function statusLabel(status: UploadState, uploadPercent: number): string {
   switch (status) {
     case 'COMPRESSING':
       return 'Compressing…'
     case 'UPLOADING':
-      return 'Uploading…'
+      return uploadPercent > 0
+        ? `Uploading ${uploadPercent}%`
+        : 'Uploading…'
     case 'SAVING':
       return 'Saving…'
     default:
@@ -123,18 +125,21 @@ export default function MediaUploader({
   phase: Phase
 }) {
   const router = useRouter()
+  const [isRefreshing, startRefreshTransition] = useTransition()
 
   const [file, setFile] = useState<File | null>(null)
   const [caption, setCaption] = useState('')
   const [mediaType, setMediaType] = useState<MediaType>('IMAGE')
 
   const [status, setStatus] = useState<UploadState>('IDLE')
+  const [uploadPercent, setUploadPercent] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [compressionNote, setCompressionNote] = useState<string | null>(null)
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const pendingClearRef = useRef(false)
 
   const disabled = status !== 'IDLE'
 
@@ -149,6 +154,14 @@ export default function MediaUploader({
       }
     }
   }, [previewUrl])
+
+  useEffect(() => {
+    if (!isRefreshing && pendingClearRef.current) {
+      pendingClearRef.current = false
+      setCaption('')
+      void onPickFile(null)
+    }
+  }, [isRefreshing])
 
   const maxBytes = useMemo(() => {
     return mediaType === 'VIDEO'
@@ -168,6 +181,7 @@ export default function MediaUploader({
     setError(null)
     setMessage(null)
     setCompressionNote(null)
+    setUploadPercent(0)
   }
 
   async function onPickFile(next: File | null) {
@@ -235,12 +249,12 @@ export default function MediaUploader({
             )
           }
         } catch {
-          // Compression failed — upload the original file.
           uploadFile = file
         }
       }
 
       setStatus('UPLOADING')
+      setUploadPercent(0)
 
       const signRes = await fetch('/api/pro/uploads', {
         method: 'POST',
@@ -271,15 +285,18 @@ export default function MediaUploader({
         return
       }
 
-      const uploadRes = await supabaseBrowser.storage
-        .from(signData.bucket)
-        .uploadToSignedUrl(signData.path, signData.token, uploadFile, {
-          upsert: false,
-          contentType: uploadFile.type || undefined,
-        })
+      const uploadResult = await uploadWithProgress({
+        bucket: signData.bucket,
+        path: signData.path,
+        token: signData.token,
+        file: uploadFile,
+        contentType: uploadFile.type || 'application/octet-stream',
+        onProgress: setUploadPercent,
+        signal: controller.signal,
+      })
 
-      if (uploadRes.error) {
-        setError(uploadRes.error.message || 'Upload failed.')
+      if (uploadResult.error) {
+        setError(uploadResult.error)
         setStatus('IDLE')
         return
       }
@@ -324,11 +341,12 @@ export default function MediaUploader({
         return
       }
 
-      setMessage('Uploaded ✅')
-      setCaption('')
-      await onPickFile(null)
+      setMessage('Uploaded')
 
-      router.refresh()
+      pendingClearRef.current = true
+      startRefreshTransition(() => {
+        router.refresh()
+      })
     } catch (caught: unknown) {
       if (caught instanceof DOMException && caught.name === 'AbortError') {
         return
@@ -370,6 +388,8 @@ export default function MediaUploader({
 
     return 'Ready to upload to private storage.'
   })()
+
+  const showProgress = status === 'UPLOADING' || status === 'COMPRESSING' || status === 'SAVING'
 
   return (
     <div className={shell}>
@@ -420,7 +440,37 @@ export default function MediaUploader({
                   decoding: 'async',
                 }}
               />
+
+              {showProgress ? (
+                <div className="absolute inset-x-0 bottom-0 p-2">
+                  <div className="brand-pro-session-upload-progress">
+                    <div
+                      className="brand-pro-session-upload-progress-bar"
+                      style={{
+                        width:
+                          status === 'COMPRESSING'
+                            ? '15%'
+                            : status === 'SAVING'
+                              ? '100%'
+                              : `${Math.max(20, uploadPercent)}%`,
+                      }}
+                      role="progressbar"
+                      aria-valuenow={
+                        status === 'UPLOADING' ? uploadPercent : undefined
+                      }
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    />
+                  </div>
+                </div>
+              ) : null}
             </div>
+
+            {message ? (
+              <div className="mt-2 text-center text-[11px] font-black text-textPrimary">
+                {message}
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -478,7 +528,7 @@ export default function MediaUploader({
             disabled={!canSubmit || disabled}
             className={btn}
           >
-            {statusLabel(status)}
+            {statusLabel(status, uploadPercent)}
           </button>
 
           {compressionNote ? (
@@ -487,7 +537,7 @@ export default function MediaUploader({
             </span>
           ) : null}
 
-          {message ? (
+          {!previewUrl && message ? (
             <span className="text-xs font-black text-textPrimary">
               {message}
             </span>

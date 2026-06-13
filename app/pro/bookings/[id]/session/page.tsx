@@ -871,7 +871,7 @@ function ConsultationView({
 
           {canProceedToBefore ? (
             <form action={toBefore} className="mt-4">
-              <PendingActionButton pendingLabel="Advancing…">Proceed to before photos</PendingActionButton>
+              <PendingActionButton pendingLabel="Advancing…" transitionLabel="Moving to before photos…">Proceed to before photos</PendingActionButton>
             </form>
           ) : null}
 
@@ -1026,7 +1026,7 @@ function BeforePhotosView({
         </section>
 
         <form action={toService}>
-          <PendingActionButton pendingLabel="Starting…">
+          <PendingActionButton pendingLabel="Starting…" transitionLabel="Starting service…">
             Start service <ArrowRightIcon />
           </PendingActionButton>
         </form>
@@ -1116,7 +1116,7 @@ function ServiceInProgressView({
         </Card>
 
         <form action={toFinishReview}>
-          <PendingActionButton pendingLabel="Finishing…">
+          <PendingActionButton pendingLabel="Finishing…" transitionLabel="Finishing service…">
             Finish service <ArrowRightIcon />
           </PendingActionButton>
         </form>
@@ -1166,7 +1166,7 @@ function FinishReviewView({
           </div>
 
           <form action={toWrapUp} className="mt-3">
-            <PendingActionButton pendingLabel="Wrapping up…">
+            <PendingActionButton pendingLabel="Wrapping up…" transitionLabel="Moving to wrap-up…">
               Go to wrap-up <ArrowRightIcon />
             </PendingActionButton>
           </form>
