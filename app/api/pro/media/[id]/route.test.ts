@@ -102,6 +102,8 @@ function makeExistingMedia(
   overrides?: Partial<{
     id: string
     professionalId: string
+    reviewId: string | null
+    storageBucket: string
     caption: string | null
     isEligibleForLooks: boolean
     isFeaturedInPortfolio: boolean
@@ -111,6 +113,8 @@ function makeExistingMedia(
   return {
     id: 'media_1',
     professionalId: 'pro_1',
+    reviewId: null,
+    storageBucket: 'media-public',
     caption: 'Before caption',
     isEligibleForLooks: false,
     isFeaturedInPortfolio: false,
@@ -213,6 +217,52 @@ describe('app/api/pro/media/[id]/route.ts', () => {
       })
 
       expect(mocks.mediaAssetUpdate).not.toHaveBeenCalled()
+    })
+
+    it('returns 403 when making an unpromoted private session photo public', async () => {
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeExistingMedia({
+          storageBucket: 'media-private',
+          reviewId: null,
+        }),
+      )
+
+      const res = await PATCH(
+        makeJsonRequest({ isEligibleForLooks: true }),
+        makeCtx(),
+      )
+
+      expect(res.status).toBe(403)
+      await expect(res.json()).resolves.toEqual({
+        ok: false,
+        error:
+          'This session photo can only be shared publicly after the client adds it to a review.',
+      })
+      expect(mocks.mediaAssetUpdate).not.toHaveBeenCalled()
+    })
+
+    it('allows making a review-promoted private photo public', async () => {
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeExistingMedia({
+          storageBucket: 'media-private',
+          reviewId: 'review_1',
+        }),
+      )
+      mocks.mediaAssetUpdate.mockResolvedValueOnce({
+        id: 'media_1',
+        caption: 'Before caption',
+        visibility: MediaVisibility.PUBLIC,
+        isEligibleForLooks: true,
+        isFeaturedInPortfolio: false,
+      })
+
+      const res = await PATCH(
+        makeJsonRequest({ isEligibleForLooks: true }),
+        makeCtx(),
+      )
+
+      expect(res.status).toBe(200)
+      expect(mocks.mediaAssetUpdate).toHaveBeenCalledTimes(1)
     })
 
     it('returns 400 when provided serviceIds is empty', async () => {

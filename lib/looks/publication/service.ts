@@ -9,6 +9,10 @@ import {
 } from '@prisma/client'
 
 import {
+  isUnpromotedPrivateMedia,
+  UNPROMOTED_MEDIA_MESSAGE,
+} from '@/lib/media/publicShareGuard'
+import {
   toLookPublicationAsyncEffectsDto,
   toProLookPublicationResultDto,
   type CreateProLookRequestDto,
@@ -44,6 +48,8 @@ const mediaAssetPublicationSelect =
   Prisma.validator<Prisma.MediaAssetSelect>()({
     id: true,
     professionalId: true,
+    reviewId: true,
+    storageBucket: true,
     caption: true,
     visibility: true,
     isEligibleForLooks: true,
@@ -98,6 +104,8 @@ const proLookPublicationSelect =
       select: {
         id: true,
         professionalId: true,
+        reviewId: true,
+        storageBucket: true,
         caption: true,
         visibility: true,
         isEligibleForLooks: true,
@@ -313,7 +321,7 @@ async function getProLookByIdOrThrow(
 function assertMediaAssetCanBackLooks(
   media: Pick<
     MediaAssetPublicationRow,
-    'visibility' | 'isEligibleForLooks'
+    'visibility' | 'isEligibleForLooks' | 'storageBucket' | 'reviewId'
   >,
 ): void {
   if (media.visibility !== MediaVisibility.PUBLIC) {
@@ -324,6 +332,13 @@ function assertMediaAssetCanBackLooks(
     throw new Error(
       'Media asset must be marked eligible for Looks before publication.',
     )
+  }
+
+  // Defense in depth: a client's unpromoted private session photo must never
+  // back a public Look, even if its flags were somehow set. Only review-promoted
+  // or public-bucket media may be published.
+  if (isUnpromotedPrivateMedia(media)) {
+    throw new Error(UNPROMOTED_MEDIA_MESSAGE)
   }
 }
 

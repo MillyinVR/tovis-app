@@ -5,6 +5,7 @@ import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { MediaVisibility } from '@prisma/client'
 import { resolveStoragePointers, safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -21,6 +22,7 @@ async function loadOwnedMedia(mediaId: string, professionalId: string) {
     select: {
       id: true,
       professionalId: true,
+      reviewId: true,
       isFeaturedInPortfolio: true,
       isEligibleForLooks: true,
       visibility: true,
@@ -96,6 +98,12 @@ export async function POST(_req: NextRequest, props: Props) {
 
     const owned = await loadOwnedMedia(mediaId, professionalId)
     if (!owned.ok) return jsonFail(owned.status, owned.error)
+
+    // Consent gate: a client's private session photo can only be featured
+    // publicly after the client added it to a review (which sets reviewId).
+    if (!canProSharePublicly(owned.media)) {
+      return jsonFail(403, UNPROMOTED_MEDIA_MESSAGE)
+    }
 
     // Optional: move old rows toward canonical pointers
     await backfillPointersIfMissing(mediaId, owned.media)

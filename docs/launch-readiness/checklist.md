@@ -394,6 +394,7 @@ Harden storage, media, rate limits, request trust boundaries, and safe logging.
 | UploadSession binding | TODO | No | No | No | No | No | Tori | Required before public launch if uploads are in scope. |
 | Orphan media cleanup | TODO | No | No | No | No | No | Tori | Still missing. |
 | Media scan/moderation decision | TODO | No | No | No | No | No | Tori | Decide or explicitly defer. |
+| Client consent gate for publishing session media | PASS LOCALLY | Yes | Yes | Unknown | No | Partial | Tori | Pro can only make media public if it is public-bucket or review-promoted (reviewId set). Enforced in pro media portfolio + [id] PATCH routes and Looks publication. lib/media/publicShareGuard.ts; change-2026-06-13-media-consent-gate.md. Prod check: 0 rows previously mis-published. |
 
 ---
 
