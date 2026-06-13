@@ -18,6 +18,7 @@ import ConsultationForm, {
   type ConsultationInitialItem,
 } from '../ConsultationForm'
 import PendingActionButton from './PendingActionButton'
+import ElapsedTimer from './_components/ElapsedTimer'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
@@ -141,22 +142,6 @@ function formatAppointmentLine(args: {
 }): string {
   const when = args.scheduledFor ? formatDateTime(args.scheduledFor) : 'Time TBD'
   return `${args.clientName} · ${when ?? 'Time TBD'} · ${args.durationLabel}`
-}
-
-function formatElapsed(startedAt: Date | null | undefined): string {
-  if (!startedAt) return '0:00:00'
-
-  const elapsedMs = Math.max(0, Date.now() - startedAt.getTime())
-  const totalSeconds = Math.floor(elapsedMs / 1000)
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-
-  return [
-    String(hours),
-    String(minutes).padStart(2, '0'),
-    String(seconds).padStart(2, '0'),
-  ].join(':')
 }
 
 function sumDurations(
@@ -1084,7 +1069,7 @@ function ServiceInProgressView({
           </div>
 
           <div className="brand-pro-session-timer-value">
-            {formatElapsed(startedAt)}
+            <ElapsedTimer startedAt={startedAt} />
           </div>
 
           <div className="brand-pro-session-timer-sub">
