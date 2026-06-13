@@ -489,6 +489,7 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     submitChanges: bookingModal.submitChanges,
     approveBooking: bookingModal.approveBooking,
     denyBooking: bookingModal.denyBooking,
+    startSession: bookingModal.startSession,
 
     bookingOverridePrompt: bookingModal.bookingOverridePrompt,
     bookingOverrideIntent: bookingModal.bookingOverrideIntent,

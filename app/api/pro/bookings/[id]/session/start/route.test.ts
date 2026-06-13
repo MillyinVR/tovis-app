@@ -221,6 +221,7 @@ describe('POST /api/pro/bookings/[id]/start', () => {
         professionalId: 'pro_123',
         actorUserId: 'user_123',
         bookingId: 'booking_1',
+        explicitSelection: false,
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -322,6 +323,7 @@ describe('POST /api/pro/bookings/[id]/start', () => {
         professionalId: 'pro_123',
         actorUserId: 'user_123',
         bookingId: 'booking_1',
+        explicitSelection: false,
       },
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -337,6 +339,8 @@ describe('POST /api/pro/bookings/[id]/start', () => {
       professionalId: 'pro_123',
       requestId: null,
       idempotencyKey: 'idem_start_success_1',
+      explicitSelection: false,
+      actorUserId: 'user_123',
     })
 
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({
@@ -370,6 +374,8 @@ describe('POST /api/pro/bookings/[id]/start', () => {
       professionalId: 'pro_123',
       requestId: 'request_123',
       idempotencyKey: 'idem_start_with_request_id_1',
+      explicitSelection: false,
+      actorUserId: 'user_123',
     })
   })
 
@@ -496,5 +502,47 @@ describe('POST /api/pro/bookings/[id]/start', () => {
     })
 
     consoleErrorSpy.mockRestore()
+  })
+
+  it('passes explicitSelection and actorUserId when body contains explicitSelection: true', async () => {
+    expectIdempotencyStarted('idem_start_explicit_1')
+
+    const req = new Request(
+      'http://localhost/api/pro/bookings/booking_1/start',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'idem_start_explicit_1',
+        },
+        body: JSON.stringify({ explicitSelection: true }),
+      },
+    )
+
+    const result = await POST(req, makeCtx())
+
+    expect(mocks.beginRouteIdempotency).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestBody: {
+          professionalId: 'pro_123',
+          actorUserId: 'user_123',
+          bookingId: 'booking_1',
+          explicitSelection: true,
+        },
+      }),
+    )
+
+    expect(mocks.startBookingSession).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      professionalId: 'pro_123',
+      requestId: null,
+      idempotencyKey: 'idem_start_explicit_1',
+      explicitSelection: true,
+      actorUserId: 'user_123',
+    })
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, status: 200 }),
+    )
   })
 })

@@ -48,6 +48,7 @@ type BookingModalProps = {
   onSave: () => void
   onApprove: () => void
   onDeny: () => void
+  onStartSession?: () => void
 
   /**
    * Bridge until booking modal copy moves fully into BrandProCalendarCopy.
@@ -145,11 +146,13 @@ type ModalFooterProps = {
   booking: BookingDetails | null
   saving: boolean
   canSave: boolean
+  canStart: boolean
   noServicesSelected: boolean
   saveBlockedByOutsideHours: boolean
   copy: BookingModalCopy
   onClose: () => void
   onSave: () => void
+  onStartSession?: () => void
 }
 
 type ActionButtonProps = {
@@ -329,6 +332,11 @@ function isPendingBooking(booking: BookingDetails | null): boolean {
   return booking?.status.toUpperCase() === 'PENDING'
 }
 
+function isAcceptedBooking(booking: BookingDetails | null): boolean {
+  const s = booking?.status.toUpperCase()
+  return s === 'ACCEPTED' || s === 'CONFIRMED'
+}
+
 function durationForBooking(args: {
   durationMinutes: number
   booking: BookingDetails | null
@@ -456,6 +464,7 @@ export function BookingModal(props: BookingModalProps) {
     onSave,
     onApprove,
     onDeny,
+    onStartSession,
     copy: copyOverride,
   } = props
 
@@ -507,6 +516,7 @@ export function BookingModal(props: BookingModalProps) {
   })
 
   const isPending = isPendingBooking(booking)
+  const isAccepted = isAcceptedBooking(booking)
   const noServicesSelected = selectedDraftServiceIds.length === 0
   const saveBlockedByOutsideHours = editOutside && !allowOutsideHours
 
@@ -679,11 +689,13 @@ export function BookingModal(props: BookingModalProps) {
         booking={booking}
         saving={saving}
         canSave={canSave}
+        canStart={isAccepted && !saving}
         noServicesSelected={noServicesSelected}
         saveBlockedByOutsideHours={saveBlockedByOutsideHours}
         copy={copy}
         onClose={close}
         onSave={onSave}
+        onStartSession={onStartSession}
       />
     </BookingModalFrame>
   )
@@ -773,11 +785,13 @@ function ModalFooter(props: ModalFooterProps) {
     booking,
     saving,
     canSave,
+    canStart,
     noServicesSelected,
     saveBlockedByOutsideHours,
     copy,
     onClose,
     onSave,
+    onStartSession,
   } = props
 
   return (
@@ -796,6 +810,16 @@ function ModalFooter(props: ModalFooterProps) {
         <ActionButton tone="ghost" onClick={onClose} disabled={saving}>
           {copy.cancelLabel}
         </ActionButton>
+
+        {canStart && onStartSession ? (
+          <ActionButton
+            tone="primary"
+            onClick={onStartSession}
+            disabled={saving}
+          >
+            {saving ? 'Starting…' : 'Start'}
+          </ActionButton>
+        ) : null}
 
         <ActionButton
           tone="primary"

@@ -586,4 +586,70 @@ describe('useBookingModal', () => {
     expect(reloadCalendar).toHaveBeenCalled()
     expect(forceProFooterRefresh).toHaveBeenCalled()
   })
+
+  it('startSession calls the start endpoint with explicitSelection: true and navigates on success', async () => {
+    const booking = makeBooking({ status: 'ACCEPTED' })
+
+    mocks.parseBookingDetails.mockReturnValue(booking)
+    mocks.safeJson
+      .mockResolvedValueOnce({ booking })
+      .mockResolvedValueOnce({ services: [] })
+      .mockResolvedValueOnce({
+        booking: { id: 'booking_1', status: 'IN_PROGRESS' },
+        nextHref: '/pro/bookings/booking_1/session',
+      })
+
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+
+    const reloadCalendar = vi.fn(async () => {})
+    const forceProFooterRefresh = vi.fn()
+
+    const { result } = renderHook(() =>
+      useBookingModal({
+        eventsRef: { current: [] },
+        activeStepMinutes: 15,
+        activeLocationType: 'SALON',
+        timeZone: 'America/Los_Angeles',
+        resolveLocationStepMinutes: () => 15,
+        resolveBookingSchedulingContext: () => ({
+          timeZone: 'America/New_York',
+          workingHours: null,
+          stepMinutes: 15,
+        }),
+        reloadCalendar,
+        forceProFooterRefresh,
+        locations: [],
+      }),
+    )
+
+    await act(async () => {
+      await result.current.openBooking('booking_1')
+    })
+
+    await act(async () => {
+      await result.current.startSession()
+    })
+
+    const postCalls = fetchMock.mock.calls.filter(
+      (call) =>
+        typeof call[0] === 'string' &&
+        call[0].includes('/api/pro/bookings/booking_1/session/start') &&
+        call[1]?.method === 'POST',
+    )
+
+    expect(postCalls).toHaveLength(1)
+
+    const body = JSON.parse(String(postCalls[0]?.[1]?.body))
+    expect(body.explicitSelection).toBe(true)
+
+    const headers = postCalls[0]?.[1]?.headers as Record<string, string>
+    expect(headers['Idempotency-Key']).toBeTruthy()
+    expect(headers['x-idempotency-key']).toBeTruthy()
+
+    expect(reloadCalendar).toHaveBeenCalled()
+    expect(forceProFooterRefresh).toHaveBeenCalled()
+  })
 })

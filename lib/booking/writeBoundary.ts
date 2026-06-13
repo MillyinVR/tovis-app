@@ -3,6 +3,8 @@ import {
   AftercareRebookMode,
   BookingCheckoutStatus,
   BookingCloseoutAuditAction,
+  BookingOverrideAction,
+  BookingOverrideRule,
   BookingServiceItemType,
   BookingSource,
   BookingStatus,
@@ -442,6 +444,8 @@ type StartBookingSessionArgs = {
   professionalId: string
   requestId?: string | null
   idempotencyKey?: string | null
+  explicitSelection?: boolean
+  actorUserId?: string | null
 }
 
 type FinishBookingSessionArgs = {
@@ -5200,6 +5204,8 @@ async function performLockedStartBookingSession(args: {
   professionalId: string
   requestId?: string | null
   idempotencyKey?: string | null
+  explicitSelection?: boolean
+  actorUserId?: string | null
 }): Promise<StartBookingSessionResult> {
   const booking: StartBookingRecord | null = await args.tx.booking.findUnique({
     where: { id: args.bookingId },
@@ -5318,12 +5324,45 @@ async function performLockedStartBookingSession(args: {
     }
   }
 
-  if (!isWithinStartWindow(booking.scheduledFor, args.now)) {
+  const outsideWindow = !isWithinStartWindow(booking.scheduledFor, args.now)
+
+  if (outsideWindow && !args.explicitSelection) {
     throw bookingError('FORBIDDEN', {
       message:
         'You can start this appointment 15 minutes before or after the scheduled time.',
       userMessage:
         'You can start this appointment 15 minutes before or after the scheduled time.',
+    })
+  }
+
+  if (outsideWindow && args.explicitSelection && args.actorUserId) {
+    await args.tx.bookingOverrideAuditLog.create({
+      data: {
+        bookingId: booking.id,
+        professionalId: args.professionalId,
+        actorUserId: args.actorUserId,
+        action: BookingOverrideAction.START,
+        rule: BookingOverrideRule.START_WINDOW,
+        reason: null,
+        route: 'lib/booking/writeBoundary.ts:startBookingSession',
+        requestId: args.requestId ?? null,
+        oldValue: {
+          withinWindow: false,
+          scheduledFor: booking.scheduledFor.toISOString(),
+          now: args.now.toISOString(),
+          windowMinutes: 15,
+        },
+        newValue: {
+          withinWindow: true,
+          explicitSelection: true,
+        },
+        bookingScheduledForBefore: null,
+        bookingScheduledForAfter: booking.scheduledFor,
+        metadata: {
+          source: 'explicit_selection_start',
+          trigger: 'pro_explicit_start',
+        },
+      },
     })
   }
 
@@ -11730,6 +11769,8 @@ export async function startBookingSession(
         professionalId: args.professionalId,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
+        explicitSelection: args.explicitSelection ?? false,
+        actorUserId: args.actorUserId ?? null,
       }),
   )
 }
