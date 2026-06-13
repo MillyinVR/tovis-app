@@ -80,12 +80,6 @@ describe('useManagementPanel', () => {
     )
     expect(reloadCalendar).not.toHaveBeenCalled()
 
-    // Confirming without a reason does nothing.
-    await act(async () => {
-      await result.current.confirmManagementOverride()
-    })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-
     await act(async () => {
       result.current.setManagementOverrideReason('Regular client, slot just freed up')
     })
@@ -110,6 +104,45 @@ describe('useManagementPanel', () => {
     expect(result.current.managementOverrideReason).toBe('')
     expect(reloadCalendar).toHaveBeenCalled()
     expect(forceProFooterRefresh).toHaveBeenCalled()
+  })
+
+  it('retries the accept without an overrideReason when none is given', async () => {
+    mocks.safeJson
+      .mockResolvedValueOnce({
+        ok: false,
+        code: 'ADVANCE_NOTICE_REQUIRED',
+      })
+      .mockResolvedValueOnce({ ok: true })
+
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 400 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+
+    const { result, reloadCalendar } = renderPanel()
+
+    await act(async () => {
+      await result.current.approveBookingById('booking_1')
+    })
+
+    expect(result.current.managementOverridePrompt?.flag).toBe(
+      'allowShortNotice',
+    )
+
+    // The reason is optional: an empty reason still retries with the
+    // override flag and omits overrideReason from the payload.
+    await act(async () => {
+      await result.current.confirmManagementOverride()
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(retryBody.status).toBe('ACCEPTED')
+    expect(retryBody.allowShortNotice).toBe(true)
+    expect(retryBody.overrideReason).toBeUndefined()
+
+    expect(result.current.managementOverridePrompt).toBeNull()
+    expect(reloadCalendar).toHaveBeenCalled()
   })
 
   it('cancelling the override clears the prompt without retrying', async () => {

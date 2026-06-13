@@ -15,7 +15,7 @@ type BuildBookingOverrideAuditRowsArgs = {
   actorUserId: string
   action: BookingOverrideAction | 'CREATE' | 'UPDATE'
   route: string
-  reason: string
+  reason: string | null
   appliedOverrides: ProSchedulingAppliedOverride[]
   bookingScheduledForBefore?: Date | null
   bookingScheduledForAfter: Date
@@ -214,8 +214,10 @@ function buildMetadata(args: {
 export function buildBookingOverrideAuditRows(
   args: BuildBookingOverrideAuditRowsArgs,
 ): Prisma.BookingOverrideAuditLogCreateManyInput[] {
-  const normalizedReason = args.reason.trim()
-  if (!normalizedReason) return []
+  // The reason is optional: every applied override gets an audit row, with
+  // the reason recorded only when the pro provided one.
+  const trimmedReason = args.reason?.trim() ?? ''
+  const normalizedReason = trimmedReason.length > 0 ? trimmedReason : null
 
   const normalizedAction = normalizeAuditAction(args.action)
   const uniqueRules = Array.from(new Set(args.appliedOverrides))

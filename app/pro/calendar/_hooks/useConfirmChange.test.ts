@@ -172,8 +172,8 @@ describe('useConfirmChange', () => {
     expect(body.scheduledFor).toBe('2026-06-12T16:00:00.000Z')
     expect(body.notifyClient).toBe(true)
 
-    // Override flags need an explicit reason server-side, so the calendar
-    // must never blind-send them with a plain drag move.
+    // Override flags must be explicit, so the calendar must never
+    // blind-send them with a plain drag move.
     expect(body.allowShortNotice).toBeUndefined()
     expect(body.allowFarFuture).toBeUndefined()
     expect(body.overrideReason).toBeUndefined()
@@ -216,12 +216,6 @@ describe('useConfirmChange', () => {
     expect(result.current.pendingChange).not.toBeNull()
     expect(reloadCalendar).not.toHaveBeenCalled()
 
-    // Confirming without a reason does nothing.
-    await act(async () => {
-      await result.current.confirmChangeOverride()
-    })
-    expect(bookingPatchCalls()).toHaveLength(1)
-
     await act(async () => {
       result.current.setChangeOverrideReason('Client asked to move it today')
     })
@@ -244,6 +238,45 @@ describe('useConfirmChange', () => {
     const retryKey = patchCalls[1]?.[1]?.headers?.['Idempotency-Key']
     expect(retryKey).toBeTruthy()
     expect(retryKey).not.toBe(firstKey)
+
+    expect(result.current.changeOverridePrompt).toBeNull()
+    expect(result.current.pendingChange).toBeNull()
+    expect(reloadCalendar).toHaveBeenCalled()
+  })
+
+  it('retries the override without an overrideReason when none is given', async () => {
+    mocks.safeJson
+      .mockResolvedValueOnce({ ok: false, code: 'ADVANCE_NOTICE_REQUIRED' })
+      .mockResolvedValueOnce({ ok: true })
+
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 400 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+
+    const { result, reloadCalendar } = renderConfirmChange()
+
+    act(() => {
+      result.current.openConfirm(makeMoveChange())
+    })
+
+    await act(async () => {
+      await result.current.applyConfirm()
+    })
+
+    expect(result.current.changeOverridePrompt?.flag).toBe('allowShortNotice')
+
+    // The reason is optional: confirming with an empty reason retries with
+    // the override flag and omits overrideReason entirely.
+    await act(async () => {
+      await result.current.confirmChangeOverride()
+    })
+
+    const patchCalls = bookingPatchCalls()
+    expect(patchCalls).toHaveLength(2)
+
+    const retryBody = JSON.parse(String(patchCalls[1]?.[1]?.body))
+    expect(retryBody.allowShortNotice).toBe(true)
+    expect(retryBody.overrideReason).toBeUndefined()
 
     expect(result.current.changeOverridePrompt).toBeNull()
     expect(result.current.pendingChange).toBeNull()

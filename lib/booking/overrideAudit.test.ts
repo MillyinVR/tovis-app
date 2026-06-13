@@ -196,7 +196,7 @@ describe('buildBookingOverrideAuditRows', () => {
     expect(rows[0]?.bookingScheduledForAfter).toEqual(AFTER_TIME)
   })
 
-  it('returns no rows when reason is blank after trimming', () => {
+  it('builds a row with a null reason when reason is blank after trimming', () => {
     const rows = buildBookingOverrideAuditRows(
       makeArgs({
         reason: '   ',
@@ -204,7 +204,22 @@ describe('buildBookingOverrideAuditRows', () => {
       }),
     )
 
-    expect(rows).toEqual([])
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.reason).toBeNull()
+    expect(rows[0]?.rule).toBe(BookingOverrideRule.ADVANCE_NOTICE)
+  })
+
+  it('builds a row with a null reason when reason is null', () => {
+    const rows = buildBookingOverrideAuditRows(
+      makeArgs({
+        reason: null,
+        appliedOverrides: ['WORKING_HOURS'],
+      }),
+    )
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.reason).toBeNull()
+    expect(rows[0]?.rule).toBe(BookingOverrideRule.WORKING_HOURS)
   })
 
   it('returns no rows when there are no applied overrides', () => {

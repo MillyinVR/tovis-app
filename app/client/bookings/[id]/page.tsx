@@ -1049,6 +1049,12 @@ export default async function ClientBookingPage(props: {
   const title = booking.display?.title || COPY.bookings.titleFallback
   const locationLine = booking.locationLabel || ''
 
+  const proOverrideNote =
+    typeof raw.clientVisibleOverrideNote === 'string' &&
+    raw.clientVisibleOverrideNote.trim()
+      ? raw.clientVisibleOverrideNote.trim()
+      : null
+
   const showConsultationApproval = Boolean(viewModel.showConsultationApproval)
   const consultApprovalMode = step === 'consult' && showConsultationApproval
   const shouldShowReview = reviewCloseoutEligible && step === 'aftercare'
@@ -1167,6 +1173,15 @@ export default async function ClientBookingPage(props: {
                 <span className="text-textSecondary"> · {locationLine}</span>
               ) : null}
             </div>
+
+            {proOverrideNote ? (
+              <div className="mt-2 whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">
+                <span className="font-black text-textPrimary">
+                  Note from your pro:
+                </span>{' '}
+                {proOverrideNote}
+              </div>
+            ) : null}
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-2">

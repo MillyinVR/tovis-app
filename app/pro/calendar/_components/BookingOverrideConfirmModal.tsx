@@ -28,7 +28,6 @@ type ModalCopy = {
   body: string
   confirmLabel: string
   busyLabel: string
-  missingReasonHint: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -38,17 +37,15 @@ const MAX_OVERRIDE_REASON_LENGTH = 280
 const MODAL_COPY: Record<BookingOverridePromptIntent, ModalCopy> = {
   accept: {
     title: 'Accept anyway?',
-    body: 'Clients cannot normally book this slot. You can still accept it, but the override needs a reason and is recorded.',
+    body: 'Clients cannot normally book this slot. You can still accept it — the override is recorded, and you can optionally add a note for your client.',
     confirmLabel: 'Accept anyway',
     busyLabel: 'Accepting…',
-    missingReasonHint: 'Add a reason before accepting with an override.',
   },
   edit: {
     title: 'Save anyway?',
-    body: 'Clients cannot normally book this slot. You can still save this change, but the override needs a reason and is recorded.',
+    body: 'Clients cannot normally book this slot. You can still save this change — the override is recorded, and you can optionally add a note for your client.',
     confirmLabel: 'Save anyway',
     busyLabel: 'Saving…',
-    missingReasonHint: 'Add a reason before saving with an override.',
   },
 }
 
@@ -147,8 +144,7 @@ export function BookingOverrideConfirmModal(
 
   if (!open || !prompt) return null
 
-  const trimmedReason = reason.trim()
-  const confirmDisabled = busy || trimmedReason.length === 0
+  const confirmDisabled = busy
 
   function cancel() {
     if (busy) return
@@ -218,7 +214,7 @@ export function BookingOverrideConfirmModal(
           <section className="mt-4">
             <label htmlFor="booking-override-reason">
               <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-                Reason for override
+                Reason (optional — shared with your client)
               </span>
 
               <textarea
@@ -234,7 +230,7 @@ export function BookingOverrideConfirmModal(
             </label>
 
             <div className="mt-1 flex items-center justify-between gap-3 font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paperMute">
-              <span>Required</span>
+              <span>Optional</span>
               <span>
                 {reason.length}/{MAX_OVERRIDE_REASON_LENGTH}
               </span>
@@ -258,7 +254,6 @@ export function BookingOverrideConfirmModal(
               onClick={onConfirm}
               disabled={confirmDisabled}
               className={buttonClassName('primary')}
-              title={trimmedReason.length === 0 ? copy.missingReasonHint : ''}
             >
               {busy ? copy.busyLabel : copy.confirmLabel}
             </button>

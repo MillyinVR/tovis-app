@@ -39,6 +39,8 @@ const bookingPageBookingSelect = {
   totalDurationMinutes: true,
   bufferMinutes: true,
 
+  clientVisibleOverrideNote: true,
+
   locationType: true,
   locationId: true,
   locationTimeZone: true,

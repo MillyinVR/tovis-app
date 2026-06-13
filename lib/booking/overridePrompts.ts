@@ -2,8 +2,9 @@
 //
 // Client-safe mapping from override-gated booking error codes to the
 // PATCH /api/pro/bookings/[id] flags that authorize a retry, plus the
-// copy the confirm dialog shows. The backend requires an overrideReason
-// alongside these flags and writes a BookingOverrideAuditLog entry.
+// copy the confirm dialog shows. The backend writes a BookingOverrideAuditLog
+// entry for every applied override; the overrideReason is optional and, when
+// provided, is also surfaced on the client's appointment detail.
 
 import { isRecord } from '@/lib/guards'
 

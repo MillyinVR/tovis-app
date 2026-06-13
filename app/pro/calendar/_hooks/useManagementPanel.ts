@@ -309,7 +309,6 @@ export function useManagementPanel(deps: ManagementPanelDeps) {
     if (busyIdRef.current !== null) return
 
     const reason = managementOverrideReason.trim()
-    if (!reason) return
 
     setBusyId(managementOverride.bookingId)
     clearActionErrorTimer()
@@ -319,7 +318,7 @@ export function useManagementPanel(deps: ManagementPanelDeps) {
       const payload: BookingPatchPayload = {
         status: 'ACCEPTED',
         notifyClient: true,
-        overrideReason: reason,
+        ...(reason ? { overrideReason: reason } : {}),
       }
 
       for (const flag of managementOverride.flags) {

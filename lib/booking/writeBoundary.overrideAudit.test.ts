@@ -577,6 +577,15 @@ describe('lib/booking/writeBoundary override audit', () => {
       ],
     })
 
+    // The provided reason also becomes the client-visible override note.
+    expect(mocks.txBookingCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientVisibleOverrideNote: 'approved by manager',
+        }),
+      }),
+    )
+
     expect(
       mocks.cancelScheduledClientNotificationsForBooking,
     ).toHaveBeenCalledWith({
@@ -622,6 +631,87 @@ describe('lib/booking/writeBoundary override audit', () => {
         noOp: false,
       },
     })
+  })
+
+  it('writes audit rows with a null reason when an override is used without one', async () => {
+    mocks.buildBookingOverrideAuditRows.mockReturnValue([
+      {
+        bookingId: BOOKING_ID,
+        professionalId: PROFESSIONAL_ID,
+        actorUserId: 'user_1',
+        action: BookingOverrideAction.CREATE,
+        rule: BookingOverrideRule.ADVANCE_NOTICE,
+        reason: null,
+        route: 'lib/booking/writeBoundary.ts:createProBooking',
+        requestId: null,
+        oldValue: {
+          allowShortNotice: false,
+          advanceNoticeMinutes: 30,
+        },
+        newValue: {
+          allowShortNotice: true,
+          advanceNoticeMinutes: 30,
+        },
+        bookingScheduledForBefore: null,
+        bookingScheduledForAfter: REQUESTED_START,
+        metadata: {
+          source: 'booking_override_audit',
+          appliedOverride: 'ADVANCE_NOTICE',
+          timeZone: LOCATION_TIME_ZONE,
+        },
+        createdAt: TEST_NOW,
+      },
+    ])
+
+    await createProBooking({
+      professionalId: PROFESSIONAL_ID,
+      actorUserId: 'user_1',
+      overrideReason: null,
+      clientId: CLIENT_ID,
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: REQUESTED_START,
+      clientAddressId: null,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: true,
+      allowFarFuture: false,
+    })
+
+    expect(mocks.assertCanUseBookingOverride).toHaveBeenCalledWith({
+      actorUserId: 'user_1',
+      professionalId: PROFESSIONAL_ID,
+      rule: 'ADVANCE_NOTICE',
+    })
+
+    expect(mocks.buildBookingOverrideAuditRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: null,
+        appliedOverrides: ['ADVANCE_NOTICE'],
+      }),
+    )
+
+    expect(mocks.txBookingOverrideAuditLogCreateMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          bookingId: BOOKING_ID,
+          rule: BookingOverrideRule.ADVANCE_NOTICE,
+          reason: null,
+        }),
+      ],
+    })
+
+    // No reason means no client-visible note.
+    expect(mocks.txBookingCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientVisibleOverrideNote: null,
+        }),
+      }),
+    )
   })
 
   it('does not write audit rows when no override was actually applied', async () => {

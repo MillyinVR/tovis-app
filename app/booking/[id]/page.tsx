@@ -40,6 +40,8 @@ const bookingReceiptSelect = {
   subtotalSnapshot: true,
   totalDurationMinutes: true,
 
+  clientVisibleOverrideNote: true,
+
   locationTimeZone: true,
   locationAddressSnapshot: true,
   locationLatSnapshot: true,
@@ -296,6 +298,8 @@ export default async function BookingReceiptPage(props: PageProps) {
   const statusLabel = friendlyStatus(booking.status)
   const isWaiting = upper(booking.status) === 'PENDING'
 
+  const overrideNote = booking.clientVisibleOverrideNote?.trim() || null
+
   const items = booking.serviceItems ?? []
   const baseItems = items.filter((item) => !isAddOnItem(item))
   const addOnItems = items.filter((item) => isAddOnItem(item))
@@ -372,6 +376,15 @@ export default async function BookingReceiptPage(props: PageProps) {
               </span>
             ) : null}
           </div>
+
+          {overrideNote ? (
+            <div className="tovis-glass-soft mt-3 whitespace-pre-wrap rounded-card p-3 text-[12px] font-semibold text-textSecondary">
+              <span className="font-black text-textPrimary">
+                {isClientViewer ? 'Note from your pro:' : 'Note shared with your client:'}
+              </span>{' '}
+              {overrideNote}
+            </div>
+          ) : null}
 
           {isWaiting ? (
             <div className="tovis-glass-soft mt-3 rounded-card p-3 text-[12px] font-semibold text-textSecondary">

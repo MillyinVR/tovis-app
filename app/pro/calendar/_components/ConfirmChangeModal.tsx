@@ -173,16 +173,14 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
   if (!open || !change) return null
 
   const isBlock = change.entityType === 'block'
-  const needsOverrideReason = outsideWorkingHours && !isBlock
-  const trimmedOverrideReason = overrideReason.trim()
+  const showOverrideReason = outsideWorkingHours && !isBlock
 
   const summary = buildChangeSummary({
     change,
     outsideWorkingHours,
   })
 
-  const confirmDisabled =
-    applying || (needsOverrideReason && trimmedOverrideReason.length === 0)
+  const confirmDisabled = applying
 
   function cancel() {
     if (applying) return
@@ -254,16 +252,16 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
 
               <p className="mt-2 text-sm leading-6 text-paperDim">
                 Clients cannot normally book this time. You can still place the
-                appointment here, but the override needs a reason.
+                appointment here, and optionally add a note for your client.
               </p>
             </section>
           ) : null}
 
-          {needsOverrideReason ? (
+          {showOverrideReason ? (
             <section className="mt-4">
               <label htmlFor="calendar-override-reason">
                 <span className="mb-1 block font-mono text-[9px] font-black uppercase tracking-[0.12em] text-paperMute">
-                  Reason for override
+                  Reason (optional — shared with your client)
                 </span>
 
                 <textarea
@@ -281,7 +279,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
               </label>
 
               <div className="mt-1 flex items-center justify-between gap-3 font-mono text-[9px] font-black uppercase tracking-[0.08em] text-paperMute">
-                <span>Required</span>
+                <span>Optional</span>
                 <span>
                   {overrideReason.length}/{MAX_OVERRIDE_REASON_LENGTH}
                 </span>
@@ -306,11 +304,6 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
               onClick={onConfirm}
               disabled={confirmDisabled}
               className={buttonClassName('primary')}
-              title={
-                needsOverrideReason && trimmedOverrideReason.length === 0
-                  ? 'Add a reason before saving outside working hours.'
-                  : ''
-              }
             >
               {applying ? 'Applying…' : summary.confirmLabel}
             </button>
