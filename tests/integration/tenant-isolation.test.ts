@@ -30,6 +30,7 @@ import {
   nfcCardTenantVisibilityFilter,
   proDiscoveryVisibilityFilter,
 } from '@/lib/tenant/visibility'
+import { consumeTapIntent } from '@/lib/tapIntentConsume'
 
 const databaseUrl = process.env.DATABASE_URL
 
@@ -356,4 +357,90 @@ describe('nfc card tenant isolation', () => {
 
     expect(ids).toEqual(expect.arrayContaining(seededCardIds))
   })
+})
+
+// NFC CLAIM (write path) — distinct from the read/visibility filter above.
+// consumeTapIntent (lib/tapIntentConsume.ts) claims a card by id with NO tenant
+// check; nfcCardTenantVisibilityFilter exists but is not applied on claim.
+// See docs/launch-readiness/tenant-isolation-audit.md for the open decision.
+describe('nfc claim tenant isolation', () => {
+  it('KNOWN GAP: a white-label card is currently claimable by a Pro outside its tenant', async () => {
+    // Arrange: a Pro whose home tenant is Salon A, and an unclaimed
+    // SALON_WHITE_LABEL card issued by Salon B.
+    const proUser = await db.user.create({
+      data: {
+        email: `${tag}_nfc_claimer@example.com`,
+        password: 'test-password',
+        role: Role.PRO,
+      },
+      select: { id: true },
+    })
+    const proProfile = await db.professionalProfile.create({
+      data: {
+        userId: proUser.id,
+        firstName: 'Outside',
+        lastName: 'Claimer',
+        businessName: 'Outside studio',
+        homeTenantId: salonACtx.tenantId,
+      },
+      select: { id: true },
+    })
+    const card = await db.nfcCard.create({
+      data: {
+        type: NfcCardType.SALON_WHITE_LABEL,
+        shortCode: `${tag}CLAIM`.slice(-24).toUpperCase(),
+        tenantId: salonBCtx.tenantId, // issued by a DIFFERENT tenant
+      },
+      select: { id: true, tenantId: true },
+    })
+    const expiresAt = new Date()
+    expiresAt.setUTCHours(expiresAt.getUTCHours() + 1)
+    const tapIntent = await db.tapIntent.create({
+      data: {
+        cardId: card.id,
+        intentType: 'SIGNUP_PRO',
+        expiresAt,
+      },
+      select: { id: true },
+    })
+
+    try {
+      // Act
+      const result = await consumeTapIntent({
+        tapIntentId: tapIntent.id,
+        userId: proUser.id,
+      })
+      expect(result.ok).toBe(true)
+
+      // Assert CURRENT behaviour: the cross-tenant claim succeeds. This
+      // documents the gap. When NFC claim becomes tenant-scoped, this test
+      // MUST flip to assert the claim is rejected (claimedByUserId stays null).
+      const claimed = await db.nfcCard.findUnique({
+        where: { id: card.id },
+        select: {
+          claimedByUserId: true,
+          professionalId: true,
+          type: true,
+          tenantId: true,
+        },
+      })
+      expect(claimed?.tenantId).toBe(salonBCtx.tenantId)
+      expect(claimed?.claimedByUserId).toBe(proUser.id) // <- the gap
+      expect(claimed?.professionalId).toBe(proProfile.id)
+      expect(claimed?.type).toBe(NfcCardType.PRO_BOOKING)
+    } finally {
+      await db.attributionEvent.deleteMany({ where: { cardId: card.id } })
+      await db.tapIntent.deleteMany({ where: { cardId: card.id } })
+      await db.nfcCard.delete({ where: { id: card.id } })
+      await db.professionalProfile.delete({ where: { id: proProfile.id } })
+      await db.user.delete({ where: { id: proUser.id } })
+    }
+  })
+
+  // Desired end state, blocked on the product/security decision in
+  // docs/launch-readiness/tenant-isolation-audit.md: a white-label card should
+  // only be claimable within its issuing tenant (root cards stay open).
+  it.todo(
+    'white-label card is NOT claimable by a Pro outside its tenant (after NFC claim is tenant-scoped)',
+  )
 })
