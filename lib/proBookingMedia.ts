@@ -9,7 +9,7 @@
 import { MediaPhase } from '@prisma/client'
 import type { MediaType, MediaVisibility } from '@prisma/client'
 
-import { renderMediaUrls } from './media/renderUrls'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { prisma } from './prisma'
 
 export type ProBookingMediaItem = {

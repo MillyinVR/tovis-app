@@ -231,8 +231,6 @@ app/api/pro/session/route.ts:optional direct property read:booking.client?.user?
 app/api/pro/session/route.ts:optional direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:lastName: true,
-app/booking/[id]/page.tsx:direct property read:const proName = professional?.businessName || professional?.user?.email || 'Professional'
-app/booking/[id]/page.tsx:optional direct property read:const proName = professional?.businessName || professional?.user?.email || 'Professional'
 app/claim/[token]/page.tsx:direct property read:booking.professional?.user?.email?.trim() ||
 app/claim/[token]/page.tsx:optional direct property read:booking.professional?.user?.email?.trim() ||
 app/client/_data/getClientHomeData.ts:Prisma select/include plaintext field:
@@ -389,25 +387,13 @@ app/pro/calendar/_components/BookingModal.tsx:direct property read:{booking.clie
 app/pro/calendar/_components/BookingModal.tsx:direct property read:{booking.client.fullName}
 app/pro/calendar/_components/BookingModal.tsx:direct property read:{booking.client.phone ? ` · ${booking.client.phone}` : ''}
 app/pro/calendar/_utils/parsers.ts:direct property read:const fullName = nullableText(client.fullName)
-app/pro/clients/[id]/page.tsx:Prisma select/include plaintext field:email: true,
 app/pro/clients/[id]/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/clients/[id]/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/pro/clients/[id]/page.tsx:Prisma select/include plaintext field:phone: true,
-app/pro/clients/[id]/page.tsx:direct property read:? ` • by ${allergy.recordedBy.user.email}`
-app/pro/clients/[id]/page.tsx:direct property read:booking.professional?.user?.email ||
-app/pro/clients/[id]/page.tsx:direct property read:booking.professional?.user?.email,
 app/pro/clients/[id]/page.tsx:direct property read:const email = client.user?.email || ''
 app/pro/clients/[id]/page.tsx:direct property read:const phone = client.phone || ''
-app/pro/clients/[id]/page.tsx:direct property read:note.professional?.user?.email ||
-app/pro/clients/[id]/page.tsx:direct property read:review.professional?.user?.email ||
-app/pro/clients/[id]/page.tsx:direct property read:{allergy.recordedBy?.user?.email
 app/pro/clients/[id]/page.tsx:direct property read:{client.firstName} {client.lastName}
-app/pro/clients/[id]/page.tsx:optional direct property read:booking.professional?.user?.email ||
-app/pro/clients/[id]/page.tsx:optional direct property read:booking.professional?.user?.email,
 app/pro/clients/[id]/page.tsx:optional direct property read:const email = client.user?.email || ''
-app/pro/clients/[id]/page.tsx:optional direct property read:note.professional?.user?.email ||
-app/pro/clients/[id]/page.tsx:optional direct property read:review.professional?.user?.email ||
-app/pro/clients/[id]/page.tsx:optional direct property read:{allergy.recordedBy?.user?.email
 app/pro/clients/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/clients/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/pro/clients/page.tsx:Prisma select/include plaintext field:phone: true,

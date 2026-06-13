@@ -7,7 +7,10 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import { mapsHrefFromLocation } from '@/lib/maps'
 import { messageStartHref } from '@/lib/messages'
-import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
+import {
+  formatProfessionalPublicDisplayName,
+  professionalPublicDisplayNameSelect,
+} from '@/lib/privacy/professionalDisplayName'
 import { DEFAULT_TIME_ZONE, pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
@@ -15,6 +18,13 @@ export const dynamic = 'force-dynamic'
 type PageProps = {
   params: { id: string } | Promise<{ id: string }>
 }
+
+const bookingReceiptProfessionalSelect = {
+  id: true,
+  ...professionalPublicDisplayNameSelect,
+  timeZone: true,
+  location: true,
+} satisfies Prisma.ProfessionalProfileSelect
 
 const bookingReceiptSelect = {
   id: true,
@@ -73,14 +83,7 @@ const bookingReceiptSelect = {
   },
 
   professional: {
-    select: {
-      id: true,
-      businessName: true,
-      firstName: true,
-      lastName: true,
-      timeZone: true,
-      location: true,
-    },
+    select: bookingReceiptProfessionalSelect,
   },
 } satisfies Prisma.BookingSelect
 
@@ -260,12 +263,7 @@ export default async function BookingReceiptPage(props: PageProps) {
   const professional = booking.professional
   const service = booking.service
 
-  const proName = formatPublicProfileDisplayName({
-    businessName: professional?.businessName,
-    firstName: professional?.firstName,
-    lastName: professional?.lastName,
-    fallback: 'Professional',
-  })
+  const proName = formatProfessionalPublicDisplayName(professional, 'Professional')
   const serviceName = service?.name || 'Service'
 
   const appointmentTz = resolveReceiptTimeZone({
