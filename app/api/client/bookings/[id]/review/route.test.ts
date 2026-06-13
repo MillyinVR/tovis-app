@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   txMediaAssetUpdateMany: vi.fn(),
   txMediaAssetCreateMany: vi.fn(),
 
+  txProfessionalProfileFindUnique: vi.fn(),
+
   requireClient: vi.fn(),
   pickString: vi.fn(),
   jsonFail: vi.fn(),
@@ -116,6 +118,9 @@ const tx = {
     findMany: mocks.txMediaAssetFindMany,
     updateMany: mocks.txMediaAssetUpdateMany,
     createMany: mocks.txMediaAssetCreateMany,
+  },
+  professionalProfile: {
+    findUnique: mocks.txProfessionalProfileFindUnique,
   },
 }
 
@@ -367,6 +372,10 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     mockRenderMediaUrls.mockReset()
+
+    mocks.txProfessionalProfileFindUnique.mockResolvedValue({
+      homeTenantId: 'tenant_root',
+    })
 
     mockRenderMediaUrls.mockImplementation(
       async (row: {
@@ -782,6 +791,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       data: [
         {
           professionalId: 'pro_1',
+          proTenantId: 'tenant_root',
           bookingId: 'booking_1',
           reviewId: 'review_1',
           mediaType: MediaType.IMAGE,

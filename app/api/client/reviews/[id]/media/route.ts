@@ -9,6 +9,7 @@ import { resolveStoragePointers, safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
+import { resolveProTenantId } from '@/lib/tenant/bookingAttribution'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 import { safeError } from '@/lib/security/logging'
@@ -363,11 +364,13 @@ export async function POST(
     const bookingId = review.bookingId
 
     const created = await prisma.$transaction(async (tx) => {
+      const proTenantId = await resolveProTenantId(tx, review.professionalId)
       const rows = await Promise.all(
         resolved.map((media) =>
           tx.mediaAsset.create({
             data: {
               professionalId: review.professionalId,
+              proTenantId,
               bookingId,
               reviewId: review.id,
               storageBucket: media.storageBucket,

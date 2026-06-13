@@ -1,5 +1,6 @@
 // app/api/pro/media/route.ts
 import { prisma } from '@/lib/prisma'
+import { resolveProTenantId } from '@/lib/tenant/bookingAttribution'
 import {
   jsonFail,
   jsonOk,
@@ -293,9 +294,11 @@ export async function POST(req: Request) {
     const priceStartingAt = getStr(body, 'priceStartingAt')
 
     const result = await prisma.$transaction(async (tx) => {
+      const proTenantId = await resolveProTenantId(tx, professionalId)
       const created = await tx.mediaAsset.create({
         data: {
           professionalId,
+          proTenantId,
 
           url,
           thumbUrl,

@@ -51,6 +51,7 @@ const mocks = vi.hoisted(() => ({
   txReminderDeleteMany: vi.fn(),
 
   txProfessionalProfileUpdate: vi.fn(),
+  txProfessionalProfileFindUnique: vi.fn(),
   txExecuteRaw: vi.fn(),
   txQueryRaw: vi.fn(),
 
@@ -130,6 +131,7 @@ const tx = {
   },
   professionalProfile: {
     update: mocks.txProfessionalProfileUpdate,
+    findUnique: mocks.txProfessionalProfileFindUnique,
   },
   $executeRaw: mocks.txExecuteRaw,
   $queryRaw: mocks.txQueryRaw,
@@ -413,6 +415,10 @@ describe('lib/booking/writeBoundary lifecycle integration contract', () => {
     vi.resetAllMocks()
     vi.useFakeTimers()
     vi.setSystemTime(TEST_NOW)
+
+    mocks.txProfessionalProfileFindUnique.mockResolvedValue({
+      homeTenantId: 'tenant_root',
+    })
 
     mocks.areAuditValuesEqual.mockImplementation(
       (left: unknown, right: unknown) =>
