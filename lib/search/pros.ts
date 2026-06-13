@@ -64,6 +64,11 @@ export type SearchProsParams = {
   lat: number | null
   lng: number | null
   categoryId: string | null
+  // Exact service-offering filter (GIN on psi."serviceIds"). Used by the
+  // nearby surface; the search route leaves it null.
+  serviceId: string | null
+  // Excludes one pro from results (e.g. "other pros near this one"). Nearby-only.
+  excludeProfessionalId: string | null
   radiusMiles: number
   mobileOnly: boolean
   openNowOnly: boolean
@@ -113,6 +118,10 @@ export function parseSearchProsParams(
     lat: pickFiniteNumber(searchParams.get('lat')),
     lng: pickFiniteNumber(searchParams.get('lng')),
     categoryId: normalizeOptionalId(searchParams.get('categoryId')),
+    // serviceId / excludeProfessionalId are nearby-surface inputs; the search
+    // route does not expose them, so they stay null here.
+    serviceId: null,
+    excludeProfessionalId: null,
     radiusMiles,
     mobileOnly: parseBooleanParam(searchParams.get('mobile')),
     openNowOnly: parseBooleanParam(searchParams.get('openNow')),
@@ -214,10 +223,25 @@ function toFiniteCount(value: number | bigint): number {
   return Number.isFinite(value) ? value : 0
 }
 
-export async function searchPros(
+// One pro's candidate row plus its resolved closest + primary locations (full
+// DiscoveryLocationDtos, including workingHours). Both discovery surfaces — the
+// paginated search list and the distance-ranked nearby cards — build their own
+// response DTOs from this, so the geo/index query lives in exactly one place.
+export type ProSearchCandidate = {
+  row: CandidateRow
+  closest: DiscoveryLocationDto
+  primary: DiscoveryLocationDto | null
+}
+
+// Core index read shared by searchPros and loadNearbyPros. Applies the
+// status/bookable/tenant/geo/category/service/price/rating/text filters,
+// resolves each pro to a single row (closest location given an origin, else
+// primary), backfills the primary location, and runs the open-now JS filter.
+// Mapping to a surface-specific DTO + pagination/slicing is the caller's job.
+export async function fetchProSearchCandidates(
   params: SearchProsParams,
   tenantContext: TenantContext,
-): Promise<SearchProsResponseDto> {
+): Promise<ProSearchCandidate[]> {
   const hasOrigin = params.lat != null && params.lng != null
 
   const filters: Prisma.Sql[] = []
@@ -245,6 +269,20 @@ export async function searchPros(
   if (params.categoryId) {
     filters.push(
       Prisma.sql`${params.categoryId}::text = ANY(psi."categoryIds")`,
+    )
+  }
+
+  // Exact offering match via GIN(serviceIds). Nearby uses this; search omits it.
+  if (params.serviceId) {
+    filters.push(
+      Prisma.sql`${params.serviceId}::text = ANY(psi."serviceIds")`,
+    )
+  }
+
+  // Exclude one pro (e.g. "other pros near this one").
+  if (params.excludeProfessionalId) {
+    filters.push(
+      Prisma.sql`psi."professionalId" <> ${params.excludeProfessionalId}`,
     )
   }
 
@@ -392,13 +430,7 @@ export async function searchPros(
     })
   }
 
-  type Materialized = {
-    row: CandidateRow
-    closest: DiscoveryLocationDto
-    primary: DiscoveryLocationDto | null
-  }
-
-  let materialized: Materialized[] = candidates.map((row) => {
+  let materialized: ProSearchCandidate[] = candidates.map((row) => {
     const closest: DiscoveryLocationDto = {
       id: row.locationId,
       formattedAddress: row.formattedAddress,
@@ -427,6 +459,15 @@ export async function searchPros(
       }),
     )
   }
+
+  return materialized
+}
+
+export async function searchPros(
+  params: SearchProsParams,
+  tenantContext: TenantContext,
+): Promise<SearchProsResponseDto> {
+  const materialized = await fetchProSearchCandidates(params, tenantContext)
 
   const items: SearchProItemDto[] = materialized.map((entry) => ({
     id: entry.row.professionalId,

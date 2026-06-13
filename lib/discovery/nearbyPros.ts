@@ -12,6 +12,8 @@ import {
 } from '@/lib/discovery/nearby'
 import { prisma } from '@/lib/prisma'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
+import { fetchProSearchCandidates } from '@/lib/search/pros'
 import { proDiscoveryVisibilityFilter, type TenantContext } from '@/lib/tenant'
 
 const LOCATION_SELECT = {
@@ -82,7 +84,91 @@ function compareNullableText(a: string | null, b: string | null): number {
   return left.localeCompare(right)
 }
 
+function toRatingCount(value: number | bigint): number {
+  const n = typeof value === 'bigint' ? Number(value) : value
+  return Number.isFinite(n) ? n : 0
+}
+
+// New path: delegate the geo prefilter + dedup + rating/price rollups to the
+// shared ProfessionalSearchIndex (GIST) read, then map to NearbyProCard. This
+// replaces the bounding-box + JS haversine + live review/offering queries with
+// the same index the search list already uses (single source of truth) and
+// fixes the under-indexed `(isPrimary,isBookable,lat,lng)` scan.
+//
+// Behaviour difference vs legacy (intentional): ranks by the *closest* bookable
+// location, not the primary one. Rating/price come from the event-refreshed
+// index rather than a live query. Gated by the `nearby_search_index_enabled`
+// runtime flag so it can be verified on staging and reverted instantly.
+async function loadNearbyProsViaSearchIndex(
+  args: NearbyProsArgs,
+  tenantContext: TenantContext,
+): Promise<NearbyProCard[]> {
+  const candidates = await fetchProSearchCandidates(
+    {
+      q: null,
+      lat: args.lat,
+      lng: args.lng,
+      categoryId: args.categoryId,
+      serviceId: args.serviceId,
+      excludeProfessionalId: args.excludeProfessionalId,
+      radiusMiles: args.radiusMiles,
+      mobileOnly: false,
+      openNowOnly: false,
+      minRating: null,
+      maxPrice: null,
+      sort: 'DISTANCE',
+      cursorId: null,
+      limit: args.limit,
+    },
+    tenantContext,
+  )
+
+  const cards: NearbyProCard[] = []
+
+  for (const entry of candidates) {
+    const distanceMiles = entry.row.distanceMiles
+    // ST_DWithin already bounds candidates to the radius; this guards the
+    // NearbyProCard contract (non-null distance) and the no-origin edge.
+    if (distanceMiles == null || !Number.isFinite(distanceMiles)) {
+      continue
+    }
+
+    cards.push({
+      id: entry.row.professionalId,
+      businessName: entry.row.businessName,
+      handle: entry.row.handle,
+      professionType: entry.row.professionType,
+      avatarUrl: entry.row.avatarUrl,
+      locationLabel: buildDiscoveryLocationLabel({ location: entry.closest }),
+      distanceMiles: roundDistanceMiles(distanceMiles),
+      ratingAvg: entry.row.ratingAvg,
+      ratingCount: toRatingCount(entry.row.ratingCount),
+      minPrice: entry.row.minAnyPrice,
+      supportsMobile: entry.row.offersMobile,
+      closestLocation: entry.closest,
+      primaryLocation: entry.primary ?? entry.closest,
+    })
+  }
+
+  // Candidates already arrive distance-sorted (sort: 'DISTANCE'); enforce the
+  // caller's limit to match the legacy contract.
+  return cards.slice(0, args.limit)
+}
+
+// Public entry point — dispatches to the search-index path when enabled,
+// otherwise the legacy bounding-box path. Defaults to legacy (flag off).
 export async function loadNearbyPros(
+  args: NearbyProsArgs,
+  tenantContext: TenantContext,
+): Promise<NearbyProCard[]> {
+  if (await isRuntimeFlagEnabled('nearby_search_index_enabled')) {
+    return loadNearbyProsViaSearchIndex(args, tenantContext)
+  }
+
+  return loadNearbyProsLegacy(args, tenantContext)
+}
+
+async function loadNearbyProsLegacy(
   args: NearbyProsArgs,
   tenantContext: TenantContext,
 ): Promise<NearbyProCard[]> {

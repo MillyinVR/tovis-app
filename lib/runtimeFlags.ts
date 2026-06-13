@@ -1,7 +1,16 @@
 // lib/runtimeFlags.ts
 import { getRedis, requireRedis } from '@/lib/redis'
 
-export const RUNTIME_FLAG_NAMES = ['signup_disabled', 'sms_disabled'] as const
+// `*_disabled` flags are kill switches (default off → feature on).
+// `nearby_search_index_enabled` is a progressive-rollout opt-in (default off →
+// legacy bounding-box path) so the unproven search-index path can be enabled
+// per-environment after staging EXPLAIN + parity verification, and reverted
+// instantly. See docs/performance/ticket-consolidate-nearby-onto-search-index.md.
+export const RUNTIME_FLAG_NAMES = [
+  'signup_disabled',
+  'sms_disabled',
+  'nearby_search_index_enabled',
+] as const
 
 export type RuntimeFlagName = (typeof RUNTIME_FLAG_NAMES)[number]
 
@@ -15,6 +24,7 @@ function defaultFlags(): Record<RuntimeFlagName, boolean> {
   return {
     signup_disabled: false,
     sms_disabled: false,
+    nearby_search_index_enabled: false,
   }
 }
 
@@ -41,6 +51,9 @@ export async function getRuntimeFlags(): Promise<RuntimeFlagsSnapshot> {
     return {
       signup_disabled: normalizeStoredBoolean(raw?.signup_disabled),
       sms_disabled: normalizeStoredBoolean(raw?.sms_disabled),
+      nearby_search_index_enabled: normalizeStoredBoolean(
+        raw?.nearby_search_index_enabled,
+      ),
       backendAvailable: true,
     }
   } catch {
