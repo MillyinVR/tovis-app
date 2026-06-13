@@ -374,9 +374,9 @@ Harden storage, media, rate limits, request trust boundaries, and safe logging.
 
 | Item | Status | Implemented | Tested locally | Tested in CI | Verified deployed | Operationalized | Owner | Notes |
 |---|---|---:|---:|---:|---:|---:|---|---|
-| Supabase Storage bucket/policy migration as code | DONE | Yes | Yes | Unknown | No | Partial | Tori | Migration exists. |
-| Media-private restrictive policy baseline | DONE | Yes | Yes | Unknown | No | Partial | Tori | Repo proof exists; deployed proof still needed. |
-| Media-public policy baseline | DONE | Yes | Yes | Unknown | No | Partial | Tori | Policy baseline exists. |
+| Supabase Storage bucket/policy migration as code | PASS DEPLOYED | Yes | Yes | Unknown | Yes | Partial | Tori | Applied to prod 2026-06-13 via Supabase platform connection (no 42501). 1 policy created (`media-public public read`); media-private 0 (deny-by-default). supabase/migrations/20260514180000. |
+| Media-private restrictive policy baseline | PASS DEPLOYED | Yes | Yes | Unknown | Yes | Partial | Tori | Deny-by-default verified in prod 2026-06-13: anon private read=400, service-role signed read=200 (proof A/B). 0 media-private policies. scripts/proof-storage-policy.mjs. |
+| Media-public policy baseline | PASS DEPLOYED | Yes | Yes | Unknown | Yes | Partial | Tori | `media-public public read` policy applied 2026-06-13; anon public read of real file=200 (proof D). |
 | Central rate-limit policy definitions | DONE | Yes | Yes | Unknown | No | Partial | Tori | Policies exist. |
 | High-risk route/wrapper rate-limit enforcement | DONE | Yes | Yes | Unknown | No | Partial | Tori | Code coverage exists. |
 | Auth route rate limits | DONE | Yes | Yes | Unknown | No | Partial | Tori | Code coverage exists. |
@@ -389,7 +389,7 @@ Harden storage, media, rate limits, request trust boundaries, and safe logging.
 | Hold-create internal error logging sanitization | DONE | Yes | Yes | Yes | No | Partial | Tori | Safe logging proof exists. |
 | Sentry redaction scrubber | DONE | Yes | Yes | Unknown | Partial | Partial | Tori | Config implemented; review event payload safety before broad production logging. |
 | Supabase policy SQL tests | TODO | No | No | No | No | No | Tori | Still missing. |
-| Live Supabase bucket policy verification | TODO | Partial | No | No | No | No | Tori | Required before public rollout. |
+| Live Supabase bucket policy verification | PASS DEPLOYED | Yes | Yes | No | Yes | Partial | Tori | 2026-06-13: 6/6 live proof (anon-deny, signed-read 200, PUT upload 200, POST reproduces RLS bug, public read 200). scripts/proof-storage-policy.mjs. Residual: full-UI BEFORE/AFTER pro upload after PUT fix ships. |
 | No-bare-error logging CI guard | TODO | No | No | No | No | No | Tori | Add tools/check-no-bare-error-log.mjs. |
 | UploadSession binding | TODO | No | No | No | No | No | Tori | Required before public launch if uploads are in scope. |
 | Orphan media cleanup | TODO | No | No | No | No | No | Tori | Still missing. |

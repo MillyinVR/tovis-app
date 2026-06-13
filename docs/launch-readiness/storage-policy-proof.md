@@ -1,12 +1,75 @@
 # Storage Policy Proof
 
-Status: Verified with caveat  
-Last verified: 2026-05-22  
+Status: APPLIED + VERIFIED in production (deny-by-default; signed-upload PUT fix proven)
+Last verified: 2026-06-13 (live proof against project `rqhhvuaoksuvbvlypztn`)
 Related migration: `supabase/migrations/20260514180000_storage_media_bucket_policies.sql`
+Repeatable proof: `scripts/proof-storage-policy.mjs` (6/6 passed 2026-06-13)
 
-Verification caveat: `pg_policies` did not expose `storage.objects` policies in this Supabase environment, and manual policy creation in Supabase SQL Editor failed with `ERROR: 42501 must be owner of table objects`. Because Supabase owns/manages `storage.objects`, this proof relies on static migration review plus live HTTP behavior checks. Live HTTP behavior checks passed.
+> History (2026-06-13): the prior "Verified with caveat / 2026-05-22" header
+> over-claimed. The migration was authored but **never applied** — it lived in
+> `supabase/migrations/` (which `prisma migrate deploy` never runs) and was
+> believed un-appliable due to a past `42501 must be owner of table objects` in
+> the SQL editor. On 2026-06-13 a read-only check confirmed **0 policies**; the
+> migration was then applied via the Supabase platform connection (which DOES
+> hold storage-owner privileges — no 42501), creating exactly one policy
+> (`media-public public read`). `media-private` retains **zero** policies
+> (deny-by-default). All access goes through service-role signed URLs.
 
-Environment note: Verification output showed Supabase project ref `rqhhvuaoksuvbvlypztn`. This project ref is treated as protected/main by app safeguards. Proof objects were limited to `proof/*.txt` and were cleaned up successfully.
+## Pre-apply production state (2026-06-13, read-only — before the migration)
+
+This is the snapshot that surfaced the gap. The applied/verified state (1 policy)
+is in "Live proof — applied state" below.
+
+Source: `SELECT` against `pg_class`, `pg_policy`, `storage.buckets`, `storage.objects`
+via the Supabase MCP `execute_sql` tool (read-only; no writes performed).
+
+| Check | Value |
+|---|---|
+| `storage.objects` RLS enabled (`relrowsecurity`) | `true` |
+| `storage.objects` RLS forced (`relforcerowsecurity`) | `false` |
+| Policy count on `storage.objects` | **0** |
+| `media-public` bucket `public` | `true` |
+| `media-private` bucket `public` | `false` |
+| Objects in `media-private` | 206 |
+| Objects in `media-public` | 34 |
+
+Interpretation: every direct anon/authenticated read/list/insert/update/delete on
+`storage.objects` is refused (no permissive policy exists). The 206 private objects
+were all written via the service-role signed-upload flow, which bypasses RLS. No
+private object is reachable without a server-minted signed URL.
+
+Environment note: Project ref `rqhhvuaoksuvbvlypztn` is treated as protected/main
+by app safeguards. Only read-only `SELECT`s were run for this proof.
+
+### Live proof — applied state (2026-06-13, `scripts/proof-storage-policy.mjs`, 6/6 passed)
+
+Post-apply policy state (`pg_policy` on `storage.objects`): **1 policy** —
+`media-public public read` (SELECT, role public, `bucket_id = 'media-public'`).
+`media-private`: 0 policies.
+
+| Check | Result | Evidence |
+|---|---|---|
+| A. Anon direct read of a real `media-private` object | Denied | `GET /object/media-private/<real path>` (apikey only) → HTTP 400 |
+| A. Anon `/public/` read of a `media-private` object | Denied | HTTP 400 (bucket not public) |
+| B. Service-role signed READ of `media-private` | Allowed | signed URL → HTTP 200, 516 bytes |
+| C1. Signed upload via **PUT** (shipped fix) | Allowed | `PUT /object/upload/sign/media-private/...?token=` (apikey only) → HTTP 200 |
+| C2. Signed upload via **POST** (the old bug) | Denied (reproduced) | same path, POST → HTTP 400 `403 new row violates row-level security policy` |
+| D. Anon public read of a real `media-public` file | Allowed | `GET /object/public/media-public/<avatar>` → HTTP 200, ~1 MB |
+
+Root cause of the BEFORE-ok / AFTER-fail session photos: the in-house uploader
+POSTed to the signed-upload endpoint. That endpoint only honors the
+service-role-signed token (and bypasses RLS) on **PUT**; a POST runs as the anon
+role and hits `media-private`'s deny-by-default INSERT → "new row violates
+row-level security policy". Fixed by switching the method to PUT in
+`lib/media/uploadWithProgress.ts`. (An earlier hypothesis that the anon
+`Authorization` header was the cause was disproven by C1/C2 — POST fails with or
+without it; PUT succeeds with apikey alone.)
+
+### Remaining (cannot be done from a script)
+
+- [ ] End-to-end: a pro uploads a BEFORE **and** AFTER session photo through the
+      real app UI after the PUT fix ships, and both succeed. (Storage-layer
+      equivalent is proven above by C1; this is the full-stack confirmation.)
 
 ## Goal
 

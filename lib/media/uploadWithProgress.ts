@@ -85,9 +85,24 @@ export function uploadWithProgress(
 
     args.signal.addEventListener('abort', () => xhr.abort(), { once: true })
 
-    xhr.open('POST', url.toString())
+    // MUST be PUT, not POST.
+    //
+    // The signed-upload endpoint authorizes the write via the service-role-signed
+    // `token` in the URL and bypasses RLS — but only on PUT (this matches the
+    // Supabase SDK's uploadToSignedUrl). A POST to the same endpoint is treated as
+    // a normal upload, runs as the request's anon role, and fails the media-private
+    // INSERT RLS check with "new row violates row-level security policy". That is
+    // exactly what produced the intermittent BEFORE-ok / AFTER-fail session photos
+    // after a storage-api change stopped POST from honoring the token.
+    //
+    // `apikey` is required for the API gateway to route the request. No
+    // Authorization bearer is needed — the token is the sole authorizer, and
+    // sending the anon key as a bearer only invites anon-role evaluation.
+    //
+    // Verified against production 2026-06-13 (scripts/diag-signed-upload.mjs):
+    // PUT+apikey -> 200; POST+apikey -> 403 RLS.
+    xhr.open('PUT', url.toString())
     xhr.setRequestHeader('apikey', supabaseKey)
-    xhr.setRequestHeader('Authorization', `Bearer ${supabaseKey}`)
     xhr.setRequestHeader('Content-Type', args.contentType)
     xhr.setRequestHeader('x-upsert', 'false')
     xhr.send(args.file)
