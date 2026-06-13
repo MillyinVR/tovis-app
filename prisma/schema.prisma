@@ -522,7 +522,11 @@ model Notification {
   priority NotificationPriority @default(NORMAL)
 
   professionalId String
+  // Tenant of the recipient pro (derived from professional.homeTenantId).
+  // Expand phase: nullable + backfilled; contract migration makes it NOT NULL.
+  proTenantId    String?
   professional   ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  proTenant      Tenant?             @relation("TenantNotifications", fields: [proTenantId], references: [id], onDelete: Restrict)
 
   actorUserId String?
   actorUser   User?   @relation("NotificationActor", fields: [actorUserId], references: [id], onDelete: SetNull)
@@ -562,6 +566,7 @@ model Notification {
   @@index([professionalId, priority, archivedAt, createdAt])
   @@index([bookingId])
   @@index([reviewId])
+  @@index([proTenantId])
 }
 
 model NotificationDispatch {
@@ -898,6 +903,8 @@ model Tenant {
   proBookings    Booking[]             @relation("TenantProBookings")
   clientBookings Booking[]             @relation("TenantClientHomeBookings")
   nfcCards       NfcCard[]             @relation("TenantNfcCards")
+  mediaAssets    MediaAsset[]          @relation("TenantMediaAssets")
+  notifications  Notification[]        @relation("TenantNotifications")
 
   @@index([isActive])
 }
@@ -2656,6 +2663,10 @@ model Reminder {
 model MediaAsset {
   id               String              @id @default(cuid())
   professionalId   String
+  // Tenant of the owning pro (derived from professional.homeTenantId).
+  // Expand phase: nullable + backfilled; a follow-up contract migration makes
+  // it NOT NULL. See finish-plan T2.2.
+  proTenantId      String?
   bookingId        String?
   reviewId         String?
   uploadedByUserId String?
@@ -2676,6 +2687,7 @@ model MediaAsset {
   reviewLocked          Boolean         @default(false)
 
   professional   ProfessionalProfile @relation(fields: [professionalId], references: [id])
+  proTenant      Tenant?             @relation("TenantMediaAssets", fields: [proTenantId], references: [id], onDelete: Restrict)
   booking        Booking?            @relation(fields: [bookingId], references: [id])
   review         Review?             @relation(fields: [reviewId], references: [id])
   phase          MediaPhase          @default(OTHER)
@@ -2698,6 +2710,7 @@ model MediaAsset {
   @@index([uploadedByUserId, createdAt])
   @@index([bookingId, phase, createdAt])
   @@index([bookingId, createdAt])
+  @@index([proTenantId])
 }
 
 model MediaServiceTag {
