@@ -11,6 +11,7 @@ import {
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import ThreadClient from './ThreadClient'
 
 export const dynamic = 'force-dynamic'
@@ -286,6 +287,8 @@ export default async function MessageThreadPage(props: PageProps) {
       professional: {
         select: {
           businessName: true,
+          firstName: true,
+          lastName: true,
           avatarUrl: true,
         },
       },
@@ -339,7 +342,12 @@ export default async function MessageThreadPage(props: PageProps) {
   const title =
     user.role === Role.PRO
       ? formatPersonName(thread.client?.firstName, thread.client?.lastName) || 'Client'
-      : thread.professional?.businessName || 'Professional'
+      : formatPublicProfileDisplayName({
+          businessName: thread.professional?.businessName,
+          firstName: thread.professional?.firstName,
+          lastName: thread.professional?.lastName,
+          fallback: 'Professional',
+        })
 
   const contextMeta = await buildContextMeta({
     contextType: thread.contextType,

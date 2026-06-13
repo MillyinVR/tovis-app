@@ -220,6 +220,12 @@ describe('useBookingModal', () => {
     expect(body.notifyClient).toBe(true)
     expect(body.allowOutsideWorkingHours).toBe(false)
 
+    // Override flags need an explicit reason server-side, so they must never
+    // be sent blindly with a plain reschedule.
+    expect(body.allowShortNotice).toBeUndefined()
+    expect(body.allowFarFuture).toBeUndefined()
+    expect(body.overrideReason).toBeUndefined()
+
     expect(reloadCalendar).toHaveBeenCalled()
     expect(forceProFooterRefresh).toHaveBeenCalled()
   })
@@ -296,5 +302,301 @@ describe('useBookingModal', () => {
 
     const body = JSON.parse(String(patchCall?.[1]?.body))
     expect(body.scheduledFor).toBe('2026-06-01T04:15:00.000Z')
+  })
+
+  it('offers an override and retries the accept with overrideReason when advance notice blocks it', async () => {
+    const booking = makeBooking({ status: 'PENDING' })
+
+    mocks.parseBookingDetails.mockReturnValue(booking)
+    mocks.apiMessage.mockImplementation((data: unknown, fallback: string) => {
+      if (
+        data &&
+        typeof data === 'object' &&
+        'error' in data &&
+        typeof data.error === 'string'
+      ) {
+        return data.error
+      }
+      return fallback
+    })
+
+    const failPayload = {
+      ok: false,
+      error:
+        'That booking is too soon unless you explicitly override advance notice.',
+      code: 'ADVANCE_NOTICE_REQUIRED',
+      retryable: true,
+      uiAction: 'PICK_NEW_SLOT',
+    }
+
+    mocks.safeJson
+      .mockResolvedValueOnce({ booking }) // GET booking
+      .mockResolvedValueOnce({ services: [] }) // GET services
+      .mockResolvedValueOnce(failPayload) // PATCH accept fails
+      .mockResolvedValueOnce({ ok: true }) // PATCH override retry succeeds
+
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: false, status: 400 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+
+    const reloadCalendar = vi.fn(async () => {})
+    const forceProFooterRefresh = vi.fn()
+
+    const { result } = renderHook(() =>
+      useBookingModal({
+        eventsRef: { current: [] },
+        activeStepMinutes: 15,
+        activeLocationType: 'SALON',
+        timeZone: 'America/Los_Angeles',
+        resolveLocationStepMinutes: () => 15,
+        resolveBookingSchedulingContext: () => ({
+          timeZone: 'America/New_York',
+          workingHours: null,
+          stepMinutes: 15,
+        }),
+        reloadCalendar,
+        forceProFooterRefresh,
+        locations: [],
+      }),
+    )
+
+    await act(async () => {
+      await result.current.openBooking('booking_1')
+    })
+
+    await act(async () => {
+      await result.current.approveBooking()
+    })
+
+    // The accept must not dead-end: instead of an error, the override prompt opens.
+    expect(result.current.bookingError).toBeNull()
+    expect(result.current.bookingOverridePrompt?.code).toBe(
+      'ADVANCE_NOTICE_REQUIRED',
+    )
+    expect(result.current.bookingOverridePrompt?.flag).toBe('allowShortNotice')
+    expect(result.current.bookingOverrideIntent).toBe('accept')
+    expect(reloadCalendar).not.toHaveBeenCalled()
+
+    // Confirming without a reason does nothing.
+    const patchCallsBefore = fetchMock.mock.calls.filter(
+      (call) => call[1]?.method === 'PATCH',
+    ).length
+
+    await act(async () => {
+      await result.current.confirmBookingOverride()
+    })
+
+    expect(
+      fetchMock.mock.calls.filter((call) => call[1]?.method === 'PATCH').length,
+    ).toBe(patchCallsBefore)
+
+    await act(async () => {
+      result.current.setBookingOverrideReason('Client asked for a same-day slot')
+    })
+
+    await act(async () => {
+      await result.current.confirmBookingOverride()
+    })
+
+    const patchCalls = fetchMock.mock.calls.filter(
+      (call) =>
+        typeof call[0] === 'string' &&
+        call[0].includes('/api/pro/bookings/booking_1') &&
+        call[1]?.method === 'PATCH',
+    )
+
+    expect(patchCalls).toHaveLength(2)
+
+    const retryBody = JSON.parse(String(patchCalls[1]?.[1]?.body))
+    expect(retryBody.status).toBe('ACCEPTED')
+    expect(retryBody.notifyClient).toBe(true)
+    expect(retryBody.allowShortNotice).toBe(true)
+    expect(retryBody.overrideReason).toBe('Client asked for a same-day slot')
+
+    // Each attempt must use a fresh idempotency key (different body).
+    const firstKey = patchCalls[0]?.[1]?.headers?.['Idempotency-Key']
+    const retryKey = patchCalls[1]?.[1]?.headers?.['Idempotency-Key']
+    expect(retryKey).toBeTruthy()
+    expect(retryKey).not.toBe(firstKey)
+
+    expect(result.current.bookingOverridePrompt).toBeNull()
+    expect(reloadCalendar).toHaveBeenCalled()
+    expect(forceProFooterRefresh).toHaveBeenCalled()
+  })
+
+  it('accumulates flags when the override retry trips a second override-gated rule', async () => {
+    const booking = makeBooking({ status: 'PENDING' })
+
+    mocks.parseBookingDetails.mockReturnValue(booking)
+
+    mocks.safeJson
+      .mockResolvedValueOnce({ booking })
+      .mockResolvedValueOnce({ services: [] })
+      .mockResolvedValueOnce({ ok: false, code: 'ADVANCE_NOTICE_REQUIRED' })
+      .mockResolvedValueOnce({ ok: false, code: 'OUTSIDE_WORKING_HOURS' })
+      .mockResolvedValueOnce({ ok: true })
+
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: false, status: 400 })
+      .mockResolvedValueOnce({ ok: false, status: 400 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+
+    const { result } = renderHook(() =>
+      useBookingModal({
+        eventsRef: { current: [] },
+        activeStepMinutes: 15,
+        activeLocationType: 'SALON',
+        timeZone: 'America/Los_Angeles',
+        resolveLocationStepMinutes: () => 15,
+        resolveBookingSchedulingContext: () => ({
+          timeZone: 'America/New_York',
+          workingHours: null,
+          stepMinutes: 15,
+        }),
+        reloadCalendar: async () => {},
+        forceProFooterRefresh: () => {},
+        locations: [],
+      }),
+    )
+
+    await act(async () => {
+      await result.current.openBooking('booking_1')
+    })
+
+    await act(async () => {
+      await result.current.approveBooking()
+    })
+
+    await act(async () => {
+      result.current.setBookingOverrideReason('Client travels tomorrow')
+    })
+
+    await act(async () => {
+      await result.current.confirmBookingOverride()
+    })
+
+    // First retry tripped the working-hours rule: dialog stays open with new prompt.
+    expect(result.current.bookingOverridePrompt?.code).toBe(
+      'OUTSIDE_WORKING_HOURS',
+    )
+
+    await act(async () => {
+      await result.current.confirmBookingOverride()
+    })
+
+    const patchCalls = fetchMock.mock.calls.filter(
+      (call) => call[1]?.method === 'PATCH',
+    )
+    expect(patchCalls).toHaveLength(3)
+
+    const finalBody = JSON.parse(String(patchCalls[2]?.[1]?.body))
+    expect(finalBody.allowShortNotice).toBe(true)
+    expect(finalBody.allowOutsideWorkingHours).toBe(true)
+    expect(finalBody.overrideReason).toBe('Client travels tomorrow')
+
+    expect(result.current.bookingOverridePrompt).toBeNull()
+  })
+
+  it('offers an edit override and retries the reschedule when advance notice blocks it', async () => {
+    const booking = makeBooking({
+      scheduledFor: '2026-01-15T17:30:00.000Z',
+      timeZone: 'America/New_York',
+    })
+
+    mocks.parseBookingDetails.mockReturnValue(booking)
+
+    mocks.safeJson
+      .mockResolvedValueOnce({ booking }) // GET booking
+      .mockResolvedValueOnce({ services: [] }) // GET services
+      .mockResolvedValueOnce({ ok: false, code: 'ADVANCE_NOTICE_REQUIRED' }) // PATCH reschedule fails
+      .mockResolvedValueOnce({ ok: true }) // PATCH override retry succeeds
+
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+      .mockResolvedValueOnce({ ok: false, status: 400 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+
+    const reloadCalendar = vi.fn(async () => {})
+    const forceProFooterRefresh = vi.fn()
+
+    const { result } = renderHook(() =>
+      useBookingModal({
+        eventsRef: { current: [] },
+        activeStepMinutes: 15,
+        activeLocationType: 'SALON',
+        timeZone: 'America/Los_Angeles',
+        resolveLocationStepMinutes: () => 15,
+        resolveBookingSchedulingContext: () => ({
+          timeZone: 'America/New_York',
+          workingHours: null,
+          stepMinutes: 15,
+        }),
+        reloadCalendar,
+        forceProFooterRefresh,
+        locations: [],
+      }),
+    )
+
+    await act(async () => {
+      await result.current.openBooking('booking_1')
+    })
+
+    await act(async () => {
+      result.current.setReschedDate('2026-01-15')
+      result.current.setReschedTime('13:15')
+    })
+
+    await act(async () => {
+      await result.current.submitChanges()
+    })
+
+    // No dead end: the edit-intent override prompt opens instead of an error.
+    expect(result.current.bookingError).toBeNull()
+    expect(result.current.bookingOverridePrompt?.code).toBe(
+      'ADVANCE_NOTICE_REQUIRED',
+    )
+    expect(result.current.bookingOverridePrompt?.flag).toBe('allowShortNotice')
+    expect(result.current.bookingOverrideIntent).toBe('edit')
+    expect(reloadCalendar).not.toHaveBeenCalled()
+
+    await act(async () => {
+      result.current.setBookingOverrideReason('Client asked to move it today')
+    })
+
+    await act(async () => {
+      await result.current.confirmBookingOverride()
+    })
+
+    const patchCalls = fetchMock.mock.calls.filter(
+      (call) =>
+        typeof call[0] === 'string' &&
+        call[0].includes('/api/pro/bookings/booking_1') &&
+        call[1]?.method === 'PATCH',
+    )
+
+    expect(patchCalls).toHaveLength(2)
+
+    // First attempt carries no override flags at all.
+    const firstBody = JSON.parse(String(patchCalls[0]?.[1]?.body))
+    expect(firstBody.scheduledFor).toBe('2026-01-15T18:15:00.000Z')
+    expect(firstBody.allowShortNotice).toBeUndefined()
+    expect(firstBody.overrideReason).toBeUndefined()
+
+    // The retry re-sends the same reschedule plus the explicit override.
+    const retryBody = JSON.parse(String(patchCalls[1]?.[1]?.body))
+    expect(retryBody.scheduledFor).toBe('2026-01-15T18:15:00.000Z')
+    expect(retryBody.notifyClient).toBe(true)
+    expect(retryBody.allowShortNotice).toBe(true)
+    expect(retryBody.overrideReason).toBe('Client asked to move it today')
+    expect(retryBody.status).toBeUndefined()
+
+    expect(result.current.bookingOverridePrompt).toBeNull()
+    expect(reloadCalendar).toHaveBeenCalled()
+    expect(forceProFooterRefresh).toHaveBeenCalled()
   })
 })

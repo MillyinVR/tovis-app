@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import AdminGuard from '../_components/AdminGuard'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
+import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { ProfessionalLocationType, VerificationStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -172,7 +173,10 @@ export default async function AdminProfessionalsPage({
                     <div className="flex flex-wrap justify-between gap-3">
                       <div className="grid gap-1">
                         <div className="text-sm font-extrabold">
-                          {p.businessName || 'Unnamed business'}{' '}
+                          {formatPublicProfileDisplayName({
+                            businessName: p.businessName,
+                            fallback: 'Unnamed business',
+                          })}{' '}
                           <span className="text-xs font-bold text-textSecondary">({p.user.email})</span>
                         </div>
 

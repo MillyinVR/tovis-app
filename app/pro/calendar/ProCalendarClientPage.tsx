@@ -7,6 +7,7 @@ import BlockTimeModal from './_components/BlockTimeModal'
 import EditBlockModal from './_components/EditBlockModal'
 
 import { BookingModal } from './_components/BookingModal'
+import { BookingOverrideConfirmModal } from './_components/BookingOverrideConfirmModal'
 import { CalendarDesktopShell } from './_components/CalendarDesktopShell'
 import { CalendarMobileShell } from './_components/CalendarMobileShell'
 import { CalendarTabletShell } from './_components/CalendarTabletShell'
@@ -312,6 +313,44 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         }}
         onDeny={() => {
           void cal.denyBooking()
+        }}
+      />
+
+      <BookingOverrideConfirmModal
+        open={Boolean(cal.bookingOverridePrompt)}
+        prompt={cal.bookingOverridePrompt}
+        intent={cal.bookingOverrideIntent}
+        busy={cal.savingReschedule}
+        reason={cal.bookingOverrideReason}
+        onChangeReason={cal.setBookingOverrideReason}
+        onCancel={cal.cancelBookingOverride}
+        onConfirm={() => {
+          void cal.confirmBookingOverride()
+        }}
+      />
+
+      <BookingOverrideConfirmModal
+        open={Boolean(cal.changeOverridePrompt)}
+        prompt={cal.changeOverridePrompt}
+        intent="edit"
+        busy={cal.applyingChange}
+        reason={cal.changeOverrideReason}
+        onChangeReason={cal.setChangeOverrideReason}
+        onCancel={cal.cancelChangeOverride}
+        onConfirm={() => {
+          void cal.confirmChangeOverride()
+        }}
+      />
+
+      <BookingOverrideConfirmModal
+        open={Boolean(cal.managementOverridePrompt)}
+        prompt={cal.managementOverridePrompt}
+        busy={cal.managementOverrideBusy}
+        reason={cal.managementOverrideReason}
+        onChangeReason={cal.setManagementOverrideReason}
+        onCancel={cal.cancelManagementOverride}
+        onConfirm={() => {
+          void cal.confirmManagementOverride()
         }}
       />
     </main>

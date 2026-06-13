@@ -1,10 +1,8 @@
 // app/pro/bookings/[id]/session/after-photos/page.tsx
 import type { ReactNode } from 'react'
 import Link from 'next/link'
-import { headers } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
 import {
-  BookingStatus,
   MediaPhase,
   Role,
   SessionStep,
@@ -14,32 +12,20 @@ import MediaPreviewGrid from '../_components/MediaPreviewGrid'
 import MediaUploader from '../MediaUploader'
 
 import { getCurrentUser } from '@/lib/currentUser'
-import { isRecord } from '@/lib/guards'
-import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
+import { listProBookingMedia } from '@/lib/proBookingMedia'
 import {
   afterPhotosHref,
   aftercareHref,
   isTerminalBooking,
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
-import { getServerOrigin } from '@/lib/serverOrigin'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
 
 type PageProps = {
   params: Promise<{ id: string }>
-}
-
-type ApiMediaItem = {
-  id: string
-  mediaType: 'IMAGE' | 'VIDEO'
-  caption: string | null
-  createdAt: string | Date
-  reviewId: string | null
-  renderUrl: string | null
-  renderThumbUrl: string | null
 }
 
 function loginHref(bookingId: string): string {
@@ -51,66 +37,6 @@ function fullName(
   lastName: string | null | undefined,
 ): string {
   return `${firstName ?? ''} ${lastName ?? ''}`.trim()
-}
-
-function pickMediaType(value: unknown): ApiMediaItem['mediaType'] {
-  return value === 'VIDEO' ? 'VIDEO' : 'IMAGE'
-}
-
-function parseApiMediaItem(value: unknown): ApiMediaItem | null {
-  if (!isRecord(value)) return null
-
-  const id = pickString(value.id) ?? ''
-  if (!id) return null
-
-  const renderUrl =
-    pickString(value.renderUrl) ??
-    pickString(value.url) ??
-    pickString(value.signedUrl) ??
-    null
-
-  const renderThumbUrl =
-    pickString(value.renderThumbUrl) ??
-    pickString(value.thumbUrl) ??
-    pickString(value.signedThumbUrl) ??
-    null
-
-  return {
-    id,
-    mediaType: pickMediaType(value.mediaType),
-    caption: pickString(value.caption) ?? null,
-    createdAt: pickString(value.createdAt) ?? new Date().toISOString(),
-    reviewId: pickString(value.reviewId) ?? null,
-    renderUrl,
-    renderThumbUrl,
-  }
-}
-
-async function fetchAfterMedia(bookingId: string): Promise<ApiMediaItem[]> {
-  const origin = (await getServerOrigin()) || ''
-  const url = origin
-    ? `${origin}/api/pro/bookings/${encodeURIComponent(
-        bookingId,
-      )}/media?phase=AFTER`
-    : `/api/pro/bookings/${encodeURIComponent(bookingId)}/media?phase=AFTER`
-
-  const requestHeaders = await headers()
-  const cookie = requestHeaders.get('cookie') ?? ''
-
-  const response = await fetch(url, {
-    cache: 'no-store',
-    headers: cookie ? { cookie } : undefined,
-  }).catch(() => null)
-
-  if (!response?.ok) return []
-
-  const data: unknown = await response.json().catch(() => ({}))
-
-  if (!isRecord(data) || !Array.isArray(data.items)) return []
-
-  return data.items
-    .map(parseApiMediaItem)
-    .filter((item): item is ApiMediaItem => Boolean(item))
 }
 
 function ChevronLeftIcon({ size = 13 }: { size?: number }) {
@@ -422,8 +348,12 @@ export default async function ProAfterPhotosPage(props: PageProps) {
   if (step !== SessionStep.AFTER_PHOTOS) {
     redirect(sessionHubHref(bookingId))
   }
-  const [items, afterCount] = await Promise.all([
-    fetchAfterMedia(bookingId),
+  const [mediaOutcome, afterCount] = await Promise.all([
+    listProBookingMedia({
+      bookingId,
+      professionalId,
+      phase: MediaPhase.AFTER,
+    }),
     prisma.mediaAsset.count({
       where: {
         bookingId,
@@ -432,6 +362,8 @@ export default async function ProAfterPhotosPage(props: PageProps) {
       },
     }),
   ])
+
+  const items = mediaOutcome.ok ? mediaOutcome.items : []
 
   const canContinue = afterCount > 0
   const serviceName = booking.service?.name?.trim() || 'Service'

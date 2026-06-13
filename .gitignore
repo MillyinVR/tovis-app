@@ -56,6 +56,7 @@ logs/
 server.log
 
 playwright-report/
+playwright/.auth/
 test-results/
 
 .env*.local

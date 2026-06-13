@@ -14,6 +14,14 @@ import type {
 import { apiMessage } from '../_utils/parsers'
 import { safeJson, errorMessageFromUnknown } from '@/lib/http'
 
+import {
+  BookingOverrideRequiredError,
+  mergeBookingOverrideFlags,
+  readBookingOverridePrompt,
+  type BookingOverrideFlag,
+  type BookingOverridePrompt,
+} from '@/lib/booking/overridePrompts'
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ManagementPanelDeps = {
@@ -44,6 +52,16 @@ type SetBookingStatusArgs = {
 type BookingPatchPayload = {
   status: BookingStatusUpdate
   notifyClient: boolean
+  allowShortNotice?: boolean
+  allowFarFuture?: boolean
+  allowOutsideWorkingHours?: boolean
+  overrideReason?: string
+}
+
+type ManagementOverrideState = {
+  bookingId: string
+  prompt: BookingOverridePrompt
+  flags: BookingOverrideFlag[]
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -98,16 +116,9 @@ function bookingPatchEndpoint(bookingId: string): string {
   return `/api/pro/bookings/${encodeURIComponent(bookingId)}`
 }
 
-function bookingStatusPayload(status: BookingStatusUpdate): BookingPatchPayload {
-  return {
-    status,
-    notifyClient: true,
-  }
-}
-
 async function patchBookingStatus(args: {
   bookingId: string
-  status: BookingStatusUpdate
+  payload: BookingPatchPayload
   fallbackErrorMessage: string
 }): Promise<void> {
   const idempotencyKey =
@@ -124,13 +135,20 @@ async function patchBookingStatus(args: {
       'Idempotency-Key': idempotencyKey,
       'x-idempotency-key': idempotencyKey,
     },
-    body: JSON.stringify(bookingStatusPayload(args.status)),
+    body: JSON.stringify(args.payload),
   })
 
   const data: unknown = await safeJson(response)
 
   if (!response.ok) {
-    throw new Error(apiMessage(data, args.fallbackErrorMessage))
+    const message = apiMessage(data, args.fallbackErrorMessage)
+    const overridePrompt = readBookingOverridePrompt(data)
+
+    if (overridePrompt) {
+      throw new BookingOverrideRequiredError(message, overridePrompt)
+    }
+
+    throw new Error(message)
   }
 }
 
@@ -159,6 +177,11 @@ export function useManagementPanel(deps: ManagementPanelDeps) {
 
   const [managementActionError, setManagementActionError] =
     useState<string | null>(null)
+
+  const [managementOverride, setManagementOverride] =
+    useState<ManagementOverrideState | null>(null)
+
+  const [managementOverrideReason, setManagementOverrideReason] = useState('')
 
   const busyIdRef = useRef<string | null>(null)
   const errorTimeoutRef = useRef<number | null>(null)
@@ -227,12 +250,28 @@ export function useManagementPanel(deps: ManagementPanelDeps) {
       try {
         await patchBookingStatus({
           bookingId,
-          status: args.status,
+          payload: {
+            status: args.status,
+            notifyClient: true,
+          },
           fallbackErrorMessage: copy.failedUpdateMessage,
         })
 
         await refreshAfterAction()
       } catch (caught) {
+        if (
+          caught instanceof BookingOverrideRequiredError &&
+          args.status === 'ACCEPTED'
+        ) {
+          setManagementOverride({
+            bookingId,
+            prompt: caught.prompt,
+            flags: [caught.prompt.flag],
+          })
+          setManagementOverrideReason('')
+          return
+        }
+
         const message = errorMessageFromUnknown(
           caught,
           copy.failedUpdateMessage,
@@ -257,6 +296,79 @@ export function useManagementPanel(deps: ManagementPanelDeps) {
       showActionError,
     ],
   )
+
+  const cancelManagementOverride = useCallback((): void => {
+    if (busyIdRef.current !== null) return
+
+    setManagementOverride(null)
+    setManagementOverrideReason('')
+  }, [])
+
+  const confirmManagementOverride = useCallback(async (): Promise<void> => {
+    if (!managementOverride) return
+    if (busyIdRef.current !== null) return
+
+    const reason = managementOverrideReason.trim()
+    if (!reason) return
+
+    setBusyId(managementOverride.bookingId)
+    clearActionErrorTimer()
+    setManagementActionError(null)
+
+    try {
+      const payload: BookingPatchPayload = {
+        status: 'ACCEPTED',
+        notifyClient: true,
+        overrideReason: reason,
+      }
+
+      for (const flag of managementOverride.flags) {
+        payload[flag] = true
+      }
+
+      await patchBookingStatus({
+        bookingId: managementOverride.bookingId,
+        payload,
+        fallbackErrorMessage: copy.failedUpdateMessage,
+      })
+
+      setManagementOverride(null)
+      setManagementOverrideReason('')
+      await refreshAfterAction()
+    } catch (caught) {
+      if (caught instanceof BookingOverrideRequiredError) {
+        // The retry can trip another override-gated rule. Keep the dialog
+        // open and accumulate the new flag so the next confirm covers both.
+        const prompt = caught.prompt
+
+        setManagementOverride((previous) =>
+          previous
+            ? {
+                ...previous,
+                prompt,
+                flags: mergeBookingOverrideFlags(previous.flags, prompt.flag),
+              }
+            : previous,
+        )
+      } else {
+        setManagementOverride(null)
+        setManagementOverrideReason('')
+        showActionError(
+          errorMessageFromUnknown(caught, copy.failedUpdateMessage),
+        )
+      }
+    } finally {
+      setBusyId(null)
+    }
+  }, [
+    clearActionErrorTimer,
+    copy.failedUpdateMessage,
+    managementOverride,
+    managementOverrideReason,
+    refreshAfterAction,
+    setBusyId,
+    showActionError,
+  ])
 
   const approveBookingById = useCallback(
     async (bookingId: string): Promise<void> => {
@@ -297,6 +409,13 @@ export function useManagementPanel(deps: ManagementPanelDeps) {
 
     approveBookingById,
     denyBookingById,
+
+    managementOverridePrompt: managementOverride?.prompt ?? null,
+    managementOverrideBusy: managementActionBusyId !== null,
+    managementOverrideReason,
+    setManagementOverrideReason,
+    confirmManagementOverride,
+    cancelManagementOverride,
   }
 }
 

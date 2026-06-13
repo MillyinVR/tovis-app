@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { AdminPermissionRole, ProfessionalLocationType } from '@prisma/client'
 import AdminProActions from './AdminProActions'
 import { sanitizeTimeZone } from '@/lib/timeZone'
+import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 
 export const dynamic = 'force-dynamic'
 
@@ -170,7 +171,10 @@ export default async function AdminProfessionalDetailPage({ params }: PageProps)
   const proId = pro.id
   const from = `/admin/professionals/${encodeURIComponent(proId)}`
 
-  const proName = pro.businessName || 'Unnamed business'
+  const proName = formatPublicProfileDisplayName({
+    businessName: pro.businessName,
+    fallback: 'Unnamed business',
+  })
   const email = pro.user?.email || 'No email'
   const profession = pro.professionType || 'Unknown'
 

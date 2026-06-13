@@ -18,7 +18,10 @@ import { uploadProBookingMedia } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
-import { prisma } from '@/lib/prisma'
+import {
+  listProBookingMedia,
+  parseMediaPhase,
+} from '@/lib/proBookingMedia'
 import { safeError } from '@/lib/security/logging'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
@@ -69,16 +72,6 @@ function readRequestMeta(request: Request): RequestMeta {
 
 function upper(value: unknown): string {
   return typeof value === 'string' ? value.trim().toUpperCase() : ''
-}
-
-function parsePhase(value: unknown): MediaPhase | null {
-  const normalized = upper(value)
-
-  if (normalized === 'BEFORE') return MediaPhase.BEFORE
-  if (normalized === 'AFTER') return MediaPhase.AFTER
-  if (normalized === 'OTHER') return MediaPhase.OTHER
-
-  return null
 }
 
 function parseMediaType(value: unknown): MediaType | null {
@@ -241,80 +234,25 @@ export async function GET(req: Request, ctx: Ctx) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: {
-        id: true,
-        professionalId: true,
-      },
-    })
-
-    if (!booking) {
-      return jsonFail(404, 'Booking not found.')
-    }
-
-    if (booking.professionalId !== professionalId) {
-      return jsonFail(403, 'Forbidden.')
-    }
-
     const url = new URL(req.url)
     const phaseParam = url.searchParams.get('phase')
-    const phase = phaseParam === null ? null : parsePhase(phaseParam)
+    const phase = phaseParam === null ? null : parseMediaPhase(phaseParam)
 
     if (phaseParam !== null && !phase) {
       return jsonFail(400, 'Invalid phase query param.')
     }
 
-    const where: { bookingId: string; phase?: MediaPhase } = { bookingId }
-
-    if (phase) {
-      where.phase = phase
-    }
-
-    const rows = await prisma.mediaAsset.findMany({
-      where,
-      select: {
-        id: true,
-        mediaType: true,
-        visibility: true,
-        phase: true,
-        caption: true,
-        createdAt: true,
-        reviewId: true,
-        isEligibleForLooks: true,
-        isFeaturedInPortfolio: true,
-        storageBucket: true,
-        storagePath: true,
-        thumbBucket: true,
-        thumbPath: true,
-        url: true,
-        thumbUrl: true,
-      },
-      orderBy: { createdAt: 'desc' },
+    const outcome = await listProBookingMedia({
+      bookingId,
+      professionalId,
+      phase,
     })
 
-    const items = await Promise.all(
-      rows.map(async (media) => {
-        const { renderUrl, renderThumbUrl } = await renderMediaUrls({
-          storageBucket: media.storageBucket,
-          storagePath: media.storagePath,
-          thumbBucket: media.thumbBucket,
-          thumbPath: media.thumbPath,
-          url: media.url,
-          thumbUrl: media.thumbUrl,
-        })
+    if (!outcome.ok) {
+      return jsonFail(outcome.status, outcome.error)
+    }
 
-        return {
-          ...media,
-          renderUrl,
-          renderThumbUrl,
-          url: renderUrl,
-          thumbUrl: renderThumbUrl,
-        }
-      }),
-    )
-
-    return jsonOk({ items }, 200)
+    return jsonOk({ items: outcome.items }, 200)
   } catch (error: unknown) {
     console.error('GET /api/pro/bookings/[id]/media error', {
       error: safeError(error),
@@ -407,7 +345,7 @@ export async function POST(req: Request, ctx: Ctx) {
       )
     }
 
-    const phase = parsePhase(body.phase)
+    const phase = parseMediaPhase(body.phase)
 
     if (!phase) {
       return jsonFail(400, 'Invalid phase.')

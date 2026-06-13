@@ -11,6 +11,7 @@ import {
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,6 +43,8 @@ type InboxThread = {
   professional: {
     id: string
     businessName: string | null
+    firstName: string
+    lastName: string
     avatarUrl: string | null
   } | null
   participants: {
@@ -104,6 +107,27 @@ const inboxTabs: { key: InboxFilter; label: string }[] = [
 function pickOne(value: string | string[] | undefined): string {
   if (!value) return ''
   return Array.isArray(value) ? value[0] ?? '' : value
+}
+
+// Older links land context params on /messages directly; hand them to
+// /messages/start, which owns param-driven thread resolution.
+function buildStartRedirectQuery(sp: SearchParamsShape): string | null {
+  const contextType = pickOne(sp.contextType).trim()
+  const contextId = pickOne(sp.contextId).trim()
+
+  if (!contextType || !contextId) return null
+
+  const query = new URLSearchParams()
+  query.set('contextType', contextType)
+  query.set('contextId', contextId)
+
+  const professionalId = pickOne(sp.professionalId).trim()
+  const clientId = pickOne(sp.clientId).trim()
+
+  if (professionalId) query.set('professionalId', professionalId)
+  if (clientId) query.set('clientId', clientId)
+
+  return query.toString()
 }
 
 function readFilter(sp: SearchParamsShape): InboxFilter {
@@ -352,7 +376,12 @@ function buildThreadPresentation(params: {
     viewerRole === Role.PRO
       ? formatPersonName(thread.client?.firstName, thread.client?.lastName) ||
         'Client'
-      : thread.professional?.businessName || 'Professional'
+      : formatPublicProfileDisplayName({
+          businessName: thread.professional?.businessName,
+          firstName: thread.professional?.firstName,
+          lastName: thread.professional?.lastName,
+          fallback: 'Professional',
+        })
 
   const avatarUrl =
     viewerRole === Role.PRO
@@ -446,6 +475,8 @@ async function findInboxThreads(params: {
         select: {
           id: true,
           businessName: true,
+          firstName: true,
+          lastName: true,
           avatarUrl: true,
         },
       },
@@ -528,6 +559,13 @@ export default async function MessagesInboxPage(props: PageProps) {
   }
 
   const sp = await Promise.resolve(props.searchParams ?? {})
+
+  const startQuery = buildStartRedirectQuery(sp)
+
+  if (startQuery) {
+    redirect(`/messages/start?${startQuery}`)
+  }
+
   const activeFilter = readFilter(sp)
 
   const threads = await findInboxThreads({
