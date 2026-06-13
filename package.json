@@ -41,6 +41,7 @@
     "check:pii-plaintext-reads": "node tools/check-pii-plaintext-reads.mjs",
     "check:tenant-aware-discovery": "node tools/check-tenant-aware-discovery.mjs",
     "check:no-hardcoded-brand-strings": "node tools/check-no-hardcoded-brand-strings.mjs",
+    "proof:storage-policy": "node --env-file=.env.production.local scripts/proof-storage-policy.mjs",
     "test:chaos": "dotenv -e .env.local -- vitest run --config vitest.config.mts tests/chaos",
     "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch",
     "check:privacy-guards": "pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads",
