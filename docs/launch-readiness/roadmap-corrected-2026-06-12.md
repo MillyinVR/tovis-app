@@ -57,18 +57,26 @@ Done when: per-route p99 recorded for availability / day-slots / hold / finalize
 / checkout / session-state / media-metadata / webhook-ingest, each meets target
 or has a ticketed bottleneck.
 
-### 2. Cross-tenant isolation — there is a KNOWN LEAK, plus an untested matrix
-Tenant columns exist on only **4 models** (Client/Pro/Booking/NfcCard). **MediaAsset,
-LookPost, and Review are unattributed**, and the **looks feed has zero tenant
-scoping**: `lib/looks/feed.ts` filters on publication-state only — the tenant guard
-does not cover `lookPost.findMany`, so a white-label client can see other tenants'
-look posts. **This is an active cross-tenant data leak and must be closed before any
-white-label tenant goes live.**
+### 2. Cross-tenant isolation — one gap closed, one open, plus untested surfaces
+**Status after the 2026-06-12 audit (see `tenant-isolation-audit.md`):**
 
-Separately, visibility *filters* are unit-tested (`lib/tenant/visibility.test.ts`),
-but there is no end-to-end matrix proving tenant A **cannot use** tenant B's action
-token, media URL, or NFC claim path. Build that matrix. Treat both as a privacy
-gate, not a feature.
+- ✅ **Looks feed leak — CLOSED** (PR #94). `lib/looks/feed.ts` now requires a
+  `TenantContext` and applies `proDiscoveryVisibilityFilter`; the discovery guard
+  watches `lookPost.findMany` so it can't regress.
+- ✅ **NFC claim — CLOSED (Option A).** `consumeTapIntent` (`lib/tapIntentConsume.ts`)
+  now scopes the claim: a white-label card is only claimable by a user whose
+  `homeTenantId` matches the card's issuing tenant; root cards stay open; mismatch
+  is ignored gracefully + logged (`NFC_CLAIM_TENANT_MISMATCH`). Covered by
+  `tenant-isolation.test.ts`. See the audit doc.
+- ✅ **Action tokens & media — safe via ownership.** Token/media access is gated by
+  booking/pro ownership, and a Pro belongs to exactly one tenant, so cross-tenant
+  reuse fails the ownership check. But `MediaAsset` and `Review` have **no tenant
+  column** (tenant is only derivable via relations) — fine today, revisit if
+  tenant-scoped media/review queries are ever added.
+
+Remaining work: extend the end-to-end isolation **test matrix** to the media and
+action-token ownership paths (discovery / booking / NFC visibility + NFC claim are
+now covered). Treat as a privacy/integrity gate, not a feature.
 
 ### 3. Write-boundary expansion (architecture, non-blocking)
 `lib/booking/writeBoundary.ts` is a 13,563-line single source of truth with a real

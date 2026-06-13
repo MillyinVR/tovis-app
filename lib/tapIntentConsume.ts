@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { NfcCardType, Role } from '@prisma/client'
 import { nextUrlFromPayloadJson } from '@/lib/security/safeNextUrl'
+import { TOVIS_ROOT_TENANT_SLUG } from '@/lib/tenant/constants'
 
 export async function consumeTapIntent(args: { tapIntentId: string | null; userId: string }) {
   const { tapIntentId, userId } = args
@@ -45,8 +46,8 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
       select: {
         id: true,
         role: true,
-        professionalProfile: { select: { id: true } },
-        clientProfile: { select: { id: true } },
+        professionalProfile: { select: { id: true, homeTenantId: true } },
+        clientProfile: { select: { id: true, homeTenantId: true } },
       },
     })
 
@@ -74,6 +75,8 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
         claimedAt: true,
         claimedByUserId: true,
         professionalId: true,
+        tenantId: true,
+        tenant: { select: { slug: true } },
       },
     })
 
@@ -88,6 +91,34 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
           actorUserId: user.id,
           creditedUserId: card.claimedByUserId ?? null,
           metaJson: { tapIntentId: ti.id, nextUrl },
+        },
+      })
+
+      return { ok: true as const, nextUrl }
+    }
+
+    // Tenant scope (Option A — docs/launch-readiness/tenant-isolation-audit.md):
+    // a white-label (non-root) card may only be claimed by a user whose home
+    // tenant matches the card's issuing tenant. Root cards stay open to anyone.
+    // Mismatch is ignored gracefully (don't brick signup) and logged.
+    const isRootCard = card.tenant.slug === TOVIS_ROOT_TENANT_SLUG
+    const claimerHomeTenantId =
+      user.professionalProfile?.homeTenantId ??
+      user.clientProfile?.homeTenantId ??
+      null
+
+    if (!isRootCard && claimerHomeTenantId !== card.tenantId) {
+      await tx.attributionEvent.create({
+        data: {
+          eventType: 'NFC_CLAIM_TENANT_MISMATCH',
+          cardId: card.id,
+          actorUserId: user.id,
+          metaJson: {
+            tapIntentId: ti.id,
+            cardTenantId: card.tenantId,
+            claimerHomeTenantId,
+            nextUrl,
+          },
         },
       })
 
