@@ -7,6 +7,10 @@ import {
 } from '@prisma/client'
 
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
+import {
+  rootTenantContext,
+  whiteLabelTenantContext,
+} from '@/lib/tenant/context'
 
 import {
   LOOKS_SPOTLIGHT_SLUG,
@@ -18,6 +22,12 @@ import {
   parseLooksFeedSort,
   resolveLooksFeedKind,
 } from './feed'
+
+const ROOT_TENANT = rootTenantContext('tenant_root')
+const WHITE_LABEL_TENANT = whiteLabelTenantContext({
+  tenantId: 'tenant_salon_a',
+  slug: 'salon-a',
+})
 
 describe('lib/looks/feed.ts', () => {
   describe('resolveLooksFeedKind', () => {
@@ -72,6 +82,7 @@ describe('lib/looks/feed.ts', () => {
   describe('buildLooksFeedWhere', () => {
     it('builds shared published/approved/pro-verified policy for spotlight', () => {
       const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
         kind: 'SPOTLIGHT',
       })
 
@@ -106,6 +117,7 @@ describe('lib/looks/feed.ts', () => {
 
     it('uses the canonical publicly approved pro statuses in the shared feed gate', () => {
       const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
         kind: 'ALL',
       })
 
@@ -122,6 +134,7 @@ describe('lib/looks/feed.ts', () => {
 
     it('treats category=spotlight as an alias, not a real service category filter', () => {
       const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
         kind: 'SPOTLIGHT',
         categorySlug: LOOKS_SPOTLIGHT_SLUG,
       })
@@ -152,6 +165,7 @@ describe('lib/looks/feed.ts', () => {
 
     it('still applies a real category filter inside spotlight when the slug is not the alias', () => {
       const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
         kind: 'SPOTLIGHT',
         categorySlug: 'nails',
       })
@@ -183,6 +197,7 @@ describe('lib/looks/feed.ts', () => {
 
     it('builds category and text-search filters for the all feed', () => {
       const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
         kind: 'ALL',
         categorySlug: 'nails',
         q: 'gloss',
@@ -265,6 +280,7 @@ describe('lib/looks/feed.ts', () => {
 
     it('includes followers-only visibility for the following feed', () => {
       const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
         kind: 'FOLLOWING',
         followingProfessionalIds: ['pro_1', 'pro_2'],
       })
@@ -292,6 +308,7 @@ describe('lib/looks/feed.ts', () => {
 
     it('builds an empty following guard when following ids are absent', () => {
       const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
         kind: 'FOLLOWING',
         followingProfessionalIds: [],
       })
@@ -307,6 +324,7 @@ describe('lib/looks/feed.ts', () => {
 
     it('dedupes and trims following professional ids', () => {
       const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
         kind: 'FOLLOWING',
         followingProfessionalIds: ['pro_1', ' pro_1 ', '', 'pro_2'],
       })
@@ -322,6 +340,38 @@ describe('lib/looks/feed.ts', () => {
       expect(followingFilter).toEqual({
         professionalId: {
           in: ['pro_1', 'pro_2'],
+        },
+      })
+    })
+
+    it('does not scope the professional by tenant for the root context', () => {
+      const where = buildLooksFeedWhere({
+        kind: 'ALL',
+        tenant: ROOT_TENANT,
+      })
+
+      expect(where.professional).toEqual({
+        is: {
+          verificationStatus: {
+            in: [...PUBLICLY_APPROVED_PRO_STATUSES],
+          },
+        },
+      })
+      expect(JSON.stringify(where)).not.toContain('homeTenantId')
+    })
+
+    it('confines the feed to the white-label tenant via homeTenantId', () => {
+      const where = buildLooksFeedWhere({
+        kind: 'ALL',
+        tenant: WHITE_LABEL_TENANT,
+      })
+
+      expect(where.professional).toEqual({
+        is: {
+          verificationStatus: {
+            in: [...PUBLICLY_APPROVED_PRO_STATUSES],
+          },
+          homeTenantId: 'tenant_salon_a',
         },
       })
     })

@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => {
   }
 
   const getCurrentUser = vi.fn()
+  const resolveTenantContextForRequest = vi.fn()
   const resolveLooksFeedKind = vi.fn()
   const buildLooksFeedWhere = vi.fn()
   const buildLooksFeedCursorWhere = vi.fn()
@@ -51,6 +52,7 @@ const mocks = vi.hoisted(() => {
     jsonFail,
     prisma,
     getCurrentUser,
+    resolveTenantContextForRequest,
     resolveLooksFeedKind,
     buildLooksFeedWhere,
     buildLooksFeedCursorWhere,
@@ -86,6 +88,10 @@ vi.mock('@/lib/currentUser', () => ({
   getCurrentUser: mocks.getCurrentUser,
 }))
 
+vi.mock('@/lib/tenant', () => ({
+  resolveTenantContextForRequest: mocks.resolveTenantContextForRequest,
+}))
+
 vi.mock('@/lib/looks/feed', () => ({
   resolveLooksFeedKind: mocks.resolveLooksFeedKind,
   buildLooksFeedWhere: mocks.buildLooksFeedWhere,
@@ -104,7 +110,11 @@ vi.mock('@/lib/looks/mappers', () => ({
   mapLooksFeedMediaToDto: mocks.mapLooksFeedMediaToDto,
 }))
 
+import { rootTenantContext } from '@/lib/tenant/context'
+
 import { GET } from './route'
+
+const ROOT_TENANT = rootTenantContext('tenant_root')
 
 function makeRequest(path: string): Request {
   return new Request(`http://localhost${path}`)
@@ -177,6 +187,7 @@ describe('app/api/looks/route.ts', () => {
     vi.clearAllMocks()
 
     mocks.getCurrentUser.mockResolvedValue(null)
+    mocks.resolveTenantContextForRequest.mockResolvedValue(ROOT_TENANT)
     mocks.resolveLooksFeedKind.mockReturnValue('ALL')
     mocks.buildLooksFeedWhere.mockReturnValue({
       whereToken: 'default-where',
@@ -221,6 +232,7 @@ describe('app/api/looks/route.ts', () => {
 
     expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
       kind: 'ALL',
+      tenant: ROOT_TENANT,
       categorySlug: null,
       q: null,
       followingProfessionalIds: [],
@@ -374,6 +386,7 @@ describe('app/api/looks/route.ts', () => {
 
     expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
       kind: 'FOLLOWING',
+      tenant: ROOT_TENANT,
       categorySlug: null,
       q: null,
       followingProfessionalIds: ['pro_1', 'pro_2'],
@@ -440,6 +453,7 @@ describe('app/api/looks/route.ts', () => {
 
     expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
       kind: 'SPOTLIGHT',
+      tenant: ROOT_TENANT,
       categorySlug: 'spotlight',
       q: 'fade',
       followingProfessionalIds: [],
@@ -502,6 +516,7 @@ describe('app/api/looks/route.ts', () => {
 
     expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
       kind: 'ALL',
+      tenant: ROOT_TENANT,
       categorySlug: 'nails',
       q: 'fade',
       followingProfessionalIds: [],

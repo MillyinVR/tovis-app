@@ -12,6 +12,7 @@ import {
 import { mapLooksFeedMediaToDto } from '@/lib/looks/mappers'
 import { looksFeedSelect } from '@/lib/looks/selects'
 import type { LooksFeedResponseDto } from '@/lib/looks/types'
+import type { TenantContext } from '@/lib/tenant'
 import { prisma } from '@/lib/prisma'
 import {
   SearchRequestError,
@@ -38,6 +39,7 @@ function resolvePublicLooksSearchKind(args: {
 
 export async function searchLooks(
   searchParams: URLSearchParams,
+  tenant: TenantContext,
 ): Promise<LooksFeedResponseDto> {
   const limit = parseLimit(searchParams.get('limit'), {
     defaultValue: 12,
@@ -83,6 +85,7 @@ export async function searchLooks(
 
   const where = buildLooksFeedWhere({
     kind,
+    tenant,
     categorySlug: rawCategorySlug,
     q,
     followingProfessionalIds: [],

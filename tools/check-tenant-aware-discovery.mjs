@@ -32,6 +32,11 @@ const DISCOVERY_QUERY_PATTERNS = [
     query: 'professionalLocation.findMany',
     qualifiers: ['PUBLICLY_APPROVED_PRO_STATUSES'],
   },
+  // Looks feeds enumerate published posts across Pros, so they are a Pro
+  // discovery surface too: an unscoped lookPost.findMany leaks other tenants'
+  // looks to white-label clients. The canonical builder applies the tenant
+  // filter, so referencing it (below) counts as tenant-aware.
+  { query: 'lookPost.findMany' },
 ]
 
 // Referencing any of these counts as tenant-aware.
@@ -42,6 +47,10 @@ const TENANT_HELPER_PATTERNS = [
   'searchIndexVisibilityFilter',
   'searchIndexVisibilitySql',
   'platformCrossTenantProVisibilityFilter',
+  // buildLooksFeedWhere requires a TenantContext and applies
+  // proDiscoveryVisibilityFilter internally, so composing it is proof the
+  // looks feed is tenant-scoped.
+  'buildLooksFeedWhere',
 ]
 
 const SCAN_DIRS = ['app', 'lib']

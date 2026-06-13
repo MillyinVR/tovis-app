@@ -2,7 +2,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MediaType, ProfessionType } from '@prisma/client'
 
+import { rootTenantContext } from '@/lib/tenant/context'
+
 import { SearchRequestError } from './contracts'
+
+const ROOT_TENANT = rootTenantContext('tenant_root')
 
 const mocks = vi.hoisted(() => {
   const prisma = {
@@ -164,7 +168,7 @@ describe('lib/search/looks.ts', () => {
     mocks.buildLooksFeedWhere.mockReturnValue(sharedWhere)
     mocks.buildLooksFeedOrderBy.mockReturnValue(sharedOrderBy)
 
-    const result = await searchLooks(new URLSearchParams(''))
+    const result = await searchLooks(new URLSearchParams(''), ROOT_TENANT)
 
     expect(mocks.resolveLooksFeedKind).toHaveBeenCalledWith({
       filter: null,
@@ -177,6 +181,7 @@ describe('lib/search/looks.ts', () => {
 
     expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
       kind: 'ALL',
+      tenant: ROOT_TENANT,
       categorySlug: null,
       q: null,
       followingProfessionalIds: [],
@@ -213,7 +218,7 @@ describe('lib/search/looks.ts', () => {
 
   it('rejects following=true because looks search is public-search-only', async () => {
     await expect(
-      searchLooks(new URLSearchParams('following=true')),
+      searchLooks(new URLSearchParams('following=true'), ROOT_TENANT),
     ).rejects.toMatchObject({
       status: 400,
       message: 'Looks search does not support following.',
@@ -226,7 +231,7 @@ describe('lib/search/looks.ts', () => {
 
   it('rejects filter=following because following stays owned by the feed route', async () => {
     await expect(
-      searchLooks(new URLSearchParams('filter=following')),
+      searchLooks(new URLSearchParams('filter=following'), ROOT_TENANT),
     ).rejects.toMatchObject({
       status: 400,
       message: 'Looks search does not support following.',
@@ -267,6 +272,7 @@ describe('lib/search/looks.ts', () => {
       new URLSearchParams(
         'sort=ranked&cursor=cursor_123&category=nails&q=fade&limit=18',
       ),
+      ROOT_TENANT,
     )
 
     expect(mocks.resolveLooksFeedKind).toHaveBeenCalledWith({
@@ -280,6 +286,7 @@ describe('lib/search/looks.ts', () => {
 
     expect(mocks.buildLooksFeedWhere).toHaveBeenCalledWith({
       kind: 'ALL',
+      tenant: ROOT_TENANT,
       categorySlug: 'nails',
       q: 'fade',
       followingProfessionalIds: [],
@@ -342,7 +349,7 @@ describe('lib/search/looks.ts', () => {
       .mockResolvedValueOnce(dto1)
       .mockResolvedValueOnce(dto2)
 
-    const result = await searchLooks(new URLSearchParams('limit=2'))
+    const result = await searchLooks(new URLSearchParams('limit=2'), ROOT_TENANT)
 
     expect(mocks.prisma.lookPost.findMany).toHaveBeenCalledWith({
       where: { whereToken: 'default-where' },
@@ -402,7 +409,7 @@ describe('lib/search/looks.ts', () => {
     mocks.resolveLooksFeedKind.mockReturnValue(null)
 
     await expect(
-      searchLooks(new URLSearchParams('filter=banana')),
+      searchLooks(new URLSearchParams('filter=banana'), ROOT_TENANT),
     ).rejects.toMatchObject({
       status: 400,
       message: 'Invalid looks filter.',
@@ -418,7 +425,7 @@ describe('lib/search/looks.ts', () => {
     mocks.parseLooksFeedSort.mockReturnValue(null)
 
     await expect(
-      searchLooks(new URLSearchParams('sort=chaos')),
+      searchLooks(new URLSearchParams('sort=chaos'), ROOT_TENANT),
     ).rejects.toMatchObject({
       status: 400,
       message: 'Invalid looks sort.',
@@ -434,7 +441,7 @@ describe('lib/search/looks.ts', () => {
     mocks.decodeLooksFeedCursor.mockReturnValue(null)
 
     await expect(
-      searchLooks(new URLSearchParams('cursor=bad_cursor')),
+      searchLooks(new URLSearchParams('cursor=bad_cursor'), ROOT_TENANT),
     ).rejects.toMatchObject({
       status: 400,
       message: 'Invalid looks cursor.',
@@ -450,7 +457,7 @@ describe('lib/search/looks.ts', () => {
     mocks.decodeLooksFeedCursor.mockReturnValue(null)
 
     try {
-      await searchLooks(new URLSearchParams('cursor=bad_cursor'))
+      await searchLooks(new URLSearchParams('cursor=bad_cursor'), ROOT_TENANT)
       throw new Error('expected searchLooks to throw')
     } catch (error) {
       expect(error).toBeInstanceOf(SearchRequestError)
