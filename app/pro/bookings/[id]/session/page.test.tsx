@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 
   redirect: vi.fn(),
   notFound: vi.fn(),
+  revalidatePath: vi.fn(),
 
   transitionSessionStep: vi.fn(),
   recordInPersonConsultationDecision: vi.fn(),
@@ -27,6 +28,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('next/navigation', () => ({
   redirect: mocks.redirect,
   notFound: mocks.notFound,
+}))
+
+vi.mock('next/cache', () => ({
+  revalidatePath: mocks.revalidatePath,
 }))
 
 vi.mock('next/link', () => ({
@@ -79,6 +84,23 @@ vi.mock('../ConsultationForm', () => ({
         'data-initial-price': initialPrice,
       },
       'ConsultationForm',
+    ),
+}))
+
+vi.mock('./PendingActionButton', () => ({
+  default: ({
+    children,
+    variant,
+    disabled,
+  }: {
+    children: React.ReactNode
+    variant?: string
+    disabled?: boolean
+  }) =>
+    React.createElement(
+      'button',
+      { type: 'submit', 'data-variant': variant, disabled },
+      children,
     ),
 }))
 

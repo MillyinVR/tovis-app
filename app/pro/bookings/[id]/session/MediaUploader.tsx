@@ -13,14 +13,21 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
+import {
+  processImageForUpload,
+  formatBytes,
+} from '@/lib/media/processImageForUpload'
 
 type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
 type MediaType = 'IMAGE' | 'VIDEO'
-type UploadState = 'IDLE' | 'UPLOADING' | 'SAVING'
+type UploadState = 'IDLE' | 'COMPRESSING' | 'UPLOADING' | 'SAVING'
 
 const MAX_IMAGE_MB = 25
 const MAX_VIDEO_MB = 200
 const CAPTION_MAX = 300
+
+const COMPRESS_MAX_DIMENSION = 2000
+const COMPRESS_MAX_BYTES = 25 * 1024 * 1024
 
 type SignedUploadResponse = {
   ok: true
@@ -95,13 +102,17 @@ function bytesFromMb(mb: number): number {
   return mb * 1024 * 1024
 }
 
-/**
- * Optional: create an image thumbnail client-side.
- * Disabled by default to avoid fragility.
- */
-async function maybeCreateImageThumb(file: File): Promise<Blob | null> {
-  void file
-  return null
+function statusLabel(status: UploadState): string {
+  switch (status) {
+    case 'COMPRESSING':
+      return 'Compressing…'
+    case 'UPLOADING':
+      return 'Uploading…'
+    case 'SAVING':
+      return 'Saving…'
+    default:
+      return 'Upload'
+  }
 }
 
 export default function MediaUploader({
@@ -120,6 +131,7 @@ export default function MediaUploader({
   const [status, setStatus] = useState<UploadState>('IDLE')
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [compressionNote, setCompressionNote] = useState<string | null>(null)
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -155,6 +167,7 @@ export default function MediaUploader({
   function resetMessages() {
     setError(null)
     setMessage(null)
+    setCompressionNote(null)
   }
 
   async function onPickFile(next: File | null) {
@@ -201,6 +214,32 @@ export default function MediaUploader({
     const mt: MediaType = mediaType
 
     try {
+      let uploadFile: File = file
+
+      if (mt === 'IMAGE') {
+        setStatus('COMPRESSING')
+
+        try {
+          const result = await processImageForUpload(file, {
+            maxBytes: COMPRESS_MAX_BYTES,
+            maxWidth: COMPRESS_MAX_DIMENSION,
+            maxHeight: COMPRESS_MAX_DIMENSION,
+            outputMimeType: 'image/jpeg',
+          })
+
+          uploadFile = result.file
+
+          if (result.processedBytes < result.originalBytes) {
+            setCompressionNote(
+              `${formatBytes(result.originalBytes)} → ${formatBytes(result.processedBytes)}`,
+            )
+          }
+        } catch {
+          // Compression failed — upload the original file.
+          uploadFile = file
+        }
+      }
+
       setStatus('UPLOADING')
 
       const signRes = await fetch('/api/pro/uploads', {
@@ -211,8 +250,8 @@ export default function MediaUploader({
           kind: 'CONSULT_PRIVATE',
           bookingId,
           phase,
-          contentType: file.type || 'application/octet-stream',
-          size: file.size,
+          contentType: uploadFile.type || 'application/octet-stream',
+          size: uploadFile.size,
         }),
       })
 
@@ -234,9 +273,9 @@ export default function MediaUploader({
 
       const uploadRes = await supabaseBrowser.storage
         .from(signData.bucket)
-        .uploadToSignedUrl(signData.path, signData.token, file, {
+        .uploadToSignedUrl(signData.path, signData.token, uploadFile, {
           upsert: false,
-          contentType: file.type || undefined,
+          contentType: uploadFile.type || undefined,
         })
 
       if (uploadRes.error) {
@@ -245,17 +284,8 @@ export default function MediaUploader({
         return
       }
 
-      let thumbBucket: string | null = null
-      let thumbPath: string | null = null
-
-      if (mt === 'IMAGE') {
-        const thumbBlob = await maybeCreateImageThumb(file)
-
-        if (thumbBlob) {
-          thumbBucket = null
-          thumbPath = null
-        }
-      }
+      const thumbBucket: string | null = null
+      const thumbPath: string | null = null
 
       setStatus('SAVING')
 
@@ -345,7 +375,7 @@ export default function MediaUploader({
     <div className={shell}>
       <div className="text-xs font-semibold text-textSecondary">
         Upload {phase.toLowerCase()} media (stored privately). The client can
-        only “release” media by attaching it to a review.
+        only &ldquo;release&rdquo; media by attaching it to a review.
       </div>
 
       <div className="mt-3 grid gap-3">
@@ -448,12 +478,14 @@ export default function MediaUploader({
             disabled={!canSubmit || disabled}
             className={btn}
           >
-            {status === 'UPLOADING'
-              ? 'Uploading…'
-              : status === 'SAVING'
-                ? 'Saving…'
-                : 'Upload'}
+            {statusLabel(status)}
           </button>
+
+          {compressionNote ? (
+            <span className="text-[10px] font-semibold text-textSecondary">
+              {compressionNote}
+            </span>
+          ) : null}
 
           {message ? (
             <span className="text-xs font-black text-textPrimary">

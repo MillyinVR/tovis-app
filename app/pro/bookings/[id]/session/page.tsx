@@ -2,6 +2,7 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
 import {
   BookingCheckoutStatus,
   BookingServiceItemType,
@@ -16,6 +17,7 @@ import {
 import ConsultationForm, {
   type ConsultationInitialItem,
 } from '../ConsultationForm'
+import PendingActionButton from './PendingActionButton'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
@@ -232,7 +234,7 @@ async function transitionAction(bookingId: string, next: SessionStep) {
     nextStep: next,
   })
 
-  redirect(sessionHubHref(bookingId))
+  revalidatePath(sessionHubHref(bookingId))
 }
 
 async function inPersonDecisionAction(
@@ -275,7 +277,7 @@ async function inPersonDecisionAction(
     userAgent: 'pro_session_server_action',
   })
 
-  redirect(sessionHubHref(bookingId))
+  revalidatePath(sessionHubHref(bookingId))
 }
 
 async function wrapUpAction(bookingId: string) {
@@ -610,33 +612,6 @@ function ActionLink({
   )
 }
 
-function ActionButton({
-  children,
-  variant = 'primary',
-  full = true,
-  disabled = false,
-  grow,
-}: {
-  children: ReactNode
-  variant?: ButtonVariant
-  full?: boolean
-  disabled?: boolean
-  grow?: 1 | 2
-}) {
-  return (
-    <button
-      type="submit"
-      className="brand-pro-session-button brand-focus"
-      data-variant={variant}
-      data-full={full}
-      data-grow={grow}
-      disabled={disabled}
-      aria-disabled={disabled}
-    >
-      {children}
-    </button>
-  )
-}
 
 function StepRows({ effectiveStep }: { effectiveStep: SessionStep }) {
   const steps = buildSessionStepItems(effectiveStep)
@@ -896,7 +871,7 @@ function ConsultationView({
 
           {canProceedToBefore ? (
             <form action={toBefore} className="mt-4">
-              <ActionButton>Proceed to before photos</ActionButton>
+              <PendingActionButton pendingLabel="Advancing…">Proceed to before photos</PendingActionButton>
             </form>
           ) : null}
 
@@ -975,21 +950,21 @@ function WaitingView({
           {canUseInPersonFallback ? (
             <div className="brand-pro-session-fallback-actions">
               <form action={approveInPerson}>
-                <ActionButton variant="ghost">
+                <PendingActionButton variant="ghost" pendingLabel="Recording…">
                   <CheckIcon size={10} />
                   Record approval
-                </ActionButton>
+                </PendingActionButton>
               </form>
 
               <form action={rejectInPerson}>
-                <ActionButton variant="danger">Record decline</ActionButton>
+                <PendingActionButton variant="danger" pendingLabel="Recording…">Record decline</PendingActionButton>
               </form>
             </div>
           ) : null}
         </Card>
 
         <form action={toConsult} className="pt-3 pb-4">
-          <ActionButton variant="ghost">← Back to consultation</ActionButton>
+          <PendingActionButton variant="ghost" pendingLabel="Going back…">← Back to consultation</PendingActionButton>
         </form>
 
         <div className="brand-pro-session-help-text">{subtitle}</div>
@@ -1051,9 +1026,9 @@ function BeforePhotosView({
         </section>
 
         <form action={toService}>
-          <ActionButton>
+          <PendingActionButton pendingLabel="Starting…">
             Start service <ArrowRightIcon />
-          </ActionButton>
+          </PendingActionButton>
         </form>
 
         <div className="brand-pro-session-help-text">
@@ -1141,9 +1116,9 @@ function ServiceInProgressView({
         </Card>
 
         <form action={toFinishReview}>
-          <ActionButton>
+          <PendingActionButton pendingLabel="Finishing…">
             Finish service <ArrowRightIcon />
-          </ActionButton>
+          </PendingActionButton>
         </form>
 
         <div className="brand-pro-session-help-text pb-4">
@@ -1191,9 +1166,9 @@ function FinishReviewView({
           </div>
 
           <form action={toWrapUp} className="mt-3">
-            <ActionButton>
+            <PendingActionButton pendingLabel="Wrapping up…">
               Go to wrap-up <ArrowRightIcon />
-            </ActionButton>
+            </PendingActionButton>
           </form>
         </Card>
       </div>
@@ -1541,7 +1516,7 @@ function UnmappedStateView({
           </div>
 
           <form action={toConsult} className="mt-3">
-            <ActionButton>Back to consult</ActionButton>
+            <PendingActionButton pendingLabel="Going back…">Back to consult</PendingActionButton>
           </form>
         </Card>
 

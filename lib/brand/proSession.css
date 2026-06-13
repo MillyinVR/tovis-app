@@ -391,6 +391,21 @@
   opacity: 0.55;
 }
 
+.brand-pro-session-button[data-pending] {
+  cursor: wait;
+}
+
+@keyframes brand-pro-session-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.brand-pro-session-spinner {
+  animation: brand-pro-session-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
 /* ──────────────────────────────────────────────────────────────────
    Stats
 ────────────────────────────────────────────────────────────────── */
