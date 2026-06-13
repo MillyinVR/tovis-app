@@ -33,7 +33,10 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
-import { resolveBookingTenantAttribution } from '@/lib/tenant/bookingAttribution'
+import {
+  resolveBookingTenantAttribution,
+  resolveProTenantId,
+} from '@/lib/tenant/bookingAttribution'
 import { upper } from '@/lib/booking/guards'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 import {
@@ -6414,9 +6417,12 @@ async function performLockedUploadProBookingMedia(args: {
     })
   }
 
+  const proTenantId = await resolveProTenantId(args.tx, booking.professionalId)
+
   const created: BookingMediaAssetRecord = await args.tx.mediaAsset.create({
     data: {
       professionalId: booking.professionalId,
+      proTenantId,
       bookingId: booking.id,
       uploadedByUserId: args.uploadedByUserId,
       uploadedByRole: Role.PRO,

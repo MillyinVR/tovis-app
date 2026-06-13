@@ -65,6 +65,7 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
   txMediaAssetCreate: vi.fn(),
   txReviewFindUnique: vi.fn(),
+  txProfessionalProfileFindUnique: vi.fn(),
 
   safeUrl: vi.fn(),
   resolveStoragePointers: vi.fn(),
@@ -130,6 +131,9 @@ type TxForReviewMedia = {
   }
   review: {
     findUnique: typeof mocks.txReviewFindUnique
+  }
+  professionalProfile: {
+    findUnique: typeof mocks.txProfessionalProfileFindUnique
   }
 }
 
@@ -251,8 +255,15 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
           review: {
             findUnique: mocks.txReviewFindUnique,
           },
+          professionalProfile: {
+            findUnique: mocks.txProfessionalProfileFindUnique,
+          },
         }),
     )
+
+    mocks.txProfessionalProfileFindUnique.mockResolvedValue({
+      homeTenantId: 'tenant_root',
+    })
 
     mocks.renderMediaUrls.mockResolvedValue(renderedUrls)
 
@@ -614,6 +625,7 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
     expect(mocks.txMediaAssetCreate).toHaveBeenCalledWith({
       data: {
         professionalId: 'pro_1',
+        proTenantId: 'tenant_root',
         bookingId: 'booking_1',
         reviewId: 'review_1',
         storageBucket: BUCKETS.mediaPublic,

@@ -35,10 +35,14 @@ const mocks = vi.hoisted(() => {
 
   const serviceFindMany = vi.fn()
   const mediaAssetCreate = vi.fn()
+  const professionalProfileFindUnique = vi.fn()
 
   const tx = {
     mediaAsset: {
       create: mediaAssetCreate,
+    },
+    professionalProfile: {
+      findUnique: professionalProfileFindUnique,
     },
   }
 
@@ -63,6 +67,7 @@ const mocks = vi.hoisted(() => {
     tx,
     serviceFindMany,
     mediaAssetCreate,
+    professionalProfileFindUnique,
     createOrUpdateProLookFromMediaAsset,
   }
 })
@@ -286,6 +291,10 @@ describe('app/api/pro/media/route.ts', () => {
 
     mocks.mediaAssetCreate.mockResolvedValue(makeCreatedMedia())
 
+    mocks.professionalProfileFindUnique.mockResolvedValue({
+      homeTenantId: 'tenant_root',
+    })
+
     mocks.createOrUpdateProLookFromMediaAsset.mockResolvedValue(
       makeLookPublicationResult(),
     )
@@ -371,6 +380,7 @@ describe('app/api/pro/media/route.ts', () => {
     expect(mocks.mediaAssetCreate).toHaveBeenCalledWith({
       data: {
         professionalId: 'pro_1',
+        proTenantId: 'tenant_root',
         url: 'https://cdn.example.com/media_1.jpg',
         thumbUrl: null,
         caption: 'Portfolio upload',

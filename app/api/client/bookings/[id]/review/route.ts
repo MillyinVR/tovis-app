@@ -37,6 +37,7 @@ import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
+import { resolveProTenantId } from '@/lib/tenant/bookingAttribution'
 
 export const dynamic = 'force-dynamic'
 
@@ -579,9 +580,14 @@ export async function POST(
         }
 
         if (resolvedClientMedia.length > 0) {
+          const proTenantId = await resolveProTenantId(
+            tx,
+            eligibility.booking.professionalId,
+          )
           await tx.mediaAsset.createMany({
             data: resolvedClientMedia.map((item) => ({
               professionalId: eligibility.booking.professionalId,
+              proTenantId,
               bookingId: eligibility.booking.id,
               reviewId: review.id,
               mediaType: item.mediaType,

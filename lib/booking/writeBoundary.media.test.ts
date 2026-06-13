@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   txBookingFindUnique: vi.fn(),
   txBookingUpdate: vi.fn(),
   txMediaAssetCreate: vi.fn(),
+  txProfessionalProfileFindUnique: vi.fn(),
 
   createBookingCloseoutAuditLog: vi.fn(),
   areAuditValuesEqual: vi.fn(),
@@ -53,6 +54,9 @@ const tx = {
   },
   mediaAsset: {
     create: mocks.txMediaAssetCreate,
+  },
+  professionalProfile: {
+    findUnique: mocks.txProfessionalProfileFindUnique,
   },
 }
 
@@ -135,6 +139,7 @@ function expectMediaCreateCalledWith(args: {
     data: {
       bookingId: 'booking_1',
       professionalId: 'pro_1',
+      proTenantId: 'tenant_root',
       uploadedByUserId: 'user_1',
       uploadedByRole: Role.PRO,
       storageBucket: 'booking-media',
@@ -217,6 +222,10 @@ describe('lib/booking/writeBoundary media lifecycle invariants', () => {
     vi.resetAllMocks()
     vi.useFakeTimers()
     vi.setSystemTime(TEST_NOW)
+
+    mocks.txProfessionalProfileFindUnique.mockResolvedValue({
+      homeTenantId: 'tenant_root',
+    })
 
     mocks.areAuditValuesEqual.mockImplementation(
       (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b),

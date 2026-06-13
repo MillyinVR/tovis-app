@@ -31,6 +31,34 @@ export type BookingTenantAttribution = {
   clientHomeTenantId: string
 }
 
+// Minimal client shape for resolving a single Pro's home tenant.
+type ProProfileLookupClient = {
+  professionalProfile: AttributionTx['professionalProfile']
+}
+
+/**
+ * Resolves a single Pro's home tenant for attributing pro-owned rows created
+ * outside the booking write boundary (MediaAsset, Notification). Mirrors the
+ * booking attribution invariant: homeTenantId is NOT NULL (contract phase), so
+ * a missing profile is a caller data-integrity bug and throws rather than
+ * writing a null tenant.
+ */
+export async function resolveProTenantId(
+  client: ProProfileLookupClient,
+  professionalId: string,
+): Promise<string> {
+  const pro = await client.professionalProfile.findUnique({
+    where: { id: professionalId },
+    select: { homeTenantId: true },
+  })
+
+  if (!pro) {
+    throw new Error(`resolveProTenantId: professional ${professionalId} not found`)
+  }
+
+  return pro.homeTenantId
+}
+
 export async function resolveBookingTenantAttribution(
   tx: AttributionTx,
   args: { professionalId: string; clientId: string },

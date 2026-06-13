@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { resolveBookingTenantAttribution } from './bookingAttribution'
+import {
+  resolveBookingTenantAttribution,
+  resolveProTenantId,
+} from './bookingAttribution'
 
 function makeTx(args: {
   proHomeTenantId: string | undefined
@@ -76,5 +79,31 @@ describe('resolveBookingTenantAttribution', () => {
         clientId: 'client_missing',
       }),
     ).rejects.toThrow(/client client_missing not found/)
+  })
+})
+
+describe('resolveProTenantId', () => {
+  it('returns the professional home tenant', async () => {
+    const tx = makeTx({
+      proHomeTenantId: 'tenant_salon',
+      clientHomeTenantId: 'tenant_root',
+    })
+
+    await expect(resolveProTenantId(tx, 'pro_1')).resolves.toBe('tenant_salon')
+    expect(tx.professionalProfile.findUnique).toHaveBeenCalledWith({
+      where: { id: 'pro_1' },
+      select: { homeTenantId: true },
+    })
+  })
+
+  it('throws when the professional profile is missing (contract-phase integrity)', async () => {
+    const tx = makeTx({
+      proHomeTenantId: undefined,
+      clientHomeTenantId: 'tenant_root',
+    })
+
+    await expect(resolveProTenantId(tx, 'pro_missing')).rejects.toThrow(
+      'resolveProTenantId: professional pro_missing not found',
+    )
   })
 })
