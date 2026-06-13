@@ -231,8 +231,6 @@ app/api/pro/session/route.ts:optional direct property read:booking.client?.user?
 app/api/pro/session/route.ts:optional direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:lastName: true,
-app/booking/[id]/page.tsx:Prisma select/include plaintext field:firstName: true,
-app/booking/[id]/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/claim/[token]/page.tsx:direct property read:booking.professional?.user?.email?.trim() ||
 app/claim/[token]/page.tsx:optional direct property read:booking.professional?.user?.email?.trim() ||
 app/client/_data/getClientHomeData.ts:Prisma select/include plaintext field:
@@ -247,10 +245,6 @@ app/client/bookings/[id]/page.tsx:direct property read:raw.professional.user.ema
 app/client/bookings/[id]/page.tsx:direct property read:typeof raw.professional?.user?.email === 'string' &&
 app/client/bookings/[id]/page.tsx:optional direct property read:booking.consultation?.consultationNotes ||
 app/client/bookings/[id]/page.tsx:optional direct property read:typeof raw.professional?.user?.email === 'string' &&
-app/client/bookings/page.tsx:direct property read:const handle = (user.email?.split('@')[0] ?? 'you')
-app/client/bookings/page.tsx:direct property read:user.clientProfile?.firstName?.trim() ||
-app/client/bookings/page.tsx:direct property read:user.email?.split('@')[0] ||
-app/client/bookings/page.tsx:optional direct property read:user.clientProfile?.firstName?.trim() ||
 app/client/components/SavedServicesWithProviders.tsx:direct property read:const postalCode = pickText(place.postalCode) || null
 app/client/consultation/[token]/page.tsx:direct property read:const clientLabel = [data.booking.client.firstName, data.booking.client.lastName]
 app/client/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:
@@ -392,13 +386,9 @@ app/pro/calendar/_utils/parsers.ts:direct property read:const fullName = nullabl
 app/pro/clients/[id]/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/clients/[id]/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/pro/clients/[id]/page.tsx:Prisma select/include plaintext field:phone: true,
-app/pro/clients/[id]/page.tsx:direct property read:booking.professional?.firstName,
-app/pro/clients/[id]/page.tsx:direct property read:booking.professional?.lastName,
 app/pro/clients/[id]/page.tsx:direct property read:const email = client.user?.email || ''
 app/pro/clients/[id]/page.tsx:direct property read:const phone = client.phone || ''
 app/pro/clients/[id]/page.tsx:direct property read:{client.firstName} {client.lastName}
-app/pro/clients/[id]/page.tsx:optional direct property read:booking.professional?.firstName,
-app/pro/clients/[id]/page.tsx:optional direct property read:booking.professional?.lastName,
 app/pro/clients/[id]/page.tsx:optional direct property read:const email = client.user?.email || ''
 app/pro/clients/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/clients/page.tsx:Prisma select/include plaintext field:lastName: true,
@@ -513,7 +503,6 @@ lib/notifications/proNotifications.ts:direct property read:const profilePhone = 
 lib/notifications/proNotifications.ts:direct property read:const userPhone = normNullableString(professional.user.phone, 64)
 lib/profiles/publicProfileFormatting.ts:direct property read:const firstName = trimToNull(input.firstName)
 lib/profiles/publicProfileFormatting.ts:direct property read:const lastName = trimToNull(input.lastName)
-lib/profiles/publicProfileFormatting.ts:direct property read:const personName = [trimToNull(args.firstName), trimToNull(args.lastName)]
 lib/profiles/publicProfileFormatting.ts:direct property read:return trimToNull(input.email) ?? 'Client'
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:email: true,
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:firstName: true,

@@ -490,10 +490,24 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     approveBooking: bookingModal.approveBooking,
     denyBooking: bookingModal.denyBooking,
 
+    bookingOverridePrompt: bookingModal.bookingOverridePrompt,
+    bookingOverrideIntent: bookingModal.bookingOverrideIntent,
+    bookingOverrideReason: bookingModal.bookingOverrideReason,
+    setBookingOverrideReason: bookingModal.setBookingOverrideReason,
+    confirmBookingOverride: bookingModal.confirmBookingOverride,
+    cancelBookingOverride: bookingModal.cancelBookingOverride,
+
     approveBookingById: mgmt.approveBookingById,
     denyBookingById: mgmt.denyBookingById,
     managementActionBusyId: mgmt.managementActionBusyId,
     managementActionError: mgmt.managementActionError,
+
+    managementOverridePrompt: mgmt.managementOverridePrompt,
+    managementOverrideBusy: mgmt.managementOverrideBusy,
+    managementOverrideReason: mgmt.managementOverrideReason,
+    setManagementOverrideReason: mgmt.setManagementOverrideReason,
+    confirmManagementOverride: mgmt.confirmManagementOverride,
+    cancelManagementOverride: mgmt.cancelManagementOverride,
 
     openBookingOrBlock,
     closeBooking: bookingModal.closeBooking,
@@ -506,6 +520,12 @@ export function useCalendarData(args: UseCalendarDataArgs) {
     pendingOutsideWorkingHours: confirm.pendingOutsideWorkingHours,
     overrideReason: confirm.overrideReason,
     setOverrideReason: confirm.setOverrideReason,
+
+    changeOverridePrompt: confirm.changeOverridePrompt,
+    changeOverrideReason: confirm.changeOverrideReason,
+    setChangeOverrideReason: confirm.setChangeOverrideReason,
+    confirmChangeOverride: confirm.confirmChangeOverride,
+    cancelChangeOverride: confirm.cancelChangeOverride,
 
     ui: {
       suppressClickRef: dragDrop.ui.suppressClickRef,

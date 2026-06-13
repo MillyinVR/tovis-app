@@ -9,6 +9,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { formatProfessionalPublicSearchText } from '@/lib/privacy/professionalDisplayName'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 
 import EditAlertBannerForm from './EditAlertBannerForm'
@@ -289,9 +290,7 @@ function buildBookingSearchIndex(booking: BookingRow): string {
   const parts = [
     booking.service?.name,
     booking.service?.category?.name,
-    booking.professional?.businessName,
-    booking.professional?.firstName,
-    booking.professional?.lastName,
+    formatProfessionalPublicSearchText(booking.professional),
     booking.status,
     booking.aftercareSummary?.notes,
     String(booking.totalDurationMinutes ?? ''),

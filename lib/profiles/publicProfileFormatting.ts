@@ -2,6 +2,7 @@
 // lib/profiles/publicProfileFormatting.ts
 import type { ProfessionType } from '@prisma/client'
 
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 
 export type PublicProfileTab = 'portfolio' | 'services' | 'reviews'
@@ -139,15 +140,7 @@ export function formatPublicProfileDisplayName(args: {
   lastName?: string | null
   fallback?: string
 }): string {
-  const businessName = trimToNull(args.businessName)
-  if (businessName) return businessName
-
-  const personName = [trimToNull(args.firstName), trimToNull(args.lastName)]
-    .filter(Boolean)
-    .join(' ')
-  if (personName) return personName
-
-  return args.fallback ?? 'Beauty professional'
+  return formatProfessionalPublicDisplayName(args, args.fallback)
 }
 
 export function formatProfessionLabel(

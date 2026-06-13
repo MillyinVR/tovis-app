@@ -1,12 +1,13 @@
 // app/pro/calendar/ProCalendarClientPage.tsx
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import BlockTimeModal from './_components/BlockTimeModal'
 import EditBlockModal from './_components/EditBlockModal'
 
 import { BookingModal } from './_components/BookingModal'
+import { BookingOverrideConfirmModal } from './_components/BookingOverrideConfirmModal'
 import { CalendarDesktopShell } from './_components/CalendarDesktopShell'
 import { CalendarMobileShell } from './_components/CalendarMobileShell'
 import { CalendarTabletShell } from './_components/CalendarTabletShell'
@@ -128,6 +129,24 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
     [topPendingRequest],
   )
 
+  // Dismissal is keyed to the current set of pending requests, so the bar
+  // returns as soon as a new request arrives or the set changes.
+  const pendingRequestsKey = useMemo(
+    () => cal.management.pendingRequests.map((event) => event.id).join('|'),
+    [cal.management.pendingRequests],
+  )
+
+  const [dismissedPendingKey, setDismissedPendingKey] = useState<
+    string | null
+  >(null)
+
+  const pendingBarDismissed =
+    pendingRequestsKey.length > 0 && dismissedPendingKey === pendingRequestsKey
+
+  const dismissPendingBar = useCallback(() => {
+    setDismissedPendingKey(pendingRequestsKey)
+  }, [pendingRequestsKey])
+
   const viewTitle = useMemo(
     () => calendarTitleForView(view, copy.titles),
     [copy.titles, view],
@@ -153,6 +172,8 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onNext={goNext}
         topPendingRequest={topPendingRequest}
         topPendingBookingId={topPendingBookingId}
+        pendingBarDismissed={pendingBarDismissed}
+        onDismissPendingBar={dismissPendingBar}
         cal={cal}
       />
 
@@ -171,6 +192,8 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onToday={goToToday}
         onBack={goBack}
         onNext={goNext}
+        pendingBarDismissed={pendingBarDismissed}
+        onDismissPendingBar={dismissPendingBar}
         cal={cal}
       />
 
@@ -190,6 +213,8 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         onToday={goToToday}
         onBack={goBack}
         onNext={goNext}
+        pendingBarDismissed={pendingBarDismissed}
+        onDismissPendingBar={dismissPendingBar}
         cal={cal}
       />
 
@@ -288,6 +313,44 @@ export function ProCalendarClientPage(props: ProCalendarClientPageProps) {
         }}
         onDeny={() => {
           void cal.denyBooking()
+        }}
+      />
+
+      <BookingOverrideConfirmModal
+        open={Boolean(cal.bookingOverridePrompt)}
+        prompt={cal.bookingOverridePrompt}
+        intent={cal.bookingOverrideIntent}
+        busy={cal.savingReschedule}
+        reason={cal.bookingOverrideReason}
+        onChangeReason={cal.setBookingOverrideReason}
+        onCancel={cal.cancelBookingOverride}
+        onConfirm={() => {
+          void cal.confirmBookingOverride()
+        }}
+      />
+
+      <BookingOverrideConfirmModal
+        open={Boolean(cal.changeOverridePrompt)}
+        prompt={cal.changeOverridePrompt}
+        intent="edit"
+        busy={cal.applyingChange}
+        reason={cal.changeOverrideReason}
+        onChangeReason={cal.setChangeOverrideReason}
+        onCancel={cal.cancelChangeOverride}
+        onConfirm={() => {
+          void cal.confirmChangeOverride()
+        }}
+      />
+
+      <BookingOverrideConfirmModal
+        open={Boolean(cal.managementOverridePrompt)}
+        prompt={cal.managementOverridePrompt}
+        busy={cal.managementOverrideBusy}
+        reason={cal.managementOverrideReason}
+        onChangeReason={cal.setManagementOverrideReason}
+        onCancel={cal.cancelManagementOverride}
+        onConfirm={() => {
+          void cal.confirmManagementOverride()
         }}
       />
     </main>

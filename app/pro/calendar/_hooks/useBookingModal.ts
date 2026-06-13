@@ -53,6 +53,16 @@ import {
 import { isRecord } from '@/lib/guards'
 import { errorMessageFromUnknown, safeJson } from '@/lib/http'
 
+import {
+  BookingOverrideRequiredError,
+  bookingOverridePromptFor,
+  mergeBookingOverrideFlags,
+  readBookingOverridePrompt,
+  type BookingOverrideFlag,
+  type BookingOverridePrompt,
+  type BookingOverridePromptIntent,
+} from '@/lib/booking/overridePrompts'
+
 type BookingModalDeps = {
   eventsRef: RefObject<CalendarEvent[]>
   activeStepMinutes: number
@@ -87,6 +97,8 @@ type BookingPatchPayload = {
   notifyClient?: boolean
   allowShortNotice?: boolean
   allowOutsideWorkingHours?: boolean
+  allowFarFuture?: boolean
+  overrideReason?: string
   status?: 'ACCEPTED' | 'CANCELLED'
   serviceItems?: BookingPatchServiceItem[]
 }
@@ -104,6 +116,14 @@ type TimeParts = {
 
 type BookingStatusMutation = {
   status: 'ACCEPTED' | 'CANCELLED'
+  fallbackError: string
+}
+
+type BookingOverrideState = {
+  intent: BookingOverridePromptIntent
+  prompt: BookingOverridePrompt
+  flags: BookingOverrideFlag[]
+  basePayload: BookingPatchPayload
   fallbackError: string
 }
 
@@ -301,7 +321,14 @@ async function patchBooking(args: {
   const data: unknown = await safeJson(response)
 
   if (!response.ok) {
-    throw new Error(apiMessage(data, args.fallbackError))
+    const message = apiMessage(data, args.fallbackError)
+    const overridePrompt = readBookingOverridePrompt(data)
+
+    if (overridePrompt) {
+      throw new BookingOverrideRequiredError(message, overridePrompt)
+    }
+
+    throw new Error(message)
   }
 }
 
@@ -353,6 +380,10 @@ export function useBookingModal(deps: BookingModalDeps) {
   const [savingReschedule, setSavingReschedule] = useState(false)
   const [allowOutsideHours, setAllowOutsideHours] = useState(false)
   const [services, setServices] = useState<ServiceOption[]>([])
+
+  const [bookingOverride, setBookingOverride] =
+    useState<BookingOverrideState | null>(null)
+  const [bookingOverrideReason, setBookingOverrideReason] = useState('')
 
   const bookingLoadControllerRef = useRef<AbortController | null>(null)
   const servicesLoadControllerRef = useRef<AbortController | null>(null)
@@ -470,6 +501,8 @@ export function useBookingModal(deps: BookingModalDeps) {
     setReschedDate('')
     setReschedTime('')
     setNotifyClient(true)
+    setBookingOverride(null)
+    setBookingOverrideReason('')
   }, [])
 
   const loadServicesForLocation = useCallback(
@@ -624,6 +657,8 @@ export function useBookingModal(deps: BookingModalDeps) {
     setSavingReschedule(true)
     setBookingError(null)
 
+    let payload: BookingPatchPayload | null = null
+
     try {
       const { dateParts, timeParts } = dateAndTimeParts({
         date: reschedDate,
@@ -658,10 +693,9 @@ export function useBookingModal(deps: BookingModalDeps) {
         timeZone: activeSchedulingContext.timeZone,
       })
 
-      const payload: BookingPatchPayload = {
+      payload = {
         scheduledFor: nextStartIso,
         notifyClient,
-        allowShortNotice: true,
         allowOutsideWorkingHours: outside ? Boolean(allowOutsideHours) : false,
       }
 
@@ -679,6 +713,20 @@ export function useBookingModal(deps: BookingModalDeps) {
       await reloadCalendar()
       forceProFooterRefresh()
     } catch (caught) {
+      if (caught instanceof BookingOverrideRequiredError && payload) {
+        const prompt = bookingOverridePromptFor(caught.prompt.code, 'edit')
+
+        setBookingOverride({
+          intent: 'edit',
+          prompt,
+          flags: [prompt.flag],
+          basePayload: payload,
+          fallbackError: 'Failed to save changes.',
+        })
+        setBookingOverrideReason('')
+        return
+      }
+
       setBookingError(errorMessageFromUnknown(caught))
     } finally {
       setSavingReschedule(false)
@@ -722,6 +770,24 @@ export function useBookingModal(deps: BookingModalDeps) {
         await reloadCalendar()
         forceProFooterRefresh()
       } catch (caught) {
+        if (
+          caught instanceof BookingOverrideRequiredError &&
+          mutation.status === 'ACCEPTED'
+        ) {
+          setBookingOverride({
+            intent: 'accept',
+            prompt: caught.prompt,
+            flags: [caught.prompt.flag],
+            basePayload: {
+              status: 'ACCEPTED',
+              notifyClient: true,
+            },
+            fallbackError: mutation.fallbackError,
+          })
+          setBookingOverrideReason('')
+          return
+        }
+
         setBookingError(errorMessageFromUnknown(caught))
       } finally {
         setSavingReschedule(false)
@@ -742,6 +808,78 @@ export function useBookingModal(deps: BookingModalDeps) {
       fallbackError: 'Failed to approve booking.',
     })
   }, [mutateBookingStatus])
+
+  const cancelBookingOverride = useCallback(() => {
+    if (savingReschedule) return
+
+    setBookingOverride(null)
+    setBookingOverrideReason('')
+  }, [savingReschedule])
+
+  const confirmBookingOverride = useCallback(async () => {
+    if (!booking || !bookingOverride || savingReschedule) return
+
+    const reason = bookingOverrideReason.trim()
+    if (!reason) return
+
+    setSavingReschedule(true)
+    setBookingError(null)
+
+    try {
+      const payload: BookingPatchPayload = {
+        ...bookingOverride.basePayload,
+        overrideReason: reason,
+      }
+
+      for (const flag of bookingOverride.flags) {
+        payload[flag] = true
+      }
+
+      await patchBooking({
+        bookingId: booking.id,
+        payload,
+        fallbackError: bookingOverride.fallbackError,
+      })
+
+      resetBookingState()
+      await reloadCalendar()
+      forceProFooterRefresh()
+    } catch (caught) {
+      if (caught instanceof BookingOverrideRequiredError) {
+        // The retry can trip another override-gated rule (e.g. the slot is
+        // both short-notice and outside working hours). Keep the dialog open
+        // and accumulate the new flag so the next confirm covers both.
+        const code = caught.prompt.code
+
+        setBookingOverride((previous) =>
+          previous
+            ? {
+                ...previous,
+                prompt: bookingOverridePromptFor(code, previous.intent),
+                flags: mergeBookingOverrideFlags(
+                  previous.flags,
+                  caught.prompt.flag,
+                ),
+              }
+            : previous,
+        )
+      } else {
+        setBookingOverride(null)
+        setBookingOverrideReason('')
+        setBookingError(errorMessageFromUnknown(caught))
+      }
+    } finally {
+      setSavingReschedule(false)
+    }
+  }, [
+    booking,
+    bookingOverride,
+    bookingOverrideReason,
+    forceProFooterRefresh,
+    reloadCalendar,
+    resetBookingState,
+    savingReschedule,
+  ])
 
   const denyBooking = useCallback(async () => {
     await mutateBookingStatus({
@@ -791,6 +929,13 @@ export function useBookingModal(deps: BookingModalDeps) {
     submitChanges,
     approveBooking,
     denyBooking,
+
+    bookingOverridePrompt: bookingOverride?.prompt ?? null,
+    bookingOverrideIntent: bookingOverride?.intent ?? 'accept',
+    bookingOverrideReason,
+    setBookingOverrideReason,
+    confirmBookingOverride,
+    cancelBookingOverride,
   }
 }
 

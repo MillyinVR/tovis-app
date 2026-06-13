@@ -40,6 +40,14 @@ import {
 
 import { errorMessageFromUnknown, safeJson } from '@/lib/http'
 
+import {
+  BookingOverrideRequiredError,
+  mergeBookingOverrideFlags,
+  readBookingOverridePrompt,
+  type BookingOverrideFlag,
+  type BookingOverridePrompt,
+} from '@/lib/booking/overridePrompts'
+
 type ConfirmChangeDeps = {
   eventsRef: RefObject<CalendarEvent[]>
   setEvents: Dispatch<SetStateAction<CalendarEvent[]>>
@@ -69,6 +77,7 @@ type BookingPatchPayload = {
   durationMinutes?: number
   scheduledFor?: string
   allowShortNotice?: boolean
+  allowFarFuture?: boolean
   allowOutsideWorkingHours?: boolean
   overrideReason?: string
 }
@@ -76,6 +85,11 @@ type BookingPatchPayload = {
 type BlockPatchPayload = {
   startsAt: string
   endsAt: string
+}
+
+type ChangeOverrideState = {
+  prompt: BookingOverridePrompt
+  flags: BookingOverrideFlag[]
 }
 
 const TEMPORARY_ERROR_MS = 3500
@@ -200,7 +214,6 @@ function buildBookingPatchPayload(args: {
 
   const payload: BookingPatchPayload = {
     notifyClient: true,
-    allowShortNotice: true,
   }
 
   if (change.kind === 'resize') {
@@ -277,6 +290,7 @@ async function patchJson(args: {
   url: string
   payload: BookingPatchPayload | BlockPatchPayload
   fallbackError: string
+  overrideGated?: boolean
 }) {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -296,7 +310,17 @@ async function patchJson(args: {
   const data: unknown = await safeJson(response)
 
   if (!response.ok) {
-    throw new Error(apiMessage(data, args.fallbackError))
+    const message = apiMessage(data, args.fallbackError)
+
+    if (args.overrideGated) {
+      const overridePrompt = readBookingOverridePrompt(data, 'edit')
+
+      if (overridePrompt) {
+        throw new BookingOverrideRequiredError(message, overridePrompt)
+      }
+    }
+
+    throw new Error(message)
   }
 }
 
@@ -315,6 +339,10 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [applyingChange, setApplyingChange] = useState(false)
   const [overrideReason, setOverrideReason] = useState('')
+
+  const [changeOverride, setChangeOverride] =
+    useState<ChangeOverrideState | null>(null)
+  const [changeOverrideReason, setChangeOverrideReason] = useState('')
 
   const errorTokenRef = useRef(0)
   const errorTimeoutRef = useRef<number | null>(null)
@@ -348,6 +376,8 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
     setConfirmOpen(false)
     setPendingChange(null)
     setOverrideReason('')
+    setChangeOverride(null)
+    setChangeOverrideReason('')
   }, [])
 
   const rollbackChange = useCallback(
@@ -424,6 +454,7 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
             overrideReason: reason,
           }),
           fallbackError: 'Failed to apply changes.',
+          overrideGated: true,
         })
       } else {
         const currentEvent = eventsRef.current.find(
@@ -446,6 +477,18 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
       await reloadCalendar()
       forceProFooterRefresh()
     } catch (caught) {
+      if (caught instanceof BookingOverrideRequiredError) {
+        // Keep the pending change (and its optimistic event position) so the
+        // override confirm can retry the same mutation with explicit flags.
+        setConfirmOpen(false)
+        setChangeOverride({
+          prompt: caught.prompt,
+          flags: [caught.prompt.flag],
+        })
+        setChangeOverrideReason('')
+        return
+      }
+
       if (!mutationSucceeded) {
         rollbackChange(pendingChange)
         clearConfirmState()
@@ -469,6 +512,83 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
     showTemporaryError,
   ])
 
+  const cancelChangeOverride = useCallback(() => {
+    if (applyingChange) return
+
+    rollbackChange(pendingChange)
+    clearConfirmState()
+  }, [applyingChange, clearConfirmState, pendingChange, rollbackChange])
+
+  const confirmChangeOverride = useCallback(async () => {
+    if (!pendingChange || !changeOverride || applyingChange) return
+
+    const reason = changeOverrideReason.trim()
+    if (!reason) return
+
+    setApplyingChange(true)
+
+    try {
+      if (!bookingContext) {
+        throw new Error('Missing booking scheduling context.')
+      }
+
+      const payload = buildBookingPatchPayload({
+        change: pendingChange,
+        context: bookingContext,
+        outsideWorkingHours: pendingOutsideWorkingHours,
+        overrideReason: reason,
+      })
+
+      for (const flag of changeOverride.flags) {
+        payload[flag] = true
+      }
+
+      payload.overrideReason = reason
+
+      await patchJson({
+        idempotencyKey: buildProBookingPatchIdempotencyKey(pendingChange.apiId),
+        url: bookingEndpoint(pendingChange.apiId),
+        payload,
+        fallbackError: 'Failed to apply changes.',
+        overrideGated: true,
+      })
+
+      clearConfirmState()
+
+      await reloadCalendar()
+      forceProFooterRefresh()
+    } catch (caught) {
+      if (caught instanceof BookingOverrideRequiredError) {
+        // The retry can trip another override-gated rule. Keep the dialog
+        // open and accumulate the new flag so the next confirm covers both.
+        const prompt = caught.prompt
+
+        setChangeOverride((previous) => ({
+          prompt,
+          flags: mergeBookingOverrideFlags(previous?.flags ?? [], prompt.flag),
+        }))
+      } else {
+        rollbackChange(pendingChange)
+        clearConfirmState()
+        showTemporaryError(errorMessageFromUnknown(caught))
+      }
+    } finally {
+      setApplyingChange(false)
+    }
+  }, [
+    applyingChange,
+    bookingContext,
+    changeOverride,
+    changeOverrideReason,
+    clearConfirmState,
+    forceProFooterRefresh,
+    pendingChange,
+    pendingOutsideWorkingHours,
+    reloadCalendar,
+    rollbackChange,
+    showTemporaryError,
+  ])
+
   useEffect(() => {
     return () => clearTemporaryErrorTimer()
   }, [clearTemporaryErrorTimer])
@@ -485,6 +605,12 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
     pendingOutsideWorkingHours,
     overrideReason,
     setOverrideReason,
+
+    changeOverridePrompt: changeOverride?.prompt ?? null,
+    changeOverrideReason,
+    setChangeOverrideReason,
+    confirmChangeOverride,
+    cancelChangeOverride,
   }
 }
 
