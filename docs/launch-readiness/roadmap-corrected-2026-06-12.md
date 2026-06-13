@@ -63,21 +63,20 @@ or has a ticketed bottleneck.
 - ✅ **Looks feed leak — CLOSED** (PR #94). `lib/looks/feed.ts` now requires a
   `TenantContext` and applies `proDiscoveryVisibilityFilter`; the discovery guard
   watches `lookPost.findMany` so it can't regress.
-- ❌ **NFC claim — UNSCOPED (open gap).** `consumeTapIntent` (`lib/tapIntentConsume.ts`)
-  claims a card by id with **no tenant check** — the `nfcCardTenantVisibilityFilter`
-  helper exists but is not applied on the claim path. The correct rule (should a
-  white-label card be claimable only within its tenant? do root cards stay open?) is
-  a **product/security decision** — see the audit doc. Not a data leak (needs a
-  physical tap to exploit), but a real attribution-integrity gap before white-label.
+- ✅ **NFC claim — CLOSED (Option A).** `consumeTapIntent` (`lib/tapIntentConsume.ts`)
+  now scopes the claim: a white-label card is only claimable by a user whose
+  `homeTenantId` matches the card's issuing tenant; root cards stay open; mismatch
+  is ignored gracefully + logged (`NFC_CLAIM_TENANT_MISMATCH`). Covered by
+  `tenant-isolation.test.ts`. See the audit doc.
 - ✅ **Action tokens & media — safe via ownership.** Token/media access is gated by
   booking/pro ownership, and a Pro belongs to exactly one tenant, so cross-tenant
   reuse fails the ownership check. But `MediaAsset` and `Review` have **no tenant
   column** (tenant is only derivable via relations) — fine today, revisit if
   tenant-scoped media/review queries are ever added.
 
-Remaining work: (a) resolve the NFC claim decision + fix, (b) build the end-to-end
-isolation **test matrix** (only discovery/booking/NFC-visibility are covered today;
-media, token, and NFC-claim are not). Treat as a privacy/integrity gate, not a feature.
+Remaining work: extend the end-to-end isolation **test matrix** to the media and
+action-token ownership paths (discovery / booking / NFC visibility + NFC claim are
+now covered). Treat as a privacy/integrity gate, not a feature.
 
 ### 3. Write-boundary expansion (architecture, non-blocking)
 `lib/booking/writeBoundary.ts` is a 13,563-line single source of truth with a real

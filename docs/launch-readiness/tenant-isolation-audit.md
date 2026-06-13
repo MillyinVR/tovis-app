@@ -25,46 +25,37 @@ Two mechanisms:
 | Looks feed | visibility filter (`proDiscoveryVisibilityFilter`), PR #94 | ✅ scoped + guarded | `lib/looks/feed.test.ts` |
 | Bookings (admin/analytics) | visibility filter (`proTenantId`) | ✅ scoped | `tenant-isolation.test.ts` |
 | NFC card listing (read) | visibility filter (`tenantId`) | ✅ scoped | `tenant-isolation.test.ts` |
-| **NFC card claim (write)** | none | ❌ **UNSCOPED — open gap** | `tenant-isolation.test.ts` (pins current gap + `it.todo` for fix) |
+| **NFC card claim (write)** | tenant check on claim (Option A) | ✅ **scoped (fixed)** | `tenant-isolation.test.ts` (outside-rejected / in-tenant-allowed / root-open) |
 | Action tokens (consultation / aftercare) | ownership (booking + client/pro) | ✅ safe via ownership | covered by token unit tests |
 | Media access (`MediaAsset`) | ownership (`professionalId`/booking) | ✅ safe via ownership; **no tenant column** | route auth tests |
 | Reviews (`Review`) | ownership (booking + client) | ✅ safe via ownership; **no tenant column** | — |
 
-## The open gap: NFC claim
+## NFC claim — CLOSED (Option A, 2026-06-13)
 
-`consumeTapIntent` (`lib/tapIntentConsume.ts`) loads a card by id and claims it
-with **no tenant check** — `nfcCardTenantVisibilityFilter` is never applied on the
-claim path. A Pro whose home tenant is A can claim a `SALON_WHITE_LABEL` card
-issued by tenant B, becoming its owner (`claimedByUserId`, `professionalId`,
-`type → PRO_BOOKING`).
+Previously, `consumeTapIntent` (`lib/tapIntentConsume.ts`) claimed a card by id
+with **no tenant check**, so a Pro whose home tenant is A could claim a
+`SALON_WHITE_LABEL` card issued by tenant B.
 
-- **Severity:** integrity / attribution, not a data leak. Exploiting it needs a
-  valid non-expired `TapIntent`, which requires physically tapping the card (or
-  the tap endpoint). So it is bounded, but it lets cross-tenant ownership of a
-  white-label salon's physical card inventory.
-- **Pinned by:** `tenant-isolation.test.ts → "KNOWN GAP: a white-label card is
-  currently claimable by a Pro outside its tenant"`. When the gap is closed this
-  test must flip to assert rejection; the adjacent `it.todo` is the target.
+**Fix (Option A):** the claim path now compares the card's issuing tenant against
+the claimer's `homeTenantId`:
 
-### Decision needed (product/security)
+- A **white-label** card (issuing `tenant.slug !== tovis-root`) is only claimable
+  by a user whose `homeTenantId` equals the card's `tenantId`.
+- **Root** cards stay open to anyone.
+- A mismatch is **ignored gracefully** (returns `ok: true` with the nextUrl, so
+  signup is never bricked) and logged as an `NFC_CLAIM_TENANT_MISMATCH`
+  attribution event.
 
-The fix is not mechanical because the rule is a product call:
+Covered by `tenant-isolation.test.ts → "nfc claim tenant isolation"`:
+outside-tenant claim rejected (card stays unclaimed + mismatch event), in-tenant
+claim succeeds, root card claimable from any tenant.
 
-- **Option A — scope white-label cards, keep root open.** A non-root card
-  (`tenantId !== tovis-root`) is only claimable by a user whose `homeTenantId`
-  matches the card's `tenantId`; root cards stay open to anyone. Mismatched claim
-  → ignore gracefully (don't brick signup), log an attribution event.
-- **Option B — scope by tap host.** Resolve tenant from the tap request host and
-  require it to match the card's tenant. Closer to how discovery resolves tenant,
-  but couples claim to request context.
-- **Option C — accept as-is for launch.** Document the risk in the risk register;
-  acceptable only if the first white-label tenants are trusted and card inventory
-  is operationally controlled.
+> Severity was integrity/attribution, not a data leak (exploiting it needed a
+> physical tap), but it let cross-tenant ownership of a white-label salon's card
+> inventory — now closed.
 
-Recommended: **Option A** — clearest rule, fail-graceful, no coupling to request
-host. Implementation: thread the user's `homeTenantId` (already loaded for the
-PRO branch via `professionalProfile`) and the card's `tenantId` into the claim
-decision; reject/ignore on mismatch for non-root cards.
+Options B (scope by tap host) and C (accept as-is) were considered and not taken;
+Option A is the clearest rule with no coupling to request context.
 
 ## Still-untested surfaces (build into the matrix)
 
