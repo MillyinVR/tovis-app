@@ -140,6 +140,7 @@ export default function MediaUploader({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const pendingClearRef = useRef(false)
+  const fileRef = useRef<HTMLInputElement | null>(null)
 
   const disabled = status !== 'IDLE'
 
@@ -154,6 +155,13 @@ export default function MediaUploader({
       }
     }
   }, [previewUrl])
+
+  // Abort any in-flight upload if the uploader unmounts mid-flow.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [])
 
   useEffect(() => {
     if (!isRefreshing && pendingClearRef.current) {
@@ -201,6 +209,7 @@ export default function MediaUploader({
 
     if (!next) {
       setMediaType('IMAGE')
+      if (fileRef.current) fileRef.current.value = ''
       return
     }
 
@@ -212,10 +221,25 @@ export default function MediaUploader({
     } catch {
       setPreviewUrl(null)
     }
+
+    // Auto-upload: the salon footer flow should be one tap, so kick off the
+    // pipeline the moment a file is chosen. Skip files we can't upload
+    // (empty or over-limit) — they stay selected and the hint explains why.
+    const limit =
+      inferred === 'VIDEO' ? bytesFromMb(MAX_VIDEO_MB) : bytesFromMb(MAX_IMAGE_MB)
+
+    if (bookingId && next.size > 0 && next.size <= limit) {
+      void runUpload(next, inferred)
+    }
   }
 
-  async function submit() {
-    if (!canSubmit || !file || disabled) return
+  async function runUpload(uploadTarget: File, mt: MediaType) {
+    if (disabled || !bookingId) return
+    if (uploadTarget.size <= 0) return
+
+    const limit =
+      mt === 'VIDEO' ? bytesFromMb(MAX_VIDEO_MB) : bytesFromMb(MAX_IMAGE_MB)
+    if (uploadTarget.size > limit) return
 
     resetMessages()
 
@@ -225,16 +249,15 @@ export default function MediaUploader({
     abortRef.current = controller
 
     const cap = caption.trim().slice(0, CAPTION_MAX) || null
-    const mt: MediaType = mediaType
 
     try {
-      let uploadFile: File = file
+      let uploadFile: File = uploadTarget
 
       if (mt === 'IMAGE') {
         setStatus('COMPRESSING')
 
         try {
-          const result = await processImageForUpload(file, {
+          const result = await processImageForUpload(uploadTarget, {
             maxBytes: COMPRESS_MAX_BYTES,
             maxWidth: COMPRESS_MAX_DIMENSION,
             maxHeight: COMPRESS_MAX_DIMENSION,
@@ -249,7 +272,7 @@ export default function MediaUploader({
             )
           }
         } catch {
-          uploadFile = file
+          uploadFile = uploadTarget
         }
       }
 
@@ -378,7 +401,9 @@ export default function MediaUploader({
   ].join(' ')
 
   const hint = (() => {
-    if (!file) return `Choose a ${phase.toLowerCase()} file to upload.`
+    if (!file) {
+      return `Choose a ${phase.toLowerCase()} photo — it uploads automatically.`
+    }
 
     if (file.size > maxBytes) {
       const mb = (file.size / (1024 * 1024)).toFixed(1)
@@ -386,7 +411,7 @@ export default function MediaUploader({
       return `That file is ${mb}MB — over the ${limit}MB limit.`
     }
 
-    return 'Ready to upload to private storage.'
+    return 'Stored privately for you and the client.'
   })()
 
   const showProgress = status === 'UPLOADING' || status === 'COMPRESSING' || status === 'SAVING'
@@ -405,9 +430,11 @@ export default function MediaUploader({
           </label>
 
           <input
+            ref={fileRef}
             type="file"
             disabled={disabled}
             accept="image/*,video/*"
+            aria-label={`Upload ${phase.toLowerCase()} media`}
             onChange={(event) =>
               void onPickFile(event.target.files?.[0] ?? null)
             }
@@ -522,14 +549,25 @@ export default function MediaUploader({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void submit()}
-            disabled={!canSubmit || disabled}
-            className={btn}
-          >
-            {statusLabel(status, uploadPercent)}
-          </button>
+          {error && file && !disabled ? (
+            <button
+              type="button"
+              onClick={() => void runUpload(file, mediaType)}
+              disabled={!canSubmit}
+              className={btn}
+            >
+              Retry upload
+            </button>
+          ) : null}
+
+          {showProgress ? (
+            <span
+              className="text-xs font-black text-textPrimary"
+              aria-live="polite"
+            >
+              {statusLabel(status, uploadPercent)}
+            </span>
+          ) : null}
 
           {compressionNote ? (
             <span className="text-[10px] font-semibold text-textSecondary">
