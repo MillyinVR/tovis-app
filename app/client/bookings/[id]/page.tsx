@@ -820,6 +820,21 @@ function ClientAftercareMediaTile(props: {
   )
 }
 
+function AftercarePrivacyNote() {
+  return (
+    <div className="flex items-start gap-2 rounded-xl border border-white/10 bg-bgSecondary px-3 py-2 text-[12px] font-semibold text-textSecondary">
+      <span aria-hidden className="leading-none">
+        🔒
+      </span>
+      <span>
+        These photos are private — only you and your pro can see them. They’re
+        never made public unless{' '}
+        <span className="text-textPrimary">you add them to a review</span>.
+      </span>
+    </div>
+  )
+}
+
 function ClientAftercareBeforeAfter(props: {
   beforeMedia: LoadedRenderableMedia[]
   afterMedia: LoadedRenderableMedia[]
@@ -830,14 +845,19 @@ function ClientAftercareBeforeAfter(props: {
 
   if (!hasMedia) {
     return (
-      <div className="brand-pro-session-card-body">
-        Your pro will attach photos during your appointment flow.
+      <div className="grid gap-3">
+        <div className="brand-pro-session-card-body">
+          Your pro will attach photos during your appointment flow.
+        </div>
+        <AftercarePrivacyNote />
       </div>
     )
   }
 
   return (
     <div className="grid gap-3">
+      <AftercarePrivacyNote />
+
       <div className="brand-pro-session-photo-grid" data-columns="2">
         <ClientAftercareMediaTile label="Before" media={primaryBefore} />
         <ClientAftercareMediaTile label="After" media={primaryAfter} />
