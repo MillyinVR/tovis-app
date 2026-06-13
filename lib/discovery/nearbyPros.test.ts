@@ -18,11 +18,23 @@ const mocks = vi.hoisted(() => {
     },
   }
 
-  return { prisma }
+  return {
+    prisma,
+    isRuntimeFlagEnabled: vi.fn(),
+    fetchProSearchCandidates: vi.fn(),
+  }
 })
 
 vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
+}))
+
+vi.mock('@/lib/runtimeFlags', () => ({
+  isRuntimeFlagEnabled: mocks.isRuntimeFlagEnabled,
+}))
+
+vi.mock('@/lib/search/pros', () => ({
+  fetchProSearchCandidates: mocks.fetchProSearchCandidates,
 }))
 
 import { loadNearbyPros } from './nearbyPros'
@@ -113,12 +125,80 @@ function makeRatingRow(args: {
   }
 }
 
+// Builds a ProSearchCandidate (the shape returned by the mocked
+// fetchProSearchCandidates) for the search-index path tests.
+function makeCandidate(args: {
+  professionalId: string
+  distanceMiles: number | null
+  closestLocationId: string
+  primaryLocationId?: string
+  minAnyPrice?: number | null
+  offersMobile?: boolean
+  ratingAvg?: number | null
+  ratingCount?: number | bigint
+  businessName?: string | null
+}) {
+  const closest = {
+    id: args.closestLocationId,
+    formattedAddress: '1 Closest St',
+    city: 'San Diego',
+    state: 'CA',
+    timeZone: 'America/Los_Angeles',
+    placeId: `place_${args.closestLocationId}`,
+    lat: 32.7,
+    lng: -117.1,
+    isPrimary: args.primaryLocationId == null,
+    workingHours: DEFAULT_WORKING_HOURS,
+  }
+
+  const primary =
+    args.primaryLocationId == null
+      ? closest
+      : {
+          ...closest,
+          id: args.primaryLocationId,
+          formattedAddress: '2 Primary Ave',
+          isPrimary: true,
+        }
+
+  return {
+    row: {
+      professionalId: args.professionalId,
+      businessName: args.businessName ?? 'TOVIS Studio',
+      handle: 'tovisstudio',
+      professionType: ProfessionType.BARBER,
+      avatarUrl: null,
+      locationId: args.closestLocationId,
+      formattedAddress: closest.formattedAddress,
+      city: closest.city,
+      state: closest.state,
+      timeZone: closest.timeZone,
+      placeId: closest.placeId,
+      lat: closest.lat,
+      lng: closest.lng,
+      isPrimary: closest.isPrimary,
+      workingHours: closest.workingHours,
+      ratingAvg: args.ratingAvg ?? null,
+      ratingCount: args.ratingCount ?? 0,
+      offersMobile: args.offersMobile ?? false,
+      minMobilePrice: null,
+      minAnyPrice: args.minAnyPrice ?? null,
+      distanceMiles: args.distanceMiles,
+    },
+    closest,
+    primary,
+  }
+}
+
 describe('lib/discovery/nearbyPros.ts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.prisma.professionalLocation.findMany.mockResolvedValue([])
     mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([])
     mocks.prisma.review.groupBy.mockResolvedValue([])
+    // Default to the legacy bounding-box path; the search-index suite opts in.
+    mocks.isRuntimeFlagEnabled.mockResolvedValue(false)
+    mocks.fetchProSearchCandidates.mockResolvedValue([])
   })
 
   it('queries only primary, bookable, publicly approved locations and excludes the provided professional id', async () => {
@@ -328,5 +408,134 @@ describe('lib/discovery/nearbyPros.ts', () => {
       ratingCount: 9,
     })
     expect(typeof result[0]?.distanceMiles).toBe('number')
+  })
+
+  describe('search-index path (nearby_search_index_enabled)', () => {
+    beforeEach(() => {
+      mocks.isRuntimeFlagEnabled.mockResolvedValue(true)
+    })
+
+    it('delegates to the shared candidate query with DISTANCE sort + nearby filters and skips the legacy query', async () => {
+      mocks.fetchProSearchCandidates.mockResolvedValue([])
+
+      await loadNearbyPros(
+        {
+          lat: 32.7157,
+          lng: -117.1611,
+          radiusMiles: 15,
+          categoryId: 'cat_hair',
+          serviceId: 'svc_balayage',
+          excludeProfessionalId: 'pro_self',
+          limit: 20,
+        },
+        SALON_CONTEXT,
+      )
+
+      expect(mocks.isRuntimeFlagEnabled).toHaveBeenCalledWith(
+        'nearby_search_index_enabled',
+      )
+      expect(mocks.fetchProSearchCandidates).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lat: 32.7157,
+          lng: -117.1611,
+          radiusMiles: 15,
+          categoryId: 'cat_hair',
+          serviceId: 'svc_balayage',
+          excludeProfessionalId: 'pro_self',
+          sort: 'DISTANCE',
+          mobileOnly: false,
+          openNowOnly: false,
+          limit: 20,
+        }),
+        SALON_CONTEXT,
+      )
+      // The bounding-box path must not run when the flag is on.
+      expect(mocks.prisma.professionalLocation.findMany).not.toHaveBeenCalled()
+      expect(mocks.prisma.review.groupBy).not.toHaveBeenCalled()
+    })
+
+    it('maps candidates to cards using the closest location and denormalized rollups', async () => {
+      mocks.fetchProSearchCandidates.mockResolvedValue([
+        makeCandidate({
+          professionalId: 'pro_2',
+          distanceMiles: 3.456,
+          closestLocationId: 'loc_closest',
+          primaryLocationId: 'loc_primary',
+          minAnyPrice: 120,
+          offersMobile: true,
+          ratingAvg: 4.7,
+          ratingCount: BigInt(9),
+        }),
+      ])
+
+      const result = await loadNearbyPros(
+        {
+          lat: 32.7,
+          lng: -117.1,
+          radiusMiles: 15,
+          categoryId: null,
+          serviceId: null,
+          excludeProfessionalId: null,
+          limit: 20,
+        },
+        ROOT_CONTEXT,
+      )
+
+      expect(result).toHaveLength(1)
+      expect(result[0]).toMatchObject({
+        id: 'pro_2',
+        distanceMiles: 3.5, // rounded to 1 dp
+        minPrice: 120, // minAnyPrice (mobileOnly false)
+        supportsMobile: true,
+        ratingAvg: 4.7,
+        ratingCount: 9, // bigint -> number
+      })
+      // Closest vs primary are distinct (the intentional semantics change).
+      expect(result[0]?.closestLocation.id).toBe('loc_closest')
+      expect(result[0]?.primaryLocation.id).toBe('loc_primary')
+      // workingHours preserved on the embedded location DTO (contract parity).
+      expect(result[0]?.closestLocation).toHaveProperty('workingHours')
+    })
+
+    it('honors the caller limit and drops candidates with a non-finite distance', async () => {
+      mocks.fetchProSearchCandidates.mockResolvedValue([
+        makeCandidate({
+          professionalId: 'pro_a',
+          distanceMiles: 1,
+          closestLocationId: 'la',
+        }),
+        makeCandidate({
+          professionalId: 'pro_nodist',
+          distanceMiles: null,
+          closestLocationId: 'lnd',
+        }),
+        makeCandidate({
+          professionalId: 'pro_b',
+          distanceMiles: 2,
+          closestLocationId: 'lb',
+        }),
+        makeCandidate({
+          professionalId: 'pro_c',
+          distanceMiles: 3,
+          closestLocationId: 'lc',
+        }),
+      ])
+
+      const result = await loadNearbyPros(
+        {
+          lat: 32.7,
+          lng: -117.1,
+          radiusMiles: 15,
+          categoryId: null,
+          serviceId: null,
+          excludeProfessionalId: null,
+          limit: 2,
+        },
+        ROOT_CONTEXT,
+      )
+
+      // pro_nodist dropped (null distance); limit slices the rest to 2.
+      expect(result.map((card) => card.id)).toEqual(['pro_a', 'pro_b'])
+    })
   })
 })

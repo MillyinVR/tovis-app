@@ -41,6 +41,7 @@ describe('lib/runtimeFlags', () => {
     expect(result).toEqual({
       signup_disabled: false,
       sms_disabled: false,
+      nearby_search_index_enabled: false,
       backendAvailable: false,
     })
     expect(mockGetRedis).toHaveBeenCalledTimes(1)
@@ -63,6 +64,7 @@ describe('lib/runtimeFlags', () => {
     expect(result).toEqual({
       signup_disabled: true,
       sms_disabled: true,
+      nearby_search_index_enabled: false,
       backendAvailable: true,
     })
   })
@@ -83,6 +85,7 @@ describe('lib/runtimeFlags', () => {
     expect(result).toEqual({
       signup_disabled: false,
       sms_disabled: false,
+      nearby_search_index_enabled: false,
       backendAvailable: true,
     })
   })
@@ -100,6 +103,7 @@ describe('lib/runtimeFlags', () => {
     expect(result).toEqual({
       signup_disabled: false,
       sms_disabled: false,
+      nearby_search_index_enabled: false,
       backendAvailable: false,
     })
   })

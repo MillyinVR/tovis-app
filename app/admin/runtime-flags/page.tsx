@@ -31,6 +31,12 @@ const FLAG_META: Record<RuntimeFlagName, FlagMeta> = {
     description:
       'Stops verification SMS sends without a deploy. Use this if the SMS provider is misbehaving or under attack.',
   },
+  nearby_search_index_enabled: {
+    name: 'nearby_search_index_enabled',
+    title: 'Nearby via search index',
+    description:
+      'Serves /api/pros/nearby from the ProfessionalSearchIndex (GIST) path instead of the legacy bounding-box query. Off = legacy. Enable after staging EXPLAIN + parity checks; revert instantly if results drift.',
+  },
 }
 
 function isRuntimeFlagName(value: string): value is RuntimeFlagName {
