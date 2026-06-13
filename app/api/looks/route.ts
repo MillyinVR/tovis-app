@@ -128,9 +128,14 @@ export async function GET(req: Request) {
 
     let likedSet = new Set<string>()
     let savedSet = new Set<string>()
+    let followedSet = new Set<string>()
 
     if (user && items.length > 0) {
-      const [likes, savedItems] = await Promise.all([
+      const professionalIds = Array.from(
+        new Set(items.map((item) => item.professionalId)),
+      )
+
+      const [likes, savedItems, follows] = await Promise.all([
         prisma.lookLike.findMany({
           where: {
             userId: user.id,
@@ -157,10 +162,24 @@ export async function GET(req: Request) {
               },
             })
           : Promise.resolve([] as Array<{ lookPostId: string }>),
+        user.clientProfile?.id
+          ? prisma.proFollow.findMany({
+              where: {
+                clientId: user.clientProfile.id,
+                professionalId: {
+                  in: professionalIds,
+                },
+              },
+              select: {
+                professionalId: true,
+              },
+            })
+          : Promise.resolve([] as Array<{ professionalId: string }>),
       ])
 
       likedSet = new Set(likes.map((like) => like.lookPostId))
       savedSet = new Set(savedItems.map((item) => item.lookPostId))
+      followedSet = new Set(follows.map((follow) => follow.professionalId))
     }
 
     const mapped = await Promise.all(
@@ -169,6 +188,9 @@ export async function GET(req: Request) {
           item,
           viewerLiked: user ? likedSet.has(item.id) : false,
           viewerSaved: user?.clientProfile?.id ? savedSet.has(item.id) : false,
+          viewerFollows: user?.clientProfile?.id
+            ? followedSet.has(item.professionalId)
+            : false,
         }),
       ),
     )

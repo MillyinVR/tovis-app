@@ -47,11 +47,12 @@ These were silent engagement leaks. Shipped in this branch:
 | **Share deep-link** ✅ | Share produced `/looks?m={id}`, a param nothing reads — every shared link dumped the recipient on the generic feed, not the look. Now points at the working `/looks/[id]` detail page. | [`LooksFeed.tsx`](../../app/(main)/looks/_components/LooksFeed.tsx) |
 | **OG / social cards** ✅ | Look detail had no `generateMetadata` — pasted links rendered as naked URLs with no image. Added Open Graph + Twitter card with the look's image + caption (request-memoized via React `cache()`, no double fetch). | [`looks/[id]/page.tsx`](../../app/(main)/looks/[id]/page.tsx) |
 
-**Remaining S0 decision (not code):**
-- **S0.4 — Fake booking signals** 🧑‍⚖️ `"Booked today" / "Filling fast" / "Popular near you"` in
-  [`LooksFeed.tsx`](../../app/(main)/looks/_components/LooksFeed.tsx) are deterministically hashed from
-  the look id — **not real data**. Decide: (a) wire to real signals (recent bookings count, save
-  velocity, availability), or (b) remove them. Do not ship decorative social proof to public ramp.
+**S0.4 — Fake booking signals** ✅ RESOLVED (removed, 2026-06-13)
+- `"Booked today" / "Filling fast" / "Popular near you"` and the "future self" tag lines were
+  deterministically hashed from the look id — not real data — and (as it turned out) rendered nowhere.
+  Removed entirely as dead fabricated code rather than shipped as decorative social proof. Real social
+  proof will come from actual engagement/availability data (e.g. genuine save velocity) when that data
+  is on the feed payload — tracked under S2 (view tracking) and S1.4 (real share counts).
 
 **S0 follow-up (small):** add a unit test covering the `loadMore` cursor path (existing tests stub
 `nextCursor: null`, so the new pagination branch is currently untested). Driving it requires simulating
@@ -76,16 +77,18 @@ follow no one yet → suggest pros to follow.
 **Acceptance:** a logged-in client sees a Following feed of looks from pros they follow; guests are
 prompted to sign in. **Effort:** S.
 
-### S1.2 — Follow button + follower counts in-feed and on profiles ⭐
-**Why:** the graph can't grow if users can't follow from where they spend time (the feed). Follow API
-exists ([`/api/pros/[id]/follow`](../../app/api/pros/[id]/follow/route.ts)); it's just not on the feed
-overlay.
-**Build:** add a follow toggle to the pro overlay in
-[`LookOverlays.tsx`](../../app/(main)/looks/_components/LookOverlays.tsx) and the right action rail;
-show follower count on the pro public profile and look overlay. Optimistic toggle with rollback (mirror
-the like pattern). Guest → login redirect.
-**Acceptance:** a client can follow/unfollow a pro without leaving the feed; counts update optimistically.
-**Effort:** S–M.
+### S1.2 — Follow button + follower counts in-feed and on profiles ⭐ (follow toggle DONE 2026-06-13)
+**Why:** the graph can't grow if users can't follow from where they spend time (the feed).
+**Done:** the previously fake, non-functional `FOLLOW` pill in
+[`LookOverlays.tsx`](../../app/(main)/looks/_components/LookOverlays.tsx) is now a real, stateful
+button wired to [`/api/pros/[id]/follow`](../../app/api/pros/[id]/follow/route.ts) with an optimistic
+toggle + rollback (mirrors the like pattern) and a guest→login redirect. The feed payload now carries a
+real `viewerFollows` per item (computed in [`app/api/looks/route.ts`](../../app/api/looks/route.ts) and
+[`lib/search/looks.ts`](../../lib/search/looks.ts)); a pro appearing on multiple slides stays in sync.
+The button reads FOLLOW / FOLLOWING from real state.
+**Still to do:** surface a real **follower count** on the look overlay and pro public profile (needs a
+`followerCount` on the professional in the feed select). Add a follow affordance to the right action
+rail too. **Effort:** S.
 
 ### S1.3 — Social notifications (like / comment / follow / save) ⭐
 **Why:** engagement notifications are *the* retention engine of every platform we want to compete with.

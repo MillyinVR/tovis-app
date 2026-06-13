@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => {
     boardItem: {
       findMany: vi.fn(),
     },
+    proFollow: {
+      findMany: vi.fn(),
+    },
   }
 
   const getCurrentUser = vi.fn()
@@ -88,6 +91,7 @@ function makeLookRow(
 ) {
   return {
     id,
+    professionalId: `pro_${id}`,
     publishedAt: new Date('2026-04-18T12:00:00.000Z'),
     spotlightScore: 0,
     rankScore: 0,
@@ -157,6 +161,7 @@ describe('lib/search/looks.ts', () => {
     mocks.prisma.lookPost.findMany.mockResolvedValue([])
     mocks.prisma.lookLike.findMany.mockResolvedValue([])
     mocks.prisma.boardItem.findMany.mockResolvedValue([])
+    mocks.prisma.proFollow.findMany.mockResolvedValue([])
 
     mocks.mapLooksFeedMediaToDto.mockResolvedValue(null)
   })
@@ -316,6 +321,7 @@ describe('lib/search/looks.ts', () => {
       item: look1,
       viewerLiked: false,
       viewerSaved: false,
+      viewerFollows: false,
     })
 
     expect(result).toEqual({
@@ -376,18 +382,28 @@ describe('lib/search/looks.ts', () => {
       select: { lookPostId: true },
     })
 
+    expect(mocks.prisma.proFollow.findMany).toHaveBeenCalledWith({
+      where: {
+        clientId: 'client_1',
+        professionalId: { in: ['pro_look_1', 'pro_look_2'] },
+      },
+      select: { professionalId: true },
+    })
+
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenCalledTimes(2)
 
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(1, {
       item: look1,
       viewerLiked: false,
       viewerSaved: true,
+      viewerFollows: false,
     })
 
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(2, {
       item: look2,
       viewerLiked: true,
       viewerSaved: false,
+      viewerFollows: false,
     })
 
     expect(mocks.encodeLooksFeedCursor).toHaveBeenCalledWith({

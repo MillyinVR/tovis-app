@@ -43,6 +43,7 @@ export type LooksFeedItemDto = {
   _count: LooksCountsDto
   viewerLiked: boolean
   viewerSaved: boolean
+  viewerFollows: boolean
 
   serviceId: string | null
   serviceName: string | null

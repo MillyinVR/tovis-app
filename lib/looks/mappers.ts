@@ -241,8 +241,9 @@ export async function mapLooksFeedMediaToDto(args: {
   item: LooksFeedRow
   viewerLiked: boolean
   viewerSaved: boolean
+  viewerFollows: boolean
 }): Promise<LooksFeedItemDto | null> {
-  const { item, viewerLiked, viewerSaved } = args
+  const { item, viewerLiked, viewerSaved, viewerFollows } = args
   const primaryMedia: FeedPrimaryMediaShape = item.primaryMediaAsset
 
   const rendered = await renderAssetUrls({
@@ -287,6 +288,7 @@ export async function mapLooksFeedMediaToDto(args: {
     },
     viewerLiked,
     viewerSaved,
+    viewerFollows,
 
     serviceId: primaryService?.id ?? null,
     serviceName: primaryService?.name ?? null,

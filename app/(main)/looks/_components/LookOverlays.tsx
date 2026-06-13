@@ -15,6 +15,7 @@ type ClampStyle = CSSProperties & {
 type Props = {
   item: FeedItem
   rightRailBottom: number
+  onToggleFollow: () => void
 }
 
 function pickTrimmed(v: unknown): string | null {
@@ -30,8 +31,9 @@ function formatHelpful(n: number) {
   return `${n} ${n === 1 ? 'helpful' : 'helpfuls'}`
 }
 
-export default function LookOverlays({ item: m, rightRailBottom }: Props) {
+export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow }: Props) {
   const pro = m.professional ?? null
+  const isFollowing = Boolean(m.viewerFollows)
 
   const businessName = (pro?.businessName ?? '').trim()
   const handle = (pro?.handle ?? '').trim()
@@ -102,23 +104,38 @@ export default function LookOverlays({ item: m, rightRailBottom }: Props) {
             </span>
           )}
 
-          <div
-            className="pointer-events-auto"
-            style={{
-              padding: '2px 8px',
-              border: '1px solid rgba(244,239,231,0.35)',
-              borderRadius: 999,
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
-              color: PAPER,
-              cursor: 'pointer',
-              fontFamily: 'var(--font-mono)',
-              flexShrink: 0,
-            }}
-          >
-            FOLLOW
-          </div>
+          {pro?.id ? (
+            <button
+              type="button"
+              aria-pressed={isFollowing}
+              aria-label={
+                isFollowing
+                  ? `Unfollow ${displayName}`
+                  : `Follow ${displayName}`
+              }
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onToggleFollow()
+              }}
+              className="pointer-events-auto"
+              style={{
+                padding: '2px 8px',
+                border: '1px solid rgba(244,239,231,0.35)',
+                borderRadius: 999,
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.06em',
+                color: isFollowing ? 'rgba(244,239,231,0.7)' : PAPER,
+                background: isFollowing ? 'rgba(244,239,231,0.12)' : 'transparent',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-mono)',
+                flexShrink: 0,
+              }}
+            >
+              {isFollowing ? 'FOLLOWING' : 'FOLLOW'}
+            </button>
+          ) : null}
         </div>
       ) : null}
 

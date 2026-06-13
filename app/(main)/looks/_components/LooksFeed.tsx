@@ -176,6 +176,7 @@ export default function LooksFeed() {
   const updatingTimerRef = useRef<number | null>(null)
 
   const likeInFlight = useRef<Record<string, boolean>>({})
+  const followInFlight = useRef<Record<string, boolean>>({})
   const lastTapRef = useRef<Record<string, number>>({})
   const feedScrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -556,6 +557,73 @@ export default function LooksFeed() {
     [redirectToLogin],
   )
 
+  const toggleFollow = useCallback(
+    async (professionalId: string) => {
+      if (!professionalId) return
+      if (followInFlight.current[professionalId]) return
+      followInFlight.current[professionalId] = true
+
+      let before = false
+
+      // A pro can appear on multiple slides — keep every one of their cards in sync.
+      setItems((prev) => {
+        const current = prev.find(
+          (item) => item.professional?.id === professionalId,
+        )
+        before = Boolean(current?.viewerFollows)
+
+        return prev.map((item) =>
+          item.professional?.id === professionalId
+            ? { ...item, viewerFollows: !before }
+            : item,
+        )
+      })
+
+      const rollback = () =>
+        setItems((prev) =>
+          prev.map((item) =>
+            item.professional?.id === professionalId
+              ? { ...item, viewerFollows: before }
+              : item,
+          ),
+        )
+
+      try {
+        const res = await fetch(`/api/pros/${professionalId}/follow`, {
+          method: 'POST',
+        })
+        const raw = await safeJson(res)
+
+        if (isGuestBlocked(res.status)) {
+          rollback()
+          redirectToLogin('follow')
+          return
+        }
+
+        if (!res.ok) {
+          rollback()
+          return
+        }
+
+        const serverFollowing =
+          isRecord(raw) && typeof raw.following === 'boolean'
+            ? raw.following
+            : !before
+
+        setItems((prev) =>
+          prev.map((item) =>
+            item.professional?.id === professionalId
+              ? { ...item, viewerFollows: serverFollowing }
+              : item,
+          ),
+        )
+      } finally {
+        followInFlight.current[professionalId] = false
+      }
+    },
+    [redirectToLogin],
+  )
+
   const likeOnly = useCallback(
     (lookPostId: string) => {
       const item = items.find((value) => value.id === lookPostId)
@@ -848,6 +916,9 @@ export default function LooksFeed() {
                     onToggleLike={() => void toggleLike(item.id)}
                     onOpenComments={() => void openCommentsDrawer(item.id)}
                     onOpenAvailability={() => openAvailabilityFor(item)}
+                    onToggleFollow={() =>
+                      void toggleFollow(item.professional?.id ?? '')
+                    }
                   />
                 )
               })

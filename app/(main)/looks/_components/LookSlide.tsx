@@ -31,10 +31,11 @@ export default function LookSlide(props: {
   onToggleLike: () => void
   onOpenComments: () => void
   onOpenAvailability: () => void
+  onToggleFollow: () => void
 
   rightRail?: ReactNode
 }) {
-  const { index, item, isActive, rightRailBottom, onDoubleClickLike, onTouchEndLike, rightRail } = props
+  const { index, item, isActive, rightRailBottom, onDoubleClickLike, onTouchEndLike, onToggleFollow, rightRail } = props
 
   const isReviewSpotlight = Boolean(item.reviewId)
 
@@ -95,7 +96,7 @@ export default function LookSlide(props: {
               </div>
             ) : null}
 
-            <LookOverlays item={item} rightRailBottom={rightRailBottom} />
+            <LookOverlays item={item} rightRailBottom={rightRailBottom} onToggleFollow={onToggleFollow} />
             {rightRail}
           </div>
         </div>
