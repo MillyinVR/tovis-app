@@ -680,16 +680,9 @@ describe('PATCH /api/pro/bookings/[id]', () => {
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('passes missing overrideReason through to updateProBooking and maps FORBIDDEN from the boundary', async () => {
+  it('accepts an override-flagged update without an overrideReason and passes null through', async () => {
     mocks.beginRouteIdempotency.mockResolvedValueOnce(
       makeStartedIdempotency('idem_missing_override_reason_1'),
-    )
-
-    mocks.updateProBooking.mockRejectedValueOnce(
-      bookingError('FORBIDDEN', {
-        message: 'Override reason is required when using booking rule overrides.',
-        userMessage: 'Please add a reason for this override.',
-      }),
     )
 
     const result = await PATCH(
@@ -711,24 +704,14 @@ describe('PATCH /api/pro/bookings/[id]', () => {
       }),
     )
 
-    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
-      operation: ROUTE_OPERATION,
-    })
-
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      403,
-      'Please add a reason for this override.',
-      expect.objectContaining({
-        code: 'FORBIDDEN',
-      }),
-    )
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.jsonOk).toHaveBeenCalledWith(defaultPatchResponse, 200)
 
     expect(result).toEqual(
       expect.objectContaining({
-        ok: false,
-        status: 403,
-        code: 'FORBIDDEN',
+        ok: true,
+        status: 200,
+        data: defaultPatchResponse,
       }),
     )
   })

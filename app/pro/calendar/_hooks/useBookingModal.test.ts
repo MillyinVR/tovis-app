@@ -379,19 +379,6 @@ describe('useBookingModal', () => {
     expect(result.current.bookingOverrideIntent).toBe('accept')
     expect(reloadCalendar).not.toHaveBeenCalled()
 
-    // Confirming without a reason does nothing.
-    const patchCallsBefore = fetchMock.mock.calls.filter(
-      (call) => call[1]?.method === 'PATCH',
-    ).length
-
-    await act(async () => {
-      await result.current.confirmBookingOverride()
-    })
-
-    expect(
-      fetchMock.mock.calls.filter((call) => call[1]?.method === 'PATCH').length,
-    ).toBe(patchCallsBefore)
-
     await act(async () => {
       result.current.setBookingOverrideReason('Client asked for a same-day slot')
     })

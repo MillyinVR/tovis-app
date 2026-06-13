@@ -2073,6 +2073,11 @@ model Booking {
   internalNotes String?
   clientNotes   String?
 
+  // Pro-authored note attached to the latest booking-rule override
+  // (advance notice / working hours / far future). Client-visible: shown on
+  // the client's appointment detail, unlike BookingOverrideAuditLog.reason.
+  clientVisibleOverrideNote String?
+
   client       ClientProfile                @relation(fields: [clientId], references: [id])
   professional ProfessionalProfile          @relation(fields: [professionalId], references: [id])
   service      Service                      @relation(fields: [serviceId], references: [id])
@@ -2147,7 +2152,7 @@ model BookingOverrideAuditLog {
   action BookingOverrideAction
   rule   BookingOverrideRule
 
-  reason    String
+  reason    String?
   route     String
   requestId String?
 

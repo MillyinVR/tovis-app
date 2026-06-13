@@ -231,7 +231,7 @@ function buildBookingPatchPayload(args: {
 
     const trimmedOverrideReason = overrideReason.trim()
     if (trimmedOverrideReason) {
-      payload.overrideReason = overrideReason.trim()
+      payload.overrideReason = trimmedOverrideReason
     }
   }
 
@@ -523,7 +523,6 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
     if (!pendingChange || !changeOverride || applyingChange) return
 
     const reason = changeOverrideReason.trim()
-    if (!reason) return
 
     setApplyingChange(true)
 
@@ -543,7 +542,9 @@ export function useConfirmChange(deps: ConfirmChangeDeps) {
         payload[flag] = true
       }
 
-      payload.overrideReason = reason
+      if (reason) {
+        payload.overrideReason = reason
+      }
 
       await patchJson({
         idempotencyKey: buildProBookingPatchIdempotencyKey(pendingChange.apiId),

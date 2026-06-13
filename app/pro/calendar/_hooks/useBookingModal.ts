@@ -820,7 +820,6 @@ export function useBookingModal(deps: BookingModalDeps) {
     if (!booking || !bookingOverride || savingReschedule) return
 
     const reason = bookingOverrideReason.trim()
-    if (!reason) return
 
     setSavingReschedule(true)
     setBookingError(null)
@@ -828,7 +827,7 @@ export function useBookingModal(deps: BookingModalDeps) {
     try {
       const payload: BookingPatchPayload = {
         ...bookingOverride.basePayload,
-        overrideReason: reason,
+        ...(reason ? { overrideReason: reason } : {}),
       }
 
       for (const flag of bookingOverride.flags) {

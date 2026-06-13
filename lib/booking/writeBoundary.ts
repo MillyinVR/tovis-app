@@ -2104,27 +2104,6 @@ function normalizeReason(reason?: string | null): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function assertExplicitOverrideReasonIfNeeded(args: {
-  allowShortNotice: boolean
-  allowFarFuture: boolean
-  allowOutsideWorkingHours: boolean
-  overrideReason: string | null
-}): string | null {
-  const reason = normalizeReason(args.overrideReason)
-
-  const requiresExplicitReason =
-    args.allowShortNotice || args.allowFarFuture
-
-  if (requiresExplicitReason && !reason) {
-    throw bookingError('FORBIDDEN', {
-      message:
-        'Override reason is required when using short-notice or far-future booking rule overrides.',
-      userMessage: 'Please add a reason for this override.',
-    })
-  }
-
-  return reason
-}
 
 function isWithinStartWindow(scheduledFor: Date, now: Date): boolean {
   const start = scheduledFor.getTime() - 15 * 60 * 1000
@@ -3706,7 +3685,7 @@ async function createBookingOverrideAuditLogs(args: {
   actorUserId: string
   action: 'CREATE' | 'UPDATE'
   route: string
-  reason: string
+  reason: string | null
   appliedOverrides: ProSchedulingAppliedOverride[]
   bookingScheduledForBefore?: Date | null
   bookingScheduledForAfter: Date
@@ -8348,12 +8327,7 @@ async function performLockedCreateProBooking(args: {
     bookingEntryPoint: 'PRO_CREATED',
   })
 
-  const normalizedOverrideReason = assertExplicitOverrideReasonIfNeeded({
-    allowShortNotice: args.allowShortNotice,
-    allowFarFuture: args.allowFarFuture,
-    allowOutsideWorkingHours: args.allowOutsideWorkingHours,
-    overrideReason: args.overrideReason,
-  })
+  const normalizedOverrideReason = normalizeReason(args.overrideReason)
 
   const requestedStart = normalizeToMinute(args.scheduledFor)
 
@@ -8658,6 +8632,10 @@ async function performLockedCreateProBooking(args: {
           addressSnapshotsEncryptedAt,
 
         internalNotes: args.internalNotes ?? null,
+        clientVisibleOverrideNote:
+          schedulingDecision.appliedOverrides.length > 0
+            ? normalizedOverrideReason
+            : null,
         bufferMinutes,
         totalDurationMinutes,
         subtotalSnapshot: basePrice,
@@ -8737,10 +8715,7 @@ await syncBookingAppointmentReminders({
   bookingId: booking.id,
 })
   
-if (
-  schedulingDecision.appliedOverrides.length > 0 &&
-  normalizedOverrideReason
-) {
+if (schedulingDecision.appliedOverrides.length > 0) {
   await createBookingOverrideAuditLogs({
     tx: args.tx,
     bookingId: booking.id,
@@ -9329,12 +9304,7 @@ async function performLockedUpdateProBooking(args: {
 }): Promise<UpdateProBookingResult> {
     assertNonEmptyUserId(args.actorUserId)
 
-  const normalizedOverrideReason = assertExplicitOverrideReasonIfNeeded({
-    allowShortNotice: args.allowShortNotice,
-    allowFarFuture: args.allowFarFuture,
-    allowOutsideWorkingHours: args.allowOutsideWorkingHours,
-    overrideReason: args.overrideReason,
-  })
+  const normalizedOverrideReason = normalizeReason(args.overrideReason)
 
   const existing = await args.tx.booking.findFirst({
     where: { id: args.bookingId, professionalId: args.professionalId },
@@ -9814,6 +9784,11 @@ if (args.notifyClient) {
       ...(args.nextStatus === BookingStatus.ACCEPTED
         ? { status: BookingStatus.ACCEPTED }
         : {}),
+      // Track the latest override's client-visible note: a fresh override
+      // replaces (or clears) whatever an earlier override left behind.
+      ...(schedulingDecision.appliedOverrides.length > 0
+        ? { clientVisibleOverrideNote: normalizedOverrideReason }
+        : {}),
       scheduledFor: finalStart,
       bufferMinutes: finalBuffer,
       totalDurationMinutes: finalDuration,
@@ -9837,10 +9812,7 @@ if (args.notifyClient) {
     } satisfies Prisma.BookingSelect,
   })
 
-    if (
-  schedulingDecision.appliedOverrides.length > 0 &&
-  normalizedOverrideReason
-) {
+    if (schedulingDecision.appliedOverrides.length > 0) {
   await createBookingOverrideAuditLogs({
     tx: args.tx,
     bookingId: updated.id,
