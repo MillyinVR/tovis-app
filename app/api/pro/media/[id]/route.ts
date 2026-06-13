@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { MediaVisibility } from '@prisma/client'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
 import { pickBool, pickString } from '@/lib/pick'
 import { safeError } from '@/lib/security/logging'
 
@@ -54,6 +55,8 @@ export async function PATCH(req: Request, ctx: Ctx) {
       select: {
         id: true,
         professionalId: true,
+        reviewId: true,
+        storageBucket: true,
         caption: true,
         isEligibleForLooks: true,
         isFeaturedInPortfolio: true,
@@ -79,6 +82,16 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
 
     const nextVisibility = normalizeVisibilityFromFlags(nextFlags)
+
+    // Consent gate: never let a pro flip a client's unpromoted private session
+    // media to public. Only review-promoted (reviewId set) or public-bucket
+    // media may go public.
+    if (
+      nextVisibility === MediaVisibility.PUBLIC &&
+      !canProSharePublicly(existing)
+    ) {
+      return jsonFail(403, UNPROMOTED_MEDIA_MESSAGE)
+    }
 
     const serviceIds = parseServiceIds(body.serviceIds)
     const serviceIdsProvided = serviceIds !== null

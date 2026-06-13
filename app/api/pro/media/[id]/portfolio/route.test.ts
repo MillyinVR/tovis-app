@@ -91,6 +91,7 @@ function makeOwnedMedia(
   overrides?: Partial<{
     id: string
     professionalId: string
+    reviewId: string | null
     isFeaturedInPortfolio: boolean
     isEligibleForLooks: boolean
     visibility: MediaVisibility
@@ -105,6 +106,7 @@ function makeOwnedMedia(
   return {
     id: 'media_1',
     professionalId: 'pro_1',
+    reviewId: null,
     isFeaturedInPortfolio: false,
     isEligibleForLooks: false,
     visibility: MediaVisibility.PRO_CLIENT,
@@ -240,6 +242,41 @@ describe('app/api/pro/media/[id]/portfolio/route.ts', () => {
       expect(mocks.mediaAssetUpdate).not.toHaveBeenCalled()
     })
 
+    it('returns 403 and does not update when media is an unpromoted private session photo', async () => {
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeOwnedMedia({
+          storageBucket: 'media-private',
+          reviewId: null,
+          visibility: MediaVisibility.PRO_CLIENT,
+        }),
+      )
+
+      const res = await POST(makeRequest('POST'), makeCtx())
+
+      expect(res.status).toBe(403)
+      await expect(res.json()).resolves.toEqual({
+        ok: false,
+        error:
+          'This session photo can only be shared publicly after the client adds it to a review.',
+      })
+      expect(mocks.mediaAssetUpdate).not.toHaveBeenCalled()
+    })
+
+    it('allows featuring a private session photo once it has been promoted via a review', async () => {
+      mocks.mediaAssetFindUnique.mockResolvedValueOnce(
+        makeOwnedMedia({
+          storageBucket: 'media-private',
+          reviewId: 'review_1',
+          visibility: MediaVisibility.PUBLIC,
+        }),
+      )
+
+      const res = await POST(makeRequest('POST'), makeCtx())
+
+      expect(res.status).toBe(200)
+      expect(mocks.mediaAssetUpdate).toHaveBeenCalledTimes(1)
+    })
+
     it('marks owned media as featured and public when not eligible for Looks', async () => {
       const updated = makeUpdatedMedia({
         isFeaturedInPortfolio: true,
@@ -256,6 +293,7 @@ describe('app/api/pro/media/[id]/portfolio/route.ts', () => {
         select: {
           id: true,
           professionalId: true,
+          reviewId: true,
           isFeaturedInPortfolio: true,
           isEligibleForLooks: true,
           visibility: true,
