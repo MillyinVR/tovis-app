@@ -26,7 +26,15 @@ import {
 } from '@/lib/viewerLocation'
 
 const ALL_TAB: UiCategory = { name: 'Look', slug: 'all' }
+const FOLLOWING_TAB: UiCategory = { name: 'Following', slug: 'following' }
 const SPOTLIGHT_TAB: UiCategory = { name: 'Spotlight', slug: 'spotlight' }
+
+// Fixed tabs that are always present and never come from the categories API.
+const FIXED_TAB_SLUGS = new Set([
+  ALL_TAB.slug,
+  FOLLOWING_TAB.slug,
+  SPOTLIGHT_TAB.slug,
+])
 
 const FEED_LIMIT = 24
 const FEED_CACHE_TTL_MS = 15_000
@@ -41,16 +49,27 @@ type FeedCacheEntry = {
 // When the active slide is within this many items of the end, fetch the next page.
 const LOAD_MORE_THRESHOLD = 4
 
-function withSpotlight(cats: UiCategory[]) {
-  if (cats.some((c) => c.slug === SPOTLIGHT_TAB.slug)) return cats
-  const next = [...cats]
-  next.splice(1, 0, SPOTLIGHT_TAB)
-  return next
+// Always lead with the fixed social tabs (Look · Following · Spotlight), then
+// the dynamic service categories — deduped against the fixed slugs.
+function withFixedTabs(cats: UiCategory[]) {
+  const dynamic = cats.filter((c) => !FIXED_TAB_SLUGS.has(c.slug))
+  return [ALL_TAB, FOLLOWING_TAB, SPOTLIGHT_TAB, ...dynamic]
 }
 
 function makeFeedKey(args: { slug: string; q: string; limit: number }) {
   const q = args.q.trim().toLowerCase()
   return `${args.slug}|${q}|${args.limit}`
+}
+
+// Translate the active tab into feed query params: Following uses the
+// `following` flag (server-resolved to the FOLLOWING feed); Spotlight and the
+// service categories travel as `category`; the default Look tab needs neither.
+function applyFeedScopeParams(qs: URLSearchParams, slug: string) {
+  if (slug === FOLLOWING_TAB.slug) {
+    qs.set('following', 'true')
+  } else if (slug && slug !== ALL_TAB.slug) {
+    qs.set('category', slug)
+  }
 }
 
 function currentPathWithQuery() {
@@ -67,10 +86,10 @@ function sanitizeFrom(from: string) {
 }
 
 function parseCategories(raw: unknown): UiCategory[] {
-  if (!isRecord(raw)) return withSpotlight([ALL_TAB])
+  if (!isRecord(raw)) return withFixedTabs([ALL_TAB])
 
   const categories = raw.categories
-  if (!Array.isArray(categories)) return withSpotlight([ALL_TAB])
+  if (!Array.isArray(categories)) return withFixedTabs([ALL_TAB])
 
   const normalized: UiCategory[] = categories
     .filter((category): category is Partial<UiCategory> => Boolean(category && typeof category === 'object'))
@@ -90,7 +109,7 @@ function parseCategories(raw: unknown): UiCategory[] {
     map.set(category.slug, category)
   }
 
-  return withSpotlight([ALL_TAB, ...Array.from(map.values())])
+  return withFixedTabs([ALL_TAB, ...Array.from(map.values())])
 }
 
 function parseFeedEnvelope(raw: unknown): {
@@ -148,7 +167,7 @@ export default function LooksFeed() {
   const [refreshing, setRefreshing] = useState(false)
   const [feedError, setFeedError] = useState<string | null>(null)
 
-  const [cats, setCats] = useState<UiCategory[]>(withSpotlight([ALL_TAB]))
+  const [cats, setCats] = useState<UiCategory[]>(withFixedTabs([ALL_TAB]))
   const [activeCategorySlug, setActiveCategorySlug] = useState<string>(
     ALL_TAB.slug,
   )
@@ -231,7 +250,7 @@ export default function LooksFeed() {
         next.some((category) => category.slug === current) ? current : ALL_TAB.slug,
       )
     } catch {
-      const next = withSpotlight([ALL_TAB])
+      const next = withFixedTabs([ALL_TAB])
       setCats(next)
       setActiveCategorySlug((current) =>
         next.some((category) => category.slug === current) ? current : ALL_TAB.slug,
@@ -286,9 +305,7 @@ export default function LooksFeed() {
       const qs = new URLSearchParams()
       qs.set('limit', String(FEED_LIMIT))
 
-      if (activeCategorySlug && activeCategorySlug !== ALL_TAB.slug) {
-        qs.set('category', activeCategorySlug)
-      }
+      applyFeedScopeParams(qs, activeCategorySlug)
 
       if (query.trim()) {
         qs.set('q', query.trim())
@@ -347,9 +364,7 @@ export default function LooksFeed() {
       qs.set('limit', String(FEED_LIMIT))
       qs.set('cursor', nextCursor)
 
-      if (activeCategorySlug && activeCategorySlug !== ALL_TAB.slug) {
-        qs.set('category', activeCategorySlug)
-      }
+      applyFeedScopeParams(qs, activeCategorySlug)
 
       if (query.trim()) {
         qs.set('q', query.trim())
@@ -873,7 +888,9 @@ export default function LooksFeed() {
               <div className="p-3 text-textSecondary">Loading Looks…</div>
             ) : !items.length ? (
               <div className="p-3 text-textSecondary">
-                No Looks yet. This is where the glow-ups will live.
+                {activeCategorySlug === FOLLOWING_TAB.slug
+                  ? 'No Looks from pros you follow yet. Tap Follow on a Look to build your feed.'
+                  : 'No Looks yet. This is where the glow-ups will live.'}
               </div>
             ) : (
               items.map((item, idx) => {
