@@ -101,6 +101,7 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
     const caption = pickString(item.caption)
     const viewerLiked = pickBoolean(item.viewerLiked)
     const viewerSaved = pickBoolean(item.viewerSaved)
+    const viewerFollows = pickBoolean(item.viewerFollows) ?? false
 
     const mediaType =
       item.mediaType === MediaType.IMAGE || item.mediaType === MediaType.VIDEO
@@ -167,6 +168,7 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
       },
       viewerLiked,
       viewerSaved,
+      viewerFollows,
 
       serviceId: pickString(item.serviceId),
       serviceName: pickString(item.serviceName),

@@ -329,12 +329,14 @@ describe('app/api/looks/route.ts', () => {
       item: look1,
       viewerLiked: false,
       viewerSaved: true,
+      viewerFollows: false,
     })
 
     expect(mocks.mapLooksFeedMediaToDto).toHaveBeenNthCalledWith(2, {
       item: look2,
       viewerLiked: true,
       viewerSaved: false,
+      viewerFollows: false,
     })
 
     expect(mocks.encodeLooksFeedCursor).toHaveBeenCalledWith({
