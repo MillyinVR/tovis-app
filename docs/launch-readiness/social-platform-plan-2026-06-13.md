@@ -77,18 +77,21 @@ follow no one yet → suggest pros to follow.
 **Acceptance:** a logged-in client sees a Following feed of looks from pros they follow; guests are
 prompted to sign in. **Effort:** S.
 
-### S1.2 — Follow button + follower counts in-feed and on profiles ⭐ (follow toggle DONE 2026-06-13)
+### S1.2 — Follow button + follower counts in-feed and on profiles ⭐ ✅ DONE 2026-06-13
 **Why:** the graph can't grow if users can't follow from where they spend time (the feed).
-**Done:** the previously fake, non-functional `FOLLOW` pill in
+**Done (follow toggle):** the previously fake, non-functional `FOLLOW` pill in
 [`LookOverlays.tsx`](../../app/(main)/looks/_components/LookOverlays.tsx) is now a real, stateful
 button wired to [`/api/pros/[id]/follow`](../../app/api/pros/[id]/follow/route.ts) with an optimistic
-toggle + rollback (mirrors the like pattern) and a guest→login redirect. The feed payload now carries a
+toggle + rollback (mirrors the like pattern) and a guest→login redirect. The feed payload carries a
 real `viewerFollows` per item (computed in [`app/api/looks/route.ts`](../../app/api/looks/route.ts) and
 [`lib/search/looks.ts`](../../lib/search/looks.ts)); a pro appearing on multiple slides stays in sync.
-The button reads FOLLOW / FOLLOWING from real state.
-**Still to do:** surface a real **follower count** on the look overlay and pro public profile (needs a
-`followerCount` on the professional in the feed select). Add a follow affordance to the right action
-rail too. **Effort:** S.
+**Done (follower counts):** the feed payload now carries a real `followerCount` per pro via an
+index-backed `_count.followers` on a feed-scoped professional select
+([`looksFeedProProfileSelect`](../../lib/looks/selects.ts)), surfaced next to the Follow button in
+compact form (`1.5k followers`). The count updates optimistically on follow/unfollow (±1) and reconciles
+with the authoritative `followerCount` the follow API returns. Covered by a new `LookOverlays` test.
+**Still to do:** show follower count on the **pro public profile** page (the feed overlay is done), and
+add a follow affordance to the right action rail. **Effort:** S.
 
 ### S1.3 — Social notifications (like / comment / follow / save) ⭐
 **Why:** engagement notifications are *the* retention engine of every platform we want to compete with.

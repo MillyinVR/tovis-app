@@ -62,6 +62,7 @@ function makeFeedDto(
       professionType: ProfessionType.BARBER,
       avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
       location: 'San Diego, CA',
+      followerCount: 256,
     },
     _count: {
       likes: 9,
@@ -161,6 +162,7 @@ describe('lib/looks/parsers.ts', () => {
             professionType: null,
             avatarUrl: null,
             location: null,
+            followerCount: 0,
           },
           _count: {
             likes: 1,

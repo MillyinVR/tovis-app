@@ -565,28 +565,58 @@ export default function LooksFeed() {
 
       let before = false
 
-      // A pro can appear on multiple slides — keep every one of their cards in sync.
+      // Optimistic follow toggle: flip viewerFollows and nudge the follower
+      // count by ±1. A pro can appear on multiple slides — keep every one of
+      // their cards in sync.
+      const applyFollow = (
+        follows: boolean,
+        countFor: (current: number) => number,
+      ) =>
+        setItems((prev) =>
+          prev.map((item) =>
+            item.professional?.id === professionalId && item.professional
+              ? {
+                  ...item,
+                  viewerFollows: follows,
+                  professional: {
+                    ...item.professional,
+                    followerCount: Math.max(
+                      0,
+                      countFor(item.professional.followerCount),
+                    ),
+                  },
+                }
+              : item,
+          ),
+        )
+
       setItems((prev) => {
         const current = prev.find(
           (item) => item.professional?.id === professionalId,
         )
         before = Boolean(current?.viewerFollows)
+        const delta = before ? -1 : 1
 
         return prev.map((item) =>
-          item.professional?.id === professionalId
-            ? { ...item, viewerFollows: !before }
+          item.professional?.id === professionalId && item.professional
+            ? {
+                ...item,
+                viewerFollows: !before,
+                professional: {
+                  ...item.professional,
+                  followerCount: Math.max(
+                    0,
+                    item.professional.followerCount + delta,
+                  ),
+                },
+              }
             : item,
         )
       })
 
+      // Undo the optimistic ±1 and restore the prior follow state.
       const rollback = () =>
-        setItems((prev) =>
-          prev.map((item) =>
-            item.professional?.id === professionalId
-              ? { ...item, viewerFollows: before }
-              : item,
-          ),
-        )
+        applyFollow(before, (count) => count + (before ? 1 : -1))
 
       try {
         const res = await fetch(`/api/pros/${professionalId}/follow`, {
@@ -610,12 +640,14 @@ export default function LooksFeed() {
             ? raw.following
             : !before
 
-        setItems((prev) =>
-          prev.map((item) =>
-            item.professional?.id === professionalId
-              ? { ...item, viewerFollows: serverFollowing }
-              : item,
-          ),
+        const serverFollowerCount =
+          isRecord(raw) && typeof raw.followerCount === 'number'
+            ? Math.max(0, raw.followerCount)
+            : null
+
+        // Reconcile with the authoritative count when the server returns one.
+        applyFollow(serverFollowing, (count) =>
+          serverFollowerCount !== null ? serverFollowerCount : count,
         )
       } finally {
         followInFlight.current[professionalId] = false

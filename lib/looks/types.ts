@@ -28,6 +28,7 @@ export type LooksProfessionalDto = {
   professionType: ProfessionType | null
   avatarUrl: string | null
   location: string | null
+  followerCount: number
 }
 
 export type LooksFeedItemDto = {

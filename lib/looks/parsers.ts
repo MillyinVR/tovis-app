@@ -137,6 +137,8 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
       if (professionalId) {
         const professionTypeRaw = professionalRaw.professionType
 
+        const followerCountRaw = pickNumber(professionalRaw.followerCount)
+
         professional = {
           id: professionalId,
           businessName: pickString(professionalRaw.businessName),
@@ -146,6 +148,9 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
             : null,
           avatarUrl: pickString(professionalRaw.avatarUrl),
           location: pickString(professionalRaw.location),
+          followerCount: followerCountRaw !== null && followerCountRaw >= 0
+            ? followerCountRaw
+            : 0,
         }
       }
     }

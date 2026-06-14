@@ -31,9 +31,24 @@ function formatHelpful(n: number) {
   return `${n} ${n === 1 ? 'helpful' : 'helpfuls'}`
 }
 
+// Compact follower count: 999 → "999", 1500 → "1.5k", 2_000_000 → "2m".
+function formatFollowerCount(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) {
+    const k = n / 1000
+    return `${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}k`
+  }
+  const mil = n / 1_000_000
+  return `${mil % 1 === 0 ? mil.toFixed(0) : mil.toFixed(1)}m`
+}
+
 export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow }: Props) {
   const pro = m.professional ?? null
   const isFollowing = Boolean(m.viewerFollows)
+  const followerCount =
+    typeof pro?.followerCount === 'number' && pro.followerCount > 0
+      ? pro.followerCount
+      : 0
 
   const businessName = (pro?.businessName ?? '').trim()
   const handle = (pro?.handle ?? '').trim()
@@ -135,6 +150,22 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
             >
               {isFollowing ? 'FOLLOWING' : 'FOLLOW'}
             </button>
+          ) : null}
+
+          {pro?.id && followerCount > 0 ? (
+            <span
+              aria-label={`${followerCount} ${followerCount === 1 ? 'follower' : 'followers'}`}
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'rgba(244,239,231,0.7)',
+                fontFamily: 'var(--font-mono)',
+                flexShrink: 0,
+              }}
+            >
+              {formatFollowerCount(followerCount)}{' '}
+              {followerCount === 1 ? 'follower' : 'followers'}
+            </span>
           ) : null}
         </div>
       ) : null}
