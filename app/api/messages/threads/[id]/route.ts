@@ -1,6 +1,6 @@
 // app/api/messages/threads/[id]/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import type { Prisma } from '@prisma/client'
@@ -44,8 +44,9 @@ async function validateCursorForThread(threadId: string, cursor: string | null) 
 
 export async function GET(req: Request, ctx: { params: { id: string } | Promise<{ id: string }> }) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user) return jsonFail(401, 'Unauthorized.')
+    const auth = await requireUser()
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const { id } = await readParams(ctx)
     const threadId = trimId(id)
@@ -111,8 +112,9 @@ export async function POST(req: Request, ctx: { params: { id: string } | Promise
   const debugId = Math.random().toString(36).slice(2, 9)
 
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user) return jsonFail(401, 'Unauthorized.')
+    const auth = await requireUser()
+    if (!auth.ok) return auth.res
+    const user = auth.user
     const userId = user.id
 
     const { id } = await readParams(ctx)

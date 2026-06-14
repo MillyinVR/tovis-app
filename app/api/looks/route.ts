@@ -1,7 +1,7 @@
 // app/api/looks/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickInt, pickString } from '@/app/api/_utils'
-import { getCurrentUser } from '@/lib/currentUser'
+import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
 import {
   buildLooksFeedCursorWhere,
   buildLooksFeedOrderBy,
@@ -50,7 +50,7 @@ async function loadFollowingProfessionalIds(args: {
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
+    const user = await getOptionalUser()
 
     const { searchParams } = new URL(req.url)
 

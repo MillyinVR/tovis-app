@@ -1,6 +1,6 @@
 // app/api/media/url/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { pickString } from '@/lib/pick'
 import { MediaVisibility } from '@prisma/client'
@@ -51,8 +51,9 @@ export async function GET(req: Request) {
     }
 
     // ✅ Anything non-public requires auth
-    const user = await getCurrentUser().catch(() => null)
-    if (!user) return jsonFail(401, 'Unauthorized.')
+    const auth = await requireUser({ allowVerificationSession: true })
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const isOwnerPro = user.role === 'PRO' && user.professionalProfile?.id === media.professionalId
     if (!isOwnerPro) return jsonFail(403, 'Forbidden.')

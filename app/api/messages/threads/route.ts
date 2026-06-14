@@ -1,14 +1,15 @@
 // app/api/messages/threads/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user) return jsonFail(401, 'Unauthorized.')
+    const auth = await requireUser()
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const threads = await prisma.messageThread.findMany({
       where: { participants: { some: { userId: user.id } } },

@@ -1,8 +1,7 @@
 // app/api/client/footer/route.ts
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getUnreadClientNotificationCount } from '@/lib/notifications/clientNotifications'
-import { Role } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,13 +12,11 @@ function clampSmallCount(n: number): string | null {
 
 export async function GET() {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user || user.role !== Role.CLIENT || !user.clientProfile?.id) {
-      return jsonFail(401, 'Unauthorized')
-    }
+    const auth = await requireClient()
+    if (!auth.ok) return auth.res
 
     const unreadNotificationCount = await getUnreadClientNotificationCount({
-      clientId: user.clientProfile.id,
+      clientId: auth.clientId,
     })
 
     const inboxBadge = clampSmallCount(unreadNotificationCount)
