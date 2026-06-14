@@ -1,6 +1,11 @@
 // app/api/client/uploads/route.ts
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { prisma } from '@/lib/prisma'
+import {
+  createUploadSession,
+  uploadSurfaceForKind,
+} from '@/lib/media/uploadSession'
 
 export const dynamic = 'force-dynamic'
 
@@ -80,6 +85,24 @@ export async function POST(req: Request) {
 
     const publicUrl = `${base}/storage/v1/object/public/${bucket}/${path}`
 
+    // Bind this signed upload to a PENDING UploadSession (client review media).
+    // The pro/tenant aren't known until the review is attached, so only clientId
+    // is recorded here; the attach route validates ownership by clientId.
+    const surface = uploadSurfaceForKind(kind)
+    let uploadSessionId: string | null = null
+    if (surface) {
+      const session = await createUploadSession(prisma, {
+        surface,
+        storageBucket: bucket,
+        storagePath: path,
+        contentType,
+        maxBytes: 30 * 1024 * 1024,
+        clientId,
+        now: new Date(),
+      })
+      uploadSessionId = session.id
+    }
+
     return jsonOk({
       kind: 'REVIEW_PUBLIC',
       bucket,
@@ -89,6 +112,7 @@ export async function POST(req: Request) {
       publicUrl,
       isPublic: true,
       cacheBuster: Date.now(),
+      uploadSessionId,
     })
   } catch (e: unknown) {
     console.error('POST /api/client/uploads error', e)

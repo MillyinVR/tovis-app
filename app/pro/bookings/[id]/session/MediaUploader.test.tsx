@@ -55,6 +55,7 @@ function signOk() {
     publicUrl: null,
     isPublic: false,
     cacheBuster: null,
+    uploadSessionId: 'us_1',
   })
 }
 
@@ -152,8 +153,7 @@ describe('MediaUploader', () => {
       unknown
     >
     expect(body).toMatchObject({
-      storageBucket: 'media-private',
-      storagePath: 'bookings/booking_1/before/main.jpg',
+      uploadSessionId: 'us_1',
       mediaType: 'IMAGE',
       phase: 'BEFORE',
     })

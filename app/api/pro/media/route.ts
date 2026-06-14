@@ -14,6 +14,7 @@ import {
   MediaVisibility,
 } from '@prisma/client'
 import { BUCKETS } from '@/lib/storageBuckets'
+import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import { createOrUpdateProLookFromMediaAsset } from '@/lib/looks/publication/service'
 import { safeError } from '@/lib/security/logging'
 
@@ -297,24 +298,26 @@ export async function POST(req: Request) {
       const proTenantId = await resolveProTenantId(tx, professionalId)
       const created = await tx.mediaAsset.create({
         data: {
-          professionalId,
-          proTenantId,
+          ...buildMediaAssetCreateData({
+            professionalId,
+            proTenantId,
 
-          url,
-          thumbUrl,
+            url,
+            thumbUrl,
 
-          caption: caption || null,
-          mediaType,
-          visibility,
+            caption,
+            mediaType,
+            visibility,
 
-          isFeaturedInPortfolio,
-          isEligibleForLooks,
+            isFeaturedInPortfolio,
+            isEligibleForLooks,
 
-          storageBucket: bucket,
-          storagePath: path,
+            storageBucket: bucket,
+            storagePath: path,
 
-          thumbBucket,
-          thumbPath: thumbBucket && thumbPath ? thumbPath : null,
+            thumbBucket,
+            thumbPath: thumbBucket && thumbPath ? thumbPath : null,
+          }),
 
           services: {
             createMany: {

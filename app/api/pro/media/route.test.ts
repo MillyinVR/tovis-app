@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   LookPostVisibility,
+  MediaPhase,
   MediaType,
   MediaVisibility,
 } from '@prisma/client'
@@ -392,6 +393,12 @@ describe('app/api/pro/media/route.ts', () => {
         storagePath: 'pros/pro_1/media_1.jpg',
         thumbBucket: null,
         thumbPath: null,
+        bookingId: null,
+        reviewId: null,
+        uploadedByUserId: null,
+        uploadedByRole: null,
+        phase: MediaPhase.OTHER,
+        reviewLocked: false,
         services: {
           createMany: {
             data: [{ serviceId: 'service_1' }],

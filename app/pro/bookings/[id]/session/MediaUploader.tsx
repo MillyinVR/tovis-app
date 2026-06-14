@@ -45,6 +45,7 @@ type SignedUploadResponse = {
   publicUrl: string | null
   isPublic: boolean | null
   cacheBuster: number | null
+  uploadSessionId: string | null
 }
 
 function errorFrom(res: Response, data: unknown): string {
@@ -101,6 +102,7 @@ function readSignedUploadResponse(value: unknown): SignedUploadResponse | null {
     publicUrl: pickString(value.publicUrl),
     isPublic: readBooleanOrNull(value.isPublic),
     cacheBuster: readNumberOrNull(value.cacheBuster),
+    uploadSessionId: pickString(value.uploadSessionId),
   }
 }
 
@@ -345,9 +347,6 @@ export default function MediaUploader({
         return
       }
 
-      const thumbBucket: string | null = null
-      const thumbPath: string | null = null
-
       setStatus('SAVING')
 
       // Key on the signed storage path, which is unique per uploaded object.
@@ -374,10 +373,7 @@ export default function MediaUploader({
           },
           signal: controller.signal,
           body: JSON.stringify({
-            storageBucket: signData.bucket,
-            storagePath: signData.path,
-            thumbBucket,
-            thumbPath,
+            uploadSessionId: signData.uploadSessionId,
             caption: cap,
             mediaType: mt,
             phase,

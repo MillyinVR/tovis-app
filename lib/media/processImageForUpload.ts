@@ -282,6 +282,39 @@ export function formatBytes(bytes: number): string {
   return `${bytes}B`
 }
 
+/**
+ * Convenience wrapper for the simple upload surfaces (avatar, service images,
+ * verification docs, admin defaults) that want compression without a crop UI.
+ *
+ * - Images are downscaled + re-encoded via processImageForUpload, then the
+ *   SMALLER of {original, processed} is returned so we never inflate an
+ *   already-optimized file.
+ * - Videos and any non-image files pass through untouched (canvas can't decode
+ *   them).
+ * - If processing throws (e.g. a decode failure on an exotic format), the
+ *   original file is returned so the upload still proceeds — the signing route
+ *   and storage still enforce the hard 30MB cap server-side.
+ *
+ * Callers MUST use the returned File for the signing request (contentType +
+ * size) and for the upload itself, since the processed file's type/extension
+ * and byte length can differ from the original.
+ */
+export async function compressImageForUpload(
+  file: File,
+  options?: ProcessImageOptions,
+): Promise<File> {
+  if (!file.type.startsWith('image/')) {
+    return file
+  }
+
+  try {
+    const result = await processImageForUpload(file, options)
+    return result.processedBytes < file.size ? result.file : file
+  } catch {
+    return file
+  }
+}
+
 export async function processImageForUpload(
   file: File,
   options?: ProcessImageOptions,

@@ -2705,6 +2705,10 @@ model MediaAsset {
   thumbBucket   String?
   thumbPath     String?
 
+  // One MediaAsset per stored object. Prevents duplicate/orphaned rows pointing
+  // at the same upload (e.g. a retried attach). Upload pointers are minted
+  // server-side with timestamped/random paths, so legitimate rows never collide.
+  @@unique([storageBucket, storagePath])
   @@index([professionalId, createdAt])
   @@index([professionalId, isEligibleForLooks, createdAt])
   @@index([professionalId, isFeaturedInPortfolio, createdAt])
@@ -2712,6 +2716,68 @@ model MediaAsset {
   @@index([bookingId, phase, createdAt])
   @@index([bookingId, createdAt])
   @@index([proTenantId])
+}
+
+// UploadSession binds a server-minted signed-upload URL to the eventual
+// MediaAsset it produces (finish-plan T2.1 / Phase 4). The signing routes create
+// a PENDING session and return its id; the media-attach routes look the session
+// up by id, validate it (owner / booking / phase / expiry / status), create the
+// MediaAsset from the session's authoritative storage pointer, and mark the
+// session CONSUMED. This closes two gaps: the client can no longer assert the
+// storage path on attach (the server owns it), and orphaned objects (bytes
+// uploaded but never attached) are discoverable as stale PENDING sessions for a
+// cleanup job to reap.
+//
+// Context ids are snapshot columns (no FK relations), matching the booking
+// attribution philosophy — they record who/what the upload was for at sign time.
+enum UploadSurface {
+  PRO_BOOKING_MEDIA
+  PRO_LOOKS
+  PRO_PORTFOLIO
+  CLIENT_REVIEW
+}
+
+enum UploadSessionStatus {
+  PENDING
+  CONSUMED
+  EXPIRED
+}
+
+model UploadSession {
+  id      String              @id @default(cuid())
+  surface UploadSurface
+  status  UploadSessionStatus @default(PENDING)
+
+  // Context snapshot (who/what this upload is for). Nullable because not every
+  // surface knows every dimension at sign time (e.g. client review uploads only
+  // know the client until the review is attached).
+  tenantId       String?
+  professionalId String?
+  clientId       String?
+  bookingId      String?
+  phase          MediaPhase?
+
+  // Authoritative storage pointer minted by the signing route. NEVER supplied by
+  // the client on attach — the attach route reads it back from here.
+  storageBucket  String
+  storagePath    String
+  contentType    String
+  maxBytes       Int
+  checksumSha256 String?
+
+  // Lifecycle.
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  mediaAssetId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([storageBucket, storagePath])
+  @@index([status, expiresAt])
+  @@index([professionalId])
+  @@index([clientId])
+  @@index([bookingId])
 }
 
 model MediaServiceTag {

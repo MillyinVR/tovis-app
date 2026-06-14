@@ -13,7 +13,8 @@ import {
 import type { ReactNode, RefObject } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
-import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 
 import { cn } from '@/lib/utils'
 import {
@@ -967,14 +968,16 @@ const ServiceEditForm = forwardRef<
           return
         }
 
+        const uploadFile = await compressImageForUpload(file)
+
         const initRes = await fetch('/api/admin/uploads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC',
             serviceId: service.id,
-            contentType: file.type,
-            size: file.size,
+            contentType: uploadFile.type,
+            size: uploadFile.size,
           }),
         })
 
@@ -987,15 +990,19 @@ const ServiceEditForm = forwardRef<
           throw new Error(message)
         }
 
-        const { error: uploadError } = await supabaseBrowser.storage
-          .from(init.bucket)
-          .uploadToSignedUrl(init.path, init.token, file, {
-            contentType: file.type,
-            upsert: true,
-          })
+        const { error: uploadError } = await uploadWithProgress({
+          bucket: init.bucket,
+          path: init.path,
+          token: init.token,
+          file: uploadFile,
+          contentType: uploadFile.type || 'application/octet-stream',
+          upsert: true,
+          onProgress: () => {},
+          signal: new AbortController().signal,
+        })
 
         if (uploadError) {
-          throw new Error(uploadError.message || 'Upload failed.')
+          throw new Error(uploadError || 'Upload failed.')
         }
 
         const finalUrl = withCacheBuster(init.publicUrl, init.cacheBuster)

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import {
   LookPostVisibility,
   MediaType,
@@ -488,15 +488,19 @@ export default function NewMediaPostForm() {
       throw new Error('Upload init failed (missing bucket/path/token).')
     }
 
-    const { error: uploadError } = await supabaseBrowser.storage
-      .from(init.bucket)
-      .uploadToSignedUrl(init.path, init.token, uploadCandidateFile, {
-        contentType: uploadCandidateFile.type || undefined,
-        upsert: false,
-      })
+    const { error: uploadError } = await uploadWithProgress({
+      bucket: init.bucket,
+      path: init.path,
+      token: init.token,
+      file: uploadCandidateFile,
+      contentType: uploadCandidateFile.type || 'application/octet-stream',
+      upsert: false,
+      onProgress: () => {},
+      signal: new AbortController().signal,
+    })
 
     if (uploadError) {
-      throw new Error(uploadError.message || 'Upload failed.')
+      throw new Error(uploadError || 'Upload failed.')
     }
 
     return {

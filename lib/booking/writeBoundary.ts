@@ -73,6 +73,7 @@ import {
 } from '@/lib/timeZone'
 import { clampInt } from '@/lib/pick'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
+import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import { createAftercareAccessDelivery } from '@/lib/clientActions/createAftercareAccessDelivery'
 import {
   normalizeAddress,
@@ -6404,30 +6405,24 @@ async function performLockedUploadProBookingMedia(args: {
 
   const created: BookingMediaAssetRecord = await args.tx.mediaAsset.create({
     data: {
-      professionalId: booking.professionalId,
-      proTenantId,
-      bookingId: booking.id,
-      uploadedByUserId: args.uploadedByUserId,
-      uploadedByRole: Role.PRO,
+      ...buildMediaAssetCreateData({
+        professionalId: booking.professionalId,
+        proTenantId,
+        bookingId: booking.id,
+        uploadedByUserId: args.uploadedByUserId,
+        uploadedByRole: Role.PRO,
 
-      storageBucket: args.storageBucket,
-      storagePath: args.storagePath,
-      thumbBucket: args.thumbBucket,
-      thumbPath: args.thumbPath,
+        storageBucket: args.storageBucket,
+        storagePath: args.storagePath,
+        thumbBucket: args.thumbBucket,
+        thumbPath: args.thumbPath,
 
-      url: null,
-      thumbUrl: null,
+        mediaType: args.mediaType,
+        phase: args.phase,
+        caption: args.caption,
 
-      mediaType: args.mediaType,
-      phase: args.phase,
-      caption: args.caption,
-
-      visibility: MediaVisibility.PRO_CLIENT,
-      isEligibleForLooks: false,
-      isFeaturedInPortfolio: false,
-
-      reviewId: null,
-      reviewLocked: false,
+        visibility: MediaVisibility.PRO_CLIENT,
+      }),
     },
     select: BOOKING_MEDIA_ASSET_SELECT,
   })

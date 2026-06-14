@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation'
 import type { VerificationDocumentType } from '@prisma/client'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
+import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 
 export type VerificationMethodOption = {
   type: VerificationDocumentType
@@ -40,14 +42,16 @@ export default function VerificationUploadClient({
   async function uploadVerificationDocument(file: File) {
     if (!selectedMethod) throw new Error('Pick a document type first.')
 
+    const uploadFile = await compressImageForUpload(file)
+
     // 1) signed upload init
     const metaRes = await fetch('/api/pro/uploads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         kind: 'VERIFY_PRIVATE',
-        contentType: file.type || 'application/octet-stream',
-        size: file.size,
+        contentType: uploadFile.type || 'application/octet-stream',
+        size: uploadFile.size,
       }),
     })
 
@@ -57,24 +61,30 @@ export default function VerificationUploadClient({
       throw new Error(msg)
     }
 
-    const signedUrl = typeof metaRaw.signedUrl === 'string' ? metaRaw.signedUrl : ''
     const bucket = typeof metaRaw.bucket === 'string' ? metaRaw.bucket : ''
     const path = typeof metaRaw.path === 'string' ? metaRaw.path : ''
+    const token = typeof metaRaw.token === 'string' ? metaRaw.token : ''
 
-    if (!signedUrl || !bucket || !path) {
-      throw new Error('Upload initialization missing signedUrl/bucket/path.')
+    if (!bucket || !path || !token) {
+      throw new Error('Upload initialization missing bucket/path/token.')
     }
 
-    // 2) PUT file to signed URL
-    const putRes = await fetch(signedUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': file.type || 'application/octet-stream' },
-      body: file,
+    // 2) PUT file to the signed-upload endpoint via the shared helper, which
+    // carries the PUT-not-POST + apikey + x-upsert semantics (VERIFY_PRIVATE
+    // lives in media-private and is not overwritten, so upsert stays false).
+    const { error: upErr } = await uploadWithProgress({
+      bucket,
+      path,
+      token,
+      file: uploadFile,
+      contentType: uploadFile.type || 'application/octet-stream',
+      upsert: false,
+      onProgress: () => {},
+      signal: new AbortController().signal,
     })
 
-    if (!putRes.ok) {
-      const txt = await putRes.text().catch(() => '')
-      throw new Error(txt || 'Upload failed while sending file.')
+    if (upErr) {
+      throw new Error(upErr || 'Upload failed while sending file.')
     }
 
     // 3) create VerificationDocument row

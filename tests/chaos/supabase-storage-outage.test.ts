@@ -18,6 +18,9 @@ const mocks = vi.hoisted(() => ({
 
   uploadProBookingMedia: vi.fn(),
 
+  validateUploadSession: vi.fn(),
+  consumeUploadSession: vi.fn(),
+
   getSupabaseAdmin: vi.fn(),
   createSignedUrl: vi.fn(),
 
@@ -54,6 +57,15 @@ vi.mock('@/lib/rateLimit/response', () => ({
 vi.mock('@/lib/booking/writeBoundary', () => ({
   uploadProBookingMedia: mocks.uploadProBookingMedia,
 }))
+
+vi.mock('@/lib/media/uploadSession', () => {
+  class UploadSessionError extends Error {}
+  return {
+    validateUploadSession: mocks.validateUploadSession,
+    consumeUploadSession: mocks.consumeUploadSession,
+    UploadSessionError,
+  }
+})
 
 vi.mock('@/lib/supabaseAdmin', () => ({
   getSupabaseAdmin: mocks.getSupabaseAdmin,
@@ -93,10 +105,7 @@ function makeRequest(body?: Record<string, unknown>): Request {
     },
     body: JSON.stringify(
       body ?? {
-        storageBucket: 'media-private',
-        storagePath: 'bookings/booking_1/after/photo.jpg',
-        thumbBucket: 'media-private',
-        thumbPath: 'bookings/booking_1/after/thumb.jpg',
+        uploadSessionId: 'us_1',
         phase: MediaPhase.AFTER,
         mediaType: MediaType.IMAGE,
         caption: 'After photo',
@@ -146,6 +155,25 @@ describe('chaos: Supabase storage outage', () => {
         })),
       },
     })
+
+    mocks.validateUploadSession.mockResolvedValue({
+      id: 'us_1',
+      surface: 'PRO_BOOKING_MEDIA',
+      status: 'PENDING',
+      professionalId: 'pro_1',
+      clientId: null,
+      bookingId: 'booking_1',
+      phase: MediaPhase.AFTER,
+      storageBucket: 'media-private',
+      storagePath: 'bookings/booking_1/after/photo.jpg',
+      contentType: 'image/jpeg',
+      maxBytes: 30 * 1024 * 1024,
+      checksumSha256: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      consumedAt: null,
+      mediaAssetId: null,
+    })
+    mocks.consumeUploadSession.mockResolvedValue(undefined)
   })
 
   it('fails safely when Supabase cannot create a signed URL for uploaded media verification', async () => {

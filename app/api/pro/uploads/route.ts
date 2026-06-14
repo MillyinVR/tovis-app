@@ -2,6 +2,11 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+import { resolveProTenantId } from '@/lib/tenant/bookingAttribution'
+import {
+  createUploadSession,
+  uploadSurfaceForKind,
+} from '@/lib/media/uploadSession'
 
 export const dynamic = 'force-dynamic'
 
@@ -244,6 +249,28 @@ export async function POST(req: Request) {
     const signedUrl = typeof (data as Record<string, unknown>).signedUrl === 'string' ? (data as Record<string, unknown>).signedUrl : null
     const publicUrl = isPublic ? `${base}/storage/v1/object/public/${bucket}/${path}` : null
 
+    // For surfaces that produce a MediaAsset, bind this signed upload to a
+    // PENDING UploadSession. The attach route consumes it and reads the storage
+    // pointer back from the session, so the client never asserts the path.
+    const surface = uploadSurfaceForKind(kind)
+    let uploadSessionId: string | null = null
+    if (surface) {
+      const proTenantId = await resolveProTenantId(prisma, proId)
+      const session = await createUploadSession(prisma, {
+        surface,
+        storageBucket: bucket,
+        storagePath: path,
+        contentType,
+        maxBytes: 30 * 1024 * 1024,
+        professionalId: proId,
+        tenantId: proTenantId,
+        bookingId: bookingId || null,
+        phase: phase ?? null,
+        now: new Date(),
+      })
+      uploadSessionId = session.id
+    }
+
     return jsonOk(
       {
         kind,
@@ -254,6 +281,7 @@ export async function POST(req: Request) {
         publicUrl,
         isPublic,
         cacheBuster: Date.now(),
+        uploadSessionId,
       },
       200,
     )

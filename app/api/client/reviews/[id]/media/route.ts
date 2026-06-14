@@ -7,6 +7,7 @@ import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { resolveStoragePointers, safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { resolveProTenantId } from '@/lib/tenant/bookingAttribution'
@@ -369,23 +370,21 @@ export async function POST(
         resolved.map((media) =>
           tx.mediaAsset.create({
             data: {
-              professionalId: review.professionalId,
-              proTenantId,
-              bookingId,
-              reviewId: review.id,
-              storageBucket: media.storageBucket,
-              storagePath: media.storagePath,
-              thumbBucket: media.thumbBucket,
-              thumbPath: media.thumbPath,
-              url: null,
-              thumbUrl: null,
-              mediaType: media.mediaType,
-              visibility: MediaVisibility.PUBLIC,
-              uploadedByUserId: user.id,
-              uploadedByRole: Role.CLIENT,
-              isFeaturedInPortfolio: false,
-              isEligibleForLooks: false,
-              reviewLocked: true,
+              ...buildMediaAssetCreateData({
+                professionalId: review.professionalId,
+                proTenantId,
+                bookingId,
+                reviewId: review.id,
+                storageBucket: media.storageBucket,
+                storagePath: media.storagePath,
+                thumbBucket: media.thumbBucket,
+                thumbPath: media.thumbPath,
+                mediaType: media.mediaType,
+                visibility: MediaVisibility.PUBLIC,
+                uploadedByUserId: user.id,
+                uploadedByRole: Role.CLIENT,
+                reviewLocked: true,
+              }),
             },
             select: {
               id: true,
