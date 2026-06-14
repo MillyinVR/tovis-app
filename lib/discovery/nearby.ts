@@ -1,6 +1,7 @@
 // lib/discovery/nearby.ts
 import { Prisma, ProfessionType } from '@prisma/client'
 
+import { clampFloat } from '@/lib/queryParams'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 export type DiscoveryLocationDto = {
@@ -49,11 +50,6 @@ function normalizeOptionalId(value: string | null | undefined): string | null {
 
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
-}
-
-function clampFloat(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.min(Math.max(value, min), max)
 }
 
 function toFiniteNumber(value: unknown): number | null {

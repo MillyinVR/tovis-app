@@ -44,6 +44,7 @@ import { withVersionedCache } from '@/lib/cache/versionedCache'
 import { isRecord } from '@/lib/guards'
 import { clampInt } from '@/lib/pick'
 import { prismaRead } from '@/lib/prisma'
+import { toIntParam as toInt } from '@/lib/queryParams'
 import { resolveTenantContextForRequest, tenantCacheScope } from '@/lib/tenant'
 
 export const dynamic = 'force-dynamic'
@@ -218,11 +219,6 @@ function buildServerTimingHeader(timers: TimerMap): string {
 function withServerTiming(response: Response, timers: TimerMap): Response {
   response.headers.set('Server-Timing', buildServerTimingHeader(timers))
   return response
-}
-
-function toInt(value: string | null, fallback: number): number {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback
 }
 
 function pickString(value: unknown): string | null {

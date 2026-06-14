@@ -8,6 +8,7 @@ import {
   ServiceFavorite,
   ServiceLocationType,
 } from '@prisma/client'
+import { haversineMiles } from '@/lib/discovery/nearby'
 import {
   mergeAndDedupeRecipients,
   type LastMinuteAudienceCandidate,
@@ -60,28 +61,6 @@ function decimalToNumber(value: Prisma.Decimal | null | undefined): number | nul
   if (!value) return null
   const n = Number(value.toString())
   return Number.isFinite(n) ? n : null
-}
-
-function haversineMiles(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
-  const R = 3958.7613
-  const toRad = (d: number) => (d * Math.PI) / 180
-
-  const dLat = toRad(b.lat - a.lat)
-  const dLng = toRad(b.lng - a.lng)
-  const lat1 = toRad(a.lat)
-  const lat2 = toRad(b.lat)
-
-  const sinLat = Math.sin(dLat / 2)
-  const sinLng = Math.sin(dLng / 2)
-
-  const h =
-    sinLat * sinLat +
-    Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng
-
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)))
 }
 
 function toClientIdSetFromProfiles(

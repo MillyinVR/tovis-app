@@ -36,6 +36,7 @@ import { utcDateToLocalParts } from '@/lib/booking/dateTime'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import { clampInt } from '@/lib/pick'
+import { parseFloatParam, toIntParam as toInt } from '@/lib/queryParams'
 import { resolveTenantContextForRequest, tenantCacheScope } from '@/lib/tenant'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
@@ -73,17 +74,6 @@ type AlternateResult = {
   slots: string[]
   scheduleVersion: string | number
   scheduleConfigVersion: string | number
-}
-
-function toInt(value: string | null, fallback: number): number {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback
-}
-
-function parseFloatParam(v: string | null): number | null {
-  if (!v) return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
 }
 
 function resolveDebugClientAddressId(args: {

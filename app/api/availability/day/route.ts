@@ -38,6 +38,7 @@ import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import { withVersionedCache } from '@/lib/cache/versionedCache'
 import { prismaRead } from '@/lib/prisma'
 import { clampInt } from '@/lib/pick'
+import { toIntParam as toInt } from '@/lib/queryParams'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
 
 export const dynamic = 'force-dynamic'
@@ -60,11 +61,6 @@ type AvailabilityRequestBasePayload = {
 
 type AvailabilityDayRequestPayload = AvailabilityRequestBasePayload & {
   date: string
-}
-
-function toInt(value: string | null, fallback: number): number {
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback
 }
 
 function resolveDebugClientAddressId(args: {

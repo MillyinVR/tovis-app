@@ -8,6 +8,7 @@ import {
 } from '@/lib/lastMinute/commands/createLastMinuteOpening'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
+import { parseIntParam } from '@/lib/queryParams'
 import {
   LastMinuteOfferType,
   LastMinuteRecipientStatus,
@@ -37,15 +38,6 @@ function clampInt(value: number, min: number, max: number): number {
   const n = Math.trunc(Number(value))
   if (!Number.isFinite(n)) return min
   return Math.max(min, Math.min(max, n))
-}
-
-function parseIntParam(v: string | null): number | null {
-  const s = pickString(v)
-  if (!s) return null
-
-  const n = Number(s)
-  if (!Number.isFinite(n)) return null
-  return Math.trunc(n)
 }
 
 function parseIsoDate(v: unknown): Date | null {

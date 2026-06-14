@@ -18,6 +18,12 @@ import {
 } from '@/lib/discovery/nearby'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
+import {
+  clampFloat,
+  parseCommaIds,
+  parseFloatParam,
+  parseIntParam,
+} from '@/lib/queryParams'
 import { getRedis } from '@/lib/redis'
 
 export const dynamic = 'force-dynamic'
@@ -153,33 +159,6 @@ type OpeningRow = Prisma.LastMinuteOpeningGetPayload<{
 }>
 
 type PublicTierPlanRow = OpeningRow['tierPlans'][number]
-
-function parseFloatParam(v: string | null): number | null {
-  if (!v) return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
-}
-
-function parseIntParam(v: string | null): number | null {
-  if (!v) return null
-  const n = Number(v)
-  return Number.isFinite(n) ? Math.trunc(n) : null
-}
-
-function parseCommaIds(v: string | null): string[] {
-  if (!v) return []
-
-  return v
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 25)
-}
-
-function clampFloat(n: number, min: number, max: number): number {
-  if (!Number.isFinite(n)) return min
-  return Math.min(Math.max(n, min), max)
-}
 
 function stableHash(input: unknown): string {
   return createHash('sha256')
