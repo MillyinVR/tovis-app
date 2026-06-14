@@ -3,6 +3,7 @@
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { enforceVerificationSendThrottle } from '@/app/api/_utils/auth/verificationThrottle'
+import { isEmailNotConfiguredError } from '@/lib/auth/emailProviderEnv'
 import {
   getAppUrlFromRequest,
   issueAndSendEmailVerification,
@@ -127,10 +128,7 @@ export async function POST(request: Request) {
       200,
     )
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : 'Internal server error'
-
-    if (message.includes('Missing env var: POSTMARK_')) {
+    if (isEmailNotConfiguredError(error)) {
       captureAuthException({
         event: 'auth.email.send.failed',
         route: 'auth.email.send',

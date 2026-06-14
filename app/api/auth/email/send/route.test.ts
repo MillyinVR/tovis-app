@@ -3,6 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Role } from '@prisma/client'
 
+import { EmailNotConfiguredError } from '@/lib/auth/emailProviderEnv'
+
 const mockRequireUser = vi.hoisted(() => vi.fn())
 const mockEnforceVerificationSendThrottle = vi.hoisted(() => vi.fn())
 const mockGetAppUrlFromRequest = vi.hoisted(() => vi.fn())
@@ -365,7 +367,7 @@ describe('app/api/auth/email/send/route', () => {
     })
     mockGetAppUrlFromRequest.mockReturnValue('http://localhost:3000')
     mockIssueAndSendEmailVerification.mockRejectedValue(
-      new Error('Missing env var: POSTMARK_SERVER_TOKEN'),
+      new EmailNotConfiguredError('POSTMARK_SERVER_TOKEN'),
     )
 
     const result = await POST(makeRequest())
