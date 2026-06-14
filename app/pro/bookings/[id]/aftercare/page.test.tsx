@@ -122,6 +122,24 @@ vi.mock('./AftercareForm', () => ({
     ),
 }))
 
+vi.mock('./ClientProfilePanel', () => ({
+  default: ({
+    clientId,
+    allergies,
+    notes,
+  }: {
+    clientId: string
+    allergies: Array<unknown>
+    notes: Array<unknown>
+  }) =>
+    React.createElement('div', {
+      'data-testid': 'client-profile-panel',
+      'data-client-id': clientId,
+      'data-allergy-count': String(allergies.length),
+      'data-note-count': String(notes.length),
+    }),
+}))
+
 import ProAftercarePage from './page'
 
 function makeRedirectError(href: string) {
@@ -160,6 +178,14 @@ function makeBooking(overrides?: {
   sessionStep?: SessionStep | null
   aftercareSummary?: Record<string, unknown> | null
   mediaAssets?: Array<Record<string, unknown>>
+  serviceSubtotalSnapshot?: number | string | null
+  discountAmount?: number | string | null
+  taxAmount?: number | string | null
+  tipAmount?: number | string | null
+  totalAmount?: number | string | null
+  serviceItems?: Array<Record<string, unknown>>
+  allergies?: Array<Record<string, unknown>>
+  clientNotes?: Array<Record<string, unknown>>
 }) {
   return {
     id: 'booking_1',
@@ -177,9 +203,19 @@ function makeBooking(overrides?: {
         : SessionStep.AFTER_PHOTOS,
     locationTimeZone: 'America/Los_Angeles',
 
+    clientId: 'client_1',
+
+    serviceSubtotalSnapshot: overrides?.serviceSubtotalSnapshot ?? null,
+    discountAmount: overrides?.discountAmount ?? null,
+    taxAmount: overrides?.taxAmount ?? null,
+    tipAmount: overrides?.tipAmount ?? null,
+    totalAmount: overrides?.totalAmount ?? null,
+
     service: {
       name: 'Haircut',
     },
+
+    serviceItems: overrides?.serviceItems ?? [],
 
     client: {
       firstName: 'Tori',
@@ -187,6 +223,8 @@ function makeBooking(overrides?: {
       user: {
         email: 'tori@example.com',
       },
+      allergies: overrides?.allergies ?? [],
+      notes: overrides?.clientNotes ?? [],
     },
 
     aftercareSummary:
@@ -503,5 +541,64 @@ describe('app/pro/bookings/[id]/aftercare/page.tsx', () => {
     expect(markup).toContain('data-existing-media-count="0"')
     expect(markup).toContain('data-existing-products-count="0"')
     expect(markup).toContain('data-existing-is-finalized="false"')
+  })
+
+  it('renders the services-received summary and the client private profile panel', async () => {
+    const page = await renderPage({
+      booking: makeBooking({
+        serviceItems: [
+          {
+            id: 'si_1',
+            itemType: 'BASE',
+            priceSnapshot: 80,
+            durationMinutesSnapshot: 60,
+            service: { name: 'Balayage' },
+          },
+          {
+            id: 'si_2',
+            itemType: 'ADD_ON',
+            priceSnapshot: 20,
+            durationMinutesSnapshot: 15,
+            service: { name: 'Gloss' },
+          },
+        ],
+        serviceSubtotalSnapshot: 100,
+        tipAmount: 15,
+        totalAmount: 115,
+        allergies: [
+          {
+            id: 'a1',
+            label: 'PPD',
+            severity: 'HIGH',
+            description: null,
+            createdAt: new Date('2026-04-12T18:00:00.000Z'),
+            recordedBy: null,
+          },
+        ],
+        clientNotes: [
+          {
+            id: 'n1',
+            title: null,
+            body: 'Prefers cool tones',
+            createdAt: new Date('2026-04-12T18:00:00.000Z'),
+          },
+        ],
+      }),
+    })
+
+    const markup = renderMarkup(page)
+
+    // Services + prices summary (real component)
+    expect(markup).toContain('Services received')
+    expect(markup).toContain('Balayage')
+    expect(markup).toContain('Gloss')
+    expect(markup).toContain('ADD-ON')
+    expect(markup).toContain('$115.00')
+
+    // Private client profile panel (mocked) receives the booking's client +
+    // the allergies/notes loaded for this pro.
+    expect(markup).toContain('data-client-id="client_1"')
+    expect(markup).toContain('data-allergy-count="1"')
+    expect(markup).toContain('data-note-count="1"')
   })
 })
