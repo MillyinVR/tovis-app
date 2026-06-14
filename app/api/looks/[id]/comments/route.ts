@@ -8,6 +8,7 @@ import {
   requireUser,
 } from '@/app/api/_utils'
 import { getCurrentUser } from '@/lib/currentUser'
+import { isRecord } from '@/lib/guards'
 import {
   canCommentOnLookPost,
   canViewLookPost,
@@ -56,10 +57,6 @@ const lookCommentSelect = Prisma.validator<Prisma.LookCommentSelect>()({
 
 async function getParams(ctx: Ctx): Promise<Params> {
   return await Promise.resolve(ctx.params)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function readCommentText(raw: unknown): string {

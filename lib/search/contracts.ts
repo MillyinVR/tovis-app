@@ -1,6 +1,8 @@
 // lib/search/contracts.ts
 import type { ProfessionType } from '@prisma/client'
 
+import { isRecord } from '@/lib/guards'
+
 export class SearchRequestError extends Error {
   readonly status: number
 
@@ -9,10 +11,6 @@ export class SearchRequestError extends Error {
     this.name = 'SearchRequestError'
     this.status = status
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 export function pickNonEmptyString(

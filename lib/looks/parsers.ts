@@ -9,6 +9,7 @@ import {
   VerificationStatus,
 } from '@prisma/client'
 
+import { isRecord } from '@/lib/guards'
 import type {
   LooksCommentDto,
   LooksDetailAdminDto,
@@ -20,10 +21,6 @@ import type {
   LooksFeedItemDto,
   LooksFeedResponseDto,
 } from '@/lib/looks/types'
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0

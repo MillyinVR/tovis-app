@@ -3,6 +3,7 @@ import React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { LooksCommentDto, LooksDetailItemDto } from '@/lib/looks/types'
+import { isRecord } from '@/lib/guards'
 
 const mockPush = vi.hoisted(() => vi.fn())
 const mockWriteText = vi.hoisted(() => vi.fn())
@@ -21,10 +22,6 @@ const mockViewerLocation: MockViewerLocation = {
   radiusMiles: 15,
   placeId: 'place_sandiego',
   locationLabel: 'San Diego, CA',
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 vi.mock('next/navigation', () => ({

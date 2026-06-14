@@ -3,6 +3,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { isRecord } from '@/lib/guards'
+
 type Attachment = {
   id: string
   url: string
@@ -17,16 +19,10 @@ type Msg = {
   attachments: Attachment[]
 }
 
-type JsonRecord = Record<string, unknown>
-
 type ThreadClientProps = {
   threadId: string
   myUserId: string
   initialMessages: Msg[]
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isAttachmentMediaType(value: unknown): value is Attachment['mediaType'] {

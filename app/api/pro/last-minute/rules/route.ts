@@ -2,13 +2,10 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { parseMoney } from '@/lib/money'
+import { isRecord } from '@/lib/guards'
 import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
   const raw: unknown = await req.json().catch(() => ({}))

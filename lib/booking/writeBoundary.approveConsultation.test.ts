@@ -11,6 +11,8 @@ import {
   SessionStep,
 } from '@prisma/client'
 
+import { isRecord } from '@/lib/guards'
+
 const TEST_NOW = new Date('2026-03-18T16:00:00.000Z')
 const BOOKING_ID = 'booking_1'
 const CLIENT_ID = 'client_1'
@@ -134,10 +136,6 @@ const tx = {
   bookingCloseoutAuditLog: {
     create: mocks.txBookingCloseoutAuditLogCreate,
   },
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function hasTrueFlag(

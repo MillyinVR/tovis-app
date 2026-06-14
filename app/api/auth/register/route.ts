@@ -32,6 +32,7 @@ import {
   VerificationStatus,
 } from '@prisma/client'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
+import { isRecord } from '@/lib/guards'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
 import {
   logAuthEvent,
@@ -129,10 +130,6 @@ type RegisterBody = {
 /* =========================================================
    Helpers
 ========================================================= */
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 function asArray(v: unknown): unknown[] {
   return Array.isArray(v) ? v : []

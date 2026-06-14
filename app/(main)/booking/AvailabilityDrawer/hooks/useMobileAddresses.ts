@@ -11,10 +11,7 @@ import type {
 
 import { safeJson } from '../utils/safeJson'
 import { redirectToLogin } from '../utils/authRedirect'
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
-}
+import { isRecord } from '@/lib/guards'
 
 function pickErrorMessage(raw: unknown): string | null {
   if (!isRecord(raw)) return null

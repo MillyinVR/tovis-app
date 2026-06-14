@@ -8,6 +8,7 @@ import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 type Offering = {
   id: string
   serviceId: string
@@ -100,10 +101,6 @@ type AddOnSaveItem = {
   locationType: 'SALON' | 'MOBILE' | null
   priceOverride: string | null
   durationOverrideMinutes: number | null
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function isOkTrue(v: unknown): v is Record<string, unknown> & { ok: true } {

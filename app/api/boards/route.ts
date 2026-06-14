@@ -14,16 +14,13 @@ import {
   getBoardSummaries,
   parseBoardVisibility,
 } from '@/lib/boards'
+import { isRecord } from '@/lib/guards'
 import type {
   LooksBoardDetailResponseDto,
   LooksBoardsListResponseDto,
 } from '@/lib/looks/types'
 
 export const dynamic = 'force-dynamic'
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 export async function GET(req: Request) {
   try {

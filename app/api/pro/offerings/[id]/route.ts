@@ -6,6 +6,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
+import { isRecord } from '@/lib/guards'
 import { parseMoney, moneyToString } from '@/lib/money'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import {
@@ -16,8 +17,6 @@ import {
 export const dynamic = 'force-dynamic'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
-
-type JsonObject = Record<string, unknown>
 
 type OfferingRow = Prisma.ProfessionalServiceOfferingGetPayload<{
   include: { service: { include: { category: true } } }
@@ -32,10 +31,6 @@ type UpdateResult =
       extra?: Record<string, unknown>
     }
   | { kind: 'OK'; offering: OfferingRow }
-
-function isRecord(v: unknown): v is JsonObject {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 function trimId(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''

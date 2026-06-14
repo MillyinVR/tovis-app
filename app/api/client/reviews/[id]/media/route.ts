@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server'
 
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { isRecord } from '@/lib/guards'
 import { safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
@@ -43,10 +44,6 @@ type ResolvedMediaItem = {
   storagePath: string
   thumbBucket: string | null
   thumbPath: string | null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
 function isPublicBucket(bucket: string): boolean {

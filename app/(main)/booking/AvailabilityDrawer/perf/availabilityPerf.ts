@@ -10,6 +10,7 @@ import type {
   EndAvailabilityMetricArgs,
   StartAvailabilityMetricArgs,
 } from './availabilityPerfTypes'
+import { isRecord } from '@/lib/guards'
 
 const PERF_STORE_VERSION = 1 as const
 const MAX_PERF_ENTRIES = 5_000
@@ -47,10 +48,6 @@ function trimEntries(store: AvailabilityPerfStore): void {
   if (overflow > 0) {
     store.entries.splice(0, overflow)
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
 function isAvailabilityPerfMetaValue(

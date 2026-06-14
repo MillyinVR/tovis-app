@@ -11,6 +11,7 @@ import {
   zonedTimeToUtc,
 } from '@/lib/timeZone'
 import { safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 type VisibilityMode = 'TARGETED_ONLY' | 'PUBLIC_AT_DISCOVERY' | 'PUBLIC_IMMEDIATE'
 
@@ -71,10 +72,6 @@ type RulePatch = Partial<
 
 function isMoney(v: string) {
   return /^\d+(\.\d{1,2})?$/.test(v.trim())
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function apiErrorFrom(v: unknown): string | null {

@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { safeJson } from '../utils/safeJson'
 import type { MobileAddressOption } from '../types'
+import { isRecord } from '@/lib/guards'
 
 type PlacePrediction = {
   placeId: string
@@ -30,10 +31,6 @@ type Props = {
   open: boolean
   onClose: () => void
   onSaved: (address: MobileAddressOption | null) => void | Promise<void>
-}
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return Boolean(x && typeof x === 'object' && !Array.isArray(x))
 }
 
 function pickString(v: unknown): string | null {

@@ -33,6 +33,7 @@ import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundary'
+import { isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { parseIdArray, parseRating1to5 } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
@@ -94,10 +95,6 @@ type ReviewTransactionResult = {
       thumbUrl: string | null
     }>
   } | null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
 function mediaTypeFromContentType(contentType: string): MediaType {

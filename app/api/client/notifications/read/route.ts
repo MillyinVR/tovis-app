@@ -1,6 +1,7 @@
 // app/api/client/notifications/read/route.ts
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
+import { isRecord } from '@/lib/guards'
 import { markClientNotificationsRead } from '@/lib/notifications/clientNotifications'
 import { NotificationEventKey } from '@prisma/client'
 
@@ -9,10 +10,6 @@ export const dynamic = 'force-dynamic'
 const NOTIFICATION_EVENT_KEY_VALUES = new Set<string>(
   Object.values(NotificationEventKey),
 )
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function parseIdList(value: unknown): string[] {
   if (!Array.isArray(value)) return []

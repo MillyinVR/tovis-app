@@ -12,6 +12,7 @@ import {
   professionalPublicDisplayNameSelect,
 } from '@/lib/privacy/professionalDisplayName'
 import { DEFAULT_TIME_ZONE, pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
+import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -94,10 +95,6 @@ type BookingReceiptRow = Prisma.BookingGetPayload<{
 }>
 
 type ServiceItemRow = BookingReceiptRow['serviceItems'][number]
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 function fmtInTimeZone(dateUtc: Date, timeZone: string) {
   const tz = sanitizeTimeZone(timeZone, DEFAULT_TIME_ZONE)

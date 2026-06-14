@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 
+import { isRecord } from '@/lib/guards'
+
 export const dynamic = 'force-dynamic'
 
 type PageProps = {
@@ -224,10 +226,6 @@ function formatMoney(value: unknown): string | null {
   }
 
   return null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 type ProposedItemView = {

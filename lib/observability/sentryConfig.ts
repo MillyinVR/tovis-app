@@ -2,6 +2,7 @@
 
 import * as Sentry from '@sentry/nextjs'
 
+import { isRecord } from '@/lib/guards'
 import { redactAuditPayload } from '@/lib/security/auditRedaction'
 
 const DEFAULT_TRACES_SAMPLE_RATE = 0.05
@@ -103,8 +104,4 @@ function readBoolean(value: string | undefined, fallback: boolean): boolean {
   if (!normalized) return fallback
 
   return normalized === '1' || normalized === 'true' || normalized === 'yes'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

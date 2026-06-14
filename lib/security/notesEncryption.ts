@@ -1,5 +1,6 @@
 // lib/security/notesEncryption.ts
 
+import { isRecord } from '@/lib/guards'
 import {
   decryptAead,
   encryptAead,
@@ -94,8 +95,4 @@ export function readNotesEnvelope(value: EncryptedNotesEnvelopeV1): string {
     envelope: value.ciphertext,
     associatedData: NOTES_AEAD_ASSOCIATED_DATA,
   })
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

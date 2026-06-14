@@ -7,6 +7,7 @@ import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
 import { MediaVisibility } from '@prisma/client'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 type Visibility = MediaVisibility
 type ServiceOption = { id: string; name: string }
@@ -26,10 +27,6 @@ type Props = {
 type JsonObject = Record<string, unknown>
 
 const CAPTION_MAX = 300
-
-function isRecord(v: unknown): v is JsonObject {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 async function safeJsonObject(res: Response): Promise<JsonObject> {
   const data = await safeJson(res)

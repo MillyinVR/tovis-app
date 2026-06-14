@@ -7,6 +7,8 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 
+import { isRecord } from '@/lib/guards'
+
 const TEST_NOW = new Date('2026-03-18T16:00:00.000Z')
 const REQUESTED_START = new Date('2026-03-20T18:00:00.000Z')
 const REQUESTED_END = new Date('2026-03-20T19:15:00.000Z')
@@ -144,10 +146,6 @@ const tx = {
   bookingOverrideAuditLog: {
     createMany: mocks.txBookingOverrideAuditLogCreateMany,
   },
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function hasTrueFlag(

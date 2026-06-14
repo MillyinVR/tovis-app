@@ -5,6 +5,8 @@
  * Single source of truth for Google Maps / Places / Timezone calls.
  */
 
+import { isRecord } from '@/lib/guards'
+
 const DEFAULT_TIMEOUT_MS = 8000
 const MIN_GOOGLE_RADIUS_METERS = 1
 const MAX_GOOGLE_RADIUS_METERS = 200_000
@@ -104,10 +106,6 @@ export type GooglePostalGeocode = {
   state: string | null
   postalCode: string | null
   countryCode: string | null
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function componentMap(addressComponents: unknown): Record<string, string> {
