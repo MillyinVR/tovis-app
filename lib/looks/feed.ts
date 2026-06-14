@@ -5,6 +5,7 @@ import {
   ModerationStatus,
   Prisma,
 } from '@prisma/client'
+import { isRecord } from '@/lib/guards'
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { buildLookPostSpotlightEligibilityWhere } from '@/lib/looks/spotlight'
 import { proDiscoveryVisibilityFilter } from '@/lib/tenant'
@@ -442,10 +443,6 @@ export function buildLooksFeedCursorWhere(args: {
       },
     ],
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 export function parseLooksFeedSort(

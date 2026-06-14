@@ -11,6 +11,7 @@ import {
   buildLifecycleActionViewModel,
   type LifecycleAction,
 } from '@/lib/booking/lifecycleActionViewModel'
+import { isRecord } from '@/lib/guards'
 
 type Props = {
   bookingId: string
@@ -24,12 +25,6 @@ type Props = {
    * UI policy: do NOT invent a timezone if missing.
    */
   timeZone?: string | null
-}
-
-type JsonObject = Record<string, unknown>
-
-function isRecord(v: unknown): v is JsonObject {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function readString(v: unknown): string | null {

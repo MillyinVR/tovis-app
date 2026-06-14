@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { LastMinuteVisibilityMode, Prisma } from '@prisma/client'
 import { parseMoney } from '@/lib/money'
+import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,10 +18,6 @@ const DAY_FLAGS = [
 ] as const
 
 type DayFlag = (typeof DAY_FLAGS)[number]
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 function hasOwn(obj: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key)

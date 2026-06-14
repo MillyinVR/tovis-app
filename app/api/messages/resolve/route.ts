@@ -1,16 +1,13 @@
 // app/api/messages/resolve/route.ts
 import { getCurrentUser } from '@/lib/currentUser'
 import { jsonFail, jsonOk, pickString, upper } from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
 import { resolveMessageThread } from '@/lib/messagesResolve'
 import { MessageThreadContextType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
 type JsonRecord = Record<string, unknown>
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 async function readJsonObject(req: Request): Promise<JsonRecord> {
   const raw: unknown = await req.json().catch(() => ({}))

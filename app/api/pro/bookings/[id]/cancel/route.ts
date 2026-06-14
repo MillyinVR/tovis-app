@@ -11,6 +11,7 @@ import {
 } from '@/app/api/_utils/idempotency'
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
 import { cancelBooking } from '@/lib/booking/writeBoundary'
+import { isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 
@@ -24,10 +25,6 @@ type CancelResponseBody = Prisma.InputJsonObject
 
 function asTrimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function buildCancelRequestBody(args: {

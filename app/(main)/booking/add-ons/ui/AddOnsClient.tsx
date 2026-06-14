@@ -13,6 +13,7 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
+import { isRecord } from '@/lib/guards'
 
 type AddOnDTO = {
   id: string
@@ -38,10 +39,6 @@ type Props = {
 }
 
 const MAX_ADD_ON_IDS = 50
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
-}
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' ? value : null

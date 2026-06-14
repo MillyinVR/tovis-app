@@ -2,6 +2,7 @@
 
 import { Prisma } from '@prisma/client'
 
+import { isRecord } from '@/lib/guards'
 import {
   decryptAead,
   encryptAead,
@@ -329,8 +330,4 @@ function isNormalizedAddressPrivacyPayload(
 
 function isNullableStringValue(value: unknown): value is string | null {
   return value === null || typeof value === 'string'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

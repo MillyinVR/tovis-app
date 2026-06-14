@@ -10,6 +10,7 @@ import {
   pickString,
 } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
@@ -26,10 +27,6 @@ import {
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 async function updateUserPhone(args: {
   userId: string

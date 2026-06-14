@@ -1,5 +1,6 @@
 // app/api/pro/looks/[id]/route.ts
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
   getProLookPublicationById,
@@ -17,10 +18,6 @@ export const dynamic = 'force-dynamic'
 type Params = { id: string }
 type Ctx = { params: Params | Promise<Params> }
 type JsonRecord = Record<string, unknown>
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 async function getParams(ctx: Ctx): Promise<Params> {
   return await Promise.resolve(ctx.params)

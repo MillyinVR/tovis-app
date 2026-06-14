@@ -4,6 +4,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,10 +41,6 @@ function normalizeCollectPaymentAt(
   if (normalized === 'AT_BOOKING') return 'AT_BOOKING'
   if (normalized === 'AFTER_SERVICE') return 'AFTER_SERVICE'
   return undefined
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function normalizeTipSuggestions(v: unknown): TipSuggestion[] | undefined {

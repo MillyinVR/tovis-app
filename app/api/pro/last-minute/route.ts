@@ -5,12 +5,9 @@ import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_util
 import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
 import { parseMoney } from '@/lib/money'
 import { updateBookingLastMinuteDiscount } from '@/lib/booking/writeBoundary'
+import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
   const raw: unknown = await req.json().catch(() => ({}))

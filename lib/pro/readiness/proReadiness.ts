@@ -12,6 +12,7 @@ import {
   VerificationStatus,
 } from '@prisma/client'
 
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 
@@ -112,10 +113,6 @@ type WorkingDay = {
 }
 
 const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
 
 function isWorkingDay(value: unknown): value is WorkingDay {
   if (!isRecord(value)) return false

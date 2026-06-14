@@ -3,6 +3,7 @@
 import { timingSafeEqual } from 'node:crypto'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -57,10 +58,6 @@ function assertPostmarkAuth(req: Request): boolean {
     safeEqual(parsed.username, expectedUsername) &&
     safeEqual(parsed.password, expectedPassword)
   )
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function pickString(value: unknown): string | null {

@@ -8,6 +8,7 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
+import { isRecord } from '@/lib/guards'
 
 type CheckoutStatus =
   | 'NOT_READY'
@@ -155,10 +156,6 @@ function clampQuantity(value: number): number {
   if (whole <= 0) return 0
   if (whole > 99) return 99
   return whole
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function parseSubmitErrorMessage(data: unknown): string | null {

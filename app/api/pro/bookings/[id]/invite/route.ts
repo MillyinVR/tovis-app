@@ -4,6 +4,7 @@ import { ContactMethod, ProClientInviteStatus } from '@prisma/client'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import type { TenantContext } from '@/lib/tenant/context'
@@ -52,10 +53,6 @@ type ClaimInviteForDelivery = {
   invitedEmail: string | null
   invitedPhone: string | null
   preferredContactMethod: ContactMethod | null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function asTrimmedString(value: unknown): string | null {

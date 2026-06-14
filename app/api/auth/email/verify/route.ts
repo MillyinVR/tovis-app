@@ -6,6 +6,7 @@ import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
 import { getCurrentUser } from '@/lib/currentUser'
+import { isRecord } from '@/lib/guards'
 import {
   logAuthEvent,
   captureAuthException,
@@ -16,10 +17,6 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 const MAX_VERIFY_ATTEMPTS = 5
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 async function readVerificationBody(request: Request): Promise<{
   verificationId: string | null

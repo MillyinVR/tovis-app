@@ -1,19 +1,14 @@
 // app/api/google/places/details/route.ts
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
-
-type JsonObject = Record<string, unknown>
 
 function normalizePlaceResourceName(raw: string) {
   const s = raw.trim()
   if (!s) return null
   return s.startsWith('places/') ? s : `places/${s}`
-}
-
-function isRecord(x: unknown): x is JsonObject {
-  return typeof x === 'object' && x !== null && !Array.isArray(x)
 }
 
 function pickText(v: unknown): string {

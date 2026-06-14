@@ -10,6 +10,7 @@ import {
   isValidHandle,
   normalizeHandle,
 } from '@/lib/handles'
+import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,10 +20,6 @@ function pickNonEmptyStringOrUndefined(v: unknown): string | undefined {
   return t ? t : undefined
 }
 
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function isProfessionTypeValue(value: string): value is ProfessionType {
   return Object.values(ProfessionType).some((candidate) => candidate === value)

@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import { isRecord } from '@/lib/guards'
 import { ClientNoteVisibility } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -10,10 +11,6 @@ type Ctx = { params: Promise<{ id: string }> | { id: string } }
 
 const TITLE_MAX = 80
 const BODY_MAX = 4000
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 export async function POST(req: Request, context: Ctx) {
   try {

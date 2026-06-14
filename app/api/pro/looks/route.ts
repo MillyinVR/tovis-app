@@ -6,6 +6,7 @@ import {
   jsonOk,
   requirePro,
 } from '@/app/api/_utils'
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
   createOrUpdateProLookFromMediaAsset,
@@ -18,10 +19,6 @@ import type {
 export const dynamic = 'force-dynamic'
 
 type JsonRecord = Record<string, unknown>
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 async function readJsonBody(req: Request): Promise<JsonRecord | null> {
   const contentType = req.headers.get('content-type') ?? ''
