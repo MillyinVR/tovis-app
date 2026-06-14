@@ -144,6 +144,10 @@ import {
 import { findSchedulingConflicts } from '@/lib/booking/schedulingConflicts'
 import { resolveAftercarePreselectedSlot } from '@/lib/booking/aftercarePreselectedSlot'
 import { validateAftercareRebookSlotOwnership } from '@/lib/booking/aftercareRebookSlotOwnership'
+import {
+  isCheckoutCloseoutComplete,
+  isCloseoutPaymentAndAftercareComplete,
+} from '@/lib/booking/closeoutState'
 // Side-effect import: registers the Sentry sink for lifecycle drift events.
 // Must come after recordStepTransition import so the contract module loads first.
 import '@/lib/observability/bookingEvents'
@@ -2408,27 +2412,6 @@ async function tryHydrateProBookingByIdempotency(args: {
     serviceName: existing.service?.name || 'Appointment',
     meta: buildMeta(false),
   }
-}
-
-function isCheckoutCloseoutComplete(
-  checkoutStatus: BookingCheckoutStatus | null | undefined,
-): boolean {
-  return (
-    checkoutStatus === BookingCheckoutStatus.PAID ||
-    checkoutStatus === BookingCheckoutStatus.WAIVED
-  )
-}
-
-function isCloseoutPaymentAndAftercareComplete(args: {
-  aftercareSentAt: Date | null | undefined
-  checkoutStatus: BookingCheckoutStatus | null | undefined
-  paymentCollectedAt: Date | null | undefined
-}): boolean {
-  return (
-    Boolean(args.aftercareSentAt) &&
-    Boolean(args.paymentCollectedAt) &&
-    isCheckoutCloseoutComplete(args.checkoutStatus)
-  )
 }
 
 async function maybeCompleteBookingCloseout(args: {
