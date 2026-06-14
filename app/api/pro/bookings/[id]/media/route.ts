@@ -16,6 +16,10 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
+import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
@@ -35,8 +39,6 @@ import { proRateLimitKey } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
-
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 const CAPTION_MAX = 300
 
@@ -186,7 +188,7 @@ async function objectExistsViaSignedUrl(
   }
 }
 
-export async function GET(req: Request, ctx: Ctx) {
+export async function GET(req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
 
@@ -195,7 +197,7 @@ export async function GET(req: Request, ctx: Ctx) {
     }
 
     const professionalId = auth.professionalId
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const bookingId = pickString(params.id)
 
     if (!bookingId) {
@@ -235,7 +237,7 @@ export async function GET(req: Request, ctx: Ctx) {
   }
 }
 
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -255,7 +257,7 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const bookingId = pickString(params.id)
 
     if (!bookingId) {

@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,13 +12,13 @@ function pickTrimmedString(v: unknown): string | null {
   return s ? s : null
 }
 
-export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function POST(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
     const user = auth.user
 
-    const { id } = await ctx.params
+    const { id } = await resolveRouteParams(ctx)
     const professionalId = pickTrimmedString(id)
     if (!professionalId) return jsonFail(400, 'Missing professional id.')
 
@@ -42,13 +43,13 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   }
 }
 
-export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function DELETE(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
     const user = auth.user
 
-    const { id } = await ctx.params
+    const { id } = await resolveRouteParams(ctx)
     const professionalId = pickTrimmedString(id)
     if (!professionalId) return jsonFail(400, 'Missing professional id.')
 

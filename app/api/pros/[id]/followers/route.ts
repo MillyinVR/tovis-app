@@ -1,6 +1,7 @@
 // app/api/pros/[id]/followers/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickInt, pickString, requirePro } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import {
   assertCanViewFollowersList,
   buildProFollowersListResponse,
@@ -11,19 +12,12 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
-
-export async function GET(req: Request, ctx: Ctx) {
+export async function GET(req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await getParams(ctx)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const professionalId = pickString(rawId)
 
     if (!professionalId) {

@@ -20,6 +20,10 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { prisma } from '@/lib/prisma'
 import {
   isBookingError,
@@ -33,7 +37,6 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 type RebookMode = 'BOOK' | 'RECOMMEND_WINDOW' | 'CLEAR'
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type RebookResponseBody = Prisma.InputJsonObject
 
@@ -136,7 +139,7 @@ async function upsertAftercareRebookState(args: {
   })
 }
 
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -147,7 +150,7 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     const professionalId = auth.professionalId
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const bookingId = pickString(params?.id)
 
     if (!bookingId) {

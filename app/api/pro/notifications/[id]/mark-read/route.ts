@@ -1,20 +1,17 @@
 // app/api/pro/notifications/[id]/mark-read/route.ts
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { markProNotificationRead } from '@/lib/notifications/proNotificationQueries'
 
 export const dynamic = 'force-dynamic'
 
-type Ctx = {
-  params: { id: string } | Promise<{ id: string }>
-}
-
-export async function POST(_req: Request, ctx: Ctx) {
+export async function POST(_req: Request, ctx: RouteContext) {
   const auth = await requirePro()
   if (!auth.ok) return auth.res
 
   const professionalId = auth.professionalId
 
-  const { id } = await Promise.resolve(ctx.params)
+  const { id } = await resolveRouteParams(ctx)
   const notificationId = pickString(id)
 
   if (!notificationId) {

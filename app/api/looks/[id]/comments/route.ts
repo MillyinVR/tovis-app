@@ -8,6 +8,10 @@ import {
   requireUser,
 } from '@/app/api/_utils'
 import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { isRecord } from '@/lib/guards'
 import {
   canCommentOnLookPost,
@@ -27,9 +31,6 @@ import type {
 import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
 
 export const dynamic = 'force-dynamic'
-
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
 
 const lookCommentSelect = Prisma.validator<Prisma.LookCommentSelect>()({
   id: true,
@@ -55,10 +56,6 @@ const lookCommentSelect = Prisma.validator<Prisma.LookCommentSelect>()({
   },
 })
 
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
-
 function readCommentText(raw: unknown): string {
   if (!isRecord(raw)) return ''
 
@@ -66,9 +63,9 @@ function readCommentText(raw: unknown): string {
   return typeof body === 'string' ? body.trim() : ''
 }
 
-export async function GET(req: Request, ctx: Ctx) {
+export async function GET(req: Request, ctx: RouteContext) {
   try {
-    const { id: rawId } = await getParams(ctx)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const lookPostId = pickString(rawId)
 
     if (!lookPostId) {
@@ -145,12 +142,12 @@ export async function GET(req: Request, ctx: Ctx) {
   }
 }
 
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await getParams(ctx)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const lookPostId = pickString(rawId)
 
     if (!lookPostId) {

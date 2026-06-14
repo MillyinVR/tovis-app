@@ -4,16 +4,10 @@ import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
 import { pickStateCode } from '@/app/api/_utils/pick'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { AdminPermissionRole, ProfessionType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
 
 function trimId(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
@@ -32,13 +26,13 @@ function normalizeProfessionTypes(values: FormDataEntryValue[]): ProfessionType[
   return Array.from(new Set(out))
 }
 
-export async function POST(req: NextRequest, ctx: Ctx) {
+export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requireUser({ roles: ['ADMIN'] })
     if (!auth.ok) return auth.res
     const user = auth.user
 
-    const { id } = await getParams(ctx)
+    const { id } = await resolveRouteParams(ctx)
     const serviceId = trimId(id)
     if (!serviceId) return NextResponse.json({ error: 'Missing id' }, { status: 400 })
 

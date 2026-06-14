@@ -1,17 +1,22 @@
 // app/api/pro/invites/[token]/route.ts
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { getClientClaimLinkPublicState } from '@/lib/clients/clientClaimLinks'
 import { normalizeProClientInviteToken } from '@/lib/clients/proClientInviteTokens'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-type Ctx = { params: { token: string } | Promise<{ token: string }> }
-
-export async function GET(_request: Request, ctx: Ctx) {
+export async function GET(
+  _request: Request,
+  ctx: RouteContext<{ token: string }>,
+) {
   try {
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const token = normalizeProClientInviteToken(params?.token)
 
     if (!token) {

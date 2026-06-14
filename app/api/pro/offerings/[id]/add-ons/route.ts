@@ -2,14 +2,13 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { isRecord } from '@/lib/guards'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { MAX_SLOT_DURATION_MINUTES } from '@/lib/booking/constants'
 import { Prisma, ServiceLocationType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-type Ctx = { params: Promise<{ id: string }> }
 
 type ParsedItem = {
   addOnServiceId: string
@@ -128,9 +127,9 @@ async function requireOfferingForPro(args: {
   return { ok: true, base }
 }
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: RouteContext) {
   try {
-    const { id } = await ctx.params
+    const { id } = await resolveRouteParams(ctx)
     const offeringId = asTrimmedString(id)
     if (!offeringId) {
       return jsonFail(400, 'Missing offering id.')
@@ -220,9 +219,9 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
 }
 
-export async function PUT(req: Request, ctx: Ctx) {
+export async function PUT(req: Request, ctx: RouteContext) {
   try {
-    const { id } = await ctx.params
+    const { id } = await resolveRouteParams(ctx)
     const offeringId = asTrimmedString(id)
     if (!offeringId) {
       return jsonFail(400, 'Missing offering id.')

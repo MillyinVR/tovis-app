@@ -7,15 +7,13 @@ import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { safeUrl } from '@/app/api/_utils/media'
 import { pickBool, pickInt, pickMethod, pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { hasAdminPermission } from '@/lib/adminPermissions'
 import { parseMoney } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
-
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
 
 type ServiceForPatch = {
   id: string
@@ -24,10 +22,6 @@ type ServiceForPatch = {
 
 type HttpStatusError = Error & {
   status?: number
-}
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
 }
 
 function trimId(value: unknown): string {
@@ -162,11 +156,14 @@ function buildServiceUpdateAuditNote(args: {
   ].join(' ')
 }
 
-async function handleUpdate(req: NextRequest, ctx: Ctx): Promise<Response> {
+async function handleUpdate(
+  req: NextRequest,
+  ctx: RouteContext,
+): Promise<Response> {
   const auth = await requireUser({ roles: ['ADMIN'] })
   if (!auth.ok) return auth.res
 
-  const { id } = await getParams(ctx)
+  const { id } = await resolveRouteParams(ctx)
   const serviceId = trimId(id)
 
   if (!serviceId) return jsonFail(400, 'Missing id')
@@ -380,7 +377,7 @@ async function patchFromForm(args: PatchArgs): Promise<Response> {
   return jsonOk({}, 200)
 }
 
-export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
+export async function POST(req: NextRequest, ctx: RouteContext): Promise<Response> {
   try {
     return await handleUpdate(req, ctx)
   } catch (error: unknown) {
@@ -393,7 +390,7 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<Response> {
   }
 }
 
-export async function PATCH(req: NextRequest, ctx: Ctx): Promise<Response> {
+export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<Response> {
   try {
     return await handleUpdate(req, ctx)
   } catch (error: unknown) {

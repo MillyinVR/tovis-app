@@ -13,6 +13,7 @@ import {
   getViewerLookSaveState,
 } from '@/lib/boards'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { loadLookAccess } from '@/lib/looks/access'
 import {
   canSaveLookPost,
@@ -21,19 +22,12 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
-
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const { id: rawBoardId } = await getParams(ctx)
+    const { id: rawBoardId } = await resolveRouteParams(ctx)
     const boardId = pickString(rawBoardId)
 
     if (!boardId) {

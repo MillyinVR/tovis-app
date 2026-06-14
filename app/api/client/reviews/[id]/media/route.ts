@@ -5,6 +5,10 @@ import { NextRequest } from 'next/server'
 
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { isRecord } from '@/lib/guards'
 import { safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
@@ -167,10 +171,7 @@ function errMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export async function POST(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> },
-) {
+export async function POST(req: NextRequest, context: RouteContext) {
   try {
     const auth = await requireClient()
 
@@ -178,7 +179,7 @@ export async function POST(
 
     const { user, clientId } = auth
 
-    const { id } = await context.params
+    const { id } = await resolveRouteParams(context)
     const reviewId = pickString(id)
 
     if (!reviewId) {

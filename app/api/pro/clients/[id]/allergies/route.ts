@@ -2,13 +2,15 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { AllergySeverity } from '@prisma/client'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 
 export const dynamic = 'force-dynamic'
-
-type Params = { params: Promise<{ id: string }> }
 
 const SEVERITY_MAP: Record<string, AllergySeverity> = {
   LOW: AllergySeverity.LOW,
@@ -19,17 +21,13 @@ const SEVERITY_MAP: Record<string, AllergySeverity> = {
   CRITICAL: AllergySeverity.CRITICAL,
 }
 
-async function readParams(ctx: Params) {
-  return await ctx.params
-}
-
-export async function POST(req: NextRequest, ctx: Params) {
+export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const { id } = await readParams(ctx)
+    const { id } = await resolveRouteParams(ctx)
     const clientId = pickString(id)
     if (!clientId) return jsonFail(400, 'Missing client id.')
 

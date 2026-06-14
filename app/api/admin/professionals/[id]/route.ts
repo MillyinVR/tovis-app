@@ -7,19 +7,13 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { pickBool, pickString } from '@/app/api/_utils/pick'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 
 export const dynamic = 'force-dynamic'
-
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
 
 function trimId(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -66,14 +60,14 @@ function buildVerificationUpdateNote(args: {
   ].join(' ')
 }
 
-export async function PATCH(req: NextRequest, ctx: Ctx) {
+export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requireUser({ roles: [Role.ADMIN] })
     if (!auth.ok) return auth.res
 
     const user = auth.user
 
-    const { id } = await getParams(ctx)
+    const { id } = await resolveRouteParams(ctx)
     const professionalId = trimId(id)
 
     if (!professionalId) {

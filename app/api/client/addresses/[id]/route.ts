@@ -4,6 +4,7 @@ import { ClientAddressKind, Prisma } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { type RouteContext } from '@/app/api/_utils/routeContext'
 import { prisma } from '@/lib/prisma'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import {
@@ -21,8 +22,6 @@ import {
 } from '@/lib/clientAddresses/addressInput'
 
 export const dynamic = 'force-dynamic'
-
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 async function loadOwnedAddress(clientId: string, addressId: string) {
   return prisma.clientAddress.findFirst({
@@ -92,7 +91,7 @@ function hasPatchChange(body: Record<string, unknown>): boolean {
   )
 }
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
@@ -115,7 +114,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
 }
 
-export async function PATCH(req: Request, ctx: Ctx) {
+export async function PATCH(req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
@@ -313,7 +312,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res

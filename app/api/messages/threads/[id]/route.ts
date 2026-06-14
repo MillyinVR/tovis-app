@@ -3,13 +3,13 @@ import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-async function readParams(ctx: { params: { id: string } | Promise<{ id: string }> }) {
-  return await Promise.resolve(ctx.params)
-}
 
 function trimId(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
@@ -42,13 +42,13 @@ async function validateCursorForThread(threadId: string, cursor: string | null) 
   return ok?.id ?? null
 }
 
-export async function GET(req: Request, ctx: { params: { id: string } | Promise<{ id: string }> }) {
+export async function GET(req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
     const user = auth.user
 
-    const { id } = await readParams(ctx)
+    const { id } = await resolveRouteParams(ctx)
     const threadId = trimId(id)
     if (!threadId) return jsonFail(400, 'Missing id.')
 
@@ -108,7 +108,7 @@ export async function GET(req: Request, ctx: { params: { id: string } | Promise<
   }
 }
 
-export async function POST(req: Request, ctx: { params: { id: string } | Promise<{ id: string }> }) {
+export async function POST(req: Request, ctx: RouteContext) {
   const debugId = Math.random().toString(36).slice(2, 9)
 
   try {
@@ -117,7 +117,7 @@ export async function POST(req: Request, ctx: { params: { id: string } | Promise
     const user = auth.user
     const userId = user.id
 
-    const { id } = await readParams(ctx)
+    const { id } = await resolveRouteParams(ctx)
     const threadId = trimId(id)
     if (!threadId) return jsonFail(400, 'Missing id.')
 

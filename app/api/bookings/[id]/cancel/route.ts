@@ -11,6 +11,7 @@ import {
 } from '@/app/api/_utils/idempotency'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
@@ -23,9 +24,6 @@ import { clientRateLimitKey, proRateLimitKey } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
-
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
 
 type CancelActor =
   | {
@@ -136,7 +134,7 @@ function toCancelResponseBody(
   }
 }
 
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -149,7 +147,7 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     const user = auth.user
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const bookingId = pickString(params?.id)
 
     if (!bookingId) {

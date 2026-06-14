@@ -2,6 +2,10 @@
 import { ContactMethod, ProClientInviteStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { isRecord } from '@/lib/guards'
@@ -12,8 +16,6 @@ import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type InviteRequestBody = {
   name?: unknown
@@ -200,12 +202,12 @@ async function maybeQueueInviteDelivery(args: {
   }
 }
 
-export async function POST(request: Request, ctx: Ctx) {
+export async function POST(request: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const bookingId = asTrimmedString(params?.id)
 
     if (!bookingId) {

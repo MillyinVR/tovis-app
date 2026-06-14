@@ -7,18 +7,14 @@ import {
   requireClient,
   upper,
 } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import {
   handleConsultationDecision,
   type ConsultationDecisionAction,
-  type ConsultationDecisionCtx,
 } from './_decision'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-type Ctx = ConsultationDecisionCtx & {
-  params: Promise<{ id: string }> | { id: string }
-}
 
 type OwnershipOk = { ok: true }
 type OwnershipFail = { ok: false; res: ReturnType<typeof jsonFail> }
@@ -58,13 +54,13 @@ function readRequestMeta(req: Request): {
   return { requestId, idempotencyKey }
 }
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
     const { clientId } = auth
 
-    const { id: rawId } = await Promise.resolve(ctx.params)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const bookingId = pickString(rawId)
 
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
@@ -101,7 +97,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
 }
 
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   try {
     const body = (await req.json().catch(() => ({}))) as { action?: unknown }
     const a = upper(body?.action)

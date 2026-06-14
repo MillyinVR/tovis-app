@@ -6,6 +6,7 @@ import { NextRequest } from 'next/server'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { hasOwn, isRecord, type UnknownRecord } from '@/lib/guards'
@@ -34,17 +35,9 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type Params = {
-  params: Promise<{ id: string }>
-}
-
 type OwnedLocationRow = Prisma.ProfessionalLocationGetPayload<{
   select: typeof PROFESSIONAL_LOCATION_SELECT
 }>
-
-async function readParams(ctx: Params) {
-  return await ctx.params
-}
 
 async function loadOwnedLocation(args: {
   locationId: string
@@ -81,7 +74,7 @@ function hasAddressPrivacyRelevantChange(body: UnknownRecord): boolean {
   )
 }
 
-export async function PATCH(req: NextRequest, ctx: Params) {
+export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -94,7 +87,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     })
     if (limited) return limited
 
-    const { id } = await readParams(ctx)
+    const { id } = await resolveRouteParams(ctx)
     const locationId = pickString(id)
 
     if (!locationId) {
@@ -359,7 +352,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
   }
 }
 
-export async function DELETE(_req: NextRequest, ctx: Params) {
+export async function DELETE(_req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -372,7 +365,7 @@ export async function DELETE(_req: NextRequest, ctx: Params) {
     })
     if (limited) return limited
 
-    const { id } = await readParams(ctx)
+    const { id } = await resolveRouteParams(ctx)
     const locationId = pickString(id)
 
     if (!locationId) {

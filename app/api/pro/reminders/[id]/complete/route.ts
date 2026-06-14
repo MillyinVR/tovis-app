@@ -2,18 +2,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, pickString, requirePro } from '@/app/api/_utils'
-
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 
 export const dynamic = 'force-dynamic'
 
-export async function POST(req: NextRequest, { params }: Ctx) {
+export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const { id: rawId } = await Promise.resolve(params)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const id = pickString(rawId)
     if (!id) return jsonFail(400, 'Missing reminder id.')
 

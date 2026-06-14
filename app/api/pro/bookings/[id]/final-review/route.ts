@@ -10,6 +10,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { confirmBookingFinalReview } from '@/lib/booking/writeBoundary'
 import {
   AftercareRebookMode,
@@ -29,10 +33,6 @@ import { safeError, safeLogMeta } from '@/lib/security/logging'
 export const dynamic = 'force-dynamic'
 
 const ROUTE_OPERATION = 'POST /api/pro/bookings/[id]/final-review'
-
-type Ctx = {
-  params: { id: string } | Promise<{ id: string }>
-}
 
 type FinalReviewLineItemInput = {
   bookingServiceItemId?: unknown
@@ -383,7 +383,7 @@ async function failStartedIdempotency(
   )
 }
 
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -400,7 +400,7 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const bookingId = pickString(params?.id)
 
     if (!bookingId) {

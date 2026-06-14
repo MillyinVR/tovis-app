@@ -5,18 +5,16 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { prisma } from '@/lib/prisma'
 import {
   exportUserData,
   USER_DATA_EXPORT_VERSION,
 } from '@/lib/privacy/exportUserData'
-
-type RouteContext = {
-  params: Promise<{
-    userId: string
-  }>
-}
 
 const PRIVACY_EXPORT_ACTION = 'privacy.user_export' as const
 
@@ -62,8 +60,11 @@ function readRequestId(request: NextRequest): string | null {
   return requestId && requestId.length > 0 ? requestId : null
 }
 
-export async function POST(request: NextRequest, context: RouteContext) {
-  const { userId } = await context.params
+export async function POST(
+  request: NextRequest,
+  context: RouteContext<{ userId: string }>,
+) {
+  const { userId } = await resolveRouteParams(context)
   const targetUserId = userId.trim()
 
   if (!targetUserId) {

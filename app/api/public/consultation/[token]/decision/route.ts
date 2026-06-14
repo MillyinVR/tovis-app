@@ -1,5 +1,6 @@
 // app/api/public/consultation/[token]/decision/route.ts
 import { jsonFail, jsonOk, pickString, upper } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import {
   enforceRateLimit,
   rateLimitIdentity,
@@ -31,10 +32,6 @@ import {
   IDEMPOTENCY_ROUTES,
 } from '@/lib/idempotency'
 export const dynamic = 'force-dynamic'
-
-type Ctx = {
-  params: { token: string } | Promise<{ token: string }>
-}
 
 type DecisionAction = 'APPROVE' | 'REJECT'
 
@@ -93,8 +90,8 @@ function idempotencyConflictFail(): Response {
   )
 }
 
-async function getToken(ctx: Ctx): Promise<string | null> {
-  const params = await Promise.resolve(ctx.params)
+async function getToken(ctx: RouteContext<{ token: string }>): Promise<string | null> {
+  const params = await resolveRouteParams(ctx)
   return pickString(params?.token)
 }
 
@@ -299,7 +296,7 @@ async function failStartedIdempotency(
   })
 }
 
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
   let idempotencyRecordId: string | null = null
 
   try {
