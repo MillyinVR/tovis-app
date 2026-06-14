@@ -1,0 +1,81 @@
+name: migrate-deploy
+
+# Applies pending Prisma migrations to the production database on every merge to
+# main, so the schema can never drift behind the deployed code.
+#
+# Why this exists: the Vercel build runs only `next build` (+ `prisma generate`)
+# and never runs `prisma migrate deploy`. Without this workflow, a migration
+# merged alongside the code that needs it silently misses production until the
+# deployed code hits the missing column/enum and 500s (this caused the
+# 2026-06-13 `proTenantId` MediaAsset outage).
+#
+# Scope: runs ONLY on push to main (and manual dispatch) — never on
+# pull_request — so it cannot touch preview/branch databases. It applies
+# whatever is pending; with the team's expand→contract discipline, expand
+# (additive) migrations are backward-compatible, and contract migrations are
+# only merged once their expand phase is fully deployed, so auto-applying on
+# merge is safe in both cases.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   PRODUCTION_DATABASE_URL  – pooled connection string (the app's DATABASE_URL)
+#   PRODUCTION_DIRECT_URL    – direct connection string (DIRECT_URL); this is
+#                              what `migrate deploy` actually connects through.
+# Until both are set, the preflight step fails loudly (a red check on main is
+# the intended signal that migrations are NOT being applied yet).
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize runs and NEVER cancel an in-flight migration — queue instead.
+concurrency:
+  group: migrate-deploy-production
+  cancel-in-progress: false
+
+jobs:
+  migrate-deploy:
+    name: Deploy DB migrations (production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.20.2
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      # --ignore-scripts skips the postinstall `prisma generate`; migrate deploy
+      # needs only the prisma CLI + migration files + schema, not the client.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Preflight — require production DB secrets
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$DIRECT_URL" ]; then
+            echo "::error::PRODUCTION_DATABASE_URL and/or PRODUCTION_DIRECT_URL secret is missing. Add both in repo Settings → Secrets and variables → Actions. Migrations are NOT being applied to production until this is configured."
+            exit 1
+          fi
+
+      - name: Apply pending migrations
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}
+        run: pnpm exec prisma migrate deploy
