@@ -4,6 +4,7 @@ import { ServiceLocationType } from '@prisma/client'
 
 import { pickString } from '@/app/api/_utils/pick'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
+import { clampFloat, parseCommaIds, parseFloatParam } from '@/lib/queryParams'
 
 export type ParsedAvailabilityRequest = {
   professionalId: string | null
@@ -38,30 +39,9 @@ const DEFAULT_RADIUS_MILES = 15
 const MIN_RADIUS_MILES = 5
 const MAX_RADIUS_MILES = 50
 
-function clampFloat(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.min(Math.max(value, min), max)
-}
-
-function parseFloatParam(value: string | null): number | null {
-  if (!value) return null
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : null
-}
-
 function roundCoordForCache(value: number | null): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null
   return Math.round(value * 1000) / 1000
-}
-
-function parseCommaIds(value: string | null): string[] {
-  if (!value) return []
-
-  return value
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .slice(0, 25)
 }
 
 export function parseAvailabilityRequest(

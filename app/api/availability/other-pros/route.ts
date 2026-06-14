@@ -20,6 +20,7 @@ import {
 } from '@/lib/booking/locationContext'
 import { withVersionedCache } from '@/lib/cache/versionedCache'
 import { prisma, prismaRead } from '@/lib/prisma'
+import { clampFloat, parseFloatParam } from '@/lib/queryParams'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 
@@ -109,20 +110,8 @@ type PlacementCacheValue =
       error: string
     }
 
-function clampFloat(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min
-  return Math.min(Math.max(value, min), max)
-}
-
 function normalizeAddress(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function parseFloatParam(v: string | null): number | null {
-  if (!v) return null
-
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
 }
 
 function locationTypeForLocation(
