@@ -142,7 +142,13 @@ export async function GET() {
     const { windowStart, windowEnd } = getProSessionStartWindow()
 
     /**
-     * 1) ACTIVE booking wins and stays pinned until finished.
+     * 1) ACTIVE booking stays pinned until aftercare is sent.
+     *
+     * Sending aftercare is the pro's last hands-on step, so it ends the active
+     * session even when the booking isn't fully closed out yet (payment /
+     * checkout may still be pending). That lets the pro start their next
+     * appointment immediately; the remaining closeout is finished from the
+     * booking itself (it still appears in /pro/bookings and on the calendar).
      */
     const active = await prisma.booking.findFirst({
       where: {
@@ -152,6 +158,10 @@ export async function GET() {
           not: null,
         },
         finishedAt: null,
+        OR: [
+          { aftercareSummary: { is: null } },
+          { aftercareSummary: { sentToClientAt: null } },
+        ],
       },
       orderBy: {
         startedAt: 'desc',

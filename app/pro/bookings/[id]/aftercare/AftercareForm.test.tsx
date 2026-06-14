@@ -136,7 +136,7 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Aftercare sent\. Booking is not complete yet\./i),
+        screen.getByText(/free to start your next appointment/i),
       ).toBeInTheDocument()
     })
 
@@ -196,7 +196,7 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Aftercare sent\. Booking is not complete yet\./i),
+        screen.getByText(/free to start your next appointment/i),
       ).toBeInTheDocument()
     })
 
@@ -252,7 +252,7 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
     })
 
     expect(
-      screen.queryByText(/Booking is not complete yet/i),
+      screen.queryByText(/free to start your next appointment/i),
     ).not.toBeInTheDocument()
   })
 
@@ -288,7 +288,7 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
     })
 
     expect(
-      screen.queryByText(/Booking is not complete yet/i),
+      screen.queryByText(/free to start your next appointment/i),
     ).not.toBeInTheDocument()
     expect(screen.queryByText(/Aftercare not sent:/i)).not.toBeInTheDocument()
   })
