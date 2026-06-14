@@ -292,4 +292,32 @@ describe('app/pro/bookings/[id]/aftercare/AftercareForm', () => {
     ).not.toBeInTheDocument()
     expect(screen.queryByText(/Aftercare not sent:/i)).not.toBeInTheDocument()
   })
+
+  it('uses date-only window inputs and auto-advances the end past the start', () => {
+    const { container } = renderForm()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Booking window' }))
+
+    const dateInputs = Array.from(
+      container.querySelectorAll('input[type="date"]'),
+    ) as HTMLInputElement[]
+
+    // Window start + end are dates only — no time-of-day inputs in window mode.
+    expect(dateInputs).toHaveLength(2)
+    expect(
+      container.querySelectorAll('input[type="datetime-local"]'),
+    ).toHaveLength(0)
+
+    const [startInput, endInput] = dateInputs as [
+      HTMLInputElement,
+      HTMLInputElement,
+    ]
+
+    fireEvent.change(startInput, { target: { value: '2026-09-10' } })
+    expect(endInput.value).toBe('2026-09-11')
+
+    // Moving the start to/after the end pulls the end forward to start + 1 day.
+    fireEvent.change(startInput, { target: { value: '2026-09-20' } })
+    expect(endInput.value).toBe('2026-09-21')
+  })
 })
