@@ -4,6 +4,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 
+import { initialsForName } from '@/lib/initials'
+
 import type { CalendarEvent, ManagementKey, ManagementLists } from '../_types'
 
 import { isBlockedEvent } from '../_utils/calendarMath'
@@ -281,19 +283,6 @@ function normalizeText(value: string | null | undefined): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function initialsFromName(name: string): string {
-  const trimmedName = name.trim()
-
-  if (!trimmedName) return '?'
-
-  const parts = trimmedName.split(/\s+/)
-  const firstInitial = parts[0]?.charAt(0) ?? ''
-  const lastInitial =
-    parts.length > 1 ? parts[parts.length - 1]?.charAt(0) ?? '' : ''
-
-  return `${firstInitial}${lastInitial}`.toUpperCase() || '?'
-}
-
 function eventDisplayTimeZone(
   event: CalendarEvent,
   viewportTimeZone: string,
@@ -399,7 +388,7 @@ function buildEventRowCopy(args: {
   return {
     title: title || copy.appointmentFallback,
     subtitle: `${clientName || copy.clientFallback} · ${timeLabel}`,
-    initials: initialsFromName(clientName),
+    initials: initialsForName(clientName, '?'),
     timeLabel,
     statusLabel: statusMeta.label,
   }

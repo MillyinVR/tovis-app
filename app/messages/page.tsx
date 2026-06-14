@@ -11,6 +11,7 @@ import {
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { initialsForName } from '@/lib/initials'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 
 export const dynamic = 'force-dynamic'
@@ -175,14 +176,6 @@ function formatPersonName(
   lastName: string | null | undefined,
 ): string {
   return [firstName, lastName].filter(isPresentString).join(' ').trim()
-}
-
-function initialsFromName(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(isPresentString)
-  const first = parts[0]?.[0] ?? ''
-  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? '' : ''
-
-  return `${first}${last}`.toUpperCase() || '?'
 }
 
 function formatRelativeTime(date: Date): string {
@@ -400,7 +393,7 @@ function buildThreadPresentation(params: {
   return {
     title,
     avatarUrl,
-    initials: initialsFromName(title),
+    initials: initialsForName(title, '?'),
     eyebrow,
     preview: previewText(thread.lastMessagePreview),
     timeLabel: formatRelativeTime(lastActivityAt),
