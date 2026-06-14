@@ -66,16 +66,17 @@ public ramp.
 Each of these is mostly *wiring* — the backend exists. This is the cheapest way to make TOVIS *feel*
 social.
 
-### S1.1 — Surface the **Following** feed ⭐
-**Why:** the follow graph is the core social-network mechanic, and the feed already supports it
-(`kind=FOLLOWING`, `FOLLOWERS_ONLY` visibility). Today there's no tab for it.
-**Build:** add a `Following` tab alongside `Look`/`Spotlight` in
-[`LooksTopBar`](../../app/(main)/looks/_components/LooksTopBar.tsx) /
-[`LooksFeed`](../../app/(main)/looks/_components/LooksFeed.tsx); pass `following=true` to `/api/looks`
-(already handled in [`app/api/looks/route.ts`](../../app/api/looks/route.ts)). Empty-state for users who
-follow no one yet → suggest pros to follow.
-**Acceptance:** a logged-in client sees a Following feed of looks from pros they follow; guests are
-prompted to sign in. **Effort:** S.
+### S1.1 — Surface the **Following** feed ⭐ ✅ DONE 2026-06-13
+**Why:** the follow graph is the core social-network mechanic, and the feed already supported it
+(`kind=FOLLOWING`, `FOLLOWERS_ONLY` visibility) — there was just no tab.
+**Done:** added a `Following` tab in the fixed tab row (Look · Following · Spotlight) in
+[`LooksFeed`](../../app/(main)/looks/_components/LooksFeed.tsx); selecting it fetches
+`/api/looks?following=true` (resolved server-side to the followed-pros feed) for both the initial load
+and infinite-scroll, via a shared `applyFeedScopeParams` helper that preserves Spotlight's behavior.
+Contextual empty state when you follow no one yet, pointing at the Follow button.
+**Still to do:** a logged-out viewer currently sees an empty Following feed rather than a sign-in
+prompt — wire the guest→login nudge when `isAuthenticated` is false (the feed envelope already carries
+`viewerContext.isAuthenticated`). **Effort:** S.
 
 ### S1.2 — Follow button + follower counts in-feed and on profiles ⭐ (follow toggle DONE 2026-06-13)
 **Why:** the graph can't grow if users can't follow from where they spend time (the feed).
