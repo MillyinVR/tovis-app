@@ -1,5 +1,6 @@
 // app/api/internal/jobs/notifications/process/route.ts
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import {
   processDueDeliveries,
   type DeliveryProviderRegistry,
@@ -46,23 +47,6 @@ function requireEnv(name: string): string {
   }
 
   return value
-}
-
-function getJobSecret(): string | null {
-  return readEnv('INTERNAL_JOB_SECRET') ?? readEnv('CRON_SECRET')
-}
-
-function isAuthorizedJobRequest(req: Request): boolean {
-  const secret = getJobSecret()
-  if (!secret) return false
-
-  const authHeader = req.headers.get('authorization')
-  if (authHeader === `Bearer ${secret}`) return true
-
-  const internalHeader = req.headers.get('x-internal-job-secret')
-  if (internalHeader === secret) return true
-
-  return false
 }
 
 function buildRealtimeChannel(recipientInAppTargetId: string): string {
@@ -175,7 +159,7 @@ function buildProviderRegistry(): DeliveryProviderRegistry {
 }
 
 async function runJob(req: Request) {
-  const secret = getJobSecret()
+  const secret = getInternalJobSecret()
   if (!secret) {
     return jsonFail(
       500,

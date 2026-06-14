@@ -1,5 +1,6 @@
 // app/api/internal/jobs/looks-social/process/route.ts
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import {
   processLooksSocialJobs,
   type ProcessLooksSocialJobsResult,
@@ -23,28 +24,6 @@ function readTake(req: Request): number {
   return Math.max(1, Math.min(MAX_TAKE, parsed))
 }
 
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim()
-  return value && value.length > 0 ? value : null
-}
-
-function getJobSecret(): string | null {
-  return readEnv('INTERNAL_JOB_SECRET') ?? readEnv('CRON_SECRET')
-}
-
-function isAuthorizedJobRequest(req: Request): boolean {
-  const secret = getJobSecret()
-  if (!secret) return false
-
-  const authHeader = req.headers.get('authorization')
-  if (authHeader === `Bearer ${secret}`) return true
-
-  const internalHeader = req.headers.get('x-internal-job-secret')
-  if (internalHeader === secret) return true
-
-  return false
-}
-
 function createBatchId(): string {
   return crypto.randomUUID()
 }
@@ -63,7 +42,7 @@ async function runJob(
   method: JobMethod,
   batchId: string,
 ) {
-  const secret = getJobSecret()
+  const secret = getInternalJobSecret()
   if (!secret) {
     return jsonFail(
       500,
