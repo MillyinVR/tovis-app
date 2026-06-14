@@ -1,5 +1,6 @@
 // app/api/internal/jobs/client-reminders/route.ts
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import {
   cancelDueAppointmentReminder,
   validateDueAppointmentReminder,
@@ -56,27 +57,6 @@ function readTake(req: Request): number {
 
   if (!Number.isFinite(parsed)) return DEFAULT_TAKE
   return Math.max(1, Math.min(MAX_TAKE, parsed))
-}
-
-function getJobSecret(): string | null {
-  const raw = process.env.INTERNAL_JOB_SECRET ?? process.env.CRON_SECRET ?? null
-  if (!raw) return null
-
-  const trimmed = raw.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function isAuthorizedJobRequest(req: Request): boolean {
-  const secret = getJobSecret()
-  if (!secret) return false
-
-  const authHeader = req.headers.get('authorization')
-  if (authHeader === `Bearer ${secret}`) return true
-
-  const internalHeader = req.headers.get('x-internal-job-secret')
-  if (internalHeader === secret) return true
-
-  return false
 }
 
 async function markReminderProcessedIfPending(args: {
@@ -240,7 +220,7 @@ async function loadDueRows(args: {
 }
 
 async function runJob(req: Request) {
-  const secret = getJobSecret()
+  const secret = getInternalJobSecret()
   if (!secret) {
     return jsonFail(
       500,

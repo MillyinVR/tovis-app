@@ -8,33 +8,12 @@
 // Auth matches the other internal jobs (Bearer INTERNAL_JOB_SECRET / CRON_SECRET).
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import { prisma } from '@/lib/prisma'
 import { expireStaleUploadSessions } from '@/lib/media/uploadSession'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim()
-  return value && value.length > 0 ? value : null
-}
-
-function getJobSecret(): string | null {
-  return readEnv('INTERNAL_JOB_SECRET') ?? readEnv('CRON_SECRET')
-}
-
-function isAuthorizedJobRequest(req: Request): boolean {
-  const secret = getJobSecret()
-  if (!secret) return false
-
-  const authHeader = req.headers.get('authorization')
-  if (authHeader === `Bearer ${secret}`) return true
-
-  const internalHeader = req.headers.get('x-internal-job-secret')
-  if (internalHeader === secret) return true
-
-  return false
-}
 
 export async function POST(req: Request) {
   if (!isAuthorizedJobRequest(req)) {

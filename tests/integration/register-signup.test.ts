@@ -386,7 +386,7 @@ describe('POST /api/auth/register (integration)', () => {
   })
 
   it('creates a salon pro with a non-bookable primary location and address privacy columns', async () => {
-    const body = makeProBody({ handle: `studio_${tag.slice(-6)}` })
+    const body = makeProBody({ handle: `studio-${tag.slice(-6)}` })
 
     const res = await POST(makeRequest(body))
     const data = await res.json()
@@ -408,7 +408,7 @@ describe('POST /api/auth/register (integration)', () => {
       lastName: 'Pro',
       professionType: 'MAKEUP_ARTIST',
       businessName: 'TOVIS Integration Studio',
-      handleNormalized: `studio_${tag.slice(-6)}`.toLowerCase(),
+      handleNormalized: `studio-${tag.slice(-6)}`.toLowerCase(),
       timeZone: 'America/Los_Angeles',
       verificationStatus: 'PENDING',
       licenseVerified: false,

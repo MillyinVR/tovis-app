@@ -22,10 +22,9 @@ import {
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { createRebookedBookingFromCompletedBooking } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
@@ -54,17 +53,6 @@ type AftercareRebookRecord = Prisma.AftercareSummaryGetPayload<{
 
 function isMode(value: unknown): value is RebookMode {
   return value === 'BOOK' || value === 'RECOMMEND_WINDOW' || value === 'CLEAR'
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function readRequestId(req: Request): string | null {

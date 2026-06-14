@@ -2,14 +2,15 @@
 
 import { Role } from '@prisma/client'
 
-import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import {
   beginRouteIdempotency,
   completeRouteIdempotency,
   failStartedRouteIdempotency,
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
-import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
+import { isBookingError } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { waiveProBookingCheckout } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
@@ -40,17 +41,6 @@ type WaiveCheckoutSuccessBody = {
     noOp: boolean
     completedBooking: boolean
   }
-}
-
-function bookingJsonFail(
-  code: Parameters<typeof getBookingFailPayload>[0],
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function normalizeBookingId(raw: string | null | undefined): string | null {

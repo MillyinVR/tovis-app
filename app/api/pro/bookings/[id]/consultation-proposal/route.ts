@@ -21,10 +21,9 @@ import {
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import { createConsultationActionDelivery } from '@/lib/clientActions/createConsultationActionDelivery'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import {
   beginRouteIdempotency,
   completeRouteIdempotency,
@@ -132,17 +131,6 @@ const CONSULTATION_DELIVERY_BOOKING_SELECT = {
 type ConsultationDeliveryBookingRecord = Prisma.BookingGetPayload<{
   select: typeof CONSULTATION_DELIVERY_BOOKING_SELECT
 }>
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
 
 function parseMoneyToCents(v: unknown): number | null {
   if (v == null) return null

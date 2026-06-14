@@ -3,7 +3,6 @@
 import { prisma } from '@/lib/prisma'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import {
-  jsonFail,
   jsonOk,
   pickBool,
   pickInt,
@@ -39,10 +38,9 @@ import {
 } from '@/lib/booking/snapshots'
 import {
   bookingError,
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { updateProBooking } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
@@ -70,17 +68,6 @@ function normalizeRequestedStatus(value: unknown): RequestedStatus | null {
   if (normalized === BookingStatus.CANCELLED) return BookingStatus.CANCELLED
 
   return null
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function readRequestId(request: Request): string | null {

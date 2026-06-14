@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import AuthShell from '../AuthShell'
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
+import { sanitizeHandleInput } from '@/lib/handles'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
 import { getTurnstileToken } from '@/lib/turnstileClient'
@@ -196,9 +197,6 @@ function isUsZip(raw: string) {
   return /^\d{5}(-\d{4})?$/.test(s)
 }
 
-function normalizeHandleInput(raw: string) {
-  return raw.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
-}
 
 type ProfessionType =
   | 'COSMETOLOGIST'
@@ -741,7 +739,7 @@ export default function SignupProClient() {
             ? businessName.trim()
             : undefined,
           handle: handle.trim()
-            ? normalizeHandleInput(handle.trim())
+            ? sanitizeHandleInput(handle.trim())
             : undefined,
           professionType,
           mobileRadiusMiles:
@@ -793,7 +791,7 @@ export default function SignupProClient() {
     }
   }
 
-  const handlePreview = normalizeHandleInput(handle.trim())
+  const handlePreview = sanitizeHandleInput(handle.trim())
   const handleIsTrimmed = handle.trim() !== handlePreview
 
   return (
