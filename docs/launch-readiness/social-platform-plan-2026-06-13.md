@@ -94,18 +94,66 @@ with the authoritative `followerCount` the follow API returns. Covered by a new 
 **Still to do:** show follower count on the **pro public profile** page (the feed overlay is done), and
 add a follow affordance to the right action rail. **Effort:** S.
 
-### S1.3 — Social notifications (like / comment / follow / save) ⭐
+### S1.3 — Social notifications (like / comment / follow / save) ⭐ — BUILD-READY SPEC (scoped 2026-06-14)
 **Why:** engagement notifications are *the* retention engine of every platform we want to compete with.
-Today notifications exist only for pro **bookings** — no "X liked your look," "new comment," "started
-following you."
-**Build:** extend the existing notification surface
-([`app/pro/notifications/page.tsx`](../../app/pro/notifications/page.tsx)) and add a client-facing
-equivalent. Emit notifications from the like/comment/follow/save mutations — fan out **via the existing
-`LooksSocialJob` queue**, not inline, to protect write latency. Batch ("3 people liked your look") to
-avoid spam. Respect a per-user notification preference.
-**Acceptance:** acting on a look notifies the owner (batched, async); a notifications bell with unread
-count exists for both roles. **Effort:** M. **Depends:** notification model may need a tenant column
-(see finish-plan T2.2) and a generic `actor → verb → target` shape.
+Today notifications exist only for pro **bookings**.
+
+**Good news from the infra audit — most of this already exists; S1.3 is wiring into existing rails, not new infrastructure:**
+- Pro inbox: `Notification` model + central [`createProNotification`](../../lib/notifications/proNotifications.ts)
+  helper (idempotent via `dedupeKey`, actor/read-state, and **already fills `proTenantId`** from the pro's
+  home tenant — just call it).
+- Client inbox: `ClientNotification` model + [`createClientNotification`](../../lib/notifications/clientNotifications.ts)
+  + a client API route already exist. So the "both audiences" answer needs **no new client surface from
+  scratch** — pros use [`app/pro/notifications/page.tsx`](../../app/pro/notifications/page.tsx), clients use
+  the existing `ClientNotification` rails.
+- Channels are per-event via [`eventKeys.ts`](../../lib/notifications/eventKeys.ts)
+  `defaultChannelsByRecipient`. `PRO_IN_APP_ONLY_CHANNELS` already exists → **social events ship in-app-only**,
+  no per-event email (the digest in PR 4 handles email). Precedent: `LAST_MINUTE_OPENING_AVAILABLE`
+  (non-transactional, in-app-only).
+- Dispatch/email/SMS pipeline + the `LooksSocialJob` fan-out queue (template:
+  `FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS`) are built and reusable.
+- `Record<NotificationTemplateKey, …>` maps in `eventKeys.ts` + `renderNotificationContent.ts` are
+  **exhaustive** — the compiler forces you to register every new key (CTA label + `buildStandardTemplateRenderer`).
+
+**Adding one event type — the recipe (per the audit):**
+1. `prisma/schema.prisma`: add the value to `enum NotificationEventKey`. Hand-author a migration
+   `prisma/migrations/<ts>_…/migration.sql` with `ALTER TYPE "NotificationEventKey" ADD VALUE IF NOT EXISTS '…';`
+   (established pattern, e.g. `…_add_viral_request_approved_notification_event_key`). Run `npx prisma generate`.
+2. `lib/notifications/eventKeys.ts`: add a `NotificationTemplateKey`, an entry in `NOTIFICATION_EVENT_KEYS`,
+   and an event definition (`transactional: false`, `PRO_IN_APP_ONLY_CHANNELS`).
+3. `lib/notifications/delivery/renderNotificationContent.ts`: add a `templateCtaLabels` entry + a
+   `templateRenderers` entry (`buildStandardTemplateRenderer(label)`).
+4. `app/pro/notifications/page.tsx`: add a `SOCIAL` category to `NotificationCategory` + `CATEGORY_EVENT_KEYS`,
+   and a Social tab.
+5. Emit at the mutation boundary (best-effort, **outside** the write tx so a notify failure can't roll back
+   the action): call `createProNotification({ professionalId, eventKey, actorUserId, title, href, dedupeKey })`.
+
+**PR slices (each its own green PR):**
+- **PR 1 — new follower → pro** (the smallest end-to-end vertical slice; proves the whole pipeline).
+  Emit in [`app/api/pros/[id]/follow/route.ts`](../../app/api/pros/[id]/follow/route.ts) POST, *after*
+  `toggleProFollow` returns `following: true` (the route already has `auth.user` as the actor — no extra
+  query; outside the follow tx). `dedupeKey: follower:<actorUserId>` (re-follow won't spam). Event key
+  `LOOK_FOLLOWER_NEW`.
+- **PR 2 — new comment → pro.** Emit in [`app/api/looks/[id]/comments`](../../app/api/looks/[id]/comments/route.ts)
+  POST after the comment row is created; load the look's `professionalId`; **skip self-comments**. No batching
+  (low volume). Event key `LOOK_COMMENTED`.
+- **PR 3 — like + save → pro (batched).** High volume → aggregate with a per-look-per-window `dedupeKey`
+  (e.g. `look:<id>:liked`) and a count in `data` ("X and 3 others"). Consider a short `LooksSocialJob` debounce
+  rather than notifying on every like.
+- **PR 4 — new look from a followed pro → client.** On publish in
+  [`lib/looks/publication/service.ts`](../../lib/looks/publication/service.ts), enqueue a
+  `LooksSocialJob` fan-out (mirror `FAN_OUT_VIRAL_REQUEST_APPROVAL_NOTIFICATIONS`) that writes a
+  `ClientNotification` to each follower. New job type + a client event key.
+- **PR 5 — email digest + cron.** New `/api/internal/jobs/notifications/digest` route + a `vercel.json`
+  cron, batching each recipient's unread social notifications into one Postmark email (reuse
+  [`sendEmail`](../../lib/notifications/delivery/sendEmail.ts)). This is the only net-new email work; everything
+  else is in-app-only.
+
+**Acceptance:** following a pro notifies them in-app on their notifications page under a Social tab; comments
+and (batched) likes/saves follow; followers get "new look" client notifications; a weekly/daily digest email
+summarizes unread. **Effort:** M (spread across 5 small PRs). **Risk note:** the enum migration touches the
+shared `prisma/schema.prisma` — coordinate with concurrent schema work (tenant-attribution PRs) and rebase
+before merge.
 
 ### S1.4 — Make `shareCount` real + count it in ranking
 **Why:** `shareCount` exists but is never incremented, and shares aren't in the rank formula — yet a
