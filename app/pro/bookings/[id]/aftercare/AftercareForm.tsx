@@ -860,7 +860,8 @@ export default function AftercareForm({
       if (completionBlockers.length > 0) {
         setSuccess(
           [
-            'Aftercare sent. Booking is not complete yet.',
+            'Aftercare sent — you’re free to start your next appointment.',
+            'To finish this booking’s closeout (do it anytime from Bookings):',
             ...completionBlockers.map(
               (blocker) => `${blocker.label}: ${blocker.description}`,
             ),

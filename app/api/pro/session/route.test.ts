@@ -85,6 +85,12 @@ function expectActiveFindFirst() {
         not: null,
       },
       finishedAt: null,
+      // Bookings whose aftercare has already been sent are no longer the
+      // active hands-on session, so the footer clears once aftercare goes out.
+      OR: [
+        { aftercareSummary: { is: null } },
+        { aftercareSummary: { sentToClientAt: null } },
+      ],
     },
     orderBy: {
       startedAt: 'desc',
@@ -197,6 +203,24 @@ describe('GET /api/pro/session', () => {
         },
       },
     })
+  })
+
+  it('excludes bookings whose aftercare was already sent from the active session', async () => {
+    // Default mocks return no active booking; assert the query itself filters
+    // out aftercare-sent bookings so the footer clears once aftercare goes out.
+    await GET()
+
+    expect(mocks.bookingFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          finishedAt: null,
+          OR: [
+            { aftercareSummary: { is: null } },
+            { aftercareSummary: { sentToClientAt: null } },
+          ],
+        }),
+      }),
+    )
   })
 
   it('uses fallback service name and client email when name fields are blank', async () => {
