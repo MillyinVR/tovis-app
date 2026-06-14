@@ -701,10 +701,18 @@ export default function AftercareForm({
 
     try {
       const payload = buildPayload(sendToClient)
+      // nonce: the payload itself. Aftercare is saved iteratively (edit ->
+      // Save draft -> edit -> Save draft), and `version` bumps after every
+      // save, so two sequential saves in the same 60s bucket carry different
+      // bodies. Without a nonce they share a key and the server rejects the
+      // second with a 409 body-hash conflict. Keying on the payload lets a
+      // genuinely different save through while a true double-click (identical
+      // payload, same version) still dedupes.
       const idempotencyKey = buildClientIdempotencyKey({
         scope: 'booking-aftercare',
         entityId: bookingId,
         action: sendToClient ? 'send' : 'draft',
+        nonce: JSON.stringify(payload),
       })
       const res = await fetch(
         `/api/pro/bookings/${encodeURIComponent(bookingId)}/aftercare`,

@@ -238,6 +238,11 @@ async function submitRecommendedProducts(args: {
     scope: 'client-checkout-products',
     entityId: args.bookingId,
     action: 'save-selection',
+    // Selection is iterative (adjust quantities, save, adjust, save). Those
+    // are distinct bodies under one key, so without a nonce the second save in
+    // the 60s bucket 409s on a body-hash conflict. Keying on the lines lets a
+    // changed selection through while a true double-click still dedupes.
+    nonce: JSON.stringify(args.lines),
   })
 
   const response = await fetch(
