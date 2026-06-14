@@ -6,12 +6,9 @@ import { getCurrentUser } from '@/lib/currentUser'
 import ProSessionFooter from '@/app/_components/ProSessionFooter/ProSessionFooter'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
+import { normalizeHandle } from '@/lib/handles'
 
 export const dynamic = 'force-dynamic'
-
-function normalizeHandle(raw: string) {
-  return raw.trim().toLowerCase()
-}
 
 function displayTimeZoneOrNull(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
