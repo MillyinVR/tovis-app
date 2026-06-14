@@ -13,6 +13,7 @@ import {
 } from '@/lib/looks/feed'
 import { looksFeedSelect } from '@/lib/looks/selects'
 import { mapLooksFeedMediaToDto } from '@/lib/looks/mappers'
+import { buildLooksViewerFlagResolver } from '@/lib/looks/viewerFlags'
 import type { LooksFeedResponseDto } from '@/lib/looks/types'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
 
@@ -126,71 +127,16 @@ export async function GET(req: Request) {
     const hasMore = rows.length > limit
     const items = hasMore ? rows.slice(0, limit) : rows
 
-    let likedSet = new Set<string>()
-    let savedSet = new Set<string>()
-    let followedSet = new Set<string>()
-
-    if (user && items.length > 0) {
-      const professionalIds = Array.from(
-        new Set(items.map((item) => item.professionalId)),
-      )
-
-      const [likes, savedItems, follows] = await Promise.all([
-        prisma.lookLike.findMany({
-          where: {
-            userId: user.id,
-            lookPostId: {
-              in: items.map((item) => item.id),
-            },
-          },
-          select: {
-            lookPostId: true,
-          },
-        }),
-        user.clientProfile?.id
-          ? prisma.boardItem.findMany({
-              where: {
-                lookPostId: {
-                  in: items.map((item) => item.id),
-                },
-                board: {
-                  clientId: user.clientProfile.id,
-                },
-              },
-              select: {
-                lookPostId: true,
-              },
-            })
-          : Promise.resolve([] as Array<{ lookPostId: string }>),
-        user.clientProfile?.id
-          ? prisma.proFollow.findMany({
-              where: {
-                clientId: user.clientProfile.id,
-                professionalId: {
-                  in: professionalIds,
-                },
-              },
-              select: {
-                professionalId: true,
-              },
-            })
-          : Promise.resolve([] as Array<{ professionalId: string }>),
-      ])
-
-      likedSet = new Set(likes.map((like) => like.lookPostId))
-      savedSet = new Set(savedItems.map((item) => item.lookPostId))
-      followedSet = new Set(follows.map((follow) => follow.professionalId))
-    }
+    const resolveViewerFlags = await buildLooksViewerFlagResolver({
+      user,
+      items,
+    })
 
     const mapped = await Promise.all(
       items.map((item) =>
         mapLooksFeedMediaToDto({
           item,
-          viewerLiked: user ? likedSet.has(item.id) : false,
-          viewerSaved: user?.clientProfile?.id ? savedSet.has(item.id) : false,
-          viewerFollows: user?.clientProfile?.id
-            ? followedSet.has(item.professionalId)
-            : false,
+          ...resolveViewerFlags(item),
         }),
       ),
     )
