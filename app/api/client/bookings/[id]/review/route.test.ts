@@ -45,6 +45,9 @@ const mocks = vi.hoisted(() => ({
   parseIdArray: vi.fn(),
   parseRating1to5: vi.fn(),
 
+  validateUploadSession: vi.fn(),
+  consumeUploadSession: vi.fn(),
+
   assertClientBookingReviewEligibility: vi.fn(),
 
   createBookingCloseoutAuditLog: vi.fn(),
@@ -84,6 +87,24 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
   assertClientBookingReviewEligibility:
     mocks.assertClientBookingReviewEligibility,
 }))
+
+vi.mock('@/lib/media/uploadSession', () => {
+  class UploadSessionError extends Error {
+    code: string
+    httpStatus: number
+    constructor(code: string, message: string) {
+      super(message)
+      this.name = 'UploadSessionError'
+      this.code = code
+      this.httpStatus = code === 'FORBIDDEN' ? 403 : code === 'NOT_FOUND' ? 404 : 400
+    }
+  }
+  return {
+    validateUploadSession: mocks.validateUploadSession,
+    consumeUploadSession: mocks.consumeUploadSession,
+    UploadSessionError,
+  }
+})
 
 vi.mock('@/lib/booking/closeoutAudit', () => ({
   createBookingCloseoutAuditLog: mocks.createBookingCloseoutAuditLog,
@@ -280,36 +301,38 @@ function makeValidBody(overrides?: Record<string, unknown>) {
     headline: 'Great service',
     body: 'Loved it',
     attachedMediaIds: ['media_pro_1'],
-    media: [
-      {
-        url: 'https://example.com/client/review-1.png',
-        mediaType: MediaType.IMAGE,
-        storageBucket: 'reviews',
-        storagePath: 'client/review-1.png',
-        thumbBucket: 'reviews-thumbs',
-        thumbPath: 'client/review-1-thumb.png',
-      },
-    ],
+    media: [{ uploadSessionId: 'us_1' }],
     ...(overrides ?? {}),
   }
 }
 
-function expectedResolvedClientMedia() {
-  return [
-    {
-      mediaType: MediaType.IMAGE,
-      caption: null,
-      storageBucket: 'reviews',
-      storagePath: 'client/review-1.png',
-      thumbBucket: 'reviews-thumbs',
-      thumbPath: 'client/review-1-thumb.png',
-    },
-  ]
+// The authoritative session validateUploadSession returns for the client review
+// upload. The route reads the pointer back from here.
+function clientReviewSession(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'us_1',
+    surface: 'CLIENT_REVIEW',
+    status: 'PENDING',
+    tenantId: null,
+    professionalId: null,
+    clientId: 'client_1',
+    bookingId: null,
+    phase: null,
+    storageBucket: 'reviews',
+    storagePath: 'client/review-1.png',
+    contentType: 'image/jpeg',
+    maxBytes: 30 * 1024 * 1024,
+    checksumSha256: null,
+    expiresAt: new Date('2026-03-25T17:00:00.000Z'),
+    consumedAt: null,
+    mediaAssetId: null,
+    ...overrides,
+  }
 }
 
 function expectedIdempotencyRequestBody(overrides?: {
   attachedMediaIds?: string[]
-  clientMedia?: ReturnType<typeof expectedResolvedClientMedia>
+  uploadSessionIds?: string[]
   headline?: string | null
   body?: string | null
 }) {
@@ -321,7 +344,7 @@ function expectedIdempotencyRequestBody(overrides?: {
     headline: overrides && 'headline' in overrides ? overrides.headline : 'Great service',
     body: overrides && 'body' in overrides ? overrides.body : 'Loved it',
     attachedMediaIds: overrides?.attachedMediaIds ?? ['media_pro_1'],
-    clientMedia: overrides?.clientMedia ?? expectedResolvedClientMedia(),
+    uploadSessionIds: overrides?.uploadSessionIds ?? ['us_1'],
   }
 }
 
@@ -492,6 +515,9 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
       makeEligibility(),
     )
 
+    mocks.validateUploadSession.mockResolvedValue(clientReviewSession())
+    mocks.consumeUploadSession.mockResolvedValue(undefined)
+
     mocks.beginRouteIdempotency.mockResolvedValue(makeStartedIdempotency())
     mocks.isRouteIdempotencyHandled.mockReturnValue(false)
     mocks.completeRouteIdempotency.mockResolvedValue(undefined)
@@ -551,45 +577,13 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
     expect(mocks.prismaTransaction).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when client-uploaded media is missing storage pointers before idempotency starts', async () => {
-    const req = makeRequest({
-      rating: 5,
-      headline: 'Bad media',
-      body: 'Missing storage pointers',
-      media: [
-        {
-          url: 'https://example.com/client/review-1.png',
-          mediaType: MediaType.IMAGE,
-        },
-      ],
-    })
-
-    const res = await POST(req, makeCtx())
-    const json = await res.json()
-
-    expect(res.status).toBe(400)
-    expect(json).toEqual({
-      ok: false,
-      error:
-        'Media must include storageBucket/storagePath (or a Supabase Storage URL we can parse).',
-    })
-
-    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
-    expect(mocks.prismaTransaction).not.toHaveBeenCalled()
-    expect(mocks.txReviewCreate).not.toHaveBeenCalled()
-    expect(mocks.createBookingCloseoutAuditLog).not.toHaveBeenCalled()
-  })
-
-  it('returns 400 when client media exceeds upload caps before idempotency starts', async () => {
+  it('returns 400 when client media exceeds the total cap before idempotency starts', async () => {
     const req = makeRequest({
       rating: 5,
       headline: 'Too much media',
       body: 'Should cap',
       media: Array.from({ length: 8 }, (_, i) => ({
-        url: `https://example.com/client/${i + 1}.png`,
-        mediaType: MediaType.IMAGE,
-        storageBucket: 'reviews',
-        storagePath: `client/${i + 1}.png`,
+        uploadSessionId: `us_${i + 1}`,
       })),
     })
 
@@ -805,13 +799,25 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
           reviewLocked: true,
           storageBucket: 'reviews',
           storagePath: 'client/review-1.png',
-          thumbBucket: 'reviews-thumbs',
-          thumbPath: 'client/review-1-thumb.png',
+          thumbBucket: null,
+          thumbPath: null,
           url: null,
           thumbUrl: null,
           caption: null,
         },
       ],
+    })
+
+    expect(mocks.validateUploadSession).toHaveBeenCalledWith(expect.anything(), {
+      uploadSessionId: 'us_1',
+      surface: 'CLIENT_REVIEW',
+      clientId: 'client_1',
+      now: expect.any(Date),
+    })
+
+    expect(mocks.consumeUploadSession).toHaveBeenCalledWith(expect.anything(), {
+      uploadSessionId: 'us_1',
+      now: expect.any(Date),
     })
 
     expect(mocks.createBookingCloseoutAuditLog).toHaveBeenCalledWith({

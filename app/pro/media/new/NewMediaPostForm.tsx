@@ -28,6 +28,7 @@ type UploadInit = {
   path: string
   token: string
   publicUrl: string | null
+  uploadSessionId: string | null
 }
 
 const CAPTION_MAX = 300
@@ -86,7 +87,9 @@ function parseUploadInit(data: unknown): UploadInit | null {
 
   if (!bucket || !path || !token) return null
 
-  return { bucket, path, token, publicUrl }
+  const uploadSessionId = pickStringOrEmpty(data.uploadSessionId) || null
+
+  return { bucket, path, token, publicUrl, uploadSessionId }
 }
 
 function normalizeMoneyInput(value: string): string {
@@ -504,9 +507,7 @@ export default function NewMediaPostForm() {
     }
 
     return {
-      storageBucket: init.bucket,
-      storagePath: init.path,
-      publicUrl: init.publicUrl,
+      uploadSessionId: init.uploadSessionId,
     }
   }
 
@@ -536,9 +537,7 @@ export default function NewMediaPostForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          bucket: uploaded.storageBucket,
-          path: uploaded.storagePath,
-          publicUrl: uploaded.publicUrl ?? undefined,
+          uploadSessionId: uploaded.uploadSessionId,
           caption: caption.trim().slice(0, CAPTION_MAX) || undefined,
           mediaType,
           isFeaturedInPortfolio,

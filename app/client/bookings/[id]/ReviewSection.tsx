@@ -41,13 +41,7 @@ type AppointmentMediaOption = {
 }
 
 type ReviewMediaSubmitItem = {
-  mediaType: MediaType
-  storageBucket: string
-  storagePath: string
-  thumbBucket: string | null
-  thumbPath: string | null
-  url: string | null
-  thumbUrl: string | null
+  uploadSessionId: string
 }
 
 type PendingUpload = {
@@ -63,6 +57,10 @@ type PendingUpload = {
   storagePath?: string | null
   thumbBucket?: string | null
   thumbPath?: string | null
+
+  // The session the signing route minted for this object; sent on attach so the
+  // server reads the storage pointer back authoritatively.
+  uploadSessionId?: string | null
 
   // optional: render convenience only (NOT truth)
   renderUrl?: string | null
@@ -203,6 +201,7 @@ type SignedUploadInit = {
   token: string
   publicUrl: string | null
   cacheBuster: number | null
+  uploadSessionId: string | null
 }
 
 function parseSignedUploadInit(data: unknown): SignedUploadInit | null {
@@ -226,6 +225,7 @@ function parseSignedUploadInit(data: unknown): SignedUploadInit | null {
     token,
     publicUrl,
     cacheBuster,
+    uploadSessionId: pickStringOrEmpty(data.uploadSessionId) || null,
   }
 }
 
@@ -481,7 +481,8 @@ export default function ReviewSection({
           continue
         }
 
-        const { bucket, path, token, publicUrl, cacheBuster } = init.data
+        const { bucket, path, token, publicUrl, cacheBuster, uploadSessionId } =
+          init.data
 
         const { error: upErr } = await uploadWithProgress({
           bucket,
@@ -518,6 +519,7 @@ export default function ReviewSection({
                   storagePath: path,
                   thumbBucket: null,
                   thumbPath: null,
+                  uploadSessionId,
                   renderUrl: finalUrl,
                 }
               : p,
@@ -538,17 +540,9 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
 
   for (const item of pending) {
     if (item.status !== 'UPLOADED') continue
-    if (!item.storageBucket || !item.storagePath) continue
+    if (!item.uploadSessionId) continue
 
-    media.push({
-      mediaType: item.mediaType,
-      storageBucket: item.storageBucket,
-      storagePath: item.storagePath,
-      thumbBucket: item.thumbBucket ?? null,
-      thumbPath: item.thumbPath ?? null,
-      url: item.renderUrl ?? null,
-      thumbUrl: null,
-    })
+    media.push({ uploadSessionId: item.uploadSessionId })
   }
 
   return media
