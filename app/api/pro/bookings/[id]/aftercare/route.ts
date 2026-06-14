@@ -11,10 +11,9 @@ import { isRecord } from '@/lib/guards'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import {
@@ -182,7 +181,6 @@ const GET_BOOKING_SELECT = {
     },
   },
 } satisfies Prisma.BookingSelect
-
 
 type GetBookingRecord = Prisma.BookingGetPayload<{
   select: typeof GET_BOOKING_SELECT
@@ -591,18 +589,6 @@ function normalizeRebookFields(args: {
     },
   }
 }
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
 
 function toIsoOrNull(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null

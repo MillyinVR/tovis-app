@@ -8,10 +8,9 @@ import {
 } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { recordInPersonConsultationDecision } from '@/lib/booking/writeBoundary'
 import { ConsultationDecision, Prisma, Role } from '@prisma/client'
 import {
@@ -50,18 +49,6 @@ function bookingBase(bookingId: string): string {
 function sessionHubHref(bookingId: string): string {
   return `${bookingBase(bookingId)}/session`
 }
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
-
 
 function parseDecisionAction(value: unknown): ConsultationDecision | null {
   const normalized = upper(value)

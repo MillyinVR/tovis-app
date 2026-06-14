@@ -33,6 +33,7 @@ import {
   getBookingFailPayload,
   type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import { withVersionedCache } from '@/lib/cache/versionedCache'
 import { prismaRead } from '@/lib/prisma'
@@ -59,22 +60,6 @@ type AvailabilityRequestBasePayload = {
 
 type AvailabilityDayRequestPayload = AvailabilityRequestBasePayload & {
   date: string
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-  extra?: Record<string, unknown>,
-) {
-  const fail = getBookingFailPayload(code, overrides)
-
-  return jsonFail(fail.httpStatus, fail.userMessage, {
-    ...fail.extra,
-    ...(extra ?? {}),
-  })
 }
 
 function toInt(value: string | null, fallback: number): number {
@@ -482,7 +467,9 @@ export async function GET(req: Request) {
       : await computeDayPayload()
 
     if (loaderResult.kind === 'fail') {
-      return bookingJsonFail(loaderResult.code, undefined, {
+      const fail = getBookingFailPayload(loaderResult.code)
+      return jsonFail(fail.httpStatus, fail.userMessage, {
+        ...fail.extra,
         locationId,
         timeZone,
         timeZoneSource,

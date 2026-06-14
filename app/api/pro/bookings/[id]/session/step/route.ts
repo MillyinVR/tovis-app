@@ -10,10 +10,9 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { SESSION_STEP_TRANSITIONS } from '@/lib/booking/lifecycleContract'
 import { transitionSessionStep } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -28,17 +27,6 @@ type NestedInputJsonValue = Prisma.InputJsonValue | null
 
 type JsonObjectPayload = {
   [key: string]: NestedInputJsonValue
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function readRequestId(request: Request): string | null {

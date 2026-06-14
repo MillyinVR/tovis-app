@@ -6,10 +6,9 @@ import {
   tokenRateLimitIdentity,
 } from '@/app/api/_utils/rateLimit'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import {
   approveConsultationByClientActionToken,
   rejectConsultationByClientActionToken,
@@ -60,17 +59,6 @@ const TOKEN_ID_SELECT = {
 type TokenIdRecord = Prisma.ClientActionTokenGetPayload<{
   select: typeof TOKEN_ID_SELECT
 }>
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
 
 function invalidTokenFail(): Response {
   return bookingJsonFail('FORBIDDEN', {

@@ -16,10 +16,9 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import {
   prepareClientStripeCheckoutSession,
   recordStripeCheckoutSessionAttached,
@@ -142,14 +141,6 @@ function buildStripeApiIdempotencyKey(args: {
   idempotencyKey: string
 }): string {
   return `tovis:stripe-session:${args.bookingId}:${args.idempotencyKey}`
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: { message?: string; userMessage?: string },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 async function failStripeSessionIdempotency(
