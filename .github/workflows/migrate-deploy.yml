@@ -20,8 +20,10 @@ name: migrate-deploy
 #   PRODUCTION_DATABASE_URL  – pooled connection string (the app's DATABASE_URL)
 #   PRODUCTION_DIRECT_URL    – direct connection string (DIRECT_URL); this is
 #                              what `migrate deploy` actually connects through.
-# Until both are set, the preflight step fails loudly (a red check on main is
-# the intended signal that migrations are NOT being applied yet).
+# Until both are set, the job SKIPS `migrate deploy` and surfaces a loud
+# `::warning::` annotation plus a job-summary note on every main push — the
+# signal that migrations are NOT being auto-applied yet, without a permanently
+# red check that erodes trust in CI. Add both secrets to enable auto-migration.
 
 on:
   push:
@@ -64,17 +66,31 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Preflight — require production DB secrets
+      # Detect whether the production DB secrets are configured. When they are
+      # absent we SKIP the migrate step (and warn) instead of failing the job,
+      # so an unconfigured repo does not leave a permanently red check on main.
+      - name: Check for production DB secrets
+        id: preflight
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}
         run: |
           if [ -z "$DATABASE_URL" ] || [ -z "$DIRECT_URL" ]; then
-            echo "::error::PRODUCTION_DATABASE_URL and/or PRODUCTION_DIRECT_URL secret is missing. Add both in repo Settings → Secrets and variables → Actions. Migrations are NOT being applied to production until this is configured."
-            exit 1
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::PRODUCTION_DATABASE_URL and/or PRODUCTION_DIRECT_URL is not set — skipping prisma migrate deploy. Production migrations are NOT being auto-applied. Add both in Settings → Secrets and variables → Actions to enable."
+            {
+              echo "### ⚠️ Production migrations NOT applied"
+              echo ""
+              echo "\`PRODUCTION_DATABASE_URL\` and/or \`PRODUCTION_DIRECT_URL\` secrets are not configured, so this run skipped \`prisma migrate deploy\`."
+              echo ""
+              echo "Add both in **Settings → Secrets and variables → Actions** to enable automatic production migrations on merge to main."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Apply pending migrations
+        if: steps.preflight.outputs.configured == 'true'
         env:
           DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
           DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}
