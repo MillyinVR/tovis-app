@@ -14,6 +14,7 @@ import {
 import { createEmailDeliveryProvider } from '@/lib/notifications/delivery/sendEmail'
 import { createInAppDeliveryProvider } from '@/lib/notifications/delivery/sendInApp'
 import { createSmsDeliveryProvider } from '@/lib/notifications/delivery/sendSms'
+import { readOptionalEnv as readEnv, requireEnv } from '@/lib/env'
 import { getRedis } from '@/lib/redis'
 import { rootTenantContext } from '@/lib/tenant/context'
 import { getRootTenantId } from '@/lib/tenant/resolveTenant'
@@ -33,20 +34,6 @@ function readTake(req: Request): number {
 
   if (!Number.isFinite(parsed)) return DEFAULT_TAKE
   return Math.max(1, Math.min(MAX_TAKE, parsed))
-}
-
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim()
-  return value && value.length > 0 ? value : null
-}
-
-function requireEnv(name: string): string {
-  const value = readEnv(name)
-  if (!value) {
-    throw new Error(`Missing ${name} configuration.`)
-  }
-
-  return value
 }
 
 function buildRealtimeChannel(recipientInAppTargetId: string): string {

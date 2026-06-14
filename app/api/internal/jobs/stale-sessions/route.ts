@@ -22,6 +22,7 @@ import { BookingStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
+import { readOptionalEnv as readEnv } from '@/lib/env'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
@@ -32,10 +33,6 @@ export const runtime = 'nodejs'
 const DEFAULT_STALE_PENDING_HOURS = 48
 const DEFAULT_STALE_IN_PROGRESS_HOURS = 12
 const SCAN_LIMIT = 500
-
-function readEnv(name: string): string | null {
-  return process.env[name] ?? null
-}
 
 function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = readEnv(name)

@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 
+import { readOptionalEnv as envOrNull } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { logAuthEvent } from '@/lib/observability/authEvents'
@@ -53,11 +54,6 @@ function envOrThrow(name: string): string {
     throw new Error(`Missing env var: ${name}`)
   }
   return value
-}
-
-function envOrNull(name: string): string | null {
-  const value = process.env[name]?.trim()
-  return value ? value : null
 }
 
 function sanitizeInternalPath(raw: string | null | undefined): string | null {

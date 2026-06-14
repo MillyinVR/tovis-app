@@ -2,6 +2,8 @@
 
 import { NotificationProvider, Prisma } from '@prisma/client'
 
+import { readOptionalEnv as readEnv } from '@/lib/env'
+
 export type PostmarkWebhookPayload = Prisma.InputJsonObject
 
 export type PostmarkDeliveryWebhookKind =
@@ -62,10 +64,6 @@ function readDate(value: unknown): Date | null {
   }
 
   return null
-}
-
-function readEnv(name: string): string | null {
-  return readOptionalString(process.env[name])
 }
 
 export function readPostmarkWebhookSecret(): string | null {

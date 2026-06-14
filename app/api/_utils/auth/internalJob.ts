@@ -1,10 +1,6 @@
 // app/api/_utils/auth/internalJob.ts
 import { timingSafeEqualUtf8 } from '@/lib/auth/timingSafe'
-
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim()
-  return value && value.length > 0 ? value : null
-}
+import { readOptionalEnv as readEnv } from '@/lib/env'
 
 /**
  * Shared secret used to authorize internal job / cron route invocations.

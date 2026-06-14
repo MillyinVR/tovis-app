@@ -1,6 +1,8 @@
 // lib/twilio/verify.ts
 import Twilio from 'twilio'
 
+import { readOptionalEnv as readEnv } from '@/lib/env'
+
 type TwilioVerifyConfig = {
   accountSid: string
   authToken: string
@@ -31,11 +33,6 @@ export type TwilioVerifyCheckResult =
       code: 'TWILIO_VERIFY_NOT_CONFIGURED' | 'TWILIO_VERIFY_CHECK_FAILED'
       message: string
     }
-
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim()
-  return value && value.length > 0 ? value : null
-}
 
 function readTwilioVerifyConfig(): TwilioVerifyConfig | null {
   const accountSid = readEnv('TWILIO_ACCOUNT_SID')
