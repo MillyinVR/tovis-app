@@ -7,14 +7,9 @@ import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { prisma } from '@/lib/prisma'
 import { buildViralRequestUploadTargetPath } from '@/lib/viralRequests'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
+import { isRecord, type UnknownRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
-
-type UnknownRecord = Record<string, unknown>
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === 'object' && value !== null
-}
 
 function trimString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''

@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs'
 import jwt, { type JwtPayload as JsonWebTokenPayload } from 'jsonwebtoken'
+import { isRecord } from '@/lib/guards'
 
 const JWT_SECRET = process.env.JWT_SECRET
 
@@ -26,10 +27,6 @@ type TokenSubject = {
 
 export type AuthTokenPayload = TokenSubject & {
   sessionKind: AuthSessionKind
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 function isNonEmptyString(value: unknown): value is string {

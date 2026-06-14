@@ -4,11 +4,8 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
-}
 
 type DeleteDocButtonProps = {
   docId: string
