@@ -1,6 +1,7 @@
 import React from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  BookingCheckoutStatus,
   BookingServiceItemType,
   BookingStatus,
   Prisma,
@@ -117,6 +118,9 @@ function makeBooking(overrides?: {
   clientId?: string
   firstName?: string
   lastName?: string
+  checkoutStatus?: BookingCheckoutStatus
+  paymentCollectedAt?: Date | null
+  aftercareSentAt?: Date | null
 }) {
   return {
     id: overrides?.id ?? 'booking_1',
@@ -133,6 +137,16 @@ function makeBooking(overrides?: {
         ? overrides.finishedAt
         : null,
     locationTimeZone: 'America/Los_Angeles',
+
+    checkoutStatus: overrides?.checkoutStatus ?? BookingCheckoutStatus.NOT_READY,
+    paymentCollectedAt:
+      overrides && 'paymentCollectedAt' in overrides
+        ? overrides.paymentCollectedAt
+        : null,
+    aftercareSummary:
+      overrides && 'aftercareSentAt' in overrides
+        ? { sentToClientAt: overrides.aftercareSentAt ?? null }
+        : null,
 
     totalDurationMinutes: 75,
     subtotalSnapshot: new Prisma.Decimal(100),
@@ -379,6 +393,68 @@ describe('app/pro/bookings/page.tsx', () => {
 
     expect(hasText(page, 'Resume session')).toBe(true)
     expect(hasText(page, 'SERVICE IN PROGRESS')).toBe(true)
+  })
+
+  it('renders a Payment due badge linking to the session for aftercare-sent-but-unpaid bookings', async () => {
+    const needsCloseoutBooking = makeBooking({
+      id: 'booking_closeout_1',
+      status: BookingStatus.IN_PROGRESS,
+      startedAt: new Date('2026-04-12T18:00:00.000Z'),
+      finishedAt: null,
+      aftercareSentAt: new Date('2026-04-12T19:00:00.000Z'),
+      checkoutStatus: BookingCheckoutStatus.NOT_READY,
+      paymentCollectedAt: null,
+    })
+
+    const page = await renderPage({
+      status: 'IN_PROGRESS',
+      todayBookings: [needsCloseoutBooking],
+    })
+
+    expect(hasText(page, 'Payment due')).toBe(true)
+
+    const anchors = findAnchors(page)
+    expect(
+      anchors.some(
+        (anchor) =>
+          anchor.props.href === '/pro/bookings/booking_closeout_1/session',
+      ),
+    ).toBe(true)
+  })
+
+  it('does not render the Payment due badge once payment + checkout closeout is complete', async () => {
+    const closedOutBooking = makeBooking({
+      id: 'booking_closeout_done_1',
+      status: BookingStatus.IN_PROGRESS,
+      startedAt: new Date('2026-04-12T18:00:00.000Z'),
+      finishedAt: null,
+      aftercareSentAt: new Date('2026-04-12T19:00:00.000Z'),
+      checkoutStatus: BookingCheckoutStatus.PAID,
+      paymentCollectedAt: new Date('2026-04-12T19:05:00.000Z'),
+    })
+
+    const page = await renderPage({
+      status: 'IN_PROGRESS',
+      todayBookings: [closedOutBooking],
+    })
+
+    expect(hasText(page, 'Payment due')).toBe(false)
+  })
+
+  it('does not render the Payment due badge before aftercare is sent', async () => {
+    const activeBooking = makeBooking({
+      id: 'booking_active_no_aftercare',
+      status: BookingStatus.IN_PROGRESS,
+      startedAt: new Date('2026-04-12T18:00:00.000Z'),
+      finishedAt: null,
+    })
+
+    const page = await renderPage({
+      status: 'IN_PROGRESS',
+      todayBookings: [activeBooking],
+    })
+
+    expect(hasText(page, 'Payment due')).toBe(false)
   })
 
   it('falls back to All when an unknown status filter is provided', async () => {

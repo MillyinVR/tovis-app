@@ -21,6 +21,7 @@ import {
   zonedTimeToUtc,
 } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
+import { isCloseoutPaymentAndAftercareComplete } from '@/lib/booking/closeoutState'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,6 +50,14 @@ const bookingSelect = {
   startedAt: true,
   finishedAt: true,
   locationTimeZone: true,
+
+  checkoutStatus: true,
+  paymentCollectedAt: true,
+  aftercareSummary: {
+    select: {
+      sentToClientAt: true,
+    },
+  },
 
   totalDurationMinutes: true,
   subtotalSnapshot: true,
@@ -164,6 +173,43 @@ function StatusPill({ status }: { status: string }) {
     >
       {formatStatus(s)}
     </span>
+  )
+}
+
+// A booking "needs closeout" when the pro has sent aftercare (so it drops out
+// of the active-session footer) but payment + checkout aren't finished yet. It
+// still lives under the Active/IN_PROGRESS filter and otherwise looks identical
+// to a session still being worked — this is the "don't forget me" surface the
+// footer used to provide. The booking is intentionally NOT auto-completed on
+// aftercare send; it completes via closeout logic once payment lands.
+function needsCloseout(booking: BookingRow): boolean {
+  if (
+    booking.status !== BookingStatus.ACCEPTED &&
+    booking.status !== BookingStatus.IN_PROGRESS
+  ) {
+    return false
+  }
+  if (booking.finishedAt) return false
+
+  const aftercareSentAt = booking.aftercareSummary?.sentToClientAt ?? null
+  if (!aftercareSentAt) return false
+
+  return !isCloseoutPaymentAndAftercareComplete({
+    aftercareSentAt,
+    checkoutStatus: booking.checkoutStatus,
+    paymentCollectedAt: booking.paymentCollectedAt,
+  })
+}
+
+function CloseoutBadge({ bookingId }: { bookingId: string }) {
+  return (
+    <Link
+      href={`/pro/bookings/${encodeURIComponent(bookingId)}/session`}
+      title="Aftercare sent, but payment isn't collected yet. Tap to finish closeout."
+      className="inline-flex items-center gap-1 rounded-full border border-toneWarn/40 bg-toneWarn/10 px-2 py-1 text-[11px] font-black text-toneWarn transition hover:border-toneWarn/70 hover:bg-toneWarn/15"
+    >
+      Payment due
+    </Link>
   )
 }
 
@@ -403,6 +449,10 @@ function Section({
                       </div>
 
                       <StatusPill status={booking.status} />
+
+                      {needsCloseout(booking) ? (
+                        <CloseoutBadge bookingId={booking.id} />
+                      ) : null}
                     </div>
 
                     <div className="mt-1 text-[12px] text-textSecondary">
