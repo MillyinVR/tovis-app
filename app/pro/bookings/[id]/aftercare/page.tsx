@@ -9,10 +9,14 @@ import {
 } from '@prisma/client'
 
 import AftercareForm from './AftercareForm'
+import ClientProfilePanel from './ClientProfilePanel'
+import ServicesReceivedCard from './ServicesReceivedCard'
 
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 import { getCurrentUser } from '@/lib/currentUser'
+import { moneyToFixed2String } from '@/lib/money'
 import { prisma } from '@/lib/prisma'
+import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import {
   aftercareHref,
   isTerminalBooking,
@@ -431,15 +435,39 @@ export default async function ProAftercarePage({ params }: PageProps) {
     select: {
       id: true,
       professionalId: true,
+      clientId: true,
       status: true,
       startedAt: true,
       finishedAt: true,
       sessionStep: true,
       locationTimeZone: true,
 
+      serviceSubtotalSnapshot: true,
+      discountAmount: true,
+      taxAmount: true,
+      tipAmount: true,
+      totalAmount: true,
+
       service: {
         select: {
           name: true,
+        },
+      },
+
+      serviceItems: {
+        orderBy: {
+          sortOrder: 'asc',
+        },
+        select: {
+          id: true,
+          itemType: true,
+          priceSnapshot: true,
+          durationMinutesSnapshot: true,
+          service: {
+            select: {
+              name: true,
+            },
+          },
         },
       },
 
@@ -450,6 +478,39 @@ export default async function ProAftercarePage({ params }: PageProps) {
           user: {
             select: {
               email: true,
+            },
+          },
+          allergies: {
+            orderBy: {
+              createdAt: 'desc',
+            },
+            select: {
+              id: true,
+              label: true,
+              severity: true,
+              description: true,
+              createdAt: true,
+              recordedBy: {
+                select: {
+                  businessName: true,
+                  firstName: true,
+                  lastName: true,
+                },
+              },
+            },
+          },
+          notes: {
+            where: {
+              professionalId,
+            },
+            orderBy: {
+              createdAt: 'desc',
+            },
+            select: {
+              id: true,
+              title: true,
+              body: true,
+              createdAt: true,
             },
           },
         },
@@ -581,6 +642,45 @@ export default async function ProAftercarePage({ params }: PageProps) {
     booking.client?.user?.email ||
     'Client'
 
+  const serviceLines = booking.serviceItems.map((item) => ({
+    id: item.id,
+    name: item.service?.name?.trim() || 'Service',
+    isAddOn: item.itemType === 'ADD_ON',
+    price: moneyToFixed2String(item.priceSnapshot),
+    durationMinutes: item.durationMinutesSnapshot ?? null,
+  }))
+
+  const pricing = {
+    serviceSubtotal: moneyToFixed2String(booking.serviceSubtotalSnapshot),
+    discount: moneyToFixed2String(booking.discountAmount),
+    tax: moneyToFixed2String(booking.taxAmount),
+    tip: moneyToFixed2String(booking.tipAmount),
+    total: moneyToFixed2String(booking.totalAmount),
+  }
+
+  const clientAllergies = (booking.client?.allergies ?? []).map((allergy) => ({
+    id: allergy.id,
+    label: allergy.label,
+    severity: String(allergy.severity),
+    description: allergy.description ?? null,
+    createdAt: allergy.createdAt.toISOString(),
+    recordedByName: allergy.recordedBy
+      ? formatPublicProfileDisplayName({
+          businessName: allergy.recordedBy.businessName,
+          firstName: allergy.recordedBy.firstName,
+          lastName: allergy.recordedBy.lastName,
+          fallback: 'Professional',
+        })
+      : null,
+  }))
+
+  const clientNotes = (booking.client?.notes ?? []).map((note) => ({
+    id: note.id,
+    title: note.title ?? null,
+    body: note.body,
+    createdAt: note.createdAt.toISOString(),
+  }))
+
   const hasAftercareDraft = Boolean(aftercare?.id)
   const hasFinalizedAftercare = Boolean(aftercare?.sentToClientAt)
 
@@ -609,6 +709,18 @@ export default async function ProAftercarePage({ params }: PageProps) {
           sentToClientAt={aftercare?.sentToClientAt}
           version={aftercare?.version}
         />
+
+        <div className="mt-4">
+          <ServicesReceivedCard services={serviceLines} pricing={pricing} />
+        </div>
+
+        <div className="mt-4">
+          <ClientProfilePanel
+            clientId={booking.clientId}
+            allergies={clientAllergies}
+            notes={clientNotes}
+          />
+        </div>
 
         <div className="mt-4 pb-4">
           <AftercareForm
