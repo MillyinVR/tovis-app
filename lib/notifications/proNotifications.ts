@@ -23,6 +23,7 @@ const notificationIdSelect = {
 const professionalDispatchRecipientSelect = {
   id: true,
   userId: true,
+  homeTenantId: true,
   phone: true,
   phoneVerifiedAt: true,
   timeZone: true,
@@ -167,11 +168,13 @@ function buildUpdateData(
 
 function buildCreateData(
   normalized: NormalizedCreateArgs,
+  proTenantId: string,
 ): Prisma.NotificationUncheckedCreateInput {
   const data = normalizeJsonField(normalized.data)
 
   return {
     professionalId: normalized.professionalId,
+    proTenantId,
     eventKey: normalized.eventKey,
     priority: normalized.priority,
     title: normalized.title,
@@ -310,13 +313,11 @@ function resolvePreferredPhone(
 async function enqueueNewProNotificationDispatch(args: {
   notificationId: string
   normalized: NormalizedCreateArgs
+  professional: ProfessionalDispatchRecipientRow
+  preference: ProfessionalNotificationPreferenceRow | null
   tx?: Prisma.TransactionClient
 }): Promise<void> {
-  const { professional, preference } = await getProfessionalDispatchRecipient({
-    professionalId: args.normalized.professionalId,
-    eventKey: args.normalized.eventKey,
-    tx: args.tx,
-  })
+  const { professional, preference } = args
 
   const preferredPhone = resolvePreferredPhone(professional)
 
@@ -346,6 +347,42 @@ async function enqueueNewProNotificationDispatch(args: {
 }
 
 /**
+ * Creates a brand-new inbox row and enqueues its first delivery cycle.
+ *
+ * Loads the professional once and reuses that row for both the tenant
+ * attribution snapshot (proTenantId mirrors the Pro's home tenant) and the
+ * dispatch recipient — avoiding a second profile lookup. The load happens
+ * before the insert because proTenantId is written at create time; a missing
+ * profile is a caller data-integrity bug and throws rather than writing a null
+ * tenant snapshot.
+ */
+async function createAndDispatchProNotification(args: {
+  normalizedForCreate: NormalizedCreateArgs
+  tx: Prisma.TransactionClient
+}): Promise<ProNotificationCreateResult> {
+  const { professional, preference } = await getProfessionalDispatchRecipient({
+    professionalId: args.normalizedForCreate.professionalId,
+    eventKey: args.normalizedForCreate.eventKey,
+    tx: args.tx,
+  })
+
+  const created = await args.tx.notification.create({
+    data: buildCreateData(args.normalizedForCreate, professional.homeTenantId),
+    select: notificationIdSelect,
+  })
+
+  await enqueueNewProNotificationDispatch({
+    notificationId: created.id,
+    normalized: args.normalizedForCreate,
+    professional,
+    preference,
+    tx: args.tx,
+  })
+
+  return created
+}
+
+/**
  * Idempotent pro notification creation.
  *
  * Contract:
@@ -370,21 +407,10 @@ export async function createProNotification(
     const normalized = normalizeCreateArgs(args)
 
     if (!normalized.dedupeKey) {
-      const created = await tx.notification.create({
-        data: buildCreateData({
-          ...normalized,
-          dedupeKey: null,
-        }),
-        select: notificationIdSelect,
-      })
-
-      await enqueueNewProNotificationDispatch({
-        notificationId: created.id,
-        normalized,
+      return createAndDispatchProNotification({
+        normalizedForCreate: { ...normalized, dedupeKey: null },
         tx,
       })
-
-      return created
     }
 
     const updated = await tx.notification.updateMany({
@@ -404,18 +430,10 @@ export async function createProNotification(
     }
 
     try {
-      const created = await tx.notification.create({
-        data: buildCreateData(normalized),
-        select: notificationIdSelect,
-      })
-
-      await enqueueNewProNotificationDispatch({
-        notificationId: created.id,
-        normalized,
+      return await createAndDispatchProNotification({
+        normalizedForCreate: normalized,
         tx,
       })
-
-      return created
     } catch (error) {
       if (!isUniqueConstraintError(error)) {
         throw error

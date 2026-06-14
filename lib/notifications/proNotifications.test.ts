@@ -71,6 +71,7 @@ describe('lib/notifications/proNotifications', () => {
     mockPrisma.professionalProfile.findUnique.mockResolvedValue({
       id: 'pro_1',
       userId: 'user_1',
+      homeTenantId: 'tenant_pro_1',
       phone: '+15551234567',
       phoneVerifiedAt: new Date('2026-04-08T09:00:00.000Z'),
       timeZone: 'America/Los_Angeles',
@@ -113,6 +114,7 @@ describe('lib/notifications/proNotifications', () => {
     expect(mockPrisma.notification.create).toHaveBeenCalledWith({
       data: {
         professionalId: 'pro_1',
+        proTenantId: 'tenant_pro_1',
         eventKey,
         priority: expectedPriority,
         title: 'New review received',
@@ -140,6 +142,7 @@ describe('lib/notifications/proNotifications', () => {
       select: {
         id: true,
         userId: true,
+        homeTenantId: true,
         phone: true,
         phoneVerifiedAt: true,
         timeZone: true,
@@ -205,6 +208,7 @@ describe('lib/notifications/proNotifications', () => {
     mockPrisma.professionalProfile.findUnique.mockResolvedValue({
       id: 'pro_1',
       userId: 'user_1',
+      homeTenantId: 'tenant_pro_1',
       phone: null,
       phoneVerifiedAt: null,
       timeZone: 'America/Los_Angeles',
@@ -342,11 +346,14 @@ describe('lib/notifications/proNotifications', () => {
       select: { id: true },
     })
 
+    // The pro is loaded once for the tenant snapshot before the create that
+    // loses the race; the create throws before any delivery is enqueued, so the
+    // retry settles as an update without a second delivery cycle.
     expect(mockEnqueueDispatch).not.toHaveBeenCalled()
-    expect(mockPrisma.professionalProfile.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.professionalProfile.findUnique).toHaveBeenCalledTimes(1)
     expect(
       mockPrisma.professionalNotificationPreference.findUnique,
-    ).not.toHaveBeenCalled()
+    ).toHaveBeenCalledTimes(1)
   })
 
   it('throws when the professional cannot be loaded for dispatch enqueue', async () => {
