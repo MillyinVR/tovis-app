@@ -61,3 +61,6 @@ test-results/
 
 .env*.local
 .env.staging.local
+
+# Local-only dev scratch tools (machine-specific paths)
+.tovis-smoke-watch.cjs
