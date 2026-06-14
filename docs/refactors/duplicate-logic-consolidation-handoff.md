@@ -47,53 +47,124 @@ in #127 (see lesson below).
 
 ## Remaining backlog
 
-Ordered roughly by value-to-risk. **None are clean mechanical sweeps anymore** —
-each needs judgment or a decision.
+Refreshed by a full re-audit on 2026-06-14 (5 parallel sweeps over `main` after
+#125–#138 merged). All canonical modules above are holding — nothing regressed.
+The re-audit found materially MORE than the first pass; the clean zero-risk sweeps
+in Tier A were missed originally. Counts are approximate.
 
-### Bounded but needs a decision
-1. **`professionalName`** (~6 files: 5 client components + `app/api/calendar/route.ts`).
-   Three different fallback policies: client components use
-   `businessName ?? handle ?? 'Professional'`; calendar uses `?? email`; the existing
-   `lib/privacy/professionalDisplayName.ts` uses `?? "first last"`. Unifying changes
-   display/privacy behavior → **product decision required** before consolidating.
-2. **Inline initials → `lib/initials.ts` `initialsForName`** (e.g. `app/messages/page.tsx`,
-   `ManagementModal`, `ProProfileCard`). Small; verify each inline version matches before swapping.
-3. **`envOrThrow` → `requireEnv`** (`lib/auth/passwordReset.ts`, `lib/auth/emailVerification.ts`).
-   Two copies, identical to `requireEnv` except the thrown message string ("Missing env var: X"
-   vs "Missing required environment variable: X"). Trivial, but a test may pin the message.
+### Tier A — clean zero-risk sweeps (canonical already exists; isRecord-style)
+Best effort/reward. Each is "delete N local copies, import the existing helper."
+1. **`normalizeOptionalString` → `lib/guards.ts` `asTrimmedString`** — ~18 identical copies
+   (`(v) => typeof v === 'string' ? (v.trim() || null) : null`). e.g.
+   `lib/clientActions/policies.ts:29`, `lib/notifications/delivery/sendEmail.ts:59`
+   (+ sendSms/sendInApp/completeDeliveryAttempt), `lib/booking/createProBookingWithClient.ts:129`,
+   `lib/admin/auditLog.ts:77`.
+2. **`errorMessageFromUnknown` / `getErrorMessage` → `lib/http.ts` `errorMessageFromUnknown`** —
+   ~17 copies (7 are health checks: `lib/health/{stripe,postgres,storage,postmark,twilio,redis,checks}.ts`;
+   plus `app/pro/profile/ReviewsPanel.tsx:48`, `OfferingManager.tsx:156`, `app/api/admin/permissions/route.ts:39`).
+   Pass the per-site fallback as the 2nd arg.
+3. **`trimToNull` / `trimOrNull` → `asTrimmedString`** — 5 copies
+   (`lib/privacy/professionalDisplayName.ts:17`, `lib/profiles/publicProfileFormatting.ts:44`,
+   `app/api/pro/offerings/route.ts:32` + `[id]/route.ts:39`, `app/api/admin/permissions/route.ts:34`).
+   The `undefined`-passthrough variant needs one shared helper, not two private copies.
+4. **`envOrThrow` → `lib/env.ts` `requireEnv`** — `lib/auth/passwordReset.ts`, `lib/auth/emailVerification.ts`
+   (both already import `readOptionalEnv as envOrNull` from `lib/env`; just swap the throw helper). NB the
+   thrown message changes ("Missing env var: X" → "Missing required environment variable: X") — check tests.
+5. **Inline initials → `lib/initials.ts` `initialsForName`** — `app/messages/page.tsx:180`,
+   `app/pro/calendar/_components/ManagementModal.tsx:284` (other surfaces already import it).
+6. **`kmToMiles` → `lib/discovery/nearby.ts`** — `app/pro/locations/LocationsClient.tsx:52`,
+   `app/api/pro/onboarding/location/route.ts:80` (`Math.round(km * 0.621371)`).
 
-### Larger / lower-value
-4. **`RouteContext` type** — `type Ctx = { params: {id} | Promise<{id}> }` is redeclared ~45×,
-   with three params-await styles (`await ctx.params`, `await context.params`,
-   `await Promise.resolve(params)`). Pure ergonomic churn across many files; low value.
+### Tier B — cleanup / correctness (small, high-value)
+7. **DELETE dead webhook routes.** `app/api/webhooks/{postmark,twilio}/route.ts` reimplement
+   signature verification + event parsing already in `lib/notifications/webhooks/*` — and the
+   re-audit confirmed they're **unwired** (zero references; the live handlers are
+   `app/api/internal/webhooks/...`; `sendSms.ts` points the Twilio callback at the internal route).
+   Delete both routes + their `route.test.ts`, and fix the ~5 runbooks that cite the old paths.
+8. **Upload-signing URL builder (latent bug).** `pro/uploads`, `client/uploads`,
+   `viral-service-requests/upload`, `pro/media`, `admin/uploads` build the `media-public` URL inline
+   **without** `encodeURIComponent` — unlike canonical `lib/media/renderUrls.ts` (which encodes each
+   segment). Breaks on paths with spaces/unicode. Also `guessExtFromType` is duplicated and the
+   `image/`+`video/`+30MB validation is copy-pasted. Extract `lib/media/signUpload.ts`
+   (`guessExtFromType`, `MAX_UPLOAD_BYTES`, `assertUploadContentType`, `buildPublicObjectUrl`
+   reusing the renderUrls encoder, `extractSignedUpload`).
 
-### High-risk — write parity/behavior tests FIRST, one PR each
-5. **Idempotency `withRouteIdempotency` wrapper** (~46 routes). Each mutating route
-   hand-wires `beginRouteIdempotency` / `isRouteIdempotencyHandled` / `completeRouteIdempotency`
-   / `failStartedRouteIdempotency`. Forgetting the catch-side `failStarted` leaves records
-   "in progress" → spurious 409s. A higher-order wrapper that owns the lifecycle prevents
-   that, but it changes control flow on payment/booking paths. Add tests before refactoring.
-6. **Conflict-engine merge.** `findSchedulingConflicts` (`lib/booking/schedulingConflicts.ts`,
-   `calculateWindowEnd` — no clamping) vs `getTimeRangeConflict`
-   (`lib/booking/conflictQueries.ts`, `bookingToBusyInterval` — clamps duration to [15, 720]
-   and buffer to [0, 180]). They still differ in end-time clamping. Unifying touches the core
-   booking write path (`writeBoundary.ts`); needs parity tests proving identical results first.
+### Tier C — mechanical, mid-size
+9. **Booking policy scaffolding.** `WORKING_HOURS_ERROR_PREFIX` (×6), `getReadableWorkingHoursMessage`
+   (×4), `mapSlotReadinessCodeToBookingCode` (×3), the `computedRequestedEnd` line, and the
+   conflict-code→fail mapping are copy-pasted across `lib/booking/policies/{holdPolicy,finalizePolicy,
+   reschedulePolicy,proSchedulingPolicy}.ts` (+ `slotReadiness.ts`, `writeBoundary.ts`). Extract
+   `lib/booking/policies/_shared.ts`. Mechanical, no behavior change.
+10. **Timezone helpers.** `localMinutesSinceMidnight`/`localDaySerial`/`offsetFromWindowStartDay`
+    triplicated (`lib/booking/workingHoursGuard.ts`, `lib/scheduling/workingHours.ts` — byte-identical —
+    and a re-impl in `lib/booking/slotReadiness.ts`); promote to `lib/timeZone.ts` (already exports
+    `minutesSinceMidnightInTimeZone`/`getZonedParts`). Related: `lib/booking/dateTime.ts` has its own
+    `Intl` part-extraction stack duplicating `lib/timeZone.ts` — re-base it. And a "first valid IANA TZ
+    else UTC" resolver is hand-rolled ~6× in `writeBoundary.ts`/`timeZoneTruth.ts`/`locationContext.ts`
+    instead of `pickTimeZoneOrNull`/`sanitizeTimeZone`.
+11. **`professionalName`** (~6 files) — needs a **product decision**: client components use
+    `businessName ?? handle ?? 'Professional'`; `app/api/calendar/route.ts` uses `?? email`; the existing
+    `lib/privacy/professionalDisplayName.ts` uses `?? "first last"`. Pick one policy first. (Also a related
+    `firstName + lastName` client-name helper is duplicated ~3×.)
+12. **Per-route booking-id extraction** — `pickString(params.id)` / `asTrimmedString` / local
+    `normalizeBookingId` / `getBookingIdFromContext` across ~15 booking routes, each with its own
+    `BOOKING_ID_REQUIRED` fail. Fold into a `requireBookingId(ctx)` helper (pairs with #13).
+13. **`RouteContext` type** — `type Ctx = { params: {id} | Promise<{id}> }` redeclared ~60×, three
+    params-await styles, a `readParams` helper copied 5×. Export `RouteCtx<T>` + `resolveParams(ctx)`.
+    Broad but low-value churn.
+14. **Debug step/lead-time block** — identical `stepMinutes`/`leadTimeMinutes` debug-override resolution
+    copied across `app/api/availability/{day,bootstrap,alternates}/route.ts`. Small.
 
-### Rate-limit (only if explicitly scoped)
-7. **Two rate-limit stacks.** `app/api/_utils/rateLimit.ts` (`enforceRateLimit`, returns a
-   `Response`) is built **on top of** `lib/rateLimit/enforce` + `lib/rateLimit/response.ts`
-   (`rateLimitExceededResponse`) + `lib/rateLimit/identity.ts` (`clientRateLimitKey`). ~20
-   routes call the lower-level stack directly. Unifying is an **API redesign on a
-   correctness-sensitive path**, not a swap — only do it if deliberately scoped with tests.
+### Tier D — high-risk (write parity/behavior tests FIRST, one PR each)
+15. **Idempotency `withRouteIdempotency` wrapper** (~21 mutating routes) — they hand-wire
+    `beginRouteIdempotency` / `isRouteIdempotencyHandled` / `completeRouteIdempotency` /
+    `failStartedRouteIdempotency`. Forgetting the catch-side `failStarted` leaves records "in progress"
+    → spurious 409s. A higher-order wrapper that owns the lifecycle prevents that, but it changes control
+    flow on payment/booking paths. Tests first.
+16. **Conflict-engine merge** — `findSchedulingConflicts` (`lib/booking/schedulingConflicts.ts`,
+    `calculateWindowEnd` — no clamping, 0 fallback, no minute-normalize) vs `getTimeRangeConflict`
+    (`lib/booking/conflictQueries.ts` → `bookingToBusyInterval`/`holdToBusyInterval` — clamps duration
+    [15, 720] + buffer [0, 180], normalizes start to the minute). **Latent correctness bug:** the two
+    paths can decide a slot oppositely (e.g. duration < 15 or sub-minute `scheduledFor`).
+    `findSchedulingConflicts` has ONE caller (`writeBoundary.ts:4659`). Make it build intervals from the
+    `conflicts.ts` helpers and delete `calculateWindowEnd`. Core write path — parity tests first.
 
-### Notifications (Wave 5)
-8. Legacy `app/api/webhooks/{postmark,twilio}/route.ts` reimplement signature verification +
-   event parsing that already live in `lib/notifications/webhooks/*` — **first verify whether
-   they're still wired up**; they may be deletable.
-9. `lib/notifications/proNotifications.ts` and `clientNotifications.ts` are near-identical
-   (shared dedupe-upsert + dispatch could be one generic).
-10. Quiet-hours math duplicated across `channelPolicy.ts` and
-    `delivery/runtimeChannelPolicy.ts` (`normalizeMinuteOfDay`, `isWithinQuietHours`).
+### Tier E — rate-limit (only if explicitly scoped)
+17. **Two rate-limit stacks.** `app/api/_utils/rateLimit.ts` (`enforceRateLimit`, returns a `Response`)
+    is built **on top of** `lib/rateLimit/enforce` + `lib/rateLimit/response.ts` (`rateLimitExceededResponse`)
+    + `lib/rateLimit/identity.ts` (`clientRateLimitKey`). ~9 routes call the lower-level stack directly,
+    ~13 use `enforceRateLimit`. The core algorithm is already shared; the dup is the call-site idiom + the
+    second response builder. An API-redesign on a correctness path — only with tests.
+
+### Tier F — notifications
+18. `lib/notifications/proNotifications.ts` ≈ `clientNotifications.ts` — the entire idempotent
+    dedupe-upsert + dispatch state machine is mirrored, plus `norm*` helpers, `isUniqueConstraintError`,
+    `normInternalHref`, `resolvePreferred*Phone`, `MAX_*` constants. Extract a generic
+    `dedupeUpsertNotification(...)` + a shared field-norm module.
+19. **Quiet-hours math** duplicated across `lib/notifications/channelPolicy.ts` and
+    `delivery/runtimeChannelPolicy.ts` (`normalizeMinuteOfDay`, `channelUsesQuietHours`,
+    `isWithinQuietHours`). Move to `lib/notifications/quietHours.ts`.
+20. **Provider send-failure boilerplate** in `delivery/send{Email,Sms,InApp}.ts`
+    (`buildConfigurationFailure`/`buildRequestFailure`/`buildThrownFailure` + norm helpers). Lowest impact.
+
+### Tier G — frontend (Tier 3; largely untouched)
+21. **Auth-redirect + form-submit state machine** (HIGHEST frontend impact). `currentPathWithQuery` /
+    `sanitizeFrom` / `redirectToLogin` redefined in ~9 files; `errorFromResponse` in ~15; local
+    `isAbortError` in 7; the abort+loading+error+`401→redirect`+"Please log in to continue." scaffold in
+    ~12. A shared extraction already exists at `app/(main)/booking/AvailabilityDrawer/utils/authRedirect.ts`
+    (drawer-only). Promote it to `lib/`, add a `useApiFormSubmit` hook, add `errorFromResponse` to
+    `lib/http.ts` (built on `readErrorMessage`).
+22. **Modal scaffolding** — no shared primitive; `keydown === 'Escape'` handler in ~20 files,
+    `document.body.style.overflow` scroll-lock in ~28. Extract `useCloseOnEscape()` + `useBodyScrollLock()`
+    (or a `<ModalShell>`).
+23. **UI primitives** — `StatusPill` (×5), `SectionCard` (×6), `Pill` (×8, three byte-identical) redefined
+    per page; local `statusTone` (×2) duplicates `app/pro/calendar/_utils/statusStyles.ts`. Add shared
+    `components/ui` versions driven by `statusStyles.ts`.
+24. **Inline `Intl.DateTimeFormat`** in ~28 components (many with the exact `formatAppointmentWhen` option
+    set) instead of `lib/formatInTimeZone.ts`; `prettyWhen`/`formatWhen` are two re-impls of
+    `formatAppointmentWhen`.
+25. **Ad-hoc money formatters** (~8) and **local `safeJson` variants** (~4) instead of `lib/money.ts` /
+    `lib/http.ts` — fold the AvailabilityDrawer's content-type-aware `safeJson` superset into `lib/http.ts`.
 
 ## Working style that worked
 
