@@ -7,7 +7,7 @@ import {
   pickString,
   requireUser,
 } from '@/app/api/_utils'
-import { getCurrentUser } from '@/lib/currentUser'
+import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
 import { isRecord } from '@/lib/guards'
 import {
   canCommentOnLookPost,
@@ -77,7 +77,7 @@ export async function GET(req: Request, ctx: Ctx) {
       })
     }
 
-    const viewer = await getCurrentUser().catch(() => null)
+    const viewer = await getOptionalUser()
 
     const access = await loadLookAccess(prisma, {
       lookPostId,

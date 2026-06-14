@@ -6,7 +6,7 @@ import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
-import { getCurrentUser } from '@/lib/currentUser'
+import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
 import {
   logAuthEvent,
   captureAuthException,
@@ -266,7 +266,7 @@ export async function POST(request: Request) {
       200,
     )
 
-    const currentUser = await getCurrentUser().catch(() => null)
+    const currentUser = await getOptionalUser()
     if (currentUser?.id === result.id) {
       const sessionToken = isFullyVerified
         ? createActiveToken({

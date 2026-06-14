@@ -1,12 +1,12 @@
 // app/api/debug/me/route.ts
 
 import { NextResponse } from 'next/server'
-import { getCurrentUser } from '@/lib/currentUser'
+import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const user = await getCurrentUser().catch(() => null)
+  const user = await getOptionalUser()
   return NextResponse.json({
     ok: true,
     user: user

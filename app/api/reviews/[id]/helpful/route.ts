@@ -1,6 +1,6 @@
 // app/api/reviews/[id]/helpful/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
@@ -13,12 +13,9 @@ function pickTrimmedString(v: unknown): string | null {
 
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user) return jsonFail(401, 'Login required.')
-
-    if (user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return jsonFail(403, 'Only clients can mark reviews as helpful.')
-    }
+    const auth = await requireClient()
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const { id } = await ctx.params
     const reviewId = pickTrimmedString(id)
@@ -62,12 +59,9 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user) return jsonFail(401, 'Login required.')
-
-    if (user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return jsonFail(403, 'Only clients can unmark reviews as helpful.')
-    }
+    const auth = await requireClient()
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const { id } = await ctx.params
     const reviewId = pickTrimmedString(id)

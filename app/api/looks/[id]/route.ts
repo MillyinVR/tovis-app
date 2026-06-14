@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
-import { getCurrentUser } from '@/lib/currentUser'
+import { getOptionalUser } from '@/app/api/_utils/auth/getOptionalUser'
 import { loadLookAccess } from '@/lib/looks/access'
 import {
   canCommentOnLookPost,
@@ -35,7 +35,7 @@ export async function GET(_req: Request, ctx: Ctx) {
       })
     }
 
-    const viewer = await getCurrentUser().catch(() => null)
+    const viewer = await getOptionalUser()
 
     const access = await loadLookAccess(prisma, {
       lookPostId,

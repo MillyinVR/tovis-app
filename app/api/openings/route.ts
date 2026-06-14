@@ -1,6 +1,6 @@
 // app/api/openings/route.ts
 import { prisma } from '@/lib/prisma'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import {
   LastMinuteOfferType,
@@ -476,8 +476,8 @@ function mapOpening(row: OpeningQueryRow, now: Date): OpeningDto {
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user) return jsonFail(401, 'Unauthorized.')
+    const auth = await requireUser()
+    if (!auth.ok) return auth.res
 
     const url = new URL(req.url)
 

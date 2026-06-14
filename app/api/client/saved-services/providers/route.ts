@@ -16,7 +16,7 @@ import {
   boundsForRadiusMiles,
   haversineMiles,
 } from '@/lib/discovery/nearby'
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { prisma } from '@/lib/prisma'
 import {
   clampFloat,
@@ -275,11 +275,8 @@ function mapPublicIncentive(
 
 export async function GET(req: Request) {
   try {
-    const user = await getCurrentUser().catch(() => null)
-    if (!user) return jsonFail(401, 'Login required.')
-    if (user.role !== 'CLIENT' || !user.clientProfile?.id) {
-      return jsonFail(403, 'Client only.')
-    }
+    const auth = await requireClient()
+    if (!auth.ok) return auth.res
 
     const { searchParams } = new URL(req.url)
 

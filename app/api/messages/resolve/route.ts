@@ -1,5 +1,5 @@
 // app/api/messages/resolve/route.ts
-import { getCurrentUser } from '@/lib/currentUser'
+import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString, upper } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { resolveMessageThread } from '@/lib/messagesResolve'
@@ -56,11 +56,9 @@ export async function POST(req: Request) {
   const debugId = Math.random().toString(36).slice(2, 9)
 
   try {
-    const user = await getCurrentUser().catch(() => null)
-
-    if (!user) {
-      return jsonFail(401, 'Unauthorized.')
-    }
+    const auth = await requireUser()
+    if (!auth.ok) return auth.res
+    const user = auth.user
 
     const body = await readJsonRecord(req)
 
