@@ -8,19 +8,18 @@
 import { prisma } from '@/lib/prisma'
 import { VerificationStatus } from '@prisma/client'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { pickString } from '@/lib/pick'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
-type Ctx = { params: Promise<{ id: string }> }
-
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await ctx.params
+    const { id: rawId } = await resolveRouteParams(ctx)
     const docId = pickString(rawId)
     if (!docId) return jsonFail(400, 'Missing id.')
 

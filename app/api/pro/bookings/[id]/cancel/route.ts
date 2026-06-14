@@ -9,6 +9,10 @@ import {
   failStartedRouteIdempotency,
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
 import { cancelBooking } from '@/lib/booking/writeBoundary'
 import { isRecord } from '@/lib/guards'
@@ -18,8 +22,6 @@ import { safeError, safeLogMeta } from '@/lib/security/logging'
 export const dynamic = 'force-dynamic'
 
 const ROUTE_OPERATION = 'PATCH /api/pro/bookings/[id]/cancel'
-
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type CancelResponseBody = Prisma.InputJsonObject
 
@@ -54,7 +56,7 @@ function buildCancelResponseBody(
   }
 }
 
-export async function PATCH(req: Request, ctx: Ctx) {
+export async function PATCH(req: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -75,7 +77,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
     }
 
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const bookingId = asTrimmedString(params.id)
 
     if (!bookingId) {

@@ -24,6 +24,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { createClientRebookedBookingFromAftercare } from '@/lib/booking/writeBoundary'
 import { isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -34,10 +38,6 @@ import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-type Ctx = {
-  params: { token: string } | Promise<{ token: string }>
-}
 
 type RequestMeta = {
   requestId: string | null
@@ -75,8 +75,10 @@ type RebookIdempotencyRequestBody = {
   scheduledFor: string
 }
 
-async function getRouteToken(ctx: Ctx): Promise<string | null> {
-  const params = await Promise.resolve(ctx.params)
+async function getRouteToken(
+  ctx: RouteContext<{ token: string }>,
+): Promise<string | null> {
+  const params = await resolveRouteParams(ctx)
   return pickString(params?.token)
 }
 
@@ -244,7 +246,7 @@ function buildRebookIdempotencyRequestBody(args: {
   }
 }
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: RouteContext<{ token: string }>) {
   try {
     const rawToken = await getRouteToken(ctx)
 
@@ -285,7 +287,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
 }
 
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
   let idempotencyRecordId: string | null = null
 
   try {

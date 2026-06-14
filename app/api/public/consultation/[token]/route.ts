@@ -1,16 +1,13 @@
 // app/api/public/consultation/[token]/route.ts 
 
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { prisma } from '@/lib/prisma'
 import { hashClientActionToken } from '@/lib/consultation/clientActionTokens'
 import { ClientActionTokenKind, ConsultationApprovalStatus } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-type Ctx = {
-  params: { token: string } | Promise<{ token: string }>
-}
 
 function asIso(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
@@ -37,9 +34,9 @@ function isPendingAndActionable(args: {
   return true
 }
 
-export async function GET(_request: Request, ctx: Ctx) {
+export async function GET(_request: Request, ctx: RouteContext<{ token: string }>) {
   try {
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const rawToken = pickString(params?.token)
 
     if (!rawToken) {

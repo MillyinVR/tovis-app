@@ -4,23 +4,26 @@ import { Role } from '@prisma/client'
 import { NextRequest } from 'next/server'
 
 import { requireClient, pickString, jsonFail, jsonOk } from '@/app/api/_utils'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
-type RouteContext = {
-  params: Promise<{ id: string; mediaId: string }>
-}
-
-export async function DELETE(_req: NextRequest, { params }: RouteContext) {
+export async function DELETE(
+  _req: NextRequest,
+  ctx: RouteContext<{ id: string; mediaId: string }>,
+) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
     const { user, clientId } = auth
 
-    const raw = await params
+    const raw = await resolveRouteParams(ctx)
     const reviewId = pickString(raw?.id)
     const mediaId = pickString(raw?.mediaId)
 

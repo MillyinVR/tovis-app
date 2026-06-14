@@ -11,6 +11,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { recordInPersonConsultationDecision } from '@/lib/booking/writeBoundary'
 import { ConsultationDecision, Prisma, Role } from '@prisma/client'
 import {
@@ -24,8 +28,6 @@ import { captureBookingException } from '@/lib/observability/bookingEvents'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type RequestMeta = {
   requestId: string | null
@@ -208,7 +210,7 @@ async function failStartedIdempotency(
   })
 }
 
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -225,7 +227,7 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const bookingId = pickString(params?.id)
 
     if (!bookingId) {

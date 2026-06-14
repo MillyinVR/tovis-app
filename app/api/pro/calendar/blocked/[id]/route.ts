@@ -3,6 +3,10 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { clampInt } from '@/lib/pick'
 import {
   assertNoCalendarBlockConflict,
@@ -28,10 +32,6 @@ import {
 export const dynamic = 'force-dynamic'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-type Ctx = {
-  params: { id: string } | Promise<{ id: string }>
-}
 
 type BlockRouteLocalErrorCode =
   | 'BLOCK_ID_REQUIRED'
@@ -94,8 +94,8 @@ function normalizeLocationBufferMinutes(value: unknown): number {
   return clampInt(value, 0, MAX_BUFFER_MINUTES)
 }
 
-async function getBlockId(ctx: Ctx): Promise<string | null> {
-  const params = await Promise.resolve(ctx.params)
+async function getBlockId(ctx: RouteContext): Promise<string | null> {
+  const params = await resolveRouteParams(ctx)
 
   return pickString(params?.id)
 }
@@ -254,7 +254,7 @@ function handleCalendarBlockConflictError(args: {
 
 // ─── Route handlers ───────────────────────────────────────────────────────────
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -303,7 +303,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
 }
 
-export async function PATCH(req: Request, ctx: Ctx) {
+export async function PATCH(req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -542,7 +542,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res

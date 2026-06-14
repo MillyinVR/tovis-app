@@ -7,17 +7,11 @@ import { jsonFail } from '@/app/api/_utils'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { pickMethod } from '@/app/api/_utils/pick'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
-
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
 
 function trimId(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
@@ -29,7 +23,7 @@ function redirectToPermissions(req: NextRequest): Response {
   })
 }
 
-export async function POST(req: NextRequest, ctx: Ctx) {
+export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requireUser({ roles: [Role.ADMIN] })
     if (!auth.ok) return auth.res
@@ -45,7 +39,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return permission.res
     }
 
-    const { id } = await getParams(ctx)
+    const { id } = await resolveRouteParams(ctx)
     const permissionId = trimId(id)
 
     if (!permissionId) {

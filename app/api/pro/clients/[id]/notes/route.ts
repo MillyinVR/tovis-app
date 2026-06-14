@@ -1,24 +1,26 @@
 // app/api/pro/clients/[id]/notes/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { ClientNoteVisibility } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
 
-type Ctx = { params: Promise<{ id: string }> | { id: string } }
-
 const TITLE_MAX = 80
 const BODY_MAX = 4000
 
-export async function POST(req: Request, context: Ctx) {
+export async function POST(req: Request, context: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const params = await Promise.resolve(context.params)
+    const params = await resolveRouteParams(context)
     const clientId = pickString(params.id)
     if (!clientId) return jsonFail(400, 'Missing client id.')
 

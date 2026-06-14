@@ -6,6 +6,7 @@ import {
   pickString,
   requireClient,
 } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import {
   buildLooksBoardItemMutationResponse,
   getBoardErrorMeta,
@@ -15,19 +16,15 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type Params = { id: string; lookId: string }
-type Ctx = { params: Params | Promise<Params> }
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
-
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(
+  _req: Request,
+  ctx: RouteContext<{ id: string; lookId: string }>,
+) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const { id: rawBoardId, lookId: rawLookId } = await getParams(ctx)
+    const { id: rawBoardId, lookId: rawLookId } = await resolveRouteParams(ctx)
     const boardId = pickString(rawBoardId)
     const lookPostId = pickString(rawLookId)
 

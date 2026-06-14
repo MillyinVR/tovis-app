@@ -7,6 +7,10 @@ import {
   failStartedRouteIdempotency,
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { Prisma, Role, SessionStep } from '@prisma/client'
 import {
   isBookingError,
@@ -16,8 +20,6 @@ import { finishBookingSession } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 export const dynamic = 'force-dynamic'
-
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type NestedInputJsonValue = Prisma.InputJsonValue | null
 
@@ -137,7 +139,7 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
  * - Idempotent: if already in FINISH_REVIEW / AFTER_PHOTOS / DONE,
  *   returns a stable nextHref.
  */
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -154,7 +156,7 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const bookingId = pickString(params?.id)
 
     if (!bookingId) {

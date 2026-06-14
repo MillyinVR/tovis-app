@@ -17,6 +17,7 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 export const dynamic = 'force-dynamic'
 
@@ -39,17 +40,14 @@ function sortKey(
   return b.createdAt.getTime() - a.createdAt.getTime()
 }
 
-export async function GET(
-  _req: Request,
-  ctx: { params: Promise<{ id: string }> },
-) {
+export async function GET(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
     const { clientId } = auth
 
-    const { id: rawId } = await ctx.params
+    const { id: rawId } = await resolveRouteParams(ctx)
     const bookingId = pickString(rawId)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 

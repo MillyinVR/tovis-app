@@ -14,6 +14,7 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { upsertClientBookingCheckoutProducts } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
@@ -268,10 +269,7 @@ async function failCheckoutProductsIdempotency(
   })
 }
 
-export async function POST(
-  req: NextRequest,
-  props: { params: Promise<{ id: string }> },
-) {
+export async function POST(req: NextRequest, props: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -287,7 +285,7 @@ export async function POST(
       })
     }
 
-    const { id } = await props.params
+    const { id } = await resolveRouteParams(props)
     const bookingId = trimmedString(id)
 
     if (!bookingId) {

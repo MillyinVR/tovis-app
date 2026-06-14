@@ -2,6 +2,10 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireClient, pickString, jsonFail, jsonOk } from '@/app/api/_utils'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -44,13 +48,13 @@ if (trimmed.length > maxLen) {
 return { value: trimmed }
 }
 
-export async function PATCH(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
     const { clientId } = auth
 
-    const { id } = await context.params
+    const { id } = await resolveRouteParams(context)
     const reviewId = pickString(id)
     if (!reviewId) return jsonFail(400, 'Missing review id.')
 
@@ -104,13 +108,13 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
   }
 }
 
-export async function DELETE(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
+export async function DELETE(_req: NextRequest, context: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
     const { clientId } = auth
 
-    const { id } = await context.params
+    const { id } = await resolveRouteParams(context)
     const reviewId = pickString(id)
     if (!reviewId) return jsonFail(400, 'Missing review id.')
 

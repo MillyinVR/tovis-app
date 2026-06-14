@@ -1,5 +1,9 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireUser } from '@/app/api/_utils'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { loadLookAccess } from '@/lib/looks/access'
 import { canViewLookPost } from '@/lib/looks/guards'
 import {
@@ -10,23 +14,15 @@ import type { LooksCommentReportResponseDto } from '@/lib/looks/types'
 
 export const dynamic = 'force-dynamic'
 
-type Params = {
-  id: string
-  commentId: string
-}
-
-type Ctx = { params: Params | Promise<Params> }
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
-
-export async function POST(_req: Request, ctx: Ctx) {
+export async function POST(
+  _req: Request,
+  ctx: RouteContext<{ id: string; commentId: string }>,
+) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
 
-    const { id: rawId, commentId: rawCommentId } = await getParams(ctx)
+    const { id: rawId, commentId: rawCommentId } = await resolveRouteParams(ctx)
     const lookPostId = pickString(rawId)
     const commentId = pickString(rawCommentId)
 

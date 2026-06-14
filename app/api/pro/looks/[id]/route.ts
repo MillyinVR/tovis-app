@@ -1,5 +1,9 @@
 // app/api/pro/looks/[id]/route.ts
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
@@ -15,13 +19,7 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
 type JsonRecord = Record<string, unknown>
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
 
 async function readJsonBody(req: Request): Promise<JsonRecord | null> {
   const contentType = req.headers.get('content-type') ?? ''
@@ -161,12 +159,12 @@ function toErrorResponse(error: unknown): Response {
   return jsonFail(500, message)
 }
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await getParams(ctx)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const lookPostId = pickString(rawId)
 
     if (!lookPostId) {
@@ -187,12 +185,12 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
 }
 
-export async function PATCH(req: Request, ctx: Ctx) {
+export async function PATCH(req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await getParams(ctx)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const lookPostId = pickString(rawId)
 
     if (!lookPostId) {

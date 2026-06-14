@@ -14,6 +14,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import {
@@ -30,10 +34,6 @@ import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-type Ctx = {
-  params: { id: string } | Promise<{ id: string }>
-}
 
 type PublicAccess =
   | {
@@ -679,8 +679,10 @@ function readRequestMeta(req: Request): RequestMeta {
   }
 }
 
-async function getBookingIdFromContext(ctx: Ctx): Promise<string | null> {
-  const params = await Promise.resolve(ctx.params)
+async function getBookingIdFromContext(
+  ctx: RouteContext,
+): Promise<string | null> {
+  const params = await resolveRouteParams(ctx)
   return pickString(params?.id)
 }
 
@@ -878,7 +880,7 @@ function buildAftercareResponseBody(args: {
   })
 }
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -938,7 +940,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
 }
 
-export async function POST(req: Request, ctx: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {

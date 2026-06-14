@@ -9,6 +9,10 @@ import {
   failStartedRouteIdempotency,
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { isBookingError } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { waiveProBookingCheckout } from '@/lib/booking/writeBoundary'
@@ -21,12 +25,6 @@ import { safeError, safeLogMeta } from '@/lib/security/logging'
 export const dynamic = 'force-dynamic'
 
 const ROUTE_OPERATION = 'POST /api/pro/bookings/[id]/checkout/waive'
-
-type RouteParams = {
-  params: Promise<{
-    id: string
-  }>
-}
 
 type WaiveCheckoutSuccessBody = {
   booking: {
@@ -99,7 +97,7 @@ function buildSuccessBody(result: {
   }
 }
 
-export async function POST(request: Request, context: RouteParams) {
+export async function POST(request: Request, context: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -109,7 +107,7 @@ export async function POST(request: Request, context: RouteParams) {
       return auth.res
     }
 
-    const { id } = await context.params
+    const { id } = await resolveRouteParams(context)
     const bookingId = normalizeBookingId(id)
 
     if (!bookingId) {

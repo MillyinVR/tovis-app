@@ -10,6 +10,7 @@ import {
 } from '@/app/api/_utils/idempotency'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonOk } from '@/app/api/_utils/responses'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
@@ -25,8 +26,6 @@ import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type RescheduleResponseBody = Prisma.InputJsonObject
 
@@ -62,7 +61,7 @@ function toRescheduleResponseBody(
   }
 }
 
-export async function POST(req: Request, { params }: Ctx) {
+export async function POST(req: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -71,7 +70,7 @@ export async function POST(req: Request, { params }: Ctx) {
 
     const clientId = auth.clientId
 
-    const resolvedParams = await Promise.resolve(params)
+    const resolvedParams = await resolveRouteParams(ctx)
     const bookingId = pickString(resolvedParams.id)
 
     if (!bookingId) {

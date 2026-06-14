@@ -29,6 +29,10 @@ import {
   failStartedRouteIdempotency,
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
@@ -322,10 +326,7 @@ async function failReviewIdempotency(
   })
 }
 
-export async function POST(
-  req: NextRequest,
-  ctx: { params: Promise<{ id: string }> },
-) {
+export async function POST(req: NextRequest, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
 
   try {
@@ -342,7 +343,7 @@ export async function POST(
       })
     }
 
-    const { id: rawId } = await ctx.params
+    const { id: rawId } = await resolveRouteParams(ctx)
     const bookingId = pickString(rawId)
 
     if (!bookingId) {

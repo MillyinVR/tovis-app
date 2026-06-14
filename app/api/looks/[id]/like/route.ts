@@ -4,6 +4,10 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireUser } from '@/app/api/_utils'
 import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
+import {
   canSaveLookPost,
   canViewLookPost,
 } from '@/lib/looks/guards'
@@ -14,19 +18,12 @@ import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
 
 export const dynamic = 'force-dynamic'
 
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
-
-export async function POST(_req: Request, ctx: Ctx) {
+export async function POST(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await getParams(ctx)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const lookPostId = pickString(rawId)
 
     if (!lookPostId) {
@@ -119,12 +116,12 @@ export async function POST(_req: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await getParams(ctx)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const lookPostId = pickString(rawId)
 
     if (!lookPostId) {

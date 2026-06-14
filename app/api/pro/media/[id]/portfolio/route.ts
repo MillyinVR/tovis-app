@@ -2,6 +2,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { MediaVisibility } from '@prisma/client'
 import { resolveStoragePointers, safeUrl } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
@@ -9,8 +10,6 @@ import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publi
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-type Props = { params: Promise<{ id: string }> }
 
 function computeVisibility(isFeaturedInPortfolio: boolean, isEligibleForLooks: boolean): MediaVisibility {
   return isFeaturedInPortfolio || isEligibleForLooks ? MediaVisibility.PUBLIC : MediaVisibility.PRO_CLIENT
@@ -86,13 +85,13 @@ async function backfillPointersIfMissing(mediaId: string, m: {
   })
 }
 
-export async function POST(_req: NextRequest, props: Props) {
+export async function POST(_req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const { id: rawId } = await props.params
+    const { id: rawId } = await resolveRouteParams(ctx)
     const mediaId = pickString(rawId)
     if (!mediaId) return jsonFail(400, 'Missing media id.')
 
@@ -149,13 +148,13 @@ export async function POST(_req: NextRequest, props: Props) {
     return jsonFail(500, 'Internal server error')
   }
 }
-export async function DELETE(_req: NextRequest, props: Props) {
+export async function DELETE(_req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const { id: rawId } = await props.params
+    const { id: rawId } = await resolveRouteParams(ctx)
     const mediaId = pickString(rawId)
     if (!mediaId) return jsonFail(400, 'Missing media id.')
 

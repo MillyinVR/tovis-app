@@ -21,6 +21,10 @@ import {
 } from '@/app/api/_utils/google'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
@@ -29,10 +33,6 @@ import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
-
-type Params = {
-  params: Promise<{ id: string }>
-}
 
 function pickRadiusMiles(v: unknown): number | null {
   const n =
@@ -49,7 +49,7 @@ function pickRadiusMiles(v: unknown): number | null {
   return miles >= 1 && miles <= 200 ? miles : null
 }
 
-export async function PATCH(req: NextRequest, ctx: Params) {
+export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -62,7 +62,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     })
     if (limited) return limited
 
-    const { id } = await ctx.params
+    const { id } = await resolveRouteParams(ctx)
     const locationId = pickString(id)
 
     if (!locationId) {

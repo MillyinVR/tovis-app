@@ -2,13 +2,12 @@
 import { prisma } from '@/lib/prisma'
 import { MediaVisibility } from '@prisma/client'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { canProSharePublicly, UNPROMOTED_MEDIA_MESSAGE } from '@/lib/media/publicShareGuard'
 import { pickBool, pickString } from '@/lib/pick'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-type Ctx = { params: Promise<{ id: string }> }
 
 function normalizeVisibilityFromFlags(flags: {
   isEligibleForLooks: boolean
@@ -41,12 +40,12 @@ function parseServiceIds(v: unknown, max = 50): string[] | null {
   return uniqueStrings(cleaned)
 }
 
-export async function PATCH(req: Request, ctx: Ctx) {
+export async function PATCH(req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await ctx.params
+    const { id: rawId } = await resolveRouteParams(ctx)
     const mediaId = pickString(rawId)
     if (!mediaId) return jsonFail(400, 'Missing id.')
 
@@ -153,12 +152,12 @@ export async function PATCH(req: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await ctx.params
+    const { id: rawId } = await resolveRouteParams(ctx)
     const mediaId = pickString(rawId)
     if (!mediaId) return jsonFail(400, 'Missing id.')
 

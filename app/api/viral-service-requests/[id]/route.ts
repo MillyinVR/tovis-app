@@ -3,6 +3,7 @@ import { AdminPermissionRole, Role } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { prisma } from '@/lib/prisma'
 import { viralRequestListSelect } from '@/lib/viralRequests'
@@ -10,24 +11,17 @@ import { toViralRequestDto } from '@/lib/viralRequests/contracts'
 
 export const dynamic = 'force-dynamic'
 
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
-
 function pickRequestId(value: string): string | null {
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
 }
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireUser()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await getParams(ctx)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const requestId = pickRequestId(rawId)
 
     if (!requestId) {

@@ -5,6 +5,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
 import { prisma } from '@/lib/prisma'
 import {
@@ -12,12 +16,6 @@ import {
   type DeleteUserDataResult,
 } from '@/lib/privacy/deleteUserData'
 import { summarizeDeleteUserDataResult } from '@/lib/privacy/deleteUserDataSummary'
-
-type RouteContext = {
-  params: Promise<{
-    userId: string
-  }>
-}
 
 type DeletePrivacyRequestBody = {
   dryRun?: unknown
@@ -264,8 +262,11 @@ async function runLiveAnonymizeDelete(args: {
   })
 }
 
-export async function POST(request: NextRequest, context: RouteContext) {
-  const { userId } = await context.params
+export async function POST(
+  request: NextRequest,
+  context: RouteContext<{ userId: string }>,
+) {
+  const { userId } = await resolveRouteParams(context)
   const targetUserId = userId.trim()
 
   if (!targetUserId) {

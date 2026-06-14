@@ -2,12 +2,14 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
 import { releaseHold } from '@/lib/booking/writeBoundary'
 
 export const dynamic = 'force-dynamic'
-
-type Ctx = { params: Promise<{ id: string }> | { id: string } }
 
 const HOLD_ROUTE_SELECT = {
   id: true,
@@ -32,8 +34,8 @@ function isExpired(expiresAt: Date): boolean {
   return expiresAt.getTime() <= Date.now()
 }
 
-async function getHoldId(ctx: Ctx): Promise<string | null> {
-  const params = await Promise.resolve(ctx.params)
+async function getHoldId(ctx: RouteContext): Promise<string | null> {
+  const params = await resolveRouteParams(ctx)
   return pickString(params?.id)
 }
 
@@ -56,7 +58,7 @@ function toHoldDto(hold: HoldRouteRecord) {
   }
 }
 
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
@@ -96,7 +98,7 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res

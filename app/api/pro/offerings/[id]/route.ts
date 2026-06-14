@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma, ProfessionalLocationType } from '@prisma/client'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { isRecord } from '@/lib/guards'
@@ -15,8 +16,6 @@ import {
 } from '@/lib/scheduling/workingHoursValidation'
 
 export const dynamic = 'force-dynamic'
-
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type OfferingRow = Prisma.ProfessionalServiceOfferingGetPayload<{
   include: { service: { include: { category: true } } }
@@ -236,7 +235,7 @@ async function ensureLocationsForOffering(args: {
   }
 }
 
-export async function GET(_request: Request, ctx: Ctx) {
+export async function GET(_request: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
 
@@ -246,7 +245,7 @@ export async function GET(_request: Request, ctx: Ctx) {
 
     const professionalId = auth.professionalId
 
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const offeringId = trimId(params.id)
 
     if (!offeringId) {
@@ -279,7 +278,7 @@ export async function GET(_request: Request, ctx: Ctx) {
   }
 }
 
-export async function PATCH(request: Request, ctx: Ctx) {
+export async function PATCH(request: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
 
@@ -298,7 +297,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
       return limited
     }
 
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const offeringId = trimId(params.id)
 
     if (!offeringId) {
@@ -775,7 +774,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_request: Request, ctx: Ctx) {
+export async function DELETE(_request: Request, ctx: RouteContext) {
   try {
     const auth = await requirePro()
 
@@ -794,7 +793,7 @@ export async function DELETE(_request: Request, ctx: Ctx) {
       return limited
     }
 
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const offeringId = trimId(params.id)
 
     if (!offeringId) {

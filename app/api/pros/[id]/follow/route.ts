@@ -1,6 +1,7 @@
 // app/api/pros/[id]/follow/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requireClient } from '@/app/api/_utils'
+import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import {
   buildProFollowStateResponse,
   getFollowErrorMeta,
@@ -12,19 +13,12 @@ import { createLookFollowerNewProNotification } from '@/lib/notifications/lookFo
 
 export const dynamic = 'force-dynamic'
 
-type Params = { id: string }
-type Ctx = { params: Params | Promise<Params> }
-
-async function getParams(ctx: Ctx): Promise<Params> {
-  return await Promise.resolve(ctx.params)
-}
-
-export async function GET(_req: Request, ctx: Ctx) {
+export async function GET(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await getParams(ctx)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const professionalId = pickString(rawId)
 
     if (!professionalId) {
@@ -66,12 +60,12 @@ export async function GET(_req: Request, ctx: Ctx) {
   }
 }
 
-export async function POST(_req: Request, ctx: Ctx) {
+export async function POST(_req: Request, ctx: RouteContext) {
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const { id: rawId } = await getParams(ctx)
+    const { id: rawId } = await resolveRouteParams(ctx)
     const professionalId = pickString(rawId)
 
     if (!professionalId) {

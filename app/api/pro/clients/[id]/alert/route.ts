@@ -1,17 +1,21 @@
 // app/api/pro/clients/[id]/alert/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 
 export const dynamic = 'force-dynamic'
 
-export async function PATCH(req: Request, context: { params: Promise<{ id: string }> }) {
+export async function PATCH(req: Request, context: RouteContext) {
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const { id } = await context.params
+    const { id } = await resolveRouteParams(context)
     const clientId = pickString(id)
     if (!clientId) return jsonFail(400, 'Missing client id.')
 

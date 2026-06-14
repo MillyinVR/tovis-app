@@ -10,6 +10,10 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import {
+  resolveRouteParams,
+  type RouteContext,
+} from '@/app/api/_utils/routeContext'
+import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
@@ -19,8 +23,6 @@ import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type RequestMeta = {
   requestId: string | null
@@ -135,7 +137,7 @@ function buildStartSessionResponseBody(
   })
 }
 
-export async function POST(request: Request, ctx: Ctx) {
+export async function POST(request: Request, ctx: RouteContext) {
   let idempotencyRecordId: string | null = null
   const { requestId } = readRequestMeta(request)
 
@@ -156,7 +158,7 @@ export async function POST(request: Request, ctx: Ctx) {
       })
     }
 
-    const params = await Promise.resolve(ctx.params)
+    const params = await resolveRouteParams(ctx)
     const bookingId = pickString(params.id)
 
     if (!bookingId) {
