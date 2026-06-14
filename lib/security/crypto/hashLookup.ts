@@ -1,6 +1,7 @@
 // lib/security/crypto/hashLookup.ts
 import { createHmac } from 'node:crypto'
 
+import { isRecord } from '@/lib/guards'
 import {
   normalizeEmailForLookup,
   normalizePhoneForLookup,
@@ -165,8 +166,4 @@ function parseContactLookupHmacKeyring(
   }
 
   return keyring
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

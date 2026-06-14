@@ -15,6 +15,7 @@ import {
   type BookingErrorCode,
 } from '@/lib/booking/errors'
 import { startBookingSession } from '@/lib/booking/writeBoundary'
+import { isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError } from '@/lib/security/logging'
 
@@ -120,10 +121,6 @@ function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
   }
 
   return out
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function buildStartSessionIdempotencyBody(args: {

@@ -4,6 +4,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 type JsonObject = Record<string, unknown>
 type Kind = 'ADDRESS' | 'AREA' | 'ANY'
@@ -28,10 +29,6 @@ type PlaceDetails = {
   lng: number
   name: string | null
   sessionToken: string
-}
-
-function isRecord(v: unknown): v is JsonObject {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 /**

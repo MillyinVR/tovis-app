@@ -1,4 +1,5 @@
 // lib/auth/middlewareToken.ts
+import { isRecord } from '@/lib/guards'
 
 const jwtSecret = process.env.JWT_SECRET?.trim()
 
@@ -51,10 +52,6 @@ function getHmacKey(): Promise<CryptoKey> {
   }
 
   return hmacKeyPromise
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isNonEmptyString(value: unknown): value is string {

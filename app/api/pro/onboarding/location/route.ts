@@ -10,6 +10,7 @@ import {
   googleTimeZoneId,
 } from '@/app/api/_utils/google'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { refreshLocation } from '@/lib/search/index/refreshSearchIndex'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
@@ -18,10 +19,6 @@ import { isValidIanaTimeZone } from '@/lib/timeZone'
 export const dynamic = 'force-dynamic'
 
 type OnboardingLocationMode = 'SALON' | 'SUITE' | 'MOBILE'
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 function normalizeMode(v: unknown): OnboardingLocationMode | null {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : ''

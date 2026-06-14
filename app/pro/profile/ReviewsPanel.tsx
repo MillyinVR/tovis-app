@@ -3,6 +3,8 @@
 
 import { useMemo, useState } from 'react'
 
+import { isRecord } from '@/lib/guards'
+
 type MediaType = 'IMAGE' | 'VIDEO'
 
 export type ReviewForPanel = {
@@ -30,10 +32,6 @@ type HelpfulResponse = {
   helpful?: boolean
   helpfulCount?: number
   error?: string
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function parseHelpfulResponse(value: unknown): HelpfulResponse {

@@ -12,13 +12,12 @@ import {
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
+import { isRecord } from '@/lib/guards'
 import { parseMoney, moneyToString } from '@/lib/money'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import { toPrismaJson } from '@/lib/typed'
 
 export const dynamic = 'force-dynamic'
-
-type JsonObject = Record<string, unknown>
 
 type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
 
@@ -29,10 +28,6 @@ type WorkingHoursDay = {
 }
 
 type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
-
-function isRecord(v: unknown): v is JsonObject {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 function trimOrNull(v: unknown): string | null | undefined {
   if (v === undefined) return undefined

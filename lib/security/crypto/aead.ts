@@ -26,6 +26,8 @@
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 
+import { isRecord } from '@/lib/guards'
+
 const ALGORITHM = 'aes-256-gcm-v1'
 const NODE_CIPHER = 'aes-256-gcm'
 const KEY_LENGTH_BYTES = 32
@@ -230,8 +232,4 @@ function decodeBase64Field(value: string, fieldName: string): Buffer {
   }
 
   return decoded
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

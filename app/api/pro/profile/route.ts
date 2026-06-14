@@ -4,6 +4,7 @@ import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { Prisma, ProfessionType } from '@prisma/client'
 import { canEditPublicPublishingFields } from '@/lib/proTrustState'
 import { isHandleReserved } from '@/lib/handles'
+import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,10 +34,6 @@ function isValidHandleNormalized(h: string) {
   if (!/^[a-z0-9]/.test(h)) return false
   if (!/[a-z0-9]$/.test(h)) return false
   return true
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isProfessionTypeValue(value: string): value is ProfessionType {

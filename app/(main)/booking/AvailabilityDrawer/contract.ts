@@ -16,10 +16,7 @@ import type {
   ProCard,
   ServiceLocationType,
 } from './types'
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null && !Array.isArray(x)
-}
+import { isRecord } from '@/lib/guards'
 
 function pickString(x: unknown): string | null {
   return typeof x === 'string' && x.trim() ? x.trim() : null

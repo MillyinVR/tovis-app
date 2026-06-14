@@ -22,16 +22,13 @@ import {
   validateUploadSession,
 } from '@/lib/media/uploadSession'
 import { createOrUpdateProLookFromMediaAsset } from '@/lib/looks/publication/service'
+import { isRecord } from '@/lib/guards'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
 type StorageBucket = (typeof BUCKETS)[keyof typeof BUCKETS]
 type JsonRecord = Record<string, unknown>
-
-function isRecord(v: unknown): v is JsonRecord {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 async function readJsonObject(req: Request): Promise<JsonRecord> {
   const raw: unknown = await req.json().catch(() => ({}))

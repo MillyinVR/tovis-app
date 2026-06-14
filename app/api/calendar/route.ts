@@ -12,6 +12,7 @@ import { normalizeEmail } from '@/app/api/_utils/email'
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail } from '@/app/api/_utils/responses'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import {
@@ -21,8 +22,6 @@ import {
 } from '@/lib/timeZone'
 
 export const dynamic = 'force-dynamic'
-
-type JsonRecord = Record<string, unknown>
 
 type TimeZoneResult =
   | { ok: true; timeZone: string }
@@ -75,10 +74,6 @@ const bookingCalendarSelect = {
 type BookingCalendarRow = Prisma.BookingGetPayload<{
   select: typeof bookingCalendarSelect
 }>
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function escapeIcsText(value: string): string {
   return value

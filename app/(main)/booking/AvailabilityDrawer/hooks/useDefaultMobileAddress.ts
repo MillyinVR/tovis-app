@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClientAddressRecord } from '../types'
 
 import { safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 type DefaultMobileAddressState = {
   defaultAddressId: string | null
@@ -32,10 +33,6 @@ let inFlightDefaultMobileAddressPromise:
       defaultAddressId: string | null
     }>
   | null = null
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null && !Array.isArray(x)
-}
 
 function pickString(x: unknown): string | null {
   return typeof x === 'string' && x.trim() ? x.trim() : null

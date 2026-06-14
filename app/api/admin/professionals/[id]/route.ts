@@ -8,6 +8,7 @@ import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermis
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { pickBool, pickString } from '@/app/api/_utils/pick'
 import { writeAdminAuditLog } from '@/lib/admin/auditLog'
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 
@@ -22,10 +23,6 @@ async function getParams(ctx: Ctx): Promise<Params> {
 
 function trimId(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function normalizeStatus(value: unknown): VerificationStatus | null {

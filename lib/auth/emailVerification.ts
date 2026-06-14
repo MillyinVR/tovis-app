@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { logAuthEvent } from '@/lib/observability/authEvents'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
@@ -44,10 +45,6 @@ function sha256(input: string): string {
 
 function generateEmailToken(): string {
   return crypto.randomBytes(32).toString('hex')
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function envOrThrow(name: string): string {

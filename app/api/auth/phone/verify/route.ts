@@ -5,6 +5,7 @@ import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
 import { createActiveToken, createVerificationToken } from '@/lib/auth'
+import { isRecord } from '@/lib/guards'
 import { checkTwilioVerifyPhoneCode } from '@/lib/twilio/verify'
 import {
   captureAuthException,
@@ -13,10 +14,6 @@ import {
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function hostToHostname(hostHeader: string | null): string | null {
   if (!hostHeader) return null

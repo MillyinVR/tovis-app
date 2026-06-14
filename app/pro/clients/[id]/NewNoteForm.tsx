@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 type Props = {
   clientId: string
@@ -12,10 +13,6 @@ type Props = {
 
 type ApiErrorPayload = {
   error?: unknown
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function currentPathWithQuery(): string {

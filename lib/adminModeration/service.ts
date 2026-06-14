@@ -34,6 +34,7 @@ import {
   recomputeLookPostCommentCount,
   recomputeLookPostScores,
 } from '@/lib/looks/counters'
+import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { updateViralRequestStatus } from '@/lib/viralRequests'
 import {
@@ -166,10 +167,6 @@ class AdminModerationRouteError extends Error {
     this.status = status
     this.details = details
   }
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function trimString(value: unknown): string | null {

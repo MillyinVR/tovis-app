@@ -16,6 +16,7 @@ import type {
   LooksSavedBoardStateDto,
 } from '@/lib/looks/types'
 import { cn } from '@/lib/utils'
+import { isRecord } from '@/lib/guards'
 
 type SaveToBoardModalProps = {
   isOpen: boolean
@@ -34,10 +35,6 @@ type ModalBoard = {
   name: string
   visibility: string
   itemCount: number
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isStringArray(value: unknown): value is string[] {

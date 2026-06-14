@@ -5,15 +5,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { safeJson } from '@/lib/http'
+import { isRecord } from '@/lib/guards'
 
 type Props = { clientId: string }
 
 const SEVERITIES = ['LOW', 'MODERATE', 'HIGH', 'CRITICAL'] as const
 type Severity = (typeof SEVERITIES)[number]
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 function getErrorMessage(data: unknown): string | null {
   if (!isRecord(data)) return null

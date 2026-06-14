@@ -4,6 +4,7 @@ import {
   Prisma,
 } from '@prisma/client'
 
+import { isRecord } from '@/lib/guards'
 import {
   cancelScheduledClientNotificationsForBooking,
   scheduleClientNotification,
@@ -132,10 +133,6 @@ function readDate(value: unknown): Date | null {
   }
 
   return null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function normalizeDateOrNull(value: Date | null | undefined): Date | null {

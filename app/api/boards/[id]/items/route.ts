@@ -12,6 +12,7 @@ import {
   getBoardErrorMeta,
   getViewerLookSaveState,
 } from '@/lib/boards'
+import { isRecord } from '@/lib/guards'
 import { loadLookAccess } from '@/lib/looks/access'
 import {
   canSaveLookPost,
@@ -22,10 +23,6 @@ export const dynamic = 'force-dynamic'
 
 type Params = { id: string }
 type Ctx = { params: Params | Promise<Params> }
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
 
 async function getParams(ctx: Ctx): Promise<Params> {
   return await Promise.resolve(ctx.params)
