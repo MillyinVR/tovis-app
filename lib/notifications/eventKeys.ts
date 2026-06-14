@@ -24,6 +24,7 @@ export type NotificationTemplateKey =
   | 'viral_request_approved'
   | 'payment_collected'
   | 'payment_action_required'
+  | 'look_follower_new'
 
 export type NotificationEventDefinition = {
   key: NotificationEventKey
@@ -91,6 +92,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
+  NotificationEventKey.LOOK_FOLLOWER_NEW,
 ]
 
 export const NOTIFICATION_EVENT_DEFINITIONS: Record<
@@ -352,6 +354,19 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
     },
   },
+
+  [NotificationEventKey.LOOK_FOLLOWER_NEW]: {
+    key: NotificationEventKey.LOOK_FOLLOWER_NEW,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'look_follower_new',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    // In-app only for launch; engagement email is handled by the digest (S1.3 PR 5).
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
+    },
+  },
 }
 
 export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
@@ -368,6 +383,7 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
+  NotificationEventKey.LOOK_FOLLOWER_NEW,
 ]
 
 export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [

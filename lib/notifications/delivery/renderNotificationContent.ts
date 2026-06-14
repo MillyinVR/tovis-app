@@ -288,6 +288,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   viral_request_approved: 'View request',
   payment_collected: 'View payment',
   payment_action_required: 'Resolve payment',
+  look_follower_new: 'View your profile',
 }
 
 const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = {
@@ -344,6 +345,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   payment_action_required: buildStandardTemplateRenderer(
     templateCtaLabels.payment_action_required,
+  ),
+  look_follower_new: buildStandardTemplateRenderer(
+    templateCtaLabels.look_follower_new,
   ),
 }
 

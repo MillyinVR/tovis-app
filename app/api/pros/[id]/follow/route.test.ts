@@ -58,6 +58,7 @@ const mocks = vi.hoisted(() => {
   const getProfessionalFollowState = vi.fn()
   const requireFollowProfessionalTarget = vi.fn()
   const toggleProFollow = vi.fn()
+  const createLookFollowerNewProNotification = vi.fn()
 
   return {
     jsonOk,
@@ -69,6 +70,7 @@ const mocks = vi.hoisted(() => {
     getProfessionalFollowState,
     requireFollowProfessionalTarget,
     toggleProFollow,
+    createLookFollowerNewProNotification,
   }
 })
 
@@ -93,6 +95,11 @@ vi.mock('@/lib/follows', () => ({
   getProfessionalFollowState: mocks.getProfessionalFollowState,
   requireFollowProfessionalTarget: mocks.requireFollowProfessionalTarget,
   toggleProFollow: mocks.toggleProFollow,
+}))
+
+vi.mock('@/lib/notifications/lookFollowerNew', () => ({
+  createLookFollowerNewProNotification:
+    mocks.createLookFollowerNewProNotification,
 }))
 
 import { GET, POST } from './route'
@@ -168,6 +175,9 @@ describe('app/api/pros/[id]/follow/route.ts', () => {
       makeFollowState({ following: true, followerCount: 8 }),
     )
     mocks.getFollowErrorMeta.mockReturnValue(null)
+    mocks.createLookFollowerNewProNotification.mockResolvedValue({
+      id: 'notif_1',
+    })
   })
 
   it('GET returns stable follow state by canonical professionalId', async () => {
@@ -237,6 +247,14 @@ describe('app/api/pros/[id]/follow/route.ts', () => {
       following: true,
       followerCount: 8,
     })
+
+    // Following a pro notifies them (best-effort) — actor id only, no PII name.
+    expect(
+      mocks.createLookFollowerNewProNotification,
+    ).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      followerUserId: 'user_client_1',
+    })
   })
 
   it('POST returns unfollowed state when toggle removes an existing follow', async () => {
@@ -261,6 +279,11 @@ describe('app/api/pros/[id]/follow/route.ts', () => {
       following: false,
       followerCount: 4,
     })
+
+    // Unfollowing must not emit a follower notification.
+    expect(
+      mocks.createLookFollowerNewProNotification,
+    ).not.toHaveBeenCalled()
   })
 
   it('returns 400 when the route param is blank', async () => {

@@ -405,6 +405,7 @@ enum NotificationEventKey {
   VIRAL_REQUEST_APPROVED
   PAYMENT_COLLECTED
   PAYMENT_ACTION_REQUIRED
+  LOOK_FOLLOWER_NEW
 }
 
 enum NotificationChannel {

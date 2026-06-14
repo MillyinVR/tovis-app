@@ -8,6 +8,7 @@ import {
   requireFollowProfessionalTarget,
   toggleProFollow,
 } from '@/lib/follows'
+import { createLookFollowerNewProNotification } from '@/lib/notifications/lookFollowerNew'
 
 export const dynamic = 'force-dynamic'
 
@@ -97,6 +98,17 @@ export async function POST(_req: Request, ctx: Ctx) {
       clientId: auth.clientId,
       professionalId: professional.id,
     })
+
+    if (state.following) {
+      // Best-effort: the follow already succeeded; a notification failure must
+      // never fail the request or roll anything back.
+      await createLookFollowerNewProNotification({
+        professionalId: professional.id,
+        followerUserId: auth.user.id,
+      }).catch((error) => {
+        console.error('POST /api/pros/[id]/follow notify error', error)
+      })
+    }
 
     return jsonOk(
       buildProFollowStateResponse({

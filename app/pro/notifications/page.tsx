@@ -21,6 +21,7 @@ type NotificationCategory =
   | 'UPDATES'
   | 'CANCELLED'
   | 'REVIEWS'
+  | 'SOCIAL'
 
 type NotifRow = {
   id: string
@@ -54,6 +55,7 @@ const CATEGORY_EVENT_KEYS: Record<
     NotificationEventKey.BOOKING_CANCELLED_BY_ADMIN,
   ],
   REVIEWS: [NotificationEventKey.REVIEW_RECEIVED],
+  SOCIAL: [NotificationEventKey.LOOK_FOLLOWER_NEW],
 }
 
 function spString(value: unknown): string {
@@ -80,6 +82,7 @@ function parseNotificationCategory(raw: unknown): NotificationCategory | null {
   if (s === 'UPDATES') return 'UPDATES'
   if (s === 'CANCELLED') return 'CANCELLED'
   if (s === 'REVIEWS') return 'REVIEWS'
+  if (s === 'SOCIAL') return 'SOCIAL'
 
   return null
 }
@@ -88,6 +91,7 @@ function categoryLabel(category: NotificationCategory): string {
   if (category === 'REQUESTS') return 'Requests'
   if (category === 'UPDATES') return 'Updates'
   if (category === 'CANCELLED') return 'Cancelled'
+  if (category === 'SOCIAL') return 'Social'
   return 'Reviews'
 }
 
@@ -388,6 +392,15 @@ export default async function ProNotificationsPage(props: {
         take: '60',
       }),
       active: category === 'REVIEWS',
+    },
+    {
+      label: 'Social',
+      href: buildHref(base, {
+        unread: unreadOnly ? '1' : null,
+        category: 'SOCIAL',
+        take: '60',
+      }),
+      active: category === 'SOCIAL',
     },
   ] as const
 
