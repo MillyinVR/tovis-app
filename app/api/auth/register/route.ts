@@ -1,5 +1,6 @@
 // app/api/auth/register/route.ts
 import { prisma } from '@/lib/prisma'
+import { readOptionalEnv as envOrNull } from '@/lib/env'
 import { hashPassword, createVerificationToken } from '@/lib/auth'
 import { validatePassword } from '@/lib/passwordPolicy'
 import { getCurrentTosVersion } from '@/lib/legal'
@@ -133,11 +134,6 @@ type RegisterBody = {
 
 function asArray(v: unknown): unknown[] {
   return Array.isArray(v) ? v : []
-}
-
-function envOrNull(name: string) {
-  const v = process.env[name]
-  return v && v.trim() ? v : null
 }
 
 function pickUpper(v: unknown) {

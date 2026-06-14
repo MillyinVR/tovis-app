@@ -487,7 +487,7 @@ describe('app/api/internal/jobs/notifications/process/route.ts', () => {
       {
         error: {
           name: 'Error',
-          message: 'Missing TWILIO_AUTH_TOKEN configuration.',
+          message: 'Missing required environment variable: TWILIO_AUTH_TOKEN',
         },
       },
     )

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { requireEnv } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
 
 // States with automated verification (backed by DCA BreEZe API).
@@ -64,12 +65,6 @@ type DcaLicenseSearchResponse = {
   licenseDetails?: unknown
 }
 
-function mustEnv(name: string) {
-  const value = process.env[name]
-  if (!value) throw new Error(`Missing env: ${name}`)
-  return value
-}
-
 function stringFromUnknown(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
@@ -122,8 +117,8 @@ async function getBreezeTypeMap(): Promise<Record<Profession, string>> {
   const now = Date.now()
   if (cachedTypeMap && now < cachedTypeMapExp) return cachedTypeMap
 
-  const APP_ID = mustEnv('DCA_SEARCH_APP_ID')
-  const APP_KEY = mustEnv('DCA_SEARCH_APP_KEY')
+  const APP_ID = requireEnv('DCA_SEARCH_APP_ID')
+  const APP_KEY = requireEnv('DCA_SEARCH_APP_KEY')
 
   const base = 'https://iservices.dca.ca.gov/api/search/v1'
   const url = `${base}/breezeDetailService/getAllLicenseTypes`
@@ -269,8 +264,8 @@ export async function POST(req: Request) {
       )
     }
 
-    const APP_ID = mustEnv('DCA_SEARCH_APP_ID')
-    const APP_KEY = mustEnv('DCA_SEARCH_APP_KEY')
+    const APP_ID = requireEnv('DCA_SEARCH_APP_ID')
+    const APP_KEY = requireEnv('DCA_SEARCH_APP_KEY')
 
     const base = 'https://iservices.dca.ca.gov/api/search/v1'
     const url = new URL(`${base}/licenseSearchService/getLicenseNumberSearch`)

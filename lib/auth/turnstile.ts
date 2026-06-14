@@ -1,4 +1,5 @@
 // lib/auth/turnstile.ts
+import { readOptionalEnv as envOrNull } from '@/lib/env'
 import { getTrustedClientIpFromRequest } from '@/lib/trustedClientIp'
 
 const TURNSTILE_VERIFY_URL =
@@ -16,11 +17,6 @@ type VerifyTurnstileResult =
       code: 'CAPTCHA_REQUIRED' | 'CAPTCHA_FAILED' | 'CAPTCHA_UNAVAILABLE'
       message: string
     }
-
-function envOrNull(name: string): string | null {
-  const value = process.env[name]?.trim()
-  return value ? value : null
-}
 
 function isTurnstileFailOpenAllowed(): boolean {
   return (

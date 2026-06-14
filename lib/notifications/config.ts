@@ -2,6 +2,8 @@
 
 import { NotificationChannel, NotificationProvider } from '@prisma/client'
 
+import { readOptionalEnv as readEnv } from '@/lib/env'
+
 export type NotificationProviderConfigErrorCode =
   | 'TWILIO_SMS_NOT_CONFIGURED'
   | 'POSTMARK_EMAIL_NOT_CONFIGURED'
@@ -36,11 +38,6 @@ export type PostmarkEmailConfig = {
 export type NotificationProviderConfig =
   | TwilioSmsConfig
   | PostmarkEmailConfig
-
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim()
-  return value && value.length > 0 ? value : null
-}
 
 function readFirstEnv(names: readonly string[]): string | null {
   for (const name of names) {

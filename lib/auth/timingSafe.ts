@@ -13,6 +13,15 @@ export function sha256Hex(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex')
 }
 
+/**
+ * Generate a cryptographically-random token as a lowercase hex string.
+ * Single source of truth for opaque secret/token generation (password-reset
+ * secrets, email-verification tokens, client-action tokens, …).
+ */
+export function generateTokenHex(byteLength = 32): string {
+  return crypto.randomBytes(byteLength).toString('hex')
+}
+
 export function timingSafeEqualHex(left: string, right: string): boolean {
   const leftBuf = hexToBuffer(left)
   const rightBuf = hexToBuffer(right)

@@ -3,15 +3,12 @@
 import * as Sentry from '@sentry/nextjs'
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
+import { readOptionalEnv as readEnv } from '@/lib/env'
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 const SYNTHETIC_ALERT_MESSAGE = 'TOVIS production-safe synthetic Sentry alert v2'
 const SYNTHETIC_ALERT_KEY = 'launch-readiness.synthetic-sentry-alert.v2'
 const SYNTHETIC_ALERT_SOURCE = 'sentry-debug-route'
-function readEnv(name: string): string | null {
-  const value = process.env[name]?.trim()
-  return value && value.length > 0 ? value : null
-}
 function isProduction(): boolean {
   return process.env.NODE_ENV === 'production'
 }
