@@ -16,7 +16,7 @@ import {
 import { addMinutes } from '@/lib/booking/conflicts'
 import { utcDateToLocalYmd } from '@/lib/booking/dateTime'
 import {
-  resolveAppointmentSchedulingContext,
+  resolveApptTimeZoneFromValues,
   type TimeZoneTruthSource,
 } from '@/lib/booking/timeZoneTruth'
 import { clampInt } from '@/lib/pick'
@@ -495,14 +495,12 @@ function toCalendarServiceItems(booking: BookingRow): CalendarServiceItem[] {
   }))
 }
 
-async function toBookingEvent(args: {
+function toBookingEvent(args: {
   booking: BookingRow
-  professionalId: string
   professionalTimeZone: string | null
   viewportTimeZone: string
-}): Promise<BookingEvent | null> {
-  const { booking, professionalId, professionalTimeZone, viewportTimeZone } =
-    args
+}): BookingEvent | null {
+  const { booking, professionalTimeZone, viewportTimeZone } = args
 
   if (!booking.locationId) return null
 
@@ -514,27 +512,26 @@ async function toBookingEvent(args: {
   const bufferMinutes = safeBufferMinutes(booking.bufferMinutes)
   const end = addMinutes(start, durationMinutes + bufferMinutes)
 
-  const schedulingContextResult = await resolveAppointmentSchedulingContext({
+  // Timezone precedence (booking snapshot → location → professional → UTC) is
+  // resolved purely from values already loaded with the booking. Every booking
+  // in this range shares the selected location, so the per-row location lookup
+  // that resolveAppointmentSchedulingContext performs is redundant here — it can
+  // only ever return booking.location.timeZone, which is already in hand. Using
+  // the pure resolver keeps the result identical while dropping an N+1 query.
+  const tzResult = resolveApptTimeZoneFromValues({
     bookingLocationTimeZone: booking.locationTimeZone,
-    location: booking.location
-      ? {
-          id: booking.location.id,
-          timeZone: booking.location.timeZone,
-        }
-      : null,
-    locationId: booking.locationId,
-    professionalId,
+    locationTimeZone: booking.location?.timeZone,
     professionalTimeZone,
     fallback: 'UTC',
     requireValid: false,
   })
 
-  const appointmentTimeZone = schedulingContextResult.ok
-    ? safeEventTimeZone(schedulingContextResult.context.appointmentTimeZone)
+  const appointmentTimeZone = tzResult.ok
+    ? safeEventTimeZone(tzResult.timeZone)
     : 'UTC'
 
-  const timeZoneSource: TimeZoneTruthSource = schedulingContextResult.ok
-    ? schedulingContextResult.context.timeZoneSource
+  const timeZoneSource: TimeZoneTruthSource = tzResult.ok
+    ? tzResult.source
     : 'FALLBACK'
 
   const localDateKey = utcDateToLocalYmd(start, appointmentTimeZone)
@@ -772,20 +769,15 @@ export async function GET(req: Request) {
       }),
     ])
 
-    const bookingEventsMaybe = await Promise.all(
-      bookings.map((booking) =>
+    const bookingEvents = bookings
+      .map((booking) =>
         toBookingEvent({
           booking,
-          professionalId,
           professionalTimeZone: proProfile.timeZone,
           viewportTimeZone,
         }),
-      ),
-    )
-
-    const bookingEvents = bookingEventsMaybe.filter(
-      (event): event is BookingEvent => event !== null,
-    )
+      )
+      .filter((event): event is BookingEvent => event !== null)
 
     const blockEvents = blocks
       .map((block) => toBlockEvent(block, viewportTimeZone))
