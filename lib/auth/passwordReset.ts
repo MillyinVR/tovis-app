@@ -1,7 +1,7 @@
 // lib/auth/passwordReset.ts
-import crypto from 'crypto'
 import { Prisma } from '@prisma/client'
 
+import { sha256Hex, generateTokenHex } from '@/lib/auth/timingSafe'
 import { readOptionalEnv as envOrNull } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
@@ -22,14 +22,6 @@ type ParsedPasswordResetToken = {
 
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
-}
-
-function sha256(input: string): string {
-  return crypto.createHash('sha256').update(input).digest('hex')
-}
-
-function generateResetSecret(): string {
-  return crypto.randomBytes(32).toString('hex')
 }
 
 function envOrThrow(name: string): string {
@@ -111,8 +103,8 @@ export async function createPasswordResetToken(args: {
 }) {
   const db = getDb(args.tx)
   const now = new Date()
-  const secret = generateResetSecret()
-  const tokenHash = sha256(secret)
+  const secret = generateTokenHex()
+  const tokenHash = sha256Hex(secret)
   const expiresAt = new Date(now.getTime() + PASSWORD_RESET_EXPIRY_MS)
 
   await db.passwordResetToken.updateMany({

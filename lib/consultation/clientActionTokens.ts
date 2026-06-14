@@ -1,12 +1,12 @@
 // lib/consultation/clientActionTokens.ts
 
-import crypto from 'crypto'
 import {
   ClientActionTokenKind,
   ContactMethod,
   Prisma,
 } from '@prisma/client'
 
+import { sha256Hex, generateTokenHex } from '@/lib/auth/timingSafe'
 import { bookingError } from '@/lib/booking/errors'
 import { prisma } from '@/lib/prisma'
 
@@ -17,10 +17,6 @@ type DbClient = Prisma.TransactionClient | typeof prisma
 
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
-}
-
-function sha256(input: string): string {
-  return crypto.createHash('sha256').update(input).digest('hex')
 }
 
 function normalizeTrimmed(value: string | null | undefined): string | null {
@@ -111,11 +107,11 @@ function resolveExpiresAt(expiresAt?: Date | null): Date {
 }
 
 export function generateClientActionToken(): string {
-  return crypto.randomBytes(32).toString('hex')
+  return generateTokenHex()
 }
 
 export function hashClientActionToken(rawToken: string): string {
-  return sha256(assertRawTokenPresent(rawToken))
+  return sha256Hex(assertRawTokenPresent(rawToken))
 }
 
 /**
@@ -190,7 +186,7 @@ export async function issueConsultationActionToken(
   const expiresAt = resolveExpiresAt(args.expiresAt)
 
   const rawToken = generateClientActionToken()
-  const tokenHash = sha256(rawToken)
+  const tokenHash = sha256Hex(rawToken)
 
   const created = await db.clientActionToken.create({
     data: {

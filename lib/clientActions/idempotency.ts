@@ -1,7 +1,6 @@
 // lib/clientActions/idempotency.ts
 
-import crypto from 'node:crypto'
-
+import { sha256Hex } from '@/lib/auth/timingSafe'
 import {
   normalizeEmailForLookup,
   normalizePhoneForLookup,
@@ -37,10 +36,6 @@ const ENTITY_REF_ORDER = [
   'clientId',
   'professionalId',
 ] as const satisfies readonly (keyof ClientActionEntityRefs)[]
-
-function sha256(input: string): string {
-  return crypto.createHash('sha256').update(input, 'utf8').digest('hex')
-}
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
@@ -88,7 +83,7 @@ export function buildClientActionRecipientFingerprint(
     `phone:${recipientPhone ?? 'null'}`,
   ])
 
-  return sha256(serialized)
+  return sha256Hex(serialized)
 }
 
 export function buildClientActionBaseKey(
@@ -107,7 +102,7 @@ export function buildClientActionBaseKey(
     `recipient:${recipientFingerprint}`,
   ])
 
-  return `client-action:${slugifyActionType(args.actionType)}:${sha256(
+  return `client-action:${slugifyActionType(args.actionType)}:${sha256Hex(
     serialized,
   )}`
 }
@@ -141,7 +136,7 @@ export function buildClientActionSendKey(
   const baseKey = buildClientActionBaseKey(args)
   const sendCycle = resolveSendCycleDiscriminator(args)
 
-  return `${baseKey}:send:${sha256(sendCycle)}`
+  return `${baseKey}:send:${sha256Hex(sendCycle)}`
 }
 
 export function buildClientActionIdempotencyKeys(

@@ -1,6 +1,6 @@
-import crypto from 'crypto'
 import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 
+import { sha256Hex, generateTokenHex } from '@/lib/auth/timingSafe'
 import { readOptionalEnv as envOrNull } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
@@ -38,14 +38,6 @@ type DbClient = Prisma.TransactionClient | typeof prisma
 
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
-}
-
-function sha256(input: string): string {
-  return crypto.createHash('sha256').update(input).digest('hex')
-}
-
-function generateEmailToken(): string {
-  return crypto.randomBytes(32).toString('hex')
 }
 
 function envOrThrow(name: string): string {
@@ -127,8 +119,8 @@ export async function createEmailVerificationToken(args: {
 }) {
   const db = getDb(args.tx)
   const now = new Date()
-  const token = generateEmailToken()
-  const tokenHash = sha256(token)
+  const token = generateTokenHex()
+  const tokenHash = sha256Hex(token)
   const expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_EXPIRY_MS)
 
   await db.emailVerificationToken.updateMany({
