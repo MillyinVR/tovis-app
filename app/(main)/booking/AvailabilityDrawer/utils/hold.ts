@@ -1,9 +1,6 @@
 // app/(main)/booking/AvailabilityDrawer/utils/hold.ts
+import { isRecord } from '@/lib/guards'
 import type { HoldParsed, ServiceLocationType } from '../types'
-
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
-}
 
 function pickString(x: unknown): string | null {
   return typeof x === 'string' && x.trim() ? x.trim() : null

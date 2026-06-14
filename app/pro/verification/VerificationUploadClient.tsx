@@ -5,6 +5,7 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { VerificationDocumentType } from '@prisma/client'
 import { cn } from '@/lib/utils'
+import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
@@ -19,9 +20,6 @@ type VerificationUploadClientProps = {
   methods: VerificationMethodOption[]
 }
 
-function isRecord(x: unknown): x is Record<string, unknown> {
-  return typeof x === 'object' && x !== null
-}
 
 export default function VerificationUploadClient({
   methods,

@@ -2,6 +2,7 @@
 import { jsonFail, jsonOk, pickInt } from '@/app/api/_utils'
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
 import { prisma } from '@/lib/prisma'
+import { isRecord, type UnknownRecord } from '@/lib/guards'
 import {
   createClientViralRequest,
   listClientViralRequests,
@@ -9,12 +10,6 @@ import {
 import { toViralRequestDto } from '@/lib/viralRequests/contracts'
 
 export const dynamic = 'force-dynamic'
-
-type UnknownRecord = Record<string, unknown>
-
-function isRecord(value: unknown): value is UnknownRecord {
-  return typeof value === 'object' && value !== null
-}
 
 function pickTrimmedString(value: unknown): string | null {
   if (typeof value !== 'string') return null

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { isRecord } from '@/lib/guards'
 
 // States with automated verification (backed by DCA BreEZe API).
 const AUTOMATED_STATES = new Set(['CA'])
@@ -67,10 +68,6 @@ function mustEnv(name: string) {
   const value = process.env[name]
   if (!value) throw new Error(`Missing env: ${name}`)
   return value
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 function stringFromUnknown(value: unknown): string {
