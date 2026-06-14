@@ -3,7 +3,7 @@
 import { ClientAddressKind, Prisma } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { prisma } from '@/lib/prisma'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import {
@@ -131,8 +131,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return jsonFail(404, 'Address not found.')
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const kindRaw =
       body.kind !== undefined

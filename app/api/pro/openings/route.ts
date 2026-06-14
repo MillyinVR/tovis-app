@@ -7,6 +7,7 @@ import {
   type CreatedLastMinuteOpening,
 } from '@/lib/lastMinute/commands/createLastMinuteOpening'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { isRecord } from '@/lib/guards'
 import { parseIntParam } from '@/lib/queryParams'
 import {
@@ -21,18 +22,11 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-type JsonObject = Record<string, unknown>
-
 const DEFAULT_HOURS = 48
 const MAX_LOOKAHEAD_HOURS = 24 * 14
 const DEFAULT_TAKE = 100
 const MAX_TAKE = 200
 const MAX_NOTE_LENGTH = 500
-
-async function readJsonObject(req: Request): Promise<JsonObject> {
-  const raw: unknown = await req.json().catch(() => ({}))
-  return isRecord(raw) ? raw : {}
-}
 
 function clampInt(value: number, min: number, max: number): number {
   const n = Math.trunc(Number(value))
@@ -518,7 +512,7 @@ export async function POST(req: Request) {
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const body = await readJsonObject(req)
+    const body = await readJsonRecord(req)
 
     const offeringIdsResult = parseOfferingIds(body.offeringIds)
     if (!offeringIdsResult.ok) {
@@ -629,7 +623,7 @@ export async function PATCH(req: Request) {
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const body = await readJsonObject(req)
+    const body = await readJsonRecord(req)
 
     const openingId = pickString(body.openingId)
     if (!openingId) {

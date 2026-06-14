@@ -2,15 +2,10 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { parseMoney } from '@/lib/money'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
-  const raw: unknown = await req.json().catch(() => ({}))
-  return isRecord(raw) ? raw : {}
-}
 
 function hasOwn(obj: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key)
@@ -47,7 +42,7 @@ export async function PATCH(req: Request) {
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
-    const body = await readJsonObject(req)
+    const body = await readJsonRecord(req)
 
     const serviceId = pickString(body.serviceId)
     if (!serviceId) {

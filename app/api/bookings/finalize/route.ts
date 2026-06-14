@@ -29,7 +29,8 @@ import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { type UnknownRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
@@ -194,9 +195,7 @@ function normalizeSourceFromRequest(args: {
   return BookingSource.REQUESTED
 }
 
-function parseFinalizeBody(rawBody: unknown): ParsedFinalizeBody {
-  const body = isRecord(rawBody) ? rawBody : {}
-
+function parseFinalizeBody(body: UnknownRecord): ParsedFinalizeBody {
   const offeringId = pickString(body.offeringId)
   const holdId = pickString(body.holdId)
   const mediaId = pickString(body.mediaId)
@@ -530,8 +529,7 @@ export async function POST(request: Request) {
   const requestId = readRequestId(request)
 
   try {
-    const rawBody: unknown = await request.json().catch(() => ({}))
-    const parsedBody = parseFinalizeBody(rawBody)
+    const parsedBody = parseFinalizeBody(await readJsonRecord(request))
 
     const validated = validateParsedFinalizeBody(parsedBody)
 

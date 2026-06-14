@@ -9,8 +9,8 @@ import {
   googlePlaceDetails,
   googleTimeZoneId,
 } from '@/app/api/_utils/google'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
-import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { refreshLocation } from '@/lib/search/index/refreshSearchIndex'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
@@ -99,8 +99,7 @@ export async function POST(req: Request) {
 
     const professionalId = auth.professionalId
 
-    const raw: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(raw) ? raw : {}
+    const body = await readJsonRecord(req)
 
     const mode = normalizeMode(body.mode)
 

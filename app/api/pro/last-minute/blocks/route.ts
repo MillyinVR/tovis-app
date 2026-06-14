@@ -1,16 +1,11 @@
 // app/api/pro/last-minute/blocks/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 
 export const dynamic = 'force-dynamic'
 
 const MAX_REASON_LENGTH = 200
-
-async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
-  const raw: unknown = await req.json().catch(() => ({}))
-  return isRecord(raw) ? raw : {}
-}
 
 function toDateOrNull(v: unknown): Date | null {
   const s = pickString(v)
@@ -32,7 +27,7 @@ export async function POST(req: Request) {
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
-    const body = await readJsonObject(req)
+    const body = await readJsonRecord(req)
 
     const startAt = toDateOrNull(body.startAt)
     const endAt = toDateOrNull(body.endAt)

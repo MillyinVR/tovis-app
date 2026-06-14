@@ -5,7 +5,8 @@ import { pickString } from '@/app/api/_utils/pick'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
-import { hasOwn, isRecord, type UnknownRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { hasOwn, type UnknownRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import {
   PROFESSIONAL_LOCATION_SELECT,
@@ -74,8 +75,7 @@ export async function POST(req: Request) {
 
     if (limited) return limited
 
-    const raw: unknown = await req.json().catch(() => ({}))
-    const body: UnknownRecord = isRecord(raw) ? raw : {}
+    const body = await readJsonRecord(req)
 
     const type = normalizeProfessionalLocationType(body.type)
     if (!type) {

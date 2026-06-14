@@ -2,7 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { ClientNoteVisibility } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -26,8 +26,7 @@ export async function POST(req: Request, context: Ctx) {
     const gate = await assertProCanViewClient(professionalId, clientId)
     if (!gate.ok) return jsonFail(403, 'Forbidden.')
 
-    const raw = await req.json().catch(() => null)
-    const body = isRecord(raw) ? raw : {}
+    const body = await readJsonRecord(req)
 
     const title = pickString(body.title)
     const noteBody = pickString(body.body)

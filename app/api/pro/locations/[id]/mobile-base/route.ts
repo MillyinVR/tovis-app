@@ -20,8 +20,8 @@ import {
   googleTimeZoneId,
 } from '@/app/api/_utils/google'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
-import { isRecord } from '@/lib/guards'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
@@ -69,8 +69,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
       return jsonFail(400, 'Missing id')
     }
 
-    const raw: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(raw) ? raw : {}
+    const body = await readJsonRecord(req)
 
     const postalCode = pickString(body.postalCode) // pii-plaintext-read-ok: request body carries the new ZIP the pro is submitting, not stored PII
     const radiusMiles =

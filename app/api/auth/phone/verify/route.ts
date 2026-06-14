@@ -4,8 +4,8 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { createActiveToken, createVerificationToken } from '@/lib/auth'
-import { isRecord } from '@/lib/guards'
 import { checkTwilioVerifyPhoneCode } from '@/lib/twilio/verify'
 import {
   captureAuthException,
@@ -112,8 +112,7 @@ export async function POST(request: Request) {
 
     userIdForLog = userId
 
-    const rawBody: unknown = await request.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(request)
 
     const code = normalizeVerificationCode(body.code)
 

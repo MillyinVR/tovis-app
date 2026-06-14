@@ -19,7 +19,7 @@ import {
   failStartedRouteIdempotency,
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { prisma } from '@/lib/prisma'
 import {
   isBookingError,
@@ -154,8 +154,7 @@ export async function POST(req: Request, ctx: Ctx) {
       return jsonFail(400, 'Missing booking id.')
     }
 
-    const rawBody: unknown = await req.json().catch(() => null)
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const mode = isMode(body.mode) ? body.mode : 'BOOK'
 

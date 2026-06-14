@@ -10,7 +10,7 @@ import {
   isValidHandle,
   normalizeHandle,
 } from '@/lib/handles'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 
 export const dynamic = 'force-dynamic'
 
@@ -58,8 +58,7 @@ export async function PATCH(req: Request) {
 
     const proProfileId = auth.professionalId
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const current = await prisma.professionalProfile.findUnique({
       where: { id: proProfileId },

@@ -7,6 +7,7 @@ import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { hasOwn, isRecord, type UnknownRecord } from '@/lib/guards'
 import { pickBool, pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
@@ -100,8 +101,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
       return jsonFail(400, 'Missing id')
     }
 
-    const raw: unknown = await req.json().catch(() => ({}))
-    const body: UnknownRecord = isRecord(raw) ? raw : {}
+    const body = await readJsonRecord(req)
 
     const existing = await loadOwnedLocation({
       locationId,

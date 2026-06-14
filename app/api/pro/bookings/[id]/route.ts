@@ -25,6 +25,7 @@ import {
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 import { resolveAppointmentSchedulingContext } from '@/lib/booking/timeZoneTruth'
 import { moneyToFixed2String } from '@/lib/money'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { isRecord } from '@/lib/guards'
 import { DEFAULT_DURATION_MINUTES } from '@/lib/booking/constants'
 import { addMinutes, normalizeToMinute } from '@/lib/booking/conflicts'
@@ -448,8 +449,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const rec = isRecord(rawBody) ? rawBody : {}
+    const rec = await readJsonRecord(req)
 
     const hasStatus = Object.prototype.hasOwnProperty.call(rec, 'status')
     const hasNotifyClient = Object.prototype.hasOwnProperty.call(

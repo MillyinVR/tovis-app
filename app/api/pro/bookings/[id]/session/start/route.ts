@@ -14,7 +14,7 @@ import {
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { startBookingSession } from '@/lib/booking/writeBoundary'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError } from '@/lib/security/logging'
 
@@ -163,8 +163,7 @@ export async function POST(request: Request, ctx: Ctx) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
-    const rawBody: unknown = await request.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(request)
     const explicitSelection = body.explicitSelection === true
 
     const idempotency = await beginRouteIdempotency<StartSessionResponseBody>({

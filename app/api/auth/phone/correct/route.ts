@@ -10,7 +10,7 @@ import {
   pickString,
 } from '@/app/api/_utils'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { prisma } from '@/lib/prisma'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
@@ -94,8 +94,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const rawBody: unknown = await request.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(request)
 
     const rawPhone = pickString(body.phone)?.trim() ?? null
 

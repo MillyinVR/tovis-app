@@ -9,7 +9,7 @@ import {
   getViewerLookSaveState,
   removeBoardItem,
 } from '@/lib/boards'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { loadLookAccess } from '@/lib/looks/access'
 import {
   canSaveLookPost,
@@ -122,8 +122,7 @@ export async function POST(req: Request, ctx: Ctx) {
       })
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
     const boardId = readBoardId(body)
 
     if (!boardId) {
@@ -226,8 +225,7 @@ export async function DELETE(req: Request, ctx: Ctx) {
       })
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
     const boardId = readBoardId(body)
 
     if (!boardId) {

@@ -2,7 +2,7 @@
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { requirePro } from '@/app/api/_utils/auth/requirePro'
 import { upsertProClient } from '@/lib/clients/upsertProClient'
-import { isRecord, type UnknownRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -12,8 +12,7 @@ export async function POST(request: Request) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const raw: unknown = await request.json().catch(() => ({}))
-    const body: UnknownRecord = isRecord(raw) ? raw : {}
+    const body = await readJsonRecord(request)
 
     const result = await upsertProClient({
       professionalId: auth.professionalId,

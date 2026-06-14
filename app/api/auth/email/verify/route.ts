@@ -4,9 +4,9 @@ import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 import { createActiveToken, createVerificationToken } from '@/lib/auth'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { enforceVerificationVerifyThrottle } from '@/app/api/_utils/auth/verificationThrottle'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { sha256Hex, timingSafeEqualHex } from '@/lib/auth/timingSafe'
 import { getCurrentUser } from '@/lib/currentUser'
-import { isRecord } from '@/lib/guards'
 import {
   logAuthEvent,
   captureAuthException,
@@ -22,8 +22,7 @@ async function readVerificationBody(request: Request): Promise<{
   verificationId: string | null
   token: string | null
 }> {
-  const raw: unknown = await request.json().catch(() => ({}))
-  const body = isRecord(raw) ? raw : {}
+  const body = await readJsonRecord(request)
 
   const verificationId = pickString(body.verificationId)?.trim() ?? null
   const token = pickString(body.token)?.trim() ?? null

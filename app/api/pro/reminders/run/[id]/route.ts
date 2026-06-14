@@ -2,7 +2,7 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { isRecord, type UnknownRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,11 +10,6 @@ type Params = { params: Promise<{ id: string }> }
 
 async function readParams(ctx: Params) {
   return await ctx.params
-}
-
-async function readBody(req: NextRequest): Promise<UnknownRecord> {
-  const raw: unknown = await req.json().catch(() => ({}))
-  return isRecord(raw) ? raw : {}
 }
 
 export async function PATCH(req: NextRequest, ctx: Params) {
@@ -27,7 +22,7 @@ export async function PATCH(req: NextRequest, ctx: Params) {
     const reminderId = String(id || '').trim()
     if (!reminderId) return jsonFail(400, 'Missing reminder id.')
 
-    const body = await readBody(req)
+    const body = await readJsonRecord(req)
     const completed = body.completed
 
     if (typeof completed !== 'boolean') {
