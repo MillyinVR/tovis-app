@@ -1,5 +1,7 @@
 // app/api/_utils/bookingResponses.ts
-import { jsonFail } from '@/app/api/_utils/responses'
+// Import jsonFail from the package barrel (not ./responses directly) so route
+// tests that mock '@/app/api/_utils' also intercept the call made here.
+import { jsonFail } from '@/app/api/_utils'
 import {
   type BookingErrorCode,
   getBookingFailPayload,
