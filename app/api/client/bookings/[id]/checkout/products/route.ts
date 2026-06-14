@@ -11,10 +11,9 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { upsertClientBookingCheckoutProducts } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
@@ -136,17 +135,6 @@ function parseItems(input: unknown): ParsedItemsResult {
   }
 
   return { ok: true, value: out }
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function readRequestId(req: Request): string | null {

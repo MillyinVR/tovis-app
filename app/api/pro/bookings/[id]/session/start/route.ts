@@ -10,10 +10,9 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { startBookingSession } from '@/lib/booking/writeBoundary'
 import { isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -41,17 +40,6 @@ function bookingBase(bookingId: string): string {
 
 function sessionHubHref(bookingId: string): string {
   return `${bookingBase(bookingId)}/session`
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function readRequestMeta(request: Request): RequestMeta {

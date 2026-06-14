@@ -21,10 +21,9 @@ import {
   type ResolvedAftercareAccessToken,
 } from '@/lib/aftercare/aftercareAccessTokens'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { createClientRebookedBookingFromAftercare } from '@/lib/booking/writeBoundary'
 import { isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -74,17 +73,6 @@ type RebookIdempotencyRequestBody = {
   sourceBookingId: string
   clientId: string
   scheduledFor: string
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 async function getRouteToken(ctx: Ctx): Promise<string | null> {

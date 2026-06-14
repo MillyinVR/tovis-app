@@ -22,7 +22,7 @@
  */
 
 import { prisma } from '@/lib/prisma'
-import { BookingStatus, Prisma, ServiceLocationType } from '@prisma/client'
+import { Prisma, ServiceLocationType } from '@prisma/client'
 import {
   addMinutes,
   type BusyInterval,
@@ -33,7 +33,10 @@ import {
   mergeBusyIntervals,
   overlaps,
 } from '@/lib/booking/conflicts'
-import { DEFAULT_DURATION_MINUTES } from '@/lib/booking/constants'
+import {
+  BOOKING_BLOCKING_STATUSES,
+  DEFAULT_DURATION_MINUTES,
+} from '@/lib/booking/constants'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -94,19 +97,6 @@ type BusyIntervalWindowArgs = {
 }
 
 export type TimeRangeConflictCode = 'BLOCKED' | 'BOOKING' | 'HOLD'
-
-/**
- * Only real scheduled appointment states should consume time.
- * WAITLIST must NOT block.
- *
- * Adjust this list if your BookingStatus enum uses different active names.
- */
-const BOOKING_BLOCKING_STATUSES: BookingStatus[] = [
-  BookingStatus.PENDING,
-  BookingStatus.ACCEPTED,
-  BookingStatus.IN_PROGRESS,
-  BookingStatus.COMPLETED,
-]
 
 function db(tx?: DbClient): DbClient {
   return tx ?? prisma
@@ -202,7 +192,7 @@ function assertValidRange(start: Date, end: Date): void {
 function buildBlockingBookingStatusWhere(): Prisma.BookingWhereInput {
   return {
     status: {
-      in: BOOKING_BLOCKING_STATUSES,
+      in: [...BOOKING_BLOCKING_STATUSES],
     },
   }
 }

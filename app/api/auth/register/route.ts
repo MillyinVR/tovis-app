@@ -38,7 +38,11 @@ import {
   logAuthEvent,
   captureAuthException,
 } from '@/lib/observability/authEvents'
-import { isHandleReserved } from '@/lib/handles'
+import {
+  isHandleReserved,
+  isValidHandle,
+  normalizeHandle,
+} from '@/lib/handles'
 import { waitUntil } from '@vercel/functions'
 import { TRANSACTIONAL_SMS_POLICY_VERSION } from '@/lib/transactionalSmsPolicy'
 
@@ -221,9 +225,6 @@ function normalizeLicenseNumber(v: unknown) {
   return raw.trim().toUpperCase().replace(/\s+/g, '')
 }
 
-function normalizeHandleInput(raw: string) {
-  return raw.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 24)
-}
 
 /** Accept number or string, return finite number or null */
 function parseNumber(v: unknown): number | null {
@@ -862,8 +863,8 @@ export async function POST(request: Request) {
     let normalizedHandle: string | null = null
     if (role === 'PRO' && handleRaw?.trim()) {
       handleToStore = handleRaw.trim()
-      normalizedHandle = normalizeHandleInput(handleToStore)
-      if (!normalizedHandle) {
+      normalizedHandle = normalizeHandle(handleToStore)
+      if (!normalizedHandle || !isValidHandle(normalizedHandle)) {
         return jsonFail(400, 'Handle is invalid.', { code: 'HANDLE_INVALID' })
       }
       if (isHandleReserved(normalizedHandle)) {

@@ -3,7 +3,13 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { Prisma, ProfessionType } from '@prisma/client'
 import { canEditPublicPublishingFields } from '@/lib/proTrustState'
-import { isHandleReserved } from '@/lib/handles'
+import {
+  HANDLE_MAX,
+  HANDLE_MIN,
+  isHandleReserved,
+  isValidHandle,
+  normalizeHandle,
+} from '@/lib/handles'
 import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
@@ -14,27 +20,6 @@ function pickNonEmptyStringOrUndefined(v: unknown): string | undefined {
   return t ? t : undefined
 }
 
-/**
- * Vanity handle rules (DNS-safe for {handle}.tovis.me):
- * - 3–24 chars
- * - lowercase letters, numbers, hyphen
- * - must start + end with letter/number
- */
-const HANDLE_MIN = 3
-const HANDLE_MAX = 24
-
-
-function normalizeHandle(raw: string) {
-  return raw.trim().toLowerCase()
-}
-
-function isValidHandleNormalized(h: string) {
-  if (h.length < HANDLE_MIN || h.length > HANDLE_MAX) return false
-  if (!/^[a-z0-9-]+$/.test(h)) return false
-  if (!/^[a-z0-9]/.test(h)) return false
-  if (!/[a-z0-9]$/.test(h)) return false
-  return true
-}
 
 function isProfessionTypeValue(value: string): value is ProfessionType {
   return Object.values(ProfessionType).some((candidate) => candidate === value)
@@ -120,7 +105,7 @@ export async function PATCH(req: Request) {
       } else {
         const normalized = normalizeHandle(trimmed)
 
-        if (!isValidHandleNormalized(normalized)) {
+        if (!isValidHandle(normalized)) {
           return jsonFail(
             400,
             `Handle must be ${HANDLE_MIN}-${HANDLE_MAX} chars and use only letters, numbers, and hyphens.`,

@@ -14,10 +14,9 @@ import {
 } from '@prisma/client'
 import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundary'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 export const dynamic = 'force-dynamic'
 
@@ -38,17 +37,6 @@ function sortKey(
   const rankDelta = phaseRank(a.phase) - phaseRank(b.phase)
   if (rankDelta !== 0) return rankDelta
   return b.createdAt.getTime() - a.createdAt.getTime()
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 export async function GET(

@@ -9,12 +9,11 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import { pickString } from '@/app/api/_utils/pick'
-import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { jsonOk } from '@/app/api/_utils/responses'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { rescheduleBookingFromHold } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -30,17 +29,6 @@ export const dynamic = 'force-dynamic'
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 type RescheduleResponseBody = Prisma.InputJsonObject
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
-}
 
 function buildRescheduleIdempotencyBody(args: {
   bookingId: string

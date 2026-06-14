@@ -12,10 +12,9 @@ import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
 import { normalizeToMinute } from '@/lib/booking/conflicts'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { createHold } from '@/lib/booking/writeBoundary'
 import {
   bookingEntryPointFromHoldContext,
@@ -61,17 +60,6 @@ type HeaderCarrier = {
 
 function isValidDate(value: Date): boolean {
   return value instanceof Date && Number.isFinite(value.getTime())
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function toCreateHoldOffering(

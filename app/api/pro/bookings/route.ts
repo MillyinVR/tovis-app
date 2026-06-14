@@ -13,10 +13,9 @@ import { safeError, safeLogMeta } from '@/lib/security/logging'
 import { createProBookingWithClient } from '@/lib/booking/createProBookingWithClient'
 import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { computeRequestedEndUtc } from '@/lib/booking/slotReadiness'
 import { isRecord } from '@/lib/guards'
@@ -57,17 +56,6 @@ type ProBookingSuccessBody = {
     claimStatus: ClientClaimStatus
   }
   invite?: Prisma.InputJsonValue
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function idempotencyMissingKeyFail(): Response {

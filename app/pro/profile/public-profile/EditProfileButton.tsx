@@ -13,6 +13,7 @@ import { useRouter } from 'next/navigation'
 
 import { asTrimmedString, type UnknownRecord } from '@/lib/guards'
 import { errorMessageFromUnknown, readErrorMessage, safeJson } from '@/lib/http'
+import { sanitizeHandleInput } from '@/lib/handles'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { withCacheBuster } from '@/lib/url'
@@ -31,16 +32,6 @@ type Props = {
 }
 
 type TimeoutHandle = ReturnType<typeof setTimeout>
-
-function normalizeHandleClientPreview(raw: string) {
-  return raw
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '')
-    .replace(/[^a-z0-9-]/g, '')
-    .replace(/^-+/, '')
-    .replace(/-+$/, '')
-}
 
 function readString(obj: UnknownRecord, key: string) {
   return asTrimmedString(obj[key])
@@ -185,7 +176,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
   }, [open])
 
   const handlePreview = useMemo(
-    () => normalizeHandleClientPreview(handle),
+    () => sanitizeHandleInput(handle),
     [handle],
   )
 

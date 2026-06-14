@@ -200,7 +200,7 @@ function makeProSignupBody(overrides?: Record<string, unknown>) {
     transactionalSmsConsent: true,
     turnstileToken: 'ts_signup_ok',
     professionType: 'MAKEUP_ARTIST',
-    handle: 'jane_smith',
+    handle: 'jane-smith',
     signupLocation: {
       kind: 'PRO_SALON',
       placeId: 'place_1',
@@ -960,7 +960,7 @@ describe('app/api/auth/register/route', () => {
     )
 
     const result = await POST(
-      makeRequest(makeProSignupBody({ handle: 'jane_smith' })),
+      makeRequest(makeProSignupBody({ handle: 'jane-smith' })),
     )
     const body = await result.json()
 
@@ -968,7 +968,7 @@ describe('app/api/auth/register/route', () => {
     expect(body.ok).toBe(true)
 
     expect(mockPrisma.professionalProfile.findFirst).toHaveBeenCalledWith({
-      where: { handleNormalized: 'jane_smith' },
+      where: { handleNormalized: 'jane-smith' },
       select: { id: true },
     })
 
@@ -986,8 +986,8 @@ describe('app/api/auth/register/route', () => {
         transactionalSmsConsentUserAgent: 'vitest',
         professionalProfile: {
           create: expect.objectContaining({
-            handle: 'jane_smith',
-            handleNormalized: 'jane_smith',
+            handle: 'jane-smith',
+            handleNormalized: 'jane-smith',
             professionType: 'MAKEUP_ARTIST',
           }),
         },
