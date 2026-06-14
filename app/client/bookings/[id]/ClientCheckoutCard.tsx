@@ -215,6 +215,15 @@ async function submitCheckout(args: {
     scope: 'client-checkout',
     entityId: args.bookingId,
     action: args.confirmPayment ? 'confirm-payment' : 'save-checkout',
+    // Save-tip is iterative (save 15%, change to 20%, save again). Those are
+    // distinct bodies under one key, so without a nonce the second save in the
+    // 60s bucket 409s on a body-hash conflict. Keying on tip+method lets a
+    // changed save through while a true double-click still dedupes. The
+    // terminal confirm-payment path is left strict (action-only key) so an
+    // identical re-submit can never trigger a second charge.
+    nonce: args.confirmPayment
+      ? undefined
+      : `${args.tipAmount ?? ''}|${args.selectedPaymentMethod ?? ''}`,
   })
 
   const response = await fetch(
@@ -257,6 +266,10 @@ async function createStripeCheckoutSession(args: {
     scope: 'client-checkout-stripe-session',
     entityId: args.bookingId,
     action: 'create-stripe-session',
+    // Re-initiating with a changed tip (e.g. after returning from Stripe)
+    // is a distinct body under one key; nonce on the tip avoids a 409 while
+    // an identical re-initiate still dedupes.
+    nonce: args.tipAmount,
   })
 
   const response = await fetch(
