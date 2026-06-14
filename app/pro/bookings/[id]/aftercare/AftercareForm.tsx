@@ -26,6 +26,7 @@ import {
   ymdToIsoStartOfDay,
   type StepUnit,
 } from './aftercareDates'
+import AvailabilityCalendarPopup from './AvailabilityCalendarPopup'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 type MediaVisibility = 'PUBLIC' | 'PRO_CLIENT'
@@ -346,6 +347,11 @@ export default function AftercareForm({
   const [windowStart, setWindowStart] = useState<string>('')
   const [windowEnd, setWindowEnd] = useState<string>('')
 
+  // Which date field, if any, has the "open my calendar" popup showing.
+  const [pickerTarget, setPickerTarget] = useState<
+    'nextVisit' | 'windowStart' | 'windowEnd' | null
+  >(null)
+
   const [createRebookReminder, setCreateRebookReminder] = useState(false)
   const [rebookDaysBefore, setRebookDaysBefore] = useState('2')
 
@@ -554,6 +560,20 @@ export default function AftercareForm({
   function stepNextVisit(unit: StepUnit) {
     markDirty()
     setRebookAt((prev) => stepDatetimeLocal(prev, unit, tomorrowYmd))
+  }
+
+  // Calendar-popup pickers (return a "YYYY-MM-DD" day).
+  function pickNextVisitDate(ymd: string) {
+    markDirty()
+    setRebookAt((prev) => {
+      const time = /T(\d{2}:\d{2})$/.exec(prev)?.[1] ?? '12:00'
+      return `${ymd}T${time}`
+    })
+  }
+
+  function pickWindowEnd(ymd: string) {
+    const minEnd = windowStart ? addDaysToYmd(windowStart, 1) : null
+    applyWindowEnd(minEnd && compareYmd(ymd, minEnd) < 0 ? minEnd : ymd)
   }
 
   function addProduct() {
@@ -1159,7 +1179,11 @@ export default function AftercareForm({
                 }}
                 className={inputClass(Boolean(disabled))}
               />
-              <StepButtons disabled={disabled} onStep={stepNextVisit} />
+              <StepButtons
+                disabled={disabled}
+                onStep={stepNextVisit}
+                onOpenCalendar={() => setPickerTarget('nextVisit')}
+              />
               <div className="mt-2 text-xs font-semibold text-textSecondary">
                 This shows on the client’s summary and can power a reminder.
               </div>
@@ -1185,6 +1209,7 @@ export default function AftercareForm({
                   <StepButtons
                     disabled={disabled}
                     onStep={stepWindowStart}
+                    onOpenCalendar={() => setPickerTarget('windowStart')}
                   />
                 </div>
 
@@ -1202,7 +1227,11 @@ export default function AftercareForm({
                     onChange={(e) => applyWindowEnd(e.target.value)}
                     className={inputClass(Boolean(disabled))}
                   />
-                  <StepButtons disabled={disabled} onStep={stepWindowEnd} />
+                  <StepButtons
+                    disabled={disabled}
+                    onStep={stepWindowEnd}
+                    onOpenCalendar={() => setPickerTarget('windowEnd')}
+                  />
                 </div>
               </div>
 
@@ -1349,6 +1378,42 @@ export default function AftercareForm({
           </button>
         </div>
       </div>
+
+      {pickerTarget ? (
+        <AvailabilityCalendarPopup
+          open
+          tz={tz}
+          title={
+            pickerTarget === 'nextVisit'
+              ? 'Pick a next-visit date'
+              : pickerTarget === 'windowStart'
+                ? 'Pick a window start date'
+                : 'Pick a window end date'
+          }
+          minYmd={
+            pickerTarget === 'nextVisit'
+              ? todayYmd
+              : pickerTarget === 'windowStart'
+                ? tomorrowYmd
+                : windowStart
+                  ? addDaysToYmd(windowStart, 1) ?? tomorrowYmd
+                  : tomorrowYmd
+          }
+          anchorYmd={
+            pickerTarget === 'nextVisit'
+              ? rebookAt.slice(0, 10) || undefined
+              : pickerTarget === 'windowStart'
+                ? windowStart || undefined
+                : windowEnd || windowStart || undefined
+          }
+          onClose={() => setPickerTarget(null)}
+          onPick={(ymd) => {
+            if (pickerTarget === 'nextVisit') pickNextVisitDate(ymd)
+            else if (pickerTarget === 'windowStart') applyWindowStart(ymd)
+            else pickWindowEnd(ymd)
+          }}
+        />
+      ) : null}
     </div>
   )
 }
@@ -1362,12 +1427,24 @@ const STEP_UNITS: { unit: StepUnit; label: string }[] = [
 function StepButtons({
   disabled,
   onStep,
+  onOpenCalendar,
 }: {
   disabled: boolean
   onStep: (unit: StepUnit) => void
+  onOpenCalendar?: () => void
 }) {
   return (
     <div className="mt-2 flex flex-wrap gap-2">
+      {onOpenCalendar ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onOpenCalendar}
+          className={secondaryBtn(Boolean(disabled))}
+        >
+          📅 My calendar
+        </button>
+      ) : null}
       {STEP_UNITS.map(({ unit, label }) => (
         <button
           key={unit}
