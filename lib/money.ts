@@ -147,3 +147,35 @@ export function parseMoney(input: unknown): Prisma.Decimal {
 
   throw new Error('Invalid money amount.')
 }
+
+/**
+ * Display an untyped value (Prisma.Decimal, number, or money string) as "$X.XX".
+ * Single source of truth for showing a money value whose type isn't known at the
+ * call site (e.g. snapshot fields). Returns null when it can't be interpreted as
+ * money. A non-numeric string is returned with a leading "$" if it lacks one, so
+ * already-formatted values pass through unchanged.
+ */
+export function formatMoneyFromUnknown(value: unknown): string | null {
+  if (value === null || value === undefined) return null
+
+  if (value instanceof Prisma.Decimal) {
+    const fixed = moneyToFixed2String(value)
+    return fixed === null ? null : `$${fixed}`
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? `$${value.toFixed(2)}` : null
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+
+    const parsed = Number(trimmed)
+    if (Number.isFinite(parsed)) return `$${parsed.toFixed(2)}`
+
+    return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
+  }
+
+  return null
+}

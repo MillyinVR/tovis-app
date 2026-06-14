@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { formatMoneyFromUnknown } from '@/lib/money'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import {
@@ -102,37 +103,6 @@ function pickSearchParam(value: string | string[] | undefined): string | null {
   return pickString(value ?? null)
 }
 
-function formatMoneyFromUnknown(value: unknown): string | null {
-  if (value == null) return null
-
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return `$${value.toFixed(2)}`
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-
-    const parsed = Number(trimmed)
-    if (Number.isFinite(parsed)) {
-      return `$${parsed.toFixed(2)}`
-    }
-
-    return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    const maybeToString = value.toString
-    if (typeof maybeToString === 'function') {
-      const rendered = maybeToString.call(value)
-      if (typeof rendered === 'string') {
-        return formatMoneyFromUnknown(rendered)
-      }
-    }
-  }
-
-  return null
-}
 
 function computeRebookInfo(
   aftercare: {

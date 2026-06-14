@@ -3,6 +3,7 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
+import { formatMoneyFromUnknown } from '@/lib/money'
 import { useRouter } from 'next/navigation'
 import {
   buildClientIdempotencyKey,
@@ -104,20 +105,6 @@ function getNumericMoney(value: unknown): number | null {
   return null
 }
 
-function formatMoneyFromUnknown(value: unknown): string | null {
-  const numeric = getNumericMoney(value)
-  if (numeric != null) {
-    return `$${numeric.toFixed(2)}`
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-    return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
-  }
-
-  return null
-}
 
 function parseSubmitErrorMessage(data: unknown): string | null {
   if (!data || typeof data !== 'object') return null
