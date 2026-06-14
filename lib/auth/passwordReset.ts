@@ -32,22 +32,7 @@ function envOrThrow(name: string): string {
   return value
 }
 
-export function getPasswordResetAppUrlFromRequest(
-  request: Request,
-): string | null {
-  const envUrl = envOrNull('NEXT_PUBLIC_APP_URL')
-  if (envUrl) {
-    return envUrl.replace(/\/+$/, '')
-  }
-
-  const host =
-    request.headers.get('x-forwarded-host') ?? request.headers.get('host')
-  const proto = request.headers.get('x-forwarded-proto') ?? 'https'
-
-  if (!host) return null
-
-  return `${proto}://${host}`.replace(/\/+$/, '')
-}
+export { getAppUrlFromRequest as getPasswordResetAppUrlFromRequest } from '@/lib/appUrl'
 
 export function buildPasswordResetToken(args: {
   tokenId: string
