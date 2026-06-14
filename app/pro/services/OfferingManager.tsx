@@ -3,7 +3,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
@@ -263,14 +264,16 @@ export default function OfferingManager({
     clearMessages(o.id)
 
     try {
+      const uploadFile = await compressImageForUpload(file)
+
       const initRes = await fetch('/api/pro/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           kind: 'SERVICE_IMAGE_PUBLIC',
           serviceId: o.serviceId,
-          contentType: file.type,
-          size: file.size,
+          contentType: uploadFile.type,
+          size: uploadFile.size,
         }),
       })
 
@@ -278,11 +281,17 @@ export default function OfferingManager({
       const init = initRes.ok ? parseUploadInit(initRaw) : null
       if (!init) throw new Error(readErrorMessage(initRaw) ?? `Upload init failed (${initRes.status}).`)
 
-      const { error: upErr } = await supabaseBrowser.storage.from(init.bucket).uploadToSignedUrl(init.path, init.token, file, {
-        contentType: file.type,
+      const { error: upErr } = await uploadWithProgress({
+        bucket: init.bucket,
+        path: init.path,
+        token: init.token,
+        file: uploadFile,
+        contentType: uploadFile.type || 'application/octet-stream',
         upsert: true,
+        onProgress: () => {},
+        signal: new AbortController().signal,
       })
-      if (upErr) throw new Error(upErr.message || 'Upload failed.')
+      if (upErr) throw new Error(upErr || 'Upload failed.')
 
       const finalUrl = init.cacheBuster ? `${init.publicUrl}?v=${init.cacheBuster}` : init.publicUrl
 

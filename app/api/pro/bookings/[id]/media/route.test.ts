@@ -46,13 +46,31 @@ const expectedPostResponseBody = {
 }
 
 const validBody = {
-  storageBucket: BUCKETS.mediaPrivate,
-  storagePath: 'bookings/booking_1/before/main.jpg',
-  thumbBucket: BUCKETS.mediaPrivate,
-  thumbPath: 'bookings/booking_1/before/thumb.jpg',
+  uploadSessionId: 'us_1',
   caption: '  Before photo  ',
   phase: 'BEFORE',
   mediaType: 'IMAGE',
+}
+
+// What validateUploadSession returns by default — the authoritative pointer the
+// route uses instead of any client-supplied bucket/path.
+const validSession = {
+  id: 'us_1',
+  surface: 'PRO_BOOKING_MEDIA',
+  status: 'PENDING',
+  tenantId: 'tenant_1',
+  professionalId: 'pro_1',
+  clientId: null,
+  bookingId: 'booking_1',
+  phase: MediaPhase.BEFORE,
+  storageBucket: BUCKETS.mediaPrivate,
+  storagePath: 'bookings/booking_1/before/main.jpg',
+  contentType: 'image/jpeg',
+  maxBytes: 30 * 1024 * 1024,
+  checksumSha256: null,
+  expiresAt: new Date('2026-04-13T19:00:00.000Z'),
+  consumedAt: null,
+  mediaAssetId: null,
 }
 
 const mocks = vi.hoisted(() => ({
@@ -70,6 +88,9 @@ const mocks = vi.hoisted(() => ({
   createSignedUrl: vi.fn(),
 
   uploadProBookingMedia: vi.fn(),
+
+  validateUploadSession: vi.fn(),
+  consumeUploadSession: vi.fn(),
 
   beginRouteIdempotency: vi.fn(),
   completeRouteIdempotency: vi.fn(),
@@ -118,6 +139,34 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
   uploadProBookingMedia: mocks.uploadProBookingMedia,
 }))
 
+vi.mock('@/lib/media/uploadSession', () => {
+  class UploadSessionError extends Error {
+    code: string
+    httpStatus: number
+    constructor(code: string, message: string) {
+      super(message)
+      this.name = 'UploadSessionError'
+      this.code = code
+      const map: Record<string, number> = {
+        NOT_FOUND: 404,
+        FORBIDDEN: 403,
+        EXPIRED: 410,
+        ALREADY_CONSUMED: 409,
+        SURFACE_MISMATCH: 400,
+        CONTEXT_MISMATCH: 400,
+        CONSUME_CONFLICT: 409,
+      }
+      this.httpStatus = map[code] ?? 400
+    }
+  }
+
+  return {
+    validateUploadSession: mocks.validateUploadSession,
+    consumeUploadSession: mocks.consumeUploadSession,
+    UploadSessionError,
+  }
+})
+
 vi.mock('@/app/api/_utils/idempotency', () => ({
   beginRouteIdempotency: mocks.beginRouteIdempotency,
   completeRouteIdempotency: mocks.completeRouteIdempotency,
@@ -152,6 +201,7 @@ vi.mock('@/lib/security/logging', () => ({
 }))
 
 import { GET, POST } from './route'
+import { UploadSessionError } from '@/lib/media/uploadSession'
 
 function expectIdempotencyStarted(key = 'idem_media_create_1'): void {
   mocks.beginRouteIdempotency.mockResolvedValue({
@@ -310,6 +360,9 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       created: mediaItemFromUpload,
       advancedTo: 'BEFORE_PHOTOS',
     })
+
+    mocks.validateUploadSession.mockResolvedValue(validSession)
+    mocks.consumeUploadSession.mockResolvedValue(undefined)
   })
 
   afterEach(() => {
@@ -596,12 +649,13 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 
-  it('POST validates required storage fields after rate limit but before idempotency', async () => {
+  it('POST returns 400 when uploadSessionId is missing, before idempotency', async () => {
     const result = await POST(
       makePostRequest({
         body: {
-          ...validBody,
-          storagePath: '',
+          caption: 'Before photo',
+          phase: 'BEFORE',
+          mediaType: 'IMAGE',
         },
       }),
       makeCtx(),
@@ -615,36 +669,15 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     expect(result.status).toBe(400)
     await expect(result.json()).resolves.toEqual({
       ok: false,
-      error: 'Missing storageBucket/storagePath.',
+      error: 'Missing uploadSessionId.',
     })
 
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.validateUploadSession).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
-  it('POST validates thumb bucket and path pairing before idempotency', async () => {
-    const result = await POST(
-      makePostRequest({
-        body: {
-          ...validBody,
-          thumbBucket: BUCKETS.mediaPrivate,
-          thumbPath: '',
-        },
-      }),
-      makeCtx(),
-    )
-
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'thumbBucket and thumbPath must be provided together.',
-    })
-
-    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
-    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
-  })
-
-  it('POST validates phase and mediaType before idempotency', async () => {
+  it('POST validates phase and mediaType before idempotency or session lookup', async () => {
     const badPhase = await POST(
       makePostRequest({
         body: {
@@ -678,82 +711,42 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     })
 
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.validateUploadSession).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
-  it('POST rejects storage paths outside the booking phase prefix before idempotency', async () => {
+  it('POST maps upload-session validation errors and marks idempotency failed', async () => {
+    mocks.validateUploadSession.mockRejectedValueOnce(
+      new UploadSessionError('FORBIDDEN', 'Upload session belongs to another professional.'),
+    )
+
     const result = await POST(
-      makePostRequest({
-        body: {
-          ...validBody,
-          storagePath: 'bookings/other_booking/before/main.jpg',
-        },
-      }),
+      makeIdempotentPostRequest({ key: 'idem_media_forbidden_1' }),
       makeCtx(),
     )
 
-    expect(result.status).toBe(400)
+    expect(result.status).toBe(403)
     await expect(result.json()).resolves.toEqual({
       ok: false,
-      error: 'storagePath must be under bookings/<bookingId>/<phase>/.',
+      error: 'Upload session belongs to another professional.',
     })
 
-    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/media',
+    })
+    expect(mocks.createSignedUrl).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
-  it('POST rejects storage paths outside the submitted phase prefix before idempotency', async () => {
-    const result = await POST(
-      makePostRequest({
-        body: {
-          ...validBody,
-          phase: 'BEFORE',
-          storagePath: 'bookings/booking_1/after/main.jpg',
-        },
-      }),
-      makeCtx(),
-    )
-
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'storagePath must be under bookings/<bookingId>/<phase>/.',
+  it('POST rejects a session whose pointer is not in the private session bucket', async () => {
+    mocks.validateUploadSession.mockResolvedValueOnce({
+      ...validSession,
+      storageBucket: BUCKETS.mediaPublic,
     })
 
-    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
-    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
-  })
-
-  it('POST rejects thumb paths outside the submitted phase prefix before idempotency', async () => {
     const result = await POST(
-      makePostRequest({
-        body: {
-          ...validBody,
-          phase: 'BEFORE',
-          thumbPath: 'bookings/booking_1/after/thumb.jpg',
-        },
-      }),
-      makeCtx(),
-    )
-
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'thumbPath must be under bookings/<bookingId>/<phase>/.',
-    })
-
-    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
-    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
-  })
-
-  it('POST rejects media-public bucket for booking session media before idempotency', async () => {
-    const result = await POST(
-      makePostRequest({
-        body: {
-          ...validBody,
-          storageBucket: BUCKETS.mediaPublic,
-        },
-      }),
+      makeIdempotentPostRequest({ key: 'idem_media_badbucket_1' }),
       makeCtx(),
     )
 
@@ -763,32 +756,10 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       error: `Session media must upload to ${BUCKETS.mediaPrivate}.`,
     })
 
-    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
-    expect(mocks.createSignedUrl).not.toHaveBeenCalled()
-    expect(globalThis.fetch).not.toHaveBeenCalled()
-    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
-  })
-
-  it('POST rejects media-public thumb bucket for booking session media before idempotency', async () => {
-    const result = await POST(
-      makePostRequest({
-        body: {
-          ...validBody,
-          thumbBucket: BUCKETS.mediaPublic,
-        },
-      }),
-      makeCtx(),
-    )
-
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: `Session thumb must upload to ${BUCKETS.mediaPrivate}.`,
+    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
+      idempotencyRecordId: 'idem_record_1',
+      operation: 'POST /api/pro/bookings/[id]/media',
     })
-
-    expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
-    expect(mocks.createSignedUrl).not.toHaveBeenCalled()
-    expect(globalThis.fetch).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
 
@@ -822,10 +793,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
         professionalId: 'pro_1',
         actorUserId: 'user_1',
         bookingId: 'booking_1',
-        storageBucket: BUCKETS.mediaPrivate,
-        storagePath: 'bookings/booking_1/before/main.jpg',
-        thumbBucket: BUCKETS.mediaPrivate,
-        thumbPath: 'bookings/booking_1/before/thumb.jpg',
+        uploadSessionId: 'us_1',
         caption: 'Before photo',
         phase: MediaPhase.BEFORE,
         mediaType: MediaType.IMAGE,
@@ -838,6 +806,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       },
     })
 
+    expect(mocks.validateUploadSession).not.toHaveBeenCalled()
     expect(globalThis.fetch).not.toHaveBeenCalled()
     expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
   })
@@ -935,32 +904,6 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
   })
 
-  it('POST marks idempotency failed when uploaded thumb is missing', async () => {
-    vi.mocked(globalThis.fetch)
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
-      .mockResolvedValueOnce(new Response(null, { status: 404 }))
-
-    const result = await POST(
-      makeIdempotentPostRequest({
-        key: 'idem_missing_thumb_1',
-      }),
-      makeCtx(),
-    )
-
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'Uploaded thumb not found in storage.',
-    })
-
-    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: 'idem_record_1',
-      operation: 'POST /api/pro/bookings/[id]/media',
-    })
-    expect(mocks.uploadProBookingMedia).not.toHaveBeenCalled()
-    expect(mocks.completeRouteIdempotency).not.toHaveBeenCalled()
-  })
-
   it('POST uploads media, renders urls, completes idempotency, and returns item', async () => {
     const result = await POST(
       makeIdempotentPostRequest({
@@ -995,10 +938,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
         professionalId: 'pro_1',
         actorUserId: 'user_1',
         bookingId: 'booking_1',
-        storageBucket: BUCKETS.mediaPrivate,
-        storagePath: 'bookings/booking_1/before/main.jpg',
-        thumbBucket: BUCKETS.mediaPrivate,
-        thumbPath: 'bookings/booking_1/before/thumb.jpg',
+        uploadSessionId: 'us_1',
         caption: 'Before photo',
         phase: MediaPhase.BEFORE,
         mediaType: MediaType.IMAGE,
@@ -1011,8 +951,18 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       },
     })
 
-    expect(mocks.createSignedUrl).toHaveBeenCalledTimes(2)
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
+    expect(mocks.validateUploadSession).toHaveBeenCalledWith(expect.anything(), {
+      uploadSessionId: 'us_1',
+      surface: 'PRO_BOOKING_MEDIA',
+      professionalId: 'pro_1',
+      bookingId: 'booking_1',
+      phase: MediaPhase.BEFORE,
+      now: expect.any(Date),
+    })
+
+    // Only the main object is checked — booking session media has no thumb.
+    expect(mocks.createSignedUrl).toHaveBeenCalledTimes(1)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
 
     expect(mocks.uploadProBookingMedia).toHaveBeenCalledWith({
       bookingId: 'booking_1',
@@ -1020,13 +970,19 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
       uploadedByUserId: 'user_1',
       storageBucket: BUCKETS.mediaPrivate,
       storagePath: 'bookings/booking_1/before/main.jpg',
-      thumbBucket: BUCKETS.mediaPrivate,
-      thumbPath: 'bookings/booking_1/before/thumb.jpg',
+      thumbBucket: null,
+      thumbPath: null,
       caption: 'Before photo',
       phase: MediaPhase.BEFORE,
       mediaType: MediaType.IMAGE,
       requestId: 'req_media_success_1',
       idempotencyKey: 'idem_media_success_1',
+    })
+
+    expect(mocks.consumeUploadSession).toHaveBeenCalledWith(expect.anything(), {
+      uploadSessionId: 'us_1',
+      mediaAssetId: 'media_1',
+      now: expect.any(Date),
     })
 
     expect(mocks.renderMediaUrls).toHaveBeenLastCalledWith({

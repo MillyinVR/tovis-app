@@ -3,7 +3,8 @@
 
 import { useMemo, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { pickStringOrEmpty } from '@/lib/pick'
 import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 import { safeJson, readErrorMessage } from '@/lib/http'
@@ -166,14 +167,16 @@ export default function ServicePicker({ categories, offerings }: Props) {
     setUploadingImage(true)
 
     try {
+      const uploadFile = await compressImageForUpload(file)
+
       const initRes = await fetch('/api/pro/uploads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           kind: 'SERVICE_IMAGE_PUBLIC',
           serviceId: selectedService.id,
-          contentType: file.type,
-          size: file.size,
+          contentType: uploadFile.type,
+          size: uploadFile.size,
         }),
       })
 
@@ -204,13 +207,19 @@ export default function ServicePicker({ categories, offerings }: Props) {
         return
       }
 
-      const { error: upErr } = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, file, {
-        contentType: file.type,
+      const { error: upErr } = await uploadWithProgress({
+        bucket,
+        path,
+        token,
+        file: uploadFile,
+        contentType: uploadFile.type || 'application/octet-stream',
         upsert: true,
+        onProgress: () => {},
+        signal: new AbortController().signal,
       })
 
       if (upErr) {
-        setError(upErr.message || 'Upload failed.')
+        setError(upErr || 'Upload failed.')
         return
       }
 

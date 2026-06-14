@@ -13,16 +13,6 @@ vi.mock('next/navigation', () => ({
   }),
 }))
 
-vi.mock('@/lib/supabaseBrowser', () => ({
-  supabaseBrowser: {
-    storage: {
-      from: () => ({
-        uploadToSignedUrl: vi.fn(),
-      }),
-    },
-  },
-}))
-
 vi.mock('@/lib/guards', () => ({
   asTrimmedString: (value: unknown) =>
     typeof value === 'string' ? value.trim() : null,

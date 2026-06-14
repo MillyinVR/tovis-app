@@ -1,6 +1,6 @@
 // app/api/client/reviews/[id]/media/route.test.ts
 
-import { MediaType, MediaVisibility, Role } from '@prisma/client'
+import { MediaPhase, MediaType, MediaVisibility, Role } from '@prisma/client'
 import { NextRequest } from 'next/server'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -635,6 +635,8 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
         url: null,
         thumbUrl: null,
         mediaType: MediaType.IMAGE,
+        caption: null,
+        phase: MediaPhase.OTHER,
         visibility: MediaVisibility.PUBLIC,
         uploadedByUserId: 'user_1',
         uploadedByRole: Role.CLIENT,

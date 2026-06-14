@@ -3,7 +3,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
 import { safeJsonRecord, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
@@ -467,7 +468,12 @@ export default function ReviewSection({
       for (const item of queue) {
         setPending((prev) => prev.map((p) => (p.id === item.id ? { ...p, status: 'UPLOADING', error: null } : p)))
 
-        const init = await initSignedUpload(item.file)
+        // Images are compressed before signing; videos pass through unchanged.
+        // The same file must drive both the sign request (contentType/size) and
+        // the upload, since compression can change the file's type and bytes.
+        const uploadFile = await compressImageForUpload(item.file)
+
+        const init = await initSignedUpload(uploadFile)
         if (!init.ok) {
           sawError = true
           if ('handled' in init) return
@@ -477,15 +483,21 @@ export default function ReviewSection({
 
         const { bucket, path, token, publicUrl, cacheBuster } = init.data
 
-        const { error: upErr } = await supabaseBrowser.storage.from(bucket).uploadToSignedUrl(path, token, item.file, {
-          contentType: item.file.type,
+        const { error: upErr } = await uploadWithProgress({
+          bucket,
+          path,
+          token,
+          file: uploadFile,
+          contentType: uploadFile.type || 'application/octet-stream',
           upsert: true,
+          onProgress: () => {},
+          signal: new AbortController().signal,
         })
 
         if (upErr) {
           sawError = true
           setPending((prev) =>
-            prev.map((p) => (p.id === item.id ? { ...p, status: 'ERROR', error: upErr.message || 'Upload failed' } : p)),
+            prev.map((p) => (p.id === item.id ? { ...p, status: 'ERROR', error: upErr || 'Upload failed' } : p)),
           )
           continue
         }

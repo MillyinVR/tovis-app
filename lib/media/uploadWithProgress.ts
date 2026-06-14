@@ -12,6 +12,12 @@ export type UploadProgressArgs = {
   contentType: string
   onProgress: (percent: number) => void
   signal: AbortSignal
+  // Whether to overwrite an existing object at `path`. Must match the upsert
+  // flag the signing route baked into `token` via createSignedUploadUrl:
+  // stable-path uploads (avatar, service image at `current.<ext>`) sign with
+  // upsert=true and overwrite; unique-path uploads sign with upsert=false.
+  // Defaults to false to match the original session-media behavior.
+  upsert?: boolean
 }
 
 export type UploadProgressResult = {
@@ -104,7 +110,7 @@ export function uploadWithProgress(
     xhr.open('PUT', url.toString())
     xhr.setRequestHeader('apikey', supabaseKey)
     xhr.setRequestHeader('Content-Type', args.contentType)
-    xhr.setRequestHeader('x-upsert', 'false')
+    xhr.setRequestHeader('x-upsert', args.upsert ? 'true' : 'false')
     xhr.send(args.file)
   })
 }

@@ -11,6 +11,17 @@ vi.mock('next/navigation', () => ({
   }),
 }))
 
+// The byte push now goes through the shared XHR helper, and images are
+// compressed first. Mock both so the test exercises the verification flow
+// (sign -> upload -> record) without relying on jsdom canvas/XHR.
+vi.mock('@/lib/media/uploadWithProgress', () => ({
+  uploadWithProgress: vi.fn(async () => ({ error: null })),
+}))
+
+vi.mock('@/lib/media/processImageForUpload', () => ({
+  compressImageForUpload: vi.fn(async (file: File) => file),
+}))
+
 import VerificationUploadClient, {
   type VerificationMethodOption,
 } from './VerificationUploadClient'
@@ -56,16 +67,11 @@ function mockUploadFlowFetch() {
         return Promise.resolve(
           jsonResponse({
             ok: true,
-            signedUrl: 'https://storage.example/signed-put',
             bucket: 'media-private',
             path: 'pro/pro_1/verify_private/2026-06/123_abc.jpg',
+            token: 'signed-token-xyz',
           }),
         )
-      }
-
-      if (url === 'https://storage.example/signed-put') {
-        expect(init?.method).toBe('PUT')
-        return Promise.resolve(new Response(null, { status: 200 }))
       }
 
       if (url === '/api/pro/verification-docs') {

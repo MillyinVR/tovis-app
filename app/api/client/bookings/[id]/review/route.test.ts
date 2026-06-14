@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingCloseoutAuditAction,
+  MediaPhase,
   MediaType,
   MediaVisibility,
   NotificationEventKey,
@@ -795,6 +796,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
           bookingId: 'booking_1',
           reviewId: 'review_1',
           mediaType: MediaType.IMAGE,
+          phase: MediaPhase.OTHER,
           visibility: MediaVisibility.PUBLIC,
           uploadedByUserId: 'user_1',
           uploadedByRole: Role.CLIENT,

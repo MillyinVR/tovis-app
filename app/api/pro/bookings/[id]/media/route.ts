@@ -1,8 +1,14 @@
 // app/api/pro/bookings/[id]/media/route.ts
 
-import { MediaPhase, MediaType, Prisma, Role } from '@prisma/client'
+import { MediaPhase, MediaType, Prisma, Role, UploadSurface } from '@prisma/client'
 
+import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import {
+  consumeUploadSession,
+  UploadSessionError,
+  validateUploadSession,
+} from '@/lib/media/uploadSession'
 import {
   beginRouteIdempotency,
   completeRouteIdempotency,
@@ -34,8 +40,6 @@ export const dynamic = 'force-dynamic'
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
 
 const CAPTION_MAX = 300
-const PATH_MAX = 2048
-const BUCKET_MAX = 128
 
 const SESSION_BUCKET = BUCKETS.mediaPrivate
 const SIGNED_URL_TTL_SECONDS = 60 * 10
@@ -81,30 +85,6 @@ function parseMediaType(value: unknown): MediaType | null {
   if (normalized === 'VIDEO') return MediaType.VIDEO
 
   return null
-}
-
-function safeBucket(
-  raw: unknown,
-): (typeof BUCKETS)[keyof typeof BUCKETS] | null {
-  const value = pickString(raw)
-
-  if (!value) return null
-  if (value.length > BUCKET_MAX) return null
-  if (value === BUCKETS.mediaPrivate) return BUCKETS.mediaPrivate
-  if (value === BUCKETS.mediaPublic) return BUCKETS.mediaPublic
-
-  return null
-}
-
-function safeStoragePath(raw: unknown): string | null {
-  const value = pickString(raw)
-
-  if (!value) return null
-  if (value.length > PATH_MAX) return null
-  if (value.startsWith('/')) return null
-  if (value.includes('..')) return null
-
-  return value
 }
 
 function safeCaption(raw: unknown): string | null {
@@ -308,41 +288,16 @@ export async function POST(req: Request, ctx: Ctx) {
     }
 
     const body = (await req.json().catch(() => ({}))) as {
-      storageBucket?: unknown
-      storagePath?: unknown
-      thumbBucket?: unknown
-      thumbPath?: unknown
+      uploadSessionId?: unknown
       caption?: unknown
       phase?: unknown
       mediaType?: unknown
     }
 
-    const storageBucket = safeBucket(body.storageBucket)
-    const storagePath = safeStoragePath(body.storagePath)
+    const uploadSessionId = pickString(body.uploadSessionId)
 
-    if (!storageBucket || !storagePath) {
-      return jsonFail(400, 'Missing storageBucket/storagePath.')
-    }
-
-    const thumbBucket =
-      body.thumbBucket === null ||
-      body.thumbBucket === undefined ||
-      body.thumbBucket === ''
-        ? null
-        : safeBucket(body.thumbBucket)
-
-    const thumbPath =
-      body.thumbPath === null ||
-      body.thumbPath === undefined ||
-      body.thumbPath === ''
-        ? null
-        : safeStoragePath(body.thumbPath)
-
-    if ((thumbBucket && !thumbPath) || (!thumbBucket && thumbPath)) {
-      return jsonFail(
-        400,
-        'thumbBucket and thumbPath must be provided together.',
-      )
+    if (!uploadSessionId) {
+      return jsonFail(400, 'Missing uploadSessionId.')
     }
 
     const phase = parseMediaPhase(body.phase)
@@ -359,33 +314,12 @@ export async function POST(req: Request, ctx: Ctx) {
 
     const caption = safeCaption(body.caption)
 
-    if (!mustStartWithBookingPhasePrefix(storagePath, bookingId, phase)) {
-      return jsonFail(
-        400,
-        'storagePath must be under bookings/<bookingId>/<phase>/.',
-      )
-    }
-
-    if (
-      thumbPath &&
-      !mustStartWithBookingPhasePrefix(thumbPath, bookingId, phase)
-    ) {
-      return jsonFail(
-        400,
-        'thumbPath must be under bookings/<bookingId>/<phase>/.',
-      )
-    }
-
-    if (storageBucket !== SESSION_BUCKET) {
-      return jsonFail(400, `Session media must upload to ${SESSION_BUCKET}.`)
-    }
-
-    if (thumbBucket && thumbBucket !== SESSION_BUCKET) {
-      return jsonFail(400, `Session thumb must upload to ${SESSION_BUCKET}.`)
-    }
-
     const { requestId } = readRequestMeta(req)
 
+    // Idempotency is keyed on the upload session (not the storage pointer, which
+    // the client never supplies). Begin BEFORE touching the session so a retry
+    // replays the cached response instead of re-validating an already-consumed
+    // session.
     const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
       request: req,
       actor: {
@@ -398,10 +332,7 @@ export async function POST(req: Request, ctx: Ctx) {
         professionalId,
         actorUserId,
         bookingId,
-        storageBucket,
-        storagePath,
-        thumbBucket,
-        thumbPath,
+        uploadSessionId,
         caption,
         phase,
         mediaType,
@@ -420,6 +351,58 @@ export async function POST(req: Request, ctx: Ctx) {
 
     idempotencyRecordId = idempotency.idempotencyRecordId
 
+    // The storage pointer is read back from the UploadSession the signing route
+    // minted — never from the client. Validating also enforces that the session
+    // belongs to this pro + booking + phase and hasn't expired or been consumed.
+    let session
+    try {
+      session = await validateUploadSession(prisma, {
+        uploadSessionId,
+        surface: UploadSurface.PRO_BOOKING_MEDIA,
+        professionalId,
+        bookingId,
+        phase,
+        now: new Date(),
+      })
+    } catch (sessionError: unknown) {
+      await failStartedRouteIdempotency({
+        idempotencyRecordId,
+        operation: 'POST /api/pro/bookings/[id]/media',
+      })
+      idempotencyRecordId = null
+
+      if (sessionError instanceof UploadSessionError) {
+        return jsonFail(sessionError.httpStatus, sessionError.message)
+      }
+      throw sessionError
+    }
+
+    const storageBucket = session.storageBucket
+    const storagePath = session.storagePath
+    const thumbBucket: string | null = null
+    const thumbPath: string | null = null
+
+    if (storageBucket !== SESSION_BUCKET) {
+      await failStartedRouteIdempotency({
+        idempotencyRecordId,
+        operation: 'POST /api/pro/bookings/[id]/media',
+      })
+      idempotencyRecordId = null
+      return jsonFail(400, `Session media must upload to ${SESSION_BUCKET}.`)
+    }
+
+    if (!mustStartWithBookingPhasePrefix(storagePath, bookingId, phase)) {
+      await failStartedRouteIdempotency({
+        idempotencyRecordId,
+        operation: 'POST /api/pro/bookings/[id]/media',
+      })
+      idempotencyRecordId = null
+      return jsonFail(
+        400,
+        'storagePath must be under bookings/<bookingId>/<phase>/.',
+      )
+    }
+
     const mainExists = await objectExistsViaSignedUrl(storageBucket, storagePath)
 
     if (!mainExists) {
@@ -431,21 +414,6 @@ export async function POST(req: Request, ctx: Ctx) {
       idempotencyRecordId = null
 
       return jsonFail(400, 'Uploaded file not found in storage.')
-    }
-
-    if (thumbBucket && thumbPath) {
-      const thumbExists = await objectExistsViaSignedUrl(thumbBucket, thumbPath)
-
-      if (!thumbExists) {
-        await failStartedRouteIdempotency({
-          idempotencyRecordId,
-          operation: 'POST /api/pro/bookings/[id]/media',
-        })
-
-        idempotencyRecordId = null
-
-        return jsonFail(400, 'Uploaded thumb not found in storage.')
-      }
     }
 
     const result = await uploadProBookingMedia({
@@ -462,6 +430,27 @@ export async function POST(req: Request, ctx: Ctx) {
       requestId,
       idempotencyKey: req.headers.get('idempotency-key'),
     })
+
+    // Mark the upload session CONSUMED and link it to the created asset. The
+    // MediaAsset (bucket,path) unique index already guarantees a single asset
+    // per object, so a concurrent double-attach loses at the insert; this is the
+    // belt-and-suspenders that also flips the session out of PENDING.
+    try {
+      await consumeUploadSession(prisma, {
+        uploadSessionId,
+        mediaAssetId: result.created.id,
+        now: new Date(),
+      })
+    } catch (consumeError: unknown) {
+      if (!(consumeError instanceof UploadSessionError)) {
+        throw consumeError
+      }
+      // The asset exists and is valid; a consume conflict only means a racing
+      // request already flipped the session. Log and continue.
+      console.error('POST /api/pro/bookings/[id]/media consume', {
+        code: consumeError.code,
+      })
+    }
 
     const { renderUrl, renderThumbUrl } = await renderMediaUrls({
       storageBucket: result.created.storageBucket,

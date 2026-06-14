@@ -34,6 +34,7 @@ import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundar
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { parseIdArray, parseRating1to5 } from '@/lib/media'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
@@ -585,26 +586,26 @@ export async function POST(
             eligibility.booking.professionalId,
           )
           await tx.mediaAsset.createMany({
-            data: resolvedClientMedia.map((item) => ({
-              professionalId: eligibility.booking.professionalId,
-              proTenantId,
-              bookingId: eligibility.booking.id,
-              reviewId: review.id,
-              mediaType: item.mediaType,
-              visibility: REVIEW_MEDIA_VISIBILITY,
-              uploadedByUserId: actorUserId,
-              uploadedByRole: Role.CLIENT,
-              isFeaturedInPortfolio: false,
-              isEligibleForLooks: false,
-              reviewLocked: true,
-              storageBucket: item.storageBucket,
-              storagePath: item.storagePath,
-              thumbBucket: item.thumbBucket,
-              thumbPath: item.thumbPath,
-              url: item.url,
-              thumbUrl: item.thumbUrl,
-              caption: item.caption,
-            })),
+            data: resolvedClientMedia.map((item) =>
+              buildMediaAssetCreateData({
+                professionalId: eligibility.booking.professionalId,
+                proTenantId,
+                bookingId: eligibility.booking.id,
+                reviewId: review.id,
+                mediaType: item.mediaType,
+                visibility: REVIEW_MEDIA_VISIBILITY,
+                uploadedByUserId: actorUserId,
+                uploadedByRole: Role.CLIENT,
+                reviewLocked: true,
+                storageBucket: item.storageBucket,
+                storagePath: item.storagePath,
+                thumbBucket: item.thumbBucket,
+                thumbPath: item.thumbPath,
+                url: item.url,
+                thumbUrl: item.thumbUrl,
+                caption: item.caption,
+              }),
+            ),
           })
         }
 

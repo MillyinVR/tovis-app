@@ -3,7 +3,8 @@
 
 import React, { forwardRef, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 
 import { isRecord, asNumber, asTrimmedString } from '@/lib/guards'
 import { cn } from '@/lib/utils'
@@ -232,14 +233,16 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
   }
 
   async function uploadDefaultImageToSupabase(serviceId: string, file: File) {
+    const uploadFile = await compressImageForUpload(file)
+
     const initRes = await fetch('/api/admin/uploads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         kind: 'SERVICE_DEFAULT_IMAGE_PUBLIC',
         serviceId,
-        contentType: file.type,
-        size: file.size,
+        contentType: uploadFile.type,
+        size: uploadFile.size,
       }),
     })
 
@@ -250,11 +253,17 @@ export default function ServicesCreateWizard(props: { categories: CategoryDTO[] 
       throw new Error(msg)
     }
 
-    const { error: upErr } = await supabaseBrowser.storage.from(init.bucket).uploadToSignedUrl(init.path, init.token, file, {
-      contentType: file.type,
+    const { error: upErr } = await uploadWithProgress({
+      bucket: init.bucket,
+      path: init.path,
+      token: init.token,
+      file: uploadFile,
+      contentType: uploadFile.type || 'application/octet-stream',
       upsert: true,
+      onProgress: () => {},
+      signal: new AbortController().signal,
     })
-    if (upErr) throw new Error(upErr.message || 'Upload failed.')
+    if (upErr) throw new Error(upErr || 'Upload failed.')
 
     return withCacheBuster(init.publicUrl, init.cacheBuster ?? null)
   }

@@ -13,7 +13,8 @@ import { useRouter } from 'next/navigation'
 
 import { asTrimmedString, type UnknownRecord } from '@/lib/guards'
 import { errorMessageFromUnknown, readErrorMessage, safeJson } from '@/lib/http'
-import { supabaseBrowser } from '@/lib/supabaseBrowser'
+import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { withCacheBuster } from '@/lib/url'
 
 type Props = {
@@ -216,6 +217,8 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
     setError(null)
 
     try {
+      const uploadFile = await compressImageForUpload(avatarFile)
+
       const signedRes = await fetch('/api/pro/uploads', {
         method: 'POST',
         headers: {
@@ -224,8 +227,8 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
         },
         body: JSON.stringify({
           kind: 'AVATAR_PUBLIC',
-          contentType: avatarFile.type,
-          size: avatarFile.size,
+          contentType: uploadFile.type,
+          size: uploadFile.size,
         }),
       })
 
@@ -263,15 +266,19 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
         )
       }
 
-      const uploadResult = await supabaseBrowser.storage
-        .from(bucket)
-        .uploadToSignedUrl(path, token, avatarFile, {
-          contentType: avatarFile.type,
-          upsert: true,
-        })
+      const uploadResult = await uploadWithProgress({
+        bucket,
+        path,
+        token,
+        file: uploadFile,
+        contentType: uploadFile.type || 'application/octet-stream',
+        upsert: true,
+        onProgress: () => {},
+        signal: new AbortController().signal,
+      })
 
       if (uploadResult.error) {
-        throw new Error(uploadResult.error.message || 'Avatar upload failed')
+        throw new Error(uploadResult.error || 'Avatar upload failed')
       }
 
       return withCacheBuster(publicUrl, cacheBuster)
