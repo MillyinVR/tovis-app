@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { clampInt } from '@/lib/pick'
 import {
   assertNoCalendarBlockConflict,
@@ -317,8 +317,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       })
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const hasStartsAt = hasOwnField(body, 'startsAt')
     const hasEndsAt = hasOwnField(body, 'endsAt')

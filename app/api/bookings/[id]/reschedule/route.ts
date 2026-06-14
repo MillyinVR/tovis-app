@@ -16,8 +16,8 @@ import {
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { rescheduleBookingFromHold } from '@/lib/booking/writeBoundary'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
-import { isRecord } from '@/lib/guards'
 import { DEFAULT_TIME_ZONE } from '@/lib/timeZone'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { clientRateLimitKey } from '@/lib/rateLimit/identity'
@@ -78,8 +78,7 @@ export async function POST(req: Request, { params }: Ctx) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const holdId = pickString(body.holdId)
 

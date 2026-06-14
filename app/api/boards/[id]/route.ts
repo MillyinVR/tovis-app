@@ -13,7 +13,7 @@ import {
   parseBoardVisibility,
   updateBoard,
 } from '@/lib/boards'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import type {
   LooksBoardDeleteResponseDto,
   LooksBoardDetailResponseDto,
@@ -82,8 +82,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       })
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const hasName = Object.prototype.hasOwnProperty.call(body, 'name')
     const hasVisibility = Object.prototype.hasOwnProperty.call(body, 'visibility')

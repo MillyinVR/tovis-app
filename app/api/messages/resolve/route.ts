@@ -1,18 +1,11 @@
 // app/api/messages/resolve/route.ts
 import { getCurrentUser } from '@/lib/currentUser'
 import { jsonFail, jsonOk, pickString, upper } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { resolveMessageThread } from '@/lib/messagesResolve'
 import { MessageThreadContextType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-type JsonRecord = Record<string, unknown>
-
-async function readJsonObject(req: Request): Promise<JsonRecord> {
-  const raw: unknown = await req.json().catch(() => ({}))
-  return isRecord(raw) ? raw : {}
-}
 
 function asContextType(value: unknown): MessageThreadContextType | null {
   const normalized = upper(value)
@@ -69,7 +62,7 @@ export async function POST(req: Request) {
       return jsonFail(401, 'Unauthorized.')
     }
 
-    const body = await readJsonObject(req)
+    const body = await readJsonRecord(req)
 
     const contextType = asContextType(body.contextType)
     const contextId = pickString(body.contextId)

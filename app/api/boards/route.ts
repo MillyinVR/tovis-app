@@ -14,7 +14,7 @@ import {
   getBoardSummaries,
   parseBoardVisibility,
 } from '@/lib/boards'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import type {
   LooksBoardDetailResponseDto,
   LooksBoardsListResponseDto,
@@ -56,8 +56,7 @@ export async function POST(req: Request) {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const name = typeof body.name === 'string' ? body.name : ''
     const rawVisibility =

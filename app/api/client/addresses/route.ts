@@ -1,7 +1,7 @@
 // app/api/client/addresses/route.ts
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { prisma } from '@/lib/prisma'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import {
@@ -159,8 +159,7 @@ export async function POST(req: Request) {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const parsed = normalizeCreateClientAddressBody(body)
 

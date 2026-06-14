@@ -18,6 +18,7 @@ import {
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { computeRequestedEndUtc } from '@/lib/booking/slotReadiness'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { isRecord } from '@/lib/guards'
 import {
   beginIdempotency,
@@ -294,8 +295,7 @@ export async function POST(req: Request) {
       })
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const clientId = pickString(body.clientId)
     const client = pickClientPayload(body)

@@ -6,7 +6,7 @@ import {
   requirePro,
   upper,
 } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
@@ -26,10 +26,6 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 type Ctx = { params: { id: string } | Promise<{ id: string }> }
-
-type InPersonDecisionRequestBody = {
-  action?: unknown
-}
 
 type RequestMeta = {
   requestId: string | null
@@ -236,8 +232,7 @@ export async function POST(req: Request, ctx: Ctx) {
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body: InPersonDecisionRequestBody = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const decision = parseDecisionAction(body.action)
     if (!decision) {

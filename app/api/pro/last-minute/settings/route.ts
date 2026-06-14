@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { LastMinuteVisibilityMode, Prisma } from '@prisma/client'
 import { parseMoney } from '@/lib/money'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 
 export const dynamic = 'force-dynamic'
 
@@ -162,8 +162,7 @@ export async function PATCH(req: Request) {
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const updateData: Prisma.LastMinuteSettingsUpdateInput = {}
     const createData: Prisma.LastMinuteSettingsUncheckedCreateInput = { professionalId }

@@ -2,17 +2,10 @@
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { jsonFail, jsonOk, pickString, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import type { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
-
-type JsonRecord = Record<string, unknown>
-
-async function readJsonObject(req: Request): Promise<JsonRecord> {
-  const raw: unknown = await req.json().catch(() => ({}))
-  return isRecord(raw) ? raw : {}
-}
 
 async function readParams(ctx: { params: { id: string } | Promise<{ id: string }> }) {
   return await Promise.resolve(ctx.params)
@@ -135,7 +128,7 @@ export async function POST(req: Request, ctx: { params: { id: string } | Promise
     })
     if (limited) return limited
 
-    const body = await readJsonObject(req)
+    const body = await readJsonRecord(req)
     const raw = pickString(body.body)
     const text = (raw ?? '').trim()
 

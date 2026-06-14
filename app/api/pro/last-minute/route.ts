@@ -5,14 +5,9 @@ import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_util
 import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
 import { parseMoney } from '@/lib/money'
 import { updateBookingLastMinuteDiscount } from '@/lib/booking/writeBoundary'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 
 export const dynamic = 'force-dynamic'
-
-async function readJsonObject(req: Request): Promise<Record<string, unknown>> {
-  const raw: unknown = await req.json().catch(() => ({}))
-  return isRecord(raw) ? raw : {}
-}
 
 function normalizeLocationType(v: unknown): ServiceLocationType {
   const s = upper(v)
@@ -31,7 +26,7 @@ export async function POST(req: Request) {
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
 
-    const body = await readJsonObject(req)
+    const body = await readJsonRecord(req)
 
     const bookingId = pickString(body.bookingId)
     const offeringIdOverride = pickString(body.offeringId)

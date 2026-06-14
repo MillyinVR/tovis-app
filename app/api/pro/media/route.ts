@@ -22,18 +22,13 @@ import {
   validateUploadSession,
 } from '@/lib/media/uploadSession'
 import { createOrUpdateProLookFromMediaAsset } from '@/lib/looks/publication/service'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
 
 type StorageBucket = (typeof BUCKETS)[keyof typeof BUCKETS]
 type JsonRecord = Record<string, unknown>
-
-async function readJsonObject(req: Request): Promise<JsonRecord> {
-  const raw: unknown = await req.json().catch(() => ({}))
-  return isRecord(raw) ? raw : {}
-}
 
 function getStr(body: JsonRecord, key: string): string | null {
   return pickString(body[key])
@@ -140,7 +135,7 @@ export async function POST(req: Request) {
     if (!auth.ok) return auth.res
 
     const professionalId = auth.professionalId
-    const body = await readJsonObject(req)
+    const body = await readJsonRecord(req)
 
     const uploadSessionId = getStr(body, 'uploadSessionId')
 

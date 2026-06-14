@@ -33,6 +33,7 @@ import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
 
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundary'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { parseIdArray, parseRating1to5 } from '@/lib/media'
@@ -348,8 +349,7 @@ export async function POST(
       return bookingJsonFail('BOOKING_ID_REQUIRED')
     }
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const rating = parseRating1to5(body.rating)
     if (!rating) {

@@ -2,7 +2,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { clampInt } from '@/lib/pick'
 import { getTimeRangeConflict } from '@/lib/booking/conflictQueries'
 import { logBookingConflict } from '@/lib/booking/conflictLogging'
@@ -219,8 +219,7 @@ export async function POST(req: Request) {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     if (!hasOwnField(body, 'startsAt') || !hasOwnField(body, 'endsAt')) {
       return jsonFail(400, 'Missing startsAt/endsAt.', {

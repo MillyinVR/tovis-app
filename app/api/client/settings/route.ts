@@ -1,7 +1,7 @@
 // app/api/client/settings/route.ts
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
-import { isRecord } from '@/lib/guards'
+import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import {
@@ -142,8 +142,7 @@ export async function PATCH(req: Request) {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
 
-    const rawBody: unknown = await req.json().catch(() => ({}))
-    const body = isRecord(rawBody) ? rawBody : {}
+    const body = await readJsonRecord(req)
 
     const firstName = normalizeRequiredishName(body.firstName)
     const lastName = normalizeRequiredishName(body.lastName)
