@@ -14,6 +14,7 @@ import { jsonFail } from '@/app/api/_utils/responses'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 import {
   getZonedParts,
@@ -45,6 +46,8 @@ const bookingCalendarSelect = {
     select: {
       id: true,
       businessName: true,
+      firstName: true,
+      lastName: true,
       location: true,
       user: {
         select: {
@@ -259,10 +262,9 @@ function canAccessBooking(args: {
 
 function buildTitle(booking: BookingCalendarRow): string {
   const serviceName = booking.service?.name?.trim() || 'Appointment'
-  const professionalName =
-    booking.professional?.businessName?.trim() ||
-    booking.professional?.user?.email?.trim() ||
-    'Professional'
+  const professionalName = formatProfessionalPublicDisplayName(
+    booking.professional,
+  )
 
   return `${serviceName} with ${professionalName}`
 }
@@ -292,10 +294,9 @@ function buildCalendarInvite(args: {
   brandName: string
 }): string {
   const serviceName = args.booking.service?.name?.trim() || 'Appointment'
-  const professionalName =
-    args.booking.professional?.businessName?.trim() ||
-    args.booking.professional?.user?.email?.trim() ||
-    'Professional'
+  const professionalName = formatProfessionalPublicDisplayName(
+    args.booking.professional,
+  )
 
   const title = buildTitle(args.booking)
   const description = buildDescription({

@@ -10,6 +10,7 @@ import { prettyWhen, bookingLocationLabel, statusUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
 import CardLink from './CardLink'
 import { safeJson } from '@/lib/http'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 type SafeJsonResponse = {
   error?: unknown
@@ -153,7 +154,7 @@ export default function PendingBookings({
 
             const proId = booking.professional?.id || null
             const proLabel =
-              booking.professional?.businessName || 'Professional'
+              formatProfessionalPublicDisplayName({ businessName: booking.professional?.businessName })
 
             const price = booking.consultation?.consultationPrice ?? null
             const formattedPrice = formatMoneyMaybe(price)
@@ -257,7 +258,7 @@ export default function PendingBookings({
 
         const proId = booking.professional?.id || null
         const proLabel =
-          booking.professional?.businessName || 'Professional'
+          formatProfessionalPublicDisplayName({ businessName: booking.professional?.businessName })
 
         return (
           <CardLink key={booking.id} href={href}>

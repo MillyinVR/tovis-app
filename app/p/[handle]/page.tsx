@@ -7,6 +7,7 @@ import ProSessionFooter from '@/app/_components/ProSessionFooter/ProSessionFoote
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
 import { normalizeHandle } from '@/lib/handles'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,7 +69,9 @@ export default async function VanityProfilePage({
     )
   }
 
-  const displayName = pro.businessName?.trim() || 'Beauty professional'
+  const displayName = formatProfessionalPublicDisplayName({
+    businessName: pro.businessName,
+  })
   const subtitle = pro.professionType || 'Beauty professional'
   const location = pro.location?.trim() || null
   const proTimeZone = displayTimeZoneOrNull(pro.timeZone)

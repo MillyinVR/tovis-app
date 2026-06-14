@@ -6,6 +6,7 @@ import { memo, useMemo } from 'react'
 
 import type { ProCard, SelectedHold } from '../types'
 import { formatSlotFullLabel, formatSlotLabel } from '@/lib/bookingTime'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 type OtherProsProps = {
   others: ProCard[]
@@ -29,7 +30,7 @@ type OtherProSlotButtonProps = {
 }
 
 function getDisplayName(pro: ProCard): string {
-  return pro.businessName?.trim() || 'Professional'
+  return formatProfessionalPublicDisplayName({ businessName: pro.businessName })
 }
 
 function getTimeZone(pro: ProCard, appointmentTz: string): string {

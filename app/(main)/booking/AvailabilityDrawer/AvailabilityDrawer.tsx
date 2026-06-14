@@ -50,6 +50,7 @@ import { shouldPrefetchForSelectedIndex } from './utils/availabilityWindow'
 import { deleteHoldById, parseHoldResponse } from './utils/hold'
 import { safeJson } from './utils/safeJson'
 import { dateTimeLocalToUtcIso } from '@/lib/bookingDateTimeClient'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
 
 const FALLBACK_TZ = 'UTC' as const
@@ -1747,7 +1748,7 @@ export default function AvailabilityDrawer(props: {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-[6px] truncate text-[16px] font-black text-textPrimary">
                   <span className="truncate">
-                    {primary.businessName?.trim() || 'Professional'}
+                    {formatProfessionalPublicDisplayName({ businessName: primary.businessName })}
                   </span>
 
                   {primary.isCreator ? (

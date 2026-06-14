@@ -8,6 +8,7 @@ import { prettyWhen } from '@/app/client/components/_helpers'
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 
 type Pro = {
@@ -192,7 +193,7 @@ function serviceSummary(o: OpeningRow) {
 }
 
 function proLabel(o: OpeningRow) {
-  return o.professional.businessName || 'Professional'
+  return formatProfessionalPublicDisplayName({ businessName: o.professional.businessName })
 }
 
 function locationLabel(o: OpeningRow) {

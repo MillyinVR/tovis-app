@@ -1,4 +1,6 @@
 // app/client/me/page.tsx
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+
 import ClientMeDashboard from '../ClientMeDashboard'
 import { loadClientMePage } from './_data/loadClientMePage'
 
@@ -102,8 +104,10 @@ export default async function ClientMePage() {
     ? {
         id: data.upcomingNotificationBooking.id,
         title: data.upcomingNotificationBooking.display.title,
-        professionalName:
-          data.upcomingNotificationBooking.professional?.businessName ?? null,
+        professionalName: formatProfessionalPublicDisplayName({
+          businessName:
+            data.upcomingNotificationBooking.professional?.businessName,
+        }),
         scheduledFor: data.upcomingNotificationBooking.scheduledFor,
         timeZone: data.upcomingNotificationBooking.timeZone ?? null,
         totalLabel:
@@ -123,7 +127,9 @@ export default async function ClientMePage() {
   const following = data.following.items.map((item) => ({
     id: item.professional.id,
     href: `/professionals/${encodeURIComponent(item.professional.id)}`,
-    name: item.professional.businessName?.trim() || 'Professional',
+    name: formatProfessionalPublicDisplayName({
+      businessName: item.professional.businessName,
+    }),
     handle: item.professional.handle ?? null,
     subtitle: buildFollowingSubtitle({
       professionType: item.professional.professionType,

@@ -7,6 +7,7 @@ import { prettyWhen, bookingLocationLabel, statusUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
 import CardLink from './CardLink'
 import { cn } from '@/lib/utils'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 type PastBookingDisplay = {
   coverUrl?: string | null
@@ -99,7 +100,7 @@ export default function PastBookings({ items }: { items: BookingLike[] }) {
         const svc =
           booking.display?.title || booking.display?.baseName || 'Appointment'
 
-        const proLabel = booking.professional?.businessName || 'Professional'
+        const proLabel = formatProfessionalPublicDisplayName({ businessName: booking.professional?.businessName })
         const proId = booking.professional?.id || null
 
         const when = prettyWhen(booking.scheduledFor, booking.timeZone)

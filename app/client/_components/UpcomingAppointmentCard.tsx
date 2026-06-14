@@ -2,6 +2,7 @@
 import Link from 'next/link'
 
 import { initialsForName } from '@/lib/initials'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 import type { ClientHomeBooking } from '../_data/getClientHomeData'
 import { bookingTitle } from './bookingDisplay'
@@ -51,11 +52,9 @@ function professionalName(professional: {
   businessName: string | null
   handle?: string | null
 }): string {
-  return (
-    professional.businessName ??
-    professional.handle ??
-    'Professional'
-  ).trim()
+  return formatProfessionalPublicDisplayName({
+    businessName: professional.businessName,
+  })
 }
 
 function bookingLocation(booking: ClientHomeBooking): string | null {

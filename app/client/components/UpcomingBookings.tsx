@@ -3,6 +3,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useMemo } from 'react'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { BookingLike } from './_helpers'
 import { prettyWhen, bookingLocationLabel, statusUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
@@ -42,7 +43,9 @@ export default function UpcomingBookings({ items }: { items: BookingLike[] }) {
           const loc = bookingLocationLabel(b)
 
           const proId = b?.professional?.id || null
-          const proLabel = b?.professional?.businessName || 'Professional'
+          const proLabel = formatProfessionalPublicDisplayName({
+            businessName: b?.professional?.businessName,
+          })
 
           return (
             <CardLink

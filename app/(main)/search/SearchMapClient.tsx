@@ -9,6 +9,7 @@ import type { Bounds, Pin } from './_components/MapView'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
 import { isArray, isRecord } from '@/lib/guards'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import DiscoverCategoryRail from './_components/DiscoverCategoryRail'
 import DiscoverGridView from './_components/DiscoverGridView'
 import DiscoverViewToggle from './_components/DiscoverViewToggle'
@@ -411,7 +412,7 @@ export default function SearchMapClient() {
         id: pro.id,
         lat,
         lng,
-        label: pro.businessName || 'Beauty professional',
+        label: formatProfessionalPublicDisplayName({ businessName: pro.businessName }),
         sublabel: pro.locationLabel || pro.professionType || '',
         active: pro.id === activeProId,
       })
@@ -1309,7 +1310,7 @@ export default function SearchMapClient() {
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <div className="truncate text-[14px] font-black text-textPrimary">
-                            {activePro.businessName || 'Beauty professional'}
+                            {formatProfessionalPublicDisplayName({ businessName: activePro.businessName })}
                           </div>
 
                           <div className="mt-1 text-[12px] font-semibold text-textSecondary">
@@ -1381,7 +1382,7 @@ export default function SearchMapClient() {
                             <div className="flex items-center justify-between gap-3">
                               <div className="min-w-0">
                                 <div className="truncate text-[13px] font-black text-textPrimary">
-                                  {pro.businessName || 'Beauty professional'}
+                                  {formatProfessionalPublicDisplayName({ businessName: pro.businessName })}
                                 </div>
 
                                 <div className="mt-1 text-[12px] font-semibold text-textSecondary">
