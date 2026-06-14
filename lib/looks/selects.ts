@@ -37,6 +37,18 @@ export type LooksProProfilePreviewRow =
     select: typeof looksProProfilePreviewSelect
   }>
 
+// Feed cards surface a live follower count next to the Follow control, so the
+// feed variant adds an index-backed `followers` count on top of the preview.
+export const looksFeedProProfileSelect =
+  Prisma.validator<Prisma.ProfessionalProfileSelect>()({
+    ...looksProProfilePreviewSelect,
+    _count: {
+      select: {
+        followers: true,
+      },
+    },
+  })
+
 const looksMediaPreviewSelect =
   Prisma.validator<Prisma.MediaAssetSelect>()({
     id: true,
@@ -111,7 +123,7 @@ export const looksFeedSelect =
     },
 
     professional: {
-      select: looksProProfilePreviewSelect,
+      select: looksFeedProProfileSelect,
     },
 
     service: {

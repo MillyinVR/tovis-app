@@ -279,6 +279,7 @@ export async function mapLooksFeedMediaToDto(args: {
           professionType: item.professional.professionType ?? null,
           avatarUrl: item.professional.avatarUrl ?? null,
           location: item.professional.location ?? null,
+          followerCount: item.professional._count?.followers ?? 0,
         }
       : null,
 

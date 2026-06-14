@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import type { CSSProperties } from 'react'
+import { formatFollowerLabel } from '@/lib/profiles/publicProfileFormatting'
 import type { FeedItem } from './lookTypes'
 
 const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
@@ -34,6 +35,10 @@ function formatHelpful(n: number) {
 export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow }: Props) {
   const pro = m.professional ?? null
   const isFollowing = Boolean(m.viewerFollows)
+  const followerCount =
+    typeof pro?.followerCount === 'number' && pro.followerCount > 0
+      ? pro.followerCount
+      : 0
 
   const businessName = (pro?.businessName ?? '').trim()
   const handle = (pro?.handle ?? '').trim()
@@ -135,6 +140,20 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
             >
               {isFollowing ? 'FOLLOWING' : 'FOLLOW'}
             </button>
+          ) : null}
+
+          {pro?.id && followerCount > 0 ? (
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'rgba(244,239,231,0.7)',
+                fontFamily: 'var(--font-mono)',
+                flexShrink: 0,
+              }}
+            >
+              {formatFollowerLabel(followerCount)}
+            </span>
           ) : null}
         </div>
       ) : null}

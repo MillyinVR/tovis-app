@@ -80,6 +80,7 @@ function makeFeedRow(overrides?: Partial<LooksFeedRow>): LooksFeedRow {
       location: 'San Diego, CA',
       verificationStatus: VerificationStatus.APPROVED,
       isPremium: true,
+      _count: { followers: 128 },
     },
     service: {
       id: 'service_1',
@@ -358,6 +359,7 @@ describe('lib/looks/mappers.ts', () => {
           professionType: ProfessionType.BARBER,
           avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
           location: 'San Diego, CA',
+          followerCount: 128,
         },
         _count: {
           likes: 9,
@@ -402,6 +404,7 @@ describe('lib/looks/mappers.ts', () => {
           professionType: ProfessionType.BARBER,
           avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
           location: 'San Diego, CA',
+          followerCount: 128,
         },
         _count: {
           likes: 9,

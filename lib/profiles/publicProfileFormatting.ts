@@ -209,6 +209,16 @@ export function formatReviewLabel(count: number | null | undefined): string {
   return normalized === 1 ? '1 review' : `${formatCompactCount(normalized)} reviews`
 }
 
+export function formatFollowerLabel(count: number | null | undefined): string {
+  const normalized = typeof count === 'number' && Number.isFinite(count)
+    ? Math.max(0, Math.trunc(count))
+    : 0
+
+  return normalized === 1
+    ? '1 follower'
+    : `${formatCompactCount(normalized)} followers`
+}
+
 export function formatDurationMinutes(value: number | null | undefined): string | null {
   if (typeof value !== 'number') return null
   if (!Number.isFinite(value)) return null

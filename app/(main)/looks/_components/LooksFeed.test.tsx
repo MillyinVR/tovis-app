@@ -295,6 +295,7 @@ function makeFeedItem(
       professionType: 'BARBER',
       avatarUrl: null,
       location: 'San Diego, CA',
+      followerCount: 0,
     },
     _count: {
       likes: 3,
@@ -698,6 +699,7 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
               professionType: 'BARBER',
               avatarUrl: null,
               location: 'San Diego, CA',
+              followerCount: 0,
             },
             serviceId: 'service_book_1',
           }),
