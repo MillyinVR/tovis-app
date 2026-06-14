@@ -21,6 +21,7 @@
 import { BookingStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
@@ -46,23 +47,6 @@ function readPositiveIntEnv(name: string, fallback: number): number {
   return Math.trunc(parsed)
 }
 
-function getJobSecret(): string | null {
-  return readEnv('INTERNAL_JOB_SECRET') ?? readEnv('CRON_SECRET')
-}
-
-function isAuthorizedJobRequest(req: Request): boolean {
-  const secret = getJobSecret()
-  if (!secret) return false
-
-  const authHeader = req.headers.get('authorization')
-  if (authHeader === `Bearer ${secret}`) return true
-
-  const internalHeader = req.headers.get('x-internal-job-secret')
-  if (internalHeader === secret) return true
-
-  return false
-}
-
 function logStaleObservation(payload: Record<string, unknown>): void {
   const safePayload = safeLogMeta(payload)
 
@@ -82,7 +66,7 @@ function logStaleObservation(payload: Record<string, unknown>): void {
 }
 
 async function runJob(req: Request) {
-  const secret = getJobSecret()
+  const secret = getInternalJobSecret()
   if (!secret) {
     return jsonFail(
       500,
