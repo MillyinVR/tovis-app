@@ -219,20 +219,125 @@ describe('MediaUploader', () => {
     expect(fetchMock.mock.calls.some(([u]) => u === MEDIA_URL)).toBe(true)
   })
 
-  it('does not start an upload for an over-limit file', async () => {
+  it('does not start an upload for an image over the source ceiling', async () => {
     const fetchMock = mockFetch()
     vi.stubGlobal('fetch', fetchMock)
 
     render(<MediaUploader bookingId="booking_1" phase="BEFORE" />)
 
-    // 26MB image — over the 25MB image limit.
-    const tooBig = makeImageFile('huge.jpg', 26 * 1024 * 1024)
+    // 76MB image — over the 75MB source ceiling (too big even to compress).
+    const tooBig = makeImageFile('huge.jpg', 76 * 1024 * 1024)
     await userEvent.upload(fileInput(), tooBig)
 
-    expect(
-      screen.getByText(/over the 25MB limit/i),
-    ).toBeInTheDocument()
+    expect(screen.getByText(/over the 75MB limit/i)).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
     expect(mocks.uploadWithProgress).not.toHaveBeenCalled()
+  })
+
+  it('uploads a large image that compresses under the cap', async () => {
+    const fetchMock = mockFetch()
+    vi.stubGlobal('fetch', fetchMock)
+
+    // 26MB original (was previously rejected outright) — compression brings it
+    // under the server cap, so the full pipeline now runs.
+    mocks.processImageForUpload.mockImplementationOnce((file: File) =>
+      Promise.resolve({
+        file: makeImageFile('compressed.jpg', 4 * 1024 * 1024),
+        originalBytes: file.size,
+        processedBytes: 4 * 1024 * 1024,
+      }),
+    )
+
+    render(<MediaUploader bookingId="booking_1" phase="BEFORE" />)
+
+    await userEvent.upload(
+      fileInput(),
+      makeImageFile('big.jpg', 26 * 1024 * 1024),
+    )
+
+    await waitFor(() => {
+      expect(mockRefresh).toHaveBeenCalled()
+    })
+
+    expect(fetchMock.mock.calls.some(([u]) => u === MEDIA_URL)).toBe(true)
+  })
+
+  it('blocks an image whose compressed output still exceeds the cap', async () => {
+    const fetchMock = mockFetch()
+    vi.stubGlobal('fetch', fetchMock)
+
+    // Compression failed (component keeps the original); a 31MB original is
+    // over the 30MB server cap, so we stop client-side with a clear message
+    // rather than letting the signing route 400.
+    mocks.processImageForUpload.mockRejectedValueOnce(new Error('decode failed'))
+
+    render(<MediaUploader bookingId="booking_1" phase="BEFORE" />)
+
+    await userEvent.upload(
+      fileInput(),
+      makeImageFile('raw.jpg', 31 * 1024 * 1024),
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/over the 30MB limit/i)).toBeInTheDocument()
+    })
+    expect(fetchMock.mock.calls.some(([u]) => u === SIGN_URL)).toBe(false)
+    expect(mocks.uploadWithProgress).not.toHaveBeenCalled()
+  })
+
+  it('derives a distinct idempotency key per uploaded object', async () => {
+    const paths = [
+      'bookings/booking_1/after/one.jpg',
+      'bookings/booking_1/after/two.jpg',
+    ]
+    let signCall = 0
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString()
+      if (url === SIGN_URL) {
+        const path = paths[signCall] ?? paths[paths.length - 1]
+        signCall += 1
+        return Promise.resolve(
+          jsonResponse({
+            ok: true,
+            kind: 'CONSULT_PRIVATE',
+            bucket: 'media-private',
+            path,
+            token: 'signed-token',
+            signedUrl: 'https://storage.example/signed-put',
+            publicUrl: null,
+            isPublic: false,
+            cacheBuster: null,
+          }),
+        )
+      }
+      if (url === MEDIA_URL) {
+        return Promise.resolve(jsonResponse({ ok: true, id: 'media_1' }))
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<MediaUploader bookingId="booking_1" phase="AFTER" />)
+
+    await userEvent.upload(fileInput(), makeImageFile('a.jpg'))
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(1))
+
+    await userEvent.upload(fileInput(), makeImageFile('b.jpg'))
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(2))
+
+    const keys = fetchMock.mock.calls
+      .filter(([u]) => u === MEDIA_URL)
+      .map(([, init]) => {
+        const headers = (init?.headers ?? {}) as Record<string, string>
+        return headers['Idempotency-Key']
+      })
+
+    expect(keys).toHaveLength(2)
+    expect(keys[0]).toBeTruthy()
+    // Two distinct uploaded objects must not collide on the same key — the bug
+    // that surfaced as "idempotency key already used with a different request
+    // body" when uploading a second after-photo.
+    expect(keys[0]).not.toBe(keys[1])
   })
 })

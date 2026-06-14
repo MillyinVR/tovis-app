@@ -22,8 +22,14 @@ type Phase = 'BEFORE' | 'AFTER' | 'OTHER'
 type MediaType = 'IMAGE' | 'VIDEO'
 type UploadState = 'IDLE' | 'COMPRESSING' | 'UPLOADING' | 'SAVING'
 
-const MAX_IMAGE_MB = 25
-const MAX_VIDEO_MB = 200
+// The signing route (app/api/pro/uploads) hard-caps any single upload at 30MB.
+// Videos upload as-is, so their source ceiling must match the server. Images
+// are downscaled + compressed below COMPRESS_MAX_BYTES before upload, so we
+// accept a generous source file and let compression bring it under the cap.
+const SERVER_MAX_MB = 30
+const SERVER_MAX_BYTES = SERVER_MAX_MB * 1024 * 1024
+const MAX_VIDEO_MB = SERVER_MAX_MB
+const MAX_IMAGE_SOURCE_MB = 75
 const CAPTION_MAX = 300
 
 const COMPRESS_MAX_DIMENSION = 2000
@@ -174,7 +180,7 @@ export default function MediaUploader({
   const maxBytes = useMemo(() => {
     return mediaType === 'VIDEO'
       ? bytesFromMb(MAX_VIDEO_MB)
-      : bytesFromMb(MAX_IMAGE_MB)
+      : bytesFromMb(MAX_IMAGE_SOURCE_MB)
   }, [mediaType])
 
   const canSubmit = useMemo(() => {
@@ -226,7 +232,9 @@ export default function MediaUploader({
     // pipeline the moment a file is chosen. Skip files we can't upload
     // (empty or over-limit) — they stay selected and the hint explains why.
     const limit =
-      inferred === 'VIDEO' ? bytesFromMb(MAX_VIDEO_MB) : bytesFromMb(MAX_IMAGE_MB)
+      inferred === 'VIDEO'
+        ? bytesFromMb(MAX_VIDEO_MB)
+        : bytesFromMb(MAX_IMAGE_SOURCE_MB)
 
     if (bookingId && next.size > 0 && next.size <= limit) {
       void runUpload(next, inferred)
@@ -238,7 +246,9 @@ export default function MediaUploader({
     if (uploadTarget.size <= 0) return
 
     const limit =
-      mt === 'VIDEO' ? bytesFromMb(MAX_VIDEO_MB) : bytesFromMb(MAX_IMAGE_MB)
+      mt === 'VIDEO'
+        ? bytesFromMb(MAX_VIDEO_MB)
+        : bytesFromMb(MAX_IMAGE_SOURCE_MB)
     if (uploadTarget.size > limit) return
 
     resetMessages()
@@ -274,6 +284,17 @@ export default function MediaUploader({
         } catch {
           uploadFile = uploadTarget
         }
+      }
+
+      // The signing route rejects anything over SERVER_MAX_BYTES. Images are
+      // normally compressed well under it; this guards the rare case where
+      // compression failed (we kept the original) or a video exceeds the cap,
+      // surfacing a clear message instead of an opaque server 400.
+      if (uploadFile.size > SERVER_MAX_BYTES) {
+        const mb = (uploadFile.size / (1024 * 1024)).toFixed(1)
+        setError(`That file is ${mb}MB — over the ${SERVER_MAX_MB}MB limit.`)
+        setStatus('IDLE')
+        return
       }
 
       setStatus('UPLOADING')
@@ -329,10 +350,18 @@ export default function MediaUploader({
 
       setStatus('SAVING')
 
+      // Key on the signed storage path, which is unique per uploaded object.
+      // The commit body includes this path, so the server hashes it into the
+      // request fingerprint — a deterministic key scoped only to
+      // booking+phase+type would collide (different path, same key) the moment
+      // a second photo is uploaded for the same booking, surfacing as a
+      // "different request body" conflict. A genuine retry of the *same* commit
+      // reuses the same path and still dedupes correctly.
       const idempotencyKey = buildClientIdempotencyKey({
         scope: 'booking-media',
         entityId: bookingId,
         action: `${phase}-${mt}`,
+        nonce: signData.path,
       })
 
       const res = await fetch(
@@ -407,7 +436,7 @@ export default function MediaUploader({
 
     if (file.size > maxBytes) {
       const mb = (file.size / (1024 * 1024)).toFixed(1)
-      const limit = mediaType === 'VIDEO' ? MAX_VIDEO_MB : MAX_IMAGE_MB
+      const limit = mediaType === 'VIDEO' ? MAX_VIDEO_MB : MAX_IMAGE_SOURCE_MB
       return `That file is ${mb}MB — over the ${limit}MB limit.`
     }
 
@@ -525,7 +554,7 @@ export default function MediaUploader({
             Limits:{' '}
             {mediaType === 'VIDEO'
               ? `${MAX_VIDEO_MB}MB video`
-              : `${MAX_IMAGE_MB}MB image`}
+              : 'Images are compressed automatically'}
           </div>
         </div>
 
