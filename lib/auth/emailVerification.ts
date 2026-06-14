@@ -1,6 +1,7 @@
 import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 
 import { sha256Hex, generateTokenHex } from '@/lib/auth/timingSafe'
+import { requireEmailEnv } from '@/lib/auth/emailProviderEnv'
 import { readOptionalEnv as envOrNull } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
@@ -38,14 +39,6 @@ type DbClient = Prisma.TransactionClient | typeof prisma
 
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
-}
-
-function envOrThrow(name: string): string {
-  const value = process.env[name]?.trim()
-  if (!value) {
-    throw new Error(`Missing env var: ${name}`)
-  }
-  return value
 }
 
 function sanitizeInternalPath(raw: string | null | undefined): string | null {
@@ -158,8 +151,8 @@ export async function sendVerificationEmail(args: {
   verifyUrl: string
   brandName: string
 }): Promise<void> {
-  const apiToken = envOrThrow('POSTMARK_SERVER_TOKEN')
-  const fromEmail = envOrThrow('POSTMARK_FROM_EMAIL')
+  const apiToken = requireEmailEnv('POSTMARK_SERVER_TOKEN')
+  const fromEmail = requireEmailEnv('POSTMARK_FROM_EMAIL')
   const messageStream = envOrNull('POSTMARK_MESSAGE_STREAM')
 
   const subject = `Verify your email for ${args.brandName}`

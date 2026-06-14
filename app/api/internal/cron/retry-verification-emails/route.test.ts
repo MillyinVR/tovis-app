@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthVerificationPurpose } from '@prisma/client'
 
+import { EmailNotConfiguredError } from '@/lib/auth/emailProviderEnv'
+
 const TEST_NOW = new Date('2026-04-16T12:00:00.000Z')
 
 const mocks = vi.hoisted(() => ({
@@ -427,7 +429,7 @@ describe('app/api/internal/cron/retry-verification-emails/route', () => {
     ])
 
     mocks.issueAndSendEmailVerification
-      .mockRejectedValueOnce(new Error('Missing env var: POSTMARK_SERVER_TOKEN'))
+      .mockRejectedValueOnce(new EmailNotConfiguredError('POSTMARK_SERVER_TOKEN'))
       .mockResolvedValueOnce({
         id: 'evt_ok',
         expiresAt: new Date('2026-04-17T12:00:00.000Z'),

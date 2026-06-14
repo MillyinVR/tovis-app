@@ -2,6 +2,7 @@
 import { Prisma } from '@prisma/client'
 
 import { sha256Hex, generateTokenHex } from '@/lib/auth/timingSafe'
+import { requireEmailEnv } from '@/lib/auth/emailProviderEnv'
 import { readOptionalEnv as envOrNull } from '@/lib/env'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
@@ -22,14 +23,6 @@ type ParsedPasswordResetToken = {
 
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
-}
-
-function envOrThrow(name: string): string {
-  const value = process.env[name]?.trim()
-  if (!value) {
-    throw new Error(`Missing env var: ${name}`)
-  }
-  return value
 }
 
 export { getAppUrlFromRequest as getPasswordResetAppUrlFromRequest } from '@/lib/appUrl'
@@ -142,8 +135,8 @@ export async function sendPasswordResetEmail(args: {
   resetUrl: string
   brandName: string
 }): Promise<void> {
-  const apiToken = envOrThrow('POSTMARK_SERVER_TOKEN')
-  const fromEmail = envOrThrow('POSTMARK_FROM_EMAIL')
+  const apiToken = requireEmailEnv('POSTMARK_SERVER_TOKEN')
+  const fromEmail = requireEmailEnv('POSTMARK_FROM_EMAIL')
   const messageStream = envOrNull('POSTMARK_MESSAGE_STREAM')
 
   const subject = `Reset your ${args.brandName} password`

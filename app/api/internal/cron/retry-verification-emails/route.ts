@@ -3,6 +3,7 @@ import { AuthVerificationPurpose } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
+import { isEmailNotConfiguredError } from '@/lib/auth/emailProviderEnv'
 import {
   getAppUrlFromRequest,
   isInactiveRecipientError,
@@ -41,11 +42,8 @@ function readTake(req: Request): number {
 
 function classifyEmailError(error: unknown): RetryVerificationFailure['code'] {
   if (isInactiveRecipientError(error)) return 'EMAIL_RECIPIENT_INACTIVE'
-
-  const message = error instanceof Error ? error.message : ''
-  return message.includes('Missing env var: POSTMARK_')
-    ? 'EMAIL_NOT_CONFIGURED'
-    : 'EMAIL_SEND_FAILED'
+  if (isEmailNotConfiguredError(error)) return 'EMAIL_NOT_CONFIGURED'
+  return 'EMAIL_SEND_FAILED'
 }
 
 async function runJob(req: Request) {
