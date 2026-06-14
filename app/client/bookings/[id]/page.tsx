@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react'
 import Link from 'next/link'
+import { formatMoneyFromUnknown } from '@/lib/money'
 import { notFound, redirect } from 'next/navigation'
 
 import { COPY } from '@/lib/copy'
@@ -115,34 +116,6 @@ function toDate(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-function formatMoneyFromUnknown(value: unknown): string | null {
-  if (value == null) return null
-
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return `$${value.toFixed(2)}`
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-
-    const parsed = Number(trimmed)
-    if (Number.isFinite(parsed)) return `$${parsed.toFixed(2)}`
-    return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    const maybeToString = value.toString
-    if (typeof maybeToString === 'function') {
-      const result = maybeToString.call(value)
-      if (typeof result === 'string') {
-        return formatMoneyFromUnknown(result)
-      }
-    }
-  }
-
-  return null
-}
 
 function formatWhenInTimeZone(date: Date, timeZone: string): string {
   const tz = sanitizeTimeZone(timeZone, 'UTC')

@@ -1,5 +1,6 @@
 // app/client/bookings/[id]/_view/buildBookingViewModel.ts
 import { COPY } from '@/lib/copy'
+import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 
@@ -38,29 +39,6 @@ function toDate(value: unknown): Date | null {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-function formatMoney(value: unknown): string | null {
-  if (value == null) return null
-
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return `$${value.toFixed(2)}`
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-
-    const parsed = Number(trimmed)
-    if (Number.isFinite(parsed)) return `$${parsed.toFixed(2)}`
-    return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    const asString = value.toString()
-    return typeof asString === 'string' ? formatMoney(asString) : null
-  }
-
-  return null
-}
 
 function formatWhen(date: Date, timeZone: string): string {
   const safeTimeZone = sanitizeTimeZone(timeZone, 'UTC')

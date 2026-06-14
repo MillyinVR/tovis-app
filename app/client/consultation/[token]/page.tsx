@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 
 import { isRecord } from '@/lib/guards'
 
@@ -202,31 +203,6 @@ function formatDateOnly(value: unknown, timeZone: string | null | undefined): st
   }).format(date)
 }
 
-function formatMoney(value: unknown): string | null {
-  if (value == null) return null
-
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return `$${value.toFixed(2)}`
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-    const numeric = Number(trimmed)
-    if (Number.isFinite(numeric)) return `$${numeric.toFixed(2)}`
-    return trimmed.startsWith('$') ? trimmed : `$${trimmed}`
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    const maybeToString = value.toString
-    if (typeof maybeToString === 'function') {
-      const result = maybeToString.call(value)
-      return formatMoney(result)
-    }
-  }
-
-  return null
-}
 
 type ProposedItemView = {
   key: string
