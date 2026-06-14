@@ -16,7 +16,7 @@ describe('AvailabilityCalendarPopup', () => {
   })
 
   it('loads the month, overlays booked/blocked days, and returns the picked day', async () => {
-    const fetchMock = vi.fn(() =>
+    const fetchMock = vi.fn((_input: RequestInfo | URL) =>
       Promise.resolve(
         jsonResponse({
           ok: true,
