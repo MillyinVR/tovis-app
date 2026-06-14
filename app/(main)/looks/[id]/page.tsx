@@ -7,6 +7,7 @@ import { notFound } from 'next/navigation'
 import { parseLooksDetailResponse } from '@/lib/looks/parsers'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import LookDetailClient from './LookDetailClient'
 import { isRecord } from '@/lib/guards'
 
@@ -96,8 +97,7 @@ export async function generateMetadata({
   // Brand copy is tenant-resolved (white-label aware), never hardcoded.
   const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
-  const proName =
-    item.professional.businessName ?? `a ${brand.displayName} pro`
+  const proName = formatProfessionalPublicDisplayName({ businessName: item.professional.businessName })
   const caption = item.caption?.trim() ?? ''
 
   const title = caption ? `${caption.slice(0, 80)} — ${proName}` : `A look by ${proName}`

@@ -12,6 +12,7 @@ import { normalizeProClientInviteToken } from '@/lib/clients/proClientInviteToke
 import { getCurrentUser } from '@/lib/currentUser'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { pickString } from '@/lib/pick'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 
@@ -144,10 +145,9 @@ function buildLocationLabel(
 function buildProfessionalLabel(
   booking: NonNullable<ClaimInviteRecord['booking']>,
 ): string {
-  return (
-    booking.professional?.businessName?.trim() ||
-    booking.professional?.user?.email?.trim() ||
-    'your professional'
+  return formatProfessionalPublicDisplayName(
+    { businessName: booking.professional?.businessName },
+    'your professional',
   )
 }
 

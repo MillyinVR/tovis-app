@@ -34,7 +34,7 @@ export function pickProfessionalPublicDisplayName(
 
 export function formatProfessionalPublicDisplayName(
   input: ProfessionalPublicDisplayNameSource,
-  fallback = 'Beauty professional',
+  fallback = 'Professional',
 ): string {
   return pickProfessionalPublicDisplayName(input) ?? fallback
 }

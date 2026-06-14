@@ -9,6 +9,7 @@ import { useBrand } from '@/lib/brand/BrandProvider'
 import { asTrimmedString, isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
 import { parseLooksCommentsResponse } from '@/lib/looks/parsers'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type {
   LooksCommentDto,
   LooksDetailItemDto,
@@ -451,7 +452,7 @@ export default function LookDetailClient({
           <div className="grid gap-3 p-4">
             <div className="grid gap-1">
               <div className="text-base font-extrabold">
-                {item.professional.businessName || 'Beauty professional'}
+                {formatProfessionalPublicDisplayName({ businessName: item.professional.businessName })}
               </div>
               <div className="text-xs text-textSecondary">
                 {item.professional.professionType || 'Beauty pro'}

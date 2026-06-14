@@ -13,6 +13,7 @@ import {
 
 import SaveToBoardModal from './SaveToBoardModal'
 import type { LooksSaveStateResponseDto } from '@/lib/looks/types'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 const TEXT_SHADOW =
   '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
@@ -182,7 +183,7 @@ export default function RightActionRail({
                 {pro.avatarUrl ? (
                   <img
                     src={pro.avatarUrl}
-                    alt={pro.businessName || 'Professional'}
+                    alt={formatProfessionalPublicDisplayName({ businessName: pro.businessName })}
                     style={{
                       width: '100%',
                       height: '100%',

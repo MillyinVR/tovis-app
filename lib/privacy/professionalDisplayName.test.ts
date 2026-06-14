@@ -44,6 +44,16 @@ describe('professional public display-name privacy boundary', () => {
     ).toBe('Professional')
   })
 
+  it("defaults the fallback to 'Professional' and never exposes handle/email", () => {
+    expect(
+      formatProfessionalPublicDisplayName({
+        businessName: null,
+        firstName: null,
+        lastName: null,
+      }),
+    ).toBe('Professional')
+  })
+
   it('keeps all public name tokens searchable', () => {
     expect(
       formatProfessionalPublicSearchText({

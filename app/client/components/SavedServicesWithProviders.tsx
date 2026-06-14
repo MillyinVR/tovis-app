@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import {
   clearViewerLocation,
   loadViewerLocation,
@@ -516,7 +517,9 @@ export default function SavedServicesWithProviders({ services }: { services: Sav
                 ) : (
                   <div className="looksNoScrollbar flex gap-2 overflow-x-auto pb-1">
                     {providers.map((p) => {
-                      const proName = (p.professional.businessName ?? p.professional.handle ?? 'Professional').trim()
+                      const proName = formatProfessionalPublicDisplayName({
+                        businessName: p.professional.businessName,
+                      })
                       return (
                         <Link
                           key={p.professional.id}

@@ -71,9 +71,9 @@ describe('formatPublicProfileDisplayName', () => {
     ).toBe('Professional')
   })
 
-  it('defaults to "Beauty professional" without a fallback', () => {
+  it('defaults to "Professional" without a fallback', () => {
     expect(formatPublicProfileDisplayName({ businessName: null })).toBe(
-      'Beauty professional',
+      'Professional',
     )
   })
 })

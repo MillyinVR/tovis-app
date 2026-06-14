@@ -4,8 +4,9 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LocateFixed, MapPin, Search, X } from 'lucide-react'
-import { isRecord } from '@/lib/guards' 
+import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import {
   VIEWER_RADIUS_DEFAULT_MILES,
   VIEWER_RADIUS_MAX_MILES,
@@ -673,7 +674,7 @@ export default function SearchClient() {
                     <div key={p.id} className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-3">
                       <div className="flex items-start justify-between gap-3">
                         <Link href={href} className="min-w-0">
-                          <div className="truncate text-[14px] font-black text-textPrimary">{p.businessName || 'Professional'}</div>
+                          <div className="truncate text-[14px] font-black text-textPrimary">{formatProfessionalPublicDisplayName({ businessName: p.businessName })}</div>
                           <div className="mt-1 text-[12px] font-semibold text-textSecondary">
                             {(p.professionType || 'Beauty professional') + ' • ' + loc}
                             {dist ? <span className="text-textSecondary"> • {dist}</span> : null}

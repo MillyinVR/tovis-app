@@ -1,6 +1,8 @@
 // app/client/components/PrebookedBookings.tsx
 'use client'
 
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+
 import type { BookingLike } from './_helpers'
 import { prettyWhen, bookingLocationLabel, sourceUpper } from './_helpers'
 import ProProfileLink from './ProProfileLink'
@@ -26,7 +28,9 @@ export default function PrebookedBookings({ items }: { items: BookingLike[] }) {
 
       {list.map((b) => {
         const svc = b?.display?.title || b?.display?.baseName || 'Appointment'
-        const proLabel = b?.professional?.businessName || 'Professional'
+        const proLabel = formatProfessionalPublicDisplayName({
+          businessName: b?.professional?.businessName,
+        })
         const proId = b?.professional?.id || null
 
         const when = prettyWhen(b?.scheduledFor, b?.timeZone)

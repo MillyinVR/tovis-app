@@ -3,6 +3,7 @@
 
 import Link from 'next/link'
 import type { ProCard as Pro } from '../types'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 const PAPER = 'rgba(244,239,231,1)'
 const PAPER_DIM = 'rgba(244,239,231,0.5)'
@@ -28,7 +29,7 @@ export default function ProCard({
   viewProServicesHref: string
   onScrollToOtherPros: () => void
 }) {
-  const name = pro.businessName?.trim() || 'Professional'
+  const name = formatProfessionalPublicDisplayName({ businessName: pro.businessName })
 
   return (
     <div
