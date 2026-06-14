@@ -391,8 +391,11 @@ function installFetchMock(args?: {
 
       if (url.startsWith('/api/looks?')) {
         const parsed = new URL(url, 'http://localhost')
-        const category = parsed.searchParams.get('category') ?? 'all'
-        const items = feedByCategory[category] ?? []
+        const following = parsed.searchParams.get('following') === 'true'
+        const key = following
+          ? 'following'
+          : (parsed.searchParams.get('category') ?? 'all')
+        const items = feedByCategory[key] ?? []
         return jsonResponse({
           items: clone(items),
           nextCursor: null,
@@ -650,6 +653,36 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
     expect(await screen.findByTestId('look-slide-look_hair_1')).toBeInTheDocument()
     expect(screen.getByTestId('active-category')).toHaveTextContent('Hair')
     expect(scrollToMock).toHaveBeenCalled()
+  })
+
+  it('selects the Following tab and refetches the followed-pros feed via following=true', async () => {
+    const { fetchMock } = installFetchMock({
+      feedByCategory: {
+        all: [makeFeedItem({ id: 'look_all_1' })],
+        following: [makeFeedItem({ id: 'look_following_1' })],
+      },
+    })
+
+    render(<LooksFeed />)
+
+    expect(await screen.findByTestId('look-slide-look_all_1')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Following' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/looks?limit=24&following=true',
+        expect.objectContaining({
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        }),
+      )
+    })
+
+    expect(
+      await screen.findByTestId('look-slide-look_following_1'),
+    ).toBeInTheDocument()
+    expect(screen.getByTestId('active-category')).toHaveTextContent('Following')
   })
 
   it('opens availability with discovery context keyed off the post item and leaves legacy mediaId empty', async () => {
