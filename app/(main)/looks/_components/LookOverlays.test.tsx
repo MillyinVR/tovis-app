@@ -66,9 +66,7 @@ describe('LookOverlays follower count', () => {
         professional: { ...makeItem().professional!, followerCount: 1500 },
       }),
     )
-    expect(screen.getByText('1.5k', { exact: false })).toHaveTextContent(
-      '1.5k followers',
-    )
+    expect(screen.getByText('1.5K followers')).toBeInTheDocument()
   })
 
   it('uses the singular for a single follower', () => {

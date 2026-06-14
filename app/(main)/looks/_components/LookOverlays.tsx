@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import type { CSSProperties } from 'react'
+import { formatFollowerLabel } from '@/lib/profiles/publicProfileFormatting'
 import type { FeedItem } from './lookTypes'
 
 const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
@@ -29,17 +30,6 @@ function formatRating(r: number) {
 
 function formatHelpful(n: number) {
   return `${n} ${n === 1 ? 'helpful' : 'helpfuls'}`
-}
-
-// Compact follower count: 999 → "999", 1500 → "1.5k", 2_000_000 → "2m".
-function formatFollowerCount(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) {
-    const k = n / 1000
-    return `${k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)}k`
-  }
-  const mil = n / 1_000_000
-  return `${mil % 1 === 0 ? mil.toFixed(0) : mil.toFixed(1)}m`
 }
 
 export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow }: Props) {
@@ -154,7 +144,6 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
 
           {pro?.id && followerCount > 0 ? (
             <span
-              aria-label={`${followerCount} ${followerCount === 1 ? 'follower' : 'followers'}`}
               style={{
                 fontSize: 11,
                 fontWeight: 600,
@@ -163,8 +152,7 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
                 flexShrink: 0,
               }}
             >
-              {formatFollowerCount(followerCount)}{' '}
-              {followerCount === 1 ? 'follower' : 'followers'}
+              {formatFollowerLabel(followerCount)}
             </span>
           ) : null}
         </div>
