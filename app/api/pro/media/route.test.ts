@@ -60,6 +60,9 @@ const mocks = vi.hoisted(() => {
 
   const createOrUpdateProLookFromMediaAsset = vi.fn()
 
+  const validateUploadSession = vi.fn()
+  const consumeUploadSession = vi.fn()
+
   return {
     jsonOk,
     jsonFail,
@@ -70,6 +73,8 @@ const mocks = vi.hoisted(() => {
     mediaAssetCreate,
     professionalProfileFindUnique,
     createOrUpdateProLookFromMediaAsset,
+    validateUploadSession,
+    consumeUploadSession,
   }
 })
 
@@ -94,6 +99,24 @@ vi.mock('@/lib/looks/publication/service', () => ({
   createOrUpdateProLookFromMediaAsset:
     mocks.createOrUpdateProLookFromMediaAsset,
 }))
+
+vi.mock('@/lib/media/uploadSession', () => {
+  class UploadSessionError extends Error {
+    code: string
+    httpStatus: number
+    constructor(code: string, message: string) {
+      super(message)
+      this.name = 'UploadSessionError'
+      this.code = code
+      this.httpStatus = code === 'FORBIDDEN' ? 403 : 400
+    }
+  }
+  return {
+    validateUploadSession: mocks.validateUploadSession,
+    consumeUploadSession: mocks.consumeUploadSession,
+    UploadSessionError,
+  }
+})
 
 vi.mock('@/lib/security/logging', () => ({
   safeError: vi.fn((error: unknown) => ({
@@ -299,6 +322,27 @@ describe('app/api/pro/media/route.ts', () => {
     mocks.createOrUpdateProLookFromMediaAsset.mockResolvedValue(
       makeLookPublicationResult(),
     )
+
+    process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://supabase.example'
+
+    mocks.validateUploadSession.mockResolvedValue({
+      id: 'us_1',
+      surface: 'PRO_PORTFOLIO',
+      status: 'PENDING',
+      professionalId: 'pro_1',
+      clientId: null,
+      bookingId: null,
+      phase: null,
+      storageBucket: BUCKETS.mediaPublic,
+      storagePath: 'pros/pro_1/media_1.jpg',
+      contentType: 'image/jpeg',
+      maxBytes: 30 * 1024 * 1024,
+      checksumSha256: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      consumedAt: null,
+      mediaAssetId: null,
+    })
+    mocks.consumeUploadSession.mockResolvedValue(undefined)
   })
 
   it('passes through failed pro auth responses unchanged', async () => {
@@ -326,7 +370,7 @@ describe('app/api/pro/media/route.ts', () => {
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when upload bucket/path is missing', async () => {
+  it('returns 400 when uploadSessionId is missing', async () => {
     const res = await POST(
       makeJsonRequest({
         serviceIds: ['service_1'],
@@ -337,9 +381,10 @@ describe('app/api/pro/media/route.ts', () => {
     expect(res.status).toBe(400)
     expect(body).toEqual({
       ok: false,
-      error: 'Missing upload bucket/path.',
+      error: 'Missing uploadSessionId.',
     })
 
+    expect(mocks.validateUploadSession).not.toHaveBeenCalled()
     expect(mocks.serviceFindMany).not.toHaveBeenCalled()
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
   })
@@ -355,9 +400,7 @@ describe('app/api/pro/media/route.ts', () => {
     mocks.mediaAssetCreate.mockResolvedValue(createdMedia)
 
     const req = makeJsonRequest({
-      storageBucket: BUCKETS.mediaPublic,
-      storagePath: 'pros/pro_1/media_1.jpg',
-      publicUrl: 'https://cdn.example.com/media_1.jpg',
+      uploadSessionId: 'us_1',
       caption: 'Portfolio upload',
       mediaType: 'image',
       isFeaturedInPortfolio: true,
@@ -367,6 +410,13 @@ describe('app/api/pro/media/route.ts', () => {
 
     const res = await POST(req)
     const body = await readJson(res)
+
+    expect(mocks.validateUploadSession).toHaveBeenCalledWith(expect.anything(), {
+      uploadSessionId: 'us_1',
+      surface: ['PRO_LOOKS', 'PRO_PORTFOLIO'],
+      professionalId: 'pro_1',
+      now: expect.any(Date),
+    })
 
     expect(mocks.serviceFindMany).toHaveBeenCalledWith({
       where: {
@@ -382,7 +432,7 @@ describe('app/api/pro/media/route.ts', () => {
       data: {
         professionalId: 'pro_1',
         proTenantId: 'tenant_root',
-        url: 'https://cdn.example.com/media_1.jpg',
+        url: 'https://supabase.example/storage/v1/object/public/media-public/pros/pro_1/media_1.jpg',
         thumbUrl: null,
         caption: 'Portfolio upload',
         mediaType: MediaType.IMAGE,
@@ -418,6 +468,12 @@ describe('app/api/pro/media/route.ts', () => {
     expect(
       mocks.createOrUpdateProLookFromMediaAsset,
     ).not.toHaveBeenCalled()
+
+    expect(mocks.consumeUploadSession).toHaveBeenCalledWith(expect.anything(), {
+      uploadSessionId: 'us_1',
+      mediaAssetId: 'media_1',
+      now: expect.any(Date),
+    })
 
     expect(res.status).toBe(201)
     expect(body).toEqual({
@@ -470,9 +526,7 @@ describe('app/api/pro/media/route.ts', () => {
     )
 
     const req = makeJsonRequest({
-      storageBucket: BUCKETS.mediaPublic,
-      storagePath: 'pros/pro_1/media_looks_1.jpg',
-      publicUrl: 'https://cdn.example.com/media_looks_1.jpg',
+      uploadSessionId: 'us_1',
       caption: 'Fresh set',
       mediaType: 'image',
       isEligibleForLooks: true,
@@ -513,9 +567,9 @@ describe('app/api/pro/media/route.ts', () => {
   it('returns 400 when publishToLooks is true but isEligibleForLooks is false', async () => {
     const res = await POST(
       makeJsonRequest({
-        storageBucket: BUCKETS.mediaPrivate,
-        storagePath: 'pros/pro_1/media_1.jpg',
+        uploadSessionId: 'us_1',
         serviceIds: ['service_1'],
+        isFeaturedInPortfolio: true,
         isEligibleForLooks: false,
         publishToLooks: true,
       }),
@@ -540,9 +594,7 @@ describe('app/api/pro/media/route.ts', () => {
 
     const res = await POST(
       makeJsonRequest({
-        storageBucket: BUCKETS.mediaPublic,
-        storagePath: 'pros/pro_1/media_1.jpg',
-        publicUrl: 'https://cdn.example.com/media_1.jpg',
+        uploadSessionId: 'us_1',
         serviceIds: ['service_1', 'service_2'],
         isEligibleForLooks: true,
       }),
@@ -574,9 +626,7 @@ describe('app/api/pro/media/route.ts', () => {
 
     const res = await POST(
       makeJsonRequest({
-        storageBucket: BUCKETS.mediaPublic,
-        storagePath: 'pros/pro_1/media_1.jpg',
-        publicUrl: 'https://cdn.example.com/media_1.jpg',
+        uploadSessionId: 'us_1',
         serviceIds: ['service_1'],
         isFeaturedInPortfolio: true,
       }),

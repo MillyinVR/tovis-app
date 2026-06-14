@@ -129,7 +129,9 @@ export async function createUploadSession(
 
 export type ValidateUploadSessionInput = {
   uploadSessionId: string
-  surface: UploadSurface
+  // A single surface, or a set of acceptable surfaces (e.g. PRO_LOOKS /
+  // PRO_PORTFOLIO, which the client flips between at attach time).
+  surface: UploadSurface | UploadSurface[]
   now: Date
   // Expected ownership/context — each, when provided, must match the session.
   professionalId?: string | null
@@ -155,7 +157,11 @@ export async function validateUploadSession(
     throw new UploadSessionError('NOT_FOUND', 'Upload session not found.')
   }
 
-  if (session.surface !== input.surface) {
+  const allowedSurfaces = Array.isArray(input.surface)
+    ? input.surface
+    : [input.surface]
+
+  if (!allowedSurfaces.includes(session.surface)) {
     throw new UploadSessionError(
       'SURFACE_MISMATCH',
       'Upload session is for a different upload surface.',
@@ -216,14 +222,14 @@ export async function validateUploadSession(
  */
 export async function consumeUploadSession(
   db: UploadSessionDb,
-  input: { uploadSessionId: string; mediaAssetId: string; now: Date },
+  input: { uploadSessionId: string; mediaAssetId?: string | null; now: Date },
 ): Promise<void> {
   const result = await db.uploadSession.updateMany({
     where: { id: input.uploadSessionId, status: UploadSessionStatus.PENDING },
     data: {
       status: UploadSessionStatus.CONSUMED,
       consumedAt: input.now,
-      mediaAssetId: input.mediaAssetId,
+      mediaAssetId: input.mediaAssetId ?? null,
     },
   })
 

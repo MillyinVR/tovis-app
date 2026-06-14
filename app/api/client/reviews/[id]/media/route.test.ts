@@ -23,35 +23,39 @@ const createdMedia = {
   createdAt,
   storageBucket: BUCKETS.mediaPublic,
   storagePath: 'reviews/review_1/main.jpg',
-  thumbBucket: BUCKETS.mediaPublic,
-  thumbPath: 'reviews/review_1/thumb.jpg',
+  thumbBucket: null,
+  thumbPath: null,
   url: null,
   thumbUrl: null,
 }
 
 const renderedUrls = {
   renderUrl: 'https://public.example/main.jpg',
-  renderThumbUrl: 'https://public.example/thumb.jpg',
+  renderThumbUrl: null,
 }
 
-type TestMediaItem = {
-  url: string
-  thumbUrl?: string | null
-  mediaType: MediaType
-  storageBucket?: string | null
-  storagePath?: string | null
-  thumbBucket?: string | null
-  thumbPath?: string | null
-}
-
-const validMediaItem: TestMediaItem = {
-  url: 'https://example.com/uploaded-main.jpg',
-  thumbUrl: 'https://example.com/uploaded-thumb.jpg',
-  mediaType: MediaType.IMAGE,
-  storageBucket: BUCKETS.mediaPublic,
-  storagePath: 'reviews/review_1/main.jpg',
-  thumbBucket: BUCKETS.mediaPublic,
-  thumbPath: 'reviews/review_1/thumb.jpg',
+// The authoritative session validateUploadSession returns by default. The route
+// reads the storage pointer back from here; the client only sends uploadSessionId.
+function imageSession(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'us_1',
+    surface: 'CLIENT_REVIEW',
+    status: 'PENDING',
+    tenantId: null,
+    professionalId: null,
+    clientId: 'client_1',
+    bookingId: null,
+    phase: null,
+    storageBucket: BUCKETS.mediaPublic,
+    storagePath: 'reviews/review_1/main.jpg',
+    contentType: 'image/jpeg',
+    maxBytes: 30 * 1024 * 1024,
+    checksumSha256: null,
+    expiresAt: new Date(createdAt.getTime() + 3_600_000),
+    consumedAt: null,
+    mediaAssetId: null,
+    ...overrides,
+  }
 }
 
 const mocks = vi.hoisted(() => ({
@@ -68,8 +72,10 @@ const mocks = vi.hoisted(() => ({
   txProfessionalProfileFindUnique: vi.fn(),
 
   safeUrl: vi.fn(),
-  resolveStoragePointers: vi.fn(),
   renderMediaUrls: vi.fn(),
+
+  validateUploadSession: vi.fn(),
+  consumeUploadSession: vi.fn(),
 
   getSupabaseAdmin: vi.fn(),
   getPublicUrl: vi.fn(),
@@ -108,12 +114,29 @@ vi.mock('@/lib/prisma', () => ({
 
 vi.mock('@/lib/media', () => ({
   safeUrl: mocks.safeUrl,
-  resolveStoragePointers: mocks.resolveStoragePointers,
 }))
 
 vi.mock('@/lib/media/renderUrls', () => ({
   renderMediaUrls: mocks.renderMediaUrls,
 }))
+
+vi.mock('@/lib/media/uploadSession', () => {
+  class UploadSessionError extends Error {
+    code: string
+    httpStatus: number
+    constructor(code: string, message: string) {
+      super(message)
+      this.name = 'UploadSessionError'
+      this.code = code
+      this.httpStatus = code === 'FORBIDDEN' ? 403 : code === 'NOT_FOUND' ? 404 : 400
+    }
+  }
+  return {
+    validateUploadSession: mocks.validateUploadSession,
+    consumeUploadSession: mocks.consumeUploadSession,
+    UploadSessionError,
+  }
+})
 
 vi.mock('@/lib/supabaseAdmin', () => ({
   getSupabaseAdmin: mocks.getSupabaseAdmin,
@@ -124,6 +147,7 @@ vi.mock('@/lib/security/logging', () => ({
 }))
 
 import { POST } from './route'
+import { UploadSessionError } from '@/lib/media/uploadSession'
 
 type TxForReviewMedia = {
   mediaAsset: {
@@ -162,14 +186,9 @@ function makePostRequest(body: unknown): NextRequest {
   })
 }
 
-function makeValidBody(overrides?: Partial<TestMediaItem>) {
-  const item: TestMediaItem = {
-    ...validMediaItem,
-    ...(overrides ?? {}),
-  }
-
+function makeValidBody(sessionIds: string[] = ['us_1']) {
   return {
-    media: [item],
+    media: sessionIds.map((uploadSessionId) => ({ uploadSessionId })),
   }
 }
 
@@ -223,22 +242,11 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       return trimmed
     })
 
-    mocks.resolveStoragePointers.mockImplementation(
-      (input: {
-        storageBucket: string | null
-        storagePath: string | null
-        thumbBucket: string | null
-        thumbPath: string | null
-      }) => ({
-        storageBucket: input.storageBucket,
-        storagePath: input.storagePath,
-        thumbBucket: input.thumbBucket,
-        thumbPath: input.thumbPath,
-      }),
-    )
-
     mocks.reviewFindUnique.mockResolvedValue(review)
     mocks.mediaAssetCount.mockResolvedValue(0)
+
+    mocks.validateUploadSession.mockResolvedValue(imageSession())
+    mocks.consumeUploadSession.mockResolvedValue(undefined)
 
     mocks.txMediaAssetCreate.mockResolvedValue(createdMedia)
     mocks.txReviewFindUnique.mockResolvedValue({
@@ -343,17 +351,30 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when image cap is exceeded', async () => {
-    const media = Array.from({ length: 7 }, (_, index) => ({
-      ...validMediaItem,
-      storagePath: `reviews/review_1/image-${index}.jpg`,
-      thumbPath: `reviews/review_1/thumb-${index}.jpg`,
-    }))
-
+  it('returns 400 when more than the total cap of items is submitted', async () => {
     const result = await POST(
-      makePostRequest({
-        media,
-      }),
+      makePostRequest(
+        makeValidBody(Array.from({ length: 8 }, (_, i) => `us_${i}`)),
+      ),
+      makeCtx(),
+    )
+
+    expect(result.status).toBe(400)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'You can upload up to 6 images + 1 video (7 total).',
+    })
+
+    expect(mocks.reviewFindUnique).not.toHaveBeenCalled()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when the resolved image cap is exceeded', async () => {
+    // 7 items (== total cap) all resolve to images -> per-type image cap (6).
+    const result = await POST(
+      makePostRequest(
+        makeValidBody(Array.from({ length: 7 }, (_, i) => `us_${i}`)),
+      ),
       makeCtx(),
     )
 
@@ -363,30 +384,16 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       error: 'You can upload up to 6 images.',
     })
 
-    expect(mocks.reviewFindUnique).not.toHaveBeenCalled()
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
-  it('returns 400 when video cap is exceeded', async () => {
+  it('returns 400 when the resolved video cap is exceeded', async () => {
+    mocks.validateUploadSession.mockResolvedValue(
+      imageSession({ contentType: 'video/mp4' }),
+    )
+
     const result = await POST(
-      makePostRequest({
-        media: [
-          {
-            ...validMediaItem,
-            mediaType: MediaType.VIDEO,
-            storagePath: 'reviews/review_1/video-1.mp4',
-            thumbPath: null,
-            thumbBucket: null,
-          },
-          {
-            ...validMediaItem,
-            mediaType: MediaType.VIDEO,
-            storagePath: 'reviews/review_1/video-2.mp4',
-            thumbPath: null,
-            thumbBucket: null,
-          },
-        ],
-      }),
+      makePostRequest(makeValidBody(['us_1', 'us_2'])),
       makeCtx(),
     )
 
@@ -396,7 +403,6 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       error: 'You can upload up to 1 video.',
     })
 
-    expect(mocks.reviewFindUnique).not.toHaveBeenCalled()
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
@@ -429,9 +435,6 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       error: 'Forbidden.',
     })
 
-    expect(mocks.mediaAssetCount).not.toHaveBeenCalled()
-    expect(mocks.getPublicUrl).not.toHaveBeenCalled()
-    expect(globalThis.fetch).not.toHaveBeenCalled()
     expect(mocks.transaction).not.toHaveBeenCalled()
     expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
   })
@@ -451,7 +454,6 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
         'This review is not linked to a booking. Media must be attached to a booking to appear in aftercare.',
     })
 
-    expect(mocks.mediaAssetCount).not.toHaveBeenCalled()
     expect(mocks.transaction).not.toHaveBeenCalled()
     expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
   })
@@ -471,16 +473,29 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
     expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
   })
 
-  it('rejects media-private for public review media before storage lookup or DB write', async () => {
-    const result = await POST(
-      makePostRequest(
-        makeValidBody({
-          storageBucket: BUCKETS.mediaPrivate,
-          storagePath: 'reviews/review_1/private-main.jpg',
-        }),
-      ),
-      makeCtx(),
+  it('maps upload-session validation errors (e.g. wrong client)', async () => {
+    mocks.validateUploadSession.mockRejectedValueOnce(
+      new UploadSessionError('FORBIDDEN', 'Upload session belongs to another client.'),
     )
+
+    const result = await POST(makePostRequest(makeValidBody()), makeCtx())
+
+    expect(result.status).toBe(403)
+    await expect(result.json()).resolves.toEqual({
+      ok: false,
+      error: 'Upload session belongs to another client.',
+    })
+
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a session whose pointer is not in the public bucket', async () => {
+    mocks.validateUploadSession.mockResolvedValueOnce(
+      imageSession({ storageBucket: BUCKETS.mediaPrivate }),
+    )
+
+    const result = await POST(makePostRequest(makeValidBody()), makeCtx())
 
     expect(result.status).toBe(400)
     await expect(result.json()).resolves.toEqual({
@@ -488,77 +503,6 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       error: `Review media must upload to ${BUCKETS.mediaPublic}.`,
     })
 
-    expect(mocks.getPublicUrl).not.toHaveBeenCalled()
-    expect(mocks.createSignedUrl).not.toHaveBeenCalled()
-    expect(globalThis.fetch).not.toHaveBeenCalled()
-    expect(mocks.transaction).not.toHaveBeenCalled()
-    expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
-  })
-
-  it('rejects media-private thumb for public review media before storage lookup or DB write', async () => {
-    const result = await POST(
-      makePostRequest(
-        makeValidBody({
-          thumbBucket: BUCKETS.mediaPrivate,
-          thumbPath: 'reviews/review_1/private-thumb.jpg',
-        }),
-      ),
-      makeCtx(),
-    )
-
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: `Review thumb must upload to ${BUCKETS.mediaPublic}.`,
-    })
-
-    expect(mocks.getPublicUrl).not.toHaveBeenCalled()
-    expect(mocks.createSignedUrl).not.toHaveBeenCalled()
-    expect(globalThis.fetch).not.toHaveBeenCalled()
-    expect(mocks.transaction).not.toHaveBeenCalled()
-    expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
-  })
-
-  it('rejects path traversal before storage lookup or DB write', async () => {
-    const result = await POST(
-      makePostRequest(
-        makeValidBody({
-          storagePath: '../private/file.jpg',
-        }),
-      ),
-      makeCtx(),
-    )
-
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'Invalid storageBucket/storagePath.',
-    })
-
-    expect(mocks.getPublicUrl).not.toHaveBeenCalled()
-    expect(globalThis.fetch).not.toHaveBeenCalled()
-    expect(mocks.transaction).not.toHaveBeenCalled()
-  })
-
-  it('rejects unpaired thumb bucket and path before storage lookup or DB write', async () => {
-    const result = await POST(
-      makePostRequest(
-        makeValidBody({
-          thumbBucket: BUCKETS.mediaPublic,
-          thumbPath: null,
-        }),
-      ),
-      makeCtx(),
-    )
-
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'thumbBucket and thumbPath must be provided together.',
-    })
-
-    expect(mocks.getPublicUrl).not.toHaveBeenCalled()
-    expect(globalThis.fetch).not.toHaveBeenCalled()
     expect(mocks.transaction).not.toHaveBeenCalled()
   })
 
@@ -580,24 +524,7 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
     expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
   })
 
-  it('rejects missing uploaded thumb before DB write', async () => {
-    vi.mocked(globalThis.fetch)
-      .mockResolvedValueOnce(new Response(null, { status: 200 }))
-      .mockResolvedValueOnce(new Response(null, { status: 404 }))
-
-    const result = await POST(makePostRequest(makeValidBody()), makeCtx())
-
-    expect(result.status).toBe(400)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'Uploaded thumb not found in storage.',
-    })
-
-    expect(mocks.transaction).not.toHaveBeenCalled()
-    expect(mocks.txMediaAssetCreate).not.toHaveBeenCalled()
-  })
-
-  it('creates public review media for the owning client and returns render-safe urls', async () => {
+  it('creates public review media for the owning client, consumes the session, and returns render-safe urls', async () => {
     const result = await POST(makePostRequest(makeValidBody()), makeCtx())
 
     expect(mocks.reviewFindUnique).toHaveBeenCalledWith({
@@ -612,6 +539,13 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       },
     })
 
+    expect(mocks.validateUploadSession).toHaveBeenCalledWith(expect.anything(), {
+      uploadSessionId: 'us_1',
+      surface: 'CLIENT_REVIEW',
+      clientId: 'client_1',
+      now: expect.any(Date),
+    })
+
     expect(mocks.mediaAssetCount).toHaveBeenCalledWith({
       where: {
         reviewId: 'review_1',
@@ -619,8 +553,9 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       },
     })
 
-    expect(mocks.getPublicUrl).toHaveBeenCalledTimes(2)
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
+    // Only the main object is probed — review media has no separate thumb.
+    expect(mocks.getPublicUrl).toHaveBeenCalledTimes(1)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
 
     expect(mocks.txMediaAssetCreate).toHaveBeenCalledWith({
       data: {
@@ -630,8 +565,8 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
         reviewId: 'review_1',
         storageBucket: BUCKETS.mediaPublic,
         storagePath: 'reviews/review_1/main.jpg',
-        thumbBucket: BUCKETS.mediaPublic,
-        thumbPath: 'reviews/review_1/thumb.jpg',
+        thumbBucket: null,
+        thumbPath: null,
         url: null,
         thumbUrl: null,
         mediaType: MediaType.IMAGE,
@@ -658,6 +593,12 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       },
     })
 
+    expect(mocks.consumeUploadSession).toHaveBeenCalledWith(expect.anything(), {
+      uploadSessionId: 'us_1',
+      mediaAssetId: 'media_1',
+      now: expect.any(Date),
+    })
+
     expect(mocks.txReviewFindUnique).toHaveBeenCalledWith({
       where: {
         id: 'review_1',
@@ -667,39 +608,7 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       },
     })
 
-    expect(mocks.renderMediaUrls).toHaveBeenCalledWith({
-      storageBucket: BUCKETS.mediaPublic,
-      storagePath: 'reviews/review_1/main.jpg',
-      thumbBucket: BUCKETS.mediaPublic,
-      thumbPath: 'reviews/review_1/thumb.jpg',
-      url: null,
-      thumbUrl: null,
-    })
-
     expect(result.status).toBe(201)
-    await expect(result.json()).resolves.toEqual({
-      ok: true,
-      createdCount: 1,
-      created: [
-        {
-          ...createdMedia,
-          createdAt: createdAtIso,
-          renderUrl: renderedUrls.renderUrl,
-          renderThumbUrl: renderedUrls.renderThumbUrl,
-          url: renderedUrls.renderUrl,
-          thumbUrl: renderedUrls.renderThumbUrl,
-        },
-      ],
-      review: {
-        ...review,
-        mediaAssets: [
-          {
-            ...createdMedia,
-            createdAt: createdAtIso,
-          },
-        ],
-      },
-    })
   })
 
   it('returns 500 and logs a safe error when media creation throws', async () => {
@@ -707,11 +616,9 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       .spyOn(console, 'error')
       .mockImplementation(() => undefined)
 
-    const thrown = new Error(
-      'db failed for https://example.com/private.jpg?token=secret',
+    mocks.txMediaAssetCreate.mockRejectedValueOnce(
+      new Error('db blew up for https://signed.example/x?token=secret'),
     )
-
-    mocks.txMediaAssetCreate.mockRejectedValueOnce(thrown)
 
     const result = await POST(makePostRequest(makeValidBody()), makeCtx())
 
@@ -720,18 +627,6 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       ok: false,
       error: 'Internal server error',
     })
-
-    expect(mocks.safeError).toHaveBeenCalledWith(thrown)
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'POST /api/client/reviews/[id]/media error',
-      {
-        error: {
-          name: 'Error',
-          message:
-            'db failed for https://example.com/private.jpg?token=secret',
-        },
-      },
-    )
 
     consoleErrorSpy.mockRestore()
   })

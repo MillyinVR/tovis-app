@@ -9,6 +9,7 @@ import {
   NotificationPriority,
   Prisma,
   Role,
+  UploadSurface,
 } from '@prisma/client'
 
 import {
@@ -16,9 +17,12 @@ import {
   jsonOk,
   pickString,
   requireClient,
-  resolveStoragePointers,
-  safeUrl,
 } from '@/app/api/_utils'
+import {
+  consumeUploadSession,
+  UploadSessionError,
+  validateUploadSession,
+} from '@/lib/media/uploadSession'
 import {
   beginRouteIdempotency,
   completeRouteIdempotency,
@@ -50,16 +54,11 @@ const MAX_CLIENT_VIDEOS = 1
 const MAX_CLIENT_MEDIA_TOTAL = MAX_CLIENT_IMAGES + MAX_CLIENT_VIDEOS
 
 type IncomingMediaItem = {
-  url: string
-  thumbUrl?: string | null
-  mediaType: MediaType
-  storageBucket?: string | null
-  storagePath?: string | null
-  thumbBucket?: string | null
-  thumbPath?: string | null
+  uploadSessionId: string
 }
 
 type ResolvedClientMediaItem = {
+  uploadSessionId: string
   mediaType: MediaType
   caption: string | null
   storageBucket: string
@@ -103,8 +102,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
-function isMediaType(value: unknown): value is MediaType {
-  return value === MediaType.IMAGE || value === MediaType.VIDEO
+function mediaTypeFromContentType(contentType: string): MediaType {
+  return contentType.toLowerCase().startsWith('video/')
+    ? MediaType.VIDEO
+    : MediaType.IMAGE
 }
 
 function readRequestId(req: Request): string | null {
@@ -123,34 +124,18 @@ function parseMedia(bodyMedia: unknown): IncomingMediaItem[] {
   for (const raw of bodyMedia) {
     if (!isRecord(raw)) continue
 
-    const url = safeUrl(raw.url)
-    if (!url) continue
+    const uploadSessionId = pickString(raw.uploadSessionId)
+    if (!uploadSessionId) continue
 
-    const thumbUrlRaw = raw.thumbUrl
-    const thumbUrl =
-      thumbUrlRaw == null || thumbUrlRaw === '' ? null : safeUrl(thumbUrlRaw)
-
-    if (thumbUrlRaw && !thumbUrl) continue
-
-    const mediaType: MediaType = isMediaType(raw.mediaType)
-      ? raw.mediaType
-      : MediaType.IMAGE
-
-    items.push({
-      url,
-      thumbUrl,
-      mediaType,
-      storageBucket: pickString(raw.storageBucket) ?? null,
-      storagePath: pickString(raw.storagePath) ?? null,
-      thumbBucket: pickString(raw.thumbBucket) ?? null,
-      thumbPath: pickString(raw.thumbPath) ?? null,
-    })
+    items.push({ uploadSessionId })
   }
 
   return items
 }
 
-function enforceClientMediaCaps(items: IncomingMediaItem[]): string | null {
+function enforceClientMediaCaps(
+  items: ResolvedClientMediaItem[],
+): string | null {
   if (!items.length) return null
 
   if (items.length > MAX_CLIENT_MEDIA_TOTAL) {
@@ -321,7 +306,7 @@ function buildIdempotencyRequestBody(args: {
   headline: string | null
   reviewBody: string | null
   attachedMediaIds: string[]
-  resolvedClientMedia: ResolvedClientMediaItem[]
+  uploadSessionIds: string[]
 }): JsonObjectPayload {
   return normalizeJsonObjectPayload({
     bookingId: args.bookingId,
@@ -331,14 +316,7 @@ function buildIdempotencyRequestBody(args: {
     headline: args.headline,
     body: args.reviewBody,
     attachedMediaIds: [...args.attachedMediaIds].sort(),
-    clientMedia: args.resolvedClientMedia.map((item) => ({
-      mediaType: item.mediaType,
-      storageBucket: item.storageBucket,
-      storagePath: item.storagePath,
-      thumbBucket: item.thumbBucket,
-      thumbPath: item.thumbPath,
-      caption: item.caption,
-    })),
+    uploadSessionIds: [...args.uploadSessionIds].sort(),
   })
 }
 
@@ -404,36 +382,18 @@ export async function POST(
       MAX_ATTACH_APPT_MEDIA,
     )
 
-    const capError = enforceClientMediaCaps(clientMediaItems)
-    if (capError) return jsonFail(400, capError)
+    if (clientMediaItems.length > MAX_CLIENT_MEDIA_TOTAL) {
+      return jsonFail(
+        400,
+        `You can upload up to ${MAX_CLIENT_IMAGES} images + ${MAX_CLIENT_VIDEOS} video (${MAX_CLIENT_MEDIA_TOTAL} total).`,
+      )
+    }
 
-    const resolvedClientMedia: ResolvedClientMediaItem[] =
-      clientMediaItems.map((item) => {
-        const pointers = resolveStoragePointers({
-          url: item.url,
-          thumbUrl: item.thumbUrl ?? null,
-          storageBucket: item.storageBucket ?? null,
-          storagePath: item.storagePath ?? null,
-          thumbBucket: item.thumbBucket ?? null,
-          thumbPath: item.thumbPath ?? null,
-        })
+    const uploadSessionIds = clientMediaItems.map((item) => item.uploadSessionId)
 
-        if (!pointers) {
-          throw new Error('MEDIA_POINTERS_REQUIRED')
-        }
-
-        return {
-          mediaType: item.mediaType,
-          caption: null,
-          storageBucket: pointers.storageBucket,
-          storagePath: pointers.storagePath,
-          thumbBucket: pointers.thumbBucket,
-          thumbPath: pointers.thumbPath,
-          url: null,
-          thumbUrl: null,
-        }
-      })
-
+    // Idempotency is keyed on the upload session ids (not storage pointers, which
+    // the client never supplies). Begin BEFORE validating/consuming sessions so a
+    // retry replays the cached response instead of failing on consumed sessions.
     const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
       request: req,
       actor: {
@@ -450,7 +410,7 @@ export async function POST(
         headline: headline || null,
         reviewBody: reviewBody || null,
         attachedMediaIds,
-        resolvedClientMedia,
+        uploadSessionIds,
       }),
       messages: {
         missingKey: 'Missing idempotency key.',
@@ -467,6 +427,47 @@ export async function POST(
     idempotencyRecordId = idempotency.idempotencyRecordId
 
     const requestId = readRequestId(req)
+
+    // Validate each client-review upload session (ownership + surface + expiry).
+    // The storage pointer is read back from the session, never the client body.
+    const resolvedClientMedia: ResolvedClientMediaItem[] = []
+    for (const item of clientMediaItems) {
+      let session
+      try {
+        session = await validateUploadSession(prisma, {
+          uploadSessionId: item.uploadSessionId,
+          surface: UploadSurface.CLIENT_REVIEW,
+          clientId,
+          now: new Date(),
+        })
+      } catch (error: unknown) {
+        await failReviewIdempotency(idempotencyRecordId)
+        idempotencyRecordId = null
+        if (error instanceof UploadSessionError) {
+          return jsonFail(error.httpStatus, error.message)
+        }
+        throw error
+      }
+
+      resolvedClientMedia.push({
+        uploadSessionId: item.uploadSessionId,
+        mediaType: mediaTypeFromContentType(session.contentType),
+        caption: null,
+        storageBucket: session.storageBucket,
+        storagePath: session.storagePath,
+        thumbBucket: null,
+        thumbPath: null,
+        url: null,
+        thumbUrl: null,
+      })
+    }
+
+    const capError = enforceClientMediaCaps(resolvedClientMedia)
+    if (capError) {
+      await failReviewIdempotency(idempotencyRecordId)
+      idempotencyRecordId = null
+      return jsonFail(400, capError)
+    }
 
     const eligibility = await assertClientBookingReviewEligibility({
       bookingId,
@@ -607,6 +608,16 @@ export async function POST(
               }),
             ),
           })
+
+          // Consume each session (PENDING -> CONSUMED). A conflict rolls the
+          // whole review transaction back; the MediaAsset (bucket,path) unique
+          // index is the other half of the double-attach guard.
+          for (const item of resolvedClientMedia) {
+            await consumeUploadSession(tx, {
+              uploadSessionId: item.uploadSessionId,
+              now: new Date(),
+            })
+          }
         }
 
         await createBookingCloseoutAuditLog({

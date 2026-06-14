@@ -12,9 +12,15 @@ import {
   LookPostVisibility,
   MediaType,
   MediaVisibility,
+  UploadSurface,
 } from '@prisma/client'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
+import {
+  consumeUploadSession,
+  UploadSessionError,
+  validateUploadSession,
+} from '@/lib/media/uploadSession'
 import { createOrUpdateProLookFromMediaAsset } from '@/lib/looks/publication/service'
 import { safeError } from '@/lib/security/logging'
 
@@ -139,23 +145,12 @@ export async function POST(req: Request) {
     const professionalId = auth.professionalId
     const body = await readJsonObject(req)
 
-    const bucketRaw = getStrFrom(body, ['bucket', 'storageBucket'])
-    const path = getStrFrom(body, ['path', 'storagePath'])
-    const publicUrl = getStrFrom(body, ['publicUrl', 'url'])
+    const uploadSessionId = getStr(body, 'uploadSessionId')
 
-    const thumbBucketRaw = getStr(body, 'thumbBucket')
-    const thumbPath = getStr(body, 'thumbPath')
-    const thumbPublicUrl = getStr(body, 'thumbPublicUrl')
-
-    if (!bucketRaw || !path) {
-      return jsonFail(400, 'Missing upload bucket/path.')
+    if (!uploadSessionId) {
+      return jsonFail(400, 'Missing uploadSessionId.')
     }
 
-    if (!isStorageBucket(bucketRaw)) {
-      return jsonFail(400, 'Invalid upload bucket.')
-    }
-
-    const bucket: StorageBucket = bucketRaw
     const caption = getStr(body, 'caption')
     const mediaType = parseMediaType(body.mediaType)
 
@@ -173,6 +168,31 @@ export async function POST(req: Request) {
       isFeaturedInPortfolio,
     )
 
+    // The storage pointer is read back from the UploadSession the signing route
+    // minted — never from the client. A LOOKS or PORTFOLIO session is accepted
+    // (the pro flips between the two at attach time).
+    let session
+    try {
+      session = await validateUploadSession(prisma, {
+        uploadSessionId,
+        surface: [UploadSurface.PRO_LOOKS, UploadSurface.PRO_PORTFOLIO],
+        professionalId,
+        now: new Date(),
+      })
+    } catch (sessionError: unknown) {
+      if (sessionError instanceof UploadSessionError) {
+        return jsonFail(sessionError.httpStatus, sessionError.message)
+      }
+      throw sessionError
+    }
+
+    if (!isStorageBucket(session.storageBucket)) {
+      return jsonFail(400, 'Invalid upload bucket.')
+    }
+
+    const bucket: StorageBucket = session.storageBucket
+    const path = session.storagePath
+
     if (visibility === MediaVisibility.PUBLIC && !isPublicBucket(bucket)) {
       return jsonFail(
         400,
@@ -187,39 +207,18 @@ export async function POST(req: Request) {
       )
     }
 
-    if (isPublicBucket(bucket) && !publicUrl) {
-      return jsonFail(400, 'Missing publicUrl for public upload.')
-    }
-
-    const url = isPublicBucket(bucket) ? publicUrl : null
-
-    let thumbBucket: StorageBucket | null = null
-    if (thumbBucketRaw) {
-      if (!isStorageBucket(thumbBucketRaw)) {
-        return jsonFail(400, 'Invalid thumb bucket.')
-      }
-
-      thumbBucket = thumbBucketRaw
-    }
-
-    if (thumbBucket && !thumbPath) {
-      return jsonFail(
-        400,
-        'thumbPath is required when thumbBucket is provided.',
-      )
-    }
-
-    if (thumbBucket && isPublicBucket(thumbBucket) && !thumbPublicUrl) {
-      return jsonFail(
-        400,
-        'thumbPublicUrl is required for public thumbnails.',
-      )
-    }
-
-    const thumbUrl =
-      thumbBucket && thumbPath && isPublicBucket(thumbBucket)
-        ? thumbPublicUrl
+    // Public URL is reconstructed from the canonical pointer (matches the
+    // signing route); renderMediaUrls also derives it, so this is a legacy
+    // convenience only.
+    const base = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()
+    const url =
+      isPublicBucket(bucket) && base
+        ? `${base}/storage/v1/object/public/${bucket}/${path}`
         : null
+
+    const thumbBucket: StorageBucket | null = null
+    const thumbPath: string | null = null
+    const thumbUrl: string | null = null
 
     const serviceIdsRaw = pickStringArray(body.serviceIds)
     const serviceIds = Array.from(new Set(serviceIdsRaw))
@@ -350,6 +349,14 @@ export async function POST(req: Request) {
             },
           })
         : null
+
+      // Consume the session inside the same transaction; a CONSUME_CONFLICT
+      // (double-attach) rolls the whole create back.
+      await consumeUploadSession(tx, {
+        uploadSessionId,
+        mediaAssetId: created.id,
+        now: new Date(),
+      })
 
       return {
         media: created,
