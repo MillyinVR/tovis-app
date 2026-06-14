@@ -2,12 +2,23 @@
 import { prisma } from '@/lib/prisma'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
 import {
+  addMinutes,
+  bookingToBusyInterval,
+  holdToBusyInterval,
+  overlaps,
+} from '@/lib/booking/conflicts'
+import {
+  BOOKING_BLOCKING_STATUSES,
+  MAX_BUFFER_MINUTES,
+  MAX_OTHER_OVERLAP_MINUTES,
+  MAX_SLOT_DURATION_MINUTES,
+} from '@/lib/booking/constants'
+import {
   getZonedParts,
   isValidIanaTimeZone,
   utcFromDayAndMinutesInTimeZone,
 } from '@/lib/timeZone'
 import {
-  BookingStatus,
   LastMinuteOfferType,
   LastMinuteTier,
   LastMinuteVisibilityMode,
@@ -19,9 +30,6 @@ import {
 type DbClient = Prisma.TransactionClient | typeof prisma
 
 const OPENING_FUTURE_BUFFER_MINUTES = 5
-const MAX_SLOT_DURATION_MINUTES = 12 * 60
-const MAX_BUFFER_MINUTES = 180
-const MAX_OTHER_OVERLAP_MINUTES = MAX_SLOT_DURATION_MINUTES + MAX_BUFFER_MINUTES
 const MAX_NOTE_LENGTH = 500
 
 const TIER_ORDER = [
@@ -231,14 +239,6 @@ function assert(condition: unknown, status: number, code: string, message: strin
   if (!condition) {
     throw new CreateLastMinuteOpeningError(status, code, message)
   }
-}
-
-function addMinutes(date: Date, minutes: number): Date {
-  return new Date(date.getTime() + minutes * 60_000)
-}
-
-function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
-  return aStart < bEnd && bStart < aEnd
 }
 
 function clampInt(value: number, min: number, max: number): number {
@@ -1075,7 +1075,7 @@ async function createInsideTransaction(args: {
   const nearbyBookings = await database.booking.findMany({
     where: {
       professionalId,
-      status: { in: [BookingStatus.PENDING, BookingStatus.ACCEPTED] },
+      status: { in: [...BOOKING_BLOCKING_STATUSES] },
       scheduledFor: { gte: earliestStart, lt: finalEndAt },
     },
     select: {
@@ -1087,19 +1087,8 @@ async function createInsideTransaction(args: {
   })
 
   const overlapsBooking = nearbyBookings.some((booking) => {
-    const bookingStart = booking.scheduledFor
-    const bookingDuration = clampInt(
-      Number(booking.totalDurationMinutes ?? 0) || 60,
-      15,
-      MAX_SLOT_DURATION_MINUTES,
-    )
-    const bookingBuffer = clampInt(
-      Number(booking.bufferMinutes ?? 0) || 0,
-      0,
-      MAX_BUFFER_MINUTES,
-    )
-    const bookingEnd = addMinutes(bookingStart, bookingDuration + bookingBuffer)
-    return overlaps(startAt, finalEndAt, bookingStart, bookingEnd)
+    const busy = bookingToBusyInterval(booking)
+    return overlaps(startAt, finalEndAt, busy.start, busy.end)
   })
 
   assert(!overlapsBooking, 409, 'BOOKING_CONFLICT', 'That time overlaps an existing booking.')
@@ -1165,16 +1154,14 @@ async function createInsideTransaction(args: {
 
     const overlapsHold = activeHolds.some((hold) => {
       const holdOffering = holdOfferingById.get(hold.offeringId)
-      const rawDuration =
-        hold.locationType === ServiceLocationType.MOBILE
-          ? holdOffering?.mobileDurationMinutes ?? null
-          : holdOffering?.salonDurationMinutes ?? null
+      const busy = holdToBusyInterval({
+        hold,
+        salonDurationMinutes: holdOffering?.salonDurationMinutes ?? null,
+        mobileDurationMinutes: holdOffering?.mobileDurationMinutes ?? null,
+        bufferMinutes: holdBufferByLocationId.get(hold.locationId) ?? 0,
+      })
 
-      const holdDuration = clampInt(Number(rawDuration ?? 0) || 60, 15, MAX_SLOT_DURATION_MINUTES)
-      const holdBuffer = holdBufferByLocationId.get(hold.locationId) ?? 0
-      const holdEnd = addMinutes(hold.scheduledFor, holdDuration + holdBuffer)
-
-      return overlaps(startAt, finalEndAt, hold.scheduledFor, holdEnd)
+      return overlaps(startAt, finalEndAt, busy.start, busy.end)
     })
 
     assert(
