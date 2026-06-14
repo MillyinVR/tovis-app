@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => {
     professionalLocationFindMany: vi.fn(),
     bookingFindMany: vi.fn(),
     calendarBlockFindMany: vi.fn(),
-    resolveAppointmentSchedulingContext: vi.fn(),
   }
 })
 
@@ -43,9 +42,10 @@ vi.mock('@/app/api/_utils', () => ({
     }),
 }))
 
-vi.mock('@/lib/booking/timeZoneTruth', () => ({
-  resolveAppointmentSchedulingContext: mocks.resolveAppointmentSchedulingContext,
-}))
+// Note: @/lib/booking/timeZoneTruth is intentionally NOT mocked. The route
+// resolves each booking's timezone purely from values already loaded with the
+// booking (booking snapshot → location → professional → fallback), so the real
+// resolver exercises that precedence directly.
 
 import { GET } from './route'
 
@@ -193,86 +193,6 @@ describe('GET /api/pro/calendar', () => {
         return allBlocks.filter((block) =>
           allowedLocationIds.includes(block.locationId ?? null),
         )
-      },
-    )
-
-    mocks.resolveAppointmentSchedulingContext.mockImplementation(
-      async (args: {
-        bookingLocationTimeZone?: string | null
-        location?: { id?: string | null; timeZone?: string | null } | null
-        locationId?: string | null
-        professionalTimeZone?: string | null
-      }) => {
-        const bookingTz =
-          typeof args.bookingLocationTimeZone === 'string'
-            ? args.bookingLocationTimeZone.trim()
-            : ''
-        if (bookingTz) {
-          return {
-            ok: true,
-            context: {
-              appointmentTimeZone: bookingTz,
-              timeZoneSource: 'BOOKING_SNAPSHOT',
-              locationId: args.locationId ?? args.location?.id ?? null,
-              locationTimeZone:
-                typeof args.location?.timeZone === 'string'
-                  ? args.location.timeZone
-                  : null,
-              businessTimeZone:
-                typeof args.professionalTimeZone === 'string'
-                  ? args.professionalTimeZone
-                  : null,
-            },
-          }
-        }
-
-        const locationTz =
-          typeof args.location?.timeZone === 'string'
-            ? args.location.timeZone.trim()
-            : ''
-        if (locationTz) {
-          return {
-            ok: true,
-            context: {
-              appointmentTimeZone: locationTz,
-              timeZoneSource: 'LOCATION',
-              locationId: args.location?.id ?? args.locationId ?? null,
-              locationTimeZone: locationTz,
-              businessTimeZone:
-                typeof args.professionalTimeZone === 'string'
-                  ? args.professionalTimeZone
-                  : null,
-            },
-          }
-        }
-
-        const proTz =
-          typeof args.professionalTimeZone === 'string'
-            ? args.professionalTimeZone.trim()
-            : ''
-        if (proTz) {
-          return {
-            ok: true,
-            context: {
-              appointmentTimeZone: proTz,
-              timeZoneSource: 'PROFESSIONAL',
-              locationId: args.location?.id ?? args.locationId ?? null,
-              locationTimeZone: null,
-              businessTimeZone: proTz,
-            },
-          }
-        }
-
-        return {
-          ok: true,
-          context: {
-            appointmentTimeZone: 'UTC',
-            timeZoneSource: 'FALLBACK',
-            locationId: args.location?.id ?? args.locationId ?? null,
-            locationTimeZone: null,
-            businessTimeZone: null,
-          },
-        }
       },
     )
   })
