@@ -292,7 +292,7 @@ describe('MediaUploader', () => {
     ]
     let signCall = 0
 
-    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString()
       if (url === SIGN_URL) {
         const path = paths[signCall] ?? paths[paths.length - 1]
