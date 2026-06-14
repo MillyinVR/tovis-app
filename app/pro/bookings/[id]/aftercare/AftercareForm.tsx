@@ -15,6 +15,17 @@ import {
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
 import { getCloseoutBlockerDisplays } from '@/lib/booking/closeoutBlockers'
+import {
+  addDaysToYmd,
+  compareYmd,
+  isoToYmdInTimeZone,
+  stepDatetimeLocal,
+  stepYmd,
+  todayYmdInTimeZone,
+  ymdToIsoEndOfDay,
+  ymdToIsoStartOfDay,
+  type StepUnit,
+} from './aftercareDates'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 type MediaVisibility = 'PUBLIC' | 'PRO_CLIENT'
@@ -318,6 +329,13 @@ export default function AftercareForm({
     [timeZone],
   )
 
+  // Calendar anchors in the pro's timezone for date-only window bounds.
+  const todayYmd = useMemo(() => todayYmdInTimeZone(tz), [tz])
+  const tomorrowYmd = useMemo(
+    () => addDaysToYmd(todayYmd, 1) ?? todayYmd,
+    [todayYmd],
+  )
+
   const [notes, setNotes] = useState((existingNotes || '').slice(0, NOTES_MAX))
 
   const [products, setProducts] = useState<RecommendedProduct[]>([])
@@ -375,12 +393,12 @@ export default function AftercareForm({
     )
     setWindowStart(
       existingRebookWindowStart
-        ? isoToDatetimeLocalInTimeZone(existingRebookWindowStart, tz)
+        ? isoToYmdInTimeZone(existingRebookWindowStart, tz)
         : '',
     )
     setWindowEnd(
       existingRebookWindowEnd
-        ? isoToDatetimeLocalInTimeZone(existingRebookWindowEnd, tz)
+        ? isoToYmdInTimeZone(existingRebookWindowEnd, tz)
         : '',
     )
 
@@ -452,15 +470,12 @@ export default function AftercareForm({
   const windowError =
     rebookMode === 'RECOMMENDED_WINDOW' && (hasWindowStart || hasWindowEnd)
       ? (() => {
-          const startISO = isoFromDatetimeLocalInTimeZone(windowStart, tz)
-          const endISO = isoFromDatetimeLocalInTimeZone(windowEnd, tz)
-          if (!startISO || !endISO) return 'Pick both a window start and end.'
-          const a = new Date(startISO)
-          const b = new Date(endISO)
-          if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) {
-            return 'Window dates are invalid.'
+          if (!hasWindowStart || !hasWindowEnd) {
+            return 'Pick both a window start and end date.'
           }
-          if (b <= a) return 'Window end must be after window start.'
+          if (compareYmd(windowEnd, windowStart) <= 0) {
+            return 'Window end must be after window start.'
+          }
           return null
         })()
       : null
@@ -505,6 +520,40 @@ export default function AftercareForm({
       setRebookAt('')
       setCreateRebookReminder(false)
     }
+  }
+
+  // Setting/stepping the window start keeps the end at least one day after it
+  // (the end used to stay on the current day — this advances it forward).
+  function applyWindowStart(nextStart: string) {
+    markDirty()
+    setWindowStart(nextStart)
+    setWindowEnd((prevEnd) => {
+      const minEnd = addDaysToYmd(nextStart, 1) ?? nextStart
+      return !prevEnd || compareYmd(prevEnd, nextStart) <= 0 ? minEnd : prevEnd
+    })
+  }
+
+  function applyWindowEnd(nextEnd: string) {
+    markDirty()
+    setWindowEnd(nextEnd)
+  }
+
+  function stepWindowStart(unit: StepUnit) {
+    applyWindowStart(stepYmd(windowStart, unit, tomorrowYmd))
+  }
+
+  function stepWindowEnd(unit: StepUnit) {
+    const fallback = addDaysToYmd(windowStart || tomorrowYmd, 1) ?? tomorrowYmd
+    const stepped = stepYmd(windowEnd, unit, fallback)
+    const minEnd = windowStart ? addDaysToYmd(windowStart, 1) : null
+    applyWindowEnd(
+      minEnd && compareYmd(stepped, minEnd) < 0 ? minEnd : stepped,
+    )
+  }
+
+  function stepNextVisit(unit: StepUnit) {
+    markDirty()
+    setRebookAt((prev) => stepDatetimeLocal(prev, unit, tomorrowYmd))
   }
 
   function addProduct() {
@@ -553,8 +602,8 @@ export default function AftercareForm({
 
   function buildPayload(sendToClient: boolean) {
     const rebookISO = isoFromDatetimeLocalInTimeZone(rebookAt, tz)
-    const windowStartISO = isoFromDatetimeLocalInTimeZone(windowStart, tz)
-    const windowEndISO = isoFromDatetimeLocalInTimeZone(windowEnd, tz)
+    const windowStartISO = ymdToIsoStartOfDay(windowStart, tz)
+    const windowEndISO = ymdToIsoEndOfDay(windowEnd, tz)
 
     const daysBeforeRaw = parseInt(rebookDaysBefore, 10)
     const daysAfterRaw = parseInt(productDaysAfter, 10)
@@ -614,8 +663,8 @@ export default function AftercareForm({
     if (!bookingId) return 'Missing booking id.'
 
     const rebookISO = isoFromDatetimeLocalInTimeZone(rebookAt, tz)
-    const windowStartISO = isoFromDatetimeLocalInTimeZone(windowStart, tz)
-    const windowEndISO = isoFromDatetimeLocalInTimeZone(windowEnd, tz)
+    const windowStartISO = ymdToIsoStartOfDay(windowStart, tz)
+    const windowEndISO = ymdToIsoEndOfDay(windowEnd, tz)
     const now = Date.now()
 
     if (rebookMode === 'BOOKED_NEXT_APPOINTMENT') {
@@ -633,28 +682,21 @@ export default function AftercareForm({
     }
 
     if (rebookMode === 'RECOMMENDED_WINDOW') {
-      if (!windowStartISO || !windowEndISO) {
-        return 'Pick both a start and end for the recommended booking window.'
+      if (!windowStart.trim() || !windowEnd.trim()) {
+        return 'Pick both a start and end date for the recommended booking window.'
       }
 
-      const windowStartDate = new Date(windowStartISO)
-      const windowEndDate = new Date(windowEndISO)
-
-      if (
-        Number.isNaN(windowStartDate.getTime()) ||
-        Number.isNaN(windowEndDate.getTime())
-      ) {
+      if (!windowStartISO || !windowEndISO) {
         return 'Window dates are invalid.'
       }
 
-      if (
-        windowStartDate.getTime() <= now ||
-        windowEndDate.getTime() <= now
-      ) {
-        return 'Recommended booking window must be in the future.'
+      // Date-only window: the start must be a future calendar day (today's
+      // start-of-day is already in the past), and the end must be after it.
+      if (compareYmd(windowStart, todayYmd) <= 0) {
+        return 'Recommended booking window must start in the future.'
       }
 
-      if (windowEndDate <= windowStartDate) {
+      if (compareYmd(windowEnd, windowStart) <= 0) {
         return 'Window end must be after window start.'
       }
     }
@@ -1117,7 +1159,8 @@ export default function AftercareForm({
                 }}
                 className={inputClass(Boolean(disabled))}
               />
-              <div className="mt-1 text-xs font-semibold text-textSecondary">
+              <StepButtons disabled={disabled} onStep={stepNextVisit} />
+              <div className="mt-2 text-xs font-semibold text-textSecondary">
                 This shows on the client’s summary and can power a reminder.
               </div>
               <div className="mt-1 text-[11px] font-semibold text-textSecondary">
@@ -1132,29 +1175,34 @@ export default function AftercareForm({
                 <div>
                   <label className={labelClass()}>Window start</label>
                   <input
-                    type="datetime-local"
+                    type="date"
                     value={windowStart}
+                    min={tomorrowYmd}
                     disabled={disabled}
-                    onChange={(e) => {
-                      setWindowStart(e.target.value)
-                      markDirty()
-                    }}
+                    onChange={(e) => applyWindowStart(e.target.value)}
                     className={inputClass(Boolean(disabled))}
+                  />
+                  <StepButtons
+                    disabled={disabled}
+                    onStep={stepWindowStart}
                   />
                 </div>
 
                 <div>
                   <label className={labelClass()}>Window end</label>
                   <input
-                    type="datetime-local"
+                    type="date"
                     value={windowEnd}
+                    min={
+                      windowStart
+                        ? addDaysToYmd(windowStart, 1) ?? tomorrowYmd
+                        : tomorrowYmd
+                    }
                     disabled={disabled}
-                    onChange={(e) => {
-                      setWindowEnd(e.target.value)
-                      markDirty()
-                    }}
+                    onChange={(e) => applyWindowEnd(e.target.value)}
                     className={inputClass(Boolean(disabled))}
                   />
+                  <StepButtons disabled={disabled} onStep={stepWindowEnd} />
                 </div>
               </div>
 
@@ -1164,8 +1212,8 @@ export default function AftercareForm({
                 </div>
               ) : (
                 <div className="text-xs font-semibold text-textSecondary">
-                  Client will be prompted to book within this range. Timezone:{' '}
-                  <span className="text-textPrimary">{tz}</span>
+                  Just dates — the client books an available time within this
+                  range from your schedule.
                 </div>
               )}
             </div>
@@ -1301,6 +1349,36 @@ export default function AftercareForm({
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+const STEP_UNITS: { unit: StepUnit; label: string }[] = [
+  { unit: 'day', label: '+1 day' },
+  { unit: 'week', label: '+1 week' },
+  { unit: 'month', label: '+1 month' },
+]
+
+function StepButtons({
+  disabled,
+  onStep,
+}: {
+  disabled: boolean
+  onStep: (unit: StepUnit) => void
+}) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {STEP_UNITS.map(({ unit, label }) => (
+        <button
+          key={unit}
+          type="button"
+          disabled={disabled}
+          onClick={() => onStep(unit)}
+          className={secondaryBtn(Boolean(disabled))}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   )
 }
