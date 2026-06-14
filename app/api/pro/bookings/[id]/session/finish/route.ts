@@ -9,10 +9,9 @@ import {
 } from '@/app/api/_utils/idempotency'
 import { Prisma, Role, SessionStep } from '@prisma/client'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { finishBookingSession } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
@@ -58,17 +57,6 @@ function nextHrefFromState(args: {
   }
 
   return sessionHubHref(args.bookingId)
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function readRequestId(request: Request): string | null {

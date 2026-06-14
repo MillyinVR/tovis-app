@@ -17,16 +17,15 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import { pickString } from '@/app/api/_utils/pick'
-import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { jsonOk } from '@/app/api/_utils/responses'
 import {
   markAftercareAccessTokenUsed,
   resolveAftercareAccessTokenForMutation,
 } from '@/lib/aftercare/aftercareAccessTokens'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
@@ -141,17 +140,6 @@ type FinalizeSuccessBody = {
     mutated: boolean
     noOp: boolean
   }
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function discoveryContextMissingFail(): Response {

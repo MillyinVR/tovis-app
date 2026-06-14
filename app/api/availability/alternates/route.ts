@@ -32,10 +32,8 @@ import {
 } from '@/lib/booking/constants'
 import { addMinutes } from '@/lib/booking/conflicts'
 import { utcDateToLocalParts } from '@/lib/booking/dateTime'
-import {
-  getBookingFailPayload,
-  type BookingErrorCode,
-} from '@/lib/booking/errors'
+
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeStepMinutes } from '@/lib/booking/locationContext'
 import { clampInt } from '@/lib/pick'
 import { resolveTenantContextForRequest, tenantCacheScope } from '@/lib/tenant'
@@ -75,21 +73,6 @@ type AlternateResult = {
   slots: string[]
   scheduleVersion: string | number
   scheduleConfigVersion: string | number
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-  extra?: Record<string, unknown>,
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, {
-    ...fail.extra,
-    ...(extra ?? {}),
-  })
 }
 
 function toInt(value: string | null, fallback: number): number {

@@ -30,10 +30,8 @@ import {
   isRouteIdempotencyHandled,
 } from '@/app/api/_utils/idempotency'
 import { createBookingCloseoutAuditLog } from '@/lib/booking/closeoutAudit'
-import {
-  getBookingFailPayload,
-  type BookingErrorCode,
-} from '@/lib/booking/errors'
+
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { assertClientBookingReviewEligibility } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { parseIdArray, parseRating1to5 } from '@/lib/media'
@@ -285,17 +283,6 @@ function buildReviewResponseBody(
   return normalizeJsonObjectPayload({
     review,
   })
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function buildIdempotencyRequestBody(args: {

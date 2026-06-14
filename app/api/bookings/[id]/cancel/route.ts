@@ -12,9 +12,9 @@ import {
 import { pickString } from '@/app/api/_utils/pick'
 import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
 import {
-  getBookingFailPayload,
   isBookingError,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { cancelBooking } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
@@ -47,17 +47,6 @@ type CancelResponseBody = {
   status: string
   sessionStep: string
   meta: Prisma.InputJsonValue
-}
-
-function bookingJsonFail(
-  code: Parameters<typeof getBookingFailPayload>[0],
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-): Response {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function toCancelActor(args: {

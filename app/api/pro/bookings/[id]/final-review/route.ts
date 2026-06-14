@@ -7,10 +7,9 @@ import {
 } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
 import {
-  getBookingFailPayload,
   isBookingError,
-  type BookingErrorCode,
 } from '@/lib/booking/errors'
+import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { confirmBookingFinalReview } from '@/lib/booking/writeBoundary'
 import {
   AftercareRebookMode,
@@ -89,17 +88,6 @@ type NestedInputJsonValue = Prisma.InputJsonValue | null
 
 type JsonObjectPayload = {
   [key: string]: NestedInputJsonValue
-}
-
-function bookingJsonFail(
-  code: BookingErrorCode,
-  overrides?: {
-    message?: string
-    userMessage?: string
-  },
-) {
-  const fail = getBookingFailPayload(code, overrides)
-  return jsonFail(fail.httpStatus, fail.userMessage, fail.extra)
 }
 
 function idempotencyMissingKeyFail(): Response {
