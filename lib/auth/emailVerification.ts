@@ -69,20 +69,7 @@ function appendIfPresent(
   if (value) params.set(key, value)
 }
 
-export function getAppUrlFromRequest(request: Request): string | null {
-  const envUrl = envOrNull('NEXT_PUBLIC_APP_URL')
-  if (envUrl) {
-    return envUrl.replace(/\/+$/, '')
-  }
-
-  const host =
-    request.headers.get('x-forwarded-host') ?? request.headers.get('host')
-  const proto = request.headers.get('x-forwarded-proto') ?? 'https'
-
-  if (!host) return null
-
-  return `${proto}://${host}`.replace(/\/+$/, '')
-}
+export { getAppUrlFromRequest } from '@/lib/appUrl'
 
 export function buildVerifyEmailUrl(args: {
   appUrl: string
