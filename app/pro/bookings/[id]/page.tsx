@@ -4,7 +4,9 @@ import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from '../BookingActions'
+import RefundButton from './RefundButton'
 import { moneyToString } from '@/lib/money'
+import { PaymentProvider, StripePaymentStatus } from '@prisma/client'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import { getProClientVisibility } from '@/lib/clientVisibility'
 import { pickTimeZoneOrNull, sanitizeTimeZone } from '@/lib/timeZone'
@@ -154,6 +156,12 @@ export default async function ProBookingDetailPage(props: {
     scheduleTz,
   )
 
+  // A booking is refundable while it has a captured Stripe payment. Once fully
+  // refunded the status becomes REFUNDED, which hides the action automatically.
+  const canRefund =
+    booking.paymentProvider === PaymentProvider.STRIPE &&
+    booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED
+
   const total =
     moneyToString(booking.totalAmount ?? booking.subtotalSnapshot) ?? '0.00'
   const dur = Math.round(Number(booking.totalDurationMinutes ?? 0)) || 0
@@ -199,6 +207,14 @@ export default async function ProBookingDetailPage(props: {
               timeZone={apptTz}
             />
           </div>
+
+          {canRefund ? (
+            <RefundButton
+              bookingId={booking.id}
+              amountTotalCents={booking.stripeAmountTotal}
+              currency={booking.stripeCurrency}
+            />
+          ) : null}
         </div>
       </div>
 
