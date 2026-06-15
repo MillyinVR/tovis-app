@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
 
   startBookingSession: vi.fn(),
 
+  withRouteIdempotency: vi.fn(),
   beginRouteIdempotency: vi.fn(),
   completeRouteIdempotency: vi.fn(),
   failStartedRouteIdempotency: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock('@/app/api/_utils', () => ({
 }))
 
 vi.mock('@/app/api/_utils/idempotency', () => ({
+  withRouteIdempotency: mocks.withRouteIdempotency,
   beginRouteIdempotency: mocks.beginRouteIdempotency,
   completeRouteIdempotency: mocks.completeRouteIdempotency,
   failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
@@ -141,6 +143,49 @@ describe('POST /api/pro/bookings/[id]/start', () => {
     mocks.completeRouteIdempotency.mockResolvedValue(undefined)
     mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
 
+    // The route now calls withRouteIdempotency; this mock reproduces the real
+    // wrapper by driving the same begin/complete/failStarted helpers, so the
+    // existing lifecycle assertions still apply.
+    mocks.withRouteIdempotency.mockImplementation(
+      async (
+        args: { operation: string },
+        run: (ctx: {
+          idempotencyKey: string
+          idempotencyRecordId: string
+          requestHash: string
+        }) => Promise<{ status: number; body: Record<string, unknown> }>,
+      ) => {
+        const begin = await mocks.beginRouteIdempotency(args)
+
+        if (mocks.isRouteIdempotencyHandled(begin)) {
+          return begin.response
+        }
+
+        try {
+          const { status, body } = await run({
+            idempotencyKey: begin.idempotencyKey,
+            idempotencyRecordId: begin.idempotencyRecordId,
+            requestHash: begin.requestHash,
+          })
+
+          await mocks.completeRouteIdempotency({
+            idempotencyRecordId: begin.idempotencyRecordId,
+            responseStatus: status,
+            responseBody: body,
+          })
+
+          return mocks.jsonOk(body, status)
+        } catch (error) {
+          await mocks.failStartedRouteIdempotency({
+            idempotencyRecordId: begin.idempotencyRecordId,
+            operation: args.operation,
+          })
+
+          throw error
+        }
+      },
+    )
+
     mocks.startBookingSession.mockResolvedValue({
       booking: {
         id: 'booking_1',
@@ -230,6 +275,7 @@ describe('POST /api/pro/bookings/[id]/start', () => {
         conflict:
           'This idempotency key was already used with a different request body.',
       },
+      operation: IDEMPOTENCY_ROUTE,
     })
 
     expect(result).toBe(handledResponse)
@@ -332,6 +378,7 @@ describe('POST /api/pro/bookings/[id]/start', () => {
         conflict:
           'This idempotency key was already used with a different request body.',
       },
+      operation: IDEMPOTENCY_ROUTE,
     })
 
     expect(mocks.startBookingSession).toHaveBeenCalledWith({

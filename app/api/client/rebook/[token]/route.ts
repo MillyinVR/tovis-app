@@ -8,12 +8,7 @@ import {
   jsonFail,
   jsonOk,
 } from '@/app/api/_utils'
-import {
-  beginRouteIdempotency,
-  completeRouteIdempotency,
-  failStartedRouteIdempotency,
-  isRouteIdempotencyHandled,
-} from '@/app/api/_utils/idempotency'
+import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import {
   markAftercareAccessTokenUsed,
   resolveAftercareAccessTokenForMutation,
@@ -288,8 +283,6 @@ export async function GET(_req: Request, ctx: RouteContext<{ token: string }>) {
 }
 
 export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
-  let idempotencyRecordId: string | null = null
-
   try {
     const rawToken = await getRouteToken(ctx)
 
@@ -341,64 +334,51 @@ export async function POST(req: Request, ctx: RouteContext<{ token: string }>) {
 
     const { requestId } = readRequestMeta(req)
 
-    const idempotency = await beginRouteIdempotency<RebookResponseBody>({
-      request: req,
-      actor: {
-        actorKey: resolved.idempotencyActorKey,
-        actorRole: Role.CLIENT,
+    return await withRouteIdempotency<RebookResponseBody>(
+      {
+        request: req,
+        actor: {
+          actorKey: resolved.idempotencyActorKey,
+          actorRole: Role.CLIENT,
+        },
+        route: IDEMPOTENCY_ROUTES.CLIENT_AFTERCARE_REBOOK,
+        requestLabel: 'aftercare rebook',
+        requestBody: buildRebookIdempotencyRequestBody({
+          aftercareTokenId: resolved.token.id,
+          aftercareId: resolved.aftercare.id,
+          sourceBookingId: resolved.booking.id,
+          clientId: resolved.booking.clientId,
+          scheduledFor,
+        }),
+        messages: {
+          missingKey: 'Missing idempotency key.',
+          inProgress: 'A matching rebook request is already in progress.',
+          conflict:
+            'This idempotency key was already used with a different request body.',
+        },
+        operation: 'POST /api/client/rebook/[token]',
       },
-      route: IDEMPOTENCY_ROUTES.CLIENT_AFTERCARE_REBOOK,
-      requestLabel: 'aftercare rebook',
-      requestBody: buildRebookIdempotencyRequestBody({
-        aftercareTokenId: resolved.token.id,
-        aftercareId: resolved.aftercare.id,
-        sourceBookingId: resolved.booking.id,
-        clientId: resolved.booking.clientId,
-        scheduledFor,
-      }),
-      messages: {
-        missingKey: 'Missing idempotency key.',
-        inProgress: 'A matching rebook request is already in progress.',
-        conflict:
-          'This idempotency key was already used with a different request body.',
+      async (idem) => {
+        const result = await createClientRebookedBookingFromAftercare({
+          aftercareId: resolved.aftercare.id,
+          bookingId: resolved.booking.id,
+          clientId: resolved.booking.clientId,
+          aftercareClientActionTokenId: resolved.token.id,
+          scheduledFor,
+          requestId,
+          idempotencyKey: idem.idempotencyKey,
+        })
+
+        const responseBody = buildRebookResponseBody({ result })
+
+        await markAftercareAccessTokenUsed({
+          tokenId: resolved.token.id,
+        })
+
+        return { status: 201, body: responseBody }
       },
-    })
-
-    if (isRouteIdempotencyHandled(idempotency)) {
-      return idempotency.response
-    }
-
-    idempotencyRecordId = idempotency.idempotencyRecordId
-
-    const result = await createClientRebookedBookingFromAftercare({
-      aftercareId: resolved.aftercare.id,
-      bookingId: resolved.booking.id,
-      clientId: resolved.booking.clientId,
-      aftercareClientActionTokenId: resolved.token.id,
-      scheduledFor,
-      requestId,
-      idempotencyKey: idempotency.idempotencyKey,
-    })
-
-    const responseBody = buildRebookResponseBody({ result })
-
-    await markAftercareAccessTokenUsed({
-      tokenId: resolved.token.id,
-    })
-
-    await completeRouteIdempotency({
-      idempotencyRecordId,
-      responseStatus: 201,
-      responseBody,
-    })
-
-    return jsonOk(responseBody, 201)
+    )
   } catch (error: unknown) {
-    await failStartedRouteIdempotency({
-      idempotencyRecordId,
-      operation: 'POST /api/client/rebook/[token]',
-    })
-
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,

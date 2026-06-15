@@ -10,14 +10,8 @@ import {
 } from '@prisma/client'
 
 import { requireClient } from '@/app/api/_utils/auth/requireClient'
-import {
-  beginRouteIdempotency,
-  completeRouteIdempotency,
-  failStartedRouteIdempotency,
-  isRouteIdempotencyHandled,
-} from '@/app/api/_utils/idempotency'
+import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import { pickString } from '@/app/api/_utils/pick'
-import { jsonOk } from '@/app/api/_utils/responses'
 import {
   markAftercareAccessTokenUsed,
   resolveAftercareAccessTokenForMutation,
@@ -525,7 +519,6 @@ function getAftercareTokenId(
 }
 
 export async function POST(request: Request) {
-  let idempotencyRecordId: string | null = null
   const requestId = readRequestId(request)
 
   try {
@@ -577,91 +570,78 @@ export async function POST(request: Request) {
       return rateLimitExceededResponse(rateLimit)
     }
 
-    const idempotency = await beginRouteIdempotency<FinalizeSuccessBody>({
-      request,
-      actor: buildIdempotencyActor(ownership),
-      route: IDEMPOTENCY_ROUTES.BOOKING_FINALIZE,
-      requestLabel: 'booking finalize',
-      requestBody: buildFinalizeIdempotencyRequestBody({
-        clientId: ownership.clientId,
-        body,
-        bookingEntryPoint,
-        rebookOfBookingId: ownership.rebookOfBookingId,
-      }),
-      messages: {
-        missingKey: 'Missing idempotency key.',
-        inProgress: 'A matching booking request is already in progress.',
-        conflict:
-          'This idempotency key was already used with a different request body.',
+    return await withRouteIdempotency<FinalizeSuccessBody>(
+      {
+        request,
+        actor: buildIdempotencyActor(ownership),
+        route: IDEMPOTENCY_ROUTES.BOOKING_FINALIZE,
+        requestLabel: 'booking finalize',
+        requestBody: buildFinalizeIdempotencyRequestBody({
+          clientId: ownership.clientId,
+          body,
+          bookingEntryPoint,
+          rebookOfBookingId: ownership.rebookOfBookingId,
+        }),
+        messages: {
+          missingKey: 'Missing idempotency key.',
+          inProgress: 'A matching booking request is already in progress.',
+          conflict:
+            'This idempotency key was already used with a different request body.',
+        },
+        operation: 'POST /api/bookings/finalize',
       },
-    })
+      async (idem) => {
+        const result = await finalizeBookingFromHold({
+          clientId: ownership.clientId,
+          bookingEntryPoint,
+          holdId: body.holdId,
+          openingId: body.openingId,
+          addOnIds: body.addOnIds,
+          locationType: body.locationType,
+          source: body.source,
+          initialStatus,
+          rebookOfBookingId: ownership.rebookOfBookingId,
+          offering: toFinalizeOffering(offering),
+          fallbackTimeZone: FALLBACK_TIME_ZONE,
+          requestId,
+          idempotencyKey: idem.idempotencyKey,
+        })
 
-    if (isRouteIdempotencyHandled(idempotency)) {
-      return idempotency.response
-    }
+        try {
+          await createFinalizeProNotification({
+            professionalId: result.booking.professionalId,
+            bookingId: result.booking.id,
+            actorUserId: ownership.actorUserId,
+            bookingStatus: result.booking.status,
+            source: body.source,
+            locationType: body.locationType,
+          })
+        } catch (notificationError: unknown) {
+          console.error('POST /api/bookings/finalize pro notification error', {
+            requestId,
+            bookingId: result.booking.id,
+            professionalId: result.booking.professionalId,
+            error: safeError(notificationError),
+          })
+        }
 
-    idempotencyRecordId = idempotency.idempotencyRecordId
+        const responseBody = buildFinalizeSuccessBody({
+          booking: result.booking,
+          meta: result.meta,
+        })
 
-    const result = await finalizeBookingFromHold({
-      clientId: ownership.clientId,
-      bookingEntryPoint,
-      holdId: body.holdId,
-      openingId: body.openingId,
-      addOnIds: body.addOnIds,
-      locationType: body.locationType,
-      source: body.source,
-      initialStatus,
-      rebookOfBookingId: ownership.rebookOfBookingId,
-      offering: toFinalizeOffering(offering),
-      fallbackTimeZone: FALLBACK_TIME_ZONE,
-      requestId,
-      idempotencyKey: idempotency.idempotencyKey,
-    })
+        const aftercareTokenId = getAftercareTokenId(ownership)
 
-    try {
-      await createFinalizeProNotification({
-        professionalId: result.booking.professionalId,
-        bookingId: result.booking.id,
-        actorUserId: ownership.actorUserId,
-        bookingStatus: result.booking.status,
-        source: body.source,
-        locationType: body.locationType,
-      })
-    } catch (notificationError: unknown) {
-      console.error('POST /api/bookings/finalize pro notification error', {
-        requestId,
-        bookingId: result.booking.id,
-        professionalId: result.booking.professionalId,
-        error: safeError(notificationError),
-      })
-    }
+        if (aftercareTokenId) {
+          await markAftercareAccessTokenUsed({
+            tokenId: aftercareTokenId,
+          })
+        }
 
-    const responseBody = buildFinalizeSuccessBody({
-      booking: result.booking,
-      meta: result.meta,
-    })
-
-    const aftercareTokenId = getAftercareTokenId(ownership)
-
-    if (aftercareTokenId) {
-      await markAftercareAccessTokenUsed({
-        tokenId: aftercareTokenId,
-      })
-    }
-
-    await completeRouteIdempotency({
-      idempotencyRecordId,
-      responseStatus: 201,
-      responseBody,
-    })
-
-    return jsonOk(responseBody, 201)
+        return { status: 201, body: responseBody }
+      },
+    )
   } catch (error: unknown) {
-    await failStartedRouteIdempotency({
-      idempotencyRecordId,
-      operation: 'POST /api/bookings/finalize',
-    })
-
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,

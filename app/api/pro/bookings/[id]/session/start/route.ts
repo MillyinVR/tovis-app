@@ -2,13 +2,8 @@
 
 import { Prisma, Role } from '@prisma/client'
 
-import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
-import {
-  beginRouteIdempotency,
-  completeRouteIdempotency,
-  failStartedRouteIdempotency,
-  isRouteIdempotencyHandled,
-} from '@/app/api/_utils/idempotency'
+import { jsonFail, pickString, requirePro } from '@/app/api/_utils'
+import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -138,7 +133,6 @@ function buildStartSessionResponseBody(
 }
 
 export async function POST(request: Request, ctx: RouteContext) {
-  let idempotencyRecordId: string | null = null
   const { requestId } = readRequestMeta(request)
 
   try {
@@ -168,59 +162,46 @@ export async function POST(request: Request, ctx: RouteContext) {
     const body = await readJsonRecord(request)
     const explicitSelection = body.explicitSelection === true
 
-    const idempotency = await beginRouteIdempotency<StartSessionResponseBody>({
-      request,
-      actor: {
-        actorUserId,
-        actorRole: Role.PRO,
+    return await withRouteIdempotency<StartSessionResponseBody>(
+      {
+        request,
+        actor: {
+          actorUserId,
+          actorRole: Role.PRO,
+        },
+        route: IDEMPOTENCY_ROUTES.BOOKING_START_SESSION,
+        requestLabel: 'booking start',
+        requestBody: buildStartSessionIdempotencyBody({
+          professionalId,
+          actorUserId,
+          bookingId,
+          explicitSelection,
+        }),
+        messages: {
+          missingKey: 'Missing idempotency key.',
+          inProgress:
+            'A matching booking start request is already in progress.',
+          conflict:
+            'This idempotency key was already used with a different request body.',
+        },
+        operation: 'POST /api/pro/bookings/[id]/start',
       },
-      route: IDEMPOTENCY_ROUTES.BOOKING_START_SESSION,
-      requestLabel: 'booking start',
-      requestBody: buildStartSessionIdempotencyBody({
-        professionalId,
-        actorUserId,
-        bookingId,
-        explicitSelection,
-      }),
-      messages: {
-        missingKey: 'Missing idempotency key.',
-        inProgress:
-          'A matching booking start request is already in progress.',
-        conflict:
-          'This idempotency key was already used with a different request body.',
+      async (idem) => {
+        const result = await startBookingSession({
+          bookingId,
+          professionalId,
+          requestId,
+          idempotencyKey: idem.idempotencyKey,
+          explicitSelection,
+          actorUserId,
+        })
+
+        const responseBody = buildStartSessionResponseBody(result)
+
+        return { status: 200, body: responseBody }
       },
-    })
-
-    if (isRouteIdempotencyHandled(idempotency)) {
-      return idempotency.response
-    }
-
-    idempotencyRecordId = idempotency.idempotencyRecordId
-
-    const result = await startBookingSession({
-      bookingId,
-      professionalId,
-      requestId,
-      idempotencyKey: idempotency.idempotencyKey,
-      explicitSelection,
-      actorUserId,
-    })
-
-    const responseBody = buildStartSessionResponseBody(result)
-
-    await completeRouteIdempotency({
-      idempotencyRecordId,
-      responseStatus: 200,
-      responseBody,
-    })
-
-    return jsonOk(responseBody, 200)
+    )
   } catch (error: unknown) {
-    await failStartedRouteIdempotency({
-      idempotencyRecordId,
-      operation: 'POST /api/pro/bookings/[id]/start',
-    })
-
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
