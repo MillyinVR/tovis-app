@@ -1,9 +1,11 @@
-import { prisma } from '@/lib/prisma'
 import {
   NotificationDeliveryEventType,
   NotificationDeliveryStatus,
   Prisma,
 } from '@prisma/client'
+
+import { asTrimmedString } from '@/lib/guards'
+import { prisma } from '@/lib/prisma'
 
 const completeDeliveryAttemptSelect = {
   id: true,
@@ -123,13 +125,6 @@ function normalizeRequiredString(value: string, fieldName: string): string {
   }
 
   return normalized
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
 }
 
 function normalizeDate(value: Date | undefined, fieldName: string): Date {
@@ -385,8 +380,8 @@ export async function completeDeliveryAttempt(
   const deliveryId = normalizeRequiredString(args.deliveryId, 'deliveryId')
   const leaseToken = normalizeRequiredString(args.leaseToken, 'leaseToken')
   const attemptedAt = normalizeDate(args.attemptedAt, 'attemptedAt')
-  const providerMessageId = normalizeOptionalString(args.providerMessageId)
-  const providerStatus = normalizeOptionalString(args.providerStatus)
+  const providerMessageId = asTrimmedString(args.providerMessageId)
+  const providerStatus = asTrimmedString(args.providerStatus)
 
   if (
     args.kind === 'RETRYABLE_FAILURE' &&
@@ -452,7 +447,7 @@ export async function completeDeliveryAttempt(
           deliveredAt,
           providerStatus,
           providerMessageId,
-          message: normalizeOptionalString(args.message),
+          message: asTrimmedString(args.message),
           responseMeta: args.responseMeta,
         }),
       )

@@ -6,6 +6,7 @@ import {
   NotificationProvider,
 } from '@prisma/client'
 
+import { asTrimmedString } from '@/lib/guards'
 import {
   requireTwilioSmsConfig,
   isNotificationProviderConfigError,
@@ -60,15 +61,8 @@ function normalizeRequiredString(value: string, fieldName: string): string {
   return normalized
 }
 
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
-}
-
 function readOptionalEnv(name: string): string | null {
-  return normalizeOptionalString(process.env[name])
+  return asTrimmedString(process.env[name])
 }
 
 function readDefaultStatusCallbackUrl(): string | null {
@@ -196,7 +190,7 @@ function resolveClientAndFromNumber(options: SendSmsProviderOptions): {
   fromNumber: string
 } {
   if (options.client) {
-    const fromNumber = normalizeOptionalString(options.fromNumber)
+    const fromNumber = asTrimmedString(options.fromNumber)
 
     if (!fromNumber) {
       throw new Error(
@@ -243,7 +237,7 @@ export class SmsDeliveryProvider
     this.statusCallbackUrl =
       options.statusCallbackUrl === undefined
         ? readDefaultStatusCallbackUrl()
-        : normalizeOptionalString(options.statusCallbackUrl)
+        : asTrimmedString(options.statusCallbackUrl)
   }
 
   async send(request: SmsProviderSendRequest): Promise<ProviderSendResult> {
@@ -277,9 +271,9 @@ export class SmsDeliveryProvider
       return {
         ok: true,
         providerMessageId:
-          normalizeOptionalString(response.sid) ?? request.idempotencyKey,
+          asTrimmedString(response.sid) ?? request.idempotencyKey,
         providerStatus:
-          normalizeOptionalString(response.status) ?? 'accepted',
+          asTrimmedString(response.status) ?? 'accepted',
         responseMeta: {
           source: 'sendSms',
           to: response.to,

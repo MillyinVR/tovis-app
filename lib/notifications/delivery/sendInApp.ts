@@ -6,6 +6,8 @@ import {
   Prisma,
 } from '@prisma/client'
 
+import { asTrimmedString } from '@/lib/guards'
+
 import {
   type InAppProviderSendRequest,
   type NotificationDeliveryProvider,
@@ -49,13 +51,6 @@ function normalizeRequiredString(value: string, fieldName: string): string {
   }
 
   return normalized
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
 }
 
 function buildEnvelope(request: InAppProviderSendRequest): InAppRealtimeEnvelope {
@@ -103,7 +98,7 @@ function buildRejectedResult(
     retryable: true,
     code: 'IN_APP_PUBLISH_REJECTED',
     message: 'In-app realtime publish was rejected.',
-    providerStatus: normalizeOptionalString(publishResult.providerStatus) ?? 'rejected',
+    providerStatus: asTrimmedString(publishResult.providerStatus) ?? 'rejected',
     responseMeta:
       publishResult.responseMeta === undefined ? null : publishResult.responseMeta,
   }
@@ -185,10 +180,10 @@ export class InAppDeliveryProvider
       return {
         ok: true,
         providerMessageId:
-          normalizeOptionalString(publishResult.providerMessageId) ??
+          asTrimmedString(publishResult.providerMessageId) ??
           envelope.idempotencyKey,
         providerStatus:
-          normalizeOptionalString(publishResult.providerStatus) ?? 'accepted',
+          asTrimmedString(publishResult.providerStatus) ?? 'accepted',
         responseMeta:
           publishResult.responseMeta === undefined
             ? {

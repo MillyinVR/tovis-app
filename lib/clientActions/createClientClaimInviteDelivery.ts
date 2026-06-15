@@ -3,6 +3,7 @@
 import { ContactMethod, Prisma } from '@prisma/client'
 
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { asTrimmedString } from '@/lib/guards'
 import type { TenantContext } from '@/lib/tenant/context'
 
 import { buildClientActionLinkForType } from './linkBuilders'
@@ -39,12 +40,6 @@ export type CreateClientClaimInviteDeliveryResult = {
   dispatch: Awaited<ReturnType<typeof enqueueClientActionDispatch>>
 }
 
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
 function buildInviteTitle(args: { brandName: string }): string {
   return `Claim your ${args.brandName} profile`
 }
@@ -53,7 +48,7 @@ function buildInviteBody(args: {
   invitedName: string | null
   brandName: string
 }): string {
-  const invitedName = normalizeOptionalString(args.invitedName)
+  const invitedName = asTrimmedString(args.invitedName)
 
   if (invitedName) {
     return `${invitedName}, you’ve been invited to claim your ${args.brandName} client profile and access your booking details.`
@@ -94,15 +89,15 @@ function buildOrchestrationPlan(
     recipient: {
       clientId: args.clientId,
       professionalId: args.professionalId,
-      userId: normalizeOptionalString(args.recipientUserId),
-      invitedName: normalizeOptionalString(args.invitedName),
-      recipientEmail: normalizeOptionalString(args.invitedEmail),
-      recipientPhone: normalizeOptionalString(args.invitedPhone),
+      userId: asTrimmedString(args.recipientUserId),
+      invitedName: asTrimmedString(args.invitedName),
+      recipientEmail: asTrimmedString(args.invitedEmail),
+      recipientPhone: asTrimmedString(args.invitedPhone),
       preferredContactMethod: args.preferredContactMethod ?? null,
-      timeZone: normalizeOptionalString(args.recipientTimeZone),
+      timeZone: asTrimmedString(args.recipientTimeZone),
     },
     resendMode: 'INITIAL_SEND',
-    issuedByUserId: normalizeOptionalString(args.issuedByUserId),
+    issuedByUserId: asTrimmedString(args.issuedByUserId),
     expiresAtOverride: null,
     metadata: buildInvitePayload(args),
     tx: args.tx,
@@ -133,7 +128,7 @@ export async function createClientClaimInviteDelivery(
     href: link.href,
     title: buildInviteTitle({ brandName: brand.displayName }),
     body: buildInviteBody({
-      invitedName: normalizeOptionalString(args.invitedName),
+      invitedName: asTrimmedString(args.invitedName),
       brandName: brand.displayName,
     }),
     payload: buildInvitePayload(args),

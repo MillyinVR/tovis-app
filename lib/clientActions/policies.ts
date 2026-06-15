@@ -3,6 +3,8 @@ import {
   NotificationEventKey,
 } from '@prisma/client'
 
+import { asTrimmedString } from '@/lib/guards'
+
 import { getClientActionDefinition } from './actionRegistry'
 import type {
   ClientActionOrchestrationFailure,
@@ -26,12 +28,6 @@ function fail(
   }
 }
 
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
 function isUsableDate(value: Date | null | undefined): value is Date {
   return value instanceof Date && !Number.isNaN(value.getTime())
 }
@@ -40,8 +36,8 @@ function isContactMethodAvailable(args: {
   method: ContactMethod
   recipient: ClientActionRecipientSnapshot
 }): boolean {
-  const email = normalizeOptionalString(args.recipient.recipientEmail)
-  const phone = normalizeOptionalString(args.recipient.recipientPhone)
+  const email = asTrimmedString(args.recipient.recipientEmail)
+  const phone = asTrimmedString(args.recipient.recipientPhone)
 
   if (args.method === ContactMethod.EMAIL) {
     return email != null
@@ -59,11 +55,11 @@ function getDestinationSnapshotForMethod(args: {
   recipient: ClientActionRecipientSnapshot
 }): string | null {
   if (args.method === ContactMethod.EMAIL) {
-    return normalizeOptionalString(args.recipient.recipientEmail)
+    return asTrimmedString(args.recipient.recipientEmail)
   }
 
   if (args.method === ContactMethod.SMS) {
-    return normalizeOptionalString(args.recipient.recipientPhone)
+    return asTrimmedString(args.recipient.recipientPhone)
   }
 
   return null
@@ -318,7 +314,7 @@ export function validateClientActionRecipient(
   actionType: ClientActionType,
   recipient: ClientActionRecipientSnapshot,
 ): Success<ClientActionRecipientSnapshot> | Failure {
-  const clientId = normalizeOptionalString(recipient.clientId)
+  const clientId = asTrimmedString(recipient.clientId)
   if (!clientId) {
     return fail(
       'CLIENT_ACTION_MISSING_CLIENT_ID',
@@ -326,7 +322,7 @@ export function validateClientActionRecipient(
     )
   }
 
-  const professionalId = normalizeOptionalString(recipient.professionalId)
+  const professionalId = asTrimmedString(recipient.professionalId)
   if (!professionalId) {
     return fail(
       'CLIENT_ACTION_MISSING_PROFESSIONAL_ID',
@@ -340,12 +336,12 @@ export function validateClientActionRecipient(
       ...recipient,
       clientId,
       professionalId,
-      invitedName: normalizeOptionalString(recipient.invitedName),
-      recipientEmail: normalizeOptionalString(recipient.recipientEmail),
-      recipientPhone: normalizeOptionalString(recipient.recipientPhone),
-      timeZone: normalizeOptionalString(recipient.timeZone),
+      invitedName: asTrimmedString(recipient.invitedName),
+      recipientEmail: asTrimmedString(recipient.recipientEmail),
+      recipientPhone: asTrimmedString(recipient.recipientPhone),
+      timeZone: asTrimmedString(recipient.timeZone),
       preferredContactMethod: recipient.preferredContactMethod ?? null,
-      userId: normalizeOptionalString(recipient.userId),
+      userId: asTrimmedString(recipient.userId),
     },
   }
 }

@@ -12,7 +12,7 @@ import {
 import { createProBooking } from '@/lib/booking/writeBoundary'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
-import { isRecord } from '@/lib/guards'
+import { asTrimmedString, isRecord } from '@/lib/guards'
 import { enqueueDispatch } from '@/lib/notifications/dispatch/enqueueDispatch'
 import { prisma } from '@/lib/prisma'
 import { checkProReadinessForEntryPoint } from '@/lib/pro/readiness/proReadiness'
@@ -126,13 +126,6 @@ function normalizeServiceAddressInput(
   return value
 }
 
-function normalizeOptionalString(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-
-  const normalized = value.trim()
-  return normalized ? normalized : null
-}
-
 function shouldAutoCreateInvite(args: {
   resolvedClientClaimStatus: ClientClaimStatus
 }): boolean {
@@ -142,8 +135,8 @@ function shouldAutoCreateInvite(args: {
 function buildInvitedName(client: InviteClientSnapshot | null): string | null {
   if (!client) return null
 
-  const firstName = normalizeOptionalString(client.firstName)
-  const lastName = normalizeOptionalString(client.lastName)
+  const firstName = asTrimmedString(client.firstName)
+  const lastName = asTrimmedString(client.lastName)
   const fullName = [firstName, lastName].filter(Boolean).join(' ').trim()
 
   return fullName || null
@@ -202,8 +195,8 @@ async function tryCreateInvite(args: {
   }
 
   const invitedName = buildInvitedName(clientSnapshot)
-  const invitedEmail = normalizeOptionalString(clientSnapshot.email)
-  const invitedPhone = normalizeOptionalString(clientSnapshot.phone)
+  const invitedEmail = asTrimmedString(clientSnapshot.email)
+  const invitedPhone = asTrimmedString(clientSnapshot.phone)
   const preferredContactMethod = inferPreferredContactMethod({
     email: invitedEmail,
     phone: invitedPhone,
@@ -308,8 +301,8 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
     return
   }
 
-  const recipientEmail = normalizeOptionalString(clientSnapshot.email)
-  const recipientPhone = normalizeOptionalString(clientSnapshot.phone)
+  const recipientEmail = asTrimmedString(clientSnapshot.email)
+  const recipientPhone = asTrimmedString(clientSnapshot.phone)
   const now = new Date()
 
   if (!clientSnapshot.userId && !recipientEmail && !recipientPhone) {

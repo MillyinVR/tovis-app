@@ -2,6 +2,7 @@
 import Twilio from 'twilio'
 
 import { readOptionalEnv as readEnv } from '@/lib/env'
+import { asTrimmedString } from '@/lib/guards'
 
 type TwilioVerifyConfig = {
   accountSid: string
@@ -56,10 +57,6 @@ function errorMessage(error: unknown): string {
     : 'Unknown Twilio Verify error.'
 }
 
-function normalizeOptionalString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
 export async function startTwilioVerifyPhoneVerification(args: {
   to: string
 }): Promise<TwilioVerifyStartResult> {
@@ -86,8 +83,8 @@ export async function startTwilioVerifyPhoneVerification(args: {
 
     return {
       ok: true,
-      sid: normalizeOptionalString(verification.sid),
-      status: normalizeOptionalString(verification.status),
+      sid: asTrimmedString(verification.sid),
+      status: asTrimmedString(verification.status),
     }
   } catch (error: unknown) {
     return {
@@ -123,12 +120,12 @@ export async function checkTwilioVerifyPhoneCode(args: {
         code: args.code,
       })
 
-    const status = normalizeOptionalString(verificationCheck.status)
+    const status = asTrimmedString(verificationCheck.status)
 
     return {
       ok: true,
       approved: status === 'approved',
-      sid: normalizeOptionalString(verificationCheck.sid),
+      sid: asTrimmedString(verificationCheck.sid),
       status,
     }
   } catch (error: unknown) {
