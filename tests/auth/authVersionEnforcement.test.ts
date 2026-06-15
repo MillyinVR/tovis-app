@@ -41,8 +41,6 @@ const AUTH_IMPORT_MARKERS = [
   'from "@/app/api/_utils/auth/requireClient"',
   "from '@/app/api/_utils/auth/requirePro'",
   'from "@/app/api/_utils/auth/requirePro"',
-  "from '@/app/api/_utils/auth/requireAdmin'",
-  'from "@/app/api/_utils/auth/requireAdmin"',
 ] as const
 
 const SAFE_DB_BACKED_MARKERS = [
@@ -50,7 +48,6 @@ const SAFE_DB_BACKED_MARKERS = [
   'requireUser(',
   'requireClient(',
   'requirePro(',
-  'requireAdmin(',
 ] as const
 
 const ALLOWLIST = new Set<string>([
