@@ -29,6 +29,7 @@ import {
   getMaxAttemptsForChannel,
   getProviderForChannel,
 } from '../delivery/providerPolicy'
+import { isTwilioSmsConfigured } from '../config'
 import { getNotificationEventDefinition } from '../eventKeys'
 
 const RECIPIENT_KIND = {
@@ -358,7 +359,7 @@ function buildCapabilities(args: {
   email: string | null
   emailVerifiedAt: Date | null
 }) {
-  return getRecipientChannelCapabilities({
+  const capabilities = getRecipientChannelCapabilities({
     recipientKind: args.recipientKind,
     inAppTargetId: args.inAppTargetId,
     phone: args.phone,
@@ -366,6 +367,17 @@ function buildCapabilities(args: {
     email: args.email,
     emailVerifiedAt: args.emailVerifiedAt,
   })
+
+  // Launch gate: never select SMS while no Twilio provider is configured.
+  // Without credentials every SMS delivery attempt fails and retries (log noise
+  // + wasted work), so suppress SMS at enqueue and let email + in-app carry the
+  // notification. Re-enables automatically the instant Twilio credentials are
+  // present — no code change required.
+  if (!isTwilioSmsConfigured()) {
+    return { ...capabilities, hasSmsDestination: false }
+  }
+
+  return capabilities
 }
 
 function buildDeliveryRows(args: {
