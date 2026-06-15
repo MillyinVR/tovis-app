@@ -83,8 +83,6 @@ app/(auth)/verify-phone/page.tsx:direct property read:[resolvedNextUrl, status.e
 app/(auth)/verify-phone/page.tsx:direct property read:appendIfPresent(params, 'email', args.email)
 app/(auth)/verify-phone/page.tsx:direct property read:const maskedPhone = useMemo(() => maskPhone(status.phone), [status.phone])
 app/(auth)/verify-phone/page.tsx:direct property read:{status.email ? (
-app/(main)/booking/AvailabilityDrawer/hooks/useDefaultMobileAddress.ts:direct property read:raw.addressLine1 == null ? null : pickString(raw.addressLine1),
-app/(main)/booking/AvailabilityDrawer/hooks/useDefaultMobileAddress.ts:direct property read:raw.addressLine2 == null ? null : pickString(raw.addressLine2),
 app/(main)/booking/AvailabilityDrawer/hooks/useMobileAddresses.ts:direct property read:? row.addressLine1.trim()
 app/(main)/booking/AvailabilityDrawer/hooks/useMobileAddresses.ts:direct property read:? row.addressLine2.trim()
 app/(main)/booking/AvailabilityDrawer/hooks/useMobileAddresses.ts:direct property read:? row.postalCode.trim()
@@ -135,14 +133,10 @@ app/api/auth/register/route.ts:direct property read:typeof v.postalCode === 'str
 app/api/calendar/route.ts:Prisma select/include plaintext field:email: true,
 app/api/calendar/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/calendar/route.ts:Prisma select/include plaintext field:lastName: true,
-app/api/calendar/route.ts:direct property read:args.booking.professional?.user?.email?.trim() ||
-app/api/calendar/route.ts:direct property read:booking.professional?.user?.email?.trim() ||
 app/api/calendar/route.ts:direct property read:const clientEmail = normalizeEmail(args.booking.client?.user?.email)
 app/api/calendar/route.ts:direct property read:const organizerEmail = normalizeEmail(args.booking.professional?.user?.email)
 app/api/calendar/route.ts:direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
 app/api/calendar/route.ts:direct property read:typeof client?.lastName === 'string' ? client.lastName.trim() : ''
-app/api/calendar/route.ts:optional direct property read:args.booking.professional?.user?.email?.trim() ||
-app/api/calendar/route.ts:optional direct property read:booking.professional?.user?.email?.trim() ||
 app/api/calendar/route.ts:optional direct property read:const clientEmail = normalizeEmail(args.booking.client?.user?.email)
 app/api/calendar/route.ts:optional direct property read:const organizerEmail = normalizeEmail(args.booking.professional?.user?.email)
 app/api/calendar/route.ts:optional direct property read:typeof client?.firstName === 'string' ? client.firstName.trim() : ''
@@ -231,8 +225,6 @@ app/api/pro/session/route.ts:optional direct property read:booking.client?.user?
 app/api/pro/session/route.ts:optional direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:lastName: true,
-app/claim/[token]/page.tsx:direct property read:booking.professional?.user?.email?.trim() ||
-app/claim/[token]/page.tsx:optional direct property read:booking.professional?.user?.email?.trim() ||
 app/client/_data/getClientHomeData.ts:Prisma select/include plaintext field:
 app/client/aftercare/page.tsx:Prisma select/include plaintext field:
 app/client/bookings/[id]/_data/loadClientBookingPage.ts:Prisma select/include plaintext field:
@@ -245,7 +237,6 @@ app/client/bookings/[id]/page.tsx:direct property read:raw.professional.user.ema
 app/client/bookings/[id]/page.tsx:direct property read:typeof raw.professional?.user?.email === 'string' &&
 app/client/bookings/[id]/page.tsx:optional direct property read:booking.consultation?.consultationNotes ||
 app/client/bookings/[id]/page.tsx:optional direct property read:typeof raw.professional?.user?.email === 'string' &&
-app/client/components/SavedServicesWithProviders.tsx:direct property read:const postalCode = pickText(place.postalCode) || null
 app/client/consultation/[token]/page.tsx:direct property read:const clientLabel = [data.booking.client.firstName, data.booking.client.lastName]
 app/client/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:
 app/client/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:email: true,
