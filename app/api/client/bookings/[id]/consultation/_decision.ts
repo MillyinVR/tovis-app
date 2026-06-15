@@ -25,6 +25,10 @@ import {
   Prisma,
   Role,
 } from '@prisma/client'
+import {
+  normalizeJsonObjectPayload,
+  type JsonObjectPayload,
+} from '@/app/api/_utils/jsonPayload'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 
@@ -37,12 +41,6 @@ export type ConsultationDecisionCtx = {
 export type ConsultationDecisionRequestMeta = {
   requestId?: string | null
   idempotencyKey?: string | null
-}
-
-type NestedInputJsonValue = Prisma.InputJsonValue | null
-
-type JsonObjectPayload = {
-  [key: string]: NestedInputJsonValue
 }
 
 const OPERATION = 'POST /api/client/bookings/[id]/consultation'
@@ -152,66 +150,6 @@ async function createConsultationDecisionNotification(args: {
   } catch (e: unknown) {
     console.error('Pro notification failed (consultation decision):', e)
   }
-}
-
-function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toString()
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeNestedJsonValue(item))
-  }
-
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
-    const out: JsonObjectPayload = {}
-
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
-    }
-
-    return out
-  }
-
-  return String(value)
-}
-
-function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
-  if (value === null || value === undefined) {
-    return {}
-  }
-
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    return {
-      value: normalizeNestedJsonValue(value),
-    }
-  }
-
-  const input = value as Record<string, unknown>
-  const out: JsonObjectPayload = {}
-
-  for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
-  }
-
-  return out
 }
 
 function buildDecisionResponseBody(args: {

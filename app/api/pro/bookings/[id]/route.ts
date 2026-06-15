@@ -23,7 +23,6 @@ import {
 import {
   BookingServiceItemType,
   BookingStatus,
-  Prisma,
   Role,
 } from '@prisma/client'
 import { isValidIanaTimeZone, sanitizeTimeZone } from '@/lib/timeZone'
@@ -46,6 +45,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  normalizeJsonObjectPayload,
+  type JsonObjectPayload,
+} from '@/app/api/_utils/jsonPayload'
 import { updateProBooking } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
@@ -57,12 +60,6 @@ const PATCH_ROUTE_OPERATION = 'PATCH /api/pro/bookings/[id]'
 type RequestedStatus =
   | typeof BookingStatus.ACCEPTED
   | typeof BookingStatus.CANCELLED
-
-type NestedInputJsonValue = Prisma.InputJsonValue | null
-
-type JsonObjectPayload = {
-  [key: string]: NestedInputJsonValue
-}
 
 function normalizeRequestedStatus(value: unknown): RequestedStatus | null {
   const normalized = typeof value === 'string' ? value.trim().toUpperCase() : ''
@@ -79,60 +76,6 @@ function readRequestId(request: Request): string | null {
     pickString(request.headers.get('request-id')) ??
     null
   )
-}
-
-function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toString()
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeNestedJsonValue(item))
-  }
-
-  if (isRecord(value)) {
-    const out: JsonObjectPayload = {}
-
-    for (const key of Object.keys(value).sort()) {
-      out[key] = normalizeNestedJsonValue(value[key])
-    }
-
-    return out
-  }
-
-  return String(value)
-}
-
-function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
-  if (!isRecord(value)) {
-    return {
-      value: normalizeNestedJsonValue(value),
-    }
-  }
-
-  const out: JsonObjectPayload = {}
-
-  for (const key of Object.keys(value).sort()) {
-    out[key] = normalizeNestedJsonValue(value[key])
-  }
-
-  return out
 }
 
 function parseRequestedServiceItems(

@@ -1,6 +1,6 @@
 // app/api/pro/bookings/[id]/start/route.ts
 
-import { Prisma, Role } from '@prisma/client'
+import { Role } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import {
@@ -17,6 +17,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  normalizeJsonObjectPayload,
+  type JsonObjectPayload,
+} from '@/app/api/_utils/jsonPayload'
 import { startBookingSession } from '@/lib/booking/writeBoundary'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -26,12 +30,6 @@ export const dynamic = 'force-dynamic'
 
 type RequestMeta = {
   requestId: string | null
-}
-
-type NestedInputJsonValue = Prisma.InputJsonValue | null
-
-type JsonObjectPayload = {
-  [key: string]: NestedInputJsonValue
 }
 
 type StartSessionResponseBody = JsonObjectPayload
@@ -51,66 +49,6 @@ function readRequestMeta(request: Request): RequestMeta {
       pickString(request.headers.get('request-id')) ??
       null,
   }
-}
-
-function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toString()
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeNestedJsonValue(item))
-  }
-
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
-    const out: JsonObjectPayload = {}
-
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
-    }
-
-    return out
-  }
-
-  return String(value)
-}
-
-function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
-  if (value === null || value === undefined) {
-    return {}
-  }
-
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    return {
-      value: normalizeNestedJsonValue(value),
-    }
-  }
-
-  const input = value as Record<string, unknown>
-  const out: JsonObjectPayload = {}
-
-  for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
-  }
-
-  return out
 }
 
 function buildStartSessionIdempotencyBody(args: {
