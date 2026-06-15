@@ -136,6 +136,15 @@ vi.mock('@/lib/security/addressEncryption', () => ({
   buildAddressPrivacyWriteData: mockBuildAddressPrivacyWriteData,
 }))
 
+// Deterministic stand-in for the AEAD dual-write so the assertion does not
+// depend on a keyring being present in the test env (CI has none).
+vi.mock('@/lib/security/phonePrivacy', () => ({
+  buildPhoneEncryptionWriteData: (input: { phone?: unknown }) =>
+    input.phone === undefined
+      ? {}
+      : { phoneEncrypted: { encrypted: input.phone } },
+}))
+
 import { POST } from './route'
 
 function resetMockGroup(group: Record<string, ReturnType<typeof vi.fn>>) {
@@ -327,6 +336,10 @@ function expectedPhoneLookupData(phone: string) {
     phoneHashV2: phoneHashV2?.hash,
     phoneHashKeyVersion: phoneHashV2?.keyVersion,
   }
+}
+
+function expectedPhoneEncryption(phone: string) {
+  return { phoneEncrypted: { encrypted: phone } }
 }
 
 function makeCompleteDcaLicenseTypesResponse() {
@@ -529,6 +542,7 @@ describe('app/api/auth/register/route', () => {
           ...expectedEmailLookupData('pro-salon@example.com'),
           phone: '+15551234567',
           ...expectedPhoneLookupData('+15551234567'),
+          ...expectedPhoneEncryption('+15551234567'),
           role: 'PRO',
           transactionalSmsConsentAt: expect.any(Date),
           transactionalSmsConsentVersion: '2026-04-17',
@@ -604,6 +618,7 @@ describe('app/api/auth/register/route', () => {
           ...expectedEmailLookupData('pro-mobile@example.com'),
           phone: '+15551234567',
           ...expectedPhoneLookupData('+15551234567'),
+          ...expectedPhoneEncryption('+15551234567'),
           role: 'PRO',
           transactionalSmsConsentAt: expect.any(Date),
           transactionalSmsConsentVersion: '2026-04-17',
@@ -683,6 +698,7 @@ describe('app/api/auth/register/route', () => {
           ...expectedEmailLookupData('client@example.com'),
           phone: '+15551234567',
           ...expectedPhoneLookupData('+15551234567'),
+          ...expectedPhoneEncryption('+15551234567'),
           clientProfile: {
             create: {
               homeTenantId: 'tenant_root',
@@ -691,6 +707,7 @@ describe('app/api/auth/register/route', () => {
               phone: '+15551234567',
               ...expectedEmailLookupData('client@example.com'),
               ...expectedPhoneLookupData('+15551234567'),
+              ...expectedPhoneEncryption('+15551234567'),
               phoneVerifiedAt: null,
             },
           },
@@ -978,6 +995,7 @@ describe('app/api/auth/register/route', () => {
         ...expectedEmailLookupData('pro@example.com'),
         phone: '+15551234567',
         ...expectedPhoneLookupData('+15551234567'),
+        ...expectedPhoneEncryption('+15551234567'),
         role: 'PRO',
         transactionalSmsConsentAt: expect.any(Date),
         transactionalSmsConsentVersion: '2026-04-17',
@@ -1099,6 +1117,7 @@ describe('app/api/auth/register/route', () => {
         ...expectedEmailLookupData('client@example.com'),
         phone: '+15551234567',
         ...expectedPhoneLookupData('+15551234567'),
+        ...expectedPhoneEncryption('+15551234567'),
         phoneVerifiedAt: null,
         emailVerifiedAt: null,
         password: 'hashed_password',
@@ -1118,6 +1137,7 @@ describe('app/api/auth/register/route', () => {
             phone: '+15551234567',
             ...expectedEmailLookupData('client@example.com'),
             ...expectedPhoneLookupData('+15551234567'),
+            ...expectedPhoneEncryption('+15551234567'),
             phoneVerifiedAt: null,
           },
         },
@@ -1461,6 +1481,7 @@ describe('app/api/auth/register/route', () => {
         ...expectedEmailLookupData('pro@example.com'),
         phone: '+15551234567',
         ...expectedPhoneLookupData('+15551234567'),
+        ...expectedPhoneEncryption('+15551234567'),
         role: 'PRO',
         transactionalSmsConsentAt: expect.any(Date),
         transactionalSmsConsentVersion: '2026-04-17',

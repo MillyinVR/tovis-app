@@ -66,6 +66,15 @@ vi.mock('@/lib/observability/authEvents', () => ({
   captureAuthException: mockCaptureAuthException,
 }))
 
+// Deterministic stand-in for the AEAD dual-write so the assertion does not
+// depend on a keyring being present in the test env (CI has none).
+vi.mock('@/lib/security/phonePrivacy', () => ({
+  buildPhoneEncryptionWriteData: (input: { phone?: unknown }) =>
+    input.phone === undefined
+      ? {}
+      : { phoneEncrypted: { encrypted: input.phone } },
+}))
+
 import { POST } from './route'
 
 function makeUser(args?: {
@@ -147,6 +156,10 @@ function expectedPhoneLookupData(phone: string | null) {
     phoneHashV2: phoneHashV2?.hash ?? null,
     phoneHashKeyVersion: phoneHashV2?.keyVersion ?? null,
   }
+}
+
+function expectedPhoneEncryption(phone: string) {
+  return { phoneEncrypted: { encrypted: phone } }
 }
 
 function arrangeTransaction() {
@@ -444,6 +457,7 @@ describe('app/api/auth/phone/correct/route', () => {
       data: {
         phone: '+15557654321',
         ...expectedPhoneLookupData('+15557654321'),
+        ...expectedPhoneEncryption('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -497,6 +511,7 @@ describe('app/api/auth/phone/correct/route', () => {
       data: {
         phone: '+15557654321',
         ...expectedPhoneLookupData('+15557654321'),
+        ...expectedPhoneEncryption('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -506,6 +521,7 @@ describe('app/api/auth/phone/correct/route', () => {
       data: {
         phone: '+15557654321',
         ...expectedPhoneLookupData('+15557654321'),
+        ...expectedPhoneEncryption('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -570,6 +586,7 @@ describe('app/api/auth/phone/correct/route', () => {
       data: {
         phone: '+15557654321',
         ...expectedPhoneLookupData('+15557654321'),
+        ...expectedPhoneEncryption('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -705,6 +722,7 @@ describe('app/api/auth/phone/correct/route', () => {
       data: {
         phone: '+15557654321',
         ...expectedPhoneLookupData('+15557654321'),
+        ...expectedPhoneEncryption('+15557654321'),
         phoneVerifiedAt: null,
       },
     })
@@ -714,6 +732,7 @@ describe('app/api/auth/phone/correct/route', () => {
       data: {
         phone: '+15557654321',
         ...expectedPhoneLookupData('+15557654321'),
+        ...expectedPhoneEncryption('+15557654321'),
         phoneVerifiedAt: null,
       },
     })

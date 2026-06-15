@@ -8,6 +8,7 @@ import {
   buildEmailLookupHashV2ForContactInput,
   buildPhoneLookupHashV2ForContactInput,
 } from '@/lib/security/contactLookup'
+import { buildPhoneEncryptionWriteData } from '@/lib/security/phonePrivacy'
 import { normalizeContactInput } from '@/lib/security/contactNormalization'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -255,6 +256,9 @@ function buildMatchedProfileUpdateData(args: {
   const phoneContactData =
     phone != null ? buildClientProfileContactLookupData({ phone }) : {}
 
+  const phoneEncryptionData =
+    phone != null ? buildPhoneEncryptionWriteData({ phone }) : {}
+
   const emailPatch =
     email &&
     (profile.email == null || // pii-plaintext-read-ok: contact repair only checks whether profile email is already populated
@@ -274,6 +278,7 @@ function buildMatchedProfileUpdateData(args: {
         ? {
             ...(profile.phone == null ? { phone } : {}), // pii-plaintext-read-ok: contact repair writes phone only when profile phone is missing
             ...phoneContactData,
+            ...phoneEncryptionData,
           }
         : {}
 
@@ -509,6 +514,7 @@ export async function upsertProClient(
             email: profileEmail,
             phone: profilePhone,
           }),
+          ...buildPhoneEncryptionWriteData({ phone: profilePhone }),
         },
         select: CLIENT_PROFILE_IDENTITY_SELECT,
       })
@@ -550,6 +556,7 @@ export async function upsertProClient(
           email: profileEmail,
           phone: profilePhone,
         }),
+        ...buildPhoneEncryptionWriteData({ phone: profilePhone }),
       },
       select: CLIENT_PROFILE_IDENTITY_SELECT,
     })
