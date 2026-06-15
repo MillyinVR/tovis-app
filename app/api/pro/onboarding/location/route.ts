@@ -12,6 +12,7 @@ import {
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { bumpScheduleConfigVersion } from '@/lib/booking/cacheVersion'
 import { prisma } from '@/lib/prisma'
+import { kmToMiles } from '@/lib/units'
 import { refreshLocation } from '@/lib/search/index/refreshSearchIndex'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
@@ -78,7 +79,7 @@ async function googleTimeZone(lat: number, lng: number): Promise<string> {
 }
 
 function kmToMilesInt(km: number): number {
-  return Math.max(1, Math.min(200, Math.round(km * 0.621371)))
+  return Math.max(1, Math.min(200, kmToMiles(km)))
 }
 
 async function syncDraftLocationSideEffects(args: {

@@ -9,6 +9,7 @@ import type { LocationType, ProLocation, PickedPlace } from '@/lib/contracts/pro
 import { parseLocationType, parsePickedPlace, parseProLocationsPayload } from '@/lib/contracts/proLocations'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 import { clampInt } from '@/lib/guards'
+import { kmToMiles } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
 type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
@@ -47,10 +48,6 @@ function formatLocationAddress(l: ProLocation) {
   if (cityState) return cityState
   if (l.postalCode) return `ZIP ${l.postalCode}`
   return '—'
-}
-
-function kmToMiles(km: number) {
-  return Math.round(km * 0.621371)
 }
 
 const PUBLISH_BLOCKER_LABELS: Record<string, string> = {
