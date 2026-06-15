@@ -8,6 +8,7 @@ import {
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { ClientNoteVisibility } from '@prisma/client'
+import { encryptedNoteInput } from '@/lib/security/notesPrivacy'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,12 +36,19 @@ export async function POST(req: Request, context: RouteContext) {
 
     if (!noteBody) return jsonFail(400, 'Note body is required.')
 
+    // Encrypt the exact stored (post-slice) values so plaintext and envelope match.
+    const storedTitle = title ? title.slice(0, TITLE_MAX) : null
+    const storedBody = noteBody.slice(0, BODY_MAX)
+
     const created = await prisma.clientProfessionalNote.create({
       data: {
         clientId,
         professionalId,
-        title: title ? title.slice(0, TITLE_MAX) : null,
-        body: noteBody.slice(0, BODY_MAX),
+        title: storedTitle,
+        body: storedBody,
+        // Dual-write: plaintext (above) + AEAD envelope during burn-in.
+        titleEncrypted: encryptedNoteInput(storedTitle),
+        bodyEncrypted: encryptedNoteInput(storedBody),
         visibility: ClientNoteVisibility.PROFESSIONALS_ONLY,
       },
       select: { id: true },

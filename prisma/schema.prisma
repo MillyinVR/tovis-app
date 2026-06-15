@@ -2573,6 +2573,12 @@ model ClientProfessionalNote {
   title String?
   body  String
 
+  // AEAD-encrypted envelopes for the free-text content (expand→contract dual-write;
+  // see docs/security/ticket-encrypt-tier3-health-notes.md). Plaintext columns above
+  // remain during burn-in and are dropped in the contract migration.
+  titleEncrypted Json?
+  bodyEncrypted  Json?
+
   // Optional “review-like” rating (1–5). Keep optional so it can stay a note.
   rating Int?
 
@@ -2628,6 +2634,11 @@ model ClientAllergy {
   severity                 AllergySeverity @default(MODERATE)
   recordedByProfessionalId String?
   createdAt                DateTime        @default(now())
+
+  // AEAD-encrypted envelopes for the health-adjacent free text (expand→contract
+  // dual-write; see docs/security/ticket-encrypt-tier3-health-notes.md).
+  labelEncrypted       Json?
+  descriptionEncrypted Json?
 
   client     ClientProfile        @relation(fields: [clientId], references: [id])
   recordedBy ProfessionalProfile? @relation(fields: [recordedByProfessionalId], references: [id])
