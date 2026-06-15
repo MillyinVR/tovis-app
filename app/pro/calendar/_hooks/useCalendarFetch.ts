@@ -37,7 +37,7 @@ import {
 import { toIso } from '../_utils/date'
 import { isRecord } from '@/lib/guards'
 import { pickBool, pickString } from '@/lib/pick'
-import { safeJson } from '@/lib/http'
+import { isAbortError, safeJson } from '@/lib/http'
 
 type CalendarFetchDeps = {
   view: ViewMode
@@ -64,10 +64,6 @@ function emptyManagementLists(): ManagementLists {
     waitlistToday: [],
     blockedToday: [],
   }
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError'
 }
 
 function workingHoursEndpoint(locationType: LocationType): string {

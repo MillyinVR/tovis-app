@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { safeJson } from '@/lib/http'
+import { isAbortError, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 
 type Props = { clientId: string }
@@ -20,10 +20,6 @@ function getErrorMessage(data: unknown): string | null {
 
   const trimmed = error.trim()
   return trimmed ? trimmed : null
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 function currentPathWithQuery() {

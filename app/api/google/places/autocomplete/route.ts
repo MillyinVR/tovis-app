@@ -9,6 +9,7 @@ import {
   safeJson,
 } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
+import { isAbortError } from '@/lib/http'
 
 export const dynamic = 'force-dynamic'
 
@@ -126,16 +127,6 @@ function parsePrediction(pp: Record<string, unknown>): Prediction | null {
     types: readTypes(pp),
     distanceMeters: readDistanceMeters(pp),
   }
-}
-
-function isAbortError(e: unknown) {
-  return (
-    typeof e === 'object' &&
-    e !== null &&
-    'name' in e &&
-    typeof (e as { name: unknown }).name === 'string' &&
-    (e as { name: string }).name === 'AbortError'
-  )
 }
 
 export async function GET(req: Request) {

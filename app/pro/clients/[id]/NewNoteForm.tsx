@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { safeJson } from '@/lib/http'
+import { isAbortError, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 
 type Props = {
@@ -53,10 +53,6 @@ function errorFromResponse(res: Response, data: unknown): string {
   if (res.status === 403) return 'You don’t have access to do that.'
 
   return `Request failed (${res.status}).`
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
 }
 
 export default function NewNoteForm({ clientId }: Props) {

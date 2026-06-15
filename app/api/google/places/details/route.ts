@@ -2,6 +2,7 @@
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { getGoogleMapsKey, fetchWithTimeout, safeJson } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
+import { isAbortError } from '@/lib/http'
 
 export const dynamic = 'force-dynamic'
 
@@ -66,16 +67,6 @@ function readDisplayNameText(displayName: unknown): string | null {
   if (!isRecord(displayName)) return null
   const t = displayName.text
   return typeof t === 'string' ? (t.trim() || null) : null
-}
-
-function isAbortError(e: unknown) {
-  return (
-    typeof e === 'object' &&
-    e !== null &&
-    'name' in e &&
-    typeof (e as { name: unknown }).name === 'string' &&
-    (e as { name: string }).name === 'AbortError'
-  )
 }
 
 export async function GET(req: Request) {
