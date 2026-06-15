@@ -3,7 +3,10 @@
 import { type Prisma } from '@prisma/client'
 
 import type { SchedulingConflict } from './overlapPolicy'
-import { getConflictWindowStart } from '@/lib/booking/conflicts'
+import {
+  bookingToBusyInterval,
+  getConflictWindowStart,
+} from '@/lib/booking/conflicts'
 import { BOOKING_BLOCKING_STATUSES } from '@/lib/booking/constants'
 export type PrismaTransactionClient = Prisma.TransactionClient
 
@@ -89,16 +92,24 @@ export function windowsOverlap(
 export function toBookingSchedulingConflict(
   row: BookingConflictRow,
 ): SchedulingConflict {
+  // Bookings share the canonical busy-interval math with conflictQueries.ts
+  // (`bookingToBusyInterval`: clamps duration to [15, MAX_SLOT] and buffer to
+  // [0, MAX_BUFFER], floors the start to the minute). Delegating here keeps the
+  // write-boundary conflict check and the availability/policy checks from ever
+  // disagreeing on a booking's busy window. For in-range, minute-aligned data
+  // this is identical to the previous calculateWindowEnd result.
+  const { start, end } = bookingToBusyInterval({
+    scheduledFor: row.scheduledFor,
+    totalDurationMinutes: row.totalDurationMinutes,
+    bufferMinutes: row.bufferMinutes,
+  })
+
   return {
     kind: 'BOOKING',
     id: row.id,
     professionalId: row.professionalId,
-    startsAt: row.scheduledFor,
-    endsAt: calculateWindowEnd({
-      startsAt: row.scheduledFor,
-      durationMinutes: row.totalDurationMinutes,
-      bufferMinutes: row.bufferMinutes,
-    }),
+    startsAt: start,
+    endsAt: end,
   }
 }
 
