@@ -111,6 +111,12 @@ vi.mock('@/lib/observability/bookingEvents', () => ({
   captureBookingException: mocks.captureBookingException,
 }))
 
+// Deterministic stand-in for the AEAD dual-write so the assertion does not
+// depend on a keyring being present in the test env (CI has none).
+vi.mock('@/lib/security/notesPrivacy', () => ({
+  encryptedNoteInput: (value: unknown) => ({ encrypted: value }),
+}))
+
 import { POST } from './route'
 
 function makeJsonResponse(status: number, payload: unknown): Response {
@@ -821,6 +827,7 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
         proposedServicesJson: makeExpectedProposalJson(),
         proposedTotal: new Prisma.Decimal('125.00'),
         notes: 'Please review the updated plan.',
+        notesEncrypted: { encrypted: 'Please review the updated plan.' },
         approvedAt: null,
         rejectedAt: null,
       },
@@ -829,6 +836,7 @@ describe('app/api/pro/bookings/[id]/consultation-proposal/route.ts', () => {
         proposedServicesJson: makeExpectedProposalJson(),
         proposedTotal: new Prisma.Decimal('125.00'),
         notes: 'Please review the updated plan.',
+        notesEncrypted: { encrypted: 'Please review the updated plan.' },
         approvedAt: null,
         rejectedAt: null,
       },
