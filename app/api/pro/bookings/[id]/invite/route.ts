@@ -8,7 +8,7 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
-import { isRecord } from '@/lib/guards'
+import { asTrimmedString, isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import type { TenantContext } from '@/lib/tenant/context'
@@ -55,13 +55,6 @@ type ClaimInviteForDelivery = {
   invitedEmail: string | null
   invitedPhone: string | null
   preferredContactMethod: ContactMethod | null
-}
-
-function asTrimmedString(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 function parsePreferredContactMethod(

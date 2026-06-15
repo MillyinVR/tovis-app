@@ -1,5 +1,5 @@
 // lib/auth/middlewareToken.ts
-import { isRecord } from '@/lib/guards'
+import { isNonEmptyString, isRecord } from '@/lib/guards'
 
 const jwtSecret = process.env.JWT_SECRET?.trim()
 
@@ -52,10 +52,6 @@ function getHmacKey(): Promise<CryptoKey> {
   }
 
   return hmacKeyPromise
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0
 }
 
 function isAuthRole(value: unknown): value is MiddlewareAuthRole {

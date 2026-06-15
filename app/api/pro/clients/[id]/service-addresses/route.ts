@@ -6,14 +6,11 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { getProClientVisibility } from '@/lib/clientVisibility'
+import { asTrimmedString } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
-
-function asTrimmedString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
 
 export async function GET(_request: Request, ctx: RouteContext) {
   try {

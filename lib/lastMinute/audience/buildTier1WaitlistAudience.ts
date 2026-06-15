@@ -1,4 +1,5 @@
 // lib/lastMinute/audience/buildTier1WaitlistAudience.ts
+import { isNonEmptyString } from '@/lib/guards'
 import { getZonedParts, isValidIanaTimeZone } from '@/lib/timeZone'
 import {
   LastMinuteTier,
@@ -31,10 +32,6 @@ const openingForTier1Select = {
 export type OpeningForTier1 = Prisma.LastMinuteOpeningGetPayload<{
   select: typeof openingForTier1Select
 }>
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0
-}
 
 function timeOfDayForHour(hour: number): WaitlistTimeOfDay {
   if (hour < 12) return WaitlistTimeOfDay.MORNING
