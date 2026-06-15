@@ -1,6 +1,7 @@
 import { IdempotencyStatus, Prisma, type Role } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { buildRequestHash } from '@/lib/idempotency/requestHash'
 import type { IdempotencyRoute } from '@/lib/idempotency/routeMeta'
 
@@ -52,13 +53,6 @@ export type BeginIdempotencyResult<TBody> =
 
 function addMinutes(date: Date, minutes: number): Date {
   return new Date(date.getTime() + minutes * 60 * 1000)
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2002'
-  )
 }
 
 function normalizeNonEmptyString(value: string | null | undefined): string | null {
