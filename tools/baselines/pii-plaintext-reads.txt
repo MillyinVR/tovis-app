@@ -418,12 +418,12 @@ lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:firstName: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:lastName: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:phone: true,
-lib/booking/createProBookingWithClient.ts:direct property read:const firstName = normalizeOptionalString(client.firstName)
-lib/booking/createProBookingWithClient.ts:direct property read:const invitedEmail = normalizeOptionalString(clientSnapshot.email)
-lib/booking/createProBookingWithClient.ts:direct property read:const invitedPhone = normalizeOptionalString(clientSnapshot.phone)
-lib/booking/createProBookingWithClient.ts:direct property read:const lastName = normalizeOptionalString(client.lastName)
-lib/booking/createProBookingWithClient.ts:direct property read:const recipientEmail = normalizeOptionalString(clientSnapshot.email)
-lib/booking/createProBookingWithClient.ts:direct property read:const recipientPhone = normalizeOptionalString(clientSnapshot.phone)
+lib/booking/createProBookingWithClient.ts:direct property read:const firstName = asTrimmedString(client.firstName)
+lib/booking/createProBookingWithClient.ts:direct property read:const invitedEmail = asTrimmedString(clientSnapshot.email)
+lib/booking/createProBookingWithClient.ts:direct property read:const invitedPhone = asTrimmedString(clientSnapshot.phone)
+lib/booking/createProBookingWithClient.ts:direct property read:const lastName = asTrimmedString(client.lastName)
+lib/booking/createProBookingWithClient.ts:direct property read:const recipientEmail = asTrimmedString(clientSnapshot.email)
+lib/booking/createProBookingWithClient.ts:direct property read:const recipientPhone = asTrimmedString(clientSnapshot.phone)
 lib/booking/createProBookingWithClient.ts:direct property read:if (args.email && !args.phone) return ContactMethod.EMAIL
 lib/booking/createProBookingWithClient.ts:direct property read:if (args.phone && !args.email) return ContactMethod.SMS
 lib/booking/resolveProBookingClient.ts:Prisma select/include plaintext field:email: true,
