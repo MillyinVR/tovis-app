@@ -51,7 +51,7 @@ import {
 } from '@/lib/bookingDateTimeClient'
 
 import { isRecord } from '@/lib/guards'
-import { errorMessageFromUnknown, safeJson } from '@/lib/http'
+import { errorMessageFromUnknown, isAbortError, safeJson } from '@/lib/http'
 
 import {
   BookingOverrideRequiredError,
@@ -131,10 +131,6 @@ const DEFAULT_DURATION_MINUTES = 60
 
 function normalizeUiTimeZone(value: string | null | undefined) {
   return sanitizeTimeZone(value ?? DEFAULT_TIME_ZONE, DEFAULT_TIME_ZONE)
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof Error && error.name === 'AbortError'
 }
 
 function parseDateParts(value: string): DateParts | null {

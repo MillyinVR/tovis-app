@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { ViralRequestDto } from '@/lib/viralRequests/contracts'
 import { isRecord } from '@/lib/guards'
-import { readErrorMessage, safeJsonRecord } from '@/lib/http'
+import { isAbortError, readErrorMessage, safeJsonRecord } from '@/lib/http'
 
 const VIRAL_REQUEST_STATUSES = [
   'REQUESTED',
@@ -29,10 +29,6 @@ const VIRAL_REQUEST_STATUS_SET: ReadonlySet<string> = new Set(
 const MODERATION_STATUS_SET: ReadonlySet<string> = new Set(
   MODERATION_STATUSES,
 )
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
-}
 
 function readTrimmedString(value: unknown): string | null {
   if (typeof value !== 'string') return null

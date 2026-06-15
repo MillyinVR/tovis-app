@@ -1,5 +1,6 @@
 // app/api/google/timezone/route.ts
 import { isRecord } from '@/lib/guards'
+import { isAbortError } from '@/lib/http'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import {
   fetchWithTimeout,
@@ -12,16 +13,6 @@ import {
 } from '@/app/api/_utils'
 
 export const dynamic = 'force-dynamic'
-
-function isAbortError(e: unknown) {
-  return (
-    typeof e === 'object' &&
-    e !== null &&
-    'name' in e &&
-    typeof (e as { name: unknown }).name === 'string' &&
-    (e as { name: string }).name === 'AbortError'
-  )
-}
 
 export async function GET(req: Request) {
   try {

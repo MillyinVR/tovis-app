@@ -8,6 +8,7 @@ import { BookingServiceItemType } from '@prisma/client'
 
 import {
   errorMessageFromUnknown,
+  isAbortError,
   readErrorMessage,
   safeJson,
 } from '@/lib/http'
@@ -76,10 +77,6 @@ function pickNullableString(value: unknown): string | null {
 
 function pickNullableNumber(value: unknown): number | null {
   return pickNumber(value)
-}
-
-function isAbortError(error: unknown): boolean {
-  return isRecord(error) && error.name === 'AbortError'
 }
 
 function errorFromResponse(response: Response, data: unknown): string {

@@ -14,7 +14,7 @@ import {
 } from '../_utils/parsers'
 
 import { isRecord } from '@/lib/guards'
-import { safeJson } from '@/lib/http'
+import { isAbortError, safeJson } from '@/lib/http'
 
 type LocationCapabilitySummary = {
   canSalon: boolean
@@ -104,10 +104,6 @@ async function fetchLocations(signal: AbortSignal): Promise<ProLocation[]> {
   }
 
   return data.locations.map(parseProLocation).filter(isProLocation)
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof Error && error.name === 'AbortError'
 }
 
 export function useCalendarLocations() {
