@@ -1,3 +1,10 @@
+import {
+  normDefaultString,
+  normInternalHref,
+  normNullableString,
+  normRequiredString,
+  normalizeJsonField,
+} from '@/lib/notifications/notificationFields'
 import { prisma } from '@/lib/prisma'
 import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
@@ -203,35 +210,6 @@ type DeliveryCreateRow = {
 
 function getDb(tx?: Prisma.TransactionClient): DispatchDbClient {
   return tx ?? prisma
-}
-
-function normRequiredString(value: unknown, max: number): string {
-  const s = typeof value === 'string' ? value.trim() : ''
-  return s.slice(0, max)
-}
-
-function normDefaultString(value: unknown, max: number): string {
-  const s = typeof value === 'string' ? value.trim() : ''
-  return s.slice(0, max)
-}
-
-function normNullableString(value: unknown, max: number): string | null {
-  const s = typeof value === 'string' ? value.trim() : ''
-  const clipped = s.slice(0, max)
-  return clipped.length > 0 ? clipped : null
-}
-
-function normInternalHref(value: unknown, max: number): string {
-  const s = typeof value === 'string' ? value.trim().slice(0, max) : ''
-  if (!s) return ''
-  if (!s.startsWith('/')) return ''
-  if (s.startsWith('//')) return ''
-  return s
-}
-
-function normalizeJsonField(value: Prisma.InputJsonValue | null | undefined) {
-  if (value === undefined) return undefined
-  return value === null ? Prisma.JsonNull : value
 }
 
 function normalizeDate(value: unknown, fieldName: string): Date {

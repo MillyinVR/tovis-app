@@ -1,3 +1,10 @@
+import {
+  normDefaultString,
+  normInternalHref,
+  normNullableString,
+  normRequiredString,
+  normalizeJsonField,
+} from '@/lib/notifications/notificationFields'
 import { prisma } from '@/lib/prisma'
 import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
@@ -149,36 +156,8 @@ async function withClientNotificationTx<T>(
   return prisma.$transaction(work)
 }
 
-function normRequired(value: unknown, max: number): string {
-  const s = typeof value === 'string' ? value.trim() : ''
-  return s.slice(0, max)
-}
-
-function normDefaultString(value: unknown, max: number): string {
-  const s = typeof value === 'string' ? value.trim() : ''
-  return s.slice(0, max)
-}
-
-function normNullableString(value: unknown, max: number): string | null {
-  const s = typeof value === 'string' ? value.trim() : ''
-  const clipped = s.slice(0, max)
-  return clipped.length > 0 ? clipped : null
-}
-
 function normId(value: unknown): string | null {
   return normNullableString(value, MAX_ID)
-}
-
-/**
- * Only allow internal app paths.
- * This keeps notification href values as safe deep links.
- */
-function normInternalHref(value: unknown, max: number): string {
-  const s = typeof value === 'string' ? value.trim().slice(0, max) : ''
-  if (!s) return ''
-  if (!s.startsWith('/')) return ''
-  if (s.startsWith('//')) return ''
-  return s
 }
 
 function normStringArray(
@@ -195,11 +174,6 @@ function normStringArray(
         .filter((value): value is string => Boolean(value)),
     ),
   ).slice(0, maxItems)
-}
-
-function normalizeJsonField(value: Prisma.InputJsonValue | null | undefined) {
-  if (value === undefined) return undefined
-  return value === null ? Prisma.JsonNull : value
 }
 
 function normalizeDate(value: unknown, fieldName: string): Date {
@@ -220,8 +194,8 @@ function normalizeEventKeysOrUndefined(
 function normalizeCreateClientNotificationArgs(
   args: CreateClientNotificationArgs,
 ) {
-  const clientId = normRequired(args.clientId, MAX_ID)
-  const title = normRequired(args.title, MAX_TITLE)
+  const clientId = normRequiredString(args.clientId, MAX_ID)
+  const title = normRequiredString(args.title, MAX_TITLE)
 
   if (!clientId) {
     throw new Error('createClientNotification: missing clientId')
@@ -608,7 +582,7 @@ export async function createClientNotification(
 export async function upsertClientNotification(
   args: UpsertClientNotificationArgs,
 ) {
-  const dedupeKey = normRequired(args.dedupeKey, MAX_DEDUPE_KEY)
+  const dedupeKey = normRequiredString(args.dedupeKey, MAX_DEDUPE_KEY)
   if (!dedupeKey) {
     throw new Error('upsertClientNotification: missing dedupeKey')
   }
@@ -632,7 +606,7 @@ export async function scheduleClientNotification(
 ) {
   const db = getDb(args.tx)
 
-  const clientId = normRequired(args.clientId, MAX_ID)
+  const clientId = normRequiredString(args.clientId, MAX_ID)
   const href = normInternalHref(args.href, MAX_HREF)
   const dedupeKey = normNullableString(args.dedupeKey, MAX_DEDUPE_KEY)
   const bookingId = normId(args.bookingId)
@@ -723,7 +697,7 @@ export async function cancelScheduledClientNotificationsForBooking(
 ) {
   const db = getDb(args.tx)
 
-  const bookingId = normRequired(args.bookingId, MAX_ID)
+  const bookingId = normRequiredString(args.bookingId, MAX_ID)
   if (!bookingId) {
     throw new Error(
       'cancelScheduledClientNotificationsForBooking: missing bookingId',
@@ -762,7 +736,7 @@ export async function markClientNotificationsRead(
 ) {
   const db = getDb(args.tx)
 
-  const clientId = normRequired(args.clientId, MAX_ID)
+  const clientId = normRequiredString(args.clientId, MAX_ID)
   if (!clientId) {
     throw new Error('markClientNotificationsRead: missing clientId')
   }
@@ -798,7 +772,7 @@ export async function getUnreadClientNotificationCount(
 ) {
   const db = getDb(args.tx)
 
-  const clientId = normRequired(args.clientId, MAX_ID)
+  const clientId = normRequiredString(args.clientId, MAX_ID)
   if (!clientId) {
     throw new Error('getUnreadClientNotificationCount: missing clientId')
   }

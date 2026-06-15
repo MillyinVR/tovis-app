@@ -1,3 +1,10 @@
+import {
+  normDefaultString,
+  normInternalHref,
+  normNullableString,
+  normRequiredString,
+  normalizeJsonField,
+} from '@/lib/notifications/notificationFields'
 import { prisma } from '@/lib/prisma'
 import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
@@ -81,40 +88,6 @@ type ProfessionalNotificationPreferenceRow =
   Prisma.ProfessionalNotificationPreferenceGetPayload<{
     select: typeof professionalNotificationPreferenceSelect
   }>
-
-function normRequiredString(value: unknown, max: number): string {
-  const s = typeof value === 'string' ? value.trim() : ''
-  return s.slice(0, max)
-}
-
-function normDefaultString(value: unknown, max: number): string {
-  const s = typeof value === 'string' ? value.trim() : ''
-  return s.slice(0, max)
-}
-
-function normNullableString(value: unknown, max: number): string | null {
-  const s = typeof value === 'string' ? value.trim() : ''
-  const clipped = s.slice(0, max)
-  return clipped.length > 0 ? clipped : null
-}
-
-/**
- * Only allow internal app paths.
- * This prevents accidentally storing external or protocol-relative links
- * in notification href values.
- */
-function normInternalHref(value: unknown, max: number): string {
-  const s = typeof value === 'string' ? value.trim().slice(0, max) : ''
-  if (!s) return ''
-  if (!s.startsWith('/')) return ''
-  if (s.startsWith('//')) return ''
-  return s
-}
-
-function normalizeJsonField(value: Prisma.InputJsonValue | null | undefined) {
-  if (value === undefined) return undefined
-  return value === null ? Prisma.JsonNull : value
-}
 
 function getDb(tx?: Prisma.TransactionClient): DbClient {
   return tx ?? prisma
