@@ -1,4 +1,5 @@
 // app/client/me/page.tsx
+import { isNonEmptyString } from '@/lib/guards'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 import ClientMeDashboard from '../ClientMeDashboard'
@@ -44,10 +45,6 @@ function formatMoneyLabel(value: string | null | undefined): string | null {
   if (!Number.isFinite(parsed)) return null
 
   return `$${Math.round(parsed)}`
-}
-
-function isNonEmptyString(value: string | null | undefined): value is string {
-  return typeof value === 'string' && value.trim().length > 0
 }
 
 function buildBoardHref(boardId: string): string {

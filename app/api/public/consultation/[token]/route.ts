@@ -2,6 +2,7 @@
 
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
+import { asTrimmedString } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { hashClientActionToken } from '@/lib/consultation/clientActionTokens'
 import { ClientActionTokenKind, ConsultationApprovalStatus } from '@prisma/client'
@@ -11,10 +12,6 @@ export const runtime = 'nodejs'
 
 function asIso(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
-}
-
-function asTrimmedString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
 function isPendingAndActionable(args: {

@@ -1,5 +1,6 @@
 // lib/lastMinute/audience/buildTier2ReactivationAudience.ts
 import { BookingStatus, LastMinuteTier, Prisma } from '@prisma/client'
+import { isNonEmptyString } from '@/lib/guards'
 import {
   mergeAndDedupeRecipients,
   type LastMinuteAudienceCandidate,
@@ -17,10 +18,6 @@ const openingForTier2Select = {
 export type OpeningForTier2 = Prisma.LastMinuteOpeningGetPayload<{
   select: typeof openingForTier2Select
 }>
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0
-}
 
 function daysAgo(n: number): Date {
   return new Date(Date.now() - n * 24 * 60 * 60_000)

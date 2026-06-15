@@ -9,6 +9,7 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 import { haversineMiles } from '@/lib/discovery/nearby'
+import { isNonEmptyString } from '@/lib/guards'
 import {
   mergeAndDedupeRecipients,
   type LastMinuteAudienceCandidate,
@@ -48,10 +49,6 @@ const openingForTier3Select = {
 export type OpeningForTier3 = Prisma.LastMinuteOpeningGetPayload<{
   select: typeof openingForTier3Select
 }>
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0
-}
 
 function daysAgo(n: number): Date {
   return new Date(Date.now() - n * 24 * 60 * 60 * 1000)
