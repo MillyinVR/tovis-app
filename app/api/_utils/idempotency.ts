@@ -216,3 +216,71 @@ export async function failStartedRouteIdempotency(
     console.error(`${args.operation} idempotency failure update error:`, error)
   }
 }
+
+export type RouteIdempotencyContext = {
+  idempotencyKey: string
+  idempotencyRecordId: string
+  requestHash: string
+}
+
+export type RouteIdempotencyRunResult<
+  TBody extends RouteIdempotencyResponseBody,
+> = {
+  status: number
+  body: TBody
+}
+
+export type WithRouteIdempotencyArgs = BeginRouteIdempotencyArgs & {
+  /** Label used in the failure-update error log, e.g. "POST /api/bookings/finalize". */
+  operation: string
+}
+
+/**
+ * Owns the full route idempotency lifecycle so callers can't forget the
+ * failure-side cleanup:
+ *   begin -> (handled? return that response) -> run -> complete on success,
+ *   or failStarted + rethrow on error.
+ *
+ * `run` does the route's work and returns the success status + response body.
+ * On success the body is recorded for replay and returned via jsonOk. On any
+ * throw the started record is marked failed (preventing spurious in-progress
+ * 409s) and the error is re-thrown so the route keeps its own error->Response
+ * mapping in an outer catch.
+ */
+export async function withRouteIdempotency<
+  TBody extends RouteIdempotencyResponseBody & Prisma.InputJsonValue,
+>(
+  args: WithRouteIdempotencyArgs,
+  run: (
+    context: RouteIdempotencyContext,
+  ) => Promise<RouteIdempotencyRunResult<TBody>>,
+): Promise<Response> {
+  const begin = await beginRouteIdempotency<TBody>(args)
+
+  if (isRouteIdempotencyHandled(begin)) {
+    return begin.response
+  }
+
+  try {
+    const { status, body } = await run({
+      idempotencyKey: begin.idempotencyKey,
+      idempotencyRecordId: begin.idempotencyRecordId,
+      requestHash: begin.requestHash,
+    })
+
+    await completeRouteIdempotency({
+      idempotencyRecordId: begin.idempotencyRecordId,
+      responseStatus: status,
+      responseBody: body,
+    })
+
+    return jsonOk(body, status)
+  } catch (error: unknown) {
+    await failStartedRouteIdempotency({
+      idempotencyRecordId: begin.idempotencyRecordId,
+      operation: args.operation,
+    })
+
+    throw error
+  }
+}
