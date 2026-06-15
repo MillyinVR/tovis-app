@@ -12,6 +12,7 @@ import {
   enqueueRecomputeLookRankScore,
   enqueueRecomputeLookSpotlightScore,
 } from './enqueue'
+import { normalizeRequiredId } from '@/lib/guards'
 
 type LooksSocialJobDb = PrismaClient | Prisma.TransactionClient
 
@@ -125,16 +126,6 @@ const DEFERRED_LOOK_POST_JOB_MESSAGES: Record<
 > = {
   MODERATION_SCAN_LOOK_POST_DEFERRED:
     'moderationScanLookPost is deferred until the look moderation implementation exists.',
-}
-
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-
-  return trimmed
 }
 
 function isSupportedLookPostJobType(type: LooksSocialJobType): boolean {

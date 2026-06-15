@@ -21,6 +21,7 @@ import type {
   LooksSaveStateResponseDto,
 } from '@/lib/looks/types'
 import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
+import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
 
 type BoardsDb = PrismaClient | Prisma.TransactionClient
 
@@ -61,7 +62,7 @@ export type BoardErrorMeta = {
 export function parseBoardVisibility(
   value: string | null | undefined,
 ): BoardVisibility | null {
-  const trimmed = normalizeOptionalId(value)
+  const trimmed = asTrimmedString(value)
   if (!trimmed) return null
 
   const upper = trimmed.toUpperCase()
@@ -150,21 +151,6 @@ export function buildLooksBoardItemMutationResponse(args: {
   }
 }
 
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-  return trimmed
-}
-
-function normalizeOptionalId(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
 function normalizeBoardName(name: string): string {
   const trimmed = name.trim()
   if (!trimmed) {
@@ -207,7 +193,7 @@ export function canManageBoard(args: {
   viewerClientId: string | null | undefined
   ownerClientId: string
 }): boolean {
-  const viewerClientId = normalizeOptionalId(args.viewerClientId)
+  const viewerClientId = asTrimmedString(args.viewerClientId)
   const ownerClientId = normalizeRequiredId('ownerClientId', args.ownerClientId)
 
   return viewerClientId === ownerClientId
@@ -501,7 +487,7 @@ export async function getViewerLookSaveState(
     lookPostId: string
   },
 ): Promise<ViewerLookSaveState> {
-  const viewerClientId = normalizeOptionalId(args.viewerClientId)
+  const viewerClientId = asTrimmedString(args.viewerClientId)
   const lookPostId = normalizeRequiredId('lookPostId', args.lookPostId)
 
   if (!viewerClientId) {

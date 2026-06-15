@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 
 import { getViewerFollowState } from '@/lib/follows'
+import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
 
 type LooksAccessDb = PrismaClient | Prisma.TransactionClient
 
@@ -30,20 +31,6 @@ export type LoadedLookAccess = {
   viewerFollowsProfessional: boolean
 }
 
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-  return trimmed
-}
-
-function normalizeOptionalId(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
 export async function loadLookAccess(
   db: LooksAccessDb,
   args: {
@@ -53,8 +40,8 @@ export async function loadLookAccess(
   },
 ): Promise<LoadedLookAccess | null> {
   const lookPostId = normalizeRequiredId('lookPostId', args.lookPostId)
-  const viewerClientId = normalizeOptionalId(args.viewerClientId)
-  const viewerProfessionalId = normalizeOptionalId(args.viewerProfessionalId)
+  const viewerClientId = asTrimmedString(args.viewerClientId)
+  const viewerProfessionalId = asTrimmedString(args.viewerProfessionalId)
 
   const look = await db.lookPost.findUnique({
     where: { id: lookPostId },

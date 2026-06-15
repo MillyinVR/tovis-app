@@ -13,6 +13,7 @@ import {
   computeLookPostSpotlightScore as computeCentralLookPostSpotlightScore,
   type LookPostSpotlightScoreOptions,
 } from '@/lib/looks/spotlight'
+import { normalizeRequiredId } from '@/lib/guards'
 
 type LooksCounterDb = Prisma.TransactionClient | PrismaClient
 
@@ -56,16 +57,6 @@ type LookPostScoreRow = Prisma.LookPostGetPayload<{
 
 export type LookPostScoreComputeOptions =
   LookPostRankScoreOptions & LookPostSpotlightScoreOptions
-
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-
-  return trimmed
-}
 
 async function persistLookPostMetrics(
   db: LooksCounterDb,

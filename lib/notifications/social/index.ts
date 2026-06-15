@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 
 import { createViralRequestApprovedProNotification } from '@/lib/notifications/viralRequestApproved'
+import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
 
 export type ApprovedViralRequestMatchRecipient = {
   professionalId: string
@@ -20,23 +21,6 @@ export type NotifyMatchedProsAboutApprovedViralRequestResult = {
   notificationIds: string[]
 }
 
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-
-  return trimmed
-}
-
-function normalizeOptionalId(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
 function mergeRecipientServiceIds(
   current: readonly string[],
   next: readonly string[],
@@ -44,7 +28,7 @@ function mergeRecipientServiceIds(
   const merged = new Set<string>(current)
 
   for (const value of next) {
-    const normalized = normalizeOptionalId(value)
+    const normalized = asTrimmedString(value)
     if (normalized) {
       merged.add(normalized)
     }
@@ -87,7 +71,7 @@ export async function notifyMatchedProsAboutApprovedViralRequest(
     args.viralRequestId,
   )
   const requestName = normalizeRequiredId('requestName', args.requestName)
-  const requestedCategoryId = normalizeOptionalId(args.requestedCategoryId)
+  const requestedCategoryId = asTrimmedString(args.requestedCategoryId)
   const recipients = dedupeRecipients(args.recipients)
 
   const matchedProfessionalIds: string[] = []

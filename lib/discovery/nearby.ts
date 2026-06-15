@@ -3,6 +3,7 @@ import { Prisma, ProfessionType } from '@prisma/client'
 
 import { clampFloat } from '@/lib/queryParams'
 import { getWorkingWindowForDay } from '@/lib/scheduling/workingHours'
+import { asTrimmedString } from '@/lib/guards'
 
 export type DiscoveryLocationDto = {
   id: string
@@ -43,13 +44,6 @@ export type DiscoveryOfferSummaryDto = {
 
 function normalizeQuery(q: string): string {
   return q.trim().toLowerCase()
-}
-
-function normalizeOptionalId(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -241,7 +235,7 @@ export function summarizeDiscoveryOfferingsForProfessional(args: {
   professionalId: string
   offerings: readonly DiscoveryOfferingInput[]
 }): DiscoveryOfferSummaryDto {
-  const professionalId = normalizeOptionalId(args.professionalId)
+  const professionalId = asTrimmedString(args.professionalId)
   if (!professionalId) {
     throw new Error('professionalId is required.')
   }
@@ -261,7 +255,7 @@ export function summarizeDiscoveryOfferingsForProfessional(args: {
 
     const salonPrice = toFiniteNumber(offering.salonPriceStartingAt)
     const mobilePrice = toFiniteNumber(offering.mobilePriceStartingAt)
-    const categoryId = normalizeOptionalId(offering.categoryId)
+    const categoryId = asTrimmedString(offering.categoryId)
 
     if (offering.offersInSalon) {
       summary.supportsSalon = true
@@ -292,7 +286,7 @@ export function buildDiscoveryOfferSummaryMap(
   const grouped = new Map<string, DiscoveryOfferingInput[]>()
 
   for (const offering of offerings) {
-    const professionalId = normalizeOptionalId(offering.professionalId)
+    const professionalId = asTrimmedString(offering.professionalId)
     if (!professionalId) continue
 
     const current = grouped.get(professionalId) ?? []
@@ -319,11 +313,11 @@ export function matchesRequestedDiscoveryCategory(args: {
   requestedCategoryId: string | null | undefined
   offeringCategoryIds: readonly string[] | null | undefined
 }): boolean {
-  const requestedCategoryId = normalizeOptionalId(args.requestedCategoryId)
+  const requestedCategoryId = asTrimmedString(args.requestedCategoryId)
   if (!requestedCategoryId) return true
 
   const categoryIds = (args.offeringCategoryIds ?? [])
-    .map((id) => normalizeOptionalId(id))
+    .map((id) => asTrimmedString(id))
     .filter((id): id is string => id !== null)
 
   return categoryIds.includes(requestedCategoryId)

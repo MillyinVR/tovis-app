@@ -3,6 +3,7 @@ import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { loadNearbyPros } from '@/lib/discovery/nearbyPros'
 import { clampInt } from '@/lib/pick'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
+import { asTrimmedString } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,11 +12,6 @@ function pickNumber(value: string | null): number | null {
 
   const n = Number(value)
   return Number.isFinite(n) ? n : null
-}
-
-function normalizeOptionalId(value: string | null): string | null {
-  const trimmed = (value ?? '').trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 function isValidLatitude(value: number): boolean {
@@ -67,15 +63,15 @@ export async function GET(req: Request) {
       return clampInt(raw, 1, 50)
     })()
 
-    const categoryId = normalizeOptionalId(
+    const categoryId = asTrimmedString(
       pickString(searchParams.get('categoryId')),
     )
 
-    const serviceId = normalizeOptionalId(
+    const serviceId = asTrimmedString(
       pickString(searchParams.get('serviceId')),
     )
 
-    const excludeProfessionalId = normalizeOptionalId(
+    const excludeProfessionalId = asTrimmedString(
       pickString(searchParams.get('excludeProfessionalId')),
     )
 

@@ -17,6 +17,18 @@ export function asTrimmedString(v: unknown): string | null {
   return isNonEmptyString(v) ? v.trim() : null
 }
 
+/**
+ * Returns the trimmed value, or throws `${name} is required.` when it is blank.
+ * For required id/string fields where an empty value is a programmer error.
+ */
+export function normalizeRequiredId(name: string, value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    throw new Error(`${name} is required.`)
+  }
+  return trimmed
+}
+
 export function asNumber(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }

@@ -15,6 +15,7 @@ import type {
   RecomputeLookRankScoreJobPayload,
   RecomputeLookSpotlightScoreJobPayload,
 } from './contracts'
+import { normalizeRequiredId } from '@/lib/guards'
 
 type LooksSocialJobDb = PrismaClient | Prisma.TransactionClient
 
@@ -37,16 +38,6 @@ type PersistLooksSocialJobArgs = {
 }
 
 const DEFAULT_MAX_ATTEMPTS = 5
-
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-
-  return trimmed
-}
 
 function normalizeRunAt(value: Date | undefined): Date {
   const runAt = value ?? new Date()
