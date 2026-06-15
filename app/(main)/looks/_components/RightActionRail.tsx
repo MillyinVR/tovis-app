@@ -17,9 +17,9 @@ import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalD
 
 const TEXT_SHADOW =
   '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
-const PAPER = 'rgba(244,239,231,1)'
-const EMBER = '#FF3D4E'
-const ACID = '#D4FF3A'
+const PAPER = 'rgb(var(--text-primary) / 1)'
+const EMBER = 'rgb(var(--color-ember))'
+const ACID = 'rgb(var(--color-acid))'
 
 function clamp(n: number, min: number, max: number) {
   return Math.min(max, Math.max(min, n))
@@ -175,9 +175,9 @@ export default function RightActionRail({
                   width: 48,
                   height: 48,
                   borderRadius: '50%',
-                  border: '2px solid rgba(244,239,231,0.4)',
+                  border: '2px solid rgb(var(--surface-glass) / 0.4)',
                   overflow: 'hidden',
-                  background: 'rgba(244,239,231,0.08)',
+                  background: 'rgb(var(--surface-glass) / 0.08)',
                 }}
               >
                 {pro.avatarUrl ? (
@@ -220,8 +220,8 @@ export default function RightActionRail({
                   width: 20,
                   height: 20,
                   borderRadius: '50%',
-                  background: '#E05A28',
-                  color: '#fff',
+                  background: 'rgb(var(--accent-primary))',
+                  color: 'rgb(var(--text-primary))',
                   display: 'grid',
                   placeItems: 'center',
                   fontWeight: 900,
@@ -240,8 +240,8 @@ export default function RightActionRail({
               width: 48,
               height: 48,
               borderRadius: '50%',
-              border: '2px solid rgba(244,239,231,0.25)',
-              background: 'rgba(244,239,231,0.06)',
+              border: '2px solid rgb(var(--surface-glass) / 0.25)',
+              background: 'rgb(var(--surface-glass) / 0.06)',
             }}
           />
         )}
@@ -257,15 +257,15 @@ export default function RightActionRail({
               width: 52,
               height: 52,
               borderRadius: '50%',
-              background: '#E05A28',
-              color: '#fff',
+              background: 'rgb(var(--accent-primary))',
+              color: 'rgb(var(--text-primary))',
               display: 'grid',
               placeItems: 'center',
               border: 'none',
               cursor: 'pointer',
               padding: 0,
               boxShadow:
-                '0 8px 24px rgba(224,90,40,0.55), 0 2px 6px rgba(0,0,0,0.6)',
+                '0 8px 24px rgb(var(--accent-primary) / 0.55), 0 2px 6px rgba(0,0,0,0.6)',
             }}
           >
             <CalendarDays size={30} aria-hidden="true" />

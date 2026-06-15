@@ -29,6 +29,7 @@ export function toCssVars(tokens: BrandTokens): Record<string, string> {
     '--accent-primary': colors.accentPrimary,
     '--accent-primary-hover': colors.accentPrimaryHover,
     '--micro-accent': colors.microAccent,
+    '--on-accent': colors.onAccent,
 
     '--color-acid': colors.colorAcid,
     '--color-fern': colors.colorFern,

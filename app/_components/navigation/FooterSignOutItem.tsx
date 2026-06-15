@@ -33,7 +33,7 @@ export default function FooterSignOutItem() {
         display: 'grid',
         gap: 2,
         justifyItems: 'center',
-        color: 'rgba(122,117,105,1)',
+        color: 'rgb(var(--text-muted) / 1)',
         textShadow: '0 2px 12px rgba(0,0,0,0.8)',
         position: 'relative',
         cursor: loading ? 'not-allowed' : 'pointer',

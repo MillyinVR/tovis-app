@@ -54,7 +54,7 @@ export default function AboutPage() {
             <div className="flex flex-wrap gap-3">
               <Link
                 href="/signup/client"
-                className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-6 py-2.5 text-[13px] font-bold text-[#F2EDE7] transition hover:bg-accentPrimaryHover active:scale-[0.98]"
+                className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-6 py-2.5 text-[13px] font-bold text-textPrimary transition hover:bg-accentPrimaryHover active:scale-[0.98]"
               >
                 Create client account
               </Link>

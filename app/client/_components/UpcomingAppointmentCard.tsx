@@ -106,12 +106,12 @@ function EmptyUpcomingCard() {
         style={{
           borderRadius: 18,
           background:
-            'linear-gradient(135deg, rgba(224,90,40,0.08) 0%, rgba(10,9,7,0) 60%)',
+            'linear-gradient(135deg, rgb(var(--accent-primary) / 0.08) 0%, rgb(var(--bg-primary) / 0) 60%)',
         }}
       >
         <div
           className="border-b px-4 py-3.5"
-          style={{ borderColor: 'rgba(224,90,40,0.18)' }}
+          style={{ borderColor: 'rgb(var(--accent-primary) / 0.18)' }}
         >
           <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-terra">
             ◆ Nothing booked yet
@@ -173,7 +173,7 @@ export default function UpcomingAppointmentCard({
         style={{
           borderRadius: 18,
           background:
-            'linear-gradient(135deg, rgba(224,90,40,0.08) 0%, rgba(10,9,7,0) 100%)',
+            'linear-gradient(135deg, rgb(var(--accent-primary) / 0.08) 0%, rgb(var(--bg-primary) / 0) 100%)',
         }}
       >
         <div className="border-b border-textPrimary/8 px-4 py-3.5">

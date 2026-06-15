@@ -23,7 +23,7 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
       className="w-full"
       style={{
         paddingBottom: 'env(safe-area-inset-bottom)',
-        background: '#0A0907',
+        background: 'rgb(var(--bg-primary))',
       }}
     >
       <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-around px-4">
@@ -42,9 +42,9 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
                   height: 68,
                   position: 'relative',
                   top: -14,
-                  backgroundColor: active ? '#E05A28' : '#F4EFE7',
-                  color: active ? '#ffffff' : '#0A0907',
-                  boxShadow: active ? '0 10px 30px rgba(224,90,40,0.55)' : '0 10px 30px rgba(244,239,231,0.15)',
+                  backgroundColor: active ? CENTER_BUTTON.bgActive : CENTER_BUTTON.bgInactive,
+                  color: active ? CENTER_BUTTON.colorActive : CENTER_BUTTON.colorInactive,
+                  boxShadow: active ? CENTER_BUTTON.shadowActive : CENTER_BUTTON.shadowInactive,
                 }}
                 title={tab.label}
                 aria-label={tab.label}

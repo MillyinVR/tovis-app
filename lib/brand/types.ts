@@ -368,6 +368,7 @@ export type BrandTokens = {
     accentPrimary: RgbTriplet // brand signature → --accent-primary / --terra
     accentPrimaryHover: RgbTriplet // hover/glow state → --terra-glow
     microAccent: RgbTriplet // warm highlight → --micro-accent
+    onAccent: RgbTriplet // readable text/icon ON TOP of accentPrimary → --on-accent
 
     // ── Brand palette ────────────────────────────────────────────
     colorAcid: RgbTriplet // yellow-green CTAs / approvals → --acid

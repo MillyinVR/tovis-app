@@ -51,12 +51,12 @@ function EmptyWaitlistCard() {
       style={{
         borderRadius: 14,
         background:
-          'linear-gradient(135deg, rgba(224,90,40,0.06) 0%, rgba(20,17,14,1) 55%)',
+          'linear-gradient(135deg, rgb(var(--accent-primary) / 0.06) 0%, rgb(var(--bg-secondary) / 1) 55%)',
       }}
     >
       <div
         className="border-b px-4 py-3"
-        style={{ borderColor: 'rgba(224,90,40,0.16)' }}
+        style={{ borderColor: 'rgb(var(--accent-primary) / 0.16)' }}
       >
         <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-terra">
           ◆ Nothing waiting

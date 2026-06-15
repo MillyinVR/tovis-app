@@ -6,7 +6,7 @@ import { formatFollowerLabel } from '@/lib/profiles/publicProfileFormatting'
 import type { FeedItem } from './lookTypes'
 
 const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
-const PAPER = 'rgba(244,239,231,1)'
+const PAPER = 'rgb(var(--text-primary) / 1)'
 
 type ClampStyle = CSSProperties & {
   WebkitLineClamp?: number
@@ -126,13 +126,13 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
               className="pointer-events-auto"
               style={{
                 padding: '2px 8px',
-                border: '1px solid rgba(244,239,231,0.35)',
+                border: '1px solid rgb(var(--surface-glass) / 0.35)',
                 borderRadius: 999,
                 fontSize: 10,
                 fontWeight: 700,
                 letterSpacing: '0.06em',
-                color: isFollowing ? 'rgba(244,239,231,0.7)' : PAPER,
-                background: isFollowing ? 'rgba(244,239,231,0.12)' : 'transparent',
+                color: isFollowing ? 'rgb(var(--text-primary) / 0.7)' : PAPER,
+                background: isFollowing ? 'rgb(var(--surface-glass) / 0.12)' : 'transparent',
                 cursor: 'pointer',
                 fontFamily: 'var(--font-mono)',
                 flexShrink: 0,
@@ -147,7 +147,7 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
               style={{
                 fontSize: 11,
                 fontWeight: 600,
-                color: 'rgba(244,239,231,0.7)',
+                color: 'rgb(var(--text-primary) / 0.7)',
                 fontFamily: 'var(--font-mono)',
                 flexShrink: 0,
               }}
@@ -172,8 +172,8 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
             <div
               style={{
                 padding: '4px 10px',
-                background: 'rgba(20,17,14,0.65)',
-                border: '1px solid rgba(244,239,231,0.18)',
+                background: 'rgb(var(--bg-secondary) / 0.65)',
+                border: '1px solid rgb(var(--surface-glass) / 0.18)',
                 borderRadius: 999,
                 backdropFilter: 'blur(8px)',
                 WebkitBackdropFilter: 'blur(8px)',
@@ -182,7 +182,7 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
                 fontWeight: 500,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase' as const,
-                color: 'rgba(244,239,231,0.9)',
+                color: 'rgb(var(--text-primary) / 0.9)',
               }}
             >
               {serviceLabel}
@@ -193,8 +193,8 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
             <div
               style={{
                 padding: '4px 10px',
-                background: 'rgba(20,17,14,0.65)',
-                border: '1px solid rgba(244,239,231,0.18)',
+                background: 'rgb(var(--bg-secondary) / 0.65)',
+                border: '1px solid rgb(var(--surface-glass) / 0.18)',
                 borderRadius: 999,
                 backdropFilter: 'blur(8px)',
                 WebkitBackdropFilter: 'blur(8px)',
@@ -202,7 +202,7 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
                 fontSize: 11,
                 fontWeight: 500,
                 letterSpacing: '0.08em',
-                color: 'rgba(244,239,231,0.75)',
+                color: 'rgb(var(--text-primary) / 0.75)',
               }}
             >
               {spotlightMeta}

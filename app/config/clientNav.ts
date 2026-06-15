@@ -19,12 +19,16 @@ export const CLIENT_TABS: ClientNavTab[] = [
   { id: 'me', label: 'Me', href: '/client/me', icon: User },
 ]
 
-/** Center button: terra when active (home page), paper when elsewhere. */
+/**
+ * Center button: accent when active (home page), paper when elsewhere.
+ * Colors resolve through the brand CSS variables set by BrandProvider, so a
+ * white-label palette swap updates this button automatically.
+ */
 export const CENTER_BUTTON = {
-  bgActive: '#E05A28',
-  bgInactive: '#F4EFE7',
-  colorActive: '#ffffff',
-  colorInactive: '#0A0907',
-  shadowActive: '0 10px 30px rgba(224,90,40,0.55)',
-  shadowInactive: '0 10px 30px rgba(244,239,231,0.15)',
+  bgActive: 'rgb(var(--accent-primary))',
+  bgInactive: 'rgb(var(--surface-glass))',
+  colorActive: 'rgb(var(--on-accent))',
+  colorInactive: 'rgb(var(--bg-primary))',
+  shadowActive: '0 10px 30px rgb(var(--accent-primary) / 0.55)',
+  shadowInactive: '0 10px 30px rgb(var(--surface-glass) / 0.15)',
 } as const
