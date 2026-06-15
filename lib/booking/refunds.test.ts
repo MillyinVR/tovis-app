@@ -3,6 +3,7 @@ import {
   BookingRefundStatus,
   BookingRefundTrigger,
   PaymentProvider,
+  type Prisma,
   Role,
   StripePaymentStatus,
 } from '@prisma/client'
@@ -79,6 +80,27 @@ function makeTx() {
           return { _sum: { amountCents: sum } }
         },
       ),
+      updateMany: vi.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { bookingId: string; stripeRefundId: string }
+          data: Record<string, unknown>
+        }) => {
+          let count = 0
+          for (const row of mocks.refundRows) {
+            if (
+              row.bookingId === where.bookingId &&
+              row.stripeRefundId === where.stripeRefundId
+            ) {
+              Object.assign(row, data)
+              count += 1
+            }
+          }
+          return { count }
+        },
+      ),
     },
   }
 }
@@ -96,7 +118,10 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-import { refundBookingPayment } from './refunds'
+import {
+  refundBookingPayment,
+  reconcileChargeRefundInTransaction,
+} from './refunds'
 
 function setBooking(overrides: Record<string, unknown> = {}) {
   mocks.booking = {
@@ -371,5 +396,94 @@ describe('refundBookingPayment — Stripe failure', () => {
     expect(mocks.stripeRefundsCreate.mock.calls.at(-1)?.[0]).toMatchObject({
       amount: 10000,
     })
+  })
+})
+
+// The in-memory mock tx implements only the handful of methods the reconcile
+// path touches; cast it once to the Prisma client type the function expects.
+function reconcileTx(): Prisma.TransactionClient {
+  return txRef.current as unknown as Prisma.TransactionClient
+}
+
+describe('reconcileChargeRefundInTransaction', () => {
+  it('returns not-handled when no booking matches the payment intent', async () => {
+    mocks.booking = null
+
+    const result = await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_missing',
+      amountRefundedCents: 5000,
+      chargeAmountCents: 5000,
+      refunds: [],
+    })
+
+    expect(result).toEqual({ handled: false })
+    expect(mocks.bookingUpdates).toHaveLength(0)
+  })
+
+  it('flips the booking to REFUNDED on a full charge refund', async () => {
+    setBooking({ stripeAmountTotal: 10000 })
+
+    const result = await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_123',
+      amountRefundedCents: 10000,
+      chargeAmountCents: 10000,
+      refunds: [{ id: 're_1', status: 'succeeded', amountCents: 10000 }],
+    })
+
+    expect(result).toEqual({ handled: true })
+    expect(mocks.bookingUpdates).toContainEqual({
+      stripePaymentStatus: StripePaymentStatus.REFUNDED,
+    })
+  })
+
+  it('does NOT flip the booking on a partial charge refund', async () => {
+    setBooking({ stripeAmountTotal: 10000 })
+
+    await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_123',
+      amountRefundedCents: 4000,
+      chargeAmountCents: 10000,
+      refunds: [{ id: 're_1', status: 'succeeded', amountCents: 4000 }],
+    })
+
+    expect(mocks.bookingUpdates).not.toContainEqual({
+      stripePaymentStatus: StripePaymentStatus.REFUNDED,
+    })
+  })
+
+  it('syncs the status of a tracked refund row by stripeRefundId', async () => {
+    setBooking({ stripeAmountTotal: 10000 })
+    mocks.refundRows.push({
+      id: 'refund_tracked',
+      bookingId: 'booking_1',
+      amountCents: 4000,
+      stripeRefundId: 're_async',
+      status: BookingRefundStatus.PENDING,
+    })
+
+    await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_123',
+      amountRefundedCents: 4000,
+      chargeAmountCents: 10000,
+      refunds: [{ id: 're_async', status: 'succeeded', amountCents: 4000 }],
+    })
+
+    expect(mocks.refundRows[0]?.status).toBe(BookingRefundStatus.SUCCEEDED)
+  })
+
+  it('does not re-update a booking already marked REFUNDED', async () => {
+    setBooking({
+      stripeAmountTotal: 10000,
+      stripePaymentStatus: StripePaymentStatus.REFUNDED,
+    })
+
+    await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_123',
+      amountRefundedCents: 10000,
+      chargeAmountCents: 10000,
+      refunds: [{ id: 're_1', status: 'succeeded', amountCents: 10000 }],
+    })
+
+    expect(mocks.bookingUpdates).toHaveLength(0)
   })
 })

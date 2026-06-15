@@ -13,6 +13,7 @@ import {
   applyStripePaymentFailedInTransaction,
   applyStripePaymentSucceededInTransaction,
 } from '@/lib/booking/writeBoundary'
+import { reconcileChargeRefundInTransaction } from '@/lib/booking/refunds'
 
 export const dynamic = 'force-dynamic'
 
@@ -196,6 +197,58 @@ async function handlePaymentIntentFailed(
   }
 }
 
+function getChargePaymentIntentId(charge: Stripe.Charge): string | null {
+  if (typeof charge.payment_intent === 'string') return charge.payment_intent
+  if (
+    charge.payment_intent &&
+    typeof charge.payment_intent === 'object' &&
+    typeof charge.payment_intent.id === 'string'
+  ) {
+    return charge.payment_intent.id
+  }
+  return null
+}
+
+async function handleChargeRefunded(
+  tx: Prisma.TransactionClient,
+  charge: Stripe.Charge,
+): Promise<StripeWebhookResult> {
+  const paymentIntentId = getChargePaymentIntentId(charge)
+
+  if (!paymentIntentId) {
+    return {
+      handled: false,
+      message: 'charge.refunded missing payment_intent.',
+    }
+  }
+
+  const refunds = (charge.refunds?.data ?? []).map((refund) => ({
+    id: refund.id,
+    status: refund.status,
+    amountCents: typeof refund.amount === 'number' ? refund.amount : 0,
+  }))
+
+  const result = await reconcileChargeRefundInTransaction(tx, {
+    paymentIntentId,
+    amountRefundedCents:
+      typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0,
+    chargeAmountCents: typeof charge.amount === 'number' ? charge.amount : 0,
+    refunds,
+  })
+
+  if (!result.handled) {
+    return {
+      handled: false,
+      message: 'charge.refunded booking not found.',
+    }
+  }
+
+  return {
+    handled: true,
+    message: 'charge.refunded reconciled.',
+  }
+}
+
 async function handleAccountUpdated(
   tx: Prisma.TransactionClient,
   account: Stripe.Account,
@@ -288,6 +341,9 @@ async function handleStripeEvent(
         event.data.object as Stripe.PaymentIntent,
         event.id,
       )
+
+    case 'charge.refunded':
+      return handleChargeRefunded(tx, event.data.object as Stripe.Charge)
 
     case 'account.updated':
       return handleAccountUpdated(tx, event.data.object as Stripe.Account)
