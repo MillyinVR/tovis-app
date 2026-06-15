@@ -15,7 +15,7 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
 import { cancelBooking } from '@/lib/booking/writeBoundary'
-import { isRecord } from '@/lib/guards'
+import { asTrimmedString, isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 
@@ -24,10 +24,6 @@ export const dynamic = 'force-dynamic'
 const ROUTE_OPERATION = 'PATCH /api/pro/bookings/[id]/cancel'
 
 type CancelResponseBody = Prisma.InputJsonObject
-
-function asTrimmedString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
 
 function buildCancelRequestBody(args: {
   bookingId: string

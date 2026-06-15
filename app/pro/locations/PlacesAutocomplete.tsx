@@ -3,7 +3,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { safeJson } from '@/lib/http'
+import { isAbortError, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 
 type JsonObject = Record<string, unknown>
@@ -102,16 +102,6 @@ function parsePlaceDetails(data: JsonObject, sessionToken: string): PlaceDetails
     name: pickNullableText(p.name),
     sessionToken,
   }
-}
-
-function isAbortError(e: unknown) {
-  return (
-    typeof e === 'object' &&
-    e !== null &&
-    'name' in e &&
-    typeof (e as { name: unknown }).name === 'string' &&
-    (e as { name: string }).name === 'AbortError'
-  )
 }
 
 export default function PlacesAutocomplete(props: {

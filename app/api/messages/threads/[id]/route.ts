@@ -1,4 +1,5 @@
 // app/api/messages/threads/[id]/route.ts
+import { clampInt } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString, enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils'
@@ -13,10 +14,6 @@ export const dynamic = 'force-dynamic'
 
 function trimId(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
-}
-
-function clampInt(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, Math.trunc(n)))
 }
 
 function parseTake(sp: URLSearchParams, fallback: number) {

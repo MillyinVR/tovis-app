@@ -48,6 +48,20 @@ export function isOkTrue(data: unknown): data is UnknownRecord & { ok: true } {
   return isRecord(data) && data.ok === true
 }
 
+/**
+ * True for an aborted fetch/request. Matches by `name === 'AbortError'` rather
+ * than `instanceof Error`, since the abort reason can be a DOMException that is
+ * not always an Error instance across runtimes.
+ */
+export function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    (error as { name: unknown }).name === 'AbortError'
+  )
+}
+
 export function safeJsonParse(input: string | null | undefined): unknown | null {
   if (input == null) return null
   const s = String(input).trim()

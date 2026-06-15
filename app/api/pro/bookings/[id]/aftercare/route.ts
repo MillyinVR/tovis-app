@@ -15,6 +15,10 @@ import {
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import {
+  normalizeJsonObjectPayload,
+  type JsonObjectPayload,
+} from '@/app/api/_utils/jsonPayload'
+import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
@@ -115,12 +119,6 @@ type ParsedPostBody = {
   productReminderDaysAfter: number
   clientTimeZoneReceived: string | null
   version: number | null
-}
-
-type NestedInputJsonValue = Prisma.InputJsonValue | null
-
-type JsonObjectPayload = {
-  [key: string]: NestedInputJsonValue
 }
 
 const NOTES_MAX = 4000
@@ -684,64 +682,6 @@ async function getBookingIdFromContext(
 ): Promise<string | null> {
   const params = await resolveRouteParams(ctx)
   return pickString(params?.id)
-}
-
-function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toString()
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeNestedJsonValue(item))
-  }
-
-  if (isRecord(value)) {
-    const out: JsonObjectPayload = {}
-
-    for (const key of Object.keys(value).sort()) {
-      out[key] = normalizeNestedJsonValue(value[key])
-    }
-
-    return out
-  }
-
-  return String(value)
-}
-
-function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
-  if (value === null || value === undefined) {
-    return {}
-  }
-
-  if (!isRecord(value)) {
-    return {
-      value: normalizeNestedJsonValue(value),
-    }
-  }
-
-  const out: JsonObjectPayload = {}
-
-  for (const key of Object.keys(value).sort()) {
-    out[key] = normalizeNestedJsonValue(value[key])
-  }
-
-  return out
 }
 
 function parsePostBody(

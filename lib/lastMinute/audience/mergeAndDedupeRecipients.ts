@@ -1,4 +1,5 @@
 // lib/lastMinute/audience/mergeAndDedupeRecipients.ts
+import { isNonEmptyString } from '@/lib/guards'
 import { startOfDayUtcInTimeZone } from '@/lib/timeZone'
 import {
   BookingStatus,
@@ -14,10 +15,6 @@ export type LastMinuteDbClient =
 export type LastMinuteAudienceCandidate = {
   clientId: string
   matchedTier: LastMinuteTier
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0
 }
 
 function dedupeCandidatesByClientId(

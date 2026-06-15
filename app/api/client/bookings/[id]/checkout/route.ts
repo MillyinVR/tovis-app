@@ -19,6 +19,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  normalizeJsonObjectPayload,
+  type JsonObjectPayload,
+} from '@/app/api/_utils/jsonPayload'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { updateClientBookingCheckout } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -44,12 +48,6 @@ type ParsedBodyResult =
       ok: false
       error: string
     }
-
-type NestedInputJsonValue = Prisma.InputJsonValue | null
-
-type JsonObjectPayload = {
-  [key: string]: NestedInputJsonValue
-}
 
 function trimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -188,64 +186,6 @@ function buildAcceptedPaymentMethods(
   if (settings.acceptZelle) out.add(PaymentMethod.ZELLE)
   if (settings.acceptAppleCash) out.add(PaymentMethod.APPLE_CASH)
   if (settings.acceptStripeCard) out.add(PaymentMethod.STRIPE_CARD)
-
-  return out
-}
-
-function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toString()
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeNestedJsonValue(item))
-  }
-
-  if (isObject(value)) {
-    const out: JsonObjectPayload = {}
-
-    for (const key of Object.keys(value).sort()) {
-      out[key] = normalizeNestedJsonValue(value[key])
-    }
-
-    return out
-  }
-
-  return String(value)
-}
-
-function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
-  if (value === null || value === undefined) {
-    return {}
-  }
-
-  if (!isObject(value)) {
-    return {
-      value: normalizeNestedJsonValue(value),
-    }
-  }
-
-  const out: JsonObjectPayload = {}
-
-  for (const key of Object.keys(value).sort()) {
-    out[key] = normalizeNestedJsonValue(value[key])
-  }
 
   return out
 }

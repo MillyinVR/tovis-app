@@ -1,7 +1,7 @@
 // app/api/client/bookings/[id]/checkout/products/route.ts
 
 import type { NextRequest } from 'next/server'
-import { Prisma, Role } from '@prisma/client'
+import { Role } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import {
@@ -14,6 +14,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  normalizeJsonObjectPayload,
+  type JsonObjectPayload,
+} from '@/app/api/_utils/jsonPayload'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import { upsertClientBookingCheckoutProducts } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -32,12 +36,6 @@ type SelectedCheckoutProductInput = {
 type ParsedItemsResult =
   | { ok: true; value: SelectedCheckoutProductInput[] }
   | { ok: false; error: string }
-
-type NestedInputJsonValue = Prisma.InputJsonValue | null
-
-type JsonObjectPayload = {
-  [key: string]: NestedInputJsonValue
-}
 
 const MAX_ITEMS = 25
 const MAX_ID_LENGTH = 191
@@ -154,64 +152,6 @@ function normalizeItemsForIdempotency(
       `${b.recommendationId}:${b.productId}`,
     ),
   )
-}
-
-function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toString()
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeNestedJsonValue(item))
-  }
-
-  if (isObject(value)) {
-    const out: JsonObjectPayload = {}
-
-    for (const key of Object.keys(value).sort()) {
-      out[key] = normalizeNestedJsonValue(value[key])
-    }
-
-    return out
-  }
-
-  return String(value)
-}
-
-function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
-  if (value === null || value === undefined) {
-    return {}
-  }
-
-  if (!isObject(value)) {
-    return {
-      value: normalizeNestedJsonValue(value),
-    }
-  }
-
-  const out: JsonObjectPayload = {}
-
-  for (const key of Object.keys(value).sort()) {
-    out[key] = normalizeNestedJsonValue(value[key])
-  }
-
-  return out
 }
 
 function buildIdempotencyRequestBody(args: {

@@ -11,6 +11,10 @@ import {
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import {
+  normalizeJsonObjectPayload,
+  type JsonObjectPayload,
+} from '@/app/api/_utils/jsonPayload'
+import {
   resolveRouteParams,
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
@@ -18,7 +22,6 @@ import { confirmBookingFinalReview } from '@/lib/booking/writeBoundary'
 import {
   AftercareRebookMode,
   BookingServiceItemType,
-  Prisma,
   Role,
 } from '@prisma/client'
 import {
@@ -82,12 +85,6 @@ type NormalizedRecommendedProduct = {
 type RequestMeta = {
   requestId: string | null
   idempotencyKey: string | null
-}
-
-type NestedInputJsonValue = Prisma.InputJsonValue | null
-
-type JsonObjectPayload = {
-  [key: string]: NestedInputJsonValue
 }
 
 function idempotencyMissingKeyFail(): Response {
@@ -283,66 +280,6 @@ function readRequestMeta(req: Request): RequestMeta {
       readHeaderValue(req, 'x-idempotency-key') ??
       null,
   }
-}
-
-function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toString()
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeNestedJsonValue(item))
-  }
-
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
-    const out: JsonObjectPayload = {}
-
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
-    }
-
-    return out
-  }
-
-  return String(value)
-}
-
-function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
-  if (value === null || value === undefined) {
-    return {}
-  }
-
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    return {
-      value: normalizeNestedJsonValue(value),
-    }
-  }
-
-  const input = value as Record<string, unknown>
-  const out: JsonObjectPayload = {}
-
-  for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
-  }
-
-  return out
 }
 
 function buildFinalReviewResponseBody(args: {
