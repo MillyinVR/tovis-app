@@ -12,6 +12,7 @@ import {
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { cancelBooking } from '@/lib/booking/writeBoundary'
+import { applyAutoCancelRefund } from '@/lib/booking/cancelRefund'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { safeError } from '@/lib/security/logging'
@@ -206,6 +207,15 @@ export async function POST(req: Request, ctx: RouteContext) {
         const result = await cancelBooking({
           bookingId,
           actor,
+        })
+
+        // Auto-refund per policy (pro/admin always; client only ≥24h out).
+        // Best-effort: never throws, so it can't fail the committed cancel.
+        await applyAutoCancelRefund({
+          bookingId,
+          actorKind: actor.kind,
+          actorUserId: user.id,
+          cancelMutated: result.meta.mutated,
         })
 
         return { status: 200, body: toCancelResponseBody(result) }

@@ -14,6 +14,7 @@ export const IDEMPOTENCY_ROUTES = {
     'POST /api/pro/bookings/[id]/checkout/waive',
 
   BOOKING_CANCEL: 'POST /api/bookings/[id]/cancel',
+  BOOKING_REFUND: 'POST /api/bookings/[id]/refund',
   BOOKING_RESCHEDULE: 'POST /api/bookings/[id]/reschedule',
 
   BOOKING_START_SESSION: 'POST /api/pro/bookings/[id]/session/start',

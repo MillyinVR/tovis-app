@@ -4,6 +4,7 @@ export type RateLimitBucket =
   | 'holds:create'
   | 'bookings:finalize'
   | 'bookings:cancel'
+  | 'bookings:refund'
   | 'bookings:reschedule'
   | 'looks:like'
   | 'looks:comment'
@@ -55,6 +56,12 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 8,
     windowSeconds: 5 * 60,
     prefix: 'rl:bookings:cancel',
+    mode: 'redis-only',
+  },
+  'bookings:refund': {
+    limit: 10,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:bookings:refund',
     mode: 'redis-only',
   },
   'bookings:reschedule': {
