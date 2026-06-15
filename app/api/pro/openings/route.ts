@@ -9,6 +9,7 @@ import {
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { isRecord } from '@/lib/guards'
+import { clampInt } from '@/lib/pick'
 import { parseIntParam } from '@/lib/queryParams'
 import {
   LastMinuteOfferType,
@@ -27,12 +28,6 @@ const MAX_LOOKAHEAD_HOURS = 24 * 14
 const DEFAULT_TAKE = 100
 const MAX_TAKE = 200
 const MAX_NOTE_LENGTH = 500
-
-function clampInt(value: number, min: number, max: number): number {
-  const n = Math.trunc(Number(value))
-  if (!Number.isFinite(n)) return min
-  return Math.max(min, Math.min(max, n))
-}
 
 function parseIsoDate(v: unknown): Date | null {
   const s = pickString(typeof v === 'string' ? v : null)

@@ -1,4 +1,5 @@
 // lib/lastMinute/commands/createLastMinuteOpening.ts
+import { clampInt } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { pickBookableLocation } from '@/lib/booking/pickLocation'
 import {
@@ -239,12 +240,6 @@ function assert(condition: unknown, status: number, code: string, message: strin
   if (!condition) {
     throw new CreateLastMinuteOpeningError(status, code, message)
   }
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  const n = Math.trunc(Number(value))
-  if (!Number.isFinite(n)) return min
-  return Math.max(min, Math.min(max, n))
 }
 
 function parseDecimalOrNull(

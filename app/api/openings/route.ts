@@ -1,4 +1,5 @@
 // app/api/openings/route.ts
+import { clampInt } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
@@ -214,12 +215,6 @@ type OpeningDto = {
     }
   }[]
   publicIncentive: PublicIncentiveDto | null
-}
-
-function clampInt(value: number, min: number, max: number) {
-  const n = Math.trunc(Number(value))
-  if (!Number.isFinite(n)) return min
-  return Math.max(min, Math.min(max, n))
 }
 
 function decimalToString(value: Prisma.Decimal | null): string | null {

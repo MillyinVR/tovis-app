@@ -1,6 +1,7 @@
 // app/api/pros/nearby/route.ts
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import { loadNearbyPros } from '@/lib/discovery/nearbyPros'
+import { clampInt } from '@/lib/pick'
 import { resolveTenantContextForRequest } from '@/lib/tenant'
 
 export const dynamic = 'force-dynamic'
@@ -10,10 +11,6 @@ function pickNumber(value: string | null): number | null {
 
   const n = Number(value)
   return Number.isFinite(n) ? n : null
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, Math.trunc(value)))
 }
 
 function normalizeOptionalId(value: string | null): string | null {

@@ -2,6 +2,11 @@
 import type { ProfessionType } from '@prisma/client'
 
 import { isRecord } from '@/lib/guards'
+import { clampInt } from '@/lib/pick'
+
+// Re-exported so existing consumers (e.g. lib/search/pros.ts) keep importing
+// clampInt from this module; the implementation lives in lib/pick.
+export { clampInt }
 
 export class SearchRequestError extends Error {
   readonly status: number
@@ -49,14 +54,6 @@ export function pickFiniteNumber(
 
   const parsed = Number(raw)
   return Number.isFinite(parsed) ? parsed : null
-}
-
-export function clampInt(
-  value: number,
-  min: number,
-  max: number,
-): number {
-  return Math.max(min, Math.min(max, Math.trunc(value)))
 }
 
 export function parseLimit(
