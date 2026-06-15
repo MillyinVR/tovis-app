@@ -10,6 +10,7 @@ import {
   hashProClientInviteToken,
   normalizeProClientInviteToken,
 } from '@/lib/clients/proClientInviteTokens'
+import { asTrimmedString } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -33,13 +34,6 @@ function normalizeRequiredString(value: string, fieldName: string): string {
   }
 
   return normalized
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const normalized = value.trim()
-  return normalized ? normalized : null
 }
 
 function validateClaimChannels(args: {
@@ -221,8 +215,8 @@ export async function upsertClientClaimLink(
   const clientId = normalizeRequiredString(args.clientId, 'clientId')
   const bookingId = normalizeRequiredString(args.bookingId, 'bookingId')
   const invitedName = normalizeRequiredString(args.invitedName, 'invitedName')
-  const invitedEmail = normalizeOptionalString(args.invitedEmail)
-  const invitedPhone = normalizeOptionalString(args.invitedPhone)
+  const invitedEmail = asTrimmedString(args.invitedEmail)
+  const invitedPhone = asTrimmedString(args.invitedPhone)
   const preferredContactMethod = args.preferredContactMethod ?? null
 
   validateClaimChannels({

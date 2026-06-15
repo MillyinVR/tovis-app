@@ -1,6 +1,5 @@
 // lib/notifications/webhooks/applyDeliveryWebhookUpdate.ts
 
-import { prisma } from '@/lib/prisma'
 import {
   NotificationDeliveryEventType,
   NotificationDeliveryStatus,
@@ -8,10 +7,12 @@ import {
   Prisma,
 } from '@prisma/client'
 
+import { asTrimmedString } from '@/lib/guards'
 import {
   mapWebhookKindToDeliveryTransition,
   type ProviderDeliveryWebhookKind,
 } from '@/lib/notifications/providerStatus'
+import { prisma } from '@/lib/prisma'
 
 const webhookUpdateSelect = {
   id: true,
@@ -105,15 +106,6 @@ function normalizeRequiredString(value: string, fieldName: string): string {
   }
 
   return normalized
-}
-
-function normalizeOptionalString(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== 'string') return null
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
 }
 
 function normalizeDate(value: Date | undefined, fieldName: string): Date {
@@ -266,8 +258,8 @@ export async function applyDeliveryWebhookUpdate(
     'providerStatus',
   )
   const occurredAt = normalizeDate(args.occurredAt, 'occurredAt')
-  const errorCode = normalizeOptionalString(args.errorCode)
-  const errorMessage = normalizeOptionalString(args.errorMessage)
+  const errorCode = asTrimmedString(args.errorCode)
+  const errorMessage = asTrimmedString(args.errorMessage)
 
   return prisma.$transaction(async (tx) => {
     const current = await tx.notificationDelivery.findFirst({
@@ -310,7 +302,7 @@ export async function applyDeliveryWebhookUpdate(
     const statusChanged = current.status !== transition.nextStatus
 
     const message =
-      normalizeOptionalString(args.message) ??
+      asTrimmedString(args.message) ??
       buildDefaultMessage({
         kind: args.kind,
         providerStatus,

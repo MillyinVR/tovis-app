@@ -2,6 +2,7 @@
 
 import { Prisma } from '@prisma/client'
 
+import { asTrimmedString } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { redactAuditPayload } from '@/lib/security/auditRedaction'
 
@@ -74,13 +75,6 @@ function normalizeRequiredString(value: string, fieldName: string): string {
   return trimmed
 }
 
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
 function maybeRedactPayload(value: AdminAuditJsonInput): Prisma.JsonValue | null {
   if (value === undefined || value === null) return null
   return redactAuditPayload(value)
@@ -140,12 +134,12 @@ export async function writeAdminAuditLog(
   const adminUserId = normalizeRequiredString(args.adminUserId, 'adminUserId')
   const action = normalizeRequiredString(args.action, 'action')
 
-  const serviceId = normalizeOptionalString(args.serviceId)
-  const categoryId = normalizeOptionalString(args.categoryId)
-  const professionalId = normalizeOptionalString(args.professionalId)
-  const targetType = normalizeOptionalString(args.targetType)
-  const targetId = normalizeOptionalString(args.targetId)
-  const note = normalizeOptionalString(args.note)
+  const serviceId = asTrimmedString(args.serviceId)
+  const categoryId = asTrimmedString(args.categoryId)
+  const professionalId = asTrimmedString(args.professionalId)
+  const targetType = asTrimmedString(args.targetType)
+  const targetId = asTrimmedString(args.targetId)
+  const note = asTrimmedString(args.note)
 
   return db.adminActionLog.create({
     data: {

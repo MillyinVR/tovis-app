@@ -4,7 +4,7 @@ import {
   Prisma,
 } from '@prisma/client'
 
-import { isRecord } from '@/lib/guards'
+import { asTrimmedString, isRecord } from '@/lib/guards'
 import {
   cancelScheduledClientNotificationsForBooking,
   scheduleClientNotification,
@@ -140,13 +140,6 @@ function normalizeDateOrNull(value: Date | null | undefined): Date | null {
   return Number.isNaN(value.getTime()) ? null : value
 }
 
-function normalizeOptionalString(
-  value: string | null | undefined,
-): string | null {
-  const normalized = typeof value === 'string' ? value.trim() : ''
-  return normalized.length > 0 ? normalized : null
-}
-
 function normalizeNowOrThrow(value: Date | undefined, fieldName: string): Date {
   const normalized = value ?? new Date()
   if (!(normalized instanceof Date) || Number.isNaN(normalized.getTime())) {
@@ -236,8 +229,8 @@ export function buildAppointmentReminderPayload(args: {
     bookingId: args.bookingId,
     scheduledFor: scheduledFor.toISOString(),
     timeZone: resolveAppointmentReminderTimeZone(args.timeZone),
-    serviceName: normalizeOptionalString(args.serviceName) ?? 'Appointment',
-    professionalName: normalizeOptionalString(args.professionalName),
+    serviceName: asTrimmedString(args.serviceName) ?? 'Appointment',
+    professionalName: asTrimmedString(args.professionalName),
   }
 }
 

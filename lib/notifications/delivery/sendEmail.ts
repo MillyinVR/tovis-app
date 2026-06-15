@@ -5,6 +5,7 @@ import {
   NotificationProvider,
 } from '@prisma/client'
 
+import { asTrimmedString } from '@/lib/guards'
 import {
   requirePostmarkEmailConfig,
   isNotificationProviderConfigError,
@@ -54,13 +55,6 @@ function normalizeRequiredString(value: string, fieldName: string): string {
   }
 
   return normalized
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : null
 }
 
 function readPostmarkErrorCode(value: number | string | null | undefined): string {
@@ -226,14 +220,14 @@ function mapApiFailure(args: {
     retryable,
     code: `POSTMARK_API_${errorCode}`,
     message:
-      normalizeOptionalString(args.response.Message) ??
+      asTrimmedString(args.response.Message) ??
       'Postmark API rejected the email.',
     providerStatus: retryable ? 'retryable_error' : 'rejected',
     responseMeta: {
       source: 'sendEmail',
       errorCode,
-      to: normalizeOptionalString(args.response.To),
-      submittedAt: normalizeOptionalString(args.response.SubmittedAt),
+      to: asTrimmedString(args.response.To),
+      submittedAt: asTrimmedString(args.response.SubmittedAt),
       nextStatus: transition.nextStatus,
       eventType: transition.eventType,
     },
@@ -316,7 +310,7 @@ function resolvePostmarkOptions(options: SendEmailProviderOptions): {
     return {
       apiToken: normalizeRequiredString(options.apiToken ?? '', 'apiToken'),
       fromEmail: normalizeRequiredString(options.fromEmail ?? '', 'fromEmail'),
-      messageStream: normalizeOptionalString(options.messageStream),
+      messageStream: asTrimmedString(options.messageStream),
       fetchImpl,
     }
   }
@@ -329,7 +323,7 @@ function resolvePostmarkOptions(options: SendEmailProviderOptions): {
     messageStream:
       options.messageStream === undefined
         ? config.messageStream
-        : normalizeOptionalString(options.messageStream),
+        : asTrimmedString(options.messageStream),
     fetchImpl,
   }
 }
@@ -417,12 +411,12 @@ export class EmailDeliveryProvider
       return {
         ok: true,
         providerMessageId:
-          normalizeOptionalString(parsed.MessageID) ?? request.idempotencyKey,
+          asTrimmedString(parsed.MessageID) ?? request.idempotencyKey,
         providerStatus: 'accepted',
         responseMeta: {
           source: 'sendEmail',
-          to: normalizeOptionalString(parsed.To) ?? request.destination,
-          submittedAt: normalizeOptionalString(parsed.SubmittedAt),
+          to: asTrimmedString(parsed.To) ?? request.destination,
+          submittedAt: asTrimmedString(parsed.SubmittedAt),
           messageStream: this.messageStream,
         },
       }

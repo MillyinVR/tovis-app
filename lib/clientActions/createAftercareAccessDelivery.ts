@@ -10,6 +10,7 @@ import {
   generateClientActionToken,
   hashClientActionToken,
 } from '@/lib/consultation/clientActionTokens'
+import { asTrimmedString } from '@/lib/guards'
 
 import { buildClientActionLinkForType } from './linkBuilders'
 import { enqueueClientActionDispatch } from './enqueueClientActionDispatch'
@@ -48,15 +49,6 @@ export type CreateAftercareAccessDeliveryResult = {
   token: ClientActionIssuedToken
   link: ClientActionBuildLinkResult
   dispatch: Awaited<ReturnType<typeof enqueueClientActionDispatch>>
-}
-
-function normalizeOptionalString(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 function normalizeResendMode(
@@ -134,15 +126,15 @@ function buildOrchestrationPlan(
     recipient: {
       clientId: args.clientId,
       professionalId: args.professionalId,
-      userId: normalizeOptionalString(args.recipientUserId),
+      userId: asTrimmedString(args.recipientUserId),
       invitedName: null,
-      recipientEmail: normalizeOptionalString(args.recipientEmail),
-      recipientPhone: normalizeOptionalString(args.recipientPhone),
+      recipientEmail: asTrimmedString(args.recipientEmail),
+      recipientPhone: asTrimmedString(args.recipientPhone),
       preferredContactMethod: args.preferredContactMethod ?? null,
-      timeZone: normalizeOptionalString(args.recipientTimeZone),
+      timeZone: asTrimmedString(args.recipientTimeZone),
     },
     resendMode: normalizeResendMode(args.resendMode),
-    issuedByUserId: normalizeOptionalString(args.issuedByUserId),
+    issuedByUserId: asTrimmedString(args.issuedByUserId),
     expiresAtOverride: args.expiresAtOverride ?? null,
     metadata: null,
     tx: args.tx,
@@ -218,10 +210,10 @@ async function issueAftercareAccessToken(args: {
       clientId: args.plan.recipient.clientId,
       professionalId: args.plan.recipient.professionalId,
       deliveryMethod: args.plan.resolvedDelivery.method,
-      recipientEmailSnapshot: normalizeOptionalString(
+      recipientEmailSnapshot: asTrimmedString(
         args.plan.recipient.recipientEmail,
       ),
-      recipientPhoneSnapshot: normalizeOptionalString(
+      recipientPhoneSnapshot: asTrimmedString(
         args.plan.recipient.recipientPhone,
       ),
       issuedByUserId: args.plan.issuedByUserId,

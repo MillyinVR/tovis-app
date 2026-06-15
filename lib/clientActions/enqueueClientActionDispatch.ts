@@ -8,6 +8,7 @@ import {
   Prisma,
 } from '@prisma/client'
 
+import { asTrimmedString } from '@/lib/guards'
 import type { NotificationPreferenceLike } from '@/lib/notifications/channelPolicy'
 import {
   enqueueDispatch,
@@ -71,12 +72,6 @@ export type EnqueueClientActionDispatchArgs = {
   clientNotificationId?: string | null
 
   tx?: Prisma.TransactionClient
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 function isUsableDate(value: Date | null | undefined): value is Date {
@@ -188,7 +183,7 @@ export async function enqueueClientActionDispatch(
   }
 
   const sourceKey =
-    normalizeOptionalString(args.sourceKeyOverride) ?? args.plan.idempotency.sendKey
+    asTrimmedString(args.sourceKeyOverride) ?? args.plan.idempotency.sendKey
 
   if (!sourceKey) {
     throw new Error(
@@ -200,8 +195,8 @@ export async function enqueueClientActionDispatch(
   const requestedChannels = resolveRequestedChannels(args.plan)
   const scheduledFor = normalizeOptionalDate(args.scheduledFor) ?? new Date()
 
-  const recipientEmail = normalizeOptionalString(args.plan.recipient.recipientEmail)
-  const recipientPhone = normalizeOptionalString(args.plan.recipient.recipientPhone)
+  const recipientEmail = asTrimmedString(args.plan.recipient.recipientEmail)
+  const recipientPhone = asTrimmedString(args.plan.recipient.recipientPhone)
   const allowUnverifiedDestination = resolveAllowUnverifiedDestination(args)
 
   const emailVerifiedAt = resolveSyntheticVerificationTimestamp({

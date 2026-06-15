@@ -1,5 +1,7 @@
 // lib/clientActions/orchestrateClientActionDelivery.ts
 
+import { asTrimmedString } from '@/lib/guards'
+
 import { getClientActionDefinition } from './actionRegistry'
 import { buildClientActionIdempotencyKeys } from './idempotency'
 import {
@@ -23,12 +25,6 @@ function fail(
     code,
     error,
   }
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 function isUsableDate(value: Date | null | undefined): value is Date {
@@ -143,7 +139,7 @@ export function orchestrateClientActionDelivery(
       pathPrefix: definition.link.pathPrefix,
       requiresToken: definition.link.requiresToken,
     },
-    issuedByUserId: normalizeOptionalString(input.issuedByUserId),
+    issuedByUserId: asTrimmedString(input.issuedByUserId),
     expiresAtOverride: resolvedExpiresAt.value,
     metadata: input.metadata ?? null,
     tx: input.tx,

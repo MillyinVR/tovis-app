@@ -1,6 +1,7 @@
 // lib/clientActions/idempotency.ts
 
 import { sha256Hex } from '@/lib/auth/timingSafe'
+import { asTrimmedString } from '@/lib/guards'
 import {
   normalizeEmailForLookup,
   normalizePhoneForLookup,
@@ -37,12 +38,6 @@ const ENTITY_REF_ORDER = [
   'professionalId',
 ] as const satisfies readonly (keyof ClientActionEntityRefs)[]
 
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
 function slugifyActionType(value: string): string {
   return value.trim().toLowerCase().replace(/_/g, '-')
 }
@@ -53,7 +48,7 @@ function serializeStableParts(parts: ReadonlyArray<string>): string {
 
 function listNormalizedEntityRefParts(refs: ClientActionEntityRefs): string[] {
   return ENTITY_REF_ORDER.flatMap((key) => {
-    const value = normalizeOptionalString(refs[key] ?? null)
+    const value = asTrimmedString(refs[key] ?? null)
     return value ? [`${key}:${value}`] : []
   })
 }
@@ -71,8 +66,8 @@ function assertHasIdempotencyAnchor(refs: ClientActionEntityRefs): void {
 export function buildClientActionRecipientFingerprint(
   args: ClientActionIdempotencyInput['recipient'],
 ): string {
-  const clientId = normalizeOptionalString(args.clientId)
-  const professionalId = normalizeOptionalString(args.professionalId)
+  const clientId = asTrimmedString(args.clientId)
+  const professionalId = asTrimmedString(args.professionalId)
   const recipientEmail = normalizeEmailForLookup(args.recipientEmail)
   const recipientPhone = normalizePhoneForLookup(args.recipientPhone)
 
@@ -118,7 +113,7 @@ function resolveSendCycleDiscriminator(
     return 'initial'
   }
 
-  const sendVersion = normalizeOptionalString(args.sendVersion)
+  const sendVersion = asTrimmedString(args.sendVersion)
   if (sendVersion) {
     return `resend:${sendVersion}`
   }
