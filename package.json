@@ -44,6 +44,7 @@
     "proof:storage-policy": "node --env-file=.env.production.local scripts/proof-storage-policy.mjs",
     "test:chaos": "dotenv -e .env.local -- vitest run --config vitest.config.mts tests/chaos",
     "verify:launch-ops": "pnpm test:chaos && pnpm test:load:launch",
+    "loadproof:fixtures": "tsx prisma/scripts/loadTestFixtures.ts",
     "check:privacy-guards": "pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads",
     "check:static-guards": "pnpm check:booking-boundary && pnpm check:media-render-boundary && pnpm check:consultation-canonical && pnpm check:lifecycle-field-writes && pnpm check:no-type-escape && pnpm check:canonical-normalization && pnpm check:pii-plaintext-reads && pnpm check:tenant-aware-discovery && pnpm check:no-hardcoded-brand-strings",
     "test:load:availability": "dotenv -e .env.local -- tsx tests/load/availability-bootstrap-load-test.ts",
