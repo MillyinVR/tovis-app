@@ -1,6 +1,6 @@
 // app/api/pro/bookings/[id]/session/step/route.ts
 
-import { Prisma, Role, SessionStep } from '@prisma/client'
+import { Role, SessionStep } from '@prisma/client'
 
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
 import {
@@ -17,6 +17,10 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import {
+  normalizeJsonObjectPayload,
+  type JsonObjectPayload,
+} from '@/app/api/_utils/jsonPayload'
 import { SESSION_STEP_TRANSITIONS } from '@/lib/booking/lifecycleContract'
 import { transitionSessionStep } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
@@ -24,12 +28,6 @@ import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-type NestedInputJsonValue = Prisma.InputJsonValue | null
-
-type JsonObjectPayload = {
-  [key: string]: NestedInputJsonValue
-}
 
 function readRequestId(request: Request): string | null {
   return (
@@ -67,66 +65,6 @@ function isReachableByPro(to: SessionStep): boolean {
   }
 
   return false
-}
-
-function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toString()
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeNestedJsonValue(item))
-  }
-
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
-    const out: JsonObjectPayload = {}
-
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
-    }
-
-    return out
-  }
-
-  return String(value)
-}
-
-function normalizeJsonObjectPayload(value: unknown): JsonObjectPayload {
-  if (value === null || value === undefined) {
-    return {}
-  }
-
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    return {
-      value: normalizeNestedJsonValue(value),
-    }
-  }
-
-  const input = value as Record<string, unknown>
-  const out: JsonObjectPayload = {}
-
-  for (const key of Object.keys(input).sort()) {
-    out[key] = normalizeNestedJsonValue(input[key])
-  }
-
-  return out
 }
 
 export async function POST(req: Request, ctx: RouteContext) {

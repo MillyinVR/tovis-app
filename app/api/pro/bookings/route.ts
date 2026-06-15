@@ -16,6 +16,7 @@ import {
   isBookingError,
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
+import { normalizeJsonValue } from '@/app/api/_utils/jsonPayload'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { computeRequestedEndUtc } from '@/lib/booking/slotReadiness'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
@@ -100,57 +101,6 @@ function decimalToCents(value: Prisma.Decimal): number {
   while (frac.length < 2) frac += '0'
 
   return Math.max(0, Number(whole) * 100 + Number(frac || '0'))
-}
-
-type NestedInputJsonValue = Prisma.InputJsonValue | null
-
-function normalizeNestedJsonValue(value: unknown): NestedInputJsonValue {
-  if (value === null || value === undefined) {
-    return null
-  }
-
-  if (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-
-  if (value instanceof Prisma.Decimal) {
-    return value.toString()
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => normalizeNestedJsonValue(item))
-  }
-
-  if (typeof value === 'object') {
-    const input = value as Record<string, unknown>
-    const out: Record<string, NestedInputJsonValue> = {}
-
-    for (const key of Object.keys(input).sort()) {
-      out[key] = normalizeNestedJsonValue(input[key])
-    }
-
-    return out
-  }
-
-  return String(value)
-}
-
-function normalizeJsonValue(value: unknown): Prisma.InputJsonValue | undefined {
-  const normalized = normalizeNestedJsonValue(value)
-
-  if (normalized === null) {
-    return undefined
-  }
-
-  return normalized
 }
 
 function pickClientPayload(body: Record<string, unknown>) {
