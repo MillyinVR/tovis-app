@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import {
   NotificationEventKey,
@@ -113,13 +114,6 @@ function normInternalHref(value: unknown, max: number): string {
 function normalizeJsonField(value: Prisma.InputJsonValue | null | undefined) {
   if (value === undefined) return undefined
   return value === null ? Prisma.JsonNull : value
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2002'
-  )
 }
 
 function getDb(tx?: Prisma.TransactionClient): DbClient {

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import {
   NotificationChannel,
@@ -254,13 +255,6 @@ function isProDispatchRecipient(
   recipient: EnqueueDispatchRecipient,
 ): recipient is EnqueueProDispatchRecipient {
   return recipient.kind === RECIPIENT_KIND.PRO
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2002'
-  )
 }
 
 function resolveInAppTargetId(

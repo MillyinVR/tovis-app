@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import { pickTimeZoneOrNull } from '@/lib/timeZone'
 import {
   NotificationEventKey,
@@ -214,13 +215,6 @@ function normalizeEventKeysOrUndefined(
 ): NotificationEventKey[] | undefined {
   if (!Array.isArray(value) || value.length === 0) return undefined
   return Array.from(new Set(value))
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2002'
-  )
 }
 
 function normalizeCreateClientNotificationArgs(

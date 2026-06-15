@@ -1,6 +1,7 @@
 import { ModerationStatus, Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { isUniqueConstraintError } from '@/lib/prismaErrors'
 import type { LooksReportStatusDto } from '@/lib/looks/types'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
@@ -25,15 +26,6 @@ function normalizeRequiredId(fieldName: string, value: unknown): string {
     throw new Error(`looks reporting: missing ${fieldName}`)
   }
   return normalized
-}
-
-function isUniqueConstraintError(
-  error: unknown,
-): error is Prisma.PrismaClientKnownRequestError {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2002'
-  )
 }
 
 async function createReport(
