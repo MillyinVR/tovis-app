@@ -6,6 +6,7 @@ import {
   type LooksProProfilePreviewRow,
 } from '@/lib/looks/selects'
 import type { LooksProProfilePreviewDto } from '@/lib/looks/types'
+import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
 
 type FollowsDb = PrismaClient | Prisma.TransactionClient
 
@@ -110,20 +111,6 @@ export type FollowErrorMeta = {
   code: 'PRO_NOT_FOUND' | 'FOLLOWERS_FORBIDDEN' | 'FOLLOWING_FORBIDDEN'
 }
 
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-  return trimmed
-}
-
-function normalizeOptionalId(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
 function normalizeTake(value: number | null | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return 24
   const truncated = Math.trunc(value)
@@ -203,7 +190,7 @@ export function canViewFollowersList(args: {
   viewerProfessionalId: string | null | undefined
   ownerProfessionalId: string
 }): boolean {
-  const viewerProfessionalId = normalizeOptionalId(args.viewerProfessionalId)
+  const viewerProfessionalId = asTrimmedString(args.viewerProfessionalId)
   const ownerProfessionalId = normalizeRequiredId(
     'ownerProfessionalId',
     args.ownerProfessionalId,
@@ -324,7 +311,7 @@ export function canViewFollowingList(args: {
   viewerClientId: string | null | undefined
   ownerClientId: string
 }): boolean {
-  const viewerClientId = normalizeOptionalId(args.viewerClientId)
+  const viewerClientId = asTrimmedString(args.viewerClientId)
   const ownerClientId = normalizeRequiredId('ownerClientId', args.ownerClientId)
   return viewerClientId === ownerClientId
 }
@@ -427,7 +414,7 @@ export async function getViewerFollowState(
     professionalId: string
   },
 ): Promise<boolean> {
-  const viewerClientId = normalizeOptionalId(args.viewerClientId)
+  const viewerClientId = asTrimmedString(args.viewerClientId)
   const professionalId = normalizeRequiredId(
     'professionalId',
     args.professionalId,

@@ -12,6 +12,7 @@ import {
   isUnpromotedPrivateMedia,
   UNPROMOTED_MEDIA_MESSAGE,
 } from '@/lib/media/publicShareGuard'
+import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
 import {
   toLookPublicationAsyncEffectsDto,
   toProLookPublicationResultDto,
@@ -139,25 +140,6 @@ type PublicationMutationPlan =
   | CreatePublicationMutationPlan
   | UpdatePublicationMutationPlan
 
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-
-  return trimmed
-}
-
-function normalizeOptionalId(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
 function normalizeOptionalCaption(
   value: string | null | undefined,
 ): string | null {
@@ -221,7 +203,7 @@ function requireMediaAssetServiceId(
   media: Pick<MediaAssetPublicationRow, 'services'>,
   requestedServiceId: string | null,
 ): string {
-  const serviceId = normalizeOptionalId(requestedServiceId)
+  const serviceId = asTrimmedString(requestedServiceId)
 
   if (!serviceId) {
     throw new Error('primaryServiceId is required.')

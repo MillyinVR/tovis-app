@@ -13,6 +13,7 @@ import { notifyMatchedProsAboutApprovedViralRequest } from '@/lib/notifications/
 import { PUBLICLY_APPROVED_PRO_STATUSES } from '@/lib/proTrustState'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { canTransitionViralRequestStatus } from '@/lib/viralRequests/status'
+import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
 
 export type ViralRequestsDb = PrismaClient | Prisma.TransactionClient
 
@@ -196,16 +197,6 @@ function pickDispatchTx(
   return '$transaction' in db ? undefined : db
 }
 
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-
-  return trimmed
-}
-
 function normalizeRequiredIdList(
   name: string,
   values: readonly string[],
@@ -213,13 +204,6 @@ function normalizeRequiredIdList(
   return Array.from(
     new Set(values.map((value) => normalizeRequiredId(name, value))),
   )
-}
-
-function normalizeOptionalId(value: string | null | undefined): string | null {
-  if (typeof value !== 'string') return null
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 function normalizeRequiredName(value: string): string {
@@ -470,7 +454,7 @@ export async function createClientViralRequest(
     maxLength: 2000,
   })
   const sourceUrl = normalizeHttpUrl(args.sourceUrl, 'sourceUrl')
-  const requestedCategoryId = normalizeOptionalId(args.requestedCategoryId)
+  const requestedCategoryId = asTrimmedString(args.requestedCategoryId)
   const links = normalizeUrlList(args.links, 'links')
   const mediaUrls = normalizeUrlList(args.mediaUrls, 'mediaUrls')
   const linksJson = toOptionalJsonArray(links)
@@ -519,7 +503,7 @@ export async function updateViralRequestStatus(
   args: UpdateViralRequestStatusArgs,
 ): Promise<ViralRequestListRow> {
   const requestId = normalizeRequiredId('requestId', args.requestId)
-  const reviewerUserId = normalizeOptionalId(args.reviewerUserId)
+  const reviewerUserId = asTrimmedString(args.reviewerUserId)
   const adminNotes = normalizeOptionalText(args.adminNotes, {
     maxLength: 2000,
   })

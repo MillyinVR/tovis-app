@@ -6,6 +6,7 @@ import {
   markViralRequestApprovalFanOutRowsFailed,
   markViralRequestApprovalFanOutRowsQueued,
 } from '@/lib/viralRequests'
+import { normalizeRequiredId } from '@/lib/guards'
 
 export type ViralApprovalOrchestratorDb =
   | PrismaClient
@@ -26,16 +27,6 @@ export type RunViralRequestApprovalOrchestrationResult = {
     durableFanOutRows: false
     smsForEvent: true
   }
-}
-
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-
-  return trimmed
 }
 
 function normalizeErrorMessage(error: unknown): string {

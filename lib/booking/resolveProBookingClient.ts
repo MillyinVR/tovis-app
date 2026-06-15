@@ -10,6 +10,7 @@ import {
 import { upsertProClient } from '@/lib/clients/upsertProClient'
 import { prisma } from '@/lib/prisma'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
+import { asTrimmedString } from '@/lib/guards'
 
 type DbClient = Prisma.TransactionClient | typeof prisma
 
@@ -52,13 +53,6 @@ function normalizeOptionalString(
   if (normalized.length > max) return 'invalid'
 
   return normalized
-}
-
-function normalizeOptionalId(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-
-  const normalized = value.trim()
-  return normalized ? normalized : null
 }
 
 function normalizeBoolean(value: unknown): boolean | undefined | 'invalid' {
@@ -459,7 +453,7 @@ async function resolveClientIdentity(args: {
       code: string
     }
 > {
-  const existingClientId = normalizeOptionalId(args.clientId)
+  const existingClientId = asTrimmedString(args.clientId)
 
   if (existingClientId) {
     const db = getDb(args.tx)
@@ -546,7 +540,7 @@ export async function resolveProBookingClient(
     }
   }
 
-  const existingClientAddressId = normalizeOptionalId(args.clientAddressId)
+  const existingClientAddressId = asTrimmedString(args.clientAddressId)
 
   if (existingClientAddressId) {
     const ownedAddress = await loadOwnedServiceAddress({

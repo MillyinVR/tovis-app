@@ -8,6 +8,7 @@ import {
 } from '@prisma/client'
 
 import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
+import { normalizeRequiredId } from '@/lib/guards'
 
 export type IndexLookPostDocumentDb =
   | PrismaClient
@@ -122,16 +123,6 @@ export type IndexLookPostDocumentOutcome =
       reason: 'LOOK_POST_SEARCHABLE'
       document: LookPostSearchDocument
     }
-
-function normalizeRequiredId(name: string, value: string): string {
-  const trimmed = value.trim()
-
-  if (!trimmed) {
-    throw new Error(`${name} is required.`)
-  }
-
-  return trimmed
-}
 
 function normalizeNullableText(
   value: string | null | undefined,
