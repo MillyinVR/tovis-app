@@ -26,6 +26,7 @@ import {
   failStartedRouteIdempotency,
   isRouteIdempotencyHandled,
   readIdempotencyKey,
+  withRouteIdempotency,
 } from './idempotency'
 
 const TEST_ROUTE = IDEMPOTENCY_ROUTES.BOOKING_FINALIZE
@@ -467,6 +468,133 @@ describe('app/api/_utils/idempotency', () => {
       )
 
       consoleErrorSpy.mockRestore()
+    })
+  })
+
+  describe('withRouteIdempotency', () => {
+    function startedRequest(): Request {
+      return requestWithHeaders({ 'idempotency-key': 'idem_wrap' })
+    }
+
+    it('returns the handled response without running work or completing', async () => {
+      // No idempotency-key header => begin returns a handled 400.
+      const run = vi.fn()
+
+      const response = await withRouteIdempotency(
+        {
+          request: requestWithHeaders(),
+          actor: TEST_ACTOR,
+          route: TEST_ROUTE,
+          requestBody: { bookingId: 'booking_1' },
+          operation: TEST_OPERATION,
+        },
+        run,
+      )
+
+      expect(response.status).toBe(400)
+      expect(run).not.toHaveBeenCalled()
+      expect(mocks.beginIdempotency).not.toHaveBeenCalled()
+      expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+      expect(mocks.failIdempotency).not.toHaveBeenCalled()
+    })
+
+    it('returns the replay response without running work', async () => {
+      mocks.beginIdempotency.mockResolvedValueOnce({
+        kind: 'replay',
+        responseStatus: 201,
+        responseBody: { bookingId: 'booking_replay' },
+      })
+      const run = vi.fn()
+
+      const response = await withRouteIdempotency(
+        {
+          request: startedRequest(),
+          actor: TEST_ACTOR,
+          route: TEST_ROUTE,
+          requestBody: { bookingId: 'booking_1' },
+          operation: TEST_OPERATION,
+        },
+        run,
+      )
+
+      expect(response.status).toBe(201)
+      await expect(readJson(response)).resolves.toMatchObject({
+        bookingId: 'booking_replay',
+      })
+      expect(run).not.toHaveBeenCalled()
+      expect(mocks.completeIdempotency).not.toHaveBeenCalled()
+    })
+
+    it('runs the work, completes with the result, and returns jsonOk', async () => {
+      mocks.beginIdempotency.mockResolvedValueOnce({
+        kind: 'started',
+        idempotencyRecordId: 'idem_record_ok',
+        requestHash: 'hash_ok',
+      })
+
+      const run = vi.fn().mockResolvedValue({
+        status: 201,
+        body: { bookingId: 'booking_created' },
+      })
+
+      const response = await withRouteIdempotency(
+        {
+          request: startedRequest(),
+          actor: TEST_ACTOR,
+          route: TEST_ROUTE,
+          requestBody: { bookingId: 'booking_1' },
+          operation: TEST_OPERATION,
+        },
+        run,
+      )
+
+      expect(run).toHaveBeenCalledWith({
+        idempotencyKey: 'idem_wrap',
+        idempotencyRecordId: 'idem_record_ok',
+        requestHash: 'hash_ok',
+      })
+
+      expect(mocks.completeIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_ok',
+        responseStatus: 201,
+        responseBody: { bookingId: 'booking_created' },
+      })
+
+      expect(mocks.failIdempotency).not.toHaveBeenCalled()
+      expect(response.status).toBe(201)
+      await expect(readJson(response)).resolves.toMatchObject({
+        ok: true,
+        bookingId: 'booking_created',
+      })
+    })
+
+    it('marks the record failed and rethrows when the work throws', async () => {
+      mocks.beginIdempotency.mockResolvedValueOnce({
+        kind: 'started',
+        idempotencyRecordId: 'idem_record_fail',
+        requestHash: 'hash_fail',
+      })
+
+      const boom = new Error('work blew up')
+      const run = vi.fn().mockRejectedValue(boom)
+
+      await expect(
+        withRouteIdempotency(
+          {
+            request: startedRequest(),
+            actor: TEST_ACTOR,
+            route: TEST_ROUTE,
+            requestBody: { bookingId: 'booking_1' },
+            operation: TEST_OPERATION,
+          },
+          run,
+        ),
+      ).rejects.toBe(boom)
+
+      expect(mocks.failIdempotency).toHaveBeenCalledWith({
+        idempotencyRecordId: 'idem_record_fail',
+      })
+      expect(mocks.completeIdempotency).not.toHaveBeenCalled()
     })
   })
 })
