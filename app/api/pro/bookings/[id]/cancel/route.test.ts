@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
   cancelBooking: vi.fn(),
+  applyAutoCancelRefund: vi.fn(),
   getBookingFailPayload: vi.fn(),
   isBookingError: vi.fn(),
 
@@ -34,6 +35,10 @@ vi.mock('@/app/api/_utils/idempotency', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   cancelBooking: mocks.cancelBooking,
+}))
+
+vi.mock('@/lib/booking/cancelRefund', () => ({
+  applyAutoCancelRefund: mocks.applyAutoCancelRefund,
 }))
 
 vi.mock('@/lib/booking/errors', () => ({
@@ -162,6 +167,7 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
         noOp: false,
       },
     })
+    mocks.applyAutoCancelRefund.mockResolvedValue({ outcome: 'NOT_ATTEMPTED' })
 
     expectIdempotencyStarted()
   })
@@ -313,6 +319,15 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
       notifyClient: true,
       reason: 'Running behind',
       allowedStatuses: [BookingStatus.PENDING, BookingStatus.ACCEPTED],
+    })
+
+    // Pro cancellation fires the auto-refund hook (always eligible).
+    expect(mocks.applyAutoCancelRefund).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      actorKind: 'pro',
+      actorUserId: 'user_1',
+      cancelMutated: true,
+      reason: 'Running behind',
     })
 
     expect(mocks.completeRouteIdempotency).toHaveBeenCalledWith({

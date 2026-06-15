@@ -15,6 +15,7 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { getBookingFailPayload, isBookingError } from '@/lib/booking/errors'
 import { cancelBooking } from '@/lib/booking/writeBoundary'
+import { applyAutoCancelRefund } from '@/lib/booking/cancelRefund'
 import { asTrimmedString, isRecord } from '@/lib/guards'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
@@ -124,6 +125,15 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       notifyClient: true,
       reason,
       allowedStatuses: [BookingStatus.PENDING, BookingStatus.ACCEPTED],
+    })
+
+    // Pro cancellation → auto full refund to the client (best-effort, never throws).
+    await applyAutoCancelRefund({
+      bookingId,
+      actorKind: 'pro',
+      actorUserId,
+      cancelMutated: result.meta.mutated,
+      reason,
     })
 
     const responseBody = buildCancelResponseBody(result)

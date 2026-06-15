@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
   cancelBooking: vi.fn(),
+  applyAutoCancelRefund: vi.fn(),
 
   withRouteIdempotency: vi.fn(),
   beginRouteIdempotency: vi.fn(),
@@ -55,6 +56,10 @@ vi.mock('@/app/api/_utils/idempotency', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   cancelBooking: mocks.cancelBooking,
+}))
+
+vi.mock('@/lib/booking/cancelRefund', () => ({
+  applyAutoCancelRefund: mocks.applyAutoCancelRefund,
 }))
 
 vi.mock('@/lib/rateLimit/enforce', () => ({
@@ -213,6 +218,7 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
 
     mocks.completeRouteIdempotency.mockResolvedValue(undefined)
     mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
+    mocks.applyAutoCancelRefund.mockResolvedValue({ outcome: 'NOT_ATTEMPTED' })
 
     setStartedIdempotencyDefault()
   })
@@ -656,6 +662,14 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
         kind: 'admin',
         professionalId: null,
       },
+    })
+
+    // Admin cancellation triggers the auto-refund hook with the admin actor.
+    expect(mocks.applyAutoCancelRefund).toHaveBeenCalledWith({
+      bookingId: 'booking_1',
+      actorKind: 'admin',
+      actorUserId: 'user_admin',
+      cancelMutated: true,
     })
   })
 
