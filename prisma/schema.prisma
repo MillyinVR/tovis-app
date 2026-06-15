@@ -758,6 +758,10 @@ model ConsultationApproval {
   proposedTotal        Decimal?
   notes                String?
 
+  // AEAD-encrypted envelope for the consultation free-text (expand→contract
+  // dual-write; see docs/security/ticket-encrypt-tier3-health-notes.md).
+  notesEncrypted Json?
+
   bookingId String  @unique
   booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
@@ -2105,6 +2109,9 @@ model Booking {
   /// tools/check-consultation-canonical.mjs.
   consultation              BookingConsultation?
   consultationNotes         String?
+  // AEAD-encrypted envelope for the legacy negotiated-outcome consultation
+  // free-text (backfill-only — no current writer; see ticket-encrypt-tier3-health-notes.md).
+  consultationNotesEncrypted Json?
   consultationPrice         Decimal?                   @db.Decimal(10, 2)
   consultationConfirmedAt   DateTime?
   consultationApproval      ConsultationApproval?

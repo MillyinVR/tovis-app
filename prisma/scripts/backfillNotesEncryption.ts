@@ -30,7 +30,12 @@ const prisma = new PrismaClient()
 const DEFAULT_BATCH_SIZE = 200
 const MAX_BATCH_SIZE = 1000
 
-type BackfillTarget = 'clientAllergy' | 'clientProfessionalNote' | 'all'
+type BackfillTarget =
+  | 'clientAllergy'
+  | 'clientProfessionalNote'
+  | 'consultationApproval'
+  | 'booking'
+  | 'all'
 
 type CliOptions = {
   dryRun: boolean
@@ -75,6 +80,8 @@ function parseOptions(argv: string[]): CliOptions {
       if (
         raw === 'clientAllergy' ||
         raw === 'clientProfessionalNote' ||
+        raw === 'consultationApproval' ||
+        raw === 'booking' ||
         raw === 'all'
       ) {
         options.target = raw
@@ -237,6 +244,116 @@ async function backfillClientProfessionalNote(
   return stats
 }
 
+async function backfillConsultationApproval(
+  options: CliOptions,
+): Promise<BackfillStats> {
+  const stats = emptyStats()
+  let cursor: string | undefined
+
+  for (;;) {
+    const rows = await prisma.consultationApproval.findMany({
+      // Only rows with plaintext notes whose envelope is still missing.
+      where: { notesEncrypted: { equals: Prisma.DbNull }, notes: { not: null } },
+      orderBy: { id: 'asc' },
+      take: options.batchSize,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: { id: true, notes: true },
+    })
+
+    if (rows.length === 0) break
+
+    for (const row of rows) {
+      stats.scanned += 1
+      try {
+        const notes = buildVerifiedField(row.notes)
+
+        if (options.dryRun) {
+          stats.updated += 1
+          if (notes.verified) stats.verified += 1
+          continue
+        }
+
+        await prisma.consultationApproval.update({
+          where: { id: row.id },
+          data: { notesEncrypted: notes.input },
+          select: { id: true },
+        })
+
+        stats.updated += 1
+        if (notes.verified) stats.verified += 1
+      } catch (error) {
+        stats.failed += 1
+        console.error('consultationApproval notes backfill failed', {
+          id: row.id,
+          error: safeError(error),
+        })
+      }
+    }
+
+    cursor = rows.at(-1)?.id
+    if (!cursor) break
+  }
+
+  return stats
+}
+
+async function backfillBookingConsultationNotes(
+  options: CliOptions,
+): Promise<BackfillStats> {
+  const stats = emptyStats()
+  let cursor: string | undefined
+
+  for (;;) {
+    const rows = await prisma.booking.findMany({
+      // Legacy negotiated-outcome notes (no current writer) — encrypt existing
+      // plaintext only; idempotent on the missing envelope.
+      where: {
+        consultationNotesEncrypted: { equals: Prisma.DbNull },
+        consultationNotes: { not: null },
+      },
+      orderBy: { id: 'asc' },
+      take: options.batchSize,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: { id: true, consultationNotes: true },
+    })
+
+    if (rows.length === 0) break
+
+    for (const row of rows) {
+      stats.scanned += 1
+      try {
+        const notes = buildVerifiedField(row.consultationNotes)
+
+        if (options.dryRun) {
+          stats.updated += 1
+          if (notes.verified) stats.verified += 1
+          continue
+        }
+
+        await prisma.booking.update({
+          where: { id: row.id },
+          data: { consultationNotesEncrypted: notes.input },
+          select: { id: true },
+        })
+
+        stats.updated += 1
+        if (notes.verified) stats.verified += 1
+      } catch (error) {
+        stats.failed += 1
+        console.error('booking consultationNotes backfill failed', {
+          id: row.id,
+          error: safeError(error),
+        })
+      }
+    }
+
+    cursor = rows.at(-1)?.id
+    if (!cursor) break
+  }
+
+  return stats
+}
+
 async function main() {
   const options = parseOptions(process.argv.slice(2))
   console.log('backfillNotesEncryption starting', options)
@@ -252,6 +369,18 @@ async function main() {
   if (options.target === 'clientProfessionalNote' || options.target === 'all') {
     const stats = await backfillClientProfessionalNote(options)
     console.log('clientProfessionalNote backfill complete', stats)
+    total = addStats(total, stats)
+  }
+
+  if (options.target === 'consultationApproval' || options.target === 'all') {
+    const stats = await backfillConsultationApproval(options)
+    console.log('consultationApproval backfill complete', stats)
+    total = addStats(total, stats)
+  }
+
+  if (options.target === 'booking' || options.target === 'all') {
+    const stats = await backfillBookingConsultationNotes(options)
+    console.log('booking consultationNotes backfill complete', stats)
     total = addStats(total, stats)
   }
 
