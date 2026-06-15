@@ -1,18 +1,20 @@
 import { createHash } from 'node:crypto'
 
+import { getTrustedClientIpFromRequest } from '@/lib/trustedClientIp'
+
+/**
+ * Resolve the client IP for a rate-limit key from a trusted-proxy header.
+ *
+ * Delegates to {@link getTrustedClientIpFromRequest}, which only honors the
+ * configured `AUTH_TRUSTED_IP_HEADER` in production (falling back to the usual
+ * proxy headers in development). This prevents attackers from rotating a
+ * spoofed `x-forwarded-for` to land in a fresh rate-limit bucket per request.
+ *
+ * Falls back to the shared `'unknown-ip'` bucket when no trusted IP can be
+ * resolved, matching the previous fallback semantics.
+ */
 export function getClientIpFromRequest(request: Request): string {
-  const forwardedFor = request.headers.get('x-forwarded-for')
-  const vercelForwardedFor = request.headers.get('x-vercel-forwarded-for')
-  const realIp = request.headers.get('x-real-ip')
-
-  const firstForwarded = forwardedFor?.split(',')[0]?.trim()
-
-  return (
-    firstForwarded ||
-    vercelForwardedFor?.trim() ||
-    realIp?.trim() ||
-    'unknown-ip'
-  )
+  return getTrustedClientIpFromRequest(request) ?? 'unknown-ip'
 }
 
 export function rateLimitKey(parts: Array<string | null | undefined>): string {
