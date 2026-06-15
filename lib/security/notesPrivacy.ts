@@ -9,12 +9,14 @@
 // See docs/security/ticket-encrypt-tier3-health-notes.md.
 
 import { Prisma } from '@prisma/client'
+import * as Sentry from '@sentry/nextjs'
 
 import {
   buildNotesEnvelope,
   isEncryptedNotesEnvelopeV1,
   readNotesEnvelope,
 } from '@/lib/security/notesEncryption'
+import { safeError } from '@/lib/security/logging'
 import { toPrismaJson } from '@/lib/typed/prismaJson'
 
 /**
@@ -28,8 +30,22 @@ import { toPrismaJson } from '@/lib/typed/prismaJson'
 export function encryptedNoteInput(
   value: string | null | undefined,
 ): Prisma.InputJsonValue | typeof Prisma.DbNull {
-  const envelope = buildNotesEnvelope(value)
-  return envelope ? toPrismaJson(envelope) : Prisma.DbNull
+  try {
+    const envelope = buildNotesEnvelope(value)
+    return envelope ? toPrismaJson(envelope) : Prisma.DbNull
+  } catch (error) {
+    // Fail-soft during the expand phase: these writes (allergy/note save,
+    // consultation proposal) must not break if the keyring is misconfigured.
+    // Plaintext is still written (the source of truth during burn-in) and the
+    // backfill re-encrypts any row whose envelope is missing. Surfaced loudly so
+    // misconfiguration is caught. Becomes fail-hard at the contract migration.
+    console.error(
+      'encryptedNoteInput failed; storing null envelope (plaintext retained)',
+      safeError(error),
+    )
+    Sentry.captureException(error)
+    return Prisma.DbNull
+  }
 }
 
 /**
