@@ -361,3 +361,76 @@ export async function refundBookingPayment(
     bookingFullyRefunded: settled.bookingFullyRefunded,
   }
 }
+
+function mapStripeRefundStatus(status: string | null): BookingRefundStatus {
+  switch (status) {
+    case 'succeeded':
+      return BookingRefundStatus.SUCCEEDED
+    case 'failed':
+      return BookingRefundStatus.FAILED
+    case 'canceled':
+      return BookingRefundStatus.CANCELED
+    default:
+      // 'pending' | 'requires_action' | unknown
+      return BookingRefundStatus.PENDING
+  }
+}
+
+export type ChargeRefundReconcileInput = {
+  paymentIntentId: string
+  amountRefundedCents: number
+  chargeAmountCents: number
+  refunds: ReadonlyArray<{
+    id: string
+    status: string | null
+    amountCents: number
+  }>
+}
+
+/**
+ * Reconcile a Stripe `charge.refunded` webhook against our records. Runs INSIDE
+ * the webhook's transaction (tx-scoped, like the other apply*InTransaction
+ * handlers). Two jobs:
+ *   1. Sync the status of refunds we already track (async pending → succeeded/
+ *      failed) by matching stripeRefundId.
+ *   2. Keep Booking.stripePaymentStatus accurate even for DASHBOARD-initiated
+ *      refunds that have no BookingRefund row — a full refund flips to REFUNDED.
+ * (Dashboard refunds are intentionally not itemized into BookingRefund rows; the
+ * booking-level status is what downstream reads depend on.)
+ */
+export async function reconcileChargeRefundInTransaction(
+  tx: Prisma.TransactionClient,
+  input: ChargeRefundReconcileInput,
+): Promise<{ handled: boolean }> {
+  const booking = await tx.booking.findUnique({
+    where: { stripePaymentIntentId: input.paymentIntentId },
+    select: { id: true, stripeAmountTotal: true, stripePaymentStatus: true },
+  })
+
+  if (!booking) {
+    return { handled: false }
+  }
+
+  for (const refund of input.refunds) {
+    await tx.bookingRefund.updateMany({
+      where: { bookingId: booking.id, stripeRefundId: refund.id },
+      data: { status: mapStripeRefundStatus(refund.status) },
+    })
+  }
+
+  const capturedTotal = booking.stripeAmountTotal ?? input.chargeAmountCents
+  const fullyRefunded =
+    capturedTotal > 0 && input.amountRefundedCents >= capturedTotal
+
+  if (
+    fullyRefunded &&
+    booking.stripePaymentStatus !== StripePaymentStatus.REFUNDED
+  ) {
+    await tx.booking.update({
+      where: { id: booking.id },
+      data: { stripePaymentStatus: StripePaymentStatus.REFUNDED },
+    })
+  }
+
+  return { handled: true }
+}

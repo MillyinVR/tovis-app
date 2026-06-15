@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   applyStripePaymentSucceededInTransaction: vi.fn(),
   applyStripePaymentFailedInTransaction: vi.fn(),
   applyStripeCheckoutSessionStatusInTransaction: vi.fn(),
+  reconcileChargeRefundInTransaction: vi.fn(),
 
   safeError: vi.fn((error: unknown) => ({
     name: error instanceof Error ? error.name : 'NonErrorThrown',
@@ -66,6 +67,10 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
     mocks.applyStripePaymentFailedInTransaction,
   applyStripeCheckoutSessionStatusInTransaction:
     mocks.applyStripeCheckoutSessionStatusInTransaction,
+}))
+
+vi.mock('@/lib/booking/refunds', () => ({
+  reconcileChargeRefundInTransaction: mocks.reconcileChargeRefundInTransaction,
 }))
 
 vi.mock('@/lib/security/logging', () => ({
@@ -275,6 +280,8 @@ describe('POST /api/webhooks/stripe', () => {
       bookingCompleted: false,
       meta: { mutated: true, noOp: false },
     })
+
+    mocks.reconcileChargeRefundInTransaction.mockResolvedValue({ handled: true })
 
     mocks.prismaTransaction.mockImplementation(
       async (
@@ -799,5 +806,97 @@ describe('POST /api/webhooks/stripe', () => {
     })
 
     consoleErrorSpy.mockRestore()
+  })
+
+  it('reconciles a charge.refunded event through the refund service', async () => {
+    mocks.constructEvent.mockReturnValueOnce(
+      makeStripeEvent({
+        id: 'evt_charge_refunded_1',
+        type: 'charge.refunded',
+        object: {
+          id: 'ch_test_1',
+          object: 'charge',
+          payment_intent: 'pi_test_123',
+          amount: 10000,
+          amount_refunded: 10000,
+          refunds: {
+            object: 'list',
+            data: [{ id: 're_1', status: 'succeeded', amount: 10000 }],
+          },
+        },
+      }),
+    )
+
+    const response = await POST(makeWebhookRequest())
+
+    expect(mocks.reconcileChargeRefundInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        paymentIntentId: 'pi_test_123',
+        amountRefundedCents: 10000,
+        chargeAmountCents: 10000,
+        refunds: [{ id: 're_1', status: 'succeeded', amountCents: 10000 }],
+      },
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      stripeEventId: 'evt_charge_refunded_1',
+      eventType: 'charge.refunded',
+      handled: true,
+      message: 'charge.refunded reconciled.',
+    })
+  })
+
+  it('returns handled=false when the charge.refunded booking is not found', async () => {
+    mocks.reconcileChargeRefundInTransaction.mockResolvedValueOnce({
+      handled: false,
+    })
+
+    mocks.constructEvent.mockReturnValueOnce(
+      makeStripeEvent({
+        id: 'evt_charge_refunded_2',
+        type: 'charge.refunded',
+        object: {
+          id: 'ch_test_2',
+          object: 'charge',
+          payment_intent: 'pi_unknown',
+          amount: 5000,
+          amount_refunded: 5000,
+          refunds: { object: 'list', data: [] },
+        },
+      }),
+    )
+
+    const response = await POST(makeWebhookRequest())
+    const body = await response.json()
+
+    expect(body.handled).toBe(false)
+    expect(body.message).toBe('charge.refunded booking not found.')
+  })
+
+  it('does not call the refund service when charge.refunded has no payment_intent', async () => {
+    mocks.constructEvent.mockReturnValueOnce(
+      makeStripeEvent({
+        id: 'evt_charge_refunded_3',
+        type: 'charge.refunded',
+        object: {
+          id: 'ch_test_3',
+          object: 'charge',
+          payment_intent: null,
+          amount: 5000,
+          amount_refunded: 5000,
+          refunds: { object: 'list', data: [] },
+        },
+      }),
+    )
+
+    const response = await POST(makeWebhookRequest())
+    const body = await response.json()
+
+    expect(mocks.reconcileChargeRefundInTransaction).not.toHaveBeenCalled()
+    expect(body.handled).toBe(false)
+    expect(body.message).toBe('charge.refunded missing payment_intent.')
   })
 })

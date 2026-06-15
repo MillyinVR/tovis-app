@@ -9,6 +9,7 @@ lib/boards/index.test.ts|as unknown as|return await callback(db as unknown as Pr
 lib/boards/index.test.ts|as unknown as|return db as unknown as Prisma.TransactionClient
 lib/boards/index.test.ts|as unknown as|return db as unknown as PrismaClient
 lib/booking/holdPolicy.overlapContract.test.ts|as unknown as|} as unknown as Prisma.TransactionClient
+lib/booking/refunds.test.ts|as unknown as|return txRef.current as unknown as Prisma.TransactionClient
 lib/booking/schedulingConflicts.test.ts|as unknown as|return tx as unknown as PrismaTransactionClient
 lib/booking/writeBoundary.aftercareRebookSlot.test.ts|as unknown as|const mockedPrisma = prisma as unknown as {
 lib/follows/index.test.ts|as unknown as|return db as unknown as Prisma.TransactionClient
