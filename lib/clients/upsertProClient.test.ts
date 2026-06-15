@@ -31,6 +31,15 @@ vi.mock('@/lib/prisma', () => ({
   prisma: mocks.prisma,
 }))
 
+// Deterministic stand-in for the AEAD dual-write so assertions do not depend on
+// a keyring being present in the test env (CI has none).
+vi.mock('@/lib/security/phonePrivacy', () => ({
+  buildPhoneEncryptionWriteData: (input: { phone?: unknown }) =>
+    input.phone === undefined
+      ? {}
+      : { phoneEncrypted: { encrypted: input.phone } },
+}))
+
 import { upsertProClient } from './upsertProClient'
 
 type TestUser = {
@@ -485,6 +494,7 @@ describe('upsertProClient', () => {
           phone: '+16195551234',
           phoneHashV2: phoneLookupHashV2('+16195551234')?.hash,
           phoneHashKeyVersion: CONTACT_LOOKUP_HMAC_KEY_VERSION,
+          phoneEncrypted: { encrypted: '+16195551234' },
         }),
       }),
     )
@@ -572,6 +582,7 @@ describe('upsertProClient', () => {
           ...expectedEmailLookupData('tori@example.com'),
           phone: '+16195551234',
           ...expectedPhoneLookupData('+16195551234'),
+          phoneEncrypted: { encrypted: '+16195551234' },
         }),
       }),
     )

@@ -47,6 +47,15 @@ vi.mock('@/lib/security/contactLookup', () => ({
     mocks.buildClientProfileContactLookupData,
 }))
 
+// Deterministic stand-in for the AEAD dual-write so the assertion does not
+// depend on a keyring being present in the test env (CI has none).
+vi.mock('@/lib/security/phonePrivacy', () => ({
+  buildPhoneEncryptionWriteData: (input: { phone?: unknown }) =>
+    input.phone === undefined
+      ? {}
+      : { phoneEncrypted: { encrypted: input.phone } },
+}))
+
 import { GET, PATCH } from './route'
 
 function makeAuthOk() {
@@ -408,6 +417,7 @@ describe('app/api/client/settings/route', () => {
         lastName: 'Morales',
         phone: '+15559990000',
         phoneLookupHash: 'phone_lookup_hash_1',
+        phoneEncrypted: { encrypted: '+15559990000' },
         avatarUrl: 'https://example.com/new-avatar.png',
         dateOfBirth: new Date('1992-08-10T12:00:00.000Z'),
       },
@@ -438,6 +448,7 @@ describe('app/api/client/settings/route', () => {
       data: {
         phone: null,
         phoneLookupHash: 'phone_lookup_hash_1',
+        phoneEncrypted: { encrypted: null },
         avatarUrl: null,
         dateOfBirth: null,
       },

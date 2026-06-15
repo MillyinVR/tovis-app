@@ -24,6 +24,7 @@ import {
   buildClientProfileContactLookupData,
   buildUserContactLookupData,
 } from '@/lib/security/contactLookup'
+import { buildPhoneEncryptionWriteData } from '@/lib/security/phonePrivacy'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -39,6 +40,7 @@ async function updateUserPhone(args: {
       data: {
         phone: args.phone,
         ...buildUserContactLookupData({ phone: args.phone }),
+        ...buildPhoneEncryptionWriteData({ phone: args.phone }), // pii-plaintext-read-ok: encrypts the same validated input phone as the adjacent lookup-hash helper
         phoneVerifiedAt: null,
       },
     })
@@ -49,6 +51,7 @@ async function updateUserPhone(args: {
         data: {
           phone: args.phone,
           ...buildClientProfileContactLookupData({ phone: args.phone }),
+          ...buildPhoneEncryptionWriteData({ phone: args.phone }), // pii-plaintext-read-ok: encrypts the same validated input phone as the adjacent lookup-hash helper
           phoneVerifiedAt: null,
         },
       })

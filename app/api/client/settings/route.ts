@@ -10,6 +10,7 @@ import {
   sortClientAddresses,
 } from '@/lib/clientAddresses/addressInput'
 import { buildClientProfileContactLookupData } from '@/lib/security/contactLookup'
+import { buildPhoneEncryptionWriteData } from '@/lib/security/phonePrivacy'
 import { normalizeSettingsPhoneFromBody } from '@/lib/security/settingsContactInput'
 
 export const dynamic = 'force-dynamic'
@@ -194,6 +195,7 @@ export async function PATCH(req: Request) {
           ? {
               phone,
               ...buildClientProfileContactLookupData({ phone }),
+              ...buildPhoneEncryptionWriteData({ phone }),
             }
           : {}),
         ...(avatarUrl !== undefined ? { avatarUrl } : {}),

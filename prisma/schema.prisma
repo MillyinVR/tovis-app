@@ -922,6 +922,11 @@ model User {
   phone               String?   @unique @db.VarChar(32)
   phoneHashV2         String?   @unique @db.VarChar(128)
   phoneHashKeyVersion Int?
+  // AEAD-encrypted envelope for the displayable phone (expand→contract dual-write;
+  // see docs/security/ticket-encrypt-phone-at-rest.md). The plaintext column above
+  // remains during burn-in and is dropped in the contract migration. The lookup
+  // hash (phoneHashV2) is the separate, untouched query anchor.
+  phoneEncrypted      Json?
   phoneVerifiedAt     DateTime?
   emailVerifiedAt     DateTime?
 
@@ -1096,6 +1101,9 @@ model ClientProfile {
   phone               String?   @unique @db.VarChar(32)
   phoneHashV2         String?   @unique @db.VarChar(128)
   phoneHashKeyVersion Int?
+  // AEAD-encrypted envelope for the displayable phone (expand→contract dual-write;
+  // see docs/security/ticket-encrypt-phone-at-rest.md). Mirrors User.phoneEncrypted.
+  phoneEncrypted      Json?
   phoneVerifiedAt     DateTime?
   avatarUrl           String?
 
