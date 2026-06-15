@@ -9,6 +9,7 @@ import {
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { AllergySeverity } from '@prisma/client'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { encryptedNoteInput } from '@/lib/security/notesPrivacy'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,6 +50,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         clientId,
         label,
         description: description ?? null,
+        // Dual-write: plaintext (above) + AEAD envelope during burn-in.
+        labelEncrypted: encryptedNoteInput(label),
+        descriptionEncrypted: encryptedNoteInput(description),
         severity,
         recordedByProfessionalId: professionalId,
       },
