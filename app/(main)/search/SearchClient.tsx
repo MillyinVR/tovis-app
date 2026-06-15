@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LocateFixed, MapPin, Search, X } from 'lucide-react'
 import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
+import { clampInt } from '@/lib/pick'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import {
   VIEWER_RADIUS_DEFAULT_MILES,
@@ -62,12 +63,6 @@ function pickString(x: unknown): string | null {
 function pickNumber(x: unknown): number | null {
   return typeof x === 'number' && Number.isFinite(x) ? x : null
 }
-
-function clampInt(n: number, min: number, max: number) {
-  const x = Math.trunc(n)
-  return Math.min(Math.max(x, min), max)
-}
-
 
 function parsePredictions(raw: unknown): PlacePrediction[] {
   if (!isRecord(raw)) return []
