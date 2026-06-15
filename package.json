@@ -60,6 +60,7 @@
     "verify:privacy-phase1": "pnpm check:privacy-guards && pnpm test:privacy",
     "backfill:address-encryption": "tsx prisma/scripts/backfillAddressEncryption.ts",
     "backfill:notes-encryption": "tsx prisma/scripts/backfillNotesEncryption.ts",
+    "backfill:phone-encryption": "tsx prisma/scripts/backfillPhoneEncryption.ts",
     "backfill:contact-hash-v2": "tsx prisma/scripts/backfillContactHashV2.ts",
     "backfill:contact-hash-v2:test": "DATABASE_URL=postgresql://postgres:postgres@localhost:5433/tovis_test DIRECT_URL=postgresql://postgres:postgres@localhost:5433/tovis_test dotenv -e .env.local -- pnpm backfill:contact-hash-v2 -- --write",
     "seed:booking-overrides": "tsx prisma/seeds/bookingOverridePermissions.ts",
