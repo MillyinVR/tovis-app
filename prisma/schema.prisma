@@ -355,6 +355,27 @@ enum StripePaymentStatus {
   DISPUTED
 }
 
+// Lifecycle of a single (possibly partial) refund against a booking's captured
+// Stripe payment. A booking may have several BookingRefund rows (partial
+// refunds), so the per-refund state lives here while Booking.stripePaymentStatus
+// flips to REFUNDED only once the cumulative refunded amount reaches the total.
+enum BookingRefundStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELED
+}
+
+// What caused a refund to be issued, for audit + reporting.
+//   AUTO_CANCELLATION — fired automatically by the cancellation policy
+//                       (pro/admin cancel, or client cancel ≥24h out).
+//   DISCRETIONARY     — issued explicitly by a pro or admin (the <24h window
+//                       and any manual/partial refund).
+enum BookingRefundTrigger {
+  AUTO_CANCELLATION
+  DISCRETIONARY
+}
+
 enum BookingCloseoutAuditAction {
   SESSION_STARTED
   SESSION_FINISHED
@@ -2135,6 +2156,7 @@ model Booking {
   notifications     Notification[]
   overrideAuditLogs BookingOverrideAuditLog[]
   closeoutAuditLogs BookingCloseoutAuditLog[]
+  refunds           BookingRefund[]
 
   sessionStep SessionStep @default(NONE)
 
@@ -2164,6 +2186,46 @@ model Booking {
   @@index([paymentProvider, checkoutStatus])
   @@index([proTenantId, scheduledFor])
   @@index([clientHomeTenantId])
+}
+
+// A single refund issued against a booking's captured Stripe payment. Multiple
+// rows per booking support partial + repeated refunds; the cumulative SUCCEEDED
+// amount drives Booking.stripePaymentStatus. stripeRefundId is unique so the
+// charge.refunded webhook can reconcile back to the exact row.
+model BookingRefund {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  // Requested amount in the booking's Stripe currency minor units (cents).
+  amountCents Int
+  currency    String @db.VarChar(3)
+
+  status  BookingRefundStatus  @default(PENDING)
+  trigger BookingRefundTrigger
+
+  // reverseTransfer claws the destination transfer back from the pro (client made
+  // whole); applicationFeeRefunded records whether a platform fee was also refunded
+  // (only ever true once application fees are charged — currently none are).
+  reverseTransfer        Boolean @default(true)
+  applicationFeeRefunded Boolean @default(false)
+
+  // Audit. Null initiatedBy* for automatic policy refunds with no explicit actor.
+  initiatedByUserId String?
+  initiatedByRole   Role?
+  reason            String? @db.VarChar(500)
+
+  // Stripe linkage. stripeRefundId is unique → idempotent create + webhook reconcile.
+  stripePaymentIntentId String?
+  stripeRefundId        String? @unique
+  failureCode           String?
+  failureMessage        String? @db.VarChar(500)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([bookingId])
+  @@index([status])
 }
 
 model BookingOverrideAuditLog {

@@ -5,6 +5,13 @@ const ROOT = process.cwd()
 
 const ALLOWED_FILES = new Set([
   normalize('lib/booking/writeBoundary.ts'),
+  // Refund service. Owns the BookingRefund table and the refund-settle
+  // transaction (under its own per-booking advisory lock). Its only Booking
+  // write is the narrow payment field Booking.stripePaymentStatus -> REFUNDED
+  // when a booking is fully refunded; it never writes the lifecycle fields
+  // (status / sessionStep), which check-lifecycle-field-writes.mjs enforces
+  // independently. See lib/booking/refunds.ts.
+  normalize('lib/booking/refunds.ts'),
   // Internal helper module of the write boundary. Only called from
   // writeBoundary.ts (`deleteExpiredHoldsForProfessional`,
   // `deleteActiveHoldsForClient`); not a user-facing surface.

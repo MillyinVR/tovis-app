@@ -1,0 +1,363 @@
+// lib/booking/refunds.ts
+//
+// Connect-aware refund service for booking payments. Single chokepoint for every
+// refund (automatic cancellation refunds + discretionary pro/admin refunds).
+//
+// Payment model: checkout creates a DESTINATION charge on the platform account
+// (payment_intent_data.transfer_data.destination = the pro's connected account)
+// with NO application_fee_amount today. So a refund is a single platform-side
+// call on the PaymentIntent with reverse_transfer:true to claw the funds back
+// from the pro (client made whole). refund_application_fee is only sent when an
+// application fee actually exists, so this stays correct if fees are added later.
+//
+// Money-correctness invariants:
+//   - Only ever refund a genuinely captured Stripe payment.
+//   - Never refund more than the remaining (captured − already PENDING/SUCCEEDED).
+//   - A per-booking advisory lock serializes concurrent refunds so two callers
+//     can't both reserve the same remaining amount.
+//   - The Stripe call runs OUTSIDE any DB transaction, made idempotent by a key
+//     derived from the reserved BookingRefund row id (safe to retry).
+
+import {
+  BookingRefundStatus,
+  BookingRefundTrigger,
+  PaymentProvider,
+  Prisma,
+  Role,
+  StripePaymentStatus,
+  type BookingRefund,
+} from '@prisma/client'
+import Stripe from 'stripe'
+import * as Sentry from '@sentry/nextjs'
+
+import { prisma } from '@/lib/prisma'
+import { getStripe } from '@/lib/stripe/server'
+import { safeError } from '@/lib/security/logging'
+
+// Distinct from the schedule lock namespace (scheduleLock.ts = 41021) so refund
+// serialization never contends with booking-schedule locks.
+const REFUND_LOCK_NAMESPACE = 41022
+
+export type RefundActor = {
+  userId: string | null
+  role: Role | null
+}
+
+export type RefundBookingInput = {
+  bookingId: string
+  trigger: BookingRefundTrigger
+  /** Omit / null => refund the full remaining amount. */
+  amountCents?: number | null
+  reason?: string | null
+  actor?: RefundActor | null
+}
+
+export type RefundSkipReason =
+  | 'NOT_STRIPE_PAYMENT'
+  | 'PAYMENT_NOT_CAPTURED'
+  | 'NOTHING_TO_REFUND'
+
+export type RefundInvalidCode = 'BOOKING_NOT_FOUND' | 'INVALID_AMOUNT'
+
+export type RefundResult =
+  | { outcome: 'REFUNDED'; refund: BookingRefund; bookingFullyRefunded: boolean }
+  | { outcome: 'SKIPPED'; reason: RefundSkipReason }
+  | { outcome: 'INVALID'; code: RefundInvalidCode; message: string }
+  | { outcome: 'FAILED'; refund: BookingRefund; message: string }
+
+const REFUNDABLE_BOOKING_SELECT = {
+  id: true,
+  paymentProvider: true,
+  stripePaymentIntentId: true,
+  stripePaymentStatus: true,
+  stripeAmountTotal: true,
+  stripeApplicationFeeAmount: true,
+  stripeCurrency: true,
+} satisfies Prisma.BookingSelect
+
+type RefundableBooking = Prisma.BookingGetPayload<{
+  select: typeof REFUNDABLE_BOOKING_SELECT
+}>
+
+const RESERVING_STATUSES: BookingRefundStatus[] = [
+  BookingRefundStatus.PENDING,
+  BookingRefundStatus.SUCCEEDED,
+]
+
+async function lockBookingForRefund(
+  tx: Prisma.TransactionClient,
+  bookingId: string,
+): Promise<void> {
+  await tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      ${REFUND_LOCK_NAMESPACE}::int4,
+      hashtext(${bookingId})::int4
+    )
+  `
+}
+
+/** Sum of amounts that are already committed against the captured total. */
+async function sumReservedCents(
+  tx: Prisma.TransactionClient,
+  bookingId: string,
+): Promise<number> {
+  const reserved = await tx.bookingRefund.aggregate({
+    where: { bookingId, status: { in: RESERVING_STATUSES } },
+    _sum: { amountCents: true },
+  })
+
+  return reserved._sum.amountCents ?? 0
+}
+
+function isCapturedStripePayment(booking: RefundableBooking): boolean {
+  return (
+    booking.paymentProvider === PaymentProvider.STRIPE &&
+    booking.stripePaymentStatus === StripePaymentStatus.SUCCEEDED &&
+    typeof booking.stripePaymentIntentId === 'string' &&
+    booking.stripePaymentIntentId.length > 0 &&
+    typeof booking.stripeAmountTotal === 'number' &&
+    booking.stripeAmountTotal > 0
+  )
+}
+
+type Reservation =
+  | { kind: 'reserved'; refund: BookingRefund; paymentIntentId: string; refundApplicationFee: boolean }
+  | { kind: 'skip'; reason: RefundSkipReason }
+  | { kind: 'invalid'; code: RefundInvalidCode; message: string }
+
+/**
+ * Validate eligibility, compute the refundable remainder, and atomically reserve
+ * a PENDING BookingRefund row under a per-booking advisory lock. Returns the
+ * reserved row (no Stripe call yet) or a skip/invalid outcome.
+ */
+async function reserveRefund(input: RefundBookingInput): Promise<Reservation> {
+  return prisma.$transaction(async (tx) => {
+    await lockBookingForRefund(tx, input.bookingId)
+
+    const booking = await tx.booking.findUnique({
+      where: { id: input.bookingId },
+      select: REFUNDABLE_BOOKING_SELECT,
+    })
+
+    if (!booking) {
+      return {
+        kind: 'invalid',
+        code: 'BOOKING_NOT_FOUND',
+        message: 'Booking not found.',
+      }
+    }
+
+    if (!isCapturedStripePayment(booking)) {
+      // Manual/unpaid/not-yet-captured bookings have nothing to refund.
+      return {
+        kind: 'skip',
+        reason:
+          booking.paymentProvider !== PaymentProvider.STRIPE
+            ? 'NOT_STRIPE_PAYMENT'
+            : 'PAYMENT_NOT_CAPTURED',
+      }
+    }
+
+    const capturedTotal = booking.stripeAmountTotal as number
+    const reserved = await sumReservedCents(tx, input.bookingId)
+    const remaining = capturedTotal - reserved
+
+    if (remaining <= 0) {
+      return { kind: 'skip', reason: 'NOTHING_TO_REFUND' }
+    }
+
+    const requested =
+      input.amountCents == null ? remaining : Math.trunc(input.amountCents)
+
+    if (!Number.isFinite(requested) || requested <= 0) {
+      return {
+        kind: 'invalid',
+        code: 'INVALID_AMOUNT',
+        message: 'Refund amount must be a positive number of cents.',
+      }
+    }
+
+    if (requested > remaining) {
+      return {
+        kind: 'invalid',
+        code: 'INVALID_AMOUNT',
+        message: `Refund amount ${requested} exceeds the remaining refundable ${remaining}.`,
+      }
+    }
+
+    const applicationFee = booking.stripeApplicationFeeAmount ?? 0
+    const refundApplicationFee = applicationFee > 0
+
+    const refund = await tx.bookingRefund.create({
+      data: {
+        bookingId: input.bookingId,
+        amountCents: requested,
+        currency: (booking.stripeCurrency ?? 'usd').toLowerCase(),
+        status: BookingRefundStatus.PENDING,
+        trigger: input.trigger,
+        reverseTransfer: true,
+        applicationFeeRefunded: false,
+        initiatedByUserId: input.actor?.userId ?? null,
+        initiatedByRole: input.actor?.role ?? null,
+        reason: input.reason ?? null,
+        stripePaymentIntentId: booking.stripePaymentIntentId,
+      },
+    })
+
+    return {
+      kind: 'reserved',
+      refund,
+      paymentIntentId: booking.stripePaymentIntentId as string,
+      refundApplicationFee,
+    }
+  })
+}
+
+/**
+ * Mark a reserved refund SUCCEEDED and flip the booking to REFUNDED once the
+ * cumulative SUCCEEDED amount reaches the captured total. Re-locks the booking so
+ * concurrent partial refunds settle the booking status consistently.
+ */
+async function settleSucceededRefund(args: {
+  refundId: string
+  bookingId: string
+  stripeRefundId: string
+  refundApplicationFee: boolean
+}): Promise<{ refund: BookingRefund; bookingFullyRefunded: boolean }> {
+  return prisma.$transaction(async (tx) => {
+    await lockBookingForRefund(tx, args.bookingId)
+
+    const refund = await tx.bookingRefund.update({
+      where: { id: args.refundId },
+      data: {
+        status: BookingRefundStatus.SUCCEEDED,
+        stripeRefundId: args.stripeRefundId,
+        applicationFeeRefunded: args.refundApplicationFee,
+        failureCode: null,
+        failureMessage: null,
+      },
+    })
+
+    const booking = await tx.booking.findUnique({
+      where: { id: args.bookingId },
+      select: { stripeAmountTotal: true },
+    })
+
+    const succeeded = await tx.bookingRefund.aggregate({
+      where: { bookingId: args.bookingId, status: BookingRefundStatus.SUCCEEDED },
+      _sum: { amountCents: true },
+    })
+
+    const refundedTotal = succeeded._sum.amountCents ?? 0
+    const capturedTotal = booking?.stripeAmountTotal ?? 0
+    const bookingFullyRefunded = capturedTotal > 0 && refundedTotal >= capturedTotal
+
+    if (bookingFullyRefunded) {
+      await tx.booking.update({
+        where: { id: args.bookingId },
+        data: { stripePaymentStatus: StripePaymentStatus.REFUNDED },
+      })
+    }
+
+    return { refund, bookingFullyRefunded }
+  })
+}
+
+async function markFailedRefund(args: {
+  refundId: string
+  failureCode: string | null
+  failureMessage: string
+}): Promise<BookingRefund> {
+  return prisma.bookingRefund.update({
+    where: { id: args.refundId },
+    data: {
+      status: BookingRefundStatus.FAILED,
+      failureCode: args.failureCode,
+      failureMessage: args.failureMessage.slice(0, 500),
+    },
+  })
+}
+
+/**
+ * Issue (or attempt) a refund against a booking's captured Stripe payment.
+ *
+ * Returns a structured result; it never throws for the expected money paths:
+ *   - REFUNDED: the Stripe refund succeeded.
+ *   - SKIPPED:  nothing to refund (not a captured Stripe payment, or already
+ *               fully refunded) — benign for the automatic cancellation path.
+ *   - INVALID:  caller error (unknown booking, bad amount) — a 4xx for the
+ *               discretionary endpoint.
+ *   - FAILED:   the Stripe call failed after a row was reserved; the row is
+ *               marked FAILED (reservation released) and is retryable.
+ */
+export async function refundBookingPayment(
+  input: RefundBookingInput,
+): Promise<RefundResult> {
+  const reservation = await reserveRefund(input)
+
+  if (reservation.kind === 'skip') {
+    return { outcome: 'SKIPPED', reason: reservation.reason }
+  }
+
+  if (reservation.kind === 'invalid') {
+    return {
+      outcome: 'INVALID',
+      code: reservation.code,
+      message: reservation.message,
+    }
+  }
+
+  const { refund, paymentIntentId, refundApplicationFee } = reservation
+
+  let stripeRefund: Stripe.Refund
+  try {
+    const stripe = getStripe()
+    stripeRefund = await stripe.refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        amount: refund.amountCents,
+        reverse_transfer: true,
+        ...(refundApplicationFee ? { refund_application_fee: true } : {}),
+        metadata: {
+          bookingId: input.bookingId,
+          bookingRefundId: refund.id,
+          trigger: input.trigger,
+        },
+      },
+      { idempotencyKey: `tovis:refund:${refund.id}` },
+    )
+  } catch (error) {
+    const failureCode =
+      error instanceof Stripe.errors.StripeError ? error.code ?? error.type : null
+    const failureMessage =
+      error instanceof Error ? error.message : 'Unknown Stripe refund error.'
+
+    console.error('refundBookingPayment: Stripe refund failed', {
+      bookingId: input.bookingId,
+      refundId: refund.id,
+      error: safeError(error),
+    })
+    Sentry.captureException(error)
+
+    const failed = await markFailedRefund({
+      refundId: refund.id,
+      failureCode,
+      failureMessage,
+    })
+
+    return { outcome: 'FAILED', refund: failed, message: failureMessage }
+  }
+
+  const settled = await settleSucceededRefund({
+    refundId: refund.id,
+    bookingId: input.bookingId,
+    stripeRefundId: stripeRefund.id,
+    refundApplicationFee,
+  })
+
+  return {
+    outcome: 'REFUNDED',
+    refund: settled.refund,
+    bookingFullyRefunded: settled.bookingFullyRefunded,
+  }
+}
