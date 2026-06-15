@@ -3,13 +3,8 @@
 import type { NextRequest } from 'next/server'
 import { Role } from '@prisma/client'
 
-import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
-import {
-  beginRouteIdempotency,
-  completeRouteIdempotency,
-  failStartedRouteIdempotency,
-  isRouteIdempotencyHandled,
-} from '@/app/api/_utils/idempotency'
+import { jsonFail, requireClient } from '@/app/api/_utils'
+import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
@@ -200,18 +195,7 @@ function buildCheckoutProductsResponseBody(args: {
   })
 }
 
-async function failCheckoutProductsIdempotency(
-  idempotencyRecordId: string | null,
-): Promise<void> {
-  await failStartedRouteIdempotency({
-    idempotencyRecordId,
-    operation: ROUTE_OPERATION,
-  })
-}
-
 export async function POST(req: NextRequest, props: RouteContext) {
-  let idempotencyRecordId: string | null = null
-
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
@@ -242,55 +226,45 @@ export async function POST(req: NextRequest, props: RouteContext) {
 
     const requestId = readRequestId(req)
 
-    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
-      request: req,
-      actor: {
-        actorUserId,
-        actorRole: Role.CLIENT,
+    return await withRouteIdempotency<JsonObjectPayload>(
+      {
+        request: req,
+        actor: {
+          actorUserId,
+          actorRole: Role.CLIENT,
+        },
+        route: IDEMPOTENCY_ROUTES.CLIENT_CHECKOUT_PRODUCTS,
+        requestLabel: 'client checkout products',
+        requestBody: buildIdempotencyRequestBody({
+          actorUserId,
+          clientId: auth.clientId,
+          bookingId,
+          items: parsedItems.value,
+        }),
+        messages: {
+          missingKey: 'Missing idempotency key.',
+          inProgress:
+            'A matching checkout products request is already in progress.',
+          conflict:
+            'This idempotency key was already used with a different request body.',
+        },
+        operation: ROUTE_OPERATION,
       },
-      route: IDEMPOTENCY_ROUTES.CLIENT_CHECKOUT_PRODUCTS,
-      requestLabel: 'client checkout products',
-      requestBody: buildIdempotencyRequestBody({
-        actorUserId,
-        clientId: auth.clientId,
-        bookingId,
-        items: parsedItems.value,
-      }),
-      messages: {
-        missingKey: 'Missing idempotency key.',
-        inProgress:
-          'A matching checkout products request is already in progress.',
-        conflict:
-          'This idempotency key was already used with a different request body.',
+      async (idem) => {
+        const result = await upsertClientBookingCheckoutProducts({
+          bookingId,
+          clientId: auth.clientId,
+          items: parsedItems.value,
+          requestId,
+          idempotencyKey: idem.idempotencyKey,
+        })
+
+        const responseBody = buildCheckoutProductsResponseBody({ result })
+
+        return { status: 200, body: responseBody }
       },
-    })
-
-    if (isRouteIdempotencyHandled(idempotency)) {
-      return idempotency.response
-    }
-
-    idempotencyRecordId = idempotency.idempotencyRecordId
-
-    const result = await upsertClientBookingCheckoutProducts({
-      bookingId,
-      clientId: auth.clientId,
-      items: parsedItems.value,
-      requestId,
-      idempotencyKey: idempotency.idempotencyKey,
-    })
-
-    const responseBody = buildCheckoutProductsResponseBody({ result })
-
-    await completeRouteIdempotency({
-      idempotencyRecordId,
-      responseStatus: 200,
-      responseBody,
-    })
-
-    return jsonOk(responseBody, 200)
+    )
   } catch (error: unknown) {
-    await failCheckoutProductsIdempotency(idempotencyRecordId)
-
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,

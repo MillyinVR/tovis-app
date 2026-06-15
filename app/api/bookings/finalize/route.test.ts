@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   createProNotification: vi.fn(),
   captureBookingException: vi.fn(),
 
+  withRouteIdempotency: vi.fn(),
   beginRouteIdempotency: vi.fn(),
   completeRouteIdempotency: vi.fn(),
   failStartedRouteIdempotency: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock('@/app/api/_utils/responses', () => ({
 }))
 
 vi.mock('@/app/api/_utils/idempotency', () => ({
+  withRouteIdempotency: mocks.withRouteIdempotency,
   beginRouteIdempotency: mocks.beginRouteIdempotency,
   completeRouteIdempotency: mocks.completeRouteIdempotency,
   failStartedRouteIdempotency: mocks.failStartedRouteIdempotency,
@@ -172,6 +174,49 @@ function expectIdempotencyStarted(key = 'idem_finalize_1'): void {
 
   mocks.isRouteIdempotencyHandled.mockImplementation(
     (result: { kind: string }) => result.kind === 'handled',
+  )
+
+  // The route now calls withRouteIdempotency; this mock reproduces the real
+  // wrapper by driving the same begin/complete/failStarted helpers, so the
+  // existing lifecycle assertions still apply.
+  mocks.withRouteIdempotency.mockImplementation(
+    async (
+      args: { operation: string },
+      run: (ctx: {
+        idempotencyKey: string
+        idempotencyRecordId: string
+        requestHash: string
+      }) => Promise<{ status: number; body: Record<string, unknown> }>,
+    ) => {
+      const begin = await mocks.beginRouteIdempotency(args)
+
+      if (mocks.isRouteIdempotencyHandled(begin)) {
+        return begin.response
+      }
+
+      try {
+        const { status, body } = await run({
+          idempotencyKey: begin.idempotencyKey,
+          idempotencyRecordId: begin.idempotencyRecordId,
+          requestHash: begin.requestHash,
+        })
+
+        await mocks.completeRouteIdempotency({
+          idempotencyRecordId: begin.idempotencyRecordId,
+          responseStatus: status,
+          responseBody: body,
+        })
+
+        return mocks.jsonOk(body, status)
+      } catch (error) {
+        await mocks.failStartedRouteIdempotency({
+          idempotencyRecordId: begin.idempotencyRecordId,
+          operation: args.operation,
+        })
+
+        throw error
+      }
+    },
   )
 }
 
@@ -802,6 +847,7 @@ describe('POST /api/bookings/finalize', () => {
         conflict:
           'This idempotency key was already used with a different request body.',
       },
+      operation: 'POST /api/bookings/finalize',
     })
 
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
@@ -1483,10 +1529,9 @@ describe('POST /api/bookings/finalize', () => {
 
     expect(mocks.beginRouteIdempotency).not.toHaveBeenCalled()
     expect(mocks.markAftercareAccessTokenUsed).not.toHaveBeenCalled()
-    expect(mocks.failStartedRouteIdempotency).toHaveBeenCalledWith({
-      idempotencyRecordId: null,
-      operation: 'POST /api/bookings/finalize',
-    })
+    // Error is thrown before withRouteIdempotency is entered, so no record is
+    // started and nothing needs to be failed (the wrapper owns failStarted).
+    expect(mocks.failStartedRouteIdempotency).not.toHaveBeenCalled()
   })
 
   it('maps BookingError from finalizeBookingFromHold and marks idempotency failed without marking token used', async () => {

@@ -24,12 +24,7 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { upsertBookingAftercare } from '@/lib/booking/writeBoundary'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
-import {
-  beginRouteIdempotency,
-  completeRouteIdempotency,
-  failStartedRouteIdempotency,
-  isRouteIdempotencyHandled,
-} from '@/app/api/_utils/idempotency'
+import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { proRateLimitKey } from '@/lib/rateLimit/identity'
@@ -881,8 +876,6 @@ export async function GET(_req: Request, ctx: RouteContext) {
 }
 
 export async function POST(req: Request, ctx: RouteContext) {
-  let idempotencyRecordId: string | null = null
-
   try {
     const auth = await requirePro()
     if (!auth.ok) return auth.res
@@ -923,73 +916,60 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     const requestMeta = readRequestMeta(req)
 
-    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
-      request: req,
-      actor: {
-        actorUserId,
-        actorRole: Role.PRO,
+    return await withRouteIdempotency<JsonObjectPayload>(
+      {
+        request: req,
+        actor: {
+          actorUserId,
+          actorRole: Role.PRO,
+        },
+        route: IDEMPOTENCY_ROUTES.BOOKING_AFTERCARE_SEND,
+        requestLabel: 'aftercare',
+        requestBody: buildIdempotencyRequestBody({
+          bookingId,
+          professionalId,
+          actorUserId,
+          parsedBody: parsedBody.value,
+        }),
+        messages: {
+          missingKey: 'Missing idempotency key.',
+          inProgress: 'A matching aftercare request is already in progress.',
+          conflict:
+            'This idempotency key was already used with a different request body.',
+        },
+        operation: 'POST /api/pro/bookings/[id]/aftercare',
       },
-      route: IDEMPOTENCY_ROUTES.BOOKING_AFTERCARE_SEND,
-      requestLabel: 'aftercare',
-      requestBody: buildIdempotencyRequestBody({
-        bookingId,
-        professionalId,
-        actorUserId,
-        parsedBody: parsedBody.value,
-      }),
-      messages: {
-        missingKey: 'Missing idempotency key.',
-        inProgress: 'A matching aftercare request is already in progress.',
-        conflict:
-          'This idempotency key was already used with a different request body.',
+      async (idem) => {
+        const result = await upsertBookingAftercare({
+          bookingId,
+          professionalId,
+          actorUserId,
+          notes: parsedBody.value.notes,
+          rebookMode: parsedBody.value.normalizedRebook.rebookMode,
+          rebookedFor: parsedBody.value.normalizedRebook.rebookedFor,
+          rebookWindowStart: parsedBody.value.normalizedRebook.rebookWindowStart,
+          rebookWindowEnd: parsedBody.value.normalizedRebook.rebookWindowEnd,
+          rebookSlot: parsedBody.value.normalizedRebook.rebookSlot,
+          createRebookReminder: parsedBody.value.createRebookReminder,
+          rebookReminderDaysBefore: parsedBody.value.rebookReminderDaysBefore,
+          createProductReminder: parsedBody.value.createProductReminder,
+          productReminderDaysAfter: parsedBody.value.productReminderDaysAfter,
+          recommendedProducts: parsedBody.value.recommendedProducts,
+          sendToClient: parsedBody.value.sendToClient,
+          version: parsedBody.value.version,
+          requestId: requestMeta.requestId,
+          idempotencyKey: idem.idempotencyKey,
+        })
+
+        const responseBody = buildAftercareResponseBody({
+          result,
+          parsedBody: parsedBody.value,
+        })
+
+        return { status: 200, body: responseBody }
       },
-    })
-
-    if (isRouteIdempotencyHandled(idempotency)) {
-      return idempotency.response
-    }
-
-    idempotencyRecordId = idempotency.idempotencyRecordId
-
-    const result = await upsertBookingAftercare({
-      bookingId,
-      professionalId,
-      actorUserId,
-      notes: parsedBody.value.notes,
-      rebookMode: parsedBody.value.normalizedRebook.rebookMode,
-      rebookedFor: parsedBody.value.normalizedRebook.rebookedFor,
-      rebookWindowStart: parsedBody.value.normalizedRebook.rebookWindowStart,
-      rebookWindowEnd: parsedBody.value.normalizedRebook.rebookWindowEnd,
-      rebookSlot: parsedBody.value.normalizedRebook.rebookSlot,
-      createRebookReminder: parsedBody.value.createRebookReminder,
-      rebookReminderDaysBefore: parsedBody.value.rebookReminderDaysBefore,
-      createProductReminder: parsedBody.value.createProductReminder,
-      productReminderDaysAfter: parsedBody.value.productReminderDaysAfter,
-      recommendedProducts: parsedBody.value.recommendedProducts,
-      sendToClient: parsedBody.value.sendToClient,
-      version: parsedBody.value.version,
-      requestId: requestMeta.requestId,
-      idempotencyKey: idempotency.idempotencyKey,
-    })
-
-    const responseBody = buildAftercareResponseBody({
-      result,
-      parsedBody: parsedBody.value,
-    })
-
-    await completeRouteIdempotency({
-      idempotencyRecordId,
-      responseStatus: 200,
-      responseBody,
-    })
-
-    return jsonOk(responseBody, 200)
+    )
   } catch (error: unknown) {
-    await failStartedRouteIdempotency({
-      idempotencyRecordId,
-      operation: 'POST /api/pro/bookings/[id]/aftercare',
-    })
-
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,

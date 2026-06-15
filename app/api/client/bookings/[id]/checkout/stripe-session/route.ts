@@ -8,13 +8,8 @@ import {
   Role,
 } from '@prisma/client'
 
-import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
-import {
-  beginRouteIdempotency,
-  completeRouteIdempotency,
-  failStartedRouteIdempotency,
-  isRouteIdempotencyHandled,
-} from '@/app/api/_utils/idempotency'
+import { jsonFail, requireClient } from '@/app/api/_utils'
+import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
@@ -144,15 +139,6 @@ function buildStripeApiIdempotencyKey(args: {
   return `tovis:stripe-session:${args.bookingId}:${args.idempotencyKey}`
 }
 
-async function failStripeSessionIdempotency(
-  idempotencyRecordId: string | null,
-): Promise<void> {
-  await failStartedRouteIdempotency({
-    idempotencyRecordId,
-    operation: ROUTE_OPERATION,
-  })
-}
-
 function getSessionPaymentIntentId(
   paymentIntent: string | { id?: string } | null | undefined,
 ): string | null {
@@ -166,8 +152,6 @@ function nullableString(value: unknown): string | null {
 }
 
 export async function POST(req: NextRequest, props: RouteContext) {
-  let idempotencyRecordId: string | null = null
-
   try {
     const auth = await requireClient()
     if (!auth.ok) return auth.res
@@ -196,152 +180,142 @@ export async function POST(req: NextRequest, props: RouteContext) {
       return jsonFail(400, parsedTip.error)
     }
 
-    const idempotency = await beginRouteIdempotency<JsonObjectPayload>({
-      request: req,
-      actor: {
-        actorUserId,
-        actorRole: Role.CLIENT,
-      },
-      route: IDEMPOTENCY_ROUTES.CLIENT_CHECKOUT_STRIPE_SESSION,
-      requestLabel: 'client Stripe checkout session',
-      requestBody: buildIdempotencyRequestBody({
-        bookingId,
-        clientId: auth.clientId,
-        actorUserId,
-        tipAmount: parsedTip.tipAmount,
-      }),
-      messages: {
-        missingKey: 'Missing idempotency key.',
-        inProgress:
-          'A matching Stripe checkout request is already in progress.',
-        conflict:
-          'This idempotency key was already used with a different request body.',
-      },
-    })
-
-    if (isRouteIdempotencyHandled(idempotency)) {
-      return idempotency.response
-    }
-
-    idempotencyRecordId = idempotency.idempotencyRecordId
-
-    const prepared = await prepareClientStripeCheckoutSession({
-      bookingId,
-      clientId: auth.clientId,
-      tipAmount: parsedTip.tipAmount,
-      requestId: null,
-      idempotencyKey: idempotency.idempotencyKey,
-    })
-
-    const stripe = getStripe()
-
-    const stripeApiIdempotencyKey = buildStripeApiIdempotencyKey({
-      bookingId,
-      idempotencyKey: idempotency.idempotencyKey,
-    })
-
-    const session = await stripe.checkout.sessions.create(
+    return await withRouteIdempotency<JsonObjectPayload>(
       {
-        mode: 'payment',
-        payment_method_types: ['card'],
-        client_reference_id: prepared.booking.id,
-        success_url: buildAftercareCheckoutReturnUrl(
-          prepared.booking.id,
-          'success',
-        ),
-        cancel_url: buildAftercareCheckoutReturnUrl(
-          prepared.booking.id,
-          'cancelled',
-        ),
-        line_items: [
+        request: req,
+        actor: {
+          actorUserId,
+          actorRole: Role.CLIENT,
+        },
+        route: IDEMPOTENCY_ROUTES.CLIENT_CHECKOUT_STRIPE_SESSION,
+        requestLabel: 'client Stripe checkout session',
+        requestBody: buildIdempotencyRequestBody({
+          bookingId,
+          clientId: auth.clientId,
+          actorUserId,
+          tipAmount: parsedTip.tipAmount,
+        }),
+        messages: {
+          missingKey: 'Missing idempotency key.',
+          inProgress:
+            'A matching Stripe checkout request is already in progress.',
+          conflict:
+            'This idempotency key was already used with a different request body.',
+        },
+        operation: ROUTE_OPERATION,
+      },
+      async (idem) => {
+        const prepared = await prepareClientStripeCheckoutSession({
+          bookingId,
+          clientId: auth.clientId,
+          tipAmount: parsedTip.tipAmount,
+          requestId: null,
+          idempotencyKey: idem.idempotencyKey,
+        })
+
+        const stripe = getStripe()
+
+        const stripeApiIdempotencyKey = buildStripeApiIdempotencyKey({
+          bookingId,
+          idempotencyKey: idem.idempotencyKey,
+        })
+
+        const session = await stripe.checkout.sessions.create(
           {
-            quantity: 1,
-            price_data: {
-              currency: prepared.stripe.currency.toLowerCase(),
-              unit_amount: prepared.stripe.amountCents,
-              product_data: {
-                name: prepared.stripe.lineItemDescription,
+            mode: 'payment',
+            payment_method_types: ['card'],
+            client_reference_id: prepared.booking.id,
+            success_url: buildAftercareCheckoutReturnUrl(
+              prepared.booking.id,
+              'success',
+            ),
+            cancel_url: buildAftercareCheckoutReturnUrl(
+              prepared.booking.id,
+              'cancelled',
+            ),
+            line_items: [
+              {
+                quantity: 1,
+                price_data: {
+                  currency: prepared.stripe.currency.toLowerCase(),
+                  unit_amount: prepared.stripe.amountCents,
+                  product_data: {
+                    name: prepared.stripe.lineItemDescription,
+                  },
+                },
+              },
+            ],
+            metadata: {
+              bookingId: prepared.booking.id,
+              clientId: auth.clientId,
+              professionalId: prepared.booking.professionalId,
+            },
+            payment_intent_data: {
+              metadata: {
+                bookingId: prepared.booking.id,
+                clientId: auth.clientId,
+                professionalId: prepared.booking.professionalId,
+              },
+              transfer_data: {
+                destination: prepared.stripe.connectedAccountId,
               },
             },
           },
-        ],
-        metadata: {
+          { idempotencyKey: stripeApiIdempotencyKey },
+        )
+
+        const stripePaymentIntentId = getSessionPaymentIntentId(
+          session.payment_intent,
+        )
+
+        const attached = await recordStripeCheckoutSessionAttached({
           bookingId: prepared.booking.id,
           clientId: auth.clientId,
-          professionalId: prepared.booking.professionalId,
-        },
-        payment_intent_data: {
-          metadata: {
-            bookingId: prepared.booking.id,
-            clientId: auth.clientId,
-            professionalId: prepared.booking.professionalId,
+          stripeCheckoutSessionId: session.id,
+          stripePaymentIntentId,
+          stripeConnectedAccountId: prepared.stripe.connectedAccountId,
+          stripeAmountSubtotal:
+            typeof session.amount_subtotal === 'number'
+              ? session.amount_subtotal
+              : prepared.stripe.amountCents,
+          stripeAmountTotal:
+            typeof session.amount_total === 'number'
+              ? session.amount_total
+              : prepared.stripe.amountCents,
+          stripeCurrency:
+            typeof session.currency === 'string'
+              ? session.currency
+              : prepared.stripe.currency,
+          requestId: null,
+          idempotencyKey: idem.idempotencyKey,
+        })
+
+        const responseBody: JsonObjectPayload = {
+          booking: {
+            id: attached.booking.id,
+            checkoutStatus: attached.booking.checkoutStatus,
+            selectedPaymentMethod: attached.booking.selectedPaymentMethod,
+            paymentProvider: attached.booking.paymentProvider,
+            stripeCheckoutSessionId: attached.booking.stripeCheckoutSessionId,
+            stripePaymentIntentId: attached.booking.stripePaymentIntentId,
+            stripeCheckoutSessionStatus:
+              attached.booking.stripeCheckoutSessionStatus,
+            stripePaymentStatus: attached.booking.stripePaymentStatus,
+            stripeAmountTotal: attached.booking.stripeAmountTotal,
+            stripeCurrency: attached.booking.stripeCurrency,
+            tipAmount: prepared.booking.tipAmount?.toString() ?? null,
+            totalAmount: prepared.booking.totalAmount?.toString() ?? null,
           },
-          transfer_data: {
-            destination: prepared.stripe.connectedAccountId,
+          stripeCheckout: {
+            sessionId: session.id,
+            url: nullableString(session.url),
           },
-        },
+        }
+
+        return { status: 200, body: responseBody }
       },
-      { idempotencyKey: stripeApiIdempotencyKey },
     )
-
-    const stripePaymentIntentId = getSessionPaymentIntentId(
-      session.payment_intent,
-    )
-
-    const attached = await recordStripeCheckoutSessionAttached({
-      bookingId: prepared.booking.id,
-      clientId: auth.clientId,
-      stripeCheckoutSessionId: session.id,
-      stripePaymentIntentId,
-      stripeConnectedAccountId: prepared.stripe.connectedAccountId,
-      stripeAmountSubtotal:
-        typeof session.amount_subtotal === 'number'
-          ? session.amount_subtotal
-          : prepared.stripe.amountCents,
-      stripeAmountTotal:
-        typeof session.amount_total === 'number'
-          ? session.amount_total
-          : prepared.stripe.amountCents,
-      stripeCurrency:
-        typeof session.currency === 'string'
-          ? session.currency
-          : prepared.stripe.currency,
-      requestId: null,
-      idempotencyKey: idempotency.idempotencyKey,
-    })
-
-    const responseBody: JsonObjectPayload = {
-      booking: {
-        id: attached.booking.id,
-        checkoutStatus: attached.booking.checkoutStatus,
-        selectedPaymentMethod: attached.booking.selectedPaymentMethod,
-        paymentProvider: attached.booking.paymentProvider,
-        stripeCheckoutSessionId: attached.booking.stripeCheckoutSessionId,
-        stripePaymentIntentId: attached.booking.stripePaymentIntentId,
-        stripeCheckoutSessionStatus:
-          attached.booking.stripeCheckoutSessionStatus,
-        stripePaymentStatus: attached.booking.stripePaymentStatus,
-        stripeAmountTotal: attached.booking.stripeAmountTotal,
-        stripeCurrency: attached.booking.stripeCurrency,
-        tipAmount: prepared.booking.tipAmount?.toString() ?? null,
-        totalAmount: prepared.booking.totalAmount?.toString() ?? null,
-      },
-      stripeCheckout: {
-        sessionId: session.id,
-        url: nullableString(session.url),
-      },
-    }
-
-    await completeRouteIdempotency({
-      idempotencyRecordId,
-      responseStatus: 200,
-      responseBody,
-    })
-
-    return jsonOk(responseBody, 200)
   } catch (error: unknown) {
-    await failStripeSessionIdempotency(idempotencyRecordId)
-
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,

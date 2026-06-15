@@ -3,14 +3,9 @@
 import { Role, type Prisma } from '@prisma/client'
 
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
-import {
-  beginRouteIdempotency,
-  completeRouteIdempotency,
-  failStartedRouteIdempotency,
-  isRouteIdempotencyHandled,
-} from '@/app/api/_utils/idempotency'
+import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import { pickString } from '@/app/api/_utils/pick'
-import { jsonFail, jsonOk } from '@/app/api/_utils/responses'
+import { jsonFail } from '@/app/api/_utils/responses'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
 import {
   isBookingError,
@@ -135,8 +130,6 @@ function toCancelResponseBody(
 }
 
 export async function POST(req: Request, ctx: RouteContext) {
-  let idempotencyRecordId: string | null = null
-
   try {
     const auth = await requireUser({
       roles: [Role.CLIENT, Role.PRO, Role.ADMIN],
@@ -183,57 +176,42 @@ export async function POST(req: Request, ctx: RouteContext) {
       return rateLimitExceededResponse(rateLimit)
     }
 
-    const idempotency = await beginRouteIdempotency<CancelResponseBody>({
-      request: req,
-      actor: {
-        actorUserId: user.id,
-        actorRole: user.role,
+    return await withRouteIdempotency<CancelResponseBody>(
+      {
+        request: req,
+        actor: {
+          actorUserId: user.id,
+          actorRole: user.role,
+        },
+        route: IDEMPOTENCY_ROUTES.BOOKING_CANCEL,
+        requestLabel: 'booking cancellation',
+        requestBody: buildCancelIdempotencyBody({
+          bookingId,
+          actorUserId: user.id,
+          actorRole: user.role,
+          clientId,
+          professionalId,
+          cancelActorKind: actor.kind,
+        }),
+        messages: {
+          missingKey: 'Missing idempotency key for booking cancellation.',
+          inProgress:
+            'A matching booking cancellation request is already in progress.',
+          conflict:
+            'This idempotency key was already used with different cancellation details.',
+        },
+        operation: 'POST /api/bookings/[id]/cancel',
       },
-      route: IDEMPOTENCY_ROUTES.BOOKING_CANCEL,
-      requestLabel: 'booking cancellation',
-      requestBody: buildCancelIdempotencyBody({
-        bookingId,
-        actorUserId: user.id,
-        actorRole: user.role,
-        clientId,
-        professionalId,
-        cancelActorKind: actor.kind,
-      }),
-      messages: {
-        missingKey: 'Missing idempotency key for booking cancellation.',
-        inProgress:
-          'A matching booking cancellation request is already in progress.',
-        conflict:
-          'This idempotency key was already used with different cancellation details.',
+      async () => {
+        const result = await cancelBooking({
+          bookingId,
+          actor,
+        })
+
+        return { status: 200, body: toCancelResponseBody(result) }
       },
-    })
-
-    if (isRouteIdempotencyHandled(idempotency)) {
-      return idempotency.response
-    }
-
-    idempotencyRecordId = idempotency.idempotencyRecordId
-
-    const result = await cancelBooking({
-      bookingId,
-      actor,
-    })
-
-    const responseBody = toCancelResponseBody(result)
-
-    await completeRouteIdempotency({
-      idempotencyRecordId,
-      responseStatus: 200,
-      responseBody,
-    })
-
-    return jsonOk(responseBody, 200)
+    )
   } catch (error: unknown) {
-    await failStartedRouteIdempotency({
-      idempotencyRecordId,
-      operation: 'POST /api/bookings/[id]/cancel',
-    })
-
     if (isBookingError(error)) {
       return bookingJsonFail(error.code, {
         message: error.message,
