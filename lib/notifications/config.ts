@@ -84,6 +84,19 @@ export function requireTwilioSmsConfig(): TwilioSmsConfig {
   return config
 }
 
+/**
+ * Whether a Twilio SMS provider is configured for notification dispatch.
+ *
+ * Used as the launch gate for SMS notifications: while this is false, SMS is
+ * suppressed at enqueue time (see lib/notifications/dispatch/enqueueDispatch.ts)
+ * so notifications fall back to email + in-app instead of piling up failed SMS
+ * delivery attempts. It flips to true automatically once credentials are set —
+ * no code change required.
+ */
+export function isTwilioSmsConfigured(): boolean {
+  return readTwilioSmsConfig() !== null
+}
+
 export function readPostmarkEmailConfig(): PostmarkEmailConfig | null {
   const serverToken = readFirstEnv([
     'POSTMARK_SERVER_TOKEN',

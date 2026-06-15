@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   NotificationChannel,
   NotificationDeliveryStatus,
@@ -191,6 +191,19 @@ function makeDispatchRecord(
 describe('lib/notifications/dispatch/enqueueDispatch', () => {
   beforeEach(() => {
     resetMockGroup(mockPrisma.notificationDispatch)
+
+    // SMS dispatch is gated on a configured Twilio provider. Configure one so the
+    // existing default-channel assertions (which include SMS) hold; the dedicated
+    // "no Twilio provider" case below clears these to assert SMS suppression.
+    process.env.TWILIO_ACCOUNT_SID = 'AC_test'
+    process.env.TWILIO_AUTH_TOKEN = 'token_test'
+    process.env.TWILIO_NOTIFICATION_FROM_NUMBER = '+15550000000'
+  })
+
+  afterEach(() => {
+    delete process.env.TWILIO_ACCOUNT_SID
+    delete process.env.TWILIO_AUTH_TOKEN
+    delete process.env.TWILIO_NOTIFICATION_FROM_NUMBER
   })
 
   it('creates a dispatch and persists the normalized recipient snapshot fields', async () => {
@@ -342,6 +355,68 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
       recipientTimeZone: 'America/Los_Angeles',
       clientNotificationId: 'notif_1',
     })
+  })
+
+  it('suppresses SMS when no Twilio provider is configured (launch gate)', async () => {
+    delete process.env.TWILIO_ACCOUNT_SID
+    delete process.env.TWILIO_AUTH_TOKEN
+    delete process.env.TWILIO_NOTIFICATION_FROM_NUMBER
+
+    const scheduledFor = new Date('2026-04-12T15:30:00.000Z')
+
+    mockPrisma.notificationDispatch.findUnique.mockResolvedValue(null)
+    mockPrisma.notificationDispatch.create.mockResolvedValue(
+      makeDispatchRecord({
+        sourceKey: 'client-notification:notif_no_sms',
+        clientNotificationId: 'notif_no_sms',
+        scheduledFor,
+      }),
+    )
+
+    const result = await enqueueDispatch({
+      key: NotificationEventKey.BOOKING_CONFIRMED,
+      sourceKey: 'client-notification:notif_no_sms',
+      recipient: {
+        kind: NotificationRecipientKind.CLIENT,
+        clientId: 'client_1',
+        userId: 'user_1',
+        inAppTargetId: 'client_1',
+        phone: '+15551234567',
+        phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
+        email: 'client@example.com',
+        emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
+        timeZone: 'America/Los_Angeles',
+        preference: null,
+      },
+      title: 'Appointment confirmed',
+      body: 'Your appointment has been confirmed.',
+      href: '/client/bookings/booking_1',
+      payload: { bookingId: 'booking_1' },
+      scheduledFor,
+      clientNotificationId: 'notif_no_sms',
+    })
+
+    // SMS dropped from selection even though the phone is verified.
+    expect(result.selectedChannels).toEqual([
+      NotificationChannel.IN_APP,
+      NotificationChannel.EMAIL,
+    ])
+
+    const smsEvaluation = result.evaluations.find(
+      (evaluation) => evaluation.channel === NotificationChannel.SMS,
+    )
+    expect(smsEvaluation).toMatchObject({
+      enabled: false,
+      reason: 'MISSING_SMS_DESTINATION',
+    })
+
+    // The SMS delivery row is persisted as SUPPRESSED, not PENDING (no send).
+    const createData = mockPrisma.notificationDispatch.create.mock.calls[0]?.[0]
+      ?.data as { deliveries: { create: Array<{ channel: string; status: string }> } }
+    const smsRow = createData.deliveries.create.find(
+      (row) => row.channel === NotificationChannel.SMS,
+    )
+    expect(smsRow?.status).toBe(NotificationDeliveryStatus.SUPPRESSED)
   })
 
   it('stores recipientTimeZone as null when the provided timezone is invalid', async () => {
