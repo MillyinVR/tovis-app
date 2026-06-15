@@ -40,6 +40,7 @@ import {
 } from '@/app/api/_utils/idempotency'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
+import { encryptedNoteInput } from '@/lib/security/notesPrivacy'
 
 export const dynamic = 'force-dynamic'
 
@@ -795,6 +796,8 @@ export async function POST(req: Request, ctx: RouteContext) {
           proposedServicesJson: proposal.proposedServicesJson,
           proposedTotal,
           notes,
+          // Dual-write: plaintext (above) + AEAD envelope during burn-in.
+          notesEncrypted: encryptedNoteInput(notes),
           approvedAt: null,
           rejectedAt: null,
         },
@@ -803,6 +806,7 @@ export async function POST(req: Request, ctx: RouteContext) {
           proposedServicesJson: proposal.proposedServicesJson,
           proposedTotal,
           notes,
+          notesEncrypted: encryptedNoteInput(notes),
           approvedAt: null,
           rejectedAt: null,
         },

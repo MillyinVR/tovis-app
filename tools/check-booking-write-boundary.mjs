@@ -17,6 +17,10 @@ const ALLOWED_FILES = new Set([
   // proTenantId/clientHomeTenantId attribution columns (never lifecycle
   // fields). See docs/architecture/tenant-model.md.
   normalize('prisma/scripts/backfillTenantFoundation.ts'),
+  // Expand-phase tier-3 note encryption backfill. Dry-run by default; writes
+  // only the encrypted note-envelope columns (e.g. Booking.consultationNotesEncrypted),
+  // never lifecycle fields. See docs/security/ticket-encrypt-tier3-health-notes.md.
+  normalize('prisma/scripts/backfillNotesEncryption.ts'),
   // Test-data reset script for the last-minute booking suite. Runs only
   // against the test database via `scripts/with-test-db.mjs`.
   normalize('prisma/test-data/resetLastMinuteTestData.cjs'),
