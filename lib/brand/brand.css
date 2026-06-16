@@ -19,30 +19,49 @@
 ────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Background layers */
-  --bg-primary: 10 9 7;
-  --bg-secondary: 20 17 14;
-  --bg-surface: 30 26 21;
+  /* Background layers — Peacock Plume ink canvas (dark fallback) */
+  --bg-primary: 10 20 19;
+  --bg-secondary: 14 26 24;
+  --bg-surface: 17 32 30;
 
   /* Text layers */
-  --text-primary: 244 239 231;
-  --text-secondary: 205 198 187;
-  --text-muted: 122 117 105;
+  --text-primary: 242 239 231;
+  --text-secondary: 199 210 207;
+  --text-muted: 143 163 158;
 
   /* Glass surface */
-  --surface-glass: 244 239 231;
+  --surface-glass: 242 239 231;
 
   /* Accent */
-  --accent-primary: 224 90 40;
-  --accent-primary-hover: 255 106 54;
-  --micro-accent: 232 221 212;
-  --on-accent: 255 255 255;
+  --accent-primary: 21 201 168;
+  --accent-primary-hover: 47 224 190;
+  --micro-accent: 242 180 62;
+  --on-accent: 10 20 19;
 
   /* Brand palette */
-  --color-acid: 212 255 58;
-  --color-fern: 98 168 122;
-  --color-ember: 255 61 78;
-  --color-amber: 240 168 48;
+  --color-acid: 107 75 230;
+  --color-fern: 14 142 137;
+  --color-ember: 255 61 110;
+  --color-amber: 242 180 62;
+
+  /* Peacock brand colors. The named aliases track the canonical per-mode
+     tokens (which BrandProvider overrides for light mode) so they flip too. */
+  --peacock-blue: 21 116 196; /* #1574C4 — constant */
+  --iris: var(--color-acid); /* pop / saves */
+  --gold: var(--micro-accent); /* "goodness" / CTA */
+  --emerald: var(--color-fern); /* success / depth */
+  --like: var(--color-ember); /* like / danger */
+
+  /* Signature gradients — reserved for wordmark & primary CTA */
+  --plume: linear-gradient(
+    100deg,
+    #f2b43e,
+    #15c9a8 32%,
+    #0e8e89 50%,
+    #1574c4 72%,
+    #6b4be6
+  );
+  --cta: linear-gradient(100deg, #f2b43e, #15c9a8);
 
   /* Status tones */
   --tone-danger: var(--color-ember);
@@ -76,26 +95,26 @@
   /* Effects */
   --glass-blur: 20px;
   --glass-opacity: 0.09;
-  --shadow-color: 10 9 7;
+  --shadow-color: 10 20 19;
 
   --shadow-soft: 0 10px 30px rgb(var(--shadow-color) / 0.32);
   --shadow-strong: 0 18px 55px rgb(var(--shadow-color) / 0.48);
   --shadow-accent: 0 10px 28px rgb(var(--accent-primary) / 0.38);
 
   /* Radii */
-  --radius-app-icon: 28px;
-  --radius-card: 14px;
+  --radius-app-icon: 22px;
+  --radius-card: 18px;
   --radius-panel: 18px;
   --radius-sheet: 24px;
   --radius-inner: 8px;
   --radius-pill: 999px;
 
   /* Typography */
-  --font-sans: var(--font-body), "Inter Tight", ui-sans-serif, system-ui,
+  --font-sans: var(--font-body), "Hanken Grotesk", ui-sans-serif, system-ui,
     -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-display: var(--font-display-face), "Fraunces", Georgia,
-    "Times New Roman", serif;
-  --font-mono: var(--font-mono-face), "JetBrains Mono", ui-monospace,
+  --font-display: var(--font-display-face), "Space Grotesk", ui-sans-serif,
+    system-ui, sans-serif;
+  --font-mono: var(--font-mono-face), "Space Mono", ui-monospace,
     "Cascadia Code", "Fira Code", monospace;
 
   --ls-caps: 0.08em;

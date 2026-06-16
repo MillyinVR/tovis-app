@@ -1,6 +1,7 @@
 // app/(auth)/_components/AuthShell.tsx
 import type { ReactNode } from 'react'
 import { getBrandConfig } from '@/lib/brand'
+import BrandWordmark from '@/lib/brand/BrandWordmark'
 
 export default function AuthShell({
   title,
@@ -35,7 +36,7 @@ export default function AuthShell({
         {/* Wordmark header */}
         <div className="mb-7 flex items-center justify-center">
           <div className="grid place-items-center gap-1.5 text-center">
-            <div className="text-[22px] font-black tracking-[0.24em] text-textPrimary">{brand.assets.wordmark.text}</div>
+            <BrandWordmark size={34} className="text-textPrimary" />
 
             {brand.tagline && (
               <div className="text-[11px] font-semibold tracking-wide text-textSecondary">

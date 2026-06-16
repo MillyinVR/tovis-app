@@ -4,7 +4,7 @@
 // The bottom GuestSessionFooter handles all nav links on mobile.
 // On sm+ breakpoints the text nav links appear alongside the wordmark.
 import Link from 'next/link'
-import { getBrandConfig } from '@/lib/brand'
+import BrandWordmark from '@/lib/brand/BrandWordmark'
 
 const navLinks = [
   { href: '/about', label: 'About' },
@@ -19,8 +19,6 @@ type Props = {
 }
 
 export default function PublicTopBar({ className }: Props) {
-  const brand = getBrandConfig()
-
   return (
     <header
       className={[
@@ -31,9 +29,10 @@ export default function PublicTopBar({ className }: Props) {
       {/* Wordmark — always visible, links home */}
       <Link
         href="/"
-        className="text-[11px] font-black tracking-[0.30em] text-textPrimary/70 transition hover:text-textPrimary"
+        aria-label="tovis home"
+        className="text-textPrimary/80 transition hover:text-textPrimary"
       >
-        {brand.assets.wordmark.text}
+        <BrandWordmark size={20} />
       </Link>
 
       <nav className="flex items-center" aria-label="Site navigation">

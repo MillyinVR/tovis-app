@@ -49,11 +49,23 @@ module.exports = {
         fern: 'rgb(var(--fern) / <alpha-value>)',
         ember: 'rgb(var(--ember) / <alpha-value>)',
         amber: 'rgb(var(--amber) / <alpha-value>)',
+
+        // ── Peacock Plume brand colors ──────────────────────────────
+        peacock: 'rgb(var(--peacock-blue) / <alpha-value>)',
+        iris: 'rgb(var(--iris) / <alpha-value>)',
+        gold: 'rgb(var(--gold) / <alpha-value>)',
+        emerald: 'rgb(var(--emerald) / <alpha-value>)',
+        like: 'rgb(var(--like) / <alpha-value>)',
+      },
+
+      backgroundImage: {
+        plume: 'var(--plume)',
+        cta: 'var(--cta)',
       },
 
       fontFamily: {
         sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        display: ['var(--font-display)', 'Georgia', 'serif'],
+        display: ['var(--font-display)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
       },
 
