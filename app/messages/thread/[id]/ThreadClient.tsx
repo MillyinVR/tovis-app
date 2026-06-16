@@ -168,7 +168,7 @@ function AttachmentPreview(props: { attachment: Attachment }) {
       <img
         src={attachment.url}
         alt=""
-        className="mt-2 max-h-56 rounded-[18px] border border-white/10 object-cover"
+        className="mt-2 max-h-56 rounded-[18px] border border-textPrimary/10 object-cover"
       />
     )
   }
@@ -177,7 +177,7 @@ function AttachmentPreview(props: { attachment: Attachment }) {
     <video
       src={attachment.url}
       controls
-      className="mt-2 max-h-56 rounded-[18px] border border-white/10"
+      className="mt-2 max-h-56 rounded-[18px] border border-textPrimary/10"
     />
   )
 }
@@ -360,19 +360,19 @@ export default function ThreadClient(props: ThreadClientProps) {
   return (
     <div className="mt-5 flex min-h-0 flex-1 flex-col">
       {err ? (
-        <div className="mb-3 rounded-[18px] border border-white/10 bg-bgSecondary/70 px-4 py-3 text-[12px] font-semibold text-textSecondary">
+        <div className="mb-3 rounded-[18px] border border-ember/30 bg-bgSecondary/70 px-4 py-3 text-[12px] font-medium text-textSecondary">
           {err}
         </div>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[26px] border border-white/10 bg-bgSecondary/30">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[26px] border border-textPrimary/10 bg-bgSecondary/30">
         <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
           {messages.length === 0 ? (
-            <div className="py-12 text-center text-[12px] font-semibold text-textSecondary">
-              No messages yet. Start it off.
+            <div className="py-12 text-center font-mono text-[11px] uppercase tracking-[0.08em] text-textMuted">
+              No messages yet — start it off.
             </div>
           ) : (
-            <div className="grid gap-3">
+            <div className="grid gap-[14px]">
               {messages.map((message) => {
                 const mine = message.senderUserId === myUserId
 
@@ -384,13 +384,13 @@ export default function ThreadClient(props: ThreadClientProps) {
                       mine ? 'justify-end' : 'justify-start',
                     ])}
                   >
-                    <div className="max-w-[82%]">
+                    <div className="max-w-[80%]">
                       <div
                         className={classNames([
-                          'rounded-[22px] px-4 py-2 text-[13px] font-semibold leading-5',
+                          'px-[14px] py-[11px] text-[13.5px] font-medium leading-[1.45]',
                           mine
-                            ? 'bg-[rgb(var(--accent-primary))] text-bgPrimary'
-                            : 'border border-white/10 bg-bgPrimary/45 text-textPrimary',
+                            ? 'rounded-[16px] rounded-br-[5px] bg-accentPrimary text-onAccent'
+                            : 'rounded-[16px] rounded-bl-[5px] border border-textPrimary/10 bg-bgPrimary/45 text-textPrimary',
                         ])}
                       >
                         {message.body ? (
@@ -413,7 +413,7 @@ export default function ThreadClient(props: ThreadClientProps) {
 
                       <div
                         className={classNames([
-                          'mt-1 text-[10px] font-semibold text-textSecondary',
+                          'mt-[5px] px-1 font-mono text-[9px] text-textMuted',
                           mine ? 'text-right' : 'text-left',
                         ])}
                       >
@@ -429,7 +429,7 @@ export default function ThreadClient(props: ThreadClientProps) {
           )}
         </div>
 
-        <div className="border-t border-white/10 p-3">
+        <div className="border-t border-textPrimary/10 p-3">
           <div className="flex items-end gap-2">
             <textarea
               value={text}
@@ -442,26 +442,26 @@ export default function ThreadClient(props: ThreadClientProps) {
                 }
               }}
               placeholder="Message…"
-              className="max-h-28 min-h-11 w-full resize-none rounded-[999px] border border-white/10 bg-bgPrimary px-4 py-3 text-[13px] font-semibold leading-5 text-textPrimary outline-none placeholder:text-textSecondary focus:border-white/20"
+              className="max-h-28 min-h-11 w-full resize-none rounded-[999px] border border-textPrimary/10 bg-bgPrimary px-4 py-3 text-[13px] font-medium leading-5 text-textPrimary outline-none placeholder:text-textMuted focus:border-accentPrimary/40"
             />
 
             <button
               type="button"
               onClick={() => void send()}
               disabled={!trimmedText || sending}
-              className="h-11 shrink-0 rounded-full bg-[rgb(var(--accent-primary))] px-5 text-[13px] font-black text-bgPrimary disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-11 shrink-0 rounded-full bg-accentPrimary px-5 text-[13px] font-bold text-onAccent transition hover:bg-accentPrimaryHover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {sending ? 'Sending' : 'Send'}
             </button>
           </div>
 
-          <div className="mt-2 flex items-center justify-between text-[11px] font-semibold text-textSecondary">
+          <div className="mt-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.06em] text-textMuted">
             <span>{loading ? 'Updating…' : ' '}</span>
 
             <button
               type="button"
               onClick={() => void fetchLatest()}
-              className="font-black text-textPrimary hover:opacity-80"
+              className="font-mono uppercase tracking-[0.06em] text-textSecondary hover:text-textPrimary"
             >
               Refresh
             </button>
