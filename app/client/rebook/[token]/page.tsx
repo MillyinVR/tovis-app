@@ -6,10 +6,15 @@ import {
   AftercareRebookMode,
   BookingSource,
   BookingStatus,
+  ClientClaimStatus,
   MediaPhase,
   MediaVisibility,
 } from '@prisma/client'
 
+import { CompletePaymentCard } from '@/app/client/_public/CompletePaymentCard'
+import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInviteCard'
+import { RebookCard } from '@/app/client/_public/RebookCard'
+import { getPublicCheckoutAvailability } from '@/lib/booking/publicCheckoutAvailability'
 import { prisma } from '@/lib/prisma'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import {
@@ -17,7 +22,6 @@ import {
   formatRangeInTimeZone,
 } from '@/lib/formatInTimeZone'
 import { pickString } from '@/lib/pick'
-import { cn } from '@/lib/utils'
 import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
 import { isBookingError } from '@/lib/booking/errors'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
@@ -185,61 +189,6 @@ function SectionCard(props: {
   )
 }
 
-function buildBaseBookParams(args: {
-  routeToken: string
-  bookingId: string
-}): URLSearchParams {
-  return new URLSearchParams({
-    source: 'AFTERCARE',
-    token: args.routeToken,
-    rebookOfBookingId: args.bookingId,
-  })
-}
-
-function applyRebookRecommendationParams(args: {
-  params: URLSearchParams
-  rebookInfo: RebookInfo
-  recommendedAtFromUrl: string | null
-  windowStartFromUrl: string | null
-  windowEndFromUrl: string | null
-}): URLSearchParams {
-  const {
-    params,
-    rebookInfo,
-    recommendedAtFromUrl,
-    windowStartFromUrl,
-    windowEndFromUrl,
-  } = args
-
-  if (recommendedAtFromUrl) {
-    params.set('recommendedAt', recommendedAtFromUrl)
-  }
-
-  if (windowStartFromUrl) {
-    params.set('windowStart', windowStartFromUrl)
-  }
-
-  if (windowEndFromUrl) {
-    params.set('windowEnd', windowEndFromUrl)
-  }
-
-  const hasExplicitUrlOverrides =
-    Boolean(recommendedAtFromUrl) ||
-    Boolean(windowStartFromUrl) ||
-    Boolean(windowEndFromUrl)
-
-  if (hasExplicitUrlOverrides) {
-    return params
-  }
-
-  if (rebookInfo.mode === 'RECOMMENDED_WINDOW') {
-    params.set('windowStart', rebookInfo.windowStart.toISOString())
-    params.set('windowEnd', rebookInfo.windowEnd.toISOString())
-  }
-
-  return params
-}
-
 async function getActiveOfferingId(args: {
   professionalId: string
   serviceId: string | null
@@ -300,12 +249,6 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
   const resolvedSearchParams =
     (await Promise.resolve(props.searchParams).catch(() => undefined)) ?? {}
 
-  const recommendedAtFromUrl = pickSearchParam(
-    resolvedSearchParams.recommendedAt,
-  )
-  const windowStartFromUrl = pickSearchParam(resolvedSearchParams.windowStart)
-  const windowEndFromUrl = pickSearchParam(resolvedSearchParams.windowEnd)
-
   let resolved: Awaited<ReturnType<typeof resolveAftercareAccessByToken>>
   try {
     resolved = await resolveAftercareAccessByToken({
@@ -352,6 +295,31 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
     bookingId: booking.id,
   })
 
+  // clientAddressId is needed for MOBILE availability lookups (resolves
+  // coordinates); null/unused for SALON bookings.
+  const bookingLocation = await prisma.booking.findUnique({
+    where: { id: booking.id },
+    select: { clientAddressId: true },
+  })
+
+  const inviteClient = await prisma.clientProfile.findUnique({
+    where: { id: booking.clientId },
+    select: { claimStatus: true, userId: true },
+  })
+
+  const showAccountInvite =
+    inviteClient != null &&
+    inviteClient.userId == null &&
+    inviteClient.claimStatus === ClientClaimStatus.UNCLAIMED
+
+  const checkoutParam = pickSearchParam(resolvedSearchParams.checkout)
+  const checkoutAvailability = await getPublicCheckoutAvailability({
+    bookingId: booking.id,
+    clientId: booking.clientId,
+  })
+  const paymentSettled =
+    checkoutAvailability.status === 'ALREADY_PAID' || checkoutParam === 'success'
+
   const rawMedia = await prisma.mediaAsset.findMany({
     where: {
       bookingId: booking.id,
@@ -386,21 +354,6 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
 
   const beforeMedia = media.filter((item) => item.phase === MediaPhase.BEFORE)
   const afterMedia = media.filter((item) => item.phase === MediaPhase.AFTER)
-
-  const bookParams = applyRebookRecommendationParams({
-    params: buildBaseBookParams({
-      routeToken,
-      bookingId: booking.id,
-    }),
-    rebookInfo,
-    recommendedAtFromUrl,
-    windowStartFromUrl,
-    windowEndFromUrl,
-  })
-
-  const bookHref = offeringId
-    ? `/offerings/${encodeURIComponent(offeringId)}?${bookParams.toString()}`
-    : null
 
   const sourceAppointmentLabel = formatAppointmentWhen(
     booking.scheduledFor,
@@ -453,6 +406,34 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
       </header>
 
       <div className="mt-4 grid gap-3">
+        {paymentSettled ? (
+          <section className="rounded-card border border-emerald-400/20 bg-emerald-400/5 p-5">
+            <div className="text-[14px] font-black text-textPrimary">
+              Payment received
+            </div>
+            <div className="mt-1 text-sm text-textSecondary">
+              {checkoutParam === 'success' &&
+              checkoutAvailability.status !== 'ALREADY_PAID'
+                ? 'Thanks! We’re finalizing your payment — this can take a moment to confirm.'
+                : 'This appointment is paid in full. Thank you!'}
+            </div>
+          </section>
+        ) : checkoutAvailability.status === 'PAYABLE' ? (
+          <>
+            {checkoutParam === 'cancelled' ? (
+              <section className="rounded-card border border-yellow-400/20 bg-yellow-400/5 px-4 py-3 text-sm text-textSecondary">
+                Checkout was canceled. You can complete your payment below
+                whenever you’re ready.
+              </section>
+            ) : null}
+            <CompletePaymentCard
+              token={routeToken}
+              amountCents={checkoutAvailability.amountCents ?? 0}
+              currency={checkoutAvailability.currency ?? 'usd'}
+            />
+          </>
+        ) : null}
+
         <SectionCard title="Aftercare notes">
           {notes ? (
             <div className="whitespace-pre-wrap text-sm text-textSecondary">
@@ -527,18 +508,29 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
                 later to see the full booking backlog.
               </div>
             </div>
-          ) : bookHref ? (
-            <div className="mt-4">
-              <Link
-                href={bookHref}
-                className={cn(
-                  'inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-black text-bgPrimary transition',
-                  'bg-accentPrimary hover:bg-accentPrimaryHover',
-                  rebookInfo.mode === AftercareRebookMode.NONE && 'opacity-70',
-                )}
-              >
-                Book your next appointment
-              </Link>
+          ) : offeringId ? (
+            <div className="mt-2">
+              <RebookCard
+                token={routeToken}
+                availability={{
+                  professionalId: booking.professionalId,
+                  serviceId: booking.serviceId ?? '',
+                  locationType: booking.locationType,
+                  locationId: booking.locationId ?? '',
+                  clientAddressId: bookingLocation?.clientAddressId ?? null,
+                }}
+                timeZone={appointmentTimeZone}
+                windowStartIso={
+                  rebookInfo.mode === 'RECOMMENDED_WINDOW'
+                    ? rebookInfo.windowStart.toISOString()
+                    : null
+                }
+                windowEndIso={
+                  rebookInfo.mode === 'RECOMMENDED_WINDOW'
+                    ? rebookInfo.windowEnd.toISOString()
+                    : null
+                }
+              />
 
               <div className="mt-3 text-xs text-textSecondary/75">
                 If you don’t see times you want, your pro may need to open more
@@ -558,6 +550,10 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
             </div>
           )}
         </SectionCard>
+
+        {showAccountInvite ? (
+          <CreateAccountInviteCard actionToken={routeToken} context="aftercare" />
+        ) : null}
 
         <SectionCard title="Secure link details">
           <div className="grid gap-2 text-xs text-textSecondary/75">

@@ -24,6 +24,7 @@ module.exports = {
         accentPrimaryHover: 'rgb(var(--accent-primary-hover) / <alpha-value>)',
         microAccent: 'rgb(var(--micro-accent) / <alpha-value>)',
         onAccent: 'rgb(var(--on-accent) / <alpha-value>)',
+        onCta: 'rgb(var(--on-cta) / <alpha-value>)',
 
         toneDanger: 'rgb(var(--tone-danger) / <alpha-value>)',
         toneWarn: 'rgb(var(--tone-warn) / <alpha-value>)',

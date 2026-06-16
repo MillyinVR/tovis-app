@@ -1,15 +1,16 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { use, useEffect, useMemo, useState } from 'react'
 import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 
+import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInviteCard'
 import { isRecord } from '@/lib/guards'
 
 export const dynamic = 'force-dynamic'
 
 type PageProps = {
-  params: { token: string }
+  params: Promise<{ token: string }>
 }
 
 type DecisionAction = 'APPROVE' | 'REJECT'
@@ -559,7 +560,7 @@ function parseDecisionResponse(value: unknown): DecisionResponse | null {
   return null
 }
 export default function PublicConsultationPage({ params }: PageProps) {
-  const token = safeText(params?.token)
+  const token = safeText(use(params)?.token)
   const [state, setState] = useState<LoadState>(() =>
     token ? { kind: 'loading' } : { kind: 'error', message: 'Missing consultation link.' },
   )
@@ -603,7 +604,12 @@ export default function PublicConsultationPage({ params }: PageProps) {
           return
         }
 
-        if (!isRecord(payload) || !isRecord(payload.data)) {
+        // The API returns the payload flat ({ ok: true, booking, ... }).
+        // Tolerate a `data` envelope too in case the contract changes.
+        const body =
+          isRecord(payload) && isRecord(payload.data) ? payload.data : payload
+
+        if (!isRecord(body)) {
           if (!cancelled) {
             setState({
               kind: 'error',
@@ -614,7 +620,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
           return
         }
 
-        const parsed = parsePublicConsultationDto(payload.data)
+        const parsed = parsePublicConsultationDto(body)
 
         if (!parsed) {
           if (!cancelled) {
@@ -691,11 +697,14 @@ export default function PublicConsultationPage({ params }: PageProps) {
         throw new Error(message)
       }
 
-      if (!isRecord(payload) || !isRecord(payload.data)) {
+      const body =
+        isRecord(payload) && isRecord(payload.data) ? payload.data : payload
+
+      if (!isRecord(body)) {
         throw new Error('Invalid decision response.')
       }
 
-      const decision = parseDecisionResponse(payload.data)
+      const decision = parseDecisionResponse(body)
 
         if (!decision) {
           throw new Error('Invalid decision response.')
@@ -937,6 +946,11 @@ export default function PublicConsultationPage({ params }: PageProps) {
             </div>
           )}
         </SectionCard>
+
+        {upper(data.booking.client.claimStatus) === 'UNCLAIMED' &&
+        (data.actionState.hasProof || !data.actionState.isPending) ? (
+          <CreateAccountInviteCard actionToken={token} context="consultation" />
+        ) : null}
 
         <section className="text-xs text-textSecondary/75">
           <div className="font-black text-textSecondary">Need help?</div>

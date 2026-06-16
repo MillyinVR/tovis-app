@@ -169,7 +169,9 @@ describe('lib/clientActions/policies', () => {
       })
     })
 
-    it('fails when an override is not allowed for the action', () => {
+    it('allows an SMS override for the consultation magic-link action', () => {
+      // Magic-link actions are email-preferred but SMS-capable so phone-only
+      // (often unclaimed) clients can receive the secure link.
       const result = resolveClientActionDeliveryMethod({
         actionType: 'CONSULTATION_ACTION',
         recipient: buildRecipient(),
@@ -177,10 +179,8 @@ describe('lib/clientActions/policies', () => {
       })
 
       expect(result).toEqual({
-        ok: false,
-        code: 'CLIENT_ACTION_CONTACT_METHOD_NOT_ALLOWED',
-        error:
-          'clientActions/policies: CONSULTATION_ACTION does not allow contact method SMS.',
+        ok: true,
+        value: ContactMethod.SMS,
       })
     })
 
@@ -337,12 +337,33 @@ describe('lib/clientActions/policies', () => {
       })
     })
 
-    it('returns an error when delivery cannot be resolved', () => {
+    it('resolves SMS for a phone-only consultation recipient (no email)', () => {
+      // The phone-only unclaimed-client case: email-preferred but falls back to
+      // SMS so the secure link still reaches them.
       const result = resolveClientActionDelivery({
         actionType: 'CONSULTATION_ACTION',
         recipient: buildRecipient({
           recipientEmail: null,
-          recipientPhone: '+15551234567',
+        }),
+      })
+
+      expect(result).toEqual({
+        ok: true,
+        value: {
+          method: ContactMethod.SMS,
+          destinationSnapshot: '+1 (555) 123-4567',
+          notificationEventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
+          notificationRecipientKind: NotificationRecipientKind.CLIENT,
+        },
+      })
+    })
+
+    it('returns an error when no destination is available at all', () => {
+      const result = resolveClientActionDelivery({
+        actionType: 'CONSULTATION_ACTION',
+        recipient: buildRecipient({
+          recipientEmail: null,
+          recipientPhone: null,
         }),
       })
 
@@ -350,7 +371,7 @@ describe('lib/clientActions/policies', () => {
         ok: false,
         code: 'CLIENT_ACTION_NO_DELIVERY_DESTINATION',
         error:
-          'clientActions/policies: CONSULTATION_ACTION has no usable delivery destination for allowed contact methods [EMAIL].',
+          'clientActions/policies: CONSULTATION_ACTION has no usable delivery destination for allowed contact methods [EMAIL, SMS].',
       })
     })
   })

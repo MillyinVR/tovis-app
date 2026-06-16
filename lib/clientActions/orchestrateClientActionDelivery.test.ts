@@ -245,7 +245,7 @@ describe('lib/clientActions/orchestrateClientActionDelivery', () => {
           userId: null,
           invitedName: 'Tori Client',
           recipientEmail: '   ',
-          recipientPhone: '+15551234567',
+          recipientPhone: '   ',
           preferredContactMethod: null,
           timeZone: 'America/Los_Angeles',
         },
@@ -256,7 +256,7 @@ describe('lib/clientActions/orchestrateClientActionDelivery', () => {
       ok: false,
       code: 'CLIENT_ACTION_NO_DELIVERY_DESTINATION',
       error:
-        'clientActions/policies: CONSULTATION_ACTION has no usable delivery destination for allowed contact methods [EMAIL].',
+        'clientActions/policies: CONSULTATION_ACTION has no usable delivery destination for allowed contact methods [EMAIL, SMS].',
     })
   })
 

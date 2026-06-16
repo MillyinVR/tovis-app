@@ -12,7 +12,7 @@ import { sanitizeTimeZone } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
 import { NotificationEventKey } from '@prisma/client'
-import ProProfileLink from '@/app/client/components/ProProfileLink'
+import ProProfileLink from '@/app/client/(gated)/components/ProProfileLink'
 
 import { getBrandConfig } from '@/lib/brand'
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'

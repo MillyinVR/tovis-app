@@ -26,10 +26,6 @@ import {
 export const AFTERCARE_ACCESS_TOKEN_EXPIRY_MS =
   1000 * 60 * 60 * 24 * 7 // 7 days
 
-const EMAIL_ONLY_CONTACT_METHODS: readonly ContactMethod[] = [
-  ContactMethod.EMAIL,
-]
-
 const EMAIL_OR_SMS_CONTACT_METHODS: readonly ContactMethod[] = [
   ContactMethod.EMAIL,
   ContactMethod.SMS,
@@ -143,12 +139,12 @@ export const CLIENT_ACTION_REGISTRY: Record<
     },
     delivery: {
       /**
-       * Kept EMAIL-only for now to stay aligned with the current
-       * AFTERCARE_READY notification catalog.
-       * If you later add SMS delivery for magic links, update this registry
-       * and the notification event/channel rules together.
+       * Email-preferred, SMS fallback. Phone-only (often unclaimed) clients
+       * receive the secure aftercare magic link via SMS. Kept in sync with the
+       * AFTERCARE_READY notification catalog (CLIENT_ALL_CHANNELS includes SMS)
+       * and resolveAllowUnverifiedDestination() in enqueueClientActionDispatch.
        */
-      allowedContactMethods: EMAIL_ONLY_CONTACT_METHODS,
+      allowedContactMethods: EMAIL_OR_SMS_CONTACT_METHODS,
       preferredContactMethod: ContactMethod.EMAIL,
       notificationEventKey: NotificationEventKey.AFTERCARE_READY,
       notificationRecipientKind: NotificationRecipientKind.CLIENT,
@@ -172,12 +168,13 @@ export const CLIENT_ACTION_REGISTRY: Record<
     },
     delivery: {
       /**
-       * Kept EMAIL-only for now to stay aligned with the current
-       * CONSULTATION_PROPOSAL_SENT notification catalog.
-       * If you later add SMS delivery for magic links, update this registry
-       * and the notification event/channel rules together.
+       * Email-preferred, SMS fallback. Phone-only (often unclaimed) clients
+       * receive the secure consultation magic link via SMS. Kept in sync with
+       * the CONSULTATION_PROPOSAL_SENT notification catalog (CLIENT_ALL_CHANNELS
+       * includes SMS) and resolveAllowUnverifiedDestination() in
+       * enqueueClientActionDispatch.
        */
-      allowedContactMethods: EMAIL_ONLY_CONTACT_METHODS,
+      allowedContactMethods: EMAIL_OR_SMS_CONTACT_METHODS,
       preferredContactMethod: ContactMethod.EMAIL,
       notificationEventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       notificationRecipientKind: NotificationRecipientKind.CLIENT,

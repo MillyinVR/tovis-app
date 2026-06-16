@@ -225,68 +225,68 @@ app/api/pro/session/route.ts:optional direct property read:booking.client?.user?
 app/api/pro/session/route.ts:optional direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:lastName: true,
-app/client/_data/getClientHomeData.ts:Prisma select/include plaintext field:
-app/client/aftercare/page.tsx:Prisma select/include plaintext field:
-app/client/bookings/[id]/_data/loadClientBookingPage.ts:Prisma select/include plaintext field:
-app/client/bookings/[id]/_data/loadClientBookingPage.ts:Prisma select/include plaintext field:email: true,
-app/client/bookings/[id]/_data/loadProfessionalPaymentSettings.ts:Prisma select/include plaintext field:stripeAccountId: true,
-app/client/bookings/[id]/_data/loadProfessionalPaymentSettings.ts:direct property read:settings.stripeAccountId &&
-app/client/bookings/[id]/page.tsx:direct property read:? raw.professional.user.email
-app/client/bookings/[id]/page.tsx:direct property read:booking.consultation?.consultationNotes ||
-app/client/bookings/[id]/page.tsx:direct property read:raw.professional.user.email.trim()
-app/client/bookings/[id]/page.tsx:direct property read:typeof raw.professional?.user?.email === 'string' &&
-app/client/bookings/[id]/page.tsx:optional direct property read:booking.consultation?.consultationNotes ||
-app/client/bookings/[id]/page.tsx:optional direct property read:typeof raw.professional?.user?.email === 'string' &&
+app/client/(gated)/_data/getClientHomeData.ts:Prisma select/include plaintext field:
+app/client/(gated)/aftercare/page.tsx:Prisma select/include plaintext field:
+app/client/(gated)/bookings/[id]/_data/loadClientBookingPage.ts:Prisma select/include plaintext field:
+app/client/(gated)/bookings/[id]/_data/loadClientBookingPage.ts:Prisma select/include plaintext field:email: true,
+app/client/(gated)/bookings/[id]/_data/loadProfessionalPaymentSettings.ts:Prisma select/include plaintext field:stripeAccountId: true,
+app/client/(gated)/bookings/[id]/_data/loadProfessionalPaymentSettings.ts:direct property read:settings.stripeAccountId &&
+app/client/(gated)/bookings/[id]/page.tsx:direct property read:? raw.professional.user.email
+app/client/(gated)/bookings/[id]/page.tsx:direct property read:booking.consultation?.consultationNotes ||
+app/client/(gated)/bookings/[id]/page.tsx:direct property read:raw.professional.user.email.trim()
+app/client/(gated)/bookings/[id]/page.tsx:direct property read:typeof raw.professional?.user?.email === 'string' &&
+app/client/(gated)/bookings/[id]/page.tsx:optional direct property read:booking.consultation?.consultationNotes ||
+app/client/(gated)/bookings/[id]/page.tsx:optional direct property read:typeof raw.professional?.user?.email === 'string' &&
+app/client/(gated)/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:
+app/client/(gated)/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:email: true,
+app/client/(gated)/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:firstName: true,
+app/client/(gated)/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:lastName: true,
+app/client/(gated)/me/page.tsx:direct property read:const emailPrefix = params.email?.split('@')[0]?.trim()
+app/client/(gated)/me/page.tsx:direct property read:const firstName = params.firstName?.trim()
+app/client/(gated)/me/page.tsx:direct property read:const handle = buildHandle(data.user.email)
+app/client/(gated)/page.tsx:direct property read:const email = (user.email ?? '').trim()
+app/client/(gated)/page.tsx:direct property read:const firstName = (user.clientProfile.firstName ?? '').trim()
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:[address.city, address.state, address.postalCode]
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:address.addressLine1 ||
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:address.addressLine1,
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:address.addressLine2,
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:address.postalCode ||
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:address.postalCode,
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:const postalCode = pickText(geo.postalCode) || null
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:place.postalCode ||
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:searchDraft.postalCode ||
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:serviceDraft.addressLine1
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:serviceDraft.addressLine1) ? (
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:serviceDraft.addressLine1}
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:value={serviceDraft.addressLine1 ?? ''}
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:value={serviceDraft.addressLine2 ?? ''}
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:value={serviceDraft.postalCode ?? ''}
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:{[serviceDraft.city, serviceDraft.state, serviceDraft.postalCode]
+app/client/(gated)/settings/ClientAddressesSettings.tsx:direct property read:{serviceDraft.city || serviceDraft.state || serviceDraft.postalCode ? (
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:? profile.dateOfBirth.trim()
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:? profile.email.trim()
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:? profile.phone.trim()
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:dateOfBirth !== (profile.dateOfBirth ?? '')
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:firstName !== profile.firstName ||
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:lastName !== profile.lastName ||
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:phone !== (profile.phone ?? '') ||
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:setDateOfBirth(next.dateOfBirth ?? '')
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:setDateOfBirth(profile.dateOfBirth ?? '')
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:setFirstName(next.firstName)
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:setFirstName(profile.firstName)
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:setLastName(next.lastName)
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:setLastName(profile.lastName)
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:setPhone(next.phone ?? '')
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:setPhone(profile.phone ?? '')
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:typeof profile.dateOfBirth === 'string' && profile.dateOfBirth.trim()
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:typeof profile.email === 'string' && profile.email.trim()
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:typeof profile.firstName === 'string' ? profile.firstName : ''
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:typeof profile.lastName === 'string' ? profile.lastName : ''
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:typeof profile.phone === 'string' && profile.phone.trim()
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:{profile.email}
+app/client/(gated)/settings/ClientProfileSettings.tsx:direct property read:{profile?.email ? (
+app/client/(gated)/settings/ClientProfileSettings.tsx:optional direct property read:{profile?.email ? (
 app/client/consultation/[token]/page.tsx:direct property read:const clientLabel = [data.booking.client.firstName, data.booking.client.lastName]
-app/client/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:
-app/client/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:email: true,
-app/client/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:firstName: true,
-app/client/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:lastName: true,
-app/client/me/page.tsx:direct property read:const emailPrefix = params.email?.split('@')[0]?.trim()
-app/client/me/page.tsx:direct property read:const firstName = params.firstName?.trim()
-app/client/me/page.tsx:direct property read:const handle = buildHandle(data.user.email)
-app/client/page.tsx:direct property read:const email = (user.email ?? '').trim()
-app/client/page.tsx:direct property read:const firstName = (user.clientProfile.firstName ?? '').trim()
-app/client/settings/ClientAddressesSettings.tsx:direct property read:[address.city, address.state, address.postalCode]
-app/client/settings/ClientAddressesSettings.tsx:direct property read:address.addressLine1 ||
-app/client/settings/ClientAddressesSettings.tsx:direct property read:address.addressLine1,
-app/client/settings/ClientAddressesSettings.tsx:direct property read:address.addressLine2,
-app/client/settings/ClientAddressesSettings.tsx:direct property read:address.postalCode ||
-app/client/settings/ClientAddressesSettings.tsx:direct property read:address.postalCode,
-app/client/settings/ClientAddressesSettings.tsx:direct property read:const postalCode = pickText(geo.postalCode) || null
-app/client/settings/ClientAddressesSettings.tsx:direct property read:place.postalCode ||
-app/client/settings/ClientAddressesSettings.tsx:direct property read:searchDraft.postalCode ||
-app/client/settings/ClientAddressesSettings.tsx:direct property read:serviceDraft.addressLine1
-app/client/settings/ClientAddressesSettings.tsx:direct property read:serviceDraft.addressLine1) ? (
-app/client/settings/ClientAddressesSettings.tsx:direct property read:serviceDraft.addressLine1}
-app/client/settings/ClientAddressesSettings.tsx:direct property read:value={serviceDraft.addressLine1 ?? ''}
-app/client/settings/ClientAddressesSettings.tsx:direct property read:value={serviceDraft.addressLine2 ?? ''}
-app/client/settings/ClientAddressesSettings.tsx:direct property read:value={serviceDraft.postalCode ?? ''}
-app/client/settings/ClientAddressesSettings.tsx:direct property read:{[serviceDraft.city, serviceDraft.state, serviceDraft.postalCode]
-app/client/settings/ClientAddressesSettings.tsx:direct property read:{serviceDraft.city || serviceDraft.state || serviceDraft.postalCode ? (
-app/client/settings/ClientProfileSettings.tsx:direct property read:? profile.dateOfBirth.trim()
-app/client/settings/ClientProfileSettings.tsx:direct property read:? profile.email.trim()
-app/client/settings/ClientProfileSettings.tsx:direct property read:? profile.phone.trim()
-app/client/settings/ClientProfileSettings.tsx:direct property read:dateOfBirth !== (profile.dateOfBirth ?? '')
-app/client/settings/ClientProfileSettings.tsx:direct property read:firstName !== profile.firstName ||
-app/client/settings/ClientProfileSettings.tsx:direct property read:lastName !== profile.lastName ||
-app/client/settings/ClientProfileSettings.tsx:direct property read:phone !== (profile.phone ?? '') ||
-app/client/settings/ClientProfileSettings.tsx:direct property read:setDateOfBirth(next.dateOfBirth ?? '')
-app/client/settings/ClientProfileSettings.tsx:direct property read:setDateOfBirth(profile.dateOfBirth ?? '')
-app/client/settings/ClientProfileSettings.tsx:direct property read:setFirstName(next.firstName)
-app/client/settings/ClientProfileSettings.tsx:direct property read:setFirstName(profile.firstName)
-app/client/settings/ClientProfileSettings.tsx:direct property read:setLastName(next.lastName)
-app/client/settings/ClientProfileSettings.tsx:direct property read:setLastName(profile.lastName)
-app/client/settings/ClientProfileSettings.tsx:direct property read:setPhone(next.phone ?? '')
-app/client/settings/ClientProfileSettings.tsx:direct property read:setPhone(profile.phone ?? '')
-app/client/settings/ClientProfileSettings.tsx:direct property read:typeof profile.dateOfBirth === 'string' && profile.dateOfBirth.trim()
-app/client/settings/ClientProfileSettings.tsx:direct property read:typeof profile.email === 'string' && profile.email.trim()
-app/client/settings/ClientProfileSettings.tsx:direct property read:typeof profile.firstName === 'string' ? profile.firstName : ''
-app/client/settings/ClientProfileSettings.tsx:direct property read:typeof profile.lastName === 'string' ? profile.lastName : ''
-app/client/settings/ClientProfileSettings.tsx:direct property read:typeof profile.phone === 'string' && profile.phone.trim()
-app/client/settings/ClientProfileSettings.tsx:direct property read:{profile.email}
-app/client/settings/ClientProfileSettings.tsx:direct property read:{profile?.email ? (
-app/client/settings/ClientProfileSettings.tsx:optional direct property read:{profile?.email ? (
 app/messages/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/messages/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/messages/page.tsx:direct property read:? formatPersonName(thread.client?.firstName, thread.client?.lastName) ||

@@ -11,6 +11,7 @@ export type RateLimitBucket =
   | 'consultation:decision'
   | 'consultation:decision:token'
   | 'client:rebook:token'
+  | 'client:checkout:token'
   | 'pro:bookings:write'
   | 'pro:media:write'
   | 'pro:offerings:write'
@@ -98,6 +99,12 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 10,
     windowSeconds: 5 * 60,
     prefix: 'rl:client:rebook:token',
+    mode: 'redis-only',
+  },
+  'client:checkout:token': {
+    limit: 10,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:client:checkout:token',
     mode: 'redis-only',
   },
   'pro:bookings:write': {

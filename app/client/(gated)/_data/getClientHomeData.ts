@@ -4,9 +4,11 @@ import {
   BookingStatus,
   ConsultationApprovalStatus,
   LastMinuteRecipientStatus,
+  ModerationStatus,
   OpeningStatus,
   Prisma,
   SessionStep,
+  ViralServiceRequestStatus,
   WaitlistStatus,
 } from '@prisma/client'
 
@@ -320,6 +322,53 @@ export const clientHomeFavoriteProSelect =
     },
   })
 
+export const clientHomeFavoriteServiceSelect =
+  Prisma.validator<Prisma.ServiceFavoriteSelect>()({
+    id: true,
+    service: {
+      select: {
+        id: true,
+        name: true,
+        minPrice: true,
+        defaultDurationMinutes: true,
+        defaultImageUrl: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    },
+  })
+
+export const clientHomeViralLiveSelect =
+  Prisma.validator<Prisma.ViralServiceRequestSelect>()({
+    id: true,
+    name: true,
+    sourceUrl: true,
+    approvedAt: true,
+    _count: {
+      select: {
+        approvalFanOuts: true,
+      },
+    },
+  })
+
+export const clientHomeViralPendingSelect =
+  Prisma.validator<Prisma.ViralServiceRequestSelect>()({
+    id: true,
+    name: true,
+    sourceUrl: true,
+    status: true,
+    createdAt: true,
+    _count: {
+      select: {
+        approvalFanOuts: true,
+      },
+    },
+  })
+
 export type ClientHomeBooking = Prisma.BookingGetPayload<{
   select: typeof clientHomeBookingSelect
 }>
@@ -340,6 +389,18 @@ export type ClientHomeFavoritePro = Prisma.ProfessionalFavoriteGetPayload<{
   select: typeof clientHomeFavoriteProSelect
 }>
 
+export type ClientHomeFavoriteService = Prisma.ServiceFavoriteGetPayload<{
+  select: typeof clientHomeFavoriteServiceSelect
+}>
+
+export type ClientHomeViralLive = Prisma.ViralServiceRequestGetPayload<{
+  select: typeof clientHomeViralLiveSelect
+}>
+
+export type ClientHomeViralPending = Prisma.ViralServiceRequestGetPayload<{
+  select: typeof clientHomeViralPendingSelect
+}>
+
 export type ClientHomeAction =
   | {
       kind: 'PENDING_CONSULTATION'
@@ -354,10 +415,14 @@ export type ClientHomeAction =
 
 export type ClientHomeData = {
   upcoming: ClientHomeBooking | null
+  upcomingCount: number
   action: ClientHomeAction
   invites: ClientHomeLastMinuteInvite[]
   waitlists: ClientHomeWaitlistEntry[]
   favoritePros: ClientHomeFavoritePro[]
+  favoriteServices: ClientHomeFavoriteService[]
+  viralLive: ClientHomeViralLive[]
+  viralPending: ClientHomeViralPending[]
 }
 
 type GetClientHomeDataArgs = {
@@ -373,11 +438,15 @@ export async function getClientHomeData({
 
   const [
     upcoming,
+    upcomingCount,
     pendingConsultation,
     aftercarePaymentDue,
     invites,
     waitlists,
     favoritePros,
+    favoriteServices,
+    viralLive,
+    viralPending,
   ] = await Promise.all([
     prisma.booking.findFirst({
       where: {
@@ -391,6 +460,16 @@ export async function getClientHomeData({
         scheduledFor: 'asc',
       },
       select: clientHomeBookingSelect,
+    }),
+
+    prisma.booking.count({
+      where: {
+        clientId,
+        status: { in: [BookingStatus.ACCEPTED, BookingStatus.IN_PROGRESS] },
+        scheduledFor: {
+          gte: now,
+        },
+      },
     }),
 
     prisma.booking.findFirst({
@@ -498,6 +577,51 @@ export async function getClientHomeData({
       take: 24,
       select: clientHomeFavoriteProSelect,
     }),
+
+    prisma.serviceFavorite.findMany({
+      where: {
+        userId,
+        service: {
+          isActive: true,
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 12,
+      select: clientHomeFavoriteServiceSelect,
+    }),
+
+    prisma.viralServiceRequest.findMany({
+      where: {
+        status: ViralServiceRequestStatus.APPROVED,
+        moderationStatus: ModerationStatus.APPROVED,
+        removedAt: null,
+      },
+      orderBy: {
+        approvedAt: 'desc',
+      },
+      take: 8,
+      select: clientHomeViralLiveSelect,
+    }),
+
+    prisma.viralServiceRequest.findMany({
+      where: {
+        clientId,
+        status: {
+          in: [
+            ViralServiceRequestStatus.REQUESTED,
+            ViralServiceRequestStatus.IN_REVIEW,
+          ],
+        },
+        removedAt: null,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 5,
+      select: clientHomeViralPendingSelect,
+    }),
   ])
 
   const action: ClientHomeAction = pendingConsultation
@@ -515,9 +639,13 @@ export async function getClientHomeData({
 
   return {
     upcoming,
+    upcomingCount,
     action,
     invites,
     waitlists,
     favoritePros,
+    favoriteServices,
+    viralLive,
+    viralPending,
   }
 }

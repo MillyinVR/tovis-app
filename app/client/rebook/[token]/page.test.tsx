@@ -7,8 +7,11 @@ const TOKEN = 'token_1'
 
 const mocks = vi.hoisted(() => ({
   bookingFindFirst: vi.fn(),
+  bookingFindUnique: vi.fn(),
   professionalServiceOfferingFindFirst: vi.fn(),
   mediaAssetFindMany: vi.fn(),
+  clientProfileFindUnique: vi.fn(),
+  getPublicCheckoutAvailability: vi.fn(),
 
   sanitizeTimeZone: vi.fn(),
   formatAppointmentWhen: vi.fn(),
@@ -44,6 +47,7 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     booking: {
       findFirst: mocks.bookingFindFirst,
+      findUnique: mocks.bookingFindUnique,
     },
     professionalServiceOffering: {
       findFirst: mocks.professionalServiceOfferingFindFirst,
@@ -51,7 +55,14 @@ vi.mock('@/lib/prisma', () => ({
     mediaAsset: {
       findMany: mocks.mediaAssetFindMany,
     },
+    clientProfile: {
+      findUnique: mocks.clientProfileFindUnique,
+    },
   },
+}))
+
+vi.mock('@/lib/booking/publicCheckoutAvailability', () => ({
+  getPublicCheckoutAvailability: mocks.getPublicCheckoutAvailability,
 }))
 
 vi.mock('@/lib/timeZone', () => ({
@@ -234,6 +245,14 @@ describe('app/client/rebook/[token]/page.tsx', () => {
 
     mocks.isBookingError.mockReturnValue(false)
     mocks.mediaAssetFindMany.mockResolvedValue([])
+    mocks.bookingFindUnique.mockResolvedValue({ clientAddressId: null })
+    mocks.clientProfileFindUnique.mockResolvedValue({
+      claimStatus: 'CLAIMED',
+      userId: 'user_1',
+    })
+    mocks.getPublicCheckoutAvailability.mockResolvedValue({
+      status: 'NOT_AVAILABLE',
+    })
   })
 
   it('calls notFound when token is missing', async () => {
@@ -305,7 +324,87 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     expect(markup).not.toContain('/client/bookings/')
   })
 
-  it('builds a booking link from a fallback offering and computed recommended window', async () => {
+  it('renders the create-account invite for an UNCLAIMED client', async () => {
+    mocks.clientProfileFindUnique.mockResolvedValueOnce({
+      claimStatus: 'UNCLAIMED',
+      userId: null,
+    })
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({ offeringId: 'offering_1' }),
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).toContain('Want to keep your summaries?')
+    expect(markup).toContain('Create your account')
+  })
+
+  it('hides the create-account invite for a CLAIMED client', async () => {
+    mocks.clientProfileFindUnique.mockResolvedValueOnce({
+      claimStatus: 'CLAIMED',
+      userId: 'user_1',
+    })
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({ offeringId: 'offering_1' }),
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).not.toContain('Create your account')
+  })
+
+  it('renders the complete-payment card when checkout is PAYABLE', async () => {
+    mocks.getPublicCheckoutAvailability.mockResolvedValueOnce({
+      status: 'PAYABLE',
+      amountCents: 4500,
+      currency: 'usd',
+    })
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({ offeringId: 'offering_1' }),
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).toContain('Complete your payment')
+    expect(markup).toContain('$45.00')
+  })
+
+  it('shows a payment-received notice when returning with checkout=success', async () => {
+    mocks.getPublicCheckoutAvailability.mockResolvedValueOnce({
+      status: 'PAYABLE',
+      amountCents: 4500,
+      currency: 'usd',
+    })
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({ offeringId: 'offering_1' }),
+      searchParams: { checkout: 'success' },
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).toContain('Payment received')
+    expect(markup).not.toContain('Complete your payment')
+  })
+
+  it('hides the complete-payment card when checkout is NOT_AVAILABLE', async () => {
+    mocks.getPublicCheckoutAvailability.mockResolvedValueOnce({
+      status: 'NOT_AVAILABLE',
+    })
+
+    const page = await renderPage({
+      resolved: makeResolvedAftercareAccess({ offeringId: 'offering_1' }),
+    })
+
+    const markup = renderMarkup(page)
+
+    expect(markup).not.toContain('Complete your payment')
+  })
+
+  it('renders the in-page rebook picker for a fallback offering within the recommended window', async () => {
     const page = await renderPage({
       resolved: makeResolvedAftercareAccess({
         offeringId: null,
@@ -331,41 +430,13 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     expect(markup).toContain(
       'Recommended rebook window: range:2026-04-20T18:00:00.000Z..2026-04-30T18:00:00.000Z:America/Los_Angeles',
     )
-    expect(markup).toContain('href="/offerings/offering_fallback_1?')
-    expect(markup).toContain('source=AFTERCARE')
-    expect(markup).toContain(`token=${TOKEN}`)
-    expect(markup).toContain('rebookOfBookingId=booking_1')
-    expect(markup).toContain('windowStart=2026-04-20T18%3A00%3A00.000Z')
-    expect(markup).toContain('windowEnd=2026-04-30T18%3A00%3A00.000Z')
+    // The broken /offerings/[id] link is gone; the in-page slot picker renders.
+    expect(markup).not.toContain('/offerings/')
+    expect(markup).toContain('Pick a day')
+    expect(markup).toContain('Times shown in America/Los_Angeles')
   })
 
-  it('preserves explicit URL recommendation params instead of overwriting them', async () => {
-    const page = await renderPage({
-      resolved: makeResolvedAftercareAccess({
-        offeringId: 'offering_1',
-        rebookMode: AftercareRebookMode.RECOMMENDED_WINDOW,
-        rebookWindowStart: new Date('2026-04-20T18:00:00.000Z'),
-        rebookWindowEnd: new Date('2026-04-30T18:00:00.000Z'),
-      }),
-      nextBooking: null,
-      searchParams: {
-        recommendedAt: '2026-05-05T19:00:00.000Z',
-        windowStart: '2026-05-01T19:00:00.000Z',
-        windowEnd: '2026-05-10T19:00:00.000Z',
-      },
-    })
-
-    const markup = renderMarkup(page)
-
-    expect(markup).toContain('href="/offerings/offering_1?')
-    expect(markup).toContain('recommendedAt=2026-05-05T19%3A00%3A00.000Z')
-    expect(markup).toContain('windowStart=2026-05-01T19%3A00%3A00.000Z')
-    expect(markup).toContain('windowEnd=2026-05-10T19%3A00%3A00.000Z')
-    expect(markup).not.toContain('windowStart=2026-04-20T18%3A00%3A00.000Z')
-    expect(markup).not.toContain('windowEnd=2026-04-30T18%3A00%3A00.000Z')
-  })
-
-  it('shows no recommendation text when rebook mode is NONE', async () => {
+  it('renders the rebook picker (no window) when rebook mode is NONE but an offering exists', async () => {
     const page = await renderPage({
       resolved: makeResolvedAftercareAccess({
         offeringId: 'offering_1',
@@ -378,7 +449,8 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     const markup = renderMarkup(page)
 
     expect(markup).toContain('No rebook recommendation yet.')
-    expect(markup).toContain('Book your next appointment')
+    expect(markup).toContain('Pick a day')
+    expect(markup).not.toContain('/offerings/')
   })
 
   it('shows the unavailable state when no active offering can be found', async () => {
@@ -398,6 +470,6 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     expect(markup).toContain(
       'We could not find an active offering for this service.',
     )
-    expect(markup).not.toContain('Book your next appointment')
+    expect(markup).not.toContain('Pick a day')
   })
 })

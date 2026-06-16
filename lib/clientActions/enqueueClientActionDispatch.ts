@@ -123,14 +123,26 @@ function resolveRequestedChannels(
   )
 }
 
-function resolveAllowUnverifiedDestination(
+/**
+ * Snapshot-based magic-link delivery flows where the business action itself is
+ * "send this secure link to the pro-entered destination". For these, the
+ * recipient is often an UNCLAIMED client with no account and an unverified
+ * phone/email, so we treat the pro-entered destination as eligible at enqueue
+ * (a synthetic eligibility timestamp, not an ownership claim). Without this,
+ * SMS to phone-only unclaimed clients is suppressed and they receive nothing.
+ */
+const UNVERIFIED_DESTINATION_ACTION_TYPES = new Set<
+  EnqueueClientActionDispatchArgs['plan']['definition']['type']
+>(['CLIENT_CLAIM_INVITE', 'CONSULTATION_ACTION', 'AFTERCARE_ACCESS'])
+
+export function resolveAllowUnverifiedDestination(
   args: Pick<EnqueueClientActionDispatchArgs, 'allowUnverifiedDestination' | 'plan'>,
 ): boolean {
   if (typeof args.allowUnverifiedDestination === 'boolean') {
     return args.allowUnverifiedDestination
   }
 
-  return args.plan.definition.type === 'CLIENT_CLAIM_INVITE'
+  return UNVERIFIED_DESTINATION_ACTION_TYPES.has(args.plan.definition.type)
 }
 
 function resolveSyntheticVerificationTimestamp(args: {

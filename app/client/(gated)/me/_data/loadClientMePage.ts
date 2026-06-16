@@ -15,7 +15,7 @@ import {
   buildClientBookingDTO,
   type ClientBookingDTO,
 } from '@/lib/dto/clientBooking'
-import { computePendingConsultation } from '@/app/client/bookings/[id]/_view/buildBookingViewModel'
+import { computePendingConsultation } from '@/app/client/(gated)/bookings/[id]/_view/buildBookingViewModel'
 
 type CurrentUserResult = Awaited<ReturnType<typeof getCurrentUser>>
 
