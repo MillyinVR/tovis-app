@@ -12,6 +12,7 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 import { sanitizeTimeZone } from '@/lib/timeZone'
+import { pickPublicTierPlan as pickPublicTierPlanShared } from '@/lib/lastMinute/pickTierPlan'
 
 export const dynamic = 'force-dynamic'
 
@@ -359,22 +360,10 @@ function openingIsAllowedByWeekday(row: OpeningQueryRow) {
 }
 
 function pickPublicTierPlan(row: OpeningQueryRow, now: Date) {
-  const plans = row.tierPlans
-  if (plans.length === 0) return null
-
-  if (row.visibilityMode === LastMinuteVisibilityMode.PUBLIC_AT_DISCOVERY) {
-    return plans.find((plan) => plan.tier === LastMinuteTier.DISCOVERY) ?? null
-  }
-
-  if (row.visibilityMode === LastMinuteVisibilityMode.PUBLIC_IMMEDIATE) {
-    const started = plans.filter((plan) => plan.scheduledFor.getTime() <= now.getTime())
-    if (started.length > 0) {
-      return started[started.length - 1] ?? null
-    }
-    return plans[0] ?? null
-  }
-
-  return null
+  return pickPublicTierPlanShared(
+    { visibilityMode: row.visibilityMode, tierPlans: row.tierPlans },
+    now,
+  )
 }
 
 function incentiveLabel(plan: NonNullable<ReturnType<typeof pickPublicTierPlan>>): string {
