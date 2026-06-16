@@ -66,3 +66,6 @@ test-results/
 .tovis-smoke-watch.cjs
 # TypeScript incremental build cache
 tsconfig.tsbuildinfo
+
+# Claude Design handoff bundle (reference only)
+docs/design/brand-handoff/

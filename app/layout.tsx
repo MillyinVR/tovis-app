@@ -3,7 +3,7 @@
 import type { Metadata } from 'next'
 import type { CSSProperties, ReactNode } from 'react'
 import { cookies } from 'next/headers'
-import { Fraunces, Inter_Tight, JetBrains_Mono } from 'next/font/google'
+import { Space_Grotesk, Hanken_Grotesk, Space_Mono } from 'next/font/google'
 
 import './globals.css'
 import '@/lib/brand/brand.css'
@@ -17,23 +17,25 @@ import { BrandProvider } from '@/lib/brand/BrandProvider'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
-const interTight = Inter_Tight({
+// Body / UI — Hanken Grotesk (brand sheet)
+const hankenGrotesk = Hanken_Grotesk({
   variable: '--font-body',
   subsets: ['latin'],
   weight: ['400', '500', '600', '700', '800'],
 })
 
-const fraunces = Fraunces({
+// Display / headlines / wordmark — Space Grotesk
+const spaceGrotesk = Space_Grotesk({
   variable: '--font-display-face',
   subsets: ['latin'],
-  weight: ['300', '400', '600', '700'],
-  style: ['normal', 'italic'],
+  weight: ['400', '500', '600', '700'],
 })
 
-const jetBrainsMono = JetBrains_Mono({
+// Labels / timestamps / system texture — Space Mono
+const spaceMono = Space_Mono({
   variable: '--font-mono-face',
   subsets: ['latin'],
-  weight: ['400', '500'],
+  weight: ['400', '700'],
 })
 
 export const dynamic = 'force-dynamic'
@@ -43,9 +45,9 @@ type RootLayoutProps = {
 }
 
 const bodyClassName = [
-  interTight.variable,
-  fraunces.variable,
-  jetBrainsMono.variable,
+  hankenGrotesk.variable,
+  spaceGrotesk.variable,
+  spaceMono.variable,
 ].join(' ')
 
 const appContentStyle: CSSProperties = {
