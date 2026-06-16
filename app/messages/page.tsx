@@ -171,6 +171,28 @@ function classNames(values: (string | false | null | undefined)[]): string {
   return classes.join(' ')
 }
 
+// Deterministic brand-gradient fallback for avatars without a photo. Pairs are drawn from
+// existing brand tokens (no hardcoded hex) and picked by a stable hash of the thread id, so a
+// given thread always gets the same gradient. Purely visual — not derived from any live data.
+const AVATAR_GRADIENTS: ReadonlyArray<readonly [string, string]> = [
+  ['--accent-primary', '--iris'],
+  ['--peacock-blue', '--accent-primary'],
+  ['--iris', '--peacock-blue'],
+  ['--amber', '--fern'],
+]
+
+function avatarGradientStyle(seed: string): { background: string } {
+  let hash = 0
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+  }
+  const fallback: readonly [string, string] = ['--accent-primary', '--iris']
+  const [from, to] = AVATAR_GRADIENTS[hash % AVATAR_GRADIENTS.length] ?? fallback
+  return {
+    background: `radial-gradient(130% 120% at 32% 20%, rgb(var(${from})), rgb(var(${to})))`,
+  }
+}
+
 function formatPersonName(
   firstName: string | null | undefined,
   lastName: string | null | undefined,
@@ -595,16 +617,27 @@ export default async function MessagesInboxPage(props: PageProps) {
   const offeringMap = mapById(offeringRows)
   const waitlistMap = mapById(waitlistRows)
 
+  const viewerLabel = user.role === Role.PRO ? 'Pro' : 'Client'
+
   return (
-    <main className="min-h-screen bg-bgPrimary text-textPrimary">
-      <section className="mx-auto flex min-h-screen w-full max-w-[430px] flex-col px-6 pb-28 pt-16">
+    <main className="relative min-h-screen overflow-hidden bg-bgPrimary text-textPrimary">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[200px] bg-[linear-gradient(180deg,rgb(var(--accent-primary)/0.12),transparent)]"
+      />
+      <section className="relative mx-auto flex min-h-screen w-full max-w-[430px] flex-col px-6 pb-28 pt-16">
         <header>
-          <h1 className="font-serif text-[38px] font-black italic leading-none tracking-[-0.04em]">
-            Inbox
-          </h1>
+          <div className="flex items-center justify-between">
+            <h1 className="font-display text-[38px] font-bold italic leading-none tracking-[-0.04em]">
+              Inbox
+            </h1>
+            <span className="rounded-full border border-textPrimary/15 px-[11px] py-[6px] font-mono text-[10px] uppercase tracking-[0.14em] text-textMuted">
+              {viewerLabel}
+            </span>
+          </div>
 
           <nav
-            className="mt-5 flex items-end gap-5"
+            className="mt-[22px] flex items-end gap-[22px]"
             aria-label="Inbox filters"
           >
             {inboxTabs.map((tab) => {
@@ -616,10 +649,10 @@ export default async function MessagesInboxPage(props: PageProps) {
                 href={hrefForFilter(tab.key)}
                 aria-current={active ? 'page' : undefined}
                 className={classNames([
-                  'inline-flex border-b-[3px] pb-2 text-[13px] font-black transition hover:text-textPrimary',
+                  'inline-flex border-b-[3px] pb-[9px] font-display text-[13px] font-bold transition hover:text-textPrimary',
                   active
                     ? '[border-bottom-color:rgb(var(--accent-primary))] text-textPrimary'
-                    : '[border-bottom-color:transparent] text-textSecondary',
+                    : '[border-bottom-color:transparent] text-textMuted',
                 ])}
               >
                 {tab.label}
@@ -631,14 +664,14 @@ export default async function MessagesInboxPage(props: PageProps) {
 
         <div className="mt-7">
           {threads.length === 0 ? (
-            <div className="rounded-[22px] border border-white/10 bg-bgSecondary/40 px-5 py-6">
-              <div className="text-[14px] font-black">
+            <div className="rounded-[22px] border border-textPrimary/10 bg-bgSecondary/40 px-5 py-6">
+              <div className="font-display text-[15px] font-bold">
                 {activeFilter === 'waitlists'
                   ? 'No waitlist messages yet'
                   : 'No messages yet'}
               </div>
 
-              <p className="mt-2 text-[13px] font-semibold leading-5 text-textSecondary">
+              <p className="mt-2 text-[13px] font-medium leading-5 text-textSecondary">
                 {activeFilter === 'waitlists'
                   ? 'Waitlist conversations will show here once a waitlist thread has message activity.'
                   : 'Once a message thread has activity, it will show up here.'}
@@ -646,13 +679,13 @@ export default async function MessagesInboxPage(props: PageProps) {
 
               <Link
                 href="/looks"
-                className="mt-5 inline-flex rounded-full border-terra px-5 py-3 text-[13px] font-black text-bgPrimary hover:border-terraHover"
+                className="mt-5 inline-flex rounded-full bg-accentPrimary px-5 py-3 text-[13px] font-bold text-onAccent transition hover:bg-accentPrimaryHover"
               >
                 Browse Looks
               </Link>
             </div>
           ) : (
-            <div className="divide-y divide-white/10 border-y border-white/10">
+            <div className="border-t border-textPrimary/10">
               {threads.map((thread) => {
                 const item = buildThreadPresentation({
                   thread,
@@ -667,45 +700,44 @@ export default async function MessagesInboxPage(props: PageProps) {
                   <Link
                     key={thread.id}
                     href={`/messages/thread/${encodeURIComponent(thread.id)}`}
-                    className="group grid grid-cols-[64px_1fr_auto] gap-4 py-4 transition hover:bg-bgSecondary/25"
+                    className="group grid grid-cols-[60px_1fr_auto] gap-[15px] border-b border-textPrimary/10 py-4 transition hover:bg-bgSecondary/25"
                   >
-                    <div className="relative h-16 w-16 overflow-hidden rounded-full bg-bgSecondary">
+                    <div className="relative h-[60px] w-[60px]">
                       {item.avatarUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={item.avatarUrl}
                           alt=""
-                          className="h-full w-full object-cover"
+                          className="h-[60px] w-[60px] rounded-full object-cover"
                         />
                       ) : (
-                        <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full border border-white/10 bg-bgSecondary">
-                          <div className="absolute inset-0 rotate-45 bg-bgPrimary/35" />
-                          <div className="absolute inset-0 border-terra/10" />
-                          <span className="relative text-[13px] font-black text-textPrimary">
-                            {item.initials}
-                          </span>
+                        <div
+                          className="grid h-[60px] w-[60px] place-items-center rounded-full font-display text-[16px] font-bold text-onAccent"
+                          style={avatarGradientStyle(thread.id)}
+                        >
+                          {item.initials}
                         </div>
                       )}
 
                       {item.isUnread ? (
                         <span
                           aria-hidden="true"
-                          className="absolute right-0 top-0 h-4 w-6 rounded-bl-full rounded-tr-full border-terra"
+                          className="absolute right-px top-px h-[14px] w-[14px] rounded-full bg-accentPrimary ring-[2.5px] ring-bgPrimary"
                         />
                       ) : null}
                     </div>
 
-                    <div className="min-w-0 pt-0.5">
-                      <div className="truncate text-[15px] font-black leading-5">
+                    <div className="min-w-0 pt-[2px]">
+                      <div className="truncate font-display text-[15.5px] font-bold leading-5 tracking-[-0.01em]">
                         {item.title}
                       </div>
 
                       <div
                         className={classNames([
-                          'mt-0.5 truncate text-[11px] font-black uppercase leading-4',
+                          'mt-[3px] truncate font-mono text-[9.5px] font-bold uppercase leading-4 tracking-[0.06em]',
                           item.isAccent
                             ? 'text-accentPrimary'
-                            : 'text-textSecondary',
+                            : 'text-textMuted',
                         ])}
                       >
                         {item.eyebrow}
@@ -713,24 +745,32 @@ export default async function MessagesInboxPage(props: PageProps) {
 
                       <div
                         className={classNames([
-                          'mt-0.5 truncate text-[13px] leading-5',
+                          'mt-1 truncate text-[13px] leading-[1.35]',
                           item.isUnread
-                            ? 'font-black text-textPrimary'
-                            : 'font-semibold text-textSecondary',
+                            ? 'font-bold text-textPrimary'
+                            : 'font-medium text-textMuted',
                         ])}
                       >
                         {item.preview}
                       </div>
                     </div>
 
-                    <div className="pt-1 text-right text-[11px] font-semibold text-textSecondary">
-                      {item.timeLabel}
+                    <div className="flex flex-col items-end gap-[7px] pt-[3px]">
+                      <span className="whitespace-nowrap font-mono text-[10.5px] text-textMuted">
+                        {item.timeLabel}
+                      </span>
                     </div>
                   </Link>
                 )
               })}
             </div>
           )}
+
+          {activeFilter === 'waitlists' && threads.length > 0 ? (
+            <div className="mt-[18px] text-center font-mono text-[10px] uppercase tracking-[0.1em] text-textMuted">
+              Waitlist threads appear the moment a client joins
+            </div>
+          ) : null}
         </div>
       </section>
     </main>
