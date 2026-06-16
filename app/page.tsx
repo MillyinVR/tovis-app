@@ -56,7 +56,7 @@ export default function Home() {
 
           {/* Headline — the only large text on this page */}
           <h1 className="font-display text-[52px] font-semibold leading-[1.08] tracking-tight sm:text-[68px] lg:text-[84px] xl:text-[96px]">
-            A New Age<br />
+            The New Age<br />
             <span className="text-textPrimary/50">of Self Care</span>
           </h1>
 

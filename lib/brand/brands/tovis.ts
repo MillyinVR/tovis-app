@@ -356,7 +356,7 @@ const proCalendar: BrandConfig['proCalendar'] = {
 export const tovisBrand: BrandConfig = {
   id: 'tovis',
   displayName: 'TOVIS',
-  tagline: 'Find your look. Book your light.',
+  tagline: 'The New Age of Self Care',
   defaultMode: 'dark',
 
   assets: {
