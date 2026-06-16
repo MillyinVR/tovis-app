@@ -146,12 +146,12 @@ export default function NewClientForm() {
     <form
       onSubmit={handleSubmit}
       style={{
-        border: '1px solid #eee',
+        border: '1px solid rgb(var(--text-primary) / 0.10)',
         borderRadius: 12,
         padding: 16,
         display: 'grid',
         gap: 12,
-        background: '#fff',
+        background: 'rgb(var(--bg-surface))',
       }}
     >
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -176,7 +176,7 @@ export default function NewClientForm() {
             style={{
               width: '100%',
               borderRadius: 8,
-              border: '1px solid #ddd',
+              border: '1px solid rgb(var(--text-primary) / 0.10)',
               padding: 8,
               fontSize: 13,
               fontFamily: 'inherit',
@@ -206,7 +206,7 @@ export default function NewClientForm() {
             style={{
               width: '100%',
               borderRadius: 8,
-              border: '1px solid #ddd',
+              border: '1px solid rgb(var(--text-primary) / 0.10)',
               padding: 8,
               fontSize: 13,
               fontFamily: 'inherit',
@@ -239,7 +239,7 @@ export default function NewClientForm() {
           style={{
             width: '100%',
             borderRadius: 8,
-            border: '1px solid #ddd',
+            border: '1px solid rgb(var(--text-primary) / 0.10)',
             padding: 8,
             fontSize: 13,
             fontFamily: 'inherit',
@@ -270,7 +270,7 @@ export default function NewClientForm() {
           style={{
             width: '100%',
             borderRadius: 8,
-            border: '1px solid #ddd',
+            border: '1px solid rgb(var(--text-primary) / 0.10)',
             padding: 8,
             fontSize: 13,
             fontFamily: 'inherit',
@@ -279,10 +279,10 @@ export default function NewClientForm() {
         />
       </div>
 
-      {error ? <div style={{ fontSize: 12, color: 'red' }}>{error}</div> : null}
+      {error ? <div style={{ fontSize: 12, color: 'rgb(var(--tone-danger))' }}>{error}</div> : null}
 
       {success ? (
-        <div style={{ fontSize: 12, color: '#2e7d32' }}>Client added.</div>
+        <div style={{ fontSize: 12, color: 'rgb(var(--tone-success))' }}>Client added.</div>
       ) : null}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -294,8 +294,8 @@ export default function NewClientForm() {
             borderRadius: 999,
             border: 'none',
             fontSize: 13,
-            background: loading ? '#374151' : '#111',
-            color: '#fff',
+            background: loading ? 'rgb(var(--text-secondary))' : 'rgb(var(--text-primary))',
+            color: 'rgb(var(--bg-primary))',
             cursor: loading ? 'not-allowed' : 'pointer',
           }}
         >

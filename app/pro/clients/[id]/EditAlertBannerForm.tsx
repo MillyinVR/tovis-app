@@ -61,10 +61,10 @@ export default function EditAlertBannerForm({
               display: 'inline-flex',
               padding: '4px 10px',
               borderRadius: 999,
-              background: '#fff4e5',
-              border: '1px solid #f0b46a',
+              background: 'rgb(var(--tone-warn) / 0.12)',
+              border: '1px solid rgb(var(--tone-warn) / 0.35)',
               fontSize: 12,
-              color: '#8a4a00',
+              color: 'rgb(var(--tone-warn))',
               alignItems: 'center',
               gap: 6,
             }}
@@ -75,7 +75,7 @@ export default function EditAlertBannerForm({
           <div
             style={{
               fontSize: 12,
-              color: '#999',
+              color: 'rgb(var(--text-muted))',
               marginBottom: 4,
             }}
           >
@@ -90,8 +90,8 @@ export default function EditAlertBannerForm({
             fontSize: 11,
             padding: '4px 10px',
             borderRadius: 999,
-            border: '1px solid #ddd',
-            background: '#fafafa',
+            border: '1px solid rgb(var(--text-primary) / 0.10)',
+            background: 'rgb(var(--text-primary) / 0.04)',
             cursor: 'pointer',
           }}
         >
@@ -119,7 +119,7 @@ export default function EditAlertBannerForm({
         style={{
           width: '100%',
           borderRadius: 8,
-          border: '1px solid #ddd',
+          border: '1px solid rgb(var(--text-primary) / 0.10)',
           padding: 6,
           fontSize: 12,
           fontFamily: 'inherit',
@@ -127,7 +127,7 @@ export default function EditAlertBannerForm({
         }}
       />
       {error && (
-        <div style={{ fontSize: 11, color: 'red', marginBottom: 4 }}>
+        <div style={{ fontSize: 11, color: 'rgb(var(--tone-danger))', marginBottom: 4 }}>
           {error}
         </div>
       )}
@@ -143,8 +143,8 @@ export default function EditAlertBannerForm({
               fontSize: 11,
               padding: '4px 10px',
               borderRadius: 999,
-              border: '1px solid #ddd',
-              background: '#fff',
+              border: '1px solid rgb(var(--text-primary) / 0.10)',
+              background: 'rgb(var(--bg-surface))',
               cursor: 'pointer',
             }}
           >
@@ -163,8 +163,8 @@ export default function EditAlertBannerForm({
             fontSize: 11,
             padding: '4px 10px',
             borderRadius: 999,
-            border: '1px solid #ddd',
-            background: '#fafafa',
+            border: '1px solid rgb(var(--text-primary) / 0.10)',
+            background: 'rgb(var(--text-primary) / 0.04)',
             cursor: 'pointer',
           }}
         >
@@ -178,8 +178,8 @@ export default function EditAlertBannerForm({
             padding: '4px 12px',
             borderRadius: 999,
             border: 'none',
-            background: '#111',
-            color: '#fff',
+            background: 'rgb(var(--text-primary))',
+            color: 'rgb(var(--bg-primary))',
             cursor: 'pointer',
           }}
         >

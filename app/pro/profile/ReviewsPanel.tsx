@@ -278,7 +278,7 @@ function ReviewsPanelInner({
   return (
     <section style={{ display: 'grid', gap: 10 }}>
       {localReviews.length === 0 ? (
-        <div style={{ fontSize: 12, color: '#6b7280' }}>No reviews yet.</div>
+        <div style={{ fontSize: 12, color: 'rgb(var(--text-muted))' }}>No reviews yet.</div>
       ) : (
         localReviews.map((review) => {
           const name = review.clientName?.trim() || 'Client'
@@ -299,8 +299,8 @@ function ReviewsPanelInner({
               key={review.id}
               style={{
                 borderRadius: 12,
-                border: '1px solid #eee',
-                background: '#fff',
+                border: '1px solid rgb(var(--text-primary) / 0.10)',
+                background: 'rgb(var(--bg-surface))',
                 padding: 12,
                 display: 'grid',
                 gridTemplateColumns: primarySrc ? '1fr 170px' : '1fr',
@@ -321,7 +321,7 @@ function ReviewsPanelInner({
                     <div
                       style={{
                         fontSize: 11,
-                        color: '#9ca3af',
+                        color: 'rgb(var(--text-muted))',
                         marginTop: 2,
                       }}
                     >
@@ -329,7 +329,7 @@ function ReviewsPanelInner({
                     </div>
                   </div>
 
-                  <div style={{ fontSize: 12, color: '#f59e0b' }}>
+                  <div style={{ fontSize: 12, color: 'rgb(var(--amber))' }}>
                     {stars.map((star) => (
                       <span key={star}>
                         {star <= review.rating ? '★' : '☆'}
@@ -345,7 +345,7 @@ function ReviewsPanelInner({
                 ) : null}
 
                 {review.body ? (
-                  <div style={{ marginTop: 6, fontSize: 12, color: '#374151' }}>
+                  <div style={{ marginTop: 6, fontSize: 12, color: 'rgb(var(--text-secondary))' }}>
                     {review.body}
                   </div>
                 ) : null}
@@ -366,11 +366,11 @@ function ReviewsPanelInner({
                         void toggleHelpful(review.id)
                       }}
                       style={{
-                        border: '1px solid #e5e7eb',
+                        border: '1px solid rgb(var(--text-primary) / 0.10)',
                         borderRadius: 999,
                         padding: '6px 10px',
-                        background: viewerHelpful ? '#111' : '#fff',
-                        color: viewerHelpful ? '#fff' : '#111',
+                        background: viewerHelpful ? 'rgb(var(--text-primary))' : 'rgb(var(--bg-surface))',
+                        color: viewerHelpful ? 'rgb(var(--bg-primary))' : 'rgb(var(--text-primary))',
                         cursor: helpfulBusy ? 'default' : 'pointer',
                         fontSize: 12,
                         fontWeight: 700,
@@ -381,12 +381,12 @@ function ReviewsPanelInner({
                       {helpfulBusy ? '…' : viewerHelpful ? 'Helpful ✓' : 'Helpful'}
                     </button>
 
-                    <div style={{ fontSize: 12, color: '#6b7280' }}>
+                    <div style={{ fontSize: 12, color: 'rgb(var(--text-muted))' }}>
                       {helpfulCount} {helpfulCount === 1 ? 'helpful' : 'helpfuls'}
                     </div>
                   </div>
                 ) : (
-                  <div style={{ marginTop: 10, fontSize: 12, color: '#6b7280' }}>
+                  <div style={{ marginTop: 10, fontSize: 12, color: 'rgb(var(--text-muted))' }}>
                     {helpfulCount} {helpfulCount === 1 ? 'helpful' : 'helpfuls'}
                   </div>
                 )}
@@ -413,10 +413,10 @@ function ReviewsPanelInner({
                             type="button"
                             onClick={() => open(src, item.mediaType)}
                             style={{
-                              border: '1px solid #eee',
+                              border: '1px solid rgb(var(--text-primary) / 0.10)',
                               borderRadius: 10,
                               padding: 0,
-                              background: '#f3f4f6',
+                              background: 'rgb(var(--text-primary) / 0.04)',
                               width: 92,
                               height: 92,
                               overflow: 'hidden',
@@ -433,8 +433,8 @@ function ReviewsPanelInner({
                                   height: '100%',
                                   display: 'grid',
                                   placeItems: 'center',
-                                  background: '#111',
-                                  color: '#fff',
+                                  background: 'rgb(var(--text-primary))',
+                                  color: 'rgb(var(--bg-primary))',
                                   fontSize: 10,
                                   fontWeight: 800,
                                 }}
@@ -483,11 +483,11 @@ function ReviewsPanelInner({
                               style={{
                                 marginTop: 6,
                                 width: '100%',
-                                border: '1px solid #e5e7eb',
+                                border: '1px solid rgb(var(--text-primary) / 0.10)',
                                 borderRadius: 999,
                                 padding: '6px 8px',
-                                background: inPortfolio ? '#111' : '#fff',
-                                color: inPortfolio ? '#fff' : '#111',
+                                background: inPortfolio ? 'rgb(var(--text-primary))' : 'rgb(var(--bg-surface))',
+                                color: inPortfolio ? 'rgb(var(--bg-primary))' : 'rgb(var(--text-primary))',
                                 cursor:
                                   busyMediaId === item.id ? 'default' : 'pointer',
                                 fontSize: 11,
@@ -514,7 +514,7 @@ function ReviewsPanelInner({
                       <div
                         style={{
                           fontSize: 12,
-                          color: '#6b7280',
+                          color: 'rgb(var(--text-muted))',
                           alignSelf: 'center',
                         }}
                       >
@@ -530,10 +530,10 @@ function ReviewsPanelInner({
                   type="button"
                   onClick={() => open(primarySrc, primary.mediaType)}
                   style={{
-                    border: '1px solid #eee',
+                    border: '1px solid rgb(var(--text-primary) / 0.10)',
                     borderRadius: 12,
                     padding: 0,
-                    background: '#f3f4f6',
+                    background: 'rgb(var(--text-primary) / 0.04)',
                     overflow: 'hidden',
                     cursor: 'pointer',
                     width: '100%',
@@ -549,8 +549,8 @@ function ReviewsPanelInner({
                         height: '100%',
                         display: 'grid',
                         placeItems: 'center',
-                        background: '#111',
-                        color: '#fff',
+                        background: 'rgb(var(--text-primary))',
+                        color: 'rgb(var(--bg-primary))',
                         fontSize: 12,
                         fontWeight: 900,
                       }}
@@ -624,7 +624,7 @@ function Lightbox({
       <div
         onClick={(event) => event.stopPropagation()}
         style={{
-          background: '#111',
+          background: 'rgb(var(--bg-surface))',
           borderRadius: 14,
           overflow: 'hidden',
           maxWidth: 920,
@@ -661,7 +661,8 @@ function Lightbox({
               border: 'none',
               borderRadius: 999,
               padding: '8px 12px',
-              background: '#fff',
+              background: 'rgb(var(--text-primary) / 0.08)',
+              color: 'rgb(var(--text-primary))',
               cursor: 'pointer',
               fontSize: 12,
             }}

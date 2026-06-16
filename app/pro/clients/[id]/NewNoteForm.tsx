@@ -143,9 +143,9 @@ export default function NewNoteForm({ clientId }: Props) {
       onSubmit={handleSubmit}
       style={{
         borderRadius: 10,
-        border: '1px solid #eee',
+        border: '1px solid rgb(var(--text-primary) / 0.10)',
         padding: 12,
-        background: '#fafafa',
+        background: 'rgb(var(--text-primary) / 0.04)',
         display: 'grid',
         gap: 8,
         fontSize: 13,
@@ -173,7 +173,7 @@ export default function NewNoteForm({ clientId }: Props) {
           style={{
             width: '100%',
             borderRadius: 8,
-            border: '1px solid #ddd',
+            border: '1px solid rgb(var(--text-primary) / 0.10)',
             padding: 8,
             fontSize: 13,
             fontFamily: 'inherit',
@@ -205,7 +205,7 @@ export default function NewNoteForm({ clientId }: Props) {
           style={{
             width: '100%',
             borderRadius: 8,
-            border: '1px solid #ddd',
+            border: '1px solid rgb(var(--text-primary) / 0.10)',
             padding: 8,
             fontSize: 13,
             fontFamily: 'inherit',
@@ -215,7 +215,7 @@ export default function NewNoteForm({ clientId }: Props) {
         />
       </div>
 
-      {error ? <div style={{ fontSize: 12, color: 'red' }}>{error}</div> : null}
+      {error ? <div style={{ fontSize: 12, color: 'rgb(var(--tone-danger))' }}>{error}</div> : null}
 
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button
@@ -225,8 +225,8 @@ export default function NewNoteForm({ clientId }: Props) {
             padding: '6px 14px',
             borderRadius: 999,
             border: 'none',
-            background: loading ? '#374151' : '#111',
-            color: '#fff',
+            background: loading ? 'rgb(var(--text-secondary))' : 'rgb(var(--text-primary))',
+            color: 'rgb(var(--bg-primary))',
             fontSize: 13,
             cursor: loading ? 'not-allowed' : 'pointer',
           }}

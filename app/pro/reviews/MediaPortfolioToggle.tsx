@@ -52,9 +52,9 @@ export default function MediaPortfolioToggle({
           padding: '6px 10px',
           fontSize: 12,
           cursor: loading ? 'default' : 'pointer',
-          background: featured ? '#111' : '#fff',
-          color: featured ? '#fff' : '#111',
-          borderColor: '#111',
+          background: featured ? 'rgb(var(--text-primary))' : 'rgb(var(--bg-surface))',
+          color: featured ? 'rgb(var(--bg-primary))' : 'rgb(var(--text-primary))',
+          borderColor: 'rgb(var(--text-primary))',
           borderWidth: 1,
           borderStyle: 'solid',
         }}
@@ -63,7 +63,7 @@ export default function MediaPortfolioToggle({
         {loading ? 'Saving…' : featured ? 'In Portfolio' : 'Add to Portfolio'}
       </button>
 
-      {error && <div style={{ fontSize: 11, color: 'red' }}>{error}</div>}
+      {error && <div style={{ fontSize: 11, color: 'rgb(var(--tone-danger))' }}>{error}</div>}
     </div>
   )
 }
