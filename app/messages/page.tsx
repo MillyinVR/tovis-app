@@ -625,10 +625,10 @@ export default async function MessagesInboxPage(props: PageProps) {
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-[200px] bg-[linear-gradient(180deg,rgb(var(--accent-primary)/0.12),transparent)]"
       />
-      <section className="relative mx-auto flex min-h-screen w-full max-w-[430px] flex-col px-6 pb-28 pt-16">
+      <section className="relative mx-auto flex min-h-screen w-full max-w-none flex-col px-[22px] pb-28 pt-16 md:max-w-[480px] md:px-[34px] lg:max-w-[500px] lg:px-[40px]">
         <header>
           <div className="flex items-center justify-between">
-            <h1 className="font-display text-[38px] font-bold italic leading-none tracking-[-0.04em]">
+            <h1 className="font-display text-[38px] font-bold italic leading-none tracking-[-0.04em] md:text-[42px] lg:text-[46px]">
               Inbox
             </h1>
             <span className="rounded-full border border-textPrimary/15 px-[11px] py-[6px] font-mono text-[10px] uppercase tracking-[0.14em] text-textMuted">

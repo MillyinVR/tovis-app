@@ -364,14 +364,14 @@ export default async function MessageThreadPage(props: PageProps) {
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-[180px] bg-[linear-gradient(180deg,rgb(var(--accent-primary)/0.12),transparent)]"
       />
-      <section className="relative mx-auto flex min-h-screen w-full max-w-[430px] flex-col px-6 pb-28 pt-12">
+      <section className="relative mx-auto flex min-h-screen w-full max-w-none flex-col px-[22px] pb-28 pt-12 md:max-w-[520px] md:px-[30px] lg:max-w-[540px] lg:px-[36px]">
         <header className="flex items-start justify-between gap-[14px]">
           <div className="min-w-0">
             <div className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-textMuted">
               {contextMeta.line}
             </div>
 
-            <h1 className="mt-[9px] truncate font-display text-[24px] font-bold leading-[1.05] tracking-[-0.02em]">
+            <h1 className="mt-[9px] truncate font-display text-[24px] font-bold leading-[1.05] tracking-[-0.02em] md:text-[26px] lg:text-[28px]">
               {title}
             </h1>
 
