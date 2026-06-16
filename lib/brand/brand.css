@@ -61,7 +61,19 @@
     #1574c4 72%,
     #6b4be6
   );
-  --cta: linear-gradient(100deg, #f2b43e, #15c9a8);
+  /* Derived from the per-brand accent tokens (--micro-accent → --accent-primary),
+     which BrandProvider overrides per tenant — so the primary CTA gradient
+     rebrands automatically instead of being a Tovis constant. For Tovis this
+     resolves to the original gold→teal (#f2b43e → #15c9a8). */
+  --cta: linear-gradient(
+    100deg,
+    rgb(var(--micro-accent)),
+    rgb(var(--accent-primary))
+  );
+  /* Ink that reads on the bright --cta gradient — constant across light/dark
+     (unlike --on-accent, which flips). A white-label brand with a dark CTA
+     would override this. */
+  --on-cta: 10 20 19;
 
   /* Status tones */
   --tone-danger: var(--color-ember);

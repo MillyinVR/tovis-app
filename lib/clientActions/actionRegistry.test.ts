@@ -63,7 +63,7 @@ describe('lib/clientActions/actionRegistry', () => {
           revokeOutstandingOnResend: true,
         },
         delivery: {
-          allowedContactMethods: [ContactMethod.EMAIL],
+          allowedContactMethods: [ContactMethod.EMAIL, ContactMethod.SMS],
           preferredContactMethod: ContactMethod.EMAIL,
           notificationEventKey: NotificationEventKey.AFTERCARE_READY,
           notificationRecipientKind: NotificationRecipientKind.CLIENT,
@@ -88,7 +88,7 @@ describe('lib/clientActions/actionRegistry', () => {
           revokeOutstandingOnResend: true,
         },
         delivery: {
-          allowedContactMethods: [ContactMethod.EMAIL],
+          allowedContactMethods: [ContactMethod.EMAIL, ContactMethod.SMS],
           preferredContactMethod: ContactMethod.EMAIL,
           notificationEventKey:
             NotificationEventKey.CONSULTATION_PROPOSAL_SENT,

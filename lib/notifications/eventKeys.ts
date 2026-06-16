@@ -223,7 +223,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'consultation_proposal_sent',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
+      // SMS included so phone-only (often unclaimed) clients receive the
+      // secure consultation magic link. Email-preferred clients still get email.
+      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
     },
   },
 
@@ -295,7 +297,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'aftercare_ready',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
+      // SMS included so phone-only (often unclaimed) clients receive the
+      // secure aftercare magic link. Email-preferred clients still get email.
+      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
     },
   },
 

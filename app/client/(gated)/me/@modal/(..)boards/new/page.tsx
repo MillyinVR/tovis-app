@@ -2,8 +2,8 @@
 import { redirect } from 'next/navigation'
 
 import { getCurrentUser } from '@/lib/currentUser'
-import CreateBoardForm from '@/app/client/boards/_components/CreateBoardForm'
-import { createBoardAction } from '@/app/client/boards/_actions/createBoard'
+import CreateBoardForm from '@/app/client/(gated)/boards/_components/CreateBoardForm'
+import { createBoardAction } from '@/app/client/(gated)/boards/_actions/createBoard'
 import DismissModalButton from '../../_components/DismissModalButton'
 
 export const dynamic = 'force-dynamic'

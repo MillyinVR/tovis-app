@@ -592,6 +592,25 @@ export default function ConsultationForm({
         return
       }
 
+      // Surface delivery state: the proposal can save but fail to reach the
+      // client when there's no email/phone on file (or a send failure). Don't
+      // navigate away in that case so the pro notices and can add a contact
+      // method and resend.
+      const delivery =
+        isRecord(data) && isRecord(data.consultationActionDelivery)
+          ? data.consultationActionDelivery
+          : null
+      const deliveryUndeliverable =
+        delivery?.attempted === true && delivery.queued !== true
+
+      if (deliveryUndeliverable) {
+        setError(
+          'Consultation saved, but we couldn’t send the secure link — this client has no email or phone on file (or delivery failed). Add a contact method and resend.',
+        )
+        router.refresh()
+        return
+      }
+
       setMessage('Sent to client for approval.')
       router.refresh()
 

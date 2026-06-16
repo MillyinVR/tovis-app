@@ -304,6 +304,130 @@ export async function upsertClientClaimLink(
   return withRawToken(updated, legacyRawToken)
 }
 
+export type IssueClaimLinkForBookingArgs = {
+  bookingId: string
+  tx?: Prisma.TransactionClient
+}
+
+export type IssueClaimLinkForBookingResult =
+  | { kind: 'ok'; rawToken: string; invite: ClientClaimLinkRow }
+  | { kind: 'not_found' }
+  | { kind: 'already_claimed' }
+  | { kind: 'revoked' }
+
+/**
+ * Mint (or rotate) a claim link for a booking's UNCLAIMED client, returning a
+ * fresh raw token usable at /claim/{token}.
+ *
+ * Unlike upsertClientClaimLink (driven by the pro at booking time), this is for
+ * the public consultation/aftercare pages: the caller already holds a valid
+ * ClientActionToken proving they are the intended recipient, so we always
+ * regenerate the token hash and hand back a working link even when the original
+ * emailed claim token is no longer recoverable. It does not require a contact
+ * channel — the link itself is the delivery.
+ *
+ * Respects pro revocation: a revoked invite returns { kind: 'revoked' } rather
+ * than silently re-opening claim access.
+ */
+export async function issueClaimLinkForBooking(
+  args: IssueClaimLinkForBookingArgs,
+): Promise<IssueClaimLinkForBookingResult> {
+  const db = getDb(args.tx)
+  const bookingId = normalizeRequiredString(args.bookingId, 'bookingId')
+
+  const booking = await db.booking.findUnique({
+    where: { id: bookingId },
+    select: {
+      id: true,
+      professionalId: true,
+      client: {
+        select: {
+          id: true,
+          userId: true,
+          firstName: true, // pii-plaintext-read-ok: builds required ProClientInvite.invitedName for the claim link
+          lastName: true, // pii-plaintext-read-ok: builds required ProClientInvite.invitedName for the claim link
+          email: true, // pii-plaintext-read-ok: seeds invitedEmail for claim-link prefill, mirrors upsertProClient invite flow
+          phone: true, // pii-plaintext-read-ok: seeds invitedPhone for claim-link prefill, mirrors upsertProClient invite flow
+          claimStatus: true,
+        },
+      },
+    },
+  })
+
+  if (!booking || !booking.client) {
+    return { kind: 'not_found' }
+  }
+
+  const client = booking.client
+
+  if (client.userId != null || client.claimStatus === ClientClaimStatus.CLAIMED) {
+    return { kind: 'already_claimed' }
+  }
+
+  const invitedName =
+    [client.firstName, client.lastName] // pii-plaintext-read-ok: composes required ProClientInvite.invitedName for the claim link
+      .map((part) => asTrimmedString(part))
+      .filter((part): part is string => Boolean(part))
+      .join(' ') || 'Client'
+  const invitedEmail = asTrimmedString(client.email) // pii-plaintext-read-ok: seeds invitedEmail for claim-link prefill, mirrors upsertProClient invite flow
+  const invitedPhone = asTrimmedString(client.phone) // pii-plaintext-read-ok: seeds invitedPhone for claim-link prefill, mirrors upsertProClient invite flow
+  const preferredContactMethod = invitedEmail
+    ? ContactMethod.EMAIL
+    : invitedPhone
+      ? ContactMethod.SMS
+      : null
+
+  const existing = await db.proClientInvite.findUnique({
+    where: { bookingId },
+    select: clientClaimLinkSelect,
+  })
+
+  if (existing && isLinkRevoked(existing)) {
+    return { kind: 'revoked' }
+  }
+
+  const rawToken = createProClientInviteToken()
+  const tokenHash = hashProClientInviteToken(rawToken)
+
+  if (!existing) {
+    const created = await db.proClientInvite.create({
+      data: {
+        professionalId: booking.professionalId,
+        clientId: client.id,
+        bookingId,
+        invitedName,
+        invitedEmail,
+        invitedPhone,
+        preferredContactMethod,
+        status: ProClientInviteStatus.PENDING,
+        token: null,
+        tokenHash,
+      },
+      select: clientClaimLinkSelect,
+    })
+
+    return { kind: 'ok', rawToken, invite: created }
+  }
+
+  const updated = await db.proClientInvite.update({
+    where: { id: existing.id },
+    data: {
+      professionalId: booking.professionalId,
+      clientId: client.id,
+      invitedName,
+      invitedEmail,
+      invitedPhone,
+      preferredContactMethod,
+      status: ProClientInviteStatus.PENDING,
+      token: null,
+      tokenHash,
+    },
+    select: clientClaimLinkSelect,
+  })
+
+  return { kind: 'ok', rawToken, invite: updated }
+}
+
 export async function getClientClaimLinkByToken(
   args: GetClientClaimLinkByTokenArgs,
 ): Promise<ClientClaimLinkRow | null> {

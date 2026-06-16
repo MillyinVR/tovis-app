@@ -35,6 +35,7 @@ const IGNORED_TOKEN_PATTERNS = [
   /tovis-root/g, // reserved tenant slug
   /tovis-app/g, // repo/package name
   /TOVIS_[A-Z0-9_]+/g, // env var / constant identifiers
+  /Tovis[A-Z][A-Za-z0-9]*/g, // PascalCase brand component identifiers (e.g. TovisEye from lib/brand) — not user-facing copy
 ]
 
 function stripIgnoredTokens(line) {

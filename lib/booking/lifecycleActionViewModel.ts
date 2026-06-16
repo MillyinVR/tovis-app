@@ -10,7 +10,7 @@
 //
 // Used by:
 //   - app/pro/bookings/BookingActions.tsx
-//   - app/client/bookings/[id]/BookingActions.tsx
+//   - app/client/(gated)/bookings/[id]/BookingActions.tsx
 //
 // New surfaces should consume this view-model rather than branching on
 // `BookingStatus` directly. The legacy `BookingStatus = 'PENDING' | 'ACCEPTED'

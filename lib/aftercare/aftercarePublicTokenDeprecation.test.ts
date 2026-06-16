@@ -9,7 +9,7 @@ const ACTIVE_SOURCE_FILES = [
   'app/api/pro/bookings/[id]/aftercare/route.ts',
   'app/api/client/rebook/[token]/route.ts',
   'app/client/rebook/[token]/page.tsx',
-  'app/client/bookings/[id]/page.tsx',
+  'app/client/(gated)/bookings/[id]/page.tsx',
   'lib/booking/writeBoundary.ts',
   'lib/clientActions/createAftercareAccessDelivery.ts',
   'lib/aftercare/aftercareAccessTokens.ts',

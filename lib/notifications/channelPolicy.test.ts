@@ -436,6 +436,7 @@ describe('lib/notifications/channelPolicy', () => {
         recipientKind: NotificationRecipientKind.CLIENT,
         capabilities: makeCapabilities({
           hasEmailDestination: false,
+          hasSmsDestination: false,
         }),
       })
 
