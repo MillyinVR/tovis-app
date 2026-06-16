@@ -359,15 +359,19 @@ export default async function MessageThreadPage(props: PageProps) {
   })
 
   return (
-    <main className="min-h-screen bg-bgPrimary text-textPrimary">
-      <section className="mx-auto flex min-h-screen w-full max-w-[430px] flex-col px-6 pb-28 pt-12">
-        <header className="flex items-start justify-between gap-3">
+    <main className="relative min-h-screen overflow-hidden bg-bgPrimary text-textPrimary">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[180px] bg-[linear-gradient(180deg,rgb(var(--accent-primary)/0.12),transparent)]"
+      />
+      <section className="relative mx-auto flex min-h-screen w-full max-w-[430px] flex-col px-6 pb-28 pt-12">
+        <header className="flex items-start justify-between gap-[14px]">
           <div className="min-w-0">
-            <div className="text-[11px] font-black uppercase tracking-[0.12em] text-textSecondary">
+            <div className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-textMuted">
               {contextMeta.line}
             </div>
 
-            <h1 className="mt-2 truncate text-[24px] font-black leading-tight">
+            <h1 className="mt-[9px] truncate font-display text-[24px] font-bold leading-[1.05] tracking-[-0.02em]">
               {title}
             </h1>
 
@@ -375,7 +379,7 @@ export default async function MessageThreadPage(props: PageProps) {
               <div className="mt-2">
                 <Link
                   href={contextMeta.href}
-                  className="text-[12px] font-black text-textPrimary hover:opacity-80"
+                  className="font-display text-[12px] font-semibold text-accentPrimary hover:opacity-80"
                 >
                   {contextMeta.cta} →
                 </Link>
@@ -385,7 +389,7 @@ export default async function MessageThreadPage(props: PageProps) {
 
           <Link
             href="/messages"
-            className="shrink-0 text-[12px] font-black text-textSecondary hover:text-textPrimary"
+            className="shrink-0 font-display text-[12px] font-semibold text-textMuted hover:text-textPrimary"
           >
             ← Inbox
           </Link>
