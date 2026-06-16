@@ -172,6 +172,7 @@ export function CalendarTabletShell(props: CalendarTabletShellProps) {
             copy={copy.stats}
             stats={cal.stats}
             management={cal.management}
+            showWaitlist={cal.management.waitlistToday.length > 0}
             blockedMinutesToday={cal.blockedMinutesToday}
             onOpenManagement={cal.openManagement}
             variant="tablet"

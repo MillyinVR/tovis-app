@@ -5,6 +5,9 @@ import {
   Prisma,
   ProfessionalLocationType,
   ServiceLocationType,
+  WaitlistPreferenceType,
+  WaitlistStatus,
+  WaitlistTimeOfDay,
 } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
@@ -70,6 +73,32 @@ type BookingEvent = {
   status: BookingStatus
   locationType: ServiceLocationType | null
   locationId: string
+  durationMinutes: number
+  timeZone: string
+  timeZoneSource: TimeZoneTruthSource
+  localDateKey: string
+  viewLocalDateKey: string
+  details: {
+    serviceName: string
+    bufferMinutes: number
+    serviceItems: CalendarServiceItem[]
+  }
+}
+
+// Synthetic BOOKING-kind event used only for the management.waitlistToday list. Waitlist
+// entries are not real calendar occupancy, so this carries no location and a 'WAITLIST'
+// status (part of the client BookingCalendarStatus union). It never enters the top-level
+// `events` grid — only the management modal / stats tile.
+type WaitlistEvent = {
+  id: string
+  kind: 'BOOKING'
+  startsAt: string
+  endsAt: string
+  title: string
+  clientName: string
+  status: 'WAITLIST'
+  locationType: null
+  locationId: null
   durationMinutes: number
   timeZone: string
   timeZoneSource: TimeZoneTruthSource
@@ -561,6 +590,129 @@ function toBookingEvent(args: {
   }
 }
 
+// Canonical time-of-day → minute windows, mirroring the audience matcher
+// (lib/lastMinute/audience/buildTier1WaitlistAudience.ts): MORNING hour<12, AFTERNOON 12–16,
+// EVENING 17+.
+const WAITLIST_TIME_OF_DAY_WINDOWS: Record<
+  WaitlistTimeOfDay,
+  { startMin: number; endMin: number }
+> = {
+  MORNING: { startMin: 0, endMin: 720 },
+  AFTERNOON: { startMin: 720, endMin: 1020 },
+  EVENING: { startMin: 1020, endMin: 1440 },
+}
+
+const waitlistSelect = {
+  id: true,
+  status: true,
+  preferenceType: true,
+  specificDate: true,
+  timeOfDay: true,
+  windowStartMin: true,
+  windowEndMin: true,
+  service: { select: { name: true } },
+  client: {
+    select: {
+      firstName: true,
+      lastName: true,
+      user: { select: { email: true } },
+    },
+  },
+} satisfies Prisma.WaitlistEntrySelect
+
+type WaitlistRow = Prisma.WaitlistEntryGetPayload<{ select: typeof waitlistSelect }>
+
+function getWaitlistClientName(entry: WaitlistRow): string {
+  const firstName = entry.client?.firstName?.trim() ?? ''
+  const lastName = entry.client?.lastName?.trim() ?? ''
+  const email = entry.client?.user?.email?.trim() ?? ''
+
+  if (firstName || lastName) {
+    return `${firstName} ${lastName}`.trim()
+  }
+
+  return email || DEFAULT_BOOKING_CLIENT_NAME
+}
+
+function toWaitlistEvent(args: {
+  entry: WaitlistRow
+  viewportTimeZone: string
+  viewportTodayKey: string
+  viewportTodayStart: Date
+  viewportTomorrowStart: Date
+}): WaitlistEvent | null {
+  const {
+    entry,
+    viewportTimeZone,
+    viewportTodayKey,
+    viewportTodayStart,
+    viewportTomorrowStart,
+  } = args
+
+  // A SPECIFIC_DATE entry only counts for today when the requested calendar date IS today.
+  // specificDate is a @db.Date stored at UTC midnight, so compare the literal calendar date
+  // (UTC slice) against the pro's local "today" key — this avoids a timezone day-shift.
+  if (entry.preferenceType === WaitlistPreferenceType.SPECIFIC_DATE) {
+    const requested = entry.specificDate
+      ? entry.specificDate.toISOString().slice(0, 10)
+      : null
+    if (!requested || requested !== viewportTodayKey) return null
+  }
+
+  // Map the preference window onto today in the viewport timezone.
+  let startMin = 0
+  let endMin = 1440
+  if (entry.preferenceType === WaitlistPreferenceType.TIME_OF_DAY && entry.timeOfDay) {
+    const band = WAITLIST_TIME_OF_DAY_WINDOWS[entry.timeOfDay]
+    startMin = band.startMin
+    endMin = band.endMin
+  } else if (
+    entry.preferenceType === WaitlistPreferenceType.TIME_RANGE &&
+    entry.windowStartMin != null &&
+    entry.windowEndMin != null &&
+    entry.windowEndMin > entry.windowStartMin
+  ) {
+    startMin = entry.windowStartMin
+    endMin = entry.windowEndMin
+  }
+
+  const start =
+    startMin <= 0
+      ? viewportTodayStart
+      : new Date(viewportTodayStart.getTime() + startMin * 60000)
+  const end =
+    endMin >= 1440
+      ? viewportTomorrowStart
+      : new Date(viewportTodayStart.getTime() + endMin * 60000)
+  const durationMinutes = Math.max(
+    0,
+    Math.round((end.getTime() - start.getTime()) / 60000),
+  )
+  const serviceName = entry.service?.name?.trim() || DEFAULT_BOOKING_SERVICE_NAME
+
+  return {
+    id: `waitlist:${entry.id}`,
+    kind: 'BOOKING',
+    startsAt: start.toISOString(),
+    endsAt: end.toISOString(),
+    title: serviceName,
+    clientName: getWaitlistClientName(entry),
+    status: 'WAITLIST',
+    locationType: null,
+    locationId: null,
+    durationMinutes,
+    timeZone: safeEventTimeZone(viewportTimeZone),
+    timeZoneSource: 'PROFESSIONAL',
+    localDateKey: utcDateToLocalYmd(start, viewportTimeZone),
+    viewLocalDateKey: viewportTodayKey,
+    details: {
+      serviceName,
+      bufferMinutes: 0,
+      serviceItems: [],
+    },
+  }
+}
+
 function toBlockEvent(
   block: CalendarBlockRow,
   viewportTimeZone: string,
@@ -814,6 +966,41 @@ export async function GET(req: Request) {
       tomorrowStart: viewportTomorrowStart,
     })
 
+    // Active waitlist entries relevant to today: undated preferences (ANY_TIME / TIME_OF_DAY /
+    // TIME_RANGE) always apply; SPECIFIC_DATE only when it lands on today (exact-matched in
+    // toWaitlistEvent). The date OR-clause is a loose ±1-day pre-filter to absorb tz shift.
+    const waitlistRows = await prisma.waitlistEntry.findMany({
+      where: {
+        professionalId,
+        status: WaitlistStatus.ACTIVE,
+        OR: [
+          { preferenceType: { not: WaitlistPreferenceType.SPECIFIC_DATE } },
+          {
+            preferenceType: WaitlistPreferenceType.SPECIFIC_DATE,
+            specificDate: {
+              gte: addDaysUtc(viewportTodayStart, -1),
+              lt: addDaysUtc(viewportTomorrowStart, 1),
+            },
+          },
+        ],
+      },
+      select: waitlistSelect,
+      orderBy: { createdAt: 'desc' },
+      take: MAX_CALENDAR_EVENTS_PER_RANGE,
+    })
+
+    const waitlistTodayEvents = waitlistRows
+      .map((entry) =>
+        toWaitlistEvent({
+          entry,
+          viewportTimeZone,
+          viewportTodayKey,
+          viewportTodayStart,
+          viewportTomorrowStart,
+        }),
+      )
+      .filter((event): event is WaitlistEvent => event !== null)
+
     const stats: CalendarStats = {
       todaysBookings: todaysBookingsEvents.length,
       availableHours: null,
@@ -848,7 +1035,7 @@ export async function GET(req: Request) {
         management: {
           todaysBookings: todaysBookingsEvents,
           pendingRequests: pendingRequestEvents,
-          waitlistToday: [],
+          waitlistToday: waitlistTodayEvents,
           blockedToday: blockedTodayEvents,
         },
       },
