@@ -127,6 +127,33 @@
 }
 
 /* ──────────────────────────────────────────────────────────────────
+   Loading splash motion (TovisLoader). Reduced-motion users get a static
+   loader via the global prefers-reduced-motion reset in globals.css.
+────────────────────────────────────────────────────────────────── */
+
+@keyframes tovisBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes tovisGlint {
+  0%, 100% { opacity: 0.6; transform: scale(0.88); }
+  50% { opacity: 1; transform: scale(1.2); }
+}
+@keyframes tovisShimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+@keyframes tovisDrift {
+  0% { transform: translate(-4%, -2%) scale(1); }
+  50% { transform: translate(4%, 3%) scale(1.08); }
+  100% { transform: translate(-4%, -2%) scale(1); }
+}
+@keyframes tovisIndeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(360%); }
+}
+
+/* ──────────────────────────────────────────────────────────────────
    Base document
 ────────────────────────────────────────────────────────────────── */
 
