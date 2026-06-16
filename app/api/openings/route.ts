@@ -13,6 +13,10 @@ import {
 } from '@prisma/client'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { pickPublicTierPlan as pickPublicTierPlanShared } from '@/lib/lastMinute/pickTierPlan'
+import {
+  openingSelect,
+  type OpeningWithDetails,
+} from '@/lib/lastMinute/openingSelect'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,121 +43,7 @@ type Cursor = {
   id: string
 } | null
 
-const openingSelect = {
-  id: true,
-  professionalId: true,
-  startAt: true,
-  endAt: true,
-  note: true,
-  status: true,
-  visibilityMode: true,
-  publicVisibleFrom: true,
-  publicVisibleUntil: true,
-  bookedAt: true,
-  cancelledAt: true,
-  timeZone: true,
-  locationType: true,
-  locationId: true,
-
-  location: {
-    select: {
-      id: true,
-      city: true,
-      state: true,
-      formattedAddress: true,
-      lat: true,
-      lng: true,
-      timeZone: true,
-      type: true,
-    },
-  },
-
-  services: {
-    where: {
-      offering: {
-        is: {
-          isActive: true,
-        },
-      },
-    },
-    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-    select: {
-      id: true,
-      openingId: true,
-      serviceId: true,
-      offeringId: true,
-      sortOrder: true,
-      service: {
-        select: {
-          id: true,
-          name: true,
-          minPrice: true,
-          defaultDurationMinutes: true,
-        },
-      },
-      offering: {
-        select: {
-          id: true,
-          title: true,
-          salonPriceStartingAt: true,
-          mobilePriceStartingAt: true,
-          salonDurationMinutes: true,
-          mobileDurationMinutes: true,
-          offersInSalon: true,
-          offersMobile: true,
-        },
-      },
-    },
-  },
-
-  tierPlans: {
-    where: {
-      cancelledAt: null,
-    },
-    orderBy: [{ scheduledFor: 'asc' }, { tier: 'asc' }],
-    select: {
-      id: true,
-      tier: true,
-      scheduledFor: true,
-      offerType: true,
-      percentOff: true,
-      amountOff: true,
-      freeAddOnServiceId: true,
-      freeAddOnService: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-    },
-  },
-
-  professional: {
-    select: {
-      id: true,
-      businessName: true,
-      handle: true,
-      avatarUrl: true,
-      professionType: true,
-      location: true,
-      lastMinuteSettings: {
-        select: {
-          disableMon: true,
-          disableTue: true,
-          disableWed: true,
-          disableThu: true,
-          disableFri: true,
-          disableSat: true,
-          disableSun: true,
-        },
-      },
-    },
-  },
-} satisfies Prisma.LastMinuteOpeningSelect
-
-type OpeningQueryRow = Prisma.LastMinuteOpeningGetPayload<{
-  select: typeof openingSelect
-}>
+type OpeningQueryRow = OpeningWithDetails
 
 type PublicIncentiveDto = {
   tier: LastMinuteTier
