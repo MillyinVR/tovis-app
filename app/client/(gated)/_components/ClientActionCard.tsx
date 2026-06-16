@@ -28,7 +28,7 @@ function PendingConsultationCard({ booking }: { booking: ClientHomeBooking }) {
   const href = `/client/bookings/${encodeURIComponent(booking.id)}?step=consult`
 
   return (
-    <section className="px-4">
+    <section>
       <div className="rounded-card border border-l-[3px] border-textPrimary/10 border-l-gold bg-bgSurface p-[18px] shadow-[0_16px_40px_rgb(var(--shadow-color)/0.14)]">
         <div className="mb-3.5 flex items-center gap-2.5">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gold/15 text-gold">
@@ -102,7 +102,7 @@ function AftercarePaymentCard({ action }: { action: AftercarePaymentAction }) {
   const href = `/client/bookings/${encodeURIComponent(booking.id)}?step=aftercare`
 
   return (
-    <section className="px-4">
+    <section>
       <div className="rounded-card border border-l-[3px] border-textPrimary/10 border-l-terra bg-bgSurface p-[18px] shadow-[0_16px_40px_rgb(var(--shadow-color)/0.14)]">
         <div className="mb-3.5 flex flex-wrap items-center gap-2.5">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-terra/15 text-terra">
