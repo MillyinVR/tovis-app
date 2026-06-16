@@ -69,6 +69,8 @@ vi.mock('@/lib/brand/BrandProvider', () => ({
       displayName: 'TOVIS',
     },
     mode: 'dark',
+    preference: 'system',
+    setPreference: vi.fn(),
     setMode: mockSetBrandMode,
   }),
   BrandProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,

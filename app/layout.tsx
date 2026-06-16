@@ -14,6 +14,7 @@ import '@/lib/brand/proLastMinute.css'
 
 import RoleFooter from '@/app/_components/RoleFooter'
 import { BrandProvider } from '@/lib/brand/BrandProvider'
+import { THEME_INIT_SCRIPT } from '@/lib/brand/theme'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
@@ -87,8 +88,12 @@ export default async function RootLayout({ children }: RootLayoutProps) {
   const brand = getBrandForTenantContext(tenantContext)
 
   return (
-    <html lang="en" className={bodyClassName} suppressHydrationWarning>
+    <html lang="en" data-mode="dark" className={bodyClassName} suppressHydrationWarning>
       <body>
+        {/* No-flash theme init: applies the resolved light/dark mode to
+            <html> before first paint (reads localStorage, falls back to the
+            device's prefers-color-scheme). */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <BrandProvider brand={brand}>
           <div style={appContentStyle}>{children}</div>
 
