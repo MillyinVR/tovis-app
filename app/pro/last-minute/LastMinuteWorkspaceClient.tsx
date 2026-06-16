@@ -2,12 +2,13 @@
 'use client'
 
 import {
-  useEffect,
   useMemo,
   useState,
   type ComponentProps,
   type ReactNode,
 } from 'react'
+
+import { useMediaQuery } from '@/lib/ui/useMediaQuery'
 
 import {
   LastMinuteCreateOpeningPanel,
@@ -52,39 +53,16 @@ const DISABLED_DAY_DEFS = [
   label: string
 }>
 
-function readViewportMode(): WorkspaceViewportMode {
-  if (typeof window === 'undefined') {
-    return 'desktop'
-  }
-
-  if (window.matchMedia('(max-width: 767px)').matches) {
-    return 'mobile'
-  }
-
-  if (window.matchMedia('(max-width: 1199px)').matches) {
-    return 'tablet'
-  }
-
-  return 'desktop'
-}
-
 function useWorkspaceViewportMode(): WorkspaceViewportMode {
-  const [mode, setMode] = useState<WorkspaceViewportMode>('desktop')
+  // Bespoke thresholds for the 3-pane workspace (tablet boundary at 1200px,
+  // wider than the app-standard 1024) — preserved while moving off a manual
+  // resize listener onto the shared SSR-safe matchMedia primitive.
+  const isMobile = useMediaQuery('(max-width: 767px)')
+  const isTabletOrBelow = useMediaQuery('(max-width: 1199px)')
 
-  useEffect(() => {
-    function syncMode() {
-      setMode(readViewportMode())
-    }
-
-    syncMode()
-    window.addEventListener('resize', syncMode)
-
-    return () => {
-      window.removeEventListener('resize', syncMode)
-    }
-  }, [])
-
-  return mode
+  if (isMobile) return 'mobile'
+  if (isTabletOrBelow) return 'tablet'
+  return 'desktop'
 }
 
 function visibilityLabel(
