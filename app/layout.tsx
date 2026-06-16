@@ -1,6 +1,6 @@
 // app/layout.tsx
 
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import type { CSSProperties, ReactNode } from 'react'
 import { cookies } from 'next/headers'
 import { Space_Grotesk, Hanken_Grotesk, Space_Mono } from 'next/font/google'
@@ -15,6 +15,7 @@ import '@/lib/brand/proLastMinute.css'
 import RoleFooter from '@/app/_components/RoleFooter'
 import { BrandProvider } from '@/lib/brand/BrandProvider'
 import { THEME_INIT_SCRIPT } from '@/lib/brand/theme'
+import { rgbTripletToHex } from '@/lib/brand/eyeSvg'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
@@ -75,9 +76,37 @@ export async function generateMetadata(): Promise<Metadata> {
   const tenantContext = await resolveTenantContextForLayout()
   const brand = getBrandForTenantContext(tenantContext)
 
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL
+
   return {
+    metadataBase: appUrl ? new URL(appUrl) : undefined,
     title: brand.displayName,
     description: brand.tagline ?? brand.displayName,
+    applicationName: brand.displayName,
+    appleWebApp: {
+      capable: true,
+      title: brand.displayName,
+      statusBarStyle: 'black-translucent',
+    },
+  }
+}
+
+// Browser UI color follows the page background per color scheme.
+export async function generateViewport(): Promise<Viewport> {
+  const tenantContext = await resolveTenantContextForLayout()
+  const brand = getBrandForTenantContext(tenantContext)
+
+  return {
+    themeColor: [
+      {
+        media: '(prefers-color-scheme: dark)',
+        color: rgbTripletToHex(brand.tokensByMode.dark.colors.bgPrimary),
+      },
+      {
+        media: '(prefers-color-scheme: light)',
+        color: rgbTripletToHex(brand.tokensByMode.light.colors.bgPrimary),
+      },
+    ],
   }
 }
 
