@@ -1,14 +1,37 @@
 // lib/brand/BrandProvider.tsx
 'use client'
 
-import React, { createContext, useContext, useMemo, useState } from 'react'
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from 'react'
 import type { BrandConfig, BrandMode } from './types'
-import { getBrandConfig, getInitialMode } from './index'
+import { getBrandConfig } from './index'
 import { toCssVars } from './utils'
+import {
+  applyMode,
+  getModeSnapshot,
+  getPreferenceSnapshot,
+  getServerModeSnapshot,
+  getServerPreferenceSnapshot,
+  setStoredPreference,
+  subscribeTheme,
+  type ThemePreference,
+} from './theme'
 
 type BrandContextValue = {
   brand: BrandConfig
+  /** Resolved color mode currently applied. */
   mode: BrandMode
+  /** User preference: 'system' follows the device. */
+  preference: ThemePreference
+  /** Set + persist the preference (System / Light / Dark). */
+  setPreference: (p: ThemePreference) => void
+  /** Back-compat low-level setter — persists as an explicit mode. */
   setMode: (m: BrandMode) => void
 }
 
@@ -25,19 +48,60 @@ type BrandProviderProps = {
   brand?: BrandConfig
 }
 
+function serializeVars(vars: Record<string, string>): string {
+  return Object.entries(vars)
+    .map(([k, v]) => `${k}:${v};`)
+    .join('')
+}
+
 export function BrandProvider({ children, brand: brandProp }: BrandProviderProps) {
   const brand = useMemo(() => brandProp ?? getBrandConfig(), [brandProp])
-  const [mode, setMode] = useState<BrandMode>(() => getInitialMode(brand))
 
-  const tokens = brand.tokensByMode[mode]
-  const cssVars = toCssVars(tokens)
+  // Subscribe to the persisted preference + device prefers-color-scheme.
+  const preference = useSyncExternalStore(
+    subscribeTheme,
+    getPreferenceSnapshot,
+    getServerPreferenceSnapshot,
+  )
+  const mode = useSyncExternalStore(
+    subscribeTheme,
+    getModeSnapshot,
+    getServerModeSnapshot,
+  )
+
+  // Keep <html data-mode> / color-scheme in sync with the resolved mode.
+  useEffect(() => {
+    applyMode(mode)
+  }, [mode])
+
+  // Emit BOTH modes as [data-mode]-scoped CSS variables. The pre-paint inline
+  // script sets <html data-mode>, so the right variables apply before first
+  // paint (no flash), and a nested [data-mode="dark"] can pin a subtree (e.g.
+  // the Looks feed) regardless of the global theme. One brand renders per
+  // request (server-resolved), so no brand-id scoping is needed here.
+  const themeCss = useMemo(() => {
+    const dark = serializeVars(toCssVars(brand.tokensByMode.dark))
+    const light = serializeVars(toCssVars(brand.tokensByMode.light))
+    return `[data-mode="dark"]{${dark}}[data-mode="light"]{${light}}`
+  }, [brand])
+
+  const setPreference = useCallback((next: ThemePreference) => {
+    setStoredPreference(next)
+  }, [])
+
+  const setMode = useCallback((next: BrandMode) => {
+    setStoredPreference(next)
+  }, [])
+
+  const value = useMemo<BrandContextValue>(
+    () => ({ brand, mode, preference, setPreference, setMode }),
+    [brand, mode, preference, setPreference, setMode],
+  )
 
   return (
-    <BrandContext.Provider value={{ brand, mode, setMode }}>
-      {/* We set CSS variables at the app root. */}
-      <div style={cssVars as React.CSSProperties} data-brand={brand.id} data-mode={mode}>
-        {children}
-      </div>
+    <BrandContext.Provider value={value}>
+      <style data-brand-theme={brand.id} dangerouslySetInnerHTML={{ __html: themeCss }} />
+      <div data-brand={brand.id}>{children}</div>
     </BrandContext.Provider>
   )
 }

@@ -4,8 +4,14 @@ import LooksFeed from './_components/LooksFeed'
 export const dynamic = 'force-dynamic'
 
 export default function LooksPage() {
+  // Media stays dark in both themes (brand sheet: the feed stays dark, only
+  // the chrome flips). data-mode pins the dark tokens for this subtree.
   return (
-    <main className="bg-bgPrimary" style={{ height: '100dvh', overflow: 'hidden' }}>
+    <main
+      data-mode="dark"
+      className="bg-bgPrimary"
+      style={{ height: '100dvh', overflow: 'hidden', colorScheme: 'dark' }}
+    >
       <LooksFeed />
     </main>
   )

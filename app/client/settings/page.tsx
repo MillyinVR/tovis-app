@@ -4,6 +4,7 @@ import ClientProfileSettings from './ClientProfileSettings'
 import ClientLocationSettings from './ClientLocationSettings'
 import ClientAddressesSettings from './ClientAddressesSettings'
 import { getBrandConfig } from '@/lib/brand'
+import ThemeToggle from '@/lib/brand/ThemeToggle'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,6 +63,16 @@ export default function ClientSettingsPage() {
           <div className="rounded-full border border-[rgb(var(--accent-primary)/0.22)] bg-[rgb(var(--accent-primary)/0.10)] px-3 py-1.5 text-[11px] font-black uppercase tracking-[var(--ls-caps)] text-textPrimary">
             Salon = area okay · Mobile = real address required
           </div>
+        </div>
+      </section>
+
+      <section className="brand-glass p-5 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <SectionIntro
+            title="Appearance"
+            description={`Choose how ${brand.displayName} looks. System follows your device's light or dark setting.`}
+          />
+          <ThemeToggle />
         </div>
       </section>
 
