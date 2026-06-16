@@ -410,9 +410,15 @@ export type BrandTokens = {
 
 export type BrandAssets = {
   mark: {
-    // Keep it simple now: PNG path. Later swap to SVG path with same key.
+    /** Public path to the logo file, used by <Image>/<img> in the DOM. */
     src: string
     alt: string
+    /**
+     * Raw SVG markup of the mark, for contexts that can't reference a file —
+     * favicon/apple-icon/OG ImageResponse routes embed this. Optional; those
+     * routes fall back to The Eye when a brand omits it.
+     */
+    svg?: string
   }
 
   wordmark: {

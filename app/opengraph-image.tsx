@@ -1,7 +1,7 @@
 // app/opengraph-image.tsx — branded social share card, generated from The Eye
 // + the tenant-resolved brand name/tagline. Also serves as the Twitter image.
 import { ImageResponse } from 'next/og'
-import { TOVIS_EYE_DATA_URL } from '@/lib/brand/eyeSvg'
+import { svgToDataUrl, TOVIS_EYE_SVG } from '@/lib/brand/eyeSvg'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
@@ -11,6 +11,7 @@ export const alt = 'tovis'
 
 export default async function OpengraphImage() {
   const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+  const markDataUrl = svgToDataUrl(brand.assets.mark.svg ?? TOVIS_EYE_SVG)
 
   return new ImageResponse(
     (
@@ -27,7 +28,7 @@ export default async function OpengraphImage() {
           color: '#F2EFE7',
         }}
       >
-        <img src={TOVIS_EYE_DATA_URL} width={172} height={172} alt="" />
+        <img src={markDataUrl} width={172} height={172} alt="" />
         <div style={{ fontSize: 88, fontWeight: 700, letterSpacing: '-0.04em' }}>
           {brand.assets.wordmark.text}
         </div>
