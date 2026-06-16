@@ -91,10 +91,23 @@ function LiveLookHero({
           >
             Book this look
           </Link>
+          {/* Viral → waitlist bridge: routes discovery into the per-pro
+              waitlist-join flow (search → pro page → AvailabilityDrawer's
+              WaitlistPanel) for when slots are tight. Honest-signals: we do NOT
+              fabricate a "N pros booked out" count — real cross-pro availability
+              lands with the PR-D presence/availability engine, at which point
+              this line can carry that count. */}
+          <Link
+            href={`/search?q=${encodeURIComponent(live.name)}`}
+            className="mt-2.5 flex items-center justify-center gap-1.5 font-display text-[12px] font-semibold text-textSecondary transition hover:text-textPrimary"
+          >
+            <span className="text-[9px] leading-none text-accentPrimary">✦</span>
+            Hard to book? Join a pro&apos;s waitlist →
+          </Link>
           {moreCount > 0 ? (
             <Link
               href="/looks"
-              className="mt-2.5 block text-center font-display text-[12px] font-semibold text-textSecondary transition hover:text-textPrimary"
+              className="mt-2 block text-center font-display text-[12px] font-semibold text-textSecondary transition hover:text-textPrimary"
             >
               +{moreCount} more live in the feed →
             </Link>
