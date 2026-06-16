@@ -1,11 +1,16 @@
-// app/apple-icon.tsx — iOS home-screen icon (PNG) generated from The Eye.
+// app/apple-icon.tsx — iOS home-screen icon (PNG), from the tenant brand mark.
 import { ImageResponse } from 'next/og'
-import { TOVIS_EYE_DATA_URL } from '@/lib/brand/eyeSvg'
+import { svgToDataUrl, TOVIS_EYE_SVG } from '@/lib/brand/eyeSvg'
+import { getBrandForTenantContext } from '@/lib/brand/forTenant'
+import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
 
 export const size = { width: 180, height: 180 }
 export const contentType = 'image/png'
 
-export default function AppleIcon() {
+export default async function AppleIcon() {
+  const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
+  const markDataUrl = svgToDataUrl(brand.assets.mark.svg ?? TOVIS_EYE_SVG)
+
   return new ImageResponse(
     (
       <div
@@ -18,7 +23,7 @@ export default function AppleIcon() {
           background: '#0A1413',
         }}
       >
-        <img src={TOVIS_EYE_DATA_URL} width={124} height={124} alt="" />
+        <img src={markDataUrl} width={124} height={124} alt="" />
       </div>
     ),
     { ...size },

@@ -18,10 +18,13 @@ export const TOVIS_EYE_SVG =
   '<circle cx="42" cy="38" r="6.5" fill="#FFF6E2"/>' +
   '</svg>'
 
+/** Wrap any SVG markup as a data URL for <img src> inside ImageResponse. */
+export function svgToDataUrl(svg: string): string {
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+}
+
 /** Data URL form for <img src> inside next/og ImageResponse (Satori). */
-export const TOVIS_EYE_DATA_URL = `data:image/svg+xml;utf8,${encodeURIComponent(
-  TOVIS_EYE_SVG,
-)}`
+export const TOVIS_EYE_DATA_URL = svgToDataUrl(TOVIS_EYE_SVG)
 
 /** "21 201 168" → "#15c9a8". For manifest theme_color / viewport themeColor. */
 export function rgbTripletToHex(triplet: string): string {
