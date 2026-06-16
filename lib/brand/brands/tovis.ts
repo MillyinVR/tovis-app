@@ -361,11 +361,11 @@ export const tovisBrand: BrandConfig = {
 
   assets: {
     mark: {
-      src: '/brand/tovis/mark.png',
-      alt: 'TOVIS mark',
+      src: '/brand/tovis/mark.svg',
+      alt: 'tovis',
     },
     wordmark: {
-      text: 'TOVIS',
+      text: 'tovis',
     },
   },
 
