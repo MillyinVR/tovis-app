@@ -58,13 +58,13 @@ function PendingConsultationCard({ booking }: { booking: ClientHomeBooking }) {
         className="overflow-hidden border"
         style={{
           borderRadius: 18,
-          background: 'rgba(224,90,40,0.04)',
-          borderColor: 'rgba(224,90,40,0.35)',
+          background: 'rgb(var(--accent-primary) / 0.04)',
+          borderColor: 'rgb(var(--accent-primary) / 0.35)',
         }}
       >
         <div
           className="border-b px-4 py-3.5"
-          style={{ borderColor: 'rgba(224,90,40,0.15)' }}
+          style={{ borderColor: 'rgb(var(--accent-primary) / 0.15)' }}
         >
           <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-terra">
             ◆ Consultation pending
@@ -84,7 +84,7 @@ function PendingConsultationCard({ booking }: { booking: ClientHomeBooking }) {
             <p
               className="mt-3 rounded-[10px] border border-textPrimary/8 px-3 py-2.5 text-[12px] italic leading-relaxed text-textSecondary"
               style={{
-                background: 'rgba(224,90,40,0.05)',
+                background: 'rgb(var(--accent-primary) / 0.05)',
                 fontFamily: 'var(--font-display)',
               }}
             >
@@ -149,13 +149,13 @@ function AftercarePaymentCard({ action }: { action: AftercarePaymentAction }) {
         className="overflow-hidden border"
         style={{
           borderRadius: 18,
-          background: 'rgba(212,255,58,0.04)',
-          borderColor: 'rgba(212,255,58,0.2)',
+          background: 'rgb(var(--color-acid) / 0.04)',
+          borderColor: 'rgb(var(--color-acid) / 0.2)',
         }}
       >
         <div
           className="border-b px-4 py-3.5"
-          style={{ borderColor: 'rgba(212,255,58,0.12)' }}
+          style={{ borderColor: 'rgb(var(--color-acid) / 0.12)' }}
         >
           <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-acid">
             ◆ Aftercare ready{sentDate ? ` · From ${sentDate}` : ''}
@@ -185,7 +185,7 @@ function AftercarePaymentCard({ action }: { action: AftercarePaymentAction }) {
                 <div
                   key={product.key}
                   className="min-w-0 flex-1 rounded-[10px] border border-textPrimary/8 px-3 py-2"
-                  style={{ background: 'rgba(244,239,231,0.04)' }}
+                  style={{ background: 'rgb(var(--surface-glass) / 0.04)' }}
                 >
                   <p className="truncate text-[11px] font-semibold text-textPrimary">
                     {product.label}

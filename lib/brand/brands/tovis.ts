@@ -393,6 +393,7 @@ export const tovisBrand: BrandConfig = {
         accentPrimary: '224 90 40',
         accentPrimaryHover: '255 106 54',
         microAccent: '232 221 212',
+        onAccent: '255 255 255',
 
         colorAcid: '212 255 58',
         colorFern: '98 168 122',
@@ -442,6 +443,7 @@ export const tovisBrand: BrandConfig = {
         accentPrimary: '224 90 40',
         accentPrimaryHover: '255 106 54',
         microAccent: '154 123 92',
+        onAccent: '255 255 255',
 
         colorAcid: '180 200 0',
         colorFern: '68 130 90',

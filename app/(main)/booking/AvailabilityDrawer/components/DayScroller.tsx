@@ -39,8 +39,8 @@ const DayButton = memo(function DayButton({
         minWidth: 54,
         padding: '10px 12px',
         borderRadius: 14,
-        border: active ? 'none' : '1px solid rgba(244,239,231,0.12)',
-        background: active ? '#E05A28' : 'rgba(244,239,231,0.06)',
+        border: active ? 'none' : '1px solid rgb(var(--surface-glass) / 0.12)',
+        background: active ? 'rgb(var(--accent-primary))' : 'rgb(var(--surface-glass) / 0.06)',
         cursor: 'pointer',
         textAlign: 'center',
         transition: 'background 0.15s ease',
@@ -52,7 +52,7 @@ const DayButton = memo(function DayButton({
           fontWeight: 900,
           textTransform: 'uppercase',
           letterSpacing: '0.08em',
-          color: active ? 'rgba(255,255,255,0.9)' : 'rgba(244,239,231,0.55)',
+          color: active ? 'rgb(var(--text-primary) / 0.9)' : 'rgb(var(--text-primary) / 0.55)',
           fontFamily: 'var(--font-mono)',
           lineHeight: 1,
         }}
@@ -66,7 +66,7 @@ const DayButton = memo(function DayButton({
           fontSize: 18,
           fontWeight: 900,
           lineHeight: 1,
-          color: active ? '#fff' : 'rgba(244,239,231,0.95)',
+          color: active ? 'rgb(var(--text-primary))' : 'rgb(var(--text-primary) / 0.95)',
         }}
       >
         {day.labelBottom}

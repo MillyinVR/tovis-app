@@ -25,7 +25,7 @@ export default function NavItem({
         display: 'grid',
         gap: 2,
         justifyItems: 'center',
-        color: active ? 'rgba(244,239,231,1)' : 'rgba(122,117,105,1)',
+        color: active ? 'rgb(var(--text-primary))' : 'rgb(var(--text-muted))',
         textShadow: '0 2px 12px rgba(0,0,0,0.8)',
         position: 'relative',
       }}

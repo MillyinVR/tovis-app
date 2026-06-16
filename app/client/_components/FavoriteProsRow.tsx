@@ -52,7 +52,7 @@ function EmptyProsCard() {
     >
       <div
         className="border-b px-4 py-3"
-        style={{ borderColor: 'rgba(224,90,40,0.14)' }}
+        style={{ borderColor: 'rgb(var(--accent-primary) / 0.14)' }}
       >
         <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-terra">
           ◆ No pros saved yet
@@ -114,7 +114,7 @@ function FindMoreBubble() {
     >
       <div
         className="grid h-14 w-14 place-items-center rounded-full text-xl text-textMuted transition group-hover:border-textPrimary/25 group-hover:text-textSecondary"
-        style={{ border: '1.5px dashed rgba(244,239,231,0.16)' }}
+        style={{ border: '1.5px dashed rgb(var(--surface-glass) / 0.16)' }}
       >
         +
       </div>

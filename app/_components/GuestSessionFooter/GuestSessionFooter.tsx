@@ -25,7 +25,6 @@ export default function GuestSessionFooter() {
 
   const homeActive = isActivePath(pathname, ROUTES.home)
   const searchActive = isActivePath(pathname, ROUTES.search)
-  const looksActive = isActivePath(pathname, ROUTES.looks)
   const loginActive = isActivePath(pathname, ROUTES.login) || isActivePath(pathname, ROUTES.signup)
 
   return (
@@ -33,7 +32,7 @@ export default function GuestSessionFooter() {
       className="w-full"
       style={{
         paddingBottom: 'env(safe-area-inset-bottom)',
-        background: '#0A0907',
+        background: 'rgb(var(--bg-primary))',
       }}
     >
       <div>
@@ -50,9 +49,9 @@ export default function GuestSessionFooter() {
               height: 68,
               position: 'relative',
               top: -14,
-              backgroundColor: '#E05A28',
-              color: '#ffffff',
-              boxShadow: '0 8px 24px rgba(224,90,40,0.45)',
+              backgroundColor: 'rgb(var(--accent-primary))',
+              color: 'rgb(var(--on-accent))',
+              boxShadow: '0 8px 24px rgb(var(--accent-primary) / 0.45)',
             }}
             title="Looks"
             aria-label="Looks"

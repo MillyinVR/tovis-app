@@ -31,8 +31,8 @@ export default function StickyCTA({
   return (
     <div
       style={{
-        borderTop: '1px solid rgba(244,239,231,0.1)',
-        background: '#0A0907',
+        borderTop: '1px solid rgb(var(--surface-glass) / 0.1)',
+        background: 'rgb(var(--bg-primary))',
         padding: '14px 16px 18px',
       }}
     >
@@ -43,11 +43,11 @@ export default function StickyCTA({
             textAlign: 'center',
             fontSize: 12,
             fontWeight: 600,
-            color: 'rgba(244,239,231,0.45)',
+            color: 'rgb(var(--text-primary) / 0.45)',
           }}
         >
           Held:{' '}
-          <span style={{ fontWeight: 900, color: 'rgba(244,239,231,0.88)' }}>
+          <span style={{ fontWeight: 900, color: 'rgb(var(--text-primary) / 0.88)' }}>
             {selectedLine}
           </span>
         </div>
@@ -67,15 +67,15 @@ export default function StickyCTA({
           alignItems: 'center',
           justifyContent: 'center',
           gap: 8,
-          background: canContinue ? '#E05A28' : 'rgba(244,239,231,0.1)',
-          color: canContinue ? '#ffffff' : 'rgba(244,239,231,0.3)',
+          background: canContinue ? 'rgb(var(--accent-primary))' : 'rgb(var(--surface-glass) / 0.1)',
+          color: canContinue ? 'rgb(var(--text-primary))' : 'rgb(var(--text-primary) / 0.3)',
           fontSize: 14,
           fontWeight: 900,
           letterSpacing: '0.04em',
           fontFamily: 'var(--font-mono)',
           cursor: canContinue && !pending ? 'pointer' : 'not-allowed',
           transition: 'background 0.2s ease, color 0.2s ease',
-          boxShadow: canContinue ? '0 4px 20px rgba(224,90,40,0.45)' : 'none',
+          boxShadow: canContinue ? '0 4px 20px rgb(var(--accent-primary) / 0.45)' : 'none',
         }}
       >
         {pending ? (
@@ -94,7 +94,7 @@ export default function StickyCTA({
             textAlign: 'center',
             fontSize: 11,
             fontWeight: 600,
-            color: 'rgba(244,239,231,0.28)',
+            color: 'rgb(var(--text-primary) / 0.28)',
           }}
         >
           No charge yet · The pro confirms first

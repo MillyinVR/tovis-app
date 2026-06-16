@@ -70,7 +70,7 @@ export default function Home() {
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <Link
               href="/signup/client"
-              className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-7 py-3 text-[13px] font-bold text-[#F2EDE7] shadow-[0_0_32px_rgb(196_103_58/0.30)] transition hover:bg-accentPrimaryHover hover:shadow-[0_0_44px_rgb(196_103_58/0.42)] active:scale-[0.98]"
+              className="inline-flex items-center justify-center rounded-full bg-accentPrimary px-7 py-3 text-[13px] font-bold text-textPrimary shadow-[0_0_32px_rgb(196_103_58/0.30)] transition hover:bg-accentPrimaryHover hover:shadow-[0_0_44px_rgb(196_103_58/0.42)] active:scale-[0.98]"
             >
               Create Client Account
             </Link>

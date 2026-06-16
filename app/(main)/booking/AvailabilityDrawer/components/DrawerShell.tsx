@@ -85,7 +85,7 @@ export default function DrawerShell({
     boxShadow: '0 -18px 60px rgba(0,0,0,0.70)',
     display: 'grid',
     gridTemplateRows: 'auto 1fr auto',
-    background: '#0A0907',
+    background: 'rgb(var(--bg-primary))',
   }
 
   const ui = (

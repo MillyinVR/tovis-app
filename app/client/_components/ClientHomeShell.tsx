@@ -42,13 +42,13 @@ export default function ClientHomeShell({
         className="pointer-events-none absolute inset-x-0 top-0 h-72"
         style={{
           background:
-            'linear-gradient(180deg, rgba(224,90,40,0.12) 0%, rgba(224,90,40,0.05) 45%, transparent 100%)',
+            'linear-gradient(180deg, rgb(var(--accent-primary) / 0.12) 0%, rgb(var(--accent-primary) / 0.05) 45%, transparent 100%)',
         }}
       />
       <div
         className="pointer-events-none absolute right-0 top-0 h-64 w-64 rounded-full md:h-96 md:w-96"
         style={{
-          background: 'rgba(224,90,40,0.12)',
+          background: 'rgb(var(--accent-primary) / 0.12)',
           filter: 'blur(72px)',
         }}
       />

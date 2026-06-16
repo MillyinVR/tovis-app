@@ -8,8 +8,8 @@ const TAB_LOOKS = 'Look'
 const TAB_SPOTLIGHT = 'Spotlight'
 
 const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
-const PAPER = 'rgba(244,239,231,1)'
-const PAPER_DIM = 'rgba(244,239,231,0.65)'
+const PAPER = 'rgb(var(--text-primary) / 1)'
+const PAPER_DIM = 'rgb(var(--text-primary) / 0.65)'
 
 export default function LooksTopBar(props: {
   categories: string[]
@@ -92,7 +92,7 @@ export default function LooksTopBar(props: {
                   height: 2,
                   borderRadius: 999,
                   background: PAPER,
-                  boxShadow: '0 0 10px rgba(244,239,231,0.4)',
+                  boxShadow: '0 0 10px rgb(var(--surface-glass) / 0.4)',
                   opacity: looksActive ? 1 : 0,
                   transition: 'opacity 160ms ease',
                 }}
@@ -149,7 +149,7 @@ export default function LooksTopBar(props: {
                         height: 2,
                         borderRadius: 999,
                         background: PAPER,
-                        boxShadow: '0 0 10px rgba(244,239,231,0.4)',
+                        boxShadow: '0 0 10px rgb(var(--surface-glass) / 0.4)',
                         opacity: active ? 1 : 0,
                         transition: 'opacity 160ms ease',
                       }}
@@ -189,8 +189,8 @@ export default function LooksTopBar(props: {
               marginTop: 10,
               padding: '10px 12px',
               borderRadius: 14,
-              background: 'rgba(10,9,7,0.80)',
-              border: '1px solid rgba(244,239,231,0.14)',
+              background: 'rgb(var(--bg-primary) / 0.80)',
+              border: '1px solid rgb(var(--surface-glass) / 0.14)',
               backdropFilter: 'blur(16px)',
               WebkitBackdropFilter: 'blur(16px)',
               display: 'flex',
@@ -225,8 +225,8 @@ export default function LooksTopBar(props: {
                   display: 'grid',
                   placeItems: 'center',
                   borderRadius: 999,
-                  background: 'rgba(244,239,231,0.10)',
-                  border: '1px solid rgba(244,239,231,0.12)',
+                  background: 'rgb(var(--surface-glass) / 0.10)',
+                  border: '1px solid rgb(var(--surface-glass) / 0.12)',
                   cursor: 'pointer',
                   color: PAPER,
                 }}

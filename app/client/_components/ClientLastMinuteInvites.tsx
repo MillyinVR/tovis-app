@@ -196,14 +196,14 @@ function InviteCard({
         )}
         <div
           className="absolute inset-0"
-          style={{ background: 'rgba(10,9,7,0.25)' }}
+          style={{ background: 'rgb(var(--bg-primary) / 0.25)' }}
         />
 
         {discount && (
           <div
             className="absolute right-2 top-2 rounded-full px-2 py-0.5 font-mono text-[9px] font-extrabold text-acid"
             style={{
-              background: 'rgba(10,9,7,0.65)',
+              background: 'rgb(var(--bg-primary) / 0.65)',
               backdropFilter: 'blur(6px)',
               letterSpacing: '0.08em',
             }}
@@ -215,7 +215,7 @@ function InviteCard({
         <div
           className="absolute bottom-2 left-2 rounded-full px-2 py-0.5 font-mono text-[9px] text-textMuted"
           style={{
-            background: 'rgba(10,9,7,0.65)',
+            background: 'rgb(var(--bg-primary) / 0.65)',
             backdropFilter: 'blur(6px)',
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
@@ -259,26 +259,26 @@ function InviteCard({
   )
 }
 
-const SKELETON = 'rgba(244,239,231,0.07)'
+const SKELETON = 'rgb(var(--surface-glass) / 0.07)'
 
 function GhostInviteCards() {
   const ghosts = [
     {
       gradient: PORTRAIT_GRADIENTS[0]!,
       opacity: 1,
-      borderColor: 'rgba(224,90,40,0.28)',
-      bg: 'rgba(224,90,40,0.06)',
+      borderColor: 'rgb(var(--accent-primary) / 0.28)',
+      bg: 'rgb(var(--accent-primary) / 0.06)',
     },
     {
       gradient: PORTRAIT_GRADIENTS[2]!,
       opacity: 0.62,
-      borderColor: 'rgba(244,239,231,0.10)',
+      borderColor: 'rgb(var(--surface-glass) / 0.10)',
       bg: undefined,
     },
     {
       gradient: PORTRAIT_GRADIENTS[4]!,
       opacity: 0.3,
-      borderColor: 'rgba(244,239,231,0.08)',
+      borderColor: 'rgb(var(--surface-glass) / 0.08)',
       bg: undefined,
     },
   ]

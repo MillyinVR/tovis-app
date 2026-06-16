@@ -75,7 +75,7 @@ export default function LookSlide(props: {
                 left: 0,
                 right: 0,
                 height: 260,
-                background: 'linear-gradient(to top, rgba(10,9,7,0.92) 0%, rgba(10,9,7,0.4) 45%, transparent 100%)',
+                background: 'linear-gradient(to top, rgb(var(--bg-primary) / 0.92) 0%, rgb(var(--bg-primary) / 0.4) 45%, transparent 100%)',
                 pointerEvents: 'none',
                 zIndex: 5,
               }}
