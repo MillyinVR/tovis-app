@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingSource,
   BookingStatus,
+  LastMinuteOfferType,
+  LastMinuteTier,
   ServiceLocationType,
 } from '@prisma/client'
 
@@ -25,6 +27,8 @@ const mocks = vi.hoisted(() => ({
 
   findSchedulingConflicts: vi.fn(),
   decideBookingOverlapPermission: vi.fn(),
+
+  computeLastMinuteDiscount: vi.fn(),
 
   upsertClientNotification: vi.fn(),
   createProNotification: vi.fn(),
@@ -143,6 +147,10 @@ vi.mock('@/lib/booking/schedulingConflicts', () => ({
 
 vi.mock('@/lib/booking/overlapPolicy', () => ({
   decideBookingOverlapPermission: mocks.decideBookingOverlapPermission,
+}))
+
+vi.mock('@/lib/lastMinutePricing', () => ({
+  computeLastMinuteDiscount: mocks.computeLastMinuteDiscount,
 }))
 
 vi.mock('@/lib/notifications/clientNotifications', () => ({
@@ -333,6 +341,15 @@ describe('writeBoundary overlap policy integration', () => {
       ok: true,
     })
 
+    // Default: no opening incentive (zero discount). Tests that exercise a discount override this.
+    mocks.computeLastMinuteDiscount.mockResolvedValue({
+      discountAmount: 0,
+      discountedPrice: 100,
+      appliedPct: 0,
+      window: null,
+      reason: null,
+    })
+
     mocks.evaluateHoldCreationDecision.mockResolvedValue({
       ok: true,
       value: {
@@ -507,7 +524,11 @@ describe('writeBoundary overlap policy integration', () => {
       id: 'opening_1',
       startAt: new Date('2030-05-01T18:00:00.000Z'),
       professionalId: 'pro_1',
+      visibilityMode: 'TARGETED_ONLY',
+      timeZone: 'America/Los_Angeles',
       services: [{ offeringId: 'offering_1', serviceId: 'service_1' }],
+      tierPlans: [],
+      recipients: [],
     })
     // Booking wins the race for the opening.
     mocks.prisma.lastMinuteOpening.updateMany.mockResolvedValue({ count: 1 })
@@ -572,5 +593,119 @@ describe('writeBoundary overlap policy integration', () => {
     })
     expect(suppressCall?.data).toMatchObject({ status: 'SUPPRESSED' })
     expect(suppressCall?.data.suppressedAt).toBeInstanceOf(Date)
+  })
+
+  it('applies the opening incentive: PERCENT_OFF for a notified recipient discounts the booking', async () => {
+    mocks.prisma.lastMinuteOpening.findFirst.mockResolvedValue({
+      id: 'opening_1',
+      startAt: new Date('2030-05-01T18:00:00.000Z'),
+      professionalId: 'pro_1',
+      visibilityMode: 'TARGETED_ONLY',
+      timeZone: 'America/Los_Angeles',
+      services: [{ offeringId: 'offering_1', serviceId: 'service_1' }],
+      tierPlans: [
+        {
+          tier: LastMinuteTier.WAITLIST,
+          scheduledFor: new Date('2030-05-01T00:00:00.000Z'),
+          offerType: LastMinuteOfferType.PERCENT_OFF,
+          percentOff: 20,
+          amountOff: null,
+        },
+      ],
+      recipients: [
+        { notifiedTier: LastMinuteTier.WAITLIST, firstMatchedTier: LastMinuteTier.WAITLIST },
+      ],
+    })
+    mocks.prisma.lastMinuteOpening.updateMany.mockResolvedValue({ count: 1 })
+    mocks.prisma.lastMinuteRecipient.updateMany.mockResolvedValue({ count: 0 })
+    // base subtotal is 100.00 (validatedContext priceStartingAt) → 20% off = 20 discount.
+    mocks.computeLastMinuteDiscount.mockResolvedValue({
+      discountAmount: 20,
+      discountedPrice: 80,
+      appliedPct: 20,
+      window: 'OPENING_TIER',
+      reason: null,
+    })
+
+    await finalizeBookingFromHold({
+      clientId: 'client_1',
+      bookingEntryPoint: 'PRO_CREATED',
+      holdId: 'hold_1',
+      aftercareClientActionTokenId: null,
+      openingId: 'opening_1',
+      addOnIds: [],
+      locationType: ServiceLocationType.SALON,
+      source: BookingSource.REQUESTED,
+      initialStatus: BookingStatus.PENDING,
+      rebookOfBookingId: null,
+      fallbackTimeZone: 'America/Los_Angeles',
+      requestId: null,
+      idempotencyKey: null,
+      offering: {
+        id: 'offering_1',
+        professionalId: 'pro_1',
+        serviceId: 'service_1',
+        offersInSalon: true,
+        offersMobile: false,
+        salonPriceStartingAt: null,
+        salonDurationMinutes: 60,
+        mobilePriceStartingAt: null,
+        mobileDurationMinutes: null,
+        professionalTimeZone: 'America/Los_Angeles',
+      },
+    })
+
+    // The incentive was resolved from the recipient's tier and passed to the discount calc.
+    expect(mocks.computeLastMinuteDiscount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        offerType: LastMinuteOfferType.PERCENT_OFF,
+        percentOff: 20,
+        serviceId: 'service_1',
+        professionalId: 'pro_1',
+      }),
+    )
+
+    const createArgs = mocks.prisma.booking.create.mock.calls[0]?.[0] as {
+      data: { discountAmount: { toString(): string }; totalAmount: { toString(): string } }
+    }
+    expect(createArgs.data.discountAmount.toString()).toBe('20')
+    expect(createArgs.data.totalAmount.toString()).toBe('80')
+  })
+
+  it('does not discount a booking with no openingId (regression)', async () => {
+    await finalizeBookingFromHold({
+      clientId: 'client_1',
+      bookingEntryPoint: 'PRO_CREATED',
+      holdId: 'hold_1',
+      aftercareClientActionTokenId: null,
+      openingId: null,
+      addOnIds: [],
+      locationType: ServiceLocationType.SALON,
+      source: BookingSource.REQUESTED,
+      initialStatus: BookingStatus.PENDING,
+      rebookOfBookingId: null,
+      fallbackTimeZone: 'America/Los_Angeles',
+      requestId: null,
+      idempotencyKey: null,
+      offering: {
+        id: 'offering_1',
+        professionalId: 'pro_1',
+        serviceId: 'service_1',
+        offersInSalon: true,
+        offersMobile: false,
+        salonPriceStartingAt: null,
+        salonDurationMinutes: 60,
+        mobilePriceStartingAt: null,
+        mobileDurationMinutes: null,
+        professionalTimeZone: 'America/Los_Angeles',
+      },
+    })
+
+    expect(mocks.computeLastMinuteDiscount).not.toHaveBeenCalled()
+    const createArgs = mocks.prisma.booking.create.mock.calls[0]?.[0] as {
+      data: { discountAmount: { toString(): string }; totalAmount: { toString(): string } }
+    }
+    expect(createArgs.data.discountAmount.toString()).toBe('0')
+    expect(createArgs.data.totalAmount.toString()).toBe('100')
   })
 })

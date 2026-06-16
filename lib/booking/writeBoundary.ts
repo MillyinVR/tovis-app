@@ -13,6 +13,7 @@ import {
   ConsultationApprovalStatus,
   ConsultationDecision,
   ContactMethod,
+  LastMinuteOfferType,
   LastMinuteRecipientStatus,
   MediaPhase,
   MediaType,
@@ -33,6 +34,12 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
+import { parseMoney } from '@/lib/money'
+import {
+  pickPublicTierPlan,
+  pickRecipientTierPlan,
+} from '@/lib/lastMinute/pickTierPlan'
 import {
   resolveBookingTenantAttribution,
   resolveProTenantId,
@@ -7818,6 +7825,16 @@ async function performLockedFinalizeBookingFromHold(args: {
 
   const requestedStart = normalizeToMinute(new Date(hold.scheduledFor))
 
+  // Captured from a claimed opening so the booking below applies the SAME tier incentive the
+  // client was shown (PERCENT_OFF / AMOUNT_OFF). null when this is not an opening claim, or the
+  // applicable plan carries no chargeable discount.
+  let openingIncentive: {
+    offerType: LastMinuteOfferType
+    percentOff: number | null
+    amountOff: Prisma.Decimal | null
+    timeZone: string
+  } | null = null
+
   if (args.openingId) {
     const activeOpening = await args.tx.lastMinuteOpening.findFirst({
       where: {
@@ -7830,10 +7847,29 @@ async function performLockedFinalizeBookingFromHold(args: {
         id: true,
         startAt: true,
         professionalId: true,
+        visibilityMode: true,
+        timeZone: true,
         services: {
           select: {
             offeringId: true,
             serviceId: true,
+          },
+        },
+        tierPlans: {
+          where: { cancelledAt: null },
+          select: {
+            tier: true,
+            scheduledFor: true,
+            offerType: true,
+            percentOff: true,
+            amountOff: true,
+          },
+        },
+        recipients: {
+          where: { clientId: args.clientId },
+          select: {
+            notifiedTier: true,
+            firstMatchedTier: true,
           },
         },
       },
@@ -7881,6 +7917,38 @@ async function performLockedFinalizeBookingFromHold(args: {
 
     if (updatedOpening.count !== 1) {
       throw bookingError('OPENING_NOT_AVAILABLE')
+    }
+
+    // Resolve which tier plan's incentive applies — the recipient's matched tier if this client
+    // was notified, else the public tier — via the SHARED selectors the read paths use, so the
+    // price charged matches the price advertised. Only PERCENT_OFF / AMOUNT_OFF are applied here;
+    // FREE_SERVICE / FREE_ADD_ON are deferred (booking proceeds at full price, never $0).
+    const recipientRow = activeOpening.recipients[0] ?? null
+    const tierPlan = recipientRow
+      ? pickRecipientTierPlan({
+          notifiedTier: recipientRow.notifiedTier,
+          firstMatchedTier: recipientRow.firstMatchedTier,
+          tierPlans: activeOpening.tierPlans,
+        })
+      : pickPublicTierPlan(
+          {
+            visibilityMode: activeOpening.visibilityMode,
+            tierPlans: activeOpening.tierPlans,
+          },
+          bookedAt,
+        )
+
+    if (
+      tierPlan &&
+      (tierPlan.offerType === LastMinuteOfferType.PERCENT_OFF ||
+        tierPlan.offerType === LastMinuteOfferType.AMOUNT_OFF)
+    ) {
+      openingIncentive = {
+        offerType: tierPlan.offerType,
+        percentOff: tierPlan.percentOff,
+        amountOff: tierPlan.amountOff,
+        timeZone: activeOpening.timeZone,
+      }
     }
   }
 
@@ -7985,6 +8053,25 @@ async function performLockedFinalizeBookingFromHold(args: {
   )
 
   const subtotal = basePrice.add(addOnsPriceTotal)
+
+  // Apply the claimed opening's incentive to the subtotal. computeLastMinuteDiscount re-applies
+  // the pro's eligibility gates (enabled / day-disabled / minCollectedSubtotal floor), so a
+  // voided discount safely returns 0 and the booking proceeds at full price.
+  let lastMinuteDiscount = zeroMoney()
+  if (openingIncentive) {
+    const discountResult = await computeLastMinuteDiscount({
+      professionalId: args.offering.professionalId,
+      serviceId: args.offering.serviceId,
+      scheduledFor: requestedStart,
+      basePrice: Number(subtotal.toString()),
+      timeZone: openingIncentive.timeZone,
+      offerType: openingIncentive.offerType,
+      percentOff: openingIncentive.percentOff,
+      amountOff: openingIncentive.amountOff,
+    })
+    lastMinuteDiscount = parseMoney(discountResult.discountAmount)
+  }
+  const lastMinuteTotal = subtotal.sub(lastMinuteDiscount)
 
   const addOnsDurationTotal = resolvedAddOns.reduce(
     (sum, row) => sum + (row.durationMinutesSnapshot ?? 0),
@@ -8150,8 +8237,8 @@ async function performLockedFinalizeBookingFromHold(args: {
         productSubtotalSnapshot: zeroMoney(),
         tipAmount: zeroMoney(),
         taxAmount: zeroMoney(),
-        discountAmount: zeroMoney(),
-        totalAmount: subtotal,
+        discountAmount: lastMinuteDiscount,
+        totalAmount: lastMinuteTotal,
         checkoutStatus: BookingCheckoutStatus.NOT_READY,
         selectedPaymentMethod: null,
         paymentAuthorizedAt: null,

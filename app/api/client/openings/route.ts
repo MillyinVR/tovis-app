@@ -15,6 +15,7 @@ import {
   Prisma,
   ServiceLocationType,
 } from '@prisma/client'
+import { pickRecipientTierPlan } from '@/lib/lastMinute/pickTierPlan'
 
 export const dynamic = 'force-dynamic'
 
@@ -173,14 +174,13 @@ type RecipientRow = Prisma.LastMinuteRecipientGetPayload<{
   select: typeof recipientSelect
 }>
 
-function pickMatchedTierPlan(recipient: RecipientRow) {
-  const matchedTier = recipient.notifiedTier ?? recipient.firstMatchedTier
-  return recipient.opening.tierPlans.find((plan) => plan.tier === matchedTier) ?? null
-}
-
 function mapOpening(recipient: RecipientRow) {
   const opening = recipient.opening
-  const matchedTierPlan = pickMatchedTierPlan(recipient)
+  const matchedTierPlan = pickRecipientTierPlan({
+    notifiedTier: recipient.notifiedTier,
+    firstMatchedTier: recipient.firstMatchedTier,
+    tierPlans: opening.tierPlans,
+  })
 
   return {
     id: opening.id,
