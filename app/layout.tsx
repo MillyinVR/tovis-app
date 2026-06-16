@@ -87,8 +87,8 @@ export default async function RootLayout({ children }: RootLayoutProps) {
   const brand = getBrandForTenantContext(tenantContext)
 
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={bodyClassName}>
+    <html lang="en" className={bodyClassName} suppressHydrationWarning>
+      <body>
         <BrandProvider brand={brand}>
           <div style={appContentStyle}>{children}</div>
 

@@ -3,9 +3,19 @@
 @import "leaflet/dist/leaflet.css";
 
 @theme {
-  --radius-app-icon: 28px;
-  --radius-card:     14px;
+  --radius-app-icon: 22px;
+  --radius-card:     18px;
   --radius-inner:    8px;
+
+  /* Font utilities (font-sans / font-display / font-mono). next/font sets
+     --font-body / --font-display-face / --font-mono-face on <html>; these
+     chain through them. brand.css re-declares the same values as the brand
+     token source of truth. */
+  --font-sans: var(--font-body), "Hanken Grotesk", ui-sans-serif, system-ui,
+    sans-serif;
+  --font-display: var(--font-display-face), "Space Grotesk", ui-sans-serif,
+    system-ui, sans-serif;
+  --font-mono: var(--font-mono-face), "Space Mono", ui-monospace, monospace;
 }
 
 @utility rounded-card {
