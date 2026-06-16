@@ -34,13 +34,25 @@ export default function ClientHomeShell({
 
   return (
     <main
-      className="relative -mx-4 w-screen overflow-x-hidden bg-bgPrimary text-textPrimary md:mx-0 md:w-full"
+      className="relative -mt-4 overflow-x-hidden bg-bgPrimary text-textPrimary"
       style={{
+        // Full-bleed at every breakpoint, independent of the gated layout's
+        // constrained wrapper (max-w-5xl px-4 pt-4): break out to the viewport
+        // edges so the atmospheric glow spans seamlessly, while the inner
+        // header/grid/band keep their own max-w-[1040px] centering. This
+        // removes the parent's 1024px cap and the double horizontal padding.
+        // -mt-4 cancels the wrapper's pt-4 so the glow sits flush at the top.
+        width: '100vw',
+        marginLeft: 'calc(50% - 50vw)',
+        marginRight: 'calc(50% - 50vw)',
         paddingTop: 'max(30px, env(safe-area-inset-top, 0px) + 22px)',
         paddingBottom: 'max(120px, env(safe-area-inset-bottom, 0px) + 100px)',
       }}
     >
-      {/* Atmospheric glow */}
+      {/* Atmospheric glow — both layers are horizontally symmetric and span
+          the full width (inset-x-0), so the top glow reads seamlessly edge to
+          edge with no hard cut-off. Vertical fade band + a centered radial pop
+          (replaces the old top-right blob that skewed bright to one side). */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 top-0 h-[280px]"
@@ -51,8 +63,11 @@ export default function ClientHomeShell({
       />
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -right-10 -top-10 h-[300px] w-[300px] rounded-full"
-        style={{ background: 'rgb(var(--accent-primary) / 0.12)', filter: 'blur(72px)' }}
+        className="pointer-events-none absolute inset-x-0 top-0 h-[320px]"
+        style={{
+          background:
+            'radial-gradient(120% 90% at 50% -20%, rgb(var(--accent-primary) / 0.16), rgb(var(--accent-primary) / 0.05) 45%, transparent 72%)',
+        }}
       />
 
       {/* Greeting header */}
@@ -91,9 +106,10 @@ export default function ClientHomeShell({
         </Link>
       </header>
 
-      {/* Main grid */}
-      <div className="relative mx-auto grid max-w-[1040px] items-start gap-5 px-4 md:grid-cols-2 md:gap-[22px] md:px-8">
-        <div className="grid min-w-0 content-start gap-5 md:gap-[22px]">
+      {/* Main grid. grid-cols-1 (= minmax(0,1fr)) so single-column mobile/tablet
+          tracks can shrink and inner truncation works; two columns from md up. */}
+      <div className="relative mx-auto grid max-w-[1040px] grid-cols-1 items-start gap-5 px-4 md:grid-cols-2 md:gap-[22px] md:px-8">
+        <div className="grid min-w-0 grid-cols-1 content-start gap-5 md:gap-[22px]">
           <ClientActionCard action={home.action} />
           <ClientLastMinuteInvites invites={home.invites} />
           <UpcomingAppointmentCard
@@ -101,7 +117,7 @@ export default function ClientHomeShell({
             upcomingCount={home.upcomingCount}
           />
         </div>
-        <div className="grid min-w-0 content-start gap-5 md:gap-[22px]">
+        <div className="grid min-w-0 grid-cols-1 content-start gap-5 md:gap-[22px]">
           <FavoriteProsRow
             favoritePros={home.favoritePros}
             removeProFavoriteAction={removeProFavoriteAction}
