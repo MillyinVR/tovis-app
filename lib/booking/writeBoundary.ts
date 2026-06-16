@@ -8286,6 +8286,30 @@ if (args.openingId) {
       status: LastMinuteRecipientStatus.BOOKED,
     },
   })
+
+  // The opening transitioned ACTIVE -> BOOKED above (guarded by updatedOpening.count === 1),
+  // so this booking won the race. Suppress every OTHER notified recipient for this opening so
+  // they stop chasing a slot that is now gone. Only pre-terminal statuses are touched — never
+  // overwrite an already BOOKED / CANCELLED / SUPPRESSED row. Suppressed silently (no
+  // "slot filled" notification exists today).
+  await args.tx.lastMinuteRecipient.updateMany({
+    where: {
+      openingId: args.openingId,
+      clientId: { not: args.clientId },
+      status: {
+        in: [
+          LastMinuteRecipientStatus.PLANNED,
+          LastMinuteRecipientStatus.ENQUEUED,
+          LastMinuteRecipientStatus.OPENED,
+          LastMinuteRecipientStatus.CLICKED,
+        ],
+      },
+    },
+    data: {
+      status: LastMinuteRecipientStatus.SUPPRESSED,
+      suppressedAt: new Date(),
+    },
+  })
 }
 
   await args.tx.bookingHold.delete({

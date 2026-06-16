@@ -501,4 +501,76 @@ describe('writeBoundary overlap policy integration', () => {
       }),
     )
   })
+
+  it('marks the opening BOOKED, books the buyer recipient, and SUPPRESSES the other recipients', async () => {
+    mocks.prisma.lastMinuteOpening.findFirst.mockResolvedValue({
+      id: 'opening_1',
+      startAt: new Date('2030-05-01T18:00:00.000Z'),
+      professionalId: 'pro_1',
+      services: [{ offeringId: 'offering_1', serviceId: 'service_1' }],
+    })
+    // Booking wins the race for the opening.
+    mocks.prisma.lastMinuteOpening.updateMany.mockResolvedValue({ count: 1 })
+    mocks.prisma.lastMinuteRecipient.updateMany.mockResolvedValue({ count: 0 })
+
+    await finalizeBookingFromHold({
+      clientId: 'client_1',
+      bookingEntryPoint: 'PRO_CREATED',
+      holdId: 'hold_1',
+      aftercareClientActionTokenId: null,
+      openingId: 'opening_1',
+      addOnIds: [],
+      locationType: ServiceLocationType.SALON,
+      source: BookingSource.REQUESTED,
+      initialStatus: BookingStatus.PENDING,
+      rebookOfBookingId: null,
+      fallbackTimeZone: 'America/Los_Angeles',
+      requestId: null,
+      idempotencyKey: null,
+      offering: {
+        id: 'offering_1',
+        professionalId: 'pro_1',
+        serviceId: 'service_1',
+        offersInSalon: true,
+        offersMobile: false,
+        salonPriceStartingAt: null,
+        salonDurationMinutes: 60,
+        mobilePriceStartingAt: null,
+        mobileDurationMinutes: null,
+        professionalTimeZone: 'America/Los_Angeles',
+      },
+    })
+
+    // Opening transitioned ACTIVE -> BOOKED.
+    expect(mocks.prisma.lastMinuteOpening.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'opening_1', status: 'ACTIVE' }),
+        data: expect.objectContaining({ status: 'BOOKED' }),
+      }),
+    )
+
+    // Two recipient updates: the buyer (BOOKED) and everyone else (SUPPRESSED).
+    expect(mocks.prisma.lastMinuteRecipient.updateMany).toHaveBeenCalledTimes(2)
+
+    const recipientCalls = mocks.prisma.lastMinuteRecipient.updateMany.mock.calls.map(
+      (call) => call[0] as { where: Record<string, unknown>; data: Record<string, unknown> },
+    )
+
+    const buyerCall = recipientCalls.find((c) => c.data.status === 'BOOKED')
+    const suppressCall = recipientCalls.find((c) => c.data.status === 'SUPPRESSED')
+
+    expect(buyerCall?.where).toMatchObject({
+      clientId: 'client_1',
+      openingId: 'opening_1',
+      bookedAt: null,
+    })
+
+    expect(suppressCall?.where).toMatchObject({
+      openingId: 'opening_1',
+      clientId: { not: 'client_1' },
+      status: { in: ['PLANNED', 'ENQUEUED', 'OPENED', 'CLICKED'] },
+    })
+    expect(suppressCall?.data).toMatchObject({ status: 'SUPPRESSED' })
+    expect(suppressCall?.data.suppressedAt).toBeInstanceOf(Date)
+  })
 })

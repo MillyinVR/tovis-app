@@ -192,11 +192,17 @@ app/api/pro/calendar/route.ts:Prisma select/include plaintext field:email: true,
 app/api/pro/calendar/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/pro/calendar/route.ts:Prisma select/include plaintext field:lastName: true,
 app/api/pro/calendar/route.ts:direct property read:const email = booking.client?.user?.email?.trim() ?? ''
+app/api/pro/calendar/route.ts:direct property read:const email = entry.client?.user?.email?.trim() ?? ''
 app/api/pro/calendar/route.ts:direct property read:const firstName = booking.client?.firstName?.trim() ?? ''
+app/api/pro/calendar/route.ts:direct property read:const firstName = entry.client?.firstName?.trim() ?? ''
 app/api/pro/calendar/route.ts:direct property read:const lastName = booking.client?.lastName?.trim() ?? ''
+app/api/pro/calendar/route.ts:direct property read:const lastName = entry.client?.lastName?.trim() ?? ''
 app/api/pro/calendar/route.ts:optional direct property read:const email = booking.client?.user?.email?.trim() ?? ''
+app/api/pro/calendar/route.ts:optional direct property read:const email = entry.client?.user?.email?.trim() ?? ''
 app/api/pro/calendar/route.ts:optional direct property read:const firstName = booking.client?.firstName?.trim() ?? ''
+app/api/pro/calendar/route.ts:optional direct property read:const firstName = entry.client?.firstName?.trim() ?? ''
 app/api/pro/calendar/route.ts:optional direct property read:const lastName = booking.client?.lastName?.trim() ?? ''
+app/api/pro/calendar/route.ts:optional direct property read:const lastName = entry.client?.lastName?.trim() ?? ''
 app/api/pro/clients/search/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/pro/clients/search/route.ts:Prisma select/include plaintext field:lastName: true,
 app/api/pro/clients/search/route.ts:Prisma select/include plaintext field:phone: true,

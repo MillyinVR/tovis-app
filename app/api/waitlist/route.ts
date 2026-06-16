@@ -1,13 +1,103 @@
 // app/api/waitlist/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickInt, pickString, requireClient } from '@/app/api/_utils'
+import { resolveMessageThread } from '@/lib/messagesResolve'
 import {
+  MessageThreadContextType,
   WaitlistPreferenceType,
   WaitlistStatus,
   WaitlistTimeOfDay,
 } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
+
+function minutesToHhMm(min: number): string {
+  const clamped = Math.max(0, Math.min(1440, Math.trunc(min)))
+  const h = Math.floor(clamped / 60)
+  const m = clamped % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+/** Short human-readable summary of a waitlist preference for the seed message. */
+function formatWaitlistPreferenceSummary(pref: {
+  preferenceType: WaitlistPreferenceType
+  specificDate: Date | null
+  timeOfDay: WaitlistTimeOfDay | null
+  windowStartMin: number | null
+  windowEndMin: number | null
+}): string {
+  switch (pref.preferenceType) {
+    case WaitlistPreferenceType.TIME_OF_DAY:
+      return pref.timeOfDay ? pref.timeOfDay.toLowerCase() : 'any time'
+    case WaitlistPreferenceType.SPECIFIC_DATE:
+      return pref.specificDate
+        ? pref.specificDate.toISOString().slice(0, 10)
+        : 'a specific date'
+    case WaitlistPreferenceType.TIME_RANGE:
+      return pref.windowStartMin != null && pref.windowEndMin != null
+        ? `${minutesToHhMm(pref.windowStartMin)}–${minutesToHhMm(pref.windowEndMin)}`
+        : 'a time range'
+    case WaitlistPreferenceType.ANY_TIME:
+    default:
+      return 'any time'
+  }
+}
+
+/**
+ * Best-effort: materialize the WAITLIST message thread and seed it with one message so the
+ * waitlister surfaces in the pro inbox (the inbox requires lastMessageAt != null). Failures
+ * here must NEVER fail the waitlist join — they are swallowed and logged.
+ */
+async function seedWaitlistThread(args: {
+  clientId: string
+  senderUserId: string
+  entryId: string
+  serviceId: string
+  notes: string | null
+  preferenceSummary: string
+}): Promise<void> {
+  try {
+    const resolved = await resolveMessageThread({
+      viewer: { clientProfile: { id: args.clientId } },
+      input: {
+        contextType: MessageThreadContextType.WAITLIST,
+        contextId: args.entryId,
+        createIfMissing: true,
+      },
+    })
+
+    if (!resolved.ok || !resolved.thread) return
+
+    const threadId = resolved.thread.id
+    const service = await prisma.service.findUnique({
+      where: { id: args.serviceId },
+      select: { name: true },
+    })
+    const serviceName = service?.name ?? 'this service'
+
+    const body =
+      `Joined your waitlist for ${serviceName}. Preferred: ${args.preferenceSummary}.` +
+      (args.notes ? ` Notes: ${args.notes}` : '')
+
+    await prisma.$transaction(async (tx) => {
+      const msg = await tx.message.create({
+        data: { threadId, senderUserId: args.senderUserId, body },
+        select: { id: true, createdAt: true },
+      })
+      await tx.messageThread.update({
+        where: { id: threadId },
+        data: { lastMessageAt: msg.createdAt, lastMessagePreview: body.slice(0, 140) },
+      })
+      await tx.messageThreadParticipant.update({
+        where: { threadId_userId: { threadId, userId: args.senderUserId } },
+        data: { lastReadAt: msg.createdAt },
+      })
+    })
+  } catch (err) {
+    console.error('POST /api/waitlist: waitlist thread seed failed', err)
+    // Swallow — the waitlist join already succeeded.
+  }
+}
 
 function isObject(x: unknown): x is Record<string, unknown> {
   return Boolean(x && typeof x === 'object' && !Array.isArray(x))
@@ -219,6 +309,15 @@ export async function POST(req: Request) {
         windowStartMin: true,
         windowEndMin: true,
       },
+    })
+
+    await seedWaitlistThread({
+      clientId: auth.clientId,
+      senderUserId: auth.user.id,
+      entryId: entry.id,
+      serviceId,
+      notes: notes ?? null,
+      preferenceSummary: formatWaitlistPreferenceSummary(parsedPreference),
     })
 
     return jsonOk({ entry }, 201)
