@@ -89,6 +89,12 @@ export const SERVICE_ALIASES: Record<string, string[]> = {
   // Makeup
   'Soft Glam Makeup': ['soft glam', 'glam makeup', 'event makeup', 'special occasion makeup'],
   'Bridal Makeup': ['bridal makeup', 'wedding makeup', 'bridal trial', 'bridal'],
+  // Permanent makeup
+  Microblading: ['microblading', 'micro blading', 'permanent brows', 'pmu brows', 'ombre brows', 'powder brows'],
+  // Braiding
+  'Box Braids': ['box braids', 'braids', 'knotless braids', 'feed in braids', 'cornrows'],
+  // Hair removal
+  Electrolysis: ['electrolysis', 'electrolysis hair removal', 'permanent hair removal'],
   // Massage
   '60-Minute Swedish Massage': ['swedish massage', '60 min massage', 'relaxation massage', 'full body massage'],
   '60-Minute Deep Tissue': ['deep tissue', 'deep tissue massage', '60 min deep tissue'],
