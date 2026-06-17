@@ -186,6 +186,11 @@ enum ServiceLocationType {
   MOBILE
 }
 
+enum RaiseStepMode {
+  PCT // stepValue is percentage points (compounding)
+  USD // stepValue is a flat dollar amount per step
+}
+
 enum AftercareRebookMode {
   NONE
   BOOKED_NEXT_APPOINTMENT // pro scheduled it (show “Next appointment”)
@@ -1810,9 +1815,38 @@ model ProfessionalServiceOffering {
   aftercareRebookSlots AftercareRebookSlot[]
 
   lastMinuteOpeningServices LastMinuteOpeningService[]
+  priceRamps                OfferingPriceRamp[]
 
   @@unique([professionalId, serviceId])
   @@index([professionalId, isActive])
+}
+
+/// Price-grace ramp for an offering whose price the pro set BELOW the catalog
+/// minimum. New clients are always quoted the catalog minimum; existing clients
+/// are grandfathered at `currentPrice`, which a scheduled job steps up toward
+/// `targetPrice` (the catalog minimum at ramp start) on the chosen cadence.
+/// One ramp per offering per booking mode — a salon and mobile price can each be
+/// below minimum independently. See docs/design/pro-migration-import.md.
+model OfferingPriceRamp {
+  id                 String              @id @default(cuid())
+  offeringId         String
+  mode               ServiceLocationType
+  grandfatheredPrice Decimal             @db.Decimal(10, 2)
+  targetPrice        Decimal             @db.Decimal(10, 2)
+  currentPrice       Decimal             @db.Decimal(10, 2)
+  stepMode           RaiseStepMode
+  stepValue          Decimal             @db.Decimal(10, 2)
+  cadenceWeeks       Int
+  startedAt          DateTime            @default(now())
+  nextStepAt         DateTime
+  completedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  offering ProfessionalServiceOffering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+
+  @@unique([offeringId, mode])
+  @@index([completedAt, nextStepAt])
 }
 
 model LastMinuteSettings {
