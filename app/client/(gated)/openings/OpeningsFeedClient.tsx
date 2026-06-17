@@ -1,14 +1,22 @@
 // app/client/(gated)/openings/OpeningsFeedClient.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 
 import { isRecord } from '@/lib/guards'
+import { usePresenceSignalsBatch } from '@/lib/presence/usePresenceSignalsBatch'
+import type {
+  PresenceBatchItem,
+  PresenceSignalCounts,
+} from '@/lib/presence/presenceSignals'
 
 type FeedCard = {
   key: string
   href: string
+  openingId: string
+  professionalId: string | null
+  serviceId: string | null
   serviceName: string
   meta: string
   whenLabel: string
@@ -95,6 +103,9 @@ function parseCard(notification: unknown): FeedCard | null {
   const place = str(professional?.locationLabel)
   const meta = [proName, place].filter(Boolean).join(' · ')
 
+  const professionalId = str(professional?.id)
+  const serviceId = str(primary.serviceId) ?? str(service?.id)
+
   const timeZone = str(opening.timeZone)
   const whenLabel = formatWhen(startAt, timeZone)
 
@@ -132,6 +143,9 @@ function parseCard(notification: unknown): FeedCard | null {
     href: `/offerings/${encodeURIComponent(offeringId)}?scheduledFor=${encodeURIComponent(
       startAt,
     )}&source=DISCOVERY&openingId=${encodeURIComponent(openingId)}`,
+    openingId,
+    professionalId,
+    serviceId,
     serviceName,
     meta,
     whenLabel,
@@ -143,6 +157,33 @@ function parseCard(notification: unknown): FeedCard | null {
   }
 }
 
+function FeedPresence({ counts }: { counts: PresenceSignalCounts | undefined }) {
+  // Honest signals: never count just the viewer, never fake liveness.
+  const showWatching = typeof counts?.watching === 'number' && counts.watching >= 2
+  const showWaitlist = (counts?.waitlisted ?? 0) >= 1
+
+  if (!showWatching && !showWaitlist) return null
+
+  return (
+    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+      {showWatching ? (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-textPrimary/5 px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.06em] text-textMuted">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accentPrimary/70" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accentPrimary" />
+          </span>
+          {counts!.watching} watching
+        </span>
+      ) : null}
+      {showWaitlist ? (
+        <span className="inline-flex items-center rounded-full bg-textPrimary/5 px-2.5 py-1 font-mono text-[9px] font-bold uppercase tracking-[0.06em] text-textMuted">
+          {counts!.waitlisted} on waitlist
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 type Status =
   | { kind: 'loading' }
   | { kind: 'error' }
@@ -150,6 +191,23 @@ type Status =
 
 export default function OpeningsFeedClient() {
   const [status, setStatus] = useState<Status>({ kind: 'loading' })
+
+  const presenceItems = useMemo<PresenceBatchItem[]>(() => {
+    if (status.kind !== 'ready') return []
+    const items: PresenceBatchItem[] = []
+    for (const card of status.cards) {
+      if (!card.professionalId) continue
+      items.push({
+        resourceType: 'opening',
+        resourceId: card.openingId,
+        professionalId: card.professionalId,
+        serviceId: card.serviceId ?? undefined,
+      })
+    }
+    return items
+  }, [status])
+
+  const presence = usePresenceSignalsBatch(presenceItems)
 
   useEffect(() => {
     let cancelled = false
@@ -272,6 +330,8 @@ export default function OpeningsFeedClient() {
                       ) : null}
                     </div>
                   </div>
+
+                  <FeedPresence counts={presence[card.openingId]} />
 
                   <Link
                     href={card.href}
