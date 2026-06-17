@@ -1,7 +1,10 @@
 const path = require('path')
 const { loadEnvConfig } = require('@next/env')
 
-loadEnvConfig(path.join(__dirname, '..'))
+// Load env in development mode unless explicitly in production, so local/test
+// seeds read .env.development.local (local DB) and never pull in
+// .env.production.local — which carries the prod DATABASE_URL and VERCEL_ENV.
+loadEnvConfig(path.join(__dirname, '..'), process.env.NODE_ENV !== 'production')
 
 const { requireSafeScriptRun } = require('../scripts/_safe-script-guard.cjs')
 
