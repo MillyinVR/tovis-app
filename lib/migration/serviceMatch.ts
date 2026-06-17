@@ -96,20 +96,27 @@ function jaccard(a: string[], b: string[]): number {
 }
 
 function levenshtein(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
   if (a === b) return 0
-  if (a.length === 0) return b.length
-  if (b.length === 0) return a.length
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i)
-  let curr = new Array<number>(b.length + 1)
-  for (let i = 1; i <= a.length; i += 1) {
-    curr[0] = i
-    for (let j = 1; j <= b.length; j += 1) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost)
+  if (m === 0) return n
+  if (n === 0) return m
+
+  let prev: number[] = []
+  for (let j = 0; j <= n; j += 1) prev[j] = j
+
+  for (let i = 1; i <= m; i += 1) {
+    const curr: number[] = [i]
+    for (let j = 1; j <= n; j += 1) {
+      const cost = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1
+      const del = (prev[j] ?? 0) + 1
+      const ins = (curr[j - 1] ?? 0) + 1
+      const sub = (prev[j - 1] ?? 0) + cost
+      curr[j] = Math.min(del, ins, sub)
     }
-    ;[prev, curr] = [curr, prev]
+    prev = curr
   }
-  return prev[b.length]
+  return prev[n] ?? 0
 }
 
 function fuzzyRatio(a: string, b: string): number {
