@@ -126,6 +126,28 @@ describe('commitCalendarImport', () => {
     expect(result.created.bookings).toBe(1)
   })
 
+  it('falls back to a held block when booking creation fails (e.g. STEP_MISMATCH)', async () => {
+    const bookingError: Error & { code?: string } = new Error('off grid')
+    bookingError.code = 'STEP_MISMATCH'
+    mocks.createProBooking.mockRejectedValueOnce(bookingError)
+    const events = [
+      event({ uid: 'b1', summary: 'Haircut', attendeeName: 'Jane Doe', attendeeEmail: 'jane@example.com' }),
+    ]
+
+    const result = await commitCalendarImport({
+      professionalId: 'pro-1',
+      actorUserId: 'user-1',
+      events,
+      now: NOW,
+    })
+
+    expect(mocks.createProBooking).toHaveBeenCalledTimes(1)
+    expect(mocks.blockCreate).toHaveBeenCalledTimes(1)
+    expect(result.created.bookings).toBe(0)
+    expect(result.created.blocks).toBe(1)
+    expect(result.failed).toBe(0)
+  })
+
   it('holds the time as a block when the only salon location is missing', async () => {
     mocks.locationFindFirst.mockResolvedValue(null)
     const events = [

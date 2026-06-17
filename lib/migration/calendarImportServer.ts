@@ -313,29 +313,48 @@ export async function commitCalendarImport(args: {
           continue
         }
 
-        await createProBooking({
-          professionalId: args.professionalId,
-          actorUserId: args.actorUserId,
-          overrideReason: null,
-          clientId: clientResult.clientId,
-          offeringId: match.offeringId,
-          locationId: salonLocationId,
-          locationType: ServiceLocationType.SALON,
-          scheduledFor: event.start,
-          clientAddressId: null,
-          internalNotes: null,
-          requestedBufferMinutes: null,
-          requestedTotalDurationMinutes: null,
-          // A migrating pro hasn't necessarily configured working hours yet;
-          // honor their real calendar. Pros self-authorize these two overrides.
-          allowOutsideWorkingHours: true,
-          allowShortNotice: true,
-          allowFarFuture: false,
-          importMode: true,
-          idempotencyKey: `${IMPORT_IDEMPOTENCY_PREFIX}${event.uid}`,
-        })
-        created.bookings += 1
-        continue
+        try {
+          await createProBooking({
+            professionalId: args.professionalId,
+            actorUserId: args.actorUserId,
+            overrideReason: null,
+            clientId: clientResult.clientId,
+            offeringId: match.offeringId,
+            locationId: salonLocationId,
+            locationType: ServiceLocationType.SALON,
+            scheduledFor: event.start,
+            clientAddressId: null,
+            internalNotes: null,
+            requestedBufferMinutes: null,
+            requestedTotalDurationMinutes: null,
+            // A migrating pro hasn't necessarily configured working hours yet;
+            // honor their real calendar. Pros self-authorize these two overrides.
+            allowOutsideWorkingHours: true,
+            allowShortNotice: true,
+            allowFarFuture: false,
+            importMode: true,
+            idempotencyKey: `${IMPORT_IDEMPOTENCY_PREFIX}${event.uid}`,
+          })
+          created.bookings += 1
+          continue
+        } catch (bookingError: unknown) {
+          // The appointment couldn't become a clean booking — most often its
+          // start time doesn't sit on the pro's slot grid (STEP_MISMATCH) or it
+          // collides with an existing booking. Never drop it: hold the time as a
+          // block so the pro sees + can fix it, rather than losing the slot.
+          const code =
+            bookingError && typeof bookingError === 'object' && 'code' in bookingError
+              ? String((bookingError as { code: unknown }).code)
+              : 'UNKNOWN'
+          const outcome = await createBlockIfAbsent({
+            professionalId: args.professionalId,
+            event,
+            reason: `imported appointment needs review (${code})`,
+          })
+          if (outcome === 'created') created.blocks += 1
+          else skipped += 1
+          continue
+        }
       }
 
       // Everything else (unmapped, mobile-only, no client, or no salon
@@ -349,9 +368,14 @@ export async function commitCalendarImport(args: {
       else skipped += 1
     } catch (error: unknown) {
       failed += 1
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? String((error as { code: unknown }).code)
+          : undefined
       console.error('commitCalendarImport: failed to import event', {
         uid: event.uid,
         classification,
+        code,
         error: safeError(error),
       })
     }
