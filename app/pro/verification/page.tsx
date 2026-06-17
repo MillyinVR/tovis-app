@@ -71,6 +71,9 @@ export default async function ProVerificationPage() {
   if (!pro) redirect('/pro')
 
   const methods = verificationMethodsForProfession(pro.professionType)
+  const isLicensed = Boolean(
+    pro.professionType && requiresLicense(pro.professionType, pro.licenseState),
+  )
 
   return (
     <main className="mx-auto max-w-3xl pb-24 pt-6 font-sans">
@@ -80,39 +83,37 @@ export default async function ProVerificationPage() {
           This controls marketplace visibility + who can book you. (Yes, paperwork is the villain.)
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-card border border-white/10 bg-bgPrimary/30 p-4">
-            <div className="text-xs font-extrabold text-textSecondary">Status</div>
-            <div className="mt-2 text-sm font-black text-textPrimary">{pro.verificationStatus}</div>
-            <div className="mt-2 text-xs text-textSecondary">
-              License verified: <span className="font-black text-textPrimary">{pro.licenseVerified ? 'YES' : 'NO'}</span>
-            </div>
+        <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary/30 p-4">
+          <div className="text-xs font-extrabold text-textSecondary">Status</div>
+          <div className="mt-2 text-sm font-black text-textPrimary">{pro.verificationStatus}</div>
+          <div className="mt-2 text-xs text-textSecondary">
+            License verified: <span className="font-black text-textPrimary">{pro.licenseVerified ? 'YES' : 'NO'}</span>
           </div>
-
-          {pro.professionType && requiresLicense(pro.professionType, pro.licenseState) ? (
-            <LicenseEditForm
-              initialState={pro.licenseState ?? ''}
-              initialNumber={pro.licenseNumber ?? ''}
-              initialExpiry={toDateInputValue(pro.licenseExpiry)}
-            />
-          ) : (
-            <div className="rounded-card border border-white/10 bg-bgPrimary/30 p-4">
-              <div className="text-xs font-extrabold text-textSecondary">License</div>
-              <div className="mt-2 text-xs text-textSecondary">
-                No state license required for your profession. Upload a
-                certificate below if applicable.
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="mt-5 h-px w-full bg-white/10" />
 
+        {/* One "Your license" section: details + photo together, so renewing
+            pros update the date AND re-upload in the same place. */}
         <div className="mt-5">
-          <div className="text-sm font-black text-textPrimary">Upload a verification document</div>
-          <div className="mt-1 text-xs text-textSecondary">
-            Pick a document type, then upload a clear photo. We keep it private and only admins can view it.
+          <div className="text-sm font-black text-textPrimary">
+            {isLicensed ? 'Your license' : 'Your certifications'}
           </div>
+          <div className="mt-1 text-xs text-textSecondary">
+            {isLicensed
+              ? 'Keep your details current and upload a clear photo of your license. Both are required before an admin can approve you — and at renewal, update the date and re-upload. We keep it private; only admins can view it.'
+              : 'No state license required for your profession. Upload your certificate(s) below. We keep it private; only admins can view it.'}
+          </div>
+
+          {isLicensed ? (
+            <div className="mt-3">
+              <LicenseEditForm
+                initialState={pro.licenseState ?? ''}
+                initialNumber={pro.licenseNumber ?? ''}
+                initialExpiry={toDateInputValue(pro.licenseExpiry)}
+              />
+            </div>
+          ) : null}
 
           <div className="mt-3">
             <VerificationUploadClient methods={methods} />
