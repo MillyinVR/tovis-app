@@ -434,6 +434,44 @@ export function isStartAlignedToWorkingWindowStep(
   return validateWorkingWindowStep(resolved)
 }
 
+// Snap a start time to the nearest valid slot on the pro's working-window step
+// grid, for calendar-migration imports (a competitor export's arbitrary times
+// rarely land on the grid). Only corrects MINOR misalignment within working
+// hours — adjusts by less than half a step. Returns null (caller should hold the
+// time as a block instead) when there's no usable window that day or the start
+// is before the window opens, so appointments are never relocated by a large
+// amount or fabricated onto a closed day.
+export function snapStartToWorkingWindowStep(args: StepAlignmentArgs): Date | null {
+  const fallbackTimeZone =
+    typeof args.fallbackTimeZone === 'string' && args.fallbackTimeZone.trim()
+      ? args.fallbackTimeZone
+      : DEFAULT_FALLBACK_TIME_ZONE
+
+  const timeZone = sanitizeTimeZone(args.timeZone, fallbackTimeZone)
+  const stepMinutes = normalizeStepMinutes(args.stepMinutes, 15)
+  const startUtc = normalizeToMinute(new Date(args.startUtc))
+
+  if (!isValidDate(startUtc)) return null
+
+  const resolved = resolveWorkingWindowForPreparedArgs({
+    startUtc,
+    workingHours: args.workingHours,
+    timeZone,
+    stepMinutes,
+  })
+
+  if (!resolved.ok) return null
+  // Don't relocate appointments that start before the window opens — hold them.
+  if (resolved.startOffset < resolved.windowStartMinutes) return null
+
+  const diff = resolved.startOffset - resolved.windowStartMinutes
+  const snappedOffset =
+    resolved.windowStartMinutes + Math.round(diff / stepMinutes) * stepMinutes
+  const deltaMinutes = snappedOffset - resolved.startOffset
+
+  return deltaMinutes === 0 ? startUtc : addMinutes(startUtc, deltaMinutes)
+}
+
 export function checkAdvanceNotice(
   args: AdvanceNoticeArgs,
 ):

@@ -6,7 +6,39 @@ import {
   checkSlotReadiness,
   computeRequestedEndUtc,
   isStartAlignedToWorkingWindowStep,
+  snapStartToWorkingWindowStep,
 } from './slotReadiness'
+
+const WED_HOURS = { wed: { enabled: true, start: '09:10', end: '17:10' } }
+const SNAP_ARGS = { workingHours: WED_HOURS, timeZone: 'America/Los_Angeles', stepMinutes: 15, fallbackTimeZone: 'UTC' }
+
+describe('snapStartToWorkingWindowStep', () => {
+  it('snaps a slightly-off start down to the nearest grid slot', () => {
+    // 09:15 local is +5 from the 09:10 window start → nearest 15-min slot is 09:10.
+    const snapped = snapStartToWorkingWindowStep({ ...SNAP_ARGS, startUtc: new Date('2026-03-11T16:15:00.000Z') })
+    expect(snapped?.toISOString()).toBe('2026-03-11T16:10:00.000Z')
+  })
+
+  it('snaps up to the next slot when closer', () => {
+    // 09:20 local is +10 from 09:10 → nearest slot is 09:25.
+    const snapped = snapStartToWorkingWindowStep({ ...SNAP_ARGS, startUtc: new Date('2026-03-11T16:20:00.000Z') })
+    expect(snapped?.toISOString()).toBe('2026-03-11T16:25:00.000Z')
+  })
+
+  it('returns an already-aligned start unchanged', () => {
+    const snapped = snapStartToWorkingWindowStep({ ...SNAP_ARGS, startUtc: new Date('2026-03-11T16:25:00.000Z') })
+    expect(snapped?.toISOString()).toBe('2026-03-11T16:25:00.000Z')
+  })
+
+  it('returns null for a start before the window opens (held, not relocated)', () => {
+    // 09:00 local is before the 09:10 window start.
+    expect(snapStartToWorkingWindowStep({ ...SNAP_ARGS, startUtc: new Date('2026-03-11T16:00:00.000Z') })).toBeNull()
+  })
+
+  it('returns null when the day has no working window', () => {
+    expect(snapStartToWorkingWindowStep({ ...SNAP_ARGS, workingHours: null, startUtc: new Date('2026-03-11T16:15:00.000Z') })).toBeNull()
+  })
+})
 
 describe('slotReadiness', () => {
   beforeEach(() => {

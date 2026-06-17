@@ -50,6 +50,7 @@ import {
   pickOfferingModeRamp,
   resolveChargedUnitPrice,
 } from '@/lib/booking/rampedUnitPrice'
+import { snapStartToWorkingWindowStep } from '@/lib/booking/slotReadiness'
 import {
   withLockedClientOwnedBookingTransaction,
   withLockedProfessionalTransaction,
@@ -8503,7 +8504,8 @@ async function performLockedCreateProBooking(args: {
 
   const normalizedOverrideReason = normalizeReason(args.overrideReason)
 
-  const requestedStart = normalizeToMinute(args.scheduledFor)
+  // Reassigned below for calendar imports (snapped to the slot grid).
+  let requestedStart = normalizeToMinute(args.scheduledFor)
 
   const [client, clientAddress, offering] = await Promise.all([
     args.tx.clientProfile.findUnique({
@@ -8654,6 +8656,20 @@ async function performLockedCreateProBooking(args: {
   }
 
   const stepMinutes = locationContext.stepMinutes
+
+  // Calendar imports: an external appointment's start rarely lands on the pro's
+  // slot grid. Snap minor misalignment to the nearest valid slot so it can book;
+  // times we can't snap (before hours / closed day) keep the original start and
+  // fall back to a held block downstream (see commitCalendarImport).
+  if (importMode) {
+    const snapped = snapStartToWorkingWindowStep({
+      startUtc: requestedStart,
+      workingHours: locationContext.workingHours,
+      timeZone: locationContext.timeZone,
+      stepMinutes,
+    })
+    if (snapped) requestedStart = snapped
+  }
 
   const locationBufferMinutes = clampInt(
     Number(locationContext.bufferMinutes ?? 0),
