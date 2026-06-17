@@ -2,10 +2,9 @@
 
 import type { MigrationStepKey, SourceApp } from './_types'
 
-// Raise-ramp policy floor (contract: 10% every 10 weeks — not a per-pro setting).
-// A pro may go faster (bigger step / shorter cadence), never gentler.
-export const RAISE_FLOOR_PCT = 10
-export const RAISE_FLOOR_WEEKS = 10
+// Raise-ramp policy floor lives in the canonical ramp module; re-exported here
+// so UI imports stay local. (Contract: 10% every 10 weeks, never gentler.)
+export { RAISE_FLOOR_PCT, RAISE_FLOOR_WEEKS } from '@/lib/migration/priceRamp'
 
 export const MIGRATION_STEPS: ReadonlyArray<{
   key: MigrationStepKey
