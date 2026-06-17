@@ -145,7 +145,7 @@ export default async function AdminLicenseReviewPage() {
                           })}
                         </Link>{' '}
                         <span className="text-xs font-bold text-textSecondary">
-                          ({pro.user.email})
+                          ({pro.user.email}) {/* pii-plaintext-read-ok: admin-only operator review surface, mirrors the professionals queue */}
                         </span>
                       </div>
 
