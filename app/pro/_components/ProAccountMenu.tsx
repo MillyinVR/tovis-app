@@ -151,6 +151,12 @@ export default function ProAccountMenu(props: Props) {
         emoji: '💬',
         hint: 'Inbox',
       },
+      {
+        label: 'Referral Rewards',
+        href: '/pro/referral-rewards',
+        emoji: '🎁',
+        hint: 'Reward tiers for client referrals',
+      },
     ],
     [
       props.publicUrl,

@@ -25,6 +25,9 @@ export type NotificationTemplateKey =
   | 'payment_collected'
   | 'payment_action_required'
   | 'look_follower_new'
+  | 'referral_tap_received'
+  | 'referral_confirmed'
+  | 'referral_converted'
 
 export type NotificationEventDefinition = {
   key: NotificationEventKey
@@ -93,6 +96,9 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
+  NotificationEventKey.REFERRAL_TAP_RECEIVED,
+  NotificationEventKey.REFERRAL_CONFIRMED,
+  NotificationEventKey.REFERRAL_CONVERTED,
 ]
 
 export const NOTIFICATION_EVENT_DEFINITIONS: Record<
@@ -366,9 +372,44 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     allowQuietHoursBypass: false,
     templateKey: 'look_follower_new',
     supportedRecipients: [NotificationRecipientKind.PRO],
-    // In-app only for launch; engagement email is handled by the digest (S1.3 PR 5).
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.REFERRAL_TAP_RECEIVED]: {
+    key: NotificationEventKey.REFERRAL_TAP_RECEIVED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'referral_tap_received',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.REFERRAL_CONFIRMED]: {
+    key: NotificationEventKey.REFERRAL_CONFIRMED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'referral_confirmed',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.REFERRAL_CONVERTED]: {
+    key: NotificationEventKey.REFERRAL_CONVERTED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'referral_converted',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
     },
   },
 }
@@ -405,6 +446,9 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
+  NotificationEventKey.REFERRAL_TAP_RECEIVED,
+  NotificationEventKey.REFERRAL_CONFIRMED,
+  NotificationEventKey.REFERRAL_CONVERTED,
 ]
 
 export function getNotificationEventDefinition(

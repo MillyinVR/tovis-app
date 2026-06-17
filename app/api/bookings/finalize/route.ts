@@ -36,6 +36,10 @@ import {
   tokenActorRateLimitKey,
 } from '@/lib/rateLimit/identity'
 import { rateLimitExceededResponse } from '@/lib/rateLimit/response'
+import {
+  applyReferralRewardOnBooking,
+  convertReferralOnBooking,
+} from '@/lib/referral/referralConversion'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -624,6 +628,28 @@ export async function POST(request: Request) {
             error: safeError(notificationError),
           })
         }
+
+        const referralArgs = {
+          clientId: ownership.clientId,
+          bookingId: result.booking.id,
+          professionalId: result.booking.professionalId,
+        }
+
+        convertReferralOnBooking(referralArgs).catch((err) => {
+          console.error('POST /api/bookings/finalize referral conversion error', {
+            requestId,
+            bookingId: result.booking.id,
+            error: safeError(err),
+          })
+        })
+
+        applyReferralRewardOnBooking(referralArgs).catch((err) => {
+          console.error('POST /api/bookings/finalize referral reward error', {
+            requestId,
+            bookingId: result.booking.id,
+            error: safeError(err),
+          })
+        })
 
         const responseBody = buildFinalizeSuccessBody({
           booking: result.booking,
