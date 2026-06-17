@@ -115,12 +115,21 @@ export default async function AdminHomePage() {
       <Section title="Core admin tools" subtitle="Platform control panels. Use wisely. Or at least use them with supervision.">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {perms.canReviewPros ? (
-            <Card
-              title="Professionals queue"
-              desc="Review applications, approve/decline, flag for changes, suspend if needed."
-              href="/admin/professionals"
-              cta="Open queue"
-            />
+            <>
+              <Card
+                title="Professionals queue"
+                desc="Review applications, approve/decline, flag for changes, suspend if needed."
+                href="/admin/professionals"
+                cta="Open queue"
+              />
+              <Card
+                title="License review"
+                desc="Manually verify out-of-state & specialty credentials we couldn’t auto-check."
+                href="/admin/license-review"
+                cta="Open queue"
+                tone="highlight"
+              />
+            </>
           ) : null}
 
           {perms.canManageCatalog ? (
