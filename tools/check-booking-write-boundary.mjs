@@ -31,6 +31,9 @@ const ALLOWED_FILES = new Set([
   // Test-data reset script for the last-minute booking suite. Runs only
   // against the test database via `scripts/with-test-db.mjs`.
   normalize('prisma/test-data/resetLastMinuteTestData.cjs'),
+  // Referral reward application. Only writes discountAmount/totalAmount on
+  // Booking when a referral reward is applied; never touches lifecycle fields.
+  normalize('lib/referral/referralConversion.ts'),
 ])
 
 const TEMP_ALLOWED_FILES = new Set([
