@@ -13,7 +13,6 @@ import { defaultMigrationCopy } from '@/lib/brand/defaultMigrationCopy'
 import {
   mockCalendarViewModel,
   mockReviewViewModel,
-  mockServicesViewModel,
 } from '../../pro/migrate/_mock'
 import { MigrateEntryClient } from '../../pro/migrate/MigrateEntryClient'
 import { MigrateCalendarClient } from '../../pro/migrate/calendar/MigrateCalendarClient'
@@ -41,9 +40,7 @@ export default async function PreviewMigrateStepPage({
       case 'entry':
         return <MigrateEntryClient copy={copy.entry} />
       case 'services':
-        return (
-          <MigrateServicesClient copy={copy.services} vm={mockServicesViewModel()} />
-        )
+        return <MigrateServicesClient copy={copy.services} />
       case 'clients':
         return <MigrateClientsClient copy={copy.clients} />
       case 'calendar':

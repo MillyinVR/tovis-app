@@ -27,12 +27,19 @@ export type GraceRow = {
 
 type RaiseConfig = { mode: RaiseStepMode; value: number; cadenceWeeks: number }
 
+export type RaiseConfigChange = {
+  mode: RaiseStepMode
+  value: number
+  cadenceWeeks: number
+}
+
 type Props = {
   rows: GraceRow[]
   copy: MigrationCopy['services']['raise']
+  onConfigChange?: (rowId: string, config: RaiseConfigChange) => void
 }
 
-export function RaisePlanSection({ rows, copy }: Props) {
+export function RaisePlanSection({ rows, copy, onConfigChange }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(
     rows[0]?.rowId ?? null,
   )
@@ -66,6 +73,7 @@ export function RaisePlanSection({ rows, copy }: Props) {
             onToggle={() =>
               setExpandedId((cur) => (cur === row.rowId ? null : row.rowId))
             }
+            onConfigChange={onConfigChange}
           />
         ))}
       </div>
@@ -78,17 +86,24 @@ function RaiseRow({
   copy,
   expanded,
   onToggle,
+  onConfigChange,
 }: {
   row: GraceRow
   copy: Props['copy']
   expanded: boolean
   onToggle: () => void
+  onConfigChange?: (rowId: string, config: RaiseConfigChange) => void
 }) {
-  const [config, setConfig] = useState<RaiseConfig>({
+  const [config, setConfigState] = useState<RaiseConfig>({
     mode: row.grace.step.mode,
     value: row.grace.step.value,
     cadenceWeeks: row.grace.cadenceWeeks,
   })
+
+  function setConfig(next: RaiseConfig) {
+    setConfigState(next)
+    onConfigChange?.(row.rowId, next)
+  }
 
   if (!expanded) {
     return (

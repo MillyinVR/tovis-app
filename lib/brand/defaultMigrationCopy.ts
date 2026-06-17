@@ -13,6 +13,16 @@ export type MigrationCopy = {
     title: string
     subtitle: string
     importedSuffix: string // rendered as "{n} services imported"
+    guideTitle: string
+    guideSteps: string[]
+    upload: string
+    uploadHint: string
+    chooseFile: string
+    parseError: string
+    addBtn: string
+    importing: string
+    resultTitle: string
+    startOver: string
     colYours: string
     colMapped: string
     colPrice: string
@@ -143,6 +153,20 @@ export function defaultMigrationCopy(wordmark: string): MigrationCopy {
       title: `Map your menu to ${wordmark}`,
       subtitle: `Match each of your services to a ${wordmark} service so pricing and naming stay consistent.`,
       importedSuffix: 'services imported',
+      guideTitle: 'How to bring your menu over',
+      guideSteps: [
+        'In your old booking app, export your service or price list as a CSV file.',
+        'Upload it below — we match each service to the catalog so names stay consistent.',
+        "Review each match, set what you charge, and we'll handle prices below the minimum.",
+      ],
+      upload: 'Upload your service menu',
+      uploadHint: 'A CSV exported from your old booking app',
+      chooseFile: 'Choose CSV file',
+      parseError: "We couldn't read that file. Make sure it's a CSV exported from your booking app.",
+      addBtn: 'Add these services',
+      importing: 'Adding…',
+      resultTitle: 'Services added',
+      startOver: 'Import another file',
       colYours: 'Your service',
       colMapped: `${wordmark} service`,
       colPrice: 'Price · duration · availability',

@@ -28,6 +28,7 @@ export type CatalogOption = {
   name: string
   categoryName: string | null
   minPrice: number
+  defaultDurationMinutes: number
   allowMobile: boolean
 }
 
@@ -65,6 +66,7 @@ async function loadCatalogOptions(professionalId: string): Promise<CatalogOption
     name: s.name,
     categoryName: s.categoryName,
     minPrice: s.minPrice ? Number(s.minPrice) : 0,
+    defaultDurationMinutes: s.defaultDurationMinutes,
     allowMobile: s.allowMobile,
   }))
 }
