@@ -26,6 +26,12 @@ import {
 } from './fieldErrors'
 import { buildTransactionalSmsCheckboxLabel } from '@/lib/transactionalSmsPolicy'
 import { useBrand } from '@/lib/brand/BrandProvider'
+import { US_STATES, stateName } from '@/lib/usStates'
+import {
+  getLicenseRequirement,
+  requiresLicense,
+  supportsOnlineVerification,
+} from '@/lib/licensing/licenseRequirement'
 import { PASSWORD_MIN_LEN } from '@/lib/passwordPolicyConstants'
 import {
   compactPhoneInputForSubmit,
@@ -38,6 +44,7 @@ type VerificationSendState = boolean | 'pending'
 type ProField =
   | 'location'
   | 'radius'
+  | 'state'
   | 'licenseNumber'
   | 'firstName'
   | 'lastName'
@@ -50,6 +57,7 @@ type ProField =
 const FIELD_IDS: Record<ProField, string> = {
   location: 'signup-pro-location',
   radius: 'signup-pro-radius',
+  state: 'signup-pro-state',
   licenseNumber: 'signup-pro-license-number',
   firstName: 'signup-first-name',
   lastName: 'signup-last-name',
@@ -63,6 +71,7 @@ const FIELD_IDS: Record<ProField, string> = {
 const FIELD_ORDER: ProField[] = [
   'location',
   'radius',
+  'state',
   'licenseNumber',
   'firstName',
   'lastName',
@@ -78,7 +87,7 @@ const STEP_LABELS = ['Your work', 'About you', 'Account'] as const
 const LAST_STEP = STEP_LABELS.length - 1
 
 const STEP_FIELDS: ProField[][] = [
-  ['location', 'radius', 'licenseNumber'],
+  ['location', 'radius', 'state', 'licenseNumber'],
   ['firstName', 'lastName', 'phone', 'smsConsent'],
   ['email', 'password', 'tos'],
 ]
@@ -207,17 +216,9 @@ type ProfessionType =
   | 'ELECTROLOGIST'
   | 'MASSAGE_THERAPIST'
   | 'MAKEUP_ARTIST'
-
-function requiresCaBbcLicense(professionType: ProfessionType) {
-  return (
-    professionType === 'COSMETOLOGIST' ||
-    professionType === 'BARBER' ||
-    professionType === 'ESTHETICIAN' ||
-    professionType === 'MANICURIST' ||
-    professionType === 'HAIRSTYLIST' ||
-    professionType === 'ELECTROLOGIST'
-  )
-}
+  | 'LASH_TECHNICIAN'
+  | 'HAIR_BRAIDER'
+  | 'PERMANENT_MAKEUP_ARTIST'
 
 type GooglePrediction = {
   placeId: string
@@ -407,7 +408,7 @@ export default function SignupProClient() {
     useState<ProfessionType>('COSMETOLOGIST')
   const [proMode, setProMode] = useState<'SALON' | 'MOBILE'>('SALON')
   const [mobileRadiusMiles, setMobileRadiusMiles] = useState('15')
-  const [licenseState] = useState<'CA'>('CA')
+  const [licenseState, setLicenseState] = useState<string>('')
   const [licenseNumber, setLicenseNumber] = useState('')
 
   const sessionToken = useMemo(
@@ -441,7 +442,11 @@ export default function SignupProClient() {
     })
   }
 
-  const needsLicense = requiresCaBbcLicense(professionType)
+  // Whether a credential is required depends on BOTH profession and state.
+  const needsLicense = Boolean(licenseState) && requiresLicense(professionType, licenseState)
+  const licenseRequirement = licenseState
+    ? getLicenseRequirement(professionType, licenseState)
+    : null
 
   function resetLocation(nextQuery = '') {
     setLocQuery(nextQuery)
@@ -605,10 +610,17 @@ export default function SignupProClient() {
             }
           }
           break
+        case 'state':
+          if (!licenseState) {
+            errors.state = 'Please select your state.'
+          }
+          break
         case 'licenseNumber':
           if (needsLicense && !licenseNumber.trim()) {
             errors.licenseNumber =
-              'License number is required for this profession.'
+              licenseRequirement === 'REGISTERED'
+                ? 'Registration number is required for this profession in your state.'
+                : 'License number is required for this profession in your state.'
           }
           break
         case 'firstName':
@@ -744,7 +756,7 @@ export default function SignupProClient() {
           professionType,
           mobileRadiusMiles:
             proMode === 'MOBILE' ? Number(mobileRadiusMiles) : undefined,
-          licenseState: needsLicense ? licenseState : undefined,
+          licenseState: licenseState || undefined,
           licenseNumber: needsLicense
             ? licenseNumber.trim().toUpperCase()
             : undefined,
@@ -842,13 +854,45 @@ export default function SignupProClient() {
             <option value="ELECTROLOGIST">Electrologist</option>
             <option value="MASSAGE_THERAPIST">Massage therapist</option>
             <option value="MAKEUP_ARTIST">Makeup artist</option>
+            <option value="LASH_TECHNICIAN">Lash technician</option>
+            <option value="HAIR_BRAIDER">Hair braider</option>
+            <option value="PERMANENT_MAKEUP_ARTIST">Permanent makeup artist</option>
           </Select>
 
-          {professionType === 'MAKEUP_ARTIST' ? (
+        </div>
+
+        <div className="grid gap-2">
+          <label className="grid gap-1.5">
+            <FieldLabel>State you’re licensed / operating in</FieldLabel>
+            <Select
+              id={FIELD_IDS.state}
+              value={licenseState}
+              onChange={(e) => {
+                setLicenseState(e.target.value)
+                setFieldError('state', null)
+                setError(null)
+              }}
+              {...fieldErrorDescribedBy(FIELD_IDS.state, fieldErrors.state)}
+            >
+              <option value="">Select your state…</option>
+              {US_STATES.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <FieldErrorText
+            id={`${FIELD_IDS.state}-error`}
+            message={fieldErrors.state}
+          />
+          {licenseState && !needsLicense ? (
             <div className="rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 px-3 py-2 text-xs text-textSecondary">
-              Makeup artists don’t require a CA license check here. After
-              signup, you’ll upload your makeup certificate and a photo ID on
-              the{' '}
+              No state license is required for this profession in{' '}
+              <span className="font-black text-textPrimary">
+                {stateName(licenseState)}
+              </span>
+              . After signup you’ll upload a certificate and photo ID on the{' '}
               <span className="font-black text-textPrimary">Verification</span>{' '}
               page of your pro dashboard.
             </div>
@@ -1011,54 +1055,46 @@ export default function SignupProClient() {
           <div className="grid gap-3 rounded-card border border-surfaceGlass/10 bg-bgPrimary/20 p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="font-black text-textPrimary">
-                California license
+                {stateName(licenseState)}{' '}
+                {licenseRequirement === 'REGISTERED' ? 'registration' : 'license'}
               </div>
               <span className="text-xs font-black text-textSecondary/80">
                 Required
               </span>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="grid gap-1.5">
-                <FieldLabel>State</FieldLabel>
-                <Select value={licenseState} disabled>
-                  <option value="CA">California</option>
-                </Select>
-                <HelpText>CA only for now (we’ll expand later).</HelpText>
-              </label>
-
-              <label className="grid gap-1.5">
-                <FieldLabel>License number</FieldLabel>
-                <Input
-                  id={FIELD_IDS.licenseNumber}
-                  value={licenseNumber}
-                  onChange={(e) => {
-                    setLicenseNumber(e.target.value)
-                    setFieldError('licenseNumber', null)
-                  }}
-                  placeholder="e.g. 123456"
-                  autoCapitalize="characters"
-                  {...fieldErrorDescribedBy(
-                    FIELD_IDS.licenseNumber,
-                    fieldErrors.licenseNumber,
-                  )}
-                />
-                <FieldErrorText
-                  id={`${FIELD_IDS.licenseNumber}-error`}
-                  message={fieldErrors.licenseNumber}
-                />
-              </label>
-            </div>
+            <label className="grid gap-1.5">
+              <FieldLabel>
+                {licenseRequirement === 'REGISTERED'
+                  ? 'Registration number'
+                  : 'License number'}
+              </FieldLabel>
+              <Input
+                id={FIELD_IDS.licenseNumber}
+                value={licenseNumber}
+                onChange={(e) => {
+                  setLicenseNumber(e.target.value)
+                  setFieldError('licenseNumber', null)
+                }}
+                placeholder="e.g. 123456"
+                autoCapitalize="characters"
+                {...fieldErrorDescribedBy(
+                  FIELD_IDS.licenseNumber,
+                  fieldErrors.licenseNumber,
+                )}
+              />
+              <FieldErrorText
+                id={`${FIELD_IDS.licenseNumber}-error`}
+                message={fieldErrors.licenseNumber}
+              />
+            </label>
 
             <div className="rounded-card border border-surfaceGlass/12 bg-bgPrimary/25 px-3 py-2 text-xs text-textSecondary">
-              We’ll try to verify your license automatically. If verification is
-              unavailable, you’ll upload a license photo
-              <span className="font-black text-textPrimary">
-                {' '}
-                after signup
-              </span>{' '}
-              on the Verification page of your pro dashboard for admin
-              approval.
+              {supportsOnlineVerification(professionType, licenseState)
+                ? 'We’ll try to verify your license automatically. If verification is unavailable, you’ll upload a license photo'
+                : 'We’ll review your credential after signup. You’ll upload a photo'}
+              <span className="font-black text-textPrimary"> after signup</span>{' '}
+              on the Verification page of your pro dashboard for admin approval.
               <div className="mt-1">
                 You can still set up services + your calendar immediately.
               </div>

@@ -209,6 +209,7 @@ function makeProSignupBody(overrides?: Record<string, unknown>) {
     transactionalSmsConsent: true,
     turnstileToken: 'ts_signup_ok',
     professionType: 'MAKEUP_ARTIST',
+    licenseState: 'CA',
     handle: 'jane-smith',
     signupLocation: {
       kind: 'PRO_SALON',
@@ -241,6 +242,7 @@ function makeProSalonSignupBody() {
     turnstileToken: 'ts_signup_ok',
     businessName: 'TOVIS Studio',
     professionType: 'MAKEUP_ARTIST',
+    licenseState: 'CA',
     signupLocation: {
       kind: 'PRO_SALON',
       placeId: 'place_123',
@@ -271,6 +273,7 @@ function makeProMobileSignupBody() {
     turnstileToken: 'ts_signup_ok',
     businessName: 'TOVIS Mobile',
     professionType: 'MAKEUP_ARTIST',
+    licenseState: 'CA',
     mobileRadiusMiles: 25,
     signupLocation: {
       kind: 'PRO_MOBILE',

@@ -34,6 +34,11 @@ import {
 } from '@prisma/client'
 import { isRuntimeFlagEnabled } from '@/lib/runtimeFlags'
 import { isRecord } from '@/lib/guards'
+import { isUsStateCode } from '@/lib/usStates'
+import {
+  requiresLicense,
+  supportsOnlineVerification,
+} from '@/lib/licensing/licenseRequirement'
 import { validateSmsDestinationCountry } from '@/lib/smsCountryPolicy'
 import {
   logAuthEvent,
@@ -393,22 +398,9 @@ function isAnyProfessionType(v: string): v is ProfessionType {
   return ALL_PROFESSIONS_SET.has(v)
 }
 
-const CA_BBC_LICENSE_REQUIRED: ProfessionType[] = [
-  'COSMETOLOGIST',
-  'BARBER',
-  'ESTHETICIAN',
-  'MANICURIST',
-  'HAIRSTYLIST',
-  'ELECTROLOGIST',
-]
-
-const CA_BBC_LICENSE_REQUIRED_SET = new Set<ProfessionType>(
-  CA_BBC_LICENSE_REQUIRED,
-)
-
-function requiresCaBbcLicense(p: ProfessionType): boolean {
-  return CA_BBC_LICENSE_REQUIRED_SET.has(p)
-}
+// Licensure requirement is now per (profession, state) — see
+// lib/licensing/licenseRequirement.ts. requiresLicense()/supportsOnlineVerification()
+// replace the old global CA-only set.
 
 /* =========================================================
    CA DCA (BreEZe) verification
@@ -910,78 +902,98 @@ export async function POST(request: Request) {
     let manualLicensePendingReview = false
     let dcaTimedOutAtSignup = false
 
-    if (role === 'PRO' && profession && requiresCaBbcLicense(profession)) {
+    // State is mandatory for every pro — it drives the per-state service gate
+    // (loadAllowedServices keys off licenseState), not only license checks.
+    if (role === 'PRO') {
       const licenseState = pickUpper(body.licenseState)
-      const licenseNumber = normalizeLicenseNumber(body.licenseNumber)
-
-      if (!licenseState || !licenseNumber) {
-        return jsonFail(
-          400,
-          'CA license state and number are required for this profession.',
-          { code: 'LICENSE_REQUIRED' },
-        )
-      }
-      if (licenseState !== 'CA') {
-        return jsonFail(
-          400,
-          'Only California licenses are supported right now.',
-          { code: 'LICENSE_STATE_UNSUPPORTED' },
-        )
-      }
-
-      licenseStateToStore = 'CA'
-      licenseNumberToStore = licenseNumber
-
-      const v = await verifyCaBbcLicense({
-        professionType: profession,
-        licenseNumber,
-      })
-
-      if (v.ok && v.verified) {
-        verificationStatus = VerificationStatus.APPROVED
-        licenseVerified = true
-        licenseExpiryToStore = parseMaybeDate(v.expDate ?? null)
-        licenseVerifiedAtToStore = new Date()
-        licenseVerifiedSourceToStore = v.source
-        licenseStatusCodeToStore = v.statusCode ?? null
-        licenseRawJsonToStore = v.raw
-      } else if (v.ok && !v.verified) {
-        return jsonFail(400, 'License could not be verified as CURRENT.', {
-          code: 'LICENSE_NOT_VERIFIED',
-          statusCode: v.statusCode ?? null,
+      if (!licenseState) {
+        return jsonFail(400, 'Please select the state you’re licensed/operating in.', {
+          code: 'STATE_REQUIRED',
         })
-      } else if (v.reason === 'TIMEOUT') {
-        dcaTimedOutAtSignup = true
-        verificationStatus = VerificationStatus.PENDING
-        licenseVerified = false
-        licenseRawJsonToStore = {
-          note: 'DCA timeout at signup',
-          error: 'AbortError',
-        } satisfies Prisma.InputJsonValue
-      } else {
-        // keep your current fallback behavior for non-timeout DCA failures
+      }
+      if (!isUsStateCode(licenseState)) {
+        return jsonFail(400, 'Please select a valid US state.', {
+          code: 'STATE_INVALID',
+        })
+      }
+      licenseStateToStore = licenseState
+
+      // Helper: stage the attestation + manual-review path (optional doc now,
+      // otherwise upload later on the Verification page). Account stays usable.
+      const stageManualReview = (note: string, extra: Prisma.JsonObject) => {
         const docUrlRaw = pickString(body.licenseDocumentUrl)
         if (docUrlRaw?.trim()) {
           const checked = validateLicenseDocUrl(docUrlRaw)
-          if (!checked.ok) {
-            return jsonFail(400, checked.error, {
-              code: 'LICENSE_DOC_INVALID',
-            })
-          }
+          if (!checked.ok) return checked.error
           manualLicenseDocUrl = checked.value
           manualLicensePendingReview = true
         } else {
           needsManualLicenseUpload = true
         }
-
         verificationStatus = VerificationStatus.PENDING
         licenseVerified = false
         licenseRawJsonToStore = {
-          note: 'DCA unavailable at signup; manual follow-up required',
-          error: v.error ?? null,
+          note,
           needsManualUpload: needsManualLicenseUpload,
           docProvidedAtSignup: Boolean(manualLicenseDocUrl),
+          ...extra,
         } satisfies Prisma.InputJsonValue
+        return null
+      }
+
+      if (profession && requiresLicense(profession, licenseState)) {
+        const licenseNumber = normalizeLicenseNumber(body.licenseNumber)
+        if (!licenseNumber) {
+          return jsonFail(
+            400,
+            'A license or registration number is required for this profession in your state.',
+            { code: 'LICENSE_REQUIRED' },
+          )
+        }
+        licenseNumberToStore = licenseNumber
+
+        if (supportsOnlineVerification(profession, licenseState)) {
+          // CA BreEZe online verification (the only auto-verifier today).
+          const v = await verifyCaBbcLicense({
+            professionType: profession,
+            licenseNumber,
+          })
+
+          if (v.ok && v.verified) {
+            verificationStatus = VerificationStatus.APPROVED
+            licenseVerified = true
+            licenseExpiryToStore = parseMaybeDate(v.expDate ?? null)
+            licenseVerifiedAtToStore = new Date()
+            licenseVerifiedSourceToStore = v.source
+            licenseStatusCodeToStore = v.statusCode ?? null
+            licenseRawJsonToStore = v.raw
+          } else if (v.ok && !v.verified) {
+            return jsonFail(400, 'License could not be verified as CURRENT.', {
+              code: 'LICENSE_NOT_VERIFIED',
+              statusCode: v.statusCode ?? null,
+            })
+          } else if (v.reason === 'TIMEOUT') {
+            dcaTimedOutAtSignup = true
+            verificationStatus = VerificationStatus.PENDING
+            licenseVerified = false
+            licenseRawJsonToStore = {
+              note: 'DCA timeout at signup',
+              error: 'AbortError',
+            } satisfies Prisma.InputJsonValue
+          } else {
+            const err = stageManualReview('DCA unavailable at signup; manual follow-up required', {
+              error: v.error ?? null,
+            })
+            if (err) return jsonFail(400, err, { code: 'LICENSE_DOC_INVALID' })
+          }
+        } else {
+          // Out-of-state / specialty credential: no online verifier yet →
+          // attestation + async admin review.
+          const err = stageManualReview('Out-of-state/specialty credential; manual review required', {
+            state: licenseState,
+          })
+          if (err) return jsonFail(400, err, { code: 'LICENSE_DOC_INVALID' })
+        }
       }
     }
 

@@ -176,15 +176,22 @@ function checkTransactionalSmsConsent() {
   fireEvent.click(getTransactionalSmsCheckbox())
 }
 
+function selectState(code = 'CA') {
+  fireEvent.change(screen.getByLabelText(/licensed \/ operating/i), {
+    target: { value: code },
+  })
+}
+
 function fillLicenseNumber(value = '123456') {
   fireEvent.change(screen.getByLabelText(/License number/i), {
     target: { value },
   })
 }
 
-/** Step 1 ("Your work"): confirmed mobile ZIP + license, then Continue. */
+/** Step 1 ("Your work"): confirmed mobile ZIP + state + license, then Continue. */
 async function completeWorkStep() {
   await confirmMobileZip('92101')
+  selectState('CA')
   fillLicenseNumber()
   clickContinue()
 
@@ -297,8 +304,10 @@ describe('app/(auth)/_components/signup/SignupProClient.tsx', () => {
       ).toBeTruthy()
     })
 
+    // State is required for every pro (drives the per-state service gate);
+    // the license-number error only appears once a state that needs one is set.
     expect(
-      screen.getByText('License number is required for this profession.'),
+      screen.getByText('Please select your state.'),
     ).toBeTruthy()
 
     // Later-step errors must not appear yet.
