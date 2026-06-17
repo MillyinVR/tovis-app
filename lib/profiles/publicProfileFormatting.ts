@@ -39,6 +39,9 @@ const PROFESSION_LABEL_BY_TYPE = {
   ELECTROLOGIST: 'Electrologist',
   MASSAGE_THERAPIST: 'Massage therapist',
   MAKEUP_ARTIST: 'Makeup artist',
+  LASH_TECHNICIAN: 'Lash technician',
+  HAIR_BRAIDER: 'Hair braider',
+  PERMANENT_MAKEUP_ARTIST: 'Permanent makeup artist',
 } satisfies Record<ProfessionType, string>
 
 function trimToNull(value: string | null | undefined): string | null {
