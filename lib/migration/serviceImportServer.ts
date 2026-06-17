@@ -246,3 +246,54 @@ export async function commitServiceImport(args: {
     summary: { attempted, created, skipped, rampsCreated },
   }
 }
+
+// ── request parsing (shared by the preview + commit routes; no casts) ─────────
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+function asBool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+export function parseServiceMenuRows(body: unknown): ServiceMenuInputRow[] | null {
+  if (!isRecord(body) || !Array.isArray(body.rows)) return null
+  return body.rows.filter(isRecord).flatMap((r) => {
+    const name = asString(r.name).trim()
+    if (!name) return []
+    return [{ name, price: asNumber(r.price), durationMinutes: asNumber(r.durationMinutes) }]
+  })
+}
+
+export function parseServiceDecisions(body: unknown): ServiceImportDecision[] | null {
+  if (!isRecord(body) || !Array.isArray(body.decisions)) return null
+  return body.decisions.filter(isRecord).flatMap((d) => {
+    const serviceId = asString(d.serviceId)
+    if (!serviceId) return []
+    const rampIn = isRecord(d.ramp) ? d.ramp : {}
+    const decision: ServiceImportDecision = {
+      serviceId,
+      offersInSalon: asBool(d.offersInSalon, false),
+      offersMobile: asBool(d.offersMobile, false),
+      salonPrice: asNumber(d.salonPrice),
+      salonDurationMinutes: asNumber(d.salonDurationMinutes),
+      mobilePrice: asNumber(d.mobilePrice),
+      mobileDurationMinutes: asNumber(d.mobileDurationMinutes),
+      ramp: {
+        stepMode: rampIn.stepMode === 'USD' ? 'USD' : 'PCT',
+        stepValue: asNumber(rampIn.stepValue) ?? 10,
+        cadenceWeeks: asNumber(rampIn.cadenceWeeks) ?? 10,
+      },
+    }
+    return [decision]
+  })
+}
