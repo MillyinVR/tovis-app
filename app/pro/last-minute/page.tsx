@@ -180,6 +180,8 @@ function buildInitialPayload(args: {
     settings: {
       id: settings.id,
       enabled: settings.enabled,
+      priorityOfferEnabled: settings.priorityOfferEnabled,
+      priorityOfferMinutes: settings.priorityOfferMinutes,
       defaultVisibilityMode: settings.defaultVisibilityMode,
       minCollectedSubtotal: normalizeNullableMoney(
         settings.minCollectedSubtotal,

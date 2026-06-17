@@ -27,6 +27,8 @@ type Initial = {
   settings: {
     id: string
     enabled: boolean
+    priorityOfferEnabled: boolean
+    priorityOfferMinutes: number
     defaultVisibilityMode: VisibilityMode
     minCollectedSubtotal: string | null
     tier2NightBeforeMinutes: number
@@ -61,7 +63,13 @@ type DaysState = Pick<
 type SettingsPatch = Partial<
   Pick<
     Initial['settings'],
-    'enabled' | 'defaultVisibilityMode' | 'minCollectedSubtotal' | 'tier2NightBeforeMinutes' | 'tier3DayOfMinutes'
+    | 'enabled'
+    | 'priorityOfferEnabled'
+    | 'priorityOfferMinutes'
+    | 'defaultVisibilityMode'
+    | 'minCollectedSubtotal'
+    | 'tier2NightBeforeMinutes'
+    | 'tier3DayOfMinutes'
   > &
     DaysState
 >
@@ -275,6 +283,12 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
   const [err, setErr] = useState<string | null>(null)
 
   const [enabled, setEnabled] = useState(initial.settings.enabled)
+  const [priorityOfferEnabled, setPriorityOfferEnabled] = useState(
+    initial.settings.priorityOfferEnabled,
+  )
+  const [priorityOfferMinutes, setPriorityOfferMinutes] = useState(
+    String(initial.settings.priorityOfferMinutes),
+  )
   const [defaultVisibilityMode, setDefaultVisibilityMode] = useState<VisibilityMode>(
     initial.settings.defaultVisibilityMode,
   )
@@ -567,6 +581,59 @@ export default function LastMinuteSettingsClient({ initial }: { initial: Initial
             />
             <span className={hint}>Current local anchor: {fmtMinutesAsTime(Number(tier3DayOfMinutes) || 0)}</span>
           </label>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-white/10 bg-bgPrimary/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-[220px]">
+              <div className="text-[13px] font-black text-textPrimary">
+                Priority offers for your waitlist
+              </div>
+              <div className={`${hint} mt-1`}>
+                Offer last-minute openings to waitlist clients one at a time in
+                join order, instead of notifying everyone at once. Each client
+                gets a private window to claim before it passes to the next.
+              </div>
+            </div>
+
+            <TogglePill
+              on={priorityOfferEnabled}
+              disabled={busy || !enabled}
+              labelOn="Priority offers on"
+              labelOff="Notify all at once"
+              onClick={() => {
+                const next = !priorityOfferEnabled
+                setPriorityOfferEnabled(next)
+                void saveSettings({ priorityOfferEnabled: next })
+              }}
+            />
+          </div>
+
+          {priorityOfferEnabled ? (
+            <label className="mt-4 grid max-w-[320px] gap-2">
+              <span className={label}>Claim window (minutes)</span>
+              <input
+                value={priorityOfferMinutes}
+                disabled={busy || !enabled}
+                inputMode="numeric"
+                onChange={(e) => setPriorityOfferMinutes(e.target.value)}
+                onBlur={() => {
+                  const n = Math.trunc(Number(priorityOfferMinutes))
+                  if (!Number.isFinite(n) || n < 5 || n > 120) {
+                    setErr('Claim window must be a whole number from 5 to 120 minutes.')
+                    return
+                  }
+                  setErr(null)
+                  setPriorityOfferMinutes(String(n))
+                  void saveSettings({ priorityOfferMinutes: n })
+                }}
+                className={field}
+              />
+              <span className={hint}>
+                How long each client has to claim before the offer moves on. 5–120 minutes.
+              </span>
+            </label>
+          ) : null}
         </div>
 
         <div className="mt-4">

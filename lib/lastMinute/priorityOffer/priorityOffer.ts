@@ -197,7 +197,9 @@ export async function offerNextPriorityClient(args: {
     eventKey: NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
     title: args.notificationContent.title,
     body: args.notificationContent.body,
-    href: args.notificationContent.href,
+    // Deep-link to the priority-offer page (countdown + claim/pass), not the
+    // generic claim page — this client has an exclusive window, not a free-for-all.
+    href: `/client/offers?accept=${recipient.id}`,
     dedupeKey: `priority-offer:${args.openingId}:${nextClientId}`,
     data: {
       ...args.notificationContent.data,
