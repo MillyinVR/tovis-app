@@ -209,6 +209,30 @@ export async function PATCH(req: Request) {
       createData.tier3DayOfMinutes = tier3Patch.value
     }
 
+    const priorityOfferEnabled = readBool(body, 'priorityOfferEnabled')
+    if (priorityOfferEnabled !== undefined) {
+      updateData.priorityOfferEnabled = priorityOfferEnabled
+      createData.priorityOfferEnabled = priorityOfferEnabled
+    }
+
+    const priorityOfferMinutesPatch = hasOwn(body, 'priorityOfferMinutes')
+      ? (() => {
+          const v = body.priorityOfferMinutes
+          const n = typeof v === 'number' ? v : NaN
+          if (!Number.isFinite(n) || n < 5 || n > 120) {
+            return { ok: false as const, error: 'priorityOfferMinutes must be 5–120.' }
+          }
+          return { ok: true as const, value: Math.trunc(n) }
+        })()
+      : null
+    if (priorityOfferMinutesPatch && !priorityOfferMinutesPatch.ok) {
+      return jsonFail(400, priorityOfferMinutesPatch.error)
+    }
+    if (priorityOfferMinutesPatch && priorityOfferMinutesPatch.ok) {
+      updateData.priorityOfferMinutes = priorityOfferMinutesPatch.value
+      createData.priorityOfferMinutes = priorityOfferMinutesPatch.value
+    }
+
     for (const key of DAY_FLAGS) {
       const value = readBool(body, key)
       if (value !== undefined) {

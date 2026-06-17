@@ -15,6 +15,11 @@ import {
 import { buildTier1WaitlistAudience } from '@/lib/lastMinute/audience/buildTier1WaitlistAudience'
 import { buildTier2ReactivationAudience } from '@/lib/lastMinute/audience/buildTier2ReactivationAudience'
 import { buildTier3DiscoveryAudience } from '@/lib/lastMinute/audience/buildTier3DiscoveryAudience'
+import {
+  expireOverduePriorityOffers,
+  offerNextPriorityClient,
+  hasActivePriorityOffer,
+} from '@/lib/lastMinute/priorityOffer/priorityOffer'
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
@@ -317,6 +322,22 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<ProcessTierPlanRes
         }
       }
 
+      if (plan.tier === LastMinuteTier.WAITLIST) {
+        const settings = await tx.lastMinuteSettings.findUnique({
+          where: { professionalId: plan.opening.professionalId },
+          select: { priorityOfferEnabled: true, priorityOfferMinutes: true },
+        })
+
+        if (settings?.priorityOfferEnabled) {
+          return {
+            status: 'priority_offer' as const,
+            createdRecipients: 0,
+            pendingNotifications: [] as PendingNotification[],
+            priorityMinutes: settings.priorityOfferMinutes,
+          }
+        }
+      }
+
       let candidates: Candidate[] = []
 
       if (plan.tier === LastMinuteTier.WAITLIST) {
@@ -405,6 +426,35 @@ async function processTierPlan(plan: DueTierPlanRow): Promise<ProcessTierPlanRes
         pendingNotifications,
       }
     })
+
+    if (transactionResult.status === 'priority_offer') {
+      await expireOverduePriorityOffers(plan.openingId)
+
+      const notification = buildNotificationContent(plan)
+      const result = await offerNextPriorityClient({
+        openingId: plan.openingId,
+        professionalId: plan.opening.professionalId,
+        priorityMinutes: 'priorityMinutes' in transactionResult
+          ? (transactionResult.priorityMinutes as number)
+          : 30,
+        notificationContent: notification,
+      })
+
+      if (!result.offered && result.reason === 'no_candidates') {
+        await prisma.lastMinuteTierPlan.update({
+          where: { id: plan.id },
+          data: { processedAt: now, lastError: null },
+        })
+      }
+
+      return {
+        id: plan.id,
+        openingId: plan.openingId,
+        tier: plan.tier,
+        status: 'processed',
+        createdRecipients: result.offered ? 1 : 0,
+      }
+    }
 
     if (transactionResult.status !== 'processed') {
       return {

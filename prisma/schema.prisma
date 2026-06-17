@@ -158,6 +158,9 @@ enum LastMinuteRecipientStatus {
   BOOKED
   SUPPRESSED
   CANCELLED
+  PRIORITY_OFFERED
+  PRIORITY_EXPIRED
+  PRIORITY_DECLINED
 }
 
 enum LastMinuteVisibilityMode {
@@ -1790,6 +1793,9 @@ model LastMinuteSettings {
 
   enabled Boolean @default(false)
 
+  priorityOfferEnabled Boolean @default(false)
+  priorityOfferMinutes Int     @default(30)
+
   minCollectedSubtotal Decimal? @db.Decimal(10, 2)
 
   defaultVisibilityMode LastMinuteVisibilityMode @default(PUBLIC_AT_DISCOVERY)
@@ -1952,6 +1958,9 @@ model LastMinuteRecipient {
   suppressedAt DateTime?
   cancelledAt  DateTime?
 
+  priorityExpiresAt DateTime?
+  priorityOrder     Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1962,6 +1971,7 @@ model LastMinuteRecipient {
   @@index([clientId, status, createdAt])
   @@index([openingId, firstMatchedTier, status])
   @@index([openingId, notifiedTier])
+  @@index([openingId, status, priorityExpiresAt])
 }
 
 model ClientIntentEvent {
