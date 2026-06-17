@@ -6,8 +6,6 @@
 
 export type MigrationStepKey = 'services' | 'clients' | 'calendar' | 'review'
 
-export type StepStatus = 'not-started' | 'active' | 'done'
-
 export type SourceApp =
   | 'Vagaro'
   | 'GlossGenius'
@@ -71,81 +69,6 @@ export type ServiceMapRow = {
   offering: OfferingDraft
   priceGrace?: PriceGrace // present iff status === 'PRICE_GRACE'
   status: ServiceRowStatus
-}
-
-// What the Services page server passes to the client.
-export type MigrateServicesViewModel = {
-  sourceApp: SourceApp | null
-  catalog: CanonicalService[]
-  columnMappings: Array<{ src: string; dest: string }>
-  rows: ServiceMapRow[]
-}
-
-// ── Clients (step 2) ────────────────────────────────────────────────────────
-
-export type ClientMatchStatus =
-  | 'AUTO_MATCHED'
-  | 'NEW'
-  | 'POSSIBLE_DUPE'
-  | 'MISSING_INFO'
-
-export type DupeResolution = 'UNRESOLVED' | 'MERGE' | 'SEPARATE'
-
-export type ClientImportRow = {
-  rowId: string
-  firstName: string
-  lastName: string
-  email?: string
-  phone?: string
-  lastVisit?: string
-  visitCount?: number
-  match: ClientMatchStatus
-  dupeResolution?: DupeResolution
-  included: boolean
-}
-
-export type MigrateClientsViewModel = {
-  columnMappings: Array<{ src: string; dest: string }>
-  rows: ClientImportRow[]
-  contactsFound: number
-}
-
-// ── Calendar (step 3) ───────────────────────────────────────────────────────
-
-export type WorkingDay = {
-  key: string
-  label: string
-  enabled: boolean
-  hours?: string
-}
-
-export type TimeBlock = {
-  id: string
-  label: string
-  range: string
-  cadence: string
-}
-
-export type BookingTransferStatus = 'CONFIRMED' | 'PENDING' | 'SKIPPED'
-
-export type BookingTransferRow = {
-  rowId: string
-  startLabel: string
-  clientName: string
-  serviceName: string
-  durationMinutes: number
-  status: BookingTransferStatus
-  transfer: boolean
-  conflictNote?: string
-}
-
-export type MigrateCalendarViewModel = {
-  workingHours: WorkingDay[]
-  bufferMinutes: number
-  advanceWeeks: number
-  timeBlocks: TimeBlock[]
-  bookings: BookingTransferRow[]
-  pastVisitsCount: number
 }
 
 // ── Review (step 4) ─────────────────────────────────────────────────────────

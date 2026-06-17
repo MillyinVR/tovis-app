@@ -46,6 +46,7 @@ const PRO_HEADER_ROUTE_TITLES: ProHeaderRouteTitle[] = [
   { path: '/pro/media', title: 'Media' },
   { path: '/pro/locations', title: 'Locations' },
   { path: '/pro/verification', title: 'Verification' },
+  { path: '/pro/migrate', title: 'Import' },
 ]
 
 const PRO_HEADER_TABS: ProHeaderTabItem[] = [
