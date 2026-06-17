@@ -5,7 +5,6 @@ import { headers } from 'next/headers'
 import { getBrandConfig } from '@/lib/brand'
 import { defaultMigrationCopy } from '@/lib/brand/defaultMigrationCopy'
 
-import { mockClientsViewModel } from '../_mock'
 import { MigrateClientsClient } from './MigrateClientsClient'
 
 async function getRequestHost(): Promise<string | null> {
@@ -18,5 +17,5 @@ export default async function ProMigrateClientsPage() {
   const brand = getBrandConfig({ host })
   const copy = defaultMigrationCopy(brand.assets.wordmark.text)
 
-  return <MigrateClientsClient copy={copy.clients} vm={mockClientsViewModel()} />
+  return <MigrateClientsClient copy={copy.clients} />
 }

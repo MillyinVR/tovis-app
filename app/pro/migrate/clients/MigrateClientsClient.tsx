@@ -1,87 +1,176 @@
 'use client'
 
 // app/pro/migrate/clients/MigrateClientsClient.tsx
+//
+// Real client-import flow: upload CSV → map columns → live dedupe preview
+// (POST /preview) → commit (POST /commit). All data comes from the server,
+// which reuses upsertProClient. Type-only imports from the server module are
+// erased at build time, so no server code is bundled into the client.
 
+import Papa from 'papaparse'
+import Link from 'next/link'
 import { useMemo, useState } from 'react'
 
 import type { MigrationCopy } from '@/lib/brand/defaultMigrationCopy'
+import type {
+  ClientImportField,
+  ColumnMapping,
+  RawCsvRow,
+} from '@/lib/migration/clientImport'
+import type { ClientImportPreviewRow } from '@/lib/migration/clientImportServer'
 
-import { ColumnMappingBanner } from '../_components/ColumnMappingBanner'
 import { MigrationStepper } from '../_components/MigrationStepper'
 import { StatusChip } from '../_components/StatusChip'
 import { SummaryBar, type SummaryStat } from '../_components/SummaryBar'
 import { ToggleSwitch } from '../_components/ToggleSwitch'
-import type {
-  ClientImportRow,
-  DupeResolution,
-  MigrateClientsViewModel,
-} from '../_types'
 
-type Props = {
-  copy: MigrationCopy['clients']
-  vm: MigrateClientsViewModel
+type Phase = 'upload' | 'map' | 'preview' | 'done'
+
+type PreviewResponse = {
+  ok: boolean
+  rows?: ClientImportPreviewRow[]
+  error?: string
 }
 
-function initials(r: ClientImportRow): string {
-  return `${r.firstName[0] ?? ''}${r.lastName[0] ?? ''}`.toUpperCase()
+type CommitResponse = {
+  ok: boolean
+  summary?: { attempted: number; imported: number; failed: number; skipped: number }
+  error?: string
 }
 
-export function MigrateClientsClient({ copy, vm }: Props) {
-  const [rows, setRows] = useState<ClientImportRow[]>(vm.rows)
-  const [query, setQuery] = useState('')
+const FIELD_ORDER: ClientImportField[] = ['firstName', 'lastName', 'email', 'phone']
+const REQUIRED_FIELDS: ClientImportField[] = ['firstName', 'lastName']
 
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((r) =>
-      `${r.firstName} ${r.lastName} ${r.email ?? ''} ${r.phone ?? ''}`
-        .toLowerCase()
-        .includes(q),
-    )
-  }, [rows, query])
+function guessMapping(headers: string[]): ColumnMapping {
+  const find = (subs: string[]): string | undefined =>
+    headers.find((h) => subs.some((s) => h.toLowerCase().includes(s)))
+  const mapping: ColumnMapping = {}
+  const first = find(['first'])
+  const last = find(['last', 'surname'])
+  const email = find(['email', 'e-mail'])
+  const phone = find(['phone', 'mobile', 'cell'])
+  if (first) mapping.firstName = first
+  if (last) mapping.lastName = last
+  if (email) mapping.email = email
+  if (phone) mapping.phone = phone
+  return mapping
+}
 
-  function setIncluded(rowId: string, included: boolean) {
-    setRows((cur) => cur.map((r) => (r.rowId === rowId ? { ...r, included } : r)))
-  }
-  function resolveDupe(rowId: string, resolution: DupeResolution) {
-    setRows((cur) =>
-      cur.map((r) => (r.rowId === rowId ? { ...r, dupeResolution: resolution } : r)),
-    )
-  }
-  function setAll(included: boolean) {
-    const ids = new Set(visible.map((r) => r.rowId))
-    setRows((cur) => cur.map((r) => (ids.has(r.rowId) ? { ...r, included } : r)))
-  }
-
-  const counts = useMemo(() => {
-    let imported = 0
-    let autoMatched = 0
-    let dupes = 0
-    let excluded = 0
-    for (const r of rows) {
-      if (!r.included) excluded += 1
-      else if (r.match !== 'MISSING_INFO') imported += 1
-      if (r.match === 'AUTO_MATCHED') autoMatched += 1
-      if (r.match === 'POSSIBLE_DUPE' && r.dupeResolution === 'UNRESOLVED')
-        dupes += 1
-    }
-    return { imported, autoMatched, dupes, excluded }
-  }, [rows])
-
-  const blockingMissing = rows.some(
-    (r) => r.included && r.match === 'MISSING_INFO',
+export function MigrateClientsClient({ copy }: { copy: MigrationCopy['clients'] }) {
+  const [phase, setPhase] = useState<Phase>('upload')
+  const [rawRows, setRawRows] = useState<RawCsvRow[]>([])
+  const [headers, setHeaders] = useState<string[]>([])
+  const [mapping, setMapping] = useState<ColumnMapping>({})
+  const [previewRows, setPreviewRows] = useState<ClientImportPreviewRow[]>([])
+  const [excluded, setExcluded] = useState<Set<number>>(new Set())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<{ imported: number; skipped: number; failed: number } | null>(
+    null,
   )
-  const ctaDisabled = counts.dupes > 0 || blockingMissing
+
+  const mappingValid = REQUIRED_FIELDS.every((f) => Boolean(mapping[f]))
+
+  function handleFile(file: File): void {
+    setError(null)
+    Papa.parse<RawCsvRow>(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (res) => {
+        const fields = res.meta.fields ?? []
+        const rows = res.data.filter((r): r is RawCsvRow => Boolean(r) && typeof r === 'object')
+        if (fields.length === 0 || rows.length === 0) {
+          setError(copy.parseError)
+          return
+        }
+        setHeaders(fields)
+        setRawRows(rows)
+        setMapping(guessMapping(fields))
+        setPhase('map')
+      },
+      error: () => setError(copy.parseError),
+    })
+  }
+
+  async function runPreview(): Promise<void> {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/pro/migrate/clients/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: rawRows, mapping }),
+      })
+      const data: PreviewResponse = await res.json()
+      if (!res.ok || !data.ok || !data.rows) {
+        setError(data.error ?? 'Could not preview the import.')
+        return
+      }
+      setPreviewRows(data.rows)
+      setExcluded(new Set(data.rows.filter((r) => !r.importable).map((r) => r.index)))
+      setPhase('preview')
+    } catch {
+      setError('Could not preview the import.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function runCommit(): Promise<void> {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/pro/migrate/clients/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: rawRows, mapping, excludeIndices: [...excluded] }),
+      })
+      const data: CommitResponse = await res.json()
+      if (!res.ok || !data.ok || !data.summary) {
+        setError(data.error ?? 'Could not import your clients.')
+        return
+      }
+      setResult({
+        imported: data.summary.imported,
+        skipped: data.summary.skipped,
+        failed: data.summary.failed,
+      })
+      setPhase('done')
+    } catch {
+      setError('Could not import your clients.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function reset(): void {
+    setPhase('upload')
+    setRawRows([])
+    setHeaders([])
+    setMapping({})
+    setPreviewRows([])
+    setExcluded(new Set())
+    setResult(null)
+    setError(null)
+  }
+
+  const includedCount = useMemo(
+    () => previewRows.filter((r) => r.importable && !excluded.has(r.index)).length,
+    [previewRows, excluded],
+  )
 
   const stats: SummaryStat[] = [
-    { value: String(counts.imported), label: 'will be imported', tone: 'accent' },
-    { value: String(counts.autoMatched), label: 'auto-matched', tone: 'accent' },
+    { value: String(includedCount), label: 'will be imported', tone: 'accent' },
     {
-      value: String(counts.dupes),
-      label: 'to resolve',
-      tone: counts.dupes > 0 ? 'gold' : 'muted',
+      value: String(previewRows.filter((r) => r.match === 'EXISTING').length),
+      label: 'already in book',
+      tone: 'accent',
     },
-    { value: String(counts.excluded), label: 'excluded', tone: 'muted' },
+    {
+      value: String(previewRows.filter((r) => !r.importable).length),
+      label: 'needs info',
+      tone: previewRows.some((r) => !r.importable) ? 'gold' : 'muted',
+    },
   ]
 
   return (
@@ -89,207 +178,301 @@ export function MigrateClientsClient({ copy, vm }: Props) {
       <div className="mx-auto w-full max-w-5xl px-4 pt-8">
         <MigrationStepper active="clients" />
 
-        <header className="mt-6 flex flex-wrap items-center gap-3">
-          <h1 className="font-display text-[28px] font-medium tracking-[-0.02em]">
-            {copy.title}
-          </h1>
-          <span className="rounded-full bg-white/5 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.1em] text-textMuted">
-            {vm.contactsFound} {copy.contactsSuffix}
-          </span>
-        </header>
+        <h1 className="mt-6 font-display text-[28px] font-medium tracking-[-0.02em]">
+          {copy.title}
+        </h1>
 
-        <div className="mt-5">
-          <ColumnMappingBanner mappings={vm.columnMappings} />
-        </div>
-
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={copy.search}
-            className="h-9 w-full max-w-xs rounded-[12px] border border-white/10 bg-white/[0.03] px-3 text-[13px] text-textPrimary outline-none placeholder:text-textMuted focus:border-white/25"
-          />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setAll(true)}
-              className="rounded-full border border-white/10 px-3 py-1.5 text-[12px] text-textSecondary hover:border-white/20"
-            >
-              {copy.selectAll}
-            </button>
-            <button
-              type="button"
-              onClick={() => setAll(false)}
-              className="rounded-full border border-white/10 px-3 py-1.5 text-[12px] text-textSecondary hover:border-white/20"
-            >
-              {copy.deselectAll}
-            </button>
+        {error ? (
+          <div className="mt-4 rounded-card border border-ember/40 bg-ember/[0.06] px-4 py-3 text-[13px] text-ember">
+            {error}
           </div>
-        </div>
+        ) : null}
 
-        <p className="mt-4 text-[12px] text-textMuted">{copy.noMessages}</p>
+        {phase === 'upload' ? (
+          <UploadStep copy={copy} onFile={handleFile} />
+        ) : null}
 
-        <div className="mt-3 flex flex-col gap-3">
-          {visible.map((row) => (
-            <ClientRow
-              key={row.rowId}
-              row={row}
-              copy={copy}
-              onToggle={(v) => setIncluded(row.rowId, v)}
-              onResolve={(res) => resolveDupe(row.rowId, res)}
-            />
-          ))}
-        </div>
-      </div>
-
-      <SummaryBar stats={stats} cta={{ label: copy.cta, disabled: ctaDisabled }} />
-    </div>
-  )
-}
-
-function ClientRow({
-  row,
-  copy,
-  onToggle,
-  onResolve,
-}: {
-  row: ClientImportRow
-  copy: MigrationCopy['clients']
-  onToggle: (v: boolean) => void
-  onResolve: (res: DupeResolution) => void
-}) {
-  const dim = !row.included
-  const dupeBorder =
-    row.match === 'POSSIBLE_DUPE' && row.dupeResolution === 'UNRESOLVED'
-  const missing = row.match === 'MISSING_INFO'
-
-  return (
-    <div
-      className={[
-        'rounded-card border bg-bgSurface p-4 transition',
-        dupeBorder
-          ? 'border-amber/50'
-          : missing
-            ? 'border-ember/40'
-            : 'border-white/10',
-        dim ? 'opacity-60' : '',
-      ].join(' ')}
-    >
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.4fr_1.2fr_1fr_0.8fr_auto] md:items-center">
-        {/* Client */}
-        <div className="flex items-center gap-3">
-          <span
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accentPrimary/15 text-[12px] font-medium text-accentPrimary"
-            aria-hidden="true"
-          >
-            {initials(row)}
-          </span>
-          <span className="text-[14px] text-textPrimary">
-            {row.firstName} {row.lastName}
-          </span>
-        </div>
-
-        {/* Contact */}
-        <div className="text-[13px] text-textSecondary">
-          {row.email ? <p>{row.email}</p> : null}
-          {row.phone ? <p className="text-textMuted">{row.phone}</p> : null}
-          {!row.email && !row.phone ? (
-            <p className="text-ember">{copy.noContact}</p>
-          ) : null}
-        </div>
-
-        {/* Match */}
-        <div>
-          <MatchChip row={row} copy={copy} />
-        </div>
-
-        {/* Last visit */}
-        <div className="text-[13px] text-textMuted">
-          {row.lastVisit ?? '—'}
-          {row.visitCount != null ? (
-            <span className="block text-[11px]">{row.visitCount} visits</span>
-          ) : null}
-        </div>
-
-        {/* Include */}
-        <div className="flex items-center gap-2 md:justify-end">
-          <ToggleSwitch
-            on={row.included}
-            onChange={onToggle}
-            label={`Include ${row.firstName} ${row.lastName}`}
+        {phase === 'map' ? (
+          <MapStep
+            copy={copy}
+            headers={headers}
+            mapping={mapping}
+            setMapping={setMapping}
+            rowCount={rawRows.length}
+            valid={mappingValid}
+            busy={busy}
+            onBack={reset}
+            onContinue={runPreview}
           />
-          {dim ? (
-            <span className="text-[11px] text-textMuted md:hidden">
-              {copy.chips.excluded}
-            </span>
-          ) : null}
-        </div>
+        ) : null}
+
+        {phase === 'preview' ? (
+          <PreviewStep
+            copy={copy}
+            rows={previewRows}
+            excluded={excluded}
+            onToggle={(index, include) => {
+              setExcluded((cur) => {
+                const next = new Set(cur)
+                if (include) next.delete(index)
+                else next.add(index)
+                return next
+              })
+            }}
+          />
+        ) : null}
+
+        {phase === 'done' && result ? (
+          <DoneStep copy={copy} result={result} onReset={reset} />
+        ) : null}
       </div>
 
-      {dupeBorder ? <DupePanel copy={copy} onResolve={onResolve} /> : null}
+      {phase === 'preview' ? (
+        <SummaryBar
+          stats={stats}
+          cta={{
+            label: busy ? copy.importing : copy.importBtn,
+            disabled: busy || includedCount === 0,
+            onClick: runCommit,
+          }}
+        />
+      ) : null}
     </div>
   )
 }
 
-function MatchChip({
-  row,
+function UploadStep({
   copy,
-}: {
-  row: ClientImportRow
-  copy: MigrationCopy['clients']
-}) {
-  if (!row.included) return <StatusChip variant="muted">{copy.chips.excluded}</StatusChip>
-  switch (row.match) {
-    case 'AUTO_MATCHED':
-      return <StatusChip variant="accent">{copy.chips.autoMatched}</StatusChip>
-    case 'NEW':
-      return <StatusChip variant="muted">{copy.chips.newClient}</StatusChip>
-    case 'POSSIBLE_DUPE':
-      return row.dupeResolution === 'MERGE' ? (
-        <StatusChip variant="accent">Merged</StatusChip>
-      ) : row.dupeResolution === 'SEPARATE' ? (
-        <StatusChip variant="muted">Kept separate</StatusChip>
-      ) : (
-        <StatusChip variant="violet">{copy.chips.possibleDupe}</StatusChip>
-      )
-    case 'MISSING_INFO':
-      return <StatusChip variant="warn">{copy.chips.missingInfo}</StatusChip>
-    default:
-      return null
-  }
-}
-
-function DupePanel({
-  copy,
-  onResolve,
+  onFile,
 }: {
   copy: MigrationCopy['clients']
-  onResolve: (res: DupeResolution) => void
+  onFile: (file: File) => void
 }) {
   return (
-    <div className="mt-3 rounded-inner border border-acid/30 bg-acid/[0.06] p-3">
-      <p className="mb-2 text-[13px] text-textPrimary">{copy.dupe.question}</p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+    <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-[1.1fr_1fr]">
+      <div className="rounded-card border border-white/10 bg-bgSurface p-5">
+        <h2 className="font-display text-[16px] font-medium">{copy.guideTitle}</h2>
+        <ol className="mt-3 flex flex-col gap-3">
+          {copy.guideSteps.map((step, i) => (
+            <li key={step} className="flex gap-3 text-[14px] text-textSecondary">
+              <span
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accentPrimary/12 font-mono text-[12px] text-accentPrimary"
+                aria-hidden="true"
+              >
+                {i + 1}
+              </span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      <div className="flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-white/15 bg-bgSurface p-8 text-center">
+        <p className="text-[15px] font-medium">{copy.upload}</p>
+        <p className="text-[13px] text-textMuted">{copy.uploadHint}</p>
+        <label className="mt-2 inline-flex h-11 cursor-pointer items-center justify-center rounded-full border border-white/15 px-6 text-[14px] font-medium hover:border-white/30">
+          {copy.chooseFile}
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            className="sr-only"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) onFile(file)
+              e.target.value = ''
+            }}
+          />
+        </label>
+      </div>
+    </div>
+  )
+}
+
+function MapStep({
+  copy,
+  headers,
+  mapping,
+  setMapping,
+  rowCount,
+  valid,
+  busy,
+  onBack,
+  onContinue,
+}: {
+  copy: MigrationCopy['clients']
+  headers: string[]
+  mapping: ColumnMapping
+  setMapping: (m: ColumnMapping) => void
+  rowCount: number
+  valid: boolean
+  busy: boolean
+  onBack: () => void
+  onContinue: () => void
+}) {
+  return (
+    <div className="mt-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="font-display text-[18px] font-medium">{copy.mapTitle}</h2>
+        <span className="rounded-full bg-white/5 px-3 py-1 font-mono text-[11px] uppercase tracking-[0.1em] text-textMuted">
+          {rowCount} rows
+        </span>
+      </div>
+      <p className="mt-1 text-[13px] text-textMuted">{copy.mapHint}</p>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {FIELD_ORDER.map((field) => (
+          <label key={field} className="flex flex-col gap-1.5">
+            <span className="text-[13px] text-textSecondary">
+              {copy.fields[field]}
+              {REQUIRED_FIELDS.includes(field) ? (
+                <span className="text-ember"> *</span>
+              ) : null}
+            </span>
+            <select
+              value={mapping[field] ?? ''}
+              onChange={(e) => {
+                const next: ColumnMapping = { ...mapping }
+                if (e.target.value) next[field] = e.target.value
+                else delete next[field]
+                setMapping(next)
+              }}
+              className="h-10 rounded-[12px] border border-white/10 bg-white/[0.03] px-3 text-[14px] text-textPrimary outline-none focus:border-white/25"
+            >
+              <option value="">{copy.unmapped}</option>
+              {headers.map((h) => (
+                <option key={h} value={h}>
+                  {h}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+
+      <div className="mt-5 flex items-center gap-3">
         <button
           type="button"
-          onClick={() => onResolve('MERGE')}
-          className="flex flex-col items-start rounded-inner border border-accentPrimary/40 bg-accentPrimary/10 px-3 py-2 text-left hover:border-accentPrimary/60"
+          onClick={onBack}
+          className="rounded-full border border-white/10 px-4 py-2 text-[13px] text-textSecondary hover:border-white/20"
         >
-          <span className="text-[13px] font-medium text-accentPrimary">
-            {copy.dupe.merge}
-          </span>
-          <span className="text-[12px] text-textMuted">{copy.dupe.mergeHint}</span>
+          {copy.reparse}
         </button>
         <button
           type="button"
-          onClick={() => onResolve('SEPARATE')}
-          className="flex flex-col items-start rounded-inner border border-white/10 px-3 py-2 text-left hover:border-white/20"
+          onClick={onContinue}
+          disabled={!valid || busy}
+          className="inline-flex h-10 items-center justify-center rounded-full px-6 text-[14px] font-medium disabled:opacity-50"
+          style={{ background: 'var(--cta)', color: 'rgb(var(--on-cta))' }}
         >
-          <span className="text-[13px] font-medium text-textPrimary">
-            {copy.dupe.separate}
-          </span>
-          <span className="text-[12px] text-textMuted">{copy.dupe.separateHint}</span>
+          {busy ? copy.importing : copy.previewTitle} →
         </button>
+      </div>
+    </div>
+  )
+}
+
+function PreviewStep({
+  copy,
+  rows,
+  excluded,
+  onToggle,
+}: {
+  copy: MigrationCopy['clients']
+  rows: ClientImportPreviewRow[]
+  excluded: Set<number>
+  onToggle: (index: number, include: boolean) => void
+}) {
+  return (
+    <div className="mt-5">
+      <h2 className="font-display text-[18px] font-medium">{copy.previewTitle}</h2>
+      <p className="mt-1 text-[12px] text-textMuted">{copy.noMessages}</p>
+
+      <div className="mt-3 flex flex-col gap-3">
+        {rows.map((row) => {
+          const included = row.importable && !excluded.has(row.index)
+          return (
+            <div
+              key={row.index}
+              className={[
+                'rounded-card border bg-bgSurface p-4 transition',
+                row.match === 'MISSING_INFO' ? 'border-ember/40' : 'border-white/10',
+                included ? '' : 'opacity-60',
+              ].join(' ')}
+            >
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.4fr_1.4fr_1fr_auto] md:items-center">
+                <span className="text-[14px] text-textPrimary">
+                  {row.firstName} {row.lastName}
+                </span>
+                <div className="text-[13px] text-textSecondary">
+                  {row.email ? <p>{row.email}</p> : null}
+                  {row.phone ? <p className="text-textMuted">{row.phone}</p> : null}
+                  {!row.email && !row.phone ? (
+                    <p className="text-ember">{copy.noContact}</p>
+                  ) : null}
+                </div>
+                <div>
+                  {row.match === 'EXISTING' ? (
+                    <StatusChip variant="accent">{copy.chips.existing}</StatusChip>
+                  ) : row.match === 'MISSING_INFO' ? (
+                    <StatusChip variant="warn">{copy.chips.missingInfo}</StatusChip>
+                  ) : (
+                    <StatusChip variant="muted">{copy.chips.newClient}</StatusChip>
+                  )}
+                </div>
+                <div className="flex md:justify-end">
+                  {row.importable ? (
+                    <ToggleSwitch
+                      on={included}
+                      onChange={(v) => onToggle(row.index, v)}
+                      label={`Include ${row.firstName} ${row.lastName}`}
+                    />
+                  ) : (
+                    <span className="text-[11px] text-textMuted">{copy.chips.excluded}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function DoneStep({
+  copy,
+  result,
+  onReset,
+}: {
+  copy: MigrationCopy['clients']
+  result: { imported: number; skipped: number; failed: number }
+  onReset: () => void
+}) {
+  return (
+    <div className="mt-6 flex flex-col items-center gap-4 rounded-card border border-white/10 bg-bgSecondary px-6 py-10 text-center">
+      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-fern/15 text-[22px] text-fern" aria-hidden="true">
+        ✓
+      </span>
+      <h2 className="font-display text-[20px] font-medium">{copy.resultTitle}</h2>
+      <p className="text-[14px] text-textSecondary">
+        {result.imported} imported · {result.skipped} skipped
+        {result.failed > 0 ? ` · ${result.failed} failed` : ''}
+      </p>
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <button
+          type="button"
+          onClick={onReset}
+          className="rounded-full border border-white/10 px-5 py-2 text-[13px] text-textSecondary hover:border-white/20"
+        >
+          {copy.startOver}
+        </button>
+        <Link
+          href="/pro/migrate/calendar"
+          className="inline-flex h-10 items-center justify-center rounded-full px-6 text-[14px] font-medium"
+          style={{ background: 'var(--cta)', color: 'rgb(var(--on-cta))' }}
+        >
+          {copy.cta} →
+        </Link>
       </div>
     </div>
   )

@@ -75,6 +75,7 @@ export type MigrationCopy = {
     chips: {
       autoMatched: string
       newClient: string
+      existing: string
       possibleDupe: string
       missingInfo: string
       excluded: string
@@ -88,6 +89,22 @@ export type MigrationCopy = {
       separateHint: string
     }
     noMessages: string
+    guideTitle: string
+    guideSteps: string[]
+    upload: string
+    uploadHint: string
+    chooseFile: string
+    reparse: string
+    parseError: string
+    mapTitle: string
+    mapHint: string
+    fields: { firstName: string; lastName: string; email: string; phone: string }
+    unmapped: string
+    previewTitle: string
+    importBtn: string
+    importing: string
+    resultTitle: string
+    startOver: string
     cta: string
   }
   calendar: {
@@ -194,6 +211,7 @@ export function defaultMigrationCopy(wordmark: string): MigrationCopy {
       chips: {
         autoMatched: 'Auto-matched',
         newClient: 'New client',
+        existing: 'Already in your book',
         possibleDupe: 'Possible dupe',
         missingInfo: 'Missing info',
         excluded: 'Excluded',
@@ -206,7 +224,28 @@ export function defaultMigrationCopy(wordmark: string): MigrationCopy {
         separate: 'Keep separate',
         separateHint: "Create a new client — they're different people",
       },
-      noMessages: 'Importing never messages your clients.',
+      noMessages: 'Importing never messages your clients — they stay quiet until you book them.',
+      guideTitle: 'How to bring your clients over',
+      guideSteps: [
+        'In your old booking app, open your client or customer list and export it as a CSV file.',
+        'Upload that file below. It stays in your account — nothing is shared with your old app.',
+        'Match your columns to first name, last name, email, and phone.',
+        'Review the list and import. Existing clients merge instead of duplicating.',
+      ],
+      upload: 'Upload your client list',
+      uploadHint: 'A CSV exported from your old booking app',
+      chooseFile: 'Choose CSV file',
+      reparse: 'Choose a different file',
+      parseError: "We couldn't read that file. Make sure it's a CSV exported from your booking app.",
+      mapTitle: 'Match your columns',
+      mapHint: 'Tell us which column is which. First and last name are required.',
+      fields: { firstName: 'First name', lastName: 'Last name', email: 'Email', phone: 'Phone' },
+      unmapped: 'Not in my file',
+      previewTitle: 'Review your clients',
+      importBtn: 'Import clients',
+      importing: 'Importing…',
+      resultTitle: 'Clients imported',
+      startOver: 'Import another file',
       cta: 'Continue to calendar',
     },
     calendar: {
