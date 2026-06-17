@@ -94,7 +94,7 @@ type FindMatchedClientUserResult =
   | { kind: 'non_client' }
   | { kind: 'client'; user: UserIdentityRecord }
 
-function buildClientProfileLookupOrConditions(args: {
+export function buildClientProfileLookupOrConditions(args: {
   email: string | null
   phone: string | null
 }): Prisma.ClientProfileWhereInput[] {
