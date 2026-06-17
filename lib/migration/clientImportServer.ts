@@ -58,7 +58,7 @@ export function parseClientImportRequest(body: unknown): ClientImportRequest | n
   if (!Array.isArray(body.rows)) return null
   const rows = body.rows.map(toStringRecord)
   const mapping = toColumnMapping(body.mapping)
-  if (!mapping.firstName || !mapping.lastName) return null
+  if (!mapping.firstName || !mapping.lastName) return null // pii-plaintext-read-ok: CSV column-header names, not contact values
   const excludeIndices = Array.isArray(body.excludeIndices)
     ? body.excludeIndices.filter((n): n is number => typeof n === 'number')
     : []
@@ -115,7 +115,7 @@ export async function previewClientImport(args: {
     if (!row.importable) {
       match = 'MISSING_INFO'
     } else {
-      match = (await contactMatchExists(row.parsed.email, row.parsed.phone))
+      match = (await contactMatchExists(row.parsed.email, row.parsed.phone)) // pii-plaintext-read-ok: normalized contact → blind-index match (same path as upsertProClient)
         ? 'EXISTING'
         : 'NEW'
     }

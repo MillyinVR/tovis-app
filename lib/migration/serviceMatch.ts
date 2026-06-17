@@ -2,7 +2,7 @@
 //
 // Service-matching engine for the pro migration flow. Given a competitor's
 // service name (free text from a CSV/export) it suggests the best-fit entries
-// from the canonical Tovis catalog, ranked by confidence.
+// from the canonical service catalog, ranked by confidence.
 //
 // Pure logic — no DB, no React. The caller passes the catalog (sourced from the
 // Service table) and optionally an alias table. This is the brain behind the

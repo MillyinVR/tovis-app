@@ -49,10 +49,10 @@ function guessMapping(headers: string[]): ColumnMapping {
   const last = find(['last', 'surname'])
   const email = find(['email', 'e-mail'])
   const phone = find(['phone', 'mobile', 'cell'])
-  if (first) mapping.firstName = first
-  if (last) mapping.lastName = last
-  if (email) mapping.email = email
-  if (phone) mapping.phone = phone
+  if (first) mapping.firstName = first // pii-plaintext-read-ok: CSV column-header names, not contact values
+  if (last) mapping.lastName = last // pii-plaintext-read-ok: CSV column-header names, not contact values
+  if (email) mapping.email = email // pii-plaintext-read-ok: CSV column-header names, not contact values
+  if (phone) mapping.phone = phone // pii-plaintext-read-ok: CSV column-header names, not contact values
   return mapping
 }
 
@@ -390,6 +390,10 @@ function PreviewStep({
       <div className="mt-3 flex flex-col gap-3">
         {rows.map((row) => {
           const included = row.importable && !excluded.has(row.index)
+          // Imported contact the pro is reviewing — plaintext display is the point.
+          const fullName = `${row.firstName} ${row.lastName}` // pii-plaintext-read-ok: pro reviews own imported contacts
+          const email = row.email // pii-plaintext-read-ok: pro reviews own imported contacts
+          const phone = row.phone // pii-plaintext-read-ok: pro reviews own imported contacts
           return (
             <div
               key={row.index}
@@ -400,13 +404,11 @@ function PreviewStep({
               ].join(' ')}
             >
               <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.4fr_1.4fr_1fr_auto] md:items-center">
-                <span className="text-[14px] text-textPrimary">
-                  {row.firstName} {row.lastName}
-                </span>
+                <span className="text-[14px] text-textPrimary">{fullName}</span>
                 <div className="text-[13px] text-textSecondary">
-                  {row.email ? <p>{row.email}</p> : null}
-                  {row.phone ? <p className="text-textMuted">{row.phone}</p> : null}
-                  {!row.email && !row.phone ? (
+                  {email ? <p>{email}</p> : null}
+                  {phone ? <p className="text-textMuted">{phone}</p> : null}
+                  {!email && !phone ? (
                     <p className="text-ember">{copy.noContact}</p>
                   ) : null}
                 </div>
@@ -424,7 +426,7 @@ function PreviewStep({
                     <ToggleSwitch
                       on={included}
                       onChange={(v) => onToggle(row.index, v)}
-                      label={`Include ${row.firstName} ${row.lastName}`}
+                      label={`Include ${fullName}`}
                     />
                   ) : (
                     <span className="text-[11px] text-textMuted">{copy.chips.excluded}</span>
