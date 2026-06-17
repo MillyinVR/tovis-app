@@ -1285,6 +1285,8 @@ model ProfessionalProfile {
   bookings       Booking[]
   calendarBlocks CalendarBlock[]
 
+  calendarFeedSubscription CalendarFeedSubscription?
+
   notifications              Notification[]
   notificationDispatches     NotificationDispatch[]               @relation("ProfessionalNotificationDispatches")
   notificationPreferences    ProfessionalNotificationPreference[]
@@ -1848,6 +1850,30 @@ model OfferingPriceRamp {
 
   @@unique([offeringId, mode])
   @@index([completedAt, nextStepAt])
+}
+
+enum CalendarFeedStatus {
+  ACTIVE // resynced on the cron
+  PAUSED // pro disconnected; kept for history, not resynced
+  ERROR // last sync failed (e.g. feed unreachable); still retried
+}
+
+// A pro's read-only competitor calendar feed, kept in sync during migration.
+// One per pro. The resync cron re-fetches + re-imports (idempotent on event UID).
+model CalendarFeedSubscription {
+  id             String             @id @default(cuid())
+  professionalId String             @unique
+  feedUrl        String
+  status         CalendarFeedStatus @default(ACTIVE)
+  lastSyncedAt   DateTime?
+  lastSyncError  String?
+  lastSyncCounts Json? // { bookings, blocks, history, failed }
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([status, lastSyncedAt])
 }
 
 model LastMinuteSettings {

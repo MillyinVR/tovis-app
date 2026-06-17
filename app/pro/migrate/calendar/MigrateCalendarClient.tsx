@@ -61,6 +61,11 @@ export function MigrateCalendarClient({ copy }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<CalendarCommitResult | null>(null)
+  const [keepSynced, setKeepSynced] = useState(true)
+  // The feed URL the events came from (null for a file upload) — only a URL
+  // source can be kept in sync.
+  const [syncUrl, setSyncUrl] = useState<string | null>(null)
+  const [synced, setSynced] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function runPreview(text: string): Promise<void> {
@@ -92,6 +97,7 @@ export function MigrateCalendarClient({ copy }: Props) {
   async function handleFile(file: File): Promise<void> {
     setError(null)
     setBusy(true)
+    setSyncUrl(null) // a file upload can't be kept in sync
     try {
       await runPreview(await file.text())
     } catch {
@@ -117,6 +123,7 @@ export function MigrateCalendarClient({ copy }: Props) {
         setError(data?.error ?? 'We could not fetch that calendar URL.')
         return
       }
+      setSyncUrl(feedUrl)
       await runPreview(data.ics)
     } catch {
       setError('We could not fetch that calendar URL.')
@@ -151,6 +158,16 @@ export function MigrateCalendarClient({ copy }: Props) {
       }
       setResult(data)
       setPhase('done')
+
+      // If the source was a feed URL and the pro opted in, keep it synced.
+      if (syncUrl && keepSynced) {
+        const subRes = await fetch('/api/pro/migrate/calendar/subscription', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: syncUrl }),
+        })
+        setSynced(subRes.ok)
+      }
     } catch {
       setError('Something went wrong importing your calendar.')
     } finally {
@@ -247,6 +264,16 @@ export function MigrateCalendarClient({ copy }: Props) {
                 {busy ? 'Fetching…' : 'Fetch'}
               </button>
             </div>
+            <label className="mx-auto mt-3 flex max-w-md items-center gap-2 text-[12px] text-textMuted">
+              <input
+                type="checkbox"
+                checked={keepSynced}
+                onChange={(e) => setKeepSynced(e.target.checked)}
+                className="h-4 w-4 accent-accentPrimary"
+              />
+              Keep this calendar synced — pull new appointments automatically
+              while you finish moving over.
+            </label>
           </div>
         ) : null}
 
@@ -339,6 +366,12 @@ export function MigrateCalendarClient({ copy }: Props) {
                 </span>
               ) : null}
             </div>
+            {synced ? (
+              <p className="mt-4 text-[13px] text-accentPrimary">
+                ✓ Calendar kept in sync — we&rsquo;ll pull new appointments
+                automatically until you disconnect.
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>
