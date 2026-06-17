@@ -3,6 +3,7 @@
 // app/pro/migrate/review/MigrateReviewClient.tsx
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import type { MigrationCopy } from '@/lib/brand/defaultMigrationCopy'
@@ -34,7 +35,15 @@ const CARD_ICON: Record<string, string> = {
 }
 
 export function MigrateReviewClient({ copy, vm }: Props) {
+  const router = useRouter()
   const [goingLive, setGoingLive] = useState(false)
+
+  // Imports already committed live on each step (silently), so going live is the
+  // pro's confirmation — finish the wizard and head to the dashboard.
+  function goLive(): void {
+    setGoingLive(true)
+    router.push('/pro/dashboard')
+  }
 
   return (
     <div className="min-h-screen text-textPrimary">
@@ -112,7 +121,7 @@ export function MigrateReviewClient({ copy, vm }: Props) {
           <button
             type="button"
             disabled={goingLive}
-            onClick={() => setGoingLive(true)}
+            onClick={goLive}
             className="inline-flex h-14 items-center justify-center rounded-full px-8 text-[16px] font-medium transition hover:opacity-90 disabled:opacity-70"
             style={{ background: 'var(--cta)', color: 'rgb(var(--on-cta))' }}
           >
