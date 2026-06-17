@@ -16,6 +16,7 @@ import {
   buildInitialRamp,
   needsRamp,
   type RaiseStepMode,
+  type RampValues,
 } from './priceRamp'
 import {
   isConfident,
@@ -167,6 +168,36 @@ export async function commitServiceImport(args: {
 
     attempted += 1
     try {
+      const now = new Date()
+      // Build each enabled mode's ramp up front (pure). When the pro's price is
+      // below the catalog minimum we ramp it; the offering's *stored* price is
+      // then the ramp target (catalog min) — so the menu + availability screen
+      // advertise the minimum (what a new client pays) while existing clients
+      // keep their grandfathered price via the ramp at quote time.
+      const buildModeRamp = (enabled: boolean, price: number | null) =>
+        enabled && price !== null && needsRamp(price, minPrice)
+          ? buildInitialRamp({
+              grandfatheredPrice: price,
+              minPrice,
+              stepMode: d.ramp.stepMode,
+              stepValue: d.ramp.stepValue,
+              cadenceWeeks: d.ramp.cadenceWeeks,
+              startedAt: now,
+            })
+          : null
+
+      const salonRamp = buildModeRamp(d.offersInSalon, d.salonPrice)
+      const mobileRamp = buildModeRamp(d.offersMobile, d.mobilePrice)
+
+      const storedPrice = (
+        enabled: boolean,
+        price: number | null,
+        ramp: ReturnType<typeof buildInitialRamp> | null,
+      ): Prisma.Decimal | null => {
+        if (!enabled || price === null) return null
+        return dec(ramp ? ramp.targetPrice : price)
+      }
+
       const outcome = await prisma.$transaction(async (tx) => {
         const offering = await writeOffering({
           tx,
@@ -174,41 +205,32 @@ export async function commitServiceImport(args: {
           serviceId: d.serviceId,
           offersInSalon: d.offersInSalon,
           offersMobile: d.offersMobile,
-          salonPrice: d.offersInSalon && d.salonPrice !== null ? dec(d.salonPrice) : null,
+          salonPrice: storedPrice(d.offersInSalon, d.salonPrice, salonRamp),
           salonDurationMinutes: d.salonDurationMinutes,
-          mobilePrice: d.offersMobile && d.mobilePrice !== null ? dec(d.mobilePrice) : null,
+          mobilePrice: storedPrice(d.offersMobile, d.mobilePrice, mobileRamp),
           mobileDurationMinutes: d.mobileDurationMinutes,
         })
 
         let ramps = 0
-        const now = new Date()
-        const modes: Array<{ mode: ServiceLocationType; price: number | null }> = [
-          { mode: ServiceLocationType.SALON, price: d.offersInSalon ? d.salonPrice : null },
-          { mode: ServiceLocationType.MOBILE, price: d.offersMobile ? d.mobilePrice : null },
+        const modeRamps: Array<{ mode: ServiceLocationType; ramp: RampValues | null }> = [
+          { mode: ServiceLocationType.SALON, ramp: salonRamp },
+          { mode: ServiceLocationType.MOBILE, ramp: mobileRamp },
         ]
-        for (const m of modes) {
-          if (m.price === null || !needsRamp(m.price, minPrice)) continue
-          const r = buildInitialRamp({
-            grandfatheredPrice: m.price,
-            minPrice,
-            stepMode: d.ramp.stepMode,
-            stepValue: d.ramp.stepValue,
-            cadenceWeeks: d.ramp.cadenceWeeks,
-            startedAt: now,
-          })
+        for (const { mode, ramp } of modeRamps) {
+          if (!ramp) continue
           await tx.offeringPriceRamp.create({
             data: {
               offeringId: offering.id,
-              mode: m.mode,
-              grandfatheredPrice: dec(r.currentPrice),
-              targetPrice: dec(r.targetPrice),
-              currentPrice: dec(r.currentPrice),
-              stepMode: r.stepMode,
-              stepValue: dec(r.stepValue),
-              cadenceWeeks: r.cadenceWeeks,
-              startedAt: r.startedAt,
-              nextStepAt: r.nextStepAt,
-              completedAt: r.completedAt,
+              mode,
+              grandfatheredPrice: dec(ramp.currentPrice),
+              targetPrice: dec(ramp.targetPrice),
+              currentPrice: dec(ramp.currentPrice),
+              stepMode: ramp.stepMode,
+              stepValue: dec(ramp.stepValue),
+              cadenceWeeks: ramp.cadenceWeeks,
+              startedAt: ramp.startedAt,
+              nextStepAt: ramp.nextStepAt,
+              completedAt: ramp.completedAt,
             },
           })
           ramps += 1

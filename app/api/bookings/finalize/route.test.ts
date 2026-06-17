@@ -235,6 +235,10 @@ const offering = {
     autoAcceptBookings: false,
     timeZone: 'America/Los_Angeles',
   },
+  service: {
+    minPrice: new Prisma.Decimal('80'),
+  },
+  priceRamps: [],
 }
 
 const finalizeOffering = {
@@ -248,6 +252,8 @@ const finalizeOffering = {
   mobilePriceStartingAt: new Prisma.Decimal('120'),
   mobileDurationMinutes: 75,
   professionalTimeZone: 'America/Los_Angeles',
+  serviceMinPrice: new Prisma.Decimal('80'),
+  priceRamps: [],
 }
 
 function expectedBookingEntryPointForSource(
