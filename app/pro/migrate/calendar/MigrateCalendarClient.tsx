@@ -55,6 +55,7 @@ function formatWhen(iso: string): string {
 export function MigrateCalendarClient({ copy }: Props) {
   const [phase, setPhase] = useState<Phase>('upload')
   const [icsText, setIcsText] = useState('')
+  const [feedUrl, setFeedUrl] = useState('')
   const [rows, setRows] = useState<CalendarPreviewRow[]>([])
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
@@ -62,36 +63,63 @@ export function MigrateCalendarClient({ copy }: Props) {
   const [result, setResult] = useState<CalendarCommitResult | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  async function runPreview(text: string): Promise<void> {
+    if (!text.trim()) {
+      setError('That calendar looks empty. Check the export and try again.')
+      return
+    }
+    const res = await fetch('/api/pro/migrate/calendar/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ics: text }),
+    })
+    const data: (CalendarImportPreview & { ok?: boolean; error?: string }) | null =
+      await res.json().catch(() => null)
+    if (!res.ok || !data || !data.rows) {
+      setError(data?.error ?? 'We could not read that calendar.')
+      return
+    }
+    if (data.rows.length === 0) {
+      setError('No appointments were found.')
+      return
+    }
+    setIcsText(text)
+    setRows(data.rows)
+    setExcluded(new Set())
+    setPhase('review')
+  }
+
   async function handleFile(file: File): Promise<void> {
     setError(null)
     setBusy(true)
     try {
-      const text = await file.text()
-      if (!text.trim()) {
-        setError('That file looks empty. Export your calendar as an .ics file and try again.')
-        return
-      }
-      const res = await fetch('/api/pro/migrate/calendar/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ics: text }),
-      })
-      const data: (CalendarImportPreview & { ok?: boolean; error?: string }) | null =
-        await res.json().catch(() => null)
-      if (!res.ok || !data || !data.rows) {
-        setError(data?.error ?? 'We could not read that calendar file.')
-        return
-      }
-      if (data.rows.length === 0) {
-        setError('No appointments were found in that file.')
-        return
-      }
-      setIcsText(text)
-      setRows(data.rows)
-      setExcluded(new Set())
-      setPhase('review')
+      await runPreview(await file.text())
     } catch {
       setError('We could not read that calendar file.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleUrl(): Promise<void> {
+    setError(null)
+    setBusy(true)
+    try {
+      const res = await fetch('/api/pro/migrate/calendar/fetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: feedUrl }),
+      })
+      const data: { ok?: boolean; ics?: string; error?: string } | null = await res
+        .json()
+        .catch(() => null)
+      if (!res.ok || !data?.ics) {
+        setError(data?.error ?? 'We could not fetch that calendar URL.')
+        return
+      }
+      await runPreview(data.ics)
+    } catch {
+      setError('We could not fetch that calendar URL.')
     } finally {
       setBusy(false)
     }
@@ -191,6 +219,34 @@ export function MigrateCalendarClient({ copy }: Props) {
             >
               {busy ? 'Reading…' : 'Choose .ics file'}
             </button>
+
+            <div className="mx-auto mt-7 flex max-w-md items-center gap-3 text-[11px] uppercase tracking-[0.12em] text-textMuted">
+              <span className="h-px flex-1 bg-white/10" />
+              or paste a feed link
+              <span className="h-px flex-1 bg-white/10" />
+            </div>
+            <p className="mx-auto mt-3 max-w-md text-[13px] text-textMuted">
+              Most booking apps offer a read-only calendar &ldquo;subscribe&rdquo;
+              link. Paste it here and we&rsquo;ll pull it in — no file needed.
+            </p>
+            <div className="mx-auto mt-3 flex max-w-md flex-col gap-2 sm:flex-row">
+              <input
+                type="url"
+                inputMode="url"
+                value={feedUrl}
+                onChange={(e) => setFeedUrl(e.target.value)}
+                placeholder="https://…/calendar.ics"
+                className="flex-1 rounded-inner border border-white/10 bg-white/[0.03] px-3 py-2 text-[14px] text-textPrimary placeholder:text-textMuted focus:border-accentPrimary/40 focus:outline-none"
+              />
+              <button
+                type="button"
+                disabled={busy || !feedUrl.trim()}
+                onClick={() => void handleUrl()}
+                className="rounded-full border border-white/15 px-5 py-2 text-[14px] font-medium text-textPrimary disabled:opacity-50"
+              >
+                {busy ? 'Fetching…' : 'Fetch'}
+              </button>
+            </div>
           </div>
         ) : null}
 
