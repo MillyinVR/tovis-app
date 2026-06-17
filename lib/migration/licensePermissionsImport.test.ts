@@ -29,6 +29,7 @@ describe('planLicensePermissionsImport', () => {
       serviceId: r.serviceId,
       professionType: r.professionType,
       stateCode: r.stateCode,
+      mode: r.mode,
     }))
 
     const replan = planLicensePermissionsImport({ catalog, existing: half })
@@ -43,6 +44,7 @@ describe('planLicensePermissionsImport', () => {
       serviceId: r.serviceId,
       professionType: r.professionType,
       stateCode: r.stateCode,
+      mode: r.mode,
     }))
     const second = planLicensePermissionsImport({ catalog, existing })
     expect(second.toCreate).toEqual([])

@@ -1771,11 +1771,20 @@ model OfferingAddOn {
   @@index([addOnServiceId])
 }
 
+// ALLOW grants a service to a (profession, state); DENY removes it. DENY lets
+// "allowed in every state except X" be a baseline ALLOW (stateCode null) plus
+// one DENY row, instead of a per-state ALLOW for every other jurisdiction.
+enum ServicePermissionMode {
+  ALLOW
+  DENY
+}
+
 model ServicePermission {
-  id             String         @id @default(cuid())
+  id             String                @id @default(cuid())
   serviceId      String
   professionType ProfessionType
   stateCode      String?
+  mode           ServicePermissionMode @default(ALLOW)
 
   service Service @relation(fields: [serviceId], references: [id])
 

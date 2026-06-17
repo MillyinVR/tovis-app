@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   const [catalog, existing] = await Promise.all([
     prisma.service.findMany({ select: { id: true, name: true }, take: 5000 }),
     prisma.servicePermission.findMany({
-      select: { serviceId: true, professionType: true, stateCode: true },
+      select: { serviceId: true, professionType: true, stateCode: true, mode: true },
       take: 100000,
     }),
   ])
@@ -86,6 +86,7 @@ async function main(): Promise<void> {
       serviceId: row.serviceId,
       professionType: row.professionType,
       stateCode: row.stateCode,
+      mode: row.mode,
     }))
     const res = await prisma.servicePermission.createMany({ data, skipDuplicates: true })
     created += res.count

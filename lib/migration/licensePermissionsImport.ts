@@ -8,7 +8,11 @@
 
 import type { ProfessionType } from '@prisma/client'
 
-import { expandLicenseScope, type PermissionSpec } from './licenseScope'
+import {
+  expandLicenseScope,
+  type PermissionMode,
+  type PermissionSpec,
+} from './licenseScope'
 
 export type CatalogEntry = { id: string; name: string }
 
@@ -16,6 +20,7 @@ export type ExistingPermission = {
   serviceId: string
   professionType: ProfessionType
   stateCode: string | null
+  mode: PermissionMode
 }
 
 export type ResolvedPermission = {
@@ -23,6 +28,7 @@ export type ResolvedPermission = {
   serviceName: string
   professionType: ProfessionType
   stateCode: string | null
+  mode: PermissionMode
 }
 
 export type LicensePermissionsPlan = {
@@ -39,8 +45,13 @@ export type LicensePermissionsPlan = {
   totalSpecs: number
 }
 
-function permKey(serviceId: string, professionType: ProfessionType, stateCode: string | null): string {
-  return `${serviceId}|${professionType}|${stateCode ?? '*'}`
+function permKey(
+  serviceId: string,
+  professionType: ProfessionType,
+  stateCode: string | null,
+  mode: PermissionMode,
+): string {
+  return `${serviceId}|${professionType}|${stateCode ?? '*'}|${mode}`
 }
 
 // Catalog names are canonical; match case-insensitively on trimmed name so a
@@ -62,7 +73,7 @@ export function planLicensePermissionsImport(args: {
 
   const existingKeys = new Set<string>()
   for (const row of args.existing) {
-    existingKeys.add(permKey(row.serviceId, row.professionType, row.stateCode))
+    existingKeys.add(permKey(row.serviceId, row.professionType, row.stateCode, row.mode))
   }
 
   const toCreate: ResolvedPermission[] = []
@@ -83,7 +94,7 @@ export function planLicensePermissionsImport(args: {
     }
     professionsResolved.add(spec.professionType)
 
-    const key = permKey(entry.id, spec.professionType, spec.stateCode)
+    const key = permKey(entry.id, spec.professionType, spec.stateCode, spec.mode)
     if (existingKeys.has(key)) {
       alreadyPresent += 1
       continue
@@ -95,6 +106,7 @@ export function planLicensePermissionsImport(args: {
       serviceName: entry.name,
       professionType: spec.professionType,
       stateCode: spec.stateCode,
+      mode: spec.mode,
     })
   }
 

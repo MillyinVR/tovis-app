@@ -6,22 +6,25 @@
 // Across All 50 States" (June 2026); see docs/design/pro-migration-licensing-handoff.md.
 //
 // This is DATA, not logic. The gate it feeds (lib/services/allowedServices.ts)
-// is an ALLOW-LIST: a ServicePermission row = "permitted"; there is no deny row.
-// Consequences encoded below:
-//   • A null stateCode row ⇒ permitted in all jurisdictions.
-//   • "Allowed everywhere EXCEPT X" cannot be a null row minus an exception —
-//     it must expand to per-state rows for every allowed jurisdiction.
-//   • Every catalog service must be granted to each profession that should keep
-//     it; a service with zero rows is open to everyone.
+// is FAIL-CLOSED: a service is offerable only if a matching ALLOW exists and no
+// matching DENY does. That lets the tables mirror the source doc's shape —
+// "baseline scope + per-state exceptions" — instead of pre-exploding every
+// "allowed everywhere except X" into one row per jurisdiction:
+//   • ALLOW with stateCode null ⇒ permitted in all jurisdictions (the baseline).
+//   • ALLOW with a stateCode    ⇒ permitted only there (a per-state addition).
+//   • DENY  with a stateCode    ⇒ removes a baseline grant in that state.
 //
 // Internal only — clients never see license/state/board terms, just the service
 // name and its display category.
 
 import type { ProfessionType } from '@prisma/client'
 
+export type PermissionMode = 'ALLOW' | 'DENY'
+
 // ── Jurisdictions ──────────────────────────────────────────────────────────
-// The 50 states plus DC. AZ is currently the only exclusion anywhere (lash),
-// but expansions resolve against this full set so per-state grants are complete.
+// The 50 states plus DC. Used to validate state codes in the exception tables;
+// the baseline no longer expands across this set (that's the whole point of
+// DENY), so this is reference data, not a multiplier.
 export const US_JURISDICTIONS = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID',
   'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO',
@@ -73,13 +76,14 @@ const MASSAGE = [
   'Hot Stone Massage',
 ] as const
 
-// ── Nationwide baseline (null stateCode) ─────────────────────────────────────
-// The ~95% that is consistent across states. NOTE: lash is intentionally absent
-// from COSMETOLOGIST/ESTHETICIAN here — it is state-varying (see ALL_EXCEPT).
+// ── Nationwide baseline (ALLOW, stateCode null) ──────────────────────────────
+// The ~95% that is consistent across states. Lash is included for COSMETOLOGIST
+// and ESTHETICIAN here (they hold lash in scope nationwide) and removed only
+// where a state carved it out — see LICENSE_SCOPE_DENY.
 export const LICENSE_SCOPE_BASELINE: Partial<Record<ProfessionType, readonly string[]>> = {
-  COSMETOLOGIST: [...HAIR, ...NAILS, ...SKIN, ...BROWS, 'Soft Glam Makeup'],
+  COSMETOLOGIST: [...HAIR, ...NAILS, ...SKIN, ...BROWS, ...LASH, 'Soft Glam Makeup'],
   BARBER: ['Haircut & Style', "Men's Cut", 'Blowout', 'All-Over Color', 'Toner / Gloss'],
-  ESTHETICIAN: [...SKIN, ...BROWS, 'Soft Glam Makeup'],
+  ESTHETICIAN: [...SKIN, ...BROWS, ...LASH, 'Soft Glam Makeup'],
   HAIRSTYLIST: [...HAIR],
   MANICURIST: [...NAILS],
   MAKEUP_ARTIST: ['Soft Glam Makeup', 'Bridal Makeup'],
@@ -93,23 +97,8 @@ export const LICENSE_SCOPE_BASELINE: Partial<Record<ProfessionType, readonly str
   MASSAGE_THERAPIST: [...MASSAGE],
 }
 
-// ── Allowed in all jurisdictions EXCEPT the listed ones ──────────────────────
-// Expands to per-state rows for every jurisdiction not excluded.
-// Lash: only AZ removed lash from cosmetology/esthetics scope (carved out 2023,
-// "even for cosmetologists"). MD/MN/TN/TX/UT keep lash within cosmo/esth scope
-// alongside a standalone lash license, so they are NOT excluded here.
-export const LICENSE_SCOPE_ALL_EXCEPT: readonly {
-  profession: ProfessionType
-  services: readonly string[]
-  exceptStates: readonly Jurisdiction[]
-}[] = [
-  { profession: 'COSMETOLOGIST', services: [...LASH], exceptStates: ['AZ'] },
-  { profession: 'ESTHETICIAN', services: [...LASH], exceptStates: ['AZ'] },
-]
-
-// ── Allowed ONLY in the listed jurisdictions ─────────────────────────────────
-// Per-state grants beyond the baseline.
-export const LICENSE_SCOPE_ONLY_IN: readonly {
+// ── Per-state ADDITIONS (ALLOW with a stateCode) ─────────────────────────────
+export const LICENSE_SCOPE_ALLOW_IN: readonly {
   profession: ProfessionType
   services: readonly string[]
   states: readonly Jurisdiction[]
@@ -119,19 +108,34 @@ export const LICENSE_SCOPE_ONLY_IN: readonly {
   { profession: 'BARBER', services: [...SKIN], states: ['AZ'] },
 ]
 
+// ── Per-state REMOVALS (DENY with a stateCode) ───────────────────────────────
+// Only AZ removed lash from cosmetology/esthetics scope (carved out 2023, "even
+// for cosmetologists"). MD/MN/TN/TX/UT keep lash within cosmo/esth scope
+// alongside a standalone lash license, so they are NOT denied here.
+export const LICENSE_SCOPE_DENY: readonly {
+  profession: ProfessionType
+  services: readonly string[]
+  states: readonly Jurisdiction[]
+}[] = [
+  { profession: 'COSMETOLOGIST', services: [...LASH], states: ['AZ'] },
+  { profession: 'ESTHETICIAN', services: [...LASH], states: ['AZ'] },
+]
+
 // ── Expansion ────────────────────────────────────────────────────────────────
 export type PermissionSpec = {
   serviceName: string
   professionType: ProfessionType
   stateCode: string | null
+  mode: PermissionMode
 }
 
 function specKey(s: PermissionSpec): string {
-  return `${s.serviceName}|${s.professionType}|${s.stateCode ?? '*'}`
+  return `${s.serviceName}|${s.professionType}|${s.stateCode ?? '*'}|${s.mode}`
 }
 
 // Expand the scope tables into a deduped, deterministic list of permission
-// specs (service name + profession + stateCode). Pure — no DB, no catalog.
+// specs. Pure — no DB, no catalog. With DENY semantics this is small: ~one row
+// per (profession, service) baseline grant plus a handful of state exceptions.
 export function expandLicenseScope(): PermissionSpec[] {
   const out: PermissionSpec[] = []
   const seen = new Set<string>()
@@ -143,29 +147,27 @@ export function expandLicenseScope(): PermissionSpec[] {
     out.push(spec)
   }
 
-  // Baseline → null rows.
+  // Baseline → ALLOW, null state.
   for (const [professionType, services] of Object.entries(LICENSE_SCOPE_BASELINE)) {
     for (const serviceName of services ?? []) {
-      push({ serviceName, professionType: professionType as ProfessionType, stateCode: null })
+      push({ serviceName, professionType: professionType as ProfessionType, stateCode: null, mode: 'ALLOW' })
     }
   }
 
-  // All-except → per-state rows for every non-excluded jurisdiction.
-  for (const { profession, services, exceptStates } of LICENSE_SCOPE_ALL_EXCEPT) {
-    const excluded = new Set<string>(exceptStates)
-    for (const stateCode of US_JURISDICTIONS) {
-      if (excluded.has(stateCode)) continue
+  // Per-state additions → ALLOW, with state.
+  for (const { profession, services, states } of LICENSE_SCOPE_ALLOW_IN) {
+    for (const stateCode of states) {
       for (const serviceName of services) {
-        push({ serviceName, professionType: profession, stateCode })
+        push({ serviceName, professionType: profession, stateCode, mode: 'ALLOW' })
       }
     }
   }
 
-  // Only-in → per-state rows for the listed jurisdictions.
-  for (const { profession, services, states } of LICENSE_SCOPE_ONLY_IN) {
+  // Per-state removals → DENY, with state.
+  for (const { profession, services, states } of LICENSE_SCOPE_DENY) {
     for (const stateCode of states) {
       for (const serviceName of services) {
-        push({ serviceName, professionType: profession, stateCode })
+        push({ serviceName, professionType: profession, stateCode, mode: 'DENY' })
       }
     }
   }
