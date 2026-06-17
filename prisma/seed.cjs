@@ -1036,6 +1036,22 @@ async function main() {
     name: 'Waxing',
     description: 'Hair removal by waxing.',
   })
+  const hairRemoval = await upsertServiceCategory({
+    slug: 'hair-removal',
+    name: 'Hair Removal',
+    description: 'Permanent hair removal.',
+  })
+  const permanentMakeup = await upsertServiceCategory({
+    slug: 'permanent-makeup',
+    name: 'Permanent Makeup',
+    description: 'Cosmetic tattooing such as microblading and powder brows.',
+  })
+  const braiding = await upsertServiceCategory({
+    slug: 'braiding',
+    name: 'Braiding',
+    description: 'Natural hair braiding, twisting, and locking.',
+    parentId: hair.id,
+  })
 
   // Data-driven so the list is easy to review/extend. minPrice is DRAFT.
   const expandedCatalog = [
@@ -1062,6 +1078,10 @@ async function main() {
     { name: 'Bridal Makeup', categoryId: makeup.id, minPrice: '200.00', defaultDurationMinutes: 90, allowMobile: true, profession: ProfessionType.MAKEUP_ARTIST, description: 'Bridal makeup application.' },
     { name: '60-Minute Deep Tissue', categoryId: massage.id, minPrice: '120.00', defaultDurationMinutes: 60, allowMobile: true, profession: ProfessionType.MASSAGE_THERAPIST, description: 'Deep-tissue massage focusing on tension.' },
     { name: 'Hot Stone Massage', categoryId: massage.id, minPrice: '140.00', defaultDurationMinutes: 90, allowMobile: true, profession: ProfessionType.MASSAGE_THERAPIST, description: 'Massage using heated stones.' },
+    // Specialty-license services (Phase 2 licensing scope).
+    { name: 'Microblading', categoryId: permanentMakeup.id, minPrice: '350.00', defaultDurationMinutes: 120, allowMobile: false, profession: ProfessionType.PERMANENT_MAKEUP_ARTIST, description: 'Semi-permanent eyebrow tattooing for fuller, defined brows.' },
+    { name: 'Box Braids', categoryId: braiding.id, minPrice: '150.00', defaultDurationMinutes: 240, allowMobile: false, profession: ProfessionType.HAIR_BRAIDER, description: 'Protective box braids; hair cost may be separate.' },
+    { name: 'Electrolysis', categoryId: hairRemoval.id, minPrice: '60.00', defaultDurationMinutes: 30, allowMobile: false, profession: ProfessionType.ELECTROLOGIST, description: 'Permanent hair removal by electrolysis.' },
   ]
 
   for (const entry of expandedCatalog) {

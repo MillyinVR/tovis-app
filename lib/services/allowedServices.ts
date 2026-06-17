@@ -43,9 +43,10 @@ function isServicePermissionFilterEnabled(): boolean {
   return v === '1' || v === 'true' || v === 'yes'
 }
 
-// Service IDs with at least one matching ServicePermission for this
-// (professionType, state) — the services the pro is explicitly licensed for.
-async function resolveExplicitlyAllowedServiceIds(args: {
+// Service IDs this pro is licensed for: every service with a matching ALLOW
+// (profession + null/own-state) and no matching DENY. DENY overrides ALLOW so a
+// baseline grant can be removed in a single state without per-state ALLOW rows.
+async function resolveAllowedServiceIds(args: {
   professionType: ProfessionType
   licenseState: string | null
 }): Promise<Set<string>> {
@@ -57,11 +58,19 @@ async function resolveExplicitlyAllowedServiceIds(args: {
         ...(args.licenseState ? [{ stateCode: args.licenseState }] : []),
       ],
     },
-    select: { serviceId: true },
-    distinct: ['serviceId'],
-    take: 5000,
+    select: { serviceId: true, mode: true },
+    take: 10000,
   })
-  return new Set(matchingPerms.map((row) => row.serviceId))
+
+  const denied = new Set<string>()
+  const allowed = new Set<string>()
+  for (const row of matchingPerms) {
+    if (row.mode === 'DENY') denied.add(row.serviceId)
+  }
+  for (const row of matchingPerms) {
+    if (row.mode === 'ALLOW' && !denied.has(row.serviceId)) allowed.add(row.serviceId)
+  }
+  return allowed
 }
 
 export async function loadAllowedServices(
@@ -88,20 +97,12 @@ export async function loadAllowedServices(
     return services.map(toAllowedServiceDto)
   }
 
-  const explicitlyAllowed = await resolveExplicitlyAllowedServiceIds({
+  const allowed = await resolveAllowedServiceIds({
     professionType: proProfile.professionType,
     licenseState: proProfile.licenseState,
   })
 
-  // Services with zero ServicePermission rows are open to everyone.
-  const restrictedRows = await prisma.servicePermission.findMany({
-    select: { serviceId: true },
-    distinct: ['serviceId'],
-    take: 5000,
-  })
-  const restrictedSet = new Set(restrictedRows.map((r) => r.serviceId))
-
-  return services
-    .filter((svc) => !restrictedSet.has(svc.id) || explicitlyAllowed.has(svc.id))
-    .map(toAllowedServiceDto)
+  // Fail-closed: a service is offerable only if it's explicitly allowed for this
+  // license + state. A service with no matching ALLOW is hidden, not open.
+  return services.filter((svc) => allowed.has(svc.id)).map(toAllowedServiceDto)
 }
