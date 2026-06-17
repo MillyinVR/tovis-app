@@ -229,6 +229,10 @@ app/api/pro/session/route.ts:direct property read:booking.client?.user?.email ||
 app/api/pro/session/route.ts:direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
 app/api/pro/session/route.ts:optional direct property read:booking.client?.user?.email ||
 app/api/pro/session/route.ts:optional direct property read:fullName(booking.client?.firstName, booking.client?.lastName) ||
+app/api/pro/waitlist/route.ts:direct property read:row.client?.firstName ?? null,
+app/api/pro/waitlist/route.ts:direct property read:row.client?.lastName ?? null,
+app/api/pro/waitlist/route.ts:optional direct property read:row.client?.firstName ?? null,
+app/api/pro/waitlist/route.ts:optional direct property read:row.client?.lastName ?? null,
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:lastName: true,
 app/client/(gated)/_data/getClientHomeData.ts:Prisma select/include plaintext field:
