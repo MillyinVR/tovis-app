@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   Prisma,
   ProfessionalLocationType,
+  ProfessionType,
   StripeAccountStatus,
   VerificationStatus,
 } from '@prisma/client'
@@ -70,6 +71,9 @@ function makePro(overrides: Partial<ReadinessInput> = {}): ReadinessInput {
     mobileRadiusMiles: null,
     mobileBasePostalCode: null,
     verificationStatus: VerificationStatus.APPROVED,
+    professionType: null,
+    licenseState: null,
+    licenseExpiry: null,
     paymentSettings: {
       acceptStripeCard: false,
       stripeAccountStatus: StripeAccountStatus.NOT_STARTED,
@@ -82,6 +86,59 @@ function makePro(overrides: Partial<ReadinessInput> = {}): ReadinessInput {
     ...overrides,
   }
 }
+
+describe('license expiry gating', () => {
+  const DAY = 86_400_000
+
+  it('blocks every entry point when a license-required pro is expired', () => {
+    const result = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        professionType: ProfessionType.COSMETOLOGIST,
+        licenseState: 'CA',
+        licenseExpiry: new Date(Date.now() - DAY),
+      }),
+      entryPoint: 'DIRECT_PROFILE',
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.blockers).toContain('LICENSE_EXPIRED')
+  })
+
+  it('does not block when the license is merely expiring soon (future date)', () => {
+    const result = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        professionType: ProfessionType.COSMETOLOGIST,
+        licenseState: 'CA',
+        licenseExpiry: new Date(Date.now() + 10 * DAY),
+      }),
+      entryPoint: 'DIRECT_PROFILE',
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('does not gate professions that need no license, even past the date', () => {
+    const result = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        professionType: ProfessionType.MAKEUP_ARTIST,
+        licenseState: 'CA',
+        licenseExpiry: new Date(Date.now() - DAY),
+      }),
+      entryPoint: 'DIRECT_PROFILE',
+    })
+    expect(result.ok).toBe(true)
+  })
+
+  it('does not gate when no expiry is on file', () => {
+    const result = evaluateProReadinessForEntryPoint({
+      pro: makePro({
+        professionType: ProfessionType.COSMETOLOGIST,
+        licenseState: 'CA',
+        licenseExpiry: null,
+      }),
+      entryPoint: 'DIRECT_PROFILE',
+    })
+    expect(result.ok).toBe(true)
+  })
+})
 
 describe('evaluateProReadiness', () => {
   it('blocks pending/manual-review pros from broad discovery even when otherwise ready', () => {

@@ -62,6 +62,10 @@ export const PRO_BLOCKER_COPY: Record<ProReadinessBlocker, ProBlockerCopy> = {
     label: 'Finish verification so clients can discover you.',
     href: '/pro/verification',
   },
+  LICENSE_EXPIRED: {
+    label: 'Your license has expired — renew it and update your license info.',
+    href: '/pro/verification',
+  },
 }
 
 export function blockerCopy(blocker: ProReadinessBlocker): ProBlockerCopy {

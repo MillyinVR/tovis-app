@@ -54,6 +54,17 @@ function timeAgo(date: Date): string {
   return `${mins}m ago`
 }
 
+function fullName(firstName: string | null, lastName: string | null): string | null {
+  const name = [firstName?.trim(), lastName?.trim()].filter(Boolean).join(' ')
+  return name || null
+}
+
+// YYYY-MM-DD for the date input default value.
+function toDateInputValue(date: Date | null): string {
+  if (!date) return ''
+  return date.toISOString().slice(0, 10)
+}
+
 export default async function AdminLicenseReviewPage() {
   const info = await getAdminUiPerms()
   if (!info) redirect('/login?from=/admin/license-review')
@@ -63,20 +74,35 @@ export default async function AdminLicenseReviewPage() {
     // Platform-operator surface: intentionally reads across all tenants.
     where: {
       ...platformCrossTenantProVisibilityFilter(),
-      verificationStatus: { in: [...QUEUE_STATUSES] },
-      // A credential is actually in play (excludes makeup/other exempt pros who
-      // only ever submit a certificate, not a license).
-      OR: [
-        { licenseNumber: { not: null } },
-        { verificationDocs: { some: { type: VerificationDocumentType.LICENSE } } },
+      AND: [
+        // Needs a decision: awaiting initial review, OR an approved pro who
+        // edited their license info and needs a re-review.
+        {
+          OR: [
+            { verificationStatus: { in: [...QUEUE_STATUSES] } },
+            { licenseReviewPending: true },
+          ],
+        },
+        // A credential is actually in play (excludes makeup/other exempt pros
+        // who only ever submit a certificate, not a license).
+        {
+          OR: [
+            { licenseNumber: { not: null } },
+            { verificationDocs: { some: { type: VerificationDocumentType.LICENSE } } },
+          ],
+        },
       ],
     },
     select: {
       id: true,
       businessName: true,
+      firstName: true, // pii-plaintext-read-ok: admin-only operator review surface
+      lastName: true, // pii-plaintext-read-ok: admin-only operator review surface
       professionType: true,
       licenseState: true,
       licenseNumber: true,
+      licenseExpiry: true,
+      licenseReviewPending: true,
       licenseRawJson: true,
       verificationStatus: true,
       user: { select: { email: true } },
@@ -127,6 +153,7 @@ export default async function AdminLicenseReviewPage() {
           ) : (
             rows.map(({ pro, latestDoc }) => {
               const reason = pendingReason(pro.licenseRawJson)
+              const proName = fullName(pro.firstName, pro.lastName) // pii-plaintext-read-ok: admin-only operator review surface, mirrors the professionals queue
               return (
                 <div
                   key={pro.id}
@@ -149,6 +176,10 @@ export default async function AdminLicenseReviewPage() {
                         </span>
                       </div>
 
+                      {proName ? (
+                        <div className="text-sm text-textPrimary">{proName}</div>
+                      ) : null}
+
                       <div className="text-sm text-textSecondary">
                         {pro.professionType || 'Unknown profession'} ·{' '}
                         {pro.licenseState || '??'}
@@ -156,10 +187,16 @@ export default async function AdminLicenseReviewPage() {
 
                       <div className="text-xs text-textSecondary">
                         License #: {pro.licenseNumber || '—'}
+                        {' · '}
+                        {pro.licenseExpiry ? (
+                          <span>expires {pro.licenseExpiry.toLocaleDateString()}</span>
+                        ) : (
+                          <span className="text-amber-600">no expiry on file</span>
+                        )}
                         {latestDoc ? (
                           <span> · doc uploaded {timeAgo(latestDoc.createdAt)}</span>
                         ) : (
-                          <span> · awaiting upload</span>
+                          <span className="text-amber-600"> · awaiting upload</span>
                         )}
                       </div>
 
@@ -171,6 +208,7 @@ export default async function AdminLicenseReviewPage() {
                     <div className="flex flex-col items-end gap-2">
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <Pill>{String(pro.verificationStatus)}</Pill>
+                        {pro.licenseReviewPending ? <Pill>Re-review</Pill> : null}
                         {latestDoc ? (
                           <Link
                             href={`/api/admin/verification-docs/open?id=${encodeURIComponent(latestDoc.id)}`}
@@ -185,6 +223,8 @@ export default async function AdminLicenseReviewPage() {
                       <LicenseReviewActions
                         professionalId={pro.id}
                         currentStatus={pro.verificationStatus}
+                        initialExpiry={toDateInputValue(pro.licenseExpiry)}
+                        hasLicenseDoc={Boolean(latestDoc)}
                       />
                     </div>
                   </div>

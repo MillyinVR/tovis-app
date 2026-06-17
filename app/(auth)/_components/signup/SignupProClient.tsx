@@ -410,6 +410,7 @@ export default function SignupProClient() {
   const [mobileRadiusMiles, setMobileRadiusMiles] = useState('15')
   const [licenseState, setLicenseState] = useState<string>('')
   const [licenseNumber, setLicenseNumber] = useState('')
+  const [licenseExpiry, setLicenseExpiry] = useState('')
 
   const sessionToken = useMemo(
     () =>
@@ -760,6 +761,7 @@ export default function SignupProClient() {
           licenseNumber: needsLicense
             ? licenseNumber.trim().toUpperCase()
             : undefined,
+          licenseExpiry: needsLicense && licenseExpiry ? licenseExpiry : undefined,
           signupLocation,
           transactionalSmsConsent,
           tosAccepted: true,
@@ -1087,6 +1089,19 @@ export default function SignupProClient() {
                 id={`${FIELD_IDS.licenseNumber}-error`}
                 message={fieldErrors.licenseNumber}
               />
+            </label>
+
+            <label className="grid gap-1.5">
+              <FieldLabel>Expiration date</FieldLabel>
+              <Input
+                type="date"
+                value={licenseExpiry}
+                onChange={(e) => setLicenseExpiry(e.target.value)}
+              />
+              <HelpText>
+                Optional now — you’ll need it (plus a license photo) before an
+                admin can approve you.
+              </HelpText>
             </label>
 
             <div className="rounded-card border border-surfaceGlass/12 bg-bgPrimary/25 px-3 py-2 text-xs text-textSecondary">

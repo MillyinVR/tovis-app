@@ -9,11 +9,17 @@ import {
 } from '@/lib/pro/verification/methods'
 import VerificationUploadClient from './VerificationUploadClient'
 import DeleteDocButton from './DeleteDocButton'
+import LicenseEditForm from './LicenseEditForm'
+import { requiresLicense } from '@/lib/licensing/licenseRequirement'
 
 export const dynamic = 'force-dynamic'
 
 function fmtDate(d: Date) {
   return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: '2-digit' }).format(d)
+}
+
+function toDateInputValue(d: Date | null): string {
+  return d ? d.toISOString().slice(0, 10) : ''
 }
 
 function statusBadgeClasses(status: VerificationStatus): string {
@@ -83,19 +89,21 @@ export default async function ProVerificationPage() {
             </div>
           </div>
 
-          <div className="rounded-card border border-white/10 bg-bgPrimary/30 p-4">
-            <div className="text-xs font-extrabold text-textSecondary">License</div>
-            <div className="mt-2 text-xs text-textSecondary">
-              State: <span className="font-black text-textPrimary">{pro.licenseState ?? '—'}</span>
+          {pro.professionType && requiresLicense(pro.professionType, pro.licenseState) ? (
+            <LicenseEditForm
+              initialState={pro.licenseState ?? ''}
+              initialNumber={pro.licenseNumber ?? ''}
+              initialExpiry={toDateInputValue(pro.licenseExpiry)}
+            />
+          ) : (
+            <div className="rounded-card border border-white/10 bg-bgPrimary/30 p-4">
+              <div className="text-xs font-extrabold text-textSecondary">License</div>
+              <div className="mt-2 text-xs text-textSecondary">
+                No state license required for your profession. Upload a
+                certificate below if applicable.
+              </div>
             </div>
-            <div className="mt-1 text-xs text-textSecondary">
-              Number: <span className="font-black text-textPrimary">{pro.licenseNumber ?? '—'}</span>
-            </div>
-            <div className="mt-1 text-xs text-textSecondary">
-              Expiry:{' '}
-              <span className="font-black text-textPrimary">{pro.licenseExpiry ? fmtDate(pro.licenseExpiry) : '—'}</span>
-            </div>
-          </div>
+          )}
         </div>
 
         <div className="mt-5 h-px w-full bg-white/10" />

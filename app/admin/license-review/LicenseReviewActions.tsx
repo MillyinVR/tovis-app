@@ -13,6 +13,8 @@ import {
 type Props = {
   professionalId: string
   currentStatus: VerificationStatus
+  initialExpiry: string // YYYY-MM-DD or ''
+  hasLicenseDoc: boolean
 }
 
 function btn(kind: 'approve' | 'info' | 'reject', disabled: boolean) {
@@ -29,10 +31,20 @@ function btn(kind: 'approve' | 'info' | 'reject', disabled: boolean) {
 
 // Inline approve / needs-info / reject for one queued pro. Reuses the existing
 // admin verification PATCH endpoint (audit-logged, search-index refreshed).
-export default function LicenseReviewActions({ professionalId, currentStatus }: Props) {
+export default function LicenseReviewActions({
+  professionalId,
+  currentStatus,
+  initialExpiry,
+  hasLicenseDoc,
+}: Props) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [expiry, setExpiry] = useState(initialExpiry)
+
+  // Approval needs an expiry on file + an uploaded license doc (server enforces;
+  // we mirror it here so the button explains itself instead of erroring).
+  const canApprove = Boolean(expiry) && hasLicenseDoc
 
   async function setStatus(
     next: VerificationStatus,
@@ -50,6 +62,8 @@ export default function LicenseReviewActions({ professionalId, currentStatus }: 
           body: JSON.stringify({
             verificationStatus: next,
             ...(typeof licenseVerified === 'boolean' ? { licenseVerified } : {}),
+            // Persist any admin correction to the expiry alongside the decision.
+            ...(expiry ? { licenseExpiry: expiry } : {}),
           }),
         },
       )
@@ -67,12 +81,26 @@ export default function LicenseReviewActions({ professionalId, currentStatus }: 
 
   return (
     <div className="grid gap-1.5">
-      <div className="flex flex-wrap gap-2">
+      <label className="flex items-center justify-end gap-2 text-[11px] font-black text-textSecondary">
+        Expiry
+        <input
+          type="date"
+          value={expiry}
+          onChange={(e) => setExpiry(e.target.value)}
+          className="rounded-lg border border-surfaceGlass/14 bg-bgPrimary/20 px-2 py-1 text-xs text-textPrimary"
+        />
+      </label>
+      <div className="flex flex-wrap justify-end gap-2">
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !canApprove}
           onClick={() => setStatus('APPROVED', true)}
-          className={btn('approve', busy)}
+          className={btn('approve', busy || !canApprove)}
+          title={
+            canApprove
+              ? undefined
+              : 'Needs an expiration date and an uploaded license doc to approve'
+          }
         >
           Approve
         </button>
