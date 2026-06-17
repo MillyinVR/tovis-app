@@ -32,6 +32,10 @@
     {
       "path": "/api/internal/jobs/stale-sessions",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/internal/jobs/migration/ramp-step",
+      "schedule": "0 8 * * *"
     }
   ]
 }
