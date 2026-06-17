@@ -508,3 +508,6 @@ lib/profiles/publicProfileFormatting.ts:direct property read:return trimToNull(i
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:email: true,
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:firstName: true,
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:lastName: true,
+app/api/client/referrals/[id]/confirm/route.ts:direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
+app/api/client/referrals/[id]/confirm/route.ts:optional direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
+app/api/client/referrals/route.ts:direct property read:? [r.professional.firstName, r.professional.lastName]

@@ -238,6 +238,21 @@ enum NfcCardType {
   SALON_WHITE_LABEL
 }
 
+enum ReferralStatus {
+  PENDING
+  CONFIRMED
+  CONVERTED
+  REWARDED
+  DECLINED
+  EXPIRED
+}
+
+enum ReferralRewardTier {
+  RECOGNITION
+  DISCOUNT
+  CREDIT
+}
+
 enum ProfessionalLocationType {
   SALON
   SUITE
@@ -427,6 +442,9 @@ enum NotificationEventKey {
   PAYMENT_COLLECTED
   PAYMENT_ACTION_REQUIRED
   LOOK_FOLLOWER_NEW
+  REFERRAL_TAP_RECEIVED
+  REFERRAL_CONFIRMED
+  REFERRAL_CONVERTED
 }
 
 enum NotificationChannel {
@@ -1157,6 +1175,9 @@ model ClientProfile {
   scheduledNotifications ScheduledClientNotification[]
   waitlistEntries        WaitlistEntry[]
 
+  referralsAsReferrer Referral[] @relation("ReferrerReferrals")
+  referralsAsReferred Referral[] @relation("ReferredReferrals")
+
   followedPros ProFollow[]
   boards       Board[]
 
@@ -1313,6 +1334,8 @@ model ProfessionalProfile {
 
   aftercareRebookSlots AftercareRebookSlot[]
 
+  referrals Referral[]
+
   @@index([handleNormalized])
   @@index([verificationStatus])
   @@index([homeTenantId])
@@ -1454,6 +1477,11 @@ model ProfessionalPaymentSettings {
   zelleHandle     String?
   appleCashHandle String?
   paymentNote     String?
+
+  referralRewardEnabled   Boolean              @default(false)
+  referralRewardTier      ReferralRewardTier   @default(RECOGNITION)
+  referralDiscountPercent Int?
+  referralCreditAmount    Decimal?             @db.Decimal(10, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2169,6 +2197,9 @@ model Booking {
   serviceItems            BookingServiceItem[]
   checkoutProductItems    BookingCheckoutProductItem[]
   clientProfessionalNotes ClientProfessionalNote[]
+
+  referralTrigger Referral? @relation("ReferralTriggerBooking")
+  referralReward  Referral? @relation("ReferralRewardBooking")
 
   @@unique([professionalId, scheduledFor])
   @@unique([clientId, creationIdempotencyKey])
@@ -3471,6 +3502,7 @@ model NfcCard {
   updatedAt         DateTime           @updatedAt
   tapIntents        TapIntent[]
   attributionEvents AttributionEvent[]
+  referrals         Referral[]
 
   @@index([type])
   @@index([claimedByUserId])
@@ -3629,4 +3661,43 @@ model ViralServiceRequest {
   @@index([requestedCategoryId, status, createdAt])
   @@index([moderationStatus, reportCount, createdAt])
   @@index([reviewedByUserId, reviewedAt])
+}
+
+model Referral {
+  id String @id @default(cuid())
+
+  referrerClientId String
+  referrerClient   ClientProfile @relation("ReferrerReferrals", fields: [referrerClientId], references: [id])
+
+  referredClientId String
+  referredClient   ClientProfile @relation("ReferredReferrals", fields: [referredClientId], references: [id])
+
+  nfcCardId String?
+  nfcCard   NfcCard? @relation(fields: [nfcCardId], references: [id])
+
+  status    ReferralStatus @default(PENDING)
+  expiresAt DateTime
+
+  confirmedAt DateTime?
+
+  convertedAt      DateTime?
+  triggerBookingId  String?              @unique
+  triggerBooking    Booking?             @relation("ReferralTriggerBooking", fields: [triggerBookingId], references: [id])
+  professionalId   String?
+  professional     ProfessionalProfile? @relation(fields: [professionalId], references: [id])
+
+  rewardTier  ReferralRewardTier?
+  rewardValue Decimal?            @db.Decimal(10, 2)
+
+  rewardAppliedAt DateTime?
+  rewardBookingId String?  @unique
+  rewardBooking   Booking? @relation("ReferralRewardBooking", fields: [rewardBookingId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([referrerClientId, status])
+  @@index([referredClientId, status])
+  @@index([professionalId, status])
+  @@index([nfcCardId])
 }

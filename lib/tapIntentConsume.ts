@@ -1,8 +1,9 @@
 // lib/tapIntentConsume.ts
 import { prisma } from '@/lib/prisma'
-import { NfcCardType, Role } from '@prisma/client'
+import { NfcCardType, NotificationEventKey, ReferralStatus, Role } from '@prisma/client'
 import { nextUrlFromPayloadJson } from '@/lib/security/safeNextUrl'
 import { TOVIS_ROOT_TENANT_SLUG } from '@/lib/tenant/constants'
+import { createClientNotification } from '@/lib/notifications/clientNotifications'
 
 export async function consumeTapIntent(args: { tapIntentId: string | null; userId: string }) {
   const { tapIntentId, userId } = args
@@ -47,7 +48,7 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
         id: true,
         role: true,
         professionalProfile: { select: { id: true, homeTenantId: true } },
-        clientProfile: { select: { id: true, homeTenantId: true } },
+        clientProfile: { select: { id: true, firstName: true, homeTenantId: true } },
       },
     })
 
@@ -93,6 +94,22 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
           metaJson: { tapIntentId: ti.id, nextUrl },
         },
       })
+
+      // CLIENT_REFERRAL tap by a different client → create a PENDING referral
+      if (
+        card.type === NfcCardType.CLIENT_REFERRAL &&
+        user.clientProfile?.id &&
+        card.claimedByUserId &&
+        user.id !== card.claimedByUserId
+      ) {
+        await maybeCreateReferral(tx, {
+          referrerUserId: card.claimedByUserId,
+          referredClientId: user.clientProfile.id,
+          referredFirstName: user.clientProfile.firstName ?? '',
+          nfcCardId: card.id,
+          nowUtc,
+        })
+      }
 
       return { ok: true as const, nextUrl }
     }
@@ -175,5 +192,65 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
     })
 
     return { ok: true as const, nextUrl }
+  })
+}
+
+const REFERRAL_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000
+
+async function maybeCreateReferral(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  args: {
+    referrerUserId: string
+    referredClientId: string
+    referredFirstName: string
+    nfcCardId: string
+    nowUtc: Date
+  },
+) {
+  const referrerUser = await tx.user.findUnique({
+    where: { id: args.referrerUserId },
+    select: { clientProfile: { select: { id: true } } },
+  })
+
+  const referrerClientId = referrerUser?.clientProfile?.id
+  if (!referrerClientId) return
+
+  // Prevent duplicate referrals for the same pair
+  const existing = await tx.referral.findFirst({
+    where: {
+      referrerClientId,
+      referredClientId: args.referredClientId,
+      status: { in: [ReferralStatus.PENDING, ReferralStatus.CONFIRMED] },
+    },
+    select: { id: true },
+  })
+  if (existing) return
+
+  const referral = await tx.referral.create({
+    data: {
+      referrerClientId,
+      referredClientId: args.referredClientId,
+      nfcCardId: args.nfcCardId,
+      status: ReferralStatus.PENDING,
+      expiresAt: new Date(args.nowUtc.getTime() + REFERRAL_EXPIRY_MS),
+    },
+    select: { id: true },
+  })
+
+  await tx.nfcCard.update({
+    where: { id: args.nfcCardId },
+    data: { referralCount: { increment: 1 } },
+  })
+
+  const name = args.referredFirstName.trim() || 'Someone'
+
+  await createClientNotification({
+    clientId: referrerClientId,
+    eventKey: NotificationEventKey.REFERRAL_TAP_RECEIVED,
+    title: `${name} tapped your referral card`,
+    body: 'Link this as a referral to earn rewards when they book.',
+    href: `/client/referrals?confirm=${referral.id}`,
+    dedupeKey: `REFERRAL_TAP:${referral.id}`,
+    tx,
   })
 }
