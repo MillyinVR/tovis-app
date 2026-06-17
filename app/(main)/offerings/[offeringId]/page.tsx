@@ -26,6 +26,7 @@ import {
 } from '@/lib/profiles/publicProfileFormatting'
 
 import ClaimClient from './ClaimClient'
+import PresenceSignals from './PresenceSignals'
 
 export const dynamic = 'force-dynamic'
 
@@ -243,6 +244,13 @@ export default async function ClaimOpeningPage(props: PageProps) {
             ✦ {incentiveLabel}
           </div>
         ) : null}
+
+        <PresenceSignals
+          resourceType="opening"
+          resourceId={opening.id}
+          professionalId={opening.professionalId}
+          serviceId={serviceRow.serviceId}
+        />
       </div>
 
       <div className="mt-6">
