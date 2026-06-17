@@ -1,7 +1,7 @@
 // app/api/pro/offerings/route.ts
 
 import { prisma } from '@/lib/prisma'
-import { Prisma, ProfessionalLocationType } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import {
   jsonFail,
   jsonOk,
@@ -14,20 +14,9 @@ import { enforceRateLimit, rateLimitIdentity } from '@/app/api/_utils/rateLimit'
 import { refreshProfessional } from '@/lib/search/index/refreshSearchIndex'
 import { isRecord } from '@/lib/guards'
 import { parseMoney, moneyToString } from '@/lib/money'
-import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
-import { toPrismaJson } from '@/lib/typed'
+import { offeringToDto, writeOffering } from '@/lib/offerings/writeOffering'
 
 export const dynamic = 'force-dynamic'
-
-type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'
-
-type WorkingHoursDay = {
-  enabled: boolean
-  start: string
-  end: string
-}
-
-type WorkingHoursObj = Record<WeekdayKey, WorkingHoursDay>
 
 function trimOrNull(v: unknown): string | null | undefined {
   if (v === undefined) return undefined
@@ -55,38 +44,6 @@ function requirePositiveInt(v: unknown, fieldName: string) {
   }
 
   return { ok: true as const, value: n }
-}
-
-function defaultWorkingHours(): WorkingHoursObj {
-  const weekday: WorkingHoursDay = {
-    enabled: true,
-    start: '09:00',
-    end: '17:00',
-  }
-
-  const weekend: WorkingHoursDay = {
-    enabled: false,
-    start: '09:00',
-    end: '17:00',
-  }
-
-  return {
-    mon: { ...weekday },
-    tue: { ...weekday },
-    wed: { ...weekday },
-    thu: { ...weekday },
-    fri: { ...weekday },
-    sat: { ...weekend },
-    sun: { ...weekend },
-  }
-}
-
-function salonCapableTypes(): readonly ProfessionalLocationType[] {
-  return [ProfessionalLocationType.SALON, ProfessionalLocationType.SUITE]
-}
-
-function mobileCapableTypes(): readonly ProfessionalLocationType[] {
-  return [ProfessionalLocationType.MOBILE_BASE]
 }
 
 function parsePriceOrThrow(
@@ -117,134 +74,6 @@ function parsePriceOrThrow(
   return dec
 }
 
-type OfferingRow = Prisma.ProfessionalServiceOfferingGetPayload<{
-  include: { service: { include: { category: true } } }
-}>
-
-function toDto(off: OfferingRow) {
-  return {
-    id: off.id,
-    serviceId: off.serviceId,
-
-    title: null,
-
-    description: off.description ?? null,
-    customImageUrl: off.customImageUrl ?? null,
-
-    offersInSalon: Boolean(off.offersInSalon),
-    offersMobile: Boolean(off.offersMobile),
-
-    salonPriceStartingAt: off.salonPriceStartingAt
-      ? moneyToString(off.salonPriceStartingAt)
-      : null,
-    salonDurationMinutes: off.salonDurationMinutes ?? null,
-
-    mobilePriceStartingAt: off.mobilePriceStartingAt
-      ? moneyToString(off.mobilePriceStartingAt)
-      : null,
-    mobileDurationMinutes: off.mobileDurationMinutes ?? null,
-
-    isActive: Boolean(off.isActive),
-
-    serviceName: off.service.name,
-    categoryName: off.service.category?.name ?? null,
-    serviceDefaultImageUrl: off.service.defaultImageUrl ?? null,
-    minPrice: moneyToString(off.service.minPrice) ?? '0.00',
-
-    isServiceActive: Boolean(off.service.isActive),
-    isCategoryActive: Boolean(off.service.category?.isActive),
-
-    serviceIsAddOnEligible: Boolean(off.service.isAddOnEligible),
-    serviceAddOnGroup: off.service.addOnGroup ?? null,
-  }
-}
-
-function emptyAddressPrivacyWriteData() {
-  return buildAddressPrivacyWriteData({
-    formattedAddress: null,
-    addressLine1: null,
-    addressLine2: null,
-    city: null,
-    state: null,
-    postalCode: null,
-    countryCode: null,
-    placeId: null,
-    lat: null,
-    lng: null,
-  })
-}
-
-async function ensureLocationsForOffering(args: {
-  tx: Prisma.TransactionClient
-  professionalId: string
-  offersInSalon: boolean
-  offersMobile: boolean
-}) {
-  const { tx, professionalId, offersInSalon, offersMobile } = args
-
-  if (!offersInSalon && !offersMobile) return
-
-  const relevantTypes: ProfessionalLocationType[] = [
-    ...(offersInSalon ? salonCapableTypes() : []),
-    ...(offersMobile ? mobileCapableTypes() : []),
-  ]
-
-  const existing = await tx.professionalLocation.findMany({
-    where: {
-      professionalId,
-      type: { in: relevantTypes },
-    },
-    select: { type: true },
-    take: 50,
-  })
-
-  const existingTypes = new Set(existing.map((location) => location.type))
-  const hasSalonCapableLocation = salonCapableTypes().some((type) =>
-    existingTypes.has(type),
-  )
-  const hasMobileCapableLocation = existingTypes.has(
-    ProfessionalLocationType.MOBILE_BASE,
-  )
-
-  let totalLocationCount = await tx.professionalLocation.count({
-    where: { professionalId },
-  })
-
-  if (offersInSalon && !hasSalonCapableLocation) {
-    await tx.professionalLocation.create({
-      data: {
-        professionalId,
-        type: ProfessionalLocationType.SALON,
-        name: 'Set salon address',
-        isPrimary: totalLocationCount === 0,
-        isBookable: false,
-        timeZone: null,
-        workingHours: toPrismaJson(defaultWorkingHours()),
-        ...emptyAddressPrivacyWriteData(),
-      },
-      select: { id: true },
-    })
-
-    totalLocationCount += 1
-  }
-
-  if (offersMobile && !hasMobileCapableLocation) {
-    await tx.professionalLocation.create({
-      data: {
-        professionalId,
-        type: ProfessionalLocationType.MOBILE_BASE,
-        name: 'Set mobile base',
-        isPrimary: totalLocationCount === 0,
-        isBookable: false,
-        timeZone: null,
-        workingHours: toPrismaJson(defaultWorkingHours()),
-        ...emptyAddressPrivacyWriteData(),
-      },
-      select: { id: true },
-    })
-  }
-}
-
 export async function GET() {
   try {
     const auth = await requirePro()
@@ -270,7 +99,7 @@ export async function GET() {
       orderBy: [{ createdAt: 'asc' }],
     })
 
-    return jsonOk({ offerings: offerings.map(toDto) }, 200)
+    return jsonOk({ offerings: offerings.map(offeringToDto) }, 200)
   } catch (error) {
     console.error('GET /api/pro/offerings error', error)
     return jsonFail(500, 'Internal server error')
@@ -465,45 +294,25 @@ export async function POST(request: Request) {
       }
     }
 
-    const offering = await prisma.$transaction(async (tx) => {
-      await ensureLocationsForOffering({
+    const offering = await prisma.$transaction((tx) =>
+      writeOffering({
         tx,
         professionalId,
+        serviceId: service.id,
         offersInSalon,
         offersMobile,
-      })
-
-      return tx.professionalServiceOffering.create({
-        data: {
-          professionalId,
-          serviceId: service.id,
-
-          title: null,
-          description: description ?? null,
-          customImageUrl: customImageUrl ?? null,
-
-          offersInSalon,
-          offersMobile,
-
-          salonPriceStartingAt: offersInSalon ? salonPrice : null,
-          salonDurationMinutes: offersInSalon ? salonDurationMinutes : null,
-
-          mobilePriceStartingAt: offersMobile ? mobilePrice : null,
-          mobileDurationMinutes: offersMobile ? mobileDurationMinutes : null,
-        },
-        include: {
-          service: {
-            include: {
-              category: true,
-            },
-          },
-        },
-      })
-    })
+        description: description ?? null,
+        customImageUrl: customImageUrl ?? null,
+        salonPrice,
+        salonDurationMinutes,
+        mobilePrice,
+        mobileDurationMinutes,
+      }),
+    )
 
     await refreshProfessional(professionalId, 'offering.create')
 
-    return jsonOk({ offering: toDto(offering) }, 201)
+    return jsonOk({ offering: offeringToDto(offering) }, 201)
   } catch (error: unknown) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
