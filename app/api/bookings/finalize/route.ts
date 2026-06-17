@@ -66,6 +66,19 @@ const FINALIZE_OFFERING_SELECT = {
       timeZone: true,
     },
   },
+  service: {
+    select: {
+      minPrice: true,
+    },
+  },
+  priceRamps: {
+    select: {
+      mode: true,
+      currentPrice: true,
+      targetPrice: true,
+      startedAt: true,
+    },
+  },
 } satisfies Prisma.ProfessionalServiceOfferingSelect
 
 type FinalizeOfferingRecord = Prisma.ProfessionalServiceOfferingGetPayload<{
@@ -83,6 +96,13 @@ type FinalizeOfferingForBoundary = {
   mobilePriceStartingAt: Prisma.Decimal | null
   mobileDurationMinutes: number | null
   professionalTimeZone: string | null
+  serviceMinPrice: Prisma.Decimal | null
+  priceRamps: Array<{
+    mode: ServiceLocationType
+    currentPrice: Prisma.Decimal
+    targetPrice: Prisma.Decimal
+    startedAt: Date
+  }>
 }
 
 type ParsedFinalizeBody = {
@@ -289,6 +309,8 @@ function toFinalizeOffering(
     mobilePriceStartingAt: offering.mobilePriceStartingAt,
     mobileDurationMinutes: offering.mobileDurationMinutes,
     professionalTimeZone: offering.professional?.timeZone ?? null,
+    serviceMinPrice: offering.service?.minPrice ?? null,
+    priceRamps: offering.priceRamps,
   }
 }
 

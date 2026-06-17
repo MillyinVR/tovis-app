@@ -47,6 +47,10 @@ import {
 import { upper } from '@/lib/booking/guards'
 import { lockProfessionalSchedule } from '@/lib/booking/scheduleLock'
 import {
+  pickOfferingModeRamp,
+  resolveChargedUnitPrice,
+} from '@/lib/booking/rampedUnitPrice'
+import {
   withLockedClientOwnedBookingTransaction,
   withLockedProfessionalTransaction,
 } from '@/lib/booking/scheduleTransaction'
@@ -403,6 +407,14 @@ type FinalizeBookingFromHoldArgs = {
     mobilePriceStartingAt: Prisma.Decimal | null
     mobileDurationMinutes: number | null
     professionalTimeZone: string | null
+    // Catalog minimum + price-grace ramps, loaded by the route. Absent → no ramp.
+    serviceMinPrice?: Prisma.Decimal | null
+    priceRamps?: Array<{
+      mode: ServiceLocationType
+      currentPrice: Prisma.Decimal
+      targetPrice: Prisma.Decimal
+      startedAt: Date
+    }>
   }
 }
 
@@ -1320,6 +1332,15 @@ const PRO_CREATE_OFFERING_SELECT = {
     select: {
       id: true,
       name: true,
+      minPrice: true,
+    },
+  },
+  priceRamps: {
+    select: {
+      mode: true,
+      currentPrice: true,
+      targetPrice: true,
+      startedAt: true,
     },
   },
 } satisfies Prisma.ProfessionalServiceOfferingSelect
@@ -8052,7 +8073,19 @@ async function performLockedFinalizeBookingFromHold(args: {
     new Prisma.Decimal(0),
   )
 
-  const subtotal = basePrice.add(addOnsPriceTotal)
+  // Honor a price-grace ramp on the base service: existing clients keep their
+  // lower ramped price; new clients pay the catalog minimum (the stored price).
+  // Add-on prices are not ramped.
+  const chargedBasePrice = await resolveChargedUnitPrice({
+    tx: args.tx,
+    professionalId: args.offering.professionalId,
+    clientId: args.clientId,
+    listPrice: basePrice,
+    minPrice: args.offering.serviceMinPrice ?? basePrice,
+    ramp: pickOfferingModeRamp(args.offering.priceRamps, args.locationType),
+  })
+
+  const subtotal = chargedBasePrice.add(addOnsPriceTotal)
 
   // Apply the claimed opening's incentive to the subtotal. computeLastMinuteDiscount re-applies
   // the pro's eligibility gates (enabled / day-disabled / minCollectedSubtotal floor), so a
@@ -8338,7 +8371,7 @@ async function performLockedFinalizeBookingFromHold(args: {
       serviceId: args.offering.serviceId,
       offeringId: args.offering.id,
       itemType: BookingServiceItemType.BASE,
-      priceSnapshot: basePrice,
+      priceSnapshot: chargedBasePrice,
       durationMinutesSnapshot: baseDurationMinutes,
       sortOrder: 0,
     },
@@ -8555,6 +8588,20 @@ async function performLockedCreateProBooking(args: {
   const locationContext = validatedContextResult.context
   const baseDurationMinutes = validatedContextResult.durationMinutes
   const basePrice = decimalFromUnknown(validatedContextResult.priceStartingAt)
+  // Honor a price-grace ramp: existing clients of a migrated offering keep their
+  // lower ramped price; new clients pay the catalog minimum (the stored price).
+  const offeringRampForMode = pickOfferingModeRamp(
+    offering.priceRamps,
+    args.locationType,
+  )
+  const chargedUnitPrice = await resolveChargedUnitPrice({
+    tx: args.tx,
+    professionalId: args.professionalId,
+    clientId: args.clientId,
+    listPrice: basePrice,
+    minPrice: offering.service.minPrice ?? basePrice,
+    ramp: offeringRampForMode,
+  })
 
   await assertMobileBookingWithinRadius({
     tx: args.tx,
@@ -8772,13 +8819,13 @@ async function performLockedCreateProBooking(args: {
             : null,
         bufferMinutes,
         totalDurationMinutes,
-        subtotalSnapshot: basePrice,
-        serviceSubtotalSnapshot: basePrice,
+        subtotalSnapshot: chargedUnitPrice,
+        serviceSubtotalSnapshot: chargedUnitPrice,
         productSubtotalSnapshot: zeroMoney(),
         tipAmount: zeroMoney(),
         taxAmount: zeroMoney(),
         discountAmount: zeroMoney(),
-        totalAmount: basePrice,
+        totalAmount: chargedUnitPrice,
         checkoutStatus: BookingCheckoutStatus.NOT_READY,
         selectedPaymentMethod: null,
         paymentAuthorizedAt: null,
@@ -8822,7 +8869,7 @@ async function performLockedCreateProBooking(args: {
       serviceId: offering.serviceId,
       offeringId: offering.id,
       itemType: BookingServiceItemType.BASE,
-      priceSnapshot: basePrice,
+      priceSnapshot: chargedUnitPrice,
       durationMinutesSnapshot: computedDurationMinutes,
       sortOrder: 0,
     },
@@ -8878,7 +8925,7 @@ if (schedulingDecision.appliedOverrides.length > 0) {
       bufferMinutes: booking.bufferMinutes,
       status: booking.status,
     },
-    subtotalSnapshot: basePrice,
+    subtotalSnapshot: chargedUnitPrice,
     stepMinutes,
     appointmentTimeZone: locationContext.timeZone,
     locationId: locationContext.locationId,
