@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   lastMinuteRecipientFindUnique: vi.fn(),
   lastMinuteRecipientCreate: vi.fn(),
   lastMinuteRecipientUpdate: vi.fn(),
+  lastMinuteSettingsFindUnique: vi.fn(),
   transaction: vi.fn(),
 
   upsertClientNotification: vi.fn(),
@@ -32,6 +33,10 @@ const mocks = vi.hoisted(() => ({
   buildTier1WaitlistAudience: vi.fn(),
   buildTier2ReactivationAudience: vi.fn(),
   buildTier3DiscoveryAudience: vi.fn(),
+
+  expireOverduePriorityOffers: vi.fn(),
+  offerNextPriorityClient: vi.fn(),
+  hasActivePriorityOffer: vi.fn(),
 
   safeError: vi.fn((error: unknown) => ({
     name: error instanceof Error ? error.name : 'NonErrorThrown',
@@ -78,6 +83,12 @@ vi.mock('@/lib/lastMinute/audience/buildTier3DiscoveryAudience', () => ({
   buildTier3DiscoveryAudience: mocks.buildTier3DiscoveryAudience,
 }))
 
+vi.mock('@/lib/lastMinute/priorityOffer/priorityOffer', () => ({
+  expireOverduePriorityOffers: mocks.expireOverduePriorityOffers,
+  offerNextPriorityClient: mocks.offerNextPriorityClient,
+  hasActivePriorityOffer: mocks.hasActivePriorityOffer,
+}))
+
 vi.mock('@/lib/security/logging', () => ({
   safeError: mocks.safeError,
 }))
@@ -92,6 +103,9 @@ type Tx = {
   lastMinuteRecipient: {
     findUnique: typeof mocks.lastMinuteRecipientFindUnique
     create: typeof mocks.lastMinuteRecipientCreate
+  }
+  lastMinuteSettings: {
+    findUnique: typeof mocks.lastMinuteSettingsFindUnique
   }
 }
 
@@ -243,6 +257,9 @@ function makeTx(): Tx {
       findUnique: mocks.lastMinuteRecipientFindUnique,
       create: mocks.lastMinuteRecipientCreate,
     },
+    lastMinuteSettings: {
+      findUnique: mocks.lastMinuteSettingsFindUnique,
+    },
   }
 }
 
@@ -289,6 +306,7 @@ describe('app/api/internal/jobs/last-minute/process/route.ts', () => {
     mocks.lastMinuteRecipientFindUnique.mockResolvedValue(null)
     mocks.lastMinuteRecipientCreate.mockResolvedValue({ id: 'recipient_1' })
     mocks.lastMinuteRecipientUpdate.mockResolvedValue({})
+    mocks.lastMinuteSettingsFindUnique.mockResolvedValue(null)
 
     mocks.upsertClientNotification.mockResolvedValue({
       id: 'client_notification_1',
