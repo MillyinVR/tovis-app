@@ -230,6 +230,7 @@ test.describe('signup flows', () => {
     await page.goto('/signup/pro')
 
     await page.getByRole('combobox').first().selectOption('MAKEUP_ARTIST')
+    await page.getByRole('combobox').nth(1).selectOption('CA')
     await page.getByRole('button', { name: 'In salon / suite' }).click()
 
     const addressInput = page.getByPlaceholder(
@@ -258,6 +259,7 @@ test.describe('signup flows', () => {
     await page.goto('/signup/pro')
 
     await page.getByRole('combobox').first().selectOption('MASSAGE_THERAPIST')
+    await page.getByRole('combobox').nth(1).selectOption('CA')
     await page.getByRole('button', { name: 'Mobile', exact: true }).click()
 
     await page
@@ -284,6 +286,7 @@ test.describe('signup flows', () => {
     await page.goto('/signup/pro')
 
     await page.getByRole('combobox').first().selectOption('ESTHETICIAN')
+    await page.getByRole('combobox').nth(1).selectOption('CA')
     await expect(page.getByText('California license')).toBeVisible()
     await page.getByLabel('License number').fill('Z123456')
 

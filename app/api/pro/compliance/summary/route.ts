@@ -3,28 +3,19 @@ import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { ProfessionType, VerificationStatus, VerificationDocumentType, } from '@prisma/client'
 
+import { requiresLicense } from '@/lib/licensing/licenseRequirement'
+
 export const dynamic = 'force-dynamic'
 
-const CA_BBC_LICENSE_REQUIRED: readonly ProfessionType[] = [
-  ProfessionType.COSMETOLOGIST,
-  ProfessionType.BARBER,
-  ProfessionType.ESTHETICIAN,
-  ProfessionType.MANICURIST,
-  ProfessionType.HAIRSTYLIST,
-  ProfessionType.ELECTROLOGIST,
-] as const
-
-function requiresCaBbcLicense(p: ProfessionType | null) {
-  if (!p) return false
-  return CA_BBC_LICENSE_REQUIRED.includes(p)
-}
-
 // Which document type satisfies the "you've started verification" nudge for
-// this profession. Licensed professions must submit their license; makeup
-// artists verify via their primary certificate instead.
-function requiredDocTypeFor(p: ProfessionType | null): VerificationDocumentType | null {
+// this profession in this state. Licensed/registered professions submit their
+// license; makeup artists verify via their primary certificate instead.
+function requiredDocTypeFor(
+  p: ProfessionType | null,
+  stateCode: string | null,
+): VerificationDocumentType | null {
   if (!p) return null
-  if (requiresCaBbcLicense(p)) return VerificationDocumentType.LICENSE
+  if (requiresLicense(p, stateCode)) return VerificationDocumentType.LICENSE
   if (p === ProfessionType.MAKEUP_ARTIST) return VerificationDocumentType.MAKEUP_PRIMARY
   return null
 }
@@ -48,6 +39,7 @@ export async function GET() {
       select: {
         id: true,
         professionType: true,
+        licenseState: true,
         verificationStatus: true,
         licenseVerified: true,
         licenseExpiry: true,
@@ -69,8 +61,10 @@ export async function GET() {
 
     if (!pro) return jsonFail(404, 'Professional profile not found.')
 
-    const licenseRequired = requiresCaBbcLicense(pro.professionType)
-    const requiredDocType = requiredDocTypeFor(pro.professionType)
+    const licenseRequired = pro.professionType
+      ? requiresLicense(pro.professionType, pro.licenseState)
+      : false
+    const requiredDocType = requiredDocTypeFor(pro.professionType, pro.licenseState)
     const latestDocStatus =
       pro.verificationDocs.find((d) => d.type === requiredDocType)?.status ?? null
 
