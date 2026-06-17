@@ -994,6 +994,88 @@ async function main() {
   await ensurePermission(softGlam.id, ProfessionType.COSMETOLOGIST, 'CA')
   await ensurePermission(swedish60.id, ProfessionType.MASSAGE_THERAPIST, 'CA')
 
+  // ── Expanded canonical catalog (migration matcher coverage). ───────────────
+  // DRAFT minimum prices — see docs/design/canonical-catalog-expansion.md;
+  // confirm/adjust before relying on these as platform minimums. Prod catalog is
+  // admin-managed, so this only seeds dev / fresh installs.
+  const hairTreatment = await upsertServiceCategory({
+    slug: 'hair-treatment',
+    name: 'Treatment',
+    description: 'Smoothing, conditioning, and restorative hair treatments.',
+    parentId: hair.id,
+  })
+  const nailsManicure = await upsertServiceCategory({
+    slug: 'nails-manicure',
+    name: 'Manicure',
+    description: 'Manicures and gel polish.',
+    parentId: nails.id,
+  })
+  const nailsPedicure = await upsertServiceCategory({
+    slug: 'nails-pedicure',
+    name: 'Pedicure',
+    description: 'Pedicures and gel polish.',
+    parentId: nails.id,
+  })
+  const lashes = await upsertServiceCategory({
+    slug: 'lashes',
+    name: 'Lashes',
+    description: 'Lash extensions, fills, and lifts.',
+  })
+  const brows = await upsertServiceCategory({
+    slug: 'brows',
+    name: 'Brows',
+    description: 'Brow shaping, lamination, and tinting.',
+  })
+  const skin = await upsertServiceCategory({
+    slug: 'skin',
+    name: 'Skin',
+    description: 'Facials and skin treatments.',
+  })
+  const waxing = await upsertServiceCategory({
+    slug: 'waxing',
+    name: 'Waxing',
+    description: 'Hair removal by waxing.',
+  })
+
+  // Data-driven so the list is easy to review/extend. minPrice is DRAFT.
+  const expandedCatalog = [
+    { name: 'Partial Highlights', categoryId: hairColor.id, minPrice: '120.00', defaultDurationMinutes: 150, allowMobile: false, profession: ProfessionType.COSMETOLOGIST, description: 'Foil highlights through part of the head.' },
+    { name: 'Full Highlights', categoryId: hairColor.id, minPrice: '160.00', defaultDurationMinutes: 180, allowMobile: false, profession: ProfessionType.COSMETOLOGIST, description: 'Foil highlights throughout the head.' },
+    { name: 'All-Over Color', categoryId: hairColor.id, minPrice: '90.00', defaultDurationMinutes: 90, allowMobile: false, profession: ProfessionType.COSMETOLOGIST, description: 'Single-process all-over color.' },
+    { name: 'Toner / Gloss', categoryId: hairColor.id, minPrice: '45.00', defaultDurationMinutes: 45, allowMobile: false, profession: ProfessionType.COSMETOLOGIST, description: 'Refreshes tone and adds shine.' },
+    { name: "Men's Cut", categoryId: haircut.id, minPrice: '35.00', defaultDurationMinutes: 30, allowMobile: true, profession: ProfessionType.COSMETOLOGIST, description: "Men's haircut." },
+    { name: 'Blowout', categoryId: haircut.id, minPrice: '50.00', defaultDurationMinutes: 45, allowMobile: true, profession: ProfessionType.COSMETOLOGIST, description: 'Wash and blow-dry style.' },
+    { name: 'Keratin Smoothing Treatment', categoryId: hairTreatment.id, minPrice: '200.00', defaultDurationMinutes: 150, allowMobile: false, profession: ProfessionType.COSMETOLOGIST, description: 'Smoothing treatment that reduces frizz.' },
+    { name: 'Gel Manicure', categoryId: nailsManicure.id, minPrice: '45.00', defaultDurationMinutes: 60, allowMobile: true, profession: ProfessionType.MANICURIST, description: 'Manicure finished with gel polish.' },
+    { name: 'Classic Manicure', categoryId: nailsManicure.id, minPrice: '30.00', defaultDurationMinutes: 45, allowMobile: true, profession: ProfessionType.MANICURIST, description: 'Classic manicure with regular polish.' },
+    { name: 'Gel Pedicure', categoryId: nailsPedicure.id, minPrice: '55.00', defaultDurationMinutes: 60, allowMobile: false, profession: ProfessionType.MANICURIST, description: 'Pedicure finished with gel polish.' },
+    { name: 'Acrylic Full Set', categoryId: nailsEnhancements.id, minPrice: '60.00', defaultDurationMinutes: 90, allowMobile: false, profession: ProfessionType.MANICURIST, description: 'Acrylic nail extensions, full set.' },
+    { name: 'Dip Powder', categoryId: nailsEnhancements.id, minPrice: '50.00', defaultDurationMinutes: 60, allowMobile: false, profession: ProfessionType.MANICURIST, description: 'Dip-powder manicure.' },
+    { name: 'Classic Lash Full Set', categoryId: lashes.id, minPrice: '120.00', defaultDurationMinutes: 120, allowMobile: false, profession: ProfessionType.ESTHETICIAN, description: 'Classic individual lash extensions, full set.' },
+    { name: 'Volume Lash Full Set', categoryId: lashes.id, minPrice: '150.00', defaultDurationMinutes: 150, allowMobile: false, profession: ProfessionType.ESTHETICIAN, description: 'Volume lash extensions, full set.' },
+    { name: 'Lash Fill', categoryId: lashes.id, minPrice: '60.00', defaultDurationMinutes: 60, allowMobile: false, profession: ProfessionType.ESTHETICIAN, description: 'Lash extension fill/refill.' },
+    { name: 'Lash Lift', categoryId: lashes.id, minPrice: '75.00', defaultDurationMinutes: 60, allowMobile: true, profession: ProfessionType.ESTHETICIAN, description: 'Lifts and curls natural lashes.' },
+    { name: 'Brow Lamination', categoryId: brows.id, minPrice: '75.00', defaultDurationMinutes: 60, allowMobile: true, profession: ProfessionType.ESTHETICIAN, description: 'Restructures brow hairs for a fuller look.' },
+    { name: 'Brow Wax & Shape', categoryId: brows.id, minPrice: '25.00', defaultDurationMinutes: 20, allowMobile: true, profession: ProfessionType.ESTHETICIAN, description: 'Brow shaping by wax.' },
+    { name: 'Classic Facial', categoryId: skin.id, minPrice: '90.00', defaultDurationMinutes: 60, allowMobile: true, profession: ProfessionType.ESTHETICIAN, description: 'Cleansing and hydrating facial.' },
+    { name: 'Brazilian Wax', categoryId: waxing.id, minPrice: '55.00', defaultDurationMinutes: 30, allowMobile: false, profession: ProfessionType.ESTHETICIAN, description: 'Brazilian hair removal by wax.' },
+    { name: 'Bridal Makeup', categoryId: makeup.id, minPrice: '200.00', defaultDurationMinutes: 90, allowMobile: true, profession: ProfessionType.MAKEUP_ARTIST, description: 'Bridal makeup application.' },
+    { name: '60-Minute Deep Tissue', categoryId: massage.id, minPrice: '120.00', defaultDurationMinutes: 60, allowMobile: true, profession: ProfessionType.MASSAGE_THERAPIST, description: 'Deep-tissue massage focusing on tension.' },
+    { name: 'Hot Stone Massage', categoryId: massage.id, minPrice: '140.00', defaultDurationMinutes: 90, allowMobile: true, profession: ProfessionType.MASSAGE_THERAPIST, description: 'Massage using heated stones.' },
+  ]
+
+  for (const entry of expandedCatalog) {
+    const service = await upsertService({
+      name: entry.name,
+      categoryId: entry.categoryId,
+      description: entry.description,
+      defaultDurationMinutes: entry.defaultDurationMinutes,
+      minPrice: entry.minPrice,
+      allowMobile: entry.allowMobile,
+    })
+    await ensurePermission(service.id, entry.profession, 'CA')
+  }
+
   await ensureOffering({
     professionalId: professionalProfile.id,
     serviceId: balayage.id,

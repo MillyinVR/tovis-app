@@ -52,20 +52,47 @@ const FILLER = new Set([
 // Canonical service name → competitor phrases that mean the same thing.
 // Grows alongside the seeded catalog; this is where vendor vocabulary collapses
 // onto one clean canonical name.
+// Keys MUST match canonical Service names exactly (aliases bind by entry.name).
 export const SERVICE_ALIASES: Record<string, string[]> = {
+  // Hair — color
   Balayage: ['balayage', 'babylights', 'baby lights', 'hand painted color', 'painted highlights', 'ombre'],
   'Partial Highlights': ['partial highlights', 'partial foil', 'partial foils', 'half head foils', 'foilage'],
   'Full Highlights': ['full highlights', 'full foil', 'full foils', 'full head foils'],
+  'All-Over Color': ['all over color', 'single process', 'full color', 'all over', 'base color'],
+  'Toner / Gloss': ['toner', 'gloss', 'glaze', 'clear gloss', 'color gloss'],
   'Root Touch-Up': ['root touch up', 'root retouch', 'color retouch', 'root color', 'roots'],
+  // Hair — cut & style
   'Haircut & Style': ['haircut', 'cut and style', 'cut and finish', 'womens cut', 'womens haircut', 'ladies cut', 'ladies haircut', 'wash cut style'],
   "Men's Cut": ['mens cut', 'mens haircut', 'barber cut', 'clipper cut', 'fade'],
   Blowout: ['blowout', 'blow dry', 'blow out', 'wash and style'],
-  'Gel-X Full Set': ['gel x', 'gelx', 'gelx full set', 'hard gel set', 'gel extensions'],
-  'Soft Glam Makeup': ['soft glam', 'glam makeup', 'event makeup', 'special occasion makeup', 'bridal makeup'],
-  'Lash Lift': ['lash lift', 'lash perm'],
-  'Brow Lamination': ['brow lamination', 'brow lam'],
-  '60-Minute Swedish Massage': ['swedish massage', '60 min massage', 'relaxation massage', 'full body massage'],
+  // Hair — treatment / extensions
+  'Keratin Smoothing Treatment': ['keratin', 'keratin treatment', 'brazilian blowout', 'smoothing treatment'],
   'Extension Installation': ['extensions install', 'hair extensions', 'tape ins', 'install extensions', 'sew in'],
+  // Nails
+  'Gel Manicure': ['gel manicure', 'shellac manicure', 'gel polish manicure', 'shellac mani', 'gel mani'],
+  'Classic Manicure': ['classic manicure', 'basic manicure', 'manicure', 'regular manicure'],
+  'Gel Pedicure': ['gel pedicure', 'shellac pedicure', 'gel pedi'],
+  'Acrylic Full Set': ['acrylic full set', 'acrylics', 'acrylic set', 'full set acrylic', 'acrylic nails'],
+  'Dip Powder': ['dip powder', 'sns', 'dip nails', 'powder dip', 'dip'],
+  'Gel X Full Set': ['gel x', 'gelx', 'gelx full set', 'gel x full set', 'hard gel set', 'gel extensions'],
+  // Lashes
+  'Classic Lash Full Set': ['classic lashes', 'classic full set', 'classic lash set', 'eyelash extensions full set', 'lash extensions full set'],
+  'Volume Lash Full Set': ['volume lashes', 'volume full set', 'volume lash set', 'russian volume'],
+  'Lash Fill': ['lash fill', 'lash refill', 'fill in', 'lash fill in'],
+  'Lash Lift': ['lash lift', 'lash perm'],
+  // Brows
+  'Brow Lamination': ['brow lamination', 'brow lam'],
+  'Brow Wax & Shape': ['brow wax', 'eyebrow wax', 'brow shaping', 'eyebrow shaping', 'brow shape'],
+  // Skin / waxing
+  'Classic Facial': ['facial', 'classic facial', 'signature facial', 'express facial'],
+  'Brazilian Wax': ['brazilian wax', 'brazilian'],
+  // Makeup
+  'Soft Glam Makeup': ['soft glam', 'glam makeup', 'event makeup', 'special occasion makeup'],
+  'Bridal Makeup': ['bridal makeup', 'wedding makeup', 'bridal trial', 'bridal'],
+  // Massage
+  '60-Minute Swedish Massage': ['swedish massage', '60 min massage', 'relaxation massage', 'full body massage'],
+  '60-Minute Deep Tissue': ['deep tissue', 'deep tissue massage', '60 min deep tissue'],
+  'Hot Stone Massage': ['hot stone', 'hot stone massage'],
 }
 
 export function normalizeServiceName(raw: string): string {

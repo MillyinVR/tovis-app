@@ -19,12 +19,17 @@ const CATALOG: MatchCatalogEntry[] = [
   { id: '5', name: 'Haircut & Style', categoryName: 'Haircut' },
   { id: '6', name: "Men's Cut", categoryName: 'Haircut' },
   { id: '7', name: 'Blowout', categoryName: 'Haircut' },
-  { id: '8', name: 'Gel-X Full Set', categoryName: 'Nails' },
+  { id: '8', name: 'Gel X Full Set', categoryName: 'Nails' },
   { id: '9', name: 'Soft Glam Makeup', categoryName: 'Makeup' },
   { id: '10', name: 'Lash Lift', categoryName: 'Lashes' },
   { id: '11', name: 'Brow Lamination', categoryName: 'Brows' },
   { id: '12', name: '60-Minute Swedish Massage', categoryName: 'Massage' },
   { id: '13', name: 'Extension Installation', categoryName: 'Extensions' },
+  { id: '14', name: 'Gel Manicure', categoryName: 'Manicure' },
+  { id: '15', name: 'Volume Lash Full Set', categoryName: 'Lashes' },
+  { id: '16', name: '60-Minute Deep Tissue', categoryName: 'Massage' },
+  { id: '17', name: 'Brazilian Wax', categoryName: 'Waxing' },
+  { id: '18', name: 'All-Over Color', categoryName: 'Color' },
 ]
 
 function topName(input: string): string | null {
@@ -51,10 +56,19 @@ describe('suggestServices — exact & casing', () => {
   })
 
   it('matches despite filler words and punctuation', () => {
-    // "Gel X Full Set" → "Gel-X Full Set"
     const top = bestServiceMatch('Gel X full set', CATALOG)
-    expect(top?.entry.name).toBe('Gel-X Full Set')
+    expect(top?.entry.name).toBe('Gel X Full Set')
     expect(isConfident(top)).toBe(true)
+  })
+
+  it('confidently matches expanded-catalog competitor names via aliases', () => {
+    // Names a real competitor export would use → canonical catalog entries.
+    expect(topName('Shellac Mani')).toBe('Gel Manicure')
+    expect(topName('Volume Lashes')).toBe('Volume Lash Full Set')
+    expect(topName('Deep Tissue')).toBe('60-Minute Deep Tissue')
+    expect(topName('Brazilian')).toBe('Brazilian Wax')
+    expect(topName('Single Process')).toBe('All-Over Color')
+    expect(isConfident(bestServiceMatch('Shellac Mani', CATALOG))).toBe(true)
   })
 })
 
