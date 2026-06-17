@@ -29,6 +29,10 @@ const securityHeaders = [
 ]
 
 const nextConfig: NextConfig = {
+  // node-ical (calendar migration import) is server-only and must not be bundled
+  // by the route tracer — bundling breaks a transitive dep at build time
+  // ("s.BigInt is not a function"). Leave it as a runtime require.
+  serverExternalPackages: ['node-ical'],
   async headers() {
     return [
       {

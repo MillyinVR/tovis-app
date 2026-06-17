@@ -5,7 +5,6 @@ import { headers } from 'next/headers'
 import { getBrandConfig } from '@/lib/brand'
 import { defaultMigrationCopy } from '@/lib/brand/defaultMigrationCopy'
 
-import { mockCalendarViewModel } from '../_mock'
 import { MigrateCalendarClient } from './MigrateCalendarClient'
 
 async function getRequestHost(): Promise<string | null> {
@@ -18,5 +17,5 @@ export default async function ProMigrateCalendarPage() {
   const brand = getBrandConfig({ host })
   const copy = defaultMigrationCopy(brand.assets.wordmark.text)
 
-  return <MigrateCalendarClient copy={copy.calendar} vm={mockCalendarViewModel()} />
+  return <MigrateCalendarClient copy={copy.calendar} />
 }
