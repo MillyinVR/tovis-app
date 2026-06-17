@@ -51,6 +51,7 @@ enum BookingSource {
   REQUESTED // client sought out THIS pro (profile/looks/referral/NFC)
   DISCOVERY // client searched a service and picked whoever (closest/soonest)
   AFTERCARE // rebooked from aftercare summary link/button
+  IMPORTED // migrated from a competitor calendar; excluded from revenue until edited
 }
 
 enum BookingOverrideRule {

@@ -169,5 +169,11 @@ export function bookingEntryPointFromBookingSource(
 
     case BookingSource.REQUESTED:
       return 'DIRECT_PROFILE'
+
+    // IMPORTED bookings are created pro-side via createProBooking (entry point
+    // PRO_CREATED) and never reach this client-finalize mapping; treat as the
+    // strictest marketplace default for exhaustiveness.
+    case BookingSource.IMPORTED:
+      return 'BROAD_DISCOVERY'
   }
 }

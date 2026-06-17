@@ -266,6 +266,9 @@ function expectedBookingEntryPointForSource(
     case BookingSource.REQUESTED:
     case BookingSource.AFTERCARE:
       return 'DIRECT_PROFILE'
+
+    case BookingSource.IMPORTED:
+      return 'BROAD_DISCOVERY'
   }
 }
 
