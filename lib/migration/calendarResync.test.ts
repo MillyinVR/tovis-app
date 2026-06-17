@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   fetchCalendarFeed: vi.fn(),
   parseCalendarFeed: vi.fn(),
   commitCalendarImport: vi.fn(),
+  reconcileRemovedImportedEvents: vi.fn(),
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -15,7 +16,10 @@ vi.mock('@/lib/prisma', () => ({
 }))
 vi.mock('./calendarFeed', () => ({ fetchCalendarFeed: mocks.fetchCalendarFeed }))
 vi.mock('./calendarImport', () => ({ parseCalendarFeed: mocks.parseCalendarFeed }))
-vi.mock('./calendarImportServer', () => ({ commitCalendarImport: mocks.commitCalendarImport }))
+vi.mock('./calendarImportServer', () => ({
+  commitCalendarImport: mocks.commitCalendarImport,
+  reconcileRemovedImportedEvents: mocks.reconcileRemovedImportedEvents,
+}))
 
 import { runCalendarResync } from './calendarResync'
 
@@ -30,6 +34,7 @@ beforeEach(() => {
   mocks.update.mockResolvedValue({})
   mocks.parseCalendarFeed.mockReturnValue([{ uid: 'e1' }])
   mocks.commitCalendarImport.mockResolvedValue({ created: { bookings: 1, blocks: 2, history: 3 }, skipped: 0, failed: 0 })
+  mocks.reconcileRemovedImportedEvents.mockResolvedValue({ cancelledBookings: 0, deletedBlocks: 0 })
 })
 
 describe('runCalendarResync', () => {
@@ -68,11 +73,40 @@ describe('runCalendarResync', () => {
           status: 'ACTIVE',
           lastSyncError: null,
           lastSyncedAt: NOW,
-          lastSyncCounts: { bookings: 1, blocks: 2, history: 3, failed: 0 },
+          lastSyncCounts: {
+            bookings: 1,
+            blocks: 2,
+            history: 3,
+            failed: 0,
+            cancelledBookings: 0,
+            deletedBlocks: 0,
+          },
+          lastSyncedUids: ['e1'],
         }),
       }),
     )
+    // No prior UID set → nothing reconciled on a first sync.
+    expect(mocks.reconcileRemovedImportedEvents).not.toHaveBeenCalled()
     expect(summary).toMatchObject({ scanned: 1, synced: 1, errored: 0 })
+  })
+
+  it('reconciles UIDs that dropped out of the feed since the last sync', async () => {
+    mocks.findMany.mockResolvedValue([{ ...sub('a'), lastSyncedUids: ['e1', 'gone'] }])
+    mocks.fetchCalendarFeed.mockResolvedValue({ ok: true, ics: 'ICS' })
+    mocks.parseCalendarFeed.mockReturnValue([{ uid: 'e1' }]) // 'gone' removed upstream
+
+    await runCalendarResync({ now: NOW })
+
+    expect(mocks.reconcileRemovedImportedEvents).toHaveBeenCalledWith({
+      professionalId: 'pro-a',
+      removedUids: ['gone'],
+    })
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'a' },
+        data: expect.objectContaining({ lastSyncedUids: ['e1'] }),
+      }),
+    )
   })
 
   it('marks a feed ERROR when the fetch fails and never commits', async () => {

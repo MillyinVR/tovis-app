@@ -12,7 +12,10 @@
 
 import { Prisma, ProfessionalLocationType, ServiceLocationType } from '@prisma/client'
 
-import { createProBooking } from '@/lib/booking/writeBoundary'
+import {
+  cancelImportedBookingIfPristine,
+  createProBooking,
+} from '@/lib/booking/writeBoundary'
 import { upsertProClient } from '@/lib/clients/upsertProClient'
 import { prisma } from '@/lib/prisma'
 import { safeError } from '@/lib/security/logging'
@@ -22,6 +25,17 @@ import { isConfident, suggestServices, type MatchCatalogEntry } from './serviceM
 
 const DEFAULT_BLOCK_MINUTES = 60
 const IMPORT_IDEMPOTENCY_PREFIX = 'import:'
+
+// The per-event idempotency key used on imported bookings (creationIdempotencyKey).
+function importKey(uid: string): string {
+  return `${IMPORT_IDEMPOTENCY_PREFIX}${uid}`
+}
+
+// The bracketed tag embedded in a held block's note. Bracketed so a `contains`
+// match is collision-safe (uid "abc" won't match a block tagged for "abcd").
+function importBlockTag(uid: string): string {
+  return `[${importKey(uid)}]`
+}
 
 export type CalendarEventClassification = 'BOOKING' | 'BLOCK' | 'HISTORY' | 'SKIP'
 
@@ -217,7 +231,7 @@ function blockNote(event: NormalizedCalendarEvent, reason: string): string {
   // Embed the UID so re-running the import dedupes blocks on the source event.
   const who = event.attendeeName ? ` — ${event.attendeeName}` : ''
   const label = event.summary || 'Imported appointment'
-  return `${label}${who} [${IMPORT_IDEMPOTENCY_PREFIX}${event.uid}] (${reason})`
+  return `${label}${who} ${importBlockTag(event.uid)} (${reason})`
 }
 
 async function createBlockIfAbsent(args: {
@@ -225,9 +239,11 @@ async function createBlockIfAbsent(args: {
   event: NormalizedCalendarEvent
   reason: string
 }): Promise<'created' | 'skipped'> {
-  const tag = `${IMPORT_IDEMPOTENCY_PREFIX}${args.event.uid}`
   const existing = await prisma.calendarBlock.findFirst({
-    where: { professionalId: args.professionalId, note: { contains: tag } },
+    where: {
+      professionalId: args.professionalId,
+      note: { contains: importBlockTag(args.event.uid) },
+    },
     select: { id: true },
   })
   if (existing) return 'skipped'
@@ -333,7 +349,7 @@ export async function commitCalendarImport(args: {
             allowShortNotice: true,
             allowFarFuture: false,
             importMode: true,
-            idempotencyKey: `${IMPORT_IDEMPOTENCY_PREFIX}${event.uid}`,
+            idempotencyKey: importKey(event.uid),
           })
           created.bookings += 1
           continue
@@ -382,6 +398,44 @@ export async function commitCalendarImport(args: {
   }
 
   return { created, skipped, failed }
+}
+
+export type CalendarReconcileResult = {
+  cancelledBookings: number
+  deletedBlocks: number
+}
+
+// Reconcile feed deletions during resync: for events that were imported before
+// but have now disappeared from the feed (the pro deleted them in their old
+// app), delete the held block and cancel the imported booking — but ONLY if the
+// booking is still pristine (untouched since import: ACCEPTED, never started,
+// still source=IMPORTED). A booking the pro has engaged with is left alone, and
+// client history is never removed.
+export async function reconcileRemovedImportedEvents(args: {
+  professionalId: string
+  removedUids: string[]
+}): Promise<CalendarReconcileResult> {
+  let cancelledBookings = 0
+  let deletedBlocks = 0
+
+  for (const uid of args.removedUids) {
+    // Cancellation goes through the booking write boundary (lifecycle writes are
+    // owned there); it only cancels a still-pristine imported booking.
+    cancelledBookings += await cancelImportedBookingIfPristine({
+      professionalId: args.professionalId,
+      idempotencyKey: importKey(uid),
+    })
+
+    const deleted = await prisma.calendarBlock.deleteMany({
+      where: {
+        professionalId: args.professionalId,
+        note: { contains: importBlockTag(uid) },
+      },
+    })
+    deletedBlocks += deleted.count
+  }
+
+  return { cancelledBookings, deletedBlocks }
 }
 
 // ── request parsing (shared by the preview + commit routes; no casts) ─────────
