@@ -128,6 +128,12 @@ export default function ProAccountMenu(props: Props) {
         hint: 'Edit pricing & availability',
       },
       {
+        label: 'Waitlist',
+        href: '/pro/waitlist',
+        emoji: '📋',
+        hint: 'Clients waiting — reach out to fill a spot',
+      },
+      {
         label: 'Manage locations',
         href: '/pro/locations',
         emoji: '📍',
