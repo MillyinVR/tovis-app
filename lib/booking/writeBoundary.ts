@@ -446,6 +446,11 @@ type CreateProBookingArgs = {
   allowFarFuture: boolean
   requestId?: string | null
   idempotencyKey?: string | null
+  // Calendar-migration import: source = IMPORTED, price snapshotted at 0
+  // (excluded from revenue until edited), and client notifications/reminders
+  // suppressed (the migrated client has no account yet). Overlap is already
+  // permitted for PRO actors. Defaults to a normal pro booking.
+  importMode?: boolean
 }
 
 type CreateProBookingResult = {
@@ -8473,7 +8478,9 @@ async function performLockedCreateProBooking(args: {
   overrideReason: string | null
   requestId?: string | null
   idempotencyKey?: string | null
+  importMode?: boolean
 }): Promise<CreateProBookingResult> {
+  const importMode = args.importMode ?? false
 
     assertNonEmptyUserId(args.actorUserId)
 
@@ -8588,20 +8595,27 @@ async function performLockedCreateProBooking(args: {
   const locationContext = validatedContextResult.context
   const baseDurationMinutes = validatedContextResult.durationMinutes
   const basePrice = decimalFromUnknown(validatedContextResult.priceStartingAt)
-  // Honor a price-grace ramp: existing clients of a migrated offering keep their
-  // lower ramped price; new clients pay the catalog minimum (the stored price).
-  const offeringRampForMode = pickOfferingModeRamp(
-    offering.priceRamps,
-    args.locationType,
-  )
-  const chargedUnitPrice = await resolveChargedUnitPrice({
-    tx: args.tx,
-    professionalId: args.professionalId,
-    clientId: args.clientId,
-    listPrice: basePrice,
-    minPrice: offering.service.minPrice ?? basePrice,
-    ramp: offeringRampForMode,
-  })
+  // Imported bookings are snapshotted at 0 (excluded from revenue until the pro
+  // edits them). Otherwise honor a price-grace ramp: existing clients of a
+  // migrated offering keep their lower ramped price; new clients pay the catalog
+  // minimum (the stored price).
+  let chargedUnitPrice: Prisma.Decimal
+  if (importMode) {
+    chargedUnitPrice = zeroMoney()
+  } else {
+    const offeringRampForMode = pickOfferingModeRamp(
+      offering.priceRamps,
+      args.locationType,
+    )
+    chargedUnitPrice = await resolveChargedUnitPrice({
+      tx: args.tx,
+      professionalId: args.professionalId,
+      clientId: args.clientId,
+      listPrice: basePrice,
+      minPrice: offering.service.minPrice ?? basePrice,
+      ramp: offeringRampForMode,
+    })
+  }
 
   await assertMobileBookingWithinRadius({
     tx: args.tx,
@@ -8776,6 +8790,7 @@ async function performLockedCreateProBooking(args: {
         ...tenantAttribution,
         scheduledFor: requestedStart,
         status: getProCreatedBookingStatus(),
+        source: importMode ? BookingSource.IMPORTED : BookingSource.DISCOVERY,
         creationIdempotencyKey: args.idempotencyKey ?? null,
 
         locationType: args.locationType,
@@ -8875,27 +8890,31 @@ async function performLockedCreateProBooking(args: {
     },
   })
 
-await createUpdateClientNotification({
-  tx: args.tx,
-  clientId: args.clientId,
-  bookingId: booking.id,
-  eventKey: NotificationEventKey.BOOKING_CONFIRMED,
-  title: 'Appointment booked',
-  body: `Your appointment for ${offering.service.name || 'Appointment'} has been booked.`,
-  dedupeKey: `BOOKING_CONFIRMED:${booking.id}`,
-  href: `/client/bookings/${booking.id}?step=overview`,
-  data: {
+// Imported bookings are silent: the migrated client has no account yet, so we
+// don't send a confirmation or schedule appointment reminders.
+if (!importMode) {
+  await createUpdateClientNotification({
+    tx: args.tx,
+    clientId: args.clientId,
     bookingId: booking.id,
-    notificationReason: 'BOOKING_CONFIRMED',
-    bookingReason: 'PRO_BOOKED_APPOINTMENT',
-  },
-})
+    eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+    title: 'Appointment booked',
+    body: `Your appointment for ${offering.service.name || 'Appointment'} has been booked.`,
+    dedupeKey: `BOOKING_CONFIRMED:${booking.id}`,
+    href: `/client/bookings/${booking.id}?step=overview`,
+    data: {
+      bookingId: booking.id,
+      notificationReason: 'BOOKING_CONFIRMED',
+      bookingReason: 'PRO_BOOKED_APPOINTMENT',
+    },
+  })
 
-await syncBookingAppointmentReminders({
-  tx: args.tx,
-  bookingId: booking.id,
-})
-  
+  await syncBookingAppointmentReminders({
+    tx: args.tx,
+    bookingId: booking.id,
+  })
+}
+
 if (schedulingDecision.appliedOverrides.length > 0) {
   await createBookingOverrideAuditLogs({
     tx: args.tx,
@@ -12575,6 +12594,7 @@ export async function createProBooking(
         overrideReason: args.overrideReason,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
+        importMode: args.importMode ?? false,
       }),
   )
 }

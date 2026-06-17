@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BookingOverrideAction,
   BookingOverrideRule,
+  BookingSource,
   BookingStatus,
   Prisma,
   ServiceLocationType,
@@ -911,5 +912,80 @@ describe('lib/booking/writeBoundary override audit', () => {
     })
 
     expect(mocks.txBookingCreate).not.toHaveBeenCalled()
+  })
+
+  type CreatedBookingData = {
+    source: BookingSource
+    subtotalSnapshot: Prisma.Decimal
+    serviceSubtotalSnapshot: Prisma.Decimal
+    totalAmount: Prisma.Decimal
+  }
+
+  function captureBookingCreateData(): CreatedBookingData[] {
+    const captured: CreatedBookingData[] = []
+    mocks.txBookingCreate.mockImplementation((arg: { data: CreatedBookingData }) => {
+      captured.push(arg.data)
+      return Promise.resolve({
+        id: BOOKING_ID,
+        scheduledFor: REQUESTED_START,
+        totalDurationMinutes: 60,
+        bufferMinutes: 15,
+        status: BookingStatus.ACCEPTED,
+      })
+    })
+    return captured
+  }
+
+  function makeSalonCreateProBookingArgs() {
+    return {
+      professionalId: PROFESSIONAL_ID,
+      actorUserId: 'user_1',
+      overrideReason: null,
+      clientId: CLIENT_ID,
+      offeringId: 'offering_1',
+      locationId: 'loc_1',
+      locationType: ServiceLocationType.SALON,
+      scheduledFor: REQUESTED_START,
+      clientAddressId: null,
+      internalNotes: null,
+      requestedBufferMinutes: null,
+      requestedTotalDurationMinutes: null,
+      allowOutsideWorkingHours: false,
+      allowShortNotice: false,
+      allowFarFuture: false,
+    }
+  }
+
+  it('import mode creates a silent, zero-priced IMPORTED booking', async () => {
+    mocks.evaluateProSchedulingDecision.mockResolvedValue({
+      ok: true,
+      value: { requestedEnd: REQUESTED_END, appliedOverrides: [] },
+    })
+    const captured = captureBookingCreateData()
+
+    await createProBooking({ ...makeSalonCreateProBookingArgs(), importMode: true })
+
+    const data = captured[0]
+    expect(data?.source).toBe(BookingSource.IMPORTED)
+    expect(data?.subtotalSnapshot.toNumber()).toBe(0)
+    expect(data?.serviceSubtotalSnapshot.toNumber()).toBe(0)
+    expect(data?.totalAmount.toNumber()).toBe(0)
+
+    // Silent: no client confirmation notification is created for an import.
+    expect(mocks.upsertClientNotification).not.toHaveBeenCalled()
+  })
+
+  it('keeps source DISCOVERY and a real price for a normal (non-import) pro booking', async () => {
+    mocks.evaluateProSchedulingDecision.mockResolvedValue({
+      ok: true,
+      value: { requestedEnd: REQUESTED_END, appliedOverrides: [] },
+    })
+    const captured = captureBookingCreateData()
+
+    await createProBooking(makeSalonCreateProBookingArgs())
+
+    const data = captured[0]
+    expect(data?.source).toBe(BookingSource.DISCOVERY)
+    expect(data?.subtotalSnapshot.toNumber()).toBe(50)
   })
 })
