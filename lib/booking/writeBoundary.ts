@@ -12615,6 +12615,33 @@ export async function createProBooking(
   )
 }
 
+/**
+ * Calendar-migration resync reconciliation: cancel an imported booking whose
+ * source event was deleted upstream — but ONLY if it's still pristine (untouched
+ * since import: ACCEPTED, never started, source IMPORTED). A booking the pro has
+ * engaged with is left alone. Silent (the imported booking never notified the
+ * client and carries no payment). Returns the number cancelled.
+ */
+export async function cancelImportedBookingIfPristine(args: {
+  professionalId: string
+  idempotencyKey: string
+}): Promise<number> {
+  const result = await prisma.booking.updateMany({
+    where: {
+      professionalId: args.professionalId,
+      creationIdempotencyKey: args.idempotencyKey,
+      source: BookingSource.IMPORTED,
+      status: BookingStatus.ACCEPTED,
+      startedAt: null,
+    },
+    data: { status: BookingStatus.CANCELLED },
+  })
+  if (result.count > 0) {
+    await bumpProfessionalScheduleVersion(args.professionalId)
+  }
+  return result.count
+}
+
 export async function updateProBooking(
   args: UpdateProBookingArgs,
 ): Promise<UpdateProBookingResult> {

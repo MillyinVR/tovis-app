@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   locationFindFirst: vi.fn(),
   blockFindFirst: vi.fn(),
   blockCreate: vi.fn(),
+  blockDeleteMany: vi.fn(),
+  cancelImportedBookingIfPristine: vi.fn(),
   createProBooking: vi.fn(),
   upsertProClient: vi.fn(),
 }))
@@ -18,12 +20,17 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     professionalServiceOffering: { findMany: mocks.offeringFindMany },
     professionalLocation: { findFirst: mocks.locationFindFirst },
-    calendarBlock: { findFirst: mocks.blockFindFirst, create: mocks.blockCreate },
+    calendarBlock: {
+      findFirst: mocks.blockFindFirst,
+      create: mocks.blockCreate,
+      deleteMany: mocks.blockDeleteMany,
+    },
   },
 }))
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   createProBooking: mocks.createProBooking,
+  cancelImportedBookingIfPristine: mocks.cancelImportedBookingIfPristine,
 }))
 
 vi.mock('@/lib/clients/upsertProClient', () => ({
@@ -34,6 +41,7 @@ import {
   commitCalendarImport,
   parseCalendarImportRequest,
   previewCalendarImport,
+  reconcileRemovedImportedEvents,
 } from './calendarImportServer'
 import type { NormalizedCalendarEvent } from './calendarImport'
 
@@ -64,6 +72,8 @@ beforeEach(() => {
   mocks.locationFindFirst.mockResolvedValue({ id: 'loc-salon' })
   mocks.blockFindFirst.mockResolvedValue(null)
   mocks.blockCreate.mockResolvedValue({ id: 'block-1' })
+  mocks.blockDeleteMany.mockResolvedValue({ count: 1 })
+  mocks.cancelImportedBookingIfPristine.mockResolvedValue(1)
   mocks.createProBooking.mockResolvedValue({ booking: { id: 'bk-1' } })
   mocks.upsertProClient.mockResolvedValue({
     ok: true,
@@ -214,6 +224,31 @@ describe('commitCalendarImport', () => {
 
     expect(mocks.createProBooking).not.toHaveBeenCalled()
     expect(result.skipped).toBe(1)
+  })
+})
+
+describe('reconcileRemovedImportedEvents', () => {
+  it('cancels only pristine imported bookings and deletes held blocks, scoped per UID', async () => {
+    const result = await reconcileRemovedImportedEvents({
+      professionalId: 'pro-1',
+      removedUids: ['gone-1'],
+    })
+
+    expect(mocks.cancelImportedBookingIfPristine).toHaveBeenCalledWith({
+      professionalId: 'pro-1',
+      idempotencyKey: 'import:gone-1',
+    })
+    expect(mocks.blockDeleteMany).toHaveBeenCalledWith({
+      where: { professionalId: 'pro-1', note: { contains: '[import:gone-1]' } },
+    })
+    expect(result).toEqual({ cancelledBookings: 1, deletedBlocks: 1 })
+  })
+
+  it('does nothing for an empty removed list', async () => {
+    const result = await reconcileRemovedImportedEvents({ professionalId: 'pro-1', removedUids: [] })
+    expect(mocks.cancelImportedBookingIfPristine).not.toHaveBeenCalled()
+    expect(mocks.blockDeleteMany).not.toHaveBeenCalled()
+    expect(result).toEqual({ cancelledBookings: 0, deletedBlocks: 0 })
   })
 })
 

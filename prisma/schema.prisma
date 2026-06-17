@@ -1868,6 +1868,7 @@ model CalendarFeedSubscription {
   lastSyncedAt   DateTime?
   lastSyncError  String?
   lastSyncCounts Json? // { bookings, blocks, history, failed }
+  lastSyncedUids Json? // string[] of feed event UIDs from the last sync, for deletion reconciliation
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
