@@ -7,8 +7,22 @@ export default function BadgeDot({ label }: { label: string }) {
 
   return (
     <span
-      className="pointer-events-none inline-flex items-center justify-center h-4 min-w-4 px-1.5 rounded-full text-[10px] font-black leading-none"
-      style={{ backgroundColor: 'rgb(var(--accent-primary))', color: 'rgb(var(--on-accent))' }}
+      style={{
+        pointerEvents: 'none',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 16,
+        minWidth: 16,
+        padding: '0 5px',
+        borderRadius: 999,
+        background: 'rgb(var(--accent-primary))',
+        color: 'rgb(var(--on-accent))',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 10,
+        fontWeight: 700,
+        lineHeight: 1,
+      }}
       role="status"
       aria-label={`${text} unread`}
       title="Unread"

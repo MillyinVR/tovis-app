@@ -2,6 +2,8 @@
 import ServicesManagerSection from '../../_sections/ServicesManagerSection'
 
 import type { ProProfileManagementPageModel } from '../_data/proProfileManagementTypes'
+import WorkspaceSwitcher from '@/app/_components/WorkspaceSwitcher'
+import type { WorkspaceOption } from '@/lib/auth/workspaces'
 
 import ProPortfolioGrid from './ProPortfolioGrid'
 import ProProfileActions from './ProProfileActions'
@@ -13,10 +15,12 @@ import ProReviewSection from './ProReviewsSection'
 
 type ProProfileManagementShellProps = {
   model: ProProfileManagementPageModel
+  workspaces?: WorkspaceOption[]
 }
 
 export default function ProProfileManagementShell({
   model,
+  workspaces = [],
 }: ProProfileManagementShellProps) {
   return (
     <main className="brand-pro-profile-page">
@@ -34,6 +38,15 @@ export default function ProProfileManagementShell({
           <ProProfileCard model={model} />
           <ProProfileStats stats={model.stats} />
           <ProProfileActions routes={model.routes} />
+
+          {workspaces.length > 1 ? (
+            <section
+              aria-label="Workspace"
+              style={{ display: 'flex', justifyContent: 'center', padding: '4px 0 8px' }}
+            >
+              <WorkspaceSwitcher options={workspaces} />
+            </section>
+          ) : null}
 
           <ProProfileTabs activeTab={model.tab} routes={model.routes} />
 

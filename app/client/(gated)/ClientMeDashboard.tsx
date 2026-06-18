@@ -6,6 +6,8 @@ import { useMemo, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 import LogoutButton from './components/LogoutButton'
+import WorkspaceSwitcher from '@/app/_components/WorkspaceSwitcher'
+import type { WorkspaceOption } from '@/lib/auth/workspaces'
 
 type MeTabKey = 'boards' | 'following' | 'history'
 
@@ -60,6 +62,7 @@ type ClientMeDashboardProps = {
   following: FollowingItem[]
   history: HistoryItem[]
   createBoardHref?: string | null
+  workspaces?: WorkspaceOption[]
 }
 
 function firstLetter(value: string | null | undefined): string {
@@ -430,6 +433,7 @@ export default function ClientMeDashboard({
   following,
   history,
   createBoardHref = null,
+  workspaces = [],
 }: ClientMeDashboardProps) {
   const [tab, setTab] = useState<MeTabKey>('boards')
 
@@ -447,7 +451,10 @@ export default function ClientMeDashboard({
               {formattedHandle.toUpperCase()}
             </div>
 
-            <LogoutButton />
+            <div className="flex items-center gap-2">
+              <WorkspaceSwitcher options={workspaces} />
+              <LogoutButton />
+            </div>
           </div>
 
           <div className="mt-5 flex items-start gap-4">

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Compass, House, LogIn, UserPlus } from 'lucide-react'
 import NavItem from '../navigation/FooterNavItem'
+import TovisFeatherMark from '../footer/TovisFeatherMark'
 
 const ROUTES = {
   home: '/',
@@ -25,46 +26,30 @@ export default function GuestSessionFooter() {
 
   const homeActive = isActivePath(pathname, ROUTES.home)
   const searchActive = isActivePath(pathname, ROUTES.search)
-  const loginActive = isActivePath(pathname, ROUTES.login) || isActivePath(pathname, ROUTES.signup)
+  const loginActive =
+    isActivePath(pathname, ROUTES.login) || isActivePath(pathname, ROUTES.signup)
 
   return (
-    <div
-      className="w-full"
-      style={{
-        paddingBottom: 'env(safe-area-inset-bottom)',
-        background: 'rgb(var(--bg-primary))',
-      }}
-    >
-      <div>
-        <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-around px-4">
-          <NavItem label="Home" href={ROUTES.home} icon={<House size={28} />} active={homeActive} />
-          <NavItem label="Search" href={ROUTES.search} icon={<Compass size={28} />} active={searchActive} />
+    <div className="tovis-footer-root">
+      <nav className="tovis-footer-bar" aria-label="Primary">
+        <NavItem label="Home" href={ROUTES.home} icon={<House size={24} />} active={homeActive} />
+        <NavItem label="Search" href={ROUTES.search} icon={<Compass size={24} />} active={searchActive} />
 
-          {/* Center CTA: Looks */}
-          <Link
-            href={ROUTES.looks}
-            className="grid place-items-center rounded-full hover:opacity-90 active:scale-[0.98] no-underline"
-            style={{
-              width: 68,
-              height: 68,
-              position: 'relative',
-              top: -14,
-              backgroundColor: 'rgb(var(--accent-primary))',
-              color: 'rgb(var(--on-accent))',
-              boxShadow: '0 8px 24px rgb(var(--accent-primary) / 0.45)',
-            }}
-            title="Looks"
-            aria-label="Looks"
-          >
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-              Looks
-            </span>
-          </Link>
+        {/* Center: the Looks feed, as the tovis feather mark */}
+        <Link
+          href={ROUTES.looks}
+          className="tovis-center-lift no-underline tovis-focus"
+          style={{ display: 'grid', placeItems: 'center' }}
+          title="Looks"
+          aria-label="Looks"
+          aria-current={isActivePath(pathname, ROUTES.looks) ? 'page' : undefined}
+        >
+          <TovisFeatherMark size={66} />
+        </Link>
 
-          <NavItem label="Log in" href={ROUTES.login} icon={<LogIn size={28} />} active={loginActive} />
-          <NavItem label="Sign up" href={ROUTES.signup} icon={<UserPlus size={28} />} active={isActivePath(pathname, ROUTES.signup)} />
-        </div>
-      </div>
+        <NavItem label="Log in" href={ROUTES.login} icon={<LogIn size={24} />} active={loginActive} />
+        <NavItem label="Sign up" href={ROUTES.signup} icon={<UserPlus size={24} />} active={isActivePath(pathname, ROUTES.signup)} />
+      </nav>
     </div>
   )
 }

@@ -2,6 +2,7 @@
 import { getCurrentUser } from '@/lib/currentUser'
 import FooterShell, { type AppRole } from './FooterShell'
 import { clampSmallCount, getUnreadThreadCountForUser } from '@/lib/messagesUnread'
+import { buildWorkspaceOptions, type WorkspaceOption } from '@/lib/auth/workspaces'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,5 +25,19 @@ export default async function RoleFooter() {
     }
   }
 
-  return <FooterShell role={role} messagesBadge={messagesBadge} />
+  // Workspaces this user can switch into (empty unless they own more than one).
+  const workspaces: WorkspaceOption[] = user
+    ? buildWorkspaceOptions(
+        {
+          homeRole: user.homeRole,
+          clientProfile: user.clientProfile,
+          professionalProfile: user.professionalProfile,
+        },
+        user.role,
+      )
+    : []
+
+  return (
+    <FooterShell role={role} messagesBadge={messagesBadge} workspaces={workspaces} />
+  )
 }
