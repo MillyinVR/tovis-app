@@ -10,11 +10,15 @@ import ClientSessionFooter from '@/app/_components/ClientSessionFooter/ClientSes
 import AdminSessionFooter from '@/app/_components/AdminSessionFooter/AdminSessionFooter'
 import GuestSessionFooter from '@/app/_components/GuestSessionFooter/GuestSessionFooter'
 
+import type { WorkspaceOption } from '@/lib/auth/workspaces'
+
 export type AppRole = 'PRO' | 'CLIENT' | 'ADMIN' | 'GUEST'
 
 type Props = {
   role: AppRole
   messagesBadge?: string | null
+  /** Workspaces the user can switch into (empty when only one). */
+  workspaces?: WorkspaceOption[]
 }
 
 const MOUNT_ID = 'tovis-footer-mount'
@@ -81,7 +85,11 @@ function useFooterMount(): HTMLElement | null {
   )
 }
 
-export default function FooterShell({ role, messagesBadge = null }: Props) {
+export default function FooterShell({
+  role,
+  messagesBadge = null,
+  workspaces = [],
+}: Props) {
   const pathname = usePathname()
   const mountEl = useFooterMount()
 
@@ -129,7 +137,7 @@ export default function FooterShell({ role, messagesBadge = null }: Props) {
     ) : effectiveRole === 'CLIENT' ? (
       <ClientSessionFooter messagesBadge={messagesBadge} />
     ) : effectiveRole === 'ADMIN' ? (
-      <AdminSessionFooter />
+      <AdminSessionFooter workspaces={workspaces} />
     ) : (
       <GuestSessionFooter />
     )

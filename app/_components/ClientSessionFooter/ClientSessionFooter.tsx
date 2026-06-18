@@ -5,28 +5,27 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import NavItem from '../navigation/FooterNavItem'
 import BadgeDot from './BadgeDot'
+import TovisFeatherMark from '../footer/TovisFeatherMark'
 import { useUnreadBadge } from '@/app/_components/_hooks/useUnreadBadge'
-import { CLIENT_TABS, CENTER_BUTTON } from '@/app/config/clientNav'
+import { CLIENT_TABS } from '@/app/config/clientNav'
 
 function isActivePath(pathname: string, href: string) {
   const base = href.split('?')[0]
   return pathname === base || pathname.startsWith(base + '/')
 }
 
-export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?: string | null }) {
+export default function ClientSessionFooter({
+  messagesBadge,
+}: {
+  messagesBadge?: string | null
+}) {
   const pathname = usePathname()
   const badge = useUnreadBadge({ initialBadge: messagesBadge ?? null })
   const path = pathname ?? ''
 
   return (
-    <div
-      className="w-full"
-      style={{
-        paddingBottom: 'env(safe-area-inset-bottom)',
-        background: 'rgb(var(--bg-primary))',
-      }}
-    >
-      <div className="mx-auto flex h-18 w-full max-w-140 items-center justify-around px-4">
+    <div className="tovis-footer-root">
+      <nav className="tovis-footer-bar" aria-label="Primary">
         {CLIENT_TABS.map((tab) => {
           const active = isActivePath(path, tab.href)
           const Icon = tab.icon
@@ -36,20 +35,13 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
               <Link
                 key={tab.id}
                 href={tab.href}
-                className="grid place-items-center rounded-full hover:opacity-90 active:scale-[0.98] no-underline"
-                style={{
-                  width: 68,
-                  height: 68,
-                  position: 'relative',
-                  top: -14,
-                  backgroundColor: active ? CENTER_BUTTON.bgActive : CENTER_BUTTON.bgInactive,
-                  color: active ? CENTER_BUTTON.colorActive : CENTER_BUTTON.colorInactive,
-                  boxShadow: active ? CENTER_BUTTON.shadowActive : CENTER_BUTTON.shadowInactive,
-                }}
+                className="tovis-center-lift no-underline tovis-focus"
+                style={{ display: 'grid', placeItems: 'center' }}
                 title={tab.label}
                 aria-label={tab.label}
+                aria-current={active ? 'page' : undefined}
               >
-                <Icon size={30} aria-hidden="true" />
+                <TovisFeatherMark size={66} />
               </Link>
             )
           }
@@ -59,13 +51,13 @@ export default function ClientSessionFooter({ messagesBadge }: { messagesBadge?:
               key={tab.id}
               label={tab.label}
               href={tab.href}
-              icon={<Icon size={28} />}
+              icon={<Icon size={24} />}
               active={active}
               rightSlot={tab.hasBadge && badge ? <BadgeDot label={badge} /> : null}
             />
           )
         })}
-      </div>
+      </nav>
     </div>
   )
 }

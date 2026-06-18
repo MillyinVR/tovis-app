@@ -1,5 +1,5 @@
 // app/_components/AdminSessionFooter/AdminSessionFooter.test.tsx
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockUsePathname = vi.hoisted(() => vi.fn())
@@ -60,9 +60,16 @@ describe('app/_components/AdminSessionFooter/AdminSessionFooter', () => {
     )
   })
 
-  it('renders a sign out control', () => {
+  it('exposes sign out inside the Switch account sheet', () => {
     render(<AdminSessionFooter />)
 
+    // Sign out no longer lives in the footer bar; it's inside the sheet.
+    expect(screen.queryByRole('button', { name: /sign out/i })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /switch/i }))
+
+    const dialog = screen.getByRole('dialog', { name: /switch account/i })
+    expect(dialog).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: /sign out/i }),
     ).toBeInTheDocument()

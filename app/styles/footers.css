@@ -1,0 +1,107 @@
+/* ============================================================
+   Tovis footer system — shared CSS
+   Imported once from app/globals.css:  @import "./styles/footers.css";
+
+   Colors come from the existing Tovis brand tokens (lib/brand), which are
+   emitted as space-separated RGB triplets per [data-mode] and consumed via
+   rgb(var(--token)). Borders use the pre-derived --line / --line-strong
+   (already full colors). White-label palette swaps flow through for free.
+   ============================================================ */
+
+:root {
+  /* The center "app-coin" is intentionally dark in BOTH themes (like the app
+     icon) so the iridescent feather keeps its gradient. Constant. */
+  --tovis-coin: radial-gradient(125% 125% at 32% 24%, #2c4f49 0%, #16302b 27%, #0d1a17 58%, #050d0b 100%);
+  --tovis-acc-shadow: rgba(21, 201, 168, 0.45);
+}
+
+/* light mode keeps the same dark coin, just a softer cast shadow */
+[data-mode="light"] {
+  --tovis-acc-shadow: rgba(14, 155, 134, 0.38);
+}
+
+@keyframes tovisPulse {
+  0%   { transform: scale(1);   opacity: 0.5; }
+  70%  { transform: scale(1.7); opacity: 0;   }
+  100% { opacity: 0; }
+}
+
+/* soft jewel-tinted orb drifting diagonally through the feather coin */
+@keyframes tovisOrb {
+  0%        { transform: translate(-95%, -58%); }
+  55%, 100% { transform: translate(165%, 128%); }
+}
+
+/* ---- shell + responsive float ---- */
+
+.tovis-footer-root {
+  width: 100%;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tovis-footer-bar {
+  position: relative;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 35rem;
+  min-height: 80px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-around;
+  padding: 14px 16px 0;
+  background: rgb(var(--bg-surface));
+  border-top: 1px solid var(--line);
+}
+
+/* admin / utility: wider, evenly spaced, no raised hero */
+.tovis-footer-bar--wide {
+  max-width: 1100px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+}
+
+/* raised center button (mobile) */
+.tovis-center-lift    { margin-top: -30px; }
+.tovis-center-lift-lg { margin-top: -34px; }
+
+/* keyboard focus */
+.tovis-focus:focus-visible {
+  outline: 2px solid rgb(var(--accent-primary));
+  outline-offset: 3px;
+  border-radius: 14px;
+}
+
+/* From tablet up: detach the bar into a centered floating pill */
+@media (min-width: 768px) {
+  .tovis-footer-root {
+    display: flex;
+    justify-content: center;
+    padding: 0 16px calc(18px + env(safe-area-inset-bottom));
+    pointer-events: none;       /* let content behind the gutters through */
+  }
+  .tovis-footer-bar,
+  .tovis-footer-bar--wide {
+    pointer-events: auto;
+    width: max-content;
+    max-width: calc(100vw - 32px);
+    min-height: 0;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 10px 18px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    box-shadow: 0 22px 48px rgba(0, 0, 0, 0.30);
+  }
+  .tovis-center-lift,
+  .tovis-center-lift-lg { margin-top: 0; }
+}
+
+/* Honor reduced-motion: stop the ambient footer animations */
+@media (prefers-reduced-motion: reduce) {
+  .tovis-footer-root [style*="tovisOrb"],
+  .tovis-footer-root [style*="tovisPulse"] {
+    animation: none !important;
+  }
+}

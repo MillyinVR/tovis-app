@@ -187,6 +187,7 @@ describe('lib/currentUser', () => {
       email: 'user@example.com',
       phone: '+15551234567',
       role: Role.CLIENT,
+      homeRole: Role.CLIENT,
       authVersion: 1,
       phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
       emailVerifiedAt: null,
@@ -231,6 +232,7 @@ describe('lib/currentUser', () => {
       email: 'user@example.com',
       phone: '+15551234567',
       role: Role.PRO,
+      homeRole: Role.PRO,
       authVersion: 3,
       phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
       emailVerifiedAt: new Date('2026-04-08T10:05:00.000Z'),
@@ -249,5 +251,119 @@ describe('lib/currentUser', () => {
         phoneVerifiedAt: new Date('2026-04-08T10:00:00.000Z'),
       },
     })
+  })
+})
+
+describe('lib/currentUser — acting role (workspace switching)', () => {
+  const verified = new Date('2026-04-08T10:00:00.000Z')
+
+  function cookieWith(token: string) {
+    return {
+      get: vi.fn((name: string) =>
+        name === 'tovis_token' ? { value: token } : undefined,
+      ),
+    }
+  }
+
+  // A full currentUserSelect-shaped DB record with explicit profiles.
+  function dbUser(args: {
+    homeRole: Role
+    hasClientProfile?: boolean
+    proStatus?: 'APPROVED' | 'PENDING' | null
+  }) {
+    return {
+      id: 'user_1',
+      email: 'user@example.com',
+      phone: '+15551234567',
+      role: args.homeRole,
+      authVersion: 1,
+      phoneVerifiedAt: verified,
+      emailVerifiedAt: verified,
+      clientProfile: args.hasClientProfile
+        ? {
+            id: 'client_1',
+            firstName: 'Tori',
+            lastName: 'Morales',
+            avatarUrl: null,
+            phoneVerifiedAt: verified,
+          }
+        : null,
+      professionalProfile: args.proStatus
+        ? {
+            id: 'pro_1',
+            businessName: 'TOVIS Studio',
+            handle: 'tovisstudio',
+            avatarUrl: null,
+            timeZone: 'America/Los_Angeles',
+            location: null,
+            phoneVerifiedAt: verified,
+            verificationStatus: args.proStatus,
+          }
+        : null,
+    }
+  }
+
+  beforeEach(() => {
+    mockCookies.mockReset()
+    mockVerifyToken.mockReset()
+    mockPrisma.user.findUnique.mockReset()
+  })
+
+  it('honors an entitled acting role from the token (admin acting as client)', async () => {
+    mockCookies.mockResolvedValue(cookieWith('switched_token'))
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.CLIENT, // acting role
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+    mockPrisma.user.findUnique.mockResolvedValue(
+      dbUser({ homeRole: Role.ADMIN, hasClientProfile: true }),
+    )
+
+    const result = await getCurrentUser()
+
+    expect(result?.role).toBe(Role.CLIENT)
+    expect(result?.homeRole).toBe(Role.ADMIN)
+  })
+
+  it('falls back to the home role when the acting role is not entitled', async () => {
+    mockCookies.mockResolvedValue(cookieWith('forged_token'))
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.PRO, // not entitled — no pro profile
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+    mockPrisma.user.findUnique.mockResolvedValue(
+      dbUser({ homeRole: Role.CLIENT, hasClientProfile: true, proStatus: null }),
+    )
+
+    const result = await getCurrentUser()
+
+    expect(result?.role).toBe(Role.CLIENT)
+    expect(result?.homeRole).toBe(Role.CLIENT)
+  })
+
+  it('honors PRO acting role only when the professional profile is APPROVED', async () => {
+    mockCookies.mockResolvedValue(cookieWith('pro_token'))
+    mockVerifyToken.mockReturnValue({
+      userId: 'user_1',
+      role: Role.PRO,
+      sessionKind: 'ACTIVE',
+      authVersion: 1,
+    })
+    mockPrisma.user.findUnique.mockResolvedValue(
+      dbUser({ homeRole: Role.ADMIN, proStatus: 'APPROVED' }),
+    )
+
+    expect((await getCurrentUser())?.role).toBe(Role.PRO)
+
+    mockPrisma.user.findUnique.mockResolvedValue(
+      dbUser({ homeRole: Role.ADMIN, proStatus: 'PENDING' }),
+    )
+
+    // Pending license is not entitled to the PRO workspace → back to home (ADMIN).
+    expect((await getCurrentUser())?.role).toBe(Role.ADMIN)
   })
 })

@@ -11,24 +11,18 @@ export interface ClientNavTab {
   hasBadge?: boolean
 }
 
+/**
+ * Looks is the client's home base, so it takes the raised center mark
+ * (rendered as the tovis feather — see ClientSessionFooter). The `icon`
+ * on the center tab is unused for the feather but kept for completeness.
+ */
 export const CLIENT_TABS: ClientNavTab[] = [
-  { id: 'looks', label: 'Looks', href: '/looks', icon: Sparkles },
+  { id: 'home', label: 'Home', href: '/client', icon: House },
   { id: 'discover', label: 'Discover', href: '/search', icon: Compass },
-  { id: 'home', label: 'Home', href: '/client', icon: House, center: true },
+  { id: 'looks', label: 'Looks', href: '/looks', icon: Sparkles, center: true },
   { id: 'inbox', label: 'Inbox', href: '/messages', icon: Mail, hasBadge: true },
   { id: 'me', label: 'Me', href: '/client/me', icon: User },
 ]
 
-/**
- * Center button: accent when active (home page), paper when elsewhere.
- * Colors resolve through the brand CSS variables set by BrandProvider, so a
- * white-label palette swap updates this button automatically.
- */
-export const CENTER_BUTTON = {
-  bgActive: 'rgb(var(--accent-primary))',
-  bgInactive: 'rgb(var(--surface-glass))',
-  colorActive: 'rgb(var(--on-accent))',
-  colorInactive: 'rgb(var(--bg-primary))',
-  shadowActive: '0 10px 30px rgb(var(--accent-primary) / 0.55)',
-  shadowInactive: '0 10px 30px rgb(var(--surface-glass) / 0.15)',
-} as const
+// CENTER_BUTTON removed — the center is now <TovisFeatherMark /> (ring + sphere
+// coin + feather + orb). Its look is theme-driven via brand CSS variables.

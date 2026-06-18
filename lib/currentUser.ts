@@ -10,10 +10,11 @@
 //   revocation flows (sign out everywhere, password reset, authVersion bump)
 //   can be bypassed.
 
-import { Prisma } from '@prisma/client'
+import { Prisma, type Role } from '@prisma/client'
 import { cookies } from 'next/headers'
 
-import { type AuthSessionKind, verifyToken } from './auth'
+import { type AuthSessionKind, type AuthRole, verifyToken } from './auth'
+import { canActAs } from './auth/workspaces'
 import { prisma } from './prisma'
 
 export const currentUserSelect = {
@@ -55,21 +56,57 @@ type CurrentUserRecord = Prisma.UserGetPayload<{
 }>
 
 export type CurrentUser = CurrentUserRecord & {
+  /**
+   * The workspace the user is acting in right now. Equals `homeRole` unless the
+   * user has switched workspaces (the acting role rides in the JWT and is only
+   * honored when still entitled — see resolveActingRole). All role gating reads
+   * this field, so a switch takes effect everywhere.
+   */
+  role: Role
+  /** The permanent DB role — the user's home workspace and entitlement anchor. */
+  homeRole: Role
   sessionKind: AuthSessionKind
   isPhoneVerified: boolean
   isEmailVerified: boolean
   isFullyVerified: boolean
 }
 
+/**
+ * Resolve the role the user is acting as. The token may carry a different role
+ * than the DB home role (set by the workspace-switch endpoint); honor it only
+ * if the user is still entitled to it, otherwise fall back to the home role.
+ * This re-checks entitlement on every request, so a revoked capability (e.g. a
+ * pro license downgraded after switching) safely drops the user back home.
+ */
+function resolveActingRole(
+  user: CurrentUserRecord,
+  tokenRole: AuthRole,
+): Role {
+  if (tokenRole === user.role) return user.role
+  return canActAs(
+    {
+      homeRole: user.role,
+      clientProfile: user.clientProfile,
+      professionalProfile: user.professionalProfile,
+    },
+    tokenRole,
+  )
+    ? tokenRole
+    : user.role
+}
+
 function toCurrentUser(
   user: CurrentUserRecord,
   sessionKind: AuthSessionKind,
+  actingRole: Role,
 ): CurrentUser {
   const isPhoneVerified = Boolean(user.phoneVerifiedAt)
   const isEmailVerified = Boolean(user.emailVerifiedAt)
 
   return {
     ...user,
+    role: actingRole,
+    homeRole: user.role,
     sessionKind,
     isPhoneVerified,
     isEmailVerified,
@@ -94,5 +131,6 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   if (!user) return null
   if (user.authVersion !== payload.authVersion) return null
 
-  return toCurrentUser(user, payload.sessionKind)
+  const actingRole = resolveActingRole(user, payload.role)
+  return toCurrentUser(user, payload.sessionKind, actingRole)
 }

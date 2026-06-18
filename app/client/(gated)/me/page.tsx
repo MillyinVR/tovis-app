@@ -1,6 +1,8 @@
 // app/client/me/page.tsx
 import { isNonEmptyString } from '@/lib/guards'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { getCurrentUser } from '@/lib/currentUser'
+import { buildWorkspaceOptions, type WorkspaceOption } from '@/lib/auth/workspaces'
 
 import ClientMeDashboard from '../ClientMeDashboard'
 import { loadClientMePage } from './_data/loadClientMePage'
@@ -82,6 +84,18 @@ function buildFollowingSubtitle(params: {
 export default async function ClientMePage() {
   const data = await loadClientMePage()
 
+  const currentUser = await getCurrentUser().catch(() => null)
+  const workspaces: WorkspaceOption[] = currentUser
+    ? buildWorkspaceOptions(
+        {
+          homeRole: currentUser.homeRole,
+          clientProfile: currentUser.clientProfile,
+          professionalProfile: currentUser.professionalProfile,
+        },
+        currentUser.role,
+      )
+    : []
+
   const displayName = buildDisplayName({
     firstName: data.profile.firstName,
     email: data.user.email,
@@ -158,6 +172,7 @@ export default async function ClientMePage() {
         following={following}
         history={history}
         createBoardHref="/client/boards/new"
+        workspaces={workspaces}
       />
     </main>
   )
