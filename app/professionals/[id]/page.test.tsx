@@ -38,6 +38,9 @@ const mocks = vi.hoisted(() => ({
     professionalServiceOffering: {
       findMany: vi.fn(),
     },
+    professionalPaymentSettings: {
+      findUnique: vi.fn(),
+    },
     mediaAsset: {
       findMany: vi.fn(),
     },
@@ -362,6 +365,7 @@ describe('app/professionals/[id]/page', () => {
     mocks.prisma.professionalFavorite.findUnique.mockResolvedValue(null)
     mocks.prisma.booking.count.mockResolvedValue(0)
     mocks.prisma.professionalServiceOffering.findMany.mockResolvedValue([])
+    mocks.prisma.professionalPaymentSettings.findUnique.mockResolvedValue(null)
     mocks.prisma.mediaAsset.findMany.mockResolvedValue([])
     mocks.prisma.review.findMany.mockResolvedValue([])
     mocks.prisma.reviewHelpful.findMany.mockResolvedValue([])
