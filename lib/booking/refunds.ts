@@ -362,6 +362,109 @@ export async function refundBookingPayment(
   }
 }
 
+export type DiscoveryDepositRefundResult =
+  | { outcome: 'REFUNDED'; refundAmountCents: number; feeRefunded: boolean }
+  | { outcome: 'NOT_ATTEMPTED' }
+  | { outcome: 'FAILED'; message: string }
+
+/**
+ * Refund a brand-new client's discovery deposit (and, per the caller's policy, the
+ * one-time platform fee) on a SEPARATE deposit PaymentIntent. Lives here (the refund
+ * owner) so the Booking writes stay inside the allowlisted boundary; cancelRefund.ts
+ * computes the policy and calls this. Idempotent: claims the deposit row
+ * (PAID -> REFUNDED) before calling Stripe, and a deterministic Stripe idempotency key
+ * makes retries safe. Refunding the fee stamps discoveryFeeRefundedAt (refund-reset).
+ */
+export async function refundDiscoveryDeposit(args: {
+  bookingId: string
+  paymentIntentId: string
+  refundAmountCents: number
+  refundFee: boolean
+  trigger: BookingRefundTrigger
+  actor?: RefundActor | null
+  reason?: string | null
+  now?: Date
+}): Promise<DiscoveryDepositRefundResult> {
+  if (args.refundAmountCents <= 0) return { outcome: 'NOT_ATTEMPTED' }
+
+  // Claim atomically so a re-cancel can't double-refund.
+  const claimed = await prisma.booking.updateMany({
+    where: { id: args.bookingId, depositStatus: 'PAID' },
+    data: { depositStatus: 'REFUNDED' },
+  })
+  if (claimed.count !== 1) return { outcome: 'NOT_ATTEMPTED' }
+
+  try {
+    const stripe = getStripe()
+    const stripeRefund = await stripe.refunds.create(
+      {
+        payment_intent: args.paymentIntentId,
+        amount: args.refundAmountCents,
+        reverse_transfer: true,
+        ...(args.refundFee ? { refund_application_fee: true } : {}),
+        metadata: {
+          bookingId: args.bookingId,
+          kind: 'DISCOVERY_DEPOSIT_REFUND',
+          trigger: args.trigger,
+        },
+      },
+      { idempotencyKey: `tovis:deposit-refund:${args.bookingId}` },
+    )
+
+    await prisma.booking.update({
+      where: { id: args.bookingId },
+      // Refund-reset: only stamp the fee as refunded when we actually returned it.
+      data: { discoveryFeeRefundedAt: args.refundFee ? args.now ?? new Date() : null },
+    })
+
+    await prisma.bookingRefund.create({
+      data: {
+        bookingId: args.bookingId,
+        amountCents: args.refundAmountCents,
+        currency: 'usd',
+        status: BookingRefundStatus.SUCCEEDED,
+        trigger: args.trigger,
+        reverseTransfer: true,
+        applicationFeeRefunded: args.refundFee,
+        stripeRefundId: stripeRefund.id,
+        stripePaymentIntentId: args.paymentIntentId,
+        initiatedByUserId: args.actor?.userId ?? null,
+        initiatedByRole: args.actor?.role ?? null,
+        reason: args.reason ?? null,
+      },
+    })
+
+    return {
+      outcome: 'REFUNDED',
+      refundAmountCents: args.refundAmountCents,
+      feeRefunded: args.refundFee,
+    }
+  } catch (error) {
+    // Release the claim so the refund can be retried.
+    await prisma.booking
+      .updateMany({
+        where: {
+          id: args.bookingId,
+          depositStatus: 'REFUNDED',
+          discoveryFeeRefundedAt: null,
+        },
+        data: { depositStatus: 'PAID' },
+      })
+      .catch(() => {})
+
+    console.error('refundDiscoveryDeposit: Stripe refund failed', {
+      bookingId: args.bookingId,
+      error: safeError(error),
+    })
+    Sentry.captureException(error)
+
+    return {
+      outcome: 'FAILED',
+      message: error instanceof Error ? error.message : 'Deposit refund failed.',
+    }
+  }
+}
+
 function mapStripeRefundStatus(status: string | null): BookingRefundStatus {
   switch (status) {
     case 'succeeded':

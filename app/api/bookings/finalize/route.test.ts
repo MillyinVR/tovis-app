@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   markAftercareAccessTokenUsed: vi.fn(),
 
   finalizeBookingFromHold: vi.fn(),
+  resolveDiscoveryFinalize: vi.fn(),
   createProNotification: vi.fn(),
   captureBookingException: vi.fn(),
 
@@ -102,6 +103,10 @@ vi.mock('@/lib/booking/locationContext', () => ({
 
 vi.mock('@/lib/booking/writeBoundary', () => ({
   finalizeBookingFromHold: mocks.finalizeBookingFromHold,
+}))
+
+vi.mock('@/lib/booking/resolveDiscoveryFinalize', () => ({
+  resolveDiscoveryFinalize: mocks.resolveDiscoveryFinalize,
 }))
 
 vi.mock('@/lib/aftercare/aftercareAccessTokens', () => ({
@@ -286,6 +291,7 @@ function makeExpectedFinalizeArgs(
     fallbackTimeZone: string
     requestId: string | null
     idempotencyKey: string | null
+    discovery: unknown
   }> = {},
 ) {
   const source = overrides.source ?? BookingSource.REQUESTED
@@ -302,6 +308,17 @@ function makeExpectedFinalizeArgs(
     initialStatus: overrides.initialStatus ?? BookingStatus.PENDING,
     rebookOfBookingId: overrides.rebookOfBookingId ?? null,
     offering: finalizeOffering,
+    discovery: overrides.discovery ?? {
+      provenance: 'DIRECT_PROFILE',
+      feeEligible: false,
+      depositSettings: {
+        depositEnabled: false,
+        depositType: 'FLAT',
+        depositFlatAmountCents: null,
+        depositPercent: null,
+      },
+      discoveryFeeCents: 500,
+    },
     fallbackTimeZone: overrides.fallbackTimeZone ?? 'UTC',
     requestId: overrides.requestId ?? null,
     idempotencyKey: overrides.idempotencyKey ?? 'idem_finalize_1',
@@ -472,6 +489,18 @@ describe('POST /api/bookings/finalize', () => {
     }))
 
     mocks.professionalServiceOfferingFindUnique.mockResolvedValue(offering)
+
+    mocks.resolveDiscoveryFinalize.mockResolvedValue({
+      provenance: 'DIRECT_PROFILE',
+      feeEligible: false,
+      depositSettings: {
+        depositEnabled: false,
+        depositType: 'FLAT',
+        depositFlatAmountCents: null,
+        depositPercent: null,
+      },
+      discoveryFeeCents: 500,
+    })
 
     mocks.resolveAftercareAccessTokenForMutation.mockResolvedValue(
       makeResolvedAftercareAccess(),

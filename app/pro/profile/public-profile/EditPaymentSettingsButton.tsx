@@ -7,6 +7,11 @@ import { isRecord } from '@/lib/guards'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 
 export type PaymentCollectionTiming = 'AT_BOOKING' | 'AFTER_SERVICE'
+export type DepositType = 'FLAT' | 'PERCENT'
+export type DepositScope =
+  | 'NEW_DISCOVERY_ONLY'
+  | 'ALL_NEW_CLIENTS'
+  | 'ALL_CLIENTS'
 
 type TipSuggestionInput = {
   label: string
@@ -16,12 +21,21 @@ type TipSuggestionInput = {
 type Props = {
   initial: {
     collectPaymentAt: PaymentCollectionTiming
+
+    depositEnabled: boolean
+    depositType: DepositType
+    depositFlatAmount: string | null
+    depositPercent: number | null
+    depositScope: DepositScope
+
     acceptCash: boolean
     acceptCardOnFile: boolean
     acceptTapToPay: boolean
     acceptVenmo: boolean
     acceptZelle: boolean
     acceptAppleCash: boolean
+    acceptPaypal: boolean
+    acceptApplePay: boolean
 
     tipsEnabled: boolean
     allowCustomTip: boolean
@@ -30,6 +44,7 @@ type Props = {
     venmoHandle: string | null
     zelleHandle: string | null
     appleCashHandle: string | null
+    paypalHandle: string | null
     paymentNote: string | null
   } | null
 }
@@ -128,6 +143,22 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
       initial?.collectPaymentAt ?? 'AFTER_SERVICE',
     )
 
+  const [depositEnabled, setDepositEnabled] = useState(
+    initial?.depositEnabled ?? false,
+  )
+  const [depositType, setDepositType] = useState<DepositType>(
+    initial?.depositType ?? 'FLAT',
+  )
+  const [depositFlatAmount, setDepositFlatAmount] = useState(
+    initial?.depositFlatAmount ?? '',
+  )
+  const [depositPercent, setDepositPercent] = useState(
+    initial?.depositPercent != null ? String(initial.depositPercent) : '',
+  )
+  const [depositScope, setDepositScope] = useState<DepositScope>(
+    initial?.depositScope ?? 'NEW_DISCOVERY_ONLY',
+  )
+
   const [acceptCash, setAcceptCash] = useState(initial?.acceptCash ?? true)
   const [acceptCardOnFile, setAcceptCardOnFile] = useState(
     initial?.acceptCardOnFile ?? false,
@@ -139,6 +170,10 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
   const [acceptZelle, setAcceptZelle] = useState(initial?.acceptZelle ?? false)
   const [acceptAppleCash, setAcceptAppleCash] = useState(
     initial?.acceptAppleCash ?? false,
+  )
+  const [acceptPaypal, setAcceptPaypal] = useState(initial?.acceptPaypal ?? false)
+  const [acceptApplePay, setAcceptApplePay] = useState(
+    initial?.acceptApplePay ?? false,
   )
 
   const [tipsEnabled, setTipsEnabled] = useState(initial?.tipsEnabled ?? true)
@@ -154,6 +189,7 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
   const [appleCashHandle, setAppleCashHandle] = useState(
     initial?.appleCashHandle ?? '',
   )
+  const [paypalHandle, setPaypalHandle] = useState(initial?.paypalHandle ?? '')
   const [paymentNote, setPaymentNote] = useState(initial?.paymentNote ?? '')
 
   const busy = saving
@@ -208,6 +244,8 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
       acceptVenmo,
       acceptZelle,
       acceptAppleCash,
+      acceptPaypal,
+      acceptApplePay,
     ].filter(Boolean).length
   }, [
     acceptCash,
@@ -216,6 +254,8 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
     acceptVenmo,
     acceptZelle,
     acceptAppleCash,
+    acceptPaypal,
+    acceptApplePay,
   ])
 
   function updateTipSuggestion(
@@ -253,12 +293,26 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
       const payload = {
         collectPaymentAt,
 
+        depositEnabled,
+        depositType,
+        depositScope,
+        depositFlatAmount:
+          depositEnabled && depositType === 'FLAT'
+            ? depositFlatAmount.trim()
+            : null,
+        depositPercent:
+          depositEnabled && depositType === 'PERCENT'
+            ? depositPercent.trim()
+            : null,
+
         acceptCash,
         acceptCardOnFile,
         acceptTapToPay,
         acceptVenmo,
         acceptZelle,
         acceptAppleCash,
+        acceptPaypal,
+        acceptApplePay,
 
         tipsEnabled,
         allowCustomTip,
@@ -271,6 +325,7 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
         appleCashHandle: acceptAppleCash
           ? normalizeHandleInput(appleCashHandle)
           : '',
+        paypalHandle: acceptPaypal ? normalizeHandleInput(paypalHandle) : '',
         paymentNote: paymentNote.trim(),
       }
 
@@ -389,6 +444,103 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
               </SectionCard>
 
               <SectionCard
+                title="Deposits"
+                subtitle="Require a deposit to hold the appointment. New clients who find you through the Looks feed or Discovery also pay a one-time booking fee, processed with the deposit through Stripe."
+              >
+                <div className="grid gap-3">
+                  <ToggleRow
+                    checked={depositEnabled}
+                    onChange={setDepositEnabled}
+                    label="Require a deposit"
+                    description="Collected up front via card and credited toward the final total."
+                    disabled={busy}
+                  />
+
+                  {depositEnabled ? (
+                    <>
+                      <div className="grid gap-2">
+                        <div className="text-[12px] font-black text-textSecondary">
+                          Deposit amount
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <RadioRow
+                            checked={depositType === 'FLAT'}
+                            onChange={() => setDepositType('FLAT')}
+                            label="Flat amount"
+                            description="A fixed dollar deposit."
+                            disabled={busy}
+                            name="depositType"
+                          />
+                          <RadioRow
+                            checked={depositType === 'PERCENT'}
+                            onChange={() => setDepositType('PERCENT')}
+                            label="Percent of price"
+                            description="A share of the service price."
+                            disabled={busy}
+                            name="depositType"
+                          />
+                        </div>
+                      </div>
+
+                      {depositType === 'FLAT' ? (
+                        <TextInput
+                          label="Deposit amount ($)"
+                          value={depositFlatAmount}
+                          onChange={setDepositFlatAmount}
+                          placeholder="e.g. 20"
+                          disabled={busy}
+                        />
+                      ) : (
+                        <TextInput
+                          label="Deposit percent (1–100)"
+                          value={depositPercent}
+                          onChange={setDepositPercent}
+                          placeholder="e.g. 25"
+                          disabled={busy}
+                        />
+                      )}
+
+                      <div className="grid gap-2">
+                        <div className="text-[12px] font-black text-textSecondary">
+                          Who leaves a deposit
+                        </div>
+                        <RadioRow
+                          checked={depositScope === 'NEW_DISCOVERY_ONLY'}
+                          onChange={() => setDepositScope('NEW_DISCOVERY_ONLY')}
+                          label="New clients from Looks / Discovery only"
+                          description="Recommended. Only brand-new clients who found you through the feed."
+                          disabled={busy}
+                          name="depositScope"
+                        />
+                        <RadioRow
+                          checked={depositScope === 'ALL_NEW_CLIENTS'}
+                          onChange={() => setDepositScope('ALL_NEW_CLIENTS')}
+                          label="All first-time clients"
+                          description="Any client booking with you for the first time."
+                          disabled={busy}
+                          name="depositScope"
+                        />
+                        <RadioRow
+                          checked={depositScope === 'ALL_CLIENTS'}
+                          onChange={() => setDepositScope('ALL_CLIENTS')}
+                          label="Every booking"
+                          description="Charge a deposit on all appointments."
+                          disabled={busy}
+                          name="depositScope"
+                        />
+                      </div>
+
+                      <div className="rounded-card border border-white/10 bg-bgPrimary/60 p-3 text-[11px] text-textSecondary">
+                        Deposits require Stripe payouts to be set up. The one-time
+                        booking fee applies only to brand-new Looks/Discovery
+                        clients — never to your existing clients.
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              </SectionCard>
+
+              <SectionCard
                 title="Accepted methods"
                 subtitle={`Currently enabled: ${acceptedMethodsCount}`}
               >
@@ -470,6 +622,32 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
                       disabled={busy}
                     />
                   ) : null}
+
+                  <ToggleRow
+                    checked={acceptPaypal}
+                    onChange={setAcceptPaypal}
+                    label="PayPal"
+                    description="Show PayPal as accepted."
+                    disabled={busy}
+                  />
+
+                  {acceptPaypal ? (
+                    <TextInput
+                      label="PayPal link or handle"
+                      value={paypalHandle}
+                      onChange={setPaypalHandle}
+                      placeholder="paypal.me/you or @handle"
+                      disabled={busy}
+                    />
+                  ) : null}
+
+                  <ToggleRow
+                    checked={acceptApplePay}
+                    onChange={setAcceptApplePay}
+                    label="Apple Pay"
+                    description="Show Apple Pay as accepted (in person)."
+                    disabled={busy}
+                  />
                 </div>
               </SectionCard>
 
@@ -703,12 +881,13 @@ function RadioRow(props: {
   label: string
   description?: string
   disabled?: boolean
+  name?: string
 }) {
   return (
     <label className="flex items-start gap-3 rounded-card border border-white/10 bg-bgPrimary p-3">
       <input
         type="radio"
-        name="collectPaymentAt"
+        name={props.name ?? 'collectPaymentAt'}
         checked={props.checked}
         onChange={props.onChange}
         disabled={props.disabled}

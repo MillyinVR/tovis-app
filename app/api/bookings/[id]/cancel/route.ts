@@ -12,7 +12,10 @@ import {
 } from '@/lib/booking/errors'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { cancelBooking } from '@/lib/booking/writeBoundary'
-import { applyAutoCancelRefund } from '@/lib/booking/cancelRefund'
+import {
+  applyAutoCancelRefund,
+  applyDiscoveryDepositCancelRefund,
+} from '@/lib/booking/cancelRefund'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { enforceRateLimit } from '@/lib/rateLimit/enforce'
 import { safeError } from '@/lib/security/logging'
@@ -212,6 +215,15 @@ export async function POST(req: Request, ctx: RouteContext) {
         // Auto-refund per policy (pro/admin always; client only ≥24h out).
         // Best-effort: never throws, so it can't fail the committed cancel.
         await applyAutoCancelRefund({
+          bookingId,
+          actorKind: actor.kind,
+          actorUserId: user.id,
+          cancelMutated: result.meta.mutated,
+        })
+
+        // New-client discovery deposit + fee refund per policy (pro/admin refund
+        // both; client ≥24h refunds deposit, keeps fee; client <24h forfeits).
+        await applyDiscoveryDepositCancelRefund({
           bookingId,
           actorKind: actor.kind,
           actorUserId: user.id,

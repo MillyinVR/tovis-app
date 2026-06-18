@@ -43,6 +43,40 @@ function normalizeCollectPaymentAt(
   return undefined
 }
 
+type DepositType = 'FLAT' | 'PERCENT'
+type DepositScope = 'NEW_DISCOVERY_ONLY' | 'ALL_NEW_CLIENTS' | 'ALL_CLIENTS'
+
+function normalizeDepositType(v: unknown): DepositType {
+  return typeof v === 'string' && v.trim().toUpperCase() === 'PERCENT'
+    ? 'PERCENT'
+    : 'FLAT'
+}
+
+function normalizeDepositScope(v: unknown): DepositScope {
+  const n = typeof v === 'string' ? v.trim().toUpperCase() : ''
+  if (n === 'ALL_NEW_CLIENTS') return 'ALL_NEW_CLIENTS'
+  if (n === 'ALL_CLIENTS') return 'ALL_CLIENTS'
+  return 'NEW_DISCOVERY_ONLY'
+}
+
+/** Parse a positive money amount (dollars) to a 2-dp Decimal, or null. */
+function pickDepositFlatAmount(v: unknown): Prisma.Decimal | null {
+  if (v == null || v === '') return null
+  const n = typeof v === 'number' ? v : Number(String(v).trim())
+  if (!Number.isFinite(n) || n <= 0) return null
+  return new Prisma.Decimal(n.toFixed(2))
+}
+
+/** Parse a deposit percent as an integer in [1, 100], or null. */
+function pickDepositPercent(v: unknown): number | null {
+  if (v == null || v === '') return null
+  const n = typeof v === 'number' ? v : Number(String(v).trim())
+  if (!Number.isFinite(n)) return null
+  const i = Math.trunc(n)
+  if (i < 1 || i > 100) return null
+  return i
+}
+
 function normalizeTipSuggestions(v: unknown): TipSuggestion[] | undefined {
   if (v === undefined) return undefined
   if (!Array.isArray(v)) return undefined
@@ -77,9 +111,12 @@ function validateBusinessRules(args: {
   acceptVenmo: boolean
   acceptZelle: boolean
   acceptAppleCash: boolean
+  acceptPaypal: boolean
+  acceptApplePay: boolean
   venmoHandle: string | null
   zelleHandle: string | null
   appleCashHandle: string | null
+  paypalHandle: string | null
   tipsEnabled: boolean
   allowCustomTip: boolean
   tipSuggestions: TipSuggestion[]
@@ -91,6 +128,8 @@ function validateBusinessRules(args: {
     args.acceptVenmo,
     args.acceptZelle,
     args.acceptAppleCash,
+    args.acceptPaypal,
+    args.acceptApplePay,
   ].filter(Boolean).length
 
   if (enabledMethods <= 0) {
@@ -107,6 +146,10 @@ function validateBusinessRules(args: {
 
   if (args.acceptAppleCash && !args.appleCashHandle) {
     return 'Add an Apple Cash contact or turn Apple Cash off.'
+  }
+
+  if (args.acceptPaypal && !args.paypalHandle) {
+    return 'Add a PayPal link or handle, or turn PayPal off.'
   }
 
   if (!args.tipsEnabled && args.allowCustomTip) {
@@ -141,12 +184,20 @@ const paymentSettingsSelect = {
   professionalId: true,
   collectPaymentAt: true,
 
+  depositEnabled: true,
+  depositType: true,
+  depositFlatAmount: true,
+  depositPercent: true,
+  depositScope: true,
+
   acceptCash: true,
   acceptCardOnFile: true,
   acceptTapToPay: true,
   acceptVenmo: true,
   acceptZelle: true,
   acceptAppleCash: true,
+  acceptPaypal: true,
+  acceptApplePay: true,
 
   tipsEnabled: true,
   allowCustomTip: true,
@@ -155,6 +206,7 @@ const paymentSettingsSelect = {
   venmoHandle: true,
   zelleHandle: true,
   appleCashHandle: true,
+  paypalHandle: true,
   paymentNote: true,
 
   createdAt: true,
@@ -207,6 +259,8 @@ export async function PATCH(req: Request) {
     const acceptZelle = pickBooleanOrUndefined(body.acceptZelle) ?? false
     const acceptAppleCash =
       pickBooleanOrUndefined(body.acceptAppleCash) ?? false
+    const acceptPaypal = pickBooleanOrUndefined(body.acceptPaypal) ?? false
+    const acceptApplePay = pickBooleanOrUndefined(body.acceptApplePay) ?? false
 
     const tipsEnabled = pickBooleanOrUndefined(body.tipsEnabled) ?? true
     const allowCustomTip = pickBooleanOrUndefined(body.allowCustomTip) ?? true
@@ -225,8 +279,27 @@ export async function PATCH(req: Request) {
       ? pickTrimmedStringOrNullOrUndefined(body.appleCashHandle) ?? null
       : null
 
+    const paypalHandle = acceptPaypal
+      ? pickTrimmedStringOrNullOrUndefined(body.paypalHandle) ?? null
+      : null
+
     const paymentNote =
       pickTrimmedStringOrNullOrUndefined(body.paymentNote) ?? null
+
+    const depositEnabled = pickBooleanOrUndefined(body.depositEnabled) ?? false
+    const depositType = normalizeDepositType(body.depositType)
+    const depositScope = normalizeDepositScope(body.depositScope)
+    const depositFlatAmount = pickDepositFlatAmount(body.depositFlatAmount)
+    const depositPercent = pickDepositPercent(body.depositPercent)
+
+    if (depositEnabled) {
+      if (depositType === 'FLAT' && !depositFlatAmount) {
+        return jsonFail(400, 'Enter a deposit amount greater than $0, or turn deposits off.')
+      }
+      if (depositType === 'PERCENT' && depositPercent == null) {
+        return jsonFail(400, 'Enter a deposit percent between 1 and 100, or turn deposits off.')
+      }
+    }
 
     const businessRuleError = validateBusinessRules({
       acceptCash,
@@ -235,9 +308,12 @@ export async function PATCH(req: Request) {
       acceptVenmo,
       acceptZelle,
       acceptAppleCash,
+      acceptPaypal,
+      acceptApplePay,
       venmoHandle,
       zelleHandle,
       appleCashHandle,
+      paypalHandle,
       tipsEnabled,
       allowCustomTip,
       tipSuggestions,
@@ -247,21 +323,33 @@ export async function PATCH(req: Request) {
       return jsonFail(400, businessRuleError)
     }
 
+    const depositFields = {
+      depositEnabled,
+      depositType,
+      depositScope,
+      depositFlatAmount: depositType === 'FLAT' ? depositFlatAmount : null,
+      depositPercent: depositType === 'PERCENT' ? depositPercent : null,
+    }
+
     const data: Prisma.ProfessionalPaymentSettingsUncheckedCreateInput = {
       professionalId,
       collectPaymentAt,
+      ...depositFields,
       acceptCash,
       acceptCardOnFile,
       acceptTapToPay,
       acceptVenmo,
       acceptZelle,
       acceptAppleCash,
+      acceptPaypal,
+      acceptApplePay,
       tipsEnabled,
       allowCustomTip,
       tipSuggestions: tipSuggestions as Prisma.InputJsonValue,
       venmoHandle,
       zelleHandle,
       appleCashHandle,
+      paypalHandle,
       paymentNote,
     }
 
@@ -271,18 +359,22 @@ export async function PATCH(req: Request) {
         create: data,
         update: {
           collectPaymentAt,
+          ...depositFields,
           acceptCash,
           acceptCardOnFile,
           acceptTapToPay,
           acceptVenmo,
           acceptZelle,
           acceptAppleCash,
+          acceptPaypal,
+          acceptApplePay,
           tipsEnabled,
           allowCustomTip,
           tipSuggestions: tipSuggestions as Prisma.InputJsonValue,
           venmoHandle,
           zelleHandle,
           appleCashHandle,
+          paypalHandle,
           paymentNote,
         },
         select: paymentSettingsSelect,

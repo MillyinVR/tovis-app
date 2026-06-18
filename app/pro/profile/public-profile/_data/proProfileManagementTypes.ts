@@ -1,5 +1,7 @@
 // app/pro/profile/public-profile/_data/proProfileManagementTypes.ts
 import type {
+  DepositScope,
+  DepositType,
   MediaType,
   PaymentCollectionTiming,
   VerificationStatus,
@@ -60,18 +62,26 @@ export type ProProfileManagementTipSuggestion = {
 
 export type ProProfileManagementPaymentSettingsInitial = {
   collectPaymentAt: PaymentCollectionTiming
+  depositEnabled: boolean
+  depositType: DepositType
+  depositFlatAmount: string | null
+  depositPercent: number | null
+  depositScope: DepositScope
   acceptCash: boolean
   acceptCardOnFile: boolean
   acceptTapToPay: boolean
   acceptVenmo: boolean
   acceptZelle: boolean
   acceptAppleCash: boolean
+  acceptPaypal: boolean
+  acceptApplePay: boolean
   tipsEnabled: boolean
   allowCustomTip: boolean
   tipSuggestions: ProProfileManagementTipSuggestion[] | null
   venmoHandle: string | null
   zelleHandle: string | null
   appleCashHandle: string | null
+  paypalHandle: string | null
   paymentNote: string | null
 }
 

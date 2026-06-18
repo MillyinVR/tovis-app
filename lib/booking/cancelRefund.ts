@@ -13,11 +13,20 @@
 // failure must not fail the request — the FAILED BookingRefund row + Sentry
 // capture make it retryable.
 
-import { BookingRefundTrigger, Role } from '@prisma/client'
+import {
+  BookingDepositStatus,
+  BookingRefundTrigger,
+  Role,
+} from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 
 import { prisma } from '@/lib/prisma'
-import { refundBookingPayment, type RefundResult } from '@/lib/booking/refunds'
+import {
+  refundBookingPayment,
+  refundDiscoveryDeposit,
+  type RefundResult,
+} from '@/lib/booking/refunds'
+import { resolveDepositRefundPlan } from '@/lib/booking/discoveryDepositPlan'
 import { safeError } from '@/lib/security/logging'
 
 export const CLIENT_FULL_REFUND_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -112,6 +121,109 @@ export async function applyAutoCancelRefund(args: {
     return result
   } catch (error) {
     console.error('applyAutoCancelRefund: unexpected error', {
+      bookingId: args.bookingId,
+      error: safeError(error),
+    })
+    Sentry.captureException(error)
+    return { outcome: 'NOT_ATTEMPTED' }
+  }
+}
+
+export type DepositCancelRefundResult =
+  | { outcome: 'REFUNDED'; refundAmountCents: number; feeRefunded: boolean }
+  | { outcome: 'FORFEITED' }
+  | { outcome: 'NOT_ATTEMPTED' }
+  | { outcome: 'FAILED'; message: string }
+
+/**
+ * Refund a brand-new client's discovery deposit (and, per policy, the one-time
+ * platform fee) when their booking is cancelled. The deposit is a SEPARATE Stripe
+ * PaymentIntent from the final bill, so it can't go through refundBookingPayment —
+ * this refunds the deposit PI directly with reverse_transfer, and refund_application_fee
+ * only when the fee is being returned. Refunding the fee sets discoveryFeeRefundedAt,
+ * which reverts the (client, pro) pair to "new" so the fee re-charges next time.
+ *
+ * Best-effort: never throws. Idempotent via a per-booking claim + Stripe idempotency key.
+ */
+export async function applyDiscoveryDepositCancelRefund(args: {
+  bookingId: string
+  actorKind: CancelRefundActorKind
+  actorUserId: string | null
+  cancelMutated: boolean
+  now?: Date
+  reason?: string | null
+}): Promise<DepositCancelRefundResult> {
+  if (!args.cancelMutated) return { outcome: 'NOT_ATTEMPTED' }
+
+  try {
+    const now = args.now ?? new Date()
+
+    const booking = await prisma.booking.findUnique({
+      where: { id: args.bookingId },
+      select: {
+        scheduledFor: true,
+        depositStatus: true,
+        depositStripePaymentIntentId: true,
+        depositAmount: true,
+        discoveryFeeAmount: true,
+      },
+    })
+
+    if (
+      !booking ||
+      booking.depositStatus !== BookingDepositStatus.PAID ||
+      !booking.depositStripePaymentIntentId
+    ) {
+      return { outcome: 'NOT_ATTEMPTED' }
+    }
+
+    const depositCents = booking.depositAmount
+      ? Math.round(Number(booking.depositAmount) * 100)
+      : 0
+    const feeCents = booking.discoveryFeeAmount ?? 0
+
+    const plan = resolveDepositRefundPlan({
+      actorKind: args.actorKind,
+      depositCents,
+      feeCents,
+      clientWithinFullRefundWindow: isAutoCancelRefundEligible({
+        actorKind: 'client',
+        scheduledFor: booking.scheduledFor,
+        now,
+      }),
+    })
+
+    if (plan.refundAmountCents <= 0) {
+      // Client cancelled too late: deposit forfeited to the pro, fee kept. The
+      // booking is cancelled but the kept fee keeps the pair "established".
+      return { outcome: 'FORFEITED' }
+    }
+
+    // Booking + refund writes happen in the allowlisted refund owner.
+    const result = await refundDiscoveryDeposit({
+      bookingId: args.bookingId,
+      paymentIntentId: booking.depositStripePaymentIntentId,
+      refundAmountCents: plan.refundAmountCents,
+      refundFee: plan.refundFee,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+      actor: { userId: args.actorUserId, role: actorKindToRole(args.actorKind) },
+      reason: args.reason ?? `Deposit refund on ${args.actorKind} cancellation.`,
+      now,
+    })
+
+    if (result.outcome === 'REFUNDED') {
+      return {
+        outcome: 'REFUNDED',
+        refundAmountCents: result.refundAmountCents,
+        feeRefunded: result.feeRefunded,
+      }
+    }
+    if (result.outcome === 'FAILED') {
+      return { outcome: 'FAILED', message: result.message }
+    }
+    return { outcome: 'NOT_ATTEMPTED' }
+  } catch (error) {
+    console.error('applyDiscoveryDepositCancelRefund: unexpected error', {
       bookingId: args.bookingId,
       error: safeError(error),
     })

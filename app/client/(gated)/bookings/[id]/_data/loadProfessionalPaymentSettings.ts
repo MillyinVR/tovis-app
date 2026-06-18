@@ -12,6 +12,8 @@ const professionalPaymentSettingsSelect = {
   acceptVenmo: true,
   acceptZelle: true,
   acceptAppleCash: true,
+  acceptPaypal: true,
+  acceptApplePay: true,
 
   // Stripe / hosted card checkout
   acceptStripeCard: true,
@@ -28,6 +30,7 @@ const professionalPaymentSettingsSelect = {
   venmoHandle: true,
   zelleHandle: true,
   appleCashHandle: true,
+  paypalHandle: true,
   paymentNote: true,
 } satisfies Prisma.ProfessionalPaymentSettingsSelect
 
@@ -89,6 +92,7 @@ export async function loadProfessionalPaymentSettings(args: {
     venmoHandle: normalizePublicHandle(settings.venmoHandle),
     zelleHandle: normalizePublicHandle(settings.zelleHandle),
     appleCashHandle: normalizePublicHandle(settings.appleCashHandle),
+    paypalHandle: normalizePublicHandle(settings.paypalHandle),
     paymentNote: normalizePaymentNote(settings.paymentNote),
   }
 }

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
   cancelBooking: vi.fn(),
   applyAutoCancelRefund: vi.fn(),
+  applyDiscoveryDepositCancelRefund: vi.fn(),
 
   withRouteIdempotency: vi.fn(),
   beginRouteIdempotency: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 
 vi.mock('@/lib/booking/cancelRefund', () => ({
   applyAutoCancelRefund: mocks.applyAutoCancelRefund,
+  applyDiscoveryDepositCancelRefund: mocks.applyDiscoveryDepositCancelRefund,
 }))
 
 vi.mock('@/lib/rateLimit/enforce', () => ({
@@ -219,6 +221,9 @@ describe('app/api/bookings/[id]/cancel/route.ts', () => {
     mocks.completeRouteIdempotency.mockResolvedValue(undefined)
     mocks.failStartedRouteIdempotency.mockResolvedValue(undefined)
     mocks.applyAutoCancelRefund.mockResolvedValue({ outcome: 'NOT_ATTEMPTED' })
+    mocks.applyDiscoveryDepositCancelRefund.mockResolvedValue({
+      outcome: 'NOT_ATTEMPTED',
+    })
 
     setStartedIdempotencyDefault()
   })

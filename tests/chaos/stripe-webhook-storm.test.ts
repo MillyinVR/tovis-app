@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => ({
   applyStripePaymentSucceededInTransaction: vi.fn(),
   applyStripePaymentFailedInTransaction: vi.fn(),
   applyStripeCheckoutSessionStatusInTransaction: vi.fn(),
+  applyStripeDepositSucceededInTransaction: vi.fn(),
+  reconcileDepositChargeRefundInTransaction: vi.fn(),
+  applyStripeSubscriptionInTransaction: vi.fn(),
 
   safeError: vi.fn((error: unknown) => ({
     name: error instanceof Error ? error.name : 'NonErrorThrown',
@@ -62,6 +65,16 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
     mocks.applyStripePaymentFailedInTransaction,
   applyStripeCheckoutSessionStatusInTransaction:
     mocks.applyStripeCheckoutSessionStatusInTransaction,
+  applyStripeDepositSucceededInTransaction:
+    mocks.applyStripeDepositSucceededInTransaction,
+  reconcileDepositChargeRefundInTransaction:
+    mocks.reconcileDepositChargeRefundInTransaction,
+  DISCOVERY_DEPOSIT_CHECKOUT_KIND: 'DISCOVERY_DEPOSIT',
+}))
+
+vi.mock('@/lib/membership/syncSubscription', () => ({
+  applyStripeSubscriptionInTransaction:
+    mocks.applyStripeSubscriptionInTransaction,
 }))
 
 vi.mock('@/lib/security/logging', () => ({

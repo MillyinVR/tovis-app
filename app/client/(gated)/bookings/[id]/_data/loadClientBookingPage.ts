@@ -28,6 +28,8 @@ const bookingPageBookingSelect = {
   productSubtotalSnapshot: true,
   totalAmount: true,
   depositAmount: true,
+  depositStatus: true,
+  discoveryFeeAmount: true,
   tipAmount: true,
   taxAmount: true,
   discountAmount: true,

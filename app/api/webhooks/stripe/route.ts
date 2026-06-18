@@ -10,10 +10,14 @@ import { prisma } from '@/lib/prisma'
 import { getStripe, getStripeWebhookSecret } from '@/lib/stripe/server'
 import {
   applyStripeCheckoutSessionStatusInTransaction,
+  applyStripeDepositSucceededInTransaction,
   applyStripePaymentFailedInTransaction,
   applyStripePaymentSucceededInTransaction,
+  reconcileDepositChargeRefundInTransaction,
+  DISCOVERY_DEPOSIT_CHECKOUT_KIND,
 } from '@/lib/booking/writeBoundary'
 import { reconcileChargeRefundInTransaction } from '@/lib/booking/refunds'
+import { applyStripeSubscriptionInTransaction } from '@/lib/membership/syncSubscription'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,6 +92,43 @@ async function markEventFailed(args: {
   })
 }
 
+function isDiscoveryDepositMetadata(
+  metadata: Stripe.Metadata | null | undefined,
+): boolean {
+  return getMetadataString(metadata, 'kind') === DISCOVERY_DEPOSIT_CHECKOUT_KIND
+}
+
+async function handleDepositPaid(
+  tx: Prisma.TransactionClient,
+  args: {
+    stripePaymentIntentId: string | null
+    chargeId: string | null
+    bookingIdHint: string | null
+    eventLabel: string
+  },
+): Promise<StripeWebhookResult> {
+  if (!args.stripePaymentIntentId) {
+    return { handled: false, message: `${args.eventLabel} deposit missing payment_intent.` }
+  }
+
+  const result = await applyStripeDepositSucceededInTransaction(tx, {
+    stripePaymentIntentId: args.stripePaymentIntentId,
+    chargeId: args.chargeId,
+    bookingIdHint: args.bookingIdHint,
+  })
+
+  if (!result.handled) {
+    return { handled: false, message: `${args.eventLabel} deposit booking not found.` }
+  }
+
+  return {
+    handled: true,
+    message: result.alreadyPaid
+      ? `${args.eventLabel} deposit already recorded.`
+      : `${args.eventLabel} deposit marked paid.`,
+  }
+}
+
 async function handleCheckoutSession(
   tx: Prisma.TransactionClient,
   session: Stripe.Checkout.Session,
@@ -99,6 +140,20 @@ async function handleCheckoutSession(
     (typeof session.client_reference_id === 'string'
       ? session.client_reference_id.trim()
       : null)
+
+  // Discovery deposit checkout: a separate up-front charge that carries the platform
+  // fee — never touch the final-bill payment fields for it.
+  if (
+    status === StripeCheckoutSessionStatus.COMPLETE &&
+    isDiscoveryDepositMetadata(session.metadata)
+  ) {
+    return handleDepositPaid(tx, {
+      stripePaymentIntentId: getSessionPaymentIntentId(session),
+      chargeId: null,
+      bookingIdHint,
+      eventLabel,
+    })
+  }
 
   const stripeCheckoutSessionId = session.id
   if (!stripeCheckoutSessionId) {
@@ -135,12 +190,33 @@ async function handleCheckoutSession(
   }
 }
 
+function getPaymentIntentLatestChargeId(
+  paymentIntent: Stripe.PaymentIntent,
+): string | null {
+  const latestCharge = paymentIntent.latest_charge
+  if (typeof latestCharge === 'string') return latestCharge
+  if (latestCharge && typeof latestCharge === 'object' && typeof latestCharge.id === 'string') {
+    return latestCharge.id
+  }
+  return null
+}
+
 async function handlePaymentIntentSucceeded(
   tx: Prisma.TransactionClient,
   paymentIntent: Stripe.PaymentIntent,
   stripeEventId: string,
 ): Promise<StripeWebhookResult> {
   const bookingIdHint = getMetadataString(paymentIntent.metadata, 'bookingId')
+
+  // Discovery deposit PI: record the deposit, don't touch final-bill fields.
+  if (isDiscoveryDepositMetadata(paymentIntent.metadata)) {
+    return handleDepositPaid(tx, {
+      stripePaymentIntentId: paymentIntent.id,
+      chargeId: getPaymentIntentLatestChargeId(paymentIntent),
+      bookingIdHint,
+      eventLabel: 'payment_intent.succeeded',
+    })
+  }
 
   const result = await applyStripePaymentSucceededInTransaction(tx, {
     bookingIdHint,
@@ -222,6 +298,18 @@ async function handleChargeRefunded(
     }
   }
 
+  // Deposit refunds ride a separate PaymentIntent — reconcile those first.
+  const depositResult = await reconcileDepositChargeRefundInTransaction(tx, {
+    paymentIntentId,
+    amountRefundedCents:
+      typeof charge.amount_refunded === 'number' ? charge.amount_refunded : 0,
+    chargeAmountCents: typeof charge.amount === 'number' ? charge.amount : 0,
+  })
+
+  if (depositResult.handled) {
+    return { handled: true, message: 'charge.refunded reconciled deposit.' }
+  }
+
   const refunds = (charge.refunds?.data ?? []).map((refund) => ({
     id: refund.id,
     status: refund.status,
@@ -247,6 +335,21 @@ async function handleChargeRefunded(
     handled: true,
     message: 'charge.refunded reconciled.',
   }
+}
+
+async function handleSubscriptionEvent(
+  tx: Prisma.TransactionClient,
+  subscription: Stripe.Subscription,
+  eventLabel: string,
+  opts?: { deleted?: boolean },
+): Promise<StripeWebhookResult> {
+  const result = await applyStripeSubscriptionInTransaction(tx, subscription, opts)
+
+  if (!result.handled) {
+    return { handled: false, message: `${eventLabel} subscription not matched.` }
+  }
+
+  return { handled: true, message: `${eventLabel} synced.` }
 }
 
 async function handleAccountUpdated(
@@ -347,6 +450,28 @@ async function handleStripeEvent(
 
     case 'account.updated':
       return handleAccountUpdated(tx, event.data.object as Stripe.Account)
+
+    case 'customer.subscription.created':
+      return handleSubscriptionEvent(
+        tx,
+        event.data.object as Stripe.Subscription,
+        'customer.subscription.created',
+      )
+
+    case 'customer.subscription.updated':
+      return handleSubscriptionEvent(
+        tx,
+        event.data.object as Stripe.Subscription,
+        'customer.subscription.updated',
+      )
+
+    case 'customer.subscription.deleted':
+      return handleSubscriptionEvent(
+        tx,
+        event.data.object as Stripe.Subscription,
+        'customer.subscription.deleted',
+        { deleted: true },
+      )
 
     default:
       return {
