@@ -482,6 +482,71 @@ describe('app/api/pro/media/route.ts', () => {
     })
   })
 
+  it('creates a private PRO_CLIENT asset in the private bucket when no public surface is selected', async () => {
+    mocks.serviceFindMany.mockResolvedValue([{ id: 'service_1' }])
+
+    const createdMedia = makeCreatedMedia({
+      visibility: MediaVisibility.PRO_CLIENT,
+      isFeaturedInPortfolio: false,
+      isEligibleForLooks: false,
+      storageBucket: BUCKETS.mediaPrivate,
+    })
+    mocks.mediaAssetCreate.mockResolvedValue(createdMedia)
+
+    // A PORTFOLIO_PRIVATE upload arrives on the PRO_PORTFOLIO surface but in the
+    // private bucket; with both public flags off, visibility must resolve to
+    // PRO_CLIENT and no Look may be published.
+    mocks.validateUploadSession.mockResolvedValue({
+      id: 'us_1',
+      surface: 'PRO_PORTFOLIO',
+      status: 'PENDING',
+      professionalId: 'pro_1',
+      clientId: null,
+      bookingId: null,
+      phase: null,
+      storageBucket: BUCKETS.mediaPrivate,
+      storagePath: 'pro/pro_1/portfolio_private/2026-06/media_1.jpg',
+      contentType: 'image/jpeg',
+      maxBytes: 30 * 1024 * 1024,
+      checksumSha256: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      consumedAt: null,
+      mediaAssetId: null,
+    })
+
+    const req = makeJsonRequest({
+      uploadSessionId: 'us_1',
+      caption: 'Private upload',
+      mediaType: 'image',
+      isFeaturedInPortfolio: false,
+      isEligibleForLooks: false,
+      serviceIds: ['service_1'],
+    })
+
+    const res = await POST(req)
+    const body = await readJson(res)
+
+    expect(mocks.mediaAssetCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          visibility: MediaVisibility.PRO_CLIENT,
+          isFeaturedInPortfolio: false,
+          isEligibleForLooks: false,
+          storageBucket: BUCKETS.mediaPrivate,
+          url: null,
+        }),
+      }),
+    )
+
+    expect(mocks.createOrUpdateProLookFromMediaAsset).not.toHaveBeenCalled()
+
+    expect(res.status).toBe(201)
+    expect(body).toEqual({
+      ok: true,
+      media: createdMedia,
+    })
+  })
+
   it('creates media and delegates to the publication service when Looks is enabled', async () => {
     mocks.serviceFindMany.mockResolvedValue([
       { id: 'service_1' },
