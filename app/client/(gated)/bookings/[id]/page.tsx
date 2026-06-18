@@ -213,7 +213,14 @@ function friendlyCollectionTiming(value: unknown): string | null {
 function buildAcceptedMethods(
   paymentSettings: LoadedPaymentSettings,
 ): AcceptedMethod[] {
-  if (!paymentSettings) return []
+  // A pro with no saved ProfessionalPaymentSettings row still implicitly accepts
+  // cash: the schema defaults acceptCash to true and the settings-save flow
+  // requires at least one method. Treat a missing/unconfigured row as that
+  // default (Cash) instead of "no methods enabled", so a client is never
+  // hard-blocked from paying for a completed appointment.
+  if (!paymentSettings) {
+    return [{ key: 'cash', label: 'Cash', handle: null }]
+  }
 
   const methods: AcceptedMethod[] = []
 
