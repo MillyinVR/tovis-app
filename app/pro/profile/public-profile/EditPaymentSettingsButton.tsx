@@ -375,7 +375,12 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
           aria-modal="true"
           aria-label="Edit payment settings"
           className={[
-            'fixed inset-0 z-[1000] grid place-items-center p-4',
+            // Sit above the fixed app footer (z-index 999999 in layout.tsx);
+            // otherwise the footer bar overlaps the modal and intercepts taps on
+            // the Save button at the bottom. The extra bottom padding keeps the
+            // dialog (and its action row) clear of the footer/safe-area zone.
+            'fixed inset-0 z-[1000000] grid place-items-center p-4',
+            'pb-[calc(1.5rem+env(safe-area-inset-bottom))]',
             'bg-black/70 backdrop-blur-sm',
             'transition-opacity duration-150 ease-out',
             mounted && !closing ? 'opacity-100' : 'opacity-0',
