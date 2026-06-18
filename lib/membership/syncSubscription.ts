@@ -6,7 +6,7 @@
 
 import { Prisma, SubscriptionStatus } from '@prisma/client'
 
-import { getMembershipPlans } from '@/lib/membership/plans'
+import { configuredPriceIds } from '@/lib/membership/plans'
 import { resolveEntitlements } from '@/lib/pro/entitlements'
 
 export type StripeSubscriptionLike = {
@@ -60,8 +60,8 @@ function resolvePlanKey(sub: StripeSubscriptionLike): string | null {
 
   const priceId = sub.items?.data?.[0]?.price?.id
   if (priceId) {
-    const matched = getMembershipPlans().find((p) => p.stripePriceId === priceId)
-    if (matched) return matched.key
+    const matched = configuredPriceIds().find((p) => p.priceId === priceId)
+    if (matched) return matched.planKey
   }
   return null
 }

@@ -4,14 +4,19 @@ import { useState, useTransition } from 'react'
 import type { SubscriptionStatus } from '@prisma/client'
 import type { Entitlement, PlanKey } from '@/lib/pro/entitlements'
 
+type PlanPrice = {
+  interval: 'month' | 'year'
+  amountCents: number
+  perMonthCents: number
+  purchasable: boolean
+}
+
 type PlanCard = {
   key: PlanKey
   name: string
-  priceCents: number
-  interval: 'month' | null
-  trialDays: number
   blurb: string
-  purchasable: boolean
+  trialDays: number
+  prices: PlanPrice[]
 }
 
 type Props = {
@@ -34,9 +39,8 @@ const ENTITLEMENT_LABELS: Record<Entitlement, string> = {
   white_label: 'White-label / multi-pro salon',
 }
 
-function priceLabel(plan: PlanCard): string {
-  if (plan.priceCents <= 0) return 'Free'
-  return `$${(plan.priceCents / 100).toFixed(0)}/${plan.interval ?? 'mo'}`
+function dollars(cents: number): string {
+  return `$${(cents / 100).toFixed(0)}`
 }
 
 function formatDate(iso: string | null): string | null {
@@ -51,13 +55,13 @@ export default function MembershipClient(props: Props) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
-  async function startUpgrade(planKey: PlanKey) {
+  async function startUpgrade(planKey: PlanKey, interval: 'month' | 'year') {
     setError(null)
     try {
       const res = await fetch('/api/pro/membership/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planKey }),
+        body: JSON.stringify({ planKey, interval }),
       })
       const data = await res.json().catch(() => null)
       if (!res.ok || !data?.url) {
@@ -110,6 +114,9 @@ export default function MembershipClient(props: Props) {
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         {props.plans.map((plan) => {
           const isCurrent = plan.key === props.currentPlanKey
+          const monthly = plan.prices.find((p) => p.interval === 'month')
+          const annual = plan.prices.find((p) => p.interval === 'year')
+          const isFree = plan.prices.length === 0
           return (
             <div
               key={plan.key}
@@ -123,10 +130,21 @@ export default function MembershipClient(props: Props) {
               <div className="flex items-center justify-between">
                 <div className="text-[14px] font-black">{plan.name}</div>
                 <div className="text-[13px] font-black text-textPrimary">
-                  {priceLabel(plan)}
+                  {isFree
+                    ? 'Free'
+                    : monthly
+                      ? `${dollars(monthly.amountCents)}/mo`
+                      : ''}
                 </div>
               </div>
               <p className="mt-1 text-[12px] text-textSecondary">{plan.blurb}</p>
+
+              {annual ? (
+                <div className="mt-1 text-[11px] text-textSecondary">
+                  or {dollars(annual.perMonthCents)}/mo billed annually (
+                  {dollars(annual.amountCents)}/yr)
+                </div>
+              ) : null}
 
               {plan.trialDays > 0 && !isCurrent ? (
                 <div className="mt-2 text-[11px] font-black text-accentPrimary">
@@ -134,26 +152,49 @@ export default function MembershipClient(props: Props) {
                 </div>
               ) : null}
 
-              <div className="mt-3">
+              <div className="mt-3 grid gap-2">
                 {isCurrent ? (
                   <div className="rounded-card border border-white/10 bg-bgPrimary px-3 py-2 text-center text-[12px] font-black text-textSecondary">
                     Current plan
                   </div>
-                ) : plan.purchasable ? (
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => startTransition(() => startUpgrade(plan.key))}
-                    className={[
-                      'w-full rounded-card border px-3 py-2 text-[12px] font-black transition',
-                      pending
-                        ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
-                        : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
-                    ].join(' ')}
-                  >
-                    {pending ? 'Starting…' : `Upgrade to ${plan.name}`}
-                  </button>
-                ) : null}
+                ) : (
+                  <>
+                    {monthly?.purchasable ? (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() =>
+                          startTransition(() => startUpgrade(plan.key, 'month'))
+                        }
+                        className={[
+                          'w-full rounded-card border px-3 py-2 text-[12px] font-black transition',
+                          pending
+                            ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+                            : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
+                        ].join(' ')}
+                      >
+                        {pending ? 'Starting…' : `Go monthly · ${dollars(monthly.amountCents)}/mo`}
+                      </button>
+                    ) : null}
+                    {annual?.purchasable ? (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() =>
+                          startTransition(() => startUpgrade(plan.key, 'year'))
+                        }
+                        className={[
+                          'w-full rounded-card border px-3 py-2 text-[12px] font-black transition',
+                          pending
+                            ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
+                            : 'border-white/15 bg-bgPrimary text-textPrimary hover:border-white/30',
+                        ].join(' ')}
+                      >
+                        Save with annual · {dollars(annual.amountCents)}/yr
+                      </button>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
           )

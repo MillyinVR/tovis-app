@@ -42,11 +42,14 @@ export default async function ProMembershipPage() {
       plans={getMembershipPlans().map((p) => ({
         key: p.key,
         name: p.name,
-        priceCents: p.priceCents,
-        interval: p.interval,
-        trialDays: p.trialDays,
         blurb: p.blurb,
-        purchasable: p.key !== 'free' && Boolean(p.stripePriceId),
+        trialDays: p.trialDays,
+        prices: p.prices.map((price) => ({
+          interval: price.interval,
+          amountCents: price.amountCents,
+          perMonthCents: price.perMonthCents,
+          purchasable: Boolean(price.stripePriceId),
+        })),
       }))}
     />
   )

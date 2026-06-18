@@ -6,7 +6,7 @@
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { isRecord } from '@/lib/guards'
-import { getPurchasablePlan } from '@/lib/membership/plans'
+import { getPurchasablePrice } from '@/lib/membership/plans'
 import { ensureBillingCustomer } from '@/lib/membership/subscription'
 import { getStripe } from '@/lib/stripe/server'
 import { membershipReturnUrl } from '@/lib/membership/urls'
@@ -21,11 +21,14 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}) as Record<string, unknown>)
     const planKey =
       isRecord(body) && typeof body.planKey === 'string' ? body.planKey.trim() : ''
+    const interval =
+      isRecord(body) && typeof body.interval === 'string' ? body.interval.trim() : 'month'
 
-    const plan = getPurchasablePlan(planKey)
-    if (!plan || !plan.stripePriceId) {
+    const purchasable = getPurchasablePrice(planKey, interval)
+    if (!purchasable) {
       return jsonFail(400, 'That membership plan is not available for checkout.')
     }
+    const { plan, price } = purchasable
 
     const customerId = await ensureBillingCustomer({
       professionalId: auth.professionalId,
@@ -36,12 +39,13 @@ export async function POST(req: Request) {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: customerId,
-      line_items: [{ price: plan.stripePriceId, quantity: 1 }],
+      line_items: [{ price: price.stripePriceId, quantity: 1 }],
       subscription_data: {
         ...(plan.trialDays > 0 ? { trial_period_days: plan.trialDays } : {}),
         metadata: {
           professionalId: auth.professionalId,
           planKey: plan.key,
+          interval: price.interval,
           kind: 'TOVIS_MEMBERSHIP',
         },
       },
