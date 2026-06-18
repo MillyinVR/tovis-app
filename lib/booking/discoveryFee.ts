@@ -2,7 +2,7 @@
 //
 // New-client discovery deposit + one-time platform fee policy.
 //
-// Tovis charges a small, flat, one-time platform fee (plus the pro's deposit) ONLY
+// The platform charges a small, flat, one-time fee (plus the pro's deposit) ONLY
 // when a brand-new client books a pro they discovered through the Looks feed or the
 // Discovery tab — i.e. a cold match the platform created. Clients who found the pro
 // any other way (searched them by name/email, were invited, messaged them, tapped the

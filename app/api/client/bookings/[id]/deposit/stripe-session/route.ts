@@ -155,7 +155,7 @@ export async function POST(req: NextRequest, props: RouteContext) {
               kind: DISCOVERY_DEPOSIT_CHECKOUT_KIND,
             },
             payment_intent_data: {
-              // Tovis keeps the one-time platform fee; the deposit settles to the pro.
+              // The platform keeps the one-time fee; the deposit settles to the pro.
               application_fee_amount: prepared.stripe.feeCents,
               transfer_data: {
                 destination: prepared.stripe.connectedAccountId,

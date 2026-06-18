@@ -1,7 +1,7 @@
 // app/api/pro/membership/checkout/route.ts
 //
 // Starts a Stripe Billing Checkout (mode: subscription) for a pro upgrading to a paid
-// plan. This is the pro paying Tovis — a platform-account charge, NOT a Connect
+// plan. This is the pro paying the platform — a platform-account charge, NOT a Connect
 // destination charge. First month is free via the plan's trial.
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'

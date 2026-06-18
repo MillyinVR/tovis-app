@@ -513,3 +513,11 @@ app/api/client/referrals/[id]/confirm/route.ts:optional direct property read:ref
 app/api/client/referrals/route.ts:direct property read:? [r.professional.firstName, r.professional.lastName]
 lib/referral/referralConversion.ts:direct property read:const referredName = referral.referredClient?.firstName?.trim() || 'Your referral'
 lib/referral/referralConversion.ts:optional direct property read:const referredName = referral.referredClient?.firstName?.trim() || 'Your referral'
+app/api/pro/membership/portal/route.ts:direct property read:if (!sub?.stripeCustomerId) {
+app/api/pro/membership/portal/route.ts:optional direct property read:if (!sub?.stripeCustomerId) {
+app/pro/membership/page.tsx:direct property read:hasBillingAccount={Boolean(sub?.stripeCustomerId)}
+app/pro/membership/page.tsx:optional direct property read:hasBillingAccount={Boolean(sub?.stripeCustomerId)}
+lib/booking/writeBoundary.ts:direct property read:const connectedAccountId = settings?.stripeAccountId ?? null
+lib/booking/writeBoundary.ts:optional direct property read:const connectedAccountId = settings?.stripeAccountId ?? null
+lib/membership/subscription.ts:Prisma select/include plaintext field:stripeCustomerId: true,
+lib/membership/subscription.ts:direct property read:if (sub.stripeCustomerId) return sub.stripeCustomerId

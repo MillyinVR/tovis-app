@@ -17,10 +17,7 @@ import {
   DISCOVERY_DEPOSIT_CHECKOUT_KIND,
 } from '@/lib/booking/writeBoundary'
 import { reconcileChargeRefundInTransaction } from '@/lib/booking/refunds'
-import {
-  applyStripeSubscriptionInTransaction,
-  type StripeSubscriptionLike,
-} from '@/lib/membership/syncSubscription'
+import { applyStripeSubscriptionInTransaction } from '@/lib/membership/syncSubscription'
 
 export const dynamic = 'force-dynamic'
 
@@ -346,11 +343,7 @@ async function handleSubscriptionEvent(
   eventLabel: string,
   opts?: { deleted?: boolean },
 ): Promise<StripeWebhookResult> {
-  const result = await applyStripeSubscriptionInTransaction(
-    tx,
-    subscription as unknown as StripeSubscriptionLike,
-    opts,
-  )
+  const result = await applyStripeSubscriptionInTransaction(tx, subscription, opts)
 
   if (!result.handled) {
     return { handled: false, message: `${eventLabel} subscription not matched.` }

@@ -6,7 +6,7 @@
 // deposit and fee to collect up front. No I/O; fully unit-testable.
 //
 // The deposit and fee are collected together in ONE Stripe PaymentIntent: the fee
-// rides as the application_fee (Tovis keeps it) and the deposit settles to the pro.
+// rides as the application_fee (the platform keeps it) and the deposit settles to the pro.
 // That combined charge must clear Stripe's minimum, so if deposit + fee is below the
 // floor we collect nothing rather than create an un-processable sub-minimum charge.
 
@@ -27,7 +27,7 @@ export type DepositSettings = Readonly<{
 export type DiscoveryDepositPlan = Readonly<{
   /** Deposit to collect, in cents (settles to the pro, credits the final total). */
   depositCents: number
-  /** One-time platform fee, in cents (kept by Tovis as the application fee). */
+  /** One-time platform fee, in cents (kept by the platform as the application fee). */
   discoveryFeeCents: number
   /** deposit + fee — the single up-front PaymentIntent amount. */
   totalUpfrontCents: number

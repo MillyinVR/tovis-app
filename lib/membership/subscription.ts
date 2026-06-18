@@ -4,7 +4,7 @@
 //
 // IMPORTANT object hygiene: the Billing customer id stored here is DISTINCT from the
 // Connect account id on ProfessionalPaymentSettings. A pro is both a connected account
-// (receives client money) and a Billing customer (pays Tovis). Never conflate them.
+// (receives client money) and a Billing customer (pays the platform). Never conflate them.
 
 import { Prisma, SubscriptionStatus } from '@prisma/client'
 

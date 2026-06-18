@@ -15,16 +15,18 @@
 
 import {
   BookingDepositStatus,
-  BookingRefundStatus,
   BookingRefundTrigger,
   Role,
 } from '@prisma/client'
 import * as Sentry from '@sentry/nextjs'
 
 import { prisma } from '@/lib/prisma'
-import { refundBookingPayment, type RefundResult } from '@/lib/booking/refunds'
+import {
+  refundBookingPayment,
+  refundDiscoveryDeposit,
+  type RefundResult,
+} from '@/lib/booking/refunds'
 import { resolveDepositRefundPlan } from '@/lib/booking/discoveryDepositPlan'
-import { getStripe } from '@/lib/stripe/server'
 import { safeError } from '@/lib/security/logging'
 
 export const CLIENT_FULL_REFUND_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -197,85 +199,29 @@ export async function applyDiscoveryDepositCancelRefund(args: {
       return { outcome: 'FORFEITED' }
     }
 
-    // Claim atomically so a re-cancel can't double-refund.
-    const claimed = await prisma.booking.updateMany({
-      where: { id: args.bookingId, depositStatus: BookingDepositStatus.PAID },
-      data: { depositStatus: BookingDepositStatus.REFUNDED },
+    // Booking + refund writes happen in the allowlisted refund owner.
+    const result = await refundDiscoveryDeposit({
+      bookingId: args.bookingId,
+      paymentIntentId: booking.depositStripePaymentIntentId,
+      refundAmountCents: plan.refundAmountCents,
+      refundFee: plan.refundFee,
+      trigger: BookingRefundTrigger.AUTO_CANCELLATION,
+      actor: { userId: args.actorUserId, role: actorKindToRole(args.actorKind) },
+      reason: args.reason ?? `Deposit refund on ${args.actorKind} cancellation.`,
+      now,
     })
-    if (claimed.count !== 1) return { outcome: 'NOT_ATTEMPTED' }
 
-    const paymentIntentId = booking.depositStripePaymentIntentId
-
-    try {
-      const stripe = getStripe()
-      const refund = await stripe.refunds.create(
-        {
-          payment_intent: paymentIntentId,
-          amount: plan.refundAmountCents,
-          reverse_transfer: true,
-          ...(plan.refundFee ? { refund_application_fee: true } : {}),
-          metadata: {
-            bookingId: args.bookingId,
-            kind: 'DISCOVERY_DEPOSIT_REFUND',
-            actorKind: args.actorKind,
-          },
-        },
-        { idempotencyKey: `tovis:deposit-refund:${args.bookingId}` },
-      )
-
-      await prisma.booking.update({
-        where: { id: args.bookingId },
-        // Refund-reset: only stamp the fee as refunded when we actually returned it.
-        data: { discoveryFeeRefundedAt: plan.refundFee ? now : null },
-      })
-
-      await prisma.bookingRefund.create({
-        data: {
-          bookingId: args.bookingId,
-          amountCents: plan.refundAmountCents,
-          currency: 'usd',
-          status: BookingRefundStatus.SUCCEEDED,
-          trigger: BookingRefundTrigger.AUTO_CANCELLATION,
-          reverseTransfer: true,
-          applicationFeeRefunded: plan.refundFee,
-          stripeRefundId: refund.id,
-          stripePaymentIntentId: paymentIntentId,
-          initiatedByUserId: args.actorUserId,
-          initiatedByRole: actorKindToRole(args.actorKind),
-          reason:
-            args.reason ?? `Deposit refund on ${args.actorKind} cancellation.`,
-        },
-      })
-
+    if (result.outcome === 'REFUNDED') {
       return {
         outcome: 'REFUNDED',
-        refundAmountCents: plan.refundAmountCents,
-        feeRefunded: plan.refundFee,
-      }
-    } catch (error) {
-      // Release the claim so the refund can be retried.
-      await prisma.booking
-        .updateMany({
-          where: {
-            id: args.bookingId,
-            depositStatus: BookingDepositStatus.REFUNDED,
-            discoveryFeeRefundedAt: null,
-          },
-          data: { depositStatus: BookingDepositStatus.PAID },
-        })
-        .catch(() => {})
-
-      console.error('applyDiscoveryDepositCancelRefund: Stripe refund failed', {
-        bookingId: args.bookingId,
-        error: safeError(error),
-      })
-      Sentry.captureException(error)
-
-      return {
-        outcome: 'FAILED',
-        message: error instanceof Error ? error.message : 'Deposit refund failed.',
+        refundAmountCents: result.refundAmountCents,
+        feeRefunded: result.feeRefunded,
       }
     }
+    if (result.outcome === 'FAILED') {
+      return { outcome: 'FAILED', message: result.message }
+    }
+    return { outcome: 'NOT_ATTEMPTED' }
   } catch (error) {
     console.error('applyDiscoveryDepositCancelRefund: unexpected error', {
       bookingId: args.bookingId,

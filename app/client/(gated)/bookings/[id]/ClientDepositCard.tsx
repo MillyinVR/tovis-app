@@ -108,7 +108,7 @@ export default function ClientDepositCard({
       </div>
       <div className="mt-1 text-[12px] text-textSecondary">
         This pro requires a deposit to hold your booking. Because you found them through
-        the Looks feed or Discovery, a one-time Tovis booking fee also applies. Your
+        the Looks feed or Discovery, a one-time booking fee also applies. Your
         deposit is credited toward your service total.
       </div>
 
@@ -121,7 +121,7 @@ export default function ClientDepositCard({
         ) : null}
         {feeLabel ? (
           <div className="flex items-center justify-between">
-            <span className="text-textSecondary">One-time Tovis booking fee</span>
+            <span className="text-textSecondary">One-time booking fee</span>
             <span className="font-semibold text-textPrimary">{feeLabel}</span>
           </div>
         ) : null}

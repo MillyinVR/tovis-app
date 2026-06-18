@@ -445,7 +445,7 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
 
               <SectionCard
                 title="Deposits"
-                subtitle="Require a deposit to hold the appointment. New clients who find you through the Looks feed or Discovery also pay a one-time Tovis booking fee, processed with the deposit through Stripe."
+                subtitle="Require a deposit to hold the appointment. New clients who find you through the Looks feed or Discovery also pay a one-time booking fee, processed with the deposit through Stripe."
               >
                 <div className="grid gap-3">
                   <ToggleRow
@@ -532,7 +532,7 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
 
                       <div className="rounded-card border border-white/10 bg-bgPrimary/60 p-3 text-[11px] text-textSecondary">
                         Deposits require Stripe payouts to be set up. The one-time
-                        Tovis booking fee applies only to brand-new Looks/Discovery
+                        booking fee applies only to brand-new Looks/Discovery
                         clients — never to your existing clients.
                       </div>
                     </>
