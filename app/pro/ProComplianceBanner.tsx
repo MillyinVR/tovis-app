@@ -81,12 +81,12 @@ function messageForKind(args: {
   }
 
   if (kind === 'EXPIRED') {
-    return 'Your license looks expired. Upload an updated license to stay active.'
+    return 'Your license has expired — renew it, then update your license info to stay active.'
   }
 
-  return `Your license expires soon (${expiresInDays ?? '?'} day${
+  return `Your license expires in ${expiresInDays ?? '?'} day${
     expiresInDays === 1 ? '' : 's'
-  }). Upload an updated license.`
+  }. Renew it and update your license info before it lapses.`
 }
 
 function toneForKind(kind: BannerKind): string {
@@ -154,7 +154,11 @@ export default function ProComplianceBanner() {
   const locallyDismissed = dismissKey ? dismissedKeys.has(dismissKey) : false
 
   const kind = summary?.kind ?? null
-  const visible = Boolean(kind) && !persistedDismissed && !locallyDismissed
+  // Expiry warnings must keep nagging — they're not dismissible. Other notices
+  // (pending review, missing doc) can be dismissed for the session.
+  const dismissible = kind !== 'EXPIRED' && kind !== 'EXPIRING_SOON'
+  const visible =
+    Boolean(kind) && (!dismissible || (!persistedDismissed && !locallyDismissed))
 
   useEffect(() => {
     const el = ref.current
@@ -206,29 +210,31 @@ export default function ProComplianceBanner() {
             href="/pro/verification"
             className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-white/20"
           >
-            Upload
+            {dismissible ? 'Upload' : 'Update license'}
           </Link>
 
-          <button
-            type="button"
-            onClick={() => {
-              writeDismissed(dismissKey)
+          {dismissible ? (
+            <button
+              type="button"
+              onClick={() => {
+                writeDismissed(dismissKey)
 
-              if (dismissKey) {
-                setDismissedKeys((current) => {
-                  const next = new Set(current)
-                  next.add(dismissKey)
-                  return next
-                })
-              }
+                if (dismissKey) {
+                  setDismissedKeys((current) => {
+                    const next = new Set(current)
+                    next.add(dismissKey)
+                    return next
+                  })
+                }
 
-              setBannerPx(0)
-            }}
-            className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-white/20"
-            aria-label="Dismiss"
-          >
-            ✕
-          </button>
+                setBannerPx(0)
+              }}
+              className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-white/20"
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

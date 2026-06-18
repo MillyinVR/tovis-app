@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server'
 import {
   AdminPermissionRole,
   Role,
+  VerificationDocumentType,
   VerificationStatus,
 } from '@prisma/client'
 
@@ -177,6 +178,10 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
 
     mocks.professionalProfile.findUnique.mockResolvedValue({
       id: 'pro_1',
+      professionType: null,
+      licenseState: null,
+      licenseExpiry: null,
+      verificationDocs: [],
     })
 
     mocks.professionalProfile.update.mockResolvedValue({
@@ -347,7 +352,17 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
 
     expect(mocks.professionalProfile.findUnique).toHaveBeenCalledWith({
       where: { id: 'pro_1' },
-      select: { id: true },
+      select: {
+        id: true,
+        professionType: true,
+        licenseState: true,
+        licenseExpiry: true,
+        verificationDocs: {
+          where: { type: VerificationDocumentType.LICENSE },
+          select: { id: true },
+          take: 1,
+        },
+      },
     })
 
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled()
@@ -382,7 +397,17 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
 
     expect(mocks.professionalProfile.findUnique).toHaveBeenCalledWith({
       where: { id: 'pro_1' },
-      select: { id: true },
+      select: {
+        id: true,
+        professionType: true,
+        licenseState: true,
+        licenseExpiry: true,
+        verificationDocs: {
+          where: { type: VerificationDocumentType.LICENSE },
+          select: { id: true },
+          take: 1,
+        },
+      },
     })
 
     expect(mocks.prisma.$transaction).toHaveBeenCalledTimes(1)
@@ -392,11 +417,13 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
       data: {
         verificationStatus: VerificationStatus.APPROVED,
         licenseVerified: true,
+        licenseReviewPending: false,
       },
       select: {
         id: true,
         verificationStatus: true,
         licenseVerified: true,
+        licenseReviewPending: true,
       },
     })
 
@@ -461,6 +488,7 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
         id: true,
         verificationStatus: true,
         licenseVerified: true,
+        licenseReviewPending: true,
       },
     })
 
@@ -512,11 +540,13 @@ describe('app/api/admin/professionals/[id]/route.ts', () => {
       where: { id: 'pro_1' },
       data: {
         verificationStatus: VerificationStatus.REJECTED,
+        licenseReviewPending: false,
       },
       select: {
         id: true,
         verificationStatus: true,
         licenseVerified: true,
+        licenseReviewPending: true,
       },
     })
 

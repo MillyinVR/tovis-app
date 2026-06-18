@@ -15,6 +15,7 @@ import {
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
+import { requiresLicense } from '@/lib/licensing/licenseRequirement'
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ export type ProReadinessBlocker =
   | 'STRIPE_NOT_READY'
   | 'VERIFICATION_NOT_APPROVED'
   | 'VERIFICATION_NOT_BROADLY_DISCOVERABLE'
+  | 'LICENSE_EXPIRED'
 
 export type ProReadiness =
   | { ok: true; liveModes: LiveBookingMode[]; readyLocationIds: string[] }
@@ -69,6 +71,9 @@ const proReadinessSelect = {
   mobileRadiusMiles: true,
   mobileBasePostalCode: true,
   verificationStatus: true,
+  professionType: true,
+  licenseState: true,
+  licenseExpiry: true,
   paymentSettings: {
     select: {
       acceptStripeCard: true,
@@ -258,6 +263,19 @@ function evaluateProReadinessForEntryPoint(args: {
     !isBroadlyDiscoverableVerificationStatus(pro.verificationStatus)
   ) {
     addBlocker(blockers, 'VERIFICATION_NOT_BROADLY_DISCOVERABLE')
+  }
+
+  // An actually-expired license blocks every entry point. A license merely
+  // approaching expiry (or one we have no date for) does NOT — that's a banner
+  // nudge, not an access cut. Editing license info never lands here unless the
+  // date itself is in the past.
+  if (
+    pro.professionType &&
+    requiresLicense(pro.professionType, pro.licenseState) &&
+    pro.licenseExpiry &&
+    pro.licenseExpiry.getTime() < Date.now()
+  ) {
+    addBlocker(blockers, 'LICENSE_EXPIRED')
   }
 
   // ── Offerings ─────────────────────────────────────────────────────────────

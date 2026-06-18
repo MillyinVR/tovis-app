@@ -1304,6 +1304,10 @@ model ProfessionalProfile {
   licenseExpiry              DateTime?
   licenseVerified            Boolean                              @default(false)
   verificationStatus         VerificationStatus                   @default(PENDING)
+  // Pro edited their license info after approval → needs an admin re-review.
+  // Separate from verificationStatus on purpose: a re-review must NOT downgrade
+  // an APPROVED pro's access (only an actually-expired license does that).
+  licenseReviewPending       Boolean                              @default(false)
   verificationDocs           VerificationDocument[]
 
   // License verification metadata (new)

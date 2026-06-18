@@ -1,9 +1,16 @@
 // app/api/admin/professionals/[id]/route.ts
 
 import { NextRequest } from 'next/server'
-import { AdminPermissionRole, Role, VerificationStatus } from '@prisma/client'
+import {
+  AdminPermissionRole,
+  Role,
+  VerificationDocumentType,
+  VerificationStatus,
+} from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
+import { isUsStateCode } from '@/lib/usStates'
+import { requiresLicense } from '@/lib/licensing/licenseRequirement'
 import { requireAdminPermission } from '@/app/api/_utils/auth/requireAdminPermission'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { pickBool, pickString } from '@/app/api/_utils/pick'
@@ -104,17 +111,72 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       )
     }
 
-    if (status == null && licenseVerified == null) {
+    // Optional admin corrections to the license fields themselves.
+    let licenseNumber: string | undefined
+    if (typeof body.licenseNumber === 'string') {
+      licenseNumber = body.licenseNumber.trim().toUpperCase().replace(/\s+/g, '')
+    }
+    let licenseState: string | undefined
+    if (typeof body.licenseState === 'string') {
+      const up = body.licenseState.trim().toUpperCase()
+      if (!isUsStateCode(up)) return jsonFail(400, 'Invalid US state.')
+      licenseState = up
+    }
+    let licenseExpiry: Date | null | undefined
+    if (typeof body.licenseExpiry === 'string') {
+      const s = body.licenseExpiry.trim()
+      if (s === '') licenseExpiry = null
+      else {
+        const d = new Date(s)
+        if (!Number.isFinite(d.getTime())) return jsonFail(400, 'Invalid expiration date.')
+        licenseExpiry = d
+      }
+    }
+
+    const hasLicenseEdit =
+      licenseNumber !== undefined || licenseState !== undefined || licenseExpiry !== undefined
+
+    if (status == null && licenseVerified == null && !hasLicenseEdit) {
       return jsonFail(400, 'Nothing to update.')
     }
 
-    const exists = await prisma.professionalProfile.findUnique({
+    const existing = await prisma.professionalProfile.findUnique({
       where: { id: professionalId },
-      select: { id: true },
+      select: {
+        id: true,
+        professionType: true,
+        licenseState: true,
+        licenseExpiry: true,
+        verificationDocs: {
+          where: { type: VerificationDocumentType.LICENSE },
+          select: { id: true },
+          take: 1,
+        },
+      },
     })
 
-    if (!exists) {
+    if (!existing) {
       return jsonFail(404, 'Professional not found.')
+    }
+
+    // Approval gate: a license-required pro can't be APPROVED without both an
+    // expiration date on file and an uploaded license document.
+    if (status === VerificationStatus.APPROVED && existing.professionType) {
+      const effectiveState = licenseState ?? existing.licenseState
+      if (requiresLicense(existing.professionType, effectiveState)) {
+        const effectiveExpiry =
+          licenseExpiry !== undefined ? licenseExpiry : existing.licenseExpiry
+        if (!effectiveExpiry) {
+          return jsonFail(400, 'Set the license expiration date before approving.', {
+            code: 'EXPIRY_REQUIRED',
+          })
+        }
+        if (existing.verificationDocs.length === 0) {
+          return jsonFail(400, 'A license document must be uploaded before approving.', {
+            code: 'LICENSE_DOC_REQUIRED',
+          })
+        }
+      }
     }
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -123,11 +185,20 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         data: {
           ...(status != null ? { verificationStatus: status } : {}),
           ...(licenseVerified != null ? { licenseVerified } : {}),
+          ...(licenseNumber !== undefined ? { licenseNumber } : {}),
+          ...(licenseState !== undefined ? { licenseState } : {}),
+          ...(licenseExpiry !== undefined ? { licenseExpiry } : {}),
+          // Approving or rejecting resolves any pending re-review.
+          ...(status === VerificationStatus.APPROVED ||
+          status === VerificationStatus.REJECTED
+            ? { licenseReviewPending: false }
+            : {}),
         },
         select: {
           id: true,
           verificationStatus: true,
           licenseVerified: true,
+          licenseReviewPending: true,
         },
       })
 

@@ -124,6 +124,7 @@ type RegisterBody = {
   // license fields
   licenseState?: unknown
   licenseNumber?: unknown
+  licenseExpiry?: unknown
 
   // ✅ optional at signup now
   licenseDocumentUrl?: unknown
@@ -951,6 +952,9 @@ export async function POST(request: Request) {
           )
         }
         licenseNumberToStore = licenseNumber
+        // Pro-entered expiry (optional at signup; required before approval).
+        // CA online verify overrides this with the official BreEZe date below.
+        licenseExpiryToStore = parseMaybeDate(pickString(body.licenseExpiry) ?? null)
 
         if (supportsOnlineVerification(profession, licenseState)) {
           // CA BreEZe online verification (the only auto-verifier today).
