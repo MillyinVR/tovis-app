@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 
 import NavItem from '../navigation/FooterNavItem'
+import { isActivePath } from '../navigation/activePath'
 import BadgeDot from '../ClientSessionFooter/BadgeDot'
 import { useUnreadBadge } from '@/app/_components/_hooks/useUnreadBadge'
 import { useProSession } from './useProSession'
@@ -21,11 +22,6 @@ const ROUTES = {
   looks: '/looks',
   messages: '/messages',
   profile: '/pro/profile/public-profile',
-}
-
-function isActivePath(pathname: string, href: string): boolean {
-  const [base = href] = href.split('?')
-  return pathname === base || pathname.startsWith(`${base}/`)
 }
 
 function clampCenterLabel(raw: string): string {

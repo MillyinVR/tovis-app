@@ -23,10 +23,13 @@ import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
 
 const VALID_WORKSPACES: readonly Role[] = [Role.CLIENT, Role.PRO, Role.ADMIN]
 
-function parseWorkspace(value: unknown): Role | null {
-  return typeof value === 'string' && VALID_WORKSPACES.includes(value as Role)
-    ? (value as Role)
-    : null
+/** Read & validate the `workspace` field off an unknown JSON body, cast-free. */
+function parseWorkspace(body: unknown): Role | null {
+  if (typeof body !== 'object' || body === null || !('workspace' in body)) {
+    return null
+  }
+  const value = body.workspace
+  return VALID_WORKSPACES.find((role) => role === value) ?? null
 }
 
 /**
@@ -84,7 +87,7 @@ export async function POST(request: Request) {
     return jsonFail(400, 'Invalid request body')
   }
 
-  const target = parseWorkspace((body as { workspace?: unknown } | null)?.workspace)
+  const target = parseWorkspace(body)
   if (!target) return jsonFail(400, 'Unknown workspace')
 
   const entitled = canActAs(

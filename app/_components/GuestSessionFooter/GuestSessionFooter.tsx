@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Compass, House, LogIn, UserPlus } from 'lucide-react'
 import NavItem from '../navigation/FooterNavItem'
+import { isActivePath } from '../navigation/activePath'
 import TovisFeatherMark from '../footer/TovisFeatherMark'
 
 const ROUTES = {
@@ -14,11 +15,6 @@ const ROUTES = {
   login: '/login',
   signup: '/signup',
 } as const
-
-function isActivePath(pathname: string, href: string) {
-  const base = href.split('?')[0]
-  return pathname === base || pathname.startsWith(base + '/')
-}
 
 export default function GuestSessionFooter() {
   // If pathname is temporarily null during hydration, still render (don’t disappear).
