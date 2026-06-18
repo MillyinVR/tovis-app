@@ -267,6 +267,9 @@ export function uploadSurfaceForKind(kind: string): UploadSurface | null {
     case 'LOOKS_PUBLIC':
       return UploadSurface.PRO_LOOKS
     case 'PORTFOLIO_PUBLIC':
+    // A private portfolio upload shares the PRO_PORTFOLIO surface; only its
+    // bucket (media-private) and resulting visibility (PRO_CLIENT) differ.
+    case 'PORTFOLIO_PRIVATE':
       return UploadSurface.PRO_PORTFOLIO
     case 'REVIEW_PUBLIC':
       return UploadSurface.CLIENT_REVIEW

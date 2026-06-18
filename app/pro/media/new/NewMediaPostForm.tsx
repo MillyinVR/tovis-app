@@ -144,6 +144,7 @@ function getBlockingReasons(args: {
   servicesLoadError: string | null
   services: ProService[]
   serviceIds: string[]
+  isPrivate: boolean
   isPublicSelectionValid: boolean
   needsPrimaryService: boolean
   priceError: string | null
@@ -164,7 +165,8 @@ function getBlockingReasons(args: {
     reasons.push('Tag at least one service.')
   }
 
-  if (!args.isPublicSelectionValid) {
+  // A private upload has no public surface to pick — it's visible only to the pro.
+  if (!args.isPrivate && !args.isPublicSelectionValid) {
     reasons.push('Select “Show in Looks” or “Show in Portfolio”.')
   }
 
@@ -205,6 +207,11 @@ export default function NewMediaPostForm() {
   const [visibility, setVisibility] = useState<MediaVisibility>(
     MediaVisibility.PUBLIC,
   )
+
+  // 'PRIVATE' = visible only to the pro (media-private bucket, PRO_CLIENT). The
+  // pro can make it public later from their media library.
+  const [privacyMode, setPrivacyMode] = useState<'PUBLIC' | 'PRIVATE'>('PUBLIC')
+  const isPrivate = privacyMode === 'PRIVATE'
 
   const [processedImage, setProcessedImage] = useState<ProcessedImageResult | null>(null)
   const [imagePreparing, setImagePreparing] = useState(false)
@@ -353,6 +360,7 @@ export default function NewMediaPostForm() {
         servicesLoadError,
         services,
         serviceIds,
+        isPrivate,
         isPublicSelectionValid,
         needsPrimaryService,
         priceError,
@@ -363,6 +371,7 @@ export default function NewMediaPostForm() {
       servicesLoadError,
       services,
       serviceIds,
+      isPrivate,
       isPublicSelectionValid,
       needsPrimaryService,
       priceError,
@@ -458,16 +467,35 @@ export default function NewMediaPostForm() {
     setError(null)
   }
 
+  function selectPrivacyMode(mode: 'PUBLIC' | 'PRIVATE') {
+    setPrivacyMode(mode)
+    setError(null)
+
+    if (mode === 'PRIVATE') {
+      // Private has no public surfaces — clear both so visibility resolves to
+      // PRO_CLIENT and the upload routes to the private bucket.
+      setIsEligibleForLooks(false)
+      setIsFeaturedInPortfolio(false)
+    } else if (!isEligibleForLooks && !isFeaturedInPortfolio) {
+      // Returning to public with nothing selected: restore the default surface.
+      setIsFeaturedInPortfolio(true)
+    }
+  }
+
   async function uploadSelectedFile() {
     if (!uploadCandidateFile) {
       throw new Error('Select a file.')
     }
 
-    if (!isPublicSelectionValid) {
+    if (!isPrivate && !isPublicSelectionValid) {
       throw new Error('Select “Show in Looks” or “Show in Portfolio”.')
     }
 
-    const kind = isEligibleForLooks ? 'LOOKS_PUBLIC' : 'PORTFOLIO_PUBLIC'
+    const kind = isPrivate
+      ? 'PORTFOLIO_PRIVATE'
+      : isEligibleForLooks
+        ? 'LOOKS_PUBLIC'
+        : 'PORTFOLIO_PUBLIC'
 
     const res = await fetch('/api/pro/uploads', {
       method: 'POST',
@@ -651,6 +679,45 @@ export default function NewMediaPostForm() {
             </div>
           </div>
 
+          <div className="grid gap-2">
+            <label className="text-[12px] font-black text-textPrimary">
+              Who can see this?
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => selectPrivacyMode('PUBLIC')}
+                aria-pressed={!isPrivate}
+                className={[
+                  'rounded-full border px-3 py-2 text-[12px] font-black transition',
+                  !isPrivate
+                    ? 'border-white/10 bg-textPrimary text-bgPrimary'
+                    : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                ].join(' ')}
+              >
+                Public
+              </button>
+              <button
+                type="button"
+                onClick={() => selectPrivacyMode('PRIVATE')}
+                aria-pressed={isPrivate}
+                className={[
+                  'rounded-full border px-3 py-2 text-[12px] font-black transition',
+                  isPrivate
+                    ? 'border-white/10 bg-textPrimary text-bgPrimary'
+                    : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                ].join(' ')}
+              >
+                Private (only you)
+              </button>
+            </div>
+            <div className="text-[11px] text-textSecondary">
+              {isPrivate
+                ? 'Only you can see this. It won’t appear in the Looks feed or your public portfolio. You can make it public later from your media library.'
+                : 'Choose where this shows below — the Looks feed, your portfolio, or both.'}
+            </div>
+          </div>
+
           <div className="flex flex-wrap gap-3">
             <select
               value={mediaType}
@@ -678,31 +745,35 @@ export default function NewMediaPostForm() {
               </span>
             </div>
 
-            <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
-              <input
-                type="checkbox"
-                checked={isEligibleForLooks}
-                onChange={(e) => {
-                  setIsEligibleForLooks(e.target.checked)
-                  setError(null)
-                }}
-                className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
-              />
-              Show in Looks
-            </label>
+            {!isPrivate ? (
+              <>
+                <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
+                  <input
+                    type="checkbox"
+                    checked={isEligibleForLooks}
+                    onChange={(e) => {
+                      setIsEligibleForLooks(e.target.checked)
+                      setError(null)
+                    }}
+                    className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+                  />
+                  Show in Looks
+                </label>
 
-            <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
-              <input
-                type="checkbox"
-                checked={isFeaturedInPortfolio}
-                onChange={(e) => {
-                  setIsFeaturedInPortfolio(e.target.checked)
-                  setError(null)
-                }}
-                className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
-              />
-              Show in Portfolio
-            </label>
+                <label className="flex items-center gap-2 text-[12px] font-black text-textPrimary">
+                  <input
+                    type="checkbox"
+                    checked={isFeaturedInPortfolio}
+                    onChange={(e) => {
+                      setIsFeaturedInPortfolio(e.target.checked)
+                      setError(null)
+                    }}
+                    className="h-4 w-4 accent-[rgb(var(--accent-primary))]"
+                  />
+                  Show in Portfolio
+                </label>
+              </>
+            ) : null}
           </div>
 
           <div className="grid gap-2">

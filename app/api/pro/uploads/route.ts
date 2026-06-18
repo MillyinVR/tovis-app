@@ -32,6 +32,7 @@ function guessExtFromType(type: string) {
 type UploadKind =
   | 'LOOKS_PUBLIC'
   | 'PORTFOLIO_PUBLIC'
+  | 'PORTFOLIO_PRIVATE'
   | 'REVIEW_PUBLIC'
   | 'AVATAR_PUBLIC'
   | 'SERVICE_IMAGE_PUBLIC'
@@ -55,6 +56,7 @@ function parseKind(v: unknown): UploadKind | null {
   const s = upper(v)
   if (s === 'LOOKS_PUBLIC') return 'LOOKS_PUBLIC'
   if (s === 'PORTFOLIO_PUBLIC') return 'PORTFOLIO_PUBLIC'
+  if (s === 'PORTFOLIO_PRIVATE') return 'PORTFOLIO_PRIVATE'
   if (s === 'REVIEW_PUBLIC') return 'REVIEW_PUBLIC'
   if (s === 'AVATAR_PUBLIC') return 'AVATAR_PUBLIC'
   if (s === 'SERVICE_IMAGE_PUBLIC') return 'SERVICE_IMAGE_PUBLIC'

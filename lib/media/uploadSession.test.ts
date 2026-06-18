@@ -235,6 +235,8 @@ describe('uploadSurfaceForKind', () => {
     expect(uploadSurfaceForKind('CONSULT_PRIVATE')).toBe(UploadSurface.PRO_BOOKING_MEDIA)
     expect(uploadSurfaceForKind('LOOKS_PUBLIC')).toBe(UploadSurface.PRO_LOOKS)
     expect(uploadSurfaceForKind('PORTFOLIO_PUBLIC')).toBe(UploadSurface.PRO_PORTFOLIO)
+    // A private portfolio upload uses the same surface; bucket/visibility differ.
+    expect(uploadSurfaceForKind('PORTFOLIO_PRIVATE')).toBe(UploadSurface.PRO_PORTFOLIO)
     expect(uploadSurfaceForKind('REVIEW_PUBLIC')).toBe(UploadSurface.CLIENT_REVIEW)
     expect(uploadSurfaceForKind('AVATAR_PUBLIC')).toBeNull()
     expect(uploadSurfaceForKind('VERIFY_PRIVATE')).toBeNull()
