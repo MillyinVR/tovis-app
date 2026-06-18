@@ -32,7 +32,12 @@ import {
   publicProfessionalProfileSelect,
   publicReviewSelect,
 } from '@/lib/profiles/publicProfileSelects'
+import {
+  listPublicAcceptedMethods,
+  publicPaymentMethodsSelect,
+} from '@/lib/payments/publicAcceptedMethods'
 
+import AcceptedPayments from './AcceptedPayments'
 import PortfolioGrid from './PortfolioGrid'
 import ProfileHero from './ProfileHero'
 import ProfileTabs from './ProfileTabs'
@@ -83,6 +88,7 @@ export default async function PublicProfessionalProfilePage({
     completedBookingCount,
     offeringRows,
     favoriteRow,
+    paymentSettingsRow,
   ] = await Promise.all([
     prisma.review.aggregate({
       where: { professionalId: profileRow.id },
@@ -122,7 +128,14 @@ export default async function PublicProfessionalProfilePage({
           select: { id: true },
         })
       : Promise.resolve(null),
+
+    prisma.professionalPaymentSettings.findUnique({
+      where: { professionalId: profileRow.id },
+      select: publicPaymentMethodsSelect,
+    }),
   ])
+
+  const acceptedPayments = listPublicAcceptedMethods(paymentSettingsRow)
 
   const header = mapPublicProfileHeaderToDto(profileRow)
   const offerings = mapPublicOfferingsToDtos(offeringRows)
@@ -182,6 +195,8 @@ export default async function PublicProfessionalProfilePage({
           messageHref={messageHref}
           servicesHref={servicesHref}
         />
+
+        <AcceptedPayments methods={acceptedPayments} />
 
         <ProfileTabs tabs={tabs} activeTab={activeTab} />
 
