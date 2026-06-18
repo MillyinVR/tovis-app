@@ -389,18 +389,11 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
         setActiveLocationId(parsedCalendar.location.id)
       }
 
-      const [nextSalonHours, nextMobileHours] = await Promise.all([
-        loadWorkingHoursFor('SALON', controller.signal),
-        loadWorkingHoursFor('MOBILE', controller.signal),
-      ])
-
-      if (
-        sequence !== loadSequenceRef.current ||
-        controller.signal.aborted
-      ) {
-        return
-      }
-
+      // Render the grid immediately from the calendar response. Working hours
+      // feed booking create/edit only — not the event grid — so blocking the
+      // grid on the two working-hours fetches just added an extra round trip to
+      // every load. Apply calendar state and clear the loading state now, then
+      // fetch working hours in the background below.
       setRange(parsedCalendar.range)
       setTimeZone(parsedCalendar.viewportTimeZone)
       setNeedsTimeZoneSetup(parsedCalendar.needsTimeZoneSetup)
@@ -410,9 +403,35 @@ export function useCalendarFetch(deps: CalendarFetchDeps) {
       setBlockedMinutesToday(parsedCalendar.blockedMinutesToday)
       setAutoAccept(parsedCalendar.autoAcceptBookings)
       setManagement(parsedCalendar.management)
-      setWorkingHoursSalon(nextSalonHours)
-      setWorkingHoursMobile(nextMobileHours)
       setEvents(sortEventsByStart(parsedCalendar.events))
+      setLoading(false)
+
+      // Background, non-blocking: only fetch the hours for capabilities the pro
+      // actually has, and never let a working-hours failure surface as a
+      // calendar error — the grid is already on screen.
+      try {
+        const [nextSalonHours, nextMobileHours] = await Promise.all([
+          parsedCalendar.canSalon
+            ? loadWorkingHoursFor('SALON', controller.signal)
+            : Promise.resolve<WorkingHoursJson>(null),
+          parsedCalendar.canMobile
+            ? loadWorkingHoursFor('MOBILE', controller.signal)
+            : Promise.resolve<WorkingHoursJson>(null),
+        ])
+
+        if (
+          sequence !== loadSequenceRef.current ||
+          controller.signal.aborted
+        ) {
+          return
+        }
+
+        setWorkingHoursSalon(nextSalonHours)
+        setWorkingHoursMobile(nextMobileHours)
+      } catch (workingHoursError) {
+        if (isAbortError(workingHoursError)) return
+        // Non-fatal: the calendar is already displayed; leave hours unset.
+      }
     } catch (caught) {
       if (isAbortError(caught)) return
 
