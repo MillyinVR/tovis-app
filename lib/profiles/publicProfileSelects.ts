@@ -31,6 +31,8 @@ export const publicProfessionalProfileSelect =
     bio: true,
     avatarUrl: true,
     professionType: true,
+    licenseState: true,
+    licenseVerified: true,
     location: true,
     timeZone: true,
   })

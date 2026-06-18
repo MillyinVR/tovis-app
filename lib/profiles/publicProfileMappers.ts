@@ -1,10 +1,11 @@
 // lib/profiles/publicProfileMappers.ts
 import 'server-only'
 
-import { MediaType } from '@prisma/client'
-import type { MediaVisibility, ProfessionType, VerificationStatus } from '@prisma/client'
+import { MediaType, VerificationStatus } from '@prisma/client'
+import type { MediaVisibility, ProfessionType } from '@prisma/client'
 
 import { moneyToString } from '@/lib/money'
+import { requiresLicense } from '@/lib/licensing/licenseRequirement'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
 import {
@@ -65,6 +66,10 @@ export type PublicProfileHeaderDto = {
   handle: string | null
   displayHandle: string | null
   isPremium: boolean
+  // True only for an approved pro whose profession actually requires a license
+  // and whose license is verified — avoids a false "license verified" badge on
+  // exempt professions (e.g. makeup artists) that approval also marks verified.
+  isLicenseVerified: boolean
   displayName: string
   businessName: string | null
   bio: string | null
@@ -280,6 +285,13 @@ export function mapPublicProfileHeaderToDto(
     handle,
     displayHandle: formatDisplayHandle(handle),
     isPremium: profile.isPremium,
+    isLicenseVerified:
+      profile.verificationStatus === VerificationStatus.APPROVED &&
+      profile.licenseVerified &&
+      Boolean(
+        profile.professionType &&
+          requiresLicense(profile.professionType, profile.licenseState),
+      ),
     displayName: formatPublicProfileDisplayName({
       businessName,
     }),
