@@ -55,18 +55,26 @@ const proProfileManagementSelect =
     paymentSettings: {
       select: {
         collectPaymentAt: true,
+        depositEnabled: true,
+        depositType: true,
+        depositFlatAmount: true,
+        depositPercent: true,
+        depositScope: true,
         acceptCash: true,
         acceptCardOnFile: true,
         acceptTapToPay: true,
         acceptVenmo: true,
         acceptZelle: true,
         acceptAppleCash: true,
+        acceptPaypal: true,
+        acceptApplePay: true,
         tipsEnabled: true,
         allowCustomTip: true,
         tipSuggestions: true,
         venmoHandle: true,
         zelleHandle: true,
         appleCashHandle: true,
+        paypalHandle: true,
         paymentNote: true,
       },
     },
@@ -411,18 +419,29 @@ function buildPaymentSettingsInitial(
 
   return {
     collectPaymentAt: settings.collectPaymentAt,
+    depositEnabled: settings.depositEnabled,
+    depositType: settings.depositType,
+    depositFlatAmount:
+      settings.depositFlatAmount == null
+        ? null
+        : settings.depositFlatAmount.toString(),
+    depositPercent: settings.depositPercent ?? null,
+    depositScope: settings.depositScope,
     acceptCash: settings.acceptCash,
     acceptCardOnFile: settings.acceptCardOnFile,
     acceptTapToPay: settings.acceptTapToPay,
     acceptVenmo: settings.acceptVenmo,
     acceptZelle: settings.acceptZelle,
     acceptAppleCash: settings.acceptAppleCash,
+    acceptPaypal: settings.acceptPaypal,
+    acceptApplePay: settings.acceptApplePay,
     tipsEnabled: settings.tipsEnabled,
     allowCustomTip: settings.allowCustomTip,
     tipSuggestions: parseTipSuggestions(settings.tipSuggestions),
     venmoHandle: pickString(settings.venmoHandle),
     zelleHandle: pickString(settings.zelleHandle),
     appleCashHandle: pickString(settings.appleCashHandle),
+    paypalHandle: pickString(settings.paypalHandle),
     paymentNote: pickString(settings.paymentNote),
   }
 }

@@ -27,6 +27,8 @@ const mocks = vi.hoisted(() => ({
   applyStripePaymentSucceededInTransaction: vi.fn(),
   applyStripePaymentFailedInTransaction: vi.fn(),
   applyStripeCheckoutSessionStatusInTransaction: vi.fn(),
+  applyStripeDepositSucceededInTransaction: vi.fn(),
+  reconcileDepositChargeRefundInTransaction: vi.fn(),
   reconcileChargeRefundInTransaction: vi.fn(),
 
   safeError: vi.fn((error: unknown) => ({
@@ -67,6 +69,11 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
     mocks.applyStripePaymentFailedInTransaction,
   applyStripeCheckoutSessionStatusInTransaction:
     mocks.applyStripeCheckoutSessionStatusInTransaction,
+  applyStripeDepositSucceededInTransaction:
+    mocks.applyStripeDepositSucceededInTransaction,
+  reconcileDepositChargeRefundInTransaction:
+    mocks.reconcileDepositChargeRefundInTransaction,
+  DISCOVERY_DEPOSIT_CHECKOUT_KIND: 'DISCOVERY_DEPOSIT',
 }))
 
 vi.mock('@/lib/booking/refunds', () => ({
@@ -279,6 +286,15 @@ describe('POST /api/webhooks/stripe', () => {
       bookingId: 'booking_1',
       bookingCompleted: false,
       meta: { mutated: true, noOp: false },
+    })
+
+    mocks.applyStripeDepositSucceededInTransaction.mockResolvedValue({
+      handled: true,
+      alreadyPaid: false,
+    })
+
+    mocks.reconcileDepositChargeRefundInTransaction.mockResolvedValue({
+      handled: false,
     })
 
     mocks.reconcileChargeRefundInTransaction.mockResolvedValue({ handled: true })

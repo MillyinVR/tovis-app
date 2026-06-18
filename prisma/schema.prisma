@@ -349,12 +349,64 @@ enum PaymentMethod {
   VENMO
   ZELLE
   APPLE_CASH
+  PAYPAL
+  APPLE_PAY
   STRIPE_CARD
 }
 
 enum PaymentProvider {
   MANUAL
   STRIPE
+}
+
+// How a pro's deposit amount is computed.
+enum DepositType {
+  FLAT // a fixed dollar amount (depositFlatAmount)
+  PERCENT // a percentage of the service price (depositPercent, 1–100)
+}
+
+// Which clients a pro's deposit requirement applies to. The one-time platform
+// discovery fee is ALWAYS limited to the new-via-discovery subset regardless of
+// this setting — this only widens who must leave a deposit.
+enum DepositScope {
+  NEW_DISCOVERY_ONLY // only brand-new clients found via Looks/Discovery (default)
+  ALL_NEW_CLIENTS // any first-time client, however they arrived
+  ALL_CLIENTS // every booking
+}
+
+// How a client arrived at the pro for a given booking. Server-validated at hold
+// creation and copied to the Booking at finalize — it is a TRUST BOUNDARY and is
+// never taken from client input, because LOOKS_FEED / DISCOVERY_SEARCH gate the
+// one-time platform fee.
+enum BookingDiscoveryProvenance {
+  UNKNOWN // not determined / legacy rows
+  LOOKS_FEED // tapped a Look in the Looks feed (validated LookPost for this pro)
+  DISCOVERY_SEARCH // found via the Discovery tab / service browse (server attribution)
+  DIRECT_PROFILE // opened the pro's profile directly
+  NAME_SEARCH // searched the pro by name / handle / email
+  NFC // arrived via the pro's NFC card
+  AFTERCARE // rebooked from an aftercare summary
+  PRO_CREATED // the pro created the booking
+}
+
+// Lifecycle of a new-client deposit charge (separate from the final bill).
+enum BookingDepositStatus {
+  NONE // no deposit required for this booking
+  PENDING // deposit checkout created, not yet paid
+  PAID // deposit captured
+  REFUNDED // deposit refunded (fully or partially)
+  FAILED // deposit charge failed / expired
+}
+
+// Mirrors Stripe subscription states we care about. A pro with no row (or a
+// non-active state) is treated as the free plan for ENTITLEMENT purposes — core
+// booking + payment paths are never gated on this.
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  INCOMPLETE
 }
 
 enum StripeAccountStatus {
@@ -1339,6 +1391,7 @@ model ProfessionalProfile {
   nfcCards                   NfcCard[]
 
   paymentSettings    ProfessionalPaymentSettings?
+  subscription       ProfessionalSubscription?
   lastMinuteSettings LastMinuteSettings?          @relation("ProLastMinuteSettings")
   lastMinuteOpenings LastMinuteOpening[]          @relation("ProOpenings")
 
@@ -1474,6 +1527,8 @@ model ProfessionalPaymentSettings {
   acceptVenmo      Boolean @default(false)
   acceptZelle      Boolean @default(false)
   acceptAppleCash  Boolean @default(false)
+  acceptPaypal     Boolean @default(false)
+  acceptApplePay   Boolean @default(false)
 
   // New Stripe / card payment support
   acceptStripeCard Boolean @default(false)
@@ -1493,15 +1548,26 @@ model ProfessionalPaymentSettings {
   allowCustomTip Boolean @default(true)
   tipSuggestions Json?
 
+  // Deposits (opt-in). When enabled, qualifying clients (see depositScope) must
+  // leave a deposit, captured up front via Stripe and credited toward the final
+  // total. The one-time platform discovery fee rides on top of new-via-discovery
+  // deposits only — see lib/booking/discoveryFee.ts.
+  depositEnabled    Boolean      @default(false)
+  depositType       DepositType  @default(FLAT)
+  depositFlatAmount Decimal?     @db.Decimal(10, 2)
+  depositPercent    Int?
+  depositScope      DepositScope @default(NEW_DISCOVERY_ONLY)
+
   venmoHandle     String?
   zelleHandle     String?
   appleCashHandle String?
+  paypalHandle    String?
   paymentNote     String?
 
-  referralRewardEnabled   Boolean              @default(false)
-  referralRewardTier      ReferralRewardTier   @default(RECOGNITION)
+  referralRewardEnabled   Boolean            @default(false)
+  referralRewardTier      ReferralRewardTier @default(RECOGNITION)
   referralDiscountPercent Int?
-  referralCreditAmount    Decimal?             @db.Decimal(10, 2)
+  referralCreditAmount    Decimal?           @db.Decimal(10, 2)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1511,6 +1577,51 @@ model ProfessionalPaymentSettings {
   @@index([professionalId])
   @@index([stripeAccountId])
   @@index([stripeAccountStatus])
+}
+
+// Catalog of membership tiers (Free / Pro / Studio). Pricing + Stripe Billing IDs
+// live here; the entitlement matrix that actually gates features is code-defined in
+// lib/pro/entitlements.ts (keyed by `key`), so gating works without seeded rows.
+model SubscriptionPlan {
+  id              String   @id @default(cuid())
+  key             String   @unique // "free" | "pro" | "studio"
+  name            String
+  priceCents      Int      @default(0)
+  interval        String? // "month" | "year" — null for free
+  stripeProductId String?
+  stripePriceId   String? // null for free
+  features        Json? // display copy; NOT the gating source of truth
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// A pro's current membership. Missing row => free plan. The Billing customer id is
+// DISTINCT from the Connect account id on ProfessionalPaymentSettings — a pro is both
+// a connected account (receives client money) and a customer (pays Tovis).
+model ProfessionalSubscription {
+  id             String @id @default(cuid())
+  professionalId String @unique
+
+  planKey String             @default("free")
+  status  SubscriptionStatus @default(ACTIVE)
+
+  stripeCustomerId     String?   @unique
+  stripeSubscriptionId String?   @unique
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  trialEndsAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@index([planKey])
+  @@index([status])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
 }
 
 model ProfessionalLocation {
@@ -2226,6 +2337,26 @@ model Booking {
   source            BookingSource @default(DISCOVERY)
   rebookOfBookingId String?
 
+  // How the client found this pro. Server-validated at hold creation and copied
+  // here at finalize — NEVER trusted from client input, because LOOKS_FEED /
+  // DISCOVERY_SEARCH gate the one-time platform fee. See lib/booking/discoveryFee.ts.
+  discoveryProvenance BookingDiscoveryProvenance @default(UNKNOWN)
+
+  // New-client deposit captured up front, as its OWN charge (distinct from the
+  // final bill's stripe* fields). The deposit credits toward the final total.
+  depositStatus                BookingDepositStatus @default(NONE)
+  depositStripePaymentIntentId String?              @unique
+  depositStripeChargeId        String?
+  depositPaidAt                DateTime?
+  depositCreditedAt            DateTime? // when the deposit was applied against the final total
+
+  // One-time platform discovery fee (cents), captured as the Stripe application
+  // fee on the deposit charge. refundedAt is set when the fee is returned, so a
+  // fee-refunded booking stops counting as an established relationship (the pair
+  // reverts to "new" and the fee re-charges on a later discovery booking).
+  discoveryFeeAmount     Int?
+  discoveryFeeRefundedAt DateTime?
+
   // Optional client-supplied idempotency key for booking-creation dedupe.
   // Combined with clientId in @@unique below so identical retries return
   // the existing booking instead of creating a duplicate.
@@ -2254,16 +2385,16 @@ model Booking {
   /// burn-in window confirming zero database reads from the legacy table.
   /// New code is forbidden from accessing this relation — see
   /// tools/check-consultation-canonical.mjs.
-  consultation              BookingConsultation?
-  consultationNotes         String?
+  consultation               BookingConsultation?
+  consultationNotes          String?
   // AEAD-encrypted envelope for the legacy negotiated-outcome consultation
   // free-text (backfill-only — no current writer; see ticket-encrypt-tier3-health-notes.md).
   consultationNotesEncrypted Json?
-  consultationPrice         Decimal?                   @db.Decimal(10, 2)
-  consultationConfirmedAt   DateTime?
-  consultationApproval      ConsultationApproval?
-  consultationApprovalProof ConsultationApprovalProof?
-  clientActionTokens        ClientActionToken[]
+  consultationPrice          Decimal?                   @db.Decimal(10, 2)
+  consultationConfirmedAt    DateTime?
+  consultationApproval       ConsultationApproval?
+  consultationApprovalProof  ConsultationApprovalProof?
+  clientActionTokens         ClientActionToken[]
 
   aftercareSummary             AftercareSummary?
   clientNotifications          ClientNotification[]
@@ -2516,6 +2647,11 @@ model BookingHold {
   durationMinutesSnapshot Int?
   bufferMinutesSnapshot   Int?
   endsAtSnapshot          DateTime?
+
+  // Server-validated at hold creation (looks-feed lookPost ownership / discovery
+  // attribution / NFC / relationship). Copied to Booking.discoveryProvenance at
+  // finalize so the platform-fee decision never trusts client input.
+  discoveryProvenance BookingDiscoveryProvenance @default(UNKNOWN)
 
   @@unique([professionalId, scheduledFor])
   @@index([expiresAt])
@@ -3771,8 +3907,8 @@ model Referral {
   confirmedAt DateTime?
 
   convertedAt      DateTime?
-  triggerBookingId  String?              @unique
-  triggerBooking    Booking?             @relation("ReferralTriggerBooking", fields: [triggerBookingId], references: [id])
+  triggerBookingId String?              @unique
+  triggerBooking   Booking?             @relation("ReferralTriggerBooking", fields: [triggerBookingId], references: [id])
   professionalId   String?
   professional     ProfessionalProfile? @relation(fields: [professionalId], references: [id])
 
@@ -3780,8 +3916,8 @@ model Referral {
   rewardValue Decimal?            @db.Decimal(10, 2)
 
   rewardAppliedAt DateTime?
-  rewardBookingId String?  @unique
-  rewardBooking   Booking? @relation("ReferralRewardBooking", fields: [rewardBookingId], references: [id])
+  rewardBookingId String?   @unique
+  rewardBooking   Booking?  @relation("ReferralRewardBooking", fields: [rewardBookingId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

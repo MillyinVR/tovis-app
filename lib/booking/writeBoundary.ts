@@ -3,6 +3,8 @@ import {
   AftercareRebookMode,
   BookingCheckoutStatus,
   BookingCloseoutAuditAction,
+  BookingDepositStatus,
+  BookingDiscoveryProvenance,
   BookingOverrideAction,
   BookingOverrideRule,
   BookingServiceItemType,
@@ -51,6 +53,10 @@ import {
   resolveChargedUnitPrice,
 } from '@/lib/booking/rampedUnitPrice'
 import { snapStartToWorkingWindowStep } from '@/lib/booking/slotReadiness'
+import {
+  computeDiscoveryDepositPlan,
+  type DepositSettings,
+} from '@/lib/booking/discoveryDepositPlan'
 import {
   withLockedClientOwnedBookingTransaction,
   withLockedProfessionalTransaction,
@@ -397,6 +403,15 @@ type FinalizeBookingFromHoldArgs = {
   fallbackTimeZone?: string
   requestId?: string | null
   idempotencyKey?: string | null
+  // Server-validated discovery context (see lib/booking/resolveDiscoveryFinalize).
+  // Provenance is always stamped; when feeEligible, the deposit + one-time platform
+  // fee are computed from the service subtotal and recorded on the booking.
+  discovery?: {
+    provenance: BookingDiscoveryProvenance
+    feeEligible: boolean
+    depositSettings: DepositSettings
+    discoveryFeeCents: number
+  } | null
   offering: {
     id: string
     professionalId: string
@@ -7734,6 +7749,7 @@ async function performLockedFinalizeBookingFromHold(args: {
   rebookOfBookingId: string | null
   fallbackTimeZone: string
   offering: FinalizeBookingFromHoldArgs['offering']
+  discovery: FinalizeBookingFromHoldArgs['discovery']
   requestId: string | null
   idempotencyKey: string | null
 }): Promise<FinalizeBookingFromHoldResult> {
@@ -8257,6 +8273,25 @@ async function performLockedFinalizeBookingFromHold(args: {
     clientId: args.clientId,
   })
 
+  // Server-validated discovery context: stamp provenance always; when this is a
+  // fee-eligible new discovery client, compute the deposit + one-time platform fee
+  // from the service subtotal. The deposit + fee are collected up front at checkout
+  // (see prepareClientStripeCheckoutSession), so we record them here as PENDING.
+  const discoveryProvenance =
+    args.discovery?.provenance ?? BookingDiscoveryProvenance.UNKNOWN
+
+  const discoveryPlan = args.discovery?.feeEligible
+    ? computeDiscoveryDepositPlan({
+        settings: args.discovery.depositSettings,
+        servicePriceCents: Math.round(Number(subtotal) * 100),
+        isNewDiscoveryClient: true,
+        discoveryFeeCents: args.discovery.discoveryFeeCents,
+      })
+    : null
+
+  const hasUpfrontCharge =
+    discoveryPlan != null && discoveryPlan.totalUpfrontCents > 0
+
   try {
     created = await args.tx.booking.create({
       data: {
@@ -8268,6 +8303,16 @@ async function performLockedFinalizeBookingFromHold(args: {
         scheduledFor: requestedStart,
         status: args.initialStatus,
         source: args.source,
+        discoveryProvenance,
+        depositStatus: hasUpfrontCharge
+          ? BookingDepositStatus.PENDING
+          : BookingDepositStatus.NONE,
+        depositAmount: hasUpfrontCharge
+          ? new Prisma.Decimal(discoveryPlan.depositCents).div(100)
+          : null,
+        discoveryFeeAmount: hasUpfrontCharge
+          ? discoveryPlan.discoveryFeeCents
+          : null,
         locationType: args.locationType,
         rebookOfBookingId: args.rebookOfBookingId,
         creationIdempotencyKey: args.idempotencyKey ?? null,
@@ -12564,6 +12609,7 @@ export async function finalizeBookingFromHold(
         rebookOfBookingId: args.rebookOfBookingId,
         fallbackTimeZone: args.fallbackTimeZone ?? 'UTC',
         offering: args.offering,
+        discovery: args.discovery ?? null,
         requestId: args.requestId ?? null,
         idempotencyKey: args.idempotencyKey ?? null,
       }),
@@ -13221,6 +13267,246 @@ export async function recordStripeCheckoutSessionAttached(
         idempotencyKey: args.idempotencyKey ?? null,
       }),
   })
+}
+
+// ---------------------------------------------------------------------------
+// Discovery deposit collection (up-front charge that carries the platform fee)
+// ---------------------------------------------------------------------------
+
+export const DISCOVERY_DEPOSIT_CHECKOUT_KIND = 'DISCOVERY_DEPOSIT'
+
+type PrepareClientDepositCheckoutResult = {
+  booking: { id: string; professionalId: string }
+  stripe: {
+    depositCents: number
+    feeCents: number
+    totalCents: number
+    currency: string
+    connectedAccountId: string
+    lineItemDescription: string
+  }
+  meta: MutationMeta
+}
+
+/**
+ * Prepare a Stripe Checkout for a brand-new client's discovery deposit + one-time
+ * platform fee. Unlike the post-service client checkout, this fires at booking time
+ * and is the only charge that carries the platform fee (as the application fee).
+ * Validates the booking is the client's, has a PENDING discovery deposit, and that
+ * the pro can actually receive a destination charge.
+ */
+export async function prepareClientDepositCheckout(args: {
+  bookingId: string
+  clientId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}): Promise<PrepareClientDepositCheckoutResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+
+  return withLockedClientOwnedBookingTransaction({
+    bookingId: args.bookingId,
+    clientId: args.clientId,
+    run: async ({ tx }) => {
+      const booking = await tx.booking.findUnique({
+        where: { id: args.bookingId },
+        select: {
+          id: true,
+          clientId: true,
+          professionalId: true,
+          status: true,
+          depositStatus: true,
+          depositAmount: true,
+          discoveryFeeAmount: true,
+          depositPaidAt: true,
+          service: { select: { name: true } },
+          professional: {
+            select: {
+              paymentSettings: {
+                select: {
+                  stripeAccountId: true,
+                  stripeChargesEnabled: true,
+                  stripePayoutsEnabled: true,
+                },
+              },
+            },
+          },
+        },
+      })
+
+      if (!booking) throw bookingError('BOOKING_NOT_FOUND')
+      if (booking.clientId !== args.clientId) throw bookingError('FORBIDDEN')
+      if (booking.status === BookingStatus.CANCELLED) {
+        throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
+      }
+
+      if (
+        booking.depositStatus !== BookingDepositStatus.PENDING ||
+        booking.depositPaidAt
+      ) {
+        throw bookingError('FORBIDDEN', {
+          message: 'No pending deposit to collect for this booking.',
+          userMessage: 'There is no deposit due for this booking.',
+        })
+      }
+
+      const settings = booking.professional.paymentSettings
+      const connectedAccountId = settings?.stripeAccountId ?? null
+      if (
+        !connectedAccountId ||
+        !settings?.stripeChargesEnabled ||
+        !settings?.stripePayoutsEnabled
+      ) {
+        throw bookingError('FORBIDDEN', {
+          message: 'Pro is not ready to receive a deposit charge.',
+          userMessage: 'This pro cannot collect a deposit yet.',
+        })
+      }
+
+      const depositCents = decimalToCents(booking.depositAmount)
+      const feeCents = Math.max(0, booking.discoveryFeeAmount ?? 0)
+      const totalCents = depositCents + feeCents
+
+      if (totalCents <= 0) {
+        throw bookingError('FORBIDDEN', {
+          message: 'Deposit charge requires a positive amount.',
+          userMessage: 'There is no deposit due for this booking.',
+        })
+      }
+
+      return {
+        booking: { id: booking.id, professionalId: booking.professionalId },
+        stripe: {
+          depositCents,
+          feeCents,
+          totalCents,
+          currency: STRIPE_DEFAULT_CURRENCY,
+          connectedAccountId,
+          lineItemDescription: buildStripeLineItemDescription({
+            bookingId: booking.id,
+            serviceName: booking.service?.name ?? null,
+          }),
+        },
+        meta: buildMeta(false),
+      }
+    },
+  })
+}
+
+/**
+ * Persist the deposit PaymentIntent id once the Checkout Session is created, so the
+ * webhook can match the deposit payment back to this booking. The deposit stays
+ * PENDING until the webhook confirms payment.
+ */
+export async function recordDepositCheckoutAttached(args: {
+  bookingId: string
+  clientId: string
+  stripePaymentIntentId: string | null
+}): Promise<void> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+
+  if (!args.stripePaymentIntentId) return
+
+  await prisma.booking.updateMany({
+    where: {
+      id: args.bookingId,
+      clientId: args.clientId,
+      depositStatus: BookingDepositStatus.PENDING,
+    },
+    data: { depositStripePaymentIntentId: args.stripePaymentIntentId },
+  })
+}
+
+export type ApplyDepositResult = { handled: boolean; alreadyPaid: boolean }
+
+/**
+ * Mark a discovery deposit paid from a Stripe webhook. Idempotent: a second
+ * delivery for an already-paid deposit is a no-op. Matched by the deposit PI id.
+ */
+export async function applyStripeDepositSucceededInTransaction(
+  tx: Prisma.TransactionClient,
+  args: {
+    now?: Date
+    stripePaymentIntentId: string
+    chargeId: string | null
+    bookingIdHint?: string | null
+  },
+): Promise<ApplyDepositResult> {
+  const now = args.now ?? new Date()
+
+  const booking = await tx.booking.findFirst({
+    where: { depositStripePaymentIntentId: args.stripePaymentIntentId },
+    select: { id: true, depositStatus: true },
+  })
+
+  const resolved =
+    booking ??
+    (args.bookingIdHint
+      ? await tx.booking.findUnique({
+          where: { id: args.bookingIdHint },
+          select: { id: true, depositStatus: true },
+        })
+      : null)
+
+  if (!resolved) return { handled: false, alreadyPaid: false }
+
+  if (resolved.depositStatus === BookingDepositStatus.PAID) {
+    return { handled: true, alreadyPaid: true }
+  }
+
+  await tx.booking.update({
+    where: { id: resolved.id },
+    data: {
+      depositStatus: BookingDepositStatus.PAID,
+      depositPaidAt: now,
+      depositStripePaymentIntentId: args.stripePaymentIntentId,
+      depositStripeChargeId: args.chargeId,
+    },
+  })
+
+  return { handled: true, alreadyPaid: false }
+}
+
+/**
+ * Reconcile a `charge.refunded` webhook against a DEPOSIT PaymentIntent (matched by
+ * depositStripePaymentIntentId), for refunds issued out-of-band (e.g. the Stripe
+ * dashboard). Marks the deposit REFUNDED, and on a FULL refund also stamps
+ * discoveryFeeRefundedAt (refund-reset). Never clears an already-set fee-refund
+ * timestamp. Returns handled:false when the PI is not a deposit PI (so the caller
+ * falls through to the normal final-bill reconcile).
+ */
+export async function reconcileDepositChargeRefundInTransaction(
+  tx: Prisma.TransactionClient,
+  args: {
+    paymentIntentId: string
+    amountRefundedCents: number
+    chargeAmountCents: number
+    now?: Date
+  },
+): Promise<{ handled: boolean }> {
+  const booking = await tx.booking.findFirst({
+    where: { depositStripePaymentIntentId: args.paymentIntentId },
+    select: { id: true, discoveryFeeRefundedAt: true },
+  })
+
+  if (!booking) return { handled: false }
+
+  const fullyRefunded =
+    args.chargeAmountCents > 0 && args.amountRefundedCents >= args.chargeAmountCents
+
+  await tx.booking.update({
+    where: { id: booking.id },
+    data: {
+      depositStatus: BookingDepositStatus.REFUNDED,
+      // Only a full refund returns the fee; never clear an existing timestamp.
+      ...(fullyRefunded && !booking.discoveryFeeRefundedAt
+        ? { discoveryFeeRefundedAt: args.now ?? new Date() }
+        : {}),
+    },
+  })
+
+  return { handled: true }
 }
 
 // ---------------------------------------------------------------------------

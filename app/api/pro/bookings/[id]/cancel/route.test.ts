@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   jsonOk: vi.fn(),
   cancelBooking: vi.fn(),
   applyAutoCancelRefund: vi.fn(),
+  applyDiscoveryDepositCancelRefund: vi.fn(),
   getBookingFailPayload: vi.fn(),
   isBookingError: vi.fn(),
 
@@ -39,6 +40,7 @@ vi.mock('@/lib/booking/writeBoundary', () => ({
 
 vi.mock('@/lib/booking/cancelRefund', () => ({
   applyAutoCancelRefund: mocks.applyAutoCancelRefund,
+  applyDiscoveryDepositCancelRefund: mocks.applyDiscoveryDepositCancelRefund,
 }))
 
 vi.mock('@/lib/booking/errors', () => ({
@@ -168,6 +170,9 @@ describe('app/api/pro/bookings/[id]/cancel/route.ts', () => {
       },
     })
     mocks.applyAutoCancelRefund.mockResolvedValue({ outcome: 'NOT_ATTEMPTED' })
+    mocks.applyDiscoveryDepositCancelRefund.mockResolvedValue({
+      outcome: 'NOT_ATTEMPTED',
+    })
 
     expectIdempotencyStarted()
   })

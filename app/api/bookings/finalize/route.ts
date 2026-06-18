@@ -22,6 +22,7 @@ import {
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { normalizeLocationType } from '@/lib/booking/locationContext'
 import { getClientSubmittedBookingStatus } from '@/lib/booking/statusRules'
+import { resolveDiscoveryFinalize } from '@/lib/booking/resolveDiscoveryFinalize'
 import { finalizeBookingFromHold } from '@/lib/booking/writeBoundary'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
 import { type UnknownRecord } from '@/lib/guards'
@@ -596,6 +597,18 @@ export async function POST(request: Request) {
       return rateLimitExceededResponse(rateLimit)
     }
 
+    // Server-validated discovery context — the trust boundary for the deposit +
+    // one-time platform fee. Never derived from the client-supplied `source`.
+    const discovery = await resolveDiscoveryFinalize({
+      clientId: ownership.clientId,
+      clientUserId: ownership.actorUserId,
+      professionalId: offering.professionalId,
+      lookPostId: body.lookPostId,
+      mediaId: body.mediaId,
+      source: body.source,
+      aftercare: Boolean(body.aftercareToken),
+    })
+
     return await withRouteIdempotency<FinalizeSuccessBody>(
       {
         request,
@@ -628,6 +641,7 @@ export async function POST(request: Request) {
           initialStatus,
           rebookOfBookingId: ownership.rebookOfBookingId,
           offering: toFinalizeOffering(offering),
+          discovery,
           fallbackTimeZone: FALLBACK_TIME_ZONE,
           requestId,
           idempotencyKey: idem.idempotencyKey,

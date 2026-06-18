@@ -22,6 +22,7 @@ import ReviewSection from './ReviewSection'
 import { loadClientBookingPage } from './_data/loadClientBookingPage'
 import { buildBookingViewModel } from './_view/buildBookingViewModel'
 import ClientCheckoutCard from './ClientCheckoutCard'
+import ClientDepositCard from './ClientDepositCard'
 
 export const dynamic = 'force-dynamic'
 
@@ -250,6 +251,18 @@ function buildAcceptedMethods(
       label: 'Apple Cash',
       handle: paymentSettings.appleCashHandle ?? null,
     })
+  }
+
+  if (paymentSettings.acceptPaypal) {
+    methods.push({
+      key: 'paypal',
+      label: 'PayPal',
+      handle: paymentSettings.paypalHandle ?? null,
+    })
+  }
+
+  if (paymentSettings.acceptApplePay) {
+    methods.push({ key: 'apple_pay', label: 'Apple Pay', handle: null })
   }
 
   if (paymentSettings.acceptStripeCard) {
@@ -1320,6 +1333,13 @@ export default async function ClientBookingPage(props: {
 
           {step === 'overview' ? (
             <div className="mt-4 grid gap-4">
+              <ClientDepositCard
+                bookingId={booking.id}
+                depositStatus={raw.depositStatus}
+                depositAmount={raw.depositAmount?.toString() ?? null}
+                discoveryFeeCents={raw.discoveryFeeAmount}
+              />
+
               {showConsultationApproval ? (
                 <SectionCard
                   title={COPY.bookings.consultation.actionNeededTitle}
