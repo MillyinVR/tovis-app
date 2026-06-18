@@ -6,7 +6,12 @@ import { useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import AuthShell from '../AuthShell'
-import { cn } from '@/lib/utils'
+import FieldLabel from '../FieldLabel'
+import HelpText from '../HelpText'
+import Input from '../Input'
+import PasswordInput from '../PasswordInput'
+import PrimaryButton from '../PrimaryButton'
+import SecondaryLinkButton from '../SecondaryLinkButton'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { hardNavigate } from '@/lib/clientNavigation'
 import { getTurnstileToken } from '@/lib/turnstileClient'
@@ -88,84 +93,6 @@ function readVerificationSendState(
   const value = data?.[key]
   if (value === 'pending') return 'pending'
   return value === true
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-xs font-black tracking-wide text-textSecondary">
-      {children}
-    </span>
-  )
-}
-
-function HelpText({ children }: { children: React.ReactNode }) {
-  return <span className="text-xs text-textSecondary/80">{children}</span>
-}
-
-function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={cn(
-        'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
-        'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
-        'placeholder:text-textSecondary/70',
-        'hover:border-surfaceGlass/16',
-        'focus:border-accentPrimary/35 focus:ring-2 focus:ring-accentPrimary/15',
-        props.disabled && 'opacity-70',
-        props.className ?? '',
-      )}
-    />
-  )
-}
-
-function PrimaryButton({
-  children,
-  loading,
-  disabled,
-}: {
-  children: React.ReactNode
-  loading: boolean
-  disabled?: boolean
-}) {
-  return (
-    <button
-      type="submit"
-      disabled={disabled || loading}
-      className={cn(
-        'relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
-        'border border-accentPrimary/35',
-        'bg-accentPrimary/26 text-textPrimary',
-        'hover:bg-accentPrimary/30 hover:border-accentPrimary/45',
-        'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
-        loading ? 'cursor-not-allowed opacity-65' : 'cursor-pointer',
-      )}
-    >
-      <span className="relative">{children}</span>
-    </button>
-  )
-}
-
-function SecondaryLinkButton({
-  href,
-  children,
-}: {
-  href: string
-  children: React.ReactNode
-}) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        'inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-sm font-black transition',
-        'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
-        'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
-        'focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
-      )}
-    >
-      {children}
-    </Link>
-  )
 }
 
 function isUsZip(raw: string) {
@@ -688,14 +615,13 @@ export default function SignupClientClient() {
 
         <label className="grid gap-1.5">
           <FieldLabel>Password</FieldLabel>
-          <Input
+          <PasswordInput
             id={FIELD_IDS.password}
             value={password}
             onChange={(e) => {
               setPassword(e.target.value)
               setFieldError('password', null)
             }}
-            type="password"
             required
             autoComplete="new-password"
             {...fieldErrorDescribedBy(
