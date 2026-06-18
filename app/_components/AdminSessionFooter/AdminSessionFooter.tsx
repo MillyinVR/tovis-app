@@ -12,6 +12,7 @@ import {
   UserCheck,
 } from 'lucide-react'
 import NavItem from '@/app/_components/navigation/FooterNavItem'
+import { isActivePath } from '@/app/_components/navigation/activePath'
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
 import SwitchAccountSheet from './SwitchAccountSheet'
 
@@ -29,11 +30,6 @@ const ROUTES = {
   support: '/admin/support',
 } as const
 
-function isActivePath(pathname: string, href: string) {
-  if (href === '/admin') return pathname === '/admin'
-  return pathname === href || pathname.startsWith(href + '/')
-}
-
 export default function AdminSessionFooter({ supportBadge, workspaces = [] }: Props) {
   // If pathname is temporarily null during hydration, still render (don’t disappear).
   const pathname = usePathname() ?? ''
@@ -42,7 +38,7 @@ export default function AdminSessionFooter({ supportBadge, workspaces = [] }: Pr
   return (
     <div className="tovis-footer-root">
       <nav className="tovis-footer-bar tovis-footer-bar--wide" aria-label="Admin">
-        <NavItem label="Dashboard" href={ROUTES.dashboard} icon={<LayoutDashboard size={20} />} active={isActivePath(pathname, ROUTES.dashboard)} />
+        <NavItem label="Dashboard" href={ROUTES.dashboard} icon={<LayoutDashboard size={20} />} active={isActivePath(pathname, ROUTES.dashboard, { exact: true })} />
         <NavItem label="Approve" href={ROUTES.approve} icon={<UserCheck size={20} />} active={isActivePath(pathname, ROUTES.approve)} />
         <NavItem label="Services" href={ROUTES.services} icon={<Scissors size={20} />} active={isActivePath(pathname, ROUTES.services)} />
         <NavItem label="NFC" href={ROUTES.nfc} icon={<Nfc size={20} />} active={isActivePath(pathname, ROUTES.nfc)} />

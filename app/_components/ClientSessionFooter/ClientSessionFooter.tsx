@@ -4,15 +4,11 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import NavItem from '../navigation/FooterNavItem'
+import { isActivePath } from '../navigation/activePath'
 import BadgeDot from './BadgeDot'
 import TovisFeatherMark from '../footer/TovisFeatherMark'
 import { useUnreadBadge } from '@/app/_components/_hooks/useUnreadBadge'
 import { CLIENT_TABS } from '@/app/config/clientNav'
-
-function isActivePath(pathname: string, href: string) {
-  const base = href.split('?')[0]
-  return pathname === base || pathname.startsWith(base + '/')
-}
 
 export default function ClientSessionFooter({
   messagesBadge,

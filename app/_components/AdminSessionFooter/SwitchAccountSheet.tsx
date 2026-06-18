@@ -14,6 +14,19 @@ const WORKSPACE_ICON: Record<Role, LucideIcon> = {
   ADMIN: LayoutDashboard,
 }
 
+/** Read a string `href` off an unknown JSON response, cast-free. */
+function readHref(data: unknown): string | null {
+  if (
+    typeof data === 'object' &&
+    data !== null &&
+    'href' in data &&
+    typeof data.href === 'string'
+  ) {
+    return data.href
+  }
+  return null
+}
+
 /**
  * Bottom sheet for switching the active workspace and signing out.
  * `options` are the workspaces the user is genuinely entitled to (resolved
@@ -58,13 +71,9 @@ export default function SwitchAccountSheet({
       }
 
       const data: unknown = await res.json().catch(() => null)
-      const href =
-        data && typeof (data as { href?: unknown }).href === 'string'
-          ? (data as { href: string }).href
-          : option.href
 
       // Hard nav: server components re-evaluate with the re-minted cookie.
-      hardNavigate(href)
+      hardNavigate(readHref(data) ?? option.href)
     } catch {
       setSwitchingTo(null)
       setError('Could not switch workspace. Please try again.')
