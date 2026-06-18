@@ -4,26 +4,12 @@
 
 import { useState } from 'react'
 import AuthShell from '../AuthShell'
-import { cn } from '@/lib/utils'
-
-function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={cn(
-        'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
-        'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
-        'placeholder:text-textSecondary/70',
-        'hover:border-surfaceGlass/16',
-        'focus:border-accentPrimary/35 focus:ring-2 focus:ring-accentPrimary/15',
-      )}
-    />
-  )
-}
+import FieldLabel from '../FieldLabel'
+import PasswordInput from '../PasswordInput'
+import PrimaryButton from '../PrimaryButton'
 
 export default function ResetPasswordClient({ token }: { token: string }) {
   const [password, setPassword] = useState('')
-  const [show, setShow] = useState(false)
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -64,26 +50,11 @@ export default function ResetPasswordClient({ token }: { token: string }) {
       ) : (
         <form onSubmit={onSubmit} className="grid gap-4">
           <label className="grid gap-1.5">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs font-black tracking-wide text-textSecondary">New password</span>
-              <button
-                type="button"
-                onClick={() => setShow((v) => !v)}
-                className={cn(
-                  'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-black transition',
-                  'border-surfaceGlass/12 bg-bgPrimary/30 text-textSecondary',
-                  'hover:border-surfaceGlass/18 hover:text-textPrimary',
-                  'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
-                )}
-              >
-                {show ? 'Hide' : 'Show'}
-              </button>
-            </div>
+            <FieldLabel>New password</FieldLabel>
 
-            <Input
+            <PasswordInput
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              type={show ? 'text' : 'password'}
               required
               autoComplete="new-password"
               placeholder="At least 8 characters"
@@ -97,25 +68,9 @@ export default function ResetPasswordClient({ token }: { token: string }) {
             </div>
           ) : null}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className={cn(
-              'group relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
-              'border border-accentPrimary/35 bg-accentPrimary/26 text-textPrimary',
-              'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
-              'hover:bg-accentPrimary/30 hover:border-accentPrimary/45 hover:before:opacity-100',
-              'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
-              loading ? 'cursor-not-allowed opacity-65' : 'cursor-pointer',
-            )}
-          >
-            <span className="relative inline-flex items-center gap-2">
-              <span>{loading ? 'Updating…' : 'Update password'}</span>
-              <span aria-hidden="true" className="inline-block transition-transform duration-200 group-hover:translate-x-0.5">
-                →
-              </span>
-            </span>
-          </button>
+          <PrimaryButton loading={loading} withArrow>
+            {loading ? 'Updating…' : 'Update password'}
+          </PrimaryButton>
         </form>
       )}
     </AuthShell>

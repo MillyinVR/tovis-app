@@ -97,10 +97,10 @@ it('toggles password visibility', async () => {
 
   expect(input.type).toBe('password')
 
-  await user.click(screen.getByText('Show'))
+  await user.click(screen.getByRole('button', { name: 'Show password' }))
   expect(input.type).toBe('text')
 
-  await user.click(screen.getByText('Hide'))
+  await user.click(screen.getByRole('button', { name: 'Hide password' }))
   expect(input.type).toBe('password')
 })
 

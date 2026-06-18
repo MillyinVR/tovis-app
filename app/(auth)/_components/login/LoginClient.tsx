@@ -5,7 +5,11 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'next/navigation'
 
 import AuthShell from '../AuthShell'
-import { cn } from '@/lib/utils'
+import FieldLabel from '../FieldLabel'
+import Input from '../Input'
+import PasswordInput from '../PasswordInput'
+import PrimaryButton from '../PrimaryButton'
+import SecondaryLinkButton from '../SecondaryLinkButton'
 import { safeJsonRecord, readErrorMessage, readStringField } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 
@@ -141,89 +145,6 @@ function buildForgotPasswordHref(args: {
 
   const qs = params.toString()
   return qs ? `/forgot-password?${qs}` : '/forgot-password'
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="text-xs font-black tracking-wide text-textSecondary">
-      {children}
-    </span>
-  )
-}
-
-function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={cn(
-        'w-full rounded-card border px-3 py-2 text-sm outline-none transition',
-        'border-surfaceGlass/10 bg-bgSecondary/35 text-textPrimary',
-        'placeholder:text-textSecondary/70',
-        'hover:border-surfaceGlass/16',
-        'focus:border-accentPrimary/35 focus:ring-2 focus:ring-accentPrimary/15',
-        props.className ?? '',
-      )}
-    />
-  )
-}
-
-function PrimaryButton({
-  children,
-  loading,
-}: {
-  children: React.ReactNode
-  loading?: boolean
-}) {
-  return (
-    <button
-      type="submit"
-      disabled={loading}
-      className={cn(
-        'group relative inline-flex w-full items-center justify-center overflow-hidden rounded-full px-4 py-2.5 text-sm font-black transition',
-        'border border-accentPrimary/35 bg-accentPrimary/26 text-textPrimary',
-        'before:pointer-events-none before:absolute before:inset-0 before:bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.10),transparent)] before:opacity-0 before:transition',
-        'hover:bg-accentPrimary/30 hover:border-accentPrimary/45 hover:before:opacity-100',
-        'focus:outline-none focus:ring-2 focus:ring-accentPrimary/20',
-        loading ? 'cursor-not-allowed opacity-65' : 'cursor-pointer',
-      )}
-    >
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.22),transparent)]"
-      />
-      <span className="relative inline-flex items-center gap-2">
-        <span>{children}</span>
-        <span
-          aria-hidden="true"
-          className="inline-block transition-transform duration-200 group-hover:translate-x-0.5"
-        >
-          →
-        </span>
-      </span>
-    </button>
-  )
-}
-
-function SecondaryLinkButton({
-  href,
-  children,
-}: {
-  href: string
-  children: React.ReactNode
-}) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        'inline-flex w-full items-center justify-center rounded-full border px-4 py-2 text-[13px] font-black transition',
-        'border-surfaceGlass/14 bg-bgPrimary/25 text-textPrimary',
-        'hover:border-surfaceGlass/20 hover:bg-bgPrimary/30',
-        'focus:outline-none focus:ring-2 focus:ring-accentPrimary/15',
-      )}
-    >
-      {children}
-    </Link>
-  )
 }
 
 export default function LoginClient() {
@@ -447,10 +368,9 @@ export default function LoginClient() {
             </Link>
           </div>
 
-          <Input
+          <PasswordInput
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            type="password"
             required
             autoComplete="current-password"
           />
@@ -463,7 +383,7 @@ export default function LoginClient() {
         ) : null}
 
         <div className="grid gap-2 pt-1">
-          <PrimaryButton loading={loading}>
+          <PrimaryButton loading={loading} withArrow>
             {loading ? 'Logging in…' : 'Login'}
           </PrimaryButton>
 
