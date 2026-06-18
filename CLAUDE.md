@@ -1,0 +1,56 @@
+# Tovis — working rules
+
+## Session sync with `origin/main`
+
+The local checkout must be **in sync with `origin/main`** at both the start and
+end of every working session. "In sync" means BOTH:
+
+1. **Working tree is clean** — no uncommitted or untracked changes.
+2. **Local `main` is level with `origin/main`** — not ahead, not behind, checked
+   after a `git fetch`.
+
+### Start of session
+
+A `SessionStart` hook runs `scripts/git-sync-check.sh` automatically and prints
+the result. Read it before doing anything else.
+
+- If it reports **in sync** → proceed.
+- If it reports **other session(s) active** → another Claude Code session for
+  this project is live (its transcript was touched in the last ~5 min), so a
+  dirty tree is most likely *its* work. The check does **not** flag out-of-sync
+  in that case — proceed, but don't clobber the other session's changes.
+- If it reports **NOT in sync** → reconcile first. Typically:
+  - dirty working tree → review the changes, then commit on a branch / stash /
+    discard as appropriate (never blindly discard — look at what's there first);
+  - local `main` behind `origin/main` → `git checkout main && git pull --ff-only`;
+  - local `main` ahead/diverged → figure out why before pushing or resetting.
+
+Surface any drift to the user rather than silently "fixing" it.
+
+### End of session
+
+Before wrapping up, leave the checkout in sync again. Run the check by hand:
+
+```bash
+bash scripts/git-sync-check.sh
+```
+
+Then ensure it reports **in sync ✅** — commit & push outstanding work (on its
+branch), get it merged, and fast-forward local `main` to `origin/main` so the
+next session starts clean. If something can't be reconciled, tell the user what
+remains and why instead of leaving it silently dirty.
+
+> Feature branches legitimately diverge from `origin/main` mid-work — that's
+> expected. The hard requirement is the two checks above (clean tree + local
+> `main` level with `origin/main`); the current-branch ahead/behind line is
+> informational context, not a failure.
+
+### Knobs
+
+- `TOVIS_SKIP_SYNC_CHECK=1` — skip the check entirely (escape hatch).
+- `TOVIS_SYNC_CONCURRENCY_WINDOW=<seconds>` — how recently a sibling session's
+  transcript must have been written to count as "active" (default `300`).
+- Concurrent-session detection only applies when the check runs from the
+  `SessionStart` hook (it reads the session payload). A manual
+  `bash scripts/git-sync-check.sh` run is always **strict** — which is what you
+  want for the end-of-session check.
