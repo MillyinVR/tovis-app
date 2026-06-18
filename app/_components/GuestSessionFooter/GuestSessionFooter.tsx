@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { Compass, House, LogIn, UserPlus } from 'lucide-react'
 import NavItem from '../navigation/FooterNavItem'
 import { isActivePath } from '../navigation/activePath'
-import TovisFeatherMark from '../footer/TovisFeatherMark'
+import LooksMark from '../footer/LooksMark'
 
 const ROUTES = {
   home: '/',
@@ -31,7 +31,7 @@ export default function GuestSessionFooter() {
         <NavItem label="Home" href={ROUTES.home} icon={<House size={24} />} active={homeActive} />
         <NavItem label="Search" href={ROUTES.search} icon={<Compass size={24} />} active={searchActive} />
 
-        {/* Center: the Looks feed, as the tovis feather mark */}
+        {/* Center: the Looks feed — default brand feather, or the tenant's mark for white-label */}
         <Link
           href={ROUTES.looks}
           className="tovis-center-lift no-underline tovis-focus"
@@ -40,7 +40,7 @@ export default function GuestSessionFooter() {
           aria-label="Looks"
           aria-current={isActivePath(pathname, ROUTES.looks) ? 'page' : undefined}
         >
-          <TovisFeatherMark size={66} />
+          <LooksMark size={66} />
         </Link>
 
         <NavItem label="Log in" href={ROUTES.login} icon={<LogIn size={24} />} active={loginActive} />

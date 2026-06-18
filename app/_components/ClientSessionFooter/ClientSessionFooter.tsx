@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import NavItem from '../navigation/FooterNavItem'
 import { isActivePath } from '../navigation/activePath'
 import BadgeDot from './BadgeDot'
-import TovisFeatherMark from '../footer/TovisFeatherMark'
+import LooksMark from '../footer/LooksMark'
 import { useUnreadBadge } from '@/app/_components/_hooks/useUnreadBadge'
 import { CLIENT_TABS } from '@/app/config/clientNav'
 
@@ -37,7 +37,7 @@ export default function ClientSessionFooter({
                 aria-label={tab.label}
                 aria-current={active ? 'page' : undefined}
               >
-                <TovisFeatherMark size={66} />
+                <LooksMark size={66} />
               </Link>
             )
           }

@@ -292,7 +292,8 @@ export default function ProSessionFooter({
                 height: 72,
                 borderRadius: '50%',
                 padding: centerIsLive ? 3 : 0,
-                background: centerIsLive ? 'var(--plume)' : 'rgb(var(--bg-surface))',
+                // tenant-adaptive CTA gradient (rebrands per white-label tenant), not the brand-constant plume
+                background: centerIsLive ? 'var(--cta)' : 'rgb(var(--bg-surface))',
                 border: centerIsLive ? 'none' : '1.5px solid var(--line-strong)',
                 boxShadow: centerIsLive ? '0 14px 32px var(--tovis-acc-shadow)' : 'none',
                 cursor: centerDisabled ? 'not-allowed' : 'pointer',
