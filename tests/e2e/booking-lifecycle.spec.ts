@@ -133,7 +133,9 @@ async function loginAs(args: {
   await args.page.goto('/login')
 
   await args.page.getByLabel(/email/i).fill(args.email)
-  await args.page.getByLabel(/password/i).fill(args.password)
+  // Anchored so it matches only the password input, not the "Show password"
+  // visibility-toggle button that also carries "password" in its label.
+  await args.page.getByLabel(/^Password/i).fill(args.password)
 
   await Promise.all([
     args.page
