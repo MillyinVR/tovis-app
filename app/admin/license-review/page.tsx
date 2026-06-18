@@ -209,17 +209,27 @@ export default async function AdminLicenseReviewPage() {
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <Pill>{String(pro.verificationStatus)}</Pill>
                         {pro.licenseReviewPending ? <Pill>Re-review</Pill> : null}
-                        {latestDoc ? (
-                          <Link
-                            href={`/api/admin/verification-docs/open?id=${encodeURIComponent(latestDoc.id)}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center rounded-full border border-surfaceGlass/14 bg-bgPrimary/20 px-3 py-1 text-[11px] font-black text-textPrimary hover:border-surfaceGlass/24"
-                          >
-                            View license doc →
-                          </Link>
-                        ) : null}
                       </div>
+
+                      {latestDoc ? (
+                        <a
+                          href={`/api/admin/verification-docs/open?id=${encodeURIComponent(latestDoc.id)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block text-right"
+                          title="Open full size"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={`/api/admin/verification-docs/open?id=${encodeURIComponent(latestDoc.id)}`}
+                            alt="License document"
+                            className="h-20 w-32 rounded-lg border border-surfaceGlass/14 bg-bgPrimary/30 object-cover"
+                          />
+                          <span className="mt-1 block text-[11px] font-black text-accentPrimary">
+                            View larger ↗
+                          </span>
+                        </a>
+                      ) : null}
                       <LicenseReviewActions
                         professionalId={pro.id}
                         currentStatus={pro.verificationStatus}

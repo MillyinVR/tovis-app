@@ -88,6 +88,17 @@ export default function ProfileHero({
             ) : null}
           </div>
 
+          {header.isLicenseVerified ? (
+            <div className="mt-2">
+              <span
+                className="inline-flex items-center gap-1 rounded-full border border-[rgb(var(--color-acid))]/35 bg-[rgb(var(--color-acid))]/12 px-2.5 py-0.5 text-[11px] font-black text-[rgb(var(--color-acid))]"
+                title="This pro's professional license has been verified."
+              >
+                ✓ License verified
+              </span>
+            </div>
+          ) : null}
+
           <div className="brand-profile-subtext mt-2 flex flex-wrap items-center gap-2">
             <span>{header.professionLabel}</span>
 

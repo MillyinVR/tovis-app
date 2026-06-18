@@ -159,6 +159,24 @@ export default async function ProVerificationPage() {
                       ) : null}
                     </div>
                   </div>
+
+                  <a
+                    href={`/api/pro/verification-docs/${encodeURIComponent(d.id)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 block w-fit"
+                    title="Open full size"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/pro/verification-docs/${encodeURIComponent(d.id)}`}
+                      alt="Uploaded document preview"
+                      className="h-28 w-44 rounded-lg border border-white/10 bg-bgPrimary/30 object-cover"
+                    />
+                    <span className="mt-1 block text-[11px] font-black text-accentPrimary">
+                      View larger ↗
+                    </span>
+                  </a>
                 </div>
               ))}
             </div>
