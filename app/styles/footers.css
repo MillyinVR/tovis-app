@@ -10,14 +10,13 @@
 
 :root {
   /* The center "app-coin" is intentionally dark in BOTH themes (like the app
-     icon) so the iridescent feather keeps its gradient. Constant. */
+     icon) so the iridescent mark keeps its gradient. Constant. */
   --tovis-coin: radial-gradient(125% 125% at 32% 24%, #2c4f49 0%, #16302b 27%, #0d1a17 58%, #050d0b 100%);
-  --tovis-acc-shadow: rgba(21, 201, 168, 0.45);
-}
-
-/* light mode keeps the same dark coin, just a softer cast shadow */
-[data-mode="light"] {
-  --tovis-acc-shadow: rgba(14, 155, 134, 0.38);
+  /* Cast-glow under the center coin — derived from the brand accent token so it
+     rebrands per white-label tenant (and flips light/dark automatically). For
+     the default brand this resolves to the plume teal, matching the original
+     constant. */
+  --tovis-acc-shadow: rgb(var(--accent-primary) / 0.45);
 }
 
 @keyframes tovisPulse {
