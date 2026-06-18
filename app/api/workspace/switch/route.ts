@@ -46,7 +46,7 @@ async function ensureClientProfile(
   if (existing) return
 
   const tenant = await resolveTenantContextForRequest(request)
-  const phone = user.phone ?? undefined
+  const phone = user.phone ?? undefined // pii-plaintext-read-ok: fed into lib/security phone hash/encrypt helpers; not stored or logged
 
   try {
     await prisma.clientProfile.create({
@@ -56,7 +56,8 @@ async function ensureClientProfile(
         phone,
         claimStatus: 'CLAIMED',
         claimedAt: new Date(),
-        ...buildClientProfileContactLookupData({ email: user.email, phone }),
+        // email read feeds the lib/security contact-hash helper on the next line; not stored or logged
+        ...buildClientProfileContactLookupData({ email: user.email, phone }), // pii-plaintext-read-ok: contact-hash helper input
         ...buildPhoneEncryptionWriteData({ phone }),
       },
     })

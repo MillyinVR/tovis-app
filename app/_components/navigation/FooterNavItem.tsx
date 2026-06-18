@@ -4,7 +4,7 @@
 import Link from 'next/link'
 
 /**
- * Bottom-nav item on the new Tovis surface footer.
+ * Bottom-nav item on the new surface footer.
  * Active = accent icon + full-strength label + a small accent dot above.
  * Inactive = muted. (No more heavy text-shadow — the bar sits on the surface
  * token, not over media.)
