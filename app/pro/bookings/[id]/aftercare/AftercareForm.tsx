@@ -64,6 +64,7 @@ type Props = {
   existingRebookMode?: RebookMode | null
   existingRebookWindowStart?: string | null
   existingRebookWindowEnd?: string | null
+  existingRebookDeclinedAt?: string | null
   existingMedia: MediaItem[]
   existingRecommendedProducts?: RecommendedProduct[]
 
@@ -315,6 +316,7 @@ export default function AftercareForm({
   existingRebookMode,
   existingRebookWindowStart,
   existingRebookWindowEnd,
+  existingRebookDeclinedAt,
   existingMedia,
   existingRecommendedProducts,
   existingDraftSavedAt,
@@ -1166,6 +1168,18 @@ export default function AftercareForm({
 
           {showBooked ? (
             <div className="mt-4">
+              {existingRebookDeclinedAt ? (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span className="brand-pro-session-pill" data-tone="danger">
+                    Client declined
+                  </span>
+                  <span className="text-xs font-semibold text-textSecondary">
+                    They declined the time you proposed. Pick a new time and
+                    re-send to offer another.
+                  </span>
+                </div>
+              ) : null}
+
               <label className={labelClass()} htmlFor="rebookAt">
                 Recommended next visit
               </label>
