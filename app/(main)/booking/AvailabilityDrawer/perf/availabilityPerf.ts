@@ -10,7 +10,17 @@ import type {
   EndAvailabilityMetricArgs,
   StartAvailabilityMetricArgs,
 } from './availabilityPerfTypes'
+import { AVAILABILITY_PERF_METRICS } from './availabilityPerfTypes'
 import { isRecord } from '@/lib/guards'
+
+function isAvailabilityPerfMetricName(
+  value: unknown,
+): value is AvailabilityPerfMetricName {
+  return (
+    typeof value === 'string' &&
+    (AVAILABILITY_PERF_METRICS as readonly string[]).includes(value)
+  )
+}
 
 const PERF_STORE_VERSION = 1 as const
 const MAX_PERF_ENTRIES = 5_000
@@ -77,14 +87,14 @@ function sanitizeMeta(value: unknown): AvailabilityPerfMeta | undefined {
 
 function sanitizeActiveEntry(value: unknown): AvailabilityPerfActiveEntry | null {
   if (!isRecord(value)) return null
-  if (typeof value.metric !== 'string') return null
+  if (!isAvailabilityPerfMetricName(value.metric)) return null
   if (typeof value.key !== 'string') return null
   if (typeof value.startedAt !== 'number' || !Number.isFinite(value.startedAt)) {
     return null
   }
 
   return {
-    metric: value.metric as AvailabilityPerfMetricName,
+    metric: value.metric,
     key: value.key,
     startedAt: value.startedAt,
     meta: sanitizeMeta(value.meta),
@@ -93,7 +103,7 @@ function sanitizeActiveEntry(value: unknown): AvailabilityPerfActiveEntry | null
 
 function sanitizeStoredEntry(value: unknown): StoredPerfEntry | null {
   if (!isRecord(value)) return null
-  if (typeof value.metric !== 'string') return null
+  if (!isAvailabilityPerfMetricName(value.metric)) return null
   if (typeof value.key !== 'string') return null
   if (typeof value.startedAt !== 'number' || !Number.isFinite(value.startedAt)) {
     return null
@@ -109,7 +119,7 @@ function sanitizeStoredEntry(value: unknown): StoredPerfEntry | null {
     }
 
     return {
-      metric: value.metric as AvailabilityPerfMetricName,
+      metric: value.metric,
       key: value.key,
       startedAt: value.startedAt,
       endedAt: value.endedAt,
@@ -120,7 +130,7 @@ function sanitizeStoredEntry(value: unknown): StoredPerfEntry | null {
   }
 
   return {
-    metric: value.metric as AvailabilityPerfMetricName,
+    metric: value.metric,
     key: value.key,
     startedAt: value.startedAt,
     endedAt: value.endedAt,

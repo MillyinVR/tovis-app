@@ -554,7 +554,7 @@ function InlineRetryCard(props: {
       data-testid="availability-error"
       className="mb-[14px] rounded-[14px] border border-white/10 bg-bgPrimary/35 p-3.5"
     >
-      <div className="mb-2.5 text-[13px] font-semibold text-red-400">
+      <div className="mb-2.5 text-[13px] font-semibold text-toneDanger">
         {props.message}
       </div>
 
@@ -1783,7 +1783,7 @@ export default function AvailabilityDrawer(props: {
               Hold expires{' '}
               <span
                 className={
-                  holdUrgent ? 'font-black text-red-400' : 'font-black text-textPrimary'
+                  holdUrgent ? 'font-black text-toneDanger' : 'font-black text-textPrimary'
                 }
               >
                 {holdLabel}
@@ -2021,7 +2021,7 @@ export default function AvailabilityDrawer(props: {
                       <span
                         className={
                           holdUrgent
-                            ? 'font-black text-red-400'
+                            ? 'font-black text-toneDanger'
                             : 'font-black text-textPrimary'
                         }
                       >
@@ -2078,7 +2078,7 @@ export default function AvailabilityDrawer(props: {
 
               {otherProsInlineError ? (
                 <div className="mb-[14px] rounded-[12px] border border-white/10 bg-bgPrimary/35 p-[10px_12px]">
-                  <div className="text-[12px] font-semibold text-red-400">
+                  <div className="text-[12px] font-semibold text-toneDanger">
                     {otherProsInlineError}
                   </div>
                   <button
