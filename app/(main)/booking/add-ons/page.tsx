@@ -107,7 +107,9 @@ function parseAddOnsApiResponse(x: unknown): AddOnsApiResponse | null {
   const ok = x.ok
   if (ok === true) {
     const addOnsRaw = x.addOns
-    const addOns = Array.isArray(addOnsRaw) ? (addOnsRaw.map(coerceAddOn).filter(Boolean) as AddOnDTO[]) : undefined
+    const addOns = Array.isArray(addOnsRaw)
+      ? addOnsRaw.map(coerceAddOn).filter((a): a is AddOnDTO => a !== null)
+      : undefined
 
     const offeringId = typeof x.offeringId === 'string' ? x.offeringId : undefined
     const locationType = x.locationType === 'MOBILE' || x.locationType === 'SALON' ? x.locationType : undefined
