@@ -271,6 +271,14 @@ export async function POST(req: Request) {
       )
     }
 
+    // Every MediaAsset anchors to one bookable service. Portfolio uploads always
+    // carry >=1 service tag (guarded above), so fall back to the first selected
+    // when the pro didn't nominate an explicit primary.
+    const mediaPrimaryServiceId = primaryServiceId ?? serviceIds[0]
+    if (!mediaPrimaryServiceId) {
+      return jsonFail(400, 'Select at least one service tag.')
+    }
+
     const lookVisibility = parseOptionalLookVisibility(
       body.lookVisibility ?? body.visibilityOverride,
     )
@@ -292,6 +300,7 @@ export async function POST(req: Request) {
           ...buildMediaAssetCreateData({
             professionalId,
             proTenantId,
+            primaryServiceId: mediaPrimaryServiceId,
 
             url,
             thumbUrl,

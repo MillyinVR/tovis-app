@@ -72,6 +72,7 @@ function makeBooking(
   return {
     id: 'booking_1',
     professionalId: overrides?.professionalId ?? 'pro_1',
+    serviceId: 'service_1',
     status: overrides?.status ?? BookingStatus.ACCEPTED,
     startedAt: overrides?.startedAt ?? TEST_NOW,
     finishedAt: overrides?.finishedAt ?? null,
@@ -140,6 +141,7 @@ function expectMediaCreateCalledWith(args: {
       bookingId: 'booking_1',
       professionalId: 'pro_1',
       proTenantId: 'tenant_root',
+      primaryServiceId: 'service_1',
       uploadedByUserId: 'user_1',
       uploadedByRole: Role.PRO,
       storageBucket: 'media-private',

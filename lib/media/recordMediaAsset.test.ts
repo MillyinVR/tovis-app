@@ -14,6 +14,7 @@ function base(overrides: Partial<MediaAssetWriteInput> = {}): MediaAssetWriteInp
   return {
     professionalId: 'pro_1',
     proTenantId: 'tenant_1',
+    primaryServiceId: 'svc_1',
     storageBucket: PRIVATE,
     storagePath: 'pro/pro_1/x.jpg',
     mediaType: MediaType.IMAGE,
@@ -29,6 +30,7 @@ describe('buildMediaAssetCreateData defaults', () => {
     expect(data).toMatchObject({
       professionalId: 'pro_1',
       proTenantId: 'tenant_1',
+      primaryServiceId: 'svc_1',
       bookingId: null,
       reviewId: null,
       uploadedByUserId: null,
@@ -67,6 +69,14 @@ describe('buildMediaAssetCreateData defaults', () => {
       thumbBucket: PRIVATE,
       thumbPath: 'pro/pro_1/x_thumb.jpg',
     })
+  })
+})
+
+describe('primaryServiceId invariant', () => {
+  it('rejects a blank primaryServiceId', () => {
+    expect(() =>
+      assertMediaAssetInvariant(base({ primaryServiceId: '   ' })),
+    ).toThrow(MediaAssetInvariantError)
   })
 })
 

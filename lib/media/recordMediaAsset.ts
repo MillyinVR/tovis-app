@@ -40,6 +40,11 @@ export type MediaAssetWriteInput = {
   // Required ownership + storage pointers.
   professionalId: string
   proTenantId: string | null
+  // Required: every media asset is anchored to a primary bookable service so it
+  // can always route to "book this". Derive from booking.serviceId (session /
+  // review photos) or the first selected service (portfolio). Secondary services
+  // still go through the MediaServiceTag M2M; this is the canonical one.
+  primaryServiceId: string
   storageBucket: string
   storagePath: string
   mediaType: MediaType
@@ -82,6 +87,12 @@ export function assertMediaAssetInvariant(input: MediaAssetWriteInput): void {
     throw new MediaAssetInvariantError('MediaAsset requires a non-empty storagePath.')
   }
 
+  if (!input.primaryServiceId.trim()) {
+    throw new MediaAssetInvariantError(
+      'MediaAsset requires a primaryServiceId (every media must link to a bookable service).',
+    )
+  }
+
   if (input.thumbBucket != null && (!input.thumbPath || !input.thumbPath.trim())) {
     throw new MediaAssetInvariantError(
       'MediaAsset thumbPath is required when thumbBucket is set.',
@@ -117,6 +128,7 @@ export function buildMediaAssetCreateData(
   return {
     professionalId: input.professionalId,
     proTenantId: input.proTenantId,
+    primaryServiceId: input.primaryServiceId,
 
     bookingId: input.bookingId ?? null,
     reviewId: input.reviewId ?? null,

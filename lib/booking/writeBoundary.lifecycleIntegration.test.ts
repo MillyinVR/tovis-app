@@ -177,6 +177,7 @@ function makeMediaBooking(overrides?: {
   return {
     id: 'booking_1',
     professionalId: 'pro_1',
+    serviceId: 'service_1',
     status: overrides?.status ?? BookingStatus.IN_PROGRESS,
     startedAt: STARTED_AT,
     finishedAt: overrides?.finishedAt ?? null,
@@ -239,6 +240,7 @@ function makeFinishableBooking(
   return {
     id: 'booking_1',
     professionalId: 'pro_1',
+    serviceId: 'service_1',
     status: overrides?.status ?? BookingStatus.IN_PROGRESS,
     startedAt: overrides?.startedAt ?? STARTED_AT,
     finishedAt: overrides?.finishedAt ?? null,
