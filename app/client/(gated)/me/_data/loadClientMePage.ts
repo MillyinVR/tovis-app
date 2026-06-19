@@ -19,6 +19,12 @@ import {
   buildMyFollowingListResponse,
   listFollowingPage,
 } from '@/lib/follows'
+import { countUnreadClientActivity } from '@/lib/notifications/activityFeed'
+import {
+  getClientCreatorStats,
+  listClientLookRemixes,
+  type ClientLookRemix,
+} from '@/lib/creator/creatorProfileStats'
 import {
   buildClientBookingDTO,
   type ClientBookingDTO,
@@ -192,10 +198,23 @@ export type ClientMePageData = {
     saved: number
     booked: number
     following: number
+    followers: number
   }
   upcomingNotificationBooking: ClientBookingDTO | null
   history: ClientMeHistoryItem[]
   myLooks: ClientMeLook[]
+  /** Unread count for the engagement activity feed (powers the header badge). */
+  activityUnreadCount: number
+  /**
+   * Real-data creator metrics + remixes. `isCreator` gates the whole creator
+   * UI: false until the client has published at least one authored look.
+   */
+  creator: {
+    isCreator: boolean
+    savesOnYourLooks: number
+    bookedFromYou: number
+    remixes: ClientLookRemix[]
+  }
 }
 
 /**
@@ -380,6 +399,9 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
     followingCount,
     bookedCount,
     uniqueSavedRows,
+    activityUnreadCount,
+    creatorStats,
+    remixes,
   ] = await Promise.all([
     prisma.clientProfile.findUnique({
       where: { id: clientId },
@@ -458,6 +480,11 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
         lookPostId: true,
       },
     }),
+
+    countUnreadClientActivity(prisma, clientId),
+
+    getClientCreatorStats(prisma, clientId),
+    listClientLookRemixes(prisma, { clientId, take: 5 }),
   ])
 
   if (!profile) {
@@ -538,9 +565,17 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
       saved: uniqueSavedRows.length,
       booked: bookedCount,
       following: followingCount,
+      followers: creatorStats.followers,
     },
     upcomingNotificationBooking,
     history: [...historyUpcoming, ...historyCompleted].sort(compareHistoryItems),
     myLooks,
+    activityUnreadCount,
+    creator: {
+      isCreator: creatorStats.authoredLooksCount > 0,
+      savesOnYourLooks: creatorStats.savesOnYourLooks,
+      bookedFromYou: creatorStats.bookedFromYou,
+      remixes,
+    },
   }
 }

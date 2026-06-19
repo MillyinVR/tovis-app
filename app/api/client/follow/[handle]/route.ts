@@ -16,6 +16,7 @@ import {
   requireFollowableClientByHandle,
   toggleClientFollow,
 } from '@/lib/follows'
+import { createClientFollowNotification } from '@/lib/notifications/clientFollowNew'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,6 +86,21 @@ export async function POST(_req: Request, ctx: RouteContext<{ handle: string }>)
       followerClientId: auth.clientId,
       followedClientId: target.id,
     })
+
+    if (state.following) {
+      // Best-effort: the follow already committed; a notification failure must
+      // never fail the request or roll the follow back. Powers the followed
+      // client's activity feed ("started following you").
+      await createClientFollowNotification({
+        followedClientId: target.id,
+        followerClientId: auth.clientId,
+      }).catch((error) => {
+        console.error(
+          'POST /api/client/follow/[handle] notify error',
+          error,
+        )
+      })
+    }
 
     return jsonOk(
       buildClientFollowStateResponse({

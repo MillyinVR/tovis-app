@@ -25,6 +25,7 @@ export type NotificationTemplateKey =
   | 'payment_collected'
   | 'payment_action_required'
   | 'look_follower_new'
+  | 'client_follow'
   | 'referral_tap_received'
   | 'referral_confirmed'
   | 'referral_converted'
@@ -96,6 +97,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
+  NotificationEventKey.CLIENT_FOLLOW,
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,
@@ -374,6 +376,20 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     supportedRecipients: [NotificationRecipientKind.PRO],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
+  // Client→client follow. In-app only (the activity feed) — a follow should
+  // never trigger SMS/email. Non-transactional, no quiet-hours bypass.
+  [NotificationEventKey.CLIENT_FOLLOW]: {
+    key: NotificationEventKey.CLIENT_FOLLOW,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: false,
+    allowQuietHoursBypass: false,
+    templateKey: 'client_follow',
+    supportedRecipients: [NotificationRecipientKind.CLIENT],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
     },
   },
 
