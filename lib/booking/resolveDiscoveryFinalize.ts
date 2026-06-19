@@ -50,6 +50,13 @@ export type FinalizeDiscoveryDirective = Readonly<{
   feeEligible: boolean
   depositSettings: DepositSettings
   discoveryFeeCents: number
+  /**
+   * The validated LookPost this booking was started from (remix attribution),
+   * or null. Set ONLY when `lookPostId` resolved to a PUBLISHED + APPROVED look
+   * owned by this pro — the same trust boundary that validates discovery
+   * provenance. A `mediaId`-only booking carries null (not a LookPost).
+   */
+  sourceLookPostId: string | null
 }>
 
 export async function resolveDiscoveryFinalize(args: {
@@ -71,11 +78,13 @@ export async function resolveDiscoveryFinalize(args: {
     provenance: BookingDiscoveryProvenance,
     feeEligible: boolean,
     depositSettings: DepositSettings,
+    sourceLookPostId: string | null = null,
   ): FinalizeDiscoveryDirective => ({
     provenance,
     feeEligible,
     depositSettings,
     discoveryFeeCents: feeCents,
+    sourceLookPostId,
   })
 
   const disabledSettings: DepositSettings = {
@@ -168,7 +177,7 @@ export async function resolveDiscoveryFinalize(args: {
     proCreated: false,
     aftercare: false,
     arrivedViaProNfc,
-    validLookPost,
+    validLookPost: validLookPost.validProvenance,
     discoveryViewKind,
   })
 
@@ -199,14 +208,26 @@ export async function resolveDiscoveryFinalize(args: {
     arrivedViaProNfc,
   })
 
-  return baseDirective(provenance, feeEligible, depositSettings)
+  return baseDirective(
+    provenance,
+    feeEligible,
+    depositSettings,
+    validLookPost.sourceLookPostId,
+  )
+}
+
+type ValidLookPostResult = {
+  /** True when a valid LookPost OR a valid pro-owned media backs this booking. */
+  validProvenance: boolean
+  /** The validated LookPost id (remix attribution) — null for media-only. */
+  sourceLookPostId: string | null
 }
 
 async function resolveValidLookPost(args: {
   professionalId: string
   lookPostId: string | null
   mediaId: string | null
-}): Promise<boolean> {
+}): Promise<ValidLookPostResult> {
   if (args.lookPostId) {
     const lookPost = await prisma.lookPost.findUnique({
       where: { id: args.lookPostId },
@@ -218,7 +239,7 @@ async function resolveValidLookPost(args: {
       lookPost.status === LookPostStatus.PUBLISHED &&
       lookPost.moderationStatus === ModerationStatus.APPROVED
     ) {
-      return true
+      return { validProvenance: true, sourceLookPostId: args.lookPostId }
     }
   }
 
@@ -227,10 +248,12 @@ async function resolveValidLookPost(args: {
       where: { id: args.mediaId },
       select: { professionalId: true },
     })
-    if (media && media.professionalId === args.professionalId) return true
+    if (media && media.professionalId === args.professionalId) {
+      return { validProvenance: true, sourceLookPostId: null }
+    }
   }
 
-  return false
+  return { validProvenance: false, sourceLookPostId: null }
 }
 
 async function resolveArrivedViaProNfc(args: {

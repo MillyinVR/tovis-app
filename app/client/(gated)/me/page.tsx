@@ -108,6 +108,7 @@ export default async function ClientMePage() {
   const memberSince = formatMemberSince(data.user.createdAt)
 
   const counts = {
+    followers: data.counts.followers,
     boards: data.counts.boards,
     saved: data.counts.saved,
     booked: data.counts.booked,
@@ -192,6 +193,7 @@ export default async function ClientMePage() {
         }}
         activityHref="/client/activity"
         activityUnreadCount={data.activityUnreadCount}
+        creator={data.creator}
         createBoardHref="/client/boards/new"
         workspaces={workspaces}
       />

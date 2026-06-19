@@ -411,6 +411,8 @@ type FinalizeBookingFromHoldArgs = {
     feeEligible: boolean
     depositSettings: DepositSettings
     discoveryFeeCents: number
+    // Validated LookPost this booking started from (remix attribution), or null.
+    sourceLookPostId?: string | null
   } | null
   offering: {
     id: string
@@ -8308,6 +8310,8 @@ async function performLockedFinalizeBookingFromHold(args: {
         status: args.initialStatus,
         source: args.source,
         discoveryProvenance,
+        // Remix attribution: the validated look this booking was started from.
+        sourceLookPostId: args.discovery?.sourceLookPostId ?? null,
         depositStatus: hasUpfrontCharge
           ? BookingDepositStatus.PENDING
           : BookingDepositStatus.NONE,

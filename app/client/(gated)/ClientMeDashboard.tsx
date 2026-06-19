@@ -6,6 +6,7 @@ import { useMemo, useState } from 'react'
 import { Bell } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import type { ClientLookRemix } from '@/lib/creator/creatorProfileStats'
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import LogoutButton from './components/LogoutButton'
 import WorkspaceSwitcher from '@/app/_components/WorkspaceSwitcher'
@@ -14,9 +15,17 @@ import type { WorkspaceOption } from '@/lib/auth/workspaces'
 type MeTabKey = 'boards' | 'following' | 'history'
 
 type Counts = {
+  followers: number
   boards: number
   saved: number
   booked: number
+}
+
+type CreatorInfo = {
+  isCreator: boolean
+  savesOnYourLooks: number
+  bookedFromYou: number
+  remixes: ClientLookRemix[]
 }
 
 type UpcomingNotificationBooking = {
@@ -81,6 +90,7 @@ type ClientMeDashboardProps = {
   publicProfile?: PublicProfileInfo
   activityHref?: string
   activityUnreadCount?: number
+  creator?: CreatorInfo
   createBoardHref?: string | null
   workspaces?: WorkspaceOption[]
 }
@@ -429,6 +439,112 @@ function HistoryCard(props: { item: HistoryItem }) {
   )
 }
 
+function CreatorStat(props: { label: string; value: number; withBorder?: boolean }) {
+  return (
+    <div
+      className={cn(
+        'flex-1',
+        props.withBorder ? 'border-l border-textPrimary/10 pl-3' : '',
+      )}
+    >
+      <div className="text-[16px] font-black leading-none text-textPrimary">
+        {props.value.toLocaleString()}
+      </div>
+      <div className="mt-1.5 text-[9px] font-bold uppercase tracking-[0.1em] text-textSecondary">
+        {props.label}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Real-data creator metrics. The gamified influence tier / level / progress bar
+ * from the design is intentionally omitted — it needs product-defined thresholds
+ * (deferred). This card shows only numbers derived live from Prisma.
+ */
+function CreatorStatusCard(props: { creator: CreatorInfo }) {
+  const { creator } = props
+  return (
+    <div className="relative overflow-hidden rounded-[20px] border border-textPrimary/10 bg-bgSecondary p-[18px]">
+      <div className="mb-3.5 flex items-center gap-2">
+        <span aria-hidden="true" className="text-[13px] text-accentPrimary">
+          ✦
+        </span>
+        <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-textSecondary">
+          Your influence
+        </span>
+      </div>
+      <div className="flex gap-3 border-t border-textPrimary/10 pt-3.5">
+        <CreatorStat label="Saves on your looks" value={creator.savesOnYourLooks} />
+        <CreatorStat label="Booked from you" value={creator.bookedFromYou} withBorder />
+      </div>
+    </div>
+  )
+}
+
+function formatRemixTime(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ''
+  const days = Math.floor((Date.now() - then) / 86_400_000)
+  if (days < 1) return 'today'
+  if (days < 2) return 'yesterday'
+  if (days < 7) return `${days}d ago`
+  if (days < 35) return `${Math.floor(days / 7)}w ago`
+  return new Date(then).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+/** "Your looks, remixed" — appointments others booked from this client's looks. */
+function RemixesCard(props: { remixes: ClientLookRemix[] }) {
+  const { remixes } = props
+  return (
+    <div className="relative overflow-hidden rounded-[20px] border border-textPrimary/10 bg-bgSecondary p-[18px]">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span aria-hidden="true" className="text-[13px] text-accentPrimary">
+          ⟲
+        </span>
+        <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-textSecondary">
+          Your looks, remixed
+        </span>
+      </div>
+      <p className="mb-1 text-[12.5px] leading-relaxed text-textSecondary">
+        Appointments others booked, inspired by a look in your history.
+      </p>
+      <div className="flex flex-col">
+        {remixes.map((remix, index) => (
+          <div
+            key={remix.id}
+            className={cn(
+              'flex items-center gap-3 py-3',
+              index !== remixes.length - 1 ? 'border-b border-textPrimary/10' : '',
+            )}
+          >
+            <div className="min-w-0 flex-1">
+              <div className="text-[13.5px] leading-snug text-textPrimary">
+                <span className="font-black">{remix.who}</span> booked your{' '}
+                <span className="font-bold text-accentPrimary">
+                  {remix.lookName}
+                </span>
+              </div>
+              <div className="mt-0.5 text-[11.5px] text-textSecondary">
+                with {remix.proName} · {formatRemixTime(remix.bookedAt)}
+              </div>
+            </div>
+            <span
+              aria-hidden="true"
+              className="flex-none text-[10px] font-black uppercase tracking-[0.08em] text-accentPrimary"
+            >
+              +1 ✦
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function MyLookCard(props: { look: MyLook }) {
   const [isPublic, setIsPublic] = useState(props.look.isPublic)
   const [busy, setBusy] = useState(false)
@@ -537,6 +653,7 @@ export default function ClientMeDashboard({
   publicProfile,
   activityHref,
   activityUnreadCount = 0,
+  creator,
   createBoardHref = null,
   workspaces = [],
 }: ClientMeDashboardProps) {
@@ -597,7 +714,11 @@ export default function ClientMeDashboard({
                 </div>
               ) : null}
 
-              <div className="mt-5 flex items-end gap-7">
+              <div className="mt-5 flex flex-wrap items-end gap-x-7 gap-y-3">
+                {/* FOLLOWERS only matters once the client is publicly followable. */}
+                {publicProfile?.isPublic ? (
+                  <Stat label="FOLLOWERS" value={counts.followers} />
+                ) : null}
                 <Stat label="BOARDS" value={counts.boards} />
                 <Stat label="SAVED" value={counts.saved} />
                 <Stat label="BOOKED" value={counts.booked} />
@@ -626,6 +747,12 @@ export default function ClientMeDashboard({
             </div>
           </div>
         </section>
+
+        {creator?.isCreator ? (
+          <section className="mt-6 max-w-[640px]">
+            <CreatorStatusCard creator={creator} />
+          </section>
+        ) : null}
 
         {upcomingNotificationBooking ? (
           <section className="mt-6 max-w-[640px]">
@@ -699,6 +826,11 @@ export default function ClientMeDashboard({
 
         {tab === 'history' ? (
           <section className="mt-5">
+            {creator && creator.remixes.length > 0 ? (
+              <div className="mb-5">
+                <RemixesCard remixes={creator.remixes} />
+              </div>
+            ) : null}
             {history.length > 0 ? (
               <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
                 {history.map((item) => (
