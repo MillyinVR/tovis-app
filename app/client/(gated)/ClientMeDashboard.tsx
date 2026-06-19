@@ -3,6 +3,7 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import { Bell } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
@@ -78,6 +79,8 @@ type ClientMeDashboardProps = {
   history: HistoryItem[]
   myLooks?: MyLook[]
   publicProfile?: PublicProfileInfo
+  activityHref?: string
+  activityUnreadCount?: number
   createBoardHref?: string | null
   workspaces?: WorkspaceOption[]
 }
@@ -532,6 +535,8 @@ export default function ClientMeDashboard({
   history,
   myLooks = [],
   publicProfile,
+  activityHref,
+  activityUnreadCount = 0,
   createBoardHref = null,
   workspaces = [],
 }: ClientMeDashboardProps) {
@@ -552,6 +557,27 @@ export default function ClientMeDashboard({
             </div>
 
             <div className="flex items-center gap-2">
+              {activityHref ? (
+                <Link
+                  href={activityHref}
+                  aria-label={
+                    activityUnreadCount > 0
+                      ? `Activity, ${activityUnreadCount} unread`
+                      : 'Activity'
+                  }
+                  className="relative grid h-9 w-9 place-items-center rounded-full border border-textPrimary/10 bg-bgSecondary text-textPrimary transition hover:border-textPrimary/25"
+                >
+                  <Bell className="h-[18px] w-[18px]" strokeWidth={2.2} />
+                  {activityUnreadCount > 0 ? (
+                    <span
+                      className="absolute -right-0.5 -top-0.5 grid min-h-[16px] min-w-[16px] place-items-center rounded-full bg-accentPrimary px-1 text-[9px] font-black leading-none text-onAccent"
+                      aria-hidden="true"
+                    >
+                      {activityUnreadCount > 9 ? '9+' : activityUnreadCount}
+                    </span>
+                  ) : null}
+                </Link>
+              ) : null}
               <WorkspaceSwitcher options={workspaces} />
               <LogoutButton />
             </div>

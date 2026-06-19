@@ -289,6 +289,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   payment_collected: 'View payment',
   payment_action_required: 'Resolve payment',
   look_follower_new: 'View your profile',
+  client_follow: 'View activity',
   referral_tap_received: 'View referral',
   referral_confirmed: 'View referral',
   referral_converted: 'View referral',
@@ -351,6 +352,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   look_follower_new: buildStandardTemplateRenderer(
     templateCtaLabels.look_follower_new,
+  ),
+  client_follow: buildStandardTemplateRenderer(
+    templateCtaLabels.client_follow,
   ),
   referral_tap_received: buildStandardTemplateRenderer(
     templateCtaLabels.referral_tap_received,

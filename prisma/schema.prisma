@@ -508,6 +508,8 @@ enum NotificationEventKey {
   PAYMENT_COLLECTED
   PAYMENT_ACTION_REQUIRED
   LOOK_FOLLOWER_NEW
+  // Client→client follow ("started following you") — powers the activity feed.
+  CLIENT_FOLLOW
   REFERRAL_TAP_RECEIVED
   REFERRAL_CONFIRMED
   REFERRAL_CONVERTED

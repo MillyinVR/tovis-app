@@ -19,6 +19,7 @@ import {
   buildMyFollowingListResponse,
   listFollowingPage,
 } from '@/lib/follows'
+import { countUnreadClientActivity } from '@/lib/notifications/activityFeed'
 import {
   buildClientBookingDTO,
   type ClientBookingDTO,
@@ -196,6 +197,8 @@ export type ClientMePageData = {
   upcomingNotificationBooking: ClientBookingDTO | null
   history: ClientMeHistoryItem[]
   myLooks: ClientMeLook[]
+  /** Unread count for the engagement activity feed (powers the header badge). */
+  activityUnreadCount: number
 }
 
 /**
@@ -380,6 +383,7 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
     followingCount,
     bookedCount,
     uniqueSavedRows,
+    activityUnreadCount,
   ] = await Promise.all([
     prisma.clientProfile.findUnique({
       where: { id: clientId },
@@ -458,6 +462,8 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
         lookPostId: true,
       },
     }),
+
+    countUnreadClientActivity(prisma, clientId),
   ])
 
   if (!profile) {
@@ -542,5 +548,6 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
     upcomingNotificationBooking,
     history: [...historyUpcoming, ...historyCompleted].sort(compareHistoryItems),
     myLooks,
+    activityUnreadCount,
   }
 }
