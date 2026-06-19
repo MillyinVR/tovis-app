@@ -2,9 +2,13 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { Role } from '@prisma/client'
 
 import { getBrandConfig } from '@/lib/brand'
+import { getCurrentUser } from '@/lib/currentUser'
+import { buildLoginHref } from '@/lib/profiles/publicProfileFormatting'
 import { loadPublicClientProfile } from './_data/loadPublicClientProfile'
+import ProfileStats, { type FollowMode } from './_components/ProfileStats'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,25 +46,31 @@ function Avatar({ name, url }: { name: string; url: string | null }) {
   )
 }
 
-function Stat({ value, label }: { value: number; label: string }) {
-  return (
-    <div className="flex items-baseline gap-1.5">
-      <span className="text-[15px] font-black text-textPrimary">{value}</span>
-      <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-textSecondary">
-        {label}
-      </span>
-    </div>
-  )
-}
-
 export default async function PublicClientProfilePage({
   params,
 }: {
   params: Promise<{ handle: string }>
 }) {
   const { handle } = await params
-  const data = await loadPublicClientProfile(handle)
+
+  const viewer = await getCurrentUser()
+  const viewerClientId =
+    viewer && viewer.role === Role.CLIENT
+      ? (viewer.clientProfile?.id ?? null)
+      : null
+
+  const data = await loadPublicClientProfile(handle, { viewerClientId })
   if (!data) notFound()
+
+  // Only signed-in clients can follow. The owner gets no control; a signed-in
+  // non-client (pro/admin) sees nothing; a guest gets a CTA that routes to login.
+  const followMode: FollowMode = data.viewer.isOwn
+    ? 'own'
+    : viewerClientId
+      ? 'client'
+      : viewer
+        ? 'hidden'
+        : 'guest'
 
   return (
     <main className="min-h-dvh bg-bgPrimary text-textPrimary">
@@ -71,11 +81,13 @@ export default async function PublicClientProfilePage({
             <h1 className="truncate font-display text-[28px] font-semibold italic leading-none">
               {data.displayName}
             </h1>
-            <div className="mt-3 flex items-center gap-5">
-              <Stat value={data.counts.followers} label="Followers" />
-              <Stat value={data.counts.following} label="Following" />
-              <Stat value={data.counts.looks} label="Looks" />
-            </div>
+            <ProfileStats
+              handle={data.handle}
+              counts={data.counts}
+              mode={followMode}
+              initialFollowing={data.viewer.following}
+              loginHref={buildLoginHref(`/u/${data.handle}`)}
+            />
           </div>
         </section>
 

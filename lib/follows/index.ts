@@ -1,5 +1,10 @@
 // lib/follows/index.ts
 import { Prisma, PrismaClient } from '@prisma/client'
+
+// Client→client follow graph (the engagement-loop FOLLOWERS count). Kept in a
+// sibling module; re-exported here so callers import everything follow-related
+// from `@/lib/follows`.
+export * from './clientFollows'
 import { mapLooksProProfilePreviewToDto } from '@/lib/looks/profilePreview'
 import {
   looksProProfilePreviewSelect,
