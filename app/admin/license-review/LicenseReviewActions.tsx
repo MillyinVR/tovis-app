@@ -24,8 +24,8 @@ function btn(kind: 'approve' | 'info' | 'reject', disabled: boolean) {
     kind === 'approve'
       ? 'border border-surfaceGlass/25 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
       : kind === 'info'
-        ? 'border border-amber-700/70 text-amber-600 bg-bgSecondary hover:bg-surfaceGlass/10'
-        : 'border border-red-700/70 text-red-500 bg-bgSecondary hover:bg-surfaceGlass/10'
+        ? 'border border-toneWarn/70 text-toneWarn bg-bgSecondary hover:bg-surfaceGlass/10'
+        : 'border border-toneDanger/70 text-toneDanger bg-bgSecondary hover:bg-surfaceGlass/10'
   return [base, tone, disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'].join(' ')
 }
 
@@ -121,7 +121,7 @@ export default function LicenseReviewActions({
           Reject
         </button>
       </div>
-      {err ? <div className="text-[12px] text-red-500">{err}</div> : null}
+      {err ? <div className="text-[12px] text-toneDanger">{err}</div> : null}
     </div>
   )
 }

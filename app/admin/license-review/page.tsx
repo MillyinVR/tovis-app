@@ -191,12 +191,12 @@ export default async function AdminLicenseReviewPage() {
                         {pro.licenseExpiry ? (
                           <span>expires {pro.licenseExpiry.toLocaleDateString()}</span>
                         ) : (
-                          <span className="text-amber-600">no expiry on file</span>
+                          <span className="text-toneWarn">no expiry on file</span>
                         )}
                         {latestDoc ? (
                           <span> · doc uploaded {timeAgo(latestDoc.createdAt)}</span>
                         ) : (
-                          <span className="text-amber-600"> · awaiting upload</span>
+                          <span className="text-toneWarn"> · awaiting upload</span>
                         )}
                       </div>
 

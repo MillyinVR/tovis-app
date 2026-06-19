@@ -82,8 +82,8 @@ function StatusPill({ enabled }: { enabled: boolean }) {
       className={[
         'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black',
         enabled
-          ? 'border-red-400/30 bg-red-500/10 text-red-200'
-          : 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200',
+          ? 'border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
+          : 'border-toneSuccess/30 bg-toneSuccess/10 text-toneSuccess',
       ].join(' ')}
     >
       {enabled ? 'Enabled' : 'Disabled'}
@@ -113,7 +113,7 @@ export default async function AdminRuntimeFlagsPage() {
       </div>
 
       {!flags.backendAvailable ? (
-        <div className="mb-4 rounded-card border border-amber-400/20 bg-amber-500/10 p-4 text-[13px] text-amber-100">
+        <div className="mb-4 rounded-card border border-toneWarn/20 bg-toneWarn/10 p-4 text-[13px] text-toneWarn">
           Redis is unavailable, so runtime flags are currently read as off and
           cannot be changed from this page.
         </div>
@@ -162,8 +162,8 @@ export default async function AdminRuntimeFlagsPage() {
                       'inline-flex min-w-[140px] items-center justify-center rounded-full border px-4 py-2 text-[12px] font-black transition active:scale-[0.98]',
                       flags.backendAvailable
                         ? enabled
-                          ? 'border-red-400/25 bg-red-500/10 text-red-100 hover:border-red-400/35 hover:bg-red-500/15'
-                          : 'border-emerald-400/25 bg-emerald-500/10 text-emerald-100 hover:border-emerald-400/35 hover:bg-emerald-500/15'
+                          ? 'border-toneDanger/25 bg-toneDanger/10 text-toneDanger hover:border-toneDanger/35 hover:bg-toneDanger/15'
+                          : 'border-toneSuccess/25 bg-toneSuccess/10 text-toneSuccess hover:border-toneSuccess/35 hover:bg-toneSuccess/15'
                         : 'cursor-not-allowed border-white/10 bg-bgPrimary/40 text-textSecondary opacity-60',
                     ].join(' ')}
                   >
