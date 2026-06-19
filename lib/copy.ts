@@ -53,6 +53,19 @@ export const COPY = {
       rebookCtaNow: 'Rebook now',
       rebookLinkNotAvailable: 'Rebook link not available yet.',
       viewAllAftercare: 'View all aftercare',
+      nextAppointmentHeader: 'Next appointment',
+      nextAppointmentProposedSubtitle: 'Your pro suggested this time for your next visit.',
+      nextAppointmentConfirm: 'Confirm this time',
+      nextAppointmentConfirming: 'Confirming…',
+      nextAppointmentCancel: 'Cancel',
+      nextAppointmentCancelling: 'Cancelling…',
+      nextAppointmentScheduleDifferent: 'Schedule a different time',
+      nextAppointmentConfirmedLabel: 'Next appointment confirmed',
+      nextAppointmentConfirmedCta: 'View appointment',
+      nextAppointmentDeclinedLabel: 'You declined this time',
+      nextAppointmentUnavailable:
+        'That time is no longer available. Try scheduling a different time.',
+      nextAppointmentError: 'Something went wrong. Please try again.',
     },
 
     status: {

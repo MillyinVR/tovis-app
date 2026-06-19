@@ -16,6 +16,8 @@ import ProProfileLink from '@/app/client/(gated)/components/ProProfileLink'
 
 import { getBrandConfig } from '@/lib/brand'
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'
+import AftercareNextAppointmentCard from './AftercareNextAppointmentCard'
+import AftercareRebookButton from './AftercareRebookButton'
 import ClientBookingActionsCard from './ClientBookingActionsCard'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
 import ReviewSection from './ReviewSection'
@@ -894,6 +896,7 @@ export default async function ClientBookingPage(props: {
     existingReview,
     media,
     paymentSettings,
+    rebookedNextBooking,
     checkoutProductItems,
   } = await loadClientBookingPage(bookingId)
 
@@ -1625,19 +1628,50 @@ export default async function ClientBookingPage(props: {
             {aftercare && (rebookInfo.label || showRebookCTA) ? (
               <section id="rebook" className="brand-client-aftercare-rebook">
                 <ClientAftercareSectionTitle
-                  title={COPY.bookings.aftercare.rebookHeader}
+                  title={
+                    rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
+                      ? COPY.bookings.aftercare.nextAppointmentHeader
+                      : COPY.bookings.aftercare.rebookHeader
+                  }
                   subtitle={
-                    rebookInfo.label
-                      ? `${rebookInfo.label} · ${appointmentTimeZone}`
-                      : COPY.bookings.aftercare.noRebookRecommendation
+                    rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
+                      ? COPY.bookings.aftercare.nextAppointmentProposedSubtitle
+                      : rebookInfo.label
+                        ? `${rebookInfo.label} · ${appointmentTimeZone}`
+                        : COPY.bookings.aftercare.noRebookRecommendation
                   }
                 />
 
-                {showRebookCTA ? (
-                  <div className="brand-pro-session-card-body mt-3">
-                    Use the secure aftercare link sent to you to rebook from this aftercare
-                    plan.
-                  </div>
+                {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT' &&
+                aftercare.rebookedFor ? (
+                  <AftercareNextAppointmentCard
+                    bookingId={booking.id}
+                    scheduledForIso={
+                      toDate(aftercare.rebookedFor)?.toISOString() ?? ''
+                    }
+                    timeZone={appointmentTimeZone}
+                    professionalId={drawerProfessionalId}
+                    serviceId={drawerServiceId}
+                    confirmedBookingId={
+                      rebookedNextBooking &&
+                      upper(rebookedNextBooking.status) !== 'CANCELLED'
+                        ? rebookedNextBooking.id
+                        : null
+                    }
+                    declined={Boolean(aftercare.rebookDeclinedAt)}
+                  />
+                ) : showRebookCTA ? (
+                  <AftercareRebookButton
+                    professionalId={drawerProfessionalId}
+                    serviceId={drawerServiceId}
+                    anchorStartIso={
+                      rebookInfo.mode === 'RECOMMENDED_WINDOW'
+                        ? (toDate(aftercare.rebookWindowStart)?.toISOString() ??
+                          null)
+                        : null
+                    }
+                    timeZone={appointmentTimeZone}
+                  />
                 ) : null}
               </section>
             ) : null}

@@ -149,6 +149,7 @@ const aftercareSummarySelect = {
   rebookedFor: true,
   rebookWindowStart: true,
   rebookWindowEnd: true,
+  rebookDeclinedAt: true,
   draftSavedAt: true,
   sentToClientAt: true,
   lastEditedAt: true,
@@ -342,7 +343,7 @@ export async function loadClientBookingPage(bookingId: string) {
     redirect('/client/bookings')
   }
 
-  const [aftercare, rawReview, rawMedia, paymentSettings] =
+  const [aftercare, rawReview, rawMedia, paymentSettings, rebookedNextBooking] =
     await Promise.all([
       prisma.aftercareSummary.findFirst({
         where: {
@@ -373,6 +374,18 @@ export async function loadClientBookingPage(bookingId: string) {
       loadProfessionalPaymentSettings({
         professionalId: raw.professional.id,
       }),
+
+      // A confirmed/proposed-next-appointment rebook created from this booking's
+      // aftercare (source = AFTERCARE, rebookOfBookingId = this booking). Lets the
+      // aftercare summary show a "confirmed" state instead of re-offering Confirm.
+      prisma.booking.findFirst({
+        where: {
+          rebookOfBookingId: raw.id,
+          clientId: user.clientProfile.id,
+        },
+        orderBy: { scheduledFor: 'desc' },
+        select: { id: true, status: true, scheduledFor: true },
+      }),
     ])
 
   const media = await renderBookingMedia(rawMedia)
@@ -392,6 +405,7 @@ export async function loadClientBookingPage(bookingId: string) {
     existingReview,
     media,
     paymentSettings,
+    rebookedNextBooking,
     checkoutProductItems: raw.checkoutProductItems,
   }
 }
