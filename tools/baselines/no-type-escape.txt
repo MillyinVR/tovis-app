@@ -20,6 +20,7 @@ lib/jobs/looksSocial/enqueue.test.ts|as unknown as|return value as unknown as Pr
 lib/jobs/looksSocial/indexLookPostDocument.test.ts|as unknown as|} as unknown as IndexLookPostDocumentDb
 lib/looks/counters.test.ts|as unknown as|return value as unknown as Prisma.TransactionClient
 lib/looks/publication/service.test.ts|as unknown as|return mocks.prisma as unknown as PublicationDb
+lib/notifications/activityFeed.test.ts|as unknown as|return db as unknown as PrismaClient
 lib/notifications/appointmentReminders.test.ts|as unknown as|const tx = txMock as unknown as Prisma.TransactionClient
 lib/notifications/delivery/processDueDeliveries.test.ts|as unknown as|} as unknown as Response
 lib/notifications/delivery/sendEmail.test.ts|as unknown as|} as unknown as EmailProviderSendRequest

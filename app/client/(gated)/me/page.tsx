@@ -190,6 +190,8 @@ export default async function ClientMePage() {
           handle: data.profile.handle ?? null,
           isPublic: data.profile.isPublicProfile,
         }}
+        activityHref="/client/activity"
+        activityUnreadCount={data.activityUnreadCount}
         createBoardHref="/client/boards/new"
         workspaces={workspaces}
       />
