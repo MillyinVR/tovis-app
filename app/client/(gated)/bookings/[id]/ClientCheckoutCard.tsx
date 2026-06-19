@@ -9,6 +9,8 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
+import { buildPaymentDeepLink } from '@/lib/payments/paymentDeepLink'
+import { useBrand } from '@/lib/brand/BrandProvider'
 
 type CheckoutStatus =
   | 'NOT_READY'
@@ -303,8 +305,42 @@ function SummaryRow(props: { label: string; value: string }) {
   )
 }
 
+// Tap-to-copy pill for methods (Zelle / Apple Cash) that can't be deep-linked
+// with a pre-filled amount — the client copies the handle + amount into their
+// bank app or Messages.
+function CopyChip(props: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false)
+
+  function handleCopy() {
+    void navigator.clipboard
+      ?.writeText(props.value)
+      .then(() => {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1500)
+      })
+      .catch(() => {
+        // Clipboard can be unavailable (insecure context / denied permission);
+        // the value is still visible in the label, so fail silently.
+      })
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-bgPrimary px-3 py-1.5 text-[12px] font-black text-textPrimary"
+    >
+      <span>{props.label}</span>
+      <span className="text-[11px] font-black text-textSecondary">
+        {copied ? 'Copied' : 'Copy'}
+      </span>
+    </button>
+  )
+}
+
 export default function ClientCheckoutCard(props: Props) {
   const router = useRouter()
+  const { brand } = useBrand()
 
   const [selectedMethodKey, setSelectedMethodKey] = useState<string>(() =>
     normalizePaymentMethodKey(props.selectedPaymentMethod),
@@ -383,6 +419,24 @@ export default function ClientCheckoutCard(props: Props) {
   const livePreviewTotal = useMemo(() => {
     return serviceSubtotal + productSubtotal + tipAmount + taxAmount - discountAmount
   }, [serviceSubtotal, productSubtotal, tipAmount, taxAmount, discountAmount])
+
+  // One-tap "pay the pro" action for the selected off-platform method. Uses the
+  // full amount due (snapshot once the checkout is finalized, live preview while
+  // the client is still adjusting the tip). Null for cash / Stripe / methods
+  // without a stored handle.
+  const amountDue = totalSnapshot ?? livePreviewTotal
+  const payAction = useMemo(
+    () =>
+      selectedMethod
+        ? buildPaymentDeepLink({
+            methodKey: selectedMethod.key,
+            handle: selectedMethod.handle,
+            amountDue,
+            note: brand.displayName,
+          })
+        : null,
+    [selectedMethod, amountDue, brand.displayName],
+  )
 
   const presetPercents = useMemo(() => {
     if (!tipsEnabled || serviceSubtotal <= 0) return []
@@ -763,6 +817,38 @@ export default function ClientCheckoutCard(props: Props) {
         {selectedMethod ? (
           <div className="mt-3 text-[12px] font-semibold text-textSecondary">
             Paying with {selectedMethod.label}.
+          </div>
+        ) : null}
+
+        {payAction ? (
+          <div className="mt-3">
+            {payAction.kind === 'link' ? (
+              <>
+                <a
+                  href={payAction.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex w-full items-center justify-center rounded-full border border-accentPrimary bg-accentPrimary/10 px-4 py-2 text-[12px] font-black text-accentPrimary sm:w-auto"
+                >
+                  {payAction.label}
+                </a>
+                <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                  Opens {selectedMethod?.label} with the amount filled in. After
+                  you send it, tap “{ctaLabel}” to close out this booking.
+                </div>
+              </>
+            ) : (
+              <div className="rounded-card border border-white/10 bg-bgSecondary p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <CopyChip label={`Send to ${payAction.handle}`} value={payAction.handle} />
+                  <CopyChip label={`Amount $${payAction.amount}`} value={payAction.amount} />
+                </div>
+                <div className="mt-2 text-[12px] font-semibold text-textSecondary">
+                  {payAction.instruction} Then tap “{ctaLabel}” to close out this
+                  booking.
+                </div>
+              </div>
+            )}
           </div>
         ) : null}
 

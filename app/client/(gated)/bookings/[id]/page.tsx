@@ -18,6 +18,7 @@ import { getBrandConfig } from '@/lib/brand'
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'
 import AftercareNextAppointmentCard from './AftercareNextAppointmentCard'
 import AftercareRebookButton from './AftercareRebookButton'
+import AftercareStepper from './AftercareStepper'
 import ClientBookingActionsCard from './ClientBookingActionsCard'
 import ConsultationDecisionCard from './ConsultationDecisionCard'
 import ReviewSection from './ReviewSection'
@@ -1075,6 +1076,14 @@ export default async function ClientBookingPage(props: {
   const consultApprovalMode = step === 'consult' && showConsultationApproval
   const shouldShowReview = reviewCloseoutEligible && step === 'aftercare'
 
+  // The aftercare "What's next" step only appears when it has something to show:
+  // the review-locked notice, a rebook/next-appointment action, or the review
+  // form itself. Otherwise the stepper collapses to two steps.
+  const hasAftercareNextStep =
+    !reviewCloseoutEligible ||
+    Boolean(aftercare && (rebookInfo.label || showRebookCTA)) ||
+    shouldShowReview
+
   const safeExistingReview = toSafeExistingReview(existingReview)
 
   const selectedCheckoutProducts = checkoutProductItems.map(
@@ -1431,260 +1440,290 @@ export default async function ClientBookingPage(props: {
                 </div>
               </ClientAftercareCard>
 
-              <ClientAftercareCard>
-                <ClientAftercareSectionTitle title="Appointment summary" />
+              <AftercareStepper
+                steps={[
+                  {
+                    key: 'visit',
+                    label: 'Your visit',
+                    content: (
+                      <>
+                        <ClientAftercareCard>
+                          <ClientAftercareSectionTitle title="Appointment summary" />
 
-                <div className="grid gap-1">
-                  <SummaryRow label="Provider" value={professionalLabel} />
-                  <SummaryRow label="Appointment" value={whenLabel} />
-                  <SummaryRow label="Time zone" value={appointmentTimeZone} />
-                  <SummaryRow
-                    label="Status"
-                    value={String(
-                      booking.status || COPY.bookings.status.pillUnknown,
-                    ).toUpperCase()}
-                  />
-                  {locationLine ? (
-                    <SummaryRow label="Location" value={locationLine} />
-                  ) : null}
-                </div>
-              </ClientAftercareCard>
+                          <div className="grid gap-1">
+                            <SummaryRow label="Provider" value={professionalLabel} />
+                            <SummaryRow label="Appointment" value={whenLabel} />
+                            <SummaryRow label="Time zone" value={appointmentTimeZone} />
+                            <SummaryRow
+                              label="Status"
+                              value={String(
+                                booking.status || COPY.bookings.status.pillUnknown,
+                              ).toUpperCase()}
+                            />
+                            {locationLine ? (
+                              <SummaryRow label="Location" value={locationLine} />
+                            ) : null}
+                          </div>
+                        </ClientAftercareCard>
 
-              <ClientAftercareCard>
-                <ClientAftercareSectionTitle
-                  title="Before & after"
-                  subtitle={
-                    beforeMedia.length || afterMedia.length
-                      ? 'Compare your appointment photos.'
-                      : 'No photos attached yet.'
-                  }
-                  right={
-                    beforeMedia.length || afterMedia.length ? (
-                      <ClientAftercarePill tone="success">
-                        {beforeMedia.length + afterMedia.length} photo
-                        {beforeMedia.length + afterMedia.length === 1 ? '' : 's'}
-                      </ClientAftercarePill>
-                    ) : null
-                  }
-                />
+                        <ClientAftercareCard>
+                          <ClientAftercareSectionTitle
+                            title="Before & after"
+                            subtitle={
+                              beforeMedia.length || afterMedia.length
+                                ? 'Compare your appointment photos.'
+                                : 'No photos attached yet.'
+                            }
+                            right={
+                              beforeMedia.length || afterMedia.length ? (
+                                <ClientAftercarePill tone="success">
+                                  {beforeMedia.length + afterMedia.length} photo
+                                  {beforeMedia.length + afterMedia.length === 1 ? '' : 's'}
+                                </ClientAftercarePill>
+                              ) : null
+                            }
+                          />
 
-                <ClientAftercareBeforeAfter
-                  beforeMedia={beforeMedia}
-                  afterMedia={afterMedia}
-                />
-              </ClientAftercareCard>
+                          <ClientAftercareBeforeAfter
+                            beforeMedia={beforeMedia}
+                            afterMedia={afterMedia}
+                          />
+                        </ClientAftercareCard>
 
-              <ClientAftercareCard>
-                <ClientAftercareSectionTitle title="Final service breakdown" />
+                        <ClientAftercareCard>
+                          <ClientAftercareSectionTitle title="Final service breakdown" />
 
-                <ServiceBreakdownCard
-                  items={booking.items}
-                  addOnCount={booking.display?.addOnCount ?? 0}
-                />
-              </ClientAftercareCard>
+                          <ServiceBreakdownCard
+                            items={booking.items}
+                            addOnCount={booking.display?.addOnCount ?? 0}
+                          />
+                        </ClientAftercareCard>
 
-              {booking.productSales.length > 0 ? (
-                <ClientAftercareCard>
-                  <ClientAftercareSectionTitle title="Purchased products" />
+                        {booking.productSales.length > 0 ? (
+                          <ClientAftercareCard>
+                            <ClientAftercareSectionTitle title="Purchased products" />
 
-                  <PurchasedProductsCard productSales={booking.productSales} />
-                </ClientAftercareCard>
-              ) : null}
+                            <PurchasedProductsCard productSales={booking.productSales} />
+                          </ClientAftercareCard>
+                        ) : null}
 
-              <ClientAftercareCard>
-                <ClientAftercareSectionTitle title="Care notes" />
+                        <ClientAftercareCard>
+                          <ClientAftercareSectionTitle title="Care notes" />
 
-                {aftercare?.notes ? (
-                  <div className="brand-pro-session-card-body whitespace-pre-wrap">
-                    {aftercare.notes}
-                  </div>
-                ) : (
-                  <div className="brand-pro-session-card-body">
-                    {statusUpper === 'COMPLETED'
-                      ? COPY.bookings.aftercare.noAftercareNotesCompleted
-                      : COPY.bookings.aftercare.noAftercareNotesPending}
-                  </div>
-                )}
-              </ClientAftercareCard>
+                          {aftercare?.notes ? (
+                            <div className="brand-pro-session-card-body whitespace-pre-wrap">
+                              {aftercare.notes}
+                            </div>
+                          ) : (
+                            <div className="brand-pro-session-card-body">
+                              {statusUpper === 'COMPLETED'
+                                ? COPY.bookings.aftercare.noAftercareNotesCompleted
+                                : COPY.bookings.aftercare.noAftercareNotesPending}
+                            </div>
+                          )}
+                        </ClientAftercareCard>
+                      </>
+                    ),
+                  },
+                  {
+                    key: 'checkout',
+                    label: 'Checkout',
+                    content: (
+                      <>
+                        <ClientAftercareCard>
+                          <ClientAftercareSectionTitle title="Recommended products" />
 
-              <ClientAftercareCard>
-                <ClientAftercareSectionTitle title="Recommended products" />
+                          <AftercareProductRecommendationsCard
+                            bookingId={booking.id}
+                            checkoutStatus={booking.checkout.checkoutStatus}
+                            paymentCollectedAt={booking.checkout.paymentCollectedAt}
+                            recommendedProducts={aftercare?.recommendedProducts ?? []}
+                            purchasedProducts={booking.productSales}
+                            selectedCheckoutProducts={selectedCheckoutProducts}
+                          />
+                        </ClientAftercareCard>
 
-                <AftercareProductRecommendationsCard
-                  bookingId={booking.id}
-                  checkoutStatus={booking.checkout.checkoutStatus}
-                  paymentCollectedAt={booking.checkout.paymentCollectedAt}
-                  recommendedProducts={aftercare?.recommendedProducts ?? []}
-                  purchasedProducts={booking.productSales}
-                  selectedCheckoutProducts={selectedCheckoutProducts}
-                />
-              </ClientAftercareCard>
+                        <ClientAftercareCard>
+                          <ClientAftercareSectionTitle title="Final cost recap" />
 
-              <ClientAftercareCard>
-                <ClientAftercareSectionTitle title="Final cost recap" />
+                          <div className="grid gap-1">
+                            <SummaryRow
+                              label="Services subtotal"
+                              value={serviceSubtotalLabel || COPY.common.notProvided}
+                            />
+                            {productSubtotalLabel ? (
+                              <SummaryRow label="Products subtotal" value={productSubtotalLabel} />
+                            ) : null}
+                            {discountLabel ? (
+                              <SummaryRow label="Discount" value={discountLabel} />
+                            ) : null}
+                            {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
+                            {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
+                            <SummaryRow label="Final total" value={finalTotalLabel} />
+                          </div>
+                        </ClientAftercareCard>
 
-                <div className="grid gap-1">
-                  <SummaryRow
-                    label="Services subtotal"
-                    value={serviceSubtotalLabel || COPY.common.notProvided}
-                  />
-                  {productSubtotalLabel ? (
-                    <SummaryRow label="Products subtotal" value={productSubtotalLabel} />
-                  ) : null}
-                  {discountLabel ? (
-                    <SummaryRow label="Discount" value={discountLabel} />
-                  ) : null}
-                  {taxLabel ? <SummaryRow label="Tax" value={taxLabel} /> : null}
-                  {tipLabel ? <SummaryRow label="Tip" value={tipLabel} /> : null}
-                  <SummaryRow label="Final total" value={finalTotalLabel} />
-                </div>
-              </ClientAftercareCard>
+                        <ClientAftercareCard>
+                          <ClientAftercareSectionTitle title="Payment & checkout" />
 
-              <ClientAftercareCard>
-                <ClientAftercareSectionTitle title="Payment & checkout" />
+                          <div className="grid gap-1">
+                            <SummaryRow
+                              label="Checkout status"
+                              value={checkoutStatusLabel || COPY.common.notProvided}
+                            />
 
-                <div className="grid gap-1">
-                  <SummaryRow
-                    label="Checkout status"
-                    value={checkoutStatusLabel || COPY.common.notProvided}
-                  />
+                            {selectedPaymentMethodLabel ? (
+                              <SummaryRow label="Payment method" value={selectedPaymentMethodLabel} />
+                            ) : null}
 
-                  {selectedPaymentMethodLabel ? (
-                    <SummaryRow label="Payment method" value={selectedPaymentMethodLabel} />
-                  ) : null}
+                            {collectionTimingLabel ? (
+                              <SummaryRow label="Collection timing" value={collectionTimingLabel} />
+                            ) : null}
 
-                  {collectionTimingLabel ? (
-                    <SummaryRow label="Collection timing" value={collectionTimingLabel} />
-                  ) : null}
+                            {paymentAuthorizedLabel ? (
+                              <SummaryRow label="Authorized" value={paymentAuthorizedLabel} />
+                            ) : null}
 
-                  {paymentAuthorizedLabel ? (
-                    <SummaryRow label="Authorized" value={paymentAuthorizedLabel} />
-                  ) : null}
+                            {paymentCollectedLabel ? (
+                              <SummaryRow label="Collected" value={paymentCollectedLabel} />
+                            ) : null}
+                          </div>
 
-                  {paymentCollectedLabel ? (
-                    <SummaryRow label="Collected" value={paymentCollectedLabel} />
-                  ) : null}
-                </div>
+                          {paymentSettings?.paymentNote ? (
+                            <div className="brand-pro-session-card-body mt-3">
+                              {paymentSettings.paymentNote}
+                            </div>
+                          ) : null}
 
-                {paymentSettings?.paymentNote ? (
-                  <div className="brand-pro-session-card-body mt-3">
-                    {paymentSettings.paymentNote}
-                  </div>
-                ) : null}
+                          {checkoutBanner === 'success' ? (
+                            <div
+                              role="status"
+                              className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
+                            >
+                              Card payment received. We&apos;re finalizing your booking — this
+                              page will reflect the paid status as soon as the
+                              confirmation finishes processing.
+                            </div>
+                          ) : null}
 
-                {checkoutBanner === 'success' ? (
-                  <div
-                    role="status"
-                    className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
-                  >
-                    Card payment received. We&apos;re finalizing your booking — this
-                    page will reflect the paid status as soon as the
-                    confirmation finishes processing.
-                  </div>
-                ) : null}
+                          {checkoutBanner === 'cancelled' ? (
+                            <div
+                              role="status"
+                              className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
+                            >
+                              Card checkout was cancelled. You can try again or pick a
+                              different payment method below.
+                            </div>
+                          ) : null}
 
-                {checkoutBanner === 'cancelled' ? (
-                  <div
-                    role="status"
-                    className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-3 text-[12px] font-semibold text-textPrimary"
-                  >
-                    Card checkout was cancelled. You can try again or pick a
-                    different payment method below.
-                  </div>
-                ) : null}
+                          <div className="mt-4">
+                            <ClientCheckoutCard
+                              bookingId={booking.id}
+                              checkoutStatus={booking.checkout.checkoutStatus}
+                              paymentCollectedAt={booking.checkout.paymentCollectedAt}
+                              selectedPaymentMethod={booking.checkout.selectedPaymentMethod}
+                              serviceSubtotalSnapshot={booking.checkout.serviceSubtotalSnapshot}
+                              productSubtotalSnapshot={booking.checkout.productSubtotalSnapshot}
+                              tipAmount={booking.checkout.tipAmount}
+                              taxAmount={booking.checkout.taxAmount}
+                              discountAmount={booking.checkout.discountAmount}
+                              totalAmount={booking.checkout.totalAmount}
+                              acceptedMethods={acceptedMethods}
+                              tipsEnabled={paymentSettings?.tipsEnabled ?? true}
+                              allowCustomTip={paymentSettings?.allowCustomTip ?? true}
+                              tipSuggestions={paymentSettings?.tipSuggestions ?? true}
+                            />
+                          </div>
+                        </ClientAftercareCard>
+                      </>
+                    ),
+                  },
+                  ...(hasAftercareNextStep
+                    ? [
+                        {
+                          key: 'next',
+                          label: "What's next",
+                          content: (
+                            <>
+                              {!reviewCloseoutEligible ? (
+                                <ClientAftercareCard>
+                                  <ClientAftercareSectionTitle title="Review" />
 
-                <div className="mt-4">
-                  <ClientCheckoutCard
-                    bookingId={booking.id}
-                    checkoutStatus={booking.checkout.checkoutStatus}
-                    paymentCollectedAt={booking.checkout.paymentCollectedAt}
-                    selectedPaymentMethod={booking.checkout.selectedPaymentMethod}
-                    serviceSubtotalSnapshot={booking.checkout.serviceSubtotalSnapshot}
-                    productSubtotalSnapshot={booking.checkout.productSubtotalSnapshot}
-                    tipAmount={booking.checkout.tipAmount}
-                    taxAmount={booking.checkout.taxAmount}
-                    discountAmount={booking.checkout.discountAmount}
-                    totalAmount={booking.checkout.totalAmount}
-                    acceptedMethods={acceptedMethods}
-                    tipsEnabled={paymentSettings?.tipsEnabled ?? true}
-                    allowCustomTip={paymentSettings?.allowCustomTip ?? true}
-                    tipSuggestions={paymentSettings?.tipSuggestions ?? true}
-                  />
-                </div>
-              </ClientAftercareCard>
+                                  <div className="brand-pro-session-card-body">
+                                    Your review will unlock after the booking is fully closed out:
+                                    payment must be collected, checkout must be paid or waived, and
+                                    aftercare must be finalized.
+                                  </div>
+                                </ClientAftercareCard>
+                              ) : null}
 
-              {!reviewCloseoutEligible ? (
-                <ClientAftercareCard>
-                  <ClientAftercareSectionTitle title="Review" />
+                              {aftercare && (rebookInfo.label || showRebookCTA) ? (
+                                <section id="rebook" className="brand-client-aftercare-rebook">
+                                  <ClientAftercareSectionTitle
+                                    title={
+                                      rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
+                                        ? COPY.bookings.aftercare.nextAppointmentHeader
+                                        : COPY.bookings.aftercare.rebookHeader
+                                    }
+                                    subtitle={
+                                      rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
+                                        ? COPY.bookings.aftercare.nextAppointmentProposedSubtitle
+                                        : rebookInfo.label
+                                          ? `${rebookInfo.label} · ${appointmentTimeZone}`
+                                          : COPY.bookings.aftercare.noRebookRecommendation
+                                    }
+                                  />
 
-                  <div className="brand-pro-session-card-body">
-                    Your review will unlock after the booking is fully closed out:
-                    payment must be collected, checkout must be paid or waived, and
-                    aftercare must be finalized.
-                  </div>
-                </ClientAftercareCard>
-              ) : null}
+                                  {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT' &&
+                                  aftercare.rebookedFor ? (
+                                    <AftercareNextAppointmentCard
+                                      bookingId={booking.id}
+                                      scheduledForIso={
+                                        toDate(aftercare.rebookedFor)?.toISOString() ?? ''
+                                      }
+                                      timeZone={appointmentTimeZone}
+                                      professionalId={drawerProfessionalId}
+                                      serviceId={drawerServiceId}
+                                      confirmedBookingId={
+                                        rebookedNextBooking &&
+                                        upper(rebookedNextBooking.status) !== 'CANCELLED'
+                                          ? rebookedNextBooking.id
+                                          : null
+                                      }
+                                      declined={Boolean(aftercare.rebookDeclinedAt)}
+                                    />
+                                  ) : showRebookCTA ? (
+                                    <AftercareRebookButton
+                                      professionalId={drawerProfessionalId}
+                                      serviceId={drawerServiceId}
+                                      anchorStartIso={
+                                        rebookInfo.mode === 'RECOMMENDED_WINDOW'
+                                          ? (toDate(aftercare.rebookWindowStart)?.toISOString() ??
+                                            null)
+                                          : null
+                                      }
+                                      timeZone={appointmentTimeZone}
+                                    />
+                                  ) : null}
+                                </section>
+                              ) : null}
 
-            {aftercare && (rebookInfo.label || showRebookCTA) ? (
-              <section id="rebook" className="brand-client-aftercare-rebook">
-                <ClientAftercareSectionTitle
-                  title={
-                    rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
-                      ? COPY.bookings.aftercare.nextAppointmentHeader
-                      : COPY.bookings.aftercare.rebookHeader
-                  }
-                  subtitle={
-                    rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
-                      ? COPY.bookings.aftercare.nextAppointmentProposedSubtitle
-                      : rebookInfo.label
-                        ? `${rebookInfo.label} · ${appointmentTimeZone}`
-                        : COPY.bookings.aftercare.noRebookRecommendation
-                  }
-                />
-
-                {rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT' &&
-                aftercare.rebookedFor ? (
-                  <AftercareNextAppointmentCard
-                    bookingId={booking.id}
-                    scheduledForIso={
-                      toDate(aftercare.rebookedFor)?.toISOString() ?? ''
-                    }
-                    timeZone={appointmentTimeZone}
-                    professionalId={drawerProfessionalId}
-                    serviceId={drawerServiceId}
-                    confirmedBookingId={
-                      rebookedNextBooking &&
-                      upper(rebookedNextBooking.status) !== 'CANCELLED'
-                        ? rebookedNextBooking.id
-                        : null
-                    }
-                    declined={Boolean(aftercare.rebookDeclinedAt)}
-                  />
-                ) : showRebookCTA ? (
-                  <AftercareRebookButton
-                    professionalId={drawerProfessionalId}
-                    serviceId={drawerServiceId}
-                    anchorStartIso={
-                      rebookInfo.mode === 'RECOMMENDED_WINDOW'
-                        ? (toDate(aftercare.rebookWindowStart)?.toISOString() ??
-                          null)
-                        : null
-                    }
-                    timeZone={appointmentTimeZone}
-                  />
-                ) : null}
-              </section>
-            ) : null}
-            </section>
-          ) : null}
-
-          {shouldShowReview ? (
-            <div id="review" className="mt-6">
-              <ReviewSection
-                bookingId={booking.id}
-                existingReview={safeExistingReview}
+                              {shouldShowReview ? (
+                                <div id="review">
+                                  <ReviewSection
+                                    bookingId={booking.id}
+                                    existingReview={safeExistingReview}
+                                  />
+                                </div>
+                              ) : null}
+                            </>
+                          ),
+                        },
+                      ]
+                    : []),
+                ]}
               />
-            </div>
+            </section>
           ) : null}
         </>
       ) : null}
