@@ -396,10 +396,16 @@ async function attachBookingMedia(args: {
         ? 'after'
         : 'other'
 
+  const { serviceId } = await prisma.booking.findUniqueOrThrow({
+    where: { id: args.bookingId },
+    select: { serviceId: true },
+  })
+
   await prisma.mediaAsset.create({
     data: {
       bookingId: args.bookingId,
       professionalId: args.professionalId,
+      primaryServiceId: serviceId,
       uploadedByUserId: args.uploadedByUserId,
       uploadedByRole: Role.PRO,
       storageBucket: 'booking-media',

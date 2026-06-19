@@ -1855,7 +1855,8 @@ model Service {
   favoritedBy         ServiceFavorite[]
   offeringAddOnLinks  OfferingAddOn[]                       @relation("AddOnService")
 
-  lookPosts LookPost[]
+  lookPosts          LookPost[]
+  primaryMediaAssets MediaAsset[] @relation("MediaPrimaryService")
 }
 
 model OfferingAddOn {
@@ -3018,6 +3019,14 @@ model MediaAsset {
   proTenantId      String?
   bookingId        String?
   reviewId         String?
+  // Every media asset is anchored to a primary bookable service so it can always
+  // route to "book this" (the product goal: media → easy booking). Required by
+  // DB constraint + by the MediaAssetWriteInput type (single create choke point,
+  // lib/media/recordMediaAsset.ts). Derived at creation from booking.serviceId
+  // (session/review photos) or the first selected service (portfolio uploads).
+  // Extra/secondary services still live in the MediaServiceTag M2M below.
+  // (License/verification docs are NOT MediaAssets — they use VerificationDocument.)
+  primaryServiceId String
   uploadedByUserId String?
   uploadedByRole   Role?
   url              String?
@@ -3039,6 +3048,7 @@ model MediaAsset {
   proTenant      Tenant?             @relation("TenantMediaAssets", fields: [proTenantId], references: [id], onDelete: Restrict)
   booking        Booking?            @relation(fields: [bookingId], references: [id])
   review         Review?             @relation(fields: [reviewId], references: [id])
+  primaryService Service             @relation("MediaPrimaryService", fields: [primaryServiceId], references: [id])
   phase          MediaPhase          @default(OTHER)
   uploadedByUser User?               @relation("UploadedMedia", fields: [uploadedByUserId], references: [id])
 
@@ -3064,6 +3074,7 @@ model MediaAsset {
   @@index([bookingId, phase, createdAt])
   @@index([bookingId, createdAt])
   @@index([proTenantId])
+  @@index([primaryServiceId])
 }
 
 // UploadSession binds a server-minted signed-upload URL to the eventual

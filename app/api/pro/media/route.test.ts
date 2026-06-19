@@ -432,6 +432,7 @@ describe('app/api/pro/media/route.ts', () => {
       data: {
         professionalId: 'pro_1',
         proTenantId: 'tenant_root',
+        primaryServiceId: 'service_1',
         url: 'https://supabase.example/storage/v1/object/public/media-public/pros/pro_1/media_1.jpg',
         thumbUrl: null,
         caption: 'Portfolio upload',

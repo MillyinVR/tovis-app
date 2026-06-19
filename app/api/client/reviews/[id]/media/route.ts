@@ -209,6 +209,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
         clientId: true,
         professionalId: true,
         bookingId: true,
+        booking: { select: { serviceId: true } },
       },
     })
 
@@ -224,6 +225,15 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return jsonFail(
         409,
         'This review is not linked to a booking. Media must be attached to a booking to appear in aftercare.',
+      )
+    }
+
+    // Every MediaAsset anchors to the booking's bookable service.
+    const primaryServiceId = review.booking?.serviceId
+    if (!primaryServiceId) {
+      return jsonFail(
+        409,
+        'This review’s booking has no service. Media must link to a bookable service.',
       )
     }
 
@@ -303,6 +313,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
               ...buildMediaAssetCreateData({
                 professionalId: review.professionalId,
                 proTenantId,
+                primaryServiceId,
                 bookingId,
                 reviewId: review.id,
                 storageBucket: media.storageBucket,

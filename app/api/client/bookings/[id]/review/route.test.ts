@@ -189,6 +189,7 @@ function makeEligibility() {
     booking: {
       id: 'booking_1',
       professionalId: 'pro_1',
+      serviceId: 'service_1',
       status: 'COMPLETED',
       finishedAt: new Date('2026-03-25T15:30:00.000Z'),
       checkoutStatus: 'PAID',
@@ -787,6 +788,7 @@ describe('app/api/client/bookings/[id]/review/route.ts POST', () => {
         {
           professionalId: 'pro_1',
           proTenantId: 'tenant_root',
+          primaryServiceId: 'service_1',
           bookingId: 'booking_1',
           reviewId: 'review_1',
           mediaType: MediaType.IMAGE,

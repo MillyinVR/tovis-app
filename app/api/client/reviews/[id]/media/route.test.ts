@@ -14,6 +14,7 @@ const review = {
   clientId: 'client_1',
   professionalId: 'pro_1',
   bookingId: 'booking_1',
+  booking: { serviceId: 'service_1' },
 }
 
 const createdMedia = {
@@ -536,6 +537,7 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
         clientId: true,
         professionalId: true,
         bookingId: true,
+        booking: { select: { serviceId: true } },
       },
     })
 
@@ -561,6 +563,7 @@ describe('app/api/client/reviews/[id]/media/route.ts', () => {
       data: {
         professionalId: 'pro_1',
         proTenantId: 'tenant_root',
+        primaryServiceId: 'service_1',
         bookingId: 'booking_1',
         reviewId: 'review_1',
         storageBucket: BUCKETS.mediaPublic,

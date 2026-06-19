@@ -905,6 +905,7 @@ type AssertClientBookingReviewEligibilityResult = {
   booking: {
     id: string
     professionalId: string
+    serviceId: string
     status: BookingStatus
     finishedAt: Date | null
     checkoutStatus: BookingCheckoutStatus
@@ -1444,6 +1445,7 @@ const REBOOK_SOURCE_BOOKING_SELECT = {
 const BOOKING_MEDIA_UPLOAD_SELECT = {
   id: true,
   professionalId: true,
+  serviceId: true,
   status: true,
   startedAt: true,
   finishedAt: true,
@@ -1823,6 +1825,7 @@ const CLIENT_REVIEW_ELIGIBILITY_BOOKING_SELECT = {
   id: true,
   clientId: true,
   professionalId: true,
+  serviceId: true,
   status: true,
   finishedAt: true,
   checkoutStatus: true,
@@ -6457,6 +6460,7 @@ async function performLockedUploadProBookingMedia(args: {
       ...buildMediaAssetCreateData({
         professionalId: booking.professionalId,
         proTenantId,
+        primaryServiceId: booking.serviceId,
         bookingId: booking.id,
         uploadedByUserId: args.uploadedByUserId,
         uploadedByRole: Role.PRO,
@@ -11844,6 +11848,7 @@ async function performLockedAssertClientBookingReviewEligibility(args: {
     booking: {
       id: booking.id,
       professionalId: booking.professionalId,
+      serviceId: booking.serviceId,
       status: booking.status,
       finishedAt: booking.finishedAt,
       checkoutStatus: booking.checkoutStatus,

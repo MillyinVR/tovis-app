@@ -516,6 +516,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               buildMediaAssetCreateData({
                 professionalId: eligibility.booking.professionalId,
                 proTenantId,
+                primaryServiceId: eligibility.booking.serviceId,
                 bookingId: eligibility.booking.id,
                 reviewId: review.id,
                 mediaType: item.mediaType,
