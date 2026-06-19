@@ -3,6 +3,8 @@ import 'server-only'
 
 import { LookPostStatus, LookPostVisibility } from '@prisma/client'
 
+import { getViewerClientFollowState } from '@/lib/follows'
+import { asTrimmedString } from '@/lib/guards'
 import { normalizeHandle } from '@/lib/handles'
 import { lookNameFromCaption } from '@/lib/looks/publication/clientLookService'
 import { prisma } from '@/lib/prisma'
@@ -16,6 +18,13 @@ export type PublicClientLook = {
   href: string
 }
 
+export type PublicClientProfileViewer = {
+  /** The signed-in client is looking at their OWN profile. */
+  isOwn: boolean
+  /** The signed-in client already follows this profile. */
+  following: boolean
+}
+
 export type PublicClientProfileData = {
   handle: string
   displayName: string
@@ -23,6 +32,7 @@ export type PublicClientProfileData = {
   bio: string | null
   counts: { followers: number; following: number; looks: number }
   looks: PublicClientLook[]
+  viewer: PublicClientProfileViewer
 }
 
 /**
@@ -32,6 +42,7 @@ export type PublicClientProfileData = {
  */
 export async function loadPublicClientProfile(
   handleParam: string,
+  options?: { viewerClientId?: string | null },
 ): Promise<PublicClientProfileData | null> {
   const normalized = normalizeHandle(handleParam)
   if (!normalized) return null
@@ -82,6 +93,15 @@ export async function loadPublicClientProfile(
 
   if (!client || !client.isPublicProfile || !client.handle) return null
 
+  const viewerClientId = asTrimmedString(options?.viewerClientId)
+  const isOwn = viewerClientId !== null && viewerClientId === client.id
+  const following = viewerClientId
+    ? await getViewerClientFollowState(prisma, {
+        viewerClientId,
+        followedClientId: client.id,
+      })
+    : false
+
   const looks = await Promise.all(
     client.authoredLooks.map(async (row) => {
       const { renderUrl, renderThumbUrl } = await renderMediaUrls(
@@ -108,5 +128,6 @@ export async function loadPublicClientProfile(
       looks: looks.length,
     },
     looks,
+    viewer: { isOwn, following },
   }
 }
