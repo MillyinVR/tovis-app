@@ -221,8 +221,8 @@ function UpcomingCard(props: {
     <Link
       href={`/client/bookings/${encodeURIComponent(booking.id)}?step=overview`}
       className={cn(
-        'block rounded-[24px] border border-[#3a2418] bg-[rgba(20,12,9,0.9)] px-4 py-4 transition',
-        'hover:border-[#5a3523] hover:bg-[rgba(24,15,11,0.95)]',
+        'block rounded-[24px] border border-accentPrimary/25 bg-accentPrimary/6 px-4 py-4 transition',
+        'hover:border-accentPrimary/40 hover:bg-accentPrimary/10',
       )}
     >
       <div className="mb-3 flex items-center gap-2 text-[11px] font-black tracking-[0.18em] text-accentPrimary">
