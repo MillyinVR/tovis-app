@@ -3,7 +3,9 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import { cn } from '@/lib/utils'
+import { isRecord } from '@/lib/guards'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import type { ShareLookPageData, ShareLookPrefillPhoto } from './_data/loadShareLookPage'
@@ -36,8 +38,8 @@ type SignedUploadInit = {
 }
 
 function parseInit(data: unknown): SignedUploadInit | null {
-  if (!data || typeof data !== 'object') return null
-  const d = data as Record<string, unknown>
+  if (!isRecord(data)) return null
+  const d = data
   const bucket = typeof d.bucket === 'string' ? d.bucket : ''
   const path = typeof d.path === 'string' ? d.path : ''
   const token = typeof d.token === 'string' ? d.token : ''
@@ -242,24 +244,12 @@ export default function ShareLookSheet({ data }: { data: ShareLookPageData }) {
             {copy.visibilityHelp}
           </div>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isPublic}
-          aria-label={copy.visibilityTitle}
-          onClick={() => setIsPublic((v) => !v)}
-          className={cn(
-            'relative h-11 w-[60px] shrink-0 rounded-full border border-transparent transition',
-            isPublic ? 'bg-accentPrimary' : 'bg-textPrimary/15',
-          )}
-        >
-          <span
-            className={cn(
-              'absolute top-1/2 h-7 w-7 -translate-y-1/2 rounded-full bg-bgPrimary shadow transition-all',
-              isPublic ? 'left-[28px]' : 'left-[4px]',
-            )}
-          />
-        </button>
+        <ToggleSwitch
+          checked={isPublic}
+          onChange={setIsPublic}
+          label={copy.visibilityTitle}
+          size="lg"
+        />
       </div>
 
       {formError ? (

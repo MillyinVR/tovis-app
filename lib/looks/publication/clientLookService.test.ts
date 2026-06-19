@@ -14,16 +14,19 @@ const mocks = vi.hoisted(() => {
   const mediaAssetCreate = vi.fn()
   const lookPostCreate = vi.fn()
   const lookPostAssetCreate = vi.fn()
+  const lookPostFindUnique = vi.fn()
+  const lookPostUpdate = vi.fn()
 
   const tx = {
     mediaAsset: { create: mediaAssetCreate },
-    lookPost: { create: lookPostCreate },
+    lookPost: { create: lookPostCreate, update: lookPostUpdate },
     lookPostAsset: { create: lookPostAssetCreate },
   }
 
   const prisma = {
     booking: { findUnique: bookingFindUnique },
     mediaAsset: { findUnique: mediaAssetFindUnique },
+    lookPost: { findUnique: lookPostFindUnique },
     $transaction: vi.fn(async (cb: (db: typeof tx) => unknown) => cb(tx)),
   }
 
@@ -33,6 +36,8 @@ const mocks = vi.hoisted(() => {
     mediaAssetCreate,
     lookPostCreate,
     lookPostAssetCreate,
+    lookPostFindUnique,
+    lookPostUpdate,
     prisma,
     validateUploadSession: vi.fn(),
     consumeUploadSession: vi.fn(),
@@ -62,7 +67,11 @@ vi.mock('@/lib/supabaseAdmin', () => ({
   }),
 }))
 
-import { createClientLookFromVisit, ClientLookError } from './clientLookService'
+import {
+  createClientLookFromVisit,
+  updateClientLookVisibility,
+  ClientLookError,
+} from './clientLookService'
 
 const CLIENT_ID = 'client_1'
 const BOOKING_ID = 'booking_1'
@@ -306,5 +315,54 @@ describe('createClientLookFromVisit', () => {
         now: NOW,
       }),
     ).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  })
+})
+
+describe('updateClientLookVisibility', () => {
+  it('flips a client-authored look to UNLISTED (save to profile only)', async () => {
+    mocks.lookPostFindUnique.mockResolvedValue({
+      id: 'look_1',
+      clientAuthorId: CLIENT_ID,
+    })
+
+    const result = await updateClientLookVisibility(mocks.prisma as never, {
+      clientId: CLIENT_ID,
+      lookPostId: 'look_1',
+      isPublic: false,
+    })
+
+    expect(result.visibility).toBe(LookPostVisibility.UNLISTED)
+    expect(mocks.lookPostUpdate).toHaveBeenCalledWith({
+      where: { id: 'look_1' },
+      data: { visibility: LookPostVisibility.UNLISTED },
+    })
+  })
+
+  it('rejects editing a look the client does not own', async () => {
+    mocks.lookPostFindUnique.mockResolvedValue({
+      id: 'look_1',
+      clientAuthorId: 'someone_else',
+    })
+
+    await expect(
+      updateClientLookVisibility(mocks.prisma as never, {
+        clientId: CLIENT_ID,
+        lookPostId: 'look_1',
+        isPublic: true,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(mocks.lookPostUpdate).not.toHaveBeenCalled()
+  })
+
+  it('rejects a missing look', async () => {
+    mocks.lookPostFindUnique.mockResolvedValue(null)
+
+    await expect(
+      updateClientLookVisibility(mocks.prisma as never, {
+        clientId: CLIENT_ID,
+        lookPostId: 'nope',
+        isPublic: true,
+      }),
+    ).rejects.toMatchObject({ code: 'LOOK_NOT_FOUND' })
   })
 })

@@ -14,6 +14,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { getBoardSummaries } from '@/lib/boards'
+import { lookNameFromCaption } from '@/lib/looks/publication/clientLookService'
 import {
   buildMyFollowingListResponse,
   listFollowingPage,
@@ -40,6 +41,8 @@ export const clientMeProfileSelect =
     avatarUrl: true,
     claimStatus: true,
     claimedAt: true,
+    handle: true,
+    isPublicProfile: true,
   })
 
 export type ClientMeProfileRow = Prisma.ClientProfileGetPayload<{
@@ -237,7 +240,7 @@ async function loadMyLooks(clientId: string): Promise<ClientMeLook[]> {
       const { renderUrl, renderThumbUrl } = await renderMediaUrls(
         row.primaryMediaAsset,
       )
-      const name = (row.caption ?? '').split('\n')[0]?.trim() || 'Your look'
+      const name = lookNameFromCaption(row.caption, 'Your look')
       return {
         id: row.id,
         name,

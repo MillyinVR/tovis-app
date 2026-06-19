@@ -102,6 +102,8 @@ export default async function ClientMePage() {
   })
 
   const handle = buildHandle(data.user.email)
+  // Prefer the claimed public handle for display; fall back to the email-derived one.
+  const displayHandle = data.profile.handle ?? handle
   const avatarUrl = data.profile.avatarUrl ?? null
   const memberSince = formatMemberSince(data.user.createdAt)
 
@@ -175,7 +177,7 @@ export default async function ClientMePage() {
     <main className="h-[calc(100dvh-4.5rem-env(safe-area-inset-bottom))] overflow-hidden">
       <ClientMeDashboard
         displayName={displayName}
-        handle={handle}
+        handle={displayHandle}
         avatarUrl={avatarUrl}
         memberSince={memberSince}
         counts={counts}
@@ -184,6 +186,10 @@ export default async function ClientMePage() {
         following={following}
         history={history}
         myLooks={myLooks}
+        publicProfile={{
+          handle: data.profile.handle ?? null,
+          isPublic: data.profile.isPublicProfile,
+        }}
         createBoardHref="/client/boards/new"
         workspaces={workspaces}
       />

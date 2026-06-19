@@ -36,6 +36,7 @@ import {
 
 import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
 import { recomputeLookPostScores } from '@/lib/looks/counters'
+import { mediaTypeFromContentType } from '@/lib/media/contentType'
 import { copyToPublicBucket } from '@/lib/media/copyToPublicBucket'
 import { buildMediaAssetCreateData } from '@/lib/media/recordMediaAsset'
 import {
@@ -49,6 +50,18 @@ import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 const MAX_NAME_LENGTH = 80
 const MAX_CAPTION_LENGTH = 300
 
+/**
+ * A client look's caption stores the look NAME on the first line, then the
+ * optional free-text caption body. This is the single reader of that encoding —
+ * use it wherever a client look's display name is derived from its caption.
+ */
+export function lookNameFromCaption(
+  caption: string | null,
+  fallback = 'Look',
+): string {
+  return (caption ?? '').split('\n')[0]?.trim() || fallback
+}
+
 export type ClientLookErrorCode =
   | 'BOOKING_NOT_FOUND'
   | 'FORBIDDEN'
@@ -57,6 +70,7 @@ export type ClientLookErrorCode =
   | 'INVALID_INPUT'
   | 'PHOTO_NOT_FOUND'
   | 'UPLOAD_INVALID'
+  | 'LOOK_NOT_FOUND'
 
 const HTTP_STATUS_BY_CODE: Record<ClientLookErrorCode, number> = {
   BOOKING_NOT_FOUND: 404,
@@ -66,6 +80,7 @@ const HTTP_STATUS_BY_CODE: Record<ClientLookErrorCode, number> = {
   INVALID_INPUT: 400,
   PHOTO_NOT_FOUND: 400,
   UPLOAD_INVALID: 400,
+  LOOK_NOT_FOUND: 404,
 }
 
 export class ClientLookError extends Error {
@@ -128,12 +143,6 @@ function isUploadSource(
   source: ClientLookPhotoSource,
 ): source is { uploadSessionId: string } {
   return 'uploadSessionId' in source && typeof source.uploadSessionId === 'string'
-}
-
-function mediaTypeFromContentType(contentType: string): MediaType {
-  return contentType.toLowerCase().startsWith('video/')
-    ? MediaType.VIDEO
-    : MediaType.IMAGE
 }
 
 function normalizeName(value: string): string {
@@ -442,4 +451,48 @@ export async function createClientLookFromVisit(
   })
 
   return result
+}
+
+/**
+ * Flips a client-authored look between PUBLIC (on the profile + discoverable once
+ * the author is public) and UNLISTED (saved to profile, not surfaced). The client
+ * mirror of updateProLookPublication — authorizes by clientAuthorId, not pro.
+ * Only these two states are exposed to clients in v1.
+ */
+export async function updateClientLookVisibility(
+  db: PrismaClient,
+  args: {
+    clientId: string
+    lookPostId: string
+    isPublic: boolean
+  },
+): Promise<{ lookPostId: string; visibility: LookPostVisibility }> {
+  const clientId = normalizeRequiredId('clientId', args.clientId)
+  const lookPostId = normalizeRequiredId('lookPostId', args.lookPostId)
+
+  const existing = await db.lookPost.findUnique({
+    where: { id: lookPostId },
+    select: { id: true, clientAuthorId: true },
+  })
+
+  if (!existing) {
+    throw new ClientLookError('LOOK_NOT_FOUND', 'Look not found.')
+  }
+  if (existing.clientAuthorId !== clientId) {
+    throw new ClientLookError('FORBIDDEN', 'This look is not yours to edit.')
+  }
+
+  const visibility = args.isPublic
+    ? LookPostVisibility.PUBLIC
+    : LookPostVisibility.UNLISTED
+
+  await db.$transaction(async (tx) => {
+    await tx.lookPost.update({
+      where: { id: lookPostId },
+      data: { visibility },
+    })
+    await recomputeLookPostScores(tx, lookPostId)
+  })
+
+  return { lookPostId, visibility }
 }

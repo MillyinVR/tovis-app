@@ -3,6 +3,7 @@ import { MediaPhase } from '@prisma/client'
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { prisma } from '@/lib/prisma'
+import { extensionForContentType } from '@/lib/media/contentType'
 import {
   createUploadSession,
   uploadSurfaceForKind,
@@ -28,19 +29,8 @@ function trimOrEmpty(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
 }
 
-function guessExtFromType(type: string) {
-  const t = type.toLowerCase()
-  if (t.includes('png')) return 'png'
-  if (t.includes('jpeg') || t.includes('jpg')) return 'jpg'
-  if (t.includes('webp')) return 'webp'
-  if (t.includes('heic') || t.includes('heif')) return 'heic'
-  if (t.includes('mp4')) return 'mp4'
-  if (t.includes('quicktime')) return 'mov'
-  return 'bin'
-}
-
 function buildPath(args: { clientId: string; kind: ClientUploadKind; contentType: string }) {
-  const ext = guessExtFromType(args.contentType)
+  const ext = extensionForContentType(args.contentType)
   const ym = new Date().toISOString().slice(0, 7)
   const rand = Math.random().toString(16).slice(2)
   return `client/${args.clientId}/${args.kind.toLowerCase()}/${ym}/${Date.now()}_${rand}.${ext}`

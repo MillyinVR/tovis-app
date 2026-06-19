@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 
 import { cn } from '@/lib/utils'
+import ToggleSwitch from '@/app/_components/ToggleSwitch'
 import LogoutButton from './components/LogoutButton'
 import WorkspaceSwitcher from '@/app/_components/WorkspaceSwitcher'
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
@@ -60,6 +61,11 @@ type MyLook = {
   isPublic: boolean
 }
 
+type PublicProfileInfo = {
+  handle: string | null
+  isPublic: boolean
+}
+
 type ClientMeDashboardProps = {
   displayName: string
   handle: string
@@ -71,6 +77,7 @@ type ClientMeDashboardProps = {
   following: FollowingItem[]
   history: HistoryItem[]
   myLooks?: MyLook[]
+  publicProfile?: PublicProfileInfo
   createBoardHref?: string | null
   workspaces?: WorkspaceOption[]
 }
@@ -420,7 +427,31 @@ function HistoryCard(props: { item: HistoryItem }) {
 }
 
 function MyLookCard(props: { look: MyLook }) {
+  const [isPublic, setIsPublic] = useState(props.look.isPublic)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(false)
   const { look } = props
+
+  async function toggle() {
+    if (busy) return
+    const next = !isPublic
+    setBusy(true)
+    setError(false)
+    setIsPublic(next) // optimistic
+    try {
+      const res = await fetch(`/api/client/looks/${encodeURIComponent(look.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPublic: next }),
+      })
+      if (!res.ok) throw new Error('failed')
+    } catch {
+      setIsPublic(!next) // revert
+      setError(true)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="block">
@@ -443,13 +474,22 @@ function MyLookCard(props: { look: MyLook }) {
         </div>
       </div>
 
-      <div className="mt-2">
-        <div className="truncate text-[13px] font-black text-textPrimary">
-          {look.name}
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-black text-textPrimary">
+            {look.name}
+          </div>
+          <div className="mt-0.5 text-[10px] font-bold tracking-[0.12em] text-textSecondary">
+            {error ? 'COULDN’T SAVE' : isPublic ? 'PUBLIC' : 'PRIVATE'}
+          </div>
         </div>
-        <div className="mt-0.5 text-[10px] font-bold tracking-[0.12em] text-textSecondary">
-          {look.isPublic ? 'PUBLIC' : 'PRIVATE'}
-        </div>
+        <ToggleSwitch
+          checked={isPublic}
+          onChange={toggle}
+          label={`Make ${look.name} ${isPublic ? 'private' : 'public'}`}
+          size="sm"
+          disabled={busy}
+        />
       </div>
     </div>
   )
@@ -491,6 +531,7 @@ export default function ClientMeDashboard({
   following,
   history,
   myLooks = [],
+  publicProfile,
   createBoardHref = null,
   workspaces = [],
 }: ClientMeDashboardProps) {
@@ -535,6 +576,27 @@ export default function ClientMeDashboard({
                 <Stat label="SAVED" value={counts.saved} />
                 <Stat label="BOOKED" value={counts.booked} />
               </div>
+
+              {publicProfile ? (
+                <div className="mt-4">
+                  {publicProfile.isPublic && publicProfile.handle ? (
+                    <Link
+                      href={`/u/${encodeURIComponent(publicProfile.handle)}`}
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-accentPrimary/30 bg-accentPrimary/8 px-3 py-1.5 text-[12px] font-black text-accentPrimary transition hover:bg-accentPrimary/15"
+                    >
+                      View public profile
+                      <span aria-hidden="true">→</span>
+                    </Link>
+                  ) : (
+                    <Link
+                      href="/client/settings"
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-textPrimary/15 px-3 py-1.5 text-[12px] font-black text-textPrimary transition hover:border-textPrimary/25"
+                    >
+                      Set up public profile
+                    </Link>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         </section>

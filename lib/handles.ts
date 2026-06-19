@@ -44,6 +44,7 @@ export const RESERVED_HANDLES: ReadonlySet<string> = new Set([
   'team',
   'test',
   'tovis',
+  'u',
   'undefined',
   'verify',
   'www',

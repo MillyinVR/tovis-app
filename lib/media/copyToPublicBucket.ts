@@ -13,6 +13,7 @@
 // destination path is server-minted and namespaced to the client, mirroring the
 // signing routes — never derived from client input.
 
+import { extensionForContentType } from '@/lib/media/contentType'
 import { BUCKETS } from '@/lib/storageBuckets'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 
@@ -21,17 +22,6 @@ export class StorageCopyError extends Error {
     super(message)
     this.name = 'StorageCopyError'
   }
-}
-
-function extensionForContentType(type: string): string {
-  const t = type.toLowerCase()
-  if (t.includes('png')) return 'png'
-  if (t.includes('jpeg') || t.includes('jpg')) return 'jpg'
-  if (t.includes('webp')) return 'webp'
-  if (t.includes('heic') || t.includes('heif')) return 'heic'
-  if (t.includes('mp4')) return 'mp4'
-  if (t.includes('quicktime')) return 'mov'
-  return 'bin'
 }
 
 export type CopiedObjectPointer = {

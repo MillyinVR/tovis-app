@@ -1,6 +1,7 @@
 // app/client/settings/page.tsx
 import Image from 'next/image'
 import ClientProfileSettings from './ClientProfileSettings'
+import ClientPublicProfileSettings from './ClientPublicProfileSettings'
 import ClientLocationSettings from './ClientLocationSettings'
 import ClientAddressesSettings from './ClientAddressesSettings'
 import { getBrandConfig } from '@/lib/brand'
@@ -77,6 +78,8 @@ export default function ClientSettingsPage() {
       </section>
 
       <ClientProfileSettings />
+
+      <ClientPublicProfileSettings />
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div className="brand-glass p-5 sm:p-6">
