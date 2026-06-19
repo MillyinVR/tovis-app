@@ -69,3 +69,5 @@ tsconfig.tsbuildinfo
 
 # Claude Design handoff bundle (reference only)
 docs/design/brand-handoff/
+# Design handoff zip bundles dropped in the repo root (reference-only, not source)
+*handoff*.zip
