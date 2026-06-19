@@ -1212,6 +1212,15 @@ model ClientProfile {
   phoneVerifiedAt     DateTime?
   avatarUrl           String?
 
+  // Client-as-creator public identity (engagement loop). A client only becomes
+  // publicly addressable once they opt in (isPublicProfile) and claim a handle;
+  // both default off/null so existing clients are unaffected. Mirrors the
+  // ProfessionalProfile handle/handleNormalized pattern.
+  handle           String?
+  handleNormalized String? @unique
+  isPublicProfile  Boolean @default(false)
+  publicBio        String?
+
   dateOfBirth            DateTime?
   preferredContactMethod ContactMethod?
 
@@ -1247,10 +1256,17 @@ model ClientProfile {
   followedPros ProFollow[]
   boards       Board[]
 
+  // Engagement loop: looks this client authored from their visits, plus the
+  // client→client follow graph (followers of this client / who they follow).
+  authoredLooks LookPost[]     @relation("ClientAuthoredLooks")
+  following     ClientFollow[] @relation("ClientFollowing")
+  followers     ClientFollow[] @relation("ClientFollowers")
+
   @@index([claimStatus])
   @@index([emailHashKeyVersion])
   @@index([phoneHashKeyVersion])
   @@index([homeTenantId])
+  @@index([handleNormalized])
 }
 
 model ClientAddress {
@@ -2264,6 +2280,12 @@ model Booking {
   lastMinuteOpeningId String?            @unique
   lastMinuteOpening   LastMinuteOpening? @relation("BookingLastMinuteOpening", fields: [lastMinuteOpeningId], references: [id], onDelete: SetNull)
 
+  // Remix attribution (engagement loop): the look that inspired this booking, if
+  // the client booked "recreate this look". Powers "Your looks, remixed".
+  // SetNull so a booking survives the source look being removed.
+  sourceLookPostId String?
+  sourceLookPost   LookPost? @relation("LookInspiredBookings", fields: [sourceLookPostId], references: [id], onDelete: SetNull)
+
   scheduledFor DateTime
   status       BookingStatus @default(PENDING)
 
@@ -2438,6 +2460,7 @@ model Booking {
   @@index([paymentProvider, checkoutStatus])
   @@index([proTenantId, scheduledFor])
   @@index([clientHomeTenantId])
+  @@index([sourceLookPostId])
 }
 
 // A single refund issued against a booking's captured Stripe payment. Multiple
@@ -3164,7 +3187,15 @@ model MediaComment {
 
 model LookPost {
   id                  String  @id @default(cuid())
+  // professionalId is the ORIGIN pro of the look (the pro whose work it shows /
+  // who is tagged). For pro-authored looks this is also the author. For
+  // client-authored looks (clientAuthorId set) it stays the visited pro, so the
+  // existing pro-keyed indexes/relations are unchanged. Pro-facing portfolio
+  // queries must filter `clientAuthorId: null` to exclude client-authored looks.
   professionalId      String
+  // Null = pro-authored (today's behavior). Set = the client who published this
+  // look from their visit (engagement loop / Share-your-look capture).
+  clientAuthorId      String?
   primaryMediaAssetId String  @unique
   serviceId           String?
 
@@ -3196,15 +3227,17 @@ model LookPost {
   updatedAt DateTime @updatedAt
 
   professional      ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  clientAuthor      ClientProfile?      @relation("ClientAuthoredLooks", fields: [clientAuthorId], references: [id], onDelete: Cascade)
   primaryMediaAsset MediaAsset          @relation("PrimaryLookMediaAsset", fields: [primaryMediaAssetId], references: [id], onDelete: Restrict)
   service           Service?            @relation(fields: [serviceId], references: [id], onDelete: SetNull)
   reviewedByUser    User?               @relation("LookPostReviewedByUser", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
 
-  assets     LookPostAsset[]
-  likes      LookLike[]
-  comments   LookComment[]
-  reports    LookPostReport[]
-  boardItems BoardItem[]
+  assets           LookPostAsset[]
+  likes            LookLike[]
+  comments         LookComment[]
+  reports          LookPostReport[]
+  boardItems       BoardItem[]
+  inspiredBookings Booking[]        @relation("LookInspiredBookings")
 
   @@index([professionalId, publishedAt])
   @@index([serviceId, publishedAt])
@@ -3216,6 +3249,8 @@ model LookPost {
   @@index([reviewedByUserId, reviewedAt])
   @@index([professionalId, status, updatedAt])
   @@index([professionalId, visibility, updatedAt])
+  @@index([clientAuthorId, status, updatedAt])
+  @@index([clientAuthorId, visibility, publishedAt])
 }
 
 model LookPostAsset {
@@ -3390,6 +3425,23 @@ model ProFollow {
   @@unique([clientId, professionalId])
   @@index([professionalId, createdAt])
   @@index([clientId, createdAt])
+}
+
+// Client→client follow graph (engagement loop). Distinct from ProFollow
+// (client→pro): this is one public-creator client following another. Powers the
+// "FOLLOWERS" count and the activity "started following you" event.
+model ClientFollow {
+  id               String   @id @default(cuid())
+  followerClientId String
+  followedClientId String
+  createdAt        DateTime @default(now())
+
+  follower ClientProfile @relation("ClientFollowing", fields: [followerClientId], references: [id], onDelete: Cascade)
+  followed ClientProfile @relation("ClientFollowers", fields: [followedClientId], references: [id], onDelete: Cascade)
+
+  @@unique([followerClientId, followedClientId])
+  @@index([followedClientId, createdAt])
+  @@index([followerClientId, createdAt])
 }
 
 model Board {
