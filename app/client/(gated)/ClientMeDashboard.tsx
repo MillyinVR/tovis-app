@@ -49,6 +49,15 @@ type HistoryItem = {
   title: string
   label: string
   heroImageUrl: string | null
+  // Set for completed visits → opens the Share-your-look capture sheet.
+  shareHref?: string | null
+}
+
+type MyLook = {
+  id: string
+  name: string
+  imageUrl: string | null
+  isPublic: boolean
 }
 
 type ClientMeDashboardProps = {
@@ -61,6 +70,7 @@ type ClientMeDashboardProps = {
   boards: BoardCardItem[]
   following: FollowingItem[]
   history: HistoryItem[]
+  myLooks?: MyLook[]
   createBoardHref?: string | null
   workspaces?: WorkspaceOption[]
 }
@@ -358,42 +368,90 @@ function HistoryCard(props: { item: HistoryItem }) {
   const { item } = props
 
   return (
-    <Link href={item.href} className="block">
-      <div className="overflow-hidden rounded-[24px] border border-textPrimary/10">
-        <div className="aspect-[1.18/1] bg-bgSecondary">
-          {item.heroImageUrl ? (
+    <div className="block">
+      <Link href={item.href} className="block">
+        <div className="overflow-hidden rounded-[24px] border border-textPrimary/10">
+          <div className="aspect-[1.18/1] bg-bgSecondary">
+            {item.heroImageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={item.heroImageUrl}
+                alt={item.title}
+                className="h-full w-full object-cover"
+                loading="lazy"
+                decoding="async"
+              />
+            ) : (
+              <div className="grid h-full place-items-center px-5 text-center">
+                <div>
+                  <div className="text-[11px] font-black tracking-[0.12em] text-textSecondary">
+                    {item.label}
+                  </div>
+                  <div className="mt-2 text-[15px] font-black text-textPrimary">
+                    {item.title}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <div className="truncate text-[14px] font-black text-textPrimary">
+            {item.title}
+          </div>
+          <div className="mt-1 text-[11px] tracking-[0.12em] text-textSecondary">
+            {item.label}
+          </div>
+        </div>
+      </Link>
+
+      {item.shareHref ? (
+        <Link
+          href={item.shareHref}
+          className="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-full border border-accentPrimary/30 bg-accentPrimary/8 px-3 py-1.5 text-[12px] font-black text-accentPrimary transition hover:bg-accentPrimary/15"
+        >
+          <span aria-hidden="true">✦</span>
+          Share your look
+        </Link>
+      ) : null}
+    </div>
+  )
+}
+
+function MyLookCard(props: { look: MyLook }) {
+  const { look } = props
+
+  return (
+    <div className="block">
+      <div className="overflow-hidden rounded-[22px] border border-textPrimary/10">
+        <div className="aspect-[1/1] bg-bgSecondary">
+          {look.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={item.heroImageUrl}
-              alt={item.title}
+              src={look.imageUrl}
+              alt={look.name}
               className="h-full w-full object-cover"
               loading="lazy"
               decoding="async"
             />
           ) : (
-            <div className="grid h-full place-items-center px-5 text-center">
-              <div>
-                <div className="text-[11px] font-black tracking-[0.12em] text-textSecondary">
-                  {item.label}
-                </div>
-                <div className="mt-2 text-[15px] font-black text-textPrimary">
-                  {item.title}
-                </div>
-              </div>
+            <div className="grid h-full place-items-center px-4 text-center text-[13px] font-black text-textPrimary">
+              {look.name}
             </div>
           )}
         </div>
       </div>
 
-      <div className="mt-3">
-        <div className="truncate text-[14px] font-black text-textPrimary">
-          {item.title}
+      <div className="mt-2">
+        <div className="truncate text-[13px] font-black text-textPrimary">
+          {look.name}
         </div>
-        <div className="mt-1 text-[11px] tracking-[0.12em] text-textSecondary">
-          {item.label}
+        <div className="mt-0.5 text-[10px] font-bold tracking-[0.12em] text-textSecondary">
+          {look.isPublic ? 'PUBLIC' : 'PRIVATE'}
         </div>
       </div>
-    </Link>
+    </div>
   )
 }
 
@@ -432,6 +490,7 @@ export default function ClientMeDashboard({
   boards,
   following,
   history,
+  myLooks = [],
   createBoardHref = null,
   workspaces = [],
 }: ClientMeDashboardProps) {
@@ -483,6 +542,24 @@ export default function ClientMeDashboard({
         {upcomingNotificationBooking ? (
           <section className="mt-6 max-w-[640px]">
             <UpcomingCard booking={upcomingNotificationBooking} />
+          </section>
+        ) : null}
+
+        {myLooks.length > 0 ? (
+          <section className="mt-8">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 className="text-[12px] font-black tracking-[0.08em] text-textPrimary">
+                YOUR LOOKS
+              </h2>
+              <span className="text-[11px] tracking-[0.12em] text-textSecondary">
+                {myLooks.length}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-6 md:grid-cols-3 lg:grid-cols-4">
+              {myLooks.map((look) => (
+                <MyLookCard key={look.id} look={look} />
+              ))}
+            </div>
           </section>
         ) : null}
 

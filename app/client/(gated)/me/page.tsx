@@ -157,6 +157,18 @@ export default async function ClientMePage() {
     title: item.booking.display.title,
     label: item.label,
     heroImageUrl: item.heroImageUrl,
+    // Completed visits can be turned into a shareable look.
+    shareHref:
+      item.kind === 'completed'
+        ? `/client/looks/share/${encodeURIComponent(item.booking.id)}`
+        : null,
+  }))
+
+  const myLooks = data.myLooks.map((look) => ({
+    id: look.id,
+    name: look.name,
+    imageUrl: look.imageUrl,
+    isPublic: look.visibility === 'PUBLIC',
   }))
 
   return (
@@ -171,6 +183,7 @@ export default async function ClientMePage() {
         boards={boards}
         following={following}
         history={history}
+        myLooks={myLooks}
         createBoardHref="/client/boards/new"
         workspaces={workspaces}
       />

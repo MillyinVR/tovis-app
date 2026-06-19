@@ -2,7 +2,13 @@
 import 'server-only'
 
 import { redirect } from 'next/navigation'
-import { BookingStatus, MediaPhase, MediaType, Prisma } from '@prisma/client'
+import {
+  BookingStatus,
+  LookPostStatus,
+  MediaPhase,
+  MediaType,
+  Prisma,
+} from '@prisma/client'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
@@ -165,6 +171,14 @@ type ClientMeHistoryItem =
       heroImageUrl: string | null
     }
 
+export type ClientMeLook = {
+  id: string
+  name: string
+  imageUrl: string | null
+  visibility: string
+  serviceId: string | null
+}
+
 export type ClientMePageData = {
   user: AuthedClientUser
   profile: ClientMeProfileRow
@@ -178,6 +192,61 @@ export type ClientMePageData = {
   }
   upcomingNotificationBooking: ClientBookingDTO | null
   history: ClientMeHistoryItem[]
+  myLooks: ClientMeLook[]
+}
+
+/**
+ * Loads the looks this client has authored (Share-your-look). The primary asset
+ * lives in media-public, so {@link renderMediaUrls} returns a direct public URL.
+ * The look name is the first line of the caption (name + optional caption body).
+ */
+async function loadMyLooks(clientId: string): Promise<ClientMeLook[]> {
+  // Scoped to THIS client's authored looks via the relation (not a cross-tenant
+  // lookPost discovery read) — so it's tenant-safe by construction.
+  const owner = await prisma.clientProfile.findUnique({
+    where: { id: clientId },
+    select: {
+      authoredLooks: {
+        where: { status: LookPostStatus.PUBLISHED },
+        orderBy: { publishedAt: 'desc' },
+        take: 24,
+        select: {
+          id: true,
+          caption: true,
+          visibility: true,
+          serviceId: true,
+          primaryMediaAsset: {
+            select: {
+              storageBucket: true,
+              storagePath: true,
+              thumbBucket: true,
+              thumbPath: true,
+              url: true,
+              thumbUrl: true,
+            },
+          },
+        },
+      },
+    },
+  })
+
+  const rows = owner?.authoredLooks ?? []
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const { renderUrl, renderThumbUrl } = await renderMediaUrls(
+        row.primaryMediaAsset,
+      )
+      const name = (row.caption ?? '').split('\n')[0]?.trim() || 'Your look'
+      return {
+        id: row.id,
+        name,
+        imageUrl: renderThumbUrl ?? renderUrl,
+        visibility: row.visibility,
+        serviceId: row.serviceId,
+      }
+    }),
+  )
 }
 
 function isAuthedClientUser(
@@ -431,9 +500,10 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
 
   const upcomingNotificationBooking = upcomingBookings[0] ?? null
 
-  const historyHeroImageUrls = await loadHistoryHeroImageUrls(
-    completedBookings.map((booking) => booking.id),
-  )
+  const [historyHeroImageUrls, myLooks] = await Promise.all([
+    loadHistoryHeroImageUrls(completedBookings.map((booking) => booking.id)),
+    loadMyLooks(clientId),
+  ])
 
   const historyUpcoming: ClientMeHistoryItem[] = upcomingBookings.map((booking) => ({
     kind: 'upcoming',
@@ -468,5 +538,6 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
     },
     upcomingNotificationBooking,
     history: [...historyUpcoming, ...historyCompleted].sort(compareHistoryItems),
+    myLooks,
   }
 }

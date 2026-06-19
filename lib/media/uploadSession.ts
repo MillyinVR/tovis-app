@@ -273,6 +273,8 @@ export function uploadSurfaceForKind(kind: string): UploadSurface | null {
       return UploadSurface.PRO_PORTFOLIO
     case 'REVIEW_PUBLIC':
       return UploadSurface.CLIENT_REVIEW
+    case 'LOOK_PUBLIC':
+      return UploadSurface.CLIENT_LOOK
     default:
       return null
   }

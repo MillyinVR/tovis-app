@@ -1,4 +1,5 @@
 // app/api/client/uploads/route.ts
+import { MediaPhase } from '@prisma/client'
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { prisma } from '@/lib/prisma'
@@ -8,6 +9,20 @@ import {
 } from '@/lib/media/uploadSession'
 
 export const dynamic = 'force-dynamic'
+
+// Client signing kinds. REVIEW_PUBLIC = review media; LOOK_PUBLIC = a photo for a
+// Share-your-look post. Both land in media-public (the client consents to a
+// public-intent asset). LOOK_PUBLIC may carry a BEFORE/AFTER phase + bookingId.
+type ClientUploadKind = 'REVIEW_PUBLIC' | 'LOOK_PUBLIC'
+
+function isClientUploadKind(value: string): value is ClientUploadKind {
+  return value === 'REVIEW_PUBLIC' || value === 'LOOK_PUBLIC'
+}
+
+function readPhase(value: unknown): MediaPhase | null {
+  if (value === MediaPhase.BEFORE || value === MediaPhase.AFTER) return value
+  return null
+}
 
 function trimOrEmpty(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
@@ -24,7 +39,7 @@ function guessExtFromType(type: string) {
   return 'bin'
 }
 
-function buildPath(args: { clientId: string; kind: 'REVIEW_PUBLIC'; contentType: string }) {
+function buildPath(args: { clientId: string; kind: ClientUploadKind; contentType: string }) {
   const ext = guessExtFromType(args.contentType)
   const ym = new Date().toISOString().slice(0, 7)
   const rand = Math.random().toString(16).slice(2)
@@ -35,6 +50,8 @@ type Body = {
   kind?: unknown
   contentType?: unknown
   size?: unknown
+  phase?: unknown
+  bookingId?: unknown
 }
 
 function readSignedUrl(data: unknown): string | null {
@@ -56,10 +73,18 @@ export async function POST(req: Request) {
     const body = (await req.json().catch(() => ({}))) as Body
 
     const kind = trimOrEmpty(body.kind).toUpperCase()
-    if (kind !== 'REVIEW_PUBLIC') return jsonFail(400, 'Invalid kind')
+    if (!isClientUploadKind(kind)) return jsonFail(400, 'Invalid kind')
 
     const contentType = trimOrEmpty(body.contentType)
     if (!contentType) return jsonFail(400, 'Missing contentType')
+
+    // LOOK_PUBLIC uploads optionally carry the visit booking + a BEFORE/AFTER
+    // phase so the share-look attach can validate them. REVIEW_PUBLIC ignores both.
+    const phase = kind === 'LOOK_PUBLIC' ? readPhase(body.phase) : null
+    const bookingId =
+      kind === 'LOOK_PUBLIC' && trimOrEmpty(body.bookingId)
+        ? trimOrEmpty(body.bookingId)
+        : null
 
     const size = typeof body.size === 'number' && Number.isFinite(body.size) ? body.size : null
 
@@ -71,7 +96,7 @@ export async function POST(req: Request) {
     if (size != null && size > 30 * 1024 * 1024) return jsonFail(400, 'File too large (max 30MB)')
 
     const bucket = 'media-public'
-    const path = buildPath({ clientId, kind: 'REVIEW_PUBLIC', contentType })
+    const path = buildPath({ clientId, kind, contentType })
 
     const { data, error } = await supabaseAdmin.storage.from(bucket).createSignedUploadUrl(path)
 
@@ -85,8 +110,8 @@ export async function POST(req: Request) {
 
     const publicUrl = `${base}/storage/v1/object/public/${bucket}/${path}`
 
-    // Bind this signed upload to a PENDING UploadSession (client review media).
-    // The pro/tenant aren't known until the review is attached, so only clientId
+    // Bind this signed upload to a PENDING UploadSession. The pro/tenant aren't
+    // known until attach, so only clientId (+ optional bookingId/phase for looks)
     // is recorded here; the attach route validates ownership by clientId.
     const surface = uploadSurfaceForKind(kind)
     let uploadSessionId: string | null = null
@@ -98,13 +123,15 @@ export async function POST(req: Request) {
         contentType,
         maxBytes: 30 * 1024 * 1024,
         clientId,
+        bookingId,
+        phase,
         now: new Date(),
       })
       uploadSessionId = session.id
     }
 
     return jsonOk({
-      kind: 'REVIEW_PUBLIC',
+      kind,
       bucket,
       path,
       token,

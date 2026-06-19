@@ -44,6 +44,8 @@ export const IDEMPOTENCY_ROUTES = {
   CLIENT_CHECKOUT_PRODUCTS: 'POST /api/client/bookings/[id]/checkout/products',
 
   CLIENT_REVIEW_CREATE: 'POST /api/client/bookings/[id]/review',
+
+  CLIENT_SHARE_LOOK: 'POST /api/client/bookings/[id]/share-look',
 } as const
 
 export type IdempotencyRoute =

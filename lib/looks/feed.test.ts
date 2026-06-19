@@ -115,6 +115,26 @@ describe('lib/looks/feed.ts', () => {
       )
     })
 
+    it('gates client-authored looks to opted-in public authors (pro looks always qualify)', () => {
+      const where = buildLooksFeedWhere({
+        tenant: ROOT_TENANT,
+        kind: 'ALL',
+      })
+
+      const andFilters = Array.isArray(where.AND) ? where.AND : []
+
+      expect(andFilters).toEqual(
+        expect.arrayContaining([
+          {
+            OR: [
+              { clientAuthorId: null },
+              { clientAuthor: { is: { isPublicProfile: true } } },
+            ],
+          },
+        ]),
+      )
+    })
+
     it('uses the canonical publicly approved pro statuses in the shared feed gate', () => {
       const where = buildLooksFeedWhere({
         tenant: ROOT_TENANT,

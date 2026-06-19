@@ -206,6 +206,16 @@ export function buildLooksFeedWhere(
 
   const and: Prisma.LookPostWhereInput[] = [
     buildLooksVisibilityFilter(args.kind),
+    // Attribution gate: pro-authored looks (clientAuthorId null) always qualify;
+    // a client-authored look only enters discovery once its author has opted into
+    // a public creator profile, so it's never surfaced anonymized. (Engagement
+    // loop / Share-your-look — see lib/looks/publication/clientLookService.ts.)
+    {
+      OR: [
+        { clientAuthorId: null },
+        { clientAuthor: { is: { isPublicProfile: true } } },
+      ],
+    },
   ]
 
   const categoryFilter = buildCategoryFilter(resolvedCategorySlug)

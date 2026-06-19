@@ -3117,6 +3117,10 @@ enum UploadSurface {
   PRO_LOOKS
   PRO_PORTFOLIO
   CLIENT_REVIEW
+  // Client publishes a look from their visit (Share-your-look capture). Uploads
+  // land in media-public (the client consents to a public-intent look asset),
+  // optionally carrying a BEFORE/AFTER phase.
+  CLIENT_LOOK
 }
 
 enum UploadSessionStatus {

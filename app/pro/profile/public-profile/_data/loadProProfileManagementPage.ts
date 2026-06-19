@@ -191,6 +191,10 @@ export async function loadProProfileManagementPage({
     prisma.lookPost.count({
       where: {
         professionalId: pro.id,
+        // Pro portfolio count is the pro's OWN work only — exclude looks a client
+        // authored from their visit (clientAuthorId set keeps professionalId as
+        // the tagged pro). See lib/looks/publication/clientLookService.ts.
+        clientAuthorId: null,
         status: LookPostStatus.PUBLISHED,
         moderationStatus: ModerationStatus.APPROVED,
         visibility: LookPostVisibility.PUBLIC,
