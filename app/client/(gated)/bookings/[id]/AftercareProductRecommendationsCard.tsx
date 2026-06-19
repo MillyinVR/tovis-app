@@ -663,7 +663,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
           </div>
 
           {error ? (
-            <div className="mt-3 text-[12px] font-semibold text-red-300">
+            <div className="mt-3 text-[12px] font-semibold text-toneDanger">
               {error}
             </div>
           ) : null}

@@ -179,7 +179,7 @@ function StatusCard(props: {
       className={cn(
         'rounded-card border p-4',
         tone === 'warning'
-          ? 'border-amber-400/20 bg-amber-500/10'
+          ? 'border-toneWarn/20 bg-toneWarn/10'
           : 'border-surfaceGlass/10 bg-bgSecondary',
       )}
     >

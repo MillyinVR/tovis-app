@@ -88,7 +88,7 @@ export function CreateAccountInviteCard({ actionToken, context }: Props) {
       <div className="mt-1.5 text-sm text-textSecondary">{copy.body}</div>
 
       {error ? (
-        <div className="mt-3 rounded-card border border-red-400/20 bg-red-400/5 px-3 py-2 text-xs font-semibold text-red-300">
+        <div className="mt-3 rounded-card border border-toneDanger/20 bg-toneDanger/5 px-3 py-2 text-xs font-semibold text-toneDanger">
           {error}
         </div>
       ) : null}

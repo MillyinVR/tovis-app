@@ -251,15 +251,15 @@ function statusPillClass(status: string): string {
   const normalized = upper(status)
 
   if (normalized === 'APPROVED') {
-    return 'border border-emerald-400/30 bg-emerald-400/10 text-emerald-300'
+    return 'border border-toneSuccess/30 bg-toneSuccess/10 text-toneSuccess'
   }
 
   if (normalized === 'REJECTED') {
-    return 'border border-red-400/30 bg-red-400/10 text-red-300'
+    return 'border border-toneDanger/30 bg-toneDanger/10 text-toneDanger'
   }
 
   if (normalized === 'PENDING') {
-    return 'border border-yellow-400/30 bg-yellow-400/10 text-yellow-200'
+    return 'border border-toneWarn/30 bg-toneWarn/10 text-toneWarn'
   }
 
   return 'border border-white/10 bg-bgPrimary text-textPrimary'
@@ -761,7 +761,7 @@ export default function PublicConsultationPage({ params }: PageProps) {
   if (state.kind === 'error') {
     return (
       <main className="mx-auto w-full max-w-[760px] px-4 pb-20 pt-16 text-textPrimary">
-        <div className="rounded-card border border-red-400/20 bg-red-400/5 p-5">
+        <div className="rounded-card border border-toneDanger/20 bg-toneDanger/5 p-5">
           <div className="text-sm font-black text-textPrimary">Consultation link unavailable</div>
           <div className="mt-2 text-sm text-textSecondary">{state.message}</div>
           <div className="mt-4 text-xs text-textSecondary/75">

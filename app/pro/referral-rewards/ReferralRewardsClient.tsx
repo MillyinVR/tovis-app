@@ -111,7 +111,7 @@ export default function ReferralRewardsClient(props: { initial: Settings }) {
       )}
 
       {saved && !err && (
-        <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+        <div className="rounded-xl border border-toneSuccess/30 bg-toneSuccess/10 px-4 py-3 text-sm text-toneSuccess">
           Settings saved.
         </div>
       )}

@@ -120,7 +120,7 @@ export default function AftercareNextAppointmentCard({
 
   if (confirmedBookingId) {
     return (
-      <div className="mt-3 rounded-card border border-emerald-400/20 bg-emerald-400/5 p-4">
+      <div className="mt-3 rounded-card border border-toneSuccess/20 bg-toneSuccess/5 p-4">
         <div className="text-sm font-black text-textPrimary">
           {COPY.bookings.aftercare.nextAppointmentConfirmedLabel}
         </div>

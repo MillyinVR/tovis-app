@@ -29,9 +29,9 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  PENDING: 'bg-yellow-500/20 text-yellow-300',
-  CONFIRMED: 'bg-blue-500/20 text-blue-300',
-  CONVERTED: 'bg-green-500/20 text-green-300',
+  PENDING: 'bg-toneWarn/20 text-toneWarn',
+  CONFIRMED: 'bg-toneInfo/20 text-toneInfo',
+  CONVERTED: 'bg-toneSuccess/20 text-toneSuccess',
   REWARDED: 'bg-accentPrimary/20 text-accentPrimary',
   DECLINED: 'bg-white/10 text-textMuted',
   EXPIRED: 'bg-white/10 text-textMuted',

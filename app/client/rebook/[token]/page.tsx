@@ -407,7 +407,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
 
       <div className="mt-4 grid gap-3">
         {paymentSettled ? (
-          <section className="rounded-card border border-emerald-400/20 bg-emerald-400/5 p-5">
+          <section className="rounded-card border border-toneSuccess/20 bg-toneSuccess/5 p-5">
             <div className="text-[14px] font-black text-textPrimary">
               Payment received
             </div>
@@ -421,7 +421,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
         ) : checkoutAvailability.status === 'PAYABLE' ? (
           <>
             {checkoutParam === 'cancelled' ? (
-              <section className="rounded-card border border-yellow-400/20 bg-yellow-400/5 px-4 py-3 text-sm text-textSecondary">
+              <section className="rounded-card border border-toneWarn/20 bg-toneWarn/5 px-4 py-3 text-sm text-textSecondary">
                 Checkout was canceled. You can complete your payment below
                 whenever you’re ready.
               </section>

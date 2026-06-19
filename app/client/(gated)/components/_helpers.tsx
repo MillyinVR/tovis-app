@@ -102,7 +102,7 @@ export function Badge({
       : variant === 'danger'
         ? 'bg-microAccent text-bgPrimary'
         : variant === 'success'
-          ? 'bg-emerald-400 text-bgPrimary'
+          ? 'bg-toneSuccess text-bgPrimary'
           : 'bg-bgSecondary text-textPrimary border border-white/10'
 
   return (

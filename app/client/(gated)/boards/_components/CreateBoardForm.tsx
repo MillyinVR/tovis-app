@@ -45,7 +45,7 @@ export default function CreateBoardForm({
       )}
     >
       {errorMessage ? (
-        <div className="mb-4 rounded-card border border-red-400/20 bg-red-400/10 px-4 py-3 text-[13px] text-textPrimary">
+        <div className="mb-4 rounded-card border border-toneDanger/20 bg-toneDanger/10 px-4 py-3 text-[13px] text-textPrimary">
           {errorMessage}
         </div>
       ) : null}
