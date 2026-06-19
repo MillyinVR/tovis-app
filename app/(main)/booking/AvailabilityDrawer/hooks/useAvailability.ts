@@ -240,6 +240,7 @@ export function useAvailability(
   const ctxViewerLng = context.viewerLng
   const ctxViewerRadiusMiles = context.viewerRadiusMiles
   const ctxViewerPlaceId = context.viewerPlaceId
+  const ctxInitialStartDate = context.initialStartDate ?? null
 
   const contextRef = useRef(context)
   contextRef.current = context
@@ -339,7 +340,7 @@ export function useAvailability(
           : null,
         includeOtherPros: false,
         days: INITIAL_WINDOW_DAYS,
-        startDate: null,
+        startDate: ctxInitialStartDate,
       }),
     [
       ctxProfessionalId,
@@ -349,6 +350,7 @@ export function useAvailability(
       ctxViewerLng,
       ctxViewerRadiusMiles,
       ctxViewerPlaceId,
+      ctxInitialStartDate,
       locationType,
       requestedLocationId,
       normalizedClientAddressId,
@@ -367,11 +369,11 @@ export function useAvailability(
       mediaId: primaryPrefetchArgs.mediaId,
       clientAddressId: primaryPrefetchArgs.clientAddressId,
       viewer: primaryPrefetchArgs.viewer,
-      startDate: null,
+      startDate: ctxInitialStartDate,
       days: INITIAL_WINDOW_DAYS,
       includeOtherPros: false,
     })
-  }, [primaryPrefetchArgs])
+  }, [primaryPrefetchArgs, ctxInitialStartDate])
 
   const fullPrefetchArgs = useMemo(() => {
     if (!includeOtherPros) return null
@@ -385,7 +387,7 @@ export function useAvailability(
         : null,
       includeOtherPros: true,
       days: INITIAL_WINDOW_DAYS,
-      startDate: null,
+      startDate: ctxInitialStartDate,
     })
   }, [
     ctxProfessionalId,
@@ -395,6 +397,7 @@ export function useAvailability(
     ctxViewerLng,
     ctxViewerRadiusMiles,
     ctxViewerPlaceId,
+    ctxInitialStartDate,
     locationType,
     requestedLocationId,
     normalizedClientAddressId,
@@ -413,11 +416,11 @@ export function useAvailability(
       mediaId: fullPrefetchArgs.mediaId,
       clientAddressId: fullPrefetchArgs.clientAddressId,
       viewer: fullPrefetchArgs.viewer,
-      startDate: null,
+      startDate: ctxInitialStartDate,
       days: INITIAL_WINDOW_DAYS,
       includeOtherPros: true,
     })
-  }, [fullPrefetchArgs, includeOtherPros])
+  }, [fullPrefetchArgs, includeOtherPros, ctxInitialStartDate])
 
   const loadOtherProsOnly = useCallback(async () => {
     if (!includeOtherPros || !fullPrefetchArgs) return
@@ -435,7 +438,7 @@ export function useAvailability(
     try {
       const fullPage = await fetchAvailabilitySummaryWindow({
         ...fullPrefetchArgs,
-        startDate: null,
+        startDate: ctxInitialStartDate,
         days: INITIAL_WINDOW_DAYS,
         includeOtherPros: true,
       })
@@ -478,6 +481,7 @@ export function useAvailability(
     includeOtherPros,
     fullPrefetchArgs,
     fullWindowKey,
+    ctxInitialStartDate,
     startBackgroundRefresh,
     completeBackgroundRefresh,
     cancelBackgroundRefresh,
@@ -522,7 +526,7 @@ export function useAvailability(
 
         const initialPage = await fetchAvailabilitySummaryWindow({
           ...initialArgs,
-          startDate: null,
+          startDate: ctxInitialStartDate,
           days: INITIAL_WINDOW_DAYS,
           includeOtherPros: shouldLoadFullBootstrap,
         })
@@ -590,6 +594,7 @@ export function useAvailability(
       fullWindowKey,
       primaryPrefetchArgs,
       primaryWindowKey,
+      ctxInitialStartDate,
       startBackgroundRefresh,
       completeBackgroundRefresh,
       cancelBackgroundRefresh,

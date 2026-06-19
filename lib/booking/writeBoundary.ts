@@ -10461,6 +10461,7 @@ if (
       rebookedFor: args.rebookedFor,
       rebookWindowStart: args.rebookWindowStart,
       rebookWindowEnd: args.rebookWindowEnd,
+      rebookDeclinedAt: null,
 
       // Important:
       // Do not mark sent here. Sending is only true after the access delivery
@@ -10477,6 +10478,8 @@ if (
       rebookedFor: args.rebookedFor,
       rebookWindowStart: args.rebookWindowStart,
       rebookWindowEnd: args.rebookWindowEnd,
+      // A freshly saved proposal supersedes any prior client decline.
+      rebookDeclinedAt: null,
 
       // Important:
       // Preserve existing sent state, but do not create a new sent state yet.
@@ -12816,6 +12819,147 @@ export async function createClientRebookedBookingFromAftercare(
       requestId: args.requestId ?? null,
       idempotencyKey: args.idempotencyKey ?? null,
     })
+  })
+}
+
+const AFTERCARE_NEXT_APPOINTMENT_SELECT = {
+  id: true,
+  rebookMode: true,
+  rebookedFor: true,
+  booking: {
+    select: {
+      id: true,
+      clientId: true,
+      professionalId: true,
+    },
+  },
+} satisfies Prisma.AftercareSummarySelect
+
+type AftercareNextAppointmentRecord = Prisma.AftercareSummaryGetPayload<{
+  select: typeof AFTERCARE_NEXT_APPOINTMENT_SELECT
+}>
+
+type ConfirmClientAftercareNextAppointmentArgs = {
+  bookingId: string
+  clientId: string
+  requestId?: string | null
+  idempotencyKey?: string | null
+}
+
+/**
+ * Session-authenticated confirm of a pro-proposed next appointment
+ * (AftercareRebookMode.BOOKED_NEXT_APPOINTMENT). Creates the rebooked booking at
+ * the pro's proposed `rebookedFor`, ACCEPTED immediately (the pro already chose
+ * the time). Token-free counterpart of createClientRebookedBookingFromAftercare;
+ * idempotent on (rebookOfBookingId, clientId, professionalId, scheduledFor).
+ */
+export async function confirmClientAftercareNextAppointment(
+  args: ConfirmClientAftercareNextAppointmentArgs,
+): Promise<CreateClientRebookedBookingFromAftercareResult> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+
+  return prisma.$transaction(async (tx) => {
+    const loadAftercare = (): Promise<AftercareNextAppointmentRecord | null> =>
+      tx.aftercareSummary.findUnique({
+        where: { bookingId: args.bookingId },
+        select: AFTERCARE_NEXT_APPOINTMENT_SELECT,
+      })
+
+    const assertConfirmable = (
+      record: AftercareNextAppointmentRecord | null,
+    ): { aftercareId: string; professionalId: string; scheduledFor: Date } => {
+      if (!record || !record.booking) {
+        throw bookingError('BOOKING_NOT_FOUND')
+      }
+      if (record.booking.id !== args.bookingId) {
+        throw bookingError('BOOKING_NOT_FOUND')
+      }
+      if (record.booking.clientId !== args.clientId) {
+        throw bookingError('FORBIDDEN')
+      }
+      if (
+        record.rebookMode !== AftercareRebookMode.BOOKED_NEXT_APPOINTMENT ||
+        !record.rebookedFor
+      ) {
+        throw bookingError('AFTERCARE_NOT_COMPLETED', {
+          message: 'No proposed next appointment to confirm.',
+          userMessage: 'There is no proposed next appointment to confirm.',
+        })
+      }
+      return {
+        aftercareId: record.id,
+        professionalId: record.booking.professionalId,
+        scheduledFor: record.rebookedFor,
+      }
+    }
+
+    const preLock = assertConfirmable(await loadAftercare())
+
+    await lockProfessionalSchedule(tx, preLock.professionalId)
+
+    const locked = assertConfirmable(await loadAftercare())
+
+    return performLockedCreateRebookedBooking({
+      tx,
+      now: new Date(),
+      bookingId: args.bookingId,
+      professionalId: locked.professionalId,
+      scheduledFor: locked.scheduledFor,
+      initialStatus: BookingStatus.ACCEPTED,
+      clientId: args.clientId,
+      aftercareId: locked.aftercareId,
+      aftercareClientActionTokenId: null,
+      requestId: args.requestId ?? null,
+      idempotencyKey: args.idempotencyKey ?? null,
+    })
+  })
+}
+
+type DeclineClientAftercareNextAppointmentArgs = {
+  bookingId: string
+  clientId: string
+}
+
+/**
+ * Session-authenticated decline of a pro-proposed next appointment. Records the
+ * decline (rebookDeclinedAt) while preserving the proposal so the pro can see it
+ * was declined and offer another time. The client UI then shows a declined state
+ * with a "schedule a different time" path. Cleared when the pro saves a new
+ * proposal (see performLockedUpsertBookingAftercare).
+ */
+export async function declineClientAftercareNextAppointment(
+  args: DeclineClientAftercareNextAppointmentArgs,
+): Promise<{ ok: true }> {
+  assertNonEmptyBookingId(args.bookingId)
+  assertNonEmptyClientId(args.clientId)
+
+  return prisma.$transaction(async (tx) => {
+    const record: AftercareNextAppointmentRecord | null =
+      await tx.aftercareSummary.findUnique({
+        where: { bookingId: args.bookingId },
+        select: AFTERCARE_NEXT_APPOINTMENT_SELECT,
+      })
+
+    if (!record || !record.booking || record.booking.id !== args.bookingId) {
+      throw bookingError('BOOKING_NOT_FOUND')
+    }
+    if (record.booking.clientId !== args.clientId) {
+      throw bookingError('FORBIDDEN')
+    }
+    if (record.rebookMode !== AftercareRebookMode.BOOKED_NEXT_APPOINTMENT) {
+      throw bookingError('AFTERCARE_NOT_COMPLETED', {
+        message: 'No proposed next appointment to decline.',
+        userMessage: 'There is no proposed next appointment to decline.',
+      })
+    }
+
+    await tx.aftercareSummary.update({
+      where: { id: record.id },
+      data: { rebookDeclinedAt: new Date() },
+    })
+
+    return { ok: true as const }
   })
 }
 

@@ -26,6 +26,13 @@ export type DrawerContext = {
   offeringId?: string | null
   source?: BookingSource
 
+  /**
+   * Optional YMD (pro-timezone) to anchor the initial availability window to.
+   * Used by the aftercare rebook entry point so the drawer opens on the pro's
+   * recommended rebook window instead of today. Null/omitted = open on today.
+   */
+  initialStartDate?: string | null
+
   // optional viewer location (for "other pros near you")
   viewerLat?: number | null
   viewerLng?: number | null

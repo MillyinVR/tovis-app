@@ -2727,6 +2727,9 @@ model AftercareSummary {
   rebookedFor       DateTime?
   rebookWindowStart DateTime?
   rebookWindowEnd   DateTime?
+  // Set when the client declines a pro-proposed BOOKED_NEXT_APPOINTMENT. Cleared
+  // when the pro saves a new proposal. Lets the pro see the decline and re-offer.
+  rebookDeclinedAt  DateTime?
   rebookSlot        AftercareRebookSlot?
 
   draftSavedAt   DateTime?

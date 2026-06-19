@@ -139,6 +139,7 @@ const GET_BOOKING_SELECT = {
       rebookedFor: true,
       rebookWindowStart: true,
       rebookWindowEnd: true,
+      rebookDeclinedAt: true,
       draftSavedAt: true,
       sentToClientAt: true,
       lastEditedAt: true,
@@ -633,6 +634,7 @@ function mapAftercareSummaryForGet(
     rebookedFor: toIsoOrNull(aftercare.rebookedFor),
     rebookWindowStart: toIsoOrNull(aftercare.rebookWindowStart),
     rebookWindowEnd: toIsoOrNull(aftercare.rebookWindowEnd),
+    rebookDeclinedAt: toIsoOrNull(aftercare.rebookDeclinedAt),
     rebookSlot: aftercare.rebookSlot
       ? {
           id: aftercare.rebookSlot.id,
