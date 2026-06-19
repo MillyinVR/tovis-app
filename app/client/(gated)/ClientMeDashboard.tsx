@@ -129,7 +129,7 @@ function ProfileAvatar(props: {
     return (
       <div
         className={cn(
-          'overflow-hidden rounded-full border border-white/10 bg-bgSecondary',
+          'overflow-hidden rounded-full border border-textPrimary/10 bg-bgSecondary',
           sizeClassName,
         )}
       >
@@ -148,7 +148,7 @@ function ProfileAvatar(props: {
   return (
     <div
       className={cn(
-        'grid place-items-center rounded-full border border-white/10 bg-bgSecondary font-black text-textPrimary',
+        'grid place-items-center rounded-full border border-textPrimary/10 bg-bgSecondary font-black text-textPrimary',
         sizeClassName,
         textClassName,
       )}
@@ -183,7 +183,7 @@ function SectionTabs(props: {
   ]
 
   return (
-    <div className="border-b border-white/10">
+    <div className="border-b border-textPrimary/10">
       <div className="flex items-center gap-7">
         {tabs.map((tab) => {
           const active = tab.key === props.value
@@ -233,7 +233,7 @@ function UpcomingCard(props: {
       </div>
 
       <div className="flex gap-3">
-        <div className="h-[58px] w-[58px] shrink-0 rounded-[16px] border border-white/10 bg-bgSecondary" />
+        <div className="h-[58px] w-[58px] shrink-0 rounded-[16px] border border-textPrimary/10 bg-bgSecondary" />
 
         <div className="min-w-0 flex-1">
           <div className="truncate text-[15px] font-black text-textPrimary">
@@ -258,14 +258,14 @@ function PrototypeThumb(props: {
 
   if (previews.length === 0) {
     return (
-      <div className="grid aspect-[1/1] place-items-center rounded-[22px] border border-white/10 bg-bgSecondary text-[12px] font-bold text-textSecondary">
+      <div className="grid aspect-[1/1] place-items-center rounded-[22px] border border-textPrimary/10 bg-bgSecondary text-[12px] font-bold text-textSecondary">
         No preview
       </div>
     )
   }
 
   return (
-    <div className="grid aspect-[1/1] grid-cols-2 gap-[1px] overflow-hidden rounded-[22px] border border-white/10 bg-bgSecondary">
+    <div className="grid aspect-[1/1] grid-cols-2 gap-[1px] overflow-hidden rounded-[22px] border border-textPrimary/10 bg-bgSecondary">
       {previews.map((src, index) => (
         <div key={`${src}-${index}`} className="min-h-0 min-w-0 overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -291,8 +291,8 @@ function CreateBoardRow(props: { href: string }) {
     <Link
       href={props.href}
       className={cn(
-        'flex min-h-[48px] items-center gap-3 rounded-[18px] border border-dashed border-white/10 px-4 transition',
-        'text-textSecondary hover:border-white/20 hover:text-textPrimary',
+        'flex min-h-[48px] items-center gap-3 rounded-[18px] border border-dashed border-textPrimary/10 px-4 transition',
+        'text-textSecondary hover:border-textPrimary/20 hover:text-textPrimary',
       )}
     >
       <span className="text-[22px] leading-none">+</span>
@@ -328,7 +328,7 @@ function FollowingCard(props: { item: FollowingItem }) {
   return (
     <Link
       href={item.href}
-      className="flex items-center gap-3 rounded-[22px] border border-white/10 px-3 py-3 transition hover:border-white/20"
+      className="flex items-center gap-3 rounded-[22px] border border-textPrimary/10 px-3 py-3 transition hover:border-textPrimary/20"
     >
       <ProfileAvatar
         displayName={item.name}
@@ -359,7 +359,7 @@ function HistoryCard(props: { item: HistoryItem }) {
 
   return (
     <Link href={item.href} className="block">
-      <div className="overflow-hidden rounded-[24px] border border-white/10">
+      <div className="overflow-hidden rounded-[24px] border border-textPrimary/10">
         <div className="aspect-[1.18/1] bg-bgSecondary">
           {item.heroImageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -404,7 +404,7 @@ function EmptyState(props: {
   actionLabel?: string
 }) {
   return (
-    <div className="rounded-[24px] border border-white/10 px-4 py-8 text-center">
+    <div className="mx-auto max-w-[640px] rounded-[24px] border border-textPrimary/10 px-4 py-8 text-center">
       <div className="text-[15px] font-black text-textPrimary">{props.title}</div>
       <div className="mt-2 text-[13px] text-textSecondary">{props.body}</div>
 
@@ -412,7 +412,7 @@ function EmptyState(props: {
         <div className="mt-4">
           <Link
             href={props.actionHref}
-            className="inline-flex min-h-11 items-center rounded-full border border-white/10 px-4 py-2 text-[12px] font-black text-textPrimary transition hover:border-white/20"
+            className="inline-flex min-h-11 items-center rounded-full border border-textPrimary/10 px-4 py-2 text-[12px] font-black text-textPrimary transition hover:border-textPrimary/20"
           >
             {props.actionLabel}
           </Link>
@@ -444,7 +444,7 @@ export default function ClientMeDashboard({
 
   return (
     <div className="h-full overflow-y-auto bg-bgPrimary text-textPrimary">
-      <div className="mx-auto w-full max-w-[430px] px-4 pb-28 pt-6">
+      <div className="mx-auto w-full max-w-[1040px] px-5 pb-28 pt-6 md:px-8 lg:px-10">
         <section>
           <div className="flex items-center justify-between gap-3">
             <div className="text-[11px] font-black tracking-[0.18em] text-textSecondary">
@@ -481,7 +481,7 @@ export default function ClientMeDashboard({
         </section>
 
         {upcomingNotificationBooking ? (
-          <section className="mt-6">
+          <section className="mt-6 max-w-[640px]">
             <UpcomingCard booking={upcomingNotificationBooking} />
           </section>
         ) : null}
@@ -499,7 +499,7 @@ export default function ClientMeDashboard({
             ) : null}
 
             {boards.length > 0 ? (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-6">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-6 md:grid-cols-3 lg:grid-cols-4">
                 {boards.map((board) => (
                   <BoardCard key={board.id} board={board} />
                 ))}
@@ -518,7 +518,7 @@ export default function ClientMeDashboard({
         {tab === 'following' ? (
           <section className="mt-5">
             {following.length > 0 ? (
-              <div className="grid gap-3">
+              <div className="grid gap-3 md:grid-cols-2">
                 {following.map((item) => (
                   <FollowingCard key={item.id} item={item} />
                 ))}
@@ -535,7 +535,7 @@ export default function ClientMeDashboard({
         {tab === 'history' ? (
           <section className="mt-5">
             {history.length > 0 ? (
-              <div className="grid grid-cols-1 gap-5">
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
                 {history.map((item) => (
                   <HistoryCard key={item.id} item={item} />
                 ))}
