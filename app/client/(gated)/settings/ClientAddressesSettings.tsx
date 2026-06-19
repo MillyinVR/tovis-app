@@ -940,7 +940,7 @@ export default function ClientAddressesSettings() {
   return (
     <div className="grid gap-6">
       {err ? (
-        <div className="rounded-card border border-rose-400/20 bg-rose-500/10 p-3 text-sm font-semibold text-rose-200">
+        <div className="rounded-card border border-toneDanger/20 bg-toneDanger/10 p-3 text-sm font-semibold text-toneDanger">
           {err}
         </div>
       ) : null}
@@ -1024,7 +1024,7 @@ export default function ClientAddressesSettings() {
                       type="button"
                       onClick={() => void removeAddress(address)}
                       disabled={deletingId === address.id || saving}
-                      className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-rose-200 hover:text-rose-100 disabled:opacity-60"
+                      className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-toneDanger hover:opacity-80 disabled:opacity-60"
                     >
                       {deletingId === address.id ? 'Deleting…' : 'Delete'}
                     </button>
@@ -1266,7 +1266,7 @@ export default function ClientAddressesSettings() {
                         type="button"
                         onClick={() => void removeAddress(address)}
                         disabled={deletingId === address.id || saving}
-                        className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-rose-200 hover:text-rose-100 disabled:opacity-60"
+                        className="rounded-full border border-white/10 bg-transparent px-3 py-1.5 text-xs font-black text-toneDanger hover:opacity-80 disabled:opacity-60"
                       >
                         {deletingId === address.id ? 'Deleting…' : 'Delete'}
                       </button>

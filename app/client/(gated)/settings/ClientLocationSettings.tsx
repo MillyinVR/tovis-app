@@ -249,7 +249,7 @@ export default function ClientLocationSettings() {
           className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
         />
 
-        {err ? <div className="text-[12px] font-semibold text-rose-300">{err}</div> : null}
+        {err ? <div className="text-[12px] font-semibold text-toneDanger">{err}</div> : null}
         {loading ? <div className="text-[12px] font-semibold text-textSecondary">Searching…</div> : null}
 
         {predictions.length ? (
