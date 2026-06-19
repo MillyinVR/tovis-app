@@ -2,10 +2,11 @@
 import 'server-only'
 
 import { redirect } from 'next/navigation'
-import { BookingStatus, Prisma } from '@prisma/client'
+import { BookingStatus, MediaPhase, MediaType, Prisma } from '@prisma/client'
 
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { getBoardSummaries } from '@/lib/boards'
 import {
   buildMyFollowingListResponse,
@@ -155,11 +156,13 @@ type ClientMeHistoryItem =
       kind: 'completed'
       label: 'BOOKED'
       booking: ClientBookingDTO
+      heroImageUrl: string | null
     }
   | {
       kind: 'upcoming'
       label: 'UPCOMING'
       booking: ClientBookingDTO
+      heroImageUrl: string | null
     }
 
 export type ClientMePageData = {
@@ -197,6 +200,56 @@ async function requireAuthedClientUser(): Promise<AuthedClientUser> {
   }
 
   return user
+}
+
+/**
+ * Resolve the result ("after") photo for a set of completed bookings.
+ *
+ * After-photos live in the private session bucket, so they're rendered via
+ * {@link renderMediaUrls} (signed URLs) — never by reading `url`/`thumbUrl`
+ * directly. This is the client viewing their OWN visits, so they're an
+ * authorized participant. Returns one hero URL per booking that has an image.
+ */
+async function loadHistoryHeroImageUrls(
+  bookingIds: string[],
+): Promise<Map<string, string>> {
+  const heroByBooking = new Map<string, string>()
+  if (bookingIds.length === 0) return heroByBooking
+
+  const rows = await prisma.mediaAsset.findMany({
+    where: {
+      bookingId: { in: bookingIds },
+      phase: MediaPhase.AFTER,
+      mediaType: MediaType.IMAGE,
+    },
+    orderBy: [{ bookingId: 'asc' }, { createdAt: 'desc' }],
+    select: {
+      bookingId: true,
+      storageBucket: true,
+      storagePath: true,
+      thumbBucket: true,
+      thumbPath: true,
+      url: true,
+      thumbUrl: true,
+    },
+  })
+
+  // `orderBy createdAt desc` makes the first row per booking the most recent.
+  const latestByBooking = new Map<string, (typeof rows)[number]>()
+  for (const row of rows) {
+    if (!row.bookingId || latestByBooking.has(row.bookingId)) continue
+    latestByBooking.set(row.bookingId, row)
+  }
+
+  await Promise.all(
+    Array.from(latestByBooking.entries()).map(async ([bookingId, row]) => {
+      const { renderUrl, renderThumbUrl } = await renderMediaUrls(row)
+      const hero = renderThumbUrl ?? renderUrl
+      if (hero) heroByBooking.set(bookingId, hero)
+    }),
+  )
+
+  return heroByBooking
 }
 
 function toTimestamp(value: string): number {
@@ -378,16 +431,22 @@ export async function loadClientMePage(): Promise<ClientMePageData> {
 
   const upcomingNotificationBooking = upcomingBookings[0] ?? null
 
+  const historyHeroImageUrls = await loadHistoryHeroImageUrls(
+    completedBookings.map((booking) => booking.id),
+  )
+
   const historyUpcoming: ClientMeHistoryItem[] = upcomingBookings.map((booking) => ({
     kind: 'upcoming',
     label: 'UPCOMING',
     booking,
+    heroImageUrl: null,
   }))
 
   const historyCompleted: ClientMeHistoryItem[] = completedBookings.map((booking) => ({
     kind: 'completed',
     label: 'BOOKED',
     booking,
+    heroImageUrl: historyHeroImageUrls.get(booking.id) ?? null,
   }))
 
   const following = buildMyFollowingListResponse({

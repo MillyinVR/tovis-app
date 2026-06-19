@@ -156,7 +156,7 @@ export default async function ClientMePage() {
     }`,
     title: item.booking.display.title,
     label: item.label,
-    heroImageUrl: null,
+    heroImageUrl: item.heroImageUrl,
   }))
 
   return (
