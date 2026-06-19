@@ -26,11 +26,10 @@ function btnVariant(kind: 'primary' | 'warn' | 'danger') {
   if (kind === 'primary') {
     return 'border border-surfaceGlass/25 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover'
   }
-  // Keep warn/danger readable without introducing new token work right now.
   if (kind === 'warn') {
-    return 'border border-amber-700/70 text-amber-600 bg-bgSecondary hover:bg-surfaceGlass/10'
+    return 'border border-toneWarn/70 text-toneWarn bg-bgSecondary hover:bg-surfaceGlass/10'
   }
-  return 'border border-red-700/70 text-red-500 bg-bgSecondary hover:bg-surfaceGlass/10'
+  return 'border border-toneDanger/70 text-toneDanger bg-bgSecondary hover:bg-surfaceGlass/10'
 }
 
 export default function AdminProActions({ professionalId, currentStatus, licenseVerified }: Props) {
@@ -105,7 +104,7 @@ export default function AdminProActions({ professionalId, currentStatus, license
         License verified: <span className="font-bold text-textPrimary">{licenseVerified ? 'Yes' : 'No'}</span>
       </div>
 
-      {err ? <div className="text-[13px] text-red-500">{err}</div> : null}
+      {err ? <div className="text-[13px] text-toneDanger">{err}</div> : null}
     </div>
   )
 }

@@ -180,31 +180,31 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
           {baseUrl ? (
             <span className="font-mono">{baseUrl}</span>
           ) : (
-            <span className="font-mono text-red-700">MISSING (set NEXT_PUBLIC_APP_URL)</span>
+            <span className="font-mono text-toneDanger">MISSING (set NEXT_PUBLIC_APP_URL)</span>
           )}
         </div>
 
         {baseUrlMissing ? (
-          <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <div className="mt-2 rounded-xl border border-toneDanger/30 bg-toneDanger/10 px-3 py-2 text-sm text-toneDanger">
             Base URL could not be derived from headers. Set <span className="font-mono">NEXT_PUBLIC_APP_URL</span> so you
             don’t accidentally program tags with the wrong URL.
           </div>
         ) : null}
 
         {createdFlag ? (
-          <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          <div className="mt-2 rounded-xl border border-toneSuccess/30 bg-toneSuccess/10 px-3 py-2 text-sm text-toneSuccess">
             Cards generated. They’ll appear in “Recent cards” below.
           </div>
         ) : null}
 
         {errorFlag === 'qty' ? (
-          <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <div className="mt-2 rounded-xl border border-toneDanger/30 bg-toneDanger/10 px-3 py-2 text-sm text-toneDanger">
             Quantity must be between 1 and 500.
           </div>
         ) : null}
 
         {errorFlag === 'tenantSlug' ? (
-          <div className="mt-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <div className="mt-2 rounded-xl border border-toneDanger/30 bg-toneDanger/10 px-3 py-2 text-sm text-toneDanger">
             An active tenant slug is required for <span className="font-mono">SALON_WHITE_LABEL</span> cards.
           </div>
         ) : null}
