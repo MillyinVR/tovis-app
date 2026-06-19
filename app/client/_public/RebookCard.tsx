@@ -214,7 +214,7 @@ export function RebookCard({
 
   if (booking.kind === 'booked') {
     return (
-      <div className="rounded-card border border-emerald-400/20 bg-emerald-400/5 p-4">
+      <div className="rounded-card border border-toneSuccess/20 bg-toneSuccess/5 p-4">
         <div className="text-sm font-black text-textPrimary">
           Appointment requested
         </div>
@@ -282,7 +282,7 @@ export function RebookCard({
       </div>
 
       {booking.kind === 'error' ? (
-        <div className="mt-3 rounded-card border border-red-400/20 bg-red-400/5 px-3 py-2 text-xs font-semibold text-red-300">
+        <div className="mt-3 rounded-card border border-toneDanger/20 bg-toneDanger/5 px-3 py-2 text-xs font-semibold text-toneDanger">
           {booking.message}
         </div>
       ) : null}

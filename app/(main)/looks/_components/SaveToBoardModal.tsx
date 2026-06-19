@@ -431,7 +431,7 @@ export default function SaveToBoardModal({
 
           <div className="min-h-0 flex-1 overflow-y-auto p-4 overscroll-y-contain [webkit-overflow-scrolling:touch]">
             {errorMessage ? (
-              <div className="mb-4 rounded-card border border-red-400/20 bg-red-400/10 px-4 py-3 text-[13px] text-textPrimary">
+              <div className="mb-4 rounded-card border border-toneDanger/20 bg-toneDanger/10 px-4 py-3 text-[13px] text-textPrimary">
                 {errorMessage}
               </div>
             ) : null}
@@ -439,7 +439,7 @@ export default function SaveToBoardModal({
             {mode === 'create' ? (
               <form onSubmit={createBoardInline} className="grid gap-4">
                 {createError ? (
-                  <div className="rounded-card border border-red-400/20 bg-red-400/10 px-4 py-3 text-[13px] text-textPrimary">
+                  <div className="rounded-card border border-toneDanger/20 bg-toneDanger/10 px-4 py-3 text-[13px] text-textPrimary">
                     {createError}
                   </div>
                 ) : null}
