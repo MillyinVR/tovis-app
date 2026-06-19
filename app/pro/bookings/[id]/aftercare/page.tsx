@@ -524,6 +524,7 @@ export default async function ProAftercarePage({ params }: PageProps) {
           rebookMode: true,
           rebookWindowStart: true,
           rebookWindowEnd: true,
+          rebookDeclinedAt: true,
           draftSavedAt: true,
           sentToClientAt: true,
           lastEditedAt: true,
@@ -733,6 +734,7 @@ export default async function ProAftercarePage({ params }: PageProps) {
               aftercare?.rebookWindowStart,
             )}
             existingRebookWindowEnd={dateToIso(aftercare?.rebookWindowEnd)}
+            existingRebookDeclinedAt={dateToIso(aftercare?.rebookDeclinedAt)}
             existingMedia={existingMedia}
             existingRecommendedProducts={existingRecommendedProducts}
             existingDraftSavedAt={dateToIso(aftercare?.draftSavedAt)}
