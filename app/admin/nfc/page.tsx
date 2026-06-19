@@ -173,9 +173,9 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
     <main className="mx-auto w-full max-w-6xl px-4 py-8">
       <div className="mb-8 flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">NFC Cards</h1>
-        <p className="text-sm text-neutral-600">Generate cards, program physical tags, and track claim status.</p>
+        <p className="text-sm text-textSecondary">Generate cards, program physical tags, and track claim status.</p>
 
-        <div className="text-xs text-neutral-500">
+        <div className="text-xs text-textSecondary">
           Base URL:{' '}
           {baseUrl ? (
             <span className="font-mono">{baseUrl}</span>
@@ -211,30 +211,30 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
       </div>
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-5 shadow-sm">
           <h2 className="text-base font-semibold">Generate cards</h2>
-          <p className="mt-1 text-sm text-neutral-600">
+          <p className="mt-1 text-sm text-textSecondary">
             Recommended: <span className="font-medium">{NfcCardType.UNASSIGNED}</span>. First signup/login claims the card.
           </p>
 
           <form action={createCards} className="mt-5 grid gap-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <label className="grid gap-1">
-                <span className="text-xs font-medium text-neutral-700">Quantity</span>
+                <span className="text-xs font-medium text-textSecondary">Quantity</span>
                 <input
                   name="qty"
                   defaultValue="25"
                   inputMode="numeric"
-                  className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-300"
+                  className="h-11 rounded-xl border border-white/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-white/30"
                 />
               </label>
 
               <label className="grid gap-1 sm:col-span-2">
-                <span className="text-xs font-medium text-neutral-700">Type</span>
+                <span className="text-xs font-medium text-textSecondary">Type</span>
                 <select
                   name="type"
                   defaultValue={NfcCardType.UNASSIGNED}
-                  className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-300"
+                  className="h-11 rounded-xl border border-white/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-white/30"
                 >
                   <option value={NfcCardType.UNASSIGNED}>UNASSIGNED (recommended)</option>
                   <option value={NfcCardType.CLIENT_REFERRAL}>CLIENT_REFERRAL</option>
@@ -246,11 +246,11 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="grid gap-1">
-                <span className="text-xs font-medium text-neutral-700">Active?</span>
+                <span className="text-xs font-medium text-textSecondary">Active?</span>
                 <select
                   name="isActive"
                   defaultValue="true"
-                  className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-300"
+                  className="h-11 rounded-xl border border-white/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-white/30"
                 >
                   <option value="true">Yes (tap works)</option>
                   <option value="false">No (tap goes invalid)</option>
@@ -258,46 +258,46 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
               </label>
 
               <label className="grid gap-1">
-                <span className="text-xs font-medium text-neutral-700">Tenant slug (only for white label)</span>
+                <span className="text-xs font-medium text-textSecondary">Tenant slug (only for white label)</span>
                 <input
                   name="tenantSlug"
                   placeholder="e.g. luxe-la"
-                  className="h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-neutral-300"
+                  className="h-11 rounded-xl border border-white/15 bg-bgPrimary px-3 text-sm text-textPrimary outline-none focus:border-white/30"
                 />
               </label>
             </div>
 
             <button
               type="submit"
-              className="mt-1 inline-flex h-11 items-center justify-center rounded-xl bg-neutral-900 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-neutral-800 active:bg-neutral-950"
+              className="mt-1 inline-flex h-11 items-center justify-center rounded-xl bg-accentPrimary px-4 text-sm font-semibold text-bgPrimary shadow-sm transition hover:bg-accentPrimaryHover active:bg-accentPrimaryHover"
             >
               Generate
             </button>
 
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-textSecondary">
               Tip: set <span className="font-mono">NEXT_PUBLIC_APP_URL</span> in production so URLs are always correct.
             </p>
           </form>
         </div>
 
-        <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-5 shadow-sm">
           <h2 className="text-base font-semibold">Programming guide</h2>
-          <ol className="mt-3 grid gap-2 text-sm text-neutral-700">
-            <li className="rounded-xl bg-neutral-50 p-3">1) Generate cards (UNASSIGNED + Active).</li>
-            <li className="rounded-xl bg-neutral-50 p-3">
+          <ol className="mt-3 grid gap-2 text-sm text-textSecondary">
+            <li className="rounded-xl bg-bgPrimary p-3">1) Generate cards (UNASSIGNED + Active).</li>
+            <li className="rounded-xl bg-bgPrimary p-3">
               2) Write the <span className="font-medium">Tap URL</span> to the NFC tag (URL record).
             </li>
-            <li className="rounded-xl bg-neutral-50 p-3">
+            <li className="rounded-xl bg-bgPrimary p-3">
               3) Print the short code (e.g. <span className="font-mono">TOV-8K3D-2QFJ</span>) on the card.
             </li>
-            <li className="rounded-xl bg-neutral-50 p-3">
+            <li className="rounded-xl bg-bgPrimary p-3">
               4) If someone can’t tap, they can use the code URL (<span className="font-mono">/c/&lt;code&gt;</span>).
             </li>
           </ol>
 
-          <div className="mt-4 rounded-xl border border-neutral-200 bg-white p-3">
-            <div className="text-xs font-medium text-neutral-700">NFC URL format</div>
-            <p className="mt-1 text-xs text-neutral-600">
+          <div className="mt-4 rounded-xl border border-surfaceGlass/10 bg-bgPrimary p-3">
+            <div className="text-xs font-medium text-textSecondary">NFC URL format</div>
+            <p className="mt-1 text-xs text-textSecondary">
               {baseUrl ? (
                 <>
                   Put <span className="font-mono">{baseUrl}/t/&lt;cardId&gt;</span> on the tag.
@@ -312,24 +312,24 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
         </div>
       </section>
 
-      <section className="mt-10 rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm">
+      <section className="mt-10 rounded-2xl border border-surfaceGlass/10 bg-bgSecondary p-5 shadow-sm">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h2 className="text-base font-semibold">Recent cards</h2>
-            <p className="text-sm text-neutral-600">Last 30 created (most recent first).</p>
+            <p className="text-sm text-textSecondary">Last 30 created (most recent first).</p>
           </div>
         </div>
 
-        <div className="mt-4 overflow-x-auto rounded-xl border border-neutral-200">
+        <div className="mt-4 overflow-x-auto rounded-xl border border-surfaceGlass/10">
           <table className="min-w-245 w-full border-collapse text-sm">
-            <thead className="bg-neutral-50 text-left">
+            <thead className="bg-bgPrimary text-left">
               <tr>
-                <th className="px-3 py-3 font-semibold text-neutral-700">Short code</th>
-                <th className="px-3 py-3 font-semibold text-neutral-700">Tap URL (NFC)</th>
-                <th className="px-3 py-3 font-semibold text-neutral-700">Code URL (manual/QR)</th>
-                <th className="px-3 py-3 font-semibold text-neutral-700">Type</th>
-                <th className="px-3 py-3 font-semibold text-neutral-700">Active</th>
-                <th className="px-3 py-3 font-semibold text-neutral-700">Claimed</th>
+                <th className="px-3 py-3 font-semibold text-textSecondary">Short code</th>
+                <th className="px-3 py-3 font-semibold text-textSecondary">Tap URL (NFC)</th>
+                <th className="px-3 py-3 font-semibold text-textSecondary">Code URL (manual/QR)</th>
+                <th className="px-3 py-3 font-semibold text-textSecondary">Type</th>
+                <th className="px-3 py-3 font-semibold text-textSecondary">Active</th>
+                <th className="px-3 py-3 font-semibold text-textSecondary">Claimed</th>
               </tr>
             </thead>
             <tbody>
@@ -340,50 +340,50 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                 const codeUrl = baseUrl ? `${baseUrl}/c/${c.shortCode}` : null
 
                 return (
-                  <tr key={c.id} className="border-t border-neutral-200">
+                  <tr key={c.id} className="border-t border-surfaceGlass/10">
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs text-neutral-800">{pretty}</span>
+                        <span className="font-mono text-xs text-textPrimary">{pretty}</span>
                         <CopyButton value={pretty} />
                       </div>
-                      <div className="mt-1 font-mono text-[11px] text-neutral-500">{c.shortCode}</div>
+                      <div className="mt-1 font-mono text-[11px] text-textSecondary">{c.shortCode}</div>
                     </td>
 
                     <td className="px-3 py-3">
                       {tapUrl ? (
                         <>
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs text-neutral-700">{tapUrl}</span>
+                            <span className="font-mono text-xs text-textSecondary">{tapUrl}</span>
                             <CopyButton value={tapUrl} />
                           </div>
-                          <div className="mt-1 font-mono text-[11px] text-neutral-500">{c.id}</div>
+                          <div className="mt-1 font-mono text-[11px] text-textSecondary">{c.id}</div>
                         </>
                       ) : (
-                        <div className="text-xs text-neutral-500">Set NEXT_PUBLIC_APP_URL to show tap URLs</div>
+                        <div className="text-xs text-textSecondary">Set NEXT_PUBLIC_APP_URL to show tap URLs</div>
                       )}
                     </td>
 
                     <td className="px-3 py-3">
                       {codeUrl ? (
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs text-neutral-700">{codeUrl}</span>
+                          <span className="font-mono text-xs text-textSecondary">{codeUrl}</span>
                           <CopyButton value={codeUrl} />
                         </div>
                       ) : (
-                        <div className="text-xs text-neutral-500">Set NEXT_PUBLIC_APP_URL to show code URLs</div>
+                        <div className="text-xs text-textSecondary">Set NEXT_PUBLIC_APP_URL to show code URLs</div>
                       )}
                     </td>
 
-                    <td className="px-3 py-3 text-neutral-800">{c.type}</td>
-                    <td className="px-3 py-3 text-neutral-800">{c.isActive ? 'Yes' : 'No'}</td>
-                    <td className="px-3 py-3 text-neutral-800">{c.claimedAt ? 'Yes' : 'No'}</td>
+                    <td className="px-3 py-3 text-textPrimary">{c.type}</td>
+                    <td className="px-3 py-3 text-textPrimary">{c.isActive ? 'Yes' : 'No'}</td>
+                    <td className="px-3 py-3 text-textPrimary">{c.claimedAt ? 'Yes' : 'No'}</td>
                   </tr>
                 )
               })}
 
               {recent.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-6 text-sm text-neutral-600" colSpan={6}>
+                  <td className="px-3 py-6 text-sm text-textSecondary" colSpan={6}>
                     No cards yet. Generate your first batch above.
                   </td>
                 </tr>
