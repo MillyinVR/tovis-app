@@ -622,6 +622,7 @@ async function ensureOffering({
 
 async function upsertMediaAsset({
   professionalId,
+  primaryServiceId,
   url,
   mediaType,
   caption,
@@ -634,6 +635,7 @@ async function upsertMediaAsset({
 
   const baseData = {
     professionalId,
+    primaryServiceId,
     url,
     thumbUrl: null,
     mediaType,
@@ -1181,6 +1183,7 @@ async function main() {
 
   const look1 = await upsertMediaAsset({
   professionalId: professionalProfile.id,
+  primaryServiceId: balayage.id,
   mediaType: MediaType.IMAGE,
   url: '/seed/look-1.png',
   caption: 'Lived-in balayage with soft money piece ✨',
@@ -1189,6 +1192,7 @@ async function main() {
 
 const look2 = await upsertMediaAsset({
   professionalId: professionalProfile.id,
+  primaryServiceId: gelX.id,
   mediaType: MediaType.IMAGE,
   url: '/seed/look-2.png',
   caption: 'Gel X set with a clean glossy finish 💅',
@@ -1197,6 +1201,7 @@ const look2 = await upsertMediaAsset({
 
 const look3 = await upsertMediaAsset({
   professionalId: professionalProfile.id,
+  primaryServiceId: softGlam.id,
   mediaType: MediaType.IMAGE,
   url: '/seed/look-3.png',
   caption: 'Soft glam, camera-ready, no flashback allowed.',
