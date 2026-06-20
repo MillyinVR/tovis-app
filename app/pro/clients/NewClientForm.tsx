@@ -142,29 +142,18 @@ export default function NewClientForm() {
     }
   }
 
+  const fieldClassName =
+    'w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary disabled:opacity-60'
+  const labelClassName = 'mb-1 block text-xs font-semibold text-textSecondary'
+
   return (
     <form
       onSubmit={handleSubmit}
-      style={{
-        border: '1px solid rgb(var(--text-primary) / 0.10)',
-        borderRadius: 12,
-        padding: 16,
-        display: 'grid',
-        gap: 12,
-        background: 'rgb(var(--bg-surface))',
-      }}
+      className="grid gap-3 rounded-card border border-white/10 bg-bgSurface p-4"
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div className="grid grid-cols-2 gap-2.5">
         <div>
-          <label
-            htmlFor="firstName"
-            style={{
-              display: 'block',
-              fontSize: 13,
-              fontWeight: 500,
-              marginBottom: 4,
-            }}
-          >
+          <label htmlFor="firstName" className={labelClassName}>
             First name *
           </label>
 
@@ -173,28 +162,12 @@ export default function NewClientForm() {
             value={firstName}
             disabled={loading}
             onChange={(event) => setFirstName(event.target.value)}
-            style={{
-              width: '100%',
-              borderRadius: 8,
-              border: '1px solid rgb(var(--text-primary) / 0.10)',
-              padding: 8,
-              fontSize: 13,
-              fontFamily: 'inherit',
-              opacity: loading ? 0.85 : 1,
-            }}
+            className={fieldClassName}
           />
         </div>
 
         <div>
-          <label
-            htmlFor="lastName"
-            style={{
-              display: 'block',
-              fontSize: 13,
-              fontWeight: 500,
-              marginBottom: 4,
-            }}
-          >
+          <label htmlFor="lastName" className={labelClassName}>
             Last name *
           </label>
 
@@ -203,29 +176,13 @@ export default function NewClientForm() {
             value={lastName}
             disabled={loading}
             onChange={(event) => setLastName(event.target.value)}
-            style={{
-              width: '100%',
-              borderRadius: 8,
-              border: '1px solid rgb(var(--text-primary) / 0.10)',
-              padding: 8,
-              fontSize: 13,
-              fontFamily: 'inherit',
-              opacity: loading ? 0.85 : 1,
-            }}
+            className={fieldClassName}
           />
         </div>
       </div>
 
       <div>
-        <label
-          htmlFor="email"
-          style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 500,
-            marginBottom: 4,
-          }}
-        >
+        <label htmlFor="email" className={labelClassName}>
           Email *
         </label>
 
@@ -236,28 +193,12 @@ export default function NewClientForm() {
           disabled={loading}
           onChange={(event) => setEmail(event.target.value)}
           placeholder="client@email.com"
-          style={{
-            width: '100%',
-            borderRadius: 8,
-            border: '1px solid rgb(var(--text-primary) / 0.10)',
-            padding: 8,
-            fontSize: 13,
-            fontFamily: 'inherit',
-            opacity: loading ? 0.85 : 1,
-          }}
+          className={fieldClassName}
         />
       </div>
 
       <div>
-        <label
-          htmlFor="phone"
-          style={{
-            display: 'block',
-            fontSize: 13,
-            fontWeight: 500,
-            marginBottom: 4,
-          }}
-        >
+        <label htmlFor="phone" className={labelClassName}>
           Phone (optional)
         </label>
 
@@ -267,37 +208,25 @@ export default function NewClientForm() {
           disabled={loading}
           onChange={(event) => setPhone(event.target.value)}
           placeholder="For reminders later"
-          style={{
-            width: '100%',
-            borderRadius: 8,
-            border: '1px solid rgb(var(--text-primary) / 0.10)',
-            padding: 8,
-            fontSize: 13,
-            fontFamily: 'inherit',
-            opacity: loading ? 0.85 : 1,
-          }}
+          className={fieldClassName}
         />
       </div>
 
-      {error ? <div style={{ fontSize: 12, color: 'rgb(var(--tone-danger))' }}>{error}</div> : null}
-
-      {success ? (
-        <div style={{ fontSize: 12, color: 'rgb(var(--tone-success))' }}>Client added.</div>
+      {error ? (
+        <div className="text-xs font-semibold text-toneDanger">{error}</div>
       ) : null}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      {success ? (
+        <div className="text-xs font-semibold text-toneSuccess">
+          Client added.
+        </div>
+      ) : null}
+
+      <div className="flex justify-end">
         <button
           type="submit"
           disabled={loading}
-          style={{
-            padding: '6px 14px',
-            borderRadius: 999,
-            border: 'none',
-            fontSize: 13,
-            background: loading ? 'rgb(var(--text-secondary))' : 'rgb(var(--text-primary))',
-            color: 'rgb(var(--bg-primary))',
-            cursor: loading ? 'not-allowed' : 'pointer',
-          }}
+          className="rounded-full bg-bgSecondary px-4 py-2 text-xs font-extrabold text-textPrimary hover:bg-bgSecondary/70 disabled:opacity-60"
         >
           {loading ? 'Saving…' : 'Add client'}
         </button>
