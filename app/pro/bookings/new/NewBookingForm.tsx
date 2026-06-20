@@ -1784,7 +1784,7 @@ export default function NewBookingForm({
         <div className="grid gap-3 rounded-card border border-toneWarn/25 bg-toneWarn/10 p-3">
           <div className="grid gap-1">
             <div className="text-[12px] font-black uppercase tracking-wide text-toneWarn">
-              Outside your booking rules
+              Booking rule override
             </div>
             <div className="text-[12px] text-textSecondary">
               {overridePrompt.question} The override is recorded on the booking.
@@ -1802,7 +1802,7 @@ export default function NewBookingForm({
               className="mt-0.5 h-4 w-4 rounded border-white/10 bg-bgPrimary"
             />
             <span className="text-[12px] font-black text-textPrimary">
-              Book anyway — I understand this is outside my set rules
+              Book anyway — I’m overriding one of my booking rules
             </span>
           </label>
 
