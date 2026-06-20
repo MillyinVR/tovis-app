@@ -5,6 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import {
+  makePlacesSessionToken,
+  parsePlacePredictions,
+  type PlacePrediction,
+} from '@/lib/clientAddresses/placesAutocomplete'
+import {
   loadViewerLocation,
   setViewerLocation,
   VIEWER_RADIUS_DEFAULT_MILES,
@@ -29,13 +34,6 @@ type AddressRecord = {
   lng: number | null
   createdAt: string
   updatedAt: string
-}
-
-type PlacePrediction = {
-  placeId: string
-  description: string
-  mainText: string
-  secondaryText: string
 }
 
 type PlaceDetails = {
@@ -98,10 +96,6 @@ const EMPTY_DRAFT_SERVICE: DraftAddress = {
   lng: null,
 }
 
-function makeSessionToken() {
-  return `${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`
-}
-
 function pickText(v: unknown) {
   return typeof v === 'string' ? v.trim() : ''
 }
@@ -111,33 +105,6 @@ function pickErrorMessage(raw: unknown, fallback: string) {
     return raw.error.trim()
   }
   return fallback
-}
-
-function parsePredictions(raw: unknown): PlacePrediction[] {
-  if (!isRecord(raw)) return []
-
-  const arr = raw.predictions
-  if (!Array.isArray(arr)) return []
-
-  return arr
-    .map((row) => {
-      if (!isRecord(row)) return null
-
-      const placeId = pickText(row.placeId)
-      const description = pickText(row.description)
-      const mainText = pickText(row.mainText)
-      const secondaryText = pickText(row.secondaryText)
-
-      if (!placeId || !description) return null
-
-      return {
-        placeId,
-        description,
-        mainText,
-        secondaryText,
-      }
-    })
-    .filter((row): row is PlacePrediction => Boolean(row))
 }
 
 function parsePlaceDetails(raw: unknown): PlaceDetails | null {
@@ -338,8 +305,8 @@ export default function ClientAddressesSettings() {
   const [searchLoading, setSearchLoading] = useState(false)
   const [serviceLoading, setServiceLoading] = useState(false)
 
-  const searchSessionTokenRef = useRef(makeSessionToken())
-  const serviceSessionTokenRef = useRef(makeSessionToken())
+  const searchSessionTokenRef = useRef(makePlacesSessionToken())
+  const serviceSessionTokenRef = useRef(makePlacesSessionToken())
 
   const searchAreas = useMemo(
     () => addresses.filter((a) => a.kind === 'SEARCH_AREA'),
@@ -427,7 +394,7 @@ export default function ClientAddressesSettings() {
           return
         }
 
-        setSearchPredictions(parsePredictions(raw))
+        setSearchPredictions(parsePlacePredictions(raw))
       } catch (e) {
         if ((e as { name?: unknown })?.name === 'AbortError') return
         setSearchPredictions([])
@@ -480,7 +447,7 @@ export default function ClientAddressesSettings() {
           return
         }
 
-        setServicePredictions(parsePredictions(raw))
+        setServicePredictions(parsePlacePredictions(raw))
       } catch (e) {
         if ((e as { name?: unknown })?.name === 'AbortError') return
         setServicePredictions([])
@@ -568,7 +535,7 @@ export default function ClientAddressesSettings() {
 
       setSearchQuery(prediction.description)
       setSearchPredictions([])
-      searchSessionTokenRef.current = makeSessionToken()
+      searchSessionTokenRef.current = makePlacesSessionToken()
     } catch {
       setErr('Could not set that area.')
     }
@@ -684,7 +651,7 @@ export default function ClientAddressesSettings() {
 
       setServiceQuery(prediction.description)
       setServicePredictions([])
-      serviceSessionTokenRef.current = makeSessionToken()
+      serviceSessionTokenRef.current = makePlacesSessionToken()
     } catch {
       setErr('Could not set that address.')
     }
@@ -698,7 +665,7 @@ export default function ClientAddressesSettings() {
     })
     setSearchQuery('')
     setSearchPredictions([])
-    searchSessionTokenRef.current = makeSessionToken()
+    searchSessionTokenRef.current = makePlacesSessionToken()
   }, [searchAreas.length])
 
   const resetServiceDraft = useCallback(() => {
@@ -709,7 +676,7 @@ export default function ClientAddressesSettings() {
     })
     setServiceQuery('')
     setServicePredictions([])
-    serviceSessionTokenRef.current = makeSessionToken()
+    serviceSessionTokenRef.current = makePlacesSessionToken()
   }, [serviceAddresses.length])
 
   useEffect(() => {
@@ -1315,6 +1282,11 @@ export default function ClientAddressesSettings() {
                 className="w-full rounded-card border border-white/10 bg-bgPrimary/20 px-3 py-2 text-sm text-textPrimary outline-none placeholder:text-textSecondary"
               />
 
+              <div className="mt-1 text-[12px] text-textSecondary">
+                Start typing and pick your address from the list for the most
+                accurate location. You can also fill the fields below manually.
+              </div>
+
               {serviceLoading ? (
                 <div className="mt-2 text-[12px] font-semibold text-textSecondary">
                   Searching…
@@ -1363,6 +1335,10 @@ export default function ClientAddressesSettings() {
                 ) : null}
               </div>
             ) : null}
+
+            <div className="text-[12px] font-black uppercase tracking-wide text-textSecondary">
+              Or enter manually
+            </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div>

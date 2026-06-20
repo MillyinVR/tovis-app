@@ -6,26 +6,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { safeJson } from '../utils/safeJson'
 import type { MobileAddressOption } from '../types'
 import { isRecord } from '@/lib/guards'
-
-type PlacePrediction = {
-  placeId: string
-  description: string
-  mainText: string
-  secondaryText: string
-}
-
-type PlaceDetails = {
-  placeId: string
-  name: string | null
-  formattedAddress: string
-  city: string | null
-  state: string | null
-  postalCode: string | null
-  countryCode: string | null
-  lat: number | null
-  lng: number | null
-  components: Record<string, string>
-}
+import {
+  makePlacesSessionToken,
+  parsePlaceDetails,
+  parsePlacePredictions,
+  type PlaceDetails,
+  type PlacePrediction,
+} from '@/lib/clientAddresses/placesAutocomplete'
 
 type Props = {
   open: boolean
@@ -35,66 +22,6 @@ type Props = {
 
 function pickString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() ? v.trim() : null
-}
-
-function pickNumber(v: unknown): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null
-}
-
-function parsePredictions(raw: unknown): PlacePrediction[] {
-  if (!isRecord(raw) || !Array.isArray(raw.predictions)) return []
-
-  return raw.predictions.reduce<PlacePrediction[]>((acc, row) => {
-    if (!isRecord(row)) return acc
-
-    const placeId = pickString(row.placeId)
-    const description = pickString(row.description)
-    if (!placeId || !description) return acc
-
-    acc.push({
-      placeId,
-      description,
-      mainText: pickString(row.mainText) ?? description,
-      secondaryText: pickString(row.secondaryText) ?? '',
-    })
-
-    return acc
-  }, [])
-}
-
-function parsePlaceDetails(raw: unknown): PlaceDetails | null {
-  if (!isRecord(raw) || !isRecord(raw.place)) return null
-  const place = raw.place
-
-  const placeId = pickString(place.placeId)
-  const formattedAddress = pickString(place.formattedAddress)
-
-  if (!placeId || !formattedAddress) return null
-
-  const components = isRecord(place.components)
-    ? Object.entries(place.components).reduce<Record<string, string>>(
-        (acc, [key, value]) => {
-          if (typeof value === 'string' && value.trim()) {
-            acc[key] = value.trim()
-          }
-          return acc
-        },
-        {},
-      )
-    : {}
-
-  return {
-    placeId,
-    name: pickString(place.name),
-    formattedAddress,
-    city: pickString(place.city),
-    state: pickString(place.state),
-    postalCode: pickString(place.postalCode),
-    countryCode: pickString(place.countryCode),
-    lat: pickNumber(place.lat),
-    lng: pickNumber(place.lng),
-    components,
-  }
 }
 
 function parseCreatedAddress(raw: unknown): MobileAddressOption | null {
@@ -121,13 +48,6 @@ function buildAddressLine1(place: PlaceDetails) {
   return place.name ?? place.formattedAddress
 }
 
-function buildSessionToken() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `tovis-${Date.now()}`
-}
-
 export default function ClientAddressCreateModal(props: Props) {
   const { open, onClose, onSaved } = props
 
@@ -136,7 +56,7 @@ export default function ClientAddressCreateModal(props: Props) {
   const [addressLine2, setAddressLine2] = useState('')
   const [isDefault, setIsDefault] = useState(false)
 
-  const [sessionToken, setSessionToken] = useState<string>(() => buildSessionToken())
+  const [sessionToken, setSessionToken] = useState<string>(() => makePlacesSessionToken())
   const [searching, setSearching] = useState(false)
   const [predictions, setPredictions] = useState<PlacePrediction[]>([])
   const [selectedPlace, setSelectedPlace] = useState<PlaceDetails | null>(null)
@@ -153,7 +73,7 @@ export default function ClientAddressCreateModal(props: Props) {
   useEffect(() => {
     if (!open) return
 
-    setSessionToken(buildSessionToken())
+    setSessionToken(makePlacesSessionToken())
     setQuery('')
     setLabel('')
     setAddressLine2('')
@@ -220,7 +140,7 @@ export default function ClientAddressCreateModal(props: Props) {
           )
         }
 
-        setPredictions(parsePredictions(raw))
+        setPredictions(parsePlacePredictions(raw))
       } catch (e: unknown) {
         if (e instanceof Error && e.name === 'AbortError') return
         setPredictions([])
@@ -401,6 +321,10 @@ export default function ClientAddressCreateModal(props: Props) {
                 placeholder="Start typing an address..."
                 className="w-full rounded-card border border-white/10 bg-bgPrimary/25 px-3 py-3 text-[14px] font-semibold text-textPrimary outline-none transition placeholder:text-textSecondary/70 focus:border-accentPrimary/35"
               />
+              <span className="text-[12px] text-textSecondary">
+                Start typing and pick your address from the list for the most
+                accurate location.
+              </span>
             </label>
 
             {searching ? (
