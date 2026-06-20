@@ -220,6 +220,40 @@ describe('verifyTurnstileOrFailOpen', () => {
     })
   })
 
+  // Regression: auth.register.captcha_fail_open fired in production. That can
+  // only happen if NODE_ENV is NOT 'production' on a deployed surface (preview
+  // builds and some runtimes report NODE_ENV unreliably). VERCEL_ENV is the
+  // canonical deploy signal — fail-open must stay closed on any deployment
+  // regardless of NODE_ENV or the leaked opt-in flag.
+  it.each(['production', 'preview'])(
+    'does not allow fail-open on a deployed surface (VERCEL_ENV=%s) even with NODE_ENV unset and the flag set',
+    async (vercelEnv) => {
+      vi.stubEnv('NODE_ENV', 'test')
+      vi.stubEnv('VERCEL_ENV', vercelEnv)
+      vi.stubEnv('AUTH_TURNSTILE_FAIL_OPEN', '1')
+
+      const fetchMock = vi.fn(
+        async () =>
+          new Response('temporarily unavailable', {
+            status: 503,
+          }),
+      )
+
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(
+        verifyTurnstileOrFailOpen({
+          request: makeRequest(),
+          token: 'token_123',
+        }),
+      ).resolves.toEqual({
+        ok: false,
+        code: 'CAPTCHA_UNAVAILABLE',
+        message: 'Captcha is temporarily unavailable. Please try again.',
+      })
+    },
+  )
+
   it('allows missing-secret fail-open in non-production only when explicitly enabled', async () => {
     vi.stubEnv('NODE_ENV', 'test')
     vi.stubEnv('AUTH_TURNSTILE_FAIL_OPEN', '1')
