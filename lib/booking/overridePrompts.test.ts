@@ -62,16 +62,29 @@ describe('readBookingOverridePrompt', () => {
     expect(prompt?.flag).toBe('allowShortNotice')
     expect(prompt?.question).toContain('Save it anyway?')
   })
+
+  it('returns create-intent copy for a new pro booking', () => {
+    const prompt = readBookingOverridePrompt(
+      { code: 'OUTSIDE_WORKING_HOURS' },
+      'create',
+    )
+
+    expect(prompt?.flag).toBe('allowOutsideWorkingHours')
+    expect(prompt?.question).toContain('Book it anyway?')
+  })
 })
 
 describe('bookingOverridePromptFor', () => {
   it('keeps the same code and flag across intents', () => {
     const accept = bookingOverridePromptFor('MAX_DAYS_AHEAD_EXCEEDED', 'accept')
     const edit = bookingOverridePromptFor('MAX_DAYS_AHEAD_EXCEEDED', 'edit')
+    const create = bookingOverridePromptFor('MAX_DAYS_AHEAD_EXCEEDED', 'create')
 
     expect(accept.code).toBe(edit.code)
     expect(accept.flag).toBe(edit.flag)
+    expect(create.flag).toBe(accept.flag)
     expect(accept.question).not.toBe(edit.question)
+    expect(create.question).not.toBe(accept.question)
   })
 })
 

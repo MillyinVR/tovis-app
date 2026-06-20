@@ -47,6 +47,12 @@ const MODAL_COPY: Record<BookingOverridePromptIntent, ModalCopy> = {
     confirmLabel: 'Save anyway',
     busyLabel: 'Saving…',
   },
+  create: {
+    title: 'Book anyway?',
+    body: 'Clients cannot normally book this slot. You can still book it — the override is recorded, and you can optionally add a note for your client.',
+    confirmLabel: 'Book anyway',
+    busyLabel: 'Booking…',
+  },
 }
 
 // ─── Pure helpers ─────────────────────────────────────────────────────────────

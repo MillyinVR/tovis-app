@@ -20,10 +20,10 @@ export type BookingOverrideGatedCode =
 
 /**
  * Which action tripped the override-gated rule. 'accept' is approving a
- * pending request; 'edit' is rescheduling/resizing an existing booking.
- * Only the dialog copy differs.
+ * pending request; 'edit' is rescheduling/resizing an existing booking;
+ * 'create' is a pro placing a brand-new booking. Only the dialog copy differs.
  */
-export type BookingOverridePromptIntent = 'accept' | 'edit'
+export type BookingOverridePromptIntent = 'accept' | 'edit' | 'create'
 
 export type BookingOverridePrompt = {
   code: BookingOverrideGatedCode
@@ -83,6 +83,31 @@ const BOOKING_OVERRIDE_PROMPTS: Record<
       flag: 'allowOutsideWorkingHours',
       question:
         'This new time is outside your working hours. Save it anyway?',
+      reasonPlaceholder:
+        'Explain why this booking can happen outside working hours.',
+    },
+  },
+  create: {
+    ADVANCE_NOTICE_REQUIRED: {
+      code: 'ADVANCE_NOTICE_REQUIRED',
+      flag: 'allowShortNotice',
+      question:
+        'This time is inside your advance-notice window. Book it anyway?',
+      reasonPlaceholder:
+        'Explain why this booking can happen on short notice.',
+    },
+    MAX_DAYS_AHEAD_EXCEEDED: {
+      code: 'MAX_DAYS_AHEAD_EXCEEDED',
+      flag: 'allowFarFuture',
+      question:
+        'This time is further out than your booking window allows. Book it anyway?',
+      reasonPlaceholder:
+        'Explain why this booking can be scheduled this far in advance.',
+    },
+    OUTSIDE_WORKING_HOURS: {
+      code: 'OUTSIDE_WORKING_HOURS',
+      flag: 'allowOutsideWorkingHours',
+      question: 'This time is outside your working hours. Book it anyway?',
       reasonPlaceholder:
         'Explain why this booking can happen outside working hours.',
     },
