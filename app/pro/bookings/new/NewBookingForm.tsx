@@ -6,6 +6,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { safeJson, readErrorMessage } from '@/lib/http'
+import {
+  mergeBookingOverrideFlags,
+  readBookingOverridePrompt,
+  type BookingOverrideFlag,
+  type BookingOverridePrompt,
+} from '@/lib/booking/overridePrompts'
 import type {
   ProBookingNewClientDTO,
   ProBookingNewOfferingDTO,
@@ -127,6 +133,22 @@ function createClientIdempotencyKey(): string {
   }
 
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+type BookingOverrideBody = {
+  allowShortNotice: boolean
+  allowFarFuture: boolean
+  allowOutsideWorkingHours: boolean
+}
+
+function overrideBodyFromFlags(
+  flags: readonly BookingOverrideFlag[],
+): BookingOverrideBody {
+  return {
+    allowShortNotice: flags.includes('allowShortNotice'),
+    allowFarFuture: flags.includes('allowFarFuture'),
+    allowOutsideWorkingHours: flags.includes('allowOutsideWorkingHours'),
+  }
 }
 
 function errorFromResponse(res: Response, data: unknown) {
@@ -565,6 +587,19 @@ export default function NewBookingForm({
   const [internalNotes, setInternalNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Soft scheduling overrides. The server is the source of truth for whether a
+  // requested time trips a pro-overridable rule (outside working hours, short
+  // notice, too far out). When it does, it replies with an override-gated
+  // `code`; we surface a warning + confirmation and let the pro book anyway by
+  // re-submitting with the matching `allow…` flag.
+  const [overridePrompt, setOverridePrompt] =
+    useState<BookingOverridePrompt | null>(null)
+  const [authorizedOverrideFlags, setAuthorizedOverrideFlags] = useState<
+    BookingOverrideFlag[]
+  >([])
+  const [overrideReason, setOverrideReason] = useState('')
+
   const submitIdempotencyKeyRef = useRef<string | null>(null)
 
   const offeringOptions = useMemo(() => offerings ?? [], [offerings])
@@ -852,6 +887,26 @@ export default function NewBookingForm({
     addressMode,
   ])
 
+  // A scheduling override only applies to the exact slot it was confirmed for.
+  // If the pro changes the time, location, mode, or service, drop it so the new
+  // slot is validated from scratch.
+  useEffect(() => {
+    setOverridePrompt(null)
+    setAuthorizedOverrideFlags([])
+    setOverrideReason('')
+  }, [scheduledAt, locationId, locationType, offeringId])
+
+  const overrideAuthorized = overridePrompt
+    ? authorizedOverrideFlags.includes(overridePrompt.flag)
+    : true
+
+  function toggleOverrideAuthorized(flag: BookingOverrideFlag, next: boolean) {
+    setAuthorizedOverrideFlags((current) => {
+      if (next) return mergeBookingOverrideFlags(current, flag)
+      return current.filter((value) => value !== flag)
+    })
+  }
+
   function handleCancel() {
     if (loading) return
 
@@ -884,6 +939,9 @@ export default function NewBookingForm({
     addressMode === 'new' &&
     !newServiceAddressReady
       ? 'Enter a valid mobile service address'
+      : null,
+    overridePrompt && !overrideAuthorized
+      ? 'Confirm the scheduling override to continue'
       : null,
   ].filter((blocker): blocker is string => Boolean(blocker))
 
@@ -990,6 +1048,9 @@ export default function NewBookingForm({
           }
         : null
 
+    const trimmedOverrideReason = overrideReason.trim()
+    const overrideBody = overrideBodyFromFlags(authorizedOverrideFlags)
+
     setLoading(true)
 
     try {
@@ -1017,6 +1078,8 @@ export default function NewBookingForm({
       serviceAddress: serviceAddressPayload,
       scheduledFor: scheduledForISO,
       internalNotes: internalNotes.trim() || null,
+      overrideReason: trimmedOverrideReason || null,
+      ...overrideBody,
     }),
   })
 
@@ -1030,6 +1093,18 @@ export default function NewBookingForm({
 
   if (!res.ok) {
     submitIdempotencyKeyRef.current = null
+
+    // If the failure is an unauthorized, pro-overridable scheduling rule, turn
+    // it into a soft confirmation instead of a dead-end error: surface the
+    // warning + checkbox so the pro can book anyway on the next submit.
+    const prompt = readBookingOverridePrompt(data, 'create')
+
+    if (prompt && !authorizedOverrideFlags.includes(prompt.flag)) {
+      setOverridePrompt(prompt)
+      setError(null)
+      return
+    }
+
     setError(errorFromResponse(res, data))
     return
   }
@@ -1701,9 +1776,53 @@ export default function NewBookingForm({
           onChange={(e) => setInternalNotes(e.target.value)}
           rows={3}
           placeholder="Optional internal notes for this booking"
-          className={`${field} min-h-[96px] resize-y`}
+          className={`${field} min-h-24 resize-y`}
         />
       </div>
+
+      {overridePrompt ? (
+        <div className="grid gap-3 rounded-card border border-toneWarn/25 bg-toneWarn/10 p-3">
+          <div className="grid gap-1">
+            <div className="text-[12px] font-black uppercase tracking-wide text-toneWarn">
+              Outside your booking rules
+            </div>
+            <div className="text-[12px] text-textSecondary">
+              {overridePrompt.question} The override is recorded on the booking.
+            </div>
+          </div>
+
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={overrideAuthorized}
+              disabled={loading}
+              onChange={(e) =>
+                toggleOverrideAuthorized(overridePrompt.flag, e.target.checked)
+              }
+              className="mt-0.5 h-4 w-4 rounded border-white/10 bg-bgPrimary"
+            />
+            <span className="text-[12px] font-black text-textPrimary">
+              Book anyway — I understand this is outside my set rules
+            </span>
+          </label>
+
+          <div className="grid gap-2">
+            <label htmlFor="overrideReason" className={helper}>
+              Reason (optional — shared with your client)
+            </label>
+            <textarea
+              id="overrideReason"
+              value={overrideReason}
+              disabled={loading}
+              onChange={(e) => setOverrideReason(e.target.value)}
+              rows={2}
+              maxLength={280}
+              placeholder={overridePrompt.reasonPlaceholder}
+              className={`${field} min-h-16 resize-y`}
+            />
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="rounded-card border border-toneDanger/20 bg-toneDanger/10 px-3 py-2 text-[12px] font-black text-toneDanger">
