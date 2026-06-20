@@ -251,10 +251,6 @@ export default async function ClaimInvitePage(props: PageProps) {
   const verifyLink = verifyHref(token)
   const backToBookingHref = bookingHref(invite.booking.id)
 
-  if (!user && pageState === 'ready') {
-    redirect(signupLink)
-  }
-
   async function claimAction() {
     'use server'
 
@@ -311,7 +307,7 @@ export default async function ClaimInvitePage(props: PageProps) {
     <main className="mx-auto w-full max-w-[720px] px-4 pb-16 pt-16 text-textPrimary">
       <header>
         <div className="inline-flex rounded-full border border-surfaceGlass/10 bg-bgSecondary px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-textSecondary">
-          Claim your client history
+          Your booking
         </div>
 
         <h1 className="mt-4 text-[24px] font-black leading-tight">
@@ -321,14 +317,14 @@ export default async function ClaimInvitePage(props: PageProps) {
         <div className="mt-2 text-sm text-textSecondary">
           {invite.invitedName ? (
             <>
-              This link was sent for{' '}
+              This booking was created for{' '}
               <span className="font-black text-textPrimary">
                 {invite.invitedName}
               </span>
               .
             </>
           ) : (
-            'This link is ready to claim.'
+            'Here are the details for your appointment.'
           )}
         </div>
 
@@ -432,14 +428,15 @@ export default async function ClaimInvitePage(props: PageProps) {
         {pageState === 'ready' ? (
           <section className="rounded-card border border-surfaceGlass/10 bg-bgSecondary p-4">
             <div className="text-sm font-black text-textPrimary">
-              Ready to claim
+              {!user ? 'Claim your client history' : 'Ready to claim'}
             </div>
 
             {!user ? (
               <>
                 <div className="mt-2 text-sm text-textSecondary">
-                  We are sending you into client signup first so this history
-                  can attach to the right account.
+                  Your booking details are shown above — no account needed to
+                  view them. Create a free account to manage this booking,
+                  message your professional, and keep your history together.
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-3">
