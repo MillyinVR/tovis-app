@@ -11,6 +11,12 @@ import type {
   ProBookingNewOfferingDTO,
 } from '@/lib/dto/proBookingNew'
 import { isRecord } from '@/lib/guards'
+import {
+  makePlacesSessionToken,
+  parsePlaceDetails,
+  parsePlacePredictions,
+  type PlacePrediction,
+} from '@/lib/clientAddresses/placesAutocomplete'
 import { moneyToString } from '@/lib/money'
 import {
   isValidIanaTimeZone,
@@ -78,6 +84,9 @@ type ServiceAddressFormState = {
   state: string
   postalCode: string
   countryCode: string
+  placeId: string | null
+  lat: number | null
+  lng: number | null
   isDefault: boolean
 }
 
@@ -440,8 +449,116 @@ export default function NewBookingForm({
     state: '',
     postalCode: '',
     countryCode: 'US',
+    placeId: null,
+    lat: null,
+    lng: null,
     isDefault: true,
   })
+
+  // Google Places autocomplete for the new service address. Picking a suggestion
+  // fills the fields + an exact pin (placeId/lat/lng); editing an address field
+  // by hand clears the pin so the server re-geocodes what was typed.
+  const [serviceQuery, setServiceQuery] = useState('')
+  const [servicePredictions, setServicePredictions] = useState<PlacePrediction[]>(
+    [],
+  )
+  const [serviceSearching, setServiceSearching] = useState(false)
+  const serviceSessionTokenRef = useRef(makePlacesSessionToken())
+
+  function updateServiceAddressField(patch: Partial<ServiceAddressFormState>) {
+    // Any manual edit to an address-defining field invalidates a picked pin.
+    setServiceAddress((current) => ({
+      ...current,
+      ...patch,
+      placeId: null,
+      lat: null,
+      lng: null,
+    }))
+  }
+
+  useEffect(() => {
+    const q = serviceQuery.trim()
+    if (q.length < 3) {
+      setServicePredictions([])
+      setServiceSearching(false)
+      return
+    }
+
+    const ac = new AbortController()
+    const t = window.setTimeout(async () => {
+      try {
+        setServiceSearching(true)
+        const qs = new URLSearchParams()
+        qs.set('input', q)
+        qs.set('sessionToken', serviceSessionTokenRef.current)
+        qs.set('kind', 'ADDRESS')
+        qs.set('components', 'country:us')
+
+        const res = await fetch(
+          `/api/google/places/autocomplete?${qs.toString()}`,
+          {
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+            signal: ac.signal,
+          },
+        )
+        const raw = await safeJson(res)
+        setServicePredictions(res.ok ? parsePlacePredictions(raw) : [])
+      } catch (e) {
+        if ((e as { name?: unknown })?.name === 'AbortError') return
+        setServicePredictions([])
+      } finally {
+        setServiceSearching(false)
+      }
+    }, 220)
+
+    return () => {
+      ac.abort()
+      window.clearTimeout(t)
+    }
+  }, [serviceQuery])
+
+  async function chooseServicePrediction(prediction: PlacePrediction) {
+    try {
+      const qs = new URLSearchParams()
+      qs.set('placeId', prediction.placeId)
+      qs.set('sessionToken', serviceSessionTokenRef.current)
+
+      const res = await fetch(`/api/google/places/details?${qs.toString()}`, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      })
+      const raw = await safeJson(res)
+      if (!res.ok) return
+
+      const place = parsePlaceDetails(raw)
+      if (!place) return
+
+      const streetLine = [place.components.street_number, place.components.route]
+        .filter(Boolean)
+        .join(' ')
+        .trim()
+
+      setServiceAddress((current) => ({
+        ...current,
+        label: current.label.trim() || prediction.mainText || 'Home',
+        formattedAddress: place.formattedAddress,
+        addressLine1: streetLine || place.formattedAddress,
+        city: place.city ?? current.city,
+        state: place.state ?? current.state,
+        postalCode: place.postalCode ?? current.postalCode,
+        countryCode: place.countryCode ?? 'US',
+        placeId: place.placeId,
+        lat: place.lat,
+        lng: place.lng,
+      }))
+      setServiceQuery(prediction.description)
+      setServicePredictions([])
+      serviceSessionTokenRef.current = makePlacesSessionToken()
+    } catch {
+      // Non-fatal — the pro can still complete the fields manually.
+    }
+  }
   const [scheduledAt, setScheduledAt] = useState(
     defaultScheduledAt ?? defaultDatetimeLocal(),
   )
@@ -866,6 +983,9 @@ export default function NewBookingForm({
             postalCode: normalizeOptionalInput(serviceAddress.postalCode),
             countryCode:
               normalizeOptionalInput(serviceAddress.countryCode) ?? 'US',
+            placeId: serviceAddress.placeId,
+            lat: serviceAddress.lat,
+            lng: serviceAddress.lng,
             isDefault: serviceAddress.isDefault,
           }
         : null
@@ -1332,6 +1452,62 @@ export default function NewBookingForm({
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2 sm:col-span-2">
+                <label htmlFor="serviceAddressSearch" className={label}>
+                  Search address
+                </label>
+                <input
+                  id="serviceAddressSearch"
+                  value={serviceQuery}
+                  disabled={loading}
+                  onChange={(e) => setServiceQuery(e.target.value)}
+                  placeholder="Start typing the client’s address…"
+                  className={field}
+                  autoComplete="off"
+                />
+                <div className={helper}>
+                  Pick a suggestion for the most accurate location and travel
+                  pin. You can also fill the fields below manually.
+                </div>
+
+                {serviceSearching ? (
+                  <div className="text-[12px] text-textSecondary">Searching…</div>
+                ) : null}
+
+                {servicePredictions.length ? (
+                  <div className="grid gap-1.5">
+                    {servicePredictions.slice(0, 6).map((prediction) => (
+                      <button
+                        key={prediction.placeId}
+                        type="button"
+                        disabled={loading}
+                        onClick={() => void chooseServicePrediction(prediction)}
+                        className="rounded-xl border border-white/10 bg-bgPrimary/40 p-2 text-left hover:bg-white/5 disabled:opacity-60"
+                      >
+                        <div className="text-[13px] font-black text-textPrimary">
+                          {prediction.mainText || prediction.description}
+                        </div>
+                        {prediction.secondaryText ? (
+                          <div className="text-[12px] text-textSecondary">
+                            {prediction.secondaryText}
+                          </div>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {serviceAddress.lat != null && serviceAddress.lng != null ? (
+                  <div className="rounded-xl border border-toneSuccess/25 bg-toneSuccess/10 p-2 text-[12px] font-semibold text-textPrimary">
+                    Location confirmed — exact travel pin saved.
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="sm:col-span-2 text-[12px] font-black uppercase tracking-wide text-textSecondary">
+                Or enter manually
+              </div>
+
               <div className="grid gap-2">
                 <label htmlFor="serviceAddressLabel" className={label}>
                   Address label
@@ -1360,10 +1536,9 @@ export default function NewBookingForm({
                   value={serviceAddress.formattedAddress}
                   disabled={loading}
                   onChange={(e) =>
-                    setServiceAddress((current) => ({
-                      ...current,
+                    updateServiceAddressField({
                       formattedAddress: e.target.value,
-                    }))
+                    })
                   }
                   placeholder="123 Main St, City, ST 12345"
                   className={field}
@@ -1379,10 +1554,7 @@ export default function NewBookingForm({
                   value={serviceAddress.addressLine1}
                   disabled={loading}
                   onChange={(e) =>
-                    setServiceAddress((current) => ({
-                      ...current,
-                      addressLine1: e.target.value,
-                    }))
+                    updateServiceAddressField({ addressLine1: e.target.value })
                   }
                   placeholder="Street address"
                   className={field}
@@ -1417,10 +1589,7 @@ export default function NewBookingForm({
                   value={serviceAddress.city}
                   disabled={loading}
                   onChange={(e) =>
-                    setServiceAddress((current) => ({
-                      ...current,
-                      city: e.target.value,
-                    }))
+                    updateServiceAddressField({ city: e.target.value })
                   }
                   className={field}
                 />
@@ -1435,10 +1604,7 @@ export default function NewBookingForm({
                   value={serviceAddress.state}
                   disabled={loading}
                   onChange={(e) =>
-                    setServiceAddress((current) => ({
-                      ...current,
-                      state: e.target.value,
-                    }))
+                    updateServiceAddressField({ state: e.target.value })
                   }
                   className={field}
                 />
@@ -1453,10 +1619,7 @@ export default function NewBookingForm({
                   value={serviceAddress.postalCode}
                   disabled={loading}
                   onChange={(e) =>
-                    setServiceAddress((current) => ({
-                      ...current,
-                      postalCode: e.target.value,
-                    }))
+                    updateServiceAddressField({ postalCode: e.target.value })
                   }
                   className={field}
                 />
@@ -1471,10 +1634,7 @@ export default function NewBookingForm({
                   value={serviceAddress.countryCode}
                   disabled={loading}
                   onChange={(e) =>
-                    setServiceAddress((current) => ({
-                      ...current,
-                      countryCode: e.target.value,
-                    }))
+                    updateServiceAddressField({ countryCode: e.target.value })
                   }
                   placeholder="US"
                   className={field}
