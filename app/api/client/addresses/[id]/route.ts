@@ -4,6 +4,7 @@ import { ClientAddressKind, Prisma } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { resolveServiceAddressValues } from '@/app/api/client/addresses/_resolveServiceAddress'
 import { type RouteContext } from '@/app/api/_utils/routeContext'
 import { prisma } from '@/lib/prisma'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
@@ -217,6 +218,8 @@ export async function PATCH(req: Request, ctx: RouteContext) {
       }
     }
 
+    let resolvedValues = nextValues
+
     if (nextKind === ClientAddressKind.SERVICE_ADDRESS) {
       if (!hasFullClientServiceAddress(nextValues)) {
         return jsonFail(
@@ -224,19 +227,27 @@ export async function PATCH(req: Request, ctx: RouteContext) {
           'Service address needs a real address or formatted address before mobile booking.',
         )
       }
+
+      // Canonicalize a hand-typed service address into a formatted address +
+      // coordinates so it is bookable for mobile (autocomplete picks skip this).
+      const resolved = await resolveServiceAddressValues(nextValues)
+      if (!resolved.ok) {
+        return jsonFail(400, resolved.error)
+      }
+      resolvedValues = resolved.values
     }
 
     const addressPrivacyData = buildAddressPrivacyWriteData({
-      formattedAddress: nextValues.formattedAddress,
-      addressLine1: nextValues.addressLine1,
-      addressLine2: nextValues.addressLine2,
-      city: nextValues.city,
-      state: nextValues.state,
-      postalCode: nextValues.postalCode,
-      countryCode: nextValues.countryCode,
-      placeId: nextValues.placeId,
-      lat: nextValues.lat,
-      lng: nextValues.lng,
+      formattedAddress: resolvedValues.formattedAddress,
+      addressLine1: resolvedValues.addressLine1,
+      addressLine2: resolvedValues.addressLine2,
+      city: resolvedValues.city,
+      state: resolvedValues.state,
+      postalCode: resolvedValues.postalCode,
+      countryCode: resolvedValues.countryCode,
+      placeId: resolvedValues.placeId,
+      lat: resolvedValues.lat,
+      lng: resolvedValues.lng,
     })
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -256,18 +267,18 @@ export async function PATCH(req: Request, ctx: RouteContext) {
         where: { id: existing.id },
         data: {
           kind: nextKind,
-          label: nextValues.label,
+          label: resolvedValues.label,
           isDefault: nextIsDefault,
-          formattedAddress: nextValues.formattedAddress,
-          addressLine1: nextValues.addressLine1,
-          addressLine2: nextValues.addressLine2,
-          city: nextValues.city,
-          state: nextValues.state,
-          postalCode: nextValues.postalCode,
-          countryCode: nextValues.countryCode,
-          placeId: nextValues.placeId,
-          lat: clientAddressNumberToDecimalOrNull(nextValues.lat),
-          lng: clientAddressNumberToDecimalOrNull(nextValues.lng),
+          formattedAddress: resolvedValues.formattedAddress,
+          addressLine1: resolvedValues.addressLine1,
+          addressLine2: resolvedValues.addressLine2,
+          city: resolvedValues.city,
+          state: resolvedValues.state,
+          postalCode: resolvedValues.postalCode,
+          countryCode: resolvedValues.countryCode,
+          placeId: resolvedValues.placeId,
+          lat: clientAddressNumberToDecimalOrNull(resolvedValues.lat),
+          lng: clientAddressNumberToDecimalOrNull(resolvedValues.lng),
           ...addressPrivacyData,
         },
         select: { id: true },

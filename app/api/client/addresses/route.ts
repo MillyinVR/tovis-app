@@ -2,6 +2,7 @@
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { resolveServiceAddressValues } from '@/app/api/client/addresses/_resolveServiceAddress'
 import { prisma } from '@/lib/prisma'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
 import {
@@ -167,7 +168,18 @@ export async function POST(req: Request) {
       return jsonFail(400, parsed.error)
     }
 
-    const { kind, isDefault, values } = parsed
+    const { kind, isDefault } = parsed
+    let values = parsed.values
+
+    // Canonicalize a hand-typed service address into a formatted address +
+    // coordinates so it is bookable for mobile (autocomplete picks skip this).
+    if (kind === 'SERVICE_ADDRESS') {
+      const resolved = await resolveServiceAddressValues(values)
+      if (!resolved.ok) {
+        return jsonFail(400, resolved.error)
+      }
+      values = resolved.values
+    }
 
     const existingCountForKind = await prisma.clientAddress.count({
       where: {
