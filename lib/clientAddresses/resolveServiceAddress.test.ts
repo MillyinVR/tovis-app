@@ -11,7 +11,7 @@ vi.mock('@/app/api/_utils/google', () => ({
 import {
   resolveServiceAddressValues,
   SERVICE_ADDRESS_UNRESOLVED_ERROR,
-} from './_resolveServiceAddress'
+} from './resolveServiceAddress'
 
 function manualValues() {
   return {

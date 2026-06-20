@@ -1,22 +1,24 @@
-// app/api/client/addresses/_resolveServiceAddress.ts
+// lib/clientAddresses/resolveServiceAddress.ts
 //
 // Server-side resolver that canonicalizes a client SERVICE_ADDRESS on save.
 //
-// The address form lets a client either pick a Google autocomplete suggestion
-// (which fills formattedAddress + placeId + lat/lng) OR type the street/city/
-// state/zip by hand. A hand-typed address has no formattedAddress and no
-// coordinates, which passes the save-time completeness check but is then
+// A service address can be entered two ways: by picking a Google autocomplete
+// suggestion (which fills formattedAddress + placeId + lat/lng) or by typing the
+// street/city/state/zip by hand. A hand-typed address has no formattedAddress
+// and no coordinates, which passes the save-time completeness check but is then
 // rejected by mobile booking (lib/booking/writeBoundary requires a non-empty
 // formattedAddress, and the pro needs lat/lng to travel).
 //
 // This forward-geocodes the typed address so every saved service address is
-// bookable regardless of how it was entered. Autocomplete picks already carry
+// bookable regardless of how it was entered. Used by BOTH the client-facing
+// address routes (app/api/client/addresses) and the pro create-booking flow
+// (lib/booking/resolveProBookingClient). Autocomplete picks already carry
 // formattedAddress + coordinates, so they short-circuit without a Google call.
 
 import { googleGeocodeAddress } from '@/app/api/_utils/google'
 
 export const SERVICE_ADDRESS_UNRESOLVED_ERROR =
-  'We couldn’t verify that address. Use the “Search address” box and pick a suggestion so we can confirm the exact location for mobile service.'
+  'We couldn’t verify that address. Use the address search and pick a suggestion so we can confirm the exact location for mobile service.'
 
 type ServiceAddressInput = {
   formattedAddress: string | null
@@ -56,6 +58,9 @@ function buildGeocodeQuery(values: ServiceAddressInput): string {
  * coordinates (autocomplete pick). Otherwise forward-geocodes the typed address
  * and fills the missing formattedAddress / lat / lng / placeId. Returns an error
  * when the address can't be resolved to a confident point.
+ *
+ * Callers must invoke this OUTSIDE a database transaction — it performs an
+ * external HTTP request when geocoding is required.
  */
 export async function resolveServiceAddressValues<T extends ServiceAddressInput>(
   values: T,

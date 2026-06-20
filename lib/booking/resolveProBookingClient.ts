@@ -7,6 +7,7 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 
+import { resolveServiceAddressValues } from '@/lib/clientAddresses/resolveServiceAddress'
 import { upsertProClient } from '@/lib/clients/upsertProClient'
 import { prisma } from '@/lib/prisma'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
@@ -588,9 +589,25 @@ export async function resolveProBookingClient(
     }
   }
 
+  // Canonicalize a hand-typed service address into a formatted address +
+  // coordinates so mobile booking accepts it (autocomplete picks short-circuit).
+  // Runs before createServiceAddress so the external geocode is not inside a tx.
+  const resolvedAddress = await resolveServiceAddressValues(
+    normalizedAddress.data,
+  )
+
+  if (!resolvedAddress.ok) {
+    return {
+      ok: false,
+      status: 400,
+      error: resolvedAddress.error,
+      code: 'CLIENT_SERVICE_ADDRESS_INVALID',
+    }
+  }
+
   const createdAddress = await createServiceAddress({
     clientId: resolvedClient.clientId,
-    input: normalizedAddress.data,
+    input: resolvedAddress.values,
     tx: args.tx,
   })
 
