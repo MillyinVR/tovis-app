@@ -4,7 +4,7 @@ import { ClientAddressKind, Prisma } from '@prisma/client'
 
 import { jsonFail, jsonOk, requireClient } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
-import { resolveServiceAddressValues } from '@/app/api/client/addresses/_resolveServiceAddress'
+import { resolveServiceAddressValues } from '@/lib/clientAddresses/resolveServiceAddress'
 import { type RouteContext } from '@/app/api/_utils/routeContext'
 import { prisma } from '@/lib/prisma'
 import { buildAddressPrivacyWriteData } from '@/lib/security/addressEncryption'
