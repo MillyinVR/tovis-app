@@ -347,16 +347,24 @@ describe('app/claim/[token]/page.tsx', () => {
     expect(mocks.notFound).toHaveBeenCalledTimes(1)
   })
 
-  it('redirects an unauthenticated ready invite into signup with claim context and prefill data', async () => {
-    await expect(renderPage()).rejects.toThrow(/^REDIRECT:/)
+  it('renders the booking overview for an unauthenticated ready invite without redirecting', async () => {
+    const html = await renderPage()
 
-    expect(mocks.redirect).toHaveBeenCalledTimes(1)
+    // Leads with the booking frame; claim is the secondary action.
+    expect(html).toContain('Your booking')
+    expect(html).toContain('Silk Press with TOVIS Studio')
+    expect(html).toContain('Apr 13, 2026 at 11:00 AM')
+    expect(html).toContain('Claim your client history')
+    expect(html).toContain('no account needed to view them')
+    expect(mocks.redirect).not.toHaveBeenCalled()
 
-    const href = String(mocks.redirect.mock.calls[0]?.[0] ?? '')
-    expect(href.startsWith('/signup?')).toBe(true)
+    // Account creation is offered as an optional next step, carrying the
+    // claim context + prefill data into signup.
+    const signupHref = /href="(\/signup\?[^"]+)"/.exec(html)?.[1] ?? ''
+    expect(signupHref).not.toBe('')
 
-    const query = href.split('?')[1] ?? ''
-    const params = new URLSearchParams(query)
+    const decodedHref = signupHref.replace(/&amp;/g, '&')
+    const params = new URLSearchParams(decodedHref.split('?')[1] ?? '')
 
     expect(params.get('from')).toBe('/claim/tok_1')
     expect(params.get('next')).toBe('/claim/tok_1')

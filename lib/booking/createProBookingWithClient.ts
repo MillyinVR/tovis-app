@@ -10,6 +10,7 @@ import {
 } from '@prisma/client'
 
 import { createProBooking } from '@/lib/booking/writeBoundary'
+import { buildClientActionLinkForType } from '@/lib/clientActions/linkBuilders'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { asTrimmedString, isRecord } from '@/lib/guards'
@@ -285,6 +286,12 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
   professionalId: string
   bookingId: string
   clientId: string
+  /**
+   * Internal href the "View booking" CTA points at. For UNCLAIMED clients this
+   * is the public claim/overview page (no sign-in required); for claimed
+   * clients it is the gated booking detail route.
+   */
+  viewHref: string
 }): Promise<void> {
   const clientSnapshot = await loadInviteClientSnapshot(args.clientId)
 
@@ -330,7 +337,7 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
       },
       title: 'Booking confirmed',
       body: 'Your appointment has been booked.',
-      href: `/client/bookings/${args.bookingId}`,
+      href: args.viewHref,
       payload: {
         source: 'proCreatedBooking',
         bookingId: args.bookingId,
@@ -413,14 +420,6 @@ export async function createProBookingWithClient(
 
   const bookingWasCreated = bookingResult.meta.mutated
 
-  if (bookingWasCreated) {
-    await tryEnqueueBookingConfirmedDelivery({
-      professionalId: args.professionalId,
-      bookingId: bookingResult.booking.id,
-      clientId: resolvedClient.clientId,
-    })
-  }
-
   let inviteCandidate: CreatedInviteDeliveryCandidate | null = null
 
   if (
@@ -434,18 +433,40 @@ export async function createProBookingWithClient(
       bookingId: bookingResult.booking.id,
       clientId: resolvedClient.clientId,
     })
+  }
 
-    if (inviteCandidate) {
-      await tryEnqueueInviteDelivery({
-        professionalId: args.professionalId,
-        actorUserId: args.actorUserId,
-        tenantContext: args.tenantContext,
-        bookingId: bookingResult.booking.id,
-        clientId: resolvedClient.clientId,
-        clientUserId: resolvedClient.clientUserId,
-        invite: inviteCandidate,
-      })
-    }
+  if (bookingWasCreated) {
+    /**
+     * UNCLAIMED clients have no account to sign into, so the gated booking
+     * detail route would only bounce them to a login wall. When we hold a
+     * fresh claim link for them, route "View booking" to the public claim/
+     * overview page instead; claimed clients keep the gated detail route.
+     */
+    const viewHref = inviteCandidate
+      ? buildClientActionLinkForType({
+          actionType: 'CLIENT_CLAIM_INVITE',
+          rawToken: inviteCandidate.rawToken,
+        }).href
+      : `/client/bookings/${bookingResult.booking.id}`
+
+    await tryEnqueueBookingConfirmedDelivery({
+      professionalId: args.professionalId,
+      bookingId: bookingResult.booking.id,
+      clientId: resolvedClient.clientId,
+      viewHref,
+    })
+  }
+
+  if (inviteCandidate) {
+    await tryEnqueueInviteDelivery({
+      professionalId: args.professionalId,
+      actorUserId: args.actorUserId,
+      tenantContext: args.tenantContext,
+      bookingId: bookingResult.booking.id,
+      clientId: resolvedClient.clientId,
+      clientUserId: resolvedClient.clientUserId,
+      invite: inviteCandidate,
+    })
   }
 
   return {

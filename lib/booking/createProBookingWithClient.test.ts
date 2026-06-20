@@ -207,6 +207,12 @@ function expectBookingConfirmedDispatch(args: {
   userId?: string | null
   email?: string | null
   phone?: string | null
+  /**
+   * Expected "View booking" href. Defaults to the gated booking detail route
+   * (claimed clients). UNCLAIMED clients with a freshly minted claim link get
+   * the public claim/overview page instead.
+   */
+  href?: string
 }) {
   const bookingId = args.bookingId ?? 'booking_1'
 
@@ -223,7 +229,7 @@ function expectBookingConfirmedDispatch(args: {
     }),
     title: 'Booking confirmed',
     body: 'Your appointment has been booked.',
-    href: `/client/bookings/${bookingId}`,
+    href: args.href ?? `/client/bookings/${bookingId}`,
     payload: {
       source: 'proCreatedBooking',
       bookingId,
@@ -527,6 +533,7 @@ describe('createProBookingWithClient', () => {
       clientId: 'client_resolved_1',
       email: 'newclient@example.com',
       phone: null,
+      href: '/claim/token_1',
     })
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
@@ -613,6 +620,7 @@ describe('createProBookingWithClient', () => {
       clientId: 'client_existing_1',
       email: 'existing-unclaimed@example.com',
       phone: null,
+      href: '/claim/token_1',
     })
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
@@ -770,6 +778,7 @@ describe('createProBookingWithClient', () => {
       clientId: 'client_unclaimed_1',
       email: 'newclient@example.com',
       phone: null,
+      href: '/claim/token_1',
     })
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
@@ -860,6 +869,7 @@ describe('createProBookingWithClient', () => {
       clientId: 'client_unclaimed_1',
       email: null,
       phone: '+16195551234',
+      href: '/claim/token_1',
     })
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
@@ -937,6 +947,7 @@ describe('createProBookingWithClient', () => {
       clientId: 'client_unclaimed_1',
       email: 'both@example.com',
       phone: '+16195551234',
+      href: '/claim/token_1',
     })
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
@@ -1590,6 +1601,7 @@ describe('createProBookingWithClient', () => {
         clientId: 'client_unclaimed_1',
         email: 'newclient@example.com',
         phone: null,
+        href: '/claim/token_1',
       })
       expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
       expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledTimes(1)
