@@ -1,5 +1,5 @@
 // lib/auth/turnstile.ts
-import { readOptionalEnv as envOrNull } from '@/lib/env'
+import { readOptionalEnv as envOrNull, isDeployedRuntime } from '@/lib/env'
 import { getTrustedClientIpFromRequest } from '@/lib/trustedClientIp'
 
 const TURNSTILE_VERIFY_URL =
@@ -19,6 +19,15 @@ type VerifyTurnstileResult =
     }
 
 function isTurnstileFailOpenAllowed(): boolean {
+  // Fail-open is a LOCAL-DEV-ONLY escape hatch (register without solving a
+  // captcha when Turnstile isn't configured locally). It must NEVER engage on a
+  // deployed surface — production or preview — because those are real,
+  // internet-facing registration endpoints. Gate on VERCEL_ENV first: that hard
+  // block holds even if AUTH_TURNSTILE_FAIL_OPEN leaks into a deployment's env.
+  // NODE_ENV alone proved insufficient (auth.register.captcha_fail_open fired in
+  // production), so it is now only a secondary guard.
+  if (isDeployedRuntime()) return false
+
   return (
     process.env.NODE_ENV !== 'production' &&
     envOrNull(AUTH_TURNSTILE_FAIL_OPEN_ENV) === '1'
