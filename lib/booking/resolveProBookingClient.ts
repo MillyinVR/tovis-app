@@ -7,6 +7,15 @@ import {
   ServiceLocationType,
 } from '@prisma/client'
 
+import {
+  clientAddressNumberToDecimalOrNull,
+  coerceClientAddressLatLng,
+  getInvalidClientAddressField,
+  hasFullClientServiceAddress,
+  normalizeClientAddressBoolean,
+  normalizeClientAddressLatLng,
+  normalizeClientAddressOptionalString,
+} from '@/lib/clientAddresses/addressInput'
 import { resolveServiceAddressValues } from '@/lib/clientAddresses/resolveServiceAddress'
 import { upsertProClient } from '@/lib/clients/upsertProClient'
 import { prisma } from '@/lib/prisma'
@@ -40,71 +49,10 @@ function hasMeaningfulValue(value: unknown): boolean {
   return value != null
 }
 
-function normalizeOptionalString(
-  value: unknown,
-  max = 255,
-): string | null | undefined | 'invalid' {
-  if (value === undefined) return undefined
-  if (value === null) return null
-
-  if (typeof value !== 'string') return 'invalid'
-
-  const normalized = value.trim()
-  if (!normalized) return null
-  if (normalized.length > max) return 'invalid'
-
-  return normalized
-}
-
-function normalizeBoolean(value: unknown): boolean | undefined | 'invalid' {
-  if (value === undefined) return undefined
-  if (typeof value === 'boolean') return value
-
-  return 'invalid'
-}
-
-function normalizeLatLng(value: unknown): number | null | undefined | 'invalid' {
-  if (value === undefined) return undefined
-  if (value === null || value === '') return null
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 'invalid'
-
-  return value
-}
-
-function coerceLatLng(
-  value: number | null | undefined | 'invalid',
-): number | null | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (value === null) return null
-
-  return undefined
-}
-
-function toDecimalOrNull(value: number | null | undefined) {
-  if (value == null) return null
-  return new Prisma.Decimal(String(value))
-}
-
-function hasFullServiceAddress(args: {
-  formattedAddress?: string | null
-  addressLine1?: string | null
-  city?: string | null
-  state?: string | null
-  postalCode?: string | null
-  placeId?: string | null
-  lat?: number | null
-  lng?: number | null
-}) {
-  const hasAddressLine = Boolean(args.formattedAddress || args.addressLine1)
-  const hasLocationAnchor = Boolean(
-    args.placeId ||
-      (args.lat != null && args.lng != null) ||
-      args.postalCode ||
-      (args.city && args.state),
-  )
-
-  return hasAddressLine && hasLocationAnchor
-}
+// Address-field normalization, completeness, and invalid-field detection are
+// owned by lib/clientAddresses/addressInput (the single source of truth shared
+// with the client-facing address routes). This module reuses them rather than
+// re-implementing, so the pro and client paths stay in lockstep.
 
 type NewClientInput = {
   firstName?: unknown
@@ -208,55 +156,34 @@ function hasAddressPayload(
   )
 }
 
-function getInvalidServiceAddressField(args: {
-  label: string | null | undefined | 'invalid'
-  formattedAddress: string | null | undefined | 'invalid'
-  addressLine1: string | null | undefined | 'invalid'
-  addressLine2: string | null | undefined | 'invalid'
-  city: string | null | undefined | 'invalid'
-  state: string | null | undefined | 'invalid'
-  postalCode: string | null | undefined | 'invalid'
-  countryCode: string | null | undefined | 'invalid'
-  placeId: string | null | undefined | 'invalid'
-  lat: number | null | undefined | 'invalid'
-  lng: number | null | undefined | 'invalid'
-  isDefault: boolean | undefined | 'invalid'
-}): string | null {
-  if (args.label === 'invalid') return 'label'
-  if (args.formattedAddress === 'invalid') return 'formattedAddress'
-  if (args.addressLine1 === 'invalid') return 'addressLine1'
-  if (args.addressLine2 === 'invalid') return 'addressLine2'
-  if (args.city === 'invalid') return 'city'
-  if (args.state === 'invalid') return 'state'
-  if (args.postalCode === 'invalid') return 'postalCode'
-  if (args.countryCode === 'invalid') return 'countryCode'
-  if (args.placeId === 'invalid') return 'placeId'
-  if (args.lat === 'invalid') return 'lat'
-  if (args.lng === 'invalid') return 'lng'
-  if (args.isDefault === 'invalid') return 'isDefault'
-
-  return null
-}
-
 function normalizeServiceAddressInput(
   value: ProBookingServiceAddressInput | null | undefined,
 ):
   | { ok: true; data: NormalizedServiceAddressInput }
   | { ok: false; error: string } {
-  const label = normalizeOptionalString(value?.label, 80)
-  const formattedAddress = normalizeOptionalString(value?.formattedAddress, 500)
-  const addressLine1 = normalizeOptionalString(value?.addressLine1, 200)
-  const addressLine2 = normalizeOptionalString(value?.addressLine2, 200)
-  const city = normalizeOptionalString(value?.city, 120)
-  const state = normalizeOptionalString(value?.state, 120)
-  const postalCode = normalizeOptionalString(value?.postalCode, 40)
-  const countryCode = normalizeOptionalString(value?.countryCode, 8)
-  const placeId = normalizeOptionalString(value?.placeId, 255)
-  const lat = normalizeLatLng(value?.lat)
-  const lng = normalizeLatLng(value?.lng)
-  const isDefault = normalizeBoolean(value?.isDefault)
+  const label = normalizeClientAddressOptionalString(value?.label, 80)
+  const formattedAddress = normalizeClientAddressOptionalString(
+    value?.formattedAddress,
+    500,
+  )
+  const addressLine1 = normalizeClientAddressOptionalString(
+    value?.addressLine1, // pii-plaintext-read-ok: normalizes pro-supplied client service address before centralized normalization/encryption
+    200,
+  )
+  const addressLine2 = normalizeClientAddressOptionalString(
+    value?.addressLine2, // pii-plaintext-read-ok: normalizes pro-supplied client service address before centralized normalization/encryption
+    200,
+  )
+  const city = normalizeClientAddressOptionalString(value?.city, 120)
+  const state = normalizeClientAddressOptionalString(value?.state, 120)
+  const postalCode = normalizeClientAddressOptionalString(value?.postalCode, 40) // pii-plaintext-read-ok: normalizes pro-supplied client postal code before centralized normalization/encryption
+  const countryCode = normalizeClientAddressOptionalString(value?.countryCode, 8)
+  const placeId = normalizeClientAddressOptionalString(value?.placeId, 255)
+  const lat = normalizeClientAddressLatLng(value?.lat)
+  const lng = normalizeClientAddressLatLng(value?.lng)
+  const isDefault = normalizeClientAddressBoolean(value?.isDefault)
 
-  const invalidField = getInvalidServiceAddressField({
+  const invalidField = getInvalidClientAddressField({
     label,
     formattedAddress,
     addressLine1,
@@ -288,13 +215,13 @@ function normalizeServiceAddressInput(
     postalCode: postalCode ?? null,
     countryCode: countryCode ?? null,
     placeId: placeId ?? null,
-    lat: coerceLatLng(lat),
-    lng: coerceLatLng(lng),
+    lat: coerceClientAddressLatLng(lat),
+    lng: coerceClientAddressLatLng(lng),
     isDefault: typeof isDefault === 'boolean' ? isDefault : undefined,
   }
 
   if (
-    !hasFullServiceAddress({
+    !hasFullClientServiceAddress({
       formattedAddress: normalized.formattedAddress,
       addressLine1: normalized.addressLine1,
       city: normalized.city,
@@ -402,8 +329,8 @@ async function createServiceAddressInDb(args: {
       postalCode: args.input.postalCode,
       countryCode: args.input.countryCode,
       placeId: args.input.placeId,
-      lat: toDecimalOrNull(args.input.lat),
-      lng: toDecimalOrNull(args.input.lng),
+      lat: clientAddressNumberToDecimalOrNull(args.input.lat),
+      lng: clientAddressNumberToDecimalOrNull(args.input.lng),
       ...addressPrivacyData,
     },
     select: {
