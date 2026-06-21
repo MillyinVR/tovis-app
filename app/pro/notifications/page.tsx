@@ -437,8 +437,17 @@ export default async function ProNotificationsPage(props: {
             </div>
           </div>
 
-          <div className="shrink-0 rounded-full border border-surfaceGlass/12 bg-bgPrimary/35 px-3 py-1 text-[11px] font-black text-textSecondary">
-            TZ: <span className="text-textPrimary">{timeZone}</span>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <div className="rounded-full border border-surfaceGlass/12 bg-bgPrimary/35 px-3 py-1 text-[11px] font-black text-textSecondary">
+              TZ: <span className="text-textPrimary">{timeZone}</span>
+            </div>
+            <Link
+              href="/pro/notifications/settings"
+              prefetch={false}
+              className="rounded-full border border-surfaceGlass/12 bg-bgPrimary/35 px-3 py-1 text-[11px] font-black text-textSecondary transition hover:text-textPrimary"
+            >
+              Settings
+            </Link>
           </div>
         </div>
 
