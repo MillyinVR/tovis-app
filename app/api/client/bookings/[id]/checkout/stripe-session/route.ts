@@ -22,6 +22,7 @@ import {
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { getStripe } from '@/lib/stripe/server'
+import { parseTipAmount } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,9 +41,6 @@ type JsonObjectPayload = {
   [key: string]: JsonValue
 }
 
-type ParsedTipAmount =
-  | { ok: true; tipAmount: string | null | undefined }
-  | { ok: false; error: string }
 
 function trimmedString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -86,33 +84,6 @@ function buildAftercareCheckoutReturnUrl(
   url.searchParams.set('checkout', status)
 
   return url.toString()
-}
-
-function parseTipAmount(value: unknown): ParsedTipAmount {
-  if (value === undefined) return { ok: true, tipAmount: undefined }
-  if (value === null) return { ok: true, tipAmount: null }
-
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value) || value < 0) {
-      return { ok: false, error: 'tipAmount must be a non-negative number.' }
-    }
-
-    return { ok: true, tipAmount: value.toFixed(2) }
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    if (!trimmed) return { ok: true, tipAmount: null }
-
-    const parsed = Number(trimmed)
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      return { ok: false, error: 'tipAmount must be a non-negative amount.' }
-    }
-
-    return { ok: true, tipAmount: parsed.toFixed(2) }
-  }
-
-  return { ok: false, error: 'tipAmount must be a number, string, or null.' }
 }
 
 function buildIdempotencyRequestBody(args: {
