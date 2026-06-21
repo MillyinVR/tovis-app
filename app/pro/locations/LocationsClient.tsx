@@ -12,6 +12,7 @@ import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 import { clampInt } from '@/lib/guards'
 import { kmToMiles } from '@/lib/units'
 import { cn } from '@/lib/utils'
+import { Badge, Button, buttonClassName } from '@/app/_components/ui'
 
 type ToastState = { tone: 'success' | 'error'; title: string; body?: string | null }
 const ADVANCE_NOTICE_OPTIONS = [
@@ -627,20 +628,18 @@ async function updateAdvanceNotice(
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-white/10 bg-bgPrimary/25 px-3 py-1 text-[11px] font-black text-textPrimary">
-              {locations.length} total
-            </span>
-            <span className="rounded-full border border-white/10 bg-bgPrimary/25 px-3 py-1 text-[11px] font-black text-textPrimary">
+            <Badge tone="neutral">{locations.length} total</Badge>
+            <Badge tone="neutral">
               {primaryCount ? 'Primary set' : 'No primary'}
-            </span>
-            <button
-              type="button"
+            </Badge>
+            <Button
+              variant="ghost"
+              size="xs"
               onClick={() => void refresh()}
               disabled={!canInteract}
-              className="rounded-full border border-white/10 bg-bgPrimary/25 px-3 py-1.5 text-[11px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
             >
               Refresh
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -744,23 +743,23 @@ async function updateAdvanceNotice(
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => setPickedPlace(null)}
                       disabled={busy}
-                      className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
                     >
                       Clear
-                    </button>
+                    </Button>
 
-                    <button
-                      type="button"
+                    <Button
+                      variant="primary"
+                      size="sm"
                       onClick={() => void createFromPickedPlace()}
                       disabled={busy}
-                      className="rounded-full border border-accentPrimary/45 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60"
                     >
                       {busy ? 'Adding…' : 'Add location'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (
@@ -811,14 +810,15 @@ async function updateAdvanceNotice(
                 </label>
               </div>
 
-              <button
-                type="button"
+              <Button
+                variant="primary"
+                size="sm"
+                className="mt-1"
                 disabled={!canInteract}
                 onClick={() => void createMobileBase()}
-                className="mt-1 rounded-full border border-accentPrimary/45 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60"
               >
                 {busy ? 'Saving…' : 'Save mobile base'}
-              </button>
+              </Button>
             </div>
           ) : null}
 
@@ -840,14 +840,14 @@ async function updateAdvanceNotice(
               </div>
             </div>
 
-            <button
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => void publishLocations()}
               disabled={busy}
-              className="rounded-full border border-accentPrimary/45 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60"
             >
               {busy ? 'Publishing…' : 'Publish locations'}
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
@@ -883,18 +883,12 @@ async function updateAdvanceNotice(
                       <div className="flex flex-wrap items-center gap-2">
                         <div className="truncate text-[13px] font-black text-textPrimary">{formatLocationTitle(l)}</div>
 
-                        {l.isPrimary ? (
-                          <span className="rounded-full border border-accentPrimary/35 bg-accentPrimary/10 px-2 py-1 text-[11px] font-black text-textPrimary">
-                            PRIMARY
-                          </span>
-                        ) : null}
+                        {l.isPrimary ? <Badge tone="accent">PRIMARY</Badge> : null}
 
                         <span className="text-[11px] font-bold text-textSecondary">{l.type}</span>
 
                         {!l.isBookable ? (
-                          <span className="rounded-full border border-toneWarn/30 bg-bgPrimary/25 px-2 py-1 text-[11px] font-black text-toneWarn">
-                            Not bookable
-                          </span>
+                          <Badge tone="warn">Not bookable</Badge>
                         ) : null}
                       </div>
 
@@ -915,7 +909,7 @@ async function updateAdvanceNotice(
                           href={mapsHref}
                           target="_blank"
                           rel="noreferrer"
-                          className="rounded-full border border-white/10 bg-bgPrimary/25 px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
+                          className={buttonClassName({ variant: 'ghost', size: 'sm' })}
                         >
                           Maps
                         </a>
@@ -926,7 +920,7 @@ async function updateAdvanceNotice(
                           href={dirHref}
                           target="_blank"
                           rel="noreferrer"
-                          className="rounded-full border border-white/10 bg-bgPrimary/25 px-3 py-2 text-[12px] font-black text-textPrimary hover:border-white/20"
+                          className={buttonClassName({ variant: 'ghost', size: 'sm' })}
                         >
                           Directions
                         </a>
@@ -1001,58 +995,58 @@ async function updateAdvanceNotice(
                       </div>
 
                       <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => setEditingBaseId(null)}
                           disabled={busy}
-                          className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
                         >
                           Cancel
-                        </button>
+                        </Button>
 
-                        <button
-                          type="button"
+                        <Button
+                          variant="primary"
+                          size="sm"
                           onClick={() => void saveMobileBaseEdit(l.id)}
                           disabled={busy}
-                          className="rounded-full border border-accentPrimary/45 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover disabled:opacity-60"
                         >
                           {busyId === l.id ? 'Saving…' : 'Save changes'}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   ) : null}
 
                   <div className="mt-3 flex flex-wrap gap-2">
                     {l.type === 'MOBILE_BASE' && editingBaseId !== l.id ? (
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => openBaseEditor(l)}
                         disabled={busy}
-                        className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
                       >
                         Edit base
-                      </button>
+                      </Button>
                     ) : null}
 
                     {!l.isPrimary ? (
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => void setPrimaryLocation(l.id)}
                         disabled={busy}
-                        className="rounded-full border border-white/10 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-textPrimary hover:border-white/20 disabled:opacity-60"
                       >
                         {busyId === l.id ? 'Setting…' : 'Set primary'}
-                      </button>
+                      </Button>
                     ) : null}
 
-                    <button
-                      type="button"
+                    <Button
+                      variant="danger"
+                      size="sm"
                       onClick={() => setConfirmDelete({ open: true, id: l.id })}
                       disabled={busy}
-                      className="rounded-full border border-toneDanger/30 bg-bgPrimary/25 px-4 py-2 text-[12px] font-black text-toneDanger hover:border-toneDanger/55 disabled:opacity-60"
                     >
                       {busyId === l.id ? 'Deleting…' : 'Delete'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )
