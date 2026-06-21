@@ -18,9 +18,12 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
     display: 'standalone',
     background_color: rgbTripletToHex(dark.bgPrimary),
     theme_color: rgbTripletToHex(dark.bgPrimary),
+    categories: ['lifestyle', 'health'],
     icons: [
       { src: '/icon.svg', type: 'image/svg+xml', sizes: 'any' },
-      { src: '/apple-icon', type: 'image/png', sizes: '180x180' },
+      { src: '/apple-icon/120', type: 'image/png', sizes: '120x120' },
+      { src: '/apple-icon/167', type: 'image/png', sizes: '167x167' },
+      { src: '/apple-icon/180', type: 'image/png', sizes: '180x180' },
     ],
   }
 }
