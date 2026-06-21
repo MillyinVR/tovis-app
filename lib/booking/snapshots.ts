@@ -1,6 +1,7 @@
 // lib/booking/snapshots.ts
 import { Prisma } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
+import { moneyToNumber } from '@/lib/money'
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -60,37 +61,16 @@ export function reuseJsonSnapshot(
   return value as Prisma.InputJsonValue
 }
 
+// `undefined`-returning variant kept for callers that distinguish "absent"
+// (key omitted) from "present null". Delegates to the money.ts SSOT and maps
+// its null sentinel back to undefined; 0 and other falsy-but-valid numbers are
+// preserved (?? only catches null/undefined).
 export function decimalToNumber(value: unknown): number | undefined {
-  if (value == null) return undefined
-
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : undefined
-  }
-
-  if (typeof value === 'string') {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : undefined
-  }
-
-  if (typeof value === 'object' && value !== null) {
-    const maybeToNumber = (value as { toNumber?: unknown }).toNumber
-    if (typeof maybeToNumber === 'function') {
-      const parsed = maybeToNumber.call(value) as number
-      return Number.isFinite(parsed) ? parsed : undefined
-    }
-
-    const maybeToString = (value as { toString?: unknown }).toString
-    if (typeof maybeToString === 'function') {
-      const parsed = Number(String(maybeToString.call(value)))
-      return Number.isFinite(parsed) ? parsed : undefined
-    }
-  }
-
-  return undefined
+  return moneyToNumber(value) ?? undefined
 }
 
 export function decimalToNullableNumber(value: unknown): number | null {
-  return decimalToNumber(value) ?? null
+  return moneyToNumber(value)
 }
 
 export function decimalFromUnknown(value: unknown): Prisma.Decimal {

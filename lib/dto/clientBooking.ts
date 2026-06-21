@@ -1,5 +1,6 @@
 // lib/dto/clientBooking.ts
 import { Prisma, type BookingServiceItemType } from '@prisma/client'
+import { moneyToString } from '@/lib/money'
 import {
   resolveApptTimeZone,
   type TimeZoneTruthSource,
@@ -142,6 +143,10 @@ function decimalToString(v: unknown): string | null {
   if (v == null) return null
   if (typeof v === "string") return v
   if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  // Prisma.Decimal money columns route through the money SSOT. For a Decimal,
+  // moneyToString === String(value.toString()) (Decimal.toString() never emits
+  // trailing zeros), so output is unchanged.
+  if (v instanceof Prisma.Decimal) return moneyToString(v)
   if (
     typeof v === 'object' &&
     typeof (v as { toString?: unknown }).toString === 'function'

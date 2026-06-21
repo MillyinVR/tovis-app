@@ -1,5 +1,6 @@
 // app/api/pro/openings/route.ts
 import { prisma } from '@/lib/prisma'
+import { moneyToString } from '@/lib/money'
 import {
   CreateLastMinuteOpeningError,
   createLastMinuteOpening,
@@ -284,10 +285,6 @@ type OpeningRow = Prisma.LastMinuteOpeningGetPayload<{
   select: typeof openingSelect
 }>
 
-function decimalToString(value: Prisma.Decimal | null): string | null {
-  return value ? value.toString() : null
-}
-
 function mapOpeningDto(opening: OpeningRow) {
   return {
     id: opening.id,
@@ -343,9 +340,9 @@ function mapOpeningDto(opening: OpeningRow) {
         title: row.offering.title ?? null,
         offersInSalon: row.offering.offersInSalon,
         offersMobile: row.offering.offersMobile,
-        salonPriceStartingAt: decimalToString(row.offering.salonPriceStartingAt),
+        salonPriceStartingAt: moneyToString(row.offering.salonPriceStartingAt),
         salonDurationMinutes: row.offering.salonDurationMinutes,
-        mobilePriceStartingAt: decimalToString(row.offering.mobilePriceStartingAt),
+        mobilePriceStartingAt: moneyToString(row.offering.mobilePriceStartingAt),
         mobileDurationMinutes: row.offering.mobileDurationMinutes,
       },
     })),
@@ -360,7 +357,7 @@ function mapOpeningDto(opening: OpeningRow) {
       lastError: plan.lastError ?? null,
       offerType: plan.offerType,
       percentOff: plan.percentOff ?? null,
-      amountOff: decimalToString(plan.amountOff),
+      amountOff: moneyToString(plan.amountOff),
       freeAddOnServiceId: plan.freeAddOnServiceId ?? null,
       freeAddOnService: plan.freeAddOnService
         ? {

@@ -1,23 +1,7 @@
 // lib/dto/proBookingNew.ts
 import type { Prisma, Role } from '@prisma/client'
 
-function decimalToNumber(
-  value: Prisma.Decimal | number | string | null | undefined,
-): number | null {
-  if (value == null) return null
-
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null
-  }
-
-  if (typeof value === 'string') {
-    const n = Number(value)
-    return Number.isFinite(n) ? n : null
-  }
-
-  const n = Number(value.toString())
-  return Number.isFinite(n) ? n : null
-}
+import { moneyToNumber } from '@/lib/money'
 
 function dateToIso(value: Date | null | undefined): string | null {
   return value ? value.toISOString() : null
@@ -150,9 +134,9 @@ export function buildProBookingNewOfferingDTO(
     id: row.id,
     title: row.title ?? null,
     description: row.description ?? null,
-    salonPriceStartingAt: decimalToNumber(row.salonPriceStartingAt),
+    salonPriceStartingAt: moneyToNumber(row.salonPriceStartingAt),
     salonDurationMinutes: row.salonDurationMinutes ?? null,
-    mobilePriceStartingAt: decimalToNumber(row.mobilePriceStartingAt),
+    mobilePriceStartingAt: moneyToNumber(row.mobilePriceStartingAt),
     mobileDurationMinutes: row.mobileDurationMinutes ?? null,
     offersInSalon: row.offersInSalon,
     offersMobile: row.offersMobile,
@@ -166,7 +150,7 @@ export function buildProBookingNewOfferingDTO(
       categoryId: row.service.categoryId ?? null,
       description: row.service.description ?? null,
       defaultDurationMinutes: row.service.defaultDurationMinutes ?? null,
-      minPrice: decimalToNumber(row.service.minPrice),
+      minPrice: moneyToNumber(row.service.minPrice),
       defaultImageUrl: row.service.defaultImageUrl ?? null,
       allowMobile: row.service.allowMobile,
       isActive: row.service.isActive,

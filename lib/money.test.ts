@@ -1,6 +1,41 @@
 import { describe, expect, it } from 'vitest'
 import { Prisma } from '@prisma/client'
-import { formatMoneyFromUnknown, parseTipAmount } from './money'
+import {
+  formatMoneyFromUnknown,
+  moneyToNumber,
+  parseTipAmount,
+} from './money'
+
+describe('moneyToNumber', () => {
+  it('returns null for nullish, non-finite, or uninterpretable input', () => {
+    expect(moneyToNumber(null)).toBeNull()
+    expect(moneyToNumber(undefined)).toBeNull()
+    expect(moneyToNumber(Number.NaN)).toBeNull()
+    expect(moneyToNumber(Number.POSITIVE_INFINITY)).toBeNull()
+    expect(moneyToNumber('abc')).toBeNull()
+    expect(moneyToNumber({})).toBeNull()
+    expect(moneyToNumber(true)).toBeNull()
+  })
+
+  it('passes through finite numbers, including zero', () => {
+    expect(moneyToNumber(0)).toBe(0)
+    expect(moneyToNumber(80.5)).toBe(80.5)
+    expect(moneyToNumber(-122.42)).toBe(-122.42)
+  })
+
+  it('parses numeric strings', () => {
+    expect(moneyToNumber('80')).toBe(80)
+    expect(moneyToNumber('80.50')).toBe(80.5)
+  })
+
+  it('converts Prisma.Decimal without rounding or reformatting', () => {
+    expect(moneyToNumber(new Prisma.Decimal('80.00'))).toBe(80)
+    expect(moneyToNumber(new Prisma.Decimal('80.50'))).toBe(80.5)
+    // full coordinate precision is preserved (no money rounding)
+    expect(moneyToNumber(new Prisma.Decimal('37.774929'))).toBe(37.774929)
+    expect(moneyToNumber(new Prisma.Decimal('0'))).toBe(0)
+  })
+})
 
 describe('parseTipAmount', () => {
   it('treats undefined as "not provided" and null/blank as "no tip"', () => {

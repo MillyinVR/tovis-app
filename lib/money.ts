@@ -121,6 +121,45 @@ export function moneyToFixed2String(
   return `${dollars}.${cents.slice(0, 2)}`
 }
 
+/**
+ * Faithfully convert a Decimal / number / money-string into a JS number without
+ * any rounding. Returns null for nullish, non-finite, or uninterpretable input.
+ *
+ * This is the single source of truth for "Decimal column -> number". It is used
+ * both for money amounts and for other non-money Prisma.Decimal columns (e.g.
+ * latitude / longitude), so it deliberately does NOT round or reformat — it
+ * preserves the value's full precision.
+ */
+export function moneyToNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+
+  if (typeof value === 'string') {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : null
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    const n = value.toNumber()
+    return Number.isFinite(n) ? n : null
+  }
+
+  // Decimal-like objects (e.g. instances from a different Prisma client realm,
+  // where `instanceof` fails) — fall back to their string representation.
+  if (typeof value === 'object') {
+    const maybeToString = (value as { toString?: unknown }).toString
+    if (typeof maybeToString === 'function') {
+      const n = Number(String(maybeToString.call(value)))
+      return Number.isFinite(n) ? n : null
+    }
+  }
+
+  return null
+}
+
 export type ParseTipAmountResult =
   | { ok: true; tipAmount: string | null | undefined }
   | { ok: false; error: string }

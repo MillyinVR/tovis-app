@@ -1,6 +1,7 @@
 // app/api/openings/route.ts
 import { clampInt } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
+import { moneyToString } from '@/lib/money'
 import { requireUser } from '@/app/api/_utils/auth/requireUser'
 import { jsonFail, jsonOk, pickString } from '@/app/api/_utils'
 import {
@@ -106,10 +107,6 @@ type OpeningDto = {
     }
   }[]
   publicIncentive: PublicIncentiveDto | null
-}
-
-function decimalToString(value: Prisma.Decimal | null): string | null {
-  return value ? value.toString() : null
 }
 
 function weekdayDisableKeyInTimeZone(date: Date, timeZone: string): DisableKey {
@@ -293,8 +290,8 @@ function mapOpening(row: OpeningQueryRow, now: Date): OpeningDto {
       city: row.location?.city ?? null,
       state: row.location?.state ?? null,
       formattedAddress: row.location?.formattedAddress ?? null,
-      lat: decimalToString(row.location?.lat ?? null),
-      lng: decimalToString(row.location?.lng ?? null),
+      lat: moneyToString(row.location?.lat ?? null),
+      lng: moneyToString(row.location?.lng ?? null),
     },
 
     professional: {
@@ -321,8 +318,8 @@ function mapOpening(row: OpeningQueryRow, now: Date): OpeningDto {
       offering: {
         id: serviceRow.offering.id,
         title: serviceRow.offering.title ?? null,
-        salonPriceStartingAt: decimalToString(serviceRow.offering.salonPriceStartingAt),
-        mobilePriceStartingAt: decimalToString(serviceRow.offering.mobilePriceStartingAt),
+        salonPriceStartingAt: moneyToString(serviceRow.offering.salonPriceStartingAt),
+        mobilePriceStartingAt: moneyToString(serviceRow.offering.mobilePriceStartingAt),
         salonDurationMinutes: serviceRow.offering.salonDurationMinutes,
         mobileDurationMinutes: serviceRow.offering.mobileDurationMinutes,
         offersInSalon: serviceRow.offering.offersInSalon,
@@ -336,7 +333,7 @@ function mapOpening(row: OpeningQueryRow, now: Date): OpeningDto {
           offerType: publicPlan.offerType,
           label: incentiveLabel(publicPlan),
           percentOff: publicPlan.percentOff ?? null,
-          amountOff: decimalToString(publicPlan.amountOff),
+          amountOff: moneyToString(publicPlan.amountOff),
           freeAddOnService: publicPlan.freeAddOnService
             ? {
                 id: publicPlan.freeAddOnService.id,

@@ -10,6 +10,7 @@ import {
 } from '@prisma/client'
 import { haversineMiles } from '@/lib/discovery/nearby'
 import { isNonEmptyString } from '@/lib/guards'
+import { moneyToNumber } from '@/lib/money'
 import {
   mergeAndDedupeRecipients,
   type LastMinuteAudienceCandidate,
@@ -52,12 +53,6 @@ export type OpeningForTier3 = Prisma.LastMinuteOpeningGetPayload<{
 
 function daysAgo(n: number): Date {
   return new Date(Date.now() - n * 24 * 60 * 60 * 1000)
-}
-
-function decimalToNumber(value: Prisma.Decimal | null | undefined): number | null {
-  if (!value) return null
-  const n = Number(value.toString())
-  return Number.isFinite(n) ? n : null
 }
 
 function toClientIdSetFromProfiles(
@@ -219,8 +214,8 @@ async function loadSearchAreasByClientId(args: {
   })
 
   for (const row of rows) {
-    const lat = decimalToNumber(row.lat)
-    const lng = decimalToNumber(row.lng)
+    const lat = moneyToNumber(row.lat)
+    const lng = moneyToNumber(row.lng)
     const radiusMiles = row.radiusMiles
 
     if (
@@ -290,8 +285,8 @@ export async function buildTier3DiscoveryAudience(args: {
 }): Promise<Tier3DiscoveryCandidate[]> {
   const { tx, opening, now } = args
 
-  const openingLat = decimalToNumber(opening.location.lat)
-  const openingLng = decimalToNumber(opening.location.lng)
+  const openingLat = moneyToNumber(opening.location.lat)
+  const openingLng = moneyToNumber(opening.location.lng)
 
   if (openingLat == null || openingLng == null) {
     return []

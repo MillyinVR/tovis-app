@@ -1,5 +1,6 @@
 // app/api/client/openings/route.ts
 import { prisma } from '@/lib/prisma'
+import { moneyToString } from '@/lib/money'
 import {
   jsonFail,
   jsonOk,
@@ -24,10 +25,6 @@ function normalizeLocationType(v: unknown): ServiceLocationType | null {
   if (s === ServiceLocationType.SALON) return ServiceLocationType.SALON
   if (s === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
   return null
-}
-
-function decimalToString(value: Prisma.Decimal | null): string | null {
-  return value ? value.toString() : null
 }
 
 function incentiveLabel(plan: {
@@ -213,8 +210,8 @@ function mapOpening(recipient: RecipientRow) {
           city: opening.location.city ?? null,
           state: opening.location.state ?? null,
           formattedAddress: opening.location.formattedAddress ?? null,
-          lat: decimalToString(opening.location.lat),
-          lng: decimalToString(opening.location.lng),
+          lat: moneyToString(opening.location.lat),
+          lng: moneyToString(opening.location.lng),
         }
       : null,
 
@@ -233,8 +230,8 @@ function mapOpening(recipient: RecipientRow) {
       offering: {
         id: serviceRow.offering.id,
         title: serviceRow.offering.title ?? null,
-        salonPriceStartingAt: decimalToString(serviceRow.offering.salonPriceStartingAt),
-        mobilePriceStartingAt: decimalToString(serviceRow.offering.mobilePriceStartingAt),
+        salonPriceStartingAt: moneyToString(serviceRow.offering.salonPriceStartingAt),
+        mobilePriceStartingAt: moneyToString(serviceRow.offering.mobilePriceStartingAt),
         salonDurationMinutes: serviceRow.offering.salonDurationMinutes,
         mobileDurationMinutes: serviceRow.offering.mobileDurationMinutes,
         offersInSalon: serviceRow.offering.offersInSalon,
@@ -248,7 +245,7 @@ function mapOpening(recipient: RecipientRow) {
           offerType: matchedTierPlan.offerType,
           label: incentiveLabel(matchedTierPlan),
           percentOff: matchedTierPlan.percentOff ?? null,
-          amountOff: decimalToString(matchedTierPlan.amountOff),
+          amountOff: moneyToString(matchedTierPlan.amountOff),
           freeAddOnService: matchedTierPlan.freeAddOnService
             ? {
                 id: matchedTierPlan.freeAddOnService.id,

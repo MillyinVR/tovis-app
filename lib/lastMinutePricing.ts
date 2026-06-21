@@ -1,5 +1,6 @@
 // lib/lastMinutePricing.ts
 import { prisma } from '@/lib/prisma'
+import { moneyToNumber } from '@/lib/money'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { LastMinuteOfferType, Prisma } from '@prisma/client'
 
@@ -59,12 +60,6 @@ function weekdayIndexInTimeZone(d: Date, timeZone: string): number {
     default:
       return 0
   }
-}
-
-function decimalToNumber(value: Prisma.Decimal | null | undefined): number | null {
-  if (!value) return null
-  const n = Number(value.toString())
-  return Number.isFinite(n) ? n : null
 }
 
 function parseAmountOff(
@@ -195,8 +190,8 @@ export async function computeLastMinuteDiscount(args: {
     }
   }
 
-  const globalMinCollectedSubtotal = decimalToNumber(settings.minCollectedSubtotal)
-  const serviceMinCollectedSubtotal = decimalToNumber(rule?.minCollectedSubtotal)
+  const globalMinCollectedSubtotal = moneyToNumber(settings.minCollectedSubtotal)
+  const serviceMinCollectedSubtotal = moneyToNumber(rule?.minCollectedSubtotal)
   const minCollectedSubtotal =
     serviceMinCollectedSubtotal ?? globalMinCollectedSubtotal
 
