@@ -9,6 +9,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import NewClientForm from './NewClientForm'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
+import { Card, buttonClassName } from '@/app/_components/ui'
 
 export const dynamic = 'force-dynamic'
 
@@ -95,7 +96,7 @@ export default async function ProClientsPage() {
       </header>
 
       <section className="mb-6">
-        <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+        <Card variant="glass" padding="md">
           <div className="mb-3">
             <div className="text-[15px] font-black text-textPrimary">
               Add a client
@@ -106,7 +107,7 @@ export default async function ProClientsPage() {
           </div>
 
           <NewClientForm />
-        </div>
+        </Card>
       </section>
 
       <section className="grid gap-3">
@@ -141,10 +142,7 @@ export default async function ProClientsPage() {
               })
 
               return (
-                <div
-                  key={client.id}
-                  className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4"
-                >
+                <Card key={client.id} variant="glass" padding="md">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -167,21 +165,21 @@ export default async function ProClientsPage() {
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         <Link
                           href={messageHref}
-                          className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                          className={buttonClassName({ variant: 'ghost', size: 'sm' })}
                         >
                           Message
                         </Link>
 
                         <Link
                           href={`/pro/clients/${encodeURIComponent(client.id)}`}
-                          className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                          className={buttonClassName({ variant: 'ghost', size: 'sm' })}
                         >
                           View chart
                         </Link>
                       </div>
                     </div>
                   </div>
-                </div>
+                </Card>
               )
             })}
           </div>
