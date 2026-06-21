@@ -205,6 +205,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
     if (saving) return
     setError(null)
 
+    if (typeof window === 'undefined') return
     const ok = window.confirm('Delete this media? This cannot be undone.')
     if (!ok) return
 
