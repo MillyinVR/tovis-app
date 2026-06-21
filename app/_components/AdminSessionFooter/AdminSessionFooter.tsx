@@ -58,7 +58,7 @@ export default function AdminSessionFooter({ supportBadge, workspaces = [] }: Pr
                   padding: '0 4px',
                   borderRadius: 999,
                   background: 'rgb(var(--tone-danger))',
-                  color: '#fff',
+                  color: 'rgb(var(--on-accent))',
                   fontFamily: 'var(--font-mono)',
                   fontSize: 10,
                   fontWeight: 700,

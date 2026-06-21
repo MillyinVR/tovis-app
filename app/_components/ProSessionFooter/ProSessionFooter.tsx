@@ -340,7 +340,7 @@ export default function ProSessionFooter({
                     padding: '0 4px',
                     borderRadius: 999,
                     background: 'rgb(var(--color-acid))',
-                    color: '#fff',
+                    color: 'rgb(var(--on-accent))',
                     border: '2px solid rgb(var(--bg-surface))',
                     ...monoLabel,
                     fontSize: 10,
