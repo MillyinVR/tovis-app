@@ -144,7 +144,7 @@ export default function BookingActions({
       return
     }
 
-    if (action.confirmCopy && !window.confirm(action.confirmCopy)) return
+    if (action.confirmCopy && typeof window !== 'undefined' && !window.confirm(action.confirmCopy)) return
 
     resetAlerts()
     setBusy(true)
@@ -200,6 +200,7 @@ export default function BookingActions({
       return
     }
 
+    if (typeof window === 'undefined') return
     const ok = window.confirm('Use the selected new time for this booking?')
     if (!ok) return
 

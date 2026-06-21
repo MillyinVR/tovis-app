@@ -22,6 +22,7 @@ export default function DeleteDocButton({ docId }: DeleteDocButtonProps) {
         type="button"
         disabled={deleting}
         onClick={async () => {
+          if (typeof window === 'undefined') return
           const ok = window.confirm('Remove this document? You can upload a replacement after.')
           if (!ok) return
 

@@ -111,7 +111,7 @@ export default function BookingActions({
   async function run(action: LifecycleAction) {
     if (pendingVerb) return
 
-    if (action.confirmCopy) {
+    if (action.confirmCopy && typeof window !== 'undefined') {
       const ok = window.confirm(action.confirmCopy)
       if (!ok) return
     }
