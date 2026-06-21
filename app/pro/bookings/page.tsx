@@ -23,6 +23,7 @@ import {
 } from '@/lib/timeZone'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { isCloseoutPaymentAndAftercareComplete } from '@/lib/booking/closeoutState'
+import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 
 export const dynamic = 'force-dynamic'
 
@@ -119,23 +120,6 @@ function normalizeStatusFilter(raw: unknown): StatusFilter {
   return 'ALL'
 }
 
-function formatStatus(status: string) {
-  switch (status) {
-    case BookingStatus.PENDING:
-      return 'Pending'
-    case BookingStatus.ACCEPTED:
-      return 'Accepted'
-    case BookingStatus.IN_PROGRESS:
-      return 'In progress'
-    case BookingStatus.COMPLETED:
-      return 'Completed'
-    case BookingStatus.CANCELLED:
-      return 'Cancelled'
-    default:
-      return status
-  }
-}
-
 function durationLabel(totalDurationMinutes: unknown): number {
   const n = Number(totalDurationMinutes ?? 0)
   return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
@@ -172,7 +156,7 @@ function StatusPill({ status }: { status: string }) {
         tone,
       ].join(' ')}
     >
-      {formatStatus(s)}
+      {labelForBookingStatus(s)}
     </span>
   )
 }

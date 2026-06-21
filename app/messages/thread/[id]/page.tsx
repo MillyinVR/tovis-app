@@ -6,12 +6,12 @@ import {
   MessageThreadContextType,
   Role,
   WaitlistPreferenceType,
-  WaitlistStatus,
   WaitlistTimeOfDay,
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
+import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
 import ThreadClient from './ThreadClient'
 
 export const dynamic = 'force-dynamic'
@@ -82,15 +82,6 @@ function formatMinuteOfDay(value: number | null): string | null {
   const suffix = hour24 < 12 ? 'AM' : 'PM'
 
   return `${hour12}:${minute.toString().padStart(2, '0')} ${suffix}`
-}
-
-function formatWaitlistStatus(status: WaitlistStatus): string {
-  if (status === WaitlistStatus.ACTIVE) return 'Position active'
-  if (status === WaitlistStatus.NOTIFIED) return 'Notified'
-  if (status === WaitlistStatus.BOOKED) return 'Booked'
-  if (status === WaitlistStatus.CANCELLED) return 'Cancelled'
-
-  return 'Waitlist'
 }
 
 function formatWaitlistTimeOfDay(value: WaitlistTimeOfDay | null): string | null {
@@ -189,7 +180,7 @@ async function buildContextMeta(thread: {
       }
     }
 
-    const status = formatWaitlistStatus(waitlist.status)
+    const status = labelForWaitlistStatus(waitlist.status)
     const preference = formatWaitlistPreference({
       preferenceType: waitlist.preferenceType,
       specificDate: waitlist.specificDate,

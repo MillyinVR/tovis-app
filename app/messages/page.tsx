@@ -15,6 +15,7 @@ import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { initialsForName } from '@/lib/initials'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
+import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
 
 export const dynamic = 'force-dynamic'
 
@@ -251,15 +252,6 @@ function formatMinuteOfDay(value: number | null): string | null {
   return `${hour12}:${minute.toString().padStart(2, '0')} ${suffix}`
 }
 
-function formatWaitlistStatus(status: WaitlistStatus): string {
-  if (status === WaitlistStatus.ACTIVE) return 'POSITION ACTIVE'
-  if (status === WaitlistStatus.NOTIFIED) return 'NOTIFIED'
-  if (status === WaitlistStatus.BOOKED) return 'BOOKED'
-  if (status === WaitlistStatus.CANCELLED) return 'CANCELLED'
-
-  return 'WAITLIST'
-}
-
 function formatWaitlistTimeOfDay(value: WaitlistTimeOfDay | null): string | null {
   if (value === WaitlistTimeOfDay.MORNING) return 'Morning'
   if (value === WaitlistTimeOfDay.AFTERNOON) return 'Afternoon'
@@ -340,14 +332,14 @@ function buildEyebrow(params: {
       : null
 
     if (!waitlist) {
-      return 'WAITLIST'
+      return 'Waitlist'
     }
 
     const serviceName = waitlist.service?.name ?? null
-    const status = formatWaitlistStatus(waitlist.status)
+    const status = labelForWaitlistStatus(waitlist.status)
     const preference = formatWaitlistPreference(waitlist)
 
-    return ['WAITLIST', status, serviceName, preference]
+    return ['Waitlist', status, serviceName, preference]
       .filter(isPresentString)
       .join(' — ')
   }
@@ -356,20 +348,20 @@ function buildEyebrow(params: {
     const offering = thread.offeringId ? offeringMap.get(thread.offeringId) ?? null : null
     const name = offering?.title ?? offering?.service?.name ?? null
 
-    return ['SERVICE', name].filter(isPresentString).join(' — ')
+    return ['Service', name].filter(isPresentString).join(' — ')
   }
 
   if (thread.contextType === MessageThreadContextType.SERVICE) {
     const service = thread.serviceId ? serviceMap.get(thread.serviceId) ?? null : null
 
-    return ['SERVICE', service?.name].filter(isPresentString).join(' — ')
+    return ['Service', service?.name].filter(isPresentString).join(' — ')
   }
 
   if (thread.contextType === MessageThreadContextType.PRO_PROFILE) {
-    return 'PRO'
+    return 'Pro'
   }
 
-  return 'MESSAGE'
+  return 'Message'
 }
 
 function buildThreadPresentation(params: {
