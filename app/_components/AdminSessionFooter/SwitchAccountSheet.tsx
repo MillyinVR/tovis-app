@@ -235,7 +235,9 @@ export default function SwitchAccountSheet({
                     width: 36,
                     height: 36,
                     borderRadius: '50%',
-                    background: opt.current ? '#0A1413' : 'rgb(var(--bg-surface))',
+                    background: opt.current
+                      ? 'rgb(var(--bg-primary))'
+                      : 'rgb(var(--bg-surface))',
                     border: opt.current ? 'none' : '1px solid var(--line)',
                     color: opt.current
                       ? 'rgb(var(--accent-primary))'
