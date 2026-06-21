@@ -80,6 +80,29 @@ flags serve.
 | Referral tap / confirmed / converted | I (P opt-in) | — |
 | Last-minute opening | I (P opt-in) | — |
 
+## Admin operational alerts (internal; in-app + email, never SMS)
+
+Fanned out to **every user with role `ADMIN`** so admins are pushed instead of
+polling dashboards. Recipient kind `ADMIN`; channels are in-app inbox + email
+(Tier-B shape). No SMS to admins. Admin email is trusted (admins authenticate
+with it), so EMAIL is **not** gated on `emailVerifiedAt` for the `ADMIN` recipient
+kind. Admins have **no per-event preference table** — they always receive the
+default channels with no quiet-hours suppression. Emitted **best-effort
+post-commit** (logged, never thrown — an alerting hiccup must not fail the user's
+primary action) and **idempotently** (stable `dedupeKey` per source record) via
+`lib/notifications/adminNotifications.ts`.
+
+| Event | Admin | Emitted from |
+|---|---|---|
+| `ADMIN_VERIFICATION_REVIEW_NEEDED` (verification-doc upload **or** license re-review) | I E | `app/api/pro/verification-docs`, `app/api/pro/license` |
+| `ADMIN_SUPPORT_TICKET_CREATED` | I E | `app/support` (support form) |
+| `ADMIN_VIRAL_REQUEST_PENDING` | I E | `app/api/viral-service-requests` |
+
+Inbox lives at `/admin/notifications` (unread count badge in the admin footer);
+read APIs at `app/api/admin/notifications` (+ `mark-read`). Mirrors the pro/client
+inbox via the shared engine — `AdminNotification` model + `createAdminNotification`
+→ `enqueueDispatch`; no parallel system.
+
 ## Magic-link carve-out (phone-only / unclaimed clients)
 
 SMS here is the **only** way to reach the recipient (no app, often no email) — it is
@@ -136,9 +159,11 @@ send). See `lib/booking/createProBookingWithClient.ts`.
 
 ## Open / future
 
-- **Admin notifications.** No `ADMIN` recipient kind exists today. Out of scope for
-  Prompts A–D; tracked separately (email-only alerts for pending license/verification
-  review, support tickets, pending viral-service requests).
+- ~~**Admin notifications.**~~ **Shipped.** `ADMIN` recipient kind + in-app/email
+  alerts for pending license/verification review, support tickets, and pending
+  viral-service requests. See "Admin operational alerts" above. (Per-event admin
+  preferences + an `AdminNotificationPreference` table remain deferred — admins
+  currently get the defaults with no opt-out.)
 - **Native push delivery.** Add `PUSH` channel + provider (APNs/FCM) + push-token
   model when iOS/Android ship; map to the tiers above.
 - **Consolidate the two client preference models** (`ClientNotificationSettings` vs

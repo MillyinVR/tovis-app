@@ -306,13 +306,21 @@ export function getRecipientChannelCapabilities(args: {
   const phone = typeof args.phone === 'string' ? args.phone.trim() : ''
   const email = typeof args.email === 'string' ? args.email.trim() : ''
 
+  // Admins authenticate with their email, so a present admin email is always a
+  // usable destination — we do not gate admin alerts on emailVerifiedAt the way
+  // we do for outward-facing pro/client recipients.
+  const emailRequiresVerification =
+    args.recipientKind !== NotificationRecipientKind.ADMIN
+
   return {
     hasInAppTarget: inAppTargetId.length > 0,
     hasSmsDestination:
       phone.length > 0 &&
       Boolean(args.phoneVerifiedAt) &&
       Boolean(args.transactionalSmsConsentAt),
-    hasEmailDestination: email.length > 0 && Boolean(args.emailVerifiedAt),
+    hasEmailDestination:
+      email.length > 0 &&
+      (!emailRequiresVerification || Boolean(args.emailVerifiedAt)),
   }
 }
 

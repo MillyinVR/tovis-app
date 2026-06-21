@@ -1,6 +1,7 @@
 // app/api/pro/verification-docs/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { emitAdminVerificationReviewNeeded } from '@/lib/notifications/adminNotifications'
 import { VerificationStatus, VerificationDocumentType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -89,6 +90,16 @@ export async function POST(req: Request) {
 
       return doc
     })
+
+    // Best-effort admin alert — must never fail the pro's upload.
+    try {
+      await emitAdminVerificationReviewNeeded({
+        professionalId: proId,
+        verificationDocumentId: created.id,
+      })
+    } catch (notifyError) {
+      console.error('POST /api/pro/verification-docs admin notify error', notifyError)
+    }
 
     return jsonOk({ id: created.id }, 201)
   } catch (e) {

@@ -10,6 +10,7 @@
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
+import { emitAdminVerificationReviewNeeded } from '@/lib/notifications/adminNotifications'
 import { prisma } from '@/lib/prisma'
 import { isUsStateCode } from '@/lib/usStates'
 
@@ -75,6 +76,13 @@ export async function PATCH(req: Request) {
         verificationStatus: true,
       },
     })
+
+    // Best-effort admin alert — must never fail the pro's license edit.
+    try {
+      await emitAdminVerificationReviewNeeded({ professionalId: proId })
+    } catch (notifyError) {
+      console.error('PATCH /api/pro/license admin notify error', notifyError)
+    }
 
     return jsonOk({ license: updated })
   } catch (error: unknown) {

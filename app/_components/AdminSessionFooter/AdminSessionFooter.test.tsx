@@ -58,6 +58,24 @@ describe('app/_components/AdminSessionFooter/AdminSessionFooter', () => {
       'href',
       '/admin/support',
     )
+    expect(screen.getByRole('link', { name: /alerts/i })).toHaveAttribute(
+      'href',
+      '/admin/notifications',
+    )
+  })
+
+  it('shows the unread admin-notification badge when provided', () => {
+    render(<AdminSessionFooter notificationsBadge="3" />)
+
+    const alerts = screen.getByRole('link', { name: /alerts/i })
+    expect(alerts).toHaveTextContent('3')
+  })
+
+  it('omits the badge when there are no unread alerts', () => {
+    render(<AdminSessionFooter notificationsBadge={null} />)
+
+    const alerts = screen.getByRole('link', { name: /alerts/i })
+    expect(alerts).not.toHaveTextContent('3')
   })
 
   it('exposes sign out inside the Switch account sheet', () => {

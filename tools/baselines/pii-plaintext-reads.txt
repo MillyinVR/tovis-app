@@ -483,6 +483,7 @@ lib/looks/mappers.ts:optional direct property read:const clientFirst = user.clie
 lib/looks/mappers.ts:optional direct property read:const clientLast = user.clientProfile?.lastName?.trim() ?? ''
 lib/membership/subscription.ts:Prisma select/include plaintext field:stripeCustomerId: true,
 lib/membership/subscription.ts:direct property read:if (sub.stripeCustomerId) return sub.stripeCustomerId
+lib/notifications/adminNotifications.ts:Prisma select/include plaintext field:email: true,
 lib/notifications/channelPolicy.ts:direct property read:const email = typeof args.email === 'string' ? args.email.trim() : ''
 lib/notifications/channelPolicy.ts:direct property read:const phone = typeof args.phone === 'string' ? args.phone.trim() : ''
 lib/notifications/clientNotifications.ts:Prisma select/include plaintext field:email: true,

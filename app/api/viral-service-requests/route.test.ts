@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   createClientViralRequest: vi.fn(),
   listClientViralRequests: vi.fn(),
   toViralRequestDto: vi.fn(),
+  emitAdminViralRequestPending: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -60,6 +61,10 @@ vi.mock('@/lib/viralRequests', () => ({
 
 vi.mock('@/lib/viralRequests/contracts', () => ({
   toViralRequestDto: mocks.toViralRequestDto,
+}))
+
+vi.mock('@/lib/notifications/adminNotifications', () => ({
+  emitAdminViralRequestPending: mocks.emitAdminViralRequestPending,
 }))
 
 import { GET, POST } from './route'

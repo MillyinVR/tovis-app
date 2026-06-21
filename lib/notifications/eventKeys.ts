@@ -30,6 +30,9 @@ export type NotificationTemplateKey =
   | 'referral_tap_received'
   | 'referral_confirmed'
   | 'referral_converted'
+  | 'admin_verification_review_needed'
+  | 'admin_support_ticket_created'
+  | 'admin_viral_request_pending'
 
 export type NotificationEventDefinition = {
   key: NotificationEventKey
@@ -78,6 +81,12 @@ const CLIENT_EMAIL_SMS_CHANNELS: readonly NotificationChannel[] = [
   NotificationChannel.EMAIL,
 ]
 
+// Admin operational alerts: in-app inbox + email only. Admins never receive SMS.
+const ADMIN_IN_APP_EMAIL_CHANNELS: readonly NotificationChannel[] = [
+  NotificationChannel.IN_APP,
+  NotificationChannel.EMAIL,
+]
+
 export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.BOOKING_REQUEST_CREATED,
   NotificationEventKey.BOOKING_CONFIRMED,
@@ -103,6 +112,9 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,
+  NotificationEventKey.ADMIN_VERIFICATION_REVIEW_NEEDED,
+  NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED,
+  NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING,
 ]
 
 export const NOTIFICATION_EVENT_DEFINITIONS: Record<
@@ -458,6 +470,45 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
     },
   },
+
+  // Admin operational alerts. Tier B (in-app + email; never SMS). Transactional
+  // so they are durable inbox records, but no quiet-hours bypass — admins are an
+  // internal audience and these are not time-critical pages.
+  [NotificationEventKey.ADMIN_VERIFICATION_REVIEW_NEEDED]: {
+    key: NotificationEventKey.ADMIN_VERIFICATION_REVIEW_NEEDED,
+    defaultPriority: NotificationPriority.HIGH,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'admin_verification_review_needed',
+    supportedRecipients: [NotificationRecipientKind.ADMIN],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED]: {
+    key: NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'admin_support_ticket_created',
+    supportedRecipients: [NotificationRecipientKind.ADMIN],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_CHANNELS,
+    },
+  },
+
+  [NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING]: {
+    key: NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'admin_viral_request_pending',
+    supportedRecipients: [NotificationRecipientKind.ADMIN],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.ADMIN]: ADMIN_IN_APP_EMAIL_CHANNELS,
+    },
+  },
 }
 
 export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
@@ -497,6 +548,12 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,
+]
+
+export const ADMIN_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
+  NotificationEventKey.ADMIN_VERIFICATION_REVIEW_NEEDED,
+  NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED,
+  NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING,
 ]
 
 export function getNotificationEventDefinition(

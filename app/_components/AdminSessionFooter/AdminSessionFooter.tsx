@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import {
   ArrowLeftRight,
+  Bell,
   HeadphonesIcon,
   LayoutDashboard,
   Nfc,
@@ -18,6 +19,8 @@ import SwitchAccountSheet from './SwitchAccountSheet'
 
 type Props = {
   supportBadge?: string | null
+  /** Unread admin-notification count badge. */
+  notificationsBadge?: string | null
   /** Workspaces the user can switch into (resolved server-side). */
   workspaces?: WorkspaceOption[]
 }
@@ -28,9 +31,41 @@ const ROUTES = {
   services: '/admin/services',
   nfc: '/admin/nfc',
   support: '/admin/support',
+  notifications: '/admin/notifications',
 } as const
 
-export default function AdminSessionFooter({ supportBadge, workspaces = [] }: Props) {
+/** Small red count pill shared by the footer's badged nav items. */
+function CountBadge({ value }: { value?: string | null }) {
+  if (!value) return null
+
+  return (
+    <span
+      style={{
+        display: 'grid',
+        placeItems: 'center',
+        height: 18,
+        minWidth: 18,
+        padding: '0 4px',
+        borderRadius: 999,
+        background: 'rgb(var(--tone-danger))',
+        color: 'rgb(var(--on-accent))',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 10,
+        fontWeight: 700,
+        lineHeight: 1,
+        boxShadow: '0 10px 22px rgb(0 0 0 / 0.35)',
+      }}
+    >
+      {value}
+    </span>
+  )
+}
+
+export default function AdminSessionFooter({
+  supportBadge,
+  notificationsBadge,
+  workspaces = [],
+}: Props) {
   // If pathname is temporarily null during hydration, still render (don’t disappear).
   const pathname = usePathname() ?? ''
   const [switchOpen, setSwitchOpen] = useState(false)
@@ -43,33 +78,18 @@ export default function AdminSessionFooter({ supportBadge, workspaces = [] }: Pr
         <NavItem label="Services" href={ROUTES.services} icon={<Scissors size={20} />} active={isActivePath(pathname, ROUTES.services)} />
         <NavItem label="NFC" href={ROUTES.nfc} icon={<Nfc size={20} />} active={isActivePath(pathname, ROUTES.nfc)} />
         <NavItem
+          label="Alerts"
+          href={ROUTES.notifications}
+          icon={<Bell size={20} />}
+          active={isActivePath(pathname, ROUTES.notifications)}
+          rightSlot={<CountBadge value={notificationsBadge} />}
+        />
+        <NavItem
           label="Support"
           href={ROUTES.support}
           icon={<HeadphonesIcon size={20} />}
           active={isActivePath(pathname, ROUTES.support)}
-          rightSlot={
-            supportBadge ? (
-              <span
-                style={{
-                  display: 'grid',
-                  placeItems: 'center',
-                  height: 18,
-                  minWidth: 18,
-                  padding: '0 4px',
-                  borderRadius: 999,
-                  background: 'rgb(var(--tone-danger))',
-                  color: 'rgb(var(--on-accent))',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  lineHeight: 1,
-                  boxShadow: '0 10px 22px rgb(0 0 0 / 0.35)',
-                }}
-              >
-                {supportBadge}
-              </span>
-            ) : null
-          }
+          rightSlot={<CountBadge value={supportBadge} />}
         />
 
         {/* Switch account — opens the sheet that also houses Sign out */}

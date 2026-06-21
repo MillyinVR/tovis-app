@@ -262,6 +262,14 @@ async function loadPreferenceForCandidate(args: {
   tx: Prisma.TransactionClient
   candidate: RuntimePolicyCandidateDelivery
 }): Promise<NotificationPreferenceLike | null> {
+  // Admins have no per-event preference table — they always receive the event's
+  // default channels (in-app + email) with no quiet-hours suppression.
+  if (
+    args.candidate.dispatch.recipientKind === NotificationRecipientKind.ADMIN
+  ) {
+    return null
+  }
+
   if (
     args.candidate.dispatch.recipientKind === NotificationRecipientKind.CLIENT
   ) {

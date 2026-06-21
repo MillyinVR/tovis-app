@@ -2,6 +2,7 @@
 import { getCurrentUser } from '@/lib/currentUser'
 import FooterShell, { type AppRole } from './FooterShell'
 import { clampSmallCount, getUnreadThreadCountForUser } from '@/lib/messagesUnread'
+import { getUnreadAdminNotificationCount } from '@/lib/notifications/adminNotificationQueries'
 import { buildWorkspaceOptions, type WorkspaceOption } from '@/lib/auth/workspaces'
 
 export const dynamic = 'force-dynamic'
@@ -25,6 +26,16 @@ export default async function RoleFooter() {
     }
   }
 
+  let adminBadge: string | null = null
+  if (role === 'ADMIN' && user?.id) {
+    try {
+      const count = await getUnreadAdminNotificationCount({ adminUserId: user.id })
+      adminBadge = clampSmallCount(count)
+    } catch {
+      adminBadge = null
+    }
+  }
+
   // Workspaces this user can switch into (empty unless they own more than one).
   const workspaces: WorkspaceOption[] = user
     ? buildWorkspaceOptions(
@@ -38,6 +49,11 @@ export default async function RoleFooter() {
     : []
 
   return (
-    <FooterShell role={role} messagesBadge={messagesBadge} workspaces={workspaces} />
+    <FooterShell
+      role={role}
+      messagesBadge={messagesBadge}
+      adminBadge={adminBadge}
+      workspaces={workspaces}
+    />
   )
 }

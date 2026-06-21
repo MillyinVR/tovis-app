@@ -8,6 +8,7 @@ import {
   listClientViralRequests,
 } from '@/lib/viralRequests'
 import { toViralRequestDto } from '@/lib/viralRequests/contracts'
+import { emitAdminViralRequestPending } from '@/lib/notifications/adminNotifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,6 +116,16 @@ export async function POST(req: Request) {
       links: pickStringArray(body.links),
       mediaUrls: pickStringArray(body.mediaUrls),
     })
+
+    // Best-effort admin alert — must never fail the client's request.
+    try {
+      await emitAdminViralRequestPending({
+        requestId: created.id,
+        name: created.name,
+      })
+    } catch (notifyError) {
+      console.error('viral request admin notify error', notifyError)
+    }
 
     return jsonOk(
       {

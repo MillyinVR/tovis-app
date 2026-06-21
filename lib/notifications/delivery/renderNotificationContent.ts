@@ -294,6 +294,9 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   referral_tap_received: 'View referral',
   referral_confirmed: 'View referral',
   referral_converted: 'View referral',
+  admin_verification_review_needed: 'Review verification',
+  admin_support_ticket_created: 'View ticket',
+  admin_viral_request_pending: 'Review request',
 }
 
 const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = {
@@ -368,6 +371,15 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   referral_converted: buildStandardTemplateRenderer(
     templateCtaLabels.referral_converted,
+  ),
+  admin_verification_review_needed: buildStandardTemplateRenderer(
+    templateCtaLabels.admin_verification_review_needed,
+  ),
+  admin_support_ticket_created: buildStandardTemplateRenderer(
+    templateCtaLabels.admin_support_ticket_created,
+  ),
+  admin_viral_request_pending: buildStandardTemplateRenderer(
+    templateCtaLabels.admin_viral_request_pending,
   ),
 }
 
