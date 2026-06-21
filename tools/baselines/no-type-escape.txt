@@ -30,5 +30,6 @@ lib/notifications/delivery/sendEmail.test.ts|as unknown as|} as unknown as Respo
 lib/notifications/delivery/sendInApp.test.ts|as unknown as|publish: null as unknown as never,
 lib/notifications/delivery/sendSms.test.ts|as unknown as|} as unknown as SmsProviderSendRequest
 lib/notifications/delivery/sendSms.test.ts|as unknown as|} as unknown as SmsProviderSendRequest
+lib/notifications/paymentNotifications.test.ts|as unknown as|} as unknown as Prisma.TransactionClient
 lib/viralRequests/index.test.ts|as unknown as|return value as unknown as Prisma.TransactionClient
 tests/chaos/postmark-degradation.test.ts|as unknown as|} as unknown as Response

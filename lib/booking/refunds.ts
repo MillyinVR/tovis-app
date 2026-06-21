@@ -33,6 +33,7 @@ import * as Sentry from '@sentry/nextjs'
 import { prisma } from '@/lib/prisma'
 import { getStripe } from '@/lib/stripe/server'
 import { safeError } from '@/lib/security/logging'
+import { emitPaymentRefundedNotifications } from '@/lib/notifications/paymentNotifications'
 
 // Distinct from the schedule lock namespace (scheduleLock.ts = 41021) so refund
 // serialization never contends with booking-schedule locks.
@@ -519,6 +520,18 @@ export async function reconcileChargeRefundInTransaction(
       where: { bookingId: booking.id, stripeRefundId: refund.id },
       data: { status: mapStripeRefundStatus(refund.status) },
     })
+
+    // One refund receipt per Stripe refund id. The dedupeKey carries the refund
+    // id, so the cumulative refunds list a `charge.refunded` replay carries never
+    // double-notifies.
+    if (mapStripeRefundStatus(refund.status) === BookingRefundStatus.SUCCEEDED) {
+      await emitPaymentRefundedNotifications({
+        tx,
+        bookingId: booking.id,
+        refundDiscriminator: refund.id,
+        amountRefundedCents: refund.amountCents,
+      })
+    }
   }
 
   const capturedTotal = booking.stripeAmountTotal ?? input.chargeAmountCents

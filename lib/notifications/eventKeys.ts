@@ -24,6 +24,7 @@ export type NotificationTemplateKey =
   | 'viral_request_approved'
   | 'payment_collected'
   | 'payment_action_required'
+  | 'payment_refunded'
   | 'look_follower_new'
   | 'client_follow'
   | 'referral_tap_received'
@@ -96,6 +97,7 @@ export const NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
+  NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
   NotificationEventKey.CLIENT_FOLLOW,
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
@@ -378,6 +380,23 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     },
   },
 
+  [NotificationEventKey.PAYMENT_REFUNDED]: {
+    key: NotificationEventKey.PAYMENT_REFUNDED,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'payment_refunded',
+    supportedRecipients: [
+      NotificationRecipientKind.PRO,
+      NotificationRecipientKind.CLIENT,
+    ],
+    defaultChannelsByRecipient: {
+      // Tier B receipt: in-app + email (push later). No SMS.
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
+    },
+  },
+
   [NotificationEventKey.LOOK_FOLLOWER_NEW]: {
     key: NotificationEventKey.LOOK_FOLLOWER_NEW,
     defaultPriority: NotificationPriority.NORMAL,
@@ -455,6 +474,7 @@ export const PRO_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.VIRAL_REQUEST_APPROVED,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
+  NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.LOOK_FOLLOWER_NEW,
 ]
 
@@ -473,6 +493,7 @@ export const CLIENT_NOTIFICATION_EVENT_KEYS: readonly NotificationEventKey[] = [
   NotificationEventKey.LAST_MINUTE_OPENING_AVAILABLE,
   NotificationEventKey.PAYMENT_COLLECTED,
   NotificationEventKey.PAYMENT_ACTION_REQUIRED,
+  NotificationEventKey.PAYMENT_REFUNDED,
   NotificationEventKey.REFERRAL_TAP_RECEIVED,
   NotificationEventKey.REFERRAL_CONFIRMED,
   NotificationEventKey.REFERRAL_CONVERTED,

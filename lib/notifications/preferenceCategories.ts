@@ -80,6 +80,7 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.VIRAL_REQUEST_APPROVED]: 'Feature request approved',
   [NotificationEventKey.PAYMENT_COLLECTED]: 'Payment receipt',
   [NotificationEventKey.PAYMENT_ACTION_REQUIRED]: 'Payment action needed',
+  [NotificationEventKey.PAYMENT_REFUNDED]: 'Refund issued',
   [NotificationEventKey.LOOK_FOLLOWER_NEW]: 'New look follower',
   [NotificationEventKey.CLIENT_FOLLOW]: 'New follower',
   [NotificationEventKey.REFERRAL_TAP_RECEIVED]: 'Referral tap',
@@ -128,6 +129,7 @@ const CATEGORY_DEFS: readonly CategoryDef[] = [
     eventKeys: [
       NotificationEventKey.PAYMENT_COLLECTED,
       NotificationEventKey.PAYMENT_ACTION_REQUIRED,
+      NotificationEventKey.PAYMENT_REFUNDED,
     ],
   },
   {
