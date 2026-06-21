@@ -1,5 +1,37 @@
 # Tovis — working rules
 
+## House rules (apply to all work)
+
+These are non-negotiable for every change in this repo. Some are enforced by
+tooling; some are judgment-only and **must** be self-checked because no guard
+will catch them.
+
+- **No type escapes.** Never use `as any`, `as unknown as`, `: any`, or `<any>`.
+  Fix the underlying types instead. *Enforced* by `npm run check:static-guards`
+  (→ `check:no-type-escape`, baseline-tracked).
+- **No duplicate logic.** Search for an existing helper before writing one;
+  reuse or extract rather than copy. If you catch yourself repeating logic,
+  consolidate it. *Judgment-only — not guarded.*
+- **Prisma schema is the single source of truth for data shapes.** Derive types
+  from the generated Prisma client; don't hand-redeclare model shapes or write
+  around the schema. Backed by `npm run typecheck` plus the write-boundary
+  guards (`check:booking-boundary`, `check:lifecycle-field-writes`).
+- **UI must follow the white-label rules.**
+  - No hardcoded brand strings — user-facing copy comes from `lib/brand`.
+    *Enforced* by `check:no-hardcoded-brand-strings`.
+  - No raw colors — use the tone utilities (`toneDanger` / `toneSuccess` /
+    `toneWarn` / `toneInfo`) and `rgb(var(--…))` tokens that respect
+    `[data-mode]`, never raw hex or raw Tailwind color classes.
+    ⚠️ **Raw colors are NOT caught by the static guards — self-check them.**
+
+Before pushing any change, run:
+
+```bash
+npm run typecheck && npm run lint && npm run check:static-guards
+```
+
+plus the relevant `vitest` suites for the code you touched.
+
 ## Session sync with `origin/main`
 
 The local checkout must be **in sync with `origin/main`** at both the start and
