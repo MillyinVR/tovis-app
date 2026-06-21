@@ -13,6 +13,12 @@ type ProHeaderProps = {
   businessName?: string | null
   subtitle?: string | null
   publicUrl?: string | null
+  /**
+   * Whether the pro migration/import flow is enabled (ENABLE_PRO_MIGRATION).
+   * Resolved server-side and passed in so the client header never reads
+   * process.env. When false the Import tab is omitted entirely.
+   */
+  migrationEnabled?: boolean
 }
 
 type NotificationSummaryResponse = {
@@ -57,6 +63,15 @@ const PRO_HEADER_TABS: ProHeaderTabItem[] = [
   { href: '/pro/locations', label: 'Locations', match: 'prefix' },
 ]
 
+// Only surfaced when the migration flag is on (see migrationEnabled prop). The
+// flow lives behind ENABLE_PRO_MIGRATION, so with the flag off the tab would be
+// a dead link that just redirects to the dashboard.
+const PRO_MIGRATE_TAB: ProHeaderTabItem = {
+  href: '/pro/migrate',
+  label: 'Import',
+  match: 'prefix',
+}
+
 function titleFromPath(pathname: string | null, brandName: string): string {
   if (!pathname) return `${brandName} Pro`
 
@@ -79,6 +94,7 @@ export default function ProHeader({
   businessName,
   subtitle,
   publicUrl,
+  migrationEnabled = false,
 }: ProHeaderProps) {
   const pathname = usePathname()
   const { brand } = useBrand()
@@ -148,7 +164,7 @@ export default function ProHeader({
             </div>
           </div>
 
-          <ProHeaderTabs pathname={pathname} />
+          <ProHeaderTabs pathname={pathname} migrationEnabled={migrationEnabled} />
         </div>
       </div>
     </header>
@@ -181,12 +197,18 @@ function NotificationsLink({
 
 function ProHeaderTabs({
   pathname,
+  migrationEnabled,
 }: {
   pathname: string
+  migrationEnabled: boolean
 }) {
+  const tabs = migrationEnabled
+    ? [...PRO_HEADER_TABS, PRO_MIGRATE_TAB]
+    : PRO_HEADER_TABS
+
   return (
     <nav className="brand-pro-overview-tabs no-scroll" aria-label="Pro tabs">
-      {PRO_HEADER_TABS.map((tab) => (
+      {tabs.map((tab) => (
         <ProHeaderTab
           key={tab.href}
           tab={tab}
