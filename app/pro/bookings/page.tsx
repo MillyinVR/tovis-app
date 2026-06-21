@@ -13,6 +13,8 @@ import BookingActions from './BookingActions'
 import { moneyToString } from '@/lib/money'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
+import { Badge } from '@/app/_components/ui'
+import type { BadgeTone } from '@/app/_components/ui'
 import {
   DEFAULT_TIME_ZONE,
   isValidIanaTimeZone,
@@ -134,31 +136,24 @@ function formatMoneyOrNull(v: Prisma.Decimal | null | undefined): string | null 
   return moneyToString(v)
 }
 
+function statusBadgeTone(status: string): BadgeTone {
+  switch (status) {
+    case BookingStatus.ACCEPTED:
+    case BookingStatus.IN_PROGRESS:
+      return 'accent'
+    case BookingStatus.COMPLETED:
+      return 'success'
+    case BookingStatus.CANCELLED:
+      return 'danger'
+    default:
+      return 'neutral'
+  }
+}
+
 function StatusPill({ status }: { status: string }) {
   const s = String(status || '')
-  const tone =
-    s === BookingStatus.PENDING
-      ? 'border-white/10 bg-bgPrimary text-textPrimary'
-      : s === BookingStatus.ACCEPTED
-        ? 'border-accentPrimary/30 bg-bgPrimary text-textPrimary'
-        : s === BookingStatus.IN_PROGRESS
-          ? 'border-accentPrimary/50 bg-bgPrimary text-accentPrimary'
-          : s === BookingStatus.COMPLETED
-            ? 'border-toneSuccess/30 bg-bgPrimary text-toneSuccess'
-            : s === BookingStatus.CANCELLED
-              ? 'border-toneDanger/30 bg-bgPrimary text-toneDanger'
-              : 'border-white/10 bg-bgPrimary text-textSecondary'
 
-  return (
-    <span
-      className={[
-        'inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-black',
-        tone,
-      ].join(' ')}
-    >
-      {labelForBookingStatus(s)}
-    </span>
-  )
+  return <Badge tone={statusBadgeTone(s)}>{labelForBookingStatus(s)}</Badge>
 }
 
 // A booking "needs closeout" when the pro has sent aftercare (so it drops out

@@ -1,7 +1,7 @@
 // app/_components/ui/index.ts
 //
-// Shared UI primitives. Import canonical Button/Card/Avatar from here rather than
-// re-rolling per screen.
+// Shared UI primitives. Import canonical Button/Card/Avatar/Badge from here rather
+// than re-rolling per screen.
 export { default as Button, buttonClassName } from './Button'
 export type {
   ButtonProps,
@@ -21,3 +21,11 @@ export type {
 
 export { default as Avatar } from './Avatar'
 export type { AvatarProps, AvatarSize, AvatarFill } from './Avatar'
+
+export { default as Badge, badgeClassName } from './Badge'
+export type {
+  BadgeProps,
+  BadgeStyleOptions,
+  BadgeTone,
+  BadgeSize,
+} from './Badge'
