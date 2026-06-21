@@ -97,6 +97,9 @@ export async function generateViewport(): Promise<Viewport> {
   const brand = getBrandForTenantContext(tenantContext)
 
   return {
+    // viewport-fit: cover lets env(safe-area-inset-*) resolve to real notch /
+    // home-indicator insets inside the iOS/Android webview wrappers.
+    viewportFit: 'cover',
     themeColor: [
       {
         media: '(prefers-color-scheme: dark)',
