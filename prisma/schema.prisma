@@ -1042,8 +1042,9 @@ model User {
   // the user from verification-email retry sweeps.
   emailSendPermanentlyFailedAt DateTime?
 
-  lookLikes    LookLike[]
-  lookComments LookComment[]
+  lookLikes        LookLike[]
+  lookComments     LookComment[]
+  lookCommentLikes LookCommentLike[]
 
   lookPostReports    LookPostReport[]
   lookCommentReports LookCommentReport[]
@@ -3303,8 +3304,15 @@ model LookComment {
   id               String           @id @default(cuid())
   lookPostId       String
   userId           String
+  // Null = top-level comment. Set = a reply. Threading is flattened to a single
+  // level (TikTok/Instagram style): a reply's parent is always a top-level
+  // comment, so there are no replies-of-replies — the create path re-roots any
+  // reply aimed at another reply to its top-level ancestor.
+  parentCommentId  String?
   body             String
   moderationStatus ModerationStatus @default(APPROVED)
+  likeCount        Int              @default(0)
+  replyCount       Int              @default(0)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   removedAt        DateTime?
@@ -3315,14 +3323,33 @@ model LookComment {
 
   lookPost       LookPost            @relation(fields: [lookPostId], references: [id], onDelete: Cascade)
   user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentComment  LookComment?        @relation("LookCommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies        LookComment[]       @relation("LookCommentReplies")
   reviewedByUser User?               @relation("LookCommentReviewedByUser", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
   reports        LookCommentReport[]
+  likes          LookCommentLike[]
 
   @@index([lookPostId, createdAt])
+  @@index([lookPostId, parentCommentId, createdAt])
+  @@index([parentCommentId, createdAt])
   @@index([userId, createdAt])
   @@index([moderationStatus, createdAt])
   @@index([moderationStatus, reportCount, createdAt])
   @@index([reviewedByUserId, reviewedAt])
+}
+
+model LookCommentLike {
+  id            String   @id @default(cuid())
+  lookCommentId String
+  userId        String
+  createdAt     DateTime @default(now())
+
+  lookComment LookComment @relation(fields: [lookCommentId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([lookCommentId, userId])
+  @@index([lookCommentId, createdAt])
+  @@index([userId, createdAt])
 }
 
 model LookPostReport {

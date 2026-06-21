@@ -17,13 +17,14 @@ import {
   canCommentOnLookPost,
   canViewLookPost,
 } from '@/lib/looks/guards'
-import { recomputeLookPostCommentCount } from '@/lib/looks/counters'
-import { mapLooksCommentToDto } from '@/lib/looks/mappers'
-import { loadLookAccess } from '@/lib/looks/access'
 import {
-  ModerationStatus,
-  Prisma,
-} from '@prisma/client'
+  recomputeLookCommentReplyCount,
+  recomputeLookPostCommentCount,
+} from '@/lib/looks/counters'
+import { mapLooksCommentToDto } from '@/lib/looks/mappers'
+import { buildLookCommentSelect } from '@/lib/looks/commentSelect'
+import { buildLookPolicyInput, loadLookAccess } from '@/lib/looks/access'
+import { ModerationStatus, Role } from '@prisma/client'
 import type {
   LooksCommentCreateResponseDto,
   LooksCommentsListResponseDto,
@@ -32,35 +33,15 @@ import { enqueueRecomputeLookCounts } from '@/lib/jobs/looksSocial/enqueue'
 
 export const dynamic = 'force-dynamic'
 
-const lookCommentSelect = Prisma.validator<Prisma.LookCommentSelect>()({
-  id: true,
-  body: true,
-  createdAt: true,
-  user: {
-    select: {
-      id: true,
-      clientProfile: {
-        select: {
-          firstName: true,
-          lastName: true,
-          avatarUrl: true,
-        },
-      },
-      professionalProfile: {
-        select: {
-          businessName: true,
-          avatarUrl: true,
-        },
-      },
-    },
-  },
-})
-
-function readCommentText(raw: unknown): string {
+function readCommentBody(raw: unknown): string {
   if (!isRecord(raw)) return ''
-
   const body = raw.body
   return typeof body === 'string' ? body.trim() : ''
+}
+
+function readParentCommentId(raw: unknown): string | null {
+  if (!isRecord(raw)) return null
+  return pickString(raw.parentCommentId)
 }
 
 export async function GET(req: Request, ctx: RouteContext) {
@@ -69,9 +50,7 @@ export async function GET(req: Request, ctx: RouteContext) {
     const lookPostId = pickString(rawId)
 
     if (!lookPostId) {
-      return jsonFail(400, 'Missing look id.', {
-        code: 'MISSING_LOOK_ID',
-      })
+      return jsonFail(400, 'Missing look id.', { code: 'MISSING_LOOK_ID' })
     }
 
     const viewer = await getOptionalUser()
@@ -83,41 +62,33 @@ export async function GET(req: Request, ctx: RouteContext) {
     })
 
     if (!access) {
-      return jsonFail(404, 'Not found.', {
-        code: 'LOOK_NOT_FOUND',
-      })
+      return jsonFail(404, 'Not found.', { code: 'LOOK_NOT_FOUND' })
     }
 
-    const canView = canViewLookPost({
-      isOwner: access.isOwner,
-      viewerRole: viewer?.role ?? null,
-      status: access.look.status,
-      visibility: access.look.visibility,
-      moderationStatus: access.look.moderationStatus,
-      proVerificationStatus:
-        access.look.professional.verificationStatus,
-      viewerFollowsProfessional: access.viewerFollowsProfessional,
-    })
-
-    if (!canView) {
-      return jsonFail(404, 'Not found.', {
-        code: 'LOOK_NOT_FOUND',
-      })
+    if (!canViewLookPost(buildLookPolicyInput(access, viewer?.role ?? null))) {
+      return jsonFail(404, 'Not found.', { code: 'LOOK_NOT_FOUND' })
     }
 
     const { searchParams } = new URL(req.url)
     const requestedLimit = pickInt(searchParams.get('limit')) ?? 30
     const limit = Math.max(1, Math.min(requestedLimit, 100))
 
+    const viewerUserId = viewer?.id ?? null
+    const viewerIsAdmin = viewer?.role === Role.ADMIN
+
+    // Top-level comments only; replies are loaded on demand per thread. The
+    // look's stored commentCount already includes replies (matches IG/TikTok),
+    // so we count all approved rows for the header, not just top-level ones.
     const [rows, commentsCount] = await prisma.$transaction([
       prisma.lookComment.findMany({
         where: {
           lookPostId,
+          parentCommentId: null,
           moderationStatus: ModerationStatus.APPROVED,
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
-        select: lookCommentSelect,
+        select: buildLookCommentSelect(viewerUserId),
       }),
       prisma.lookComment.count({
         where: {
@@ -129,7 +100,9 @@ export async function GET(req: Request, ctx: RouteContext) {
 
     const body: LooksCommentsListResponseDto = {
       lookPostId,
-      comments: rows.map(mapLooksCommentToDto),
+      comments: rows.map((row) =>
+        mapLooksCommentToDto(row, { viewerUserId, viewerIsAdmin }),
+      ),
       commentsCount,
     }
 
@@ -151,9 +124,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     const lookPostId = pickString(rawId)
 
     if (!lookPostId) {
-      return jsonFail(400, 'Missing look id.', {
-        code: 'MISSING_LOOK_ID',
-      })
+      return jsonFail(400, 'Missing look id.', { code: 'MISSING_LOOK_ID' })
     }
 
     const access = await loadLookAccess(prisma, {
@@ -163,52 +134,27 @@ export async function POST(req: Request, ctx: RouteContext) {
     })
 
     if (!access) {
-      return jsonFail(404, 'Not found.', {
-        code: 'LOOK_NOT_FOUND',
-      })
+      return jsonFail(404, 'Not found.', { code: 'LOOK_NOT_FOUND' })
     }
 
-    const canView = canViewLookPost({
-      isOwner: access.isOwner,
-      viewerRole: auth.user.role ?? null,
-      status: access.look.status,
-      visibility: access.look.visibility,
-      moderationStatus: access.look.moderationStatus,
-      proVerificationStatus:
-        access.look.professional.verificationStatus,
-      viewerFollowsProfessional: access.viewerFollowsProfessional,
-    })
+    const policyInput = buildLookPolicyInput(access, auth.user.role ?? null)
 
-    if (!canView) {
-      return jsonFail(404, 'Not found.', {
-        code: 'LOOK_NOT_FOUND',
-      })
+    if (!canViewLookPost(policyInput)) {
+      return jsonFail(404, 'Not found.', { code: 'LOOK_NOT_FOUND' })
     }
 
-    const canComment = canCommentOnLookPost({
-      isOwner: access.isOwner,
-      viewerRole: auth.user.role ?? null,
-      status: access.look.status,
-      visibility: access.look.visibility,
-      moderationStatus: access.look.moderationStatus,
-      proVerificationStatus:
-        access.look.professional.verificationStatus,
-      viewerFollowsProfessional: access.viewerFollowsProfessional,
-    })
-
-    if (!canComment) {
+    if (!canCommentOnLookPost(policyInput)) {
       return jsonFail(403, 'You can’t comment on this look.', {
         code: 'COMMENTS_FORBIDDEN',
       })
     }
 
     const rawBody: unknown = await req.json().catch(() => null)
-    const text = readCommentText(rawBody)
+    const text = readCommentBody(rawBody)
+    const requestedParentId = readParentCommentId(rawBody)
 
     if (!text) {
-      return jsonFail(400, 'Comment cannot be empty.', {
-        code: 'EMPTY_COMMENT',
-      })
+      return jsonFail(400, 'Comment cannot be empty.', { code: 'EMPTY_COMMENT' })
     }
 
     if (text.length > 500) {
@@ -217,39 +163,64 @@ export async function POST(req: Request, ctx: RouteContext) {
       })
     }
 
+    // Resolve the real parent. Threading is flattened to one level: replying to
+    // a reply re-roots the new comment under that reply's top-level ancestor.
+    let parentCommentId: string | null = null
+    if (requestedParentId) {
+      const parent = await prisma.lookComment.findFirst({
+        where: {
+          id: requestedParentId,
+          lookPostId,
+          moderationStatus: ModerationStatus.APPROVED,
+        },
+        select: { id: true, parentCommentId: true },
+      })
+
+      if (!parent) {
+        return jsonFail(404, 'That comment is no longer available.', {
+          code: 'PARENT_COMMENT_NOT_FOUND',
+        })
+      }
+
+      parentCommentId = parent.parentCommentId ?? parent.id
+    }
+
+    const viewerUserId = auth.user.id
+    const viewerIsAdmin = auth.user.role === Role.ADMIN
+
     const result = await prisma.$transaction(async (tx) => {
       const comment = await tx.lookComment.create({
         data: {
           lookPostId,
-          userId: auth.user.id,
+          userId: viewerUserId,
+          parentCommentId,
           body: text,
         },
-        select: lookCommentSelect,
+        select: buildLookCommentSelect(viewerUserId),
       })
 
-      const commentsCount = await recomputeLookPostCommentCount(
-        tx,
-        lookPostId,
-      )
+      if (parentCommentId) {
+        await recomputeLookCommentReplyCount(tx, parentCommentId)
+      }
+
+      const commentsCount = await recomputeLookPostCommentCount(tx, lookPostId)
       await enqueueRecomputeLookCounts(tx, { lookPostId })
 
-      return {
-        comment,
-        commentsCount,
-      }
+      return { comment, commentsCount }
     })
 
     const body: LooksCommentCreateResponseDto = {
       lookPostId,
-      comment: mapLooksCommentToDto(result.comment),
+      comment: mapLooksCommentToDto(result.comment, {
+        viewerUserId,
+        viewerIsAdmin,
+      }),
       commentsCount: result.commentsCount,
     }
 
     return jsonOk(body, 201)
   } catch (e) {
     console.error('POST /api/looks/[id]/comments error', e)
-    return jsonFail(500, 'Couldn’t post that. Try again.', {
-      code: 'INTERNAL',
-    })
+    return jsonFail(500, 'Couldn’t post that. Try again.', { code: 'INTERNAL' })
   }
 }

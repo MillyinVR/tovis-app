@@ -46,7 +46,19 @@ type MediaCommentRowShape = {
   id: string
   body: string
   createdAt: Date
+  userId: string
+  parentCommentId: string | null
+  likeCount: number
+  replyCount: number
   user: MediaCommentUserShape
+  // Per-viewer like presence: the route selects the viewer's own like (if any)
+  // via a filtered `likes` relation, so a non-empty array means "viewer liked".
+  likes?: Array<{ id: string }>
+}
+
+export type LooksCommentViewerContext = {
+  viewerUserId: string | null
+  viewerIsAdmin: boolean
 }
 
 type StoredMediaShape = {
@@ -306,12 +318,21 @@ export async function mapLooksFeedMediaToDto(args: {
 
 export function mapLooksCommentToDto(
   comment: MediaCommentRowShape,
+  viewer: LooksCommentViewerContext,
 ): LooksCommentDto {
+  const isAuthor =
+    viewer.viewerUserId !== null && viewer.viewerUserId === comment.userId
+
   return {
     id: comment.id,
     body: comment.body,
     createdAt: comment.createdAt.toISOString(),
     user: normalizeCommentUser(comment.user),
+    parentCommentId: comment.parentCommentId,
+    likeCount: comment.likeCount,
+    replyCount: comment.replyCount,
+    viewerLiked: (comment.likes?.length ?? 0) > 0,
+    viewerCanDelete: isAuthor || viewer.viewerIsAdmin,
   }
 }
 

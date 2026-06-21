@@ -192,42 +192,60 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
   return parsed
 }
 
-export function parseLooksCommentsResponse(raw: unknown): LooksCommentDto[] {
-  if (!isRecord(raw)) return []
+export function parseLooksComment(raw: unknown): LooksCommentDto | null {
+  if (!isRecord(raw)) return null
 
-  const comments = raw.comments
-  if (!Array.isArray(comments)) return []
+  const id = pickString(raw.id)
+  const body = pickString(raw.body)
+  const createdAt = pickString(raw.createdAt)
+  const userRaw = isRecord(raw.user) ? raw.user : null
+
+  if (!id || !body || !createdAt || !userRaw) return null
+
+  const userId = pickString(userRaw.id)
+  const displayName = pickString(userRaw.displayName)
+
+  if (!userId || !displayName) return null
+
+  return {
+    id,
+    body,
+    createdAt,
+    user: {
+      id: userId,
+      displayName,
+      avatarUrl: pickString(userRaw.avatarUrl),
+    },
+    parentCommentId: pickString(raw.parentCommentId),
+    likeCount: pickNumber(raw.likeCount) ?? 0,
+    replyCount: pickNumber(raw.replyCount) ?? 0,
+    viewerLiked: pickBoolean(raw.viewerLiked) ?? false,
+    viewerCanDelete: pickBoolean(raw.viewerCanDelete) ?? false,
+  }
+}
+
+function parseLooksCommentArray(raw: unknown): LooksCommentDto[] {
+  if (!Array.isArray(raw)) return []
 
   const parsed: LooksCommentDto[] = []
-
-  for (const comment of comments) {
-    if (!isRecord(comment)) continue
-
-    const id = pickString(comment.id)
-    const body = pickString(comment.body)
-    const createdAt = pickString(comment.createdAt)
-    const userRaw = isRecord(comment.user) ? comment.user : null
-
-    if (!id || !body || !createdAt || !userRaw) continue
-
-    const userId = pickString(userRaw.id)
-    const displayName = pickString(userRaw.displayName)
-
-    if (!userId || !displayName) continue
-
-    parsed.push({
-      id,
-      body,
-      createdAt,
-      user: {
-        id: userId,
-        displayName,
-        avatarUrl: pickString(userRaw.avatarUrl),
-      },
-    })
+  for (const entry of raw) {
+    const comment = parseLooksComment(entry)
+    if (comment) parsed.push(comment)
   }
 
   return parsed
+}
+
+export function parseLooksCommentsResponse(raw: unknown): LooksCommentDto[] {
+  if (!isRecord(raw)) return []
+  return parseLooksCommentArray(raw.comments)
+}
+
+export function parseLooksCommentRepliesResponse(
+  raw: unknown,
+): LooksCommentDto[] {
+  if (!isRecord(raw)) return []
+  return parseLooksCommentArray(raw.replies)
 }
 
 function isLookPostStatus(value: unknown): value is LookPostStatus {

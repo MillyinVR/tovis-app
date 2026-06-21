@@ -3,23 +3,18 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import { useBrand } from '@/lib/brand/BrandProvider'
-import { asTrimmedString, isRecord } from '@/lib/guards'
+import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
-import { parseLooksCommentsResponse } from '@/lib/looks/parsers'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
-import type {
-  LooksCommentDto,
-  LooksDetailItemDto,
-} from '@/lib/looks/types'
+import type { LooksDetailItemDto } from '@/lib/looks/types'
 import {
-  loadViewerLocation,
-  subscribeViewerLocation,
   viewerLocationToDrawerContextFields,
   type ViewerLocation,
 } from '@/lib/viewerLocation'
+import { useViewerLocation } from '@/lib/useViewerLocation'
 
 import AvailabilityDrawer from '../../booking/AvailabilityDrawer'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
@@ -28,11 +23,6 @@ import RightActionRail from '../_components/RightActionRail'
 
 function currentLooksDetailPath(lookPostId: string): string {
   return `/looks/${encodeURIComponent(lookPostId)}`
-}
-
-function readErrorMessage(raw: unknown, fallback: string): string {
-  if (!isRecord(raw)) return fallback
-  return asTrimmedString(raw.error) ?? fallback
 }
 
 function isGuestBlocked(status: number): boolean {
@@ -79,22 +69,12 @@ export default function LookDetailClient({
   const [item, setItem] = useState(initialItem)
 
   const [commentsOpen, setCommentsOpen] = useState(false)
-  const [comments, setComments] = useState<LooksCommentDto[]>([])
-  const [commentsLoading, setCommentsLoading] = useState(false)
-  const [commentError, setCommentError] = useState<string | null>(null)
-  const [commentText, setCommentText] = useState('')
-  const [posting, setPosting] = useState(false)
 
-  const [viewerLoc, setViewerLoc] = useState<ViewerLocation | null>(null)
+  const viewerLoc = useViewerLocation()
   const [availabilityOpen, setAvailabilityOpen] = useState(false)
   const [drawerCtx, setDrawerCtx] = useState<AvailabilityDrawerContext | null>(
     null,
   )
-
-  useEffect(() => {
-    setViewerLoc(loadViewerLocation())
-    return subscribeViewerLocation(setViewerLoc)
-  }, [])
 
   const redirectToLogin = useCallback(
     (reason: string) => {
@@ -123,48 +103,15 @@ export default function LookDetailClient({
     setAvailabilityOpen(true)
   }, [item, viewerLoc])
 
-  const loadComments = useCallback(async () => {
-    setCommentsLoading(true)
-    setCommentError(null)
-
-    try {
-      const res = await fetch(
-        `/api/looks/${encodeURIComponent(item.id)}/comments`,
-        {
-          cache: 'no-store',
-          headers: {
-            Accept: 'application/json',
-          },
-        },
-      )
-
-      const raw = await safeJson(res)
-
-      if (isGuestBlocked(res.status)) {
-        setCommentsOpen(false)
-        redirectToLogin('comment')
-        return
-      }
-
-      if (!res.ok) {
-        throw new Error(readErrorMessage(raw, 'Failed to load comments'))
-      }
-
-      setComments(parseLooksCommentsResponse(raw))
-    } catch (error: unknown) {
-      setCommentError(
-        error instanceof Error ? error.message : 'Failed to load comments',
-      )
-    } finally {
-      setCommentsLoading(false)
-    }
-  }, [item.id, redirectToLogin])
-
-  const openComments = useCallback(async () => {
-    setCommentsOpen(true)
-    setCommentText('')
-    await loadComments()
-  }, [loadComments])
+  const handleCommentCountChange = useCallback(
+    (_lookPostId: string, commentsCount: number) => {
+      setItem((prev) => ({
+        ...prev,
+        _count: { ...prev._count, comments: commentsCount },
+      }))
+    },
+    [],
+  )
 
   const toggleLike = useCallback(async () => {
     const lookPostId = item.id
@@ -260,97 +207,6 @@ export default function LookDetailClient({
     }
   }, [item, redirectToLogin])
 
-  const postComment = useCallback(async () => {
-    if (posting) return
-
-    const body = commentText.trim()
-    if (!body) return
-
-    setPosting(true)
-    setCommentError(null)
-
-    const tempId = `temp_${Date.now()}`
-
-    const optimistic: LooksCommentDto = {
-      id: tempId,
-      body,
-      createdAt: new Date().toISOString(),
-      user: {
-        id: 'viewer',
-        displayName: 'You',
-        avatarUrl: null,
-      },
-    }
-
-    setComments((prev) => [optimistic, ...prev])
-    setCommentText('')
-    setItem((prev) => ({
-      ...prev,
-      _count: {
-        ...prev._count,
-        comments: prev._count.comments + 1,
-      },
-    }))
-
-    try {
-      const res = await fetch(
-        `/api/looks/${encodeURIComponent(item.id)}/comments`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-          },
-          body: JSON.stringify({ body }),
-        },
-      )
-
-      const raw = await safeJson(res)
-
-      if (isGuestBlocked(res.status)) {
-        setComments((prev) => prev.filter((comment) => comment.id !== tempId))
-        setItem((prev) => ({
-          ...prev,
-          _count: {
-            ...prev._count,
-            comments: Math.max(0, prev._count.comments - 1),
-          },
-        }))
-        redirectToLogin('comment')
-        return
-      }
-
-      if (!res.ok) {
-        setComments((prev) => prev.filter((comment) => comment.id !== tempId))
-        setItem((prev) => ({
-          ...prev,
-          _count: {
-            ...prev._count,
-            comments: Math.max(0, prev._count.comments - 1),
-          },
-        }))
-        setCommentError(readErrorMessage(raw, 'Failed to post comment'))
-        return
-      }
-
-      await loadComments()
-    } catch (error: unknown) {
-      setComments((prev) => prev.filter((comment) => comment.id !== tempId))
-      setItem((prev) => ({
-        ...prev,
-        _count: {
-          ...prev._count,
-          comments: Math.max(0, prev._count.comments - 1),
-        },
-      }))
-      setCommentError(
-        error instanceof Error ? error.message : 'Failed to post comment',
-      )
-    } finally {
-      setPosting(false)
-    }
-  }, [commentText, item.id, loadComments, posting, redirectToLogin])
-
   const shareLook = useCallback(async () => {
     if (typeof window === 'undefined') return
 
@@ -436,7 +292,7 @@ export default function LookDetailClient({
             right={12}
             onOpenAvailability={openAvailability}
             onToggleLike={() => void toggleLike()}
-            onOpenComments={() => void openComments()}
+            onOpenComments={() => setCommentsOpen(true)}
             onShare={() => void shareLook()}
             onSaveStateChange={(state) => {
               setItem((prev) => ({
@@ -618,15 +474,11 @@ export default function LookDetailClient({
       ) : null}
 
       <CommentsDrawer
+        lookPostId={commentsOpen ? item.id : null}
         open={commentsOpen}
         onClose={() => setCommentsOpen(false)}
-        loading={commentsLoading}
-        error={commentError}
-        comments={comments}
-        commentText={commentText}
-        setCommentText={setCommentText}
-        posting={posting}
-        onPost={() => void postComment()}
+        onCountChange={handleCommentCountChange}
+        onRequireAuth={redirectToLogin}
       />
     </>
   )

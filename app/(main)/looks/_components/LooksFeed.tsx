@@ -12,18 +12,14 @@ import LookSlide from './LookSlide'
 import CommentsDrawer from './CommentsDrawer'
 import RightActionRail from './RightActionRail'
 import { safeJson } from '@/lib/http'
-import {
-  parseLooksCommentsResponse,
-  parseLooksFeedEnvelope,
-} from '@/lib/looks/parsers'
+import { parseLooksFeedEnvelope } from '@/lib/looks/parsers'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
-import type { FeedItem, UiCategory, UiComment } from './lookTypes'
+import type { FeedItem, UiCategory } from './lookTypes'
 import {
-  loadViewerLocation,
-  subscribeViewerLocation,
   viewerLocationToDrawerContextFields,
   type ViewerLocation,
 } from '@/lib/viewerLocation'
+import { useViewerLocation } from '@/lib/useViewerLocation'
 
 const ALL_TAB: UiCategory = { name: 'Look', slug: 'all' }
 const FOLLOWING_TAB: UiCategory = { name: 'Following', slug: 'following' }
@@ -120,10 +116,6 @@ function parseFeedEnvelope(raw: unknown): {
   return { items: envelope.items, nextCursor: envelope.nextCursor }
 }
 
-function parseComments(raw: unknown): UiComment[] {
-  return parseLooksCommentsResponse(raw)
-}
-
 const FOOTER_HEIGHT = UI_SIZES.footerHeight
 const OVERLAY_BOTTOM = UI_SIZES.footerHeight + UI_SIZES.rightRailBottomOffset
 const RIGHT_RAIL_BOTTOM = UI_SIZES.rightRailBottom
@@ -181,11 +173,6 @@ export default function LooksFeed() {
   const [query, setQuery] = useState('')
 
   const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null)
-  const [comments, setComments] = useState<UiComment[]>([])
-  const [commentsLoading, setCommentsLoading] = useState(false)
-  const [commentText, setCommentText] = useState('')
-  const [commentError, setCommentError] = useState<string | null>(null)
-  const [posting, setPosting] = useState(false)
 
   const hasLoadedOnceRef = useRef(false)
   const feedCacheRef = useRef(new Map<string, FeedCacheEntry>())
@@ -205,12 +192,7 @@ export default function LooksFeed() {
   )
   const [activeIndex, setActiveIndex] = useState(0)
 
-  const [viewerLoc, setViewerLoc] = useState<ViewerLocation | null>(null)
-
-  useEffect(() => {
-    setViewerLoc(loadViewerLocation())
-    return subscribeViewerLocation(setViewerLoc)
-  }, [])
+  const viewerLoc = useViewerLocation()
 
   const redirectToLogin = useCallback(
     (reason: string) => {
@@ -697,145 +679,20 @@ export default function LooksFeed() {
     [likeOnly],
   )
 
-  async function openCommentsDrawer(lookPostId: string) {
-    setOpenCommentsFor(lookPostId)
-    setComments([])
-    setCommentText('')
-    setCommentError(null)
-    setCommentsLoading(true)
-
-    try {
-      const res = await fetch(`/api/looks/${lookPostId}/comments`, {
-        cache: 'no-store',
-        headers: { Accept: 'application/json' },
-      })
-      const raw = await safeJson(res)
-
-      if (isGuestBlocked(res.status)) {
-        setOpenCommentsFor(null)
-        redirectToLogin('comment')
-        return
-      }
-
-      if (!res.ok) {
-        throw new Error(asTrimmedString(isRecord(raw) ? raw.error : null) ?? 'Failed to load comments')
-      }
-
-      setComments(parseComments(raw))
-    } catch (error: unknown) {
-      setCommentError(
-        error instanceof Error ? error.message : 'Failed to load comments',
-      )
-    } finally {
-      setCommentsLoading(false)
-    }
-  }
-
-  async function postComment() {
-    if (!openCommentsFor || posting) return
-
-    const body = commentText.trim()
-    if (!body) return
-
-    setPosting(true)
-    setCommentError(null)
-
-    const lookPostId = openCommentsFor
-    const tempId = `temp_${Date.now()}`
-
-    const optimistic: UiComment = {
-      id: tempId,
-      body,
-      createdAt: new Date().toISOString(),
-      user: { id: 'me', displayName: 'You', avatarUrl: null },
-    }
-
-    setComments((prev) => [optimistic, ...prev])
-    setCommentText('')
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === lookPostId
-          ? {
-              ...item,
-              _count: { ...item._count, comments: item._count.comments + 1 },
-            }
-          : item,
-      ),
-    )
-
-    try {
-      const res = await fetch(`/api/looks/${lookPostId}/comments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({ body }),
-      })
-
-      const raw = await safeJson(res)
-
-      if (isGuestBlocked(res.status)) {
-        setComments((prev) => prev.filter((comment) => comment.id !== tempId))
-        setItems((prev) =>
-          prev.map((item) =>
-            item.id === lookPostId
-              ? {
-                  ...item,
-                  _count: {
-                    ...item._count,
-                    comments: Math.max(0, item._count.comments - 1),
-                  },
-                }
-              : item,
-          ),
-        )
-        redirectToLogin('comment')
-        return
-      }
-
-      if (!res.ok) {
-        setComments((prev) => prev.filter((comment) => comment.id !== tempId))
-        setItems((prev) =>
-          prev.map((item) =>
-            item.id === lookPostId
-              ? {
-                  ...item,
-                  _count: {
-                    ...item._count,
-                    comments: Math.max(0, item._count.comments - 1),
-                  },
-                }
-              : item,
-          ),
-        )
-
-        const message = asTrimmedString(isRecord(raw) ? raw.error : null)
-        setCommentError(message ?? 'Failed to post comment')
-        return
-      }
-
-      await openCommentsDrawer(lookPostId)
-    } catch (error: unknown) {
-      setComments((prev) => prev.filter((comment) => comment.id !== tempId))
+  // Keep the rail's comment tally in sync with whatever the comment sheet
+  // reports as it posts/deletes (the sheet owns the comment data itself).
+  const handleCommentCountChange = useCallback(
+    (lookPostId: string, commentsCount: number) => {
       setItems((prev) =>
         prev.map((item) =>
           item.id === lookPostId
-            ? {
-                ...item,
-                _count: {
-                  ...item._count,
-                  comments: Math.max(0, item._count.comments - 1),
-                },
-              }
+            ? { ...item, _count: { ...item._count, comments: commentsCount } }
             : item,
         ),
       )
-      setCommentError(error instanceof Error ? error.message : 'Failed to post comment')
-    } finally {
-      setPosting(false)
-    }
-  }
+    },
+    [],
+  )
 
   const closeAvailability = useCallback(() => {
     setAvailabilityOpen(false)
@@ -947,7 +804,7 @@ export default function LooksFeed() {
                 bottom={RIGHT_RAIL_BOTTOM}
                 onOpenAvailability={() => openAvailabilityFor(item)}
                 onToggleLike={() => void toggleLike(item.id)}
-                onOpenComments={() => void openCommentsDrawer(item.id)}
+                onOpenComments={() => setOpenCommentsFor(item.id)}
                 onShare={() => void shareLook(item)}
               />
                 )
@@ -963,7 +820,7 @@ export default function LooksFeed() {
                     onDoubleClickLike={() => handleDoubleClickLikeOnly(item.id)}
                     onTouchEndLike={() => handleTouchEndLikeOnly(item.id)}
                     onToggleLike={() => void toggleLike(item.id)}
-                    onOpenComments={() => void openCommentsDrawer(item.id)}
+                    onOpenComments={() => setOpenCommentsFor(item.id)}
                     onOpenAvailability={() => openAvailabilityFor(item)}
                     onToggleFollow={() =>
                       void toggleFollow(item.professional?.id ?? '')
@@ -1041,15 +898,11 @@ export default function LooksFeed() {
       ) : null}
 
       <CommentsDrawer
+        lookPostId={openCommentsFor}
         open={Boolean(openCommentsFor)}
         onClose={() => setOpenCommentsFor(null)}
-        loading={commentsLoading}
-        error={commentError}
-        comments={comments}
-        commentText={commentText}
-        setCommentText={setCommentText}
-        posting={posting}
-        onPost={postComment}
+        onCountChange={handleCommentCountChange}
+        onRequireAuth={redirectToLogin}
       />
     </>
   )

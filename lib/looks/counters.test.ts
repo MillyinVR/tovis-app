@@ -9,6 +9,8 @@ import {
 import {
   computeLookPostRankScore,
   computeLookPostSpotlightScore,
+  recomputeLookCommentLikeCount,
+  recomputeLookCommentReplyCount,
   recomputeLookPostCommentCount,
   recomputeLookPostCounters,
   recomputeLookPostLikeCount,
@@ -53,6 +55,10 @@ function makeDb() {
       count: vi.fn(),
     },
     lookComment: {
+      count: vi.fn(),
+      update: vi.fn(),
+    },
+    lookCommentLike: {
       count: vi.fn(),
     },
     boardItem: {
@@ -375,6 +381,57 @@ describe('lib/looks/counters.ts', () => {
       })
 
       expect(result).toBe(4)
+    })
+  })
+
+  describe('recomputeLookCommentLikeCount', () => {
+    it('counts the comment’s likes and persists likeCount on the comment row', async () => {
+      const db = makeDb()
+      db.lookCommentLike.count.mockResolvedValue(5)
+      db.lookComment.update.mockResolvedValue({ id: 'comment_1' })
+
+      const result = await recomputeLookCommentLikeCount(
+        asTransactionClient(db),
+        'comment_1',
+      )
+
+      expect(db.lookCommentLike.count).toHaveBeenCalledWith({
+        where: { lookCommentId: 'comment_1' },
+      })
+      expect(db.lookComment.update).toHaveBeenCalledWith({
+        where: { id: 'comment_1' },
+        data: { likeCount: 5 },
+        select: { id: true },
+      })
+      // Comment likes don't feed the look's spotlight/rank scores.
+      expect(db.lookPost.update).not.toHaveBeenCalled()
+      expect(result).toBe(5)
+    })
+  })
+
+  describe('recomputeLookCommentReplyCount', () => {
+    it('counts approved replies of the parent and persists replyCount', async () => {
+      const db = makeDb()
+      db.lookComment.count.mockResolvedValue(3)
+      db.lookComment.update.mockResolvedValue({ id: 'parent_1' })
+
+      const result = await recomputeLookCommentReplyCount(
+        asTransactionClient(db),
+        'parent_1',
+      )
+
+      expect(db.lookComment.count).toHaveBeenCalledWith({
+        where: {
+          parentCommentId: 'parent_1',
+          moderationStatus: ModerationStatus.APPROVED,
+        },
+      })
+      expect(db.lookComment.update).toHaveBeenCalledWith({
+        where: { id: 'parent_1' },
+        data: { replyCount: 3 },
+        select: { id: true },
+      })
+      expect(result).toBe(3)
     })
   })
 

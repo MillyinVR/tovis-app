@@ -1,7 +1,8 @@
-import { Prisma, PrismaClient } from '@prisma/client'
+import { Prisma, PrismaClient, type Role } from '@prisma/client'
 
 import { getViewerFollowState } from '@/lib/follows'
 import { asTrimmedString, normalizeRequiredId } from '@/lib/guards'
+import type { LookViewPolicyInput } from '@/lib/looks/guards'
 
 type LooksAccessDb = PrismaClient | Prisma.TransactionClient
 
@@ -63,5 +64,25 @@ export async function loadLookAccess(
     look,
     isOwner,
     viewerFollowsProfessional,
+  }
+}
+
+/**
+ * Shape a loaded look + viewer role into the input every look policy guard
+ * (canView/canComment/canSave) expects. Keeps the field-mapping in one place so
+ * the comment routes don't each re-spell it.
+ */
+export function buildLookPolicyInput(
+  access: LoadedLookAccess,
+  viewerRole: Role | null,
+): LookViewPolicyInput {
+  return {
+    isOwner: access.isOwner,
+    viewerRole,
+    status: access.look.status,
+    visibility: access.look.visibility,
+    moderationStatus: access.look.moderationStatus,
+    proVerificationStatus: access.look.professional.verificationStatus,
+    viewerFollowsProfessional: access.viewerFollowsProfessional,
   }
 }

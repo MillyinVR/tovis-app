@@ -266,6 +266,11 @@ describe('lib/looks/parsers.ts', () => {
               displayName: 'Tori Morales',
               avatarUrl: 'https://cdn.example.com/avatar.jpg',
             },
+            parentCommentId: null,
+            likeCount: 4,
+            replyCount: 2,
+            viewerLiked: true,
+            viewerCanDelete: true,
           },
         ],
       })
@@ -280,6 +285,46 @@ describe('lib/looks/parsers.ts', () => {
             displayName: 'Tori Morales',
             avatarUrl: 'https://cdn.example.com/avatar.jpg',
           },
+          parentCommentId: null,
+          likeCount: 4,
+          replyCount: 2,
+          viewerLiked: true,
+          viewerCanDelete: true,
+        },
+      ])
+    })
+
+    it('defaults missing engagement fields on a comment row', () => {
+      const result = parseLooksCommentsResponse({
+        comments: [
+          {
+            id: 'comment_1',
+            body: 'Minimal payload',
+            createdAt: '2026-04-18T12:00:00.000Z',
+            user: {
+              id: 'user_1',
+              displayName: 'Tori Morales',
+              avatarUrl: null,
+            },
+          },
+        ],
+      })
+
+      expect(result).toEqual([
+        {
+          id: 'comment_1',
+          body: 'Minimal payload',
+          createdAt: '2026-04-18T12:00:00.000Z',
+          user: {
+            id: 'user_1',
+            displayName: 'Tori Morales',
+            avatarUrl: null,
+          },
+          parentCommentId: null,
+          likeCount: 0,
+          replyCount: 0,
+          viewerLiked: false,
+          viewerCanDelete: false,
         },
       ])
     })

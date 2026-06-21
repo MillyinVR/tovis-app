@@ -128,6 +128,27 @@ vi.mock('@/lib/currentUser', () => ({
 
 vi.mock('@/lib/looks/access', () => ({
   loadLookAccess: mocks.loadLookAccess,
+  buildLookPolicyInput: (
+    access: {
+      isOwner: boolean
+      viewerFollowsProfessional: boolean
+      look: {
+        status: LookPostStatus
+        visibility: LookPostVisibility
+        moderationStatus: ModerationStatus
+        professional: { verificationStatus: VerificationStatus }
+      }
+    },
+    viewerRole: Role | null,
+  ) => ({
+    isOwner: access.isOwner,
+    viewerRole,
+    status: access.look.status,
+    visibility: access.look.visibility,
+    moderationStatus: access.look.moderationStatus,
+    proVerificationStatus: access.look.professional.verificationStatus,
+    viewerFollowsProfessional: access.viewerFollowsProfessional,
+  }),
 }))
 
 vi.mock('@/lib/looks/guards', () => ({
@@ -303,6 +324,7 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
     expect(mocks.prisma.lookComment.findMany).toHaveBeenCalledWith({
       where: {
         lookPostId: 'look_1',
+        parentCommentId: null,
         moderationStatus: ModerationStatus.APPROVED,
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -368,6 +390,7 @@ describe('app/api/looks/[id]/comments/route.ts', () => {
       data: {
         lookPostId: 'look_1',
         userId: 'user_1',
+        parentCommentId: null,
         body: 'Sharp work',
       },
       select: expect.objectContaining({
