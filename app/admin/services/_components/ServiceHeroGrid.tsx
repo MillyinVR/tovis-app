@@ -14,6 +14,7 @@ import type { ReactNode, RefObject } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
+import { zClass } from '@/lib/zIndex'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 
 import RemoteImage from '@/app/_components/media/RemoteImage'
@@ -634,7 +635,7 @@ export default function ServiceHeroGrid(props: {
         {toast ? (
           <motion.div
             key="toast"
-            className="fixed right-3 top-3 z-[9999] w-[min(380px,calc(100vw-24px))]"
+            className={`fixed right-3 top-3 ${zClass.toast} w-[min(380px,calc(100vw-24px))]`}
             initial={{
               opacity: 0,
               y: -10,
@@ -759,7 +760,7 @@ export default function ServiceHeroGrid(props: {
         {current ? (
           <motion.div
             key="svc-edit"
-            className="fixed inset-0 z-[9000]"
+            className={`fixed inset-0 ${zClass.modal}`}
             initial="initial"
             animate="animate"
             exit="exit"

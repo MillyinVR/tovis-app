@@ -4,6 +4,7 @@
 import { createPortal } from 'react-dom'
 import { useEffect, useState } from 'react'
 import { SHEET_MAX_W, SHEET_SIDE_PAD } from '../constants'
+import { Z } from '@/lib/zIndex'
 
 export default function DrawerShell({
   open,
@@ -50,7 +51,7 @@ export default function DrawerShell({
   const overlayRootStyle: React.CSSProperties = {
     position: 'fixed',
     inset: 0,
-    zIndex: 2147483648,
+    zIndex: Z.modal,
     transform: 'none',
   }
 

@@ -13,6 +13,7 @@ import { useRouter } from 'next/navigation'
 
 import { asTrimmedString, type UnknownRecord } from '@/lib/guards'
 import { errorMessageFromUnknown, readErrorMessage, safeJson } from '@/lib/http'
+import { zClass } from '@/lib/zIndex'
 import { sanitizeHandleInput } from '@/lib/handles'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
@@ -350,7 +351,8 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
           aria-modal="true"
           aria-label="Edit profile"
           className={[
-            'fixed inset-0 z-[1000] grid place-items-center p-4',
+            'fixed inset-0 grid place-items-center p-4',
+            zClass.modal,
             'bg-black/70 backdrop-blur-sm',
             'transition-opacity duration-150 ease-out',
             mounted && !closing ? 'opacity-100' : 'opacity-0',

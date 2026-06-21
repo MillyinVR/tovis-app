@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from 'react'
 import { Search, X } from 'lucide-react'
+import { zClass } from '@/lib/zIndex'
 
 const TAB_LOOKS = 'Look'
 const TAB_SPOTLIGHT = 'Spotlight'
@@ -48,7 +49,7 @@ export default function LooksTopBar(props: {
 
   return (
     <div
-      className="fixed left-0 right-0 top-0 z-50"
+      className={`fixed left-0 right-0 top-0 ${zClass.header}`}
       style={{
         paddingTop: `calc(env(safe-area-inset-top, 0px) + 10px)`,
         pointerEvents: 'none',

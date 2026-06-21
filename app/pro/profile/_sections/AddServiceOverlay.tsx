@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import ServicePicker from '@/app/pro/services/ServicePicker'
+import { zClass } from '@/lib/zIndex'
 
 type ServiceDTO = {
   id: string
@@ -87,7 +88,7 @@ export default function AddServiceOverlay(props: {
       {open ? (
         <motion.div
           key="add-service-overlay"
-          className="fixed inset-0 z-[1000]"
+          className={`fixed inset-0 ${zClass.modal}`}
           initial="initial"
           animate="animate"
           exit="exit"

@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 
 import { isRecord } from '@/lib/guards'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { Z } from '@/lib/zIndex'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 
@@ -620,7 +621,7 @@ function Lightbox({
         background: 'rgba(0,0,0,0.6)',
         display: 'grid',
         placeItems: 'center',
-        zIndex: 9999,
+        zIndex: Z.modal,
         padding: 16,
       }}
     >

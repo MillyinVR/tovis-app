@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { endAvailabilityMetric } from '../../AvailabilityDrawer/perf/availabilityPerf'
+import { zClass } from '@/lib/zIndex'
 import type {
   BookingSource,
   ServiceLocationType,
@@ -638,7 +639,7 @@ export default function AddOnsClient({
         </div>
       ) : null}
 
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-white/10 bg-bgPrimary/70 backdrop-blur">
+      <div className={`fixed bottom-0 left-0 right-0 ${zClass.sticky} border-t border-white/10 bg-bgPrimary/70 backdrop-blur`}>
         <div className="mx-auto max-w-180 px-4 py-3">
           <div className="tovis-glass-soft rounded-card border border-white/10 px-4 py-3">
             <button

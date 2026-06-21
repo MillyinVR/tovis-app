@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { safeJson } from '../utils/safeJson'
 import type { MobileAddressOption } from '../types'
 import { isRecord } from '@/lib/guards'
+import { Z } from '@/lib/zIndex'
 import {
   makePlacesSessionToken,
   parsePlaceDetails,
@@ -254,7 +255,7 @@ export default function ClientAddressCreateModal(props: Props) {
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 2147483648,
+        zIndex: Z.nestedModal,
       }}
       onClick={() => {
         if (saving) return

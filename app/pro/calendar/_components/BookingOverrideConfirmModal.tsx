@@ -7,6 +7,7 @@ import type {
   BookingOverridePrompt,
   BookingOverridePromptIntent,
 } from '@/lib/booking/overridePrompts'
+import { zClass } from '@/lib/zIndex'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -159,7 +160,7 @@ export function BookingOverrideConfirmModal(
 
   return (
     <div
-      className="fixed inset-0 z-[1300] flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-4"
+      className={`fixed inset-0 ${zClass.modal} flex items-end justify-center bg-black/75 p-0 backdrop-blur-md sm:items-center sm:p-4`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="booking-override-title"

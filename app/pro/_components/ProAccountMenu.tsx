@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { zClass } from '@/lib/zIndex'
 import Link from 'next/link'
 
 type Props = {
@@ -210,7 +211,7 @@ export default function ProAccountMenu(props: Props) {
 
       <div
         className={[
-          'fixed inset-0 z-[9998] transition',
+          `fixed inset-0 ${zClass.overlay} transition`,
           open
             ? 'pointer-events-auto opacity-100'
             : 'pointer-events-none opacity-0',
@@ -225,7 +226,7 @@ export default function ProAccountMenu(props: Props) {
 
       <div
         className={[
-          'z-[9999]',
+          zClass.modal,
           panelBase,
           panelSkin,
           edgeGlow,

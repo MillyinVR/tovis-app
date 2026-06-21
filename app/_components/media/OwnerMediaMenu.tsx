@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { UI_SIZES } from '@/app/(main)/ui/layoutConstants'
+import { zClass } from '@/lib/zIndex'
 import { MediaVisibility } from '@prisma/client'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
@@ -278,7 +279,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
 
       {/* Edit modal */}
       {openEdit ? (
-        <div className="fixed inset-0 z-[9999] bg-black/60" onClick={closeEdit}>
+        <div className={`fixed inset-0 ${zClass.modal} bg-black/60`} onClick={closeEdit}>
           <div
             className={cn(
               'mx-auto mt-4 w-full max-w-[560px] overflow-hidden rounded-[18px]',
