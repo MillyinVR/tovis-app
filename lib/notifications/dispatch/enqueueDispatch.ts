@@ -112,6 +112,11 @@ type EnqueueDispatchRecipientBase = {
   inAppTargetId?: string | null
   phone?: string | null
   phoneVerifiedAt?: Date | null
+  /**
+   * Transactional SMS consent timestamp (User.transactionalSmsConsentAt).
+   * Required (alongside a verified phone) for SMS to be selected at dispatch.
+   */
+  transactionalSmsConsentAt?: Date | null
   email?: string | null
   emailVerifiedAt?: Date | null
   timeZone?: string | null
@@ -178,6 +183,7 @@ type NormalizedEnqueueDispatchArgs = {
   inAppTargetId: string | null
   phone: string | null
   phoneVerifiedAt: Date | null
+  transactionalSmsConsentAt: Date | null
   email: string | null
   emailVerifiedAt: Date | null
   timeZone: string | null
@@ -356,6 +362,7 @@ function buildCapabilities(args: {
   inAppTargetId: string | null
   phone: string | null
   phoneVerifiedAt: Date | null
+  transactionalSmsConsentAt: Date | null
   email: string | null
   emailVerifiedAt: Date | null
 }) {
@@ -364,6 +371,7 @@ function buildCapabilities(args: {
     inAppTargetId: args.inAppTargetId,
     phone: args.phone,
     phoneVerifiedAt: args.phoneVerifiedAt,
+    transactionalSmsConsentAt: args.transactionalSmsConsentAt,
     email: args.email,
     emailVerifiedAt: args.emailVerifiedAt,
   })
@@ -552,6 +560,14 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
     throw new Error('enqueueDispatch: invalid recipient.emailVerifiedAt')
   }
 
+  if (
+    args.recipient.transactionalSmsConsentAt != null &&
+    (!(args.recipient.transactionalSmsConsentAt instanceof Date) ||
+      Number.isNaN(args.recipient.transactionalSmsConsentAt.getTime()))
+  ) {
+    throw new Error('enqueueDispatch: invalid recipient.transactionalSmsConsentAt')
+  }
+
   if (isProDispatchRecipient(args.recipient)) {
     const professionalId = normRequiredString(
       args.recipient.professionalId,
@@ -572,6 +588,7 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
       inAppTargetId,
       phone,
       phoneVerifiedAt: args.recipient.phoneVerifiedAt ?? null,
+      transactionalSmsConsentAt: args.recipient.transactionalSmsConsentAt ?? null,
       email,
       emailVerifiedAt: args.recipient.emailVerifiedAt ?? null,
       timeZone,
@@ -607,6 +624,7 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
     inAppTargetId,
     phone,
     phoneVerifiedAt: args.recipient.phoneVerifiedAt ?? null,
+    transactionalSmsConsentAt: args.recipient.transactionalSmsConsentAt ?? null,
     email,
     emailVerifiedAt: args.recipient.emailVerifiedAt ?? null,
     timeZone,
@@ -680,6 +698,7 @@ export async function enqueueDispatch(
     inAppTargetId: normalized.inAppTargetId,
     phone: normalized.phone,
     phoneVerifiedAt: normalized.phoneVerifiedAt,
+    transactionalSmsConsentAt: normalized.transactionalSmsConsentAt,
     email: normalized.email,
     emailVerifiedAt: normalized.emailVerifiedAt,
   })

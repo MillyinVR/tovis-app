@@ -70,6 +70,77 @@ describe('lib/notifications/delivery/runtimeChannelPolicy', () => {
     })
   })
 
+  it('applies the default 22:00–08:00 quiet hours and defers when no preference row exists', () => {
+    const now = new Date('2026-04-09T06:30:00.000Z') // 11:30 PM America/Los_Angeles
+
+    const result = evaluateRuntimeDeliveryChannelPolicy({
+      key: NotificationEventKey.APPOINTMENT_REMINDER,
+      channel: NotificationChannel.SMS,
+      now,
+      recipientTimeZone: 'America/Los_Angeles',
+      // No preference row on file → the platform default window applies.
+      preference: null,
+    })
+
+    expect(result).toEqual({
+      action: 'DEFER',
+      reason: 'QUIET_HOURS',
+      allowQuietHoursBypass: false,
+      quietHoursStartMinutes: 22 * 60,
+      quietHoursEndMinutes: 8 * 60,
+      recipientLocalMinutes: 23 * 60 + 30,
+      nextAttemptAt: new Date('2026-04-09T15:00:00.000Z'),
+    })
+  })
+
+  it('applies the default quiet hours but sends outside the window when no preference row exists', () => {
+    const now = new Date('2026-04-09T18:00:00.000Z') // 11:00 AM America/Los_Angeles
+
+    const result = evaluateRuntimeDeliveryChannelPolicy({
+      key: NotificationEventKey.APPOINTMENT_REMINDER,
+      channel: NotificationChannel.SMS,
+      now,
+      recipientTimeZone: 'America/Los_Angeles',
+      preference: null,
+    })
+
+    expect(result).toEqual({
+      action: 'SEND',
+      reason: 'OUTSIDE_QUIET_HOURS',
+      allowQuietHoursBypass: false,
+      quietHoursStartMinutes: 22 * 60,
+      quietHoursEndMinutes: 8 * 60,
+      recipientLocalMinutes: 11 * 60,
+      nextAttemptAt: null,
+    })
+  })
+
+  it('lets a preference row with an empty window disable quiet hours, overriding the default', () => {
+    const now = new Date('2026-04-09T06:30:00.000Z') // 11:30 PM America/Los_Angeles
+
+    const result = evaluateRuntimeDeliveryChannelPolicy({
+      key: NotificationEventKey.APPOINTMENT_REMINDER,
+      channel: NotificationChannel.SMS,
+      now,
+      recipientTimeZone: 'America/Los_Angeles',
+      // A present row with start === end means the recipient disabled quiet hours.
+      preference: buildPreference({
+        quietHoursStartMinutes: 0,
+        quietHoursEndMinutes: 0,
+      }),
+    })
+
+    expect(result).toEqual({
+      action: 'SEND',
+      reason: 'NO_QUIET_HOURS_CONFIGURED',
+      allowQuietHoursBypass: false,
+      quietHoursStartMinutes: null,
+      quietHoursEndMinutes: null,
+      recipientLocalMinutes: null,
+      nextAttemptAt: null,
+    })
+  })
+
   it('returns SEND when recipient timezone is missing', () => {
     const now = new Date('2026-04-09T06:30:00.000Z')
 

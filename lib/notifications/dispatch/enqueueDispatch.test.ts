@@ -59,7 +59,7 @@ function makeDelivery(args: {
     provider: args.provider,
     status: args.status,
     destination: args.destination,
-    templateKey: args.templateKey ?? 'booking_confirmed',
+    templateKey: args.templateKey ?? 'consultation_proposal_sent',
     templateVersion: args.templateVersion ?? 1,
     attemptCount: args.attemptCount ?? 0,
     maxAttempts: args.maxAttempts ?? 3,
@@ -117,7 +117,7 @@ function makeDispatchRecord(
   return {
     id: overrides.id ?? 'dispatch_1',
     sourceKey: overrides.sourceKey ?? 'client-notification:notif_1',
-    eventKey: overrides.eventKey ?? NotificationEventKey.BOOKING_CONFIRMED,
+    eventKey: overrides.eventKey ?? NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
     recipientKind: overrides.recipientKind ?? NotificationRecipientKind.CLIENT,
     priority: overrides.priority ?? NotificationPriority.NORMAL,
     userId: 'userId' in overrides ? overrides.userId! : 'user_1',
@@ -160,7 +160,7 @@ function makeDispatchRecord(
           provider: NotificationProvider.INTERNAL_REALTIME,
           status: NotificationDeliveryStatus.PENDING,
           destination: 'client_1',
-          templateKey: 'booking_confirmed',
+          templateKey: 'consultation_proposal_sent',
           maxAttempts: 3,
           nextAttemptAt: scheduledFor,
         }),
@@ -170,7 +170,7 @@ function makeDispatchRecord(
           provider: NotificationProvider.TWILIO,
           status: NotificationDeliveryStatus.PENDING,
           destination: '+15551234567',
-          templateKey: 'booking_confirmed',
+          templateKey: 'consultation_proposal_sent',
           maxAttempts: 5,
           nextAttemptAt: scheduledFor,
         }),
@@ -180,7 +180,7 @@ function makeDispatchRecord(
           provider: NotificationProvider.POSTMARK,
           status: NotificationDeliveryStatus.PENDING,
           destination: 'client@example.com',
-          templateKey: 'booking_confirmed',
+          templateKey: 'consultation_proposal_sent',
           maxAttempts: 6,
           nextAttemptAt: scheduledFor,
         }),
@@ -219,7 +219,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     )
 
     const result = await enqueueDispatch({
-      key: NotificationEventKey.BOOKING_CONFIRMED,
+      key: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       sourceKey: 'client-notification:notif_1',
       recipient: {
         kind: NotificationRecipientKind.CLIENT,
@@ -228,6 +228,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
         inAppTargetId: 'client_1',
         phone: '+15551234567',
         phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
+        transactionalSmsConsentAt: new Date('2026-04-08T11:00:00.000Z'),
         email: 'client@example.com',
         emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
         timeZone: ' America/Los_Angeles ',
@@ -268,7 +269,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     expect(mockPrisma.notificationDispatch.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         sourceKey: 'client-notification:notif_1',
-        eventKey: NotificationEventKey.BOOKING_CONFIRMED,
+        eventKey: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
         recipientKind: NotificationRecipientKind.CLIENT,
         priority: NotificationPriority.NORMAL,
         recipientInAppTargetId: 'client_1',
@@ -304,7 +305,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.INTERNAL_REALTIME,
               status: NotificationDeliveryStatus.PENDING,
               destination: 'client_1',
-              templateKey: 'booking_confirmed',
+              templateKey: 'consultation_proposal_sent',
               templateVersion: 1,
               attemptCount: 0,
               maxAttempts: 3,
@@ -324,7 +325,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.TWILIO,
               status: NotificationDeliveryStatus.PENDING,
               destination: '+15551234567',
-              templateKey: 'booking_confirmed',
+              templateKey: 'consultation_proposal_sent',
               templateVersion: 1,
               attemptCount: 0,
               maxAttempts: 5,
@@ -335,7 +336,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.POSTMARK,
               status: NotificationDeliveryStatus.PENDING,
               destination: 'client@example.com',
-              templateKey: 'booking_confirmed',
+              templateKey: 'consultation_proposal_sent',
               templateVersion: 1,
               attemptCount: 0,
               maxAttempts: 6,
@@ -374,7 +375,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     )
 
     const result = await enqueueDispatch({
-      key: NotificationEventKey.BOOKING_CONFIRMED,
+      key: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       sourceKey: 'client-notification:notif_no_sms',
       recipient: {
         kind: NotificationRecipientKind.CLIENT,
@@ -383,6 +384,9 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
         inAppTargetId: 'client_1',
         phone: '+15551234567',
         phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
+        // Consent present so SMS suppression here is attributable to the Twilio
+        // launch gate, not the consent gate.
+        transactionalSmsConsentAt: new Date('2026-04-08T11:00:00.000Z'),
         email: 'client@example.com',
         emailVerifiedAt: new Date('2026-04-08T11:30:00.000Z'),
         timeZone: 'America/Los_Angeles',
@@ -433,7 +437,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     )
 
     const result = await enqueueDispatch({
-      key: NotificationEventKey.BOOKING_CONFIRMED,
+      key: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       sourceKey: 'client-notification:notif_invalid_tz',
       recipient: {
         kind: NotificationRecipientKind.CLIENT,
@@ -474,7 +478,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     mockPrisma.notificationDispatch.findUnique.mockResolvedValue(existing)
 
     const result = await enqueueDispatch({
-      key: NotificationEventKey.BOOKING_CONFIRMED,
+      key: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       sourceKey: 'client-notification:notif_existing',
       recipient: {
         kind: NotificationRecipientKind.CLIENT,
@@ -515,7 +519,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     )
 
     const result = await enqueueDispatch({
-      key: NotificationEventKey.BOOKING_CONFIRMED,
+      key: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       sourceKey: 'client-notification:notif_raced',
       recipient: {
         kind: NotificationRecipientKind.CLIENT,
@@ -557,7 +561,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.INTERNAL_REALTIME,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: 'client_1',
-            templateKey: 'booking_confirmed',
+            templateKey: 'consultation_proposal_sent',
             maxAttempts: 3,
             nextAttemptAt: scheduledFor,
             suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
@@ -568,7 +572,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.TWILIO,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: null,
-            templateKey: 'booking_confirmed',
+            templateKey: 'consultation_proposal_sent',
             maxAttempts: 5,
             nextAttemptAt: scheduledFor,
             suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
@@ -579,7 +583,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.POSTMARK,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: 'client@example.com',
-            templateKey: 'booking_confirmed',
+            templateKey: 'consultation_proposal_sent',
             maxAttempts: 6,
             nextAttemptAt: scheduledFor,
             suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
@@ -589,7 +593,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     )
 
     const result = await enqueueDispatch({
-      key: NotificationEventKey.BOOKING_CONFIRMED,
+      key: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       sourceKey: 'client-notification:notif_sms_missing',
       recipient: {
         kind: NotificationRecipientKind.CLIENT,
@@ -624,7 +628,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.INTERNAL_REALTIME,
               status: NotificationDeliveryStatus.SUPPRESSED,
               destination: 'client_1',
-              templateKey: 'booking_confirmed',
+              templateKey: 'consultation_proposal_sent',
               maxAttempts: 3,
               nextAttemptAt: scheduledFor,
               suppressedAt: expect.any(Date),
@@ -652,7 +656,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.TWILIO,
               status: NotificationDeliveryStatus.SUPPRESSED,
               destination: null,
-              templateKey: 'booking_confirmed',
+              templateKey: 'consultation_proposal_sent',
               maxAttempts: 5,
               nextAttemptAt: scheduledFor,
               suppressedAt: expect.any(Date),
@@ -680,7 +684,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.POSTMARK,
               status: NotificationDeliveryStatus.SUPPRESSED,
               destination: 'client@example.com',
-              templateKey: 'booking_confirmed',
+              templateKey: 'consultation_proposal_sent',
               maxAttempts: 6,
               nextAttemptAt: scheduledFor,
               suppressedAt: expect.any(Date),
@@ -725,7 +729,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.INTERNAL_REALTIME,
             status: NotificationDeliveryStatus.PENDING,
             destination: 'client_1',
-            templateKey: 'booking_confirmed',
+            templateKey: 'consultation_proposal_sent',
             maxAttempts: 3,
             nextAttemptAt: scheduledFor,
           }),
@@ -735,7 +739,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.TWILIO,
             status: NotificationDeliveryStatus.PENDING,
             destination: '+15551234567',
-            templateKey: 'booking_confirmed',
+            templateKey: 'consultation_proposal_sent',
             maxAttempts: 5,
             nextAttemptAt: scheduledFor,
           }),
@@ -745,7 +749,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
             provider: NotificationProvider.POSTMARK,
             status: NotificationDeliveryStatus.SUPPRESSED,
             destination: null,
-            templateKey: 'booking_confirmed',
+            templateKey: 'consultation_proposal_sent',
             maxAttempts: 6,
             nextAttemptAt: scheduledFor,
             suppressedAt: new Date('2026-04-08T12:00:00.000Z'),
@@ -755,7 +759,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
     )
 
     const result = await enqueueDispatch({
-      key: NotificationEventKey.BOOKING_CONFIRMED,
+      key: NotificationEventKey.CONSULTATION_PROPOSAL_SENT,
       sourceKey: 'client-notification:notif_email_unverified',
       recipient: {
         kind: NotificationRecipientKind.CLIENT,
@@ -764,6 +768,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
         inAppTargetId: 'client_1',
         phone: '+15551234567',
         phoneVerifiedAt: new Date('2026-04-08T11:00:00.000Z'),
+        transactionalSmsConsentAt: new Date('2026-04-08T11:00:00.000Z'),
         email: 'client@example.com',
         emailVerifiedAt: null,
         timeZone: 'America/Los_Angeles',
@@ -802,7 +807,7 @@ describe('lib/notifications/dispatch/enqueueDispatch', () => {
               provider: NotificationProvider.POSTMARK,
               status: NotificationDeliveryStatus.SUPPRESSED,
               destination: null,
-              templateKey: 'booking_confirmed',
+              templateKey: 'consultation_proposal_sent',
               suppressedAt: expect.any(Date),
               events: {
                 create: [
