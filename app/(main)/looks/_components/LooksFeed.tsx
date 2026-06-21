@@ -11,6 +11,7 @@ import LooksTopBar from './LooksTopBar'
 import LookSlide from './LookSlide'
 import CommentsDrawer from './CommentsDrawer'
 import RightActionRail from './RightActionRail'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { safeJson } from '@/lib/http'
 import { parseLooksFeedEnvelope } from '@/lib/looks/parsers'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
@@ -776,11 +777,23 @@ export default function LooksFeed() {
             {loading && !items.length ? (
               <div className="p-3 text-textSecondary">Loading Looks…</div>
             ) : !items.length ? (
-              <div className="p-3 text-textSecondary">
-                {activeCategorySlug === FOLLOWING_TAB.slug
-                  ? 'No Looks from pros you follow yet. Tap Follow on a Look to build your feed.'
-                  : 'No Looks yet. This is where the glow-ups will live.'}
-              </div>
+              activeCategorySlug === FOLLOWING_TAB.slug ? (
+                <EmptyState
+                  className="m-3"
+                  title="No Looks from pros you follow yet"
+                  description="Tap Follow on a Look to build your feed."
+                  action={{
+                    label: 'Explore all Looks',
+                    onClick: () => onSelectCategory(ALL_TAB.name),
+                  }}
+                />
+              ) : (
+                <EmptyState
+                  className="m-3"
+                  title="No Looks yet"
+                  description="This is where the glow-ups will live."
+                />
+              )
             ) : (
               items.map((item, idx) => {
                 const isActive = idx === activeIndex

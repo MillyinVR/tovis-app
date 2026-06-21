@@ -20,6 +20,7 @@ import {
 import { readErrorMessage, safeJsonRecord } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 
 export type OfferingLite = {
   id: string
@@ -1684,7 +1685,10 @@ export function LastMinuteOpeningsListPanel() {
         {loading ? (
           <div className="lm-opening-empty">Loading…</div>
         ) : items.length === 0 ? (
-          <div className="lm-opening-empty">No openings yet.</div>
+          <EmptyState
+            title="No openings yet."
+            description="Open a last-minute slot and clients on your waitlist get notified first."
+          />
         ) : (
           items.map((opening) => (
             <OpeningCard key={opening.id} opening={opening} />
