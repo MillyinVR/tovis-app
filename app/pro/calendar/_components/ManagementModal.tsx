@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 
 import { initialsForName } from '@/lib/initials'
+import { Avatar } from '@/app/_components/ui'
 
 import type { CalendarEvent, ManagementKey, ManagementLists } from '../_types'
 
@@ -470,14 +471,7 @@ function ActionLink(props: ActionLinkProps) {
 function AvatarInitials(props: { initials: string }) {
   const { initials } = props
 
-  return (
-    <div
-      className="brand-pro-calendar-management-avatar"
-      aria-hidden="true"
-    >
-      {initials}
-    </div>
-  )
+  return <Avatar initials={initials} fill="neutral" size="md" aria-hidden />
 }
 
 function EmptyManagementState(props: { tab: ManagementTab }) {

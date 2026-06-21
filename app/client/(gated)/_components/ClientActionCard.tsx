@@ -1,6 +1,8 @@
 // app/client/(gated)/_components/ClientActionCard.tsx
 import Link from 'next/link'
 
+import { Card, buttonClassName } from '@/app/_components/ui'
+
 import type {
   ClientHomeAction,
   ClientHomeBooking,
@@ -29,7 +31,7 @@ function PendingConsultationCard({ booking }: { booking: ClientHomeBooking }) {
 
   return (
     <section>
-      <div className="rounded-card border border-l-[3px] border-textPrimary/10 border-l-gold bg-bgSurface p-[18px] shadow-[0_16px_40px_rgb(var(--shadow-color)/0.14)]">
+      <Card elevation="md" className="border-l-[3px] border-l-gold">
         <div className="mb-3.5 flex items-center gap-2.5">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gold/15 text-gold">
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -71,7 +73,12 @@ function PendingConsultationCard({ booking }: { booking: ClientHomeBooking }) {
 
         <Link
           href={href}
-          className="flex h-[46px] items-center justify-center rounded-[14px] bg-cta font-display text-[14px] font-bold text-onCta shadow-[0_6px_20px_rgb(var(--micro-accent)/0.28)] transition hover:opacity-95"
+          className={buttonClassName({
+            variant: 'primary',
+            size: 'lg',
+            shape: 'soft',
+            fullWidth: true,
+          })}
         >
           Review &amp; approve →
         </Link>
@@ -83,7 +90,7 @@ function PendingConsultationCard({ booking }: { booking: ClientHomeBooking }) {
             Decline{wasTotal ? ` · keep my ${wasTotal} booking` : ''}
           </Link>
         </div>
-      </div>
+      </Card>
     </section>
   )
 }
@@ -103,7 +110,7 @@ function AftercarePaymentCard({ action }: { action: AftercarePaymentAction }) {
 
   return (
     <section>
-      <div className="rounded-card border border-l-[3px] border-textPrimary/10 border-l-terra bg-bgSurface p-[18px] shadow-[0_16px_40px_rgb(var(--shadow-color)/0.14)]">
+      <Card elevation="md" className="border-l-[3px] border-l-terra">
         <div className="mb-3.5 flex flex-wrap items-center gap-2.5">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-terra/15 text-terra">
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -149,11 +156,16 @@ function AftercarePaymentCard({ action }: { action: AftercarePaymentAction }) {
 
         <Link
           href={href}
-          className="flex h-[46px] items-center justify-center rounded-[14px] bg-cta font-display text-[14px] font-bold text-onCta shadow-[0_6px_20px_rgb(var(--accent-primary)/0.26)] transition hover:opacity-95"
+          className={buttonClassName({
+            variant: 'primary',
+            size: 'lg',
+            shape: 'soft',
+            fullWidth: true,
+          })}
         >
           View summary{due ? ` & pay ${due}` : ''} →
         </Link>
-      </div>
+      </Card>
     </section>
   )
 }

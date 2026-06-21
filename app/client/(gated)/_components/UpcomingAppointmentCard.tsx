@@ -2,15 +2,13 @@
 import Link from 'next/link'
 
 import { asTrimmedString } from '@/lib/guards'
-import { initialsForName } from '@/lib/initials'
-import RemoteImage from '@/app/_components/media/RemoteImage'
+import { Avatar, Card, buttonClassName } from '@/app/_components/ui'
 
 import type { ClientHomeBooking } from '../_data/getClientHomeData'
 import { bookingTitle } from './bookingDisplay'
 import {
   formatDateTime,
   formatDuration,
-  gradientAvatar,
   money,
   professionalName,
 } from './homeVisuals'
@@ -36,7 +34,7 @@ function bookingTimeZone(booking: ClientHomeBooking): string | null {
 
 function EmptyUpcomingCard() {
   return (
-    <div className="rounded-card border border-textPrimary/10 bg-bgSurface p-[18px]">
+    <Card>
       <div className="mb-3.5 flex items-center justify-between">
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-textMuted">
           Next booking
@@ -50,11 +48,16 @@ function EmptyUpcomingCard() {
       </p>
       <Link
         href="/discover"
-        className="mt-3.5 inline-flex rounded-[12px] border border-textPrimary/16 px-4 py-2 text-[11.5px] font-bold text-textSecondary transition hover:border-terra/30 hover:text-terra"
+        className={buttonClassName({
+          variant: 'ghost',
+          size: 'sm',
+          shape: 'soft',
+          className: 'mt-3.5 hover:border-terra/30 hover:text-terra',
+        })}
       >
         Find a pro
       </Link>
-    </div>
+    </Card>
   )
 }
 
@@ -77,7 +80,7 @@ export default function UpcomingAppointmentCard({
   const moreCount = Math.max(0, upcomingCount - 1)
 
   return (
-    <div className="rounded-card border border-textPrimary/10 bg-bgSurface p-[18px]">
+    <Card>
       <div className="mb-[15px] flex items-center justify-between">
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-textMuted">
           Next booking
@@ -91,22 +94,11 @@ export default function UpcomingAppointmentCard({
       </div>
 
       <div className="mb-3.5 flex items-center gap-3">
-        <div
-          className="grid h-[46px] w-[46px] shrink-0 place-items-center overflow-hidden rounded-[14px] text-xs font-bold text-onCta"
-          style={{ background: gradientAvatar(0) }}
-        >
-          {booking.professional.avatarUrl ? (
-            <RemoteImage
-              src={booking.professional.avatarUrl}
-              alt={proName}
-              className="h-full w-full object-cover"
-              width={46}
-              height={46}
-            />
-          ) : (
-            initialsForName(proName)
-          )}
-        </div>
+        <Avatar
+          name={proName}
+          src={booking.professional.avatarUrl}
+          size="lg"
+        />
         <div className="min-w-0">
           <Link
             href={`/professionals/${encodeURIComponent(booking.professional.id)}`}
@@ -148,14 +140,24 @@ export default function UpcomingAppointmentCard({
       <div className="mt-4 flex gap-2.5">
         <Link
           href={`/client/bookings/${encodeURIComponent(booking.id)}`}
-          className="flex h-11 flex-1 items-center justify-center rounded-[14px] bg-cta font-display text-[13.5px] font-bold text-onCta shadow-[0_6px_20px_rgb(var(--accent-primary)/0.24)] transition hover:opacity-95"
+          className={buttonClassName({
+            variant: 'primary',
+            size: 'md',
+            shape: 'soft',
+            className: 'flex-1',
+          })}
         >
           View booking
         </Link>
         <Link
           href={`/client/bookings/${encodeURIComponent(booking.id)}?action=message`}
           aria-label="Message pro"
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] border border-textPrimary/16 text-textSecondary transition hover:border-textPrimary/25"
+          className={buttonClassName({
+            variant: 'ghost',
+            size: 'md',
+            shape: 'soft',
+            className: 'w-11 shrink-0 px-0',
+          })}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 11.5a8.38 8.38 0 0 1-9 8.5 8.5 8.5 0 0 1-4-1L3 20l1-3.5A8.5 8.5 0 1 1 21 11.5z" />
@@ -171,6 +173,6 @@ export default function UpcomingAppointmentCard({
           {moreCount} more upcoming →
         </Link>
       ) : null}
-    </div>
+    </Card>
   )
 }

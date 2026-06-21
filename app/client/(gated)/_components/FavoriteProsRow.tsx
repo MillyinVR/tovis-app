@@ -1,12 +1,11 @@
 // app/client/(gated)/_components/FavoriteProsRow.tsx
 import Link from 'next/link'
 
-import { initialsForName } from '@/lib/initials'
 import { formatProfessionLabel } from '@/lib/profiles/publicProfileFormatting'
-import RemoteImage from '@/app/_components/media/RemoteImage'
+import { Avatar, Card, buttonClassName } from '@/app/_components/ui'
 
 import type { ClientHomeFavoritePro } from '../_data/getClientHomeData'
-import { gradientAvatar, professionalName } from './homeVisuals'
+import { professionalName } from './homeVisuals'
 
 type FavoriteProsRowProps = {
   favoritePros: ClientHomeFavoritePro[]
@@ -15,7 +14,7 @@ type FavoriteProsRowProps = {
 
 function EmptyProsCard() {
   return (
-    <div className="rounded-card border border-textPrimary/10 bg-bgSurface p-[18px]">
+    <Card>
       <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-textMuted">
         Favorite pros
       </div>
@@ -27,11 +26,16 @@ function EmptyProsCard() {
       </p>
       <Link
         href="/discover"
-        className="mt-3.5 inline-flex rounded-[12px] border border-textPrimary/16 px-4 py-2 text-[11.5px] font-bold text-textSecondary transition hover:border-terra/30 hover:text-terra"
+        className={buttonClassName({
+          variant: 'ghost',
+          size: 'sm',
+          shape: 'soft',
+          className: 'mt-3.5 hover:border-terra/30 hover:text-terra',
+        })}
       >
         Find pros
       </Link>
-    </div>
+    </Card>
   )
 }
 
@@ -62,22 +66,13 @@ function FavoriteProCard({
         </button>
       </form>
 
-      <div
-        className="mb-2.5 grid h-10 w-10 place-items-center overflow-hidden rounded-full text-[11px] font-bold text-onCta"
-        style={{ background: gradientAvatar(index) }}
-      >
-        {professional.avatarUrl ? (
-          <RemoteImage
-            src={professional.avatarUrl}
-            alt={name}
-            className="h-full w-full object-cover"
-            width={40}
-            height={40}
-          />
-        ) : (
-          initialsForName(name)
-        )}
-      </div>
+      <Avatar
+        name={name}
+        src={professional.avatarUrl}
+        index={index}
+        size="md"
+        className="mb-2.5"
+      />
 
       <div className="truncate font-display text-[13.5px] font-semibold tracking-[-0.01em] text-textPrimary">
         {name}
@@ -103,7 +98,7 @@ export default function FavoriteProsRow({
   const pros = favoritePros.slice(0, 6)
 
   return (
-    <section className="rounded-card border border-textPrimary/10 bg-bgSurface p-[18px]">
+    <Card as="section">
       <div className="mb-3.5 flex items-end justify-between">
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-textMuted">
           Favorite pros · {favoritePros.length}
@@ -125,6 +120,6 @@ export default function FavoriteProsRow({
           />
         ))}
       </div>
-    </section>
+    </Card>
   )
 }
