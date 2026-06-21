@@ -742,7 +742,7 @@ export default function ServiceHeroGrid(props: {
 
                 <button
                   type="button"
-                  className={cn(btnBase, btnAccent)}
+                  className={cn(btnBase, btnAccent, 'tap-target')}
                   onClick={() => {
                     haptic(8)
                     setOpenId(service.id)

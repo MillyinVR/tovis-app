@@ -18,7 +18,7 @@ export function CopyButton({ value }: { value: string }) {
           // ignore
         }
       }}
-      className="inline-flex h-8 items-center justify-center rounded-lg border border-white/15 bg-bgSecondary px-2 text-xs font-semibold text-textPrimary hover:bg-white/10 active:bg-white/15"
+      className="tap-target inline-flex h-8 items-center justify-center rounded-lg border border-white/15 bg-bgSecondary px-2 text-xs font-semibold text-textPrimary hover:bg-white/10 active:bg-white/15"
       aria-label="Copy to clipboard"
       title={copied ? 'Copied' : 'Copy'}
     >

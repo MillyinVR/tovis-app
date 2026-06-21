@@ -38,7 +38,7 @@ export default function ProProfileHeader({
 
         <Link
           href={notificationsHref}
-          className="brand-icon-button brand-focus"
+          className="brand-icon-button brand-focus tap-target"
           aria-label={notificationLabel}
           title={notificationLabel}
         >

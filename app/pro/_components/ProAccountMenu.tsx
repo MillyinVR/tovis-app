@@ -192,7 +192,7 @@ export default function ProAccountMenu(props: Props) {
         type="button"
         onClick={() => setOpen((value) => !value)}
         className={[
-          'group inline-flex h-10 w-10 items-center justify-center',
+          'group tap-target inline-flex h-10 w-10 items-center justify-center',
           'rounded-full border border-white/10 bg-bgSecondary',
           'text-textPrimary',
           'hover:border-white/20',

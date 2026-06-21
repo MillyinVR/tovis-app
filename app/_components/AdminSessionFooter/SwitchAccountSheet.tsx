@@ -162,6 +162,7 @@ export default function SwitchAccountSheet({
             type="button"
             onClick={onClose}
             aria-label="Close"
+            className="tap-target"
             style={{
               width: 24,
               height: 24,

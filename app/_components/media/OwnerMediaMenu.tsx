@@ -235,6 +235,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
         type="button"
         onClick={() => setOpenMenu((v) => !v)}
         className={cn(
+          'tap-target',
           'inline-flex h-10 w-10 items-center justify-center rounded-full',
           'border border-white/12 bg-bgPrimary/20 backdrop-blur-xl',
           'text-white/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)]',
@@ -304,6 +305,7 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                 type="button"
                 onClick={closeEdit}
                 className={cn(
+                  'tap-target',
                   'grid h-9 w-9 place-items-center rounded-full border text-[14px] font-black',
                   busy
                     ? 'cursor-not-allowed border-white/10 text-white/50 opacity-70'

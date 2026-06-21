@@ -423,7 +423,7 @@ export default function SaveToBoardModal({
                 type="button"
                 aria-label="Close"
                 onClick={onClose}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-bgPrimary text-textSecondary transition hover:border-white/20 hover:text-textPrimary"
+                className="tap-target inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-bgPrimary text-textSecondary transition hover:border-white/20 hover:text-textPrimary"
               >
                 ×
               </button>

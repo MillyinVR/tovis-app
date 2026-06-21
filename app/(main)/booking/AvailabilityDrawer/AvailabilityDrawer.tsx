@@ -1698,7 +1698,7 @@ export default function AvailabilityDrawer(props: {
                 onClose()
               }}
               aria-label="Close"
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 text-[14px] text-textSecondary transition hover:bg-white/10"
+              className="tap-target flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-bgPrimary/35 text-[14px] text-textSecondary transition hover:bg-white/10"
             >
               ✕
             </button>
