@@ -599,8 +599,19 @@ function SummaryRow(props: { label: string; value: ReactNode }) {
   )
 }
 
+// Descriptive alt text for before/after session photos. Falls back to a plain
+// label when the booking has no resolved service name.
+function sessionPhotoAlt(
+  label: 'Before' | 'After',
+  serviceName: string | null,
+): string {
+  return serviceName ? `${label} photo — ${serviceName}` : `${label} photo`
+}
+
 function MediaStrip(props: {
   title: string
+  label: 'Before' | 'After'
+  serviceName: string | null
   items: LoadedRenderableMedia[]
 }) {
   if (props.items.length === 0) return null
@@ -634,7 +645,7 @@ function MediaStrip(props: {
               >
                 <RemoteImage
                   src={previewSrc}
-                  alt="Booking media"
+                  alt={sessionPhotoAlt(props.label, props.serviceName)}
                   width={256}
                   height={256}
                   className="h-full w-full object-cover"
@@ -788,6 +799,7 @@ function ClientAftercareSectionTitle(props: {
 
 function ClientAftercareMediaTile(props: {
   label: 'Before' | 'After'
+  serviceName: string | null
   media: LoadedRenderableMedia | null
 }) {
   const previewSrc =
@@ -802,7 +814,7 @@ function ClientAftercareMediaTile(props: {
       {previewSrc ? (
         <RemoteImage
           src={previewSrc}
-          alt={`${props.label} photo`}
+          alt={sessionPhotoAlt(props.label, props.serviceName)}
           className="brand-pro-session-photo-img"
           intrinsic
         />
@@ -836,6 +848,7 @@ function AftercarePrivacyNote() {
 function ClientAftercareBeforeAfter(props: {
   beforeMedia: LoadedRenderableMedia[]
   afterMedia: LoadedRenderableMedia[]
+  serviceName: string | null
 }) {
   const primaryBefore = props.beforeMedia[0] ?? null
   const primaryAfter = props.afterMedia[0] ?? null
@@ -857,16 +870,34 @@ function ClientAftercareBeforeAfter(props: {
       <AftercarePrivacyNote />
 
       <div className="brand-pro-session-photo-grid" data-columns="2">
-        <ClientAftercareMediaTile label="Before" media={primaryBefore} />
-        <ClientAftercareMediaTile label="After" media={primaryAfter} />
+        <ClientAftercareMediaTile
+          label="Before"
+          serviceName={props.serviceName}
+          media={primaryBefore}
+        />
+        <ClientAftercareMediaTile
+          label="After"
+          serviceName={props.serviceName}
+          media={primaryAfter}
+        />
       </div>
 
       {props.beforeMedia.length > 1 ? (
-        <MediaStrip title="More before photos" items={props.beforeMedia.slice(1)} />
+        <MediaStrip
+          title="More before photos"
+          label="Before"
+          serviceName={props.serviceName}
+          items={props.beforeMedia.slice(1)}
+        />
       ) : null}
 
       {props.afterMedia.length > 1 ? (
-        <MediaStrip title="More after photos" items={props.afterMedia.slice(1)} />
+        <MediaStrip
+          title="More after photos"
+          label="After"
+          serviceName={props.serviceName}
+          items={props.afterMedia.slice(1)}
+        />
       ) : null}
     </div>
   )
@@ -917,6 +948,10 @@ export default async function ClientBookingPage(props: {
   const afterMedia = validMedia.filter(
     (mediaItem) => upper(mediaItem.phase) === 'AFTER',
   )
+
+  // Primary service name for descriptive session-photo alt text; null when the
+  // booking has no resolved service so callers fall back to a plain label.
+  const photoServiceName = raw.service?.name?.trim() || null
 
   const hasPendingConsultationApproval =
     upper(raw.status) !== 'CANCELLED' &&
@@ -1489,6 +1524,7 @@ export default async function ClientBookingPage(props: {
                           <ClientAftercareBeforeAfter
                             beforeMedia={beforeMedia}
                             afterMedia={afterMedia}
+                            serviceName={photoServiceName}
                           />
                         </ClientAftercareCard>
 

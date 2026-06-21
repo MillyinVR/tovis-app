@@ -1048,8 +1048,9 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
                         disabled={loading || p.status === 'UPLOADING'}
                         className="rounded-full border border-white/10 bg-bgPrimary px-2 py-1 text-[11px] font-black text-textPrimary transition hover:bg-surfaceGlass disabled:cursor-not-allowed disabled:opacity-70"
                         title="Remove"
+                        aria-label="Remove photo"
                       >
-                        ✕
+                        <span aria-hidden="true">✕</span>
                       </button>
                     </div>
 

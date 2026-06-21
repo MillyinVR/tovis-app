@@ -407,7 +407,9 @@ export default function OwnerMediaMenu({ mediaId, initial, serviceOptions }: Pro
                             title="Remove"
                           >
                             <span className="max-w-[220px] truncate">{name}</span>
-                            <span className="text-white/70">✕</span>
+                            <span className="text-white/70" aria-hidden="true">
+                              ✕
+                            </span>
                           </button>
                         )
                       })}
