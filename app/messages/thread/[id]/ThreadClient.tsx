@@ -167,7 +167,7 @@ function AttachmentPreview(props: { attachment: Attachment }) {
     return (
       <RemoteImage
         src={attachment.url ?? ''}
-        alt=""
+        alt="Image attachment"
         className="mt-2 max-h-56 rounded-[18px] border border-textPrimary/10 object-cover"
         intrinsic
       />

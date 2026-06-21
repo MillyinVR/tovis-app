@@ -79,12 +79,18 @@ export default async function PublicClientProfilePage({
         : 'guest'
 
   return (
-    <main className="min-h-dvh bg-bgPrimary text-textPrimary">
+    <main
+      className="min-h-dvh bg-bgPrimary text-textPrimary"
+      aria-labelledby="public-profile-heading"
+    >
       <div className="mx-auto w-full max-w-[900px] px-5 pb-16 pt-6 md:px-8">
         <section className="mt-2 flex items-start gap-4">
           <Avatar name={data.handle} url={data.avatarUrl} />
           <div className="min-w-0 flex-1 pt-1">
-            <h1 className="truncate font-display text-[28px] font-semibold italic leading-none">
+            <h1
+              id="public-profile-heading"
+              className="truncate font-display text-[28px] font-semibold italic leading-none"
+            >
               {data.displayName}
             </h1>
             <ProfileStats
@@ -103,7 +109,7 @@ export default async function PublicClientProfilePage({
           </p>
         ) : null}
 
-        <section className="mt-8">
+        <section className="mt-8" aria-label="Looks">
           {data.looks.length > 0 ? (
             <div className="grid grid-cols-1 gap-[18px] sm:grid-cols-2 lg:grid-cols-3">
               {data.looks.map((look) => (
@@ -128,8 +134,11 @@ export default async function PublicClientProfilePage({
                     <span className="truncate text-[14px] font-black text-textPrimary">
                       {look.name}
                     </span>
-                    <span className="shrink-0 text-[11px] font-bold text-textSecondary">
-                      ♥ {look.saveCount}
+                    <span
+                      className="shrink-0 text-[11px] font-bold text-textSecondary"
+                      aria-label={`${look.saveCount} saves`}
+                    >
+                      <span aria-hidden="true">♥ {look.saveCount}</span>
                     </span>
                   </div>
                 </Link>
