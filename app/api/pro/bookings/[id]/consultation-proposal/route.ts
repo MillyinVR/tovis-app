@@ -623,12 +623,11 @@ export async function POST(req: Request, ctx: RouteContext) {
         },
       })
 
-      if (!booking) {
+      // Unify foreign + missing into a single 404 so the API never reveals
+      // that another pro's booking exists (matches requireProBooking and the
+      // booking write boundary's no-leak contract).
+      if (!booking || booking.professionalId !== professionalId) {
         return { ok: false, status: 404, error: 'Booking not found.' }
-      }
-
-      if (booking.professionalId !== professionalId) {
-        return { ok: false, status: 403, error: 'Forbidden.' }
       }
 
       if (booking.status === BookingStatus.CANCELLED) {
