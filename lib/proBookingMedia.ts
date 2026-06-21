@@ -82,7 +82,10 @@ export async function listProBookingMedia(
   }
 
   if (booking.professionalId !== professionalId) {
-    return { ok: false, status: 403, error: 'Forbidden.' }
+    // Uniform 404 on a foreign booking — indistinguishable from a missing one
+    // so the API never reveals it exists (matches requireProBooking / the
+    // booking write boundary's no-leak contract).
+    return { ok: false, status: 404, error: 'Booking not found.' }
   }
 
   const where: { bookingId: string; phase?: MediaPhase } = { bookingId }

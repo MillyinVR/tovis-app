@@ -228,10 +228,12 @@ describe('lib/booking/writeBoundary createClientRebookedBookingFromAftercare lif
 
     mocks.txAftercareSummaryFindUnique.mockResolvedValueOnce(ref)
 
+    // Foreign booking is indistinguishable from a missing one (uniform 404 /
+    // BOOKING_NOT_FOUND) so the API never leaks that it exists.
     await expect(
       createClientRebookedBookingFromAftercare(makeArgs()),
     ).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+      code: 'BOOKING_NOT_FOUND',
     })
 
     expect(mocks.txBookingFindFirst).not.toHaveBeenCalled()
@@ -246,10 +248,11 @@ describe('lib/booking/writeBoundary createClientRebookedBookingFromAftercare lif
       }),
     )
 
+    // Foreign source booking → uniform BOOKING_NOT_FOUND (no existence leak).
     await expect(
       createClientRebookedBookingFromAftercare(makeArgs()),
     ).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+      code: 'BOOKING_NOT_FOUND',
     })
   })
 

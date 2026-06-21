@@ -244,7 +244,7 @@ describe('createClientLookFromVisit', () => {
     expect(beforeCall).toBeTruthy()
   })
 
-  it('rejects a visit that is not the caller’s', async () => {
+  it('rejects a visit that is not the caller’s as not-found (no existence leak)', async () => {
     mocks.bookingFindUnique.mockResolvedValue(
       completedBooking({ clientId: 'someone_else' }),
     )
@@ -259,7 +259,7 @@ describe('createClientLookFromVisit', () => {
         after: { uploadSessionId: 'sess_after' },
         now: NOW,
       }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    ).rejects.toMatchObject({ code: 'BOOKING_NOT_FOUND' })
   })
 
   it('rejects a visit that is not completed', async () => {

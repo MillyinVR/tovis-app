@@ -157,7 +157,7 @@ describe('app/api/client/bookings/[id]/aftercare-rebook/route.ts', () => {
     expect(result).toEqual({ ok: false, status: 404, error: 'Booking not found.' })
   })
 
-  it('returns 403 when booking belongs to another client', async () => {
+  it('returns 404 when booking belongs to another client (no existence leak)', async () => {
     mocks.prismaBookingFindUnique.mockResolvedValueOnce({
       id: 'booking_1',
       clientId: 'other_client',
@@ -165,8 +165,8 @@ describe('app/api/client/bookings/[id]/aftercare-rebook/route.ts', () => {
 
     const result = await POST(makeRequest({ body: { action: 'CONFIRM' } }), makeCtx())
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(403, 'Forbidden.')
-    expect(result).toEqual({ ok: false, status: 403, error: 'Forbidden.' })
+    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Booking not found.')
+    expect(result).toEqual({ ok: false, status: 404, error: 'Booking not found.' })
   })
 
   it('returns 400 for an invalid action', async () => {

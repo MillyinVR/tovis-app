@@ -203,7 +203,7 @@ describe('app/api/client/bookings/[id]/consultation/route.ts', () => {
       expect(mocks.prismaConsultationApprovalFindUnique).not.toHaveBeenCalled()
     })
 
-    it('returns 403 when booking belongs to another client', async () => {
+    it('returns 404 when booking belongs to another client (no existence leak)', async () => {
       mocks.prismaBookingFindUnique.mockResolvedValueOnce({
         id: 'booking_1',
         clientId: 'other_client',
@@ -211,11 +211,11 @@ describe('app/api/client/bookings/[id]/consultation/route.ts', () => {
 
       const result = await GET(new Request('http://localhost'), makeCtx())
 
-      expect(mocks.jsonFail).toHaveBeenCalledWith(403, 'Forbidden.')
+      expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Booking not found.')
       expect(result).toEqual({
         ok: false,
-        status: 403,
-        error: 'Forbidden.',
+        status: 404,
+        error: 'Booking not found.',
       })
 
       expect(mocks.prismaConsultationApprovalFindUnique).not.toHaveBeenCalled()

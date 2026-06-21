@@ -4299,11 +4299,11 @@ function assertActorOwnsBooking(args: {
   const { booking, actor } = args
 
   if (actor.kind === 'client' && booking.clientId !== actor.clientId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (actor.kind === 'pro' && booking.professionalId !== actor.professionalId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 }
 
@@ -5270,7 +5270,7 @@ async function performLockedStartBookingSession(args: {
   }
 
   if (booking.professionalId !== args.professionalId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {
@@ -5514,10 +5514,9 @@ async function performLockedFinishBookingSession(args: {
   }
 
   if (booking.professionalId !== args.professionalId) {
-    throw bookingError('FORBIDDEN', {
-      message: 'You can only finish your own bookings.',
-      userMessage: 'You can only finish your own bookings.',
-    })
+    // Uniform 404 on a foreign booking — do not reveal it exists, and do not
+    // leak "your own bookings" wording that would confirm ownership mismatch.
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {
@@ -5696,7 +5695,7 @@ async function performLockedConfirmBookingFinalReview(args: {
   }
 
   if (booking.professionalId !== args.professionalId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {
@@ -6104,10 +6103,12 @@ async function performLockedTransitionSessionStep(args: {
   }
 
   if (booking.professionalId !== args.professionalId) {
+    // Unify with the missing-booking case (404) so a foreign booking is
+    // indistinguishable from one that does not exist.
     return {
       ok: false,
-      status: 403,
-      error: 'Forbidden.',
+      status: 404,
+      error: 'Booking not found.',
       meta: buildMeta(false),
     }
   }
@@ -6428,7 +6429,7 @@ async function performLockedUploadProBookingMedia(args: {
   }
 
   if (booking.professionalId !== args.professionalId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {
@@ -6938,7 +6939,7 @@ async function performLockedRescheduleBookingFromHold(args: {
   }
 
   if (booking.clientId !== args.clientId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (
@@ -7292,11 +7293,11 @@ async function performLockedApproveConsultationMaterialization(
   }
 
   if (booking.clientId !== args.clientId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.professionalId !== args.professionalId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   const approval = booking.consultationApproval
@@ -7614,11 +7615,11 @@ async function performLockedRejectConsultationDecision(
   }
 
   if (booking.clientId !== args.clientId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.professionalId !== args.professionalId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   const approval = booking.consultationApproval
@@ -10345,7 +10346,7 @@ if (args.rebookSlot) {
   }
 
   if (booking.professionalId !== args.professionalId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {
@@ -10942,7 +10943,7 @@ async function performLockedUpdateBookingCheckout(args: {
   }
 
   if (booking.professionalId !== args.professionalId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {
@@ -11166,7 +11167,7 @@ async function performLockedUpdateProCheckoutCloseout(args: {
   }
 
   if (booking.professionalId !== args.professionalId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {
@@ -11339,7 +11340,7 @@ function assertCanCreateRebookFromSourceBooking(args: {
   aftercareId?: string | null
 }): void {
   if (args.clientId && args.source.clientId !== args.clientId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (args.source.status !== BookingStatus.COMPLETED) {
@@ -12199,7 +12200,7 @@ export async function recordInPersonConsultationDecision(
       }
 
       if (booking.professionalId !== args.professionalId) {
-        throw bookingError('FORBIDDEN')
+        throw bookingError('BOOKING_NOT_FOUND')
       }
 
       if (!booking.clientId) {
@@ -12801,7 +12802,7 @@ export async function createClientRebookedBookingFromAftercare(
     }
 
     if (aftercareRef.booking.clientId !== args.clientId) {
-      throw bookingError('FORBIDDEN')
+      throw bookingError('BOOKING_NOT_FOUND')
     }
 
     await lockProfessionalSchedule(tx, aftercareRef.booking.professionalId)
@@ -12824,7 +12825,7 @@ export async function createClientRebookedBookingFromAftercare(
     }
 
     if (lockedAftercareRef.booking.clientId !== args.clientId) {
-      throw bookingError('FORBIDDEN')
+      throw bookingError('BOOKING_NOT_FOUND')
     }
 
     return performLockedCreateRebookedBooking({
@@ -12897,7 +12898,7 @@ export async function confirmClientAftercareNextAppointment(
         throw bookingError('BOOKING_NOT_FOUND')
       }
       if (record.booking.clientId !== args.clientId) {
-        throw bookingError('FORBIDDEN')
+        throw bookingError('BOOKING_NOT_FOUND')
       }
       if (
         record.rebookMode !== AftercareRebookMode.BOOKED_NEXT_APPOINTMENT ||
@@ -12966,7 +12967,7 @@ export async function declineClientAftercareNextAppointment(
       throw bookingError('BOOKING_NOT_FOUND')
     }
     if (record.booking.clientId !== args.clientId) {
-      throw bookingError('FORBIDDEN')
+      throw bookingError('BOOKING_NOT_FOUND')
     }
     if (record.rebookMode !== AftercareRebookMode.BOOKED_NEXT_APPOINTMENT) {
       throw bookingError('AFTERCARE_NOT_COMPLETED', {
@@ -13063,7 +13064,7 @@ async function performLockedPrepareClientStripeCheckoutSession(args: {
   }
 
   if (booking.clientId !== args.clientId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.status === BookingStatus.CANCELLED) {
@@ -13252,7 +13253,7 @@ async function performLockedRecordStripeCheckoutSessionAttached(args: {
   }
 
   if (booking.clientId !== args.clientId) {
-    throw bookingError('FORBIDDEN')
+    throw bookingError('BOOKING_NOT_FOUND')
   }
 
   if (booking.checkoutStatus === BookingCheckoutStatus.PAID) {
@@ -13500,7 +13501,7 @@ export async function prepareClientDepositCheckout(args: {
       })
 
       if (!booking) throw bookingError('BOOKING_NOT_FOUND')
-      if (booking.clientId !== args.clientId) throw bookingError('FORBIDDEN')
+      if (booking.clientId !== args.clientId) throw bookingError('BOOKING_NOT_FOUND')
       if (booking.status === BookingStatus.CANCELLED) {
         throw bookingError('BOOKING_CANNOT_EDIT_CANCELLED')
       }

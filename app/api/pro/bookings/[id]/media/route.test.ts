@@ -418,7 +418,7 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
     expect(mocks.enforceRateLimit).not.toHaveBeenCalled()
   })
 
-  it('GET returns forbidden when booking belongs to another professional', async () => {
+  it('GET returns 404 when booking belongs to another professional (no existence leak)', async () => {
     mocks.bookingFindUnique.mockResolvedValueOnce({
       id: 'booking_1',
       professionalId: 'other_pro',
@@ -426,10 +426,10 @@ describe('app/api/pro/bookings/[id]/media/route.ts', () => {
 
     const result = await GET(makeGetRequest(), makeCtx())
 
-    expect(result.status).toBe(403)
+    expect(result.status).toBe(404)
     await expect(result.json()).resolves.toEqual({
       ok: false,
-      error: 'Forbidden.',
+      error: 'Booking not found.',
     })
 
     expect(mocks.mediaAssetFindMany).not.toHaveBeenCalled()
