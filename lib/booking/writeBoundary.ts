@@ -139,6 +139,11 @@ import {
 } from '@/lib/notifications/appointmentReminders'
 import { createProNotification } from '@/lib/notifications/proNotifications'
 import {
+  emitPaymentActionRequiredNotifications,
+  emitPaymentCollectedNotifications,
+  emitPaymentRefundedNotifications,
+} from '@/lib/notifications/paymentNotifications'
+import {
   consumeConsultationActionToken,
   revokeConsultationActionTokensForBooking,
 } from '@/lib/consultation/clientActionTokens'
@@ -2153,6 +2158,13 @@ async function createCheckoutAuditLogs(args: {
         checkoutStatus: args.newState.checkoutStatus,
         totalAmount: args.newState.totalAmount,
       },
+    })
+
+    // Single emit point for the payment receipt — every checkout/webhook path
+    // that collects payment converges on this paymentCollectedAt transition.
+    await emitPaymentCollectedNotifications({
+      tx: args.tx,
+      bookingId: args.bookingId,
     })
   }
 }
@@ -13640,7 +13652,7 @@ export async function reconcileDepositChargeRefundInTransaction(
 ): Promise<{ handled: boolean }> {
   const booking = await tx.booking.findFirst({
     where: { depositStripePaymentIntentId: args.paymentIntentId },
-    select: { id: true, discoveryFeeRefundedAt: true },
+    select: { id: true, discoveryFeeRefundedAt: true, depositStatus: true },
   })
 
   if (!booking) return { handled: false }
@@ -13658,6 +13670,18 @@ export async function reconcileDepositChargeRefundInTransaction(
         : {}),
     },
   })
+
+  // Emit the refund receipt only on the transition into REFUNDED. The deposit
+  // rides a single PaymentIntent and is refunded once, so the PI id is a stable
+  // dedupe discriminator (no per-refund id available on this path).
+  if (booking.depositStatus !== BookingDepositStatus.REFUNDED) {
+    await emitPaymentRefundedNotifications({
+      tx,
+      bookingId: booking.id,
+      refundDiscriminator: `deposit:${args.paymentIntentId}`,
+      amountRefundedCents: args.amountRefundedCents,
+    })
+  }
 
   return { handled: true }
 }
@@ -13893,6 +13917,14 @@ async function performLockedApplyStripePaymentFailed(args: {
       id: true,
       status: true,
     } satisfies Prisma.BookingSelect,
+  })
+
+  // Only reached on a fresh failure transition (the alreadyApplied guard above
+  // short-circuits replays), so this emits once per distinct failed attempt.
+  await emitPaymentActionRequiredNotifications({
+    tx: args.tx,
+    bookingId: updated.id,
+    stripePaymentIntentId: args.stripePaymentIntentId,
   })
 
   return {

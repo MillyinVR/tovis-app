@@ -26,6 +26,12 @@ vi.mock('@sentry/nextjs', () => ({
   captureException: mocks.captureException,
 }))
 
+const mockEmitPaymentRefunded = vi.hoisted(() => vi.fn())
+
+vi.mock('@/lib/notifications/paymentNotifications', () => ({
+  emitPaymentRefundedNotifications: mockEmitPaymentRefunded,
+}))
+
 function matchesStatus(rowStatus: unknown, filter: unknown): boolean {
   if (filter && typeof filter === 'object' && 'in' in filter) {
     return (filter.in as unknown[]).includes(rowStatus)
@@ -144,6 +150,8 @@ beforeEach(() => {
   mocks.bookingUpdates = []
   mocks.idCounter = 0
   txRef.current = makeTx()
+  mockEmitPaymentRefunded.mockReset()
+  mockEmitPaymentRefunded.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -469,6 +477,39 @@ describe('reconcileChargeRefundInTransaction', () => {
     })
 
     expect(mocks.refundRows[0]?.status).toBe(BookingRefundStatus.SUCCEEDED)
+  })
+
+  it('emits a PAYMENT_REFUNDED receipt per succeeded refund, keyed by refund id', async () => {
+    setBooking({ stripeAmountTotal: 10000 })
+
+    await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_123',
+      amountRefundedCents: 4000,
+      chargeAmountCents: 10000,
+      refunds: [{ id: 're_1', status: 'succeeded', amountCents: 4000 }],
+    })
+
+    expect(mockEmitPaymentRefunded).toHaveBeenCalledTimes(1)
+    expect(mockEmitPaymentRefunded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: 'booking_1',
+        refundDiscriminator: 're_1',
+        amountRefundedCents: 4000,
+      }),
+    )
+  })
+
+  it('does not emit a refund receipt for a non-succeeded refund', async () => {
+    setBooking({ stripeAmountTotal: 10000 })
+
+    await reconcileChargeRefundInTransaction(reconcileTx(), {
+      paymentIntentId: 'pi_123',
+      amountRefundedCents: 0,
+      chargeAmountCents: 10000,
+      refunds: [{ id: 're_pending', status: 'pending', amountCents: 4000 }],
+    })
+
+    expect(mockEmitPaymentRefunded).not.toHaveBeenCalled()
   })
 
   it('does not re-update a booking already marked REFUNDED', async () => {

@@ -288,6 +288,7 @@ const templateCtaLabels: Record<NotificationTemplateKey, string> = {
   viral_request_approved: 'View request',
   payment_collected: 'View payment',
   payment_action_required: 'Resolve payment',
+  payment_refunded: 'View refund',
   look_follower_new: 'View your profile',
   client_follow: 'View activity',
   referral_tap_received: 'View referral',
@@ -349,6 +350,9 @@ const templateRenderers: Record<NotificationTemplateKey, TemplateRendererSet> = 
   ),
   payment_action_required: buildStandardTemplateRenderer(
     templateCtaLabels.payment_action_required,
+  ),
+  payment_refunded: buildStandardTemplateRenderer(
+    templateCtaLabels.payment_refunded,
   ),
   look_follower_new: buildStandardTemplateRenderer(
     templateCtaLabels.look_follower_new,
