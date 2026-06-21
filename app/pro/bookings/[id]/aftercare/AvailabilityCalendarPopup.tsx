@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
 import { addMonthsToYmd, compareYmd, todayYmdInTimeZone } from './aftercareDates'
+import { zClass } from '@/lib/zIndex'
 
 type DayBusy = { bookings: number; blocked: boolean }
 type BusyMap = Record<string, DayBusy>
@@ -167,7 +168,7 @@ export default function AvailabilityCalendarPopup({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className={`fixed inset-0 ${zClass.modal} flex items-center justify-center bg-black/60 p-4`}
       role="dialog"
       aria-modal="true"
       aria-label={title}

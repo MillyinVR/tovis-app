@@ -17,6 +17,7 @@ import type {
 } from '@/lib/looks/types'
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
+import { zClass } from '@/lib/zIndex'
 
 type SaveToBoardModalProps = {
   isOpen: boolean
@@ -384,7 +385,7 @@ export default function SaveToBoardModal({
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className={`fixed inset-0 ${zClass.modal}`}>
       <button
         type="button"
         aria-label="Close save to board modal"

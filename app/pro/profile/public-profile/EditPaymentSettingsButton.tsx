@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { isRecord } from '@/lib/guards'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
+import { zClass } from '@/lib/zIndex'
 
 export type PaymentCollectionTiming = 'AT_BOOKING' | 'AFTER_SERVICE'
 export type DepositType = 'FLAT' | 'PERCENT'
@@ -379,7 +380,8 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
             // otherwise the footer bar overlaps the modal and intercepts taps on
             // the Save button at the bottom. The extra bottom padding keeps the
             // dialog (and its action row) clear of the footer/safe-area zone.
-            'fixed inset-0 z-[1000000] grid place-items-center p-4',
+            'fixed inset-0 grid place-items-center p-4',
+            zClass.modal,
             'pb-[calc(1.5rem+env(safe-area-inset-bottom))]',
             'bg-black/70 backdrop-blur-sm',
             'transition-opacity duration-150 ease-out',

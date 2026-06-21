@@ -7,6 +7,7 @@ import type { LucideIcon } from 'lucide-react'
 import type { Role } from '@prisma/client'
 import { hardNavigate } from '@/lib/hardNavigate'
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
+import { Z } from '@/lib/zIndex'
 
 const WORKSPACE_ICON: Record<Role, LucideIcon> = {
   CLIENT: User,
@@ -106,7 +107,7 @@ export default function SwitchAccountSheet({
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 60,
+        zIndex: Z.modal,
         display: 'flex',
         alignItems: 'flex-end',
         justifyContent: 'center',

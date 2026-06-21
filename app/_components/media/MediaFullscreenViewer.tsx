@@ -4,6 +4,7 @@
 import React, { useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { zClass } from '@/lib/zIndex'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 
@@ -72,7 +73,7 @@ export default function MediaFullscreenViewer({
   // ✅ Guard: never render broken media elements
   if (!safeSrc) {
     return (
-      <main className={cn('fixed inset-0 z-[9990] grid place-items-center bg-black', className || '')}>
+      <main className={cn('fixed inset-0 grid place-items-center bg-black', zClass.modal, className || '')}>
         <div className="rounded-card border border-white/10 bg-bgPrimary/40 px-4 py-3 text-sm font-semibold text-textSecondary">
           Missing media URL.
         </div>
@@ -81,7 +82,7 @@ export default function MediaFullscreenViewer({
   }
 
   return (
-    <main className={cn('fixed inset-0 z-[9990] overflow-hidden bg-black', className || '')}>
+    <main className={cn('fixed inset-0 overflow-hidden bg-black', zClass.modal, className || '')}>
       {/* MEDIA LAYER */}
       <div className="absolute inset-0">
         {mediaType === 'VIDEO' ? (

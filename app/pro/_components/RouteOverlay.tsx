@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
+import { zClass } from '@/lib/zIndex'
 
 export default function RouteOverlay(props: {
   children: ReactNode
@@ -64,7 +65,7 @@ export default function RouteOverlay(props: {
     <AnimatePresence>
       <motion.div
         key="route-overlay"
-        className="fixed inset-0 z-[1000]"
+        className={`fixed inset-0 ${zClass.modal}`}
         initial="initial"
         animate="animate"
         exit="exit"

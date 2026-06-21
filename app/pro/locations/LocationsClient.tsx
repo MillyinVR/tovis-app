@@ -7,6 +7,7 @@ import { directionsHrefFromLocation, mapsHrefFromLocation } from '@/lib/maps'
 
 import type { LocationType, ProLocation, PickedPlace } from '@/lib/contracts/proLocations'
 import { parseLocationType, parsePickedPlace, parseProLocationsPayload } from '@/lib/contracts/proLocations'
+import { zClass } from '@/lib/zIndex'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
 import { clampInt } from '@/lib/guards'
 import { kmToMiles } from '@/lib/units'
@@ -124,7 +125,7 @@ function ConfirmModal(props: {
       : 'border-accentPrimary/35 bg-accentPrimary/12 text-textPrimary hover:border-accentPrimary/55'
 
   return (
-    <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/70 p-4" onClick={onCancel}>
+    <div className={`fixed inset-0 ${zClass.modal} flex items-center justify-center bg-black/70 p-4`} onClick={onCancel}>
       <div
         className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/10 bg-bgSecondary shadow-[0_50px_160px_rgb(0_0_0/0.78)] backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
@@ -595,7 +596,7 @@ async function updateAdvanceNotice(
     <div className="grid gap-4">
       {/* Toast */}
       {toast ? (
-        <div className="fixed right-3 top-3 z-[9999] w-[min(380px,calc(100vw-24px))]">
+        <div className={`fixed right-3 top-3 ${zClass.toast} w-[min(380px,calc(100vw-24px))]`}>
           <Toast tone={toast.tone} title={toast.title} body={toast.body ?? null} />
         </div>
       ) : null}

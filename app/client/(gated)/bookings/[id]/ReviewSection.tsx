@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
+import { zClass } from '@/lib/zIndex'
 import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
 import { safeJsonRecord, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
@@ -831,7 +832,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
           role="dialog"
           aria-modal="true"
           onClick={() => setPreview(null)}
-          className="fixed inset-0 z-9999 flex items-center justify-center bg-bgPrimary/70 p-4"
+          className={`fixed inset-0 ${zClass.modal} flex items-center justify-center bg-bgPrimary/70 p-4`}
         >
           <div
             onClick={(e) => e.stopPropagation()}

@@ -13,6 +13,7 @@ import {
   type ProcessedImageResult,
 } from '@/lib/media/processImageForUpload'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { zClass } from '@/lib/zIndex'
 
 type Props = {
   open: boolean
@@ -254,7 +255,7 @@ function ImageEditModalContent({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999] bg-black/80"
+      className={`fixed inset-0 ${zClass.modal} bg-black/80`}
       role="dialog"
       aria-modal="true"
       aria-label="Edit image"

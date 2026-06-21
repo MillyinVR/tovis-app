@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/currentUser'
 import CreateBoardForm from '@/app/client/(gated)/boards/_components/CreateBoardForm'
 import { createBoardAction } from '@/app/client/(gated)/boards/_actions/createBoard'
+import { zClass } from '@/lib/zIndex'
 import DismissModalButton from '../../_components/DismissModalButton'
 
 export const dynamic = 'force-dynamic'
@@ -70,7 +71,7 @@ export default async function ClientNewBoardModalPage(props: {
   const errorMessage = normalizeErrorMessage(searchParams.error)
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className={`fixed inset-0 ${zClass.modal}`}>
       <DismissModalButton
         ariaLabel="Close create board modal"
         className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"

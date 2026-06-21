@@ -18,6 +18,7 @@ import { THEME_INIT_SCRIPT } from '@/lib/brand/theme'
 import { rgbTripletToHex } from '@/lib/brand/eyeSvg'
 import { getBrandForTenantContext } from '@/lib/brand/forTenant'
 import { resolveTenantContextForLayout } from '@/lib/tenant/layoutContext'
+import { Z } from '@/lib/zIndex'
 
 // Body / UI — Hanken Grotesk (brand sheet)
 const hankenGrotesk = Hanken_Grotesk({
@@ -63,7 +64,7 @@ const footerHostStyle: CSSProperties = {
   right: 0,
   bottom: 0,
   width: '100%',
-  zIndex: 999999,
+  zIndex: Z.footer,
   pointerEvents: 'none',
 }
 

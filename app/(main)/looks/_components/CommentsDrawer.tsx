@@ -6,6 +6,7 @@ import { Heart, User as UserIcon, X } from 'lucide-react'
 
 import { initialsForName } from '@/lib/initials'
 import { formatRelativeTimeCompact } from '@/lib/time/relativeTime'
+import { zClass } from '@/lib/zIndex'
 import { useLookComments } from './useLookComments'
 import type { UiComment } from './lookTypes'
 
@@ -229,7 +230,7 @@ export default function CommentsDrawer({
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-100 bg-overlay/70"
+      className={`fixed inset-0 ${zClass.modal} bg-overlay/70`}
       role="presentation"
     >
       <div
