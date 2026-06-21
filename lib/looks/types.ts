@@ -163,6 +163,11 @@ export type LooksCommentDto = {
   body: string
   createdAt: string
   user: LooksCommentUserDto
+  parentCommentId: string | null
+  likeCount: number
+  replyCount: number
+  viewerLiked: boolean
+  viewerCanDelete: boolean
 }
 
 export type LooksLikeResponseDto = {
@@ -180,6 +185,27 @@ export type LooksCommentsListResponseDto = {
 export type LooksCommentCreateResponseDto = {
   lookPostId: string
   comment: LooksCommentDto
+  commentsCount: number
+}
+
+export type LooksCommentRepliesListResponseDto = {
+  lookPostId: string
+  parentCommentId: string
+  replies: LooksCommentDto[]
+  replyCount: number
+}
+
+export type LooksCommentLikeResponseDto = {
+  lookPostId: string
+  commentId: string
+  liked: boolean
+  likeCount: number
+}
+
+export type LooksCommentDeleteResponseDto = {
+  lookPostId: string
+  commentId: string
+  deleted: true
   commentsCount: number
 }
 

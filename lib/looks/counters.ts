@@ -1,6 +1,5 @@
 // lib/looks/counters.ts
 import {
-  LookPostStatus,
   ModerationStatus,
   Prisma,
   PrismaClient,
@@ -289,6 +288,79 @@ export async function recomputeLookPostCommentCount(
   })
 
   return commentCount
+}
+
+async function countLookCommentLikes(
+  db: LooksCounterDb,
+  lookCommentId: string,
+): Promise<number> {
+  return db.lookCommentLike.count({
+    where: { lookCommentId },
+  })
+}
+
+async function countApprovedLookCommentReplies(
+  db: LooksCounterDb,
+  parentCommentId: string,
+): Promise<number> {
+  return db.lookComment.count({
+    where: {
+      parentCommentId,
+      moderationStatus: ModerationStatus.APPROVED,
+    },
+  })
+}
+
+/**
+ * Recompute and persist the like total for a single comment. Returns the new
+ * count. Comment likes don't feed the look's spotlight/rank scores, so this
+ * only touches the comment row.
+ */
+export async function recomputeLookCommentLikeCount(
+  db: LooksCounterDb,
+  lookCommentId: string,
+): Promise<number> {
+  const normalizedCommentId = normalizeRequiredId(
+    'lookCommentId',
+    lookCommentId,
+  )
+
+  const likeCount = await countLookCommentLikes(db, normalizedCommentId)
+
+  await db.lookComment.update({
+    where: { id: normalizedCommentId },
+    data: { likeCount },
+    select: { id: true },
+  })
+
+  return likeCount
+}
+
+/**
+ * Recompute and persist a parent comment's approved-reply total. Returns the
+ * new count. Used to keep the "View N replies" affordance accurate.
+ */
+export async function recomputeLookCommentReplyCount(
+  db: LooksCounterDb,
+  parentCommentId: string,
+): Promise<number> {
+  const normalizedParentId = normalizeRequiredId(
+    'parentCommentId',
+    parentCommentId,
+  )
+
+  const replyCount = await countApprovedLookCommentReplies(
+    db,
+    normalizedParentId,
+  )
+
+  await db.lookComment.update({
+    where: { id: normalizedParentId },
+    data: { replyCount },
+    select: { id: true },
+  })
+
+  return replyCount
 }
 
 export async function recomputeLookPostSaveCount(

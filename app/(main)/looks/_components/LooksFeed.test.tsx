@@ -181,55 +181,29 @@ vi.mock('./LookSlide', () => ({
   ),
 }))
 
+// The comment sheet is now self-contained (owns its own data + posting). Here we
+// stub it to a shell that surfaces the look it was opened for and lets the test
+// drive the count-sync callback the parent listens to.
 vi.mock('./CommentsDrawer', () => ({
   default: ({
+    lookPostId,
     open,
     onClose,
-    loading,
-    error,
-    comments,
-    commentText,
-    setCommentText,
-    posting,
-    onPost,
+    onCountChange,
   }: {
+    lookPostId: string | null
     open: boolean
     onClose: () => void
-    loading: boolean
-    error: string | null
-    comments: Array<{
-      id: string
-      body: string
-      user: { displayName: string }
-    }>
-    commentText: string
-    setCommentText: (value: string) => void
-    posting: boolean
-    onPost: () => void
+    onCountChange: (lookPostId: string, commentsCount: number) => void
+    onRequireAuth: (reason: string) => void
   }) =>
-    open ? (
-      <div data-testid="comments-drawer">
+    open && lookPostId ? (
+      <div data-testid="comments-drawer" data-look-id={lookPostId}>
         <button type="button" onClick={onClose}>
           Close comments
         </button>
-
-        {loading ? <div>Loading comments…</div> : null}
-        {error ? <div>{error}</div> : null}
-
-        {comments.map((comment) => (
-          <div key={comment.id}>
-            {comment.user.displayName}: {comment.body}
-          </div>
-        ))}
-
-        <input
-          aria-label="Comment text"
-          value={commentText}
-          onChange={(event) => setCommentText(event.target.value)}
-        />
-
-        <button type="button" disabled={posting} onClick={onPost}>
-          Post comment
+        <button type="button" onClick={() => onCountChange(lookPostId, 2)}>
+          Report new count
         </button>
       </div>
     ) : null,
@@ -329,6 +303,11 @@ function makeComment(
       displayName: 'Tori Morales',
       avatarUrl: null,
     },
+    parentCommentId: null,
+    likeCount: 0,
+    replyCount: 0,
+    viewerLiked: false,
+    viewerCanDelete: false,
     ...overrides,
   }
 }
@@ -558,21 +537,13 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
     })
   })
 
-  it('opens comments and posts comments using the canonical lookPostId', async () => {
-    const { fetchMock } = installFetchMock({
+  it('opens the comment sheet for the canonical lookPostId and syncs the rail count', async () => {
+    installFetchMock({
       feedByCategory: {
         all: [
           makeFeedItem({
             id: 'look_comment_1',
             _count: { likes: 2, comments: 1 },
-          }),
-        ],
-      },
-      commentsByLookId: {
-        look_comment_1: [
-          makeComment({
-            id: 'comment_existing',
-            body: 'Existing comment',
           }),
         ],
       },
@@ -586,41 +557,15 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
       within(slide).getByRole('button', { name: 'Open comments' }),
     )
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/looks/look_comment_1/comments',
-        expect.objectContaining({
-          cache: 'no-store',
-          headers: { Accept: 'application/json' },
-        }),
-      )
-    })
+    const drawer = await screen.findByTestId('comments-drawer')
+    expect(drawer).toHaveAttribute('data-look-id', 'look_comment_1')
 
-    expect(await screen.findByTestId('comments-drawer')).toBeInTheDocument()
-    expect(await screen.findByText(/Existing comment/)).toBeInTheDocument()
-
-    fireEvent.change(screen.getByLabelText('Comment text'), {
-      target: { value: 'Love this look' },
-    })
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Post comment' }),
-    )
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/looks/look_comment_1/comments',
-        expect.objectContaining({
-          method: 'POST',
-        }),
-      )
-    })
+    // The sheet owns comment data; when it reports a new total the rail follows.
+    fireEvent.click(screen.getByRole('button', { name: 'Report new count' }))
 
     await waitFor(() => {
       expect(within(slide).getByTestId('comment-count')).toHaveTextContent('2')
     })
-
-    expect(await screen.findByText(/Love this look/)).toBeInTheDocument()
   })
 
   it('keeps category selection working and refetches with the selected category slug', async () => {

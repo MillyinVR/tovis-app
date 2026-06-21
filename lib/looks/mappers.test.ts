@@ -498,24 +498,32 @@ describe('lib/looks/mappers.ts', () => {
   })
 
   describe('mapLooksCommentToDto', () => {
-    it('prefers the client full name when present', () => {
-      const result = mapLooksCommentToDto({
-        id: 'comment_1',
-        body: 'This is fire',
-        createdAt: new Date('2026-04-18T12:00:00.000Z'),
-        user: {
-          id: 'user_1',
-          clientProfile: {
-            firstName: 'Tori',
-            lastName: 'Morales',
-            avatarUrl: 'https://cdn.example.com/client-avatar.jpg',
-          },
-          professionalProfile: {
-            businessName: 'Other Name',
-            avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
+    it('prefers the client full name and derives viewer like/delete flags', () => {
+      const result = mapLooksCommentToDto(
+        {
+          id: 'comment_1',
+          body: 'This is fire',
+          createdAt: new Date('2026-04-18T12:00:00.000Z'),
+          userId: 'user_1',
+          parentCommentId: null,
+          likeCount: 3,
+          replyCount: 2,
+          likes: [{ id: 'like_1' }],
+          user: {
+            id: 'user_1',
+            clientProfile: {
+              firstName: 'Tori',
+              lastName: 'Morales',
+              avatarUrl: 'https://cdn.example.com/client-avatar.jpg',
+            },
+            professionalProfile: {
+              businessName: 'Other Name',
+              avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
+            },
           },
         },
-      })
+        { viewerUserId: 'user_1', viewerIsAdmin: false },
+      )
 
       expect(result).toEqual({
         id: 'comment_1',
@@ -526,23 +534,36 @@ describe('lib/looks/mappers.ts', () => {
           displayName: 'Tori Morales',
           avatarUrl: 'https://cdn.example.com/client-avatar.jpg',
         },
+        parentCommentId: null,
+        likeCount: 3,
+        replyCount: 2,
+        viewerLiked: true,
+        viewerCanDelete: true,
       })
     })
 
     it('falls back to professional business name when no client name exists', () => {
-      const result = mapLooksCommentToDto({
-        id: 'comment_1',
-        body: 'Nice',
-        createdAt: new Date('2026-04-18T12:00:00.000Z'),
-        user: {
-          id: 'user_2',
-          clientProfile: null,
-          professionalProfile: {
-            businessName: 'TOVIS Studio',
-            avatarUrl: null,
+      const result = mapLooksCommentToDto(
+        {
+          id: 'comment_1',
+          body: 'Nice',
+          createdAt: new Date('2026-04-18T12:00:00.000Z'),
+          userId: 'user_2',
+          parentCommentId: null,
+          likeCount: 0,
+          replyCount: 0,
+          likes: [],
+          user: {
+            id: 'user_2',
+            clientProfile: null,
+            professionalProfile: {
+              businessName: 'TOVIS Studio',
+              avatarUrl: null,
+            },
           },
         },
-      })
+        { viewerUserId: null, viewerIsAdmin: false },
+      )
 
       expect(result.user.displayName).toBe('TOVIS Studio')
     })
