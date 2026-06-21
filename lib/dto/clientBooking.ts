@@ -1,5 +1,5 @@
 // lib/dto/clientBooking.ts
-import { Prisma } from '@prisma/client'
+import { Prisma, type BookingServiceItemType } from '@prisma/client'
 import {
   resolveApptTimeZone,
   type TimeZoneTruthSource,
@@ -9,7 +9,7 @@ import { isRecord } from '@/lib/guards'
 
 export type ClientBookingItemDTO = {
   id: string
-  type: 'BASE' | 'ADD_ON'
+  type: BookingServiceItemType
   serviceId: string
   name: string
   price: string

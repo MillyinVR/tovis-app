@@ -1,8 +1,11 @@
 // lib/contracts/proLocations.ts
+import type { ProfessionalLocationType } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
 import { pickBool, pickNumber, pickString, pickStringOrEmpty } from '@/lib/pick'
 
-export type LocationType = 'SALON' | 'SUITE' | 'MOBILE_BASE'
+// Source of truth is the Prisma enum. Type-only import so this contract (used
+// in client components) never pulls the @prisma/client runtime into the bundle.
+export type LocationType = ProfessionalLocationType
 
 export type ProLocation = {
   id: string

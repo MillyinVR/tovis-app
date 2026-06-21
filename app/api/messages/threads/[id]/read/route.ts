@@ -58,7 +58,6 @@ export async function POST(_req: Request, ctx: RouteContext) {
       data: { lastReadAt: stamp },
     })
 
-    console.log('[messages/read] ok', { debugId, threadId, at: stamp.toISOString() })
     return jsonOk({})
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Internal error'

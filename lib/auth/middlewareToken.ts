@@ -1,4 +1,11 @@
 // lib/auth/middlewareToken.ts
+//
+// Runs on the EDGE runtime. The Prisma Role enum is the source of truth, but
+// we use a `import type` so the compiler erases it entirely — no
+// @prisma/client runtime is pulled into the edge bundle (which can't load it).
+// Aliasing the type (rather than re-declaring the union) makes drift from the
+// Prisma enum structurally impossible.
+import type { Role } from '@prisma/client'
 import { isNonEmptyString, isRecord } from '@/lib/guards'
 
 const jwtSecret = process.env.JWT_SECRET?.trim()
@@ -9,7 +16,7 @@ if (!jwtSecret) {
 
 const JWT_SECRET: string = jwtSecret
 
-export type MiddlewareAuthRole = 'CLIENT' | 'PRO' | 'ADMIN'
+export type MiddlewareAuthRole = Role
 export type MiddlewareAuthSessionKind = 'ACTIVE' | 'VERIFICATION'
 
 export type MiddlewareAuthTokenPayload = {

@@ -37,7 +37,6 @@ const PRO_HEADER_ROUTE_TITLES: ProHeaderRouteTitle[] = [
   { path: '/pro/aftercare', title: 'Aftercare' },
   { path: '/pro/bookings', title: 'Bookings' },
   { path: '/pro/last-minute', title: 'Last Minute' },
-  { path: '/pro/store', title: 'Store' },
   { path: '/pro/calendar', title: 'Calendar' },
   { path: '/pro/notifications', title: 'Notifications' },
   { path: '/pro/clients', title: 'Clients' },
@@ -55,7 +54,6 @@ const PRO_HEADER_TABS: ProHeaderTabItem[] = [
   { href: '/pro/aftercare', label: 'Aftercare', match: 'prefix' },
   { href: '/pro/bookings', label: 'Bookings', match: 'prefix' },
   { href: '/pro/last-minute', label: 'Last Minute', match: 'prefix' },
-  { href: '/pro/store', label: 'Store', match: 'prefix' },
   { href: '/pro/locations', label: 'Locations', match: 'prefix' },
 ]
 

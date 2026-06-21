@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs'
 import jwt, { type JwtPayload as JsonWebTokenPayload } from 'jsonwebtoken'
+import type { Role } from '@prisma/client'
 import { isNonEmptyString, isRecord } from '@/lib/guards'
 
 const JWT_SECRET = process.env.JWT_SECRET
@@ -16,7 +17,8 @@ const TOKEN_EXPIRES_IN = '7d' as const
 export const DUMMY_PASSWORD_HASH =
   '$2b$10$F.ZAIlXTg.PToRZemArB7emjC1dfwqWxYrOhbd4P0bFfPiM/m19/O'
 
-export type AuthRole = 'CLIENT' | 'PRO' | 'ADMIN'
+// Source of truth is the Prisma Role enum (type-only import keeps it erased).
+export type AuthRole = Role
 export type AuthSessionKind = 'ACTIVE' | 'VERIFICATION'
 
 type TokenSubject = {
