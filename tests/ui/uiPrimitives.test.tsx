@@ -24,13 +24,15 @@ describe('buttonClassName', () => {
   })
 
   it('maps each size to its canonical height', () => {
+    expect(buttonClassName({ size: 'xs' })).toContain('h-8')
     expect(buttonClassName({ size: 'sm' })).toContain('h-9')
     expect(buttonClassName({ size: 'lg' })).toContain('h-[46px]')
   })
 
-  it('applies ghost/danger variants and fullWidth', () => {
+  it('applies ghost/danger/success variants and fullWidth', () => {
     expect(buttonClassName({ variant: 'ghost' })).toContain('text-textSecondary')
     expect(buttonClassName({ variant: 'danger' })).toContain('text-toneDanger')
+    expect(buttonClassName({ variant: 'success' })).toContain('text-toneSuccess')
     expect(buttonClassName({ fullWidth: true })).toContain('w-full')
   })
 
