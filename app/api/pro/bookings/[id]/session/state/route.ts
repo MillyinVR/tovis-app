@@ -4,8 +4,8 @@
 // state snapshot plus a stable hash; the Pro session UI polls this route
 // and refreshes the server-rendered page only when the hash changes.
 
-import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -34,20 +34,14 @@ export async function GET(_request: Request, ctx: RouteContext) {
       return jsonFail(400, 'Missing booking id.')
     }
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: PRO_SESSION_STATE_SELECT,
-    })
+    const owned = await requireProBooking(
+      bookingId,
+      auth.professionalId,
+      PRO_SESSION_STATE_SELECT,
+    )
+    if (!owned.ok) return owned.res
 
-    if (!booking) {
-      return jsonFail(404, 'Booking not found.')
-    }
-
-    if (booking.professionalId !== auth.professionalId) {
-      return jsonFail(403, 'You are not allowed to view this booking.')
-    }
-
-    const state = buildProSessionState(booking)
+    const state = buildProSessionState(owned.booking)
 
     return jsonOk(
       {

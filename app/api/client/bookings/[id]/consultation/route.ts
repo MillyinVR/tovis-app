@@ -8,6 +8,7 @@ import {
   upper,
 } from '@/app/api/_utils'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
+import { requireClientBookingOwnership } from '@/app/api/_utils/auth/requireClientBookingOwnership'
 import {
   handleConsultationDecision,
   type ConsultationDecisionAction,
@@ -15,27 +16,6 @@ import {
 import { safeError } from '@/lib/security/logging'
 
 export const dynamic = 'force-dynamic'
-
-type OwnershipOk = { ok: true }
-type OwnershipFail = { ok: false; res: ReturnType<typeof jsonFail> }
-type OwnershipResult = OwnershipOk | OwnershipFail
-
-async function requireOwnership(
-  bookingId: string,
-  clientId: string,
-): Promise<OwnershipResult> {
-  const booking = await prisma.booking.findUnique({
-    where: { id: bookingId },
-    select: { id: true, clientId: true },
-  })
-
-  if (!booking) return { ok: false, res: jsonFail(404, 'Booking not found.') }
-  if (booking.clientId !== clientId) {
-    return { ok: false, res: jsonFail(403, 'Forbidden.') }
-  }
-
-  return { ok: true }
-}
 
 function readRequestMeta(req: Request): {
   requestId: string | null
@@ -65,7 +45,7 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
-    const own = await requireOwnership(bookingId, clientId)
+    const own = await requireClientBookingOwnership(bookingId, clientId)
     if (!own.ok) return own.res
 
     const approval = await prisma.consultationApproval.findUnique({

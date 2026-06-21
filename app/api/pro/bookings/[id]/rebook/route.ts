@@ -25,6 +25,7 @@ import {
   type RouteContext,
 } from '@/app/api/_utils/routeContext'
 import { prisma } from '@/lib/prisma'
+import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import {
   isBookingError,
 } from '@/lib/booking/errors'
@@ -222,20 +223,12 @@ export async function POST(req: Request, ctx: RouteContext) {
 
     idempotencyRecordId = idempotency.idempotencyRecordId
 
-    const existing = await prisma.booking.findFirst({
-      where: {
-        id: bookingId,
-        professionalId,
-      },
-      select: {
-        id: true,
-        status: true,
-      },
+    const owned = await requireProBooking(bookingId, professionalId, {
+      id: true,
+      status: true,
     })
-
-    if (!existing) {
-      return jsonFail(404, 'Booking not found.')
-    }
+    if (!owned.ok) return owned.res
+    const existing = owned.booking
 
     if (existing.status !== BookingStatus.COMPLETED) {
       return jsonFail(409, 'Only COMPLETED bookings can be rebooked.')

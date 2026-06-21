@@ -2,6 +2,7 @@
 import { ContactMethod, ProClientInviteStatus } from '@prisma/client'
 
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -9,7 +10,6 @@ import {
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { asTrimmedString, isRecord } from '@/lib/guards'
-import { prisma } from '@/lib/prisma'
 import { safeError, safeLogMeta } from '@/lib/security/logging'
 import type { TenantContext } from '@/lib/tenant/context'
 import { resolveTenantContextForRequest } from '@/lib/tenant/requestContext'
@@ -223,27 +223,17 @@ export async function POST(request: Request, ctx: RouteContext) {
       })
     }
 
-    const booking = await prisma.booking.findFirst({
-      where: {
-        id: bookingId,
-        professionalId: auth.professionalId,
-      },
-      select: {
-        id: true,
-        clientId: true,
-        client: {
-          select: {
-            userId: true,
-          },
+    const owned = await requireProBooking(bookingId, auth.professionalId, {
+      id: true,
+      clientId: true,
+      client: {
+        select: {
+          userId: true,
         },
       },
     })
-
-    if (!booking) {
-      return jsonFail(403, 'Forbidden.', {
-        code: 'FORBIDDEN',
-      })
-    }
+    if (!owned.ok) return owned.res
+    const booking = owned.booking
 
     const invite = await upsertClientClaimLink({
       professionalId: auth.professionalId,

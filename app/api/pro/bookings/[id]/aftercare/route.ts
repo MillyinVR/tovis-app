@@ -837,7 +837,11 @@ export async function GET(_req: Request, ctx: RouteContext) {
     }
 
     if (booking.professionalId !== auth.professionalId) {
-      return bookingJsonFail('FORBIDDEN')
+      // Unify foreign-booking behavior with the missing-booking case so the
+      // API never reveals that another pro's booking exists (see
+      // requireProBooking). Kept on the bookingJsonFail envelope here because
+      // this route already returns the canonical booking-error shape.
+      return bookingJsonFail('BOOKING_NOT_FOUND')
     }
 
     return jsonOk(

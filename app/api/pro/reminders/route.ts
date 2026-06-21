@@ -1,6 +1,7 @@
 // app/api/pro/reminders/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import { ReminderType } from '@prisma/client'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 
@@ -78,11 +79,12 @@ export async function POST(req: Request) {
 
     // ✅ prevent attaching reminders to someone else’s booking
     if (bookingId) {
-      const b = await prisma.booking.findFirst({
-        where: { id: bookingId, professionalId },
-        select: { id: true, clientId: true },
+      const owned = await requireProBooking(bookingId, professionalId, {
+        id: true,
+        clientId: true,
       })
-      if (!b) return jsonFail(404, 'Booking not found.')
+      if (!owned.ok) return owned.res
+      const b = owned.booking
 
       // Optional consistency check: if both provided, they must match
       if (clientId && b.clientId !== clientId) {
