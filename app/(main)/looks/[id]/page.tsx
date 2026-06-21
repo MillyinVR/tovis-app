@@ -103,7 +103,7 @@ export async function generateMetadata({
   const title = caption ? `${caption.slice(0, 80)} — ${proName}` : `A look by ${proName}`
   const description = caption
     ? caption.slice(0, 160)
-    : `Discover this look by ${proName} on ${brand.displayName} — then book your appointment.`
+    : `Discover this look by ${proName} on ${brand.displayName} — then make your booking.`
 
   const image = item.primaryMedia.thumbUrl ?? item.primaryMedia.url
   const isVideo = item.primaryMedia.mediaType === 'VIDEO'

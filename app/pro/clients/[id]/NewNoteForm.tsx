@@ -169,7 +169,7 @@ export default function NewNoteForm({ clientId }: Props) {
           value={title}
           disabled={loading}
           onChange={(event) => setTitle(event.target.value)}
-          placeholder="Ex: First visit, tricky blonde, very talkative"
+          placeholder="Ex: First booking, tricky blonde, very talkative"
           style={{
             width: '100%',
             borderRadius: 8,

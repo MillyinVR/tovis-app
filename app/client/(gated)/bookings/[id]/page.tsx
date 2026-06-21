@@ -456,11 +456,11 @@ function getAftercareRebookInfo(
     return bookedFor
       ? {
           mode: 'BOOKED_NEXT_APPOINTMENT',
-          label: `Next appointment booked: ${formatWhenInTimeZone(bookedFor, timeZone)}`,
+          label: `Next booking confirmed: ${formatWhenInTimeZone(bookedFor, timeZone)}`,
         }
       : {
           mode: 'BOOKED_NEXT_APPOINTMENT',
-          label: 'Next appointment booked.',
+          label: 'Next booking confirmed.',
         }
   }
 
@@ -487,7 +487,7 @@ function getAftercareRebookInfo(
   if (legacyDate) {
     return {
       mode: 'RECOMMENDED_DATE',
-      label: `Recommended next visit: ${formatWhenInTimeZone(legacyDate, timeZone)}`,
+      label: `Recommended next booking: ${formatWhenInTimeZone(legacyDate, timeZone)}`,
     }
   }
 
@@ -843,7 +843,7 @@ function ClientAftercareBeforeAfter(props: {
     return (
       <div className="grid gap-3">
         <div className="brand-pro-session-card-body">
-          Your pro will attach photos during your appointment flow.
+          Your pro will attach photos during your booking flow.
         </div>
         <AftercarePrivacyNote />
       </div>
@@ -1317,7 +1317,7 @@ export default async function ClientBookingPage(props: {
             ) : (
               <span
                 className={tabDisabledClass()}
-                title="Aftercare becomes available after your appointment is completed."
+                title="Aftercare becomes available after your booking is completed."
               >
                 {COPY.bookings.tabs.aftercare}
               </span>
@@ -1414,7 +1414,7 @@ export default async function ClientBookingPage(props: {
               <ClientAftercareCard accent>
                 <ClientAftercareSectionTitle
                   title={COPY.bookings.aftercare.header}
-                  subtitle={`Your ${brand.displayName} post-appointment summary.`}
+                  subtitle={`Your ${brand.displayName} post-booking summary.`}
                   right={
                     showUnreadAftercareBadge ? (
                       <ClientAftercarePill tone="success">
@@ -1435,7 +1435,7 @@ export default async function ClientBookingPage(props: {
                 </div>
 
                 <div className="mt-3 brand-pro-session-card-body">
-                  Your final appointment details, care notes, product recommendations,
+                  Your final booking details, care notes, product recommendations,
                   checkout, and rebook guidance live here.
                 </div>
               </ClientAftercareCard>
@@ -1444,15 +1444,15 @@ export default async function ClientBookingPage(props: {
                 steps={[
                   {
                     key: 'visit',
-                    label: 'Your visit',
+                    label: 'Your booking',
                     content: (
                       <>
                         <ClientAftercareCard>
-                          <ClientAftercareSectionTitle title="Appointment summary" />
+                          <ClientAftercareSectionTitle title="Booking summary" />
 
                           <div className="grid gap-1">
                             <SummaryRow label="Provider" value={professionalLabel} />
-                            <SummaryRow label="Appointment" value={whenLabel} />
+                            <SummaryRow label="Booking" value={whenLabel} />
                             <SummaryRow label="Time zone" value={appointmentTimeZone} />
                             <SummaryRow
                               label="Status"
@@ -1471,7 +1471,7 @@ export default async function ClientBookingPage(props: {
                             title="Before & after"
                             subtitle={
                               beforeMedia.length || afterMedia.length
-                                ? 'Compare your appointment photos.'
+                                ? 'Compare your booking photos.'
                                 : 'No photos attached yet.'
                             }
                             right={

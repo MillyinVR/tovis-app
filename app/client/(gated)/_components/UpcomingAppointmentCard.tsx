@@ -39,11 +39,11 @@ function EmptyUpcomingCard() {
     <div className="rounded-card border border-textPrimary/10 bg-bgSurface p-[18px]">
       <div className="mb-3.5 flex items-center justify-between">
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-textMuted">
-          Next appointment
+          Next booking
         </span>
       </div>
       <p className="text-[13px] font-semibold text-textPrimary">
-        No approved appointments yet.
+        No approved bookings yet.
       </p>
       <p className="mt-1 text-[11.5px] leading-relaxed text-textMuted">
         When a pro approves your booking, it&apos;ll show up here.
@@ -80,7 +80,7 @@ export default function UpcomingAppointmentCard({
     <div className="rounded-card border border-textPrimary/10 bg-bgSurface p-[18px]">
       <div className="mb-[15px] flex items-center justify-between">
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-textMuted">
-          Next appointment
+          Next booking
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-terra px-2.5 py-1">
           <span className="h-1.5 w-1.5 rounded-full bg-terra" />

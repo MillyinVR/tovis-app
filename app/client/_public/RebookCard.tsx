@@ -216,7 +216,7 @@ export function RebookCard({
     return (
       <div className="rounded-card border border-toneSuccess/20 bg-toneSuccess/5 p-4">
         <div className="text-sm font-black text-textPrimary">
-          Appointment requested
+          Booking requested
         </div>
         <div className="mt-1 text-sm text-textSecondary">
           We’ve sent {formatSlotFull(booking.slotIso, timeZone)} to your

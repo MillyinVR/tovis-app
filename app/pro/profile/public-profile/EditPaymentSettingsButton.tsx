@@ -437,14 +437,14 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
                     checked={collectPaymentAt === 'AT_BOOKING'}
                     onChange={() => setCollectPaymentAt('AT_BOOKING')}
                     label="Collect at booking"
-                    description="Use this when appointments should be paid up front."
+                    description="Use this when bookings should be paid up front."
                     disabled={busy}
                   />
                   <RadioRow
                     checked={collectPaymentAt === 'AFTER_SERVICE'}
                     onChange={() => setCollectPaymentAt('AFTER_SERVICE')}
                     label="Collect after service"
-                    description="Use this when checkout happens after the appointment."
+                    description="Use this when checkout happens after the booking."
                     disabled={busy}
                   />
                 </div>
@@ -452,7 +452,7 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
 
               <SectionCard
                 title="Deposits"
-                subtitle="Require a deposit to hold the appointment. New clients who find you through the Looks feed or Discovery also pay a one-time booking fee, processed with the deposit through Stripe."
+                subtitle="Require a deposit to hold the booking. New clients who find you through the Looks feed or Discovery also pay a one-time booking fee, processed with the deposit through Stripe."
               >
                 <div className="grid gap-3">
                   <ToggleRow
@@ -531,7 +531,7 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
                           checked={depositScope === 'ALL_CLIENTS'}
                           onChange={() => setDepositScope('ALL_CLIENTS')}
                           label="Every booking"
-                          description="Charge a deposit on all appointments."
+                          description="Charge a deposit on all bookings."
                           disabled={busy}
                           name="depositScope"
                         />
@@ -776,7 +776,7 @@ export default function EditPaymentSettingsButton({ initial }: Props) {
                   onChange={(e) => setPaymentNote(e.target.value)}
                   rows={4}
                   className="w-full resize-y rounded-xl border border-white/10 bg-bgPrimary px-3 py-3 text-[13px] text-textPrimary placeholder:text-textSecondary focus:outline-none focus:ring-2 focus:ring-accentPrimary/40"
-                  placeholder="Example: Please have payment ready after your appointment."
+                  placeholder="Example: Please have payment ready after your booking."
                   disabled={busy}
                 />
               </SectionCard>

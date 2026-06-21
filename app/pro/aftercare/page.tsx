@@ -28,7 +28,7 @@ function formatRebookMode(value: unknown) {
 
   switch (mode) {
     case 'BOOKED_NEXT_APPOINTMENT':
-      return 'Booked next appointment'
+      return 'Next booking'
     case 'RECOMMENDED_WINDOW':
       return 'Recommended window'
     case 'NONE':

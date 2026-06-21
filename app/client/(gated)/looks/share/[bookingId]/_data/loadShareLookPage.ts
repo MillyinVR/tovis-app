@@ -128,7 +128,7 @@ export async function loadShareLookPage(
     loadPrefillPhoto(booking.id, booking.professionalId, MediaPhase.AFTER),
   ])
 
-  const serviceName = booking.service?.name ?? 'Your visit'
+  const serviceName = booking.service?.name ?? 'Your booking'
 
   return {
     bookingId: booking.id,

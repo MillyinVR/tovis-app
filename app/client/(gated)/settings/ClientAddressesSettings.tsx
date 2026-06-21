@@ -1153,7 +1153,7 @@ export default function ClientAddressesSettings() {
               Mobile service addresses
             </div>
             <div className="mt-1 text-xs font-semibold text-textSecondary">
-              Required for at-home appointments. Salon-only browsing does not need this.
+              Required for at-home bookings. Salon-only browsing does not need this.
             </div>
           </div>
 

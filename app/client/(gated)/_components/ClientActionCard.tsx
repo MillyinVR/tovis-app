@@ -48,7 +48,7 @@ function PendingConsultationCard({ booking }: { booking: ClientHomeBooking }) {
         </h3>
         <p className="mb-3.5 text-[13.5px] leading-relaxed text-textSecondary">
           {notes ??
-            'Your pro reviewed your details and proposed an updated plan. Approve it before your appointment.'}
+            'Your pro reviewed your details and proposed an updated plan. Approve it before your booking.'}
         </p>
 
         {proposedTotal ? (

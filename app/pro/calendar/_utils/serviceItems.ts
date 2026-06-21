@@ -102,7 +102,7 @@ export function serviceItemsLabel(items: BookingServiceItem[]): string {
     }
   }
 
-  return names.length > 0 ? names.join(' + ') : 'Appointment'
+  return names.length > 0 ? names.join(' + ') : 'Booking'
 }
 
 // ── Draft builders ─────────────────────────────────────────────────

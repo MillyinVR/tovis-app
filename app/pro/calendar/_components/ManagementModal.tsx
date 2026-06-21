@@ -160,7 +160,7 @@ const DEFAULT_COPY: ManagementModalCopy = {
   timeUnavailable: 'Time unavailable',
   blockedTimeTitle: 'Blocked time',
   personalTimeFallback: 'Personal time',
-  appointmentFallback: 'Appointment',
+  appointmentFallback: 'Booking',
   clientFallback: 'Client',
   blockedInitials: '⏱',
 
@@ -172,7 +172,7 @@ const DEFAULT_COPY: ManagementModalCopy = {
     todaysBookings: {
       title: "Today's bookings",
       shortTitle: 'Today',
-      description: 'Accepted and completed appointments happening today.',
+      description: 'Accepted and completed bookings happening today.',
       emptyTitle: 'No bookings today.',
       emptyBody: 'Nothing is scheduled for the selected calendar day.',
     },

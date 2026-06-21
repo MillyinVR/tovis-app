@@ -324,13 +324,13 @@ export default async function ClaimInvitePage(props: PageProps) {
               .
             </>
           ) : (
-            'Here are the details for your appointment.'
+            'Here are the details for your booking.'
           )}
         </div>
 
         {appointmentLabel ? (
           <div className="mt-3 text-sm text-textSecondary">
-            Appointment:{' '}
+            Booking:{' '}
             <span className="font-black text-textPrimary">
               {appointmentLabel}
             </span>

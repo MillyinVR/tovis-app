@@ -511,7 +511,7 @@ function RemixesCard(props: { remixes: ClientLookRemix[] }) {
         </span>
       </div>
       <p className="mb-1 text-[12.5px] leading-relaxed text-textSecondary">
-        Appointments others booked, inspired by a look in your history.
+        Bookings others made, inspired by a look in your history.
       </p>
       <div className="flex flex-col">
         {remixes.map((remix, index) => (
@@ -841,7 +841,7 @@ export default function ClientMeDashboard({
             ) : (
               <EmptyState
                 title="No history yet"
-                body="Your upcoming and past visits will appear here."
+                body="Your upcoming and past bookings will appear here."
               />
             )}
           </section>

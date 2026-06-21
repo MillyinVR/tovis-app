@@ -123,8 +123,8 @@ export function defaultProCalendarCopy(
     status: 'Status',
     client: 'Client',
     clientNote: 'Client note',
-    appointment: 'Appointment',
-    lastVisit: 'Last visit',
+    appointment: 'Booking',
+    lastVisit: 'Last booking',
     lifetime: 'Lifetime',
     noShows: 'No-shows',
     timeZone: 'TZ',
@@ -156,7 +156,7 @@ export function defaultProCalendarCopy(
   mobilePendingRequest: {
     label: '◆ Pending request',
     clientFallback: 'Client',
-    appointmentFallback: 'Appointment',
+    appointmentFallback: 'Booking',
     moreSuffix: 'more',
     openAllLabel: 'Open all pending requests',
     openRequestsLabel: 'Open pending booking requests',
@@ -262,7 +262,7 @@ export function defaultProCalendarCopy(
 
     baseScheduleLabel: 'Base schedule',
     baseScheduleDescription:
-      'These hours control when clients can request appointments before booking-specific rules, blocks, and overrides are applied.',
+      'These hours control when clients can request bookings before booking-specific rules, blocks, and overrides are applied.',
     setHoursPerDayLabel: 'Set hours per day',
     daysOnLabel: 'Days on',
 
@@ -316,10 +316,10 @@ export function defaultProCalendarCopy(
   },
 
   bookingModal: {
-    title: 'Appointment',
+    title: 'Booking',
     clientFallback: 'Client',
     serviceFallback: 'Service',
-    appointmentTimeLabel: 'Appointment time',
+    appointmentTimeLabel: 'Booking time',
     servicesLabel: 'Services',
     rescheduleDateLabel: 'New date',
     rescheduleTimeLabel: 'New time',
@@ -335,12 +335,12 @@ export function defaultProCalendarCopy(
   confirmChangeModal: {
     title: 'Confirm calendar change',
     description:
-      'Review this change before it updates the appointment.',
+      'Review this change before it updates the booking.',
     outsideHoursTitle: 'Outside working hours',
     outsideHoursDescription:
       'This time is outside the current working-hours rules. Add a reason to override it.',
     overrideReasonLabel: 'Override reason',
-    overrideReasonPlaceholder: 'Why is this appointment allowed here?',
+    overrideReasonPlaceholder: 'Why is this booking allowed here?',
     cancelLabel: 'Cancel',
     confirmLabel: 'Confirm change',
     applyingLabel: 'Applying…',

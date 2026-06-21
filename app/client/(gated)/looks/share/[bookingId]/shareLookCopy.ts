@@ -6,7 +6,7 @@
 
 export const shareLookCopy = {
   title: 'Share your look',
-  subtitlePrefix: 'From your visit',
+  subtitlePrefix: 'From your booking',
 
   beforeLabel: 'Before',
   afterLabel: 'After',

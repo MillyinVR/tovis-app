@@ -23,7 +23,7 @@ export default function AboutPage() {
           </h1>
           <p className="mt-4 text-[14px] leading-relaxed text-textSecondary">
             {brand.displayName} is a beauty-services platform for professionals and clients.
-            Professionals use it to manage business and appointment flows.
+            Professionals use it to manage business and booking flows.
             Clients use it to discover looks, choose services, and manage bookings.
           </p>
         </header>

@@ -965,7 +965,7 @@ export default async function ClientDetailPage(props: {
           <div className="grid gap-2 md:text-right">
             <div className="text-[12px] font-semibold text-textSecondary">
               <div>
-                Total visits:{' '}
+                Total bookings:{' '}
                 <span className="font-black text-textPrimary">
                   {totalVisits}
                 </span>
@@ -973,7 +973,7 @@ export default async function ClientDetailPage(props: {
 
               {lastVisit ? (
                 <div>
-                  Last visit:{' '}
+                  Last booking:{' '}
                   <span className="font-black text-textPrimary">
                     {formatDate(lastVisit.scheduledFor)}
                   </span>
@@ -982,7 +982,7 @@ export default async function ClientDetailPage(props: {
 
               {upcoming ? (
                 <div>
-                  Next visit:{' '}
+                  Next booking:{' '}
                   <span className="font-black text-textPrimary">
                     {formatDate(upcoming.scheduledFor)}
                   </span>

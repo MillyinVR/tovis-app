@@ -130,7 +130,7 @@ function computeRebookInfo(
 
     return {
       mode: 'BOOKED_NEXT_APPOINTMENT',
-      label: `Next appointment booked: ${formatAppointmentWhen(bookedAt, timeZone)}`,
+      label: `Next booking confirmed: ${formatAppointmentWhen(bookedAt, timeZone)}`,
       bookedAt,
     }
   }
@@ -395,7 +395,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
         </div>
 
         <div className="mt-2 text-xs text-textSecondary/80">
-          Original appointment:{' '}
+          Original booking:{' '}
           <span className="font-black text-textPrimary">
             {sourceAppointmentLabel}
           </span>
@@ -417,7 +417,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
               {checkoutParam === 'success' &&
               checkoutAvailability.status !== 'ALREADY_PAID'
                 ? 'Thanks! We’re finalizing your payment — this can take a moment to confirm.'
-                : 'This appointment is paid in full. Thank you!'}
+                : 'This booking is paid in full. Thank you!'}
             </div>
           </section>
         ) : checkoutAvailability.status === 'PAYABLE' ? (
@@ -452,7 +452,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
         <MediaStrip title="After photos" items={afterMedia} />
 
         <SectionCard
-          title="Appointment details"
+          title="Booking details"
           subtitle="Reference info from the completed service"
         >
           <div className="grid gap-2 text-sm text-textSecondary">
@@ -496,7 +496,7 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
           {nextBooking ? (
             <div className="mt-4 rounded-card border border-white/10 bg-bgPrimary p-4">
               <div className="text-sm font-black text-textPrimary">
-                Your next appointment is already booked
+                Your next booking is already confirmed
               </div>
 
               <div className="mt-1 text-sm text-textSecondary">

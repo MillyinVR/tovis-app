@@ -191,21 +191,21 @@ const TIME_INPUT_STEP_SECONDS =
   DEFAULT_CALENDAR_STEP_MINUTES * SECONDS_PER_MINUTE
 
 const DEFAULT_COPY: BookingModalCopy = {
-  eyebrow: '◆ Appointment',
+  eyebrow: '◆ Booking',
   closeLabel: 'Close',
   cancelLabel: 'Cancel',
 
-  appointmentFallback: 'Appointment',
-  appointmentDetailsFallback: 'Appointment details',
+  appointmentFallback: 'Booking',
+  appointmentDetailsFallback: 'Booking details',
   loadingBooking: 'Loading booking…',
   bookingUnavailable: 'Booking details are not available.',
 
   mobileModeLabel: 'Mobile',
   salonModeLabel: 'In-salon',
 
-  editAppointmentTitle: 'Edit appointment',
+  editAppointmentTitle: 'Edit booking',
   editAppointmentDescription:
-    'Change the appointment time, services, and client notification settings.',
+    'Change the booking time, services, and client notification settings.',
 
   clientLabel: 'Client',
   whenLabel: 'When',

@@ -13,9 +13,9 @@ import EmptyState from '@/app/_components/boundaries/EmptyState'
 export const dynamic = 'force-dynamic'
 
 function formatLastSeen(booking: { scheduledFor: Date } | null) {
-  if (!booking) return 'No visits yet'
+  if (!booking) return 'No bookings yet'
 
-  return `Last visit: ${booking.scheduledFor.toLocaleDateString(undefined, {
+  return `Last booking: ${booking.scheduledFor.toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
