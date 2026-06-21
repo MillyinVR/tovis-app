@@ -45,6 +45,7 @@ import {
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
 import { moneyToFixed2String, type MoneyInput } from '@/lib/money'
+import { fullName } from '@/lib/names'
 import { buildProSessionCloseoutChecklist } from '@/lib/proSession/closeoutChecklist'
 
 export const dynamic = 'force-dynamic'
@@ -79,13 +80,6 @@ type BookingServiceItemForInitial = {
 
 function loginHref(bookingId: string): string {
   return `/login?from=${encodeURIComponent(sessionHubHref(bookingId))}`
-}
-
-function fullName(
-  firstName: string | null | undefined,
-  lastName: string | null | undefined,
-): string {
-  return `${firstName ?? ''} ${lastName ?? ''}`.trim()
 }
 
 function moneyText(value: MoneyInput | null | undefined): string {

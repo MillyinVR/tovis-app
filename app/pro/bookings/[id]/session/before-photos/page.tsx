@@ -21,6 +21,7 @@ import {
   labelForConsultationStatus,
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
+import { fullName } from '@/lib/names'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,13 +33,6 @@ type PageProps = {
 
 function loginHref(bookingId: string): string {
   return `/login?from=${encodeURIComponent(beforePhotosHref(bookingId))}`
-}
-
-function fullName(
-  firstName: string | null | undefined,
-  lastName: string | null | undefined,
-): string {
-  return `${firstName ?? ''} ${lastName ?? ''}`.trim()
 }
 
 function ChevronLeftIcon({ size = 13 }: { size?: number }) {

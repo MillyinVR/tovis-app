@@ -21,6 +21,7 @@ import {
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import { fullName } from '@/lib/names'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,13 +31,6 @@ type PageProps = {
 
 function loginHref(bookingId: string): string {
   return `/login?from=${encodeURIComponent(afterPhotosHref(bookingId))}`
-}
-
-function fullName(
-  firstName: string | null | undefined,
-  lastName: string | null | undefined,
-): string {
-  return `${firstName ?? ''} ${lastName ?? ''}`.trim()
 }
 
 function ChevronLeftIcon({ size = 13 }: { size?: number }) {
