@@ -180,7 +180,7 @@ export default async function AdminHomePage() {
       <div className="rounded-card border border-surfaceGlass/12 bg-bgSecondary p-4">
         <div className="text-sm font-extrabold">Next we’re building</div>
         <div className="mt-1 text-sm text-textSecondary">
-          1) Pro approval workflow, 2) Services/categories CRUD, 3) License expiry dashboard + reminders.
+          License expiry dashboard + automated reminders, so credentials that lapse get caught before they become a problem.
         </div>
       </div>
 

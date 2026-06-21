@@ -165,11 +165,9 @@ export async function POST(req: Request, ctx: RouteContext) {
     })
 
     if (!result.ok) {
-      console.warn('[messages/thread send] blocked', { debugId, status: result.status, error: result.error })
       return jsonFail(result.status, result.error)
     }
 
-    console.log('[messages/thread send] ok', { debugId, threadId, msgId: result.msg.id })
     return jsonOk({ message: result.msg })
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : 'Internal error'

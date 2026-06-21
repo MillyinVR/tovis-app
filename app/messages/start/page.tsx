@@ -123,7 +123,6 @@ export default async function MessagesStartPage(props: PageProps) {
   const resolvedContext = resolveContextFromSearchParams(sp)
 
   if (!resolvedContext) {
-    console.warn('[messages/start] missing context')
     redirect('/messages')
   }
 
@@ -142,16 +141,10 @@ export default async function MessagesStartPage(props: PageProps) {
   })
 
   if (!outcome.ok) {
-    console.warn('[messages/start] resolve failed', {
-      status: outcome.status,
-      error: outcome.error,
-    })
-
     redirect('/messages')
   }
 
   if (!outcome.thread) {
-    console.warn('[messages/start] resolve returned no thread')
     redirect('/messages')
   }
 

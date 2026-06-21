@@ -67,12 +67,6 @@ export async function POST(req: Request) {
     const createIfMissing = asBool(body.createIfMissing)
 
     if (!contextType || !contextId) {
-      console.warn('[messages/resolve] missing context', {
-        debugId,
-        contextType,
-        contextId,
-      })
-
       return jsonFail(400, 'Missing contextType/contextId.')
     }
 
@@ -91,24 +85,12 @@ export async function POST(req: Request) {
     })
 
     if (!outcome.ok) {
-      console.warn('[messages/resolve] blocked', {
-        debugId,
-        status: outcome.status,
-        error: outcome.error,
-      })
-
       return outcome.details
         ? jsonFail(outcome.status, outcome.error, outcome.details)
         : jsonFail(outcome.status, outcome.error)
     }
 
     if (!outcome.thread) {
-      console.info('[messages/resolve] no existing thread; not creating', {
-        debugId,
-        contextType,
-        contextId,
-      })
-
       return jsonOk({ thread: null })
     }
 
