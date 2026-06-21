@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
+import { Button, Card, buttonClassName } from '@/app/_components/ui'
 
 export const dynamic = 'force-dynamic'
 
@@ -146,7 +147,7 @@ export default async function ProRemindersPage() {
 
           <Link
             href="/pro"
-            className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+            className={buttonClassName({ variant: 'ghost', size: 'sm' })}
           >
             ← Back to dashboard
           </Link>
@@ -155,7 +156,7 @@ export default async function ProRemindersPage() {
 
       {/* CREATE */}
       <section className="mb-6">
-        <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
+        <Card variant="glass" padding="md">
           <div className="mb-3">
             <div className="text-[15px] font-black text-textPrimary">
               Add a reminder
@@ -259,15 +260,12 @@ export default async function ProRemindersPage() {
             <input type="hidden" name="type" value="GENERAL" />
 
             <div className="flex justify-end">
-              <button
-                type="submit"
-                className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
-              >
+              <Button type="submit" variant="primary" size="sm">
                 Save reminder
-              </button>
+              </Button>
             </div>
           </form>
-        </div>
+        </Card>
       </section>
 
       {/* OPEN */}
@@ -294,10 +292,7 @@ export default async function ProRemindersPage() {
                 : false
 
               return (
-                <div
-                  key={reminder.id}
-                  className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4"
-                >
+                <Card key={reminder.id} variant="glass" padding="md">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="text-[13px] font-black text-textPrimary">
@@ -356,7 +351,7 @@ export default async function ProRemindersPage() {
                       </form>
                     </div>
                   </div>
-                </div>
+                </Card>
               )
             })}
           </div>
