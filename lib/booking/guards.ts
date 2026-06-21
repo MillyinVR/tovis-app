@@ -65,7 +65,9 @@ export async function getProOwnedBooking(args: {
 
   if (!booking) return { ok: false as const, status: 404, error: 'Booking not found.' }
   if (booking.professionalId !== proId) {
-    return { ok: false as const, status: 403, error: 'Forbidden' }
+    // Foreign booking → uniform 404 (no existence leak), matching the rest of
+    // the booking-ownership surfaces.
+    return { ok: false as const, status: 404, error: 'Booking not found.' }
   }
 
   return { ok: true as const, booking }

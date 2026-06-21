@@ -209,7 +209,9 @@ async function loadBookingOrThrow(
     throw new ClientLookError('BOOKING_NOT_FOUND', 'Visit not found.')
   }
   if (booking.clientId !== args.clientId) {
-    throw new ClientLookError('FORBIDDEN', 'This visit is not yours to share.')
+    // A foreign visit is indistinguishable from a missing one (uniform 404) so
+    // the API never reveals that another client's visit exists.
+    throw new ClientLookError('BOOKING_NOT_FOUND', 'Visit not found.')
   }
   if (booking.status !== 'COMPLETED') {
     throw new ClientLookError(
