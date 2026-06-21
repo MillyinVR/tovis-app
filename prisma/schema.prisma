@@ -486,6 +486,7 @@ enum BookingCloseoutAuditAction {
 enum NotificationRecipientKind {
   PRO
   CLIENT
+  ADMIN
 }
 
 enum NotificationEventKey {
@@ -516,6 +517,14 @@ enum NotificationEventKey {
   REFERRAL_TAP_RECEIVED
   REFERRAL_CONFIRMED
   REFERRAL_CONVERTED
+
+  // Admin operational alerts — fanned out to all users with role ADMIN.
+  // A pro submitted a verification document or edited their license (re-review).
+  ADMIN_VERIFICATION_REVIEW_NEEDED
+  // A new support ticket was created.
+  ADMIN_SUPPORT_TICKET_CREATED
+  // A new viral-service request is pending an admin decision.
+  ADMIN_VIRAL_REQUEST_PENDING
 }
 
 enum NotificationChannel {
@@ -680,6 +689,45 @@ model Notification {
   @@index([proTenantId])
 }
 
+// Admin operational-alert inbox. Keyed by the admin User (every user with role
+// ADMIN gets their own row), mirroring the pro/client inbox shape. There is no
+// admin-preference table yet: admins receive the event's default channels
+// (in-app + email; never SMS) with no quiet-hours suppression.
+model AdminNotification {
+  id          String @id @default(cuid())
+  adminUserId String
+
+  eventKey NotificationEventKey
+  priority NotificationPriority @default(NORMAL)
+
+  title String
+  body  String @default("")
+  href  String @default("")
+
+  // structured payload for UI + future-proofing
+  data Json?
+
+  dedupeKey String?
+
+  // state
+  seenAt     DateTime?
+  readAt     DateTime?
+  clickedAt  DateTime?
+  archivedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  adminUser  User                   @relation("AdminNotifications", fields: [adminUserId], references: [id], onDelete: Cascade)
+  dispatches NotificationDispatch[] @relation("AdminInboxNotificationDispatches")
+
+  @@unique([adminUserId, dedupeKey])
+  // main inbox query
+  @@index([adminUserId, archivedAt, readAt, createdAt])
+  // filters
+  @@index([adminUserId, eventKey, archivedAt, createdAt])
+}
+
 model NotificationDispatch {
   id String @id @default(cuid())
 
@@ -708,6 +756,7 @@ model NotificationDispatch {
   // optional links back to product-facing inbox records
   notificationId       String?
   clientNotificationId String?
+  adminNotificationId  String?
 
   title   String
   body    String @default("")
@@ -726,6 +775,7 @@ model NotificationDispatch {
 
   notification       Notification?       @relation("ProNotificationDispatches", fields: [notificationId], references: [id], onDelete: SetNull)
   clientNotification ClientNotification? @relation("ClientInboxNotificationDispatches", fields: [clientNotificationId], references: [id], onDelete: SetNull)
+  adminNotification  AdminNotification?  @relation("AdminInboxNotificationDispatches", fields: [adminNotificationId], references: [id], onDelete: SetNull)
 
   deliveries                  NotificationDelivery[]
   viralRequestApprovalFanOuts ViralRequestApprovalFanOut[]
@@ -736,6 +786,7 @@ model NotificationDispatch {
   @@index([userId, createdAt])
   @@index([notificationId])
   @@index([clientNotificationId])
+  @@index([adminNotificationId])
 }
 
 model NotificationDelivery {
@@ -1080,6 +1131,7 @@ model User {
   threadParticipants MessageThreadParticipant[] @relation("UserThreadParticipants")
 
   notificationActor                  Notification[]              @relation("NotificationActor")
+  adminNotifications                 AdminNotification[]         @relation("AdminNotifications")
   notificationDispatches             NotificationDispatch[]      @relation("UserNotificationDispatches")
   issuedClientActionTokens           ClientActionToken[]         @relation("IssuedClientActionTokens")
   recordedConsultationApprovalProofs ConsultationApprovalProof[] @relation("RecordedConsultationApprovalProofs")

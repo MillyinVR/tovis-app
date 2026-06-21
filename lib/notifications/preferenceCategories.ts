@@ -86,6 +86,12 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.REFERRAL_TAP_RECEIVED]: 'Referral tap',
   [NotificationEventKey.REFERRAL_CONFIRMED]: 'Referral confirmed',
   [NotificationEventKey.REFERRAL_CONVERTED]: 'Referral converted',
+  // Admin operational alerts are not user-manageable preferences (admins have no
+  // preference surface), so these never appear in a category — labels exist only
+  // to keep this map exhaustive over NotificationEventKey.
+  [NotificationEventKey.ADMIN_VERIFICATION_REVIEW_NEEDED]: 'Verification review needed',
+  [NotificationEventKey.ADMIN_SUPPORT_TICKET_CREATED]: 'New support ticket',
+  [NotificationEventKey.ADMIN_VIRAL_REQUEST_PENDING]: 'Viral request pending',
 }
 
 type CategoryDef = {

@@ -8,6 +8,7 @@ import {
   listClientViralRequests,
 } from '@/lib/viralRequests'
 import { toViralRequestDto } from '@/lib/viralRequests/contracts'
+import { emitAdminViralRequestPending } from '@/lib/notifications/adminNotifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -106,14 +107,25 @@ export async function POST(req: Request) {
       }
     }
 
-    const created = await createClientViralRequest(prisma, {
-      clientId: auth.clientId,
-      name: pickTrimmedString(body.name) ?? '',
-      description: pickTrimmedString(body.description),
-      sourceUrl: pickTrimmedString(body.sourceUrl),
-      requestedCategoryId,
-      links: pickStringArray(body.links),
-      mediaUrls: pickStringArray(body.mediaUrls),
+    const created = await prisma.$transaction(async (tx) => {
+      const row = await createClientViralRequest(tx, {
+        clientId: auth.clientId,
+        name: pickTrimmedString(body.name) ?? '',
+        description: pickTrimmedString(body.description),
+        sourceUrl: pickTrimmedString(body.sourceUrl),
+        requestedCategoryId,
+        links: pickStringArray(body.links),
+        mediaUrls: pickStringArray(body.mediaUrls),
+      })
+
+      // Alert admins that a viral request is pending a decision.
+      await emitAdminViralRequestPending({
+        tx,
+        requestId: row.id,
+        name: row.name,
+      })
+
+      return row
     })
 
     return jsonOk(

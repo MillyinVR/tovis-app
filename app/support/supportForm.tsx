@@ -2,6 +2,7 @@
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { emitAdminSupportTicketCreated } from '@/lib/notifications/adminNotifications'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,15 +23,20 @@ export default function SupportForm({ role }: Props) {
 
     if (!subject || !message) redirect('/support?error=missing')
 
-    await prisma.supportTicket.create({
-      data: {
-        createdByUserId: user?.id ?? null,
-        createdByRole: role,
-        subject,
-        message,
-        status: 'OPEN',
-      },
-      select: { id: true },
+    await prisma.$transaction(async (tx) => {
+      const ticket = await tx.supportTicket.create({
+        data: {
+          createdByUserId: user?.id ?? null,
+          createdByRole: role,
+          subject,
+          message,
+          status: 'OPEN',
+        },
+        select: { id: true },
+      })
+
+      // Alert admins that a new support ticket needs attention.
+      await emitAdminSupportTicketCreated({ tx, ticketId: ticket.id, subject })
     })
 
     redirect('/support?sent=1')

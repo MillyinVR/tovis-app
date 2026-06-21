@@ -17,6 +17,8 @@ export type AppRole = 'PRO' | 'CLIENT' | 'ADMIN' | 'GUEST'
 type Props = {
   role: AppRole
   messagesBadge?: string | null
+  /** Unread admin-notification count badge (ADMIN footer only). */
+  adminBadge?: string | null
   /** Workspaces the user can switch into (empty when only one). */
   workspaces?: WorkspaceOption[]
 }
@@ -88,6 +90,7 @@ function useFooterMount(): HTMLElement | null {
 export default function FooterShell({
   role,
   messagesBadge = null,
+  adminBadge = null,
   workspaces = [],
 }: Props) {
   const pathname = usePathname()
@@ -127,7 +130,7 @@ export default function FooterShell({
       observer.disconnect()
       clearFooterSpace()
     }
-  }, [mountEl, updateFooterSpace, effectiveRole, messagesBadge])
+  }, [mountEl, updateFooterSpace, effectiveRole, messagesBadge, adminBadge])
 
   if (!mountEl) return null
 
@@ -137,7 +140,7 @@ export default function FooterShell({
     ) : effectiveRole === 'CLIENT' ? (
       <ClientSessionFooter messagesBadge={messagesBadge} />
     ) : effectiveRole === 'ADMIN' ? (
-      <AdminSessionFooter workspaces={workspaces} />
+      <AdminSessionFooter notificationsBadge={adminBadge} workspaces={workspaces} />
     ) : (
       <GuestSessionFooter />
     )

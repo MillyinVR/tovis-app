@@ -1,6 +1,7 @@
 // app/api/pro/verification-docs/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { emitAdminVerificationReviewNeeded } from '@/lib/notifications/adminNotifications'
 import { VerificationStatus, VerificationDocumentType } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
@@ -86,6 +87,13 @@ export async function POST(req: Request) {
           select: { id: true },
         })
       }
+
+      // Alert admins that there's a verification document to review.
+      await emitAdminVerificationReviewNeeded({
+        tx,
+        professionalId: proId,
+        verificationDocumentId: doc.id,
+      })
 
       return doc
     })

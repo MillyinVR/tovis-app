@@ -35,7 +35,8 @@ import { getNotificationEventDefinition } from '../eventKeys'
 const RECIPIENT_KIND = {
   PRO: 'PRO',
   CLIENT: 'CLIENT',
-} satisfies Record<'PRO' | 'CLIENT', NotificationRecipientKind>
+  ADMIN: 'ADMIN',
+} satisfies Record<'PRO' | 'CLIENT' | 'ADMIN', NotificationRecipientKind>
 
 const MAX_ID = 64
 const MAX_SOURCE_KEY = 256
@@ -63,6 +64,7 @@ const enqueueDispatchSelect = {
   recipientTimeZone: true,
   notificationId: true,
   clientNotificationId: true,
+  adminNotificationId: true,
   title: true,
   body: true,
   href: true,
@@ -133,9 +135,16 @@ export type EnqueueClientDispatchRecipient = EnqueueDispatchRecipientBase & {
   clientId: string
 }
 
+export type EnqueueAdminDispatchRecipient = EnqueueDispatchRecipientBase & {
+  kind: typeof RECIPIENT_KIND.ADMIN
+  /** The admin's User id — admins are User records with role ADMIN. */
+  adminUserId: string
+}
+
 export type EnqueueDispatchRecipient =
   | EnqueueProDispatchRecipient
   | EnqueueClientDispatchRecipient
+  | EnqueueAdminDispatchRecipient
 
 export type EnqueueDispatchArgs = {
   key: NotificationEventKey
@@ -152,6 +161,7 @@ export type EnqueueDispatchArgs = {
 
   notificationId?: string | null
   clientNotificationId?: string | null
+  adminNotificationId?: string | null
 
   /**
    * Optional narrowing only.
@@ -199,6 +209,7 @@ type NormalizedEnqueueDispatchArgs = {
 
   notificationId: string | null
   clientNotificationId: string | null
+  adminNotificationId: string | null
 
   requestedChannels: readonly NotificationChannel[] | null
 }
@@ -242,6 +253,12 @@ function isProDispatchRecipient(
   return recipient.kind === RECIPIENT_KIND.PRO
 }
 
+function isAdminDispatchRecipient(
+  recipient: EnqueueDispatchRecipient,
+): recipient is EnqueueAdminDispatchRecipient {
+  return recipient.kind === RECIPIENT_KIND.ADMIN
+}
+
 function resolveInAppTargetId(
   recipient: EnqueueDispatchRecipient,
 ): string | null {
@@ -250,6 +267,10 @@ function resolveInAppTargetId(
 
   if (isProDispatchRecipient(recipient)) {
     return normNullableString(recipient.professionalId, MAX_ID)
+  }
+
+  if (isAdminDispatchRecipient(recipient)) {
+    return normNullableString(recipient.adminUserId, MAX_ID)
   }
 
   return normNullableString(recipient.clientId, MAX_ID)
@@ -493,6 +514,14 @@ function buildDispatchCreateData(args: {
         }
       : {}),
 
+    ...(normalized.adminNotificationId
+      ? {
+          adminNotification: {
+            connect: { id: normalized.adminNotificationId },
+          },
+        }
+      : {}),
+
     deliveries: {
       create: deliveryRows.map((row) => ({
         channel: row.channel,
@@ -531,10 +560,17 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
     args.clientNotificationId,
     MAX_ID,
   )
+  const adminNotificationId = normNullableString(
+    args.adminNotificationId,
+    MAX_ID,
+  )
 
-  if (notificationId && clientNotificationId) {
+  if (
+    [notificationId, clientNotificationId, adminNotificationId].filter(Boolean)
+      .length > 1
+  ) {
     throw new Error(
-      'enqueueDispatch: notificationId and clientNotificationId are mutually exclusive',
+      'enqueueDispatch: notificationId, clientNotificationId and adminNotificationId are mutually exclusive',
     )
   }
 
@@ -604,6 +640,46 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
       ),
       notificationId,
       clientNotificationId,
+      adminNotificationId,
+      requestedChannels: args.requestedChannels ?? null,
+    }
+  }
+
+  if (isAdminDispatchRecipient(args.recipient)) {
+    const adminUserId = normRequiredString(args.recipient.adminUserId, MAX_ID)
+
+    if (!adminUserId) {
+      throw new Error('enqueueDispatch: missing recipient.adminUserId')
+    }
+
+    return {
+      key: args.key,
+      sourceKey,
+      recipientKind: RECIPIENT_KIND.ADMIN,
+      // The admin's User id is both the dispatch userId and the in-app target.
+      userId: userId ?? adminUserId,
+      professionalId: null,
+      clientId: null,
+      inAppTargetId: inAppTargetId ?? adminUserId,
+      phone,
+      phoneVerifiedAt: args.recipient.phoneVerifiedAt ?? null,
+      transactionalSmsConsentAt: args.recipient.transactionalSmsConsentAt ?? null,
+      email,
+      emailVerifiedAt: args.recipient.emailVerifiedAt ?? null,
+      timeZone,
+      preference: args.recipient.preference ?? null,
+      title,
+      body: normDefaultString(args.body, MAX_BODY),
+      href: normInternalHref(args.href, MAX_HREF),
+      payload: normalizeJsonField(args.payload),
+      priority: args.priority ?? eventDefinition.defaultPriority,
+      scheduledFor: normalizeDate(
+        args.scheduledFor ?? new Date(),
+        'scheduledFor',
+      ),
+      notificationId,
+      clientNotificationId,
+      adminNotificationId,
       requestedChannels: args.requestedChannels ?? null,
     }
   }
@@ -640,6 +716,7 @@ function normalizeArgs(args: EnqueueDispatchArgs): NormalizedEnqueueDispatchArgs
     ),
     notificationId,
     clientNotificationId,
+    adminNotificationId,
     requestedChannels: args.requestedChannels ?? null,
   }
 }
