@@ -287,6 +287,31 @@ body {
   overscroll-behavior: contain;
 }
 
+/* ===== Tap-target hit area =====
+   Projects a centered, transparent 44x44px hit area onto an element via a
+   pseudo-element, so icon-only / compact controls meet the native mobile
+   minimum tap target WITHOUT changing their visual size or affecting layout.
+   Apply to the click target itself (button / link). The pseudo only enlarges
+   the pointer/touch surface; it paints nothing. Avoid on controls whose
+   visible box is already >= 44px, or that sit inside an `overflow-hidden`
+   ancestor that would clip the extended area (enlarge the box there instead). */
+/* `.tap-target` forces a positioning context (for statically-positioned
+   controls). `.tap-target-keep` is for controls that are ALREADY positioned
+   (absolute/fixed) and must not have their position overridden. */
+.tap-target {
+  position: relative;
+}
+.tap-target::after,
+.tap-target-keep::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  height: 44px;
+  width: 44px;
+  transform: translate(-50%, -50%);
+}
+
 /* ===== Skeleton shimmer ===== */
 @keyframes avail-shimmer {
   0%   { background-position: 200% center; }

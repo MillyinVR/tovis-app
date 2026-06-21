@@ -383,7 +383,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                 type="button"
                 onClick={beginClose}
                 className={[
-                  'grid h-9 w-9 place-items-center rounded-full border text-[14px] font-black',
+                  'tap-target grid h-9 w-9 place-items-center rounded-full border text-[14px] font-black',
                   busy
                     ? 'cursor-not-allowed border-white/10 text-textSecondary opacity-70'
                     : 'border-white/10 text-textPrimary hover:border-white/20',

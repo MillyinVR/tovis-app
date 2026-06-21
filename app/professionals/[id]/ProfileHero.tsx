@@ -49,7 +49,7 @@ export default function ProfileHero({
         <div className="brand-profile-hero-actions">
           <Link
             href={backHref}
-            className="brand-button-ghost brand-focus grid h-9 w-9 place-items-center text-[18px] font-black"
+            className="brand-button-ghost brand-focus tap-target grid h-9 w-9 place-items-center text-[18px] font-black"
             aria-label="Back to Looks"
             title="Back to Looks"
           >

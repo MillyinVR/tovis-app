@@ -255,7 +255,7 @@ export default function CommentsDrawer({
           </div>
           <button
             onClick={onClose}
-            className="rounded-full p-1 text-textPrimary/80 hover:bg-surfaceGlass/10"
+            className="tap-target rounded-full p-1 text-textPrimary/80 hover:bg-surfaceGlass/10"
             aria-label="Close comments"
             type="button"
           >
@@ -347,7 +347,7 @@ export default function CommentsDrawer({
                 type="button"
                 onClick={() => setReplyTo(null)}
                 aria-label="Cancel reply"
-                className="ml-2 rounded-full p-0.5 hover:text-textPrimary"
+                className="tap-target ml-2 rounded-full p-0.5 hover:text-textPrimary"
               >
                 <X size={14} />
               </button>

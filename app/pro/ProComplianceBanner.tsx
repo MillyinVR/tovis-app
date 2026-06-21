@@ -229,7 +229,7 @@ export default function ProComplianceBanner() {
 
                 setBannerPx(0)
               }}
-              className="rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-white/20"
+              className="tap-target rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-xs font-black text-textPrimary hover:border-white/20"
               aria-label="Dismiss"
             >
               ✕

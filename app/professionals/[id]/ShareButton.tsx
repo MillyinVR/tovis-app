@@ -142,7 +142,7 @@ export default function ShareButton({
 function buttonClassNameForVariant(variant: ShareButtonVariant): string {
   if (variant === 'icon') {
     return [
-      'brand-button-ghost brand-focus',
+      'brand-button-ghost brand-focus tap-target',
       'inline-flex h-10 w-10 items-center justify-center rounded-full',
       'text-[14px] font-black transition',
     ].join(' ')

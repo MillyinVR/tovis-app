@@ -510,7 +510,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
                     type="button"
                     onClick={() => decrement(recommendation.id)}
                     disabled={checkoutLocked || isPending || quantity <= 0}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgSecondary text-[16px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+                    className="tap-target inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgSecondary text-[16px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label={`Decrease quantity for ${productName}`}
                   >
                     −
@@ -533,7 +533,7 @@ export default function AftercareProductRecommendationsCard(props: Props) {
                     type="button"
                     onClick={() => increment(recommendation.id)}
                     disabled={checkoutLocked || isPending}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgSecondary text-[16px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
+                    className="tap-target inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-bgSecondary text-[16px] font-black text-textPrimary disabled:cursor-not-allowed disabled:opacity-50"
                     aria-label={`Increase quantity for ${productName}`}
                   >
                     +

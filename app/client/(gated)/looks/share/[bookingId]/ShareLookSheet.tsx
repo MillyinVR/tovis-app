@@ -352,7 +352,7 @@ function PhotoSlot(props: {
           type="button"
           onClick={onClear}
           aria-label={`Remove ${label} photo`}
-          className="absolute left-2 top-2 grid h-8 w-8 place-items-center rounded-lg bg-bgPrimary/70 text-textPrimary"
+          className="tap-target-keep absolute left-2 top-2 grid h-8 w-8 place-items-center rounded-lg bg-bgPrimary/70 text-textPrimary"
         >
           ✕
         </button>
