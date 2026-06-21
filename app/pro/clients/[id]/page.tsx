@@ -15,7 +15,8 @@ import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileForm
 import EditAlertBannerForm from './EditAlertBannerForm'
 import NewAllergyForm from './NewAllergyForm'
 import NewNoteForm from './NewNoteForm'
-import { Button, Card, buttonClassName } from '@/app/_components/ui'
+import { Badge, Button, Card, buttonClassName } from '@/app/_components/ui'
+import type { BadgeTone } from '@/app/_components/ui'
 
 export const dynamic = 'force-dynamic'
 
@@ -206,41 +207,23 @@ function buildProToClientMessageHref(args: {
   )}&clientId=${encodeURIComponent(clientId)}`
 }
 
-function statusTone(status: unknown): string {
-  const normalizedStatus = safeUpper(status)
-
-  if (normalizedStatus === 'COMPLETED') {
-    return 'border-toneSuccess/30 text-toneSuccess'
+function statusBadgeTone(status: string): BadgeTone {
+  switch (status) {
+    case 'COMPLETED':
+      return 'success'
+    case 'CANCELLED':
+      return 'danger'
+    case 'ACCEPTED':
+      return 'accent'
+    default:
+      return 'neutral'
   }
-
-  if (normalizedStatus === 'CANCELLED') {
-    return 'border-toneDanger/30 text-toneDanger'
-  }
-
-  if (normalizedStatus === 'ACCEPTED') {
-    return 'border-accentPrimary/30 text-textPrimary'
-  }
-
-  if (normalizedStatus === 'PENDING') {
-    return 'border-white/10 text-textPrimary'
-  }
-
-  return 'border-white/10 text-textSecondary'
 }
 
 function StatusPill({ status }: { status: unknown }) {
   const normalizedStatus = safeUpper(status) || 'UNKNOWN'
 
-  return (
-    <span
-      className={[
-        'inline-flex items-center rounded-full border bg-bgPrimary px-2 py-1 text-[11px] font-black',
-        statusTone(normalizedStatus),
-      ].join(' ')}
-    >
-      {normalizedStatus}
-    </span>
-  )
+  return <Badge tone={statusBadgeTone(normalizedStatus)}>{normalizedStatus}</Badge>
 }
 
 function SectionCard({
@@ -439,9 +422,9 @@ function ClientAllergiesList({ client }: { client: ClientDetailRecord }) {
               {allergy.label}
             </div>
 
-            <span className="shrink-0 rounded-full border border-white/10 bg-bgSecondary px-3 py-1 text-[11px] font-black text-textSecondary">
+            <Badge tone="neutral" className="shrink-0">
               {String(allergy.severity || '').toUpperCase()}
-            </span>
+            </Badge>
           </div>
 
           {allergy.description ? (
@@ -606,9 +589,9 @@ function ServiceHistoryList({
                     {proName}
                   </span>
                   {booking.professionalId === proId ? (
-                    <span className="ml-2 rounded-full border border-white/10 bg-bgSecondary px-2 py-0.5 text-[10px] font-black text-textSecondary">
+                    <Badge tone="neutral" size="sm" className="ml-2">
                       Me
-                    </span>
+                    </Badge>
                   ) : null}
                 </div>
 
@@ -951,10 +934,10 @@ export default async function ClientDetailPage(props: {
             </div>
 
             {client.alertBanner ? (
-              <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-toneWarning/30 bg-bgPrimary px-3 py-1 text-[11px] font-black text-toneWarning">
+              <Badge tone="warn" className="mt-3 max-w-full">
                 <span aria-hidden>⚠</span>
                 <span className="truncate">{client.alertBanner}</span>
-              </div>
+              </Badge>
             ) : null}
           </div>
 
