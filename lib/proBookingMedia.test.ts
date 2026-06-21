@@ -86,7 +86,7 @@ describe('listProBookingMedia', () => {
     expect(mocks.prisma.mediaAsset.findMany).not.toHaveBeenCalled()
   })
 
-  it('returns 403 when the booking belongs to another professional', async () => {
+  it('returns 404 when the booking belongs to another professional (no existence leak)', async () => {
     mocks.prisma.booking.findUnique.mockResolvedValue(bookingRow)
 
     const outcome = await listProBookingMedia({
@@ -97,8 +97,8 @@ describe('listProBookingMedia', () => {
 
     expect(outcome).toEqual({
       ok: false,
-      status: 403,
-      error: 'Forbidden.',
+      status: 404,
+      error: 'Booking not found.',
     })
 
     expect(mocks.prisma.mediaAsset.findMany).not.toHaveBeenCalled()
