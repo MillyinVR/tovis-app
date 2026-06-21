@@ -183,7 +183,7 @@ export default function EditAlertBannerForm({
             cursor: 'pointer',
           }}
         >
-          {loading ? 'Saving…' : 'Save'}
+          {loading ? 'Saving…' : 'Save alert'}
         </button>
       </div>
     </form>

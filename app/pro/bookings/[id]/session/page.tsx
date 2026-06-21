@@ -47,6 +47,7 @@ import {
 import { moneyToFixed2String, type MoneyInput } from '@/lib/money'
 import { fullName } from '@/lib/names'
 import { buildProSessionCloseoutChecklist } from '@/lib/proSession/closeoutChecklist'
+import { labelForBookingStatus } from '@/lib/booking/statusLabel'
 
 export const dynamic = 'force-dynamic'
 
@@ -771,8 +772,8 @@ function ConsultationView({
         title={serviceName}
         subtitle={subtitle}
         pills={[
-          { label: String(bookingStatus), state: 'done' },
-          { label: 'STEP 1 OF 4', state: 'active' },
+          { label: labelForBookingStatus(bookingStatus), state: 'done' },
+          { label: 'Step 1 of 4', state: 'active' },
         ]}
       />
 
