@@ -200,19 +200,18 @@ function makeInviteDeliveryResult() {
   }
 }
 
+/**
+ * Asserts the Tier-B booking-confirmation dispatch for a CLAIMED client
+ * (in-app + email, no SMS). UNCLAIMED clients are notified by the claim invite
+ * instead and get no confirmation dispatch — use
+ * expectNoBookingConfirmedDispatch for those.
+ */
 function expectBookingConfirmedDispatch(args: {
   professionalId: string
   bookingId?: string
   clientId: string
-  userId?: string | null
+  userId: string
   email?: string | null
-  phone?: string | null
-  /**
-   * Expected "View booking" href. Defaults to the gated booking detail route
-   * (claimed clients). UNCLAIMED clients with a freshly minted claim link get
-   * the public claim/overview page instead.
-   */
-  href?: string
 }) {
   const bookingId = args.bookingId ?? 'booking_1'
 
@@ -222,14 +221,13 @@ function expectBookingConfirmedDispatch(args: {
     recipient: expect.objectContaining({
       kind: NotificationRecipientKind.CLIENT,
       clientId: args.clientId,
-      userId: args.userId ?? null,
-      inAppTargetId: args.userId ? args.clientId : null,
+      userId: args.userId,
+      inAppTargetId: args.clientId,
       email: args.email ?? null,
-      phone: args.phone ?? null,
     }),
     title: 'Booking confirmed',
     body: 'Your appointment has been booked.',
-    href: args.href ?? `/client/bookings/${bookingId}`,
+    href: `/client/bookings/${bookingId}`,
     payload: {
       source: 'proCreatedBooking',
       bookingId,
@@ -239,9 +237,20 @@ function expectBookingConfirmedDispatch(args: {
     requestedChannels: [
       NotificationChannel.IN_APP,
       NotificationChannel.EMAIL,
-      NotificationChannel.SMS,
     ],
   })
+}
+
+/**
+ * Asserts NO booking-confirmation dispatch was enqueued — the expected behavior
+ * for UNCLAIMED clients, who are notified by the claim invite (which links to
+ * the booking) rather than a separate confirmation.
+ */
+function expectNoBookingConfirmedDispatch() {
+  for (const call of mocks.enqueueDispatch.mock.calls) {
+    const firstArg = call[0] as { key?: unknown } | undefined
+    expect(firstArg?.key).not.toBe(NotificationEventKey.BOOKING_CONFIRMED)
+  }
 }
 
 describe('createProBookingWithClient', () => {
@@ -528,13 +537,7 @@ describe('createProBookingWithClient', () => {
       idempotencyKey: null,
     })
 
-    expectBookingConfirmedDispatch({
-      professionalId: 'pro_1',
-      clientId: 'client_resolved_1',
-      email: 'newclient@example.com',
-      phone: null,
-      href: '/claim/token_1',
-    })
+    expectNoBookingConfirmedDispatch()
 
     expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledWith({
       tenantContext: rootTenantContext('tenant_root'),
@@ -615,13 +618,7 @@ describe('createProBookingWithClient', () => {
       select: expectedClientProfileSelect,
     })
 
-    expectBookingConfirmedDispatch({
-      professionalId: 'pro_1',
-      clientId: 'client_existing_1',
-      email: 'existing-unclaimed@example.com',
-      phone: null,
-      href: '/claim/token_1',
-    })
+    expectNoBookingConfirmedDispatch()
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
       professionalId: 'pro_1',
@@ -713,7 +710,6 @@ describe('createProBookingWithClient', () => {
       clientId: 'client_claimed_1',
       userId: 'user_claimed_1',
       email: 'claimed@example.com',
-      phone: null,
     })
 
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
@@ -773,13 +769,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expectBookingConfirmedDispatch({
-      professionalId: 'pro_1',
-      clientId: 'client_unclaimed_1',
-      email: 'newclient@example.com',
-      phone: null,
-      href: '/claim/token_1',
-    })
+    expectNoBookingConfirmedDispatch()
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
       professionalId: 'pro_1',
@@ -864,13 +854,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expectBookingConfirmedDispatch({
-      professionalId: 'pro_1',
-      clientId: 'client_unclaimed_1',
-      email: null,
-      phone: '+16195551234',
-      href: '/claim/token_1',
-    })
+    expectNoBookingConfirmedDispatch()
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
       professionalId: 'pro_1',
@@ -942,13 +926,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expectBookingConfirmedDispatch({
-      professionalId: 'pro_1',
-      clientId: 'client_unclaimed_1',
-      email: 'both@example.com',
-      phone: '+16195551234',
-      href: '/claim/token_1',
-    })
+    expectNoBookingConfirmedDispatch()
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledWith({
       professionalId: 'pro_1',
@@ -1017,12 +995,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expectBookingConfirmedDispatch({
-      professionalId: 'pro_1',
-      clientId: 'client_unclaimed_1',
-      email: 'noname@example.com',
-      phone: null,
-    })
+    expectNoBookingConfirmedDispatch()
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
@@ -1144,12 +1117,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expectBookingConfirmedDispatch({
-      professionalId: 'pro_1',
-      clientId: 'client_unclaimed_1',
-      email: 'newclient@example.com',
-      phone: null,
-    })
+    expectNoBookingConfirmedDispatch()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
@@ -1212,12 +1180,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expectBookingConfirmedDispatch({
-      professionalId: 'pro_1',
-      clientId: 'client_unclaimed_1',
-      email: 'newclient@example.com',
-      phone: null,
-    })
+    expectNoBookingConfirmedDispatch()
 
     expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
@@ -1284,12 +1247,7 @@ describe('createProBookingWithClient', () => {
       allowFarFuture: false,
     })
 
-    expectBookingConfirmedDispatch({
-      professionalId: 'pro_1',
-      clientId: 'client_unclaimed_1',
-      email: 'newclient@example.com',
-      phone: null,
-    })
+    expectNoBookingConfirmedDispatch()
     expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
     expect(result).toEqual({
       ok: true,
@@ -1380,24 +1338,28 @@ describe('createProBookingWithClient', () => {
     }
   })
 
-  it('still succeeds when booking confirmation enqueue throws and continues to invite creation', async () => {
+  it('still succeeds when booking confirmation enqueue throws (claimed client)', async () => {
+    // Confirmation only fires for claimed clients now, so the resilience of that
+    // path is exercised with a claimed client. Unclaimed clients are covered by
+    // the invite-delivery resilience test instead.
     mocks.resolveProBookingClient.mockResolvedValueOnce(
       makeResolvedClient({
-        clientId: 'client_unclaimed_1',
-        clientUserId: null,
-        clientEmail: 'newclient@example.com',
-        clientClaimStatus: ClientClaimStatus.UNCLAIMED,
+        clientId: 'client_claimed_1',
+        clientUserId: 'user_claimed_1',
+        clientEmail: 'claimed@example.com',
+        clientClaimStatus: ClientClaimStatus.CLAIMED,
       }),
     )
 
     mockClientProfileSnapshotTwice(
       makeInviteClientSnapshot({
-        id: 'client_unclaimed_1',
-        firstName: 'New',
+        id: 'client_claimed_1',
+        userId: 'user_claimed_1',
+        firstName: 'Claimed',
         lastName: 'Client',
-        email: 'newclient@example.com',
+        email: 'claimed@example.com',
         phone: null,
-        claimStatus: ClientClaimStatus.UNCLAIMED,
+        claimStatus: ClientClaimStatus.CLAIMED,
       }),
     )
 
@@ -1415,11 +1377,7 @@ describe('createProBookingWithClient', () => {
         professionalId: 'pro_1',
         actorUserId: 'user_1',
         overrideReason: null,
-        client: {
-          firstName: 'New',
-          lastName: 'Client',
-          email: 'newclient@example.com',
-        },
+        clientId: 'client_claimed_1',
         offeringId: 'offering_1',
         locationId: 'loc_1',
         locationType: ServiceLocationType.SALON,
@@ -1437,22 +1395,20 @@ describe('createProBookingWithClient', () => {
         expect.objectContaining({
           professionalId: 'pro_1',
           bookingId: 'booking_1',
-          clientId: 'client_unclaimed_1',
+          clientId: 'client_claimed_1',
           error: expect.any(Error),
         }),
       )
-      expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
-      expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledTimes(1)
+      // Claimed clients never auto-create an invite.
+      expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()
+      expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
       expect(result.ok).toBe(true)
 
       if (!result.ok) {
         throw new Error(result.error)
       }
 
-      expect(result.invite).toEqual({
-        id: 'invite_1',
-        token: 'token_1',
-      })
+      expect(result.invite).toBeNull()
     } finally {
       consoleErrorSpy.mockRestore()
     }
@@ -1511,12 +1467,7 @@ describe('createProBookingWithClient', () => {
       })
 
       expect(mocks.createProBooking).toHaveBeenCalledTimes(1)
-      expectBookingConfirmedDispatch({
-        professionalId: 'pro_1',
-        clientId: 'client_unclaimed_1',
-        email: 'newclient@example.com',
-        phone: null,
-      })
+      expectNoBookingConfirmedDispatch()
       expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
       expect(mocks.createClientClaimInviteDelivery).not.toHaveBeenCalled()
       expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -1596,13 +1547,7 @@ describe('createProBookingWithClient', () => {
         allowFarFuture: false,
       })
 
-      expectBookingConfirmedDispatch({
-        professionalId: 'pro_1',
-        clientId: 'client_unclaimed_1',
-        email: 'newclient@example.com',
-        phone: null,
-        href: '/claim/token_1',
-      })
+      expectNoBookingConfirmedDispatch()
       expect(mocks.upsertClientClaimLink).toHaveBeenCalledTimes(1)
       expect(mocks.createClientClaimInviteDelivery).toHaveBeenCalledTimes(1)
       expect(consoleErrorSpy).toHaveBeenCalledWith(

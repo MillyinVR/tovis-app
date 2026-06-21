@@ -43,6 +43,7 @@ const clientDispatchRecipientSelect = {
       emailVerifiedAt: true,
       phone: true,
       phoneVerifiedAt: true,
+      transactionalSmsConsentAt: true,
     },
   },
 } satisfies Prisma.ClientProfileSelect
@@ -468,6 +469,8 @@ async function enqueueNewClientNotificationDispatch(args: {
       inAppTargetId: recipient.client.id,
       phone: preferredPhone.phone,
       phoneVerifiedAt: preferredPhone.phoneVerifiedAt,
+      transactionalSmsConsentAt:
+        recipient.client.user?.transactionalSmsConsentAt ?? null,
       email: recipient.client.user?.email ?? null,
       emailVerifiedAt: recipient.client.user?.emailVerifiedAt ?? null,
       timeZone,

@@ -58,6 +58,17 @@ type QuietHoursWindow = {
   quietHoursEndMinutes: number
 }
 
+/**
+ * Platform default quiet-hours window (recipient-local), applied when a
+ * recipient has NO preference row. 22:00 → 08:00.
+ *
+ * Once a per-user preference row exists it fully overrides this default,
+ * including disabling quiet hours entirely (null/unset window, or a window
+ * whose start equals its end).
+ */
+const DEFAULT_QUIET_HOURS_START_MINUTES = 22 * 60
+const DEFAULT_QUIET_HOURS_END_MINUTES = 8 * 60
+
 const zonedDateTimeFormatterCache = new Map<string, Intl.DateTimeFormat>()
 
 function normalizeNow(value: Date): Date {
@@ -84,11 +95,21 @@ function normalizeMinuteOfDay(value: number | null | undefined): number | null {
 function getQuietHoursWindow(
   preference: NotificationPreferenceLike | null | undefined,
 ): QuietHoursWindow | null {
+  // No preference row on file → apply the platform default quiet-hours window.
+  if (preference == null) {
+    return {
+      quietHoursStartMinutes: DEFAULT_QUIET_HOURS_START_MINUTES,
+      quietHoursEndMinutes: DEFAULT_QUIET_HOURS_END_MINUTES,
+    }
+  }
+
+  // A preference row fully overrides the default. A null/unset window, or one
+  // whose start equals its end, means the recipient has disabled quiet hours.
   const quietHoursStartMinutes = normalizeMinuteOfDay(
-    preference?.quietHoursStartMinutes ?? null,
+    preference.quietHoursStartMinutes ?? null,
   )
   const quietHoursEndMinutes = normalizeMinuteOfDay(
-    preference?.quietHoursEndMinutes ?? null,
+    preference.quietHoursEndMinutes ?? null,
   )
 
   if (

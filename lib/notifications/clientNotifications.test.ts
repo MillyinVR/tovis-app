@@ -97,6 +97,7 @@ describe('lib/notifications/clientNotifications', () => {
         emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         phone: null,
         phoneVerifiedAt: null,
+        transactionalSmsConsentAt: new Date('2026-04-08T11:00:00.000Z'),
       },
     })
 
@@ -172,6 +173,7 @@ describe('lib/notifications/clientNotifications', () => {
         inAppTargetId: 'client_1',
         phone: null,
         phoneVerifiedAt: null,
+        transactionalSmsConsentAt: new Date('2026-04-08T11:00:00.000Z'),
         email: 'client@example.com',
         emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         timeZone: 'America/Los_Angeles',

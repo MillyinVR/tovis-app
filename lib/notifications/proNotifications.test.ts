@@ -80,6 +80,7 @@ describe('lib/notifications/proNotifications', () => {
         emailVerifiedAt: new Date('2026-04-08T07:00:00.000Z'),
         phone: '+15557654321',
         phoneVerifiedAt: new Date('2026-04-08T08:00:00.000Z'),
+        transactionalSmsConsentAt: new Date('2026-04-08T06:00:00.000Z'),
       },
     })
 
@@ -152,6 +153,7 @@ describe('lib/notifications/proNotifications', () => {
             emailVerifiedAt: true,
             phone: true,
             phoneVerifiedAt: true,
+            transactionalSmsConsentAt: true,
           },
         },
       },
@@ -185,6 +187,7 @@ describe('lib/notifications/proNotifications', () => {
         inAppTargetId: 'pro_1',
         phone: '+15551234567',
         phoneVerifiedAt: new Date('2026-04-08T09:00:00.000Z'),
+        transactionalSmsConsentAt: new Date('2026-04-08T06:00:00.000Z'),
         email: 'pro@example.com',
         emailVerifiedAt: new Date('2026-04-08T07:00:00.000Z'),
         timeZone: 'America/Los_Angeles',

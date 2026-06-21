@@ -193,7 +193,9 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
   })
 
   it('claims due deliveries and stamps lease fields plus CLAIMED events', async () => {
-    const now = new Date('2026-04-09T12:00:00.000Z')
+    // 19:00 UTC = 12:00 PDT — outside the default 22:00–08:00 quiet-hours window
+    // so the SMS candidates are claimed rather than deferred.
+    const now = new Date('2026-04-09T19:00:00.000Z')
 
     mockTransaction.notificationDelivery.findMany
       .mockResolvedValueOnce([
@@ -394,7 +396,10 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
   })
 
   it('returns no deliveries when candidates are raced away before guarded updates succeed', async () => {
-    const now = new Date('2026-04-09T12:00:00.000Z')
+    // 19:00 UTC = 12:00 PDT — outside the default 22:00–08:00 quiet-hours window
+    // so the candidates reach the guarded claim update (the raced path under test)
+    // rather than being deferred.
+    const now = new Date('2026-04-09T19:00:00.000Z')
 
     mockTransaction.notificationDelivery.findMany
       .mockResolvedValueOnce([
@@ -431,7 +436,9 @@ describe('lib/notifications/delivery/claimDeliveries', () => {
   })
 
   it('returns only successfully claimed deliveries when some candidates race and some do not', async () => {
-    const now = new Date('2026-04-09T12:00:00.000Z')
+    // 19:00 UTC = 12:00 PDT — outside the default 22:00–08:00 quiet-hours window
+    // so the SMS candidates follow the claim path rather than deferring.
+    const now = new Date('2026-04-09T19:00:00.000Z')
 
     mockTransaction.notificationDelivery.findMany
       .mockResolvedValueOnce([

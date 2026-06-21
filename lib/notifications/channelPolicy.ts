@@ -291,6 +291,13 @@ export function getRecipientChannelCapabilities(args: {
   inAppTargetId?: string | null
   phone?: string | null
   phoneVerifiedAt?: Date | null
+  /**
+   * Transactional SMS consent timestamp (User.transactionalSmsConsentAt).
+   * SMS is only a usable destination when the recipient has both a verified
+   * phone AND recorded consent to receive transactional SMS — a verified phone
+   * alone is not sufficient.
+   */
+  transactionalSmsConsentAt?: Date | null
   email?: string | null
   emailVerifiedAt?: Date | null
 }): RecipientChannelCapabilities {
@@ -301,7 +308,10 @@ export function getRecipientChannelCapabilities(args: {
 
   return {
     hasInAppTarget: inAppTargetId.length > 0,
-    hasSmsDestination: phone.length > 0 && Boolean(args.phoneVerifiedAt),
+    hasSmsDestination:
+      phone.length > 0 &&
+      Boolean(args.phoneVerifiedAt) &&
+      Boolean(args.transactionalSmsConsentAt),
     hasEmailDestination: email.length > 0 && Boolean(args.emailVerifiedAt),
   }
 }

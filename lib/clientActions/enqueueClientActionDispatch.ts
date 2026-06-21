@@ -225,6 +225,18 @@ export async function enqueueClientActionDispatch(
     fallbackAt: scheduledFor,
   })
 
+  /**
+   * SMS at dispatch now also requires transactional SMS consent. For these
+   * snapshot-based magic-link flows the recipient is typically an unclaimed
+   * client with no account-level consent on file, yet the business action IS
+   * "send this secure link to the pro-entered destination". The SMS eligibility
+   * decision for these flows is fully captured by phoneVerifiedAt above (real or
+   * synthetic), so consent mirrors it — keeping the carve-out reaching
+   * phone-only recipients. This is an enqueue-time eligibility timestamp, not an
+   * account-level consent claim.
+   */
+  const transactionalSmsConsentAt = phoneVerifiedAt
+
   return enqueueDispatch({
     key: eventKey,
     sourceKey,
@@ -235,6 +247,7 @@ export async function enqueueClientActionDispatch(
       inAppTargetId: resolveInAppTargetId(args.plan),
       phone: recipientPhone,
       phoneVerifiedAt,
+      transactionalSmsConsentAt,
       email: recipientEmail,
       emailVerifiedAt,
       timeZone: args.plan.recipient.timeZone ?? null,

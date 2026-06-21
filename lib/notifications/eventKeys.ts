@@ -131,7 +131,8 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+      // Tier B confirmation: in-app + email (push later). No SMS for app users.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
     },
   },
 
@@ -143,7 +144,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'booking_started',
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+      // In-app only now (push later) — booking-started is a low-urgency nudge,
+      // not worth SMS or email.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
     },
   },
 
@@ -190,7 +193,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
       NotificationRecipientKind.CLIENT,
     ],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.PRO]: PRO_ALL_CHANNELS,
+      // Pro is the actor here → calm in-app + email confirmation.
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
+      // Client is the affected party → urgent in-app + email + SMS.
       [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
     },
   },
@@ -249,7 +254,8 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+      // Tier B confirmation: in-app + email (push later). No SMS for app users.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
     },
   },
 
@@ -265,7 +271,8 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     ],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
-      [NotificationRecipientKind.CLIENT]: CLIENT_ALL_CHANNELS,
+      // Tier B confirmation: in-app + email (push later). No SMS for app users.
+      [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_EMAIL_CHANNELS,
     },
   },
 
@@ -277,7 +284,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     templateKey: 'review_received',
     supportedRecipients: [NotificationRecipientKind.PRO],
     defaultChannelsByRecipient: {
-      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
+      // Tier C social: in-app only (push later). No email — reviews are not a
+      // durable-record event worth an inbox message.
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_ONLY_CHANNELS,
     },
   },
 
@@ -355,7 +364,9 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     key: NotificationEventKey.PAYMENT_ACTION_REQUIRED,
     defaultPriority: NotificationPriority.HIGH,
     transactional: true,
-    allowQuietHoursBypass: false,
+    // Tier A urgent: a payment that needs action (e.g. failed/3DS) is
+    // time-critical, so it bypasses quiet hours.
+    allowQuietHoursBypass: true,
     templateKey: 'payment_action_required',
     supportedRecipients: [
       NotificationRecipientKind.PRO,

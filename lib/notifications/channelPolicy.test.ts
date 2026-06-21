@@ -41,13 +41,14 @@ function makePreference(
 
 describe('lib/notifications/channelPolicy', () => {
   describe('getRecipientChannelCapabilities', () => {
-    it('reports all capabilities when destinations are present and both phone/email are verified', () => {
+    it('reports all capabilities when destinations are present, both phone/email are verified, and SMS consent exists', () => {
       expect(
         getRecipientChannelCapabilities({
           recipientKind: NotificationRecipientKind.CLIENT,
           inAppTargetId: 'client_1',
           phone: '+15551234567',
           phoneVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
+          transactionalSmsConsentAt: new Date('2026-04-08T12:00:00.000Z'),
           email: 'client@example.com',
           emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         }),
@@ -65,6 +66,25 @@ describe('lib/notifications/channelPolicy', () => {
           inAppTargetId: 'client_1',
           phone: '+15551234567',
           phoneVerifiedAt: null,
+          transactionalSmsConsentAt: new Date('2026-04-08T12:00:00.000Z'),
+          email: 'client@example.com',
+          emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
+        }),
+      ).toEqual({
+        hasInAppTarget: true,
+        hasSmsDestination: false,
+        hasEmailDestination: true,
+      })
+    })
+
+    it('requires transactional SMS consent for SMS capability even with a verified phone', () => {
+      expect(
+        getRecipientChannelCapabilities({
+          recipientKind: NotificationRecipientKind.CLIENT,
+          inAppTargetId: 'client_1',
+          phone: '+15551234567',
+          phoneVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
+          transactionalSmsConsentAt: null,
           email: 'client@example.com',
           emailVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
         }),
@@ -82,6 +102,7 @@ describe('lib/notifications/channelPolicy', () => {
           inAppTargetId: 'client_1',
           phone: '+15551234567',
           phoneVerifiedAt: new Date('2026-04-08T12:00:00.000Z'),
+          transactionalSmsConsentAt: new Date('2026-04-08T12:00:00.000Z'),
           email: 'client@example.com',
           emailVerifiedAt: null,
         }),
@@ -184,9 +205,28 @@ describe('lib/notifications/channelPolicy', () => {
       ])
     })
 
-    it('narrows channels using requestedChannels without expanding beyond defaults', () => {
+    it('omits SMS from a Tier-B client confirmation even with full capabilities', () => {
       const result = resolveChannelPolicy({
         key: NotificationEventKey.BOOKING_CONFIRMED,
+        recipientKind: NotificationRecipientKind.CLIENT,
+        capabilities: makeCapabilities(),
+      })
+
+      // BOOKING_CONFIRMED is Tier B: in-app + email only (push later), never SMS
+      // for app users. SMS is not even in the default channel set, so it is not
+      // evaluated.
+      expect(result.selectedChannels).toEqual([
+        NotificationChannel.IN_APP,
+        NotificationChannel.EMAIL,
+      ])
+      expect(result.evaluations.map((evaluation) => evaluation.channel)).toEqual(
+        [NotificationChannel.IN_APP, NotificationChannel.EMAIL],
+      )
+    })
+
+    it('narrows channels using requestedChannels without expanding beyond defaults', () => {
+      const result = resolveChannelPolicy({
+        key: NotificationEventKey.APPOINTMENT_REMINDER,
         recipientKind: NotificationRecipientKind.CLIENT,
         capabilities: makeCapabilities(),
         requestedChannels: [NotificationChannel.EMAIL],
@@ -214,7 +254,7 @@ describe('lib/notifications/channelPolicy', () => {
 
     it('suppresses channels with missing destinations', () => {
       const result = resolveChannelPolicy({
-        key: NotificationEventKey.BOOKING_CONFIRMED,
+        key: NotificationEventKey.APPOINTMENT_REMINDER,
         recipientKind: NotificationRecipientKind.CLIENT,
         capabilities: makeCapabilities({
           hasSmsDestination: false,
@@ -244,7 +284,7 @@ describe('lib/notifications/channelPolicy', () => {
 
     it('suppresses channels disabled by preference', () => {
       const result = resolveChannelPolicy({
-        key: NotificationEventKey.BOOKING_CONFIRMED,
+        key: NotificationEventKey.APPOINTMENT_REMINDER,
         recipientKind: NotificationRecipientKind.CLIENT,
         capabilities: makeCapabilities(),
         preference: makePreference({
@@ -275,7 +315,7 @@ describe('lib/notifications/channelPolicy', () => {
 
     it('suppresses SMS and EMAIL during quiet hours but keeps IN_APP enabled', () => {
       const result = resolveChannelPolicy({
-        key: NotificationEventKey.BOOKING_CONFIRMED,
+        key: NotificationEventKey.APPOINTMENT_REMINDER,
         recipientKind: NotificationRecipientKind.CLIENT,
         capabilities: makeCapabilities(),
         preference: makePreference({
@@ -377,7 +417,7 @@ describe('lib/notifications/channelPolicy', () => {
 
     it('ignores explicit bypass when the event does not allow quiet-hours bypass', () => {
       const result = resolveChannelPolicy({
-        key: NotificationEventKey.BOOKING_CONFIRMED,
+        key: NotificationEventKey.APPOINTMENT_REMINDER,
         recipientKind: NotificationRecipientKind.CLIENT,
         capabilities: makeCapabilities(),
         preference: makePreference({
@@ -411,7 +451,7 @@ describe('lib/notifications/channelPolicy', () => {
 
     it('treats equal quiet-hours bounds as disabled', () => {
       const result = resolveChannelPolicy({
-        key: NotificationEventKey.BOOKING_CONFIRMED,
+        key: NotificationEventKey.APPOINTMENT_REMINDER,
         recipientKind: NotificationRecipientKind.CLIENT,
         capabilities: makeCapabilities(),
         preference: makePreference({

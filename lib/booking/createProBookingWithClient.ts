@@ -10,7 +10,6 @@ import {
 } from '@prisma/client'
 
 import { createProBooking } from '@/lib/booking/writeBoundary'
-import { buildClientActionLinkForType } from '@/lib/clientActions/linkBuilders'
 import { createClientClaimInviteDelivery } from '@/lib/clientActions/createClientClaimInviteDelivery'
 import { upsertClientClaimLink } from '@/lib/clients/clientClaimLinks'
 import { asTrimmedString, isRecord } from '@/lib/guards'
@@ -286,12 +285,6 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
   professionalId: string
   bookingId: string
   clientId: string
-  /**
-   * Internal href the "View booking" CTA points at. For UNCLAIMED clients this
-   * is the public claim/overview page (no sign-in required); for claimed
-   * clients it is the gated booking detail route.
-   */
-  viewHref: string
 }): Promise<void> {
   const clientSnapshot = await loadInviteClientSnapshot(args.clientId)
 
@@ -308,13 +301,19 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
     return
   }
 
-  const recipientEmail = asTrimmedString(clientSnapshot.email)
-  const recipientPhone = asTrimmedString(clientSnapshot.phone)
-  const now = new Date()
-
-  if (!clientSnapshot.userId && !recipientEmail && !recipientPhone) {
+  /**
+   * BOOKING_CONFIRMED is a Tier B event: in-app + email only, no SMS (see
+   * docs/design/notification-channel-policy.md). UNCLAIMED clients have no app
+   * target and, per policy, get no confirmation SMS — they are notified by the
+   * claim invite (SMS/email snapshot carve-out) which links to the booking. So
+   * the confirmation here only targets CLAIMED clients (in-app + email).
+   */
+  if (!clientSnapshot.userId) {
     return
   }
+
+  const recipientEmail = asTrimmedString(clientSnapshot.email)
+  const now = new Date()
 
   try {
     await enqueueDispatch({
@@ -324,20 +323,19 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
         kind: NotificationRecipientKind.CLIENT,
         clientId: args.clientId,
         userId: clientSnapshot.userId,
-        inAppTargetId: clientSnapshot.userId ? args.clientId : null,
+        inAppTargetId: args.clientId,
         email: recipientEmail,
-        phone: recipientPhone,
         /**
-         * Pro-created bookings target contact snapshots entered/selected by the Pro.
-         * This mirrors the snapshot-delivery behavior used by client claim invites.
+         * Pro-created bookings target the contact snapshot entered/selected by
+         * the Pro; treat it as eligible at enqueue (synthetic timestamp), not an
+         * ownership claim.
          */
         emailVerifiedAt: recipientEmail ? now : null,
-        phoneVerifiedAt: recipientPhone ? now : null,
         timeZone: null,
       },
       title: 'Booking confirmed',
       body: 'Your appointment has been booked.',
-      href: args.viewHref,
+      href: `/client/bookings/${args.bookingId}`,
       payload: {
         source: 'proCreatedBooking',
         bookingId: args.bookingId,
@@ -347,7 +345,6 @@ async function tryEnqueueBookingConfirmedDelivery(args: {
       requestedChannels: [
         NotificationChannel.IN_APP,
         NotificationChannel.EMAIL,
-        NotificationChannel.SMS,
       ],
     })
   } catch (error: unknown) {
@@ -437,23 +434,14 @@ export async function createProBookingWithClient(
 
   if (bookingWasCreated) {
     /**
-     * UNCLAIMED clients have no account to sign into, so the gated booking
-     * detail route would only bounce them to a login wall. When we hold a
-     * fresh claim link for them, route "View booking" to the public claim/
-     * overview page instead; claimed clients keep the gated detail route.
+     * Confirmation only fires for CLAIMED clients (in-app + email). UNCLAIMED
+     * clients are notified by the claim invite below, which links to the public
+     * claim/overview page, so no separate confirmation is sent to them here.
      */
-    const viewHref = inviteCandidate
-      ? buildClientActionLinkForType({
-          actionType: 'CLIENT_CLAIM_INVITE',
-          rawToken: inviteCandidate.rawToken,
-        }).href
-      : `/client/bookings/${bookingResult.booking.id}`
-
     await tryEnqueueBookingConfirmedDelivery({
       professionalId: args.professionalId,
       bookingId: bookingResult.booking.id,
       clientId: resolvedClient.clientId,
-      viewHref,
     })
   }
 

@@ -41,6 +41,7 @@ const professionalDispatchRecipientSelect = {
       emailVerifiedAt: true,
       phone: true,
       phoneVerifiedAt: true,
+      transactionalSmsConsentAt: true,
     },
   },
 } satisfies Prisma.ProfessionalProfileSelect
@@ -298,6 +299,8 @@ async function enqueueNewProNotificationDispatch(args: {
       inAppTargetId: professional.id,
       phone: preferredPhone.phone,
       phoneVerifiedAt: preferredPhone.phoneVerifiedAt,
+      transactionalSmsConsentAt:
+        professional.user.transactionalSmsConsentAt ?? null,
       email: professional.user.email,
       emailVerifiedAt: professional.user.emailVerifiedAt,
       timeZone: pickTimeZoneOrNull(professional.timeZone),
