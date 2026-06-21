@@ -18,6 +18,10 @@ import {
   openingSelect,
   type OpeningWithDetails,
 } from '@/lib/lastMinute/openingSelect'
+import {
+  mapOpeningServiceDtos,
+  mapPublicIncentiveDto,
+} from '@/lib/lastMinute/openingDto'
 
 export const dynamic = 'force-dynamic'
 
@@ -253,22 +257,6 @@ function pickPublicTierPlan(row: OpeningQueryRow, now: Date) {
   )
 }
 
-function incentiveLabel(plan: NonNullable<ReturnType<typeof pickPublicTierPlan>>): string {
-  if (plan.offerType === LastMinuteOfferType.PERCENT_OFF && plan.percentOff != null) {
-    return `${plan.percentOff}% off`
-  }
-  if (plan.offerType === LastMinuteOfferType.AMOUNT_OFF && plan.amountOff) {
-    return `$${plan.amountOff.toString()} off`
-  }
-  if (plan.offerType === LastMinuteOfferType.FREE_SERVICE) {
-    return 'Free service'
-  }
-  if (plan.offerType === LastMinuteOfferType.FREE_ADD_ON) {
-    return plan.freeAddOnService?.name || 'Free add-on'
-  }
-  return 'No incentive'
-}
-
 function mapOpening(row: OpeningQueryRow, now: Date): OpeningDto {
   const publicPlan = pickPublicTierPlan(row, now)
 
@@ -303,45 +291,9 @@ function mapOpening(row: OpeningQueryRow, now: Date): OpeningDto {
       locationLabel: row.professional.location ?? null,
     },
 
-    services: row.services.map((serviceRow) => ({
-      id: serviceRow.id,
-      openingId: serviceRow.openingId,
-      serviceId: serviceRow.serviceId,
-      offeringId: serviceRow.offeringId,
-      sortOrder: serviceRow.sortOrder,
-      service: {
-        id: serviceRow.service.id,
-        name: serviceRow.service.name,
-        minPrice: serviceRow.service.minPrice.toString(),
-        defaultDurationMinutes: serviceRow.service.defaultDurationMinutes,
-      },
-      offering: {
-        id: serviceRow.offering.id,
-        title: serviceRow.offering.title ?? null,
-        salonPriceStartingAt: moneyToString(serviceRow.offering.salonPriceStartingAt),
-        mobilePriceStartingAt: moneyToString(serviceRow.offering.mobilePriceStartingAt),
-        salonDurationMinutes: serviceRow.offering.salonDurationMinutes,
-        mobileDurationMinutes: serviceRow.offering.mobileDurationMinutes,
-        offersInSalon: serviceRow.offering.offersInSalon,
-        offersMobile: serviceRow.offering.offersMobile,
-      },
-    })),
+    services: mapOpeningServiceDtos(row.services),
 
-    publicIncentive: publicPlan
-      ? {
-          tier: publicPlan.tier,
-          offerType: publicPlan.offerType,
-          label: incentiveLabel(publicPlan),
-          percentOff: publicPlan.percentOff ?? null,
-          amountOff: moneyToString(publicPlan.amountOff),
-          freeAddOnService: publicPlan.freeAddOnService
-            ? {
-                id: publicPlan.freeAddOnService.id,
-                name: publicPlan.freeAddOnService.name,
-              }
-            : null,
-        }
-      : null,
+    publicIncentive: mapPublicIncentiveDto(publicPlan),
   }
 }
 
