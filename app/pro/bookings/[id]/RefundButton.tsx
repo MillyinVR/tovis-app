@@ -96,6 +96,7 @@ export default function RefundButton({
         ? `Refund this booking in full${fullLabel}? This cannot be undone.`
         : `Refund ${formatMoney(cents, currency)} for this booking? This cannot be undone.`
 
+    if (typeof window === 'undefined') return
     if (!window.confirm(confirmCopy)) return
 
     setError(null)

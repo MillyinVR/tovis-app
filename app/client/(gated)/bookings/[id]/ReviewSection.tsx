@@ -712,6 +712,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
       return
     }
 
+    if (typeof window === 'undefined') return
     const ok = window.confirm('Delete this review? This cannot be undone.')
     if (!ok) return
 
