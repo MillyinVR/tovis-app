@@ -4,6 +4,7 @@ import ClientProfileSettings from './ClientProfileSettings'
 import ClientPublicProfileSettings from './ClientPublicProfileSettings'
 import ClientLocationSettings from './ClientLocationSettings'
 import ClientAddressesSettings from './ClientAddressesSettings'
+import NotificationPreferencesForm from '@/app/_components/NotificationPreferencesForm'
 import { getBrandConfig } from '@/lib/brand'
 import ThemeToggle from '@/lib/brand/ThemeToggle'
 
@@ -99,6 +100,15 @@ export default function ClientSettingsPage() {
 
           <ClientAddressesSettings />
         </div>
+      </section>
+
+      <section className="brand-glass p-5 sm:p-6">
+        <SectionIntro
+          title="Notifications"
+          description="Choose how you hear from us for each kind of update, and set quiet hours."
+        />
+
+        <NotificationPreferencesForm endpoint="/api/client/notification-preferences" />
       </section>
 
       <section className="brand-glass p-5 sm:p-6">
