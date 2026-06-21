@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   txVerificationDocumentCreate: vi.fn(),
   txProfessionalProfileFindUnique: vi.fn(),
   txProfessionalProfileUpdate: vi.fn(),
+
+  emitAdminVerificationReviewNeeded: vi.fn(),
 }))
 
 vi.mock('@/app/api/_utils', () => ({
@@ -25,6 +27,10 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     $transaction: mocks.transaction,
   },
+}))
+
+vi.mock('@/lib/notifications/adminNotifications', () => ({
+  emitAdminVerificationReviewNeeded: mocks.emitAdminVerificationReviewNeeded,
 }))
 
 import { POST } from './route'

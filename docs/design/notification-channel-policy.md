@@ -87,8 +87,9 @@ polling dashboards. Recipient kind `ADMIN`; channels are in-app inbox + email
 (Tier-B shape). No SMS to admins. Admin email is trusted (admins authenticate
 with it), so EMAIL is **not** gated on `emailVerifiedAt` for the `ADMIN` recipient
 kind. Admins have **no per-event preference table** — they always receive the
-default channels with no quiet-hours suppression. Emitted idempotently from the
-source write (stable `dedupeKey` per source record) via
+default channels with no quiet-hours suppression. Emitted **best-effort
+post-commit** (logged, never thrown — an alerting hiccup must not fail the user's
+primary action) and **idempotently** (stable `dedupeKey` per source record) via
 `lib/notifications/adminNotifications.ts`.
 
 | Event | Admin | Emitted from |

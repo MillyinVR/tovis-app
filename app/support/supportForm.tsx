@@ -23,21 +23,23 @@ export default function SupportForm({ role }: Props) {
 
     if (!subject || !message) redirect('/support?error=missing')
 
-    await prisma.$transaction(async (tx) => {
-      const ticket = await tx.supportTicket.create({
-        data: {
-          createdByUserId: user?.id ?? null,
-          createdByRole: role,
-          subject,
-          message,
-          status: 'OPEN',
-        },
-        select: { id: true },
-      })
-
-      // Alert admins that a new support ticket needs attention.
-      await emitAdminSupportTicketCreated({ tx, ticketId: ticket.id, subject })
+    const ticket = await prisma.supportTicket.create({
+      data: {
+        createdByUserId: user?.id ?? null,
+        createdByRole: role,
+        subject,
+        message,
+        status: 'OPEN',
+      },
+      select: { id: true },
     })
+
+    // Best-effort admin alert — must never fail the support submission.
+    try {
+      await emitAdminSupportTicketCreated({ ticketId: ticket.id, subject })
+    } catch (notifyError) {
+      console.error('support ticket admin notify error', notifyError)
+    }
 
     redirect('/support?sent=1')
   }

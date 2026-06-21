@@ -58,31 +58,31 @@ export async function PATCH(req: Request) {
     })
     if (!current) return jsonFail(404, 'Professional profile not found.')
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const license = await tx.professionalProfile.update({
-        where: { id: proId },
-        data: {
-          licenseNumber,
-          licenseState: state,
-          licenseExpiry: expiry.value,
-          // Back into the admin queue for re-review — access is unaffected.
-          licenseReviewPending: true,
-        },
-        select: {
-          id: true,
-          licenseNumber: true,
-          licenseState: true,
-          licenseExpiry: true,
-          licenseReviewPending: true,
-          verificationStatus: true,
-        },
-      })
-
-      // Alert admins that this pro needs a license re-review.
-      await emitAdminVerificationReviewNeeded({ tx, professionalId: proId })
-
-      return license
+    const updated = await prisma.professionalProfile.update({
+      where: { id: proId },
+      data: {
+        licenseNumber,
+        licenseState: state,
+        licenseExpiry: expiry.value,
+        // Back into the admin queue for re-review — access is unaffected.
+        licenseReviewPending: true,
+      },
+      select: {
+        id: true,
+        licenseNumber: true,
+        licenseState: true,
+        licenseExpiry: true,
+        licenseReviewPending: true,
+        verificationStatus: true,
+      },
     })
+
+    // Best-effort admin alert — must never fail the pro's license edit.
+    try {
+      await emitAdminVerificationReviewNeeded({ professionalId: proId })
+    } catch (notifyError) {
+      console.error('PATCH /api/pro/license admin notify error', notifyError)
+    }
 
     return jsonOk({ license: updated })
   } catch (error: unknown) {

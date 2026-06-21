@@ -88,15 +88,18 @@ export async function POST(req: Request) {
         })
       }
 
-      // Alert admins that there's a verification document to review.
-      await emitAdminVerificationReviewNeeded({
-        tx,
-        professionalId: proId,
-        verificationDocumentId: doc.id,
-      })
-
       return doc
     })
+
+    // Best-effort admin alert — must never fail the pro's upload.
+    try {
+      await emitAdminVerificationReviewNeeded({
+        professionalId: proId,
+        verificationDocumentId: created.id,
+      })
+    } catch (notifyError) {
+      console.error('POST /api/pro/verification-docs admin notify error', notifyError)
+    }
 
     return jsonOk({ id: created.id }, 201)
   } catch (e) {
