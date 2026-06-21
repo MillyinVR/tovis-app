@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Heart, User as UserIcon, X } from 'lucide-react'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { initialsForName } from '@/lib/initials'
 import { formatRelativeTimeCompact } from '@/lib/time/relativeTime'
 import { zClass } from '@/lib/zIndex'
@@ -33,13 +34,12 @@ function CommentAvatar({
       style={{ width: size, height: size }}
     >
       {avatarUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <RemoteImage
           src={avatarUrl}
           alt={`${displayName} avatar`}
+          width={size}
+          height={size}
           className="h-full w-full object-cover"
-          loading="lazy"
-          decoding="async"
         />
       ) : (
         <div

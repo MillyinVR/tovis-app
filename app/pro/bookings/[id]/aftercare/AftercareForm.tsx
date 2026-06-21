@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import {
   getZonedParts,
   sanitizeTimeZone,
@@ -1513,17 +1514,21 @@ function MediaGrid({ items }: { items: MediaItem[] }) {
                   rel="noreferrer"
                   className="block h-full w-full"
                 >
-                  <img
+                  <RemoteImage
                     src={thumb}
                     alt="Booking media"
+                    width={400}
+                    height={400}
                     className="h-full w-full object-cover"
                   />
                 </a>
               ) : (
                 <div className="h-full w-full">
-                  <img
+                  <RemoteImage
                     src={thumb}
                     alt="Booking media"
+                    width={400}
+                    height={400}
                     className="h-full w-full object-cover"
                   />
                 </div>

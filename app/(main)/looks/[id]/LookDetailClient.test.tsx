@@ -318,6 +318,8 @@ function installFetchMock(args?: {
   commentsByLookId?: Record<string, LooksCommentDto[]>
   initialLiked?: boolean
   initialLikeCount?: number
+  initialFollowing?: boolean
+  initialFollowerCount?: number
 }) {
   const commentsByLookId: Record<string, LooksCommentDto[]> = {
     look_1: [makeComment()],
@@ -326,6 +328,8 @@ function installFetchMock(args?: {
 
   let liked = args?.initialLiked ?? false
   let likeCount = args?.initialLikeCount ?? 4
+  let following = args?.initialFollowing ?? false
+  let followerCount = args?.initialFollowerCount ?? 0
 
   const fetchMock = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -358,6 +362,19 @@ function installFetchMock(args?: {
             likeCount,
           })
         }
+      }
+
+      if (url === '/api/pros/pro_1/follow') {
+        if (method === 'POST') {
+          following = !following
+          followerCount = Math.max(0, followerCount + (following ? 1 : -1))
+        }
+
+        return jsonResponse({
+          professionalId: 'pro_1',
+          following,
+          followerCount,
+        })
       }
 
       if (url === '/api/looks/look_1/comments') {
@@ -452,6 +469,33 @@ describe('app/(main)/looks/[id]/LookDetailClient', () => {
     await waitFor(() => {
       expect(screen.getByTestId('like-count')).toHaveTextContent('5')
       expect(screen.getByTestId('viewer-liked')).toHaveTextContent('true')
+    })
+  })
+
+  it('toggles follow against the shared pros follow endpoint from the detail rail', async () => {
+    const { fetchMock } = installFetchMock({
+      initialFollowing: false,
+      initialFollowerCount: 12,
+    })
+
+    render(<LookDetailClient initialItem={makeDetailItem()} />)
+
+    // Hydrates from GET /api/pros/pro_1/follow on mount.
+    const followButton = await screen.findByRole('button', { name: 'Follow TOVIS Studio' })
+
+    fireEvent.click(followButton)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/pros/pro_1/follow', {
+        method: 'POST',
+      })
+    })
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Unfollow TOVIS Studio' }),
+      ).toBeInTheDocument()
+      expect(screen.getByText('13 followers')).toBeInTheDocument()
     })
   })
 

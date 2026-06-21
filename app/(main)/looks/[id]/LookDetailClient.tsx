@@ -8,7 +8,9 @@ import { useCallback, useMemo, useState } from 'react'
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { isRecord } from '@/lib/guards'
 import { safeJson } from '@/lib/http'
+import { cn } from '@/lib/utils'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { formatFollowerLabel } from '@/lib/profiles/publicProfileFormatting'
 import type { LooksDetailItemDto } from '@/lib/looks/types'
 import {
   viewerLocationToDrawerContextFields,
@@ -18,8 +20,11 @@ import { useViewerLocation } from '@/lib/useViewerLocation'
 
 import AvailabilityDrawer from '../../booking/AvailabilityDrawer'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
+import RemoteImage from '@/app/_components/media/RemoteImage'
+
 import CommentsDrawer from '../_components/CommentsDrawer'
 import RightActionRail from '../_components/RightActionRail'
+import { useProFollow } from '../_components/useProFollow'
 
 function currentLooksDetailPath(lookPostId: string): string {
   return `/looks/${encodeURIComponent(lookPostId)}`
@@ -86,6 +91,19 @@ export default function LookDetailClient({
     },
     [item.id, router],
   )
+
+  const {
+    following,
+    followerCount,
+    toggle: toggleFollow,
+  } = useProFollow({
+    professionalId: item.professional.id,
+    onRequireAuth: redirectToLogin,
+  })
+
+  const proDisplayName = formatProfessionalPublicDisplayName({
+    businessName: item.professional.businessName,
+  })
 
   const closeAvailability = useCallback(() => {
     setAvailabilityOpen(false)
@@ -266,13 +284,11 @@ export default function LookDetailClient({
                 className="h-auto w-full max-h-[520px]"
               />
             ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <RemoteImage
                 src={item.primaryMedia.url}
-                alt={item.caption || 'Look'}
+                alt={item.caption || `Look by ${proDisplayName}`}
                 className="block h-auto w-full"
-                loading="lazy"
-                decoding="async"
+                intrinsic
               />
             )}
           </div>
@@ -307,9 +323,36 @@ export default function LookDetailClient({
 
           <div className="grid gap-3 p-4">
             <div className="grid gap-1">
-              <div className="text-base font-extrabold">
-                {formatProfessionalPublicDisplayName({ businessName: item.professional.businessName })}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div className="text-base font-extrabold">{proDisplayName}</div>
+
+                <button
+                  type="button"
+                  aria-pressed={following}
+                  aria-label={
+                    following
+                      ? `Unfollow ${proDisplayName}`
+                      : `Follow ${proDisplayName}`
+                  }
+                  onClick={() => toggleFollow()}
+                  className={cn(
+                    'inline-flex shrink-0 items-center rounded-full border px-3 py-1',
+                    'font-mono text-[10px] font-bold uppercase tracking-[0.06em] transition',
+                    following
+                      ? 'border-surfaceGlass/35 bg-surfaceGlass/12 text-textPrimary/70 hover:text-textPrimary'
+                      : 'border-accentPrimary/40 bg-accentPrimary/10 text-textPrimary hover:border-accentPrimary/60',
+                  )}
+                >
+                  {following ? 'Following' : 'Follow'}
+                </button>
+
+                {followerCount > 0 ? (
+                  <span className="font-mono text-[11px] font-semibold text-textSecondary">
+                    {formatFollowerLabel(followerCount)}
+                  </span>
+                ) : null}
               </div>
+
               <div className="text-xs text-textSecondary">
                 {item.professional.professionType || 'Beauty pro'}
                 {item.professional.location
@@ -397,13 +440,12 @@ export default function LookDetailClient({
                             className="h-24 w-full object-cover"
                           />
                         ) : (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
+                          <RemoteImage
                             src={previewSrc}
                             alt={asset.media.caption || 'Look asset'}
+                            width={400}
+                            height={400}
                             className="h-24 w-full object-cover"
-                            loading="lazy"
-                            decoding="async"
                           />
                         )}
                       </div>

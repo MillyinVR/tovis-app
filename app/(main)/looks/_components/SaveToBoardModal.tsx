@@ -29,7 +29,6 @@ type SaveToBoardModalProps = {
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type ModalMode = 'list' | 'create'
-type BoardVisibilityValue = 'PRIVATE' | 'SHARED'
 
 type ModalBoard = {
   id: string
@@ -180,8 +179,6 @@ export default function SaveToBoardModal({
 
   const [mode, setMode] = useState<ModalMode>('list')
   const [createName, setCreateName] = useState('')
-  const [createVisibility, setCreateVisibility] =
-    useState<BoardVisibilityValue>('PRIVATE')
   const [createError, setCreateError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
 
@@ -322,10 +319,7 @@ export default function SaveToBoardModal({
           headers: {
             'content-type': 'application/json',
           },
-          body: JSON.stringify({
-            name,
-            visibility: createVisibility,
-          }),
+          body: JSON.stringify({ name }),
         })
 
         const payload: unknown = await response.json().catch(() => null)
@@ -341,7 +335,6 @@ export default function SaveToBoardModal({
 
         setBoards((previous) => mergeBoardList(previous, createdBoard))
         setCreateName('')
-        setCreateVisibility('PRIVATE')
         setMode('list')
 
         await updateBoardMembership(createdBoard.id, false)
@@ -353,7 +346,7 @@ export default function SaveToBoardModal({
         setCreating(false)
       }
     },
-    [createName, createVisibility, updateBoardMembership],
+    [createName, updateBoardMembership],
   )
 
   useEffect(() => {
@@ -379,7 +372,6 @@ export default function SaveToBoardModal({
     setMode('list')
     setCreateError(null)
     setCreateName('')
-    setCreateVisibility('PRIVATE')
   }, [isOpen])
 
   if (!isOpen) return null
@@ -470,38 +462,9 @@ export default function SaveToBoardModal({
                   />
                 </div>
 
-                <div>
-                  <label
-                    htmlFor="save-board-visibility"
-                    className="mb-2 block text-[12px] font-bold uppercase tracking-wide text-textSecondary"
-                  >
-                    Visibility
-                  </label>
-
-                  <select
-                    id="save-board-visibility"
-                    name="visibility"
-                    value={createVisibility}
-                    onChange={(event) =>
-                      setCreateVisibility(
-                        event.target.value === 'SHARED' ? 'SHARED' : 'PRIVATE',
-                      )
-                    }
-                    className={cn(
-                      'w-full rounded-card border border-white/10 bg-bgPrimary px-3 py-3',
-                      'text-[14px] text-textPrimary outline-none transition',
-                      'focus:border-white/20',
-                    )}
-                  >
-                    <option value="PRIVATE">Private</option>
-                    <option value="SHARED">Shared</option>
-                  </select>
-
-                  <p className="mt-2 text-[12px] leading-5 text-textSecondary">
-                    Private boards are just for you. Shared boards can be surfaced
-                    later when that flow is ready.
-                  </p>
-                </div>
+                <p className="text-[12px] leading-5 text-textSecondary">
+                  Boards are private to you.
+                </p>
 
                 <div className="flex flex-wrap items-center gap-3 border-t border-white/10 pt-3">
                   <button

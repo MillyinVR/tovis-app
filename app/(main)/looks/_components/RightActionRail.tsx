@@ -11,6 +11,7 @@ import {
   CalendarDays,
 } from 'lucide-react'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import SaveToBoardModal from './SaveToBoardModal'
 import type { LooksSaveStateResponseDto } from '@/lib/looks/types'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
@@ -181,17 +182,17 @@ export default function RightActionRail({
                 }}
               >
                 {pro.avatarUrl ? (
-                  <img
+                  <RemoteImage
                     src={pro.avatarUrl}
                     alt={formatProfessionalPublicDisplayName({ businessName: pro.businessName })}
+                    width={48}
+                    height={48}
                     style={{
                       width: '100%',
                       height: '100%',
                       objectFit: 'cover',
                       display: 'block',
                     }}
-                    loading="lazy"
-                    decoding="async"
                   />
                 ) : (
                   <div

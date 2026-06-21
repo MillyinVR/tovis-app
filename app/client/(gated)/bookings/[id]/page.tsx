@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
 import { NotificationEventKey } from '@prisma/client'
 import ProProfileLink from '@/app/client/(gated)/components/ProProfileLink'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 import { getBrandConfig } from '@/lib/brand'
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'
@@ -631,11 +632,12 @@ function MediaStrip(props: {
                 href={href}
                 className="block h-32 w-32 shrink-0 overflow-hidden rounded-card border border-white/10 bg-bgSecondary"
               >
-                <img
+                <RemoteImage
                   src={previewSrc}
-                  alt=""
+                  alt="Booking media"
+                  width={256}
+                  height={256}
                   className="h-full w-full object-cover"
-                  loading="lazy"
                 />
               </a>
             )
@@ -798,11 +800,11 @@ function ClientAftercareMediaTile(props: {
   return (
     <div className="brand-pro-session-photo-tile">
       {previewSrc ? (
-        <img
+        <RemoteImage
           src={previewSrc}
-          alt=""
+          alt={`${props.label} photo`}
           className="brand-pro-session-photo-img"
-          loading="lazy"
+          intrinsic
         />
       ) : null}
 
