@@ -6,6 +6,7 @@ import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { isAbortError, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import { Button } from '@/app/_components/ui'
 
 type ApiErrorPayload = {
   error?: unknown
@@ -223,13 +224,9 @@ export default function NewClientForm() {
       ) : null}
 
       <div className="flex justify-end">
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-full bg-bgSecondary px-4 py-2 text-xs font-extrabold text-textPrimary hover:bg-bgSecondary/70 disabled:opacity-60"
-        >
+        <Button type="submit" variant="primary" size="sm" disabled={loading}>
           {loading ? 'Saving…' : 'Add client'}
-        </button>
+        </Button>
       </div>
     </form>
   )
