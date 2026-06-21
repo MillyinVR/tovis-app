@@ -1236,7 +1236,7 @@ function WrapUpView({
             </div>
 
             <Pill
-              label={hasAfterPhoto ? 'DONE' : 'TODO'}
+              label={hasAfterPhoto ? 'Done' : 'To do'}
               tone={hasAfterPhoto ? 'success' : 'pending'}
             />
           </div>
@@ -1259,7 +1259,7 @@ function WrapUpView({
             </div>
 
             <Pill
-              label={hasFinalizedAftercare ? 'DONE' : 'TODO'}
+              label={hasFinalizedAftercare ? 'Done' : 'To do'}
               tone={hasFinalizedAftercare ? 'success' : 'pending'}
             />
           </div>
@@ -1279,7 +1279,7 @@ function WrapUpView({
             </div>
 
             <Pill
-              label={hasPaymentCollected ? 'DONE' : 'TODO'}
+              label={hasPaymentCollected ? 'Done' : 'To do'}
               tone={hasPaymentCollected ? 'success' : 'pending'}
             />
           </div>
@@ -1299,7 +1299,7 @@ function WrapUpView({
             </div>
 
             <Pill
-              label={hasCheckoutClosed ? 'DONE' : 'TODO'}
+              label={hasCheckoutClosed ? 'Done' : 'To do'}
               tone={hasCheckoutClosed ? 'success' : 'pending'}
             />
           </div>
@@ -1319,7 +1319,7 @@ function WrapUpView({
             </div>
 
             <Pill
-              label={hasConsultationApproved ? 'DONE' : 'TODO'}
+              label={hasConsultationApproved ? 'Done' : 'To do'}
               tone={hasConsultationApproved ? 'success' : 'pending'}
             />
           </div>

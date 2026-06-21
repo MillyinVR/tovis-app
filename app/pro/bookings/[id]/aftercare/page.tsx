@@ -339,7 +339,7 @@ function SummaryCard({
         </div>
 
         <StatusPill
-          label={isFinalized ? 'DONE' : hasDraft ? 'DRAFT' : 'TODO'}
+          label={isFinalized ? 'Done' : hasDraft ? 'Draft' : 'To do'}
           tone={isFinalized ? 'success' : hasDraft ? 'pending' : 'danger'}
         />
       </div>
