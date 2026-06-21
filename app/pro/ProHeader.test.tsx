@@ -90,4 +90,34 @@ describe('app/pro/ProHeader', () => {
       within(menu).getByRole('button', { name: /sign out/i }),
     ).toBeInTheDocument()
   })
+
+  it('omits the Import tab when migration is disabled', () => {
+    render(
+      <ProHeader
+        businessName="TOVIS Studio"
+        subtitle="@tovisstudio"
+        publicUrl="/professionals/pro_1"
+      />,
+    )
+
+    const tabs = screen.getByRole('navigation', { name: /pro tabs/i })
+    expect(
+      within(tabs).queryByRole('link', { name: /import/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows the Import tab linking to the migration flow when enabled', () => {
+    render(
+      <ProHeader
+        businessName="TOVIS Studio"
+        subtitle="@tovisstudio"
+        publicUrl="/professionals/pro_1"
+        migrationEnabled
+      />,
+    )
+
+    const tabs = screen.getByRole('navigation', { name: /pro tabs/i })
+    const importTab = within(tabs).getByRole('link', { name: /import/i })
+    expect(importTab).toHaveAttribute('href', '/pro/migrate')
+  })
 })

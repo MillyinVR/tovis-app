@@ -9,6 +9,7 @@ import { isPubliclyApprovedProStatus } from '@/lib/proTrustState'
 import '@/lib/brand/proOverview.css'
 import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
 import { getProOnboardingRedirectHref } from '@/lib/pro/readiness/onboardingGate'
+import { isProMigrationEnabled } from '@/lib/migration/featureFlag'
 import ProHeader from './ProHeader'
 import ProComplianceBanner from './ProComplianceBanner'
 import ProReadinessBanner from './ProReadinessBanner'
@@ -88,6 +89,7 @@ export default async function ProRootLayout({
         businessName={pro.businessName}
         subtitle={pro.handle ? `@${pro.handle}` : null}
         publicUrl={publicUrl}
+        migrationEnabled={isProMigrationEnabled()}
       />
       <ProComplianceBanner />
       <ProReadinessBanner />
