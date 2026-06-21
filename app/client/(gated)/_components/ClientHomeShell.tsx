@@ -1,10 +1,9 @@
 // app/client/(gated)/_components/ClientHomeShell.tsx
-import Link from 'next/link'
-
 import type { ClientHomeData } from '../_data/getClientHomeData'
 
 import UpcomingAppointmentCard from './UpcomingAppointmentCard'
 import ClientActionCard from './ClientActionCard'
+import InboxBell from './InboxBell'
 import ClientLastMinuteInvites from './ClientLastMinuteInvites'
 import ClientWaitlistStrip from './ClientWaitlistStrip'
 import FavoriteProsRow from './FavoriteProsRow'
@@ -30,8 +29,6 @@ export default function ClientHomeShell({
   home,
   removeProFavoriteAction,
 }: ClientHomeShellProps) {
-  const hasAlert = home.action !== null
-
   return (
     <main
       className="relative -mt-4 overflow-x-hidden bg-bgPrimary text-textPrimary"
@@ -81,29 +78,7 @@ export default function ClientHomeShell({
           </h1>
         </div>
 
-        <Link
-          href="/client/inbox"
-          aria-label="Inbox"
-          className="relative grid h-[38px] w-[38px] shrink-0 place-items-center rounded-full border border-textPrimary/16 text-textMuted transition hover:border-textPrimary/25 hover:text-textSecondary"
-        >
-          <svg width="16" height="18" viewBox="0 0 15 17" fill="none">
-            <path
-              d="M7.5 1a5 5 0 0 1 5 5c0 2.5.5 4 1.5 5H1c1-1 1.5-2.5 1.5-5a5 5 0 0 1 5-5Z"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M6 11.5a1.5 1.5 0 0 0 3 0"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              strokeLinecap="round"
-            />
-          </svg>
-          {hasAlert ? (
-            <span className="absolute right-2 top-[7px] h-[7px] w-[7px] rounded-full border-[1.5px] border-bgPrimary bg-gold" />
-          ) : null}
-        </Link>
+        <InboxBell />
       </header>
 
       {/* Main grid. grid-cols-1 (= minmax(0,1fr)) so single-column mobile/tablet
