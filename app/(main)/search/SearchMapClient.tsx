@@ -5,6 +5,7 @@ import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { directionsHrefFromLocation, mapsHrefFromLocation } from '@/lib/maps'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import type { Bounds, Pin } from './_components/MapView'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
@@ -1300,9 +1301,11 @@ export default function SearchMapClient() {
               ) : loading ? (
                 <div className="text-[13px] font-semibold text-textSecondary">Loading...</div>
               ) : !displayPros.length ? (
-                <div className="text-[13px] font-semibold text-textSecondary">
-                  No pros found in this radius. Try increasing the distance or searching a different area.
-                </div>
+                <EmptyState
+                  className="border-0 bg-transparent px-0 py-4"
+                  title="No pros found nearby"
+                  description="Try increasing the distance or searching a different area."
+                />
               ) : (
                 <>
                   {activePro ? (

@@ -8,6 +8,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 
 import NewClientForm from './NewClientForm'
 import ClientNameLink from '@/app/_components/ClientNameLink'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 
 export const dynamic = 'force-dynamic'
 
@@ -125,9 +126,11 @@ export default async function ProClientsPage() {
         </div>
 
         {clients.length === 0 ? (
-          <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[12px] font-semibold text-textSecondary">
-            No clients with active visibility right now.
-          </div>
+          <EmptyState
+            title="No clients with active visibility right now."
+            description="Only clients with active access appear here. Share your booking link to bring clients on."
+            action={{ label: 'View profile', href: '/pro/profile' }}
+          />
         ) : (
           <div className="grid gap-3">
             {clients.map((client) => {

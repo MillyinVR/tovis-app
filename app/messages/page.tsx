@@ -10,6 +10,7 @@ import {
   type Prisma,
 } from '@prisma/client'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { initialsForName } from '@/lib/initials'
@@ -665,26 +666,19 @@ export default async function MessagesInboxPage(props: PageProps) {
 
         <div className="mt-7">
           {threads.length === 0 ? (
-            <div className="rounded-[22px] border border-textPrimary/10 bg-bgSecondary/40 px-5 py-6">
-              <div className="font-display text-[15px] font-bold">
-                {activeFilter === 'waitlists'
+            <EmptyState
+              title={
+                activeFilter === 'waitlists'
                   ? 'No waitlist messages yet'
-                  : 'No messages yet'}
-              </div>
-
-              <p className="mt-2 text-[13px] font-medium leading-5 text-textSecondary">
-                {activeFilter === 'waitlists'
+                  : 'No messages yet'
+              }
+              description={
+                activeFilter === 'waitlists'
                   ? 'Waitlist conversations will show here once a waitlist thread has message activity.'
-                  : 'Once a message thread has activity, it will show up here.'}
-              </p>
-
-              <Link
-                href="/looks"
-                className="mt-5 inline-flex rounded-full bg-accentPrimary px-5 py-3 text-[13px] font-bold text-onAccent transition hover:bg-accentPrimaryHover"
-              >
-                Browse Looks
-              </Link>
-            </div>
+                  : 'Once a message thread has activity, it will show up here.'
+              }
+              action={{ label: 'Browse Looks', href: '/looks' }}
+            />
           ) : (
             <div className="border-t border-textPrimary/10">
               {threads.map((thread) => {

@@ -2,6 +2,7 @@
 'use client'
 
 import Link from 'next/link'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { cn } from '@/lib/utils'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
@@ -49,9 +50,10 @@ function formatMeta(pro: DiscoverGridPro): string {
 export default function DiscoverGridView({ pros, activeProId, onSelectPro }: DiscoverGridViewProps) {
   if (pros.length === 0) {
     return (
-      <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4 text-[13px] font-semibold text-textSecondary">
-        No pros found in this radius. Try increasing the distance or searching a different area.
-      </div>
+      <EmptyState
+        title="No pros found nearby"
+        description="Try increasing the distance or searching a different area."
+      />
     )
   }
 

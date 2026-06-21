@@ -12,6 +12,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import BookingActions from './BookingActions'
 import { moneyToString } from '@/lib/money'
 import ClientNameLink from '@/app/_components/ClientNameLink'
+import EmptyState from '@/app/_components/boundaries/EmptyState'
 import {
   DEFAULT_TIME_ZONE,
   isValidIanaTimeZone,
@@ -414,9 +415,7 @@ function Section({
       </div>
 
       {items.length === 0 ? (
-        <div className="rounded-card border border-white/10 bg-bgSecondary p-4 text-[12px] text-textSecondary">
-          No bookings here yet.
-        </div>
+        <EmptyState title="No bookings here yet." />
       ) : (
         <div className="grid gap-3">
           {items.map((booking) => {
