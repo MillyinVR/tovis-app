@@ -169,6 +169,7 @@ function RaiseConfigurator({
   // Capture "today" after mount to avoid SSR/CSR hydration drift on dates.
   const [today, setToday] = useState<Date | null>(null)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-only date capture to avoid SSR/CSR hydration drift
     setToday(new Date())
   }, [])
 

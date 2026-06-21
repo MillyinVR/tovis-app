@@ -35,9 +35,15 @@ export function usePresenceSignalsBatch(
 
   const [signals, setSignals] = useState<SignalMap>({})
   const itemsRef = useRef(items)
-  itemsRef.current = items
   const stableRoundsRef = useRef(0)
   const prevRef = useRef<string | null>(null)
+
+  // Keep the latest items in a ref so the poll loop reads them lazily without
+  // resetting on every parent re-render. Written in an effect to avoid mutating
+  // a ref during render.
+  useEffect(() => {
+    itemsRef.current = items
+  }, [items])
 
   useEffect(() => {
     if (!enabled || itemsRef.current.length === 0) return

@@ -83,6 +83,7 @@ export function usePresenceSignals(args: {
     if (!enabled || !resourceId || !professionalId) return
 
     sendHeartbeat()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- setState runs only after `await fetch(...)`, so it is async, not a synchronous cascading render
     fetchSignals()
 
     const heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS)

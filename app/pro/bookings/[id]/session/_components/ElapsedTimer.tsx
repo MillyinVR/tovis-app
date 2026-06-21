@@ -21,8 +21,8 @@ export default function ElapsedTimer({
   useEffect(() => {
     if (!startedAt) return
 
-    // Resync immediately on mount (server render time may be stale), then tick.
-    setNowMs(Date.now())
+    // Tick once per second. The first tick (≤1s away) resyncs any staleness
+    // between the server render snapshot and the client clock.
     const intervalId = setInterval(() => {
       setNowMs(Date.now())
     }, 1000)
