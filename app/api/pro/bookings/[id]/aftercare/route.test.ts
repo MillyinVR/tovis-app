@@ -766,7 +766,10 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     })
   })
 
-  it('GET maps FORBIDDEN through bookingJsonFail when booking belongs to another professional', async () => {
+  it('GET maps a foreign booking to BOOKING_NOT_FOUND so existence is not leaked', async () => {
+    // Unified ownership behavior: a booking owned by another pro returns the
+    // same not-found envelope as a missing one (404), rather than a 403 that
+    // would reveal the booking exists.
     mocks.bookingFindUnique.mockResolvedValueOnce(
       makeGetBooking({ professionalId: 'pro_other' }),
     )
@@ -774,15 +777,15 @@ describe('app/api/pro/bookings/[id]/aftercare/route.ts', () => {
     const result = await GET(new Request('http://localhost/test'), makeCtx())
 
     expect(mocks.getBookingFailPayload).toHaveBeenCalledWith(
-      'FORBIDDEN',
+      'BOOKING_NOT_FOUND',
       undefined,
     )
 
-    expect(result.status).toBe(403)
+    expect(result.status).toBe(404)
     await expect(result.json()).resolves.toEqual({
       ok: false,
-      error: 'Forbidden.',
-      code: 'FORBIDDEN',
+      error: 'Booking not found.',
+      code: 'BOOKING_NOT_FOUND',
     })
   })
 

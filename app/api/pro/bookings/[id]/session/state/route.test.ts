@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   jsonFail: vi.fn(),
   jsonOk: vi.fn(),
   pickString: vi.fn(),
-  bookingFindUnique: vi.fn(),
+  bookingFindFirst: vi.fn(),
   safeError: vi.fn(),
 }))
 
@@ -33,7 +33,7 @@ vi.mock('@/app/api/_utils', () => ({
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     booking: {
-      findUnique: mocks.bookingFindUnique,
+      findFirst: mocks.bookingFindFirst,
     },
   },
 }))
@@ -122,7 +122,7 @@ describe('GET /api/pro/bookings/[id]/session/state', () => {
     const res = await GET(makeRequest(), makeCtx())
 
     expect(res).toBe(failRes)
-    expect(mocks.bookingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
   })
 
   it('fails with 400 when the booking id is missing', async () => {
@@ -130,30 +130,30 @@ describe('GET /api/pro/bookings/[id]/session/state', () => {
 
     expect(mocks.jsonFail).toHaveBeenCalledWith(400, 'Missing booking id.')
     expect(res).toMatchObject({ kind: 'fail', status: 400 })
-    expect(mocks.bookingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
   })
 
   it('fails with 404 when the booking does not exist', async () => {
-    mocks.bookingFindUnique.mockResolvedValue(null)
+    mocks.bookingFindFirst.mockResolvedValue(null)
 
     const res = await GET(makeRequest(), makeCtx())
 
     expect(res).toMatchObject({ kind: 'fail', status: 404 })
   })
 
-  it('fails with 403 when the booking belongs to another pro', async () => {
-    mocks.bookingFindUnique.mockResolvedValue(
-      makeBookingRow({ professionalId: 'pro_other' }),
-    )
+  it('fails with 404 when the booking belongs to another pro', async () => {
+    // The ownership query is scoped to the pro, so a foreign booking returns
+    // no row and is indistinguishable from a missing one: both 404.
+    mocks.bookingFindFirst.mockResolvedValue(null)
 
     const res = await GET(makeRequest(), makeCtx())
 
-    expect(res).toMatchObject({ kind: 'fail', status: 403 })
+    expect(res).toMatchObject({ kind: 'fail', status: 404 })
   })
 
   it('returns the compact state and a matching hash', async () => {
     const row = makeBookingRow()
-    mocks.bookingFindUnique.mockResolvedValue(row)
+    mocks.bookingFindFirst.mockResolvedValue(row)
 
     const res = await GET(makeRequest(), makeCtx())
 
@@ -168,13 +168,15 @@ describe('GET /api/pro/bookings/[id]/session/state', () => {
       200,
     )
 
-    expect(mocks.bookingFindUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'booking_1' } }),
+    expect(mocks.bookingFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'booking_1', professionalId: PRO_ID },
+      }),
     )
   })
 
   it('reports terminal state for completed bookings', async () => {
-    mocks.bookingFindUnique.mockResolvedValue(
+    mocks.bookingFindFirst.mockResolvedValue(
       makeBookingRow({
         status: BookingStatus.COMPLETED,
         sessionStep: SessionStep.DONE,
@@ -193,7 +195,7 @@ describe('GET /api/pro/bookings/[id]/session/state', () => {
   })
 
   it('fails with 500 when the database read throws', async () => {
-    mocks.bookingFindUnique.mockRejectedValue(new Error('db down'))
+    mocks.bookingFindFirst.mockRejectedValue(new Error('db down'))
 
     const res = await GET(makeRequest(), makeCtx())
 

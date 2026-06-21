@@ -15,6 +15,7 @@ import ServicesReceivedCard from './ServicesReceivedCard'
 import { resolveApptTimeZone } from '@/lib/booking/timeZoneTruth'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToFixed2String } from '@/lib/money'
+import { fullName } from '@/lib/names'
 import { prisma } from '@/lib/prisma'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import {
@@ -40,13 +41,6 @@ const SIGNED_URL_TTL_SECONDS = 60 * 10
 
 function loginHref(bookingId: string): string {
   return `/login?from=${encodeURIComponent(aftercareHref(bookingId))}`
-}
-
-function fullName(
-  firstName: string | null | undefined,
-  lastName: string | null | undefined,
-): string {
-  return `${firstName ?? ''} ${lastName ?? ''}`.trim()
 }
 
 function isHttpUrl(value: string | null | undefined): value is string {

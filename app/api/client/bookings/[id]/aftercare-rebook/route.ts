@@ -6,12 +6,12 @@ import { jsonFail, jsonOk, pickString, requireClient, upper } from '@/app/api/_u
 import { withRouteIdempotency } from '@/app/api/_utils/idempotency'
 import { bookingJsonFail } from '@/app/api/_utils/bookingResponses'
 import { resolveRouteParams, type RouteContext } from '@/app/api/_utils/routeContext'
+import { requireClientBookingOwnership } from '@/app/api/_utils/auth/requireClientBookingOwnership'
 import {
   confirmClientAftercareNextAppointment,
   declineClientAftercareNextAppointment,
 } from '@/lib/booking/writeBoundary'
 import { isBookingError } from '@/lib/booking/errors'
-import { prisma } from '@/lib/prisma'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { safeError } from '@/lib/security/logging'
@@ -26,23 +26,6 @@ type ConfirmResponseBody = {
     status: string
     scheduledFor: string
   }
-}
-
-async function requireOwnership(
-  bookingId: string,
-  clientId: string,
-): Promise<{ ok: true } | { ok: false; res: Response }> {
-  const booking = await prisma.booking.findUnique({
-    where: { id: bookingId },
-    select: { id: true, clientId: true },
-  })
-
-  if (!booking) return { ok: false, res: jsonFail(404, 'Booking not found.') }
-  if (booking.clientId !== clientId) {
-    return { ok: false, res: jsonFail(403, 'Forbidden.') }
-  }
-
-  return { ok: true }
 }
 
 function readRequestId(req: Request): string | null {
@@ -63,7 +46,7 @@ export async function POST(req: Request, ctx: RouteContext) {
     const bookingId = pickString(rawId)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
-    const own = await requireOwnership(bookingId, clientId)
+    const own = await requireClientBookingOwnership(bookingId, clientId)
     if (!own.ok) return own.res
 
     const body = (await req.json().catch(() => ({}))) as { action?: unknown }

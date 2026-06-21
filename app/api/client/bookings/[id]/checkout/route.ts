@@ -28,6 +28,7 @@ import { updateClientBookingCheckout } from '@/lib/booking/writeBoundary'
 import { IDEMPOTENCY_ROUTES } from '@/lib/idempotency'
 import { captureBookingException } from '@/lib/observability/bookingEvents'
 import { prisma } from '@/lib/prisma'
+import { parseTipAmount } from '@/lib/money'
 
 export const dynamic = 'force-dynamic'
 
@@ -95,43 +96,6 @@ function normalizePaymentMethodInput(value: unknown): PaymentMethod | undefined 
   }
 }
 
-function parseTipAmount(
-  value: unknown,
-): { ok: true; value?: string | null } | { ok: false; error: string } {
-  if (value === undefined) {
-    return { ok: true, value: undefined }
-  }
-
-  if (value === null) {
-    return { ok: true, value: null }
-  }
-
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value) || value < 0) {
-      return { ok: false, error: 'tipAmount must be a non-negative number.' }
-    }
-
-    return { ok: true, value: value.toFixed(2) }
-  }
-
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-
-    if (!trimmed) {
-      return { ok: true, value: null }
-    }
-
-    const parsed = Number(trimmed)
-    if (!Number.isFinite(parsed) || parsed < 0) {
-      return { ok: false, error: 'tipAmount must be a non-negative amount.' }
-    }
-
-    return { ok: true, value: parsed.toFixed(2) }
-  }
-
-  return { ok: false, error: 'tipAmount must be a number, string, or null.' }
-}
-
 function parseBody(body: Record<string, unknown>): ParsedBodyResult {
   const parsedTip = parseTipAmount(body.tipAmount)
   if (!parsedTip.ok) return parsedTip
@@ -155,7 +119,7 @@ function parseBody(body: Record<string, unknown>): ParsedBodyResult {
   return {
     ok: true,
     value: {
-      tipAmount: parsedTip.value,
+      tipAmount: parsedTip.tipAmount,
       selectedPaymentMethod,
       confirmPayment: parseBoolean(body.confirmPayment),
     },

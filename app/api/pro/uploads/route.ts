@@ -1,6 +1,7 @@
 // app/api/pro/uploads/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
+import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import { getSupabaseAdmin } from '@/lib/supabaseAdmin'
 import { resolveProTenantId } from '@/lib/tenant/bookingAttribution'
 import {
@@ -189,13 +190,8 @@ export async function POST(req: Request) {
       if (!bookingId) return jsonFail(400, 'Missing bookingId')
       if (!phase) return jsonFail(400, 'Missing/invalid phase (BEFORE/AFTER/OTHER)')
 
-      const booking = await prisma.booking.findUnique({
-        where: { id: bookingId },
-        select: { id: true, professionalId: true },
-      })
-
-      if (!booking) return jsonFail(404, 'Booking not found')
-      if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden')
+      const owned = await requireProBooking(bookingId, proId, { id: true })
+      if (!owned.ok) return owned.res
     }
 
     const { bucket, isPublic } = resolveBucket(kind)

@@ -337,7 +337,10 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
     })
   })
 
-  it('returns FORBIDDEN when the booking is not owned by the authenticated pro', async () => {
+  it('returns 404 when the booking is not owned by the authenticated pro', async () => {
+    // Unified via requireProBooking: the ownership query is scoped to the pro,
+    // so a foreign booking is indistinguishable from a missing one (404), and
+    // the API no longer leaks that another pro's booking exists.
     mocks.bookingFindFirst.mockResolvedValueOnce(null)
 
     const result = await POST(
@@ -366,17 +369,12 @@ describe('POST /api/pro/bookings/[id]/invite', () => {
       },
     })
 
-    expect(mocks.jsonFail).toHaveBeenCalledWith(
-      403,
-      'Forbidden.',
-      { code: 'FORBIDDEN' },
-    )
+    expect(mocks.jsonFail).toHaveBeenCalledWith(404, 'Booking not found.')
 
     expect(result).toEqual({
       ok: false,
-      status: 403,
-      error: 'Forbidden.',
-      code: 'FORBIDDEN',
+      status: 404,
+      error: 'Booking not found.',
     })
 
     expect(mocks.upsertClientClaimLink).not.toHaveBeenCalled()

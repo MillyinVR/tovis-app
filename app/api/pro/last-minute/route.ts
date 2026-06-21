@@ -2,6 +2,7 @@
 import { prisma } from '@/lib/prisma'
 import type { ServiceLocationType, Prisma } from '@prisma/client'
 import { jsonFail, jsonOk, pickString, requirePro, upper } from '@/app/api/_utils'
+import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import { computeLastMinuteDiscount } from '@/lib/lastMinutePricing'
 import { parseMoney } from '@/lib/money'
 import { updateBookingLastMinuteDiscount } from '@/lib/booking/writeBoundary'
@@ -34,24 +35,18 @@ export async function POST(req: Request) {
 
     if (!bookingId) return jsonFail(400, 'Missing bookingId.')
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: {
-        id: true,
-        professionalId: true,
-        serviceId: true,
-        offeringId: true,
-        scheduledFor: true,
-        locationType: true,
-        locationTimeZone: true,
-        subtotalSnapshot: true,
-        discountAmount: true,
-      },
+    const owned = await requireProBooking(bookingId, professionalId, {
+      id: true,
+      serviceId: true,
+      offeringId: true,
+      scheduledFor: true,
+      locationType: true,
+      locationTimeZone: true,
+      subtotalSnapshot: true,
+      discountAmount: true,
     })
-
-    if (!booking || booking.professionalId !== professionalId) {
-      return jsonFail(404, 'Booking not found.')
-    }
+    if (!owned.ok) return owned.res
+    const booking = owned.booking
 
     const effectiveLocationType: ServiceLocationType = booking.locationType ?? locationTypeFallback
 

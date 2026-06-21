@@ -122,6 +122,82 @@ export function moneyToFixed2String(
 }
 
 /**
+ * Faithfully convert a Decimal / number / money-string into a JS number without
+ * any rounding. Returns null for nullish, non-finite, or uninterpretable input.
+ *
+ * This is the single source of truth for "Decimal column -> number". It is used
+ * both for money amounts and for other non-money Prisma.Decimal columns (e.g.
+ * latitude / longitude), so it deliberately does NOT round or reformat — it
+ * preserves the value's full precision.
+ */
+export function moneyToNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null
+  }
+
+  if (typeof value === 'string') {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : null
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    const n = value.toNumber()
+    return Number.isFinite(n) ? n : null
+  }
+
+  // Decimal-like objects (e.g. instances from a different Prisma client realm,
+  // where `instanceof` fails) — fall back to their string representation.
+  if (typeof value === 'object') {
+    const maybeToString = (value as { toString?: unknown }).toString
+    if (typeof maybeToString === 'function') {
+      const n = Number(String(maybeToString.call(value)))
+      return Number.isFinite(n) ? n : null
+    }
+  }
+
+  return null
+}
+
+export type ParseTipAmountResult =
+  | { ok: true; tipAmount: string | null | undefined }
+  | { ok: false; error: string }
+
+/**
+ * Single source of truth for parsing an optional tip amount off request input.
+ *
+ * Accepts a number, a money-ish string, null, or undefined and rejects negative
+ * or non-finite values. Mirrors the lenient checkout semantics: `undefined`
+ * means "not provided", `null` / blank string means "explicitly no tip", and a
+ * valid value is normalized to a fixed 2-decimal string.
+ */
+export function parseTipAmount(value: unknown): ParseTipAmountResult {
+  if (value === undefined) return { ok: true, tipAmount: undefined }
+  if (value === null) return { ok: true, tipAmount: null }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 0) {
+      return { ok: false, error: 'tipAmount must be a non-negative number.' }
+    }
+    return { ok: true, tipAmount: value.toFixed(2) }
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return { ok: true, tipAmount: null }
+
+    const parsed = Number(trimmed)
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return { ok: false, error: 'tipAmount must be a non-negative amount.' }
+    }
+    return { ok: true, tipAmount: parsed.toFixed(2) }
+  }
+
+  return { ok: false, error: 'tipAmount must be a number, string, or null.' }
+}
+
+/**
  * Parse a money input into Prisma.Decimal.
  *
  * Accepts valid dollar values like:

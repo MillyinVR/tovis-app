@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BookingServiceItemType } from '@prisma/client'
 
 const mocks = vi.hoisted(() => ({
-  bookingFindUnique: vi.fn(),
+  bookingFindFirst: vi.fn(),
   professionalServiceOfferingFindMany: vi.fn(),
 
   requirePro: vi.fn(),
@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     booking: {
-      findUnique: mocks.bookingFindUnique,
+      findFirst: mocks.bookingFindFirst,
     },
     professionalServiceOffering: {
       findMany: mocks.professionalServiceOfferingFindMany,
@@ -210,7 +210,7 @@ describe('app/api/pro/bookings/[id]/consultation-services/route.ts', () => {
     const result = await GET(makeRequest(), makeCtx())
 
     expect(result).toBe(authRes)
-    expect(mocks.bookingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
     expect(mocks.professionalServiceOfferingFindMany).not.toHaveBeenCalled()
   })
 
@@ -223,12 +223,12 @@ describe('app/api/pro/bookings/[id]/consultation-services/route.ts', () => {
       error: 'Missing booking id.',
     })
 
-    expect(mocks.bookingFindUnique).not.toHaveBeenCalled()
+    expect(mocks.bookingFindFirst).not.toHaveBeenCalled()
     expect(mocks.professionalServiceOfferingFindMany).not.toHaveBeenCalled()
   })
 
   it('returns 404 when booking is not found', async () => {
-    mocks.bookingFindUnique.mockResolvedValueOnce(null)
+    mocks.bookingFindFirst.mockResolvedValueOnce(null)
 
     const result = await GET(makeRequest(), makeCtx())
 
@@ -238,11 +238,10 @@ describe('app/api/pro/bookings/[id]/consultation-services/route.ts', () => {
       error: 'Booking not found.',
     })
 
-    expect(mocks.bookingFindUnique).toHaveBeenCalledWith({
-      where: { id: 'booking_1' },
+    expect(mocks.bookingFindFirst).toHaveBeenCalledWith({
+      where: { id: 'booking_1', professionalId: 'pro_1' },
       select: expect.objectContaining({
         id: true,
-        professionalId: true,
         serviceItems: expect.any(Object),
       }),
     })
@@ -250,26 +249,24 @@ describe('app/api/pro/bookings/[id]/consultation-services/route.ts', () => {
     expect(mocks.professionalServiceOfferingFindMany).not.toHaveBeenCalled()
   })
 
-  it('returns 403 when booking belongs to another professional', async () => {
-    mocks.bookingFindUnique.mockResolvedValueOnce(
-      makeBooking({
-        professionalId: 'other_pro',
-      }),
-    )
+  it('returns 404 when booking belongs to another professional', async () => {
+    // Ownership is enforced at the query (findFirst scoped to the pro), so a
+    // foreign booking is indistinguishable from a missing one: both 404.
+    mocks.bookingFindFirst.mockResolvedValueOnce(null)
 
     const result = await GET(makeRequest(), makeCtx())
 
-    expect(result.status).toBe(403)
+    expect(result.status).toBe(404)
     await expect(result.json()).resolves.toEqual({
       ok: false,
-      error: 'Forbidden.',
+      error: 'Booking not found.',
     })
 
     expect(mocks.professionalServiceOfferingFindMany).not.toHaveBeenCalled()
   })
 
   it('returns sorted services, add-ons, and existing booking items for the authenticated professional', async () => {
-    mocks.bookingFindUnique.mockResolvedValueOnce(makeBooking())
+    mocks.bookingFindFirst.mockResolvedValueOnce(makeBooking())
     mocks.professionalServiceOfferingFindMany.mockResolvedValueOnce(
       makeOfferings(),
     )
@@ -352,7 +349,7 @@ describe('app/api/pro/bookings/[id]/consultation-services/route.ts', () => {
       .mockImplementation(() => undefined)
 
     const error = new Error('db boom')
-    mocks.bookingFindUnique.mockRejectedValueOnce(error)
+    mocks.bookingFindFirst.mockRejectedValueOnce(error)
 
     try {
       const result = await GET(makeRequest(), makeCtx())

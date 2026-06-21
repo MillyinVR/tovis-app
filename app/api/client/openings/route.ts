@@ -1,5 +1,6 @@
 // app/api/client/openings/route.ts
 import { prisma } from '@/lib/prisma'
+import { moneyToString } from '@/lib/money'
 import {
   jsonFail,
   jsonOk,
@@ -8,14 +9,16 @@ import {
   upper,
 } from '@/app/api/_utils'
 import {
-  LastMinuteOfferType,
   LastMinuteRecipientStatus,
-  LastMinuteTier,
   OpeningStatus,
   Prisma,
   ServiceLocationType,
 } from '@prisma/client'
 import { pickRecipientTierPlan } from '@/lib/lastMinute/pickTierPlan'
+import {
+  mapOpeningServiceDtos,
+  mapPublicIncentiveDto,
+} from '@/lib/lastMinute/openingDto'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,35 +27,6 @@ function normalizeLocationType(v: unknown): ServiceLocationType | null {
   if (s === ServiceLocationType.SALON) return ServiceLocationType.SALON
   if (s === ServiceLocationType.MOBILE) return ServiceLocationType.MOBILE
   return null
-}
-
-function decimalToString(value: Prisma.Decimal | null): string | null {
-  return value ? value.toString() : null
-}
-
-function incentiveLabel(plan: {
-  offerType: LastMinuteOfferType
-  percentOff: number | null
-  amountOff: Prisma.Decimal | null
-  freeAddOnService: { id: string; name: string } | null
-}) {
-  if (plan.offerType === LastMinuteOfferType.PERCENT_OFF && plan.percentOff != null) {
-    return `${plan.percentOff}% off`
-  }
-
-  if (plan.offerType === LastMinuteOfferType.AMOUNT_OFF && plan.amountOff) {
-    return `$${plan.amountOff.toString()} off`
-  }
-
-  if (plan.offerType === LastMinuteOfferType.FREE_SERVICE) {
-    return 'Free service'
-  }
-
-  if (plan.offerType === LastMinuteOfferType.FREE_ADD_ON) {
-    return plan.freeAddOnService?.name || 'Free add-on'
-  }
-
-  return 'No incentive'
 }
 
 const recipientSelect = {
@@ -213,50 +187,14 @@ function mapOpening(recipient: RecipientRow) {
           city: opening.location.city ?? null,
           state: opening.location.state ?? null,
           formattedAddress: opening.location.formattedAddress ?? null,
-          lat: decimalToString(opening.location.lat),
-          lng: decimalToString(opening.location.lng),
+          lat: moneyToString(opening.location.lat),
+          lng: moneyToString(opening.location.lng),
         }
       : null,
 
-    services: opening.services.map((serviceRow) => ({
-      id: serviceRow.id,
-      openingId: serviceRow.openingId,
-      serviceId: serviceRow.serviceId,
-      offeringId: serviceRow.offeringId,
-      sortOrder: serviceRow.sortOrder,
-      service: {
-        id: serviceRow.service.id,
-        name: serviceRow.service.name,
-        minPrice: serviceRow.service.minPrice.toString(),
-        defaultDurationMinutes: serviceRow.service.defaultDurationMinutes,
-      },
-      offering: {
-        id: serviceRow.offering.id,
-        title: serviceRow.offering.title ?? null,
-        salonPriceStartingAt: decimalToString(serviceRow.offering.salonPriceStartingAt),
-        mobilePriceStartingAt: decimalToString(serviceRow.offering.mobilePriceStartingAt),
-        salonDurationMinutes: serviceRow.offering.salonDurationMinutes,
-        mobileDurationMinutes: serviceRow.offering.mobileDurationMinutes,
-        offersInSalon: serviceRow.offering.offersInSalon,
-        offersMobile: serviceRow.offering.offersMobile,
-      },
-    })),
+    services: mapOpeningServiceDtos(opening.services),
 
-    publicIncentive: matchedTierPlan
-      ? {
-          tier: matchedTierPlan.tier,
-          offerType: matchedTierPlan.offerType,
-          label: incentiveLabel(matchedTierPlan),
-          percentOff: matchedTierPlan.percentOff ?? null,
-          amountOff: decimalToString(matchedTierPlan.amountOff),
-          freeAddOnService: matchedTierPlan.freeAddOnService
-            ? {
-                id: matchedTierPlan.freeAddOnService.id,
-                name: matchedTierPlan.freeAddOnService.name,
-              }
-            : null,
-        }
-      : null,
+    publicIncentive: mapPublicIncentiveDto(matchedTierPlan),
   }
 }
 

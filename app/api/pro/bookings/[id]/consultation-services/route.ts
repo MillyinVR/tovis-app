@@ -1,6 +1,7 @@
 // app/api/pro/bookings/[id]/consultation-services/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, pickString, requirePro } from '@/app/api/_utils'
+import { requireProBooking } from '@/app/api/_utils/auth/requireProBooking'
 import {
   resolveRouteParams,
   type RouteContext,
@@ -93,26 +94,21 @@ export async function GET(_req: Request, ctx: RouteContext) {
     const bookingId = pickString(params?.id)
     if (!bookingId) return jsonFail(400, 'Missing booking id.')
 
-    const booking = await prisma.booking.findUnique({
-      where: { id: bookingId },
-      select: {
-        id: true,
-        professionalId: true,
-        serviceItems: {
-          orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-          select: {
-            id: true,
-            serviceId: true,
-            offeringId: true,
-            itemType: true,
-            parentItemId: true,
-          },
+    const owned = await requireProBooking(bookingId, proId, {
+      id: true,
+      serviceItems: {
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          serviceId: true,
+          offeringId: true,
+          itemType: true,
+          parentItemId: true,
         },
       },
     })
-
-    if (!booking) return jsonFail(404, 'Booking not found.')
-    if (booking.professionalId !== proId) return jsonFail(403, 'Forbidden.')
+    if (!owned.ok) return owned.res
+    const booking = owned.booking
 
     const offerings = await prisma.professionalServiceOffering.findMany({
       where: {
