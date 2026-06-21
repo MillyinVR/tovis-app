@@ -104,7 +104,7 @@ export default function ClientDepositCard({
   return (
     <section className="rounded-card border border-white/10 bg-bgSecondary p-4">
       <div className="text-[13px] font-black text-textPrimary">
-        Secure your appointment
+        Secure your booking
       </div>
       <div className="mt-1 text-[12px] text-textSecondary">
         This pro requires a deposit to hold your booking. Because you found them through

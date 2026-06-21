@@ -331,7 +331,7 @@ export default function ReviewSection({
       const has = prev.includes(id)
       if (has) return prev.filter((x) => x !== id)
       if (prev.length >= APPT_SELECT_MAX) {
-        setLimitNote(`You can add up to ${APPT_SELECT_MAX} appointment photos/videos to your review.`)
+        setLimitNote(`You can add up to ${APPT_SELECT_MAX} booking photos/videos to your review.`)
         return prev
       }
       return [...prev, id]
@@ -783,7 +783,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
                       VIDEO
                     </div>
                   ) : (
-                    <RemoteImage src={thumb} alt="Appointment media" className="block h-36 w-full object-cover" width={400} height={144} />
+                    <RemoteImage src={thumb} alt="Booking media" className="block h-36 w-full object-cover" width={400} height={144} />
                   )}
                 </button>
 
@@ -910,7 +910,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
         {/* Appointment media appears AGAIN on review screen */}
         {!hasReview ? (
           <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
-            <div className="text-xs font-black">Your appointment photos (optional)</div>
+            <div className="text-xs font-black">Your booking photos (optional)</div>
             <div className="mt-1 text-xs font-semibold text-textSecondary">
               These are visible in your aftercare summary already. If you add them here, they’ll be shown on your public
               review. If you don’t, they stay private between you + your pro.

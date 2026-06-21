@@ -179,7 +179,7 @@ export default function ClaimClient(props: Props) {
       </button>
 
       <p className="mt-2.5 text-center font-mono text-[10px] uppercase tracking-[0.08em] text-textMuted">
-        Pay at your appointment · first to claim gets it
+        Pay at your booking · first to claim gets it
       </p>
     </div>
   )

@@ -63,7 +63,7 @@ export default function Home() {
           {/* Subtitle */}
           <p className="max-w-sm text-[14px] leading-relaxed text-textSecondary sm:max-w-md sm:text-[15px]">
             Booking and client management for beauty professionals —
-            with a seamless experience for clients to discover looks and book appointments.
+            with a seamless experience for clients to discover looks and make bookings.
           </p>
 
           {/* Primary CTAs */}
@@ -113,7 +113,7 @@ export default function Home() {
             </h2>
             <p className="text-[14px] leading-relaxed text-textSecondary">
               Discover beauty professionals near you, explore curated looks,
-              and manage all your appointments in one place.
+              and manage all your bookings in one place.
             </p>
           </div>
 

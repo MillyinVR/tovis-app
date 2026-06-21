@@ -622,7 +622,7 @@ export default function WaitlistPanel({
                   setMessage(false, null)
                 }}
                 disabled={posting}
-                placeholder="Ex: after work, weekends, short appointments preferred"
+                placeholder="Ex: after work, weekends, short bookings preferred"
                 className="mt-2 h-11 w-full rounded-full border border-white/10 bg-bgPrimary/35 px-4 text-[13px] text-textPrimary outline-none placeholder:text-textSecondary/70 disabled:opacity-70"
               />
 

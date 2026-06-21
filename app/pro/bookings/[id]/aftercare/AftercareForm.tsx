@@ -691,7 +691,7 @@ export default function AftercareForm({
 
     if (rebookMode === 'BOOKED_NEXT_APPOINTMENT') {
       if (!rebookISO) {
-        return 'Pick a recommended next visit date, or change rebook mode to “None”.'
+        return 'Pick a recommended next booking date, or change rebook mode to “None”.'
       }
 
       const rebookDate = new Date(rebookISO)
@@ -699,7 +699,7 @@ export default function AftercareForm({
         Number.isNaN(rebookDate.getTime()) ||
         rebookDate.getTime() <= now
       ) {
-        return 'Recommended next visit must be in the future.'
+        return 'Recommended next booking must be in the future.'
       }
     }
 
@@ -862,7 +862,7 @@ export default function AftercareForm({
       if (completionBlockers.length > 0) {
         setSuccess(
           [
-            'Aftercare sent — you’re free to start your next appointment.',
+            'Aftercare sent — you’re free to start your next booking.',
             'To finish this booking’s closeout (do it anytime from Bookings):',
             ...completionBlockers.map(
               (blocker) => `${blocker.label}: ${blocker.description}`,
@@ -909,7 +909,7 @@ export default function AftercareForm({
           Client-facing
         </div>
         <div className="mt-1 text-sm font-semibold text-textSecondary">
-          This is the client’s official appointment summary. Drafts are not
+          This is the client’s official booking summary. Drafts are not
           completed closeout. Only sending finalizes aftercare.
         </div>
 
@@ -969,7 +969,7 @@ export default function AftercareForm({
           <div>
             <div className="text-sm font-black text-textPrimary">Before</div>
             <div className={subtleTextClass()}>
-              Before photos/videos from this appointment.
+              Before photos/videos from this booking.
             </div>
             <MediaGrid items={beforeMedia} />
           </div>
@@ -977,7 +977,7 @@ export default function AftercareForm({
           <div>
             <div className="text-sm font-black text-textPrimary">After</div>
             <div className={subtleTextClass()}>
-              After photos/videos from this appointment.
+              After photos/videos from this booking.
             </div>
             <MediaGrid items={afterMedia} />
           </div>
@@ -986,7 +986,7 @@ export default function AftercareForm({
             <div>
               <div className="text-sm font-black text-textPrimary">Other</div>
               <div className={subtleTextClass()}>
-                Extra photos/videos attached to this appointment.
+                Extra photos/videos attached to this booking.
               </div>
               <MediaGrid items={otherMedia} />
             </div>
@@ -1150,9 +1150,9 @@ export default function AftercareForm({
               className={pillClass(
                 rebookMode === 'BOOKED_NEXT_APPOINTMENT',
               )}
-              title="Recommend a single ideal next visit date"
+              title="Recommend a single ideal next booking date"
             >
-              Next visit date
+              Next booking date
             </button>
 
             <button
@@ -1181,7 +1181,7 @@ export default function AftercareForm({
               ) : null}
 
               <label className={labelClass()} htmlFor="rebookAt">
-                Recommended next visit
+                Recommended next booking
               </label>
               <input
                 id="rebookAt"
@@ -1352,7 +1352,7 @@ export default function AftercareForm({
                 <option value="14">14 days</option>
                 <option value="30">30 days</option>
               </select>
-              after the appointment.
+              after the booking.
             </span>
           </label>
 
@@ -1400,7 +1400,7 @@ export default function AftercareForm({
           tz={tz}
           title={
             pickerTarget === 'nextVisit'
-              ? 'Pick a next-visit date'
+              ? 'Pick a next-booking date'
               : pickerTarget === 'windowStart'
                 ? 'Pick a window start date'
                 : 'Pick a window end date'

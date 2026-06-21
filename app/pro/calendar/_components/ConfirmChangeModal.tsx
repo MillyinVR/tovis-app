@@ -57,7 +57,7 @@ function buildChangeSummary(args: {
   outsideWorkingHours: boolean
 }): ChangeSummary {
   const { change, outsideWorkingHours } = args
-  const nounLabel = change.entityType === 'block' ? 'blocked time' : 'appointment'
+  const nounLabel = change.entityType === 'block' ? 'blocked time' : 'booking'
 
   if (change.kind === 'resize') {
     return {
@@ -253,7 +253,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
 
               <p className="mt-2 text-sm leading-6 text-paperDim">
                 Clients cannot normally book this time. You can still place the
-                appointment here, and optionally add a note for your client.
+                booking here, and optionally add a note for your client.
               </p>
             </section>
           ) : null}
@@ -273,7 +273,7 @@ export function ConfirmChangeModal(props: ConfirmChangeModalProps) {
                   }
                   rows={4}
                   maxLength={MAX_OVERRIDE_REASON_LENGTH}
-                  placeholder="Explain why this appointment needs to be scheduled outside working hours."
+                  placeholder="Explain why this booking needs to be scheduled outside working hours."
                   className={textareaClassName()}
                   disabled={applying}
                 />

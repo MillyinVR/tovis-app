@@ -18,5 +18,5 @@ export function bookingTitle(booking: ClientHomeBooking): string {
     return `${firstServiceName} + ${serviceItemNames.length - 1} more`
   }
 
-  return booking.service?.name ?? 'Appointment'
+  return booking.service?.name ?? 'Booking'
 }

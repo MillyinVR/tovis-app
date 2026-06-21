@@ -100,7 +100,7 @@ export default function AppointmentTypeToggle({
     <div className="mb-4">
       <div
         className="grid grid-cols-2 gap-2"
-        aria-label="Appointment type"
+        aria-label="Booking type"
       >
         {modes.map((mode) => {
           const selected = effectiveValue === mode

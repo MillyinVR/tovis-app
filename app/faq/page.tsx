@@ -13,7 +13,7 @@ export default function FaqPage() {
   const faqs = [
     {
       q: `What is ${n}?`,
-      a: `${n} is a platform for beauty professionals and clients. Professionals use it to manage business and appointment flows. Clients use it to discover looks, choose services, and manage bookings.`,
+      a: `${n} is a platform for beauty professionals and clients. Professionals use it to manage business and booking flows. Clients use it to discover looks, choose services, and manage bookings.`,
     },
     {
       q: `Why does ${n} ask for my phone number during signup?`,

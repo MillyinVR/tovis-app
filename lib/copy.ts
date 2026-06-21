@@ -3,6 +3,11 @@
 /**
  * Centralized UI copy (strings) to avoid hardcoded text scattered across files.
  * Keep this file "dumb": plain strings + small helpers.
+ *
+ * GLOSSARY — user-facing copy says "booking" (never "appointment" or "visit")
+ * for the scheduled-service concept. Internal model/field/type names (e.g.
+ * Booking, BOOKED_NEXT_APPOINTMENT, appointmentTimeZone) keep their existing
+ * names; only what a user reads must use "booking". Keep native apps consistent.
  */
 
 export const COPY = {
@@ -53,15 +58,15 @@ export const COPY = {
       rebookCtaNow: 'Rebook now',
       rebookLinkNotAvailable: 'Rebook link not available yet.',
       viewAllAftercare: 'View all aftercare',
-      nextAppointmentHeader: 'Next appointment',
-      nextAppointmentProposedSubtitle: 'Your pro suggested this time for your next visit.',
+      nextAppointmentHeader: 'Next booking',
+      nextAppointmentProposedSubtitle: 'Your pro suggested this time for your next booking.',
       nextAppointmentConfirm: 'Confirm this time',
       nextAppointmentConfirming: 'Confirming…',
       nextAppointmentCancel: 'Cancel',
       nextAppointmentCancelling: 'Cancelling…',
       nextAppointmentScheduleDifferent: 'Schedule a different time',
-      nextAppointmentConfirmedLabel: 'Next appointment confirmed',
-      nextAppointmentConfirmedCta: 'View appointment',
+      nextAppointmentConfirmedLabel: 'Next booking confirmed',
+      nextAppointmentConfirmedCta: 'View booking',
       nextAppointmentDeclinedLabel: 'You declined this time',
       nextAppointmentUnavailable:
         'That time is no longer available. Try scheduling a different time.',
@@ -117,7 +122,7 @@ export const COPY = {
     title: 'Aftercare',
     subtitle: 'Every aftercare summary you’ve received, all in one place.',
     emptyTitle: 'Nothing yet',
-    emptyBody: 'After your appointments, your pro will post aftercare here.',
+    emptyBody: 'After your bookings, your pro will post aftercare here.',
     serviceFallback: 'Aftercare',
     proFallback: 'Your pro',
     newPill: 'NEW',

@@ -311,7 +311,7 @@ describe('app/client/rebook/[token]/page.tsx', () => {
     expect(markup).toContain(
       'No account required to view aftercare and rebook from this secure link.',
     )
-    expect(markup).toContain('Your next appointment is already booked')
+    expect(markup).toContain('Your next booking is already confirmed')
     expect(markup).toContain('Access type:')
     expect(markup).toContain('Client action token')
     expect(markup).toContain('Single use:')

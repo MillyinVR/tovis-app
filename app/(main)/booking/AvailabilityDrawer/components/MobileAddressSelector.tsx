@@ -35,7 +35,7 @@ export default function MobileAddressSelector(props: Props) {
             Mobile service address
           </div>
           <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-            Choose where the pro should come for this appointment.
+            Choose where the pro should come for this booking.
           </div>
         </div>
 

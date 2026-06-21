@@ -291,7 +291,7 @@ export default function ClientProfileSettings() {
                 disabled={saving}
               />
               <HelpText>
-                Used for appointment updates and booking communication.
+                Used for booking updates and booking communication.
               </HelpText>
             </label>
 

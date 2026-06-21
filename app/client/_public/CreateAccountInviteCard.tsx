@@ -22,7 +22,7 @@ const COPY: Record<
   },
   aftercare: {
     headline: 'Want to keep your summaries?',
-    body: 'Everything from this visit lives on this secure link. If you’d like to keep your aftercare and before/after photos in one place and book other services, you can create a free account — we’ll carry it all over.',
+    body: 'Everything from this booking lives on this secure link. If you’d like to keep your aftercare and before/after photos in one place and book other services, you can create a free account — we’ll carry it all over.',
   },
 }
 

@@ -26,7 +26,7 @@ type Phase = 'upload' | 'review' | 'done'
 type Props = { copy: MigrationCopy['calendar'] }
 
 const CLASSIFICATION_LABEL: Record<CalendarPreviewRow['classification'], string> = {
-  BOOKING: 'Appointment',
+  BOOKING: 'Booking',
   BLOCK: 'Time blocked',
   HISTORY: 'Client history',
   SKIP: 'Skipped',
@@ -85,7 +85,7 @@ export function MigrateCalendarClient({ copy }: Props) {
       return
     }
     if (data.rows.length === 0) {
-      setError('No appointments were found.')
+      setError('No bookings were found.')
       return
     }
     setIcsText(text)
@@ -185,7 +185,7 @@ export function MigrateCalendarClient({ copy }: Props) {
     const count = (c: CalendarPreviewRow['classification']) =>
       live.filter((r) => r.classification === c).length
     return [
-      { value: String(count('BOOKING')), label: 'appointments', tone: 'accent' },
+      { value: String(count('BOOKING')), label: 'bookings', tone: 'accent' },
       { value: String(count('BLOCK')), label: 'time blocked', tone: 'gold' },
       { value: String(count('HISTORY')), label: 'history', tone: 'muted' },
     ]
@@ -214,8 +214,8 @@ export function MigrateCalendarClient({ copy }: Props) {
               Upload your calendar export (.ics)
             </p>
             <p className="mx-auto mt-2 max-w-md text-[13px] text-textMuted">
-              Export your appointments from your current booking app as an .ics
-              file, then upload it here. We&rsquo;ll match each appointment to your
+              Export your bookings from your current booking app as an .ics
+              file, then upload it here. We&rsquo;ll match each booking to your
               menu, hold blocked time, and build your client history.
             </p>
             <input
@@ -271,7 +271,7 @@ export function MigrateCalendarClient({ copy }: Props) {
                 onChange={(e) => setKeepSynced(e.target.checked)}
                 className="h-4 w-4 accent-accentPrimary"
               />
-              Keep this calendar synced — pull new appointments automatically
+              Keep this calendar synced — pull new bookings automatically
               while you finish moving over.
             </label>
           </div>
@@ -313,7 +313,7 @@ export function MigrateCalendarClient({ copy }: Props) {
                         <ToggleSwitch
                           on={included}
                           onChange={(v) => toggleExcluded(row.uid, v)}
-                          label={`Import ${row.summary || 'appointment'}`}
+                          label={`Import ${row.summary || 'booking'}`}
                         />
                       </div>
                     </div>
@@ -343,7 +343,7 @@ export function MigrateCalendarClient({ copy }: Props) {
                 <span className="font-display text-[22px] text-accentPrimary">
                   {result.created.bookings}
                 </span>{' '}
-                <span className="text-textMuted">appointments</span>
+                <span className="text-textMuted">bookings</span>
               </span>
               <span>
                 <span className="font-display text-[22px] text-amber">
@@ -368,7 +368,7 @@ export function MigrateCalendarClient({ copy }: Props) {
             </div>
             {synced ? (
               <p className="mt-4 text-[13px] text-accentPrimary">
-                ✓ Calendar kept in sync — we&rsquo;ll pull new appointments
+                ✓ Calendar kept in sync — we&rsquo;ll pull new bookings
                 automatically until you disconnect.
               </p>
             ) : null}
