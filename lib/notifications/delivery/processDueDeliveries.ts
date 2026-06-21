@@ -74,8 +74,13 @@ export type ProcessDueDeliveriesResult = {
 
 export type DeliveryProviderRegistry = {
   inApp: NotificationDeliveryProvider<InAppProviderSendRequest>
-  sms: NotificationDeliveryProvider<SmsProviderSendRequest>
-  email: NotificationDeliveryProvider<EmailProviderSendRequest>
+  // SMS/email providers are present only when their upstream credentials are
+  // configured (see app/api/internal/jobs/notifications/process/route.ts). A
+  // null entry means the channel has no live provider — its deliveries stay
+  // claimable for a later run instead of crashing the whole worker. In-app
+  // always exists, so in-app delivery never depends on SMS/email config.
+  sms: NotificationDeliveryProvider<SmsProviderSendRequest> | null
+  email: NotificationDeliveryProvider<EmailProviderSendRequest> | null
 }
 
 function normalizeNow(value: Date | undefined): Date {
@@ -179,21 +184,48 @@ function buildProviderRequest(
   return request
 }
 
+function buildProviderUnavailableResult(args: {
+  provider: NotificationProvider
+  channel: NotificationChannel
+}): ProviderSendResult {
+  // Retryable (not final): the credentials may arrive on a later run, so keep the
+  // delivery claimable rather than burning it. The Twilio launch gate already
+  // suppresses SMS at enqueue when unconfigured, so this is the safety net for
+  // rows enqueued before a provider was turned off / not yet turned on.
+  return {
+    ok: false,
+    retryable: true,
+    code: 'PROVIDER_NOT_CONFIGURED',
+    message: `No delivery provider is configured for channel ${args.channel}.`,
+    providerStatus: 'provider_unavailable',
+    responseMeta: {
+      source: 'processDueDeliveries',
+      provider: args.provider,
+      channel: args.channel,
+    },
+  }
+}
+
 async function sendWithProvider(args: {
   request: ProviderSendRequest
   providers: DeliveryProviderRegistry
 }): Promise<ProviderSendResult> {
   const { provider, channel } = args.request
+  const { inApp, sms, email } = args.providers
 
   switch (provider) {
     case NotificationProvider.INTERNAL_REALTIME:
-      return args.providers.inApp.send(args.request)
+      return inApp.send(args.request)
 
     case NotificationProvider.TWILIO:
-      return args.providers.sms.send(args.request)
+      return sms
+        ? sms.send(args.request)
+        : buildProviderUnavailableResult({ provider, channel })
 
     case NotificationProvider.POSTMARK:
-      return args.providers.email.send(args.request)
+      return email
+        ? email.send(args.request)
+        : buildProviderUnavailableResult({ provider, channel })
   }
 
   throw new Error(

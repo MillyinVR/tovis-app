@@ -415,6 +415,120 @@ describe('lib/notifications/delivery/processDueDeliveries', () => {
     })
   })
 
+  it('keeps an SMS delivery claimable (retryable) when the SMS provider is absent', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, inAppSend, smsSend, emailSend } = makeProviders()
+
+    // Simulate Twilio not being configured: the registry carries a null sms entry.
+    const providersWithoutSms = { ...providers, sms: null }
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [
+        makeClaimedDelivery({
+          id: 'delivery_sms_no_provider',
+          channel: NotificationChannel.SMS,
+          provider: NotificationProvider.TWILIO,
+          destination: '+15551234567',
+          templateKey: 'booking_confirmed',
+          attemptCount: 0,
+          maxAttempts: 5,
+        }),
+      ],
+    })
+
+    const result = await processDueDeliveries({
+      providers: providersWithoutSms,
+      tenantContext: rootTenantContext('tenant_root'),
+      claim: { now },
+    })
+
+    expect(inAppSend).not.toHaveBeenCalled()
+    expect(smsSend).not.toHaveBeenCalled()
+    expect(emailSend).not.toHaveBeenCalled()
+
+    const expectedNextAttemptAt = new Date(now.getTime() + 60_000)
+
+    expect(mockCompleteDeliveryAttempt).toHaveBeenCalledWith({
+      kind: 'RETRYABLE_FAILURE',
+      deliveryId: 'delivery_sms_no_provider',
+      leaseToken: 'lease_token_1',
+      attemptedAt: now,
+      nextAttemptAt: expectedNextAttemptAt,
+      code: 'PROVIDER_NOT_CONFIGURED',
+      message: 'No delivery provider is configured for channel SMS.',
+      providerStatus: 'provider_unavailable',
+      responseMeta: {
+        source: 'processDueDeliveries',
+        provider: NotificationProvider.TWILIO,
+        channel: NotificationChannel.SMS,
+      },
+    })
+
+    expect(result).toEqual({
+      claimedCount: 1,
+      processedCount: 1,
+      sentCount: 0,
+      retryScheduledCount: 1,
+      finalFailureCount: 0,
+      orchestrationErrorCount: 0,
+      outcomes: [
+        {
+          deliveryId: 'delivery_sms_no_provider',
+          provider: NotificationProvider.TWILIO,
+          channel: NotificationChannel.SMS,
+          result: 'RETRY_SCHEDULED',
+          nextAttemptAt: expectedNextAttemptAt,
+        },
+      ],
+    })
+  })
+
+  it('still delivers in-app when SMS and email providers are both absent', async () => {
+    const now = new Date('2026-04-09T12:00:00.000Z')
+    const { providers, inAppSend } = makeProviders()
+
+    const providersInAppOnly = { ...providers, sms: null, email: null }
+
+    inAppSend.mockResolvedValue({
+      ok: true,
+      providerMessageId: 'realtime_msg_only',
+      providerStatus: 'accepted',
+      responseMeta: { source: 'sendInApp' },
+    })
+
+    mockClaimDeliveries.mockResolvedValue({
+      now,
+      claimedAt: now,
+      leaseExpiresAt: new Date(now.getTime() + 60_000),
+      deliveries: [
+        makeClaimedDelivery({
+          id: 'delivery_in_app_only',
+          channel: NotificationChannel.IN_APP,
+          provider: NotificationProvider.INTERNAL_REALTIME,
+          destination: 'client_1',
+        }),
+      ],
+    })
+
+    const result = await processDueDeliveries({
+      providers: providersInAppOnly,
+      tenantContext: rootTenantContext('tenant_root'),
+      claim: { now },
+    })
+
+    expect(inAppSend).toHaveBeenCalledTimes(1)
+    expect(result.sentCount).toBe(1)
+    expect(result.outcomes[0]).toEqual({
+      deliveryId: 'delivery_in_app_only',
+      provider: NotificationProvider.INTERNAL_REALTIME,
+      channel: NotificationChannel.IN_APP,
+      result: 'SENT',
+    })
+  })
+
   it('schedules a retryable failure with backoff', async () => {
     const now = new Date('2026-04-09T12:00:00.000Z')
     const { providers, smsSend } = makeProviders()

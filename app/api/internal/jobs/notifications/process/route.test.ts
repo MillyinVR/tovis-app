@@ -468,11 +468,10 @@ describe('app/api/internal/jobs/notifications/process/route.ts', () => {
     })
   })
 
-  it('GET logs safely and returns generic 500 when provider configuration throws', async () => {
-    const consoleErrorSpy = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined)
-
+  it('omits the SMS provider (no crash) when Twilio is not configured', async () => {
+    // BUG 1 regression: a missing Twilio var must NOT take down the worker. The
+    // registry is built conditionally, so SMS drops to null while in-app + email
+    // still process. The Twilio client is never constructed.
     delete process.env.TWILIO_AUTH_TOKEN
 
     const result = await GET(
@@ -481,24 +480,92 @@ describe('app/api/internal/jobs/notifications/process/route.ts', () => {
       }),
     )
 
-    expect(mocks.safeError).toHaveBeenCalledWith(expect.any(Error))
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      'GET /api/internal/jobs/notifications/process error',
-      {
-        error: {
-          name: 'Error',
-          message: 'Missing required environment variable: TWILIO_AUTH_TOKEN',
+    expect(mocks.twilioFactory).not.toHaveBeenCalled()
+    expect(mocks.createSmsDeliveryProvider).not.toHaveBeenCalled()
+
+    expect(mocks.processDueDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providers: {
+          inApp: {
+            provider: NotificationProvider.INTERNAL_REALTIME,
+            channel: NotificationChannel.IN_APP,
+            send: expect.any(Function),
+          },
+          sms: null,
+          email: {
+            provider: NotificationProvider.POSTMARK,
+            channel: NotificationChannel.EMAIL,
+            send: expect.any(Function),
+          },
         },
-      },
+      }),
     )
 
-    expect(result.status).toBe(500)
-    await expect(result.json()).resolves.toEqual({
-      ok: false,
-      error: 'Internal server error',
-    })
+    expect(result.status).toBe(200)
+  })
 
-    consoleErrorSpy.mockRestore()
+  it('omits the email provider (no crash) when Postmark is not configured', async () => {
+    delete process.env.POSTMARK_SERVER_TOKEN
+
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(mocks.createEmailDeliveryProvider).not.toHaveBeenCalled()
+
+    expect(mocks.processDueDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providers: {
+          inApp: {
+            provider: NotificationProvider.INTERNAL_REALTIME,
+            channel: NotificationChannel.IN_APP,
+            send: expect.any(Function),
+          },
+          sms: {
+            provider: NotificationProvider.TWILIO,
+            channel: NotificationChannel.SMS,
+            send: expect.any(Function),
+          },
+          email: null,
+        },
+      }),
+    )
+
+    expect(result.status).toBe(200)
+  })
+
+  it('still processes in-app deliveries when neither SMS nor email is configured', async () => {
+    // The whole point of BUG 1: in-app needs no provider and must never be
+    // blocked by missing Twilio/Postmark config.
+    delete process.env.TWILIO_ACCOUNT_SID
+    delete process.env.TWILIO_AUTH_TOKEN
+    delete process.env.TWILIO_FROM_NUMBER
+    delete process.env.POSTMARK_SERVER_TOKEN
+    delete process.env.POSTMARK_FROM_EMAIL
+
+    const result = await GET(
+      makeRequest({
+        authorization: 'Bearer job_secret_1',
+      }),
+    )
+
+    expect(mocks.processDueDeliveries).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providers: {
+          inApp: {
+            provider: NotificationProvider.INTERNAL_REALTIME,
+            channel: NotificationChannel.IN_APP,
+            send: expect.any(Function),
+          },
+          sms: null,
+          email: null,
+        },
+      }),
+    )
+
+    expect(result.status).toBe(200)
   })
 
   it('POST logs safely and returns generic 500 when processing throws', async () => {
