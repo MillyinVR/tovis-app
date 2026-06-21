@@ -14,7 +14,10 @@ import {
 import { createEmailDeliveryProvider } from '@/lib/notifications/delivery/sendEmail'
 import { createInAppDeliveryProvider } from '@/lib/notifications/delivery/sendInApp'
 import { createSmsDeliveryProvider } from '@/lib/notifications/delivery/sendSms'
-import { readOptionalEnv as readEnv, requireEnv } from '@/lib/env'
+import {
+  readPostmarkEmailConfig,
+  readTwilioSmsConfig,
+} from '@/lib/notifications/config'
 import { getRedis } from '@/lib/redis'
 import { rootTenantContext } from '@/lib/tenant/context'
 import { getRootTenantId } from '@/lib/tenant/resolveTenant'
@@ -44,7 +47,7 @@ function buildRealtimeVersionKey(recipientInAppTargetId: string): string {
   return `notifications:in-app:${recipientInAppTargetId}:version`
 }
 
-function buildProviderRegistry(): DeliveryProviderRegistry {
+function buildInAppProvider(): NotificationDeliveryProvider<InAppProviderSendRequest> {
   const inAppProvider = createInAppDeliveryProvider({
     publish: async (envelope) => {
       const redis = getRedis()
@@ -79,14 +82,27 @@ function buildProviderRegistry(): DeliveryProviderRegistry {
     },
   })
 
-  const twilioClient = Twilio(
-    requireEnv('TWILIO_ACCOUNT_SID'),
-    requireEnv('TWILIO_AUTH_TOKEN'),
-  )
-  const twilioFromNumber = requireEnv('TWILIO_FROM_NUMBER')
+  return {
+    provider: NotificationProvider.INTERNAL_REALTIME,
+    channel: NotificationChannel.IN_APP,
+    send(request) {
+      return inAppProvider.send(request)
+    },
+  }
+}
+
+function buildSmsProvider(): NotificationDeliveryProvider<SmsProviderSendRequest> | null {
+  // Only stand up the SMS provider when Twilio is actually configured. Reuse the
+  // enqueue-gate config reader (lib/notifications/config) so a config that passes
+  // the enqueue gate cannot 500 the worker, and so a missing var degrades to "no
+  // SMS provider" instead of throwing and killing in-app/email delivery too.
+  const config = readTwilioSmsConfig()
+  if (!config) return null
+
+  const twilioClient = Twilio(config.accountSid, config.authToken)
 
   const smsProvider = createSmsDeliveryProvider({
-    fromNumber: twilioFromNumber,
+    fromNumber: config.fromNumber,
     client: {
       messages: {
         async create(params) {
@@ -108,40 +124,45 @@ function buildProviderRegistry(): DeliveryProviderRegistry {
     },
   })
 
-  const emailProvider = createEmailDeliveryProvider({
-    apiToken: requireEnv('POSTMARK_SERVER_TOKEN'),
-    fromEmail: requireEnv('POSTMARK_FROM_EMAIL'),
-    messageStream: readEnv('POSTMARK_MESSAGE_STREAM'),
-  })
-
-  const inApp: NotificationDeliveryProvider<InAppProviderSendRequest> = {
-    provider: NotificationProvider.INTERNAL_REALTIME,
-    channel: NotificationChannel.IN_APP,
-    send(request) {
-      return inAppProvider.send(request)
-    },
-  }
-
-  const sms: NotificationDeliveryProvider<SmsProviderSendRequest> = {
+  return {
     provider: NotificationProvider.TWILIO,
     channel: NotificationChannel.SMS,
     send(request) {
       return smsProvider.send(request)
     },
   }
+}
 
-  const email: NotificationDeliveryProvider<EmailProviderSendRequest> = {
+function buildEmailProvider(): NotificationDeliveryProvider<EmailProviderSendRequest> | null {
+  // Only stand up the email provider when Postmark is configured, via the same
+  // config reader the enqueue gate uses (unifies env-name handling across both
+  // sides — POSTMARK_SERVER_TOKEN/POSTMARK_API_TOKEN, etc.).
+  const config = readPostmarkEmailConfig()
+  if (!config) return null
+
+  const emailProvider = createEmailDeliveryProvider({
+    apiToken: config.serverToken,
+    fromEmail: config.fromEmail,
+    messageStream: config.messageStream,
+  })
+
+  return {
     provider: NotificationProvider.POSTMARK,
     channel: NotificationChannel.EMAIL,
     send(request) {
       return emailProvider.send(request)
     },
   }
+}
 
+function buildProviderRegistry(): DeliveryProviderRegistry {
+  // In-app needs no external provider and must always be available. SMS and email
+  // are included only when configured; when absent their deliveries stay claimable
+  // (see processDueDeliveries) rather than taking down the whole worker.
   return {
-    inApp,
-    sms,
-    email,
+    inApp: buildInAppProvider(),
+    sms: buildSmsProvider(),
+    email: buildEmailProvider(),
   }
 }
 
