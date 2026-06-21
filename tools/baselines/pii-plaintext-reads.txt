@@ -145,6 +145,9 @@ app/api/client/addresses/[id]/route.ts:direct property read:body.addressLine1 !=
 app/api/client/addresses/[id]/route.ts:direct property read:body.addressLine2 !== undefined ||
 app/api/client/addresses/[id]/route.ts:direct property read:body.postalCode !== undefined ||
 app/api/client/bookings/route.ts:Prisma select/include plaintext field:
+app/api/client/referrals/[id]/confirm/route.ts:direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
+app/api/client/referrals/[id]/confirm/route.ts:optional direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
+app/api/client/referrals/route.ts:direct property read:? [r.professional.firstName, r.professional.lastName]
 app/api/client/settings/route.ts:Prisma select/include plaintext field:dateOfBirth: true,
 app/api/client/settings/route.ts:Prisma select/include plaintext field:firstName: true,
 app/api/client/settings/route.ts:Prisma select/include plaintext field:lastName: true,
@@ -157,11 +160,8 @@ app/api/client/settings/route.ts:direct property read:const dateOfBirth = parseD
 app/api/client/settings/route.ts:direct property read:const firstName = normalizeRequiredishName(body.firstName)
 app/api/client/settings/route.ts:direct property read:const lastName = normalizeRequiredishName(body.lastName)
 app/api/client/settings/route.ts:direct property read:const updated = await loadSettings(auth.clientId, auth.user.email ?? null)
-app/api/debug/me/route.ts:direct property read:? { id: user.id, email: user.email, role: user.role }
 app/api/internal/cron/retry-verification-emails/route.ts:Prisma select/include plaintext field:email: true,
 app/api/internal/cron/retry-verification-emails/route.ts:direct property read:const email = normalizeEmail(candidate.email)
-lib/looks/commentSelect.ts:Prisma select/include plaintext field:firstName: true,
-lib/looks/commentSelect.ts:Prisma select/include plaintext field:lastName: true,
 app/api/pro-license/verify/route.ts:direct property read:? nameBlock.firstName
 app/api/pro-license/verify/route.ts:direct property read:? nameBlock.lastName
 app/api/pro-license/verify/route.ts:direct property read:typeof nameBlock.firstName === 'string'
@@ -209,6 +209,8 @@ app/api/pro/clients/search/route.ts:Prisma select/include plaintext field:phone:
 app/api/pro/clients/search/route.ts:direct property read:`${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() ||
 app/api/pro/clients/search/route.ts:direct property read:c.user?.email ||
 app/api/pro/clients/search/route.ts:optional direct property read:c.user?.email ||
+app/api/pro/membership/portal/route.ts:direct property read:if (!sub?.stripeCustomerId) {
+app/api/pro/membership/portal/route.ts:optional direct property read:if (!sub?.stripeCustomerId) {
 app/api/pro/onboarding/location/route.ts:direct property read:const effectivePostalCode = geo.postalCode || postalCode
 app/api/pro/onboarding/location/route.ts:direct property read:const postalCode = pickString(body.postalCode)
 app/api/pro/payments/stripe/connect-account/route.ts:Prisma select/include plaintext field:stripeAccountId: true,
@@ -401,6 +403,8 @@ app/pro/clients/page.tsx:optional direct property read:{client.user?.email ? cli
 app/pro/locations/LocationsClient.tsx:direct property read:if (l.postalCode) return `ZIP ${l.postalCode}`
 app/pro/locations/LocationsClient.tsx:direct property read:{pickedPlace.postalCode ? ` • ${pickedPlace.postalCode}` : null}
 app/pro/locations/page.tsx:Prisma select/include plaintext field:postalCode: true,
+app/pro/membership/page.tsx:direct property read:hasBillingAccount={Boolean(sub?.stripeCustomerId)}
+app/pro/membership/page.tsx:optional direct property read:hasBillingAccount={Boolean(sub?.stripeCustomerId)}
 app/pro/profile/public-profile/_data/loadProProfileManagementPage.ts:Prisma select/include plaintext field:email: true,
 app/pro/profile/public-profile/_data/loadProProfileManagementPage.ts:Prisma select/include plaintext field:firstName: true,
 app/pro/profile/public-profile/_data/loadProProfileManagementPage.ts:Prisma select/include plaintext field:lastName: true,
@@ -424,15 +428,9 @@ lib/booking/createProBookingWithClient.ts:direct property read:const invitedEmai
 lib/booking/createProBookingWithClient.ts:direct property read:const invitedPhone = asTrimmedString(clientSnapshot.phone)
 lib/booking/createProBookingWithClient.ts:direct property read:const lastName = asTrimmedString(client.lastName)
 lib/booking/createProBookingWithClient.ts:direct property read:const recipientEmail = asTrimmedString(clientSnapshot.email)
-lib/booking/createProBookingWithClient.ts:direct property read:const recipientPhone = asTrimmedString(clientSnapshot.phone)
 lib/booking/createProBookingWithClient.ts:direct property read:if (args.email && !args.phone) return ContactMethod.EMAIL
 lib/booking/createProBookingWithClient.ts:direct property read:if (args.phone && !args.email) return ContactMethod.SMS
 lib/booking/resolveProBookingClient.ts:Prisma select/include plaintext field:email: true,
-lib/booking/resolveProBookingClient.ts:direct property read:args.postalCode ||
-lib/booking/resolveProBookingClient.ts:direct property read:const addressLine1 = normalizeOptionalString(value?.addressLine1, 200)
-lib/booking/resolveProBookingClient.ts:direct property read:const addressLine2 = normalizeOptionalString(value?.addressLine2, 200)
-lib/booking/resolveProBookingClient.ts:direct property read:const hasAddressLine = Boolean(args.formattedAddress || args.addressLine1)
-lib/booking/resolveProBookingClient.ts:direct property read:const postalCode = normalizeOptionalString(value?.postalCode, 40)
 lib/booking/resolveProBookingClient.ts:direct property read:hasMeaningfulValue(input.email) ||
 lib/booking/resolveProBookingClient.ts:direct property read:hasMeaningfulValue(input.firstName) ||
 lib/booking/resolveProBookingClient.ts:direct property read:hasMeaningfulValue(input.lastName) ||
@@ -440,12 +438,6 @@ lib/booking/resolveProBookingClient.ts:direct property read:hasMeaningfulValue(i
 lib/booking/resolveProBookingClient.ts:direct property read:hasMeaningfulValue(value.addressLine1) ||
 lib/booking/resolveProBookingClient.ts:direct property read:hasMeaningfulValue(value.addressLine2) ||
 lib/booking/resolveProBookingClient.ts:direct property read:hasMeaningfulValue(value.postalCode) ||
-lib/booking/resolveProBookingClient.ts:direct property read:if (args.addressLine1 === 'invalid') return 'addressLine1'
-lib/booking/resolveProBookingClient.ts:direct property read:if (args.addressLine2 === 'invalid') return 'addressLine2'
-lib/booking/resolveProBookingClient.ts:direct property read:if (args.postalCode === 'invalid') return 'postalCode'
-lib/booking/resolveProBookingClient.ts:optional direct property read:const addressLine1 = normalizeOptionalString(value?.addressLine1, 200)
-lib/booking/resolveProBookingClient.ts:optional direct property read:const addressLine2 = normalizeOptionalString(value?.addressLine2, 200)
-lib/booking/resolveProBookingClient.ts:optional direct property read:const postalCode = normalizeOptionalString(value?.postalCode, 40)
 lib/booking/writeBoundary.ts:Prisma select/include plaintext field:email: true,
 lib/booking/writeBoundary.ts:Prisma select/include plaintext field:firstName: true,
 lib/booking/writeBoundary.ts:Prisma select/include plaintext field:lastName: true,
@@ -456,12 +448,14 @@ lib/booking/writeBoundary.ts:direct property read:args.booking.client.email,
 lib/booking/writeBoundary.ts:direct property read:args.booking.client.phone,
 lib/booking/writeBoundary.ts:direct property read:args.booking.client.user?.email ?? null,
 lib/booking/writeBoundary.ts:direct property read:args.booking.client.user?.phone ?? null,
+lib/booking/writeBoundary.ts:direct property read:const connectedAccountId = settings?.stripeAccountId ?? null
 lib/booking/writeBoundary.ts:direct property read:if (!settings.stripeAccountId) {
 lib/booking/writeBoundary.ts:direct property read:if (args.email && !args.phone) return ContactMethod.EMAIL
 lib/booking/writeBoundary.ts:direct property read:if (args.phone && !args.email) return ContactMethod.SMS
 lib/booking/writeBoundary.ts:optional direct property read:`${(booking.client?.firstName ?? '').trim()} ${(booking.client?.lastName ?? '').trim()}`.trim()
 lib/booking/writeBoundary.ts:optional direct property read:args.booking.client.user?.email ?? null,
 lib/booking/writeBoundary.ts:optional direct property read:args.booking.client.user?.phone ?? null,
+lib/booking/writeBoundary.ts:optional direct property read:const connectedAccountId = settings?.stripeAccountId ?? null
 lib/clients/clientClaimLinks.ts:Prisma select/include plaintext field:email: true,
 lib/clients/upsertProClient.ts:Prisma select/include plaintext field:email: true,
 lib/clients/upsertProClient.ts:Prisma select/include plaintext field:firstName: true,
@@ -481,10 +475,14 @@ lib/dto/clientBooking.ts:Prisma select/include plaintext field:
 lib/dto/clientBooking.ts:direct property read:Boolean(b.consultationNotes) ||
 lib/follows/index.ts:Prisma select/include plaintext field:firstName: true,
 lib/follows/index.ts:Prisma select/include plaintext field:lastName: true,
+lib/looks/commentSelect.ts:Prisma select/include plaintext field:firstName: true,
+lib/looks/commentSelect.ts:Prisma select/include plaintext field:lastName: true,
 lib/looks/mappers.ts:direct property read:const clientFirst = user.clientProfile?.firstName?.trim() ?? ''
 lib/looks/mappers.ts:direct property read:const clientLast = user.clientProfile?.lastName?.trim() ?? ''
 lib/looks/mappers.ts:optional direct property read:const clientFirst = user.clientProfile?.firstName?.trim() ?? ''
 lib/looks/mappers.ts:optional direct property read:const clientLast = user.clientProfile?.lastName?.trim() ?? ''
+lib/membership/subscription.ts:Prisma select/include plaintext field:stripeCustomerId: true,
+lib/membership/subscription.ts:direct property read:if (sub.stripeCustomerId) return sub.stripeCustomerId
 lib/notifications/channelPolicy.ts:direct property read:const email = typeof args.email === 'string' ? args.email.trim() : ''
 lib/notifications/channelPolicy.ts:direct property read:const phone = typeof args.phone === 'string' ? args.phone.trim() : ''
 lib/notifications/clientNotifications.ts:Prisma select/include plaintext field:email: true,
@@ -492,7 +490,6 @@ lib/notifications/clientNotifications.ts:Prisma select/include plaintext field:p
 lib/notifications/clientNotifications.ts:direct property read:const profilePhone = normNullableString(client.phone, 64)
 lib/notifications/clientNotifications.ts:direct property read:const userPhone = normNullableString(client.user?.phone, 64)
 lib/notifications/clientNotifications.ts:optional direct property read:const userPhone = normNullableString(client.user?.phone, 64)
-lib/notifications/delivery/processDueDeliveries.ts:direct property read:return args.providers.email.send(args.request)
 lib/notifications/delivery/renderNotificationContent.ts:direct property read:...renderer.email(args.dispatch, brandName),
 lib/notifications/dispatch/enqueueDispatch.ts:direct property read:const email = normNullableString(args.recipient.email, MAX_EMAIL)
 lib/notifications/dispatch/enqueueDispatch.ts:direct property read:const phone = normNullableString(args.recipient.phone, MAX_PHONE)
@@ -508,16 +505,5 @@ lib/profiles/publicProfileFormatting.ts:direct property read:return trimToNull(i
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:email: true,
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:firstName: true,
 lib/profiles/publicProfileSelects.ts:Prisma select/include plaintext field:lastName: true,
-app/api/client/referrals/[id]/confirm/route.ts:direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
-app/api/client/referrals/[id]/confirm/route.ts:optional direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
-app/api/client/referrals/route.ts:direct property read:? [r.professional.firstName, r.professional.lastName]
 lib/referral/referralConversion.ts:direct property read:const referredName = referral.referredClient?.firstName?.trim() || 'Your referral'
 lib/referral/referralConversion.ts:optional direct property read:const referredName = referral.referredClient?.firstName?.trim() || 'Your referral'
-app/api/pro/membership/portal/route.ts:direct property read:if (!sub?.stripeCustomerId) {
-app/api/pro/membership/portal/route.ts:optional direct property read:if (!sub?.stripeCustomerId) {
-app/pro/membership/page.tsx:direct property read:hasBillingAccount={Boolean(sub?.stripeCustomerId)}
-app/pro/membership/page.tsx:optional direct property read:hasBillingAccount={Boolean(sub?.stripeCustomerId)}
-lib/booking/writeBoundary.ts:direct property read:const connectedAccountId = settings?.stripeAccountId ?? null
-lib/booking/writeBoundary.ts:optional direct property read:const connectedAccountId = settings?.stripeAccountId ?? null
-lib/membership/subscription.ts:Prisma select/include plaintext field:stripeCustomerId: true,
-lib/membership/subscription.ts:direct property read:if (sub.stripeCustomerId) return sub.stripeCustomerId
