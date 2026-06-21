@@ -3,6 +3,7 @@ import Link from 'next/link'
 
 import EditPaymentSettingsButton from '../EditPaymentSettingsButton'
 import EditProfileButton from '../EditProfileButton'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 import type { ProProfileManagementPageModel } from '../_data/proProfileManagementTypes'
 
@@ -17,11 +18,11 @@ export default function ProProfileCard({ model }: ProProfileCardProps) {
     <section className="brand-pro-profile-card">
       <div className="brand-pro-profile-summary">
         {model.profile.avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <RemoteImage
             src={model.profile.avatarUrl}
             alt={model.profile.displayName}
             className="brand-pro-profile-avatar"
+            intrinsic
           />
         ) : (
           <div className="brand-pro-profile-avatar-fallback" aria-hidden="true">

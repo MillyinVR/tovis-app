@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { isRecord } from '@/lib/guards'
 
 type Attachment = {
@@ -164,11 +165,11 @@ function AttachmentPreview(props: { attachment: Attachment }) {
 
   if (attachment.mediaType === 'IMAGE') {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={attachment.url}
+      <RemoteImage
+        src={attachment.url ?? ''}
         alt=""
         className="mt-2 max-h-56 rounded-[18px] border border-textPrimary/10 object-cover"
+        intrinsic
       />
     )
   }

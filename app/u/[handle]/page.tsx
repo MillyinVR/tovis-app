@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { Role } from '@prisma/client'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { getBrandConfig } from '@/lib/brand'
 import { getCurrentUser } from '@/lib/currentUser'
 import { buildLoginHref } from '@/lib/profiles/publicProfileFormatting'
@@ -31,8 +32,13 @@ function Avatar({ name, url }: { name: string; url: string | null }) {
   if (url) {
     return (
       <div className="h-[86px] w-[86px] shrink-0 overflow-hidden rounded-full border border-textPrimary/10 bg-bgSecondary">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt={name} className="h-full w-full object-cover" />
+        <RemoteImage
+          src={url}
+          alt={name}
+          className="h-full w-full object-cover"
+          width={86}
+          height={86}
+        />
       </div>
     )
   }
@@ -108,13 +114,13 @@ export default async function PublicClientProfilePage({
                 >
                   <div className="relative aspect-[1.1/1] bg-bgSecondary">
                     {look.imageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      <RemoteImage
                         src={look.imageUrl}
                         alt={look.name}
                         className="h-full w-full object-cover"
                         loading="lazy"
-                        decoding="async"
+                        width={440}
+                        height={400}
                       />
                     ) : null}
                   </div>

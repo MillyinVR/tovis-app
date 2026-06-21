@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { memo, useMemo } from 'react'
 
 import type { ProCard, SelectedHold } from '../types'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { formatSlotFullLabel, formatSlotLabel } from '@/lib/bookingTime'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
@@ -159,11 +160,12 @@ function OtherPros({
                 <div className="flex items-center gap-[10px]">
                   <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border border-white/10 bg-bgPrimary/40">
                     {pro.avatarUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={pro.avatarUrl}
+                      <RemoteImage
+                        src={pro.avatarUrl ?? ''}
                         alt={`${name} avatar`}
                         className="block h-full w-full object-cover"
+                        width={40}
+                        height={40}
                       />
                     ) : (
                       <span className="text-[15px] font-black text-textSecondary">

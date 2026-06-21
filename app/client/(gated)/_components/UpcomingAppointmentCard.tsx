@@ -3,6 +3,7 @@ import Link from 'next/link'
 
 import { asTrimmedString } from '@/lib/guards'
 import { initialsForName } from '@/lib/initials'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 import type { ClientHomeBooking } from '../_data/getClientHomeData'
 import { bookingTitle } from './bookingDisplay'
@@ -95,11 +96,12 @@ export default function UpcomingAppointmentCard({
           style={{ background: gradientAvatar(0) }}
         >
           {booking.professional.avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <RemoteImage
               src={booking.professional.avatarUrl}
               alt={proName}
               className="h-full w-full object-cover"
+              width={46}
+              height={46}
             />
           ) : (
             initialsForName(proName)

@@ -4,6 +4,7 @@
 import { useMemo, useState } from 'react'
 
 import { isRecord } from '@/lib/guards'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 
@@ -442,10 +443,11 @@ function ReviewsPanelInner({
                                 VIDEO
                               </div>
                             ) : (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
+                              <RemoteImage
                                 src={src}
                                 alt="Review media"
+                                width={400}
+                                height={400}
                                 style={{
                                   width: '100%',
                                   height: '100%',
@@ -558,10 +560,11 @@ function ReviewsPanelInner({
                       VIDEO
                     </div>
                   ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    <RemoteImage
                       src={primarySrc}
                       alt="Primary review media"
+                      width={600}
+                      height={600}
                       style={{
                         width: '100%',
                         height: '100%',
@@ -639,10 +642,10 @@ function Lightbox({
             style={{ width: '100%', height: 'auto', display: 'block' }}
           />
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <RemoteImage
             src={lightbox.src}
             alt="Full size"
+            intrinsic
             style={{ width: '100%', height: 'auto', display: 'block' }}
           />
         )}

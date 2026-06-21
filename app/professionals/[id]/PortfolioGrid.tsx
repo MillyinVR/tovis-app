@@ -1,6 +1,7 @@
 // app/professionals/[id]/PortfolioGrid.tsx// app/professionals/[id]/PortfolioGrid.tsx
 import Link from 'next/link'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import type { PublicPortfolioTileDto } from '@/lib/profiles/publicProfileMappers'
 
 type PortfolioGridProps = {
@@ -54,11 +55,11 @@ function PortfolioTile({
       title={title}
       aria-label={title}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
+      <RemoteImage
         src={tile.src}
         alt={alt}
         className="brand-profile-media-img transition duration-200 group-hover:scale-[1.02]"
+        intrinsic
       />
 
       {featured ? (

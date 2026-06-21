@@ -11,6 +11,7 @@ import VerificationUploadClient from './VerificationUploadClient'
 import DeleteDocButton from './DeleteDocButton'
 import LicenseEditForm from './LicenseEditForm'
 import { requiresLicense } from '@/lib/licensing/licenseRequirement'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 export const dynamic = 'force-dynamic'
 
@@ -167,11 +168,12 @@ export default async function ProVerificationPage() {
                     className="mt-2 block w-fit"
                     title="Open full size"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <RemoteImage
                       src={`/api/pro/verification-docs/${encodeURIComponent(d.id)}`}
                       alt="Uploaded document preview"
                       className="h-28 w-44 rounded-lg border border-white/10 bg-bgPrimary/30 object-cover"
+                      width={176}
+                      height={112}
                     />
                     <span className="mt-1 block text-[11px] font-black text-accentPrimary">
                       View larger ↗

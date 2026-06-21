@@ -9,6 +9,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { prisma } from '@/lib/prisma'
 import { platformCrossTenantProVisibilityFilter } from '@/lib/tenant'
 import { getAdminUiPerms } from '@/lib/adminUiPermissions'
@@ -219,11 +220,12 @@ export default async function AdminLicenseReviewPage() {
                           className="block text-right"
                           title="Open full size"
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
+                          <RemoteImage
                             src={`/api/admin/verification-docs/open?id=${encodeURIComponent(latestDoc.id)}`}
                             alt="License document"
                             className="h-20 w-32 rounded-lg border border-surfaceGlass/14 bg-bgPrimary/30 object-cover"
+                            width={128}
+                            height={80}
                           />
                           <span className="mt-1 block text-[11px] font-black text-accentPrimary">
                             View larger ↗

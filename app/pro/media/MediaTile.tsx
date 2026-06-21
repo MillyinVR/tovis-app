@@ -4,6 +4,7 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { safeJson, readErrorMessage, errorMessageFromUnknown } from '@/lib/http'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 type MediaKind = 'IMAGE' | 'VIDEO'
 
@@ -127,11 +128,12 @@ export default function MediaTile({
             onError={() => setMediaBroken(true)}
           />
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <RemoteImage
             src={src}
             alt=""
             className="block h-40 w-full object-cover"
+            width={400}
+            height={160}
             onError={() => setMediaBroken(true)}
           />
         )}

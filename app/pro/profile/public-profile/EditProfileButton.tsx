@@ -17,6 +17,7 @@ import { sanitizeHandleInput } from '@/lib/handles'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { withCacheBuster } from '@/lib/url'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 type Props = {
   canEditHandle: boolean
@@ -489,11 +490,12 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                   <div className="flex items-center gap-3">
                     <div className="h-11 w-11 overflow-hidden rounded-full border border-white/10 bg-bgPrimary">
                       {showAvatarImage ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={avatarSrc ?? undefined}
+                        <RemoteImage
+                          src={avatarSrc ?? ''}
                           alt=""
                           className="h-full w-full object-cover"
+                          width={44}
+                          height={44}
                           onError={() => setAvatarBroken(true)}
                         />
                       ) : (

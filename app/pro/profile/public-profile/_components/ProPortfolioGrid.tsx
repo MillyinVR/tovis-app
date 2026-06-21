@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { MediaVisibility } from '@prisma/client'
 
 import OwnerMediaMenu from '@/app/_components/media/OwnerMediaMenu'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 import type {
   ProProfileManagementPortfolio,
@@ -87,11 +88,11 @@ function PortfolioMediaTile({
         className="brand-focus"
         aria-label={title}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <RemoteImage
           src={tile.src}
           alt={alt}
           className="brand-pro-profile-media-img"
+          intrinsic
         />
       </Link>
 

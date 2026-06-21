@@ -25,6 +25,7 @@ import { pickString } from '@/lib/pick'
 import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercareAccess'
 import { isBookingError } from '@/lib/booking/errors'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -74,11 +75,12 @@ function MediaStrip(props: {
                 className="aspect-square overflow-hidden rounded-card border border-white/10 bg-bgPrimary"
               >
                 {src ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <RemoteImage
                     src={src}
                     alt={props.title}
                     className="h-full w-full object-cover"
+                    width={400}
+                    height={400}
                   />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-xs text-textSecondary">

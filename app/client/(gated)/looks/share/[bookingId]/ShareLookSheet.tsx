@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { cn } from '@/lib/utils'
 import { isRecord } from '@/lib/guards'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
@@ -308,13 +309,12 @@ function PhotoSlot(props: {
   return (
     <div className="relative aspect-[1/1.15] overflow-hidden rounded-[16px] border border-textPrimary/10 bg-bgSecondary">
       {slot.previewUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={slot.previewUrl}
+        <RemoteImage
+          src={slot.previewUrl ?? ''}
           alt={label}
           className="h-full w-full object-cover"
           loading="lazy"
-          decoding="async"
+          intrinsic
         />
       ) : (
         <div className="grid h-full place-items-center px-3 text-center">
@@ -371,13 +371,13 @@ function ProChipAvatar(props: { name: string; avatarUrl: string | null }) {
   if (props.avatarUrl) {
     return (
       <span className="block h-5 w-5 overflow-hidden rounded-full bg-bgPrimary">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={props.avatarUrl}
+        <RemoteImage
+          src={props.avatarUrl ?? ''}
           alt={props.name}
           className="h-full w-full object-cover"
           loading="lazy"
-          decoding="async"
+          width={20}
+          height={20}
         />
       </span>
     )

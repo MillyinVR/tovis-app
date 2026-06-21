@@ -3,6 +3,7 @@
 
 import React, { useEffect } from 'react'
 import { cn } from '@/lib/utils'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 
@@ -86,14 +87,14 @@ export default function MediaFullscreenViewer({
         {mediaType === 'VIDEO' ? (
           <video src={safeSrc} controls playsInline preload="metadata" className={cn('h-full w-full', objectClass)} />
         ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <RemoteImage
             src={safeSrc}
             alt={alt || 'Media'}
             draggable={false}
             loading="eager"
-            decoding="async"
             className={cn('h-full w-full', objectClass)}
+            width={1200}
+            height={1200}
           />
         )}
       </div>
