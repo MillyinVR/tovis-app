@@ -5,6 +5,7 @@ import * as React from 'react'
 import Link from 'next/link'
 
 import { initialsForName } from '@/lib/initials'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 export type OutreachEntry = {
   rank: number
@@ -124,11 +125,12 @@ function WaitlistRow({ entry }: { entry: OutreachEntry }) {
         style={{ background: avatarGradient(entry.waitlistEntryId) }}
       >
         {entry.avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={entry.avatarUrl}
+          <RemoteImage
+            src={entry.avatarUrl ?? ''}
             alt={entry.clientName}
             className="h-full w-full object-cover"
+            width={40}
+            height={40}
           />
         ) : (
           initialsForName(entry.clientName, '?')

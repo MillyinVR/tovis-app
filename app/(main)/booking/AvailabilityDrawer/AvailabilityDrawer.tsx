@@ -20,6 +20,7 @@ import type {
   ServiceLocationType,
 } from './types'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { asTrimmedString, getRecordProp, isRecord } from '@/lib/guards'
 
 import AppointmentTypeToggle from './components/AppointmentTypeToggle'
@@ -1731,11 +1732,12 @@ export default function AvailabilityDrawer(props: {
               >
                 <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-full border border-white/10 bg-bgPrimary/40">
                   {primary.avatarUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={primary.avatarUrl}
+                    <RemoteImage
+                      src={primary.avatarUrl ?? ''}
                       alt={primary.businessName || ''}
                       className="block h-full w-full object-cover"
+                      width={48}
+                      height={48}
                     />
                   ) : (
                     <span className="text-[18px] font-black text-textSecondary">

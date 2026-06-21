@@ -2,6 +2,7 @@
 import Link from 'next/link'
 
 import { initialsForName } from '@/lib/initials'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 import type { ClientHomeLastMinuteInvite } from '../_data/getClientHomeData'
 import { firstWord, gradientAvatar, money, professionalName } from './homeVisuals'
@@ -106,11 +107,12 @@ function InviteRow({
         style={{ background: gradientAvatar(index) }}
       >
         {invite.opening.professional.avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <RemoteImage
             src={invite.opening.professional.avatarUrl}
             alt={proName}
             className="h-full w-full object-cover"
+            width={38}
+            height={38}
           />
         ) : (
           initialsForName(proName)

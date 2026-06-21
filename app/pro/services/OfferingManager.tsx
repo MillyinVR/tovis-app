@@ -9,6 +9,7 @@ import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 type Offering = {
   id: string
   serviceId: string
@@ -440,8 +441,7 @@ function OfferingCard(props: {
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(40px_40px_at_30%_20%,rgb(255_255_255/0.20),transparent_60%)]" />
 
             {imgSrc ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={imgSrc} alt="" className="h-full w-full object-cover" />
+              <RemoteImage src={imgSrc} alt="" className="h-full w-full object-cover" width={56} height={56} />
             ) : (
               <div className="grid h-full w-full place-items-center text-[10px] font-black text-textSecondary">
                 No image

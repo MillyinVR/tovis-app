@@ -12,6 +12,7 @@ import {
   type ImageEditState,
   type ProcessedImageResult,
 } from '@/lib/media/processImageForUpload'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 type Props = {
   open: boolean
@@ -301,11 +302,11 @@ function ImageEditModalContent({
                   >
                     {previewUrl ? (
                       <>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
+                        <RemoteImage
                           src={previewUrl}
                           alt="Image preview"
                           className="absolute inset-0 h-full w-full object-cover"
+                          intrinsic
                           style={{
                             transform: `translate(${edit.offsetX * 0.45}%, ${edit.offsetY * 0.45}%) scale(${edit.zoom})`,
                             transformOrigin: 'center center',
@@ -313,9 +314,6 @@ function ImageEditModalContent({
                             pointerEvents: 'none',
                           }}
                           draggable={false}
-                          onDragStart={(event) => {
-                            event.preventDefault()
-                          }}
                         />
                       </>
                     ) : null}

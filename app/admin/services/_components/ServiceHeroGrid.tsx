@@ -16,6 +16,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { cn } from '@/lib/utils'
 import {
   safeJson,
@@ -295,8 +296,7 @@ function ImageWithShimmer(props: {
       ) : null}
 
       {!failed ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <RemoteImage
           key={src}
           src={src}
           alt={alt}
@@ -305,6 +305,8 @@ function ImageWithShimmer(props: {
             loaded ? 'opacity-100' : 'opacity-0',
           )}
           loading="lazy"
+          width={600}
+          height={400}
           onLoad={() => {
             setFailedSrc((current) => (current === src ? null : current))
             setLoadedSrc(src)

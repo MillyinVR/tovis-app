@@ -12,6 +12,7 @@ import { isRecord } from '@/lib/guards'
 import { pickStringOrEmpty } from '@/lib/pick'
 import { safeJsonRecord, readErrorMessage } from '@/lib/http'
 import ImageEditModal from './ImageEditModal'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import {
   DEFAULT_IMAGE_EDIT_STATE,
   IMAGE_UPLOAD_MAX_BYTES,
@@ -626,11 +627,11 @@ export default function NewMediaPostForm() {
               <div className="grid gap-2 rounded-xl border border-white/10 bg-bgPrimary p-3">
                 {uploadPreviewUrl ? (
                   <div className="overflow-hidden rounded-card border border-white/10 bg-black">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
+                    <RemoteImage
                       src={uploadPreviewUrl}
                       alt="Selected upload preview"
                       className="block max-h-[280px] w-full object-contain"
+                      intrinsic
                     />
                   </div>
                 ) : null}

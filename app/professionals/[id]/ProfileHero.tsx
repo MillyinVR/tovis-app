@@ -2,6 +2,7 @@
 // app/professionals/[id]/ProfileHero.tsx
 import Link from 'next/link'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import type {
   PublicProfileHeaderDto,
   PublicProfileStatsDto,
@@ -33,11 +34,11 @@ export default function ProfileHero({
     <>
       <section className="brand-profile-hero">
         {header.avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <RemoteImage
             src={header.avatarUrl}
             alt={header.displayName}
             className="brand-profile-hero-media"
+            intrinsic
           />
         ) : (
           <div className="brand-profile-hero-fallback" aria-hidden />

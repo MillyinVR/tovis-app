@@ -2,6 +2,7 @@
 import Link from 'next/link'
 
 import { initialsForName } from '@/lib/initials'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 import type { ClientHomeWaitlistEntry } from '../_data/getClientHomeData'
 import { gradientAvatar, professionalName } from './homeVisuals'
@@ -34,11 +35,12 @@ function WaitlistRow({
         style={{ background: gradientAvatar(index) }}
       >
         {entry.professional.avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <RemoteImage
             src={entry.professional.avatarUrl}
             alt={proName}
             className="h-full w-full object-cover"
+            width={36}
+            height={36}
           />
         ) : (
           initialsForName(proName)

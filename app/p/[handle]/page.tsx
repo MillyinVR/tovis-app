@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import ProSessionFooter from '@/app/_components/ProSessionFooter/ProSessionFooter'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
 import { canViewerSeeProPublicSurface } from '@/lib/proTrustState'
 import { normalizeHandle } from '@/lib/handles'
@@ -99,10 +100,11 @@ export default async function VanityProfilePage({
         <div className="mt-4 flex items-start gap-4">
           <div className="h-16 w-16 overflow-hidden rounded-full border border-white/10 bg-bgPrimary/25">
             {pro.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <RemoteImage
                 src={pro.avatarUrl}
                 alt={displayName}
+                width={64}
+                height={64}
                 className="h-full w-full object-cover"
               />
             ) : null}

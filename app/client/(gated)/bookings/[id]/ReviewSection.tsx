@@ -12,6 +12,7 @@ import {
   buildClientIdempotencyKey,
   idempotencyHeaders,
 } from '@/lib/idempotency/client'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 type MediaType = 'IMAGE' | 'VIDEO'
 
@@ -781,8 +782,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
                       VIDEO
                     </div>
                   ) : (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={thumb} alt="Appointment media" className="block h-36 w-full object-cover" />
+                    <RemoteImage src={thumb} alt="Appointment media" className="block h-36 w-full object-cover" width={400} height={144} />
                   )}
                 </button>
 
@@ -850,8 +850,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
               {preview.mediaType === 'VIDEO' ? (
                 <video src={preview.url} controls className="block max-h-[75vh] w-full" />
               ) : (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={preview.url} alt="Full size preview" className="block max-h-[75vh] w-full object-contain" />
+                <RemoteImage src={preview.url} alt="Full size preview" className="block max-h-[75vh] w-full object-contain" intrinsic />
               )}
             </div>
           </div>
@@ -944,8 +943,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
                         className="block w-full bg-transparent p-0"
                         title="Click to preview"
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={thumb} alt="Review media" className="block h-36 w-full object-cover" />
+                        <RemoteImage src={thumb} alt="Review media" className="block h-36 w-full object-cover" width={400} height={144} />
                       </button>
                       <div className="p-2 text-[11px] font-semibold text-textSecondary">Attached to your review</div>
                     </div>
@@ -1027,8 +1025,7 @@ function pendingForSubmit(): ReviewMediaSubmitItem[] {
                           Video
                         </div>
                       ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.localUrl} alt="Queued upload" className="block h-28 w-full object-cover" />
+                        <RemoteImage src={p.localUrl} alt="Queued upload" className="block h-28 w-full object-cover" intrinsic />
                       )}
                     </button>
 

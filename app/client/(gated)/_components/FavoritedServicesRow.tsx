@@ -1,6 +1,8 @@
 // app/client/(gated)/_components/FavoritedServicesRow.tsx
 import Link from 'next/link'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
+
 import type { ClientHomeFavoriteService } from '../_data/getClientHomeData'
 import { formatDuration, money } from './homeVisuals'
 
@@ -41,11 +43,12 @@ function ServiceRow({
         className={`grid h-[34px] w-[34px] shrink-0 place-items-center overflow-hidden rounded-[10px] ${tint}`}
       >
         {service.defaultImageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <RemoteImage
             src={service.defaultImageUrl}
             alt={service.name}
             className="h-full w-full object-cover"
+            width={34}
+            height={34}
           />
         ) : (
           <svg width="16" height="16" viewBox="0 0 24 24" className="text-ember" fill="currentColor">

@@ -9,6 +9,7 @@ import {
   WaitlistTimeOfDay,
   type Prisma,
 } from '@prisma/client'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { initialsForName } from '@/lib/initials'
@@ -704,11 +705,12 @@ export default async function MessagesInboxPage(props: PageProps) {
                   >
                     <div className="relative h-[60px] w-[60px]">
                       {item.avatarUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={item.avatarUrl}
+                        <RemoteImage
+                          src={item.avatarUrl ?? ''}
                           alt=""
                           className="h-[60px] w-[60px] rounded-full object-cover"
+                          width={60}
+                          height={60}
                         />
                       ) : (
                         <div

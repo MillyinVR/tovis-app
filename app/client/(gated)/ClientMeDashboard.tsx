@@ -8,6 +8,7 @@ import { Bell } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ClientLookRemix } from '@/lib/creator/creatorProfileStats'
 import ToggleSwitch from '@/app/_components/ToggleSwitch'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import LogoutButton from './components/LogoutButton'
 import WorkspaceSwitcher from '@/app/_components/WorkspaceSwitcher'
 import type { WorkspaceOption } from '@/lib/auth/workspaces'
@@ -163,13 +164,13 @@ function ProfileAvatar(props: {
           sizeClassName,
         )}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <RemoteImage
           src={avatarUrl}
           alt={displayName}
           className="h-full w-full object-cover"
           loading="lazy"
-          decoding="async"
+          width={96}
+          height={96}
         />
       </div>
     )
@@ -298,13 +299,13 @@ function PrototypeThumb(props: {
     <div className="grid aspect-[1/1] grid-cols-2 gap-[1px] overflow-hidden rounded-[22px] border border-textPrimary/10 bg-bgSecondary">
       {previews.map((src, index) => (
         <div key={`${src}-${index}`} className="min-h-0 min-w-0 overflow-hidden">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <RemoteImage
             src={src}
             alt={props.title}
             className="h-full w-full object-cover"
             loading="lazy"
-            decoding="async"
+            width={300}
+            height={300}
           />
         </div>
       ))}
@@ -393,13 +394,13 @@ function HistoryCard(props: { item: HistoryItem }) {
         <div className="overflow-hidden rounded-[24px] border border-textPrimary/10">
           <div className="aspect-[1.18/1] bg-bgSecondary">
             {item.heroImageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <RemoteImage
                 src={item.heroImageUrl}
                 alt={item.title}
                 className="h-full w-full object-cover"
                 loading="lazy"
-                decoding="async"
+                width={472}
+                height={400}
               />
             ) : (
               <div className="grid h-full place-items-center px-5 text-center">
@@ -577,13 +578,13 @@ function MyLookCard(props: { look: MyLook }) {
       <div className="overflow-hidden rounded-[22px] border border-textPrimary/10">
         <div className="aspect-[1/1] bg-bgSecondary">
           {look.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <RemoteImage
               src={look.imageUrl}
               alt={look.name}
               className="h-full w-full object-cover"
               loading="lazy"
-              decoding="async"
+              width={400}
+              height={400}
             />
           ) : (
             <div className="grid h-full place-items-center px-4 text-center text-[13px] font-black text-textPrimary">

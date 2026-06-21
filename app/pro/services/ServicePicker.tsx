@@ -9,6 +9,7 @@ import { pickStringOrEmpty } from '@/lib/pick'
 import { normalizeMoney2, moneyToCentsInt } from '@/lib/money'
 import { safeJson, readErrorMessage } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 type ServiceDTO = {
   id: string
@@ -397,11 +398,12 @@ export default function ServicePicker({ categories, offerings }: Props) {
 
               {serviceImageUrl ? (
                 <div className="mt-3 flex items-center gap-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
+                  <RemoteImage
                     src={serviceImageUrl}
                     alt="Service image preview"
                     className="h-16 w-16 rounded-xl border border-white/10 object-cover"
+                    width={64}
+                    height={64}
                   />
                   <button
                     type="button"

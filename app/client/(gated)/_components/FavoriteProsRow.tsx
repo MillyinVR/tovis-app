@@ -3,6 +3,7 @@ import Link from 'next/link'
 
 import { initialsForName } from '@/lib/initials'
 import { formatProfessionLabel } from '@/lib/profiles/publicProfileFormatting'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 import type { ClientHomeFavoritePro } from '../_data/getClientHomeData'
 import { gradientAvatar, professionalName } from './homeVisuals'
@@ -66,11 +67,12 @@ function FavoriteProCard({
         style={{ background: gradientAvatar(index) }}
       >
         {professional.avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <RemoteImage
             src={professional.avatarUrl}
             alt={name}
             className="h-full w-full object-cover"
+            width={40}
+            height={40}
           />
         ) : (
           initialsForName(name)

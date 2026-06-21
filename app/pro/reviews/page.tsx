@@ -6,6 +6,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import MediaPortfolioToggle from './MediaPortfolioToggle'
 import HashJumpHighlight from './HashJumpHighlight'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 function pickNonEmptyString(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
@@ -259,10 +260,11 @@ export default async function ProReviewsPage() {
                               }}
                               title="Open"
                             >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
+                              <RemoteImage
                                 src={m.src}
                                 alt={m.caption || 'Review media'}
+                                width={400}
+                                height={400}
                                 style={{
                                   width: '100%',
                                   height: '100%',

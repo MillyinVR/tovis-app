@@ -5,6 +5,7 @@ import * as React from 'react'
 
 import AvailabilityDrawer from '@/app/(main)/booking/AvailabilityDrawer'
 import type { DrawerContext } from '@/app/(main)/booking/AvailabilityDrawer/types'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 
 import {
   loadViewerLocation,
@@ -245,11 +246,12 @@ function ServiceOfferingCard({
       <div className="flex min-w-0 flex-1 gap-3">
         <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-[var(--radius-card)] border border-white/10 bg-bgSurface">
           {offering.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <RemoteImage
               src={offering.imageUrl}
               alt=""
               className="h-full w-full object-cover"
+              width={56}
+              height={56}
             />
           ) : (
             <div
