@@ -15,6 +15,7 @@ import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileForm
 import EditAlertBannerForm from './EditAlertBannerForm'
 import NewAllergyForm from './NewAllergyForm'
 import NewNoteForm from './NewNoteForm'
+import { Button, Card, buttonClassName } from '@/app/_components/ui'
 
 export const dynamic = 'force-dynamic'
 
@@ -271,9 +272,7 @@ function SectionCard({
         {right ? <div className="shrink-0">{right}</div> : null}
       </div>
 
-      <div className="tovis-glass rounded-card border border-white/10 bg-bgSecondary p-4">
-        {children}
-      </div>
+      <Card variant="glass" padding="md">{children}</Card>
     </section>
   )
 }
@@ -521,17 +520,14 @@ function BookingFilterForm({
         />
       </div>
 
-      <button
-        type="submit"
-        className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
-      >
+      <Button type="submit" variant="primary" size="sm">
         Apply
-      </button>
+      </Button>
 
       {bookingQ || bookingFilter !== 'ALL' ? (
         <Link
           href={`/pro/clients/${encodeURIComponent(clientId)}#history`}
-          className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+          className={buttonClassName({ variant: 'ghost', size: 'sm' })}
         >
           Clear
         </Link>
@@ -929,7 +925,7 @@ export default async function ClientDetailPage(props: {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <Link
           href="/pro/clients"
-          className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+          className={buttonClassName({ variant: 'ghost', size: 'sm' })}
         >
           ← Back to clients
         </Link>
@@ -993,7 +989,7 @@ export default async function ClientDetailPage(props: {
             <div className="flex flex-wrap gap-2 md:justify-end">
               <Link
                 href={messageHref}
-                className="inline-flex items-center rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+                className={buttonClassName({ variant: 'ghost', size: 'sm' })}
               >
                 Message
               </Link>
@@ -1002,7 +998,7 @@ export default async function ClientDetailPage(props: {
                 href={`/pro/bookings/new?clientId=${encodeURIComponent(
                   client.id,
                 )}`}
-                className="inline-flex items-center rounded-full border border-white/10 bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary hover:bg-accentPrimaryHover"
+                className={buttonClassName({ variant: 'primary', size: 'sm' })}
               >
                 + New booking
               </Link>
@@ -1030,7 +1026,7 @@ export default async function ClientDetailPage(props: {
           <Link
             key={tab.id}
             href={`#${tab.id}`}
-            className="rounded-full border border-white/10 bg-bgPrimary px-4 py-2 text-[12px] font-black text-textPrimary hover:bg-surfaceGlass"
+            className={buttonClassName({ variant: 'ghost', size: 'sm' })}
           >
             {tab.label}
           </Link>
