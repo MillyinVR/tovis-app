@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
 import { getBoardDetail, getBoardErrorMeta } from '@/lib/boards'
@@ -176,11 +177,12 @@ export default async function ClientBoardDetailPage(props: {
                   style={{ aspectRatio: '3 / 4' }}
                 >
                   {imageUrl ? (
-                    <img
+                    <RemoteImage
                       src={imageUrl}
                       alt={caption}
+                      width={300}
+                      height={400}
                       className="absolute inset-0 h-full w-full object-cover"
-                      loading="lazy"
                     />
                   ) : (
                     <div className="absolute inset-0 bg-gradient-to-br from-bgSurface to-bgPrimary" />

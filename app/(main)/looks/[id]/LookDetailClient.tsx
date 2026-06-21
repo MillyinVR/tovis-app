@@ -20,6 +20,8 @@ import { useViewerLocation } from '@/lib/useViewerLocation'
 
 import AvailabilityDrawer from '../../booking/AvailabilityDrawer'
 import type { DrawerContext as AvailabilityDrawerContext } from '../../booking/AvailabilityDrawer/types'
+import RemoteImage from '@/app/_components/media/RemoteImage'
+
 import CommentsDrawer from '../_components/CommentsDrawer'
 import RightActionRail from '../_components/RightActionRail'
 import { useProFollow } from '../_components/useProFollow'
@@ -282,13 +284,11 @@ export default function LookDetailClient({
                 className="h-auto w-full max-h-[520px]"
               />
             ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <RemoteImage
                 src={item.primaryMedia.url}
-                alt={item.caption || 'Look'}
+                alt={item.caption || `Look by ${proDisplayName}`}
                 className="block h-auto w-full"
-                loading="lazy"
-                decoding="async"
+                intrinsic
               />
             )}
           </div>
@@ -440,13 +440,12 @@ export default function LookDetailClient({
                             className="h-24 w-full object-cover"
                           />
                         ) : (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
+                          <RemoteImage
                             src={previewSrc}
                             alt={asset.media.caption || 'Look asset'}
+                            width={400}
+                            height={400}
                             className="h-24 w-full object-cover"
-                            loading="lazy"
-                            decoding="async"
                           />
                         )}
                       </div>
