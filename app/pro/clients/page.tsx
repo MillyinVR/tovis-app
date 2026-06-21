@@ -1,10 +1,11 @@
 // app/pro/clients/page.tsx
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { BookingStatus, Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { proClientVisibilityWhere } from '@/lib/clientVisibility'
 
 import NewClientForm from './NewClientForm'
 import ClientNameLink from '@/app/_components/ClientNameLink'
@@ -44,16 +45,11 @@ export default async function ProClientsPage() {
   const proId = user.professionalProfile.id
   const now = new Date()
 
+  // Single source of truth for chart access — same rule the page gate and the
+  // clickable name use, so the list can never disagree with them.
   const visibleBookingWhere: Prisma.BookingWhereInput = {
     professionalId: proId,
-    OR: [
-      { status: BookingStatus.PENDING },
-      { startedAt: { not: null }, finishedAt: null },
-      {
-        status: { in: [BookingStatus.ACCEPTED, BookingStatus.IN_PROGRESS] },
-        scheduledFor: { gte: now },
-      },
-    ],
+    ...proClientVisibilityWhere(now),
   }
 
   const clients = await prisma.clientProfile.findMany({
