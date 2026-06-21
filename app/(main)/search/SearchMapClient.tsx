@@ -74,6 +74,25 @@ const MapView = dynamic(() => import('./_components/MapView'), { ssr: false })
 
 const APP_BOTTOM_INSET = 'max(var(--app-footer-space, 0px), env(safe-area-inset-bottom))'
 
+// Compact branded loader for the discover panels (grid + map bottom card),
+// where BrandLoader's full splash is too tall. Reuses the app's spinner idiom
+// (animate-spin ring) with brand tokens only.
+function DiscoverLoadingRow() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-center gap-2 text-[13px] font-semibold text-textSecondary"
+    >
+      <span
+        aria-hidden
+        className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-surfaceGlass/30 border-t-accentPrimary"
+      />
+      Finding pros nearby…
+    </div>
+  )
+}
+
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string'
 }
@@ -1283,8 +1302,8 @@ export default function SearchMapClient() {
                 {err}
               </div>
             ) : loading ? (
-              <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4 text-[13px] font-semibold text-textSecondary">
-                Loading...
+              <div className="rounded-card border border-white/10 bg-bgSecondary/80 p-4">
+                <DiscoverLoadingRow />
               </div>
             ) : (
               <DiscoverGridView pros={displayPros} activeProId={activeProId} onSelectPro={handleSelectGridPro} />
@@ -1298,7 +1317,7 @@ export default function SearchMapClient() {
               {err ? (
                 <div className="text-[13px] font-semibold text-microAccent">{err}</div>
               ) : loading ? (
-                <div className="text-[13px] font-semibold text-textSecondary">Loading...</div>
+                <DiscoverLoadingRow />
               ) : !displayPros.length ? (
                 <div className="text-[13px] font-semibold text-textSecondary">
                   No pros found in this radius. Try increasing the distance or searching a different area.
