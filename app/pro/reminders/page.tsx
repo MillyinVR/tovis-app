@@ -6,6 +6,7 @@ import { Prisma } from '@prisma/client'
 import ClientNameLink from '@/app/_components/ClientNameLink'
 import { getCurrentUser } from '@/lib/currentUser'
 import { prisma } from '@/lib/prisma'
+import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import { Button, Card, buttonClassName } from '@/app/_components/ui'
 
 export const dynamic = 'force-dynamic'
@@ -83,29 +84,10 @@ export default async function ProRemindersPage() {
   }
 
   const proId = user.professionalProfile.id
-  const now = new Date()
 
-  /**
-   * Visibility set: which client charts are linkable for this pro.
-   * Same rule used elsewhere.
-   */
-  const visibleRows = await prisma.booking.findMany({
-    where: {
-      professionalId: proId,
-      OR: [
-        { status: 'PENDING' },
-        { startedAt: { not: null }, finishedAt: null },
-        { status: 'ACCEPTED', scheduledFor: { gte: now } },
-      ],
-    },
-    select: { clientId: true },
-    distinct: ['clientId'],
-    take: 5000,
-  })
-
-  const visibleClientIdSet = new Set<string>(
-    visibleRows.map((row) => String(row.clientId)),
-  )
+  // Single source of truth for chart linkability — same rule as the clients
+  // list and the page gate (includes the 30-day RECENT_COMPLETED window).
+  const visibleClientIdSet = await getVisibleClientIdSetForPro(proId)
 
   const reminders = await prisma.reminder.findMany({
     where: { professionalId: proId },

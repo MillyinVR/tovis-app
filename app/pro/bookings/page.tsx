@@ -9,6 +9,7 @@ import {
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { getVisibleClientIdSetForPro } from '@/lib/clientVisibility'
 import BookingActions from './BookingActions'
 import { moneyToString } from '@/lib/money'
 import ClientNameLink from '@/app/_components/ClientNameLink'
@@ -530,24 +531,9 @@ export default async function ProBookingsPage(props: {
     scheduleTz,
   )
 
-  const now = new Date()
-  const visibleClientRows = await prisma.booking.findMany({
-    where: {
-      professionalId: proId,
-      OR: [
-        { status: BOOKING_STATUS.PENDING },
-        { status: BOOKING_STATUS.IN_PROGRESS },
-        { startedAt: { not: null }, finishedAt: null },
-        { status: BOOKING_STATUS.ACCEPTED, scheduledFor: { gte: now } },
-      ],
-    },
-    select: { clientId: true },
-    take: 2000,
-  })
-
-  const visibleClientIdSet = new Set<string>(
-    visibleClientRows.map((row) => String(row.clientId)),
-  )
+  // Single source of truth for chart linkability — same rule as the clients
+  // list and the page gate (includes the 30-day RECENT_COMPLETED window).
+  const visibleClientIdSet = await getVisibleClientIdSetForPro(proId)
 
   const nonCancelledStatusWhere:
     | { status: { not: BookingStatus } }

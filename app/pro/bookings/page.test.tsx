@@ -359,9 +359,13 @@ describe('app/pro/bookings/page.tsx', () => {
 
     expect(mocks.bookingFindMany).toHaveBeenCalledTimes(4)
 
+    // The page now delegates chart linkability to getVisibleClientIdSetForPro
+    // (the clientVisibility SSOT), whose active clause is expressed as
+    // started-but-not-finished rather than a literal IN_PROGRESS status.
     const visibleClientQuery = mocks.bookingFindMany.mock.calls[0]?.[0]
     expect(visibleClientQuery.where.OR).toContainEqual({
-      status: BookingStatus.IN_PROGRESS,
+      startedAt: { not: null },
+      finishedAt: null,
     })
 
     const todayQuery = mocks.bookingFindMany.mock.calls[1]?.[0]
