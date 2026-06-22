@@ -26,11 +26,12 @@ function asStatus(value: unknown): PhotoReleaseStatus | null {
 
 export async function PATCH(req: Request, context: RouteContext) {
   try {
-    if (!isClientTechnicalRecordEnabled()) return jsonFail(404, 'Not found.')
-
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
+
+    if (!isClientTechnicalRecordEnabled(professionalId))
+      return jsonFail(404, 'Not found.')
 
     const params = await resolveRouteParams(context)
     const clientId = pickString(params.id)

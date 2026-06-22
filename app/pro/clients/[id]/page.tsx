@@ -1890,7 +1890,7 @@ export default async function ClientDetailPage(props: {
     ({} as SearchParams)
 
   const view = normalizeView(firstParam(searchParams.view))
-  const technicalEnabled = isClientTechnicalRecordEnabled()
+  const technicalEnabled = isClientTechnicalRecordEnabled(proId)
   const requestedTab = normalizeTab(firstParam(searchParams.tab))
   // The technical tab only exists when the flag is on; otherwise fall back to notes
   // (so a stale deep-link never queries the not-yet-migrated tables).

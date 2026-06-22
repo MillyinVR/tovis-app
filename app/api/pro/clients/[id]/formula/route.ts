@@ -28,11 +28,12 @@ function parseMinutes(value: unknown): number | null {
 
 export async function POST(req: Request, context: RouteContext) {
   try {
-    if (!isClientTechnicalRecordEnabled()) return jsonFail(404, 'Not found.')
-
     const auth = await requirePro()
     if (!auth.ok) return auth.res
     const professionalId = auth.professionalId
+
+    if (!isClientTechnicalRecordEnabled(professionalId))
+      return jsonFail(404, 'Not found.')
 
     const params = await resolveRouteParams(context)
     const clientId = pickString(params.id)

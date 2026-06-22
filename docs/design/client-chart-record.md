@@ -124,6 +124,28 @@ list. That's why the chart felt "lost" after an appointment.
 
 ---
 
+## ⚠️ Personal-testing flags to revert before opening to other pros
+
+The technical-record track (PR4) is being **dogfooded by the founder only** while
+still legal-gated. Before letting any other pro test it, REVERT all of the
+following so the feature goes fully dark again:
+
+- [ ] **Empty the dogfood allowlist** `TECHNICAL_RECORD_PRO_ALLOWLIST` in
+  `lib/clients/technicalRecord.ts` (remove `cmq9p645v0002jp04fttoatlq` —
+  amara619@gmail.com). One-line change; nothing else gates it.
+- [ ] Confirm `ENABLE_CLIENT_TECHNICAL_RECORD` is **not** set/true in prod
+  (the global flag would override the allowlist and expose it to everyone).
+- [ ] Get **legal sign-off** before turning the global flag on for all pros
+  (liability, retention, audit, photo-consent law e.g. BIPA).
+- [ ] Re-confirm the **retention** decision (currently INDEFINITE) with legal.
+
+Note: the PR4 migration (`20260621140000`) and PR3 migration
+(`20260621130000`) must be applied to prod for the dogfood to function (a prod
+deploy runs `migrate deploy`, which will also apply the pending admin-notifications
+migration `20260621000000`).
+
+---
+
 ## Build sequence
 
 Four PRs. PR1 is the behavioral core and is independently shippable. PR2 is the

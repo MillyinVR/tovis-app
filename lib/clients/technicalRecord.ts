@@ -20,12 +20,34 @@ import { ClientConsentKind } from '@prisma/client'
  */
 export const TECHNICAL_RECORD_RETENTION = 'INDEFINITE' as const
 
-/** Gate for the entire technical-record surface (UI + write routes). */
-export function isClientTechnicalRecordEnabled(): boolean {
+// ⚠️ TEMPORARY personal-dogfood allowlist. Pros listed here get the
+// technical-record surface in prod even while the global flag is OFF (the
+// feature is still legal-gated). These are professionalProfile ids (not PII).
+//
+// 🔴 REMOVE EVERY ID HERE before opening the feature to other pros / public
+//    testing — see the "Personal-testing flags to revert" checklist in
+//    docs/design/client-chart-record.md. Emptying this array (one line) fully
+//    re-darkens the feature; no other change needed.
+export const TECHNICAL_RECORD_PRO_ALLOWLIST: readonly string[] = [
+  'cmq9p645v0002jp04fttoatlq', // amara619@gmail.com — founder personal testing
+]
+
+function globalTechnicalRecordFlag(): boolean {
   const raw = process.env.ENABLE_CLIENT_TECHNICAL_RECORD
   if (typeof raw !== 'string') return false
   const v = raw.trim().toLowerCase()
   return v === '1' || v === 'true' || v === 'yes'
+}
+
+/**
+ * Gate for the entire technical-record surface (UI + write routes). Enabled when
+ * the global flag is on (every pro) OR the acting pro is on the dogfood allowlist
+ * above (just them). Pass the acting professionalId so allowlisting works.
+ */
+export function isClientTechnicalRecordEnabled(professionalId?: string): boolean {
+  if (globalTechnicalRecordFlag()) return true
+  if (!professionalId) return false
+  return TECHNICAL_RECORD_PRO_ALLOWLIST.includes(professionalId)
 }
 
 /** Formula history is author-only and never public. */

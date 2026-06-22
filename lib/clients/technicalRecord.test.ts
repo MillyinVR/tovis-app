@@ -9,6 +9,7 @@ import {
   isClientTechnicalRecordEnabled,
   isPatchTestCurrent,
   scopeConsentRecordsForViewer,
+  TECHNICAL_RECORD_PRO_ALLOWLIST,
 } from './technicalRecord'
 
 describe('isClientTechnicalRecordEnabled', () => {
@@ -16,18 +17,28 @@ describe('isClientTechnicalRecordEnabled', () => {
     delete process.env.ENABLE_CLIENT_TECHNICAL_RECORD
   })
 
-  it('is off by default and for falsy values', () => {
+  it('is off by default and for a non-allowlisted pro', () => {
     expect(isClientTechnicalRecordEnabled()).toBe(false)
+    expect(isClientTechnicalRecordEnabled('not-on-the-list')).toBe(false)
     process.env.ENABLE_CLIENT_TECHNICAL_RECORD = '0'
-    expect(isClientTechnicalRecordEnabled()).toBe(false)
+    expect(isClientTechnicalRecordEnabled('not-on-the-list')).toBe(false)
     process.env.ENABLE_CLIENT_TECHNICAL_RECORD = 'off'
-    expect(isClientTechnicalRecordEnabled()).toBe(false)
+    expect(isClientTechnicalRecordEnabled('not-on-the-list')).toBe(false)
   })
 
-  it('is on for 1/true/yes', () => {
+  it('global flag on enables every pro', () => {
     for (const v of ['1', 'true', 'YES']) {
       process.env.ENABLE_CLIENT_TECHNICAL_RECORD = v
       expect(isClientTechnicalRecordEnabled()).toBe(true)
+      expect(isClientTechnicalRecordEnabled('anyone')).toBe(true)
+    }
+  })
+
+  it('allowlisted pros are enabled even with the global flag off', () => {
+    // Guard for the temporary dogfood allowlist while it is non-empty.
+    if (TECHNICAL_RECORD_PRO_ALLOWLIST.length > 0) {
+      const id = TECHNICAL_RECORD_PRO_ALLOWLIST[0]!
+      expect(isClientTechnicalRecordEnabled(id)).toBe(true)
     }
   })
 })
