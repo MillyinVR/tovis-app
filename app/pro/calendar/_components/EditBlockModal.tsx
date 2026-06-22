@@ -6,6 +6,7 @@ import type { ReactNode } from 'react'
 
 import {
   DEFAULT_TIME_ZONE,
+  friendlyTimeZoneLabel,
   minutesSinceMidnightInTimeZone,
   sanitizeTimeZone,
   ymdInTimeZone,
@@ -652,7 +653,7 @@ export default function EditBlockModal(props: EditBlockModalProps) {
 
                 <div className="brand-pro-calendar-block-section-grid">
                   <InfoRow label={copy.timeZoneLabel}>
-                    {resolvedTimeZone} · {step} minute step
+                    {friendlyTimeZoneLabel(resolvedTimeZone) ?? resolvedTimeZone} · {step} minute step
                   </InfoRow>
                 </div>
               </section>

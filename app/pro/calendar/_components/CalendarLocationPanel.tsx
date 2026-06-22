@@ -1,6 +1,8 @@
 // app/pro/calendar/_components/CalendarLocationPanel.tsx
 'use client'
 
+import { friendlyTimeZoneLabel } from '@/lib/timeZone'
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type CalendarLocation = {
@@ -190,7 +192,7 @@ export function CalendarLocationPanel(props: CalendarLocationPanelProps) {
             <p className="brand-pro-calendar-location-panel-timezone">
               {copy.timeZoneLabel}:{' '}
               <span className="brand-pro-calendar-location-panel-timezone-value">
-                {calendarTimeZone}
+                {friendlyTimeZoneLabel(calendarTimeZone) ?? calendarTimeZone}
               </span>
             </p>
           </div>

@@ -12,7 +12,7 @@ import {
 } from '../_constants'
 
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
-import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE, friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
 
 import { calendarStatusMeta } from '../_utils/statusStyles'
 
@@ -879,7 +879,7 @@ function BookingSummary(props: {
 
         <SummaryRow label={copy.whenLabel}>
           {formatAppointmentWhen(new Date(booking.scheduledFor), timeZone)} ·{' '}
-          {timeZone} · {totalDuration} min
+          {friendlyTimeZoneLabel(timeZone) ?? timeZone} · {totalDuration} min
         </SummaryRow>
 
         <SummaryRow label={copy.modeLabel}>{modeLabel}</SummaryRow>

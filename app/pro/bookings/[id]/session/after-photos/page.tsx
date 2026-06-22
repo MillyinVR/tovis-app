@@ -20,7 +20,7 @@ import {
   isTerminalBooking,
   sessionHubHref,
 } from '@/lib/proSession/sessionFlow'
-import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import { DEFAULT_TIME_ZONE, friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
 import { fullName } from '@/lib/names'
 
 export const dynamic = 'force-dynamic'
@@ -237,7 +237,7 @@ function StatusCard({
         </div>
 
         <div className="brand-pro-session-help-text">
-          Times shown in <strong>{timeZone}</strong>
+          Times shown in <strong>{friendlyTimeZoneLabel(timeZone) ?? timeZone}</strong>
         </div>
       </Card>
     )
@@ -266,7 +266,7 @@ function StatusCard({
       </div>
 
       <div className="brand-pro-session-help-text">
-        Times shown in <strong>{timeZone}</strong>
+        Times shown in <strong>{friendlyTimeZoneLabel(timeZone) ?? timeZone}</strong>
       </div>
     </Card>
   )

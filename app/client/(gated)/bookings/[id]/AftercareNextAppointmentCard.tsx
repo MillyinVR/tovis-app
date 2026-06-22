@@ -7,6 +7,7 @@ import { useState } from 'react'
 
 import AftercareRebookButton from './AftercareRebookButton'
 import { COPY } from '@/lib/copy'
+import { friendlyTimeZoneLabel } from '@/lib/timeZone'
 import { safeJson } from '@/lib/http'
 import {
   buildClientIdempotencyKey,
@@ -125,7 +126,7 @@ export default function AftercareNextAppointmentCard({
           {COPY.bookings.aftercare.nextAppointmentConfirmedLabel}
         </div>
         <div className="mt-1 text-sm text-textSecondary">
-          {whenLabel} · {timeZone}
+          {whenLabel} · {friendlyTimeZoneLabel(timeZone) ?? timeZone}
         </div>
         <Link
           href={`/client/bookings/${encodeURIComponent(confirmedBookingId)}`}
@@ -144,7 +145,7 @@ export default function AftercareNextAppointmentCard({
           {COPY.bookings.aftercare.nextAppointmentDeclinedLabel}
         </div>
         <div className="mt-1 text-sm text-textSecondary">
-          {whenLabel} · {timeZone}
+          {whenLabel} · {friendlyTimeZoneLabel(timeZone) ?? timeZone}
         </div>
 
         <AftercareRebookButton
@@ -162,7 +163,7 @@ export default function AftercareNextAppointmentCard({
     <div className="mt-3 rounded-card border border-white/10 bg-bgSecondary p-4">
       <div className="text-base font-black text-textPrimary">{whenLabel}</div>
       <div className="mt-1 text-[12px] font-semibold text-textSecondary">
-        {timeZone}
+        {friendlyTimeZoneLabel(timeZone) ?? timeZone}
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">

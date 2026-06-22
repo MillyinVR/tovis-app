@@ -69,6 +69,7 @@ vi.mock('@/lib/pick', () => ({
 
 vi.mock('@/lib/timeZone', () => ({
   sanitizeTimeZone: mocks.sanitizeTimeZone,
+  friendlyTimeZoneLabel: (tz: string | null | undefined) => tz ?? null,
 }))
 
 import ClaimInvitePage from './page'

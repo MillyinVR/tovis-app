@@ -13,7 +13,7 @@ import { getCurrentUser } from '@/lib/currentUser'
 import { formatAppointmentWhen } from '@/lib/formatInTimeZone'
 import { pickString } from '@/lib/pick'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
@@ -163,7 +163,7 @@ function buildAppointmentLabel(
 
   if (!(booking.scheduledFor instanceof Date)) return null
 
-  return `${formatAppointmentWhen(booking.scheduledFor, timeZone)} · ${timeZone}`
+  return `${formatAppointmentWhen(booking.scheduledFor, timeZone)} · ${friendlyTimeZoneLabel(timeZone) ?? timeZone}`
 }
 
 function StatusCard(props: {

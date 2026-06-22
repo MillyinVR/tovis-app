@@ -9,7 +9,7 @@ import { COPY } from '@/lib/copy'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { prisma } from '@/lib/prisma'
-import { sanitizeTimeZone } from '@/lib/timeZone'
+import { friendlyTimeZoneLabel, sanitizeTimeZone } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
 import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
 import { NotificationEventKey } from '@prisma/client'
@@ -1154,7 +1154,7 @@ export default async function ClientBookingPage(props: {
             <span className="text-textSecondary">
               {COPY.bookings.consultation.timesShownIn}{' '}
             </span>
-            {appointmentTimeZone}
+            {friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone}
           </TinyMetaPill>
         </div>
 
@@ -1200,7 +1200,7 @@ export default async function ClientBookingPage(props: {
 
             <div className="mt-2 text-[13px] text-textPrimary">
               <span className="font-black">{whenLabel}</span>
-              <span className="text-textSecondary"> · {appointmentTimeZone}</span>
+              <span className="text-textSecondary"> · {friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone}</span>
               {locationLine ? (
                 <span className="text-textSecondary"> · {locationLine}</span>
               ) : null}
@@ -1437,7 +1437,7 @@ export default async function ClientBookingPage(props: {
                   </ClientAftercarePill>
 
                   <span className="brand-pro-session-muted text-[11px] font-bold">
-                    {appointmentTimeZone}
+                    {friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone}
                   </span>
                 </div>
 
@@ -1460,7 +1460,7 @@ export default async function ClientBookingPage(props: {
                           <div className="grid gap-1">
                             <SummaryRow label="Provider" value={professionalLabel} />
                             <SummaryRow label="Booking" value={whenLabel} />
-                            <SummaryRow label="Time zone" value={appointmentTimeZone} />
+                            <SummaryRow label="Time zone" value={friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone} />
                             <SummaryRow
                               label="Status"
                               value={String(
@@ -1677,7 +1677,7 @@ export default async function ClientBookingPage(props: {
                                       rebookInfo.mode === 'BOOKED_NEXT_APPOINTMENT'
                                         ? COPY.bookings.aftercare.nextAppointmentProposedSubtitle
                                         : rebookInfo.label
-                                          ? `${rebookInfo.label} · ${appointmentTimeZone}`
+                                          ? `${rebookInfo.label} · ${friendlyTimeZoneLabel(appointmentTimeZone) ?? appointmentTimeZone}`
                                           : COPY.bookings.aftercare.noRebookRecommendation
                                     }
                                   />

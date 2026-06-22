@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import {
   DEFAULT_TIME_ZONE,
+  friendlyTimeZoneLabel,
   sanitizeTimeZone,
   getZonedParts,
 } from '@/lib/timeZone'
@@ -439,7 +440,7 @@ export default async function ProNotificationsPage(props: {
 
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className="rounded-full border border-surfaceGlass/12 bg-bgPrimary/35 px-3 py-1 text-[11px] font-black text-textSecondary">
-              TZ: <span className="text-textPrimary">{timeZone}</span>
+              Time zone: <span className="text-textPrimary">{friendlyTimeZoneLabel(timeZone) ?? timeZone}</span>
             </div>
             <Link
               href="/pro/notifications/settings"
@@ -559,7 +560,7 @@ export default async function ProNotificationsPage(props: {
         <div className="mt-6 flex flex-wrap items-center justify-between gap-2 text-[11px] text-textSecondary">
           <div>
             Unread first • Times shown in{' '}
-            <span className="font-extrabold text-textPrimary">{timeZone}</span>
+            <span className="font-extrabold text-textPrimary">{friendlyTimeZoneLabel(timeZone) ?? timeZone}</span>
           </div>
 
           <div className="flex items-center gap-2">
