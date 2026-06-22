@@ -4,8 +4,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { ClientNoteKind } from '@prisma/client'
 import { isAbortError, safeJson } from '@/lib/http'
 import { isRecord } from '@/lib/guards'
+import {
+  AUTHORABLE_NOTE_KINDS,
+  CLIENT_NOTE_KIND_LABELS,
+} from '@/lib/clients/clientNoteKinds'
 
 type Props = {
   clientId: string
@@ -60,6 +65,7 @@ export default function NewNoteForm({ clientId }: Props) {
 
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
+  const [kind, setKind] = useState<ClientNoteKind>(ClientNoteKind.GENERAL)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -106,6 +112,7 @@ export default function NewNoteForm({ clientId }: Props) {
         body: JSON.stringify({
           title: trimmedTitle || null,
           body: trimmedBody,
+          kind,
         }),
       })
 
@@ -123,6 +130,7 @@ export default function NewNoteForm({ clientId }: Props) {
 
       setTitle('')
       setBody('')
+      setKind(ClientNoteKind.GENERAL)
       router.refresh()
     } catch (err: unknown) {
       if (isAbortError(err)) return
@@ -151,6 +159,43 @@ export default function NewNoteForm({ clientId }: Props) {
         fontSize: 13,
       }}
     >
+      <div>
+        <label
+          htmlFor="note-kind"
+          style={{
+            display: 'block',
+            fontSize: 12,
+            fontWeight: 500,
+            marginBottom: 4,
+          }}
+        >
+          Type
+        </label>
+
+        <select
+          id="note-kind"
+          value={kind}
+          disabled={loading}
+          onChange={(event) => setKind(event.target.value as ClientNoteKind)}
+          style={{
+            width: '100%',
+            borderRadius: 8,
+            border: '1px solid rgb(var(--text-primary) / 0.10)',
+            padding: 8,
+            fontSize: 13,
+            fontFamily: 'inherit',
+            background: 'rgb(var(--bg-primary))',
+            opacity: loading ? 0.85 : 1,
+          }}
+        >
+          {AUTHORABLE_NOTE_KINDS.map((noteKind) => (
+            <option key={noteKind} value={noteKind}>
+              {CLIENT_NOTE_KIND_LABELS[noteKind]}
+            </option>
+          ))}
+        </select>
+      </div>
+
       <div>
         <label
           htmlFor="note-title"
