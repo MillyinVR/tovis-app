@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation'
 
 import { useBrand } from '@/lib/brand/BrandProvider'
 import { PRO_PUBLIC_PROFILE_PATH } from '@/lib/routes'
+import type { WorkspaceOption } from '@/lib/auth/workspaces'
 import ProAccountMenu from './_components/ProAccountMenu'
 
 type ProHeaderProps = {
@@ -19,6 +20,11 @@ type ProHeaderProps = {
    * process.env. When false the Import tab is omitted entirely.
    */
   migrationEnabled?: boolean
+  /**
+   * Workspaces the user can switch into (resolved server-side). Drives the
+   * "Switch workspace" row in the account menu — empty/single = row hidden.
+   */
+  workspaceOptions?: WorkspaceOption[]
 }
 
 type NotificationSummaryResponse = {
@@ -95,6 +101,7 @@ export default function ProHeader({
   subtitle,
   publicUrl,
   migrationEnabled = false,
+  workspaceOptions,
 }: ProHeaderProps) {
   const pathname = usePathname()
   const { brand } = useBrand()
@@ -160,6 +167,7 @@ export default function ProHeader({
                 proServicesHref={`${PRO_PUBLIC_PROFILE_PATH}?tab=services`}
                 uploadHref="/pro/media/new"
                 messagesHref="/messages"
+                workspaceOptions={workspaceOptions}
               />
             </div>
           </div>
