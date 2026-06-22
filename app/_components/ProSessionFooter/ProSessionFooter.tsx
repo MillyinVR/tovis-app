@@ -7,11 +7,11 @@ import {
   CalendarDays,
   Camera,
   MessageCircle,
-  Sparkles,
   User,
 } from 'lucide-react'
 
 import NavItem from '../navigation/FooterNavItem'
+import BrandMark from '../footer/BrandMark'
 import { isActivePath } from '../navigation/activePath'
 import BadgeDot from '../ClientSessionFooter/BadgeDot'
 import { useUnreadBadge } from '@/app/_components/_hooks/useUnreadBadge'
@@ -247,7 +247,7 @@ export default function ProSessionFooter({
         <NavItem
           label="Looks"
           href={ROUTES.looks}
-          icon={<Sparkles size={22} />}
+          icon={<BrandMark size={22} />}
           active={isActivePath(path, ROUTES.looks)}
         />
         <NavItem
@@ -291,11 +291,15 @@ export default function ProSessionFooter({
                 width: 72,
                 height: 72,
                 borderRadius: '50%',
-                padding: centerIsLive ? 3 : 0,
-                // tenant-adaptive CTA gradient (rebrands per white-label tenant), not the brand-constant plume
-                background: centerIsLive ? 'var(--cta)' : 'rgb(var(--bg-surface))',
-                border: centerIsLive ? 'none' : '1.5px solid var(--line-strong)',
-                boxShadow: centerIsLive ? '0 14px 32px var(--tovis-acc-shadow)' : 'none',
+                // Ring + dark coin in every state, matching the client/guest
+                // center Looks mark for a cohesive footer. Live uses the
+                // tenant-adaptive CTA gradient (rebrands per white-label tenant);
+                // idle uses the brand-constant plume, like the Looks mark ring.
+                padding: 3,
+                background: centerIsLive ? 'var(--cta)' : 'var(--plume)',
+                border: 'none',
+                boxShadow: '0 14px 32px var(--tovis-acc-shadow)',
+                opacity: centerDisabled ? 0.5 : 1,
                 cursor: centerDisabled ? 'not-allowed' : 'pointer',
               }}
             >
@@ -306,8 +310,8 @@ export default function ProSessionFooter({
                   width: '100%',
                   height: '100%',
                   borderRadius: '50%',
-                  background: centerIsLive ? 'var(--tovis-coin)' : 'transparent',
-                  color: centerIsLive ? 'rgb(var(--accent-primary))' : 'rgb(var(--text-muted))',
+                  background: 'var(--tovis-coin)',
+                  color: 'rgb(var(--accent-primary))',
                 }}
               >
                 {showCameraIcon ? (
