@@ -11,6 +11,7 @@ import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
 import { getProOnboardingRedirectHref } from '@/lib/pro/readiness/onboardingGate'
 import { isProMigrationEnabled } from '@/lib/migration/featureFlag'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import { buildWorkspaceOptions } from '@/lib/auth/workspaces'
 import ProHeader from './ProHeader'
 import ProComplianceBanner from './ProComplianceBanner'
 import ProReadinessBanner from './ProReadinessBanner'
@@ -85,6 +86,15 @@ export default async function ProRootLayout({
     ? `/professionals/${encodeURIComponent(pro.id)}`
     : null
 
+  const workspaceOptions = buildWorkspaceOptions(
+    {
+      homeRole: user.homeRole,
+      clientProfile: user.clientProfile,
+      professionalProfile: user.professionalProfile,
+    },
+    user.role,
+  )
+
   return (
     <div className="min-h-dvh bg-bgPrimary text-textPrimary">
       <ProHeader
@@ -92,6 +102,7 @@ export default async function ProRootLayout({
         subtitle={pro.handle ? `@${pro.handle}` : null}
         publicUrl={publicUrl}
         migrationEnabled={isProMigrationEnabled()}
+        workspaceOptions={workspaceOptions}
       />
       <ProComplianceBanner />
       <ProReadinessBanner />
