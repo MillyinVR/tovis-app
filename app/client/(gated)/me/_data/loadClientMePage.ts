@@ -95,6 +95,8 @@ export const clientMeBookingSelect =
       select: {
         id: true,
         businessName: true,
+        firstName: true,
+        lastName: true,
         location: true,
         timeZone: true,
       },

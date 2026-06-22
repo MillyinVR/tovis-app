@@ -41,6 +41,8 @@ function initialLetter(name: string | null) {
 type ProMini = {
   id: string
   businessName: string | null
+  firstName?: string | null
+  lastName?: string | null
   avatarUrl?: string | null
 } | null
 
@@ -184,7 +186,7 @@ export default function RightActionRail({
                 {pro.avatarUrl ? (
                   <RemoteImage
                     src={pro.avatarUrl}
-                    alt={formatProfessionalPublicDisplayName({ businessName: pro.businessName })}
+                    alt={formatProfessionalPublicDisplayName(pro)}
                     width={48}
                     height={48}
                     style={{
@@ -206,7 +208,7 @@ export default function RightActionRail({
                       color: PAPER,
                     }}
                   >
-                    {initialLetter(pro.businessName)}
+                    {initialLetter(formatProfessionalPublicDisplayName(pro))}
                   </div>
                 )}
               </div>

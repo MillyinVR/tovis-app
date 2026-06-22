@@ -118,10 +118,9 @@ export default async function ClientMePage() {
     ? {
         id: data.upcomingNotificationBooking.id,
         title: data.upcomingNotificationBooking.display.title,
-        professionalName: formatProfessionalPublicDisplayName({
-          businessName:
-            data.upcomingNotificationBooking.professional?.businessName,
-        }),
+        professionalName: formatProfessionalPublicDisplayName(
+          data.upcomingNotificationBooking.professional,
+        ),
         scheduledFor: data.upcomingNotificationBooking.scheduledFor,
         timeZone: data.upcomingNotificationBooking.timeZone ?? null,
         totalLabel:
@@ -141,9 +140,7 @@ export default async function ClientMePage() {
   const following = data.following.items.map((item) => ({
     id: item.professional.id,
     href: `/professionals/${encodeURIComponent(item.professional.id)}`,
-    name: formatProfessionalPublicDisplayName({
-      businessName: item.professional.businessName,
-    }),
+    name: formatProfessionalPublicDisplayName(item.professional),
     handle: item.professional.handle ?? null,
     subtitle: buildFollowingSubtitle({
       professionType: item.professional.professionType,

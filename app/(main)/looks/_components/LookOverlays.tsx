@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import type { CSSProperties } from 'react'
 import { formatFollowerLabel } from '@/lib/profiles/publicProfileFormatting'
+import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { FeedItem } from './lookTypes'
 
 const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
@@ -40,9 +41,10 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
       ? pro.followerCount
       : 0
 
-  const businessName = (pro?.businessName ?? '').trim()
   const handle = (pro?.handle ?? '').trim()
-  const displayName = businessName || (handle ? `@${handle}` : null)
+  // businessName → real name (canonical helper), then @handle as the last resort.
+  const resolvedName = pro ? pickProfessionalPublicDisplayName(pro) : null
+  const displayName = resolvedName || (handle ? `@${handle}` : null)
 
   const serviceLabel = pickTrimmed(m.serviceName)
   const caption = pickTrimmed(m.caption)

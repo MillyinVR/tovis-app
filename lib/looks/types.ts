@@ -24,6 +24,8 @@ export type LooksCountsDto = {
 export type LooksProfessionalDto = {
   id: string
   businessName: string | null
+  firstName: string | null
+  lastName: string | null
   handle: string | null
   professionType: ProfessionType | null
   avatarUrl: string | null
@@ -332,6 +334,8 @@ export type LooksBoardDeleteResponseDto = {
 export type LooksProProfilePreviewDto = {
   id: string
   businessName: string | null
+  firstName: string | null
+  lastName: string | null
   handle: string | null
   avatarUrl: string | null
   professionType: ProfessionType | null

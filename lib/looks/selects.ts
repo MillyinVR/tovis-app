@@ -24,6 +24,8 @@ export const looksProProfilePreviewSelect =
   Prisma.validator<Prisma.ProfessionalProfileSelect>()({
     id: true,
     businessName: true,
+    firstName: true,
+    lastName: true,
     handle: true,
     avatarUrl: true,
     professionType: true,

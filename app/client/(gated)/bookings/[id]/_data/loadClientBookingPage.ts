@@ -59,13 +59,10 @@ const bookingPageBookingSelect = {
     select: {
       id: true,
       businessName: true,
+      firstName: true,
+      lastName: true,
       location: true,
       timeZone: true,
-      user: {
-        select: {
-          email: true,
-        },
-      },
     },
   },
 

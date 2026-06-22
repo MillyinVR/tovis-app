@@ -87,6 +87,8 @@ export type ClientBookingDTO = {
   professional: {
     id: string
     businessName: string | null
+    firstName: string | null
+    lastName: string | null
     location: string | null
     timeZone: string | null
   } | null
@@ -237,7 +239,14 @@ export type ClientBookingRow = Prisma.BookingGetPayload<{
     service: { select: { id: true; name: true } }
 
     professional: {
-      select: { id: true; businessName: true; location: true; timeZone: true }
+      select: {
+        id: true
+        businessName: true
+        firstName: true
+        lastName: true
+        location: true
+        timeZone: true
+      }
     }
 
     location: {
@@ -443,6 +452,8 @@ export async function buildClientBookingDTO(input: {
       ? {
           id: String(b.professional.id),
           businessName: b.professional.businessName ?? null,
+          firstName: b.professional.firstName ?? null,
+          lastName: b.professional.lastName ?? null,
           location: b.professional.location ?? null,
           timeZone: b.professional.timeZone ?? null,
         }

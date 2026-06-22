@@ -109,7 +109,12 @@ export async function loadShareLookPage(
       locationTimeZone: true,
       service: { select: { name: true } },
       professional: {
-        select: { businessName: true, avatarUrl: true },
+        select: {
+          businessName: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true,
+        },
       },
     },
   })
@@ -134,9 +139,9 @@ export async function loadShareLookPage(
     bookingId: booking.id,
     serviceId: booking.serviceId,
     serviceName,
-    professionalName: formatProfessionalPublicDisplayName({
-      businessName: booking.professional?.businessName,
-    }),
+    professionalName: formatProfessionalPublicDisplayName(
+      booking.professional,
+    ),
     professionalAvatarUrl: booking.professional?.avatarUrl ?? null,
     visitDateLabel: formatVisitDate(booking.scheduledFor, booking.locationTimeZone),
     suggestedName: serviceName,

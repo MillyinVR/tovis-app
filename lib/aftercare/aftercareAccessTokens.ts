@@ -78,6 +78,8 @@ const AFTERCARE_ACCESS_AFTERCARE_SELECT = {
         select: {
           id: true,
           businessName: true,
+          firstName: true,
+          lastName: true,
           timeZone: true,
           location: true,
         },

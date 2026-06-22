@@ -6,6 +6,7 @@ import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 
 import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInviteCard'
 import { isRecord } from '@/lib/guards'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 export const dynamic = 'force-dynamic'
 
@@ -84,6 +85,8 @@ type BookingDto = {
   professional: {
     id: string
     businessName: string | null
+    firstName: string | null
+    lastName: string | null
     timeZone: string | null
   }
 }
@@ -446,6 +449,8 @@ function parseBooking(value: unknown): BookingDto | null {
     professional: {
       id: readStringOrNull(professional.id) ?? '',
       businessName: readStringOrNull(professional.businessName),
+      firstName: readStringOrNull(professional.firstName),
+      lastName: readStringOrNull(professional.lastName),
       timeZone: readStringOrNull(professional.timeZone),
     },
   }
@@ -780,8 +785,10 @@ export default function PublicConsultationPage({ params }: PageProps) {
     .map((part) => safeText(part))
     .filter(Boolean)
     .join(' ')
-  const professionalLabel =
-    safeText(data.booking.professional.businessName) || 'your professional'
+  const professionalLabel = formatProfessionalPublicDisplayName(
+    data.booking.professional,
+    'your professional',
+  )
   const scheduledLabel = formatWhen(data.booking.scheduledFor, timeZone)
   const proposalTotalLabel = formatMoney(data.approval.proposedTotal)
   const proofMethodLabel = friendlyProofMethod(data.approval.proof?.method)

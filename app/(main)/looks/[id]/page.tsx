@@ -97,7 +97,7 @@ export async function generateMetadata({
   // Brand copy is tenant-resolved (white-label aware), never hardcoded.
   const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
-  const proName = formatProfessionalPublicDisplayName({ businessName: item.professional.businessName })
+  const proName = formatProfessionalPublicDisplayName(item.professional)
   const caption = item.caption?.trim() ?? ''
 
   const title = caption ? `${caption.slice(0, 80)} — ${proName}` : `A look by ${proName}`

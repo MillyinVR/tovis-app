@@ -7,6 +7,7 @@ import { notFound, redirect } from 'next/navigation'
 
 import { COPY } from '@/lib/copy'
 import { buildClientBookingDTO } from '@/lib/dto/clientBooking'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { prisma } from '@/lib/prisma'
 import { sanitizeTimeZone } from '@/lib/timeZone'
 import { cn } from '@/lib/utils'
@@ -1089,16 +1090,12 @@ export default async function ClientBookingPage(props: {
   const showRebookCTA =
     statusUpper === 'COMPLETED' && finalizedAftercare
     
-  const professionalEmail =
-    typeof raw.professional?.user?.email === 'string' &&
-    raw.professional.user.email.trim()
-      ? raw.professional.user.email
-      : null
-
-  const professionalLabel =
-    booking.professional?.businessName ||
-    professionalEmail ||
-    COPY.common.professionalFallback
+  // Resolve through the canonical helper (businessName → real name → fallback);
+  // never expose the pro's email address as a display name to the client.
+  const professionalLabel = formatProfessionalPublicDisplayName(
+    booking.professional,
+    COPY.common.professionalFallback,
+  )
 
   const title = booking.display?.title || COPY.bookings.titleFallback
   const locationLine = booking.locationLabel || ''

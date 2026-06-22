@@ -139,6 +139,8 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
         professional = {
           id: professionalId,
           businessName: pickString(professionalRaw.businessName),
+          firstName: pickString(professionalRaw.firstName),
+          lastName: pickString(professionalRaw.lastName),
           handle: pickString(professionalRaw.handle),
           professionType: isProfessionType(professionTypeRaw)
             ? professionTypeRaw
@@ -477,6 +479,8 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
   const professional = {
     id: professionalId,
     businessName: pickString(professionalRaw.businessName),
+    firstName: pickString(professionalRaw.firstName),
+    lastName: pickString(professionalRaw.lastName),
     handle: pickString(professionalRaw.handle),
     avatarUrl: pickString(professionalRaw.avatarUrl),
     professionType,

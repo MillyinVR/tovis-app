@@ -101,9 +101,7 @@ export default function LookDetailClient({
     onRequireAuth: redirectToLogin,
   })
 
-  const proDisplayName = formatProfessionalPublicDisplayName({
-    businessName: item.professional.businessName,
-  })
+  const proDisplayName = formatProfessionalPublicDisplayName(item.professional)
 
   const closeAvailability = useCallback(() => {
     setAvailabilityOpen(false)
@@ -299,6 +297,8 @@ export default function LookDetailClient({
             pro={{
               id: item.professional.id,
               businessName: item.professional.businessName,
+              firstName: item.professional.firstName,
+              lastName: item.professional.lastName,
               avatarUrl: item.professional.avatarUrl,
             }}
             viewerLiked={item.viewerContext.viewerLiked}

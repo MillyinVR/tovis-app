@@ -8,6 +8,7 @@ import { COPY } from '@/lib/copy'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
 import { buildClientBookingDTO, type ClientBookingDTO } from '@/lib/dto/clientBooking'
 import { DEFAULT_TIME_ZONE, sanitizeTimeZone } from '@/lib/timeZone'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import {
   AftercareRebookMode,
   ConsultationApprovalStatus,
@@ -85,6 +86,8 @@ const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
     select: {
       id: true,
       businessName: true,
+      firstName: true,
+      lastName: true,
       location: true,
       timeZone: true,
     },
@@ -226,8 +229,8 @@ export default async function ClientAftercareInboxPage() {
               dto?.display?.title || safeText(n.title, COPY.aftercareInbox.serviceFallback)
 
             const proId = dto?.professional?.id ?? raw?.professional?.id ?? null
-            const proName = safeText(
-              dto?.professional?.businessName ?? raw?.professional?.businessName,
+            const proName = formatProfessionalPublicDisplayName(
+              dto?.professional ?? raw?.professional ?? null,
               COPY.aftercareInbox.proFallback,
             )
 

@@ -64,6 +64,8 @@ function makeProfessionalPreview(
   overrides?: Partial<{
     id: string
     businessName: string | null
+    firstName: string
+    lastName: string
     handle: string | null
     avatarUrl: string | null
     professionType: ProfessionType | null
@@ -75,6 +77,8 @@ function makeProfessionalPreview(
   return {
     id: 'pro_1',
     businessName: 'TOVIS Studio',
+    firstName: 'Tori',
+    lastName: 'Morales',
     handle: 'tovisstudio',
     avatarUrl: null,
     professionType: null,
@@ -404,6 +408,8 @@ describe('lib/follows/index.ts', () => {
             select: {
               id: true,
               businessName: true,
+              firstName: true,
+              lastName: true,
               handle: true,
               avatarUrl: true,
               professionType: true,
@@ -476,6 +482,8 @@ describe('lib/follows/index.ts', () => {
             select: {
               id: true,
               businessName: true,
+              firstName: true,
+              lastName: true,
               handle: true,
               avatarUrl: true,
               professionType: true,
@@ -702,6 +710,8 @@ describe('lib/follows/index.ts', () => {
             professional: {
               id: 'pro_1',
               businessName: 'TOVIS Studio',
+              firstName: 'Tori',
+              lastName: 'Morales',
               handle: 'tovisstudio',
               avatarUrl: null,
               professionType: null,

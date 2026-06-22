@@ -1,6 +1,7 @@
 // app/api/client/priority-offer/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonOk, requireClient } from '@/app/api/_utils'
+import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import {
   LastMinuteOfferType,
   LastMinuteRecipientStatus,
@@ -48,7 +49,14 @@ const offerSelect = {
       timeZone: true,
       locationType: true,
       professional: {
-        select: { id: true, businessName: true, handle: true, avatarUrl: true },
+        select: {
+          id: true,
+          businessName: true,
+          firstName: true,
+          lastName: true,
+          handle: true,
+          avatarUrl: true,
+        },
       },
       services: {
         where: { offering: { is: { isActive: true } } },
@@ -142,7 +150,10 @@ export async function GET() {
       status: row.status,
       expiresAt,
       expired,
-      proName: opening.professional.businessName ?? opening.professional.handle ?? 'Your pro',
+      proName:
+        pickProfessionalPublicDisplayName(opening.professional) ??
+        opening.professional.handle ??
+        'Your pro',
       avatarUrl: opening.professional.avatarUrl ?? null,
       serviceLabel: serviceSummary(opening.services),
       startAt: opening.startAt.toISOString(),

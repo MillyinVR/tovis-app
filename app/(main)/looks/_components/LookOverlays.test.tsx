@@ -25,6 +25,8 @@ function makeItem(overrides: Partial<FeedItem> = {}): FeedItem {
     professional: {
       id: 'pro_1',
       businessName: 'TOVIS Studio',
+      firstName: 'Tori',
+      lastName: 'Morales',
       handle: 'tovisstudio',
       professionType: 'BARBER',
       avatarUrl: null,

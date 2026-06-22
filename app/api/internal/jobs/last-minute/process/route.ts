@@ -3,6 +3,7 @@ import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { getInternalJobSecret, isAuthorizedJobRequest } from '@/app/api/_utils/auth/internalJob'
 import { prisma } from '@/lib/prisma'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
+import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { upsertClientNotification } from '@/lib/notifications/clientNotifications'
 import {
   LastMinuteOfferType,
@@ -89,6 +90,8 @@ const dueTierPlanSelect = {
         select: {
           id: true,
           businessName: true,
+          firstName: true,
+          lastName: true,
           handle: true,
           mobileRadiusMiles: true,
         },
@@ -193,7 +196,7 @@ function buildNotificationContent(plan: DueTierPlanRow): {
   data: Prisma.InputJsonObject
 } {
   const proName =
-    plan.opening.professional.businessName ??
+    pickProfessionalPublicDisplayName(plan.opening.professional) ??
     plan.opening.professional.handle ??
     'your pro'
 

@@ -221,6 +221,8 @@ function makeDetailItem(): LooksDetailItemDto {
     professional: {
       id: 'pro_1',
       businessName: 'TOVIS Studio',
+      firstName: 'Tori',
+      lastName: 'Morales',
       handle: 'tovisstudio',
       avatarUrl: null,
       professionType: 'BARBER',

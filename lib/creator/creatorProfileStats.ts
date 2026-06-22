@@ -96,7 +96,9 @@ export async function listClientLookRemixes(
       // The booker is another client — addressed by handle only when public,
       // never by legal name (matches the activity-feed PII model).
       client: { select: { handle: true, isPublicProfile: true } },
-      professional: { select: { businessName: true } },
+      professional: {
+        select: { businessName: true, firstName: true, lastName: true },
+      },
       sourceLookPost: { select: { caption: true } },
     },
   })
@@ -108,9 +110,7 @@ export async function listClientLookRemixes(
       id: row.id,
       who: handle ? `@${handle}` : 'Someone',
       lookName: lookNameFromCaption(row.sourceLookPost?.caption ?? null),
-      proName: formatProfessionalPublicDisplayName({
-        businessName: row.professional.businessName,
-      }),
+      proName: formatProfessionalPublicDisplayName(row.professional),
       bookedAt: row.createdAt.toISOString(),
     }
   })

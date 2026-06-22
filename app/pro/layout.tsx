@@ -10,6 +10,7 @@ import '@/lib/brand/proOverview.css'
 import { checkProReadiness } from '@/lib/pro/readiness/proReadiness'
 import { getProOnboardingRedirectHref } from '@/lib/pro/readiness/onboardingGate'
 import { isProMigrationEnabled } from '@/lib/migration/featureFlag'
+import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import ProHeader from './ProHeader'
 import ProComplianceBanner from './ProComplianceBanner'
 import ProReadinessBanner from './ProReadinessBanner'
@@ -79,6 +80,7 @@ export default async function ProRootLayout({
   }
 
   const pro = user.professionalProfile
+  const proDisplayName = pickProfessionalPublicDisplayName(pro)
   const publicUrl = isPubliclyApprovedProStatus(pro.verificationStatus)
     ? `/professionals/${encodeURIComponent(pro.id)}`
     : null
@@ -86,7 +88,7 @@ export default async function ProRootLayout({
   return (
     <div className="min-h-dvh bg-bgPrimary text-textPrimary">
       <ProHeader
-        businessName={pro.businessName}
+        businessName={proDisplayName}
         subtitle={pro.handle ? `@${pro.handle}` : null}
         publicUrl={publicUrl}
         migrationEnabled={isProMigrationEnabled()}

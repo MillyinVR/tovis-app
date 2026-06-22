@@ -28,6 +28,7 @@ import type {
   LooksRenderedMediaDto,
 } from '@/lib/looks/types'
 import { mapLooksProProfilePreviewToDto } from '@/lib/looks/profilePreview'
+import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 type MediaCommentUserShape = {
   id: string
@@ -38,6 +39,8 @@ type MediaCommentUserShape = {
   } | null
   professionalProfile: {
     businessName: string | null
+    firstName: string | null
+    lastName: string | null
     avatarUrl: string | null
   } | null
 }
@@ -160,7 +163,12 @@ function normalizeCommentUser(user: MediaCommentUserShape): {
   const clientFirst = user.clientProfile?.firstName?.trim() ?? ''
   const clientLast = user.clientProfile?.lastName?.trim() ?? ''
   const clientFullName = [clientFirst, clientLast].filter(Boolean).join(' ')
-  const professionalName = user.professionalProfile?.businessName?.trim() ?? ''
+  // Pros resolve through the canonical helper (businessName → real name → null),
+  // so a pro without a business name shows their real name instead of falling to
+  // the generic "User" placeholder. Honors the display-name preference once added.
+  const professionalName = pickProfessionalPublicDisplayName(
+    user.professionalProfile,
+  )
 
   return {
     id: user.id,
@@ -287,6 +295,8 @@ export async function mapLooksFeedMediaToDto(args: {
       ? {
           id: item.professional.id,
           businessName: item.professional.businessName ?? null,
+          firstName: item.professional.firstName ?? null,
+          lastName: item.professional.lastName ?? null,
           handle: item.professional.handle ?? null,
           professionType: item.professional.professionType ?? null,
           avatarUrl: item.professional.avatarUrl ?? null,

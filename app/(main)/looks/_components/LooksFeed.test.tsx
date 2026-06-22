@@ -265,6 +265,8 @@ function makeFeedItem(
     professional: {
       id: 'pro_1',
       businessName: 'TOVIS Studio',
+      firstName: 'Tori',
+      lastName: 'Morales',
       handle: 'tovisstudio',
       professionType: 'BARBER',
       avatarUrl: null,
@@ -640,6 +642,8 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
             professional: {
               id: 'pro_book_1',
               businessName: 'Book Me',
+              firstName: 'Book',
+              lastName: 'Me',
               handle: 'bookme',
               professionType: 'BARBER',
               avatarUrl: null,

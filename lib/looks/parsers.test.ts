@@ -58,6 +58,8 @@ function makeFeedDto(
     professional: {
       id: 'pro_1',
       businessName: 'TOVIS Studio',
+      firstName: 'Tori',
+      lastName: 'Morales',
       handle: 'tovisstudio',
       professionType: ProfessionType.BARBER,
       avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
@@ -158,6 +160,8 @@ describe('lib/looks/parsers.ts', () => {
           professional: {
             id: 'pro_1',
             businessName: 'TOVIS Studio',
+            firstName: null,
+            lastName: null,
             handle: 'tovisstudio',
             professionType: null,
             avatarUrl: null,
@@ -374,6 +378,8 @@ describe('lib/looks/parsers.ts', () => {
           professional: {
             id: 'pro_1',
             businessName: 'TOVIS Studio',
+            firstName: 'Tori',
+            lastName: 'Morales',
             handle: 'tovisstudio',
             avatarUrl: null,
             professionType: ProfessionType.BARBER,
@@ -427,6 +433,8 @@ describe('lib/looks/parsers.ts', () => {
         professional: {
           id: 'pro_1',
           businessName: 'TOVIS Studio',
+          firstName: 'Tori',
+          lastName: 'Morales',
           handle: 'tovisstudio',
           avatarUrl: null,
           professionType: ProfessionType.BARBER,

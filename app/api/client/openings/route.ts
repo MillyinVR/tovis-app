@@ -1,5 +1,6 @@
 // app/api/client/openings/route.ts
 import { prisma } from '@/lib/prisma'
+import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { moneyToString } from '@/lib/money'
 import {
   jsonFail,
@@ -73,6 +74,8 @@ const recipientSelect = {
         select: {
           id: true,
           businessName: true,
+          firstName: true,
+          lastName: true,
           handle: true,
           avatarUrl: true,
           professionType: true,
@@ -172,6 +175,7 @@ function mapOpening(recipient: RecipientRow) {
     professional: {
       id: opening.professional.id,
       businessName: opening.professional.businessName ?? null,
+      displayName: pickProfessionalPublicDisplayName(opening.professional),
       handle: opening.professional.handle ?? null,
       avatarUrl: opening.professional.avatarUrl ?? null,
       professionType: opening.professional.professionType ?? null,

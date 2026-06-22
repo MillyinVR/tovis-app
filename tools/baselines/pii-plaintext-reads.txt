@@ -145,6 +145,12 @@ app/api/client/addresses/[id]/route.ts:direct property read:body.addressLine1 !=
 app/api/client/addresses/[id]/route.ts:direct property read:body.addressLine2 !== undefined ||
 app/api/client/addresses/[id]/route.ts:direct property read:body.postalCode !== undefined ||
 app/api/client/bookings/route.ts:Prisma select/include plaintext field:
+app/api/client/bookings/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/client/bookings/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/client/openings/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/client/openings/route.ts:Prisma select/include plaintext field:lastName: true,
+app/api/client/priority-offer/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/client/priority-offer/route.ts:Prisma select/include plaintext field:lastName: true,
 app/api/client/referrals/[id]/confirm/route.ts:direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
 app/api/client/referrals/[id]/confirm/route.ts:optional direct property read:referral.referrerClient?.firstName?.trim() || 'A friend'
 app/api/client/referrals/route.ts:direct property read:? [r.professional.firstName, r.professional.lastName]
@@ -162,6 +168,8 @@ app/api/client/settings/route.ts:direct property read:const lastName = normalize
 app/api/client/settings/route.ts:direct property read:const updated = await loadSettings(auth.clientId, auth.user.email ?? null)
 app/api/internal/cron/retry-verification-emails/route.ts:Prisma select/include plaintext field:email: true,
 app/api/internal/cron/retry-verification-emails/route.ts:direct property read:const email = normalizeEmail(candidate.email)
+app/api/internal/jobs/last-minute/process/route.ts:Prisma select/include plaintext field:firstName: true,
+app/api/internal/jobs/last-minute/process/route.ts:Prisma select/include plaintext field:lastName: true,
 app/api/pro-license/verify/route.ts:direct property read:? nameBlock.firstName
 app/api/pro-license/verify/route.ts:direct property read:? nameBlock.lastName
 app/api/pro-license/verify/route.ts:direct property read:typeof nameBlock.firstName === 'string'
@@ -239,16 +247,17 @@ app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext fie
 app/api/public/consultation/[token]/route.ts:Prisma select/include plaintext field:lastName: true,
 app/client/(gated)/_data/getClientHomeData.ts:Prisma select/include plaintext field:
 app/client/(gated)/aftercare/page.tsx:Prisma select/include plaintext field:
+app/client/(gated)/aftercare/page.tsx:Prisma select/include plaintext field:firstName: true,
+app/client/(gated)/aftercare/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/client/(gated)/bookings/[id]/_data/loadClientBookingPage.ts:Prisma select/include plaintext field:
-app/client/(gated)/bookings/[id]/_data/loadClientBookingPage.ts:Prisma select/include plaintext field:email: true,
+app/client/(gated)/bookings/[id]/_data/loadClientBookingPage.ts:Prisma select/include plaintext field:firstName: true,
+app/client/(gated)/bookings/[id]/_data/loadClientBookingPage.ts:Prisma select/include plaintext field:lastName: true,
 app/client/(gated)/bookings/[id]/_data/loadProfessionalPaymentSettings.ts:Prisma select/include plaintext field:stripeAccountId: true,
 app/client/(gated)/bookings/[id]/_data/loadProfessionalPaymentSettings.ts:direct property read:settings.stripeAccountId &&
-app/client/(gated)/bookings/[id]/page.tsx:direct property read:? raw.professional.user.email
 app/client/(gated)/bookings/[id]/page.tsx:direct property read:booking.consultation?.consultationNotes ||
-app/client/(gated)/bookings/[id]/page.tsx:direct property read:raw.professional.user.email.trim()
-app/client/(gated)/bookings/[id]/page.tsx:direct property read:typeof raw.professional?.user?.email === 'string' &&
 app/client/(gated)/bookings/[id]/page.tsx:optional direct property read:booking.consultation?.consultationNotes ||
-app/client/(gated)/bookings/[id]/page.tsx:optional direct property read:typeof raw.professional?.user?.email === 'string' &&
+app/client/(gated)/looks/share/[bookingId]/_data/loadShareLookPage.ts:Prisma select/include plaintext field:firstName: true,
+app/client/(gated)/looks/share/[bookingId]/_data/loadShareLookPage.ts:Prisma select/include plaintext field:lastName: true,
 app/client/(gated)/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:
 app/client/(gated)/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:email: true,
 app/client/(gated)/me/_data/loadClientMePage.ts:Prisma select/include plaintext field:firstName: true,
@@ -307,6 +316,8 @@ app/messages/thread/[id]/page.tsx:Prisma select/include plaintext field:firstNam
 app/messages/thread/[id]/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/messages/thread/[id]/page.tsx:direct property read:? formatPersonName(thread.client?.firstName, thread.client?.lastName) || 'Client'
 app/messages/thread/[id]/page.tsx:optional direct property read:? formatPersonName(thread.client?.firstName, thread.client?.lastName) || 'Client'
+app/p/[handle]/page.tsx:Prisma select/include plaintext field:firstName: true,
+app/p/[handle]/page.tsx:Prisma select/include plaintext field:lastName: true,
 app/pro/aftercare/page.tsx:Prisma select/include plaintext field:email: true,
 app/pro/aftercare/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/aftercare/page.tsx:Prisma select/include plaintext field:lastName: true,
@@ -419,6 +430,8 @@ app/pro/reviews/page.tsx:optional direct property read:const first = pickNonEmpt
 app/pro/reviews/page.tsx:optional direct property read:const last = pickNonEmptyString(rev.client?.lastName)
 app/pro/verification/page.tsx:Prisma select/include plaintext field:firstName: true,
 app/pro/verification/page.tsx:Prisma select/include plaintext field:lastName: true,
+lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:firstName: true,
+lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:lastName: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:email: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:firstName: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:lastName: true,
@@ -472,6 +485,8 @@ lib/currentUser.ts:Prisma select/include plaintext field:firstName: true,
 lib/currentUser.ts:Prisma select/include plaintext field:lastName: true,
 lib/currentUser.ts:Prisma select/include plaintext field:phone: true,
 lib/dto/clientBooking.ts:Prisma select/include plaintext field:
+lib/dto/clientBooking.ts:Prisma select/include plaintext field:firstName: true
+lib/dto/clientBooking.ts:Prisma select/include plaintext field:lastName: true
 lib/dto/clientBooking.ts:direct property read:Boolean(b.consultationNotes) ||
 lib/follows/index.ts:Prisma select/include plaintext field:firstName: true,
 lib/follows/index.ts:Prisma select/include plaintext field:lastName: true,
@@ -481,6 +496,8 @@ lib/looks/mappers.ts:direct property read:const clientFirst = user.clientProfile
 lib/looks/mappers.ts:direct property read:const clientLast = user.clientProfile?.lastName?.trim() ?? ''
 lib/looks/mappers.ts:optional direct property read:const clientFirst = user.clientProfile?.firstName?.trim() ?? ''
 lib/looks/mappers.ts:optional direct property read:const clientLast = user.clientProfile?.lastName?.trim() ?? ''
+lib/looks/selects.ts:Prisma select/include plaintext field:firstName: true,
+lib/looks/selects.ts:Prisma select/include plaintext field:lastName: true,
 lib/membership/subscription.ts:Prisma select/include plaintext field:stripeCustomerId: true,
 lib/membership/subscription.ts:direct property read:if (sub.stripeCustomerId) return sub.stripeCustomerId
 lib/notifications/adminNotifications.ts:Prisma select/include plaintext field:email: true,
