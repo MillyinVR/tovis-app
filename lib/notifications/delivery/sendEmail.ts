@@ -7,6 +7,10 @@ import {
 
 import { asTrimmedString } from '@/lib/guards'
 import {
+  LOAD_TEST_SUPPRESSED_STATUS,
+  realDeliverySuppressed,
+} from '@/lib/loadTestDelivery'
+import {
   requirePostmarkEmailConfig,
   isNotificationProviderConfigError,
 } from '@/lib/notifications/config'
@@ -363,6 +367,15 @@ export class EmailDeliveryProvider
       return buildConfigurationFailure(
         'Expected EMAIL channel for email delivery.',
       )
+    }
+
+    if (realDeliverySuppressed()) {
+      return {
+        ok: true,
+        providerMessageId: request.idempotencyKey,
+        providerStatus: LOAD_TEST_SUPPRESSED_STATUS,
+        responseMeta: { source: 'sendEmail', suppressed: true },
+      }
     }
 
     let postmarkRequest: PostmarkEmailRequest

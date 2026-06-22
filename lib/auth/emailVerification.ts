@@ -3,6 +3,7 @@ import { AuthVerificationPurpose, Prisma } from '@prisma/client'
 import { sha256Hex, generateTokenHex } from '@/lib/auth/timingSafe'
 import { requireEmailEnv } from '@/lib/auth/emailProviderEnv'
 import { readOptionalEnv as envOrNull } from '@/lib/env'
+import { realDeliverySuppressed } from '@/lib/loadTestDelivery'
 import { isRecord } from '@/lib/guards'
 import { prisma } from '@/lib/prisma'
 import { logAuthEvent } from '@/lib/observability/authEvents'
@@ -151,6 +152,10 @@ export async function sendVerificationEmail(args: {
   verifyUrl: string
   brandName: string
 }): Promise<void> {
+  // Load-test kill switch: never hit Postmark for real (fenced off deployed
+  // runtimes — see lib/loadTestDelivery).
+  if (realDeliverySuppressed()) return
+
   const apiToken = requireEmailEnv('POSTMARK_SERVER_TOKEN')
   const fromEmail = requireEmailEnv('POSTMARK_FROM_EMAIL')
   const messageStream = envOrNull('POSTMARK_MESSAGE_STREAM')

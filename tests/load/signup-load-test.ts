@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { performance } from 'node:perf_hooks'
 
+import { assertLoadTestDeliverySafe } from './_deliverySafety'
+
 type Stage = {
   name: string
   rps: number
@@ -514,6 +516,11 @@ function buildSummary(args: {
 }
 
 async function main(): Promise<void> {
+  // Refuse to send load unless the operator has confirmed the target does not
+  // deliver to real users (kill switch on, or sink creds). Prevents a repeat of
+  // the 2026-06-22 live-creds incident.
+  assertLoadTestDeliverySafe()
+
   const baseUrl = requireEnv('STAGING_BASE_URL').replace(/\/+$/, '')
   const turnstileToken = requireEnv('TURNSTILE_TEST_TOKEN')
 

@@ -8,6 +8,10 @@ import {
 
 import { asTrimmedString } from '@/lib/guards'
 import {
+  LOAD_TEST_SUPPRESSED_STATUS,
+  realDeliverySuppressed,
+} from '@/lib/loadTestDelivery'
+import {
   requireTwilioSmsConfig,
   isNotificationProviderConfigError,
 } from '@/lib/notifications/config'
@@ -249,6 +253,15 @@ export class SmsDeliveryProvider
 
     if (request.channel !== NotificationChannel.SMS) {
       return buildConfigurationFailure('Expected SMS channel for SMS delivery.')
+    }
+
+    if (realDeliverySuppressed()) {
+      return {
+        ok: true,
+        providerMessageId: request.idempotencyKey,
+        providerStatus: LOAD_TEST_SUPPRESSED_STATUS,
+        responseMeta: { source: 'sendSms', suppressed: true },
+      }
     }
 
     let params: TwilioSmsSendParams

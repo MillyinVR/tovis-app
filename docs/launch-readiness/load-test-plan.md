@@ -47,6 +47,37 @@ A load test is not complete unless it has:
 
 Do not run load tests against production unless the target environment, data isolation, provider costs, and rollback plan are explicitly approved.
 
+## Delivery safety (mandatory)
+
+Load harnesses create many signups, which trigger transactional SMS/email. If the
+target server holds **live** Twilio/Postmark credentials, every signup sends — and
+bills — a real message. On 2026-06-22 a signup run against a local server that was
+loading live `.env.local` creds sent ~4,375 Twilio Verify messages and cost ~$36.
+
+Two layers now prevent this:
+
+1. **Server kill switch** — `LOAD_TEST_DISABLE_REAL_DELIVERY=1` makes the app
+   short-circuit all real provider sends (Twilio Verify/SMS, Postmark email). It
+   engages on local dev, CI, and **preview/staging** deploys, but is hard-fenced
+   off **production** (keyed on `VERCEL_ENV`), so it can never disable delivery to
+   real users — even if the flag leaks into prod config. This is what makes a
+   deployed *staging* signup load proof free and safe; real delivery is proven
+   separately by the deployed *smoke* proof. See `lib/loadTestDelivery.ts`.
+2. **Harness preflight** — the load scripts refuse to send unless the operator sets
+   `LOAD_TEST_DELIVERY_SAFE=1`, asserting the target does not deliver to real users
+   (kill switch on, or sink/test provider creds). Never assert this against a server
+   with live provider keys.
+
+Safe local run:
+
+```bash
+pnpm dev:loadtest                                   # terminal A: local server, kill switch ON, local dev DB (5434)
+LOAD_TEST_DELIVERY_SAFE=1 pnpm test:load:signup     # terminal B
+```
+
+Deployed staging must use sink/test provider credentials (never prod keys) before
+`LOAD_TEST_DELIVERY_SAFE=1` is set.
+
 ## Current status summary
 
 | Scenario | Script | Status | Launch impact |

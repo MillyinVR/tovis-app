@@ -27,9 +27,21 @@ cookie hunting). Manual fallbacks, if you ever need them:
 
 ## One-time setup
 
-1. **Deploy a staging build** pointed at a **non-prod DB**.
-2. **Seed that DB**: run `pnpm seed` with the staging `DATABASE_URL` loaded (creates
+1. **Provision an isolated staging DB** — a separate Supabase project (NOT the prod
+   pooler). ⚠️ As of 2026-06-22 `.env.staging.local` points `DATABASE_URL` at the
+   **prod** project (`postgres.rqhhvuaoksuvbvlypztn`) and carries the **live** Twilio
+   account — running a load proof against it would mutate prod and bill real SMS.
+   This must be fixed before a deployed proof.
+2. **Deploy a staging build** (Vercel *preview*) pointed at that non-prod DB, with
+   **`LOAD_TEST_DISABLE_REAL_DELIVERY=1`** set in the preview env. The kill switch
+   engages on preview (not production), so signup load sends **zero** real SMS/email
+   — no Twilio sub-account or Postmark sandbox needed for the signup proof. (Real
+   delivery is covered by the separate deployed *smoke* proof.)
+3. **Seed that DB**: run `pnpm seed` with the staging `DATABASE_URL` loaded (creates
    the `tovis-test-pro` pro, the `client@tovis.app` client, and offerings).
+
+When you run the harness, set `LOAD_TEST_DELIVERY_SAFE=1` (the preflight requires it)
+— justified because the preview deploy suppresses real delivery.
 
 ## Run it
 

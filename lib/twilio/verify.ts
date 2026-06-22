@@ -3,6 +3,10 @@ import Twilio from 'twilio'
 
 import { readOptionalEnv as readEnv } from '@/lib/env'
 import { asTrimmedString } from '@/lib/guards'
+import {
+  LOAD_TEST_SUPPRESSED_STATUS,
+  realDeliverySuppressed,
+} from '@/lib/loadTestDelivery'
 
 type TwilioVerifyConfig = {
   accountSid: string
@@ -60,6 +64,10 @@ function errorMessage(error: unknown): string {
 export async function startTwilioVerifyPhoneVerification(args: {
   to: string
 }): Promise<TwilioVerifyStartResult> {
+  if (realDeliverySuppressed()) {
+    return { ok: true, sid: null, status: LOAD_TEST_SUPPRESSED_STATUS }
+  }
+
   const config = readTwilioVerifyConfig()
 
   if (!config) {

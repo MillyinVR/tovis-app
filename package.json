@@ -6,6 +6,7 @@
     "postinstall": "prisma generate && (git config core.hooksPath .githooks 2>/dev/null || true)",
     "dev": "prisma generate && next dev",
     "dev:test-db": "prisma generate && DATABASE_URL=postgresql://postgres:postgres@localhost:5433/tovis_test DIRECT_URL=postgresql://postgres:postgres@localhost:5433/tovis_test next dev",
+    "dev:loadtest": "prisma generate && LOAD_TEST_DISABLE_REAL_DELIVERY=1 DATABASE_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev DIRECT_URL=postgresql://postgres:postgres@localhost:5434/tovis_dev next dev",
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
