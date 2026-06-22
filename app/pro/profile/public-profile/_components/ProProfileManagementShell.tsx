@@ -12,6 +12,7 @@ import ProProfileHeader from './ProProfileHeader'
 import ProProfileStats from './ProProfileStats'
 import ProProfileTabs from './ProProfileTabs'
 import ProReviewSection from './ProReviewsSection'
+import YourLinkCard from './YourLinkCard'
 
 type ProProfileManagementShellProps = {
   model: ProProfileManagementPageModel
@@ -36,6 +37,14 @@ export default function ProProfileManagementShell({
           ) : null}
 
           <ProProfileCard model={model} />
+          <YourLinkCard
+            handle={model.profile.handle}
+            isApproved={model.profile.isApproved}
+            isPremium={model.profile.isPremium}
+            vanityHost={model.profile.vanityHost}
+            vanityUrl={model.profile.vanityUrl}
+            vanityQrSvg={model.profile.vanityQrSvg}
+          />
           <ProProfileStats stats={model.stats} />
           <ProProfileActions routes={model.routes} />
 

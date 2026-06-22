@@ -30,6 +30,7 @@ export type NotificationTemplateKey =
   | 'referral_tap_received'
   | 'referral_confirmed'
   | 'referral_converted'
+  | 'pro_handle_reservation_expiring'
   | 'admin_verification_review_needed'
   | 'admin_support_ticket_created'
   | 'admin_viral_request_pending'
@@ -468,6 +469,20 @@ export const NOTIFICATION_EVENT_DEFINITIONS: Record<
     supportedRecipients: [NotificationRecipientKind.CLIENT],
     defaultChannelsByRecipient: {
       [NotificationRecipientKind.CLIENT]: CLIENT_IN_APP_ONLY_CHANNELS,
+    },
+  },
+
+  // Vanity-handle reservation about to expire. In-app + email so the pro has a real
+  // chance to upgrade (or knows the handle is freeing up). Transactional; no bypass.
+  [NotificationEventKey.PRO_HANDLE_RESERVATION_EXPIRING]: {
+    key: NotificationEventKey.PRO_HANDLE_RESERVATION_EXPIRING,
+    defaultPriority: NotificationPriority.NORMAL,
+    transactional: true,
+    allowQuietHoursBypass: false,
+    templateKey: 'pro_handle_reservation_expiring',
+    supportedRecipients: [NotificationRecipientKind.PRO],
+    defaultChannelsByRecipient: {
+      [NotificationRecipientKind.PRO]: PRO_IN_APP_EMAIL_CHANNELS,
     },
   },
 

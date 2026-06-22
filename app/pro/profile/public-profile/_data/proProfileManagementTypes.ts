@@ -127,6 +127,11 @@ export type ProProfileManagementProfile = {
 
   publicUrl: string
   livePublicUrl: string | null
+
+  // Vanity (name.tovis.me) link surface.
+  vanityHost: string | null // e.g. "tori.tovis.me" (null until a handle is set)
+  vanityUrl: string | null // e.g. "https://tori.tovis.me"
+  vanityQrSvg: string | null // inline SVG QR, present only when the link is live
 }
 
 export type ProProfileManagementPortfolio = {

@@ -566,6 +566,10 @@ enum NotificationEventKey {
   REFERRAL_CONFIRMED
   REFERRAL_CONVERTED
 
+  // A not-yet-premium pro's reserved vanity handle is about to be released for
+  // inactivity. Heads-up before the expiry cron reclaims it.
+  PRO_HANDLE_RESERVATION_EXPIRING
+
   // Admin operational alerts — fanned out to all users with role ADMIN.
   // A pro submitted a verification document or edited their license (re-review).
   ADMIN_VERIFICATION_REVIEW_NEEDED
@@ -1455,6 +1459,9 @@ model ProfessionalProfile {
   businessName     String?
   handle           String?
   handleNormalized String?           @unique
+  // When a not-yet-premium pro reserves a handle. Cleared once the handle goes live
+  // under an active subscription; a cron releases stale non-premium reservations.
+  handleReservedAt DateTime?
   // Pro-chosen public display style; BUSINESS_NAME preserves legacy behavior.
   nameDisplay      ProNameDisplay    @default(BUSINESS_NAME)
   isPremium        Boolean           @default(false)

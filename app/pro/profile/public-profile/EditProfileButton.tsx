@@ -16,7 +16,7 @@ import { ProNameDisplay } from '@prisma/client'
 import { asTrimmedString, type UnknownRecord } from '@/lib/guards'
 import { errorMessageFromUnknown, readErrorMessage, safeJson } from '@/lib/http'
 import { zClass } from '@/lib/zIndex'
-import { sanitizeHandleInput } from '@/lib/handles'
+import { normalizeHandle, sanitizeHandleInput } from '@/lib/handles'
 import { uploadWithProgress } from '@/lib/media/uploadWithProgress'
 import { compressImageForUpload } from '@/lib/media/processImageForUpload'
 import { withCacheBuster } from '@/lib/url'
@@ -60,8 +60,43 @@ const NAME_DISPLAY_OPTIONS: ReadonlyArray<{
 
 type TimeoutHandle = ReturnType<typeof setTimeout>
 
+type HandleStatus = 'available' | 'taken' | 'reserved' | 'invalid' | 'yours'
+
+type HandleCheck = {
+  status: HandleStatus
+  message: string
+  suggestions: string[]
+}
+
+/** Statuses that must block Save — the handle can't be persisted as-is. */
+const BLOCKING_HANDLE_STATUSES: ReadonlySet<HandleStatus> = new Set<HandleStatus>([
+  'taken',
+  'reserved',
+  'invalid',
+])
+
 function readString(obj: UnknownRecord, key: string) {
   return asTrimmedString(obj[key])
+}
+
+function readHandleCheck(value: unknown): HandleCheck | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as UnknownRecord
+  const status = record.status
+  if (
+    status !== 'available' &&
+    status !== 'taken' &&
+    status !== 'reserved' &&
+    status !== 'invalid' &&
+    status !== 'yours'
+  ) {
+    return null
+  }
+  const message = typeof record.message === 'string' ? record.message : ''
+  const suggestions = Array.isArray(record.suggestions)
+    ? record.suggestions.filter((s): s is string => typeof s === 'string')
+    : []
+  return { status, message, suggestions }
 }
 
 function readNumber(obj: UnknownRecord, key: string) {
@@ -108,6 +143,16 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string>('')
   const [avatarBroken, setAvatarBroken] = useState(false)
+
+  const [handleCheck, setHandleCheck] = useState<HandleCheck | null>(null)
+  const [checkingHandle, setCheckingHandle] = useState(false)
+  const handleCheckTimerRef = useRef<TimeoutHandle | null>(null)
+  const handleCheckAbortRef = useRef<AbortController | null>(null)
+
+  const initialHandleNormalized = useMemo(
+    () => normalizeHandle(initial.handle ?? ''),
+    [initial.handle],
+  )
 
   const busy = saving || uploadingAvatar
 
@@ -214,6 +259,62 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
     if (!handlePreview) return null
     return `${handlePreview}.tovis.me`
   }, [handlePreview])
+
+  // Debounced availability check. The PATCH route stays authoritative; this is just
+  // fast feedback so a pro never discovers "taken" only on Save.
+  useEffect(() => {
+    if (!open || !canEditHandle) return
+
+    clearTimer(handleCheckTimerRef)
+    handleCheckAbortRef.current?.abort()
+    handleCheckAbortRef.current = null
+
+    const candidate = handlePreview
+
+    // Empty, or unchanged from the saved handle: nothing to check.
+    if (!candidate || candidate === initialHandleNormalized) {
+      setHandleCheck(null)
+      setCheckingHandle(false)
+      return
+    }
+
+    setCheckingHandle(true)
+
+    handleCheckTimerRef.current = setTimeout(async () => {
+      const controller = new AbortController()
+      handleCheckAbortRef.current = controller
+      try {
+        const res = await fetch(
+          `/api/pro/profile/handle-available?handle=${encodeURIComponent(candidate)}`,
+          { signal: controller.signal, headers: { Accept: 'application/json' } },
+        )
+        const data = await safeJson(res)
+        const parsed = readHandleCheck(data)
+        if (parsed) setHandleCheck(parsed)
+      } catch {
+        // Aborts and transient errors fall back to server-side validation on Save.
+      } finally {
+        if (handleCheckAbortRef.current === controller) {
+          setCheckingHandle(false)
+          handleCheckAbortRef.current = null
+        }
+      }
+    }, 350)
+
+    return () => {
+      clearTimer(handleCheckTimerRef)
+    }
+  }, [open, canEditHandle, handlePreview, initialHandleNormalized])
+
+  useEffect(() => {
+    return () => {
+      clearTimer(handleCheckTimerRef)
+      handleCheckAbortRef.current?.abort()
+    }
+  }, [])
+
+  const handleBlocked =
+    handleCheck !== null && BLOCKING_HANDLE_STATUSES.has(handleCheck.status)
 
   const avatarSrc = useMemo(() => {
     const value = (avatarPreview || avatarUrl || '').trim()
@@ -469,6 +570,57 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                     )}
                   </div>
 
+                  {canEditHandle && vanityPreview ? (
+                    <div
+                      className="text-[12px] font-black"
+                      aria-live="polite"
+                      role="status"
+                    >
+                      {checkingHandle ? (
+                        <span className="text-textSecondary">Checking…</span>
+                      ) : handleCheck ? (
+                        <span
+                          className={
+                            handleCheck.status === 'available' ||
+                            handleCheck.status === 'yours'
+                              ? 'text-toneSuccess'
+                              : handleCheck.status === 'reserved' ||
+                                  handleCheck.status === 'invalid'
+                                ? 'text-toneWarn'
+                                : 'text-toneDanger'
+                          }
+                        >
+                          {handleCheck.status === 'available' ||
+                          handleCheck.status === 'yours'
+                            ? '✓ '
+                            : '• '}
+                          {handleCheck.message}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {canEditHandle &&
+                  handleCheck &&
+                  handleCheck.suggestions.length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] text-textSecondary">
+                        Try:
+                      </span>
+                      {handleCheck.suggestions.map((suggestion) => (
+                        <button
+                          key={suggestion}
+                          type="button"
+                          onClick={() => setHandle(suggestion)}
+                          disabled={busy}
+                          className="rounded-full border border-white/10 bg-bgPrimary px-2.5 py-1 text-[11px] font-black text-textPrimary hover:border-white/20 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
                   {canEditHandle && !initial.isPremium ? (
                     <div className="text-[11px] text-textSecondary">
                       You can reserve a handle now. Your{' '}
@@ -635,10 +787,10 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                 <button
                   type="button"
                   onClick={save}
-                  disabled={busy}
+                  disabled={busy || handleBlocked}
                   className={[
                     'rounded-card border px-4 py-3 text-[13px] font-black transition',
-                    busy
+                    busy || handleBlocked
                       ? 'cursor-not-allowed border-white/10 bg-bgPrimary text-textSecondary opacity-70'
                       : 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary hover:bg-accentPrimaryHover',
                   ].join(' ')}

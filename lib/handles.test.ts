@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   HANDLE_MAX,
   RESERVED_HANDLES,
+  handleFormatError,
+  handleFormatMessage,
   isHandleReserved,
   isValidHandle,
   normalizeHandle,
   sanitizeHandleInput,
+  suggestHandles,
+  vanityLinkFor,
 } from './handles'
 
 function normalizeForTest(value: string): string {
@@ -63,6 +67,50 @@ describe('lib/handles.ts', () => {
 
     it('caps length at HANDLE_MAX', () => {
       expect(sanitizeHandleInput('a'.repeat(50))).toHaveLength(HANDLE_MAX)
+    })
+  })
+
+  describe('handleFormatError', () => {
+    it('classifies each failure mode and passes a clean handle', () => {
+      expect(handleFormatError('')).toBe('empty')
+      expect(handleFormatError('ab')).toBe('too_short')
+      expect(handleFormatError('a'.repeat(HANDLE_MAX + 1))).toBe('too_long')
+      expect(handleFormatError('jane_smith')).toBe('charset')
+      expect(handleFormatError('-jane')).toBe('charset')
+      expect(handleFormatError('admin')).toBe('reserved')
+      expect(handleFormatError('janesmith')).toBeNull()
+    })
+
+    it('returns user-facing copy for every error', () => {
+      for (const err of ['empty', 'too_short', 'too_long', 'charset', 'reserved'] as const) {
+        expect(handleFormatMessage(err)).toBeTruthy()
+      }
+    })
+  })
+
+  describe('suggestHandles', () => {
+    it('returns valid, non-reserved variants of the base', () => {
+      const out = suggestHandles('jane')
+      expect(out.length).toBeGreaterThan(0)
+      for (const s of out) {
+        expect(handleFormatError(s)).toBeNull()
+        expect(s).not.toBe('jane')
+      }
+    })
+
+    it('returns nothing for empty input', () => {
+      expect(suggestHandles('')).toEqual([])
+    })
+  })
+
+  describe('vanityLinkFor', () => {
+    it('builds host + url from a handle and null for blank', () => {
+      expect(vanityLinkFor('Tori')).toEqual({
+        host: 'tori.tovis.me',
+        url: 'https://tori.tovis.me',
+      })
+      expect(vanityLinkFor('')).toBeNull()
+      expect(vanityLinkFor(null)).toBeNull()
     })
   })
 })

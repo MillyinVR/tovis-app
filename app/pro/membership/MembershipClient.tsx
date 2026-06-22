@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import type { SubscriptionStatus } from '@prisma/client'
 import type { Entitlement, PlanKey } from '@/lib/pro/entitlements'
 
@@ -219,8 +220,19 @@ export default function MembershipClient(props: Props) {
           </div>
           <ul className="mt-2 grid gap-1">
             {props.entitlements.map((ent) => (
-              <li key={ent} className="text-[12px] text-textPrimary">
+              <li
+                key={ent}
+                className="flex items-center gap-2 text-[12px] text-textPrimary"
+              >
                 ✓ {ENTITLEMENT_LABELS[ent]}
+                {ent === 'custom_handle' ? (
+                  <Link
+                    href="/pro/profile/public-profile"
+                    className="font-black text-accentPrimary hover:underline"
+                  >
+                    Claim it ›
+                  </Link>
+                ) : null}
               </li>
             ))}
           </ul>

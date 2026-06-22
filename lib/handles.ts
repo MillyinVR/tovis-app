@@ -61,6 +61,25 @@ export function isHandleReserved(normalized: string): boolean {
 export const HANDLE_MIN = 3
 export const HANDLE_MAX = 24
 
+/** The app's vanity root domain (e.g. `tovis.me`). Mirrors proxy.ts resolution. */
+export function vanityRootDomain(): string {
+  return process.env.APP_ROOT_DOMAIN?.trim() || 'tovis.me'
+}
+
+/**
+ * The vanity host + absolute URL for a handle, e.g. `tori` ->
+ * { host: 'tori.tovis.me', url: 'https://tori.tovis.me' }. Returns null for a
+ * blank handle so callers can branch on "no handle yet".
+ */
+export function vanityLinkFor(
+  handle: string | null | undefined,
+): { host: string; url: string } | null {
+  const normalized = normalizeHandle(handle ?? '')
+  if (!normalized) return null
+  const host = `${normalized}.${vanityRootDomain()}`
+  return { host, url: `https://${host}` }
+}
+
 /**
  * Canonical handle form used for storage (handleNormalized), uniqueness checks,
  * and vanity-URL lookups: trim + lowercase only. Does NOT strip characters, so
@@ -96,4 +115,60 @@ export function sanitizeHandleInput(raw: string): string {
     .replace(/^-+/, '')
     .replace(/-+$/, '')
     .slice(0, HANDLE_MAX)
+}
+
+/**
+ * Why a raw (already-normalized) candidate handle is not yet persistable, or null
+ * when it passes every format/charset/reserved rule. Shared by the live
+ * availability check and the PATCH route so client and server agree on copy.
+ */
+export type HandleFormatError = 'empty' | 'too_short' | 'too_long' | 'charset' | 'reserved'
+
+export function handleFormatError(normalized: string): HandleFormatError | null {
+  if (!normalized) return 'empty'
+  if (normalized.length < HANDLE_MIN) return 'too_short'
+  if (normalized.length > HANDLE_MAX) return 'too_long'
+  if (!isValidHandle(normalized)) return 'charset'
+  if (isHandleReserved(normalized)) return 'reserved'
+  return null
+}
+
+/** Human-facing copy for each format error — single source for client + server. */
+export function handleFormatMessage(error: HandleFormatError): string {
+  switch (error) {
+    case 'empty':
+      return 'Pick a handle to preview your link.'
+    case 'too_short':
+      return `Handle must be at least ${HANDLE_MIN} characters.`
+    case 'too_long':
+      return `Handle must be ${HANDLE_MAX} characters or fewer.`
+    case 'charset':
+      return 'Use only letters, numbers, and hyphens. Must start and end with a letter or number.'
+    case 'reserved':
+      return 'That handle is reserved.'
+  }
+}
+
+/**
+ * Suggest alternative handles when a desired one is taken/reserved. Derives from
+ * the sanitized base by appending numeric and suffix variants, capped to HANDLE_MAX
+ * and filtered to valid, non-reserved candidates. Callers still check availability.
+ */
+export function suggestHandles(base: string, suffixes: readonly string[] = ['mua', 'beauty', 'studio']): string[] {
+  const root = sanitizeHandleInput(base)
+  if (!root) return []
+
+  const candidates: string[] = []
+  for (let n = 1; n <= 3; n += 1) candidates.push(`${root}${n}`)
+  for (const suffix of suffixes) candidates.push(`${root}-${suffix}`)
+
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of candidates) {
+    const c = sanitizeHandleInput(raw)
+    if (seen.has(c)) continue
+    seen.add(c)
+    if (handleFormatError(c) === null) out.push(c)
+  }
+  return out
 }
