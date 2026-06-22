@@ -137,6 +137,14 @@ function pickString(value: unknown): string | null {
     : null
 }
 
+// LookPost.priceStartingAt is a nullable Prisma.Decimal; convert to a finite
+// number for the client DTO (null when unset or non-finite).
+function toFinitePrice(value: { toNumber: () => number } | null): number | null {
+  if (value == null) return null
+  const n = value.toNumber()
+  return Number.isFinite(n) ? n : null
+}
+
 function hasStoragePointers(input: {
   storageBucket: string | null
   storagePath: string | null
@@ -340,6 +348,8 @@ export async function mapLooksFeedMediaToDto(args: {
     serviceName: primaryService?.name ?? null,
     category: primaryService?.categoryName ?? null,
     serviceIds: resolvedPrimaryService.serviceIds,
+
+    priceStartingAt: toFinitePrice(item.priceStartingAt),
 
     uploadedByRole: primaryMedia.uploadedByRole ?? null,
     reviewId: primaryMedia.reviewId ?? null,

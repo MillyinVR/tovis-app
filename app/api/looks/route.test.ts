@@ -167,6 +167,7 @@ function makeMappedDto(
     serviceName: 'Fade',
     category: 'Hair',
     serviceIds: ['svc_1'],
+    priceStartingAt: null,
     _count: {
       likes: 3,
       comments: 1,
