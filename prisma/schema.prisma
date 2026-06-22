@@ -191,6 +191,34 @@ enum ClientNoteKind {
   DO_NOT_REBOOK
 }
 
+// Client technical record (PR4 — legal-gated, flagged). These records are
+// pro-authored and persist beyond the 30-day ambient window for the authoring
+// pro (two-tier retention). Default PRIVATE_TO_AUTHOR; formula text is NEVER
+// public. See docs/design/client-chart-record.md.
+enum ClientConsentKind {
+  GENERAL_CONSENT
+  SERVICE_WAIVER
+  PATCH_TEST
+}
+
+enum ConsentProofMethod {
+  IN_PERSON
+  CLIENT_TOKEN
+  PAPER_ON_FILE
+}
+
+enum PatchTestResult {
+  PASS
+  FAIL
+  INCONCLUSIVE
+}
+
+enum PhotoReleaseStatus {
+  NOT_SET
+  GRANTED
+  DECLINED
+}
+
 enum AdminPermissionRole {
   SUPER_ADMIN
   SUPPORT
@@ -1300,6 +1328,14 @@ model ClientProfile {
   occupationEncrypted     Json?
   proCapturedSocialHandle String?
 
+  // Photo-release consent (PR4 — flagged). Explicit per-client release state that
+  // gates whether before/after photos may surface. The PUBLIC path is unchanged
+  // (review-promotion only, see lib/media/publicShareGuard.ts); this is the
+  // client's standing release decision. capturedBy is a soft snapshot id.
+  photoReleaseStatus           PhotoReleaseStatus @default(NOT_SET)
+  photoReleaseAt               DateTime?
+  photoReleaseByProfessionalId String?
+
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   addresses ClientAddress[]
@@ -1319,6 +1355,8 @@ model ClientProfile {
   proClientInvites       ProClientInvite[]
   bookingHolds           BookingHold[]
   notes                  ClientProfessionalNote[]
+  formulaEntries         ClientFormulaEntry[]
+  consentRecords         ClientConsentRecord[]
   allergies              ClientAllergy[]
   reviews                Review[]
   reminders              Reminder[]
@@ -1490,6 +1528,8 @@ model ProfessionalProfile {
   holds BookingHold[] @relation("ProHolds") // name optional but makes it clear
 
   clientNotes                 ClientProfessionalNote[]
+  clientFormulaEntries        ClientFormulaEntry[]
+  clientConsentRecords        ClientConsentRecord[]
   recordedAllergies           ClientAllergy[] // for recordedBy relation
   reviews                     Review[]
   reminders                   Reminder[]
@@ -2517,6 +2557,8 @@ model Booking {
   serviceItems            BookingServiceItem[]
   checkoutProductItems    BookingCheckoutProductItem[]
   clientProfessionalNotes ClientProfessionalNote[]
+  clientFormulaEntries    ClientFormulaEntry[]
+  clientConsentRecords    ClientConsentRecord[]
 
   referralTrigger Referral? @relation("ReferralTriggerBooking")
   referralReward  Referral? @relation("ReferralRewardBooking")
@@ -3036,6 +3078,77 @@ model ClientProfessionalNote {
   @@index([clientId, createdAt])
   @@index([professionalId, createdAt])
   @@index([professionalId, clientId, kind])
+  @@index([bookingId])
+}
+
+// Pro-authored craft record, per visit. Default PRIVATE_TO_AUTHOR and NEVER
+// public (formula text never leaves the authoring pro). Persists beyond the
+// 30-day ambient window (two-tier retention; retention = indefinite for now).
+// PR4 — flagged (ENABLE_CLIENT_TECHNICAL_RECORD); legal-gated track.
+model ClientFormulaEntry {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clientId       String
+  professionalId String
+  bookingId      String?
+
+  // Structured craft fields (plaintext). Free-text result/notes are encrypted.
+  brand                 String?
+  developer             String?
+  ratio                 String?
+  processingTimeMinutes Int?
+  resultNotesEncrypted  Json?
+
+  // Always author-scoped; never public.
+  visibility ClientNoteVisibility @default(PRIVATE_TO_AUTHOR)
+
+  client       ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  booking      Booking?            @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([professionalId, clientId, createdAt])
+  @@index([clientId, createdAt])
+  @@index([bookingId])
+}
+
+// Consent/waiver + patch-test record. The signed artifact (proof) stays
+// author-scoped; patch-test SAFETY fields (result + validity) travel to any pro
+// with chart access per the design access matrix. PR4 — flagged, legal-gated.
+model ClientConsentRecord {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clientId       String
+  professionalId String // author of the record / holder of the signed artifact
+  bookingId      String?
+
+  kind         ClientConsentKind
+  serviceScope String? // e.g. "color services", "lash extensions"
+
+  // Signature / proof capture (mirrors the clientActionToken/proof pattern; the
+  // reference is a soft snapshot id, author-scoped — not surfaced to other pros).
+  signedAt    DateTime?
+  proofMethod ConsentProofMethod?
+  proofRef    String?
+
+  // Patch-test safety fields (travel to any pro with access).
+  patchTestResult PatchTestResult?
+  validUntil      DateTime?
+
+  // Free-text notes (encrypted).
+  notesEncrypted Json?
+
+  visibility ClientNoteVisibility @default(PRIVATE_TO_AUTHOR)
+
+  client       ClientProfile       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  professional ProfessionalProfile @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  booking      Booking?            @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@index([professionalId, clientId, createdAt])
+  @@index([clientId, kind, validUntil])
   @@index([bookingId])
 }
 
