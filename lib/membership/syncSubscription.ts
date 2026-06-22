@@ -123,7 +123,12 @@ export async function applyStripeSubscriptionInTransaction(
   )
   await tx.professionalProfile.update({
     where: { id: existing.professionalId },
-    data: { isPremium: grantsCustomHandle },
+    data: {
+      isPremium: grantsCustomHandle,
+      // When the handle goes live, drop the reservation timer; when membership lapses,
+      // restart it so a now-unpaid handle gets the full grace window before release.
+      handleReservedAt: grantsCustomHandle ? null : new Date(),
+    },
   })
 
   return { handled: true, deleted: Boolean(opts?.deleted) }

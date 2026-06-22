@@ -65,6 +65,10 @@ function makeModel(
 
       publicUrl: '/professionals/pro_1',
       livePublicUrl: '/professionals/pro_1',
+
+      vanityHost: 'tovisstudio.tovis.me',
+      vanityUrl: 'https://tovisstudio.tovis.me',
+      vanityQrSvg: null,
     },
 
     stats: [

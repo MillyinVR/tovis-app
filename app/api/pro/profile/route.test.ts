@@ -72,12 +72,14 @@ function makeCurrentProfile(args?: {
   verificationStatus?: VerificationStatus
   handle?: string | null
   handleNormalized?: string | null
+  isPremium?: boolean
 }) {
   return {
     id: 'pro_1',
     verificationStatus: args?.verificationStatus ?? VerificationStatus.APPROVED,
     handle: args?.handle ?? 'tovisstudio',
     handleNormalized: args?.handleNormalized ?? 'tovisstudio',
+    isPremium: args?.isPremium ?? false,
   }
 }
 
@@ -300,11 +302,13 @@ describe('app/api/pro/profile/route.ts', () => {
 
     expect(result.status).toBe(200)
 
+    // Non-premium pro: claiming a handle stamps the reservation timer.
     expect(mocks.prisma.professionalProfile.update).toHaveBeenCalledWith({
       where: { id: 'pro_1' },
       data: {
         handle: 'new-handle',
         handleNormalized: 'new-handle',
+        handleReservedAt: expect.any(Date),
       },
       select: {
         id: true,
@@ -331,6 +335,30 @@ describe('app/api/pro/profile/route.ts', () => {
         professionType: null,
         isPremium: false,
       },
+    })
+  })
+
+  it('clears the reservation timer when a premium pro changes their handle', async () => {
+    mocks.prisma.professionalProfile.findUnique.mockResolvedValue(
+      makeCurrentProfile({
+        verificationStatus: VerificationStatus.APPROVED,
+        handle: 'tovisstudio',
+        handleNormalized: 'tovisstudio',
+        isPremium: true,
+      }),
+    )
+    mocks.prisma.professionalProfile.update.mockResolvedValue(
+      makeUpdatedProfile({ handle: 'new-handle' }),
+    )
+
+    const result = await PATCH(makeRequest({ handle: 'New-Handle' }))
+    expect(result.status).toBe(200)
+
+    const updateArg = mocks.prisma.professionalProfile.update.mock.calls[0]?.[0]
+    expect(updateArg.data).toMatchObject({
+      handle: 'new-handle',
+      handleNormalized: 'new-handle',
+      handleReservedAt: null,
     })
   })
 

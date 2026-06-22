@@ -44,6 +44,10 @@
     {
       "path": "/api/internal/jobs/migration/calendar-resync",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/internal/jobs/handle-reservations",
+      "schedule": "0 9 * * *"
     }
   ]
 }

@@ -4,10 +4,8 @@ import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
 import { Prisma, ProfessionType, ProNameDisplay } from '@prisma/client'
 import { canEditPublicPublishingFields } from '@/lib/proTrustState'
 import {
-  HANDLE_MAX,
-  HANDLE_MIN,
-  isHandleReserved,
-  isValidHandle,
+  handleFormatError,
+  handleFormatMessage,
   normalizeHandle,
 } from '@/lib/handles'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
@@ -71,6 +69,7 @@ export async function PATCH(req: Request) {
         verificationStatus: true,
         handle: true,
         handleNormalized: true,
+        isPremium: true,
       },
     })
 
@@ -117,15 +116,9 @@ export async function PATCH(req: Request) {
       } else {
         const normalized = normalizeHandle(trimmed)
 
-        if (!isValidHandle(normalized)) {
-          return jsonFail(
-            400,
-            `Handle must be ${HANDLE_MIN}-${HANDLE_MAX} chars and use only letters, numbers, and hyphens.`,
-          )
-        }
-
-        if (isHandleReserved(normalized)) {
-          return jsonFail(400, 'That handle is reserved.')
+        const formatError = handleFormatError(normalized)
+        if (formatError) {
+          return jsonFail(400, handleFormatMessage(formatError))
         }
 
         nextHandle = normalized
@@ -158,6 +151,11 @@ export async function PATCH(req: Request) {
         ? {
             handle: nextHandle,
             handleNormalized: nextHandleNormalized,
+            // Stamp a reservation only when a non-premium pro claims a handle, so the
+            // release cron can reclaim it if they never subscribe. Premium pros (link
+            // already live) and handle clears carry no reservation timer.
+            handleReservedAt:
+              nextHandleNormalized && !current.isPremium ? new Date() : null,
           }
         : {}),
     }

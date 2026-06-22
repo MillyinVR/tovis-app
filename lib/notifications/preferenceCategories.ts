@@ -86,6 +86,9 @@ const EVENT_LABELS: Record<NotificationEventKey, string> = {
   [NotificationEventKey.REFERRAL_TAP_RECEIVED]: 'Referral tap',
   [NotificationEventKey.REFERRAL_CONFIRMED]: 'Referral confirmed',
   [NotificationEventKey.REFERRAL_CONVERTED]: 'Referral converted',
+  // Account/billing heads-up — kept out of the toggleable categories below so a pro
+  // can't silence the warning that their reserved handle is about to be released.
+  [NotificationEventKey.PRO_HANDLE_RESERVATION_EXPIRING]: 'Handle reservation expiring',
   // Admin operational alerts are not user-manageable preferences (admins have no
   // preference surface), so these never appear in a category — labels exist only
   // to keep this map exhaustive over NotificationEventKey.

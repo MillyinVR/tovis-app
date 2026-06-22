@@ -15,7 +15,9 @@ import { getBrandConfig } from '@/lib/brand'
 import { getCurrentUser } from '@/lib/currentUser'
 import { countFollowers } from '@/lib/follows'
 import { isRecord } from '@/lib/guards'
+import { vanityLinkFor } from '@/lib/handles'
 import { mapPortfolioTileToDto } from '@/lib/looks/mappers'
+import { qrSvgFor } from '@/lib/media/qr'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { pickString } from '@/lib/pick'
 import { prisma } from '@/lib/prisma'
@@ -223,7 +225,7 @@ export async function loadProProfileManagementPage({
     routes: PRO_PROFILE_MANAGEMENT_ROUTES,
     tab,
 
-    profile: buildProfileModel(pro),
+    profile: await buildProfileModel(pro),
     stats: buildStats({
       reviewCount: reviewStats.reviewCount,
       averageRatingLabel,
@@ -378,13 +380,20 @@ async function mapReviewMediaForUi(
   }
 }
 
-function buildProfileModel(pro: ProProfileManagementRow) {
+async function buildProfileModel(pro: ProProfileManagementRow) {
   const isApproved = isPubliclyApprovedProStatus(pro.verificationStatus)
   const publicUrl = `/professionals/${encodeURIComponent(pro.id)}`
 
+  const handle = pickString(pro.handle)
+  const vanity = vanityLinkFor(handle)
+  // The vanity link is "live" (reachable + QR-worthy) only once approved AND premium.
+  const vanityIsLive = isApproved && pro.isPremium && Boolean(vanity)
+  const vanityQrSvg =
+    vanityIsLive && vanity ? await qrSvgFor(vanity.url) : null
+
   return {
     id: pro.id,
-    handle: pickString(pro.handle),
+    handle,
     verificationStatus: pro.verificationStatus,
     isApproved,
     isPremium: pro.isPremium,
@@ -399,6 +408,10 @@ function buildProfileModel(pro: ProProfileManagementRow) {
 
     publicUrl,
     livePublicUrl: isApproved ? publicUrl : null,
+
+    vanityHost: vanity?.host ?? null,
+    vanityUrl: vanity?.url ?? null,
+    vanityQrSvg,
   }
 }
 
