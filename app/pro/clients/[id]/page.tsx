@@ -18,12 +18,16 @@ import {
   type RelationshipIntelligence,
 } from '@/lib/clients/relationshipIntelligence'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
+import { readEncryptedNoteOrFallback } from '@/lib/security/notesPrivacy'
+import { partitionNotesByKind } from '@/lib/clients/clientNoteKinds'
 import { formatProfessionalPublicSearchText } from '@/lib/privacy/professionalDisplayName'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { loadPublicClientProfileByClientId } from '@/app/u/[handle]/_data/loadPublicClientProfile'
 import PublicProfileView from '@/app/u/[handle]/_components/PublicProfileView'
 
 import EditAlertBannerForm from './EditAlertBannerForm'
+import EditDoNotRebookForm from './EditDoNotRebookForm'
+import EditProfileContextForm from './EditProfileContextForm'
 import NewAllergyForm from './NewAllergyForm'
 import NewNoteForm from './NewNoteForm'
 import { Badge, Button, Card, buttonClassName } from '@/app/_components/ui'
@@ -77,6 +81,8 @@ const CLIENT_DETAIL_SELECT = {
   preferredContactMethod: true,
   handle: true,
   isPublicProfile: true,
+  occupationEncrypted: true,
+  proCapturedSocialHandle: true,
   user: { select: { email: true } },
   notes: {
     orderBy: { createdAt: 'desc' },
@@ -84,6 +90,7 @@ const CLIENT_DETAIL_SELECT = {
       id: true,
       title: true,
       body: true,
+      kind: true,
       createdAt: true,
     },
   },
@@ -551,8 +558,35 @@ async function loadPhotoTimeline(
   return visits
 }
 
+type ClientNoteRow = ClientDetailRecord['notes'][number]
+
+function NoteCard({ note }: { note: ClientNoteRow }) {
+  return (
+    <div className="rounded-card border border-white/10 bg-bgPrimary p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
+          {note.title || 'Note'}
+        </div>
+
+        <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
+          {formatDate(note.createdAt)}
+        </div>
+      </div>
+
+      <div className="mt-2 whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">
+        {note.body}
+      </div>
+    </div>
+  )
+}
+
+// Groups the pro's own notes by kind (General / Consultation / Communication
+// style). DO_NOT_REBOOK notes are excluded here — they surface in their own
+// author-only banner near the pinned zone.
 function ClientNotesList({ client }: { client: ClientDetailRecord }) {
-  if (client.notes.length === 0) {
+  const { groups } = partitionNotesByKind(client.notes)
+
+  if (groups.length === 0) {
     return (
       <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
         No notes yet. Start the “professional memory” file.
@@ -561,25 +595,15 @@ function ClientNotesList({ client }: { client: ClientDetailRecord }) {
   }
 
   return (
-    <div className="grid gap-3">
-      {client.notes.map((note) => (
-        <div
-          key={note.id}
-          className="rounded-card border border-white/10 bg-bgPrimary p-4"
-        >
-          <div className="flex items-baseline justify-between gap-3">
-            <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
-              {note.title || 'Note'}
-            </div>
-
-            <div className="shrink-0 text-[11px] font-semibold text-textSecondary">
-              {formatDate(note.createdAt)}
-            </div>
+    <div className="grid gap-5">
+      {groups.map((group) => (
+        <div key={group.kind} className="grid gap-3">
+          <div className="text-[11px] font-black uppercase tracking-[0.08em] text-textSecondary">
+            {group.label}
           </div>
-
-          <div className="mt-2 whitespace-pre-wrap text-[13px] font-semibold text-textSecondary">
-            {note.body}
-          </div>
+          {group.notes.map((note) => (
+            <NoteCard key={note.id} note={note} />
+          ))}
         </div>
       ))}
     </div>
@@ -1183,6 +1207,29 @@ function SafetyStrip({ client }: { client: ClientDetailRecord }) {
   )
 }
 
+function DoNotRebookBanner({ note }: { note: ClientNoteRow | null }) {
+  if (!note) return null
+
+  return (
+    <section
+      aria-label="Do not rebook"
+      className="rounded-card border border-toneDanger/40 bg-bgSecondary p-4"
+    >
+      <div className="flex items-center gap-2 text-[13px] font-black text-toneDanger">
+        <span aria-hidden>⛔</span> Do not rebook
+        <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-textSecondary">
+          · private to you
+        </span>
+      </div>
+      {note.body ? (
+        <div className="mt-2 whitespace-pre-wrap text-[12px] font-semibold text-textSecondary">
+          {note.body}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 function SmartFlagsStrip({
   flags,
 }: {
@@ -1543,6 +1590,12 @@ export default async function ClientDetailPage(props: {
   })
   const referralSource = wasReferred ? 'Referred by a client' : null
 
+  // Author-scoped extras (client.notes is already scoped to professionalId: proId).
+  const { doNotRebook } = partitionNotesByKind(client.notes)
+  const doNotRebookNote = doNotRebook[0] ?? null
+  const occupation = readEncryptedNoteOrFallback(client.occupationEncrypted, null)
+  const socialHandle = client.proCapturedSocialHandle ?? null
+
   const totalVisits = bookingRowsAll.length
   const lastVisit = totalVisits ? bookingRowsAll[0] : null
   const upcoming = upcomingBookingFromRows(bookingRowsAll)
@@ -1696,6 +1749,12 @@ export default async function ClientDetailPage(props: {
         <SafetyStrip client={client} />
       </div>
 
+      {doNotRebookNote ? (
+        <div className="mb-4">
+          <DoNotRebookBanner note={doNotRebookNote} />
+        </div>
+      ) : null}
+
       <div className="mb-4">
         <SmartFlagsStrip flags={intel.flags} />
       </div>
@@ -1705,6 +1764,34 @@ export default async function ClientDetailPage(props: {
           intel={intel}
           referralSource={referralSource}
         />
+      </div>
+
+      {/* Pro-captured context + author-only do-not-rebook control. */}
+      <div className="mb-6">
+        <Card variant="glass" padding="md">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-2">
+              <div className="text-[11px] font-black uppercase tracking-[0.08em] text-textSecondary">
+                Context
+              </div>
+              <EditProfileContextForm
+                clientId={client.id}
+                initialOccupation={occupation}
+                initialSocialHandle={socialHandle}
+              />
+            </div>
+            <div className="grid gap-2">
+              <div className="text-[11px] font-black uppercase tracking-[0.08em] text-textSecondary">
+                Rebooking
+              </div>
+              <EditDoNotRebookForm
+                clientId={client.id}
+                initialActive={Boolean(doNotRebookNote)}
+                initialReason={doNotRebookNote?.body ?? null}
+              />
+            </div>
+          </div>
+        </Card>
       </div>
 
       <div className="mb-6">

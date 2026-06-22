@@ -7,8 +7,11 @@ import {
 } from '@/app/api/_utils/routeContext'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { readJsonRecord } from '@/app/api/_utils/readJsonRecord'
-import { ClientNoteVisibility } from '@prisma/client'
 import { encryptedNoteInput } from '@/lib/security/notesPrivacy'
+import {
+  normalizeAuthorableNoteKind,
+  visibilityForNoteKind,
+} from '@/lib/clients/clientNoteKinds'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,6 +39,10 @@ export async function POST(req: Request, context: RouteContext) {
 
     if (!noteBody) return jsonFail(400, 'Note body is required.')
 
+    // Kind drives visibility (visibilityForNoteKind is the single policy point).
+    // DO_NOT_REBOOK is not authorable here — it collapses to GENERAL.
+    const kind = normalizeAuthorableNoteKind(body.kind)
+
     // Encrypt the exact stored (post-slice) values so plaintext and envelope match.
     const storedTitle = title ? title.slice(0, TITLE_MAX) : null
     const storedBody = noteBody.slice(0, BODY_MAX)
@@ -49,7 +56,8 @@ export async function POST(req: Request, context: RouteContext) {
         // Dual-write: plaintext (above) + AEAD envelope during burn-in.
         titleEncrypted: encryptedNoteInput(storedTitle),
         bodyEncrypted: encryptedNoteInput(storedBody),
-        visibility: ClientNoteVisibility.PROFESSIONALS_ONLY,
+        kind,
+        visibility: visibilityForNoteKind(kind),
       },
       select: { id: true },
     })

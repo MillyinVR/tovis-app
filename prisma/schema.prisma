@@ -181,6 +181,16 @@ enum ClientNoteVisibility {
   PRIVATE_TO_AUTHOR
 }
 
+// Discriminator for ClientProfessionalNote so the chart can group "professional
+// memory" by purpose instead of spawning new tables. DO_NOT_REBOOK is a special
+// kind that is always written PRIVATE_TO_AUTHOR (author-scoped, never shared).
+enum ClientNoteKind {
+  GENERAL
+  CONSULTATION
+  COMMUNICATION_STYLE
+  DO_NOT_REBOOK
+}
+
 enum AdminPermissionRole {
   SUPER_ADMIN
   SUPPORT
@@ -1281,6 +1291,14 @@ model ClientProfile {
 
   dateOfBirth            DateTime?
   preferredContactMethod ContactMethod?
+
+  // Pro-captured chart context (PR3). occupation is health-adjacent free-text PII,
+  // so it is stored ONLY as an AEAD envelope (no plaintext column) using the same
+  // notesPrivacy boundary as other encrypted notes. proCapturedSocialHandle is the
+  // handle a pro jots down for tagging the client on socials — distinct from the
+  // client's own creator `handle` above, and low-sensitivity, so it stays plain.
+  occupationEncrypted     Json?
+  proCapturedSocialHandle String?
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
@@ -3001,6 +3019,10 @@ model ClientProfessionalNote {
   // Optional “review-like” rating (1–5). Keep optional so it can stay a note.
   rating Int?
 
+  // What kind of professional-memory entry this is (grouped on the chart).
+  // DO_NOT_REBOOK entries are author-scoped (PRIVATE_TO_AUTHOR) by construction.
+  kind ClientNoteKind @default(GENERAL)
+
   // Who can see it
   visibility ClientNoteVisibility @default(PROFESSIONALS_ONLY)
 
@@ -3013,6 +3035,7 @@ model ClientProfessionalNote {
   @@unique([professionalId, bookingId])
   @@index([clientId, createdAt])
   @@index([professionalId, createdAt])
+  @@index([professionalId, clientId, kind])
   @@index([bookingId])
 }
 
