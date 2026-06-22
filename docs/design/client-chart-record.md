@@ -50,6 +50,16 @@ list. That's why the chart felt "lost" after an appointment.
 
 ## Decisions (locked)
 
+0. **Pros-only — clients never see or edit the chart.** The private chart (notes,
+   formula, allergies, history, relationship intelligence) is exclusively a pro
+   surface. No client-facing route to it exists, and none may be added. This is
+   already enforced and must stay enforced: the page gates on `role === 'PRO'` +
+   `professionalProfile` (`app/pro/clients/[id]/page.tsx:802`) and every write
+   route gates on `requirePro()` (`app/api/_utils/auth/requirePro.ts`). The only
+   client-controlled data anywhere in this feature is the client's OWN public
+   profile, which they edit via their own settings — the chart's `?view=public`
+   mode merely *reads* it.
+
 1. **30-day post-visit window.** After a visit completes, the pro keeps full
    view + edit access for 30 days. Hard cutoff after that. **Rebooking re-opens**
    full access automatically (a new pending/upcoming booking already matches the
