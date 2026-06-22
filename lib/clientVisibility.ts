@@ -7,6 +7,7 @@ export type ClientVisibilityReason =
   | 'PENDING_BOOKING'
   | 'UPCOMING_ACCEPTED'
   | 'RECENT_COMPLETED'
+  | 'ACTIVE_THREAD'
   | 'NONE'
 
 export type ClientVisibilityResult = {
@@ -80,12 +81,15 @@ type VisibilityRow = {
   scheduledFor: Date
 }
 
-// Lower rank = higher priority. ACTIVE > PENDING > UPCOMING_ACCEPTED > RECENT_COMPLETED.
+// Lower rank = higher priority. A real booking always wins over a bare message
+// thread, so ACTIVE_THREAD ranks last (it's only ever the reason when no booking
+// qualifies — see getProClientVisibility).
 const REASON_RANK: Record<Exclude<ClientVisibilityReason, 'NONE'>, number> = {
   ACTIVE_BOOKING: 0,
   PENDING_BOOKING: 1,
   UPCOMING_ACCEPTED: 2,
   RECENT_COMPLETED: 3,
+  ACTIVE_THREAD: 4,
 }
 
 /**
@@ -144,28 +148,49 @@ export async function getProClientVisibility(
     take: 100,
   })
 
-  if (rows.length === 0) {
-    return { canViewClient: false, reason: 'NONE', accessUntil: null }
-  }
+  if (rows.length > 0) {
+    let bestRank = Number.POSITIVE_INFINITY
+    let bestReason: ClientVisibilityReason = 'NONE'
+    let accessUntil: Date | null = null
 
-  let bestRank = Number.POSITIVE_INFINITY
-  let bestReason: ClientVisibilityReason = 'NONE'
-  let accessUntil: Date | null = null
-
-  for (const row of rows) {
-    const c = classifyRow(row, now)
-    const rank = REASON_RANK[c.reason]
-    if (rank < bestRank) {
-      bestRank = rank
-      bestReason = c.reason
-      accessUntil = c.accessUntil
-    } else if (rank === bestRank && c.accessUntil && (!accessUntil || c.accessUntil > accessUntil)) {
-      // Same tier (RECENT_COMPLETED): keep the most generous cutoff.
-      accessUntil = c.accessUntil
+    for (const row of rows) {
+      const c = classifyRow(row, now)
+      const rank = REASON_RANK[c.reason]
+      if (rank < bestRank) {
+        bestRank = rank
+        bestReason = c.reason
+        accessUntil = c.accessUntil
+      } else if (rank === bestRank && c.accessUntil && (!accessUntil || c.accessUntil > accessUntil)) {
+        // Same tier (RECENT_COMPLETED): keep the most generous cutoff.
+        accessUntil = c.accessUntil
+      }
     }
+
+    return { canViewClient: true, reason: bestReason, accessUntil }
   }
 
-  return { canViewClient: true, reason: bestReason, accessUntil }
+  // No qualifying booking. A message thread between this pro and client is a
+  // real relationship (e.g. a pre-booking inquiry), so it also opens chart
+  // access — open-ended while the thread exists. This is the gate only; the
+  // clients LIST stays booking-based, so inquiry-only contacts don't flood the
+  // CRM until there's a booking.
+  if (await hasProClientThread(proId, clientId)) {
+    return { canViewClient: true, reason: 'ACTIVE_THREAD', accessUntil: null }
+  }
+
+  return { canViewClient: false, reason: 'NONE', accessUntil: null }
+}
+
+/** Whether a message thread links this pro and client (any context). */
+async function hasProClientThread(
+  proId: string,
+  clientId: string,
+): Promise<boolean> {
+  const thread = await prisma.messageThread.findFirst({
+    where: { professionalId: proId, clientId },
+    select: { id: true },
+  })
+  return thread !== null
 }
 
 /**
