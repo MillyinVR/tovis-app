@@ -5,11 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BookingStatus } from '@prisma/client'
 
 const findMany = vi.fn()
+const findThread = vi.fn()
 
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     booking: {
       findMany: (...args: unknown[]) => findMany(...args),
+    },
+    messageThread: {
+      findFirst: (...args: unknown[]) => findThread(...args),
     },
   },
 }))
@@ -35,6 +39,9 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(NOW)
   findMany.mockReset()
+  // Default: no message thread. Thread-access tests override this.
+  findThread.mockReset()
+  findThread.mockResolvedValue(null)
 })
 
 afterEach(() => {
@@ -152,6 +159,35 @@ describe('getProClientVisibility', () => {
     expect(result.reason).toBe('RECENT_COMPLETED')
     // The 3-days-ago visit gives the later cutoff: 27 days out.
     expect(result.accessUntil).toEqual(daysFromNow(27))
+  })
+
+  it('grants open-ended ACTIVE_THREAD access when a thread exists but no booking qualifies', async () => {
+    findMany.mockResolvedValue([])
+    findThread.mockResolvedValue({ id: 'thread1' })
+    const result = await getProClientVisibility('pro1', 'client1')
+    expect(result.canViewClient).toBe(true)
+    expect(result.reason).toBe('ACTIVE_THREAD')
+    expect(result.accessUntil).toBeNull()
+    // Scoped to this exact pro↔client pair.
+    expect(findThread.mock.calls[0]?.[0]).toMatchObject({
+      where: { professionalId: 'pro1', clientId: 'client1' },
+    })
+  })
+
+  it('a booking takes priority over a thread (never falls through to the thread query)', async () => {
+    findMany.mockResolvedValue([row({ status: BookingStatus.PENDING })])
+    findThread.mockResolvedValue({ id: 'thread1' })
+    const result = await getProClientVisibility('pro1', 'client1')
+    expect(result.reason).toBe('PENDING_BOOKING')
+    expect(findThread).not.toHaveBeenCalled()
+  })
+
+  it('no booking and no thread is NONE', async () => {
+    findMany.mockResolvedValue([])
+    findThread.mockResolvedValue(null)
+    const result = await getProClientVisibility('pro1', 'client1')
+    expect(result.canViewClient).toBe(false)
+    expect(result.reason).toBe('NONE')
   })
 })
 
