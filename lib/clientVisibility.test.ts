@@ -161,10 +161,27 @@ describe('no re-divergence of the visibility rule', () => {
   // importing proClientVisibilityWhere — consolidate it back.
   it('no other source file inlines the visibility OR clauses', () => {
     const root = join(__dirname, '..')
-    // The clients list page must import the helper, not re-declare clauses.
-    const listPage = readFileSync(join(root, 'app/pro/clients/page.tsx'), 'utf8')
-    expect(listPage).toContain('proClientVisibilityWhere')
-    expect(listPage).not.toMatch(/startedAt:\s*\{\s*not:\s*null\s*\}/)
+    const inlineClause = /startedAt:\s*\{\s*not:\s*null\s*\}/
+    // Every surface that gates chart linkability (clients list, bookings list,
+    // reminders) must consume a SSOT helper, never re-declare the clauses —
+    // otherwise the list and the page gate can disagree (e.g. a recently
+    // completed client linkable on one surface but not another).
+    const ssotConsumers = [
+      'app/pro/clients/page.tsx',
+      'app/pro/bookings/page.tsx',
+      'app/pro/reminders/page.tsx',
+    ]
+    for (const rel of ssotConsumers) {
+      const src = readFileSync(join(root, rel), 'utf8')
+      expect(
+        /proClientVisibilityWhere|getVisibleClientIdSetForPro/.test(src),
+        `${rel} must import a clientVisibility SSOT helper`,
+      ).toBe(true)
+      expect(
+        inlineClause.test(src),
+        `${rel} must not inline the visibility OR clauses`,
+      ).toBe(false)
+    }
     // The in-progress clause should appear exactly once in the codebase — in
     // the SSOT module itself.
     const ssot = readFileSync(join(root, 'lib/clientVisibility.ts'), 'utf8')
