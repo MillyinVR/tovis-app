@@ -1,5 +1,6 @@
 'use client'
 
+import { ProNameDisplay } from '@prisma/client'
 import Link from 'next/link'
 import { use, useEffect, useMemo, useState } from 'react'
 import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
@@ -7,6 +8,14 @@ import { formatMoneyFromUnknown as formatMoney } from '@/lib/money'
 import { CreateAccountInviteCard } from '@/app/client/_public/CreateAccountInviteCard'
 import { isRecord } from '@/lib/guards'
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+
+function readProNameDisplay(value: unknown): ProNameDisplay | null {
+  return value === ProNameDisplay.BUSINESS_NAME ||
+    value === ProNameDisplay.REAL_NAME ||
+    value === ProNameDisplay.HANDLE
+    ? value
+    : null
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -87,6 +96,8 @@ type BookingDto = {
     businessName: string | null
     firstName: string | null
     lastName: string | null
+    handle: string | null
+    nameDisplay: ProNameDisplay | null
     timeZone: string | null
   }
 }
@@ -451,6 +462,8 @@ function parseBooking(value: unknown): BookingDto | null {
       businessName: readStringOrNull(professional.businessName),
       firstName: readStringOrNull(professional.firstName),
       lastName: readStringOrNull(professional.lastName),
+      handle: readStringOrNull(professional.handle),
+      nameDisplay: readProNameDisplay(professional.nameDisplay),
       timeZone: readStringOrNull(professional.timeZone),
     },
   }

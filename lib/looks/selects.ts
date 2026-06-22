@@ -27,6 +27,7 @@ export const looksProProfilePreviewSelect =
     firstName: true,
     lastName: true,
     handle: true,
+    nameDisplay: true,
     avatarUrl: true,
     professionType: true,
     location: true,

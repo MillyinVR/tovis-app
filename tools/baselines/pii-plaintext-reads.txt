@@ -83,6 +83,8 @@ app/(auth)/verify-phone/page.tsx:direct property read:[resolvedNextUrl, status.e
 app/(auth)/verify-phone/page.tsx:direct property read:appendIfPresent(params, 'email', args.email)
 app/(auth)/verify-phone/page.tsx:direct property read:const maskedPhone = useMemo(() => maskPhone(status.phone), [status.phone])
 app/(auth)/verify-phone/page.tsx:direct property read:{status.email ? (
+app/(main)/booking/AvailabilityDrawer/contract.ts:direct property read:const firstName = x.firstName == null ? null : pickString(x.firstName)
+app/(main)/booking/AvailabilityDrawer/contract.ts:direct property read:const lastName = x.lastName == null ? null : pickString(x.lastName)
 app/(main)/booking/AvailabilityDrawer/hooks/useMobileAddresses.ts:direct property read:? row.addressLine1.trim()
 app/(main)/booking/AvailabilityDrawer/hooks/useMobileAddresses.ts:direct property read:? row.addressLine2.trim()
 app/(main)/booking/AvailabilityDrawer/hooks/useMobileAddresses.ts:direct property read:? row.postalCode.trim()
@@ -432,6 +434,10 @@ app/pro/verification/page.tsx:Prisma select/include plaintext field:firstName: t
 app/pro/verification/page.tsx:Prisma select/include plaintext field:lastName: true,
 lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:firstName: true,
 lib/aftercare/aftercareAccessTokens.ts:Prisma select/include plaintext field:lastName: true,
+lib/availability/data/offeringContext.ts:Prisma select/include plaintext field:firstName: true,
+lib/availability/data/offeringContext.ts:Prisma select/include plaintext field:lastName: true,
+lib/availability/data/otherPros.ts:Prisma select/include plaintext field:firstName: true,
+lib/availability/data/otherPros.ts:Prisma select/include plaintext field:lastName: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:email: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:firstName: true,
 lib/booking/createProBookingWithClient.ts:Prisma select/include plaintext field:lastName: true,
@@ -470,6 +476,8 @@ lib/booking/writeBoundary.ts:optional direct property read:args.booking.client.u
 lib/booking/writeBoundary.ts:optional direct property read:args.booking.client.user?.phone ?? null,
 lib/booking/writeBoundary.ts:optional direct property read:const connectedAccountId = settings?.stripeAccountId ?? null
 lib/clients/clientClaimLinks.ts:Prisma select/include plaintext field:email: true,
+lib/clients/clientClaimLinks.ts:Prisma select/include plaintext field:firstName: true,
+lib/clients/clientClaimLinks.ts:Prisma select/include plaintext field:lastName: true,
 lib/clients/upsertProClient.ts:Prisma select/include plaintext field:email: true,
 lib/clients/upsertProClient.ts:Prisma select/include plaintext field:firstName: true,
 lib/clients/upsertProClient.ts:Prisma select/include plaintext field:lastName: true,
@@ -480,6 +488,8 @@ lib/clients/upsertProClient.ts:direct property read:const firstName = normalizeR
 lib/clients/upsertProClient.ts:direct property read:const lastName = normalizeRequiredString(args.lastName)
 lib/clients/upsertProClient.ts:direct property read:const profileEmail = email ?? matchedUser.email ?? null
 lib/clients/upsertProClient.ts:direct property read:const profilePhone = phone ?? matchedUser.phone ?? null
+lib/creator/creatorProfileStats.ts:Prisma select/include plaintext field:firstName: true,
+lib/creator/creatorProfileStats.ts:Prisma select/include plaintext field:lastName: true,
 lib/currentUser.ts:Prisma select/include plaintext field:email: true,
 lib/currentUser.ts:Prisma select/include plaintext field:firstName: true,
 lib/currentUser.ts:Prisma select/include plaintext field:lastName: true,

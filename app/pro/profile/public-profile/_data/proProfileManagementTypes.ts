@@ -4,6 +4,7 @@ import type {
   DepositType,
   MediaType,
   PaymentCollectionTiming,
+  ProNameDisplay,
   VerificationStatus,
 } from '@prisma/client'
 
@@ -52,6 +53,7 @@ export type ProProfileManagementEditProfileInitial = {
   avatarUrl: string | null
   professionType: string | null
   handle: string | null
+  nameDisplay: ProNameDisplay
   isPremium: boolean
 }
 

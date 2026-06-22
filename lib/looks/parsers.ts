@@ -5,6 +5,7 @@ import {
   MediaVisibility,
   ModerationStatus,
   ProfessionType,
+  ProNameDisplay,
   Role,
   VerificationStatus,
 } from '@prisma/client'
@@ -50,6 +51,14 @@ function isProfessionType(value: unknown): value is ProfessionType {
     value === ProfessionType.ELECTROLOGIST ||
     value === ProfessionType.MASSAGE_THERAPIST ||
     value === ProfessionType.MAKEUP_ARTIST
+  )
+}
+
+function isProNameDisplay(value: unknown): value is ProNameDisplay {
+  return (
+    value === ProNameDisplay.BUSINESS_NAME ||
+    value === ProNameDisplay.REAL_NAME ||
+    value === ProNameDisplay.HANDLE
   )
 }
 
@@ -142,6 +151,9 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
           firstName: pickString(professionalRaw.firstName),
           lastName: pickString(professionalRaw.lastName),
           handle: pickString(professionalRaw.handle),
+          nameDisplay: isProNameDisplay(professionalRaw.nameDisplay)
+            ? professionalRaw.nameDisplay
+            : null,
           professionType: isProfessionType(professionTypeRaw)
             ? professionTypeRaw
             : null,
@@ -482,6 +494,9 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
     firstName: pickString(professionalRaw.firstName),
     lastName: pickString(professionalRaw.lastName),
     handle: pickString(professionalRaw.handle),
+    nameDisplay: isProNameDisplay(professionalRaw.nameDisplay)
+      ? professionalRaw.nameDisplay
+      : null,
     avatarUrl: pickString(professionalRaw.avatarUrl),
     professionType,
     location: pickString(professionalRaw.location),

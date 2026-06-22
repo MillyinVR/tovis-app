@@ -88,6 +88,8 @@ const bookingSelect = Prisma.validator<Prisma.BookingSelect>()({
       businessName: true,
       firstName: true,
       lastName: true,
+      handle: true,
+      nameDisplay: true,
       location: true,
       timeZone: true,
     },

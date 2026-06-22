@@ -1,4 +1,5 @@
 // app/(main)/booking/AvailabilityDrawer/types.ts
+import type { ProNameDisplay } from '@prisma/client'
 
 export type EmptyObject = Record<string, never>
 
@@ -145,6 +146,10 @@ export type AvailabilitySelectedDay = {
 export type ProCard = {
   id: string
   businessName: string | null
+  firstName?: string | null
+  lastName?: string | null
+  handle?: string | null
+  nameDisplay?: ProNameDisplay | null
   avatarUrl: string | null
   location: string | null
 

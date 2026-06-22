@@ -294,6 +294,10 @@ export function mapPublicProfileHeaderToDto(
       ),
     displayName: formatPublicProfileDisplayName({
       businessName,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      handle,
+      nameDisplay: profile.nameDisplay,
     }),
     businessName,
     bio: formatBio(profile.bio),

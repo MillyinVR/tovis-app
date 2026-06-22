@@ -39,6 +39,8 @@ export default async function VanityProfilePage({
       businessName: true,
       firstName: true,
       lastName: true,
+      handle: true,
+      nameDisplay: true,
       bio: true,
       avatarUrl: true,
       professionType: true,

@@ -16,10 +16,19 @@ import type {
   ProCard,
   ServiceLocationType,
 } from './types'
+import { ProNameDisplay } from '@prisma/client'
 import { isRecord } from '@/lib/guards'
 
 function pickString(x: unknown): string | null {
   return typeof x === 'string' && x.trim() ? x.trim() : null
+}
+
+function pickProNameDisplay(x: unknown): ProNameDisplay | null {
+  return x === ProNameDisplay.BUSINESS_NAME ||
+    x === ProNameDisplay.REAL_NAME ||
+    x === ProNameDisplay.HANDLE
+    ? x
+    : null
 }
 
 function pickNumber(x: unknown): number | null {
@@ -119,6 +128,10 @@ function pickProCardBase(x: unknown): ProCard | null {
 
   const businessName =
     x.businessName == null ? null : pickString(x.businessName)
+  const firstName = x.firstName == null ? null : pickString(x.firstName)
+  const lastName = x.lastName == null ? null : pickString(x.lastName)
+  const handle = x.handle == null ? null : pickString(x.handle)
+  const nameDisplay = pickProNameDisplay(x.nameDisplay)
   const avatarUrl = x.avatarUrl == null ? null : pickString(x.avatarUrl)
   const location = x.location == null ? null : pickString(x.location)
   const offeringId = x.offeringId == null ? null : pickString(x.offeringId)
@@ -139,6 +152,10 @@ function pickProCardBase(x: unknown): ProCard | null {
   return {
     id,
     businessName: businessName ?? null,
+    firstName: firstName ?? null,
+    lastName: lastName ?? null,
+    handle: handle ?? null,
+    nameDisplay,
     avatarUrl: avatarUrl ?? null,
     location: location ?? null,
     offeringId: offeringId ?? null,

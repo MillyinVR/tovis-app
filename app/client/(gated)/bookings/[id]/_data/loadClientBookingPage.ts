@@ -61,6 +61,8 @@ const bookingPageBookingSelect = {
       businessName: true,
       firstName: true,
       lastName: true,
+      handle: true,
+      nameDisplay: true,
       location: true,
       timeZone: true,
     },

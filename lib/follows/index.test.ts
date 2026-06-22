@@ -4,6 +4,7 @@ import {
   Prisma,
   PrismaClient,
   ProfessionType,
+  ProNameDisplay,
   VerificationStatus,
 } from '@prisma/client'
 
@@ -67,6 +68,7 @@ function makeProfessionalPreview(
     firstName: string
     lastName: string
     handle: string | null
+    nameDisplay: ProNameDisplay
     avatarUrl: string | null
     professionType: ProfessionType | null
     location: string
@@ -80,6 +82,7 @@ function makeProfessionalPreview(
     firstName: 'Tori',
     lastName: 'Morales',
     handle: 'tovisstudio',
+    nameDisplay: ProNameDisplay.BUSINESS_NAME,
     avatarUrl: null,
     professionType: null,
     location: 'San Diego, CA',
@@ -411,6 +414,7 @@ describe('lib/follows/index.ts', () => {
               firstName: true,
               lastName: true,
               handle: true,
+              nameDisplay: true,
               avatarUrl: true,
               professionType: true,
               location: true,
@@ -485,6 +489,7 @@ describe('lib/follows/index.ts', () => {
               firstName: true,
               lastName: true,
               handle: true,
+              nameDisplay: true,
               avatarUrl: true,
               professionType: true,
               location: true,
@@ -713,6 +718,7 @@ describe('lib/follows/index.ts', () => {
               firstName: 'Tori',
               lastName: 'Morales',
               handle: 'tovisstudio',
+              nameDisplay: ProNameDisplay.BUSINESS_NAME,
               avatarUrl: null,
               professionType: null,
               location: 'San Diego, CA',

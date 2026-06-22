@@ -93,6 +93,7 @@ const dueTierPlanSelect = {
           firstName: true,
           lastName: true,
           handle: true,
+          nameDisplay: true,
           mobileRadiusMiles: true,
         },
       },

@@ -1,5 +1,9 @@
 // lib/dto/clientBooking.ts
-import { Prisma, type BookingServiceItemType } from '@prisma/client'
+import {
+  Prisma,
+  type BookingServiceItemType,
+  type ProNameDisplay,
+} from '@prisma/client'
 import { moneyToString } from '@/lib/money'
 import {
   resolveApptTimeZone,
@@ -89,6 +93,8 @@ export type ClientBookingDTO = {
     businessName: string | null
     firstName: string | null
     lastName: string | null
+    handle: string | null
+    nameDisplay: ProNameDisplay | null
     location: string | null
     timeZone: string | null
   } | null
@@ -244,6 +250,8 @@ export type ClientBookingRow = Prisma.BookingGetPayload<{
         businessName: true
         firstName: true
         lastName: true
+        handle: true
+        nameDisplay: true
         location: true
         timeZone: true
       }
@@ -454,6 +462,8 @@ export async function buildClientBookingDTO(input: {
           businessName: b.professional.businessName ?? null,
           firstName: b.professional.firstName ?? null,
           lastName: b.professional.lastName ?? null,
+          handle: b.professional.handle ?? null,
+          nameDisplay: b.professional.nameDisplay ?? null,
           location: b.professional.location ?? null,
           timeZone: b.professional.timeZone ?? null,
         }

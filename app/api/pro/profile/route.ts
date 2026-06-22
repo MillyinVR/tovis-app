@@ -1,7 +1,7 @@
 // app/api/pro/profile/route.ts
 import { prisma } from '@/lib/prisma'
 import { jsonFail, jsonOk, requirePro } from '@/app/api/_utils'
-import { Prisma, ProfessionType } from '@prisma/client'
+import { Prisma, ProfessionType, ProNameDisplay } from '@prisma/client'
 import { canEditPublicPublishingFields } from '@/lib/proTrustState'
 import {
   HANDLE_MAX,
@@ -23,6 +23,10 @@ function pickNonEmptyStringOrUndefined(v: unknown): string | undefined {
 
 function isProfessionTypeValue(value: string): value is ProfessionType {
   return Object.values(ProfessionType).some((candidate) => candidate === value)
+}
+
+function isNameDisplayValue(value: string): value is ProNameDisplay {
+  return Object.values(ProNameDisplay).some((candidate) => candidate === value)
 }
 
 function prismaErrorToResponse(e: unknown) {
@@ -89,6 +93,15 @@ export async function PATCH(req: Request) {
       professionType = professionTypeRaw
     }
 
+    const nameDisplayRaw = pickNonEmptyStringOrUndefined(body.nameDisplay)
+    let nameDisplay: ProNameDisplay | undefined = undefined
+    if (nameDisplayRaw !== undefined) {
+      if (!isNameDisplayValue(nameDisplayRaw)) {
+        return jsonFail(400, 'Invalid name display option.')
+      }
+      nameDisplay = nameDisplayRaw
+    }
+
     const handleRaw = typeof body.handle === 'string' ? body.handle : undefined
     const wantsHandleUpdate = handleRaw !== undefined
 
@@ -140,6 +153,7 @@ export async function PATCH(req: Request) {
       ...(location !== undefined ? { location } : {}),
       ...(avatarUrl !== undefined ? { avatarUrl } : {}),
       ...(professionType !== undefined ? { professionType } : {}),
+      ...(nameDisplay !== undefined ? { nameDisplay } : {}),
       ...(handleActuallyChanges
         ? {
             handle: nextHandle,
@@ -160,6 +174,7 @@ export async function PATCH(req: Request) {
           location: true,
           avatarUrl: true,
           professionType: true,
+          nameDisplay: true,
           isPremium: true,
         },
       })

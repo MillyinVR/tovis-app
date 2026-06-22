@@ -44,6 +44,7 @@ export const currentUserSelect = {
       firstName: true,
       lastName: true,
       handle: true,
+      nameDisplay: true,
       avatarUrl: true,
       timeZone: true,
       location: true,

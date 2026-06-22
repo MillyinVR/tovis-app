@@ -97,7 +97,13 @@ export async function listClientLookRemixes(
       // never by legal name (matches the activity-feed PII model).
       client: { select: { handle: true, isPublicProfile: true } },
       professional: {
-        select: { businessName: true, firstName: true, lastName: true },
+        select: {
+          businessName: true,
+          firstName: true,
+          lastName: true,
+          handle: true,
+          nameDisplay: true,
+        },
       },
       sourceLookPost: { select: { caption: true } },
     },

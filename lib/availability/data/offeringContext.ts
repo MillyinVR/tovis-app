@@ -1,6 +1,6 @@
 // lib/availability/data/offeringContext.ts
 
-import { Prisma, ServiceLocationType } from '@prisma/client'
+import { Prisma, ProNameDisplay, ServiceLocationType } from '@prisma/client'
 
 import {
   buildPlacementCacheKey,
@@ -48,6 +48,10 @@ export type AvailabilityOfferingContext = {
   placementLng: number | undefined
 
   proBusinessName: string | null
+  proFirstName: string | null
+  proLastName: string | null
+  proHandle: string | null
+  proNameDisplay: ProNameDisplay | null
   proAvatarUrl: string | null
   proLocation: string | null
   serviceName: string | null
@@ -76,6 +80,10 @@ export type LoadAvailabilityOfferingContextResult =
 type FreshAvailabilitySource = {
   pro: {
     businessName: string | null
+    firstName: string | null
+    lastName: string | null
+    handle: string | null
+    nameDisplay: ProNameDisplay | null
     avatarUrl: string | null
     location: string | null
     timeZone: string | null
@@ -230,6 +238,10 @@ function buildContextFromCachedPlacement(
     placementLng: cachedPlacement.lng,
 
     proBusinessName: cachedPlacement.proBusinessName,
+    proFirstName: cachedPlacement.proFirstName,
+    proLastName: cachedPlacement.proLastName,
+    proHandle: cachedPlacement.proHandle,
+    proNameDisplay: cachedPlacement.proNameDisplay,
     proAvatarUrl: cachedPlacement.proAvatarUrl,
     proLocation: cachedPlacement.proLocation,
     serviceName: cachedPlacement.serviceName,
@@ -261,6 +273,10 @@ function buildContextFromFreshAvailability(args: {
     placementLng: placement.lng,
 
     proBusinessName: source.pro.businessName ?? null,
+    proFirstName: source.pro.firstName ?? null,
+    proLastName: source.pro.lastName ?? null,
+    proHandle: source.pro.handle ?? null,
+    proNameDisplay: source.pro.nameDisplay ?? null,
     proAvatarUrl: source.pro.avatarUrl ?? null,
     proLocation: source.pro.location ?? null,
     serviceName: source.service.name,
@@ -295,6 +311,10 @@ function buildCachedPlacementValue(args: {
     lat: context.placementLat,
     lng: context.placementLng,
     proBusinessName: context.proBusinessName,
+    proFirstName: context.proFirstName,
+    proLastName: context.proLastName,
+    proHandle: context.proHandle,
+    proNameDisplay: context.proNameDisplay,
     proAvatarUrl: context.proAvatarUrl,
     proLocation: context.proLocation,
     serviceName: context.serviceName,
@@ -336,6 +356,10 @@ async function loadFreshAvailabilitySource(args: {
       where: { id: args.professionalId },
       select: {
         businessName: true,
+        firstName: true,
+        lastName: true,
+        handle: true,
+        nameDisplay: true,
         avatarUrl: true,
         location: true,
         timeZone: true,

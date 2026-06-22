@@ -7,6 +7,7 @@ import type {
   MediaVisibility,
   ModerationStatus,
   ProfessionType,
+  ProNameDisplay,
   Role,
   VerificationStatus,
 } from '@prisma/client'
@@ -27,6 +28,7 @@ export type LooksProfessionalDto = {
   firstName: string | null
   lastName: string | null
   handle: string | null
+  nameDisplay: ProNameDisplay | null
   professionType: ProfessionType | null
   avatarUrl: string | null
   location: string | null
@@ -337,6 +339,7 @@ export type LooksProProfilePreviewDto = {
   firstName: string | null
   lastName: string | null
   handle: string | null
+  nameDisplay: ProNameDisplay | null
   avatarUrl: string | null
   professionType: ProfessionType | null
   location: string | null

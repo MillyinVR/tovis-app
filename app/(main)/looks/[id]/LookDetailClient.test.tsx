@@ -1,5 +1,6 @@
 // app/(main)/looks/[id]/LookDetailClient.test.tsx
 import React from 'react'
+import { ProNameDisplay } from '@prisma/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { LooksCommentDto, LooksDetailItemDto } from '@/lib/looks/types'
@@ -224,6 +225,7 @@ function makeDetailItem(): LooksDetailItemDto {
       firstName: 'Tori',
       lastName: 'Morales',
       handle: 'tovisstudio',
+      nameDisplay: ProNameDisplay.BUSINESS_NAME,
       avatarUrl: null,
       professionType: 'BARBER',
       location: 'San Diego, CA',

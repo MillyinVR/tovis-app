@@ -55,6 +55,7 @@ const offerSelect = {
           firstName: true,
           lastName: true,
           handle: true,
+          nameDisplay: true,
           avatarUrl: true,
         },
       },

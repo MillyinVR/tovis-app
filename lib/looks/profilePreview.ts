@@ -10,6 +10,7 @@ export function mapLooksProProfilePreviewToDto(
     firstName: profile.firstName ?? null,
     lastName: profile.lastName ?? null,
     handle: profile.handle ?? null,
+    nameDisplay: profile.nameDisplay ?? null,
     avatarUrl: profile.avatarUrl ?? null,
     professionType: profile.professionType ?? null,
     location: profile.location ?? null,

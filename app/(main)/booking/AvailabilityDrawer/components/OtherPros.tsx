@@ -31,7 +31,7 @@ type OtherProSlotButtonProps = {
 }
 
 function getDisplayName(pro: ProCard): string {
-  return formatProfessionalPublicDisplayName({ businessName: pro.businessName })
+  return formatProfessionalPublicDisplayName(pro)
 }
 
 function getTimeZone(pro: ProCard, appointmentTz: string): string {

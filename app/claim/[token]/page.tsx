@@ -146,7 +146,7 @@ function buildProfessionalLabel(
   booking: NonNullable<ClaimInviteRecord['booking']>,
 ): string {
   return formatProfessionalPublicDisplayName(
-    { businessName: booking.professional?.businessName },
+    booking.professional ?? null,
     'your professional',
   )
 }

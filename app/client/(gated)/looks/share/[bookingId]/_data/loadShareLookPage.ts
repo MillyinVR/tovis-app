@@ -113,6 +113,8 @@ export async function loadShareLookPage(
           businessName: true,
           firstName: true,
           lastName: true,
+          handle: true,
+          nameDisplay: true,
           avatarUrl: true,
         },
       },
