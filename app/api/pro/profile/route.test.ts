@@ -201,6 +201,7 @@ describe('app/api/pro/profile/route.ts', () => {
         location: true,
         avatarUrl: true,
         professionType: true,
+        nameDisplay: true,
         isPremium: true,
       },
     })
@@ -263,6 +264,7 @@ describe('app/api/pro/profile/route.ts', () => {
         location: true,
         avatarUrl: true,
         professionType: true,
+        nameDisplay: true,
         isPremium: true,
       },
     })
@@ -312,6 +314,7 @@ describe('app/api/pro/profile/route.ts', () => {
         location: true,
         avatarUrl: true,
         professionType: true,
+        nameDisplay: true,
         isPremium: true,
       },
     })

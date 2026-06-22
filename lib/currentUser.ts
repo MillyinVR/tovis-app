@@ -41,7 +41,10 @@ export const currentUserSelect = {
     select: {
       id: true,
       businessName: true,
+      firstName: true,
+      lastName: true,
       handle: true,
+      nameDisplay: true,
       avatarUrl: true,
       timeZone: true,
       location: true,

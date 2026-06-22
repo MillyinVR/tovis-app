@@ -37,6 +37,10 @@ export default async function VanityProfilePage({
       userId: true,
       verificationStatus: true,
       businessName: true,
+      firstName: true,
+      lastName: true,
+      handle: true,
+      nameDisplay: true,
       bio: true,
       avatarUrl: true,
       professionType: true,
@@ -70,9 +74,7 @@ export default async function VanityProfilePage({
     )
   }
 
-  const displayName = formatProfessionalPublicDisplayName({
-    businessName: pro.businessName,
-  })
+  const displayName = formatProfessionalPublicDisplayName(pro)
   const subtitle = pro.professionType || 'Beauty professional'
   const location = pro.location?.trim() || null
   const proTimeZone = displayTimeZoneOrNull(pro.timeZone)

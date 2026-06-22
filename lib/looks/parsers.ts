@@ -5,12 +5,14 @@ import {
   MediaVisibility,
   ModerationStatus,
   ProfessionType,
+  ProNameDisplay,
   Role,
   VerificationStatus,
 } from '@prisma/client'
 
 import { isRecord } from '@/lib/guards'
 import type {
+  LooksClientAuthorDto,
   LooksCommentDto,
   LooksDetailAdminDto,
   LooksDetailAssetDto,
@@ -21,6 +23,13 @@ import type {
   LooksFeedItemDto,
   LooksFeedResponseDto,
 } from '@/lib/looks/types'
+
+function parseLooksClientAuthor(raw: unknown): LooksClientAuthorDto | null {
+  if (!isRecord(raw)) return null
+  const handle = pickString(raw.handle)
+  if (!handle) return null
+  return { handle, avatarUrl: pickString(raw.avatarUrl) }
+}
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0
@@ -50,6 +59,14 @@ function isProfessionType(value: unknown): value is ProfessionType {
     value === ProfessionType.ELECTROLOGIST ||
     value === ProfessionType.MASSAGE_THERAPIST ||
     value === ProfessionType.MAKEUP_ARTIST
+  )
+}
+
+function isProNameDisplay(value: unknown): value is ProNameDisplay {
+  return (
+    value === ProNameDisplay.BUSINESS_NAME ||
+    value === ProNameDisplay.REAL_NAME ||
+    value === ProNameDisplay.HANDLE
   )
 }
 
@@ -139,7 +156,12 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
         professional = {
           id: professionalId,
           businessName: pickString(professionalRaw.businessName),
+          firstName: pickString(professionalRaw.firstName),
+          lastName: pickString(professionalRaw.lastName),
           handle: pickString(professionalRaw.handle),
+          nameDisplay: isProNameDisplay(professionalRaw.nameDisplay)
+            ? professionalRaw.nameDisplay
+            : null,
           professionType: isProfessionType(professionTypeRaw)
             ? professionTypeRaw
             : null,
@@ -163,6 +185,7 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
       createdAt,
 
       professional,
+      clientAuthor: parseLooksClientAuthor(item.clientAuthor),
 
       _count: {
         likes: likeCount,
@@ -477,7 +500,12 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
   const professional = {
     id: professionalId,
     businessName: pickString(professionalRaw.businessName),
+    firstName: pickString(professionalRaw.firstName),
+    lastName: pickString(professionalRaw.lastName),
     handle: pickString(professionalRaw.handle),
+    nameDisplay: isProNameDisplay(professionalRaw.nameDisplay)
+      ? professionalRaw.nameDisplay
+      : null,
     avatarUrl: pickString(professionalRaw.avatarUrl),
     professionType,
     location: pickString(professionalRaw.location),
@@ -550,6 +578,7 @@ export function parseLooksDetailResponse(raw: unknown): LooksDetailItemDto | nul
     createdAt,
     updatedAt,
     professional,
+    clientAuthor: parseLooksClientAuthor(itemRaw.clientAuthor),
     service,
     primaryMedia,
     assets,

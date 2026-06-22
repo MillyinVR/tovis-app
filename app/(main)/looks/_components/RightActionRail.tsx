@@ -41,7 +41,14 @@ function initialLetter(name: string | null) {
 type ProMini = {
   id: string
   businessName: string | null
+  firstName?: string | null
+  lastName?: string | null
   avatarUrl?: string | null
+} | null
+
+type ClientAuthorMini = {
+  handle: string
+  avatarUrl: string | null
 } | null
 
 type RightActionRailProps = {
@@ -49,6 +56,7 @@ type RightActionRailProps = {
   lookTitle?: string | null
   viewerSaved?: boolean
   pro: ProMini
+  clientAuthor?: ClientAuthorMini
   viewerLiked: boolean
   likeCount: number
   commentCount: number
@@ -124,6 +132,7 @@ export default function RightActionRail({
   lookTitle = null,
   viewerSaved = false,
   pro,
+  clientAuthor = null,
   viewerLiked,
   likeCount,
   commentCount,
@@ -137,6 +146,25 @@ export default function RightActionRail({
 }: RightActionRailProps) {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
   const [saved, setSaved] = useState(viewerSaved)
+
+  // The rail avatar credits the poster: the publishing client on a
+  // client-authored look (linking to /u/[handle]), otherwise the pro.
+  const posterHref = clientAuthor
+    ? `/u/${encodeURIComponent(clientAuthor.handle)}`
+    : pro?.id
+      ? `/professionals/${encodeURIComponent(pro.id)}`
+      : null
+  const posterLabel = clientAuthor
+    ? `@${clientAuthor.handle}`
+    : pro
+      ? formatProfessionalPublicDisplayName(pro)
+      : ''
+  const posterAvatarUrl = clientAuthor
+    ? clientAuthor.avatarUrl
+    : pro?.avatarUrl ?? null
+  const posterAriaLabel = clientAuthor
+    ? `View profile: ${posterLabel}`
+    : 'View professional profile'
 
   useEffect(() => {
     setSaved(viewerSaved)
@@ -159,10 +187,10 @@ export default function RightActionRail({
           justifyItems: 'center',
         }}
       >
-        {pro?.id ? (
+        {posterHref ? (
           <Link
-            href={`/professionals/${encodeURIComponent(pro.id)}`}
-            aria-label="View professional profile"
+            href={posterHref}
+            aria-label={posterAriaLabel}
             style={{
               display: 'grid',
               justifyItems: 'center',
@@ -181,10 +209,10 @@ export default function RightActionRail({
                   background: 'rgb(var(--surface-glass) / 0.08)',
                 }}
               >
-                {pro.avatarUrl ? (
+                {posterAvatarUrl ? (
                   <RemoteImage
-                    src={pro.avatarUrl}
-                    alt={formatProfessionalPublicDisplayName({ businessName: pro.businessName })}
+                    src={posterAvatarUrl}
+                    alt={posterLabel}
                     width={48}
                     height={48}
                     style={{
@@ -206,7 +234,7 @@ export default function RightActionRail({
                       color: PAPER,
                     }}
                   >
-                    {initialLetter(pro.businessName)}
+                    {initialLetter(posterLabel)}
                   </div>
                 )}
               </div>

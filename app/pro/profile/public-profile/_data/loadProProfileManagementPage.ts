@@ -52,6 +52,7 @@ const proProfileManagementSelect =
     location: true,
     avatarUrl: true,
     professionType: true,
+    nameDisplay: true,
     paymentSettings: {
       select: {
         collectPaymentAt: true,
@@ -411,6 +412,7 @@ function buildEditProfileInitial(
     avatarUrl: pickString(pro.avatarUrl),
     professionType: pro.professionType ?? null,
     handle: pickString(pro.handle),
+    nameDisplay: pro.nameDisplay,
     isPremium: pro.isPremium,
   }
 }

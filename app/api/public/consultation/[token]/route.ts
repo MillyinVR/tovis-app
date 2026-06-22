@@ -90,6 +90,10 @@ export async function GET(_request: Request, ctx: RouteContext<{ token: string }
               select: {
                 id: true,
                 businessName: true,
+                firstName: true,
+                lastName: true,
+                handle: true,
+                nameDisplay: true,
                 timeZone: true,
               },
             },
@@ -184,6 +188,10 @@ export async function GET(_request: Request, ctx: RouteContext<{ token: string }
           professional: {
             id: token.booking.professional.id,
             businessName: token.booking.professional.businessName,
+            firstName: token.booking.professional.firstName,
+            lastName: token.booking.professional.lastName,
+            handle: token.booking.professional.handle,
+            nameDisplay: token.booking.professional.nameDisplay,
             timeZone: token.booking.professional.timeZone,
           },
         },

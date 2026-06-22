@@ -2,7 +2,11 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { PaymentCollectionTiming, VerificationStatus } from '@prisma/client'
+import {
+  PaymentCollectionTiming,
+  ProNameDisplay,
+  VerificationStatus,
+} from '@prisma/client'
 
 import type { ProProfileManagementPageModel } from './_data/proProfileManagementTypes'
 
@@ -100,6 +104,7 @@ function makeModel(
       avatarUrl: null,
       professionType: 'BARBER',
       handle: 'tovisstudio',
+      nameDisplay: ProNameDisplay.BUSINESS_NAME,
       isPremium: true,
     },
 

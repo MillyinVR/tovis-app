@@ -7,6 +7,7 @@ import type {
   MediaVisibility,
   ModerationStatus,
   ProfessionType,
+  ProNameDisplay,
   Role,
   VerificationStatus,
 } from '@prisma/client'
@@ -24,11 +25,21 @@ export type LooksCountsDto = {
 export type LooksProfessionalDto = {
   id: string
   businessName: string | null
+  firstName: string | null
+  lastName: string | null
   handle: string | null
+  nameDisplay: ProNameDisplay | null
   professionType: ProfessionType | null
   avatarUrl: string | null
   location: string | null
   followerCount: number
+}
+
+// The publishing client credited on a client-authored look. PII-safe: handle
+// and avatar only (the /u/[handle] public-profile contract), never a real name.
+export type LooksClientAuthorDto = {
+  handle: string
+  avatarUrl: string | null
 }
 
 export type LooksFeedItemDto = {
@@ -40,6 +51,7 @@ export type LooksFeedItemDto = {
   createdAt: string
 
   professional: LooksProfessionalDto | null
+  clientAuthor: LooksClientAuthorDto | null
 
   _count: LooksCountsDto
   viewerLiked: boolean
@@ -137,6 +149,7 @@ export type LooksDetailItemDto = {
   updatedAt: string
 
   professional: LooksProProfilePreviewDto
+  clientAuthor: LooksClientAuthorDto | null
   service: LooksDetailServiceDto | null
 
   primaryMedia: LooksDetailMediaDto
@@ -332,7 +345,10 @@ export type LooksBoardDeleteResponseDto = {
 export type LooksProProfilePreviewDto = {
   id: string
   businessName: string | null
+  firstName: string | null
+  lastName: string | null
   handle: string | null
+  nameDisplay: ProNameDisplay | null
   avatarUrl: string | null
   professionType: ProfessionType | null
   location: string | null

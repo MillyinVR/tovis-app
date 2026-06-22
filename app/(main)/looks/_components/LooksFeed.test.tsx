@@ -1,5 +1,6 @@
 // app/(main)/looks/_components/LooksFeed.test.tsx
 import React from 'react'
+import { ProNameDisplay } from '@prisma/client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
@@ -265,12 +266,16 @@ function makeFeedItem(
     professional: {
       id: 'pro_1',
       businessName: 'TOVIS Studio',
+      firstName: 'Tori',
+      lastName: 'Morales',
       handle: 'tovisstudio',
+      nameDisplay: ProNameDisplay.BUSINESS_NAME,
       professionType: 'BARBER',
       avatarUrl: null,
       location: 'San Diego, CA',
       followerCount: 0,
     },
+    clientAuthor: null,
     _count: {
       likes: 3,
       comments: 1,
@@ -640,7 +645,10 @@ describe('app/(main)/looks/_components/LooksFeed', () => {
             professional: {
               id: 'pro_book_1',
               businessName: 'Book Me',
+              firstName: 'Book',
+              lastName: 'Me',
               handle: 'bookme',
+              nameDisplay: ProNameDisplay.BUSINESS_NAME,
               professionType: 'BARBER',
               avatarUrl: null,
               location: 'San Diego, CA',

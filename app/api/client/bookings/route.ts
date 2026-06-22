@@ -91,6 +91,10 @@ const bookingSelect = {
     select: {
       id: true,
       businessName: true,
+      firstName: true,
+      lastName: true,
+      handle: true,
+      nameDisplay: true,
       location: true,
       timeZone: true,
     },
@@ -177,6 +181,10 @@ const waitlistSelect = {
     select: {
       id: true,
       businessName: true,
+      firstName: true,
+      lastName: true,
+      handle: true,
+      nameDisplay: true,
       location: true,
       timeZone: true,
     },

@@ -1,6 +1,6 @@
 // lib/profiles/publicProfileFormatting.ts
 // lib/profiles/publicProfileFormatting.ts
-import type { ProfessionType } from '@prisma/client'
+import type { ProfessionType, ProNameDisplay } from '@prisma/client'
 
 import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import { isValidIanaTimeZone } from '@/lib/timeZone'
@@ -141,6 +141,8 @@ export function formatPublicProfileDisplayName(args: {
   businessName: string | null | undefined
   firstName?: string | null
   lastName?: string | null
+  handle?: string | null
+  nameDisplay?: ProNameDisplay | null
   fallback?: string
 }): string {
   return formatProfessionalPublicDisplayName(args, args.fallback)

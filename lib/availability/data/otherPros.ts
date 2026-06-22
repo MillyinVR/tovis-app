@@ -3,6 +3,7 @@
 import {
   Prisma,
   ProfessionalLocationType,
+  ProNameDisplay,
   ServiceLocationType,
 } from '@prisma/client'
 
@@ -35,6 +36,10 @@ const TTL_OTHER_PROS_SECONDS = 600
 export type OtherProRow = {
   id: string
   businessName: string | null
+  firstName: string | null
+  lastName: string | null
+  handle: string | null
+  nameDisplay: ProNameDisplay | null
   avatarUrl: string | null
   location: string | null
   offeringId: string
@@ -61,6 +66,14 @@ export type LoadOtherProsNearbyCachedArgs = LoadOtherProsNearbyArgs & {
 
 function normalizeAddress(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function parseProNameDisplay(value: unknown): ProNameDisplay | null {
+  return value === ProNameDisplay.BUSINESS_NAME ||
+    value === ProNameDisplay.REAL_NAME ||
+    value === ProNameDisplay.HANDLE
+    ? value
+    : null
 }
 
 function toDecimal(value: number): Prisma.Decimal {
@@ -103,6 +116,10 @@ function parseCachedOtherPros(value: unknown): OtherProRow[] | null {
     parsed.push({
       id,
       businessName: pickString(row.businessName) ?? null,
+      firstName: pickString(row.firstName) ?? null,
+      lastName: pickString(row.lastName) ?? null,
+      handle: pickString(row.handle) ?? null,
+      nameDisplay: parseProNameDisplay(row.nameDisplay),
       avatarUrl: pickString(row.avatarUrl) ?? null,
       location: pickString(row.location) ?? null,
       offeringId,
@@ -273,6 +290,10 @@ export async function loadOtherProsNearby(
         select: {
           id: true,
           businessName: true,
+          firstName: true,
+          lastName: true,
+          handle: true,
+          nameDisplay: true,
           avatarUrl: true,
         },
       },
@@ -285,6 +306,10 @@ export async function loadOtherProsNearby(
     {
       offeringId: string
       businessName: string | null
+      firstName: string | null
+      lastName: string | null
+      handle: string | null
+      nameDisplay: ProNameDisplay | null
       avatarUrl: string | null
     }
   >()
@@ -293,6 +318,10 @@ export async function loadOtherProsNearby(
     offeringByPro.set(offering.professionalId, {
       offeringId: offering.id,
       businessName: offering.professional.businessName ?? null,
+      firstName: offering.professional.firstName ?? null,
+      lastName: offering.professional.lastName ?? null,
+      handle: offering.professional.handle ?? null,
+      nameDisplay: offering.professional.nameDisplay ?? null,
       avatarUrl: offering.professional.avatarUrl ?? null,
     })
   }
@@ -315,6 +344,10 @@ export async function loadOtherProsNearby(
     results.push({
       id: professionalId,
       businessName: offering.businessName,
+      firstName: offering.firstName,
+      lastName: offering.lastName,
+      handle: offering.handle,
+      nameDisplay: offering.nameDisplay,
       avatarUrl: offering.avatarUrl,
       location: locationLabel,
       offeringId: offering.offeringId,

@@ -54,6 +54,64 @@ describe('professional public display-name privacy boundary', () => {
     ).toBe('Professional')
   })
 
+  it('honors REAL_NAME preference over a set business name', () => {
+    expect(
+      pickProfessionalPublicDisplayName({
+        businessName: 'Glow Studio',
+        firstName: 'Amara',
+        lastName: 'Okafor',
+        handle: 'amara',
+        nameDisplay: 'REAL_NAME',
+      }),
+    ).toBe('Amara Okafor')
+  })
+
+  it('honors HANDLE preference and prefixes with @', () => {
+    expect(
+      pickProfessionalPublicDisplayName({
+        businessName: 'Glow Studio',
+        firstName: 'Amara',
+        lastName: 'Okafor',
+        handle: 'glowbyamara',
+        nameDisplay: 'HANDLE',
+      }),
+    ).toBe('@glowbyamara')
+  })
+
+  it('degrades a REAL_NAME pro with no real name to business, then handle', () => {
+    expect(
+      pickProfessionalPublicDisplayName({
+        businessName: 'Glow Studio',
+        firstName: '',
+        lastName: '',
+        handle: 'glow',
+        nameDisplay: 'REAL_NAME',
+      }),
+    ).toBe('Glow Studio')
+
+    expect(
+      pickProfessionalPublicDisplayName({
+        businessName: null,
+        firstName: '',
+        lastName: '',
+        handle: 'glow',
+        nameDisplay: 'HANDLE',
+      }),
+    ).toBe('@glow')
+  })
+
+  it('BUSINESS_NAME default never falls through to the handle', () => {
+    expect(
+      pickProfessionalPublicDisplayName({
+        businessName: null,
+        firstName: null,
+        lastName: null,
+        handle: 'glow',
+        nameDisplay: 'BUSINESS_NAME',
+      }),
+    ).toBeNull()
+  })
+
   it('keeps all public name tokens searchable', () => {
     expect(
       formatProfessionalPublicSearchText({

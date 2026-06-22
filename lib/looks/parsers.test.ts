@@ -5,6 +5,7 @@ import {
   MediaType,
   ModerationStatus,
   ProfessionType,
+  ProNameDisplay,
   VerificationStatus,
 } from '@prisma/client'
 
@@ -58,12 +59,16 @@ function makeFeedDto(
     professional: {
       id: 'pro_1',
       businessName: 'TOVIS Studio',
+      firstName: 'Tori',
+      lastName: 'Morales',
       handle: 'tovisstudio',
+      nameDisplay: ProNameDisplay.BUSINESS_NAME,
       professionType: ProfessionType.BARBER,
       avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
       location: 'San Diego, CA',
       followerCount: 256,
     },
+    clientAuthor: null,
     _count: {
       likes: 9,
       comments: 3,
@@ -158,12 +163,16 @@ describe('lib/looks/parsers.ts', () => {
           professional: {
             id: 'pro_1',
             businessName: 'TOVIS Studio',
+            firstName: null,
+            lastName: null,
             handle: 'tovisstudio',
+            nameDisplay: null,
             professionType: null,
             avatarUrl: null,
             location: null,
             followerCount: 0,
           },
+          clientAuthor: null,
           _count: {
             likes: 1,
             comments: 2,
@@ -374,7 +383,10 @@ describe('lib/looks/parsers.ts', () => {
           professional: {
             id: 'pro_1',
             businessName: 'TOVIS Studio',
+            firstName: 'Tori',
+            lastName: 'Morales',
             handle: 'tovisstudio',
+            nameDisplay: ProNameDisplay.BUSINESS_NAME,
             avatarUrl: null,
             professionType: ProfessionType.BARBER,
             location: 'San Diego, CA',
@@ -427,13 +439,17 @@ describe('lib/looks/parsers.ts', () => {
         professional: {
           id: 'pro_1',
           businessName: 'TOVIS Studio',
+          firstName: 'Tori',
+          lastName: 'Morales',
           handle: 'tovisstudio',
+          nameDisplay: ProNameDisplay.BUSINESS_NAME,
           avatarUrl: null,
           professionType: ProfessionType.BARBER,
           location: 'San Diego, CA',
           verificationStatus: VerificationStatus.APPROVED,
           isPremium: true,
         },
+        clientAuthor: null,
         service: {
           id: 'service_1',
           name: 'Fade',

@@ -126,6 +126,10 @@ const clientClaimLinkSelect = Prisma.validator<Prisma.ProClientInviteSelect>()({
         select: {
           id: true,
           businessName: true,
+          firstName: true,
+          lastName: true,
+          handle: true,
+          nameDisplay: true,
           location: true,
           timeZone: true,
           user: {

@@ -10,6 +10,7 @@ import {
   MediaVisibility,
   ModerationStatus,
   ProfessionType,
+  ProNameDisplay,
   VerificationStatus,
 } from '@prisma/client'
 
@@ -44,6 +45,8 @@ function makeFeedRow(overrides?: Partial<LooksFeedRow>): LooksFeedRow {
   return {
     id: 'look_1',
     professionalId: 'pro_1',
+    clientAuthorId: null,
+    clientAuthor: null,
     serviceId: 'service_1',
     caption: 'Fresh cut',
     priceStartingAt: null,
@@ -74,7 +77,10 @@ function makeFeedRow(overrides?: Partial<LooksFeedRow>): LooksFeedRow {
     professional: {
       id: 'pro_1',
       businessName: 'TOVIS Studio',
+      firstName: 'Tori',
+      lastName: 'Morales',
       handle: 'tovisstudio',
+      nameDisplay: ProNameDisplay.BUSINESS_NAME,
       avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
       professionType: ProfessionType.BARBER,
       location: 'San Diego, CA',
@@ -98,6 +104,8 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
   return {
     id: 'look_1',
     professionalId: 'pro_1',
+    clientAuthorId: null,
+    clientAuthor: null,
     serviceId: 'service_1',
     primaryMediaAssetId: 'media_1',
     caption: 'Detailed caption',
@@ -119,7 +127,10 @@ function makeDetailRow(overrides?: Partial<LooksDetailRow>): LooksDetailRow {
     professional: {
       id: 'pro_1',
       businessName: 'TOVIS Studio',
+      firstName: 'Tori',
+      lastName: 'Morales',
       handle: 'tovisstudio',
+      nameDisplay: ProNameDisplay.BUSINESS_NAME,
       avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
       professionType: ProfessionType.BARBER,
       location: 'San Diego, CA',
@@ -312,7 +323,10 @@ function makeProProfilePreviewRow(
   return {
     id: 'pro_1',
     businessName: 'TOVIS Studio',
+    firstName: 'Tori',
+    lastName: 'Morales',
     handle: 'tovisstudio',
+    nameDisplay: ProNameDisplay.BUSINESS_NAME,
     avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
     professionType: ProfessionType.BARBER,
     location: 'San Diego, CA',
@@ -355,12 +369,16 @@ describe('lib/looks/mappers.ts', () => {
         professional: {
           id: 'pro_1',
           businessName: 'TOVIS Studio',
+          firstName: 'Tori',
+          lastName: 'Morales',
           handle: 'tovisstudio',
+          nameDisplay: ProNameDisplay.BUSINESS_NAME,
           professionType: ProfessionType.BARBER,
           avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
           location: 'San Diego, CA',
           followerCount: 128,
         },
+        clientAuthor: null,
         _count: {
           likes: 9,
           comments: 3,
@@ -400,12 +418,16 @@ describe('lib/looks/mappers.ts', () => {
         professional: {
           id: 'pro_1',
           businessName: 'TOVIS Studio',
+          firstName: 'Tori',
+          lastName: 'Morales',
           handle: 'tovisstudio',
+          nameDisplay: ProNameDisplay.BUSINESS_NAME,
           professionType: ProfessionType.BARBER,
           avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
           location: 'San Diego, CA',
           followerCount: 128,
         },
+        clientAuthor: null,
         _count: {
           likes: 9,
           comments: 3,
@@ -518,6 +540,8 @@ describe('lib/looks/mappers.ts', () => {
             },
             professionalProfile: {
               businessName: 'Other Name',
+              firstName: 'Tori',
+              lastName: 'Morales',
               avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
             },
           },
@@ -558,6 +582,8 @@ describe('lib/looks/mappers.ts', () => {
             clientProfile: null,
             professionalProfile: {
               businessName: 'TOVIS Studio',
+              firstName: 'Solo',
+              lastName: 'Pro',
               avatarUrl: null,
             },
           },
@@ -566,6 +592,36 @@ describe('lib/looks/mappers.ts', () => {
       )
 
       expect(result.user.displayName).toBe('TOVIS Studio')
+    })
+
+    it('falls back to the professional real name when no business name is set', () => {
+      const result = mapLooksCommentToDto(
+        {
+          id: 'comment_1',
+          body: 'Love this',
+          createdAt: new Date('2026-04-18T12:00:00.000Z'),
+          userId: 'user_3',
+          parentCommentId: null,
+          likeCount: 0,
+          replyCount: 0,
+          likes: [],
+          user: {
+            id: 'user_3',
+            clientProfile: null,
+            professionalProfile: {
+              businessName: null,
+              firstName: 'Jordan',
+              lastName: 'Rivera',
+              avatarUrl: null,
+            },
+          },
+        },
+        { viewerUserId: null, viewerIsAdmin: false },
+      )
+
+      // Previously rendered the literal "User" because only businessName was
+      // read; a solo pro with no business name must show their real name.
+      expect(result.user.displayName).toBe('Jordan Rivera')
     })
   })
 
@@ -772,13 +828,17 @@ describe('lib/looks/mappers.ts', () => {
         professional: {
           id: 'pro_1',
           businessName: 'TOVIS Studio',
+          firstName: 'Tori',
+          lastName: 'Morales',
           handle: 'tovisstudio',
+          nameDisplay: ProNameDisplay.BUSINESS_NAME,
           avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
           professionType: ProfessionType.BARBER,
           location: 'San Diego, CA',
           verificationStatus: VerificationStatus.APPROVED,
           isPremium: true,
         },
+        clientAuthor: null,
         service: {
           id: 'service_1',
           name: 'Fade',
@@ -978,7 +1038,10 @@ describe('lib/looks/mappers.ts', () => {
       expect(result).toEqual({
         id: 'pro_1',
         businessName: 'TOVIS Studio',
+        firstName: 'Tori',
+        lastName: 'Morales',
         handle: 'tovisstudio',
+        nameDisplay: ProNameDisplay.BUSINESS_NAME,
         avatarUrl: 'https://cdn.example.com/pro-avatar.jpg',
         professionType: ProfessionType.BARBER,
         location: 'San Diego, CA',

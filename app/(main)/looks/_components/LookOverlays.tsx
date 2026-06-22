@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import type { CSSProperties } from 'react'
 import { formatFollowerLabel } from '@/lib/profiles/publicProfileFormatting'
+import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 import type { FeedItem } from './lookTypes'
 
 const TEXT_SHADOW = '0 2px 20px rgba(0,0,0,0.85), 0 1px 4px rgba(0,0,0,0.9)'
@@ -40,9 +41,21 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
       ? pro.followerCount
       : 0
 
-  const businessName = (pro?.businessName ?? '').trim()
   const handle = (pro?.handle ?? '').trim()
-  const displayName = businessName || (handle ? `@${handle}` : null)
+  // businessName → real name (canonical helper), then @handle as the last resort.
+  const resolvedName = pro ? pickProfessionalPublicDisplayName(pro) : null
+  const proDisplayName = resolvedName || (handle ? `@${handle}` : null)
+
+  // Client-authored looks credit the publishing client as the poster (linking to
+  // their /u/[handle] profile), while the pro stays visible + followable below.
+  const clientAuthor = m.clientAuthor ?? null
+  const posterName = clientAuthor ? `@${clientAuthor.handle}` : proDisplayName
+  const posterHref = clientAuthor
+    ? `/u/${encodeURIComponent(clientAuthor.handle)}`
+    : pro?.id
+      ? `/professionals/${encodeURIComponent(pro.id)}`
+      : null
+  const displayName = posterName
 
   const serviceLabel = pickTrimmed(m.serviceName)
   const caption = pickTrimmed(m.caption)
@@ -55,7 +68,8 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
   // Spotlight uses review headline as the caption quote
   const captionText = isReviewSpotlight ? (reviewHeadline ?? caption) : caption
 
-  const profileHref = pro?.id ? `/professionals/${encodeURIComponent(pro.id)}` : null
+  const proHref = pro?.id ? `/professionals/${encodeURIComponent(pro.id)}` : null
+  const profileHref = posterHref
 
   const hasAnyContent = Boolean(displayName || captionText || serviceLabel)
   if (!hasAnyContent) return null
@@ -109,7 +123,7 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
             </span>
           )}
 
-          {pro?.id ? (
+          {!clientAuthor && pro?.id ? (
             <button
               type="button"
               aria-pressed={isFollowing}
@@ -142,7 +156,7 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
             </button>
           ) : null}
 
-          {pro?.id && followerCount > 0 ? (
+          {!clientAuthor && pro?.id && followerCount > 0 ? (
             <span
               style={{
                 fontSize: 11,
@@ -155,6 +169,69 @@ export default function LookOverlays({ item: m, rightRailBottom, onToggleFollow 
               {formatFollowerLabel(followerCount)}
             </span>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* Row 1b: "with [pro]" credit on client-authored looks — keeps the pro
+          discoverable + followable while the client is the poster above. */}
+      {clientAuthor && proDisplayName && pro?.id ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'rgb(var(--text-primary) / 0.7)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            with
+          </span>
+          {proHref ? (
+            <Link
+              href={proHref}
+              aria-label={`View professional profile: ${proDisplayName}`}
+              className="pointer-events-auto no-underline"
+            >
+              <span style={{ fontSize: 13, fontWeight: 700, color: PAPER }}>
+                {proDisplayName}
+              </span>
+            </Link>
+          ) : (
+            <span style={{ fontSize: 13, fontWeight: 700, color: PAPER }}>
+              {proDisplayName}
+            </span>
+          )}
+
+          <button
+            type="button"
+            aria-pressed={isFollowing}
+            aria-label={
+              isFollowing
+                ? `Unfollow ${proDisplayName}`
+                : `Follow ${proDisplayName}`
+            }
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              onToggleFollow()
+            }}
+            className="pointer-events-auto"
+            style={{
+              padding: '2px 8px',
+              border: '1px solid rgb(var(--surface-glass) / 0.35)',
+              borderRadius: 999,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.06em',
+              color: isFollowing ? 'rgb(var(--text-primary) / 0.7)' : PAPER,
+              background: isFollowing ? 'rgb(var(--surface-glass) / 0.12)' : 'transparent',
+              cursor: 'pointer',
+              fontFamily: 'var(--font-mono)',
+              flexShrink: 0,
+            }}
+          >
+            {isFollowing ? 'FOLLOWING' : 'FOLLOW'}
+          </button>
         </div>
       ) : null}
 

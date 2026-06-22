@@ -292,6 +292,10 @@ describe('loadOtherProsNearby', () => {
             select: {
               id: true,
               businessName: true,
+              firstName: true,
+              lastName: true,
+              handle: true,
+              nameDisplay: true,
               avatarUrl: true,
             },
           },

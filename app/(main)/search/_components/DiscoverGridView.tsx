@@ -4,11 +4,11 @@
 import Link from 'next/link'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
 import { cn } from '@/lib/utils'
-import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 export interface DiscoverGridPro {
   id: string
   businessName: string | null
+  displayName: string
   professionType: string | null
   locationLabel: string | null
   distanceMiles: number | null
@@ -75,7 +75,7 @@ export default function DiscoverGridView({ pros, activeProId, onSelectPro }: Dis
               type="button"
               onClick={() => onSelectPro(pro)}
               className="block w-full text-left"
-              aria-label={`Select ${formatProfessionalPublicDisplayName({ businessName: pro.businessName })}`}
+              aria-label={`Select ${pro.displayName}`}
             >
               <div className="relative aspect-[0.92] overflow-hidden bg-bgPrimary/45">
                 <div
@@ -104,7 +104,7 @@ export default function DiscoverGridView({ pros, activeProId, onSelectPro }: Dis
               <div className="p-3">
                 <div className="flex items-center gap-1">
                   <div className="min-w-0 flex-1 truncate text-[13px] font-black text-textPrimary">
-                    {formatProfessionalPublicDisplayName({ businessName: pro.businessName })}
+                    {pro.displayName}
                   </div>
 
                   {typeof pro.ratingAvg === 'number' ? (

@@ -26,6 +26,7 @@ import { resolveAftercareAccessByToken } from '@/lib/aftercare/unclaimedAftercar
 import { isBookingError } from '@/lib/booking/errors'
 import { renderMediaUrls } from '@/lib/media/renderUrls'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import { formatProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -271,8 +272,10 @@ export default async function ClientRebookFromAftercarePage(props: PageProps) {
   )
 
   const serviceTitle = booking.service?.name || 'Service'
-  const professionalLabel =
-    booking.professional?.businessName || 'your professional'
+  const professionalLabel = formatProfessionalPublicDisplayName(
+    booking.professional,
+    'your professional',
+  )
   const professionalId = booking.professional?.id || booking.professionalId
   const notes = typeof aftercare.notes === 'string' ? aftercare.notes : null
   const locationLabel = booking.professional?.location?.trim() || null

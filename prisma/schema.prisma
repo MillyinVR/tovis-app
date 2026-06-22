@@ -92,6 +92,16 @@ enum MessageThreadContextType {
   WAITLIST
 }
 
+// How a professional's public-facing name is rendered. BUSINESS_NAME (default)
+// preserves the historical behavior: business name when set, otherwise the real
+// name. REAL_NAME and HANDLE let a pro override that choice. Resolution is
+// centralized in lib/privacy/professionalDisplayName.ts.
+enum ProNameDisplay {
+  BUSINESS_NAME
+  REAL_NAME
+  HANDLE
+}
+
 enum VerificationStatus {
   PENDING
   APPROVED
@@ -1445,6 +1455,8 @@ model ProfessionalProfile {
   businessName     String?
   handle           String?
   handleNormalized String?           @unique
+  // Pro-chosen public display style; BUSINESS_NAME preserves legacy behavior.
+  nameDisplay      ProNameDisplay    @default(BUSINESS_NAME)
   isPremium        Boolean           @default(false)
   clientInvites    ProClientInvite[]
   bio              String?
@@ -1855,6 +1867,9 @@ model ProfessionalSearchIndex {
   verificationStatus VerificationStatus
   professionType     ProfessionType?
   businessName       String?
+  // Pre-resolved public display name (honors ProfessionalProfile.nameDisplay),
+  // written by refreshSearchIndex so search results don't re-resolve per row.
+  displayName        String?
   handle             String?
   handleNormalized   String?
   avatarUrl          String?

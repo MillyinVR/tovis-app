@@ -97,13 +97,19 @@ export async function generateMetadata({
   // Brand copy is tenant-resolved (white-label aware), never hardcoded.
   const brand = getBrandForTenantContext(await resolveTenantContextForLayout())
 
-  const proName = formatProfessionalPublicDisplayName({ businessName: item.professional.businessName })
+  const proName = formatProfessionalPublicDisplayName(item.professional)
+  // Client-authored looks are credited to the publishing client (handle only).
+  const posterName = item.clientAuthor
+    ? `@${item.clientAuthor.handle}`
+    : proName
   const caption = item.caption?.trim() ?? ''
 
-  const title = caption ? `${caption.slice(0, 80)} — ${proName}` : `A look by ${proName}`
+  const title = caption
+    ? `${caption.slice(0, 80)} — ${posterName}`
+    : `A look by ${posterName}`
   const description = caption
     ? caption.slice(0, 160)
-    : `Discover this look by ${proName} on ${brand.displayName} — then make your booking.`
+    : `Discover this look by ${posterName} on ${brand.displayName} — then make your booking.`
 
   const image = item.primaryMedia.thumbUrl ?? item.primaryMedia.url
   const isVideo = item.primaryMedia.mediaType === 'VIDEO'

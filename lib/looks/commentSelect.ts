@@ -28,6 +28,8 @@ export function buildLookCommentSelect(viewerUserId: string | null) {
         professionalProfile: {
           select: {
             businessName: true,
+            firstName: true,
+            lastName: true,
             avatarUrl: true,
           },
         },

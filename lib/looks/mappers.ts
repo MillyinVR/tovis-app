@@ -28,6 +28,28 @@ import type {
   LooksRenderedMediaDto,
 } from '@/lib/looks/types'
 import { mapLooksProProfilePreviewToDto } from '@/lib/looks/profilePreview'
+import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
+import type { LooksClientAuthorDto } from '@/lib/looks/types'
+
+// Shared resolver for the publishing-client credit on a client-authored look.
+// Returns null unless the author is still public AND has a handle, so a look is
+// never attributed to a client who has since gone private (the feed gate admits
+// these by public status, but detail-by-id and stale rows must re-check). Only
+// the PII-safe handle + avatar are surfaced — never a real name.
+function mapLooksClientAuthorToDto(
+  clientAuthor:
+    | { handle: string | null; avatarUrl: string | null; isPublicProfile: boolean }
+    | null
+    | undefined,
+): LooksClientAuthorDto | null {
+  if (!clientAuthor || !clientAuthor.isPublicProfile || !clientAuthor.handle) {
+    return null
+  }
+  return {
+    handle: clientAuthor.handle,
+    avatarUrl: clientAuthor.avatarUrl ?? null,
+  }
+}
 
 type MediaCommentUserShape = {
   id: string
@@ -38,6 +60,8 @@ type MediaCommentUserShape = {
   } | null
   professionalProfile: {
     businessName: string | null
+    firstName: string | null
+    lastName: string | null
     avatarUrl: string | null
   } | null
 }
@@ -160,7 +184,12 @@ function normalizeCommentUser(user: MediaCommentUserShape): {
   const clientFirst = user.clientProfile?.firstName?.trim() ?? ''
   const clientLast = user.clientProfile?.lastName?.trim() ?? ''
   const clientFullName = [clientFirst, clientLast].filter(Boolean).join(' ')
-  const professionalName = user.professionalProfile?.businessName?.trim() ?? ''
+  // Pros resolve through the canonical helper (businessName → real name → null),
+  // so a pro without a business name shows their real name instead of falling to
+  // the generic "User" placeholder. Honors the display-name preference once added.
+  const professionalName = pickProfessionalPublicDisplayName(
+    user.professionalProfile,
+  )
 
   return {
     id: user.id,
@@ -287,13 +316,17 @@ export async function mapLooksFeedMediaToDto(args: {
       ? {
           id: item.professional.id,
           businessName: item.professional.businessName ?? null,
+          firstName: item.professional.firstName ?? null,
+          lastName: item.professional.lastName ?? null,
           handle: item.professional.handle ?? null,
+          nameDisplay: item.professional.nameDisplay ?? null,
           professionType: item.professional.professionType ?? null,
           avatarUrl: item.professional.avatarUrl ?? null,
           location: item.professional.location ?? null,
           followerCount: item.professional._count?.followers ?? 0,
         }
       : null,
+    clientAuthor: mapLooksClientAuthorToDto(item.clientAuthor),
 
     _count: {
       likes: item.likeCount,
@@ -512,6 +545,7 @@ export function mapLooksDetailToDto(args: {
     updatedAt: item.updatedAt.toISOString(),
 
     professional: mapLooksProProfilePreviewToDto(item.professional),
+    clientAuthor: mapLooksClientAuthorToDto(item.clientAuthor),
 
     service: primaryService
       ? {

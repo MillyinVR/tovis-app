@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto'
 
-import { ServiceLocationType } from '@prisma/client'
+import { ProNameDisplay, ServiceLocationType } from '@prisma/client'
 
 import { jsonFail, jsonOk } from '@/app/api/_utils'
 import { resolveDurationWithAddOns } from '@/lib/availability/data/addOnContext'
@@ -505,6 +505,10 @@ export async function GET(req: Request) {
       pro: {
         id: string
         businessName: string | null
+        firstName: string | null
+        lastName: string | null
+        handle: string | null
+        nameDisplay: ProNameDisplay | null
         avatarUrl: string | null
         location: string | null
         offeringId: string
@@ -560,6 +564,10 @@ export async function GET(req: Request) {
           pro: {
             id: row.pro.id,
             businessName: row.pro.businessName,
+            firstName: row.pro.firstName,
+            lastName: row.pro.lastName,
+            handle: row.pro.handle,
+            nameDisplay: row.pro.nameDisplay,
             avatarUrl: row.pro.avatarUrl,
             location: row.pro.location,
             offeringId: row.pro.offeringId,

@@ -3,6 +3,7 @@
 import {
   Prisma,
   ProfessionalLocationType,
+  ProNameDisplay,
   ServiceLocationType,
 } from '@prisma/client'
 
@@ -125,6 +126,10 @@ export type CachedPlacement = {
   lat: number | undefined
   lng: number | undefined
   proBusinessName: string | null
+  proFirstName: string | null
+  proLastName: string | null
+  proHandle: string | null
+  proNameDisplay: ProNameDisplay | null
   proAvatarUrl: string | null
   proLocation: string | null
   serviceName: string | null
@@ -274,6 +279,15 @@ export function parseCachedPlacement(raw: unknown): CachedPlacement | null {
     lat,
     lng,
     proBusinessName: pickString(raw.proBusinessName) ?? null,
+    proFirstName: pickString(raw.proFirstName) ?? null,
+    proLastName: pickString(raw.proLastName) ?? null,
+    proHandle: pickString(raw.proHandle) ?? null,
+    proNameDisplay:
+      raw.proNameDisplay === ProNameDisplay.BUSINESS_NAME ||
+      raw.proNameDisplay === ProNameDisplay.REAL_NAME ||
+      raw.proNameDisplay === ProNameDisplay.HANDLE
+        ? raw.proNameDisplay
+        : null,
     proAvatarUrl: pickString(raw.proAvatarUrl) ?? null,
     proLocation: pickString(raw.proLocation) ?? null,
     serviceName: pickString(raw.serviceName) ?? null,

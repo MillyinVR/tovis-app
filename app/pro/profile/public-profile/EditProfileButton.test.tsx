@@ -35,6 +35,8 @@ vi.mock('@/lib/url', () => ({
   withCacheBuster: (url: string) => url,
 }))
 
+import { ProNameDisplay } from '@prisma/client'
+
 import EditProfileButton from './EditProfileButton'
 
 function makeInitial() {
@@ -45,6 +47,7 @@ function makeInitial() {
     avatarUrl: null,
     professionType: 'BARBER',
     handle: 'tovisstudio',
+    nameDisplay: ProNameDisplay.BUSINESS_NAME,
     isPremium: true,
   }
 }

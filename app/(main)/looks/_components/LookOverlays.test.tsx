@@ -1,3 +1,4 @@
+import { ProNameDisplay } from '@prisma/client'
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 
@@ -25,12 +26,16 @@ function makeItem(overrides: Partial<FeedItem> = {}): FeedItem {
     professional: {
       id: 'pro_1',
       businessName: 'TOVIS Studio',
+      firstName: 'Tori',
+      lastName: 'Morales',
       handle: 'tovisstudio',
+      nameDisplay: ProNameDisplay.BUSINESS_NAME,
       professionType: 'BARBER',
       avatarUrl: null,
       location: 'San Diego, CA',
       followerCount: 0,
     },
+    clientAuthor: null,
     _count: { likes: 3, comments: 1 },
     viewerLiked: false,
     viewerSaved: false,

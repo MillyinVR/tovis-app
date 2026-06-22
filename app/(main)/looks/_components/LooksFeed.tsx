@@ -807,10 +807,13 @@ export default function LooksFeed() {
                     ? {
                         id: item.professional.id,
                         businessName: item.professional.businessName,
+                        firstName: item.professional.firstName,
+                        lastName: item.professional.lastName,
                         avatarUrl: item.professional.avatarUrl ?? null,
                       }
                     : null
                 }
+                clientAuthor={item.clientAuthor}
                 viewerLiked={item.viewerLiked}
                 likeCount={item._count.likes}
                 commentCount={item._count.comments}

@@ -11,6 +11,8 @@ import {
 } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { ProNameDisplay } from '@prisma/client'
+
 import { asTrimmedString, type UnknownRecord } from '@/lib/guards'
 import { errorMessageFromUnknown, readErrorMessage, safeJson } from '@/lib/http'
 import { zClass } from '@/lib/zIndex'
@@ -29,9 +31,32 @@ type Props = {
     avatarUrl: string | null
     professionType: string | null
     handle: string | null
+    nameDisplay: ProNameDisplay
     isPremium: boolean
   }
 }
+
+const NAME_DISPLAY_OPTIONS: ReadonlyArray<{
+  value: ProNameDisplay
+  label: string
+  hint: string
+}> = [
+  {
+    value: ProNameDisplay.BUSINESS_NAME,
+    label: 'Business',
+    hint: 'Show your business name (your real name if none is set).',
+  },
+  {
+    value: ProNameDisplay.REAL_NAME,
+    label: 'Real name',
+    hint: 'Show your first and last name.',
+  },
+  {
+    value: ProNameDisplay.HANDLE,
+    label: 'Handle',
+    hint: 'Show your @handle.',
+  },
+]
 
 type TimeoutHandle = ReturnType<typeof setTimeout>
 
@@ -76,6 +101,9 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
   const [bio, setBio] = useState(initial.bio ?? '')
   const [avatarUrl, setAvatarUrl] = useState(initial.avatarUrl ?? '')
   const [handle, setHandle] = useState(initial.handle ?? '')
+  const [nameDisplay, setNameDisplay] = useState<ProNameDisplay>(
+    initial.nameDisplay,
+  )
 
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string>('')
@@ -299,6 +327,7 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
           location,
           bio,
           avatarUrl: nextAvatarUrl,
+          nameDisplay,
           ...(canEditHandle ? { handle } : {}),
         }),
       })
@@ -465,6 +494,39 @@ export default function EditProfileButton({ canEditHandle, initial }: Props) {
                   placeholder="e.g. Lumara Beauty"
                   disabled={busy}
                 />
+              </Field>
+
+              <Field label="Display your name as">
+                <div className="grid gap-2">
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {NAME_DISPLAY_OPTIONS.map((option) => {
+                      const active = nameDisplay === option.value
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setNameDisplay(option.value)}
+                          disabled={busy}
+                          aria-pressed={active}
+                          className={[
+                            'rounded-xl border px-3 py-2.5 text-[12px] font-black transition',
+                            busy ? 'cursor-not-allowed opacity-70' : '',
+                            active
+                              ? 'border-accentPrimary/60 bg-accentPrimary text-bgPrimary'
+                              : 'border-white/10 bg-bgPrimary text-textPrimary hover:border-white/20',
+                          ].join(' ')}
+                        >
+                          {option.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="text-[11px] text-textSecondary">
+                    {NAME_DISPLAY_OPTIONS.find(
+                      (option) => option.value === nameDisplay,
+                    )?.hint ?? ''}
+                  </div>
+                </div>
               </Field>
 
               <Field label="Profession type">

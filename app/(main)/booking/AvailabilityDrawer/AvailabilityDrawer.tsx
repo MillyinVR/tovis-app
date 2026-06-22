@@ -1750,7 +1750,7 @@ export default function AvailabilityDrawer(props: {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-[6px] truncate text-[16px] font-black text-textPrimary">
                   <span className="truncate">
-                    {formatProfessionalPublicDisplayName({ businessName: primary.businessName })}
+                    {formatProfessionalPublicDisplayName(primary)}
                   </span>
 
                   {primary.isCreator ? (

@@ -3,6 +3,7 @@
 // Shared presentation helpers for the client home sections. Everything here is
 // brand-token driven (no hardcoded hex) so the home stays white-label-ready and
 // flips correctly between dark/light via the BrandProvider variable swap.
+import type { ProNameDisplay } from '@prisma/client'
 import { pickProfessionalPublicDisplayName } from '@/lib/privacy/professionalDisplayName'
 
 // Brand-token gradient pairs mirroring the design's avatar/portrait fills.
@@ -101,6 +102,7 @@ export function professionalName(professional: {
   firstName?: string | null
   lastName?: string | null
   handle?: string | null
+  nameDisplay?: ProNameDisplay | null
 }): string {
   return (
     pickProfessionalPublicDisplayName(professional) ??

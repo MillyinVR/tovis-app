@@ -99,7 +99,8 @@ function parseCard(notification: unknown): FeedCard | null {
     str(offering?.title) ?? str(service?.name) ?? 'Last-minute opening'
 
   const professional = isRecord(opening.professional) ? opening.professional : null
-  const proName = str(professional?.businessName) ?? 'Your pro'
+  const proName =
+    str(professional?.displayName) ?? str(professional?.businessName) ?? 'Your pro'
   const place = str(professional?.locationLabel)
   const meta = [proName, place].filter(Boolean).join(' · ')
 
