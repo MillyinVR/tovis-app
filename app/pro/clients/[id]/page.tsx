@@ -5,12 +5,23 @@ import { Prisma } from '@prisma/client'
 import type { ReactNode } from 'react'
 
 import ClientNameLink from '@/app/_components/ClientNameLink'
+import RemoteImage from '@/app/_components/media/RemoteImage'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
 import { moneyToString } from '@/lib/money'
 import { assertProCanViewClient } from '@/lib/clientVisibility'
+import {
+  computeRelationshipIntelligence,
+  daysLeftInWindow,
+  formatCadence,
+  type IntelBooking,
+  type RelationshipIntelligence,
+} from '@/lib/clients/relationshipIntelligence'
+import { renderMediaUrls } from '@/lib/media/renderUrls'
 import { formatProfessionalPublicSearchText } from '@/lib/privacy/professionalDisplayName'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
+import { loadPublicClientProfileByClientId } from '@/app/u/[handle]/_data/loadPublicClientProfile'
+import PublicProfileView from '@/app/u/[handle]/_components/PublicProfileView'
 
 import EditAlertBannerForm from './EditAlertBannerForm'
 import NewAllergyForm from './NewAllergyForm'
@@ -21,6 +32,20 @@ import type { BadgeTone } from '@/app/_components/ui'
 export const dynamic = 'force-dynamic'
 
 type SearchParams = Record<string, string | string[] | undefined>
+
+type ChartView = 'chart' | 'public'
+
+const CHART_TABS = [
+  { id: 'notes', label: 'Notes' },
+  { id: 'allergies', label: 'Allergies' },
+  { id: 'history', label: 'History' },
+  { id: 'products', label: 'Products' },
+  { id: 'reviews-left', label: 'Reviews' },
+  { id: 'pro-feedback', label: 'Pro feedback' },
+  { id: 'photos', label: 'Photos' },
+] as const
+
+type ChartTab = (typeof CHART_TABS)[number]['id']
 
 type BookingFilter =
   | 'ALL'
@@ -47,6 +72,11 @@ const CLIENT_DETAIL_SELECT = {
   lastName: true,
   phone: true,
   alertBanner: true,
+  // pii-plaintext-read-ok: birthday surfaced on the authorized pro client chart; dateOfBirth is plaintext-by-schema (no encrypted column).
+  dateOfBirth: true,
+  preferredContactMethod: true,
+  handle: true,
+  isPublicProfile: true,
   user: { select: { email: true } },
   notes: {
     orderBy: { createdAt: 'desc' },
@@ -80,6 +110,8 @@ const BOOKING_ROW_SELECT = {
   id: true,
   status: true,
   scheduledFor: true,
+  createdAt: true,
+  finishedAt: true,
   totalDurationMinutes: true,
   totalAmount: true,
   subtotalSnapshot: true,
@@ -158,6 +190,34 @@ const PRO_FEEDBACK_SELECT = {
   },
 } satisfies Prisma.ClientProfessionalNoteSelect
 
+// Before/after timeline. Own craft (professionalId === pro) is always visible to
+// the authoring pro; another pro's craft photos stay private to their author and
+// only surface here once the CLIENT promotes them via a review (reviewId set →
+// PUBLIC), which is world-public anyway. See design doc access matrix +
+// lib/media/publicShareGuard.ts.
+const TIMELINE_MEDIA_SELECT = {
+  id: true,
+  bookingId: true,
+  professionalId: true,
+  phase: true,
+  caption: true,
+  createdAt: true,
+  visibility: true,
+  reviewId: true,
+  storageBucket: true,
+  storagePath: true,
+  thumbBucket: true,
+  thumbPath: true,
+  url: true,
+  thumbUrl: true,
+  booking: {
+    select: {
+      scheduledFor: true,
+      service: { select: { name: true } },
+    },
+  },
+} satisfies Prisma.MediaAssetSelect
+
 type ClientDetailRecord = Prisma.ClientProfileGetPayload<{
   select: typeof CLIENT_DETAIL_SELECT
 }>
@@ -178,8 +238,51 @@ type ProFeedbackRow = Prisma.ClientProfessionalNoteGetPayload<{
   select: typeof PRO_FEEDBACK_SELECT
 }>
 
+const PHASE_ORDER: Record<string, number> = { BEFORE: 0, AFTER: 1, OTHER: 2 }
+
+type TimelinePhoto = {
+  id: string
+  phase: string
+  caption: string | null
+  imageUrl: string | null
+}
+
+type TimelineVisit = {
+  bookingId: string
+  when: Date | null
+  serviceName: string | null
+  isMine: boolean
+  photos: TimelinePhoto[]
+}
+
 function firstParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
+}
+
+function normalizeView(raw: unknown): ChartView {
+  return String(raw || '').trim().toLowerCase() === 'public' ? 'public' : 'chart'
+}
+
+function normalizeTab(raw: unknown): ChartTab {
+  const normalized = String(raw || '').trim().toLowerCase()
+  return CHART_TABS.some((tab) => tab.id === normalized)
+    ? (normalized as ChartTab)
+    : 'notes'
+}
+
+function chartHref(args: {
+  clientId: string
+  view?: ChartView
+  tab?: ChartTab
+}): string {
+  const params = new URLSearchParams()
+  params.set('view', args.view ?? 'chart')
+  if (args.tab) params.set('tab', args.tab)
+  return `/pro/clients/${encodeURIComponent(args.clientId)}?${params.toString()}`
+}
+
+function decimalToNumber(value: Prisma.Decimal | null): number | null {
+  return value === null ? null : Number(value)
 }
 
 function formatDate(value: Date | string): string {
@@ -192,8 +295,16 @@ function formatDate(value: Date | string): string {
   })
 }
 
+function formatShortDate(value: Date): string {
+  return value.toLocaleString(undefined, { month: 'short', day: 'numeric' })
+}
+
 function safeUpper(value: unknown): string {
   return typeof value === 'string' ? value.trim().toUpperCase() : ''
+}
+
+function moneyLabel(amount: number): string {
+  return `$${moneyToString(amount) ?? '0.00'}`
 }
 
 function buildProToClientMessageHref(args: {
@@ -218,6 +329,11 @@ function statusBadgeTone(status: string): BadgeTone {
     default:
       return 'neutral'
   }
+}
+
+function allergyTone(severity: unknown): BadgeTone {
+  const value = safeUpper(severity)
+  return value === 'CRITICAL' || value === 'HIGH' ? 'danger' : 'warn'
 }
 
 function StatusPill({ status }: { status: unknown }) {
@@ -286,48 +402,36 @@ function buildBookingSearchIndex(booking: BookingRow): string {
     .join(' ')
 }
 
-function bookingWhereForFilter(args: {
-  clientId: string
-  proId: string
-  bookingFilter: BookingFilter
-  myServiceIds: string[]
-  now: Date
-}): Prisma.BookingWhereInput {
-  const { clientId, proId, bookingFilter, myServiceIds, now } = args
+// JS mirror of the old bookingWhereForFilter. We load the full client booking set
+// ONCE (it powers the header + relationship intelligence + history), so the
+// history tab filters that in-memory set rather than firing a second query.
+function bookingMatchesFilter(
+  booking: BookingRow,
+  args: {
+    bookingFilter: BookingFilter
+    proId: string
+    myServiceIds: string[]
+    now: Date
+  },
+): boolean {
+  const { bookingFilter, proId, myServiceIds, now } = args
 
-  const where: Prisma.BookingWhereInput = { clientId }
-
-  if (bookingFilter === 'WITH_ME') {
-    where.professionalId = proId
+  switch (bookingFilter) {
+    case 'WITH_ME':
+      return booking.professionalId === proId
+    case 'MATCHES_MY_SERVICES':
+      return myServiceIds.includes(booking.serviceId)
+    case 'UPCOMING':
+      return booking.scheduledFor.getTime() >= now.getTime()
+    case 'PAST':
+      return booking.scheduledFor.getTime() < now.getTime()
+    case 'COMPLETED':
+      return booking.status === 'COMPLETED'
+    case 'CANCELLED':
+      return booking.status === 'CANCELLED'
+    default:
+      return true
   }
-
-  if (bookingFilter === 'UPCOMING') {
-    where.scheduledFor = { gte: now }
-  }
-
-  if (bookingFilter === 'PAST') {
-    where.scheduledFor = { lt: now }
-  }
-
-  if (bookingFilter === 'COMPLETED') {
-    where.status = 'COMPLETED'
-  }
-
-  if (bookingFilter === 'CANCELLED') {
-    where.status = 'CANCELLED'
-  }
-
-  if (bookingFilter === 'MATCHES_MY_SERVICES') {
-    where.serviceId = { in: myServiceIds }
-  }
-
-  return where
-}
-
-function visibleClientIdSetFromRows(
-  rows: Array<{ clientId: string }>,
-): Set<string> {
-  return new Set(rows.map((row) => row.clientId).filter(Boolean))
 }
 
 function upcomingBookingFromRows(rows: BookingRow[]): BookingRow | null {
@@ -364,6 +468,87 @@ function sortProductRecommendations(
       second.aftercareSummary.booking.scheduledFor.getTime() -
       first.aftercareSummary.booking.scheduledFor.getTime(),
   )
+}
+
+function toIntelBookings(rows: BookingRow[]): IntelBooking[] {
+  return rows.map((row) => ({
+    status: row.status,
+    scheduledFor: row.scheduledFor,
+    createdAt: row.createdAt,
+    finishedAt: row.finishedAt,
+    professionalId: row.professionalId,
+    amount:
+      decimalToNumber(row.totalAmount) ??
+      decimalToNumber(row.subtotalSnapshot),
+  }))
+}
+
+// Read-only before/after timeline assembled from MediaAsset.bookingId, gated by
+// the design doc access matrix (own craft always; others only when client-promoted).
+async function loadPhotoTimeline(
+  clientId: string,
+  proId: string,
+): Promise<TimelineVisit[]> {
+  const rows = await prisma.mediaAsset.findMany({
+    where: {
+      mediaType: 'IMAGE',
+      booking: { clientId },
+      OR: [
+        { professionalId: proId },
+        { visibility: 'PUBLIC', reviewId: { not: null } },
+      ],
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 500,
+    select: TIMELINE_MEDIA_SELECT,
+  })
+
+  // Resolve every (signed/public) URL up front in parallel — private images each
+  // need a network round-trip, so a sequential loop would serialize them.
+  const rendered = await Promise.all(
+    rows.map(async (row) => ({
+      row,
+      urls: await renderMediaUrls(row),
+    })),
+  )
+
+  const byBooking = new Map<string, TimelineVisit>()
+
+  for (const { row, urls } of rendered) {
+    const bookingId = row.bookingId
+    if (!bookingId) continue
+
+    let visit = byBooking.get(bookingId)
+    if (!visit) {
+      visit = {
+        bookingId,
+        when: row.booking?.scheduledFor ?? null,
+        serviceName: row.booking?.service?.name ?? null,
+        isMine: row.professionalId === proId,
+        photos: [],
+      }
+      byBooking.set(bookingId, visit)
+    }
+
+    visit.photos.push({
+      id: row.id,
+      phase: row.phase,
+      caption: row.caption,
+      imageUrl: urls.renderThumbUrl ?? urls.renderUrl,
+    })
+  }
+
+  const visits = [...byBooking.values()]
+  for (const visit of visits) {
+    visit.photos.sort(
+      (a, b) => (PHASE_ORDER[a.phase] ?? 9) - (PHASE_ORDER[b.phase] ?? 9),
+    )
+  }
+  visits.sort(
+    (a, b) => (b.when?.getTime() ?? 0) - (a.when?.getTime() ?? 0),
+  )
+
+  return visits
 }
 
 function ClientNotesList({ client }: { client: ClientDetailRecord }) {
@@ -422,7 +607,7 @@ function ClientAllergiesList({ client }: { client: ClientDetailRecord }) {
               {allergy.label}
             </div>
 
-            <Badge tone="neutral" className="shrink-0">
+            <Badge tone={allergyTone(allergy.severity)} className="shrink-0">
               {String(allergy.severity || '').toUpperCase()}
             </Badge>
           </div>
@@ -465,6 +650,10 @@ function BookingFilterForm({
       method="GET"
       action=""
     >
+      {/* Keep the chart/public mode + active tab when applying a filter. */}
+      <input type="hidden" name="view" value="chart" />
+      <input type="hidden" name="tab" value="history" />
+
       <div className="flex items-center gap-2">
         <label
           className="text-[11px] font-black text-textSecondary"
@@ -509,7 +698,7 @@ function BookingFilterForm({
 
       {bookingQ || bookingFilter !== 'ALL' ? (
         <Link
-          href={`/pro/clients/${encodeURIComponent(clientId)}#history`}
+          href={chartHref({ clientId, tab: 'history' })}
           className={buttonClassName({ variant: 'ghost', size: 'sm' })}
         >
           Clear
@@ -788,6 +977,448 @@ function ProFeedbackList({ feedback }: { feedback: ProFeedbackRow[] }) {
   )
 }
 
+function PhotoTimeline({ visits }: { visits: TimelineVisit[] }) {
+  if (visits.length === 0) {
+    return (
+      <div className="rounded-card border border-white/10 bg-bgPrimary p-4 text-[12px] font-semibold text-textSecondary">
+        No before/after photos for this client yet.
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-4">
+      {visits.map((visit) => (
+        <div
+          key={visit.bookingId}
+          className="rounded-card border border-white/10 bg-bgPrimary p-4"
+        >
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="min-w-0 truncate text-[13px] font-black text-textPrimary">
+              {visit.serviceName ?? 'Visit'}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {visit.isMine ? (
+                <Badge tone="neutral" size="sm">
+                  Me
+                </Badge>
+              ) : (
+                <Badge tone="info" size="sm">
+                  Client-shared
+                </Badge>
+              )}
+              <span className="text-[11px] font-semibold text-textSecondary">
+                {visit.when ? formatDate(visit.when) : '—'}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            {visit.photos.map((photo) => (
+              <div key={photo.id} className="grid gap-1">
+                <div className="relative aspect-square overflow-hidden rounded-card border border-white/10 bg-bgSecondary">
+                  {photo.imageUrl ? (
+                    <RemoteImage
+                      src={photo.imageUrl}
+                      alt={photo.caption ?? `${photo.phase} photo`}
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                      width={240}
+                      height={240}
+                    />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center text-[11px] font-semibold text-textSecondary">
+                      No preview
+                    </div>
+                  )}
+                  <span className="absolute left-1 top-1">
+                    <Badge tone="neutral" size="sm">
+                      {photo.phase}
+                    </Badge>
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function WindowCountdownBadge({
+  accessUntil,
+  now,
+}: {
+  accessUntil: Date | null
+  now: Date
+}) {
+  if (!accessUntil) {
+    return <Badge tone="success">Access open</Badge>
+  }
+
+  const daysLeft = daysLeftInWindow(accessUntil, now)
+  const tone: BadgeTone = daysLeft <= 7 ? 'warn' : 'info'
+  const left =
+    daysLeft === 0 ? 'closes today' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`
+
+  return (
+    <Badge tone={tone}>
+      <span aria-hidden>⏳</span>
+      Access · {left} · closes {formatShortDate(accessUntil)}
+    </Badge>
+  )
+}
+
+function ViewToggle({
+  clientId,
+  view,
+  tab,
+}: {
+  clientId: string
+  view: ChartView
+  tab: ChartTab
+}) {
+  const segments: Array<{ value: ChartView; label: string; href: string }> = [
+    { value: 'chart', label: 'Chart', href: chartHref({ clientId, view: 'chart', tab }) },
+    { value: 'public', label: 'Public profile', href: chartHref({ clientId, view: 'public' }) },
+  ]
+
+  return (
+    <div
+      className="inline-flex rounded-full border border-white/10 bg-bgPrimary p-1"
+      role="tablist"
+      aria-label="Chart view"
+    >
+      {segments.map((segment) => {
+        const active = segment.value === view
+        return (
+          <Link
+            key={segment.value}
+            href={segment.href}
+            role="tab"
+            aria-selected={active}
+            className={[
+              'rounded-full px-4 py-1.5 text-[12px] font-black transition',
+              active
+                ? 'bg-accentPrimary text-onAccent'
+                : 'text-textSecondary hover:text-textPrimary',
+            ].join(' ')}
+          >
+            {segment.label}
+          </Link>
+        )
+      })}
+    </div>
+  )
+}
+
+function TabNav({
+  clientId,
+  activeTab,
+}: {
+  clientId: string
+  activeTab: ChartTab
+}) {
+  return (
+    <nav className="flex flex-wrap gap-2" aria-label="Chart sections">
+      {CHART_TABS.map((tab) => {
+        const active = tab.id === activeTab
+        return (
+          <Link
+            key={tab.id}
+            href={chartHref({ clientId, tab: tab.id })}
+            aria-current={active ? 'page' : undefined}
+            className={buttonClassName({
+              variant: active ? 'primary' : 'ghost',
+              size: 'sm',
+            })}
+          >
+            {tab.label}
+          </Link>
+        )
+      })}
+    </nav>
+  )
+}
+
+function SafetyStrip({ client }: { client: ClientDetailRecord }) {
+  const hasAllergies = client.allergies.length > 0
+
+  return (
+    <section
+      aria-label="Safety"
+      className="tovis-glass rounded-card border border-toneWarn/30 bg-bgSecondary p-4"
+    >
+      <div className="text-[11px] font-black uppercase tracking-[0.1em] text-textSecondary">
+        Safety
+      </div>
+
+      {client.alertBanner ? (
+        <div className="mt-2 flex items-start gap-2 rounded-card border border-toneWarn/30 bg-bgPrimary p-3 text-[13px] font-black text-toneWarn">
+          <span aria-hidden>⚠</span>
+          <span className="min-w-0">{client.alertBanner}</span>
+        </div>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {hasAllergies ? (
+          client.allergies.map((allergy) => (
+            <Badge key={allergy.id} tone={allergyTone(allergy.severity)}>
+              {allergy.label}
+              <span className="opacity-70">
+                · {String(allergy.severity || '').toUpperCase()}
+              </span>
+            </Badge>
+          ))
+        ) : (
+          <span className="text-[12px] font-semibold text-textSecondary">
+            {client.alertBanner
+              ? 'No allergies on file.'
+              : 'No allergies or alerts on file.'}
+          </span>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function SmartFlagsStrip({
+  flags,
+}: {
+  flags: RelationshipIntelligence['flags']
+}) {
+  if (flags.length === 0) return null
+
+  return (
+    <div className="flex flex-wrap gap-2" aria-label="Smart flags">
+      {flags.map((flag) => (
+        <Badge key={flag.key} tone={flag.tone}>
+          {flag.label}
+        </Badge>
+      ))}
+    </div>
+  )
+}
+
+function IntelStat({
+  label,
+  value,
+  hint,
+}: {
+  label: string
+  value: string
+  hint?: string
+}) {
+  return (
+    <div className="rounded-card border border-white/10 bg-bgPrimary p-3">
+      <div className="text-[10px] font-black uppercase tracking-[0.1em] text-textSecondary">
+        {label}
+      </div>
+      <div className="mt-1 text-[15px] font-black text-textPrimary">{value}</div>
+      {hint ? (
+        <div className="mt-0.5 text-[11px] font-semibold text-textSecondary">
+          {hint}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function RelationshipIntelligenceCard({
+  intel,
+  referralSource,
+}: {
+  intel: RelationshipIntelligence
+  referralSource: string | null
+}) {
+  const cadence = formatCadence(intel.cadenceDays)
+  const leadTime =
+    intel.avgLeadTimeDays === null
+      ? null
+      : `${Math.max(1, Math.round(intel.avgLeadTimeDays))} day${
+          Math.round(intel.avgLeadTimeDays) === 1 ? '' : 's'
+        } ahead`
+  const pattern = [intel.preferredDay, intel.preferredTimeOfDay]
+    .filter(Boolean)
+    .join(' · ')
+
+  return (
+    <Card variant="glass" padding="md">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <IntelStat
+          label="Lifetime value (you)"
+          value={moneyLabel(intel.lifetimeValue.withYou)}
+          hint={`${moneyLabel(intel.lifetimeValue.platform)} platform-wide`}
+        />
+        <IntelStat
+          label="Visits with you"
+          value={String(intel.completedVisitsWithYou)}
+          hint={`${intel.completedVisits} platform-wide`}
+        />
+        <IntelStat
+          label="Cadence"
+          value={cadence ?? '—'}
+          hint={
+            intel.daysSinceLastVisit === null
+              ? undefined
+              : `${intel.daysSinceLastVisit} days since last visit`
+          }
+        />
+        <IntelStat label="Lead time" value={leadTime ?? '—'} />
+        <IntelStat
+          label="Pattern"
+          value={pattern || '—'}
+          hint={intel.cancelCount ? `${intel.cancelCount} cancelled` : undefined}
+        />
+        <IntelStat
+          label="Rebooking"
+          value={
+            intel.hasUpcoming
+              ? 'Booked'
+              : intel.retentionRisk
+                ? 'At risk'
+                : intel.lastVisitAt
+                  ? 'Lapsing'
+                  : '—'
+          }
+          hint={
+            intel.daysUntilBirthday !== null && intel.daysUntilBirthday <= 30
+              ? `Birthday in ${intel.daysUntilBirthday}d`
+              : undefined
+          }
+        />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold text-textSecondary">
+        {intel.preferredContactMethod ? (
+          <span>
+            Prefers{' '}
+            <span className="font-black text-textPrimary">
+              {intel.preferredContactMethod}
+            </span>
+          </span>
+        ) : null}
+        {referralSource ? (
+          <span>
+            Source:{' '}
+            <span className="font-black text-textPrimary">{referralSource}</span>
+          </span>
+        ) : null}
+      </div>
+    </Card>
+  )
+}
+
+function tabContent(args: {
+  tab: ChartTab
+  client: ClientDetailRecord
+  proId: string
+  bookingRowsAll: BookingRow[]
+  bookingRowsFiltered: BookingRow[]
+  bookingFilter: BookingFilter
+  bookingQ: string
+  productRecs: ProductRecommendationRow[]
+  clientLeftReviews: ClientLeftReviewRow[]
+  proFeedback: ProFeedbackRow[]
+  photoVisits: TimelineVisit[]
+}): ReactNode {
+  const { tab, client, proId } = args
+
+  switch (tab) {
+    case 'allergies':
+      return (
+        <SectionCard
+          id="allergies"
+          title="Allergies & sensitivities"
+          subtitle="Anything that could cause a reaction or needs extra care. The “do not fry their scalp” section."
+        >
+          <div className="mb-4">
+            <NewAllergyForm clientId={client.id} />
+          </div>
+
+          <ClientAllergiesList client={client} />
+        </SectionCard>
+      )
+    case 'history':
+      return (
+        <SectionCard
+          id="history"
+          title="Service history"
+          subtitle="Search and filter all bookings for this client."
+          right={
+            <BookingFilterForm
+              clientId={client.id}
+              bookingFilter={args.bookingFilter}
+              bookingQ={args.bookingQ}
+            />
+          }
+        >
+          <ServiceHistoryList
+            bookingRowsFiltered={args.bookingRowsFiltered}
+            bookingRowsAll={args.bookingRowsAll}
+            proId={proId}
+          />
+        </SectionCard>
+      )
+    case 'products':
+      return (
+        <SectionCard
+          id="products"
+          title="Products recommended"
+          subtitle="Recommendations tied to aftercare entries."
+        >
+          <ProductRecommendationsList productRecs={args.productRecs} />
+        </SectionCard>
+      )
+    case 'reviews-left':
+      return (
+        <SectionCard
+          id="reviews-left"
+          title="Reviews they left"
+          subtitle="All reviews this client has left (across any professional)."
+        >
+          <ClientLeftReviewsList reviews={args.clientLeftReviews} />
+        </SectionCard>
+      )
+    case 'pro-feedback':
+      return (
+        <SectionCard
+          id="pro-feedback"
+          title="Pro feedback"
+          subtitle="Notes from professionals who serviced this client in the past (shared with pros)."
+        >
+          <ProFeedbackList feedback={args.proFeedback} />
+        </SectionCard>
+      )
+    case 'photos':
+      return (
+        <SectionCard
+          id="photos"
+          title="Before / after photos"
+          subtitle="Per-visit gallery. Your own craft is always here; another pro's photos appear only when the client has shared them publicly."
+        >
+          <PhotoTimeline visits={args.photoVisits} />
+        </SectionCard>
+      )
+    case 'notes':
+    default:
+      return (
+        <SectionCard
+          id="notes"
+          title="Pro notes"
+          subtitle="Private notes visible to you (and admins). Preferences, patterns, and anything you don’t want to forget."
+        >
+          <div className="mb-4">
+            <NewNoteForm clientId={client.id} />
+          </div>
+
+          <ClientNotesList client={client} />
+        </SectionCard>
+      )
+  }
+}
+
 export default async function ClientDetailPage(props: {
   params: Promise<{ id: string }>
   searchParams?: Promise<SearchParams>
@@ -808,38 +1439,65 @@ export default async function ClientDetailPage(props: {
   const gate = await assertProCanViewClient(proId, clientId)
   if (!gate.ok) redirect('/pro/clients')
 
+  const accessUntil = gate.visibility.accessUntil
   const messageHref = buildProToClientMessageHref({ proId, clientId })
 
   const searchParams =
     (await props.searchParams?.catch(() => ({} as SearchParams))) ??
     ({} as SearchParams)
 
-  const bookingQ = firstParam(searchParams.q).trim()
-  const bookingFilter = normalizeBookingFilter(
-    firstParam(searchParams.bookingFilter),
-  )
-
+  const view = normalizeView(firstParam(searchParams.view))
+  const tab = normalizeTab(firstParam(searchParams.tab))
   const now = new Date()
 
-  const myOfferings = await prisma.professionalServiceOffering.findMany({
-    where: { professionalId: proId, isActive: true },
-    select: { serviceId: true },
-    take: 500,
-  })
+  // ---- Public-profile mode: render what the world sees (or an empty state). ----
+  if (view === 'public') {
+    const publicData = await loadPublicClientProfileByClientId(clientId)
 
-  const myServiceIds = myOfferings
-    .map((offering) => offering.serviceId)
-    .filter(Boolean)
+    return (
+      <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8 text-textPrimary">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <Link
+            href="/pro/clients"
+            className={buttonClassName({ variant: 'ghost', size: 'sm' })}
+          >
+            ← Back to clients
+          </Link>
 
-  const bookingWhere = bookingWhereForFilter({
-    clientId,
-    proId,
-    bookingFilter,
-    myServiceIds,
-    now,
-  })
+          <WindowCountdownBadge accessUntil={accessUntil} now={now} />
+        </div>
 
-  const [client, bookingRowsAll, productRecs, clientLeftReviews, proFeedback] =
+        <div className="mb-6">
+          <ViewToggle clientId={clientId} view={view} tab={tab} />
+        </div>
+
+        {publicData ? (
+          <PublicProfileView
+            data={publicData}
+            followMode="hidden"
+            loginHref=""
+          />
+        ) : (
+          <Card variant="glass" padding="lg">
+            <div className="grid gap-1 text-center">
+              <div className="text-[15px] font-black text-textPrimary">
+                No public profile yet
+              </div>
+              <div className="text-[12px] font-semibold text-textSecondary">
+                This client hasn&apos;t made a public profile yet.
+              </div>
+            </div>
+          </Card>
+        )}
+      </main>
+    )
+  }
+
+  // ---- Chart mode. ----
+  // One bookings query powers the header, relationship intelligence, AND the
+  // history tab (filtered in-memory). Heavy per-tab list queries only run for the
+  // active tab. Cheap counts run always (they feed the safety/intelligence zone).
+  const [client, bookingRowsAll, reviewCount, referredCount, wasReferred] =
     await Promise.all([
       prisma.clientProfile.findUnique({
         where: { id: clientId },
@@ -853,43 +1511,37 @@ export default async function ClientDetailPage(props: {
         },
       }),
       prisma.booking.findMany({
-        where: bookingWhere,
+        where: { clientId },
         orderBy: { scheduledFor: 'desc' },
         take: 2000,
         select: BOOKING_ROW_SELECT,
       }),
-      prisma.productRecommendation.findMany({
+      prisma.review.count({ where: { clientId } }),
+      prisma.referral.count({
         where: {
-          aftercareSummary: {
-            booking: {
-              clientId,
-            },
-          },
+          referrerClientId: clientId,
+          status: { in: ['CONFIRMED', 'CONVERTED', 'REWARDED'] },
         },
-        select: PRODUCT_REC_SELECT,
-        take: 2000,
       }),
-      prisma.review.findMany({
-        where: { clientId },
-        orderBy: { createdAt: 'desc' },
-        take: 2000,
-        select: CLIENT_LEFT_REVIEW_SELECT,
-      }),
-      prisma.clientProfessionalNote.findMany({
-        where: {
-          clientId,
-          visibility: 'PROFESSIONALS_ONLY',
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 2000,
-        select: PRO_FEEDBACK_SELECT,
-      }),
+      prisma.referral
+        .count({ where: { referredClientId: clientId } })
+        .then((count) => count > 0),
     ])
 
   if (!client) redirect('/pro/clients')
 
-  const visibleClientIdSet = visibleClientIdSetFromRows([{ clientId }])
-  const canSeeClient = visibleClientIdSet.has(client.id)
+  const intel = computeRelationshipIntelligence({
+    bookings: toIntelBookings(bookingRowsAll),
+    proId,
+    now,
+    reviewCount,
+    noteCount: client.notes.length,
+    referredCount,
+    wasReferred,
+    dateOfBirth: client.dateOfBirth ?? null,
+    preferredContactMethod: client.preferredContactMethod ?? null,
+  })
+  const referralSource = wasReferred ? 'Referred by a client' : null
 
   const totalVisits = bookingRowsAll.length
   const lastVisit = totalVisits ? bookingRowsAll[0] : null
@@ -898,10 +1550,58 @@ export default async function ClientDetailPage(props: {
   const email = client.user?.email || ''
   const phone = client.phone || ''
 
-  const bookingRowsFiltered = filterBookingsBySearch({
-    rows: bookingRowsAll,
-    query: bookingQ,
-  })
+  // History-tab inputs (filter the already-loaded set; no extra query).
+  const bookingQ = firstParam(searchParams.q).trim()
+  const bookingFilter = normalizeBookingFilter(
+    firstParam(searchParams.bookingFilter),
+  )
+
+  let myServiceIds: string[] = []
+  let bookingRowsFiltered: BookingRow[] = []
+  if (tab === 'history') {
+    if (bookingFilter === 'MATCHES_MY_SERVICES') {
+      const myOfferings = await prisma.professionalServiceOffering.findMany({
+        where: { professionalId: proId, isActive: true },
+        select: { serviceId: true },
+        take: 500,
+      })
+      myServiceIds = myOfferings.map((o) => o.serviceId).filter(Boolean)
+    }
+    const matched = bookingRowsAll.filter((booking) =>
+      bookingMatchesFilter(booking, { bookingFilter, proId, myServiceIds, now }),
+    )
+    bookingRowsFiltered = filterBookingsBySearch({ rows: matched, query: bookingQ })
+  }
+
+  // Per-tab heavy queries — only the active tab pays for its data.
+  let productRecs: ProductRecommendationRow[] = []
+  let clientLeftReviews: ClientLeftReviewRow[] = []
+  let proFeedback: ProFeedbackRow[] = []
+  let photoVisits: TimelineVisit[] = []
+
+  if (tab === 'products') {
+    productRecs = await prisma.productRecommendation.findMany({
+      where: { aftercareSummary: { booking: { clientId } } },
+      select: PRODUCT_REC_SELECT,
+      take: 2000,
+    })
+  } else if (tab === 'reviews-left') {
+    clientLeftReviews = await prisma.review.findMany({
+      where: { clientId },
+      orderBy: { createdAt: 'desc' },
+      take: 2000,
+      select: CLIENT_LEFT_REVIEW_SELECT,
+    })
+  } else if (tab === 'pro-feedback') {
+    proFeedback = await prisma.clientProfessionalNote.findMany({
+      where: { clientId, visibility: 'PROFESSIONALS_ONLY' },
+      orderBy: { createdAt: 'desc' },
+      take: 2000,
+      select: PRO_FEEDBACK_SELECT,
+    })
+  } else if (tab === 'photos') {
+    photoVisits = await loadPhotoTimeline(clientId, proId)
+  }
 
   return (
     <main className="mx-auto w-full max-w-240 px-4 pb-24 pt-8 text-textPrimary">
@@ -913,17 +1613,18 @@ export default async function ClientDetailPage(props: {
           ← Back to clients
         </Link>
 
-        <div className="text-[11px] font-semibold text-textSecondary">
-          Visibility:{' '}
-          <span className="font-black text-textPrimary">Granted</span>
-        </div>
+        <WindowCountdownBadge accessUntil={accessUntil} now={now} />
       </div>
 
-      <header className="tovis-glass mb-6 rounded-card border border-white/10 bg-bgSecondary p-5">
+      <div className="mb-6">
+        <ViewToggle clientId={clientId} view={view} tab={tab} />
+      </div>
+
+      <header className="tovis-glass mb-4 rounded-card border border-white/10 bg-bgSecondary p-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="min-w-0">
             <h1 className="text-[22px] font-black text-textPrimary">
-              <ClientNameLink canLink={canSeeClient} clientId={client.id}>
+              <ClientNameLink canLink clientId={client.id}>
                 {client.firstName} {client.lastName}
               </ClientNameLink>
             </h1>
@@ -932,13 +1633,6 @@ export default async function ClientDetailPage(props: {
               {email ? email : 'No email on file'}
               {phone ? ` • ${phone}` : ''}
             </div>
-
-            {client.alertBanner ? (
-              <Badge tone="warn" className="mt-3 max-w-full">
-                <span aria-hidden>⚠</span>
-                <span className="truncate">{client.alertBanner}</span>
-              </Badge>
-            ) : null}
           </div>
 
           <div className="grid gap-2 md:text-right">
@@ -997,92 +1691,40 @@ export default async function ClientDetailPage(props: {
         </div>
       </header>
 
-      <nav className="mb-6 flex flex-wrap gap-2">
-        {[
-          { id: 'notes', label: 'Notes' },
-          { id: 'allergies', label: 'Allergies' },
-          { id: 'history', label: 'Service history' },
-          { id: 'products', label: 'Products' },
-          { id: 'reviews-left', label: 'Reviews they left' },
-          { id: 'pro-feedback', label: 'Pro feedback' },
-        ].map((tab) => (
-          <Link
-            key={tab.id}
-            href={`#${tab.id}`}
-            className={buttonClassName({ variant: 'ghost', size: 'sm' })}
-          >
-            {tab.label}
-          </Link>
-        ))}
-      </nav>
+      {/* Pinned safety strip — always above the tabs, regardless of active tab. */}
+      <div className="mb-4">
+        <SafetyStrip client={client} />
+      </div>
+
+      <div className="mb-4">
+        <SmartFlagsStrip flags={intel.flags} />
+      </div>
+
+      <div className="mb-6">
+        <RelationshipIntelligenceCard
+          intel={intel}
+          referralSource={referralSource}
+        />
+      </div>
+
+      <div className="mb-6">
+        <TabNav clientId={client.id} activeTab={tab} />
+      </div>
 
       <div className="grid gap-6">
-        <SectionCard
-          id="notes"
-          title="Pro notes"
-          subtitle="Private notes visible to you (and admins). Preferences, patterns, and anything you don’t want to forget."
-        >
-          <div className="mb-4">
-            <NewNoteForm clientId={client.id} />
-          </div>
-
-          <ClientNotesList client={client} />
-        </SectionCard>
-
-        <SectionCard
-          id="allergies"
-          title="Allergies & sensitivities"
-          subtitle="Anything that could cause a reaction or needs extra care. The “do not fry their scalp” section."
-        >
-          <div className="mb-4">
-            <NewAllergyForm clientId={client.id} />
-          </div>
-
-          <ClientAllergiesList client={client} />
-        </SectionCard>
-
-        <SectionCard
-          id="history"
-          title="Service history"
-          subtitle="Search and filter all bookings for this client."
-          right={
-            <BookingFilterForm
-              clientId={client.id}
-              bookingFilter={bookingFilter}
-              bookingQ={bookingQ}
-            />
-          }
-        >
-          <ServiceHistoryList
-            bookingRowsFiltered={bookingRowsFiltered}
-            bookingRowsAll={bookingRowsAll}
-            proId={proId}
-          />
-        </SectionCard>
-
-        <SectionCard
-          id="products"
-          title="Products recommended"
-          subtitle="Recommendations tied to aftercare entries."
-        >
-          <ProductRecommendationsList productRecs={productRecs} />
-        </SectionCard>
-
-        <SectionCard
-          id="reviews-left"
-          title="Reviews they left"
-          subtitle="All reviews this client has left (across any professional)."
-        >
-          <ClientLeftReviewsList reviews={clientLeftReviews} />
-        </SectionCard>
-
-        <SectionCard
-          id="pro-feedback"
-          title="Pro feedback"
-          subtitle="Notes from professionals who serviced this client in the past (shared with pros)."
-        >
-          <ProFeedbackList feedback={proFeedback} />
-        </SectionCard>
+        {tabContent({
+          tab,
+          client,
+          proId,
+          bookingRowsAll,
+          bookingRowsFiltered,
+          bookingFilter,
+          bookingQ,
+          productRecs,
+          clientLeftReviews,
+          proFeedback,
+          photoVisits,
+        })}
       </div>
     </main>
   )
