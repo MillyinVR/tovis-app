@@ -10,10 +10,20 @@ const mocks = vi.hoisted(() => ({
   nfcCardFindUnique: vi.fn(),
   professionalProfileFindUnique: vi.fn(),
   tapIntentCreate: vi.fn(),
+  isWithinRateLimit: vi.fn(),
+  isNonInteractive: vi.fn(),
+  recordTapEvent: vi.fn(),
+  consumeTapIntent: vi.fn(),
+  checkReadiness: vi.fn(),
+  headers: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
   redirect: mocks.redirect,
+}))
+
+vi.mock('next/headers', () => ({
+  headers: mocks.headers,
 }))
 
 vi.mock('@/lib/currentUser', () => ({
@@ -34,11 +44,29 @@ vi.mock('@/lib/prisma', () => ({
   },
 }))
 
-import TapPage from './page'
+vi.mock('@/lib/nfc/tapRateLimit', () => ({
+  isNfcTapWithinRateLimit: mocks.isWithinRateLimit,
+}))
 
-function makeRedirectError(href: string): Error {
-  return new Error(`REDIRECT:${href}`)
-}
+vi.mock('@/lib/nfc/tapRequest', () => ({
+  isNonInteractiveTapRequest: mocks.isNonInteractive,
+}))
+
+vi.mock('@/lib/nfc/attributionEvents', () => ({
+  recordNfcCardTappedEvent: mocks.recordTapEvent,
+  // The page only imports the recorder; constants are unused here.
+  NFC_ATTRIBUTION_EVENT: {},
+}))
+
+vi.mock('@/lib/tapIntentConsume', () => ({
+  consumeTapIntent: mocks.consumeTapIntent,
+}))
+
+vi.mock('@/lib/pro/readiness/proReadiness', () => ({
+  checkProReadinessForEntryPoint: mocks.checkReadiness,
+}))
+
+import TapPage from './page'
 
 function makeCard(overrides?: {
   id?: string
@@ -52,23 +80,15 @@ function makeCard(overrides?: {
     id: overrides?.id ?? 'card_1',
     type: overrides?.type ?? NfcCardType.UNASSIGNED,
     isActive: overrides?.isActive ?? true,
-    claimedAt:
-      overrides && 'claimedAt' in overrides
-        ? overrides.claimedAt
-        : null,
+    claimedAt: overrides && 'claimedAt' in overrides ? overrides.claimedAt : null,
     professionalId:
-      overrides && 'professionalId' in overrides
-        ? overrides.professionalId
-        : null,
+      overrides && 'professionalId' in overrides ? overrides.professionalId : null,
     tenant: { slug: overrides?.tenantSlug ?? 'tovis-root' },
   }
 }
 
 function makeUser(overrides?: { id?: string }) {
-  return {
-    id: overrides?.id ?? 'user_1',
-    role: 'CLIENT',
-  }
+  return { id: overrides?.id ?? 'user_1', role: 'CLIENT' }
 }
 
 async function renderPage(args?: {
@@ -76,15 +96,11 @@ async function renderPage(args?: {
   searchParams?: Record<string, string | undefined>
 }) {
   const props: Parameters<typeof TapPage>[0] = {
-    params: Promise.resolve({
-      cardId: args?.cardId ?? 'card_1',
-    }),
+    params: Promise.resolve({ cardId: args?.cardId ?? 'card_1' }),
   }
-
   if (args?.searchParams) {
     props.searchParams = Promise.resolve(args.searchParams)
   }
-
   return TapPage(props)
 }
 
@@ -95,125 +111,118 @@ describe('app/t/[cardId]/page.tsx', () => {
     vi.setSystemTime(TEST_NOW)
 
     mocks.redirect.mockImplementation((href: string) => {
-      throw makeRedirectError(href)
+      throw new Error(`REDIRECT:${href}`)
+    })
+
+    mocks.isWithinRateLimit.mockResolvedValue(true)
+    mocks.isNonInteractive.mockReturnValue(false)
+    mocks.headers.mockResolvedValue({ get: () => null })
+    mocks.recordTapEvent.mockResolvedValue(undefined)
+    mocks.consumeTapIntent.mockResolvedValue({ ok: true, nextUrl: '/looks' })
+    mocks.checkReadiness.mockResolvedValue({
+      ok: true,
+      liveModes: ['SALON'],
+      readyLocationIds: ['loc_1'],
     })
 
     mocks.getCurrentUser.mockResolvedValue(null)
-
     mocks.nfcCardFindUnique.mockResolvedValue(makeCard())
-
     mocks.professionalProfileFindUnique.mockResolvedValue({
       id: 'pro_1',
       handleNormalized: 'tovis-studio',
       isPremium: true,
     })
-
-    mocks.tapIntentCreate.mockResolvedValue({
-      id: 'tap_intent_1',
-    })
+    mocks.tapIntentCreate.mockResolvedValue({ id: 'tap_intent_1' })
   })
 
-  it('redirects to invalid page when card does not exist', async () => {
+  it('redirects to the rate-limit page and skips work when over the limit', async () => {
+    mocks.isWithinRateLimit.mockResolvedValueOnce(false)
+
+    await expect(renderPage()).rejects.toThrow('REDIRECT:/nfc/invalid?reason=rate')
+
+    expect(mocks.nfcCardFindUnique).not.toHaveBeenCalled()
+    expect(mocks.tapIntentCreate).not.toHaveBeenCalled()
+  })
+
+  it('redirects to invalid when card does not exist', async () => {
     mocks.nfcCardFindUnique.mockResolvedValueOnce(null)
 
     await expect(renderPage()).rejects.toThrow('REDIRECT:/nfc/invalid')
-
-    expect(mocks.nfcCardFindUnique).toHaveBeenCalledWith({
-      where: {
-        id: 'card_1',
-      },
-      select: {
-        id: true,
-        type: true,
-        isActive: true,
-        claimedAt: true,
-        professionalId: true,
-        tenant: { select: { slug: true } },
-      },
-    })
-
     expect(mocks.tapIntentCreate).not.toHaveBeenCalled()
   })
 
-  it('redirects to invalid page when card is inactive', async () => {
-    mocks.nfcCardFindUnique.mockResolvedValueOnce(
-      makeCard({
-        isActive: false,
-      }),
-    )
+  it('redirects to invalid when card is inactive', async () => {
+    mocks.nfcCardFindUnique.mockResolvedValueOnce(makeCard({ isActive: false }))
 
     await expect(renderPage()).rejects.toThrow('REDIRECT:/nfc/invalid')
-
     expect(mocks.tapIntentCreate).not.toHaveBeenCalled()
   })
 
-  it('creates CLAIM_CARD intent and redirects unauthenticated user to signup with tap intent', async () => {
+  it('skips the tap write and redirects for non-interactive (bot/prefetch) requests', async () => {
+    mocks.isNonInteractive.mockReturnValueOnce(true)
     mocks.nfcCardFindUnique.mockResolvedValueOnce(
-      makeCard({
-        id: 'card_unclaimed_1',
-        type: NfcCardType.UNASSIGNED,
-        claimedAt: null,
-      }),
+      makeCard({ id: 'card_unclaimed_1', type: NfcCardType.UNASSIGNED }),
     )
 
-    await expect(
-      renderPage({
-        cardId: 'card_unclaimed_1',
-      }),
-    ).rejects.toThrow('REDIRECT:/signup?ti=tap_intent_1')
+    await expect(renderPage({ cardId: 'card_unclaimed_1' })).rejects.toThrow(
+      'REDIRECT:/signup',
+    )
+
+    expect(mocks.tapIntentCreate).not.toHaveBeenCalled()
+    expect(mocks.recordTapEvent).not.toHaveBeenCalled()
+  })
+
+  it('creates a CLAIM_CARD intent (empty payload) and sends an anon user to signup with ti', async () => {
+    mocks.nfcCardFindUnique.mockResolvedValueOnce(
+      makeCard({ id: 'card_unclaimed_1', type: NfcCardType.UNASSIGNED }),
+    )
+
+    await expect(renderPage({ cardId: 'card_unclaimed_1' })).rejects.toThrow(
+      'REDIRECT:/signup?ti=tap_intent_1',
+    )
 
     expect(mocks.tapIntentCreate).toHaveBeenCalledWith({
       data: {
         cardId: 'card_unclaimed_1',
         userId: null,
         intentType: 'CLAIM_CARD',
-        payloadJson: {
-          nextUrl: '/signup',
-        },
+        payloadJson: {},
         expiresAt: new Date('2026-04-12T12:30:00.000Z'),
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     })
+    expect(mocks.recordTapEvent).toHaveBeenCalledTimes(1)
+    expect(mocks.consumeTapIntent).not.toHaveBeenCalled()
   })
 
-  it('creates CLAIM_CARD intent for claimed UNASSIGNED card because UNASSIGNED is treated as unclaimed', async () => {
+  it('consumes the intent for a logged-in tapper and redirects to the consumed nextUrl', async () => {
     mocks.getCurrentUser.mockResolvedValueOnce(makeUser())
-
+    mocks.consumeTapIntent.mockResolvedValueOnce({ ok: true, nextUrl: '/looks' })
     mocks.nfcCardFindUnique.mockResolvedValueOnce(
-      makeCard({
-        id: 'card_unassigned_claimed_1',
-        type: NfcCardType.UNASSIGNED,
-        claimedAt: new Date('2026-04-10T12:00:00.000Z'),
-      }),
+      makeCard({ id: 'card_unclaimed_1', type: NfcCardType.UNASSIGNED }),
     )
 
-    await expect(
-      renderPage({
-        cardId: 'card_unassigned_claimed_1',
-      }),
-    ).rejects.toThrow('REDIRECT:/signup?ti=tap_intent_1')
+    await expect(renderPage({ cardId: 'card_unclaimed_1' })).rejects.toThrow(
+      'REDIRECT:/looks',
+    )
 
     expect(mocks.tapIntentCreate).toHaveBeenCalledWith({
       data: {
-        cardId: 'card_unassigned_claimed_1',
+        cardId: 'card_unclaimed_1',
         userId: 'user_1',
         intentType: 'CLAIM_CARD',
-        payloadJson: {
-          nextUrl: '/signup',
-        },
+        payloadJson: {},
         expiresAt: new Date('2026-04-12T12:30:00.000Z'),
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
+    })
+    expect(mocks.consumeTapIntent).toHaveBeenCalledWith({
+      tapIntentId: 'tap_intent_1',
+      userId: 'user_1',
     })
   })
 
-  it('creates BOOK_PRO intent and redirects premium pro card to handle page with tap intent', async () => {
-    mocks.getCurrentUser.mockResolvedValueOnce(makeUser())
-
+  it('creates a BOOK_PRO intent for a premium pro and sends an anon user to the handle page', async () => {
     mocks.nfcCardFindUnique.mockResolvedValueOnce(
       makeCard({
         id: 'card_pro_1',
@@ -223,49 +232,32 @@ describe('app/t/[cardId]/page.tsx', () => {
       }),
     )
 
-    await expect(
-      renderPage({
-        cardId: 'card_pro_1',
-      }),
-    ).rejects.toThrow('REDIRECT:/p/tovis-studio?ti=tap_intent_1')
+    await expect(renderPage({ cardId: 'card_pro_1' })).rejects.toThrow(
+      'REDIRECT:/p/tovis-studio?ti=tap_intent_1',
+    )
 
-    expect(mocks.professionalProfileFindUnique).toHaveBeenCalledWith({
-      where: {
-        id: 'pro_1',
-      },
-      select: {
-        id: true,
-        handleNormalized: true,
-        isPremium: true,
-      },
+    expect(mocks.checkReadiness).toHaveBeenCalledWith({
+      professionalId: 'pro_1',
+      entryPoint: 'NFC_CARD',
     })
-
     expect(mocks.tapIntentCreate).toHaveBeenCalledWith({
       data: {
         cardId: 'card_pro_1',
-        userId: 'user_1',
+        userId: null,
         intentType: 'BOOK_PRO',
-        payloadJson: {
-          professionalId: 'pro_1',
-          nextUrl: '/p/tovis-studio',
-        },
+        payloadJson: { professionalId: 'pro_1', nextUrl: '/p/tovis-studio' },
         expiresAt: new Date('2026-04-12T12:30:00.000Z'),
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     })
   })
 
-  it('creates BOOK_PRO intent and redirects non-premium pro card to professional page with tap intent', async () => {
-    mocks.getCurrentUser.mockResolvedValueOnce(makeUser())
-
+  it('routes a non-premium pro card to the professionals page', async () => {
     mocks.professionalProfileFindUnique.mockResolvedValueOnce({
       id: 'pro_1',
       handleNormalized: 'tovis-studio',
       isPremium: false,
     })
-
     mocks.nfcCardFindUnique.mockResolvedValueOnce(
       makeCard({
         id: 'card_pro_1',
@@ -275,69 +267,49 @@ describe('app/t/[cardId]/page.tsx', () => {
       }),
     )
 
-    await expect(
-      renderPage({
-        cardId: 'card_pro_1',
-      }),
-    ).rejects.toThrow('REDIRECT:/professionals/pro_1?ti=tap_intent_1')
-
-    expect(mocks.tapIntentCreate).toHaveBeenCalledWith({
-      data: {
-        cardId: 'card_pro_1',
-        userId: 'user_1',
-        intentType: 'BOOK_PRO',
-        payloadJson: {
-          professionalId: 'pro_1',
-          nextUrl: '/professionals/pro_1',
-        },
-        expiresAt: new Date('2026-04-12T12:30:00.000Z'),
-      },
-      select: {
-        id: true,
-      },
-    })
+    await expect(renderPage({ cardId: 'card_pro_1' })).rejects.toThrow(
+      'REDIRECT:/professionals/pro_1?ti=tap_intent_1',
+    )
   })
 
-  it('redirects BOOK_PRO card to invalid when professional profile does not exist', async () => {
-    mocks.getCurrentUser.mockResolvedValueOnce(makeUser())
-
-    mocks.professionalProfileFindUnique.mockResolvedValueOnce(null)
-
+  it('redirects PRO_BOOKING to the unavailable page when the pro is not bookable', async () => {
+    mocks.checkReadiness.mockResolvedValueOnce({
+      ok: false,
+      blockers: ['NO_ACTIVE_OFFERING'],
+    })
     mocks.nfcCardFindUnique.mockResolvedValueOnce(
       makeCard({
-        id: 'card_pro_missing_1',
+        id: 'card_pro_unready',
+        type: NfcCardType.PRO_BOOKING,
+        claimedAt: new Date('2026-04-10T12:00:00.000Z'),
+        professionalId: 'pro_1',
+      }),
+    )
+
+    await expect(renderPage({ cardId: 'card_pro_unready' })).rejects.toThrow(
+      'REDIRECT:/nfc/invalid?reason=unavailable',
+    )
+    expect(mocks.tapIntentCreate).not.toHaveBeenCalled()
+  })
+
+  it('redirects PRO_BOOKING to unavailable when the professional profile is missing', async () => {
+    mocks.professionalProfileFindUnique.mockResolvedValueOnce(null)
+    mocks.nfcCardFindUnique.mockResolvedValueOnce(
+      makeCard({
+        id: 'card_pro_missing',
         type: NfcCardType.PRO_BOOKING,
         claimedAt: new Date('2026-04-10T12:00:00.000Z'),
         professionalId: 'pro_missing',
       }),
     )
 
-    await expect(
-      renderPage({
-        cardId: 'card_pro_missing_1',
-      }),
-    ).rejects.toThrow('REDIRECT:/nfc/invalid?ti=tap_intent_1')
-
-    expect(mocks.tapIntentCreate).toHaveBeenCalledWith({
-      data: {
-        cardId: 'card_pro_missing_1',
-        userId: 'user_1',
-        intentType: 'BOOK_PRO',
-        payloadJson: {
-          professionalId: 'pro_missing',
-          nextUrl: '/nfc/invalid',
-        },
-        expiresAt: new Date('2026-04-12T12:30:00.000Z'),
-      },
-      select: {
-        id: true,
-      },
-    })
+    await expect(renderPage({ cardId: 'card_pro_missing' })).rejects.toThrow(
+      'REDIRECT:/nfc/invalid?reason=unavailable',
+    )
+    expect(mocks.tapIntentCreate).not.toHaveBeenCalled()
   })
 
-  it('creates SALON_WHITE_LABEL intent and redirects to salon signup with tap intent', async () => {
-    mocks.getCurrentUser.mockResolvedValueOnce(makeUser())
-
+  it('creates a SALON_WHITE_LABEL intent and redirects an anon user to salon signup', async () => {
     mocks.nfcCardFindUnique.mockResolvedValueOnce(
       makeCard({
         id: 'card_salon_1',
@@ -347,32 +319,28 @@ describe('app/t/[cardId]/page.tsx', () => {
       }),
     )
 
-    await expect(
-      renderPage({
-        cardId: 'card_salon_1',
-      }),
-    ).rejects.toThrow('REDIRECT:/signup?salon=glow-house&ti=tap_intent_1')
+    await expect(renderPage({ cardId: 'card_salon_1' })).rejects.toThrow(
+      'REDIRECT:/signup?salon=glow-house&ti=tap_intent_1',
+    )
 
     expect(mocks.tapIntentCreate).toHaveBeenCalledWith({
       data: {
         cardId: 'card_salon_1',
-        userId: 'user_1',
+        userId: null,
         intentType: 'SALON_WHITE_LABEL',
-        payloadJson: {
-          tenantSlug: 'glow-house',
-          nextUrl: '/signup?salon=glow-house',
-        },
+        payloadJson: { tenantSlug: 'glow-house' },
         expiresAt: new Date('2026-04-12T12:30:00.000Z'),
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     })
   })
 
-  it('uses safe local next override instead of derived nextUrl', async () => {
+  it('applies a safe local next override as the post-auth destination', async () => {
     mocks.getCurrentUser.mockResolvedValueOnce(makeUser())
-
+    mocks.consumeTapIntent.mockResolvedValueOnce({
+      ok: true,
+      nextUrl: '/client/bookings',
+    })
     mocks.nfcCardFindUnique.mockResolvedValueOnce(
       makeCard({
         id: 'card_pro_1',
@@ -383,28 +351,18 @@ describe('app/t/[cardId]/page.tsx', () => {
     )
 
     await expect(
-      renderPage({
-        cardId: 'card_pro_1',
-        searchParams: {
-          next: '/client/bookings',
-        },
-      }),
-    ).rejects.toThrow('REDIRECT:/client/bookings?ti=tap_intent_1')
+      renderPage({ cardId: 'card_pro_1', searchParams: { next: '/client/bookings' } }),
+    ).rejects.toThrow('REDIRECT:/client/bookings')
 
     expect(mocks.tapIntentCreate).toHaveBeenCalledWith({
       data: {
         cardId: 'card_pro_1',
         userId: 'user_1',
         intentType: 'BOOK_PRO',
-        payloadJson: {
-          professionalId: 'pro_1',
-          nextUrl: '/client/bookings',
-        },
+        payloadJson: { professionalId: 'pro_1', nextUrl: '/client/bookings' },
         expiresAt: new Date('2026-04-12T12:30:00.000Z'),
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     })
   })
 
@@ -413,8 +371,6 @@ describe('app/t/[cardId]/page.tsx', () => {
     ['protocol-relative URL', '//evil.example'],
     ['blank string', '   '],
   ])('ignores unsafe next override: %s', async (_label, next) => {
-    mocks.getCurrentUser.mockResolvedValueOnce(makeUser())
-
     mocks.nfcCardFindUnique.mockResolvedValueOnce(
       makeCard({
         id: 'card_pro_1',
@@ -425,28 +381,18 @@ describe('app/t/[cardId]/page.tsx', () => {
     )
 
     await expect(
-      renderPage({
-        cardId: 'card_pro_1',
-        searchParams: {
-          next,
-        },
-      }),
+      renderPage({ cardId: 'card_pro_1', searchParams: { next } }),
     ).rejects.toThrow('REDIRECT:/p/tovis-studio?ti=tap_intent_1')
 
     expect(mocks.tapIntentCreate).toHaveBeenCalledWith({
       data: {
         cardId: 'card_pro_1',
-        userId: 'user_1',
+        userId: null,
         intentType: 'BOOK_PRO',
-        payloadJson: {
-          professionalId: 'pro_1',
-          nextUrl: '/p/tovis-studio',
-        },
+        payloadJson: { professionalId: 'pro_1', nextUrl: '/p/tovis-studio' },
         expiresAt: new Date('2026-04-12T12:30:00.000Z'),
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     })
   })
 })

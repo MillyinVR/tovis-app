@@ -5,10 +5,15 @@ const mocks = vi.hoisted(() => ({
   redirect: vi.fn(),
   normalizeShortCode: vi.fn(),
   nfcCardFindUnique: vi.fn(),
+  isWithinRateLimit: vi.fn(),
 }))
 
 vi.mock('next/navigation', () => ({
   redirect: mocks.redirect,
+}))
+
+vi.mock('@/lib/nfc/tapRateLimit', () => ({
+  isNfcTapWithinRateLimit: mocks.isWithinRateLimit,
 }))
 
 vi.mock('@/lib/nfcShortCode', () => ({
@@ -50,10 +55,23 @@ describe('app/c/[code]/page.tsx', () => {
       return normalized.length > 0 ? normalized : null
     })
 
+    mocks.isWithinRateLimit.mockResolvedValue(true)
+
     mocks.nfcCardFindUnique.mockResolvedValue({
       id: 'card_1',
       isActive: true,
     })
+  })
+
+  it('redirects to the rate-limit page and skips lookup when over the limit', async () => {
+    mocks.isWithinRateLimit.mockResolvedValueOnce(false)
+
+    await expect(renderPage('abc123')).rejects.toThrow(
+      'REDIRECT:/nfc/invalid?reason=rate',
+    )
+
+    expect(mocks.normalizeShortCode).not.toHaveBeenCalled()
+    expect(mocks.nfcCardFindUnique).not.toHaveBeenCalled()
   })
 
   it('redirects to invalid page when short code normalizes to null', async () => {

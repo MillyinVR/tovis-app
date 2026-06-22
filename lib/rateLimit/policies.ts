@@ -20,6 +20,8 @@ export type RateLimitBucket =
   | 'google:proxy'
   | 'messages:send'
   | 'messages:read'
+  | 'nfc:tap'
+  | 'nfc:code'
   | 'auth:login'
   | 'auth:register'
   | 'auth:register:verified'
@@ -153,6 +155,24 @@ export const RATE_LIMITS: Record<RateLimitBucket, RateLimitConfig> = {
     limit: 120,
     windowSeconds: 60,
     prefix: 'rl:messages:read',
+    mode: 'redis-only',
+  },
+
+  // Public NFC tap surfaces, keyed by client IP. A real person taps a handful of
+  // times; these ceilings only bite enumeration/abuse. Fail-open (redis-only) so
+  // a Redis outage never blocks a legitimate tap-to-book.
+  'nfc:tap': {
+    limit: 30,
+    windowSeconds: 60,
+    prefix: 'rl:nfc:tap',
+    mode: 'redis-only',
+  },
+  // Short codes are typed by hand and the brute-force/enumeration vector, so the
+  // window is tighter than a direct card tap.
+  'nfc:code': {
+    limit: 15,
+    windowSeconds: 5 * 60,
+    prefix: 'rl:nfc:code',
     mode: 'redis-only',
   },
 

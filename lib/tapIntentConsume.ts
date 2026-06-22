@@ -4,6 +4,7 @@ import { NfcCardType, NotificationEventKey, ReferralStatus, Role } from '@prisma
 import { nextUrlFromPayloadJson } from '@/lib/security/safeNextUrl'
 import { TOVIS_ROOT_TENANT_SLUG } from '@/lib/tenant/constants'
 import { createClientNotification } from '@/lib/notifications/clientNotifications'
+import { NFC_ATTRIBUTION_EVENT } from '@/lib/nfc/attributionEvents'
 
 export async function consumeTapIntent(args: { tapIntentId: string | null; userId: string }) {
   const { tapIntentId, userId } = args
@@ -87,7 +88,7 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
     if (card.claimedAt) {
       await tx.attributionEvent.create({
         data: {
-          eventType: 'NFC_TAP_EXISTING_CARD',
+          eventType: NFC_ATTRIBUTION_EVENT.TAP_EXISTING_CARD,
           cardId: card.id,
           actorUserId: user.id,
           creditedUserId: card.claimedByUserId ?? null,
@@ -127,7 +128,7 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
     if (!isRootCard && claimerHomeTenantId !== card.tenantId) {
       await tx.attributionEvent.create({
         data: {
-          eventType: 'NFC_CLAIM_TENANT_MISMATCH',
+          eventType: NFC_ATTRIBUTION_EVENT.CLAIM_TENANT_MISMATCH,
           cardId: card.id,
           actorUserId: user.id,
           metaJson: {
@@ -166,7 +167,7 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
     if (claimed.count !== 1) {
       await tx.attributionEvent.create({
         data: {
-          eventType: 'NFC_CLAIM_RACE_LOST',
+          eventType: NFC_ATTRIBUTION_EVENT.CLAIM_RACE_LOST,
           cardId: card.id,
           actorUserId: user.id,
           metaJson: { tapIntentId: ti.id, nextUrl },
@@ -177,7 +178,7 @@ export async function consumeTapIntent(args: { tapIntentId: string | null; userI
 
     await tx.attributionEvent.create({
       data: {
-        eventType: 'NFC_CARD_CLAIMED',
+        eventType: NFC_ATTRIBUTION_EVENT.CARD_CLAIMED,
         cardId: card.id,
         actorUserId: user.id,
         creditedUserId: user.id,

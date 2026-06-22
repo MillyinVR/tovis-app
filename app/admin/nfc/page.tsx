@@ -1,4 +1,5 @@
 // app/admin/nfc/page.tsx
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { prisma } from '@/lib/prisma'
@@ -75,6 +76,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
 
   const sp = (await props.searchParams) ?? {}
   const createdFlag = firstParam(sp.created) === '1'
+  const updatedFlag = firstParam(sp.updated) === '1'
   const errorFlag = firstParam(sp.error)
 
   async function createCards(formData: FormData): Promise<void> {
@@ -92,11 +94,35 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
     const type = parseNfcCardType(formData.get('type'))
     const isActive = String(formData.get('isActive') ?? 'true') === 'true'
 
-    // Issuing tenant: white-label cards belong to the tenant named in the
-    // form; every other card type is issued by the root tenant.
-    let tenantId: string
+    // Optional: pre-bind this batch to a specific pro. A bound card is created
+    // already-claimed by that pro (type PRO_BOOKING, issued by the pro's home
+    // tenant) so its destiny isn't decided by whoever happens to tap it first.
+    const boundProId = String(formData.get('professionalId') ?? '').trim()
 
-    if (type === NfcCardType.SALON_WHITE_LABEL) {
+    // Issuing tenant: bound cards belong to the pro's home tenant; white-label
+    // cards belong to the tenant named in the form; everything else is root.
+    let tenantId: string
+    let effectiveType: NfcCardType = type
+    let claimedAt: Date | null = null
+    let claimedByUserId: string | null = null
+    let professionalId: string | null = null
+
+    if (boundProId) {
+      const pro = await prisma.professionalProfile.findUnique({
+        where: { id: boundProId },
+        select: { id: true, userId: true, homeTenantId: true },
+      })
+
+      if (!pro) {
+        redirect('/admin/nfc?error=pro')
+      }
+
+      effectiveType = NfcCardType.PRO_BOOKING
+      tenantId = pro.homeTenantId
+      professionalId = pro.id
+      claimedByUserId = pro.userId
+      claimedAt = new Date()
+    } else if (type === NfcCardType.SALON_WHITE_LABEL) {
       const tenantSlug = String(formData.get('tenantSlug') ?? '')
         .trim()
         .toLowerCase()
@@ -129,12 +155,12 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
           try {
             await tx.nfcCard.create({
               data: {
-                type,
+                type: effectiveType,
                 isActive,
                 tenantId,
-                claimedAt: null,
-                claimedByUserId: null,
-                professionalId: null,
+                claimedAt,
+                claimedByUserId,
+                professionalId,
                 shortCode,
               },
               select: { id: true },
@@ -154,6 +180,82 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
     redirect('/admin/nfc?created=1')
   }
 
+  async function setCardActive(formData: FormData): Promise<void> {
+    'use server'
+
+    const user = await getCurrentUser().catch(() => null)
+    if (!user || user.role !== 'ADMIN') redirect('/forbidden')
+
+    const cardId = String(formData.get('cardId') ?? '').trim()
+    const active = String(formData.get('active') ?? '') === 'true'
+    if (!cardId) redirect('/admin/nfc?error=card')
+
+    await prisma.nfcCard.update({
+      where: { id: cardId },
+      data: { isActive: active },
+    })
+
+    redirect('/admin/nfc?updated=1')
+  }
+
+  async function reissueCard(formData: FormData): Promise<void> {
+    'use server'
+
+    const user = await getCurrentUser().catch(() => null)
+    if (!user || user.role !== 'ADMIN') redirect('/forbidden')
+
+    const cardId = String(formData.get('cardId') ?? '').trim()
+    if (!cardId) redirect('/admin/nfc?error=card')
+
+    // Re-issue: wipe the claim so the card is a blank UNASSIGNED card again.
+    await prisma.nfcCard.update({
+      where: { id: cardId },
+      data: {
+        type: NfcCardType.UNASSIGNED,
+        claimedAt: null,
+        claimedByUserId: null,
+        professionalId: null,
+      },
+    })
+
+    redirect('/admin/nfc?updated=1')
+  }
+
+  async function bindCardToPro(formData: FormData): Promise<void> {
+    'use server'
+
+    const user = await getCurrentUser().catch(() => null)
+    if (!user || user.role !== 'ADMIN') redirect('/forbidden')
+
+    const cardId = String(formData.get('cardId') ?? '').trim()
+    const proId = String(formData.get('professionalId') ?? '').trim()
+    if (!cardId || !proId) redirect('/admin/nfc?error=card')
+
+    const pro = await prisma.professionalProfile.findUnique({
+      where: { id: proId },
+      select: { id: true, userId: true, homeTenantId: true },
+    })
+
+    if (!pro) {
+      redirect('/admin/nfc?error=pro')
+    }
+
+    // Transfer / bind: point the card at this pro, claimed and issued under
+    // their home tenant.
+    await prisma.nfcCard.update({
+      where: { id: cardId },
+      data: {
+        type: NfcCardType.PRO_BOOKING,
+        professionalId: pro.id,
+        claimedByUserId: pro.userId,
+        claimedAt: new Date(),
+        tenantId: pro.homeTenantId,
+      },
+    })
+
+    redirect('/admin/nfc?updated=1')
+  }
+
   const recent = await prisma.nfcCard.findMany({
     orderBy: { createdAt: 'desc' },
     take: 30,
@@ -163,6 +265,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
       type: true,
       isActive: true,
       claimedAt: true,
+      professionalId: true,
       createdAt: true,
     },
   })
@@ -197,6 +300,12 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
           </div>
         ) : null}
 
+        {updatedFlag ? (
+          <div className="mt-2 rounded-xl border border-toneSuccess/30 bg-toneSuccess/10 px-3 py-2 text-sm text-toneSuccess">
+            Card updated.
+          </div>
+        ) : null}
+
         {errorFlag === 'qty' ? (
           <div className="mt-2 rounded-xl border border-toneDanger/30 bg-toneDanger/10 px-3 py-2 text-sm text-toneDanger">
             Quantity must be between 1 and 500.
@@ -208,6 +317,24 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
             An active tenant slug is required for <span className="font-mono">SALON_WHITE_LABEL</span> cards.
           </div>
         ) : null}
+
+        {errorFlag === 'pro' ? (
+          <div className="mt-2 rounded-xl border border-toneDanger/30 bg-toneDanger/10 px-3 py-2 text-sm text-toneDanger">
+            No professional was found for that <span className="font-mono">professionalId</span>.
+          </div>
+        ) : null}
+
+        {errorFlag === 'card' ? (
+          <div className="mt-2 rounded-xl border border-toneDanger/30 bg-toneDanger/10 px-3 py-2 text-sm text-toneDanger">
+            Could not update that card — missing card or pro id.
+          </div>
+        ) : null}
+
+        <div className="mt-2 text-xs">
+          <Link href="/admin/nfc/analytics" className="font-medium text-accentPrimary hover:underline">
+            View tap analytics →
+          </Link>
+        </div>
       </div>
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -266,6 +393,20 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                 />
               </label>
             </div>
+
+            <label className="grid gap-1">
+              <span className="text-xs font-medium text-textSecondary">
+                Pre-bind to pro (optional — professionalId)
+              </span>
+              <input
+                name="professionalId"
+                placeholder="Leave blank for an unclaimed card"
+                className="h-11 rounded-xl border border-white/15 bg-bgPrimary px-3 font-mono text-sm text-textPrimary outline-none focus:border-white/30"
+              />
+              <span className="text-[11px] text-textSecondary">
+                When set, the whole batch is created as PRO_BOOKING already bound to that pro (no claim race).
+              </span>
+            </label>
 
             <button
               type="submit"
@@ -330,6 +471,7 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                 <th className="px-3 py-3 font-semibold text-textSecondary">Type</th>
                 <th className="px-3 py-3 font-semibold text-textSecondary">Active</th>
                 <th className="px-3 py-3 font-semibold text-textSecondary">Claimed</th>
+                <th className="px-3 py-3 font-semibold text-textSecondary">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -374,16 +516,65 @@ export default async function AdminNfcPage(props: { searchParams?: SearchParams 
                       )}
                     </td>
 
-                    <td className="px-3 py-3 text-textPrimary">{c.type}</td>
+                    <td className="px-3 py-3 text-textPrimary">
+                      {c.type}
+                      {c.professionalId ? (
+                        <div className="mt-1 font-mono text-[11px] text-textSecondary">
+                          pro: {c.professionalId}
+                        </div>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-3 text-textPrimary">{c.isActive ? 'Yes' : 'No'}</td>
                     <td className="px-3 py-3 text-textPrimary">{c.claimedAt ? 'Yes' : 'No'}</td>
+
+                    <td className="px-3 py-3">
+                      <div className="flex flex-col gap-2">
+                        <form action={setCardActive}>
+                          <input type="hidden" name="cardId" value={c.id} />
+                          <input type="hidden" name="active" value={c.isActive ? 'false' : 'true'} />
+                          <button
+                            type="submit"
+                            className="inline-flex h-8 items-center justify-center rounded-lg border border-white/15 px-3 text-xs font-medium text-textPrimary transition hover:border-white/30"
+                          >
+                            {c.isActive ? 'Deactivate' : 'Activate'}
+                          </button>
+                        </form>
+
+                        {c.claimedAt ? (
+                          <form action={reissueCard}>
+                            <input type="hidden" name="cardId" value={c.id} />
+                            <button
+                              type="submit"
+                              className="inline-flex h-8 items-center justify-center rounded-lg border border-white/15 px-3 text-xs font-medium text-textPrimary transition hover:border-white/30"
+                            >
+                              Re-issue (unclaim)
+                            </button>
+                          </form>
+                        ) : null}
+
+                        <form action={bindCardToPro} className="flex items-center gap-1">
+                          <input type="hidden" name="cardId" value={c.id} />
+                          <input
+                            name="professionalId"
+                            placeholder="proId"
+                            className="h-8 w-28 rounded-lg border border-white/15 bg-bgPrimary px-2 font-mono text-[11px] text-textPrimary outline-none focus:border-white/30"
+                          />
+                          <button
+                            type="submit"
+                            className="inline-flex h-8 items-center justify-center rounded-lg border border-white/15 px-2 text-xs font-medium text-textPrimary transition hover:border-white/30"
+                          >
+                            Bind
+                          </button>
+                        </form>
+                      </div>
+                    </td>
                   </tr>
                 )
               })}
 
               {recent.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-6 text-sm text-textSecondary" colSpan={6}>
+                  <td className="px-3 py-6 text-sm text-textSecondary" colSpan={7}>
                     No cards yet. Generate your first batch above.
                   </td>
                 </tr>
