@@ -70,7 +70,7 @@ export const tovisBrand: BrandConfig = createBrandConfig({
       colorAcid: '91 60 214', // #5B3CD6 iris (light)
       colorFern: '11 111 102', // #0B6F66 emerald (light)
       colorEmber: '225 29 84', // #E11D54 like (light)
-      colorAmber: '242 180 62', // #F2B43E gold (constant)
+      colorAmber: '183 131 31', // #B7831F gold-ink (readable on paper — matches microAccent; drives warn/pending tones)
     },
   },
 })
