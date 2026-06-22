@@ -4,12 +4,12 @@ import { notFound, redirect } from 'next/navigation'
 import {
   MediaType,
   MessageThreadContextType,
-  Role,
   WaitlistPreferenceType,
   WaitlistTimeOfDay,
 } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { assertProCanViewClient } from '@/lib/clientVisibility'
 import { formatPublicProfileDisplayName } from '@/lib/profiles/publicProfileFormatting'
 import { labelForWaitlistStatus } from '@/lib/waitlist/statusLabel'
 import ThreadClient from './ThreadClient'
@@ -270,6 +270,8 @@ export default async function MessageThreadPage(props: PageProps) {
       waitlistEntryId: true,
       client: {
         select: {
+          id: true,
+          userId: true,
           firstName: true,
           lastName: true,
           avatarUrl: true,
@@ -277,6 +279,8 @@ export default async function MessageThreadPage(props: PageProps) {
       },
       professional: {
         select: {
+          id: true,
+          userId: true,
           businessName: true,
           firstName: true,
           lastName: true,
@@ -330,15 +334,32 @@ export default async function MessageThreadPage(props: PageProps) {
     })),
   }))
 
-  const title =
-    user.role === Role.PRO
-      ? formatPersonName(thread.client?.firstName, thread.client?.lastName) || 'Client'
-      : formatPublicProfileDisplayName({
-          businessName: thread.professional?.businessName,
-          firstName: thread.professional?.firstName,
-          lastName: thread.professional?.lastName,
-          fallback: 'Professional',
-        })
+  // Counterparty = the participant the viewer is NOT, derived from the viewer's
+  // user id (not their acting role) so dual-role users and admins never see
+  // their own name as the thread title.
+  const viewerIsThreadPro =
+    thread.professional?.userId != null &&
+    thread.professional.userId === user.id
+
+  const title = viewerIsThreadPro
+    ? formatPersonName(thread.client?.firstName, thread.client?.lastName) || 'Client'
+    : formatPublicProfileDisplayName({
+        businessName: thread.professional?.businessName,
+        firstName: thread.professional?.firstName,
+        lastName: thread.professional?.lastName,
+        fallback: 'Professional',
+      })
+
+  // When the pro is viewing, offer a jump into the client's chart (the pro-only
+  // record), but only when the visibility SSOT actually grants access — so the
+  // link never lands on a denied page.
+  const clientChartHref =
+    viewerIsThreadPro && thread.professional?.id && thread.client?.id
+      ? (await assertProCanViewClient(thread.professional.id, thread.client.id))
+          .ok
+        ? `/pro/clients/${encodeURIComponent(thread.client.id)}`
+        : null
+      : null
 
   const contextMeta = await buildContextMeta({
     contextType: thread.contextType,
@@ -373,6 +394,17 @@ export default async function MessageThreadPage(props: PageProps) {
                   className="font-display text-[12px] font-semibold text-accentPrimary hover:opacity-80"
                 >
                   {contextMeta.cta} →
+                </Link>
+              </div>
+            ) : null}
+
+            {clientChartHref ? (
+              <div className="mt-2">
+                <Link
+                  href={clientChartHref}
+                  className="font-display text-[12px] font-semibold text-accentPrimary hover:opacity-80"
+                >
+                  View client chart →
                 </Link>
               </div>
             ) : null}

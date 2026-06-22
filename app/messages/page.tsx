@@ -40,12 +40,14 @@ type InboxThread = {
   updatedAt: Date
   client: {
     id: string
+    userId: string | null
     firstName: string | null
     lastName: string | null
     avatarUrl: string | null
   } | null
   professional: {
     id: string
+    userId: string
     businessName: string | null
     firstName: string
     lastName: string
@@ -366,7 +368,7 @@ function buildEyebrow(params: {
 
 function buildThreadPresentation(params: {
   thread: InboxThread
-  viewerRole: Role
+  viewerUserId: string
   bookingMap: Map<string, BookingLookup>
   serviceMap: Map<string, ServiceLookup>
   offeringMap: Map<string, OfferingLookup>
@@ -374,28 +376,34 @@ function buildThreadPresentation(params: {
 }): ThreadPresentation {
   const {
     thread,
-    viewerRole,
+    viewerUserId,
     bookingMap,
     serviceMap,
     offeringMap,
     waitlistMap,
   } = params
 
-  const title =
-    viewerRole === Role.PRO
-      ? formatPersonName(thread.client?.firstName, thread.client?.lastName) ||
-        'Client'
-      : formatPublicProfileDisplayName({
-          businessName: thread.professional?.businessName,
-          firstName: thread.professional?.firstName,
-          lastName: thread.professional?.lastName,
-          fallback: 'Professional',
-        })
+  // Counterparty = the participant the viewer is NOT. Derive it from the
+  // viewer's user id rather than their acting role, so a dual-role user (a pro
+  // who also messages as a client via workspace switch) and admins always see
+  // the other party — never their own name.
+  const viewerIsThreadPro =
+    thread.professional?.userId != null &&
+    thread.professional.userId === viewerUserId
 
-  const avatarUrl =
-    viewerRole === Role.PRO
-      ? thread.client?.avatarUrl ?? null
-      : thread.professional?.avatarUrl ?? null
+  const title = viewerIsThreadPro
+    ? formatPersonName(thread.client?.firstName, thread.client?.lastName) ||
+      'Client'
+    : formatPublicProfileDisplayName({
+        businessName: thread.professional?.businessName,
+        firstName: thread.professional?.firstName,
+        lastName: thread.professional?.lastName,
+        fallback: 'Professional',
+      })
+
+  const avatarUrl = viewerIsThreadPro
+    ? thread.client?.avatarUrl ?? null
+    : thread.professional?.avatarUrl ?? null
 
   const lastActivityAt = thread.lastMessageAt ?? thread.updatedAt
   const eyebrow = buildEyebrow({
@@ -475,6 +483,7 @@ async function findInboxThreads(params: {
       client: {
         select: {
           id: true,
+          userId: true,
           firstName: true,
           lastName: true,
           avatarUrl: true,
@@ -483,6 +492,7 @@ async function findInboxThreads(params: {
       professional: {
         select: {
           id: true,
+          userId: true,
           businessName: true,
           firstName: true,
           lastName: true,
@@ -676,7 +686,7 @@ export default async function MessagesInboxPage(props: PageProps) {
               {threads.map((thread) => {
                 const item = buildThreadPresentation({
                   thread,
-                  viewerRole: user.role,
+                  viewerUserId: user.id,
                   bookingMap,
                   serviceMap,
                   offeringMap,
