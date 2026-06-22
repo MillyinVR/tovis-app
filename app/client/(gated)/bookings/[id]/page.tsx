@@ -15,6 +15,7 @@ import { canBookingAcceptClientReview } from '@/lib/booking/writeBoundary'
 import { NotificationEventKey } from '@prisma/client'
 import ProProfileLink from '@/app/client/(gated)/components/ProProfileLink'
 import RemoteImage from '@/app/_components/media/RemoteImage'
+import AftercareBeforeAfter from '@/app/client/(gated)/_components/AftercareBeforeAfter'
 
 import { getBrandConfig } from '@/lib/brand'
 import AftercareProductRecommendationsCard from './AftercareProductRecommendationsCard'
@@ -798,37 +799,14 @@ function ClientAftercareSectionTitle(props: {
   )
 }
 
-function ClientAftercareMediaTile(props: {
-  label: 'Before' | 'After'
-  serviceName: string | null
-  media: LoadedRenderableMedia | null
-}) {
-  const previewSrc =
-    props.media &&
-    typeof props.media.thumbUrl === 'string' &&
-    props.media.thumbUrl.trim()
-      ? props.media.thumbUrl
-      : props.media?.url ?? null
-
-  return (
-    <div className="brand-pro-session-photo-tile">
-      {previewSrc ? (
-        <RemoteImage
-          src={previewSrc}
-          alt={sessionPhotoAlt(props.label, props.serviceName)}
-          className="brand-pro-session-photo-img"
-          intrinsic
-        />
-      ) : null}
-
-      <span
-        className="brand-pro-session-photo-label"
-        data-tone={props.label === 'After' ? 'after' : undefined}
-      >
-        {props.label.toUpperCase()}
-      </span>
-    </div>
-  )
+// Thumb-preferred render URL for a loaded media item — feeds the shared
+// before/after split (which renders the visit's primary pair).
+function mediaPreviewSrc(media: LoadedRenderableMedia | null): string | null {
+  if (!media) return null
+  const thumb = typeof media.thumbUrl === 'string' ? media.thumbUrl.trim() : ''
+  if (thumb) return media.thumbUrl
+  const url = typeof media.url === 'string' ? media.url.trim() : ''
+  return url ? media.url : null
 }
 
 function AftercarePrivacyNote() {
@@ -870,18 +848,13 @@ function ClientAftercareBeforeAfter(props: {
     <div className="grid gap-3">
       <AftercarePrivacyNote />
 
-      <div className="brand-pro-session-photo-grid" data-columns="2">
-        <ClientAftercareMediaTile
-          label="Before"
-          serviceName={props.serviceName}
-          media={primaryBefore}
-        />
-        <ClientAftercareMediaTile
-          label="After"
-          serviceName={props.serviceName}
-          media={primaryAfter}
-        />
-      </div>
+      <AftercareBeforeAfter
+        media={{
+          beforeUrl: mediaPreviewSrc(primaryBefore),
+          afterUrl: mediaPreviewSrc(primaryAfter),
+        }}
+        serviceName={props.serviceName}
+      />
 
       {props.beforeMedia.length > 1 ? (
         <MediaStrip

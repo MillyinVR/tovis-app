@@ -3,6 +3,7 @@ import Link from 'next/link'
 
 import { Card, buttonClassName } from '@/app/_components/ui'
 
+import AftercareBeforeAfter from './AftercareBeforeAfter'
 import type {
   ClientHomeAction,
   ClientHomeBooking,
@@ -96,8 +97,11 @@ function PendingConsultationCard({ booking }: { booking: ClientHomeBooking }) {
 }
 
 function AftercarePaymentCard({ action }: { action: AftercarePaymentAction }) {
-  const { aftercare, booking } = action
+  const { aftercare, booking, beforeAfter } = action
   const title = bookingTitle(booking)
+  const hasBeforeAfter = Boolean(
+    beforeAfter.beforeUrl || beforeAfter.afterUrl,
+  )
   const proName = professionalName(booking.professional)
   const due = money(booking.totalAmount)
   const notes = aftercare.notes?.trim() || null
@@ -136,11 +140,21 @@ function AftercarePaymentCard({ action }: { action: AftercarePaymentAction }) {
             'Before & after, care notes, and your receipt are waiting. Settle the balance to close it out.'}
         </p>
 
-        <div className="mb-3.5 flex items-center gap-3 rounded-[13px] border border-textPrimary/10 bg-[rgb(var(--surface-glass)/0.05)] px-3.5 py-[11px]">
-          <div
-            className="h-[38px] w-[38px] shrink-0 rounded-[11px]"
-            style={{ background: gradientAvatar(0) }}
+        {hasBeforeAfter ? (
+          <AftercareBeforeAfter
+            media={beforeAfter}
+            serviceName={title}
+            className="mb-3.5"
           />
+        ) : null}
+
+        <div className="mb-3.5 flex items-center gap-3 rounded-[13px] border border-textPrimary/10 bg-[rgb(var(--surface-glass)/0.05)] px-3.5 py-[11px]">
+          {hasBeforeAfter ? null : (
+            <div
+              className="h-[38px] w-[38px] shrink-0 rounded-[11px]"
+              style={{ background: gradientAvatar(0) }}
+            />
+          )}
           <div className="min-w-0">
             <div className="truncate font-display text-[14px] font-semibold text-textPrimary">
               {title} with {proName}

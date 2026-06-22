@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/currentUser'
+import { loadBookingBeforeAfterThumbs } from '@/lib/media/bookingBeforeAfter'
+import AftercareBeforeAfter from '@/app/client/(gated)/_components/AftercareBeforeAfter'
 import ProProfileLink from '@/app/client/(gated)/components/ProProfileLink'
 import { COPY } from '@/lib/copy'
 import { formatInTimeZone } from '@/lib/formatInTimeZone'
@@ -202,6 +204,14 @@ export default async function ClientAftercareInboxPage() {
     }),
   )
 
+  // Before/after photos for every visit linked from this inbox, loaded in one
+  // batch via the shared SSOT and rendered on each card.
+  const beforeAfterByBooking = await loadBookingBeforeAfterThumbs(
+    rows
+      .map(({ n, raw, dto }) => safeId(dto?.id ?? raw?.id ?? n.bookingId))
+      .filter((id): id is string => Boolean(id)),
+  )
+
   return (
     <main className="mx-auto w-full max-w-860px px-4 pb-24 pt-7 text-textPrimary">
       <h1 className="text-[22px] font-black">{COPY.aftercareInbox.title}</h1>
@@ -240,6 +250,10 @@ export default async function ClientAftercareInboxPage() {
 
             const date = toDate(dto?.scheduledFor ?? raw?.scheduledFor)
             const dateLabel = date ? formatDateInTz(date, tz) : ''
+
+            const beforeAfter = bookingId
+              ? beforeAfterByBooking.get(bookingId)
+              : undefined
 
             const mode = n.aftercare?.rebookMode ?? null
             const hint =
@@ -280,6 +294,13 @@ export default async function ClientAftercareInboxPage() {
                       className="text-textSecondary font-semibold hover:opacity-80"
                     />
                   </div>
+
+                  {beforeAfter ? (
+                    <AftercareBeforeAfter
+                      media={beforeAfter}
+                      serviceName={title}
+                    />
+                  ) : null}
 
                   <div className="text-[12px] font-semibold text-textSecondary/90">
                     {hint}
