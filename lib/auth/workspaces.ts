@@ -46,6 +46,11 @@ const WORKSPACE_META: Record<Role, { label: string; sub: string }> = {
   CLIENT: { label: 'Client', sub: 'Browse & book' },
 }
 
+/** Human label for a workspace (e.g. for "Switch to {label} to continue"). */
+export function workspaceLabel(role: Role): string {
+  return WORKSPACE_META[role].label
+}
+
 // Display order (also the order shown in the switcher sheet).
 const WORKSPACE_ORDER: Role[] = ['ADMIN', 'PRO', 'CLIENT']
 

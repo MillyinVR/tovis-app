@@ -32,6 +32,7 @@ type MockUserArgs = {
     avatarUrl: string | null
     timeZone: string | null
     location: string | null
+    verificationStatus?: 'APPROVED' | 'PENDING' | 'REJECTED'
   } | null
 }
 
@@ -68,6 +69,7 @@ function makeMockUser(args: MockUserArgs = {}) {
             avatarUrl: null,
             timeZone: 'America/Los_Angeles',
             location: null,
+            verificationStatus: 'APPROVED' as const,
           }
         : null
       : args.professionalProfile
@@ -77,6 +79,7 @@ function makeMockUser(args: MockUserArgs = {}) {
     email: 'user@example.com',
     phone: '+15551234567',
     role,
+    homeRole: role,
     sessionKind: args.sessionKind ?? 'ACTIVE',
     phoneVerifiedAt,
     emailVerifiedAt,
@@ -135,6 +138,49 @@ describe('app/api/_utils/auth/requireUser', () => {
     if (result.ok) throw new Error('Expected failure result')
     expect(result.res.status).toBe(403)
     expect(mockCaptureAuthException).not.toHaveBeenCalled()
+  })
+
+  it('tags a switchable role mismatch with WORKSPACE_MISMATCH + target workspace', async () => {
+    // A pro acting as PRO hits a client-only route: they are entitled to act as
+    // CLIENT, so the response should invite a one-tap switch.
+    mockGetCurrentUser.mockResolvedValue(
+      makeMockUser({
+        role: Role.PRO,
+      }),
+    )
+
+    const result = await requireUser({ roles: [Role.CLIENT] })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('Expected failure result')
+    expect(result.res.status).toBe(403)
+
+    const body = await result.res.json()
+    expect(body).toMatchObject({
+      ok: false,
+      code: 'WORKSPACE_MISMATCH',
+      requiredWorkspace: Role.CLIENT,
+    })
+  })
+
+  it('does NOT tag a mismatch the user cannot resolve by switching', async () => {
+    // A client with no approved pro profile hits a pro-only route: switching
+    // would not help, so no WORKSPACE_MISMATCH code is attached.
+    mockGetCurrentUser.mockResolvedValue(
+      makeMockUser({
+        role: Role.CLIENT,
+      }),
+    )
+
+    const result = await requireUser({ roles: [Role.PRO] })
+
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('Expected failure result')
+    expect(result.res.status).toBe(403)
+
+    const body = await result.res.json()
+    expect(body.code).toBeUndefined()
+    expect(body.requiredWorkspace).toBeUndefined()
   })
 
   it('returns 403 for a verification-only session by default', async () => {
