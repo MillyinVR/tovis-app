@@ -204,6 +204,8 @@ export function parseLooksFeedResponse(raw: unknown): LooksFeedItemDto[] {
             .filter((value): value is string => value !== null)
         : [],
 
+      priceStartingAt: pickNumber(item.priceStartingAt),
+
       uploadedByRole: isRole(uploadedByRoleRaw) ? uploadedByRoleRaw : null,
       reviewId: pickString(item.reviewId),
       reviewHelpfulCount: pickNumber(item.reviewHelpfulCount),

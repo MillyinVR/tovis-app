@@ -9,6 +9,7 @@ import {
   MediaType,
   MediaVisibility,
   ModerationStatus,
+  Prisma,
   ProfessionType,
   ProNameDisplay,
   VerificationStatus,
@@ -390,6 +391,7 @@ describe('lib/looks/mappers.ts', () => {
         serviceName: null,
         category: null,
         serviceIds: ['service_1'],
+        priceStartingAt: null,
         uploadedByRole: null,
         reviewId: null,
         reviewHelpfulCount: null,
@@ -439,6 +441,7 @@ describe('lib/looks/mappers.ts', () => {
         serviceName: 'Fade',
         category: 'Hair',
         serviceIds: ['service_1'],
+        priceStartingAt: null,
         uploadedByRole: null,
         reviewId: null,
         reviewHelpfulCount: null,
@@ -447,6 +450,19 @@ describe('lib/looks/mappers.ts', () => {
       })
 
       expect(mocks.renderMediaUrls).not.toHaveBeenCalled()
+    })
+
+    it('converts a pro-set Decimal price into a finite number on the DTO', async () => {
+      const row = makeFeedRow({ priceStartingAt: new Prisma.Decimal('240.00') })
+
+      const result = await mapLooksFeedMediaToDto({
+        item: row,
+        viewerLiked: false,
+        viewerSaved: false,
+        viewerFollows: false,
+      })
+
+      expect(result?.priceStartingAt).toBe(240)
     })
 
     it('uses rendered URLs when direct URLs are missing', async () => {

@@ -63,6 +63,10 @@ export type LooksFeedItemDto = {
   category: string | null
   serviceIds: string[]
 
+  // Pro-set starting price for the look, surfaced on bookable discover tiles as
+  // "from $X". Null when the look has no price tag (tiles fall back to "Book").
+  priceStartingAt: number | null
+
   uploadedByRole: Role | null
   reviewId: string | null
   reviewHelpfulCount: number | null

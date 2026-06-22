@@ -3,6 +3,7 @@
 
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
+import { Filter, Search } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { directionsHrefFromLocation, mapsHrefFromLocation } from '@/lib/maps'
 import EmptyState from '@/app/_components/boundaries/EmptyState'
@@ -13,6 +14,8 @@ import { isArray, isRecord } from '@/lib/guards'
 import DiscoverCategoryRail from './_components/DiscoverCategoryRail'
 import DiscoverGridView from './_components/DiscoverGridView'
 import DiscoverViewToggle from './_components/DiscoverViewToggle'
+import TrendingProRail from './_components/TrendingProRail'
+import LooksBookableGrid from './_components/LooksBookableGrid'
 import { fetchDiscoverCategories } from './_lib/discoverCategoryApi'
 import type { DiscoverViewMode } from './_lib/discoverViewTypes'
 import type { DiscoverCategoryOption } from '@/lib/discovery/categoryTypes'
@@ -391,6 +394,16 @@ export default function SearchMapClient() {
   const [activeProId, setActiveProId] = useState<string | null>(null)
   const activePro = useMemo(() => pros.find((pro) => pro.id === activeProId) ?? null, [pros, activeProId])
 
+  // Collapsible secondary controls (radius / sort / use-me) behind the filter
+  // affordance — keeps the header clean while preserving every existing control.
+  const [filtersOpen, setFiltersOpen] = useState(false)
+
+  // The scrollable GRID body sits below the floating header panel. Measure the
+  // panel rather than hardcode an offset, so the headline + collapsible filters
+  // never overlap the content.
+  const headerRef = useRef<HTMLDivElement | null>(null)
+  const [headerHeight, setHeaderHeight] = useState(178)
+
   const listRef = useRef<HTMLDivElement | null>(null)
   const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
@@ -418,6 +431,30 @@ export default function SearchMapClient() {
   }, [radiusMiles])
 
   const displayPros = useMemo(() => sortPros(pros, sortMode), [pros, sortMode])
+
+  // Active category as a slug — looks share the same ServiceCategory source, so
+  // the slug filters the bookable-looks grid through the existing feed query.
+  const activeCategorySlug = useMemo(() => {
+    if (activeCategoryId === null) return null
+
+    return (
+      categories.find((category) => category.kind !== 'ALL' && category.id === activeCategoryId)?.slug ??
+      null
+    )
+  }, [categories, activeCategoryId])
+
+  useEffect(() => {
+    const node = headerRef.current
+    if (!node || typeof ResizeObserver === 'undefined') return
+
+    const observer = new ResizeObserver((entries) => {
+      const height = entries[0]?.contentRect.height
+      if (typeof height === 'number') setHeaderHeight(Math.ceil(height))
+    })
+
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   const pins: Pin[] = useMemo(() => {
     const nextPins: Pin[] = []
@@ -1029,7 +1066,7 @@ export default function SearchMapClient() {
           )}
         />
 
-        <div className="absolute left-0 right-0 top-0 z-20 px-3 pt-3">
+        <div ref={headerRef} className="absolute left-0 right-0 top-0 z-20 px-3 pt-3">
           <div
             ref={acRootRef}
             className={cn(
@@ -1037,22 +1074,25 @@ export default function SearchMapClient() {
               'shadow-[0_18px_60px_rgba(0,0,0,0.65)]',
             )}
           >
-            <div className="flex items-start gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="text-[12px] font-black tracking-wide text-textPrimary/85">Search</div>
+            <div className="font-display text-[26px] font-semibold italic leading-none tracking-tight text-textPrimary">
+              Discover
+            </div>
 
+            <div className="mt-3">
+              <div className="flex items-center gap-2">
                 <div
                   className={cn(
-                    'mt-1 flex items-center gap-2 rounded-2xl px-3 py-2',
-                    'border border-white/12 bg-bgPrimary/20 backdrop-blur-xl',
-                    'shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]',
-                    'transition-colors transition-shadow duration-200',
-                    'focus-within:border-white/20',
-                    'focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.18),_0_0_0_3px_rgba(var(--accent-primary),0.25)]',
-                  )}
-                >
-                  <input
-                    ref={inputRef}
+                    'flex flex-1 items-center gap-2 rounded-2xl px-3 py-2',
+                      'border border-white/12 bg-bgPrimary/20 backdrop-blur-xl',
+                      'shadow-[inset_0_1px_0_rgba(255,255,255,0.14)]',
+                      'transition-colors transition-shadow duration-200',
+                      'focus-within:border-white/20',
+                      'focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.18),_0_0_0_3px_rgba(var(--accent-primary),0.25)]',
+                    )}
+                  >
+                    <Search size={16} aria-hidden className="shrink-0 text-textMuted" />
+                    <input
+                      ref={inputRef}
                     value={q}
                     onChange={(event) => {
                       setQ(event.target.value)
@@ -1126,10 +1166,26 @@ export default function SearchMapClient() {
                   ) : null}
                 </div>
 
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <div className="text-[12px] font-semibold text-textSecondary">
-                    {origin ? `Searching near: ${originLabel}` : 'Pick a place to set origin.'}
-                  </div>
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen((open) => !open)}
+                  aria-pressed={filtersOpen}
+                  aria-label="Filters"
+                  className={cn(
+                    'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-colors',
+                    filtersOpen
+                      ? 'border-accentPrimary bg-accentPrimary text-bgPrimary'
+                      : 'border-white/12 bg-bgPrimary/20 text-textPrimary hover:bg-white/10',
+                  )}
+                >
+                  <Filter size={16} />
+                </button>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <div className="text-[12px] font-semibold text-textSecondary">
+                  {origin ? `Searching near: ${originLabel}` : 'Pick a place to set origin.'}
+                </div>
 
                   {geoDenied ? (
                     <div className="text-[12px] font-semibold text-microAccent">
@@ -1163,12 +1219,9 @@ export default function SearchMapClient() {
                     ))}
                   </div>
                 ) : null}
-              </div>
 
-              <div className="flex shrink-0 flex-col items-end gap-2">
-                <div className="text-[11px] font-extrabold text-textPrimary/70">{headerHint}</div>
-
-                <div className="flex items-center gap-2">
+              {filtersOpen ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
                   <select
                     value={radiusMiles}
                     onChange={(event) => setRadiusMiles(Number(event.target.value))}
@@ -1185,16 +1238,6 @@ export default function SearchMapClient() {
                     <option value={50}>50 mi</option>
                   </select>
 
-                  <button
-                    type="button"
-                    onClick={() => void inferAndSearch()}
-                    className="rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
-                  >
-                    Go
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-2">
                   <select
                     value={sortMode}
                     onChange={(event) => {
@@ -1234,15 +1277,23 @@ export default function SearchMapClient() {
                       Use me
                     </button>
                   ) : null}
+
+                  <button
+                    type="button"
+                    onClick={() => void inferAndSearch()}
+                    className="rounded-full bg-accentPrimary px-4 py-2 text-[12px] font-black text-bgPrimary transition hover:bg-accentPrimaryHover"
+                  >
+                    Go
+                  </button>
                 </div>
-              </div>
+              ) : null}
             </div>
 
             <div className="mt-3 flex items-center justify-between gap-3">
               <DiscoverViewToggle value={viewMode} onChange={setViewMode} />
 
               <div className="shrink-0 font-mono text-[10px] font-black uppercase tracking-[0.18em] text-textSecondary">
-                Trending
+                {headerHint}
               </div>
             </div>
 
@@ -1295,7 +1346,7 @@ export default function SearchMapClient() {
           <div
             className="absolute left-0 right-0 z-10 overflow-y-auto px-3 pb-4 pt-3"
             style={{
-              top: 178,
+              top: headerHeight,
               bottom: APP_BOTTOM_INSET,
             }}
           >
@@ -1308,7 +1359,25 @@ export default function SearchMapClient() {
                 <DiscoverLoadingRow />
               </div>
             ) : (
-              <DiscoverGridView pros={displayPros} activeProId={activeProId} onSelectPro={handleSelectGridPro} />
+              <div className="space-y-5">
+                {displayPros.length > 0 ? (
+                  <section>
+                    <div className="mb-2.5 px-1 font-mono text-[10px] font-black uppercase tracking-[0.14em] text-textMuted">
+                      ◆ Trending near you
+                    </div>
+                    <TrendingProRail pros={displayPros.slice(0, 10)} onSelectPro={handleSelectGridPro} />
+                  </section>
+                ) : null}
+
+                <section>
+                  <div className="mb-2.5 px-1 font-mono text-[10px] font-black uppercase tracking-[0.14em] text-textMuted">
+                    ◆ Pros near you
+                  </div>
+                  <DiscoverGridView pros={displayPros} activeProId={activeProId} onSelectPro={handleSelectGridPro} />
+                </section>
+
+                <LooksBookableGrid categorySlug={activeCategorySlug} />
+              </div>
             )}
           </div>
         ) : null}
