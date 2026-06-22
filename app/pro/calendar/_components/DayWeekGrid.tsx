@@ -211,6 +211,10 @@ function useNowSnapshot(args: {
   }, [now, timeZone])
 }
 
+// On mobile the timeline flows in the page; leave a little chrome visible above
+// the working-hours window when we auto-scroll the page to it on first render.
+const MOBILE_INITIAL_SCROLL_HEADROOM_PX = 96
+
 function useInitialTimelineScroll(args: {
   scrollRef: RefObject<HTMLDivElement | null>
   enabled: boolean
@@ -228,7 +232,24 @@ function useInitialTimelineScroll(args: {
     if (!scrollElement) return
 
     lastScrollKeyRef.current = scrollKey
-    scrollElement.scrollTop = Math.max(0, targetTopPx)
+
+    // Desktop/tablet: the timeline is its own fixed-height vertical scroller, so
+    // position it directly. Mobile (Option A): the timeline flows in the page
+    // and has no internal vertical scroll, so scrollTop is a no-op there —
+    // fall back to scrolling the window so the working-hours window still lands
+    // near the top instead of stranding the pro at midnight.
+    const hasInternalVerticalScroll =
+      scrollElement.scrollHeight > scrollElement.clientHeight + 1
+    if (hasInternalVerticalScroll) {
+      scrollElement.scrollTop = Math.max(0, targetTopPx)
+      return
+    }
+
+    if (typeof window === 'undefined') return
+    const docTop = scrollElement.getBoundingClientRect().top + window.scrollY
+    window.scrollTo({
+      top: Math.max(0, docTop + targetTopPx - MOBILE_INITIAL_SCROLL_HEADROOM_PX),
+    })
   }, [enabled, scrollKey, scrollRef, targetTopPx])
 }
 

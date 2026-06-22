@@ -824,6 +824,22 @@
   }
 }
 
+/* Mobile: let the timeline flow with the page so a vertical swipe scrolls the
+   page rather than being trapped in this nested viewport. The day columns keep
+   their intrinsic 24h height (TOTAL_MINUTES * PX_PER_MINUTE), so the container
+   grows to fit and vertical scroll becomes the page's scroll. Only the week
+   view's horizontal overflow stays an internal scroller. */
+@media (max-width: 767px) {
+  .brand-pro-calendar-timeline-scroll {
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: visible;
+    overscroll-behavior-x: contain;
+  }
+}
+
 .brand-pro-calendar-timeline-surface {
   position: relative;
   min-width: 0;
