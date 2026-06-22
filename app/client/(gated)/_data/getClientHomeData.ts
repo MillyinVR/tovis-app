@@ -13,6 +13,10 @@ import {
 } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
+import {
+  loadBookingBeforeAfterThumbsFor,
+  type BookingBeforeAfterThumbs,
+} from '@/lib/media/bookingBeforeAfter'
 
 export const clientHomeBookingSelect = Prisma.validator<Prisma.BookingSelect>()({
   id: true,
@@ -410,6 +414,7 @@ export type ClientHomeAction =
       kind: 'AFTERCARE_PAYMENT_DUE'
       aftercare: ClientHomeAftercare
       booking: ClientHomeBooking
+      beforeAfter: BookingBeforeAfterThumbs
     }
   | null
 
@@ -624,18 +629,24 @@ export async function getClientHomeData({
     }),
   ])
 
-  const action: ClientHomeAction = pendingConsultation
-    ? {
-        kind: 'PENDING_CONSULTATION',
-        booking: pendingConsultation,
-      }
-    : aftercarePaymentDue
-      ? {
-          kind: 'AFTERCARE_PAYMENT_DUE',
-          aftercare: aftercarePaymentDue,
-          booking: aftercarePaymentDue.booking,
-        }
-      : null
+  let action: ClientHomeAction = null
+  if (pendingConsultation) {
+    action = {
+      kind: 'PENDING_CONSULTATION',
+      booking: pendingConsultation,
+    }
+  } else if (aftercarePaymentDue) {
+    action = {
+      kind: 'AFTERCARE_PAYMENT_DUE',
+      aftercare: aftercarePaymentDue,
+      booking: aftercarePaymentDue.booking,
+      // Before/after photos for the visit, shown on the action card that links
+      // to the aftercare summary.
+      beforeAfter: await loadBookingBeforeAfterThumbsFor(
+        aftercarePaymentDue.booking.id,
+      ),
+    }
+  }
 
   return {
     upcoming,
